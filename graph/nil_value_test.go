@@ -1,19 +1,16 @@
 package graph_test
 
 import (
-	"strings"
 	"testing"
 
-	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/immutable"
-	"github.com/simon-lentz/yammm/instance"
-	"github.com/simon-lentz/yammm/location"
+	"github.com/simon-lentz/yammm/internal/snapparts"
 )
 
-// A nil list an instance built past the validator holds stays nil at every
-// List the graph canonicalizes, as at one it does not: it holds no value, and
-// becomes no empty list.
-func TestAdd_ANilListStaysNilWhereTheGraphCanonicalizes(t *testing.T) {
+// A null a rebuilt record holds at a List stays null at every List the graph
+// canonicalizes, as at one it does not: it holds no value, and becomes no empty
+// list.
+func TestRebuild_ANullListStaysNullWhereTheGraphCanonicalizes(t *testing.T) {
 	t.Parallel()
 	s := loadAs(t, `schema "p"
 
@@ -32,46 +29,18 @@ type T {
 	lists := []string{"tags", "stamps", "days", "ids"}
 	raw := map[string]any{"id": "x"}
 	for _, name := range lists {
-		raw[name] = []any(nil)
+		raw[name] = nil
 	}
 	props := immutable.WrapProperties(raw, immutable.WithClone(true))
-	g := graph.New(s)
-	if res := g.Add(t.Context(), instance.NewValidInstance("T", typ.ID(), immutable.WrapKey([]any{"x"}), props, nil, nil, location.Provenance{})); res.Err() != nil {
-		t.Fatalf("add: %v", res.Err())
-	}
-	for inst := range g.Snapshot().AllInstances() {
+	snap := rebuild(s, snapparts.Parts{Instances: []snapparts.Instance{{
+		TypeID: typ.ID(), PrimaryKey: immutable.WrapKey([]any{"x"}), Properties: props,
+	}}})
+	for inst := range snap.AllInstances() {
 		for _, name := range lists {
 			val, ok := inst.Property(name)
 			if !ok || !val.IsNil() {
-				t.Errorf("%s: stored = %v, IsNil = %v; want a nil list", name, ok, val.IsNil())
+				t.Errorf("%s: stored = %v, IsNil = %v; want null", name, ok, val.IsNil())
 			}
-		}
-	}
-}
-
-// A key property that holds none behind a carrier is absent, as a nil one is,
-// so the graph refuses it before any writer writes a null key.
-func TestAdd_AKeyPropertyThatHoldsNoneIsAbsent(t *testing.T) {
-	t.Parallel()
-	s := loadAs(t, `schema "p"
-
-type T {
-	id String primary
-}
-`)
-	typ, ok := s.Type("T")
-	if !ok {
-		t.Fatal("no type T")
-	}
-	var nilString *string
-	for name, none := range map[string]any{
-		"a pointer to a nil pointer": &nilString,
-		"a pointer to a nil slice":   new([]any),
-	} {
-		props := immutable.WrapProperties(map[string]any{"id": none})
-		res := graph.New(s).Add(t.Context(), instance.NewValidInstance("T", typ.ID(), immutable.WrapKey([]any{none}), props, nil, nil, location.Provenance{}))
-		if res.Err() == nil || !strings.Contains(res.String(), `primary key property "id" is absent or null`) {
-			t.Errorf("%s: Add = %s; want the key property refused as absent", name, res)
 		}
 	}
 }

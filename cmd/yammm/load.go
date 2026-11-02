@@ -69,14 +69,7 @@ func runLoad(cmd *cobra.Command, args []string, sink *cli.DiagnosticSink) error 
 // it does not; it selects the root together with the schema path (see
 // [diagRootFor]).
 func bindSchemaSource(sink *cli.DiagnosticSink, s schema.Schema, explicitRoot, absSchemaPath string) {
-	var provider diag.SourceProvider
-	switch {
-	case !s.IsZero() && s.HasSourceProvider():
-		provider = s.Sources()
-	case !sink.CapturedSources().IsZero():
-		provider = sink.CapturedSources()
-	}
-	sink.SetSource(provider, diagRootFor(s, explicitRoot, absSchemaPath))
+	sink.SetSource(sink.CapturedSources(), diagRootFor(s, explicitRoot, absSchemaPath))
 }
 
 // reportSchemaLoad hands a schema load's diagnostics to the sink and reports

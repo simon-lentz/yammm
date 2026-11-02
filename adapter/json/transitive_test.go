@@ -5,9 +5,11 @@ import (
 	"encoding/json"
 	"testing"
 
+	"github.com/simon-lentz/yammm/internal/snapparts"
+
 	adapterjson "github.com/simon-lentz/yammm/adapter/json"
-	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/immutable"
+	"github.com/simon-lentz/yammm/internal/snappartstest"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -93,19 +95,19 @@ func TestMarshalObject_ResolvesATransitivelyImportedType(t *testing.T) {
 		t.Fatal("fixture is vacuous: the root must be a type the entry schema CAN name")
 	}
 
-	built, res := graph.RebuildSnapshot(s, graph.SnapshotParts{
+	built := snappartstest.Loaded(t, s, snapparts.Parts{
 		Types: []schema.TypeID{holder},
-		Instances: []graph.InstanceParts{
+		Instances: []snapparts.Instance{
 			{
 				TypeID:     holder,
 				PrimaryKey: immutable.WrapKey([]any{"h1"}),
 				Properties: immutable.WrapProperties(map[string]any{"id": "h1"}),
-				Composed: map[string][]graph.InstanceParts{
+				Composed: map[string][]snapparts.Instance{
 					"PIECES": {{
 						TypeID:     shard,
 						PrimaryKey: immutable.WrapKey([]any{"s1"}),
 						Properties: immutable.WrapProperties(map[string]any{"name": "s1"}),
-						Composed: map[string][]graph.InstanceParts{
+						Composed: map[string][]snapparts.Instance{
 							"BITS": {{
 								TypeID:     crumb,
 								PrimaryKey: immutable.WrapKey([]any{"c1"}),
@@ -117,9 +119,6 @@ func TestMarshalObject_ResolvesATransitivelyImportedType(t *testing.T) {
 			},
 		},
 	})
-	if res.HasErrors() {
-		t.Fatalf("assembling: %s", res)
-	}
 
 	data, err := adapterjson.New().MarshalObject(ctx, built)
 	if err != nil {

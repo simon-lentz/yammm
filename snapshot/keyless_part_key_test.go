@@ -5,12 +5,14 @@ import (
 	"math"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/immutable"
-	"github.com/simon-lentz/yammm/instance"
-	"github.com/simon-lentz/yammm/location"
+	"github.com/simon-lentz/yammm/internal/instancetest"
+	"github.com/simon-lentz/yammm/internal/snapparts"
+	"github.com/simon-lentz/yammm/internal/snappartstest"
 	"github.com/simon-lentz/yammm/schema"
 	"github.com/simon-lentz/yammm/snapshot"
 )
@@ -58,8 +60,8 @@ var partKeyShapes = []partKeyShape{
 	{"a keyed (many) part", []string{"KLINES"}, []string{"KLine"}, true},
 }
 
-// partKeyCase is one key a bypass-built part carries, and whether graph.ParseKey
-// reads each of its components back as itself.
+// partKeyCase is one key a part stated in a document carries, and whether
+// graph.ParseKey reads each of its components back as itself.
 type partKeyCase struct {
 	name       string
 	components []any
@@ -71,19 +73,17 @@ var partKeyCases = []partKeyCase{
 	{"a string", []any{"x"}, true},
 	{"an integer", []any{int64(7)}, true},
 	{"a fraction", []any{1.5}, true},
-	{"a whole float", []any{float64(5)}, true},
+	{"a whole float, which a key spells as the integer", []any{float64(5)}, false},
 	{"a bool", []any{true}, true},
 	{"a null", []any{nil}, true},
 	{"two scalars", []any{"a", int64(1)}, true},
 	{"a JSON number", []any{json.Number("12")}, true},
-	{"a uint64 past int64, which reads back as a float64", []any{uint64(math.MaxUint64)}, false},
 	{"a JSON number past int64", []any{json.Number("12345678901234567890")}, false},
 	{"a negative zero, which reads back as 0", []any{math.Copysign(0, -1)}, false},
 	{"a list", []any{[]any{"x"}}, false},
 	{"an empty list", []any{[]any{}}, false},
 	{"a map", []any{map[string]any{"a": int64(1)}}, false},
 	{"a number no float64 holds", []any{json.Number("1e400")}, false},
-	{"a string that is not UTF-8", []any{"\xff"}, false},
 	{"a list after a scalar", []any{"a", []any{"x"}}, false},
 }
 
@@ -107,32 +107,38 @@ func partKeyProps(typ string, key []any) immutable.Properties {
 	}
 }
 
-// partKeyChain returns the shape's chain as validated instances, the case's key
-// on the deepest part and an empty key on every part above it.
-func partKeyChain(t *testing.T, s schema.Schema, shape partKeyShape, key []any, depth int) instance.ValidInstance {
-	t.Helper()
-	typ, ok := s.Type(shape.types[depth])
-	if !ok {
-		t.Fatalf("no type %s", shape.types[depth])
+// validatorStates reports whether a validator can build the case's key at the
+// shape: an empty key on a keyless part, a string on a keyed one.
+func (c partKeyCase) validatorStates(shape partKeyShape) bool {
+	if !shape.keyed {
+		return len(c.components) == 0
 	}
-	if depth == len(shape.types)-1 {
-		return instance.NewValidInstance(typ.Name(), typ.ID(), immutable.WrapKey(key), partKeyProps(typ.Name(), key), nil, nil, location.Provenance{})
-	}
-	child := partKeyChain(t, s, shape, key, depth+1)
-	return instance.NewValidInstance(typ.Name(), typ.ID(), immutable.WrapKey(nil), partKeyProps(typ.Name(), nil), nil,
-		map[string]immutable.Value{shape.path[depth+1]: immutable.Wrap([]any{child})}, location.Provenance{})
+	s, ok := c.components[0].(string)
+	return ok && utf8.ValidString(s)
 }
 
-// partKeyParts is partKeyChain as RebuildSnapshot's parts.
-func partKeyParts(t *testing.T, s schema.Schema, shape partKeyShape, key []any, depth int) graph.InstanceParts {
+// partKeyInput returns the shape's chain as a validator's input, the case's key
+// on the deepest part.
+func partKeyInput(shape partKeyShape, key []any, depth int) map[string]any {
+	name := shape.types[depth]
+	input := partKeyProps(name, key).Clone()
+	if depth < len(shape.types)-1 {
+		input[strings.ToLower(shape.path[depth+1])] = []any{partKeyInput(shape, key, depth+1)}
+	}
+	return input
+}
+
+// partKeyParts returns the shape's chain as a document's parts, the case's key on
+// the deepest part and an empty key on every part above it.
+func partKeyParts(t *testing.T, s schema.Schema, shape partKeyShape, key []any, depth int) snapparts.Instance {
 	t.Helper()
 	typ, _ := s.Type(shape.types[depth])
 	if depth == len(shape.types)-1 {
-		return graph.InstanceParts{TypeID: typ.ID(), PrimaryKey: immutable.WrapKey(key), Properties: partKeyProps(typ.Name(), key)}
+		return snapparts.Instance{TypeID: typ.ID(), PrimaryKey: immutable.WrapKey(key), Properties: partKeyProps(typ.Name(), key)}
 	}
-	return graph.InstanceParts{
+	return snapparts.Instance{
 		TypeID: typ.ID(), PrimaryKey: immutable.WrapKey(nil), Properties: partKeyProps(typ.Name(), nil),
-		Composed: map[string][]graph.InstanceParts{shape.path[depth+1]: {partKeyParts(t, s, shape, key, depth+1)}},
+		Composed: map[string][]snapparts.Instance{shape.path[depth+1]: {partKeyParts(t, s, shape, key, depth+1)}},
 	}
 }
 
@@ -155,13 +161,13 @@ func partKeyStoredKeys(snap graph.Snapshot) []immutable.Key {
 	return keys
 }
 
-// TestPartKey_EveryConstructorsSnapshotLoadsBack holds every snapshot constructor to
-// the .ys reader, a second implementation of the stored-key rule, over every
-// key of a table on every part shape. A constructor that accepts a key gives a
-// snapshot Marshal writes and Load reads, every stored key of which
-// graph.ParseKey reads back; a constructor refuses with E_GRAPH_INVALID_PK
-// exactly the keys holding a component ParseKey cannot read, keyed or not.
-func TestPartKey_EveryConstructorsSnapshotLoadsBack(t *testing.T) {
+// TestPartKey_EverySnapshotLoadsBack holds both ways to a snapshot, Graph.Add and
+// the .ys reader, to the reader, over every key of a table on every part shape. A
+// snapshot either builds is one Marshal writes and Load reads, every stored key of
+// which graph.ParseKey reads back. The reader refuses exactly the keys holding a
+// component ParseKey cannot read, keyed or not. Graph.Add takes only the keys a
+// validator states.
+func TestPartKey_EverySnapshotLoadsBack(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()
 	s, res := schema.LoadString(ctx, partKeySchema, "partkey.yammm")
@@ -176,51 +182,43 @@ func TestPartKey_EveryConstructorsSnapshotLoadsBack(t *testing.T) {
 		snap graph.Snapshot
 		res  diag.Result
 	}
-	constructors := map[string]func(partKeyShape, []any) built{
+	builders := map[string]func(partKeyShape, []any) built{
 		"Graph.Add": func(shape partKeyShape, key []any) built {
-			child := partKeyChain(t, s, shape, key, 0)
-			doc := instance.NewValidInstance("Doc", docT.ID(), docKey, docProps, nil,
-				map[string]immutable.Value{shape.path[0]: immutable.Wrap([]any{child})}, location.Provenance{})
+			doc := instancetest.Valid(t, s, "Doc", map[string]any{
+				"id": "d1", strings.ToLower(shape.path[0]): []any{partKeyInput(shape, key, 0)},
+			})
 			g := graph.New(s)
 			r := g.Add(ctx, doc)
 			return built{g.Snapshot(), r}
 		},
-		"Graph.AddComposed": func(shape partKeyShape, key []any) built {
-			g := graph.New(s)
-			if r := g.Add(ctx, instance.NewValidInstance("Doc", docT.ID(), docKey, docProps, nil, nil, location.Provenance{})); !r.OK() {
-				t.Fatalf("Add the root: %s", r)
-			}
-			r := g.AddComposed(ctx, docT.ID(), docKey.String(), shape.path[0], partKeyChain(t, s, shape, key, 0))
-			return built{g.Snapshot(), r}
-		},
-		"RebuildSnapshot": func(shape partKeyShape, key []any) built {
-			snap, r := graph.RebuildSnapshot(s, graph.SnapshotParts{
+		"snapshot.Load": func(shape partKeyShape, key []any) built {
+			snap, r := snapshot.Load(ctx, snappartstest.Document(t, s, snapparts.Parts{
 				Types: []schema.TypeID{docT.ID()},
-				Instances: []graph.InstanceParts{{
+				Instances: []snapparts.Instance{{
 					TypeID: docT.ID(), PrimaryKey: docKey, Properties: docProps,
-					Composed: map[string][]graph.InstanceParts{shape.path[0]: {partKeyParts(t, s, shape, key, 0)}},
+					Composed: map[string][]snapparts.Instance{shape.path[0]: {partKeyParts(t, s, shape, key, 0)}},
 				}},
-			})
+			}), s)
 			return built{snap, r}
 		},
 	}
 
 	accepted, refused := 0, 0
-	for name, construct := range constructors {
+	for name, build := range builders {
 		for _, shape := range partKeyShapes {
 			for _, kc := range partKeyCases {
-				if !kc.applies(shape) {
+				if !kc.applies(shape) || (name == "Graph.Add" && !kc.validatorStates(shape)) {
 					continue
 				}
 				at := name + ", " + shape.name + ", " + kc.name
-				b := construct(shape, kc.components)
+				b := build(shape, kc.components)
 				if !b.res.OK() {
 					refused++
 					if kc.readable {
 						t.Errorf("%s: refused a key graph.ParseKey reads back: %s", at, b.res)
 					}
-					if !b.res.HasCode(diag.E_GRAPH_INVALID_PK) || !strings.Contains(b.res.String(), "graph.ParseKey reads back") {
-						t.Errorf("%s: %s, want E_GRAPH_INVALID_PK naming the ParseKey rule", at, b.res)
+					if !b.res.HasCode(diag.E_SNAPSHOT_MALFORMED) {
+						t.Errorf("%s: %s, want %s", at, b.res, diag.E_SNAPSHOT_MALFORMED)
 					}
 					continue
 				}

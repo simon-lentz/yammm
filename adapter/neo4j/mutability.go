@@ -25,8 +25,8 @@ const (
 	mutableKeys keyMutability = iota
 
 	// immutableKeys declares primary-key fields and every property in the
-	// type's schema-derived @writeOnce set (see [ImmutableKeysFor] and
-	// [NodeShape.ImmutableKeys]) are set once at node creation and must not
+	// type's schema-derived @writeOnce set (see [ImmutableKeysFor]) are set
+	// once at node creation and must not
 	// be rewritten on MATCH. A caller building `$update_props` from any
 	// narrower list rewrites the @writeOnce properties it omits on each
 	// MERGE, silently defeating the guarantee the annotation exists to

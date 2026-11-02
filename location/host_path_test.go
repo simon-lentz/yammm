@@ -105,14 +105,6 @@ func TestConstructors_AgreeOnTwoSpellingsOfOneFile(t *testing.T) {
 	if id.String() != want {
 		t.Errorf("SourceIDFromPath(%q) = %q; want %q", typed, id.String(), want)
 	}
-
-	key, err := CanonicalizePathForSourceID(typed)
-	if err != nil {
-		t.Fatalf("CanonicalizePathForSourceID(%q): %v", typed, err)
-	}
-	if key != want {
-		t.Errorf("CanonicalizePathForSourceID(%q) = %q; want %q", typed, key, want)
-	}
 }
 
 // TestNewCanonicalPath_IdentityDoesNotChangeWhenTheFileIsCreated holds an
@@ -468,9 +460,6 @@ func TestResolveHostPath_RefusesAPathWhoseResolvedFormExceedsPathMax(t *testing.
 		if got, err := NewCanonicalPath(typed); !errors.Is(err, syscall.ENAMETOOLONG) {
 			t.Errorf("NewCanonicalPath(%q) = %q, %v; want ENAMETOOLONG", typed, got.String(), err)
 		}
-		if got, err := CanonicalizePathForSourceID(typed); !errors.Is(err, syscall.ENAMETOOLONG) {
-			t.Errorf("CanonicalizePathForSourceID(%q) = %q, %v; want ENAMETOOLONG", typed, got, err)
-		}
 		return
 	}
 	if runtime.GOOS != "darwin" {
@@ -528,12 +517,6 @@ func TestCanonicalize_RefusesAnEmptyPath(t *testing.T) {
 		t.Parallel()
 		if _, err := SourceIDFromPath(""); !errors.Is(err, ErrEmptyPath) {
 			t.Errorf("SourceIDFromPath(\"\") error = %v; want ErrEmptyPath", err)
-		}
-	})
-	t.Run("CanonicalizePathForSourceID", func(t *testing.T) {
-		t.Parallel()
-		if _, err := CanonicalizePathForSourceID(""); !errors.Is(err, ErrEmptyPath) {
-			t.Errorf("CanonicalizePathForSourceID(\"\") error = %v; want ErrEmptyPath", err)
 		}
 	})
 }
@@ -667,8 +650,7 @@ func TestResolveHostPath_RefusesAPathUnderARegularFile(t *testing.T) {
 
 // TestResolveHostPath_SpellsAPathTheProcessCannotRead holds the resolver to
 // looking a path up without reading it. A file with no permission bits and a
-// directory the process can traverse but not list are spelled on disk, and
-// CanonicalizePathForSourceID, which requires the path to exist, accepts them.
+// directory the process can traverse but not list are spelled on disk.
 func TestResolveHostPath_SpellsAPathTheProcessCannotRead(t *testing.T) {
 	t.Parallel()
 	if runtime.GOOS == "windows" {
@@ -716,9 +698,6 @@ func TestResolveHostPath_SpellsAPathTheProcessCannotRead(t *testing.T) {
 			typed := retype(row.created)
 			if got, err := ResolveHostPath(typed); err != nil || got != row.created {
 				t.Errorf("ResolveHostPath(%q) = %q, %v; want %q", typed, got, err, row.created)
-			}
-			if got, err := CanonicalizePathForSourceID(typed); err != nil || got != identityForm(row.created) {
-				t.Errorf("CanonicalizePathForSourceID(%q) = %q, %v; want %q", typed, got, err, identityForm(row.created))
 			}
 		})
 	}
@@ -798,4 +777,16 @@ func TestResolveHostPath_KeepsWhatTheLSPDependsOn(t *testing.T) {
 			t.Errorf("ResolveHostPath(%q) = %q; want it unchanged", virtual, got)
 		}
 	})
+}
+
+// TestResolveHostPath_InvalidUTF8UnderAFileIsRefusedAsText holds that the path's
+// text is judged before the walk, which would answer ENOTDIR under a regular file.
+func TestResolveHostPath_InvalidUTF8UnderAFileIsRefusedAsText(t *testing.T) {
+	file := filepath.Join(t.TempDir(), "file")
+	if err := os.WriteFile(file, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ResolveHostPath(file + "/\xff"); !errors.Is(err, ErrInvalidUTF8Path) {
+		t.Errorf("ResolveHostPath = %v, want ErrInvalidUTF8Path", err)
+	}
 }

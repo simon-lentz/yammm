@@ -11,7 +11,10 @@ import (
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/instance"
+	"github.com/simon-lentz/yammm/internal/instancetest"
 	"github.com/simon-lentz/yammm/internal/recordtest"
+	"github.com/simon-lentz/yammm/internal/snapparts"
+	"github.com/simon-lentz/yammm/internal/snappartstest"
 	"github.com/simon-lentz/yammm/internal/yammmtest"
 	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/location/path"
@@ -50,8 +53,7 @@ type Zone {
 }
 `
 
-// copiesGraph holds a root duplicate, a composed duplicate on a (many) slot and one
-// on a (one) slot, two or more of each collection, and a no-property edge.
+// copiesGraph holds two or more of each collection, and a no-property edge.
 func copiesGraph(t *testing.T) (schema.Schema, *graph.Graph) {
 	t.Helper()
 	ctx := t.Context()
@@ -86,36 +88,15 @@ func copiesGraph(t *testing.T) (schema.Schema, *graph.Graph) {
 		"also":      []any{map[string]any{"_target_id": "gone1"}, map[string]any{"_target_id": "gone2"}},
 	})
 	add("Order", map[string]any{"id": "o1", "note": "the duplicate"})
-	order, ok := s.Type("Order")
-	if !ok {
-		t.Fatal("no type Order")
-	}
-	composed := func(relation string, props map[string]any) {
-		t.Helper()
-		children, res := v.ValidateForComposition(ctx, "Order", relation, []instance.RawInstance{{Properties: props}})
-		if !res.OK() {
-			t.Fatal(res)
-		}
-		if res := g.AddComposed(ctx, order.ID(), `["o1"]`, relation, children[0]); res.OK() {
-			t.Fatalf("%s: the child must be a duplicate", relation)
-		}
-	}
-	composed("LINES", map[string]any{"sku": "a", "qty": int64(9)})
-	composed("CFG", map[string]any{"ver": "2"})
+	add("Zone", map[string]any{"id": "z1"})
 	return s, g
 }
 
 func checkCopyIdentity(t *testing.T, label string, snap graph.Snapshot) {
 	t.Helper()
 	roots := map[graph.Instance]bool{}
-	children := map[graph.Instance]bool{}
 	for inst := range snap.AllInstances() {
 		roots[inst] = true
-		for _, relation := range inst.ComposedRelations() {
-			for child := range inst.Composed(relation) {
-				children[child] = true
-			}
-		}
 	}
 	for e := range snap.Edges() {
 		if !roots[e.Source()] || !roots[e.Target()] {
@@ -133,21 +114,12 @@ func checkCopyIdentity(t *testing.T, label string, snap graph.Snapshot) {
 	var duplicates int
 	for d := range snap.Duplicates() {
 		duplicates++
-		if d.Relation() == "" {
-			if !roots[d.Conflict()] || !d.Parent().IsZero() {
-				t.Errorf("%s: a root duplicate must conflict with a root and hold no parent", label)
-			}
-			continue
-		}
-		if !roots[d.Parent()] {
-			t.Errorf("%s: %s: a composed duplicate's parent must be a root", label, d.Relation())
-		}
-		if !children[d.Conflict()] || !slices.Contains(slices.Collect(d.Parent().Composed(d.Relation())), d.Conflict()) {
-			t.Errorf("%s: %s: a composed duplicate must conflict with an occupant of its parent's slot", label, d.Relation())
+		if !roots[d.Conflict()] {
+			t.Errorf("%s: a duplicate must conflict with a root", label)
 		}
 	}
-	if duplicates != 3 {
-		t.Errorf("%s: Duplicates yields %d, want 3", label, duplicates)
+	if duplicates != 2 {
+		t.Errorf("%s: Duplicates yields %d, want 2", label, duplicates)
 	}
 }
 
@@ -195,13 +167,13 @@ func TestCopies_TwoSnapshotsOfAGraphShareNoRecord(t *testing.T) {
 		}
 		for d := range first.Duplicates() {
 			if held[d.Instance()] || held[d.Conflict()] {
-				t.Errorf("%s: a duplicate of %q shares its record with the first snapshot", label, d.Relation())
+				t.Errorf("%s: a duplicate at %s shares its record with the first snapshot", label, d.Instance().PrimaryKey())
 			}
 		}
 	}
 }
 
-func TestCopies_AComposedDuplicateWalksTheSameBuiltAndLoaded(t *testing.T) {
+func TestCopies_ADuplicateWalksTheSameBuiltAndLoaded(t *testing.T) {
 	ctx := t.Context()
 	s, g := copiesGraph(t)
 	built := g.Snapshot()
@@ -289,13 +261,8 @@ func TestImport_ADuplicatesKeyMovesToTheNewSchemasForm(t *testing.T) {
 		return s
 	}
 	before, after := load("String"), load("Timestamp")
-	run, ok := before.Type("Run")
-	if !ok {
-		t.Fatal("no type Run")
-	}
 	const raw = "2020-01-02T03:04:05.000+01:00"
-	inst := instance.NewValidInstance("Run", run.ID(), immutable.WrapKey([]any{raw}),
-		immutable.WrapProperties(map[string]any{"at": raw}), nil, nil, location.Provenance{})
+	inst := instancetest.Valid(t, before, "Run", map[string]any{"at": raw})
 	g := graph.New(before)
 	_ = g.Add(ctx, inst)
 	_ = g.Add(ctx, inst)
@@ -401,11 +368,10 @@ func TestZeroRoots_EachPanicNamesTheCallAndWhatIsZero(t *testing.T) {
 	for want, call := range map[string]func(){
 		"graph.New: zero schema":                             func() { graph.New(schema.Schema{}) },
 		"graph.NewFromSnapshot: zero Snapshot":               func() { _, _ = graph.NewFromSnapshot(s, graph.Snapshot{}) },
-		"graph.RebuildSnapshot: zero Schema":                 func() { _, _ = graph.RebuildSnapshot(schema.Schema{}, graph.SnapshotParts{}) },
 		"graph.NewBatchAssembler: zero schema":               func() { graph.NewBatchAssembler(ctx, schema.Schema{}) },
 		"graph.NewBatchAssemblerFromSnapshot: zero schema":   func() { _, _ = graph.NewBatchAssemblerFromSnapshot(ctx, schema.Schema{}, built) },
 		"graph.NewBatchAssemblerFromSnapshot: zero Snapshot": func() { _, _ = graph.NewBatchAssemblerFromSnapshot(ctx, s, graph.Snapshot{}) },
-		"graph.AddComposed: zero ValidInstance":              func() { g.AddComposed(ctx, schema.TypeID{}, "", "", instance.ValidInstance{}) },
+		"graph.Add: zero ValidInstance":                      func() { g.Add(ctx, instance.ValidInstance{}) },
 		"snapshot.Marshal: zero Snapshot":                    func() { _, _ = snapshot.Marshal(ctx, graph.Snapshot{}) },
 		"snapshot.Load: zero Schema":                         func() { _, _ = snapshot.Load(ctx, data, schema.Schema{}) },
 		"snapshot.Verify: zero Schema":                       func() { snapshot.Verify(ctx, data, schema.Schema{}) },
@@ -417,30 +383,6 @@ func TestZeroRoots_EachPanicNamesTheCallAndWhatIsZero(t *testing.T) {
 	}
 	if got := yammmtest.AssertPanics(t, func() { _, _ = graph.NewFromSnapshot(schema.Schema{}, built) }); got != "graph.New: zero schema" {
 		t.Errorf("NewFromSnapshot with a zero schema: panic = %v", got)
-	}
-}
-
-func TestAdd_AZeroChildIsNamedAsNoInstance(t *testing.T) {
-	ctx := t.Context()
-	s, _ := copiesGraph(t)
-	order, ok := s.Type("Order")
-	if !ok {
-		t.Fatal("no type Order")
-	}
-	for relation, child := range map[string]immutable.Value{
-		"LINES": immutable.Wrap([]any{instance.ValidInstance{}}),
-		"CFG":   immutable.Wrap(instance.ValidInstance{}),
-	} {
-		inst := instance.NewValidInstance("Order", order.ID(), immutable.WrapKey([]any{"o"}),
-			immutable.WrapProperties(map[string]any{"id": "o"}), nil, map[string]immutable.Value{relation: child}, location.Provenance{})
-		res := graph.New(s).Add(ctx, inst)
-		var named bool
-		for issue := range res.Issues() {
-			named = named || strings.Contains(issue.Message(), "is not an instance")
-		}
-		if !named {
-			t.Errorf("%s: issues %s must say the child is not an instance", relation, res)
-		}
 	}
 }
 
@@ -461,7 +403,7 @@ func TestInfo_AnEdgeListUnderAnUndeclaredRelationDoesNotPanic(t *testing.T) {
 	}
 }
 
-func TestRebuildSnapshot_ADuplicateWithNoProvenanceSortsBeforeAnEmptySourceName(t *testing.T) {
+func TestLoad_ADuplicateWithNoProvenanceSortsBeforeAnEmptySourceName(t *testing.T) {
 	s, res := schema.LoadString(t.Context(), "schema \"t\"\n\ntype Co {\n\tid String primary\n\tnote String\n}\n", "t.yammm")
 	if res.HasErrors() {
 		t.Fatal(res)
@@ -472,21 +414,18 @@ func TestRebuildSnapshot_ADuplicateWithNoProvenanceSortsBeforeAnEmptySourceName(
 	}
 	key := immutable.WrapKey([]any{"c1"})
 	props := immutable.WrapProperties(map[string]any{"id": "c1", "note": "x"})
-	part := func(p location.Provenance) graph.InstanceParts {
-		return graph.InstanceParts{TypeID: co.ID(), PrimaryKey: key, Properties: props, Provenance: p}
+	part := func(p location.Provenance) snapparts.Instance {
+		return snapparts.Instance{TypeID: co.ID(), PrimaryKey: key, Properties: props, Provenance: p}
 	}
 	none, empty := location.Provenance{}, location.NewProvenance("", path.Root(), location.Span{})
 	for _, order := range [][]location.Provenance{{none, empty}, {empty, none}} {
-		snap, res := graph.RebuildSnapshot(s, graph.SnapshotParts{
-			Instances: []graph.InstanceParts{part(none)},
-			Duplicates: []graph.DuplicateParts{
-				{Instance: part(order[0])},
-				{Instance: part(order[1])},
+		snap := snappartstest.Loaded(t, s, snapparts.Parts{
+			Instances: []snapparts.Instance{part(none)},
+			Duplicates: []snapparts.Instance{
+				part(order[0]),
+				part(order[1]),
 			},
 		})
-		if res.HasErrors() {
-			t.Fatal(res)
-		}
 		var zero []bool
 		for d := range snap.Duplicates() {
 			zero = append(zero, d.Instance().Provenance().IsZero())

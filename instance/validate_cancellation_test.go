@@ -2,10 +2,10 @@ package instance
 
 import (
 	"context"
-	"log/slog"
 	"strings"
-	"sync"
 	"testing"
+
+	"github.com/simon-lentz/yammm/internal/yammmtest"
 
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/schema"
@@ -38,73 +38,6 @@ type Row {
 		t.Fatalf("load: %s", res)
 	}
 	return s
-}
-
-// ctxKey is the value a handler reads back to prove which context reached it.
-type ctxKey struct{}
-
-// recordingHandler captures each record's message and the context it was
-// handled with, which is the only way to see whether the caller's context
-// reached the emit site.
-type recordingHandler struct {
-	mu      sync.Mutex
-	msgs    []string
-	ctxVals []any
-	onMsg   func(msg string)
-}
-
-func (h *recordingHandler) Enabled(context.Context, slog.Level) bool { return true }
-
-func (h *recordingHandler) Handle(ctx context.Context, r slog.Record) error {
-	h.mu.Lock()
-	h.msgs = append(h.msgs, r.Message)
-	h.ctxVals = append(h.ctxVals, ctx.Value(ctxKey{}))
-	h.mu.Unlock()
-	if h.onMsg != nil {
-		h.onMsg(r.Message)
-	}
-	return nil
-}
-
-func (h *recordingHandler) WithAttrs([]slog.Attr) slog.Handler { return h }
-func (h *recordingHandler) WithGroup(string) slog.Handler      { return h }
-
-func (h *recordingHandler) sawContextValue(want any) bool {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	for i, msg := range h.msgs {
-		if msg == "property name normalized" && h.ctxVals[i] == want {
-			return true
-		}
-	}
-	return false
-}
-
-// TestValidate_NormalizationRecordCarriesTheCallersContext pins the claim
-// WithLogger's godoc, the package doc and docs/API.md all make: each record is
-// logged with the context passed to Validate. The normalization record was
-// emitted through slog.Logger.Debug, which the standard library hard-codes to
-// context.Background, so a request id on the caller's context reached every
-// record but this one. Emitting it through Debug again turns this red.
-func TestValidate_NormalizationRecordCarriesTheCallersContext(t *testing.T) {
-	t.Parallel()
-	h := &recordingHandler{}
-	v := NewValidator(cancellationSchema(t), WithLogger(slog.New(h)))
-
-	ctx := context.WithValue(t.Context(), ctxKey{}, "req-1")
-	// "Count" folds onto "count", which is what emits the record.
-	if _, res := v.ValidateOne(ctx, "Row", RawInstance{
-		Properties: map[string]any{
-			"id": "r1", "Count": int64(1),
-			"parts": []any{map[string]any{"id": "p1"}},
-		},
-	}); res.HasErrors() {
-		t.Fatalf("the row does not validate: %s", res)
-	}
-
-	if !h.sawContextValue("req-1") {
-		t.Errorf("the normalization record did not carry the caller's context; records seen: %v", h.msgs)
-	}
 }
 
 // TestValidate_EachGateReadsItsOwnPassesErrors pins that an error from one pass
@@ -173,20 +106,6 @@ func TestValidate_EachGateReadsItsOwnPassesErrors(t *testing.T) {
 	})
 }
 
-// cancelOnNormalize cancels the context the moment the normalization record is
-// emitted, which puts the cancellation inside the row rather than between rows.
-func cancelOnNormalize(t *testing.T, s schema.Schema) (*Validator, context.Context) {
-	t.Helper()
-	ctx, cancel := context.WithCancel(t.Context())
-	t.Cleanup(cancel)
-	h := &recordingHandler{onMsg: func(msg string) {
-		if msg == "property name normalized" {
-			cancel()
-		}
-	}}
-	return NewValidator(s, WithLogger(slog.New(h))), ctx
-}
-
 // TestValidateOne_CancelledMidRowReturnsTheCancellationAlone pins that
 // ValidateOne applies the batch rule. Validate drops a cancelled row's partial
 // diagnostics and returns one E_CONTEXT_CANCELLED; ValidateOne returned the
@@ -195,20 +114,23 @@ func cancelOnNormalize(t *testing.T, s schema.Schema) (*Validator, context.Conte
 // Removing ValidateOne's post-row check turns this red.
 func TestValidateOne_CancelledMidRowReturnsTheCancellationAlone(t *testing.T) {
 	t.Parallel()
-	v, ctx := cancelOnNormalize(t, cancellationSchema(t))
+	v := NewValidator(cancellationSchema(t))
+	raw := RawInstance{Properties: map[string]any{"id": "r1", "Count": "not a number"}}
+	total := yammmtest.CountChecks(t.Context(), func(ctx context.Context) { v.ValidateOne(ctx, "Row", raw) })
 
-	inst, res := v.ValidateOne(ctx, "Row", RawInstance{
-		Properties: map[string]any{"id": "r1", "Count": "not a number"},
-	})
-	if !inst.IsZero() {
-		t.Error("a cancelled row yielded an instance")
-	}
-	if !res.HasCode(diag.E_CONTEXT_CANCELLED) {
-		t.Fatalf("the cancellation is missing: %s", res)
-	}
-	for is := range res.Issues() {
-		if is.Code() != diag.E_CONTEXT_CANCELLED {
-			t.Errorf("a cancelled row kept a partial diagnostic: %s %s", is.Code(), is.Message())
+	for n := range total {
+		ctx := yammmtest.NewCheckContext(t.Context(), n+1)
+		inst, res := v.ValidateOne(ctx, "Row", raw)
+		if !inst.IsZero() {
+			t.Errorf("check %d: a cancelled row yielded an instance", n+1)
+		}
+		if !res.HasCode(diag.E_CONTEXT_CANCELLED) {
+			t.Fatalf("check %d: the cancellation is missing: %s", n+1, res)
+		}
+		for is := range res.Issues() {
+			if is.Code() != diag.E_CONTEXT_CANCELLED {
+				t.Errorf("check %d: a cancelled row kept a partial diagnostic: %s %s", n+1, is.Code(), is.Message())
+			}
 		}
 	}
 }
@@ -220,45 +142,167 @@ func TestValidateOne_CancelledMidRowReturnsTheCancellationAlone(t *testing.T) {
 // caller could not tell a failed row from an abandoned one.
 func TestValidateProperties_CancellationRecordedAtEveryExit(t *testing.T) {
 	t.Parallel()
-	v, ctx := cancelOnNormalize(t, cancellationSchema(t))
+	v := NewValidator(cancellationSchema(t))
+	raws := []RawInstance{{Properties: map[string]any{"id": "r1", "Count": "not a number"}}}
+	total := yammmtest.CountChecks(t.Context(), func(ctx context.Context) { v.Validate(ctx, "Row", raws) })
 
-	_, res := v.Validate(ctx, "Row", []RawInstance{{
-		Properties: map[string]any{"id": "r1", "Count": "not a number"},
-	}})
-	if !res.HasCode(diag.E_CONTEXT_CANCELLED) {
-		t.Errorf("a row cancelled while it was erroring did not record the cancellation: %s", res)
+	for n := range total {
+		_, res := v.Validate(yammmtest.NewCheckContext(t.Context(), n+1), "Row", raws)
+		if !res.HasCode(diag.E_CONTEXT_CANCELLED) {
+			t.Errorf("check %d: a row cancelled while it was erroring did not record the cancellation: %s", n+1, res)
+		}
 	}
 }
 
-// TestValidate_NestedBatchCancellationIsReportedOnce pins cancelled's once
-// guard across a nested composed batch: a child that cancels must not add a
-// second E_CONTEXT_CANCELLED as the parent unwinds through its own exits.
+// A child that cancels must not add a second E_CONTEXT_CANCELLED as the parent
+// unwinds through its own exits.
 func TestValidate_NestedBatchCancellationIsReportedOnce(t *testing.T) {
 	t.Parallel()
-	v, ctx := cancelOnNormalize(t, cancellationSchema(t))
-
-	_, res := v.Validate(ctx, "Row", []RawInstance{{
+	v := NewValidator(cancellationSchema(t))
+	raws := []RawInstance{{
 		Properties: map[string]any{
 			"id":    "r1",
 			"parts": []any{map[string]any{"id": "p1", "Id": "p2"}},
 		},
-	}})
-	n := 0
-	for is := range res.Issues() {
-		if is.Code() == diag.E_CONTEXT_CANCELLED {
-			n++
+	}}
+	total := yammmtest.CountChecks(t.Context(), func(ctx context.Context) { v.Validate(ctx, "Row", raws) })
+
+	for at := range total {
+		_, res := v.Validate(yammmtest.NewCheckContext(t.Context(), at+1), "Row", raws)
+		n := 0
+		for is := range res.Issues() {
+			if is.Code() == diag.E_CONTEXT_CANCELLED {
+				n++
+			}
+		}
+		if n != 1 {
+			t.Errorf("check %d: the cancellation was reported %d times, want once: %s", at+1, n, res)
 		}
 	}
-	if n > 1 {
-		t.Errorf("the cancellation was reported %d times, want at most once: %s", n, res)
+}
+
+// panicsAtCheck is a context that panics at its at-th Err call and reports
+// [context.Canceled] from then on.
+type panicsAtCheck struct {
+	context.Context //nolint:containedctx // a decorator holds the context it wraps
+	at, seen        int64
+}
+
+func (c *panicsAtCheck) Err() error {
+	c.seen++
+	if c.seen == c.at {
+		panic("a check panics")
+	}
+	if c.seen > c.at {
+		return context.Canceled
+	}
+	return nil
+}
+
+// validateOneRecovering is ValidateOne on ctx, and reports false when a panic
+// left it.
+func validateOneRecovering(ctx context.Context, v *Validator, typeName string, raw RawInstance) (res diag.Result, returned bool) {
+	defer func() {
+		if recover() != nil {
+			returned = false
+		}
+	}()
+	_, res = v.ValidateOne(ctx, typeName, raw)
+	return res, true
+}
+
+// A panic in a row's invariant is a library defect, and it reaches the caller
+// beside the cancellation that follows it, stamped with the row it stopped on.
+func TestValidate_ARowsInternalErrorOutlivesTheCancellation(t *testing.T) {
+	t.Parallel()
+	s, loaded := schema.LoadString(t.Context(), `schema "defect"
+
+type Row {
+	id String primary
+	! "named" id != "bad"
+}
+`, "defect.yammm")
+	if loaded.HasErrors() {
+		t.Fatalf("load: %s", loaded)
+	}
+	v := NewValidator(s)
+	raws := []RawInstance{{Properties: map[string]any{"id": "a"}}}
+	total := yammmtest.CountChecks(t.Context(), func(ctx context.Context) { v.Validate(ctx, "Row", raws) })
+
+	defects := 0
+	for at := range total {
+		func() {
+			defer func() { _ = recover() }()
+			valid, res := v.Validate(&panicsAtCheck{Context: t.Context(), at: at + 1}, "Row", raws)
+			if !res.HasCode(diag.E_INTERNAL) {
+				return
+			}
+			defects++
+			if valid != nil {
+				t.Errorf("check %d: a cancelled batch returned instances: %v", at+1, valid)
+			}
+			if !res.HasCode(diag.E_CONTEXT_CANCELLED) {
+				t.Errorf("check %d: the cancellation is missing beside the defect: %s", at+1, res)
+			}
+		}()
+	}
+	if defects == 0 {
+		t.Error("no check drew an E_INTERNAL")
+	}
+}
+
+// A panic in a composed child's invariant is a library defect, and it reaches the
+// caller beside the cancellation that follows it, for each child of the batch.
+func TestValidateOne_AComposedChildsInternalErrorOutlivesTheCancellation(t *testing.T) {
+	t.Parallel()
+	s, loaded := schema.LoadString(t.Context(), `schema "defect"
+
+part type Line {
+	id String primary
+	! "named" id != "bad"
+}
+
+type Order {
+	id String primary
+	*-> LINES (_:many) Line
+}
+`, "defect.yammm")
+	if loaded.HasErrors() {
+		t.Fatalf("load: %s", loaded)
+	}
+	v := NewValidator(s)
+	raw := RawInstance{Properties: map[string]any{
+		"id":    "o1",
+		"lines": []any{map[string]any{"id": "a"}, map[string]any{"id": "b"}},
+	}}
+	total := yammmtest.CountChecks(t.Context(), func(ctx context.Context) { v.ValidateOne(ctx, "Order", raw) })
+
+	defects := make(map[string]bool)
+	for at := range total {
+		res, returned := validateOneRecovering(&panicsAtCheck{Context: t.Context(), at: at + 1}, v, "Order", raw)
+		if !returned {
+			continue
+		}
+		for is := range res.Issues() {
+			if is.Code() != diag.E_INTERNAL {
+				continue
+			}
+			defects[is.Path()] = true
+			if !res.HasCode(diag.E_CONTEXT_CANCELLED) {
+				t.Errorf("check %d: the cancellation is missing beside the defect: %s", at+1, res)
+			}
+		}
+	}
+	for _, path := range []string{"$.lines[0]", "$.lines[1]"} {
+		if !defects[path] {
+			t.Errorf("no check drew an E_INTERNAL at %s; drew %v", path, defects)
+		}
 	}
 }
 
 // TestKeepInternalErrors pins the rule directly. A row's Fatal E_INTERNAL
 // survives the cancellation that drops the rest, so a library defect is never
-// reported as a deadline. The end-to-end trigger is a panic inside the
-// validator that no probe has reached from a loaded schema, so the rule is
-// pinned at the function that states it.
+// reported as a deadline.
 func TestKeepInternalErrors(t *testing.T) {
 	t.Parallel()
 	c := diag.NewCollectorUnlimited()

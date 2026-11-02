@@ -1,6 +1,9 @@
 package expr_test
 
 import (
+	"os"
+	"slices"
+	"strings"
 	"testing"
 
 	"github.com/simon-lentz/yammm/schema/expr"
@@ -15,6 +18,22 @@ func TestLookupBuiltin_IsCaseInsensitive(t *testing.T) {
 	}
 	if _, ok := expr.LookupBuiltin("Bogus"); ok {
 		t.Error("an unknown name must not resolve")
+	}
+}
+
+// testdata/builtin_names.txt lists the catalogue for the tests of other packages
+// that walk it, and holds exactly its names.
+func TestBuiltins_NamesFileListsTheCatalogue(t *testing.T) {
+	data, err := os.ReadFile("testdata/builtin_names.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var names []string
+	for _, s := range expr.Builtins() {
+		names = append(names, s.Name)
+	}
+	if got, want := strings.Fields(string(data)), names; !slices.Equal(got, want) {
+		t.Errorf("builtin_names.txt holds %v, the catalogue %v", got, want)
 	}
 }
 

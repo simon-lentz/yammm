@@ -8,9 +8,8 @@ import (
 	"testing"
 
 	"github.com/simon-lentz/yammm/graph"
-	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/instance"
-	"github.com/simon-lentz/yammm/location"
+	"github.com/simon-lentz/yammm/internal/instancetest"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -64,15 +63,14 @@ func FuzzGraph_ConcurrentOperations(f *testing.F) {
 func buildFuzzSchema(t *testing.T) schema.Schema {
 	t.Helper()
 
-	s, result := schema.NewBuilder().
-		WithName("fuzz").
-		WithSourceID(location.MustNewSourceID("test://fuzz.yammm")).
-		AddType("Person").
-		WithPrimaryKey("id", schema.StringConstraint{}).
-		WithProperty("name", schema.StringConstraint{}).
-		WithRelation("FRIEND", schema.LocalTypeRef("Person", location.Span{}), true, false).
-		Done().
-		Build()
+	s, result := schema.LoadString(t.Context(), `schema "fuzz"
+
+type Person {
+	id String primary
+	name String required
+	--> FRIEND (_:one) Person
+}
+`, "fuzz.yammm")
 
 	if result.HasErrors() {
 		t.Fatalf("Failed to build fuzz schema: %s", result.String())
@@ -84,10 +82,7 @@ func buildFuzzSchema(t *testing.T) schema.Schema {
 func runFuzzOperations(t *testing.T, g *graph.Graph, s schema.Schema, ctx context.Context, r *rand.Rand, workerID, numOps int) {
 	t.Helper()
 
-	personType, ok := s.Type("Person")
-	if !ok {
-		t.Fatal("Person type not found")
-	}
+	validator := instance.NewValidator(s)
 
 	for range numOps {
 		op := r.Intn(4) // 0=Add, 1=Snapshot, 2=Check, 3=InstanceByKey
@@ -95,20 +90,17 @@ func runFuzzOperations(t *testing.T, g *graph.Graph, s schema.Schema, ctx contex
 		switch op {
 		case 0: // Add
 			id := r.Intn(100) // Use limited ID space to create some duplicates
-			pk := []any{formatID(workerID, id)}
+			data := map[string]any{"id": formatID(workerID, id), "name": formatName(workerID, id)}
 			// Half the instances carry a friend reference, so edges and
 			// unresolved records both form and the oracle's edge block runs.
-			var edges map[string]instance.ValidEdgeData
 			if r.Intn(2) == 0 {
-				edges = edgeData("FRIEND", nil, []any{formatID(workerID, r.Intn(100))})
+				data["friend"] = map[string]any{"_target_id": formatID(workerID, r.Intn(100))}
 			}
-			inst := instance.NewValidInstance(
-				"Person",
-				personType.ID(),
-				immutable.WrapKey(pk),
-				immutable.WrapProperties(map[string]any{"id": pk[0], "name": formatName(workerID, id)}),
-				edges, nil, location.Provenance{},
-			)
+			inst, res := validator.ValidateOne(ctx, "Person", instance.RawInstance{Properties: data})
+			if res.HasErrors() {
+				t.Errorf("validate Person: %s", res)
+				return
+			}
 			// Ignore results - we just want to test for races/panics
 			g.Add(ctx, inst)
 
@@ -187,7 +179,6 @@ func FuzzGraph_AddSequence(f *testing.F) {
 		g := graph.New(s)
 		ctx := t.Context()
 
-		personType, _ := s.Type("Person")
 		r := rand.New(rand.NewSource(seed)) //nolint:gosec // fuzz test
 
 		// Generate a sequence of 20 random instance IDs
@@ -199,13 +190,7 @@ func FuzzGraph_AddSequence(f *testing.F) {
 		// Add instances in the random order
 		for _, id := range ids {
 			pk := []any{"p" + string(rune('0'+id))}
-			inst := instance.NewValidInstance(
-				"Person",
-				personType.ID(),
-				immutable.WrapKey(pk),
-				immutable.WrapProperties(map[string]any{"id": pk[0], "name": "Person-" + string(rune('0'+id))}),
-				nil, nil, location.Provenance{},
-			)
+			inst := instancetest.Valid(t, s, "Person", map[string]any{"id": pk[0], "name": "Person-" + string(rune('0'+id))})
 			g.Add(ctx, inst)
 		}
 

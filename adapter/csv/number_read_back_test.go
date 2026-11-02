@@ -2,7 +2,6 @@ package csv
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -14,9 +13,9 @@ import (
 	"testing"
 
 	"github.com/simon-lentz/yammm/graph"
-	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/instance"
-	"github.com/simon-lentz/yammm/internal/instancetest"
+	"github.com/simon-lentz/yammm/internal/snapparts"
+	"github.com/simon-lentz/yammm/internal/snappartstest"
 	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
 )
@@ -39,36 +38,24 @@ type Holder {
 }
 `
 
-// numberBypass builds Holder h1 through instancetest, which runs no
-// validation, holding props beside its key and one LINK to Target t1 whose w
-// is weight.
-func numberBypass(t *testing.T, s schema.Schema, props map[string]any, weight any) graph.Snapshot {
+// heldNumbers reads a document holding props beside Holder h1's key, and weight as
+// the w on its one LINK to Target t1: a document alone delivers a literal no finite
+// float64 holds.
+func heldNumbers(t *testing.T, s schema.Schema, props map[string]any, weight any) graph.Snapshot {
 	t.Helper()
-	target, _ := s.Type("Target")
-	holder, _ := s.Type("Holder")
 	all := map[string]any{"id": "h1"}
 	maps.Copy(all, props)
 	edge := map[string]any{}
 	if weight != nil {
 		edge["w"] = weight
 	}
-	g := graph.New(s)
-	for _, inst := range []instance.ValidInstance{
-		instancetest.VI("Target", instancetest.TypeID(target.ID()), instancetest.PK("t1"),
-			instancetest.Props(map[string]any{"key": "t1"})),
-		instancetest.VI("Holder", instancetest.TypeID(holder.ID()), instancetest.PK("h1"),
-			instancetest.Props(all),
-			instancetest.Edges(map[string]instance.ValidEdgeData{
-				"LINK": instance.NewValidEdgeData([]instance.ValidEdgeTarget{
-					instance.NewValidEdgeTarget(immutable.WrapKey([]any{"t1"}), immutable.WrapProperties(edge)),
-				}),
-			})),
-	} {
-		if res := g.Add(context.Background(), inst); !res.OK() {
-			t.Fatalf("add: %s", res)
-		}
-	}
-	return g.Snapshot()
+	return snappartstest.Loaded(t, s, snapparts.Parts{
+		Instances: []snapparts.Instance{
+			heldRoot(t, s, "Target", "t1", map[string]any{"key": "t1"}),
+			heldRoot(t, s, "Holder", "h1", all),
+		},
+		Edges: []snapparts.Edge{heldEdge(t, s, "Holder", "h1", "LINK", "t1", edge)},
+	})
 }
 
 // numberPosition is one place a Float stands in a Holder: how to hold a value
@@ -165,14 +152,12 @@ func writeAndReadBack(t *testing.T, s schema.Schema, snap graph.Snapshot) (writt
 	return written, inst, nil, nil
 }
 
-// What the writer writes for a number literal, the parser and the validator
-// read back as that number at every position a Float stands in; a literal they
-// would not read back so is refused as the class, naming its site and the
-// fault, and nothing else is. Text that is no number literal is refused as a
-// value no cell spells. At a String, where no numeric kind stores the number in
-// its own form first, the same literals are written and the same refused. The
-// standard library says which text is a number a float64 holds: encoding/json
-// for the literal and strconv for the float.
+// What the writer writes for a number literal, the parser and the validator read
+// back as that number at every position a Float stands in; a literal they would
+// not read back so is refused as the class, naming its site and the fault, and
+// nothing else is. At a String, where no numeric kind stores the number in its own
+// form first, the same literals are written and the same refused. strconv says
+// which text is a number a float64 holds.
 func TestMarshalSnapshot_ANumberLiteralIsReadBackOrRefused(t *testing.T) {
 	t.Parallel()
 	s, res := schema.LoadString(t.Context(), numberCSVSchema, "numbers.yammm")
@@ -180,31 +165,26 @@ func TestMarshalSnapshot_ANumberLiteralIsReadBackOrRefused(t *testing.T) {
 		t.Fatalf("load schema: %s", res)
 	}
 	texts := []string{
-		"0", "-0", "5", "-5", "007", "+5", "1.5", "-1.5", "1e2", "1E2", "1e-2", "0.0", "-0.0",
+		"0", "5", "-5", "1.5", "-1.5", "1e2", "1E2", "1e-2", "0.0", "-0.0",
 		"9223372036854775807", "9223372036854775808", "-9223372036854775809", "99999999999999999999",
 		"1e308", "1.7976931348623157e308", "1.7976931348623159e308", "1e309", "1e400", "-1e400", "1.5e999",
-		"1e-400", "", " ", "abc", "NaN", "Inf", "-Inf", "+Inf", "0x10", "0x1p4", "1_000", ".5", "5.", "1e", "1e+",
-		" 5", "5 ", "5\n", "1,5", "1|5", "١٢",
+		"1e-400",
 		strings.Repeat("9", 400), "0." + strings.Repeat("0", 400) + "1", "1" + strings.Repeat("0", 400) + ".0",
 	}
 	for _, text := range texts {
 		nearest, ferr := strconv.ParseFloat(text, 64)
-		readable := json.Valid([]byte(text)) && strings.TrimSpace(text) == text && ferr == nil
-		fault := "reads back as a number in no column"
-		if !immutable.IsNumberLiteral(json.Number(text)) {
-			fault = "has no spelling in a cell"
-		}
+		readable := ferr == nil
 		for _, p := range numberPositions {
 			t.Run(fmt.Sprintf("%q at %s", text, p.name), func(t *testing.T) {
 				t.Parallel()
 				props, weight := p.hold(json.Number(text))
-				written, inst, werr, rerr := writeAndReadBack(t, s, numberBypass(t, s, props, weight))
+				written, inst, werr, rerr := writeAndReadBack(t, s, heldNumbers(t, s, props, weight))
 				switch {
 				case errors.Is(werr, ErrUnrepresentable):
 					if readable {
 						t.Errorf("refused a number a cell can hold: %v", werr)
 					}
-					if !strings.Contains(werr.Error(), p.mentions) || !strings.Contains(werr.Error(), fault) {
+					if !strings.Contains(werr.Error(), p.mentions) || !errors.Is(werr, errUnreadNumber) {
 						t.Errorf("the refusal does not name %s and the fault: %v", p.mentions, werr)
 					}
 				case werr != nil:
@@ -219,7 +199,7 @@ func TestMarshalSnapshot_ANumberLiteralIsReadBackOrRefused(t *testing.T) {
 					t.Errorf("written as %q, which does not read back: %v", written, rerr)
 				default:
 					got, ok := p.read(inst)
-					if !ok || ferr != nil || math.Float64bits(got) != math.Float64bits(nearest) {
+					if !ok || math.Float64bits(got) != math.Float64bits(nearest) {
 						t.Errorf("written as %q and read back as %v (%t), want the float64 nearest %q", written, got, ok, text)
 					}
 				}
@@ -228,54 +208,35 @@ func TestMarshalSnapshot_ANumberLiteralIsReadBackOrRefused(t *testing.T) {
 	}
 }
 
-// A Go number is read back as the number it is, or
-// refused: no cell spells a NaN or an infinity that the parser reads.
-func TestMarshalSnapshot_AGoNumberIsReadBackOrRefused(t *testing.T) {
+// A float a document holds, and an integer at a Float position, read back as the
+// number they are.
+func TestMarshalSnapshot_AHeldNumberIsReadBack(t *testing.T) {
 	t.Parallel()
 	s, res := schema.LoadString(t.Context(), numberCSVSchema, "numbers.yammm")
 	if res.HasErrors() {
 		t.Fatalf("load schema: %s", res)
 	}
-	type namedFloat float64
 	for _, c := range []struct {
 		name string
 		val  any
 		want float64
 	}{
-		{"NaN", math.NaN(), math.NaN()},
-		{"+Inf", math.Inf(1), math.Inf(1)},
-		{"-Inf", math.Inf(-1), math.Inf(-1)},
-		{"a float32 NaN", float32(math.NaN()), math.NaN()},
-		{"a named NaN", namedFloat(math.NaN()), math.NaN()},
-		{"a float32 infinity", float32(math.Inf(1)), math.Inf(1)},
 		{"1.5", 1.5, 1.5},
 		{"a whole float", 5.0, 5},
 		{"negative zero", math.Copysign(0, -1), math.Copysign(0, -1)},
 		{"the largest float64", math.MaxFloat64, math.MaxFloat64},
 		{"the smallest float64", math.SmallestNonzeroFloat64, math.SmallestNonzeroFloat64},
-		{"a float32", float32(0.1), float64(float32(0.1))},
-		{"a named float", namedFloat(2.5), 2.5},
 		{"an int64", int64(-7), -7},
-		{"the largest uint64", uint64(math.MaxUint64), float64(math.MaxUint64)},
+		{"the largest uint64 as a literal", json.Number("18446744073709551615"), float64(math.MaxUint64)},
 	} {
-		finite := !math.IsNaN(c.want) && !math.IsInf(c.want, 0)
 		for _, p := range numberPositions {
 			t.Run(c.name+" at "+p.name, func(t *testing.T) {
 				t.Parallel()
 				props, weight := p.hold(c.val)
-				written, inst, werr, rerr := writeAndReadBack(t, s, numberBypass(t, s, props, weight))
+				written, inst, werr, rerr := writeAndReadBack(t, s, heldNumbers(t, s, props, weight))
 				switch {
-				case errors.Is(werr, ErrUnrepresentable):
-					if finite {
-						t.Errorf("refused a finite number: %v", werr)
-					}
-					if !strings.Contains(werr.Error(), p.mentions) {
-						t.Errorf("the refusal does not name %s: %v", p.mentions, werr)
-					}
 				case werr != nil:
-					t.Errorf("MarshalSnapshot failed outside the class: %v", werr)
-				case !finite:
-					t.Errorf("written as %q, though the number is not finite", written)
+					t.Errorf("MarshalSnapshot refused a finite number: %v", werr)
 				case p.read == nil:
 				case rerr != nil:
 					t.Errorf("written as %q, which does not read back: %v", written, rerr)

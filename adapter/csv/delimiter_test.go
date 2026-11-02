@@ -1,9 +1,7 @@
 package csv
 
 import (
-	"bytes"
 	"context"
-	"io"
 	"reflect"
 	"strings"
 	"testing"
@@ -24,7 +22,7 @@ func TestParseTyped_WithDelimiterSplitsOnTab(t *testing.T) {
 	st, _ := s.Type("Entity")
 
 	raws, result := New(WithDelimiter('\t')).ParseTyped(context.Background(),
-		location.MustNewSourceID("test://data.tsv"), "Entity",
+		location.NewSourceID("test://data.tsv"), "Entity",
 		strings.NewReader("id\tname\tcount\n"+tabRecord), st)
 
 	if !result.OK() {
@@ -46,7 +44,7 @@ func TestParseWithTypeColumn_WithDelimiterSplitsOnTab(t *testing.T) {
 	s := loadTestSchema(t, "basic.yammm")
 
 	parsed, result := New(WithTypeColumn("kind"), WithDelimiter('\t')).ParseWithTypeColumn(context.Background(),
-		location.MustNewSourceID("test://data.tsv"),
+		location.NewSourceID("test://data.tsv"),
 		strings.NewReader("kind\tid\tname\tcount\nEntity\t"+tabRecord),
 		func(name string) schema.Type {
 			st, _ := s.Type(name)
@@ -94,7 +92,7 @@ func TestMarshalSnapshot_WithDelimiterWritesTabsAndReadsBack(t *testing.T) {
 	}
 
 	raws, result := a.ParseTyped(context.Background(),
-		location.MustNewSourceID("test://out.tsv"), "Entity", strings.NewReader(text), st)
+		location.NewSourceID("test://out.tsv"), "Entity", strings.NewReader(text), st)
 	if !result.OK() {
 		t.Fatalf("re-parse: %s", result)
 	}
@@ -104,31 +102,6 @@ func TestMarshalSnapshot_WithDelimiterWritesTabsAndReadsBack(t *testing.T) {
 	props := raws[0].Properties
 	if props["name"] != "Smith, Ann" || !reflect.DeepEqual(props["tags"], []any{"a", "b"}) {
 		t.Errorf("read back %#v", props)
-	}
-}
-
-// WriteSnapshot builds its own csv.Writer per type, so the option has to reach
-// it separately from MarshalSnapshot's.
-func TestWriteSnapshot_WithDelimiterWritesTabs(t *testing.T) {
-	t.Parallel()
-	s := loadTestSchema(t, "basic.yammm")
-	snap := buildSnapshot(t, s, map[string][]map[string]any{
-		"Entity": {{"id": "e1", "name": "Smith, Ann"}},
-	})
-	var buf bytes.Buffer
-
-	err := New(WithDelimiter('\t')).WriteSnapshot(context.Background(), func(string) (io.Writer, error) {
-		return &buf, nil
-	}, snap)
-	if err != nil {
-		t.Fatalf("write: %v", err)
-	}
-	header, row, _ := strings.Cut(buf.String(), "\n")
-	if strings.Contains(header, ",") || !strings.Contains(header, "\t") {
-		t.Errorf("header %q is not tab-delimited", header)
-	}
-	if !strings.Contains(row, "\tSmith, Ann\t") {
-		t.Errorf("row %q does not carry the comma-bearing cell bare between tabs", row)
 	}
 }
 
@@ -142,7 +115,7 @@ func TestWithDelimiter_RefusedDelimiterIsReportedAtUse(t *testing.T) {
 	st, _ := s.Type("Entity")
 	snap := buildSnapshot(t, s, map[string][]map[string]any{"Entity": {{"id": "e1", "name": "Ann"}}})
 	const refusal = "invalid field or comment delimiter"
-	id := location.MustNewSourceID("test://data.csv")
+	id := location.NewSourceID("test://data.csv")
 
 	requireRefusal := func(t *testing.T, result diag.Result) {
 		t.Helper()
@@ -187,10 +160,6 @@ func TestWithDelimiter_RefusedDelimiterIsReportedAtUse(t *testing.T) {
 
 			_, err := a.MarshalSnapshot(context.Background(), snap)
 			requireWriteRefusal(t, err)
-			err = a.WriteSnapshot(context.Background(), func(string) (io.Writer, error) {
-				return io.Discard, nil
-			}, snap)
-			requireWriteRefusal(t, err)
 		})
 	}
 }
@@ -204,7 +173,7 @@ func TestWithDelimiter_RefusalNamesTheDelimiter(t *testing.T) {
 	s := loadTestSchema(t, "basic.yammm")
 	st, _ := s.Type("Entity")
 	snap := buildSnapshot(t, s, map[string][]map[string]any{"Entity": {{"id": "e1", "name": "Ann"}}})
-	id := location.MustNewSourceID("test://data.csv")
+	id := location.NewSourceID("test://data.csv")
 
 	for _, c := range []struct {
 		delim rune
@@ -240,12 +209,6 @@ func TestWithDelimiter_RefusalNamesTheDelimiter(t *testing.T) {
 			_, err := a.MarshalSnapshot(context.Background(), snap)
 			if err == nil || err.Error() != want {
 				t.Errorf("MarshalSnapshot error = %v, want %q", err, want)
-			}
-			err = a.WriteSnapshot(context.Background(), func(string) (io.Writer, error) {
-				return io.Discard, nil
-			}, snap)
-			if err == nil || err.Error() != want {
-				t.Errorf("WriteSnapshot error = %v, want %q", err, want)
 			}
 		})
 	}

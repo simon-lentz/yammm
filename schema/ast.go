@@ -34,8 +34,8 @@ type importDecl struct {
 	// With no alias written, Alias is empty; see [importDecl.unnamed].
 	PathRefused bool
 	// PathRaw is the path literal as the source wrote it, quotes included; a
-	// Builder's import, and a path with no value and no alias, have none. It
-	// is what a message shows for a path that has no value.
+	// path with no value and no alias has none. It is what a message shows for
+	// a path that has no value.
 	PathRaw string
 }
 
@@ -64,9 +64,7 @@ func (d *importDecl) shownPath() string {
 // unnamed reports that the declaration has no alias: its path has no value to
 // derive one from and the source wrote none. It is still an import
 // declaration, which a context that takes no import refuses and counts, but
-// nothing can refer to it, so the completer applies no alias rule to it. A
-// Builder's import with an empty alias is not one: its path has a value, and
-// the alias rules refuse it.
+// nothing can refer to it, so the completer applies no alias rule to it.
 func (d *importDecl) unnamed() bool {
 	return d.PathRefused && d.Alias == ""
 }
@@ -76,11 +74,6 @@ type astTypeRef struct {
 	Qualifier string        // Empty for local types; import alias otherwise
 	Name      string        // Type name (UC_WORD)
 	Span      location.Span // Source location for diagnostics
-}
-
-// IsQualified returns true if the reference has an import qualifier.
-func (r astTypeRef) IsQualified() bool {
-	return r.Qualifier != ""
 }
 
 // String returns the fully qualified name (e.g., "parts.Wheel" or "Wheel").
@@ -146,7 +139,7 @@ type relationDecl struct {
 // evaluate it without re-parsing.
 type invariantDecl struct {
 	Name string
-	Expr expr.Expression // Compiled expression; nil only from a Builder caller, which completion refuses
+	Expr expr.Expression // Compiled expression
 	// NoValue holds each literal in Expr that stands in for one with no
 	// value, with the kind of literal the source wrote.
 	NoValue       []parse.NoValueLiteral

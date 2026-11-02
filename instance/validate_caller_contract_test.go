@@ -3,15 +3,12 @@ package instance_test
 import (
 	"context"
 	"encoding/json"
-	"log/slog"
 	"slices"
 	"strings"
 	"testing"
 
 	"github.com/simon-lentz/yammm/diag"
-	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/instance"
-	"github.com/simon-lentz/yammm/internal/yammmtest"
 	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/location/path"
 	"github.com/simon-lentz/yammm/schema"
@@ -154,8 +151,7 @@ func TestValidate_CancellationReturnsNoPartialSlice(t *testing.T) {
 }
 
 // An unknown type name is a failure whatever the batch: Validate resolves
-// the name before it answers a nil or empty batch, as ValidateForComposition
-// does, and as docs/API.md states.
+// the name before it answers a nil or empty batch, as docs/API.md states.
 func TestValidate_UnknownTypeFailsOnAnEmptyBatch(t *testing.T) {
 	t.Parallel()
 	s := loadT(t, "schema \"p\"\n\ntype T {\n\tid String primary\n}\n")
@@ -221,23 +217,6 @@ func TestValidate_AnAbstractRowRefusalCarriesItsSpan(t *testing.T) {
 	}
 }
 
-// A cancelled composition batch returns no partial slice either: the
-// one-entry-per-input contract is ValidateForComposition's as it is Validate's.
-func TestValidateForComposition_CancellationReturnsNoPartialSlice(t *testing.T) {
-	t.Parallel()
-	s := loadT(t, "schema \"p\"\n\npart type Line {\n\tid String primary\n}\n\ntype T {\n\tid String primary\n\t*-> LINES (many) Line\n}\n")
-	v := instance.NewValidator(s)
-	raws := []instance.RawInstance{{Properties: map[string]any{"id": "a"}}, {Properties: map[string]any{"id": "b"}}}
-	ctx, cancel := context.WithCancel(t.Context())
-	if valids, res := v.ValidateForComposition(ctx, "T", "LINES", raws); res.Err() != nil || len(valids) != 2 {
-		t.Fatalf("control: %d valids, %v", len(valids), res.Err())
-	}
-	cancel()
-	if valids, res := v.ValidateForComposition(ctx, "T", "LINES", raws); valids != nil || !res.HasCode(diag.E_CONTEXT_CANCELLED) {
-		t.Errorf("a cancelled composition batch returned %d valids with %v", len(valids), codes(res))
-	}
-}
-
 // A batch-wide resolution error names the source and no row: the type name,
 // not raws[0], is at fault.
 func TestValidate_BatchWideErrorBlamesNoRow(t *testing.T) {
@@ -267,36 +246,15 @@ func TestValidate_BatchWideErrorBlamesNoRow(t *testing.T) {
 	}
 }
 
-// NewValidInstance does not alias the caller's maps: the godoc promises
-// immutability, so a caller that reuses its map cannot change the instance.
-func TestNewValidInstance_DoesNotAliasCallerMaps(t *testing.T) {
-	t.Parallel()
-	edges := map[string]instance.ValidEdgeData{"AT": instance.NewValidEdgeData(nil)}
-	composed := map[string]immutable.Value{}
-	vi := instance.NewValidInstance("T", schema.TypeID{}, immutable.Key{}, immutable.Properties{}, edges, composed, location.Provenance{})
-	delete(edges, "AT")
-	if _, ok := vi.Edge("AT"); !ok {
-		t.Error("deleting from the caller's map removed the instance's edge")
-	}
-	composed["LINES"] = immutable.Wrap([]any{})
-	n := 0
-	for range vi.Compositions() {
-		n++
-	}
-	if n != 0 {
-		t.Error("adding to the caller's composed map reached the instance")
-	}
-}
-
 // A nil ValidInstance — the documented shape of a failed entry in Validate's
 // slice — answers its accessors as ValidEdgeData does, instead of panicking.
 func TestValidInstance_ZeroHandleIsSafe(t *testing.T) {
 	t.Parallel()
 	var vi instance.ValidInstance
-	if vi.TypeName() != "" || vi.Validated() || !vi.Provenance().IsZero() {
+	if vi.TypeName() != "" || !vi.Provenance().IsZero() {
 		t.Error("a nil instance must answer zero values")
 	}
-	if vi.TypeID() != (schema.TypeID{}) || vi.PrimaryKey().Len() != 0 || vi.Properties().Len() != 0 {
+	if vi.Type() != (schema.Type{}) || vi.PrimaryKey().Len() != 0 || vi.Properties().Len() != 0 {
 		t.Error("a nil instance must answer zero identity, key and properties")
 	}
 	if _, ok := vi.Property("x"); ok {
@@ -381,21 +339,6 @@ type Sub extends Base {
 	_, res := v.ValidateOne(t.Context(), "Sub", instance.RawInstance{Properties: map[string]any{"id": "s", "n": int64(-1)}})
 	if !res.HasCode(diag.E_INVARIANT_FAIL) {
 		t.Errorf("the inherited invariant did not run: %v", codes(res))
-	}
-}
-
-// The validator's logger reaches the evaluator: an invariant evaluation
-// emits the evaluator's trace op under it.
-func TestWithLogger_ReachesTheEvaluator(t *testing.T) {
-	t.Parallel()
-	s := loadT(t, "schema \"p\"\n\ntype T {\n\tid String primary\n\tn Integer\n\t! \"pos\" n > 0\n}\n")
-	h := yammmtest.NewRecordHandler(slog.LevelDebug)
-	v := instance.NewValidator(s, instance.WithLogger(slog.New(h)))
-	if _, res := v.ValidateOne(t.Context(), "T", instance.RawInstance{Properties: map[string]any{"id": "x", "n": int64(1)}}); res.Err() != nil {
-		t.Fatal(res.Err())
-	}
-	if !yammmtest.HasAttr(h.Records(), "op", "yammm.eval.expr") {
-		t.Error("the evaluator's trace op was never logged: the validator's logger does not reach it")
 	}
 }
 

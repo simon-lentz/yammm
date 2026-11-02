@@ -26,7 +26,7 @@ func parseBoth(t *testing.T, a func(...Option) *Adapter, st schema.Type, input s
 } {
 	t.Helper()
 	const typeName = "Entity"
-	id := location.MustNewSourceID("test://data/structure.csv")
+	id := location.NewSourceID("test://data/structure.csv")
 	out := make(map[string]struct {
 		raws   []instance.RawInstance
 		result diag.Result
@@ -200,7 +200,7 @@ func TestParse_AFailingReaderStopsTheParseAtFatal(t *testing.T) {
 				done := make(chan diag.Result, 1)
 				var produced int
 				go func() {
-					id := location.MustNewSourceID("test://data/failing.csv")
+					id := location.NewSourceID("test://data/failing.csv")
 					if entry == "ParseTyped" {
 						raws, result := New().ParseTyped(t.Context(), id, "Entity", r, schema.Type{})
 						produced = len(raws)
@@ -322,7 +322,7 @@ func TestParseTyped_AKeyComponentNamingNoKeyOfTheTargetReachesTheValidator(t *te
 	t.Parallel()
 	s := loadTestSchema(t, "with_relations.yammm")
 	st, _ := s.Type("Employee")
-	id := location.MustNewSourceID("test://data/bogus_key.csv")
+	id := location.NewSourceID("test://data/bogus_key.csv")
 	header := "employee_id,name,works_at._target_company_id,works_at._target_bogus\n"
 
 	for adapter, a := range map[string]*Adapter{"WithSchema": New(WithSchema(s)), "without WithSchema": New()} {
@@ -358,7 +358,7 @@ func TestParseTyped_APlainColumnAndADottedGroupWritingOneKeyIsRefused(t *testing
 	t.Parallel()
 	s := loadTestSchema(t, "with_relations.yammm")
 	st, _ := s.Type("Employee")
-	id := location.MustNewSourceID("test://data/one_key.csv")
+	id := location.NewSourceID("test://data/one_key.csv")
 	header := "employee_id,name,works_at,works_at._target_company_id\n"
 	for _, c := range []struct {
 		name, row string
@@ -401,7 +401,7 @@ func mapEqual(got any, want map[string]any) bool {
 // mistyped discriminator is named as one.
 func TestParseWithTypeColumn_AValueThatIsNoTypeNameIsRefused(t *testing.T) {
 	t.Parallel()
-	id := location.MustNewSourceID("test://data/kinds.csv")
+	id := location.NewSourceID("test://data/kinds.csv")
 	input := "kind,id\n" +
 		",e0\n" + // line 2: no type name at all, as JSON's empty key
 		"not a type,e1\n" + // line 3
@@ -451,7 +451,7 @@ func TestParseTyped_ATargetCountDisagreementNamesTheSameColumnsEveryRun(t *testi
 	input := "order_id,carries._target_item_id,carries.quantity\no1,a|b|c,1|2\n"
 	const want = `association "carries" columns disagree on target count: "carries._target_item_id" holds 3, "carries.quantity" holds 2`
 	for range 50 {
-		_, result := New().ParseTyped(t.Context(), location.MustNewSourceID("test://o.csv"), "Order", strings.NewReader(input), st)
+		_, result := New().ParseTyped(t.Context(), location.NewSourceID("test://o.csv"), "Order", strings.NewReader(input), st)
 		issue, ok := firstIssue(result)
 		if !ok || issue.Message() != want {
 			t.Fatalf("diagnostic %q, want %q", issue.Message(), want)
@@ -468,7 +468,7 @@ func TestParseTyped_AStrayColumnsLongNameIsCut(t *testing.T) {
 	column := "carries." + strings.Repeat("z", 40)
 	input := "order_id,carries._target_item_id," + column + "\no1,a|b,x|y|z\n"
 	const want = `association "carries" column "carries.zzzzzzzzzzzzzzzzzzzzzzzz"… (48 bytes) holds 3 segments for 2 targets and is left out`
-	_, result := New().ParseTyped(t.Context(), location.MustNewSourceID("test://o.csv"), "Order", strings.NewReader(input), st)
+	_, result := New().ParseTyped(t.Context(), location.NewSourceID("test://o.csv"), "Order", strings.NewReader(input), st)
 	issue, ok := issueContaining(result, "is left out")
 	if !ok || issue.Message() != want {
 		t.Fatalf("diagnostic %q, want %q: %s", issue.Message(), want, result)
@@ -484,7 +484,7 @@ func TestParseWithTypeColumn_TheTypeColumnNeedNotBeFirst(t *testing.T) {
 	s := loadTestSchema(t, "basic.yammm")
 	st, _ := s.Type("Entity")
 	byType, result := New(WithTypeColumn("kind")).ParseWithTypeColumn(t.Context(),
-		location.MustNewSourceID("test://data/last.csv"), strings.NewReader("id,kind,name\ne1,Entity,Ann\n"),
+		location.NewSourceID("test://data/last.csv"), strings.NewReader("id,kind,name\ne1,Entity,Ann\n"),
 		func(string) schema.Type { return st })
 	if !result.OK() || len(byType["Entity"]) != 1 {
 		t.Fatalf("parse: %v, %s", byType, result)
@@ -500,7 +500,7 @@ func TestParseTyped_AnEdgeValueThatDoesNotCoerceIsRefused(t *testing.T) {
 	t.Parallel()
 	s := loadTestSchema(t, "edge_properties.yammm")
 	st, _ := s.Type("Order")
-	raws, result := New().ParseTyped(t.Context(), location.MustNewSourceID("test://o.csv"), "Order",
+	raws, result := New().ParseTyped(t.Context(), location.NewSourceID("test://o.csv"), "Order",
 		strings.NewReader("order_id,carries._target_item_id,carries.quantity\no1,a,many\n"), st)
 	if _, ok := issueContaining(result, `column "carries".quantity`); !ok {
 		t.Fatalf("no coercion diagnostic: %s", result)
@@ -516,7 +516,7 @@ func TestParseTyped_AnEdgeValueThatDoesNotCoerceIsRefused(t *testing.T) {
 func TestParseWithTypeColumn_AMissingTypeColumnIsReportedAtTheHeadersLine(t *testing.T) {
 	t.Parallel()
 	_, result := New(WithTypeColumn("kind")).ParseWithTypeColumn(t.Context(),
-		location.MustNewSourceID("test://data/nokind.csv"), strings.NewReader("\n\nid,name\ne1,Ann\n"),
+		location.NewSourceID("test://data/nokind.csv"), strings.NewReader("\n\nid,name\ne1,Ann\n"),
 		func(string) schema.Type { return schema.Type{} })
 	issue, ok := issueContaining(result, `type column "kind" not found in header`)
 	if !ok || issue.Span().Start.Line != 3 {

@@ -2,7 +2,6 @@ package graph
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"sync"
 	"sync/atomic"
@@ -12,60 +11,30 @@ import (
 	"github.com/simon-lentz/yammm/schema"
 )
 
-// ErrAssemblerFinalized is returned by [BatchAssembler.Add],
-// [BatchAssembler.AddValid] and [BatchAssembler.AddValidOrMerge] when called
-// after [BatchAssembler.Finalize].
-//
-// Consumers performing retry / cleanup logic check via errors.Is:
-//
-//	if err := ba.Add(typeName, raw); err != nil {
-//	    if errors.Is(err, graph.ErrAssemblerFinalized) {
-//	        // batch is complete; stop submitting
-//	    }
-//	    ...
-//	}
-var ErrAssemblerFinalized = errors.New("graph: BatchAssembler.Add called after Finalize")
-
 // BatchAssembler composes a
 // [github.com/simon-lentz/yammm/instance.Validator] and a [Graph] into a single
-// call-surface for the common pipeline pattern:
+// call-surface for the common pipeline pattern, one validator serving every
+// goroutine:
 //
-//	validator.ValidateOne(...) → graph.Add(...) → graph.Check(...) → graph.Snapshot()
+//	validator.ValidateOne(...) → graph.Add(...)
 //
-// The assembler encodes the ordering invariant (validate before add,
-// check before snapshot), so a consumer that stays on its methods cannot get
-// the sequence wrong. A caller that reaches past Finalize through
-// [BatchAssembler.Graph] can take a snapshot before any check.
+// The end of the batch reads the graph through [BatchAssembler.Graph]: check it
+// with [Graph.Check], then take [Graph.Snapshot]. An add can reach the graph
+// until the caller stops making them, so the coordinator waits for its workers
+// before the check.
+//
 // A record that fails validation or the add is surfaced as a contextual
 // error tagged with its type and the call's attempt ordinal, or, for a zero
 // instance, "zero-instance" and the ordinal; a record whose one fault is an
 // [instance.Refused] value, as an error that matches
-// [instance.ErrRefusedValue] under the same tag. Finalize's error is tagged
-// "batch_finalize".
+// [instance.ErrRefusedValue] under the same tag.
 //
 // # Thread safety
 //
-// BatchAssembler is safe for concurrent use: Add, AddValid,
-// AddValidOrMerge, Count, Graph, and Finalize may all be called from multiple
-// goroutines against the same instance. A single shared Validator is serialized through an internal
-// sync.Mutex; the lock covers ValidateOne, Graph.Add, and the
-// success-counter increment as one atomic step.
-//
-// Finalize sets a
-// finalized flag, then acquires an internal sync.RWMutex write lock —
-// which by Go's RWMutex semantics waits for every outstanding Add's
-// RLock to release before granting. Once the write lock is held, no
-// in-flight Add can be in progress, and Finalize runs Check + Snapshot.
-// Concurrent Add calls that arrive during Finalize either complete
-// before Finalize observes them (if they had already acquired their
-// RLock and committed to Graph.Add) or fail with [ErrAssemblerFinalized]
-// (the one-shot-consumed contract).
-//
-// The concurrent-safety contract specifically supports the worker-pool
-// pattern where one assembler is shared across N scraper goroutines,
-// each calling Add for its per-record outputs, with a coordinator
-// goroutine calling Finalize at end-of-batch. No external mutex
-// required at call sites.
+// BatchAssembler is safe for concurrent use: Add, AddValid, AddValidOrMerge,
+// Count and Graph may all be called from multiple goroutines against the same
+// instance, with no external mutex at call sites. An internal sync.Mutex covers
+// ValidateOne, Graph.Add and the success-counter increment as one atomic step.
 //
 // BatchAssembler is a convenience primitive. Consumers who need
 // finer-grained control (per-record error handling, mid-batch
@@ -81,75 +50,12 @@ type BatchAssembler struct {
 	// addMu serializes ValidateOne + Graph.Add + counter ops.
 	addMu sync.Mutex
 
-	// lifecycleMu coordinates Add lifecycle against Finalize.
-	//
-	//   - Add / AddValid / AddValidOrMerge hold RLock for the whole call.
-	//     Many calls hold it at once, but each call that reaches the graph
-	//     runs its graph add, and Add its validation, under addMu, one call
-	//     at a time; the RLock is the barrier Finalize waits on.
-	//   - Finalize sets the finalized flag, then acquires the write
-	//     lock — which by Go's RWMutex semantics waits for every
-	//     outstanding RLock to release before granting. After the write
-	//     lock is held, no in-flight Add can be in progress, and no
-	//     new Add can acquire its RLock until Finalize releases.
-	//
-	// A sync.WaitGroup cannot carry this: an Add(1) concurrent with a Wait()
-	// at a zero counter is a race, which Go's race detector flags even when
-	// the calls are functionally well-ordered.
-	lifecycleMu sync.RWMutex
-
-	// finalized is the one-shot finalization flag. Once true, subsequent
-	// Add / AddValid / AddValidOrMerge calls return ErrAssemblerFinalized.
-	// Read inside the lifecycle RLock so the load happens-before any concurrent
-	// Finalize's Lock acquisition.
-	finalized atomic.Bool
-
-	// Counters. attempts increments on every Add / AddValid /
-	// AddValidOrMerge call that finds the assembler unfinalized, whatever
-	// its outcome, and labels per-record errors with a 1-indexed attempt
-	// ordinal. successes increments only
-	// when a call adds an instance, never on a merge, and is what Count()
-	// returns.
+	// attempts increments on every Add / AddValid / AddValidOrMerge call,
+	// whatever its outcome, and labels per-record errors with a 1-indexed attempt
+	// ordinal. successes increments only when a call adds an instance, never on a
+	// merge, and is what Count() returns.
 	attempts  atomic.Int64
 	successes atomic.Int64
-
-	// finalizeDone memoizes Finalize's outcome, which its contract promises
-	// a second call returns without a second Check pass. finalizeSnap holds
-	// the snapshot from the first call that took one, whatever that call's
-	// outcome: once finalized the graph cannot change, so a retry after a
-	// cancelled Check reuses it rather than cloning the graph again. All FOUR
-	// guarded by lifecycleMu's write lock.
-	finalizeDone bool
-	finalizeRes  FinalizeResult
-	finalizeErr  error
-	finalizeSnap Snapshot
-}
-
-// FinalizeResult is the structured return value from
-// [BatchAssembler.Finalize]. It carries the finalized graph snapshot;
-// diagnostics are reached via Snapshot.Diagnostics() at the call site.
-//
-// Snapshot is never zero. This is the load-bearing contract the
-// struct exists to encode: callers read res.Snapshot directly without
-// gating on err == nil, because the graph state at the point of
-// finalization is useful for diagnostics on either outcome path
-// (operators logging a failed batch want to see which instances were
-// assembled before the check tripped, not just the check's error
-// message).
-//
-// Snapshot.Diagnostics() carries the construction diagnostics of every
-// assembler add and of every [Graph.Add], [Graph.AddOrMerge] and
-// [Graph.AddComposed] call on its graph. It does NOT carry [Graph.Check]'s issues: Check
-// returns a fresh result per call and accumulates nothing, which is what
-// makes it idempotent. Finalize returns Check's issues in its own error.
-type FinalizeResult struct {
-	// Snapshot is the graph state at the point of finalization.
-	// Never zero. On success, this is the completed snapshot ready
-	// for downstream use (marshaling, verification, logging). On
-	// failure, this is the partial snapshot at the point Graph.Check
-	// tripped — all instances successfully added before the check
-	// failure are present and inspectable.
-	Snapshot Snapshot
 }
 
 // NewBatchAssembler constructs an assembler bound to schema s.
@@ -161,9 +67,7 @@ type FinalizeResult struct {
 // The supplied ctx is captured and used for the assembler's internal
 // ValidateOne and Graph.Add calls. Cancelling ctx cancels in-flight
 // validation; Add then returns a *diag.ContextualError whose result holds
-// Fatal E_CONTEXT_CANCELLED, so match the code rather than context.Canceled. Finalize
-// takes its own ctx parameter independent of the construction-time
-// context.
+// Fatal E_CONTEXT_CANCELLED, so match the code rather than context.Canceled.
 //
 // Panics if s is zero or ctx is nil (consistent with [graph.New] and
 // [instance.NewValidator]).
@@ -197,22 +101,22 @@ func NewBatchAssembler(ctx context.Context, s schema.Schema) *BatchAssembler {
 //   - A new instance whose (type, primary key) collides with a seeded
 //     instance is rejected as a duplicate (E_DUPLICATE_PK) by Add and
 //     AddValid; AddValidOrMerge merges it into the seeded instance, or
-//     refuses it, by [Graph.AddOrMerge]'s rules.
-//   - Finalize's Check covers seeded and new state alike: a required
-//     association imported from snap and still unresolved at Finalize
-//     fails the batch with E_UNRESOLVED_REQUIRED.
+//     refuses it, by the package doc's Merge on a Duplicate Key section.
+//   - [Graph.Check] covers seeded and new state alike: a required
+//     association imported from snap and still unresolved reports
+//     E_UNRESOLVED_REQUIRED.
 //
 // Two accounting consequences of seeding:
 //
 //   - [BatchAssembler.Count] counts only records added through this
 //     assembler; seeded instances are not counted.
-//   - Construction diagnostics are not carried over from snap — the
-//     finalized snapshot's Diagnostics() reflects only this assembler's
+//   - Construction diagnostics are not carried over from snap — a later
+//     snapshot's Diagnostics() reflects only this assembler's
 //     Add / AddValid / AddValidOrMerge calls and any add through
 //     [BatchAssembler.Graph]. Snapshots loaded from .ys
 //     files carry no construction diagnostics in the first place (diagnostics are
-//     transient by design); the structural records — Duplicates and
-//     Unresolved — are what persist and import.
+//     transient by design). A document persists the instances, the edges, and
+//     the Duplicates and Unresolved records, and the seeding imports those.
 //
 // snap is held to s as [NewFromSnapshot] holds it, under the package doc's
 // "Structural facts": a snapshot [NewFromSnapshot] refuses draws a nil assembler
@@ -221,9 +125,7 @@ func NewBatchAssembler(ctx context.Context, s schema.Schema) *BatchAssembler {
 // [Graph] bound to s, or loaded via
 // [github.com/simon-lentz/yammm/snapshot.Load] against s, is never refused.
 //
-// Every other contract matches [NewBatchAssembler]: the captured ctx,
-// the Add / AddValid / AddValidOrMerge / Finalize lifecycle and finalize
-// barrier, and the [FinalizeResult] nonzero-Snapshot guarantee.
+// Every other contract matches [NewBatchAssembler].
 //
 // Panics if s or snap is zero or ctx is nil (consistent with [NewBatchAssembler]
 // and [NewFromSnapshot]).
@@ -272,45 +174,12 @@ func newBatchAssembler(ctx context.Context, s schema.Schema, g *Graph) *BatchAss
 // [instance.ErrRefusedValue] instead, and adds no diagnostic: its producer
 // reported the value.
 //
-// Returns [ErrAssemblerFinalized] (matchable via errors.Is) when called
-// after [BatchAssembler.Finalize].
-//
-// Add does not call Graph.Check or Graph.Snapshot — those happen in
-// Finalize.
+// Add does not call Graph.Check or Graph.Snapshot.
 func (ba *BatchAssembler) Add(typeName string, raw instance.RawInstance) error {
-	// Take the lifecycle RLock for the entire duration of this Add.
-	// Finalize's Lock() will not be granted until this
-	// RUnlock fires (deferred), so every Add committed past this line
-	// happens-before Finalize's snapshot. A late Add that arrives after
-	// Finalize has already taken the write lock blocks on RLock until
-	// Finalize releases, then re-checks `finalized` and returns the
-	// post-finalize error.
-	ba.lifecycleMu.RLock()
-	defer ba.lifecycleMu.RUnlock()
-
-	if ba.finalized.Load() {
-		return ErrAssemblerFinalized
-	}
-
 	attemptN := ba.attempts.Add(1)
 
-	return ba.addSerial(typeName, raw, attemptN)
-}
-
-// addSerial validates raw and adds the result, serialized on addMu because
-// one validator serves every goroutine.
-func (ba *BatchAssembler) addSerial(typeName string, raw instance.RawInstance, attemptN int64) error {
 	ba.addMu.Lock()
 	defer ba.addMu.Unlock()
-
-	// Optimistic re-check: if Finalize set the flag while we were
-	// blocked on addMu, bail early. Not strictly required for
-	// correctness (the lifecycle RLock already orders our completion
-	// before Finalize's snapshot), but avoids wasted validate +
-	// Graph.Add work when the caller has already moved on.
-	if ba.finalized.Load() {
-		return ErrAssemblerFinalized
-	}
 
 	valid, vRes := ba.validator.ValidateOne(ba.ctx, typeName, raw)
 	// A caller that discards per-record errors reads a validation failure
@@ -333,45 +202,31 @@ func (ba *BatchAssembler) addSerial(typeName string, raw instance.RawInstance, a
 	return nil
 }
 
-// AddValid adds a pre-validated instance directly to the Graph,
-// bypassing the validator. Useful when the caller has its own
-// validator or is re-adding instances from a prior snapshot. Safe
-// for concurrent use from multiple goroutines.
-//
-// AddValid still respects the post-finalize contract and the in-flight
-// tracking, and increments both attempts and successes counters so
-// Count() reflects the total successful additions across the Add, AddValid
-// and AddValidOrMerge call paths.
-//
-// Returns [ErrAssemblerFinalized] (matchable via errors.Is) when called
-// after [BatchAssembler.Finalize].
+// AddValid adds a validated instance directly to the Graph, with no validation
+// pass of its own, and is safe for concurrent use. It counts in
+// [BatchAssembler.Count] as [BatchAssembler.Add] does. It panics on an instance
+// validated under another schema load, as [Graph.Add] does.
 func (ba *BatchAssembler) AddValid(valid instance.ValidInstance) error {
 	_, err := ba.addValid(valid, false)
 	return err
 }
 
-// AddValidOrMerge is [BatchAssembler.AddValid] with [Graph.AddOrMerge]'s merge
-// and refusals, and reports whether it merged: a pre-validated instance whose
-// type and primary key the graph already holds merges its association records
-// into the held instance. A merge adds no instance, so [BatchAssembler.Count]
-// does not count it. Each merge plans and commits under the graph's lock, so
-// concurrent callers merging one key keep every edge. merged is false whenever
-// err is not nil.
+// AddValidOrMerge is [BatchAssembler.AddValid] that merges, and reports whether
+// it merged: a pre-validated instance whose type and primary key the graph
+// already holds, and which carries no composed children, merges its association
+// records into the held instance and keeps nothing else of itself. A merge
+// records no [Duplicate], raises no error and adds nothing to
+// [BatchAssembler.Count], and one that would give a (one) association a second
+// target is refused with an E_GRAPH_CARDINALITY for each such association.
+// merged is false whenever err is not nil. It panics on an instance validated
+// under another schema load, as [Graph.Add] does, and the package doc's Merge on a
+// Duplicate Key section states the rules.
 func (ba *BatchAssembler) AddValidOrMerge(valid instance.ValidInstance) (merged bool, err error) {
 	return ba.addValid(valid, true)
 }
 
 // addValid is AddValid, and with merge set AddValidOrMerge.
 func (ba *BatchAssembler) addValid(valid instance.ValidInstance, merge bool) (bool, error) {
-	// Same lifecycle-RLock pattern as Add — see Add's Godoc and the
-	// lifecycleMu field comment for the reasoning.
-	ba.lifecycleMu.RLock()
-	defer ba.lifecycleMu.RUnlock()
-
-	if ba.finalized.Load() {
-		return false, ErrAssemblerFinalized
-	}
-
 	attemptN := ba.attempts.Add(1)
 
 	if valid.IsZero() {
@@ -401,11 +256,7 @@ func (ba *BatchAssembler) addValid(valid instance.ValidInstance, merge bool) (bo
 	ba.addMu.Lock()
 	defer ba.addMu.Unlock()
 
-	name, traceName := "graph.Add", "yammm.graph.add"
-	if merge {
-		name, traceName = "graph.AddOrMerge", "yammm.graph.add_or_merge"
-	}
-	merged, addRes := ba.graph.add(ba.ctx, valid, name, traceName, merge)
+	merged, addRes := ba.graph.add(ba.ctx, valid, merge)
 	if addRes.HasErrors() {
 		return false, ba.wrapAddError(valid.TypeName(), attemptN, addRes)
 	}
@@ -433,105 +284,6 @@ func (ba *BatchAssembler) wrapAddError(typeName string, attemptN int64, res diag
 	return res.WithContext(tag)
 }
 
-// Finalize runs Graph.Check, takes a Snapshot, and returns both via
-// a [FinalizeResult] struct plus a paired error.
-//
-// Return-value contract:
-//
-//   - On success (Graph.Check produced no error-severity diagnostics):
-//     returns (FinalizeResult{Snapshot: snap}, nil). Warning-severity
-//     diagnostics surface on res.Snapshot.Diagnostics(); they do not
-//     block the batch.
-//   - On failure (error-severity diagnostics from Graph.Check): returns
-//     (FinalizeResult{Snapshot: snap}, err) where res.Snapshot is
-//     never zero (the partial snapshot at the point of failure)
-//     and err is a [*diag.ContextualError] tagged "batch_finalize"
-//     carrying Check's error-severity issues.
-//
-// The error reports Check alone. A record that failed its own Add reported
-// that failure from Add; its diagnostics reach res.Snapshot.Diagnostics(),
-// which a caller that discards per-record errors must read to see them. A
-// record [BatchAssembler.Add] refuses for an [instance.Refused] value alone adds
-// none: its issue is in the result of the parser that wrote the value.
-//
-// The Snapshot of a returned [FinalizeResult] is never zero, so a caller checks
-// err alone for success or failure:
-//
-//	res, err := ba.Finalize(ctx)
-//	if err != nil { return fmt.Errorf("batch: %w", err) }
-//	// res.Snapshot is never zero; no gating needed.
-//	qualityCollector.Merge(res.Snapshot.Diagnostics())
-//
-// The "batch_finalize" tag is fixed (not configurable via options) so
-// downstream log consumers have a stable signal to filter on; callers
-// who want richer context wrap further via fmt.Errorf("%s: %w", ...).
-//
-// After Finalize, the assembler is effectively consumed; subsequent
-// Add / AddValid / AddValidOrMerge calls return [ErrAssemblerFinalized].
-// Calling Finalize twice is supported: the second call returns the first call's stored
-// FinalizeResult and error, with no second Check pass and no second
-// snapshot, so a later ctx cannot change a completed outcome.
-//
-// One outcome is not stored: a Check that returned a Fatal — that is, ctx was
-// already cancelled. Cancellation is an abort rather than a result, the graph
-// is unchanged, and a retry with a live context can still finalize. The
-// assembler still refuses further Add / AddValid / AddValidOrMerge calls, so
-// retrying Finalize is the only recovery there is and memoizing the cancellation would remove it.
-// The snapshot that call built is kept, though: the retry returns the same
-// Snapshot rather than cloning every instance and edge a second time, so an add
-// through [BatchAssembler.Graph] after that call does not reach it.
-//
-// Panics if ctx is nil (consistent with [Graph.Check]).
-func (ba *BatchAssembler) Finalize(ctx context.Context) (FinalizeResult, error) {
-	if ctx == nil {
-		panic("graph.BatchAssembler.Finalize: nil context")
-	}
-
-	// Flip the finalized flag first so any Add still in its pre-RLock
-	// window observes the new value and returns the post-finalize error
-	// after acquiring its RLock. The store is loaded inside the RLock by
-	// every concurrent Add (see Add / AddValid / AddValidOrMerge).
-	ba.finalized.Store(true)
-
-	// Take the lifecycle write lock. Go's RWMutex semantics guarantee this
-	// call blocks until every outstanding RLock is released — i.e., every
-	// in-flight Add has finished its Graph.Add and counter increment. After
-	// this point no in-flight Add can be in progress, and no new Add can
-	// acquire its RLock until we release. This is the barrier that makes
-	// "every Add that returned nil occurred before Finalize's snapshot"
-	// hold.
-	ba.lifecycleMu.Lock()
-	defer ba.lifecycleMu.Unlock()
-
-	if ba.finalizeDone {
-		return ba.finalizeRes, ba.finalizeErr
-	}
-
-	checkRes := ba.graph.Check(ctx)
-	if ba.finalizeSnap.IsZero() {
-		ba.finalizeSnap = ba.graph.Snapshot() // once; the graph is fixed from here
-	}
-	res := FinalizeResult{Snapshot: ba.finalizeSnap} // never zero
-
-	// A Fatal is a cancelled Check — an abort, not a result. The graph is
-	// unchanged and a retry with a live context can still finalize, so this
-	// outcome is NOT memoized: storing it would make one expired deadline
-	// permanent with no other recovery, since the assembler already refuses
-	// further Adds.
-	if checkRes.HasFatal() {
-		//nolint:wrapcheck // returning *diag.ContextualError directly is the documented contract; consumers errors.As against it
-		return res, checkRes.WithContext("batch_finalize")
-	}
-
-	ba.finalizeRes = res
-	if checkRes.HasErrors() {
-		ba.finalizeErr = checkRes.WithContext("batch_finalize")
-	}
-	ba.finalizeDone = true
-
-	return ba.finalizeRes, ba.finalizeErr
-}
-
 // Count returns the number of records successfully added so far.
 // Useful for progress reporting in long-running batches.
 //
@@ -547,22 +299,11 @@ func (ba *BatchAssembler) Count() int {
 	return int(ba.successes.Load())
 }
 
-// Graph exposes the underlying [Graph], whose one read is [Graph.Snapshot].
+// Graph returns the underlying [Graph], which the end of the batch checks with
+// [Graph.Check] and reads with [Graph.Snapshot].
 //
-// Prefer NOT to call this. The returned *Graph shares lifecycle with
-// the assembler. A Graph.Snapshot mid-batch, for progress or a partial read, is
-// the intended use. A Graph.Check or Graph.Snapshot taken as the batch's result
-// bypasses Finalize's "check before snapshot" ordering, the invariant the
-// BatchAssembler exists to enforce, and is not supported. Anything
-// that would mutate the assembly sequence
-// should go through Add / AddValid / AddValidOrMerge / Finalize. If you
-// find yourself reaching for Graph() to drive the final Check + Snapshot, use the
-// underlying Validator + Graph primitives directly instead — that's
-// the supported escape hatch, not this accessor.
-//
-// Graph() does NOT serialize against in-flight Add calls; the
-// returned *Graph is concurrent-safe by its own contract, and reads
-// against it (e.g., Snapshot()) reflect whatever instances have been
+// Graph does not serialize against in-flight Add calls: the returned *Graph is
+// concurrent-safe by its own contract, and a read reflects the instances
 // committed at the time of the read.
 func (ba *BatchAssembler) Graph() *Graph {
 	return ba.graph

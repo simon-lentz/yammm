@@ -9,7 +9,6 @@ import (
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/instance"
-	"github.com/simon-lentz/yammm/internal/instancetest"
 	"github.com/simon-lentz/yammm/schema"
 	"github.com/simon-lentz/yammm/snapshot"
 )
@@ -84,7 +83,6 @@ const (
 	sbOuterBox      = `"BOX":[{"key":null,"type":0,"properties":{"n":1},"composed"`
 	sbLastOrder     = `,"provenance":null}]},{"type":4,"items":[`
 	sbInnerBox      = `{"key":null,"type":0,"properties":{"n":2},"provenance":null}`
-	sbLines         = `"LINES":[{"key":null,"type":2,"properties":{"note":"a"},"provenance":null},{"key":null,"type":2,"properties":{"note":"b"},"provenance":null}],`
 	sbSeal          = `"SEAL":[{"key":["s1"],"type":5,"properties":{"code":"s1"},"provenance":null}]`
 	sbTagT1         = `{"key":["t1"],"type":6,"properties":{"code":"t1"},"provenance":null}`
 	sbTagT2         = `{"key":["t2"],"type":6,"properties":{"code":"t2"},"provenance":null}`
@@ -92,12 +90,8 @@ const (
 
 	sbDupInstance = `"instance":{"key":["c1"],"properties":{"id":"c1"},"provenance":null}`
 	sbRootDup     = `{"type":1,"key":["c1"],` + sbDupInstance + `,"conflict":{"type":1,"key":["c1"]}}`
-	sbSealDup     = `{"type":5,"key":["s2"],"instance":{"key":["s2"],"properties":{"code":"s2"},"provenance":null},"conflict":{"type":5,"key":["s1"]},"parent_type":3,"parent_key":["o1"],"relation":"SEAL"}`
 	sbTagDup      = `{"type":6,"key":["t1"],"instance":{"key":["t1"],"properties":{"code":"t1"},"provenance":null},"conflict":{"type":6,"key":["t1"]},"parent_type":3,"parent_key":["o1"],"relation":"TAGS"}`
 	sbDups        = `"duplicates":[`
-
-	sbSealConflict = `"conflict":{"type":5,"key":["s1"]}`
-	sbTagConflict  = `"conflict":{"type":6,"key":["t1"]}`
 
 	sbEmpty      = `{"source_type":4,"source_key":["p2"],"relation":"CLIENTS","target_type":1,"target_key":null,"required":true,"reason":"empty"}`
 	sbAbsent     = `{"source_type":4,"source_key":["p2"],"relation":"EMPLOYER","target_type":1,"target_key":null,"required":true,"reason":"absent"}`
@@ -112,8 +106,7 @@ var sbIntegrity = regexp.MustCompile(`"integrity_hash":"sha256:[0-9a-f]+"`)
 // hash, so an edited copy reads without one on every surface. It holds
 // Companies c1 and c2; Person p1 with an edge under each of its four
 // associations; Person p2 with an unresolved record under each; Order o1 with
-// two Tags, two keyless Lines, a Seal and a Box in a Box; a root duplicate of
-// c1, and a composed duplicate under BOX, under SEAL and under TAGS.
+// two Tags, two keyless Lines, a Seal and a Box in a Box; and a duplicate of c1.
 func singleBreakDoc(t *testing.T) (schema.Schema, string) {
 	t.Helper()
 	s, res := schema.LoadString(t.Context(), singleBreakSchema, "sb.yammm")
@@ -151,19 +144,6 @@ func singleBreakDoc(t *testing.T) (schema.Schema, string) {
 		"SEAL":  []any{map[string]any{"code": "s1"}},
 		"BOX":   []any{map[string]any{"n": 1, "BOX": []any{map[string]any{"n": 2}}}},
 	})
-	id := func(name string) schema.TypeID {
-		ty, ok := s.Type(name)
-		if !ok {
-			t.Fatalf("no type %s", name)
-		}
-		return ty.ID()
-	}
-	g.AddComposed(t.Context(), id("Order"), `["o1"]`, "TAGS",
-		instancetest.VI("Tag", instancetest.TypeID(id("Tag")), instancetest.PK("t1"), instancetest.Props(map[string]any{"code": "t1"})))
-	g.AddComposed(t.Context(), id("Order"), `["o1"]`, "BOX",
-		instancetest.VI("Box", instancetest.TypeID(id("Box")), instancetest.NoKey(), instancetest.Props(map[string]any{"n": 3})))
-	g.AddComposed(t.Context(), id("Order"), `["o1"]`, "SEAL",
-		instancetest.VI("Seal", instancetest.TypeID(id("Seal")), instancetest.PK("s2"), instancetest.Props(map[string]any{"code": "s2"})))
 	data, res := snapshot.Marshal(t.Context(), g.Snapshot())
 	if res.HasErrors() {
 		t.Fatalf("Marshal: %s", res)
@@ -193,15 +173,13 @@ func sbError(code diag.Code, phrase string) sbWant {
 // the fact needs no schema. required counts the
 // unresolved records no check refused under a required association, each of which
 // WithRevalidation reports as W_SNAPSHOT_UNRESOLVED_REQUIRED by its own rule;
-// zero means the fixture's two. rebuild, where positive, is the number of
-// issues graph.RebuildSnapshot reports for the document's parts.
+// zero means the fixture's two.
 type sbRow struct {
 	name       string
 	edits      [][2]string
 	want       []sbWant
 	schemaless bool
 	required   int
-	rebuild    int
 }
 
 func sbNestedBoxes(n int) string {
@@ -255,10 +233,6 @@ func sbRows() []sbRow {
 		return edit(sbP2, `{"key":["p2"],"properties":{"id":"p2"},"edges":{`+edges+`},"provenance":null}`)
 	}
 	p3 := `{"key":["p3"],"properties":{"id":"p3"},"edges":{"CLIENTS":[{"target_type":1,"target_key":["c1"],"properties":{}}],"EMPLOYER":[{"target_type":1,"target_key":["c1"],"properties":{}}]},"provenance":null}`
-	lineDup := func(relation string, parentType int, parentKey string) string {
-		return fmt.Sprintf(`{"type":2,"key":null,"instance":{"key":null,"properties":{"note":"a"},"provenance":null},"conflict":{"type":2,"key":null},"parent_type":%d,"parent_key":[%q],"relation":%q},`,
-			parentType, parentKey, relation)
-	}
 	return []sbRow{
 		// The instances section's groups.
 		{
@@ -279,7 +253,7 @@ func sbRows() []sbRow {
 		},
 		{
 			name: "root of a part type", edits: edit(sbLastGroup, `}]},{"type":6,"items":[{"key":["t7"],"properties":{"code":"t7"},"provenance":null}]}],"diagnostics"`),
-			want: one(diag.E_SNAPSHOT_INVALID_ROOT, "is a part type"), rebuild: 1,
+			want: one(diag.E_SNAPSHOT_INVALID_ROOT, "is a part type"),
 		},
 
 		// One instance.
@@ -305,23 +279,23 @@ func sbRows() []sbRow {
 		},
 		{
 			name: "stored key disagrees with its property", edits: edit(sbP1, `{"key":["px"],"properties":{"age":30,"id":"p1"},"edges":{`),
-			want: malformed(`disagrees with property "id"`), rebuild: 1,
+			want: malformed(`disagrees with property "id"`),
 		},
 		{
 			name: "stored key of another arity", edits: edit(sbP1, `{"key":["p1","x"],"properties":{"age":30,"id":"p1"},"edges":{`),
-			want: malformed("has 2 components"), rebuild: 1,
+			want: malformed("has 2 components"),
 		},
 		{
 			name: "undeclared property", edits: edit(sbP2, `{"key":["p2"],"properties":{"ghost":1,"id":"p2"},"provenance":null}`),
-			want: malformed(`holds property "ghost"`), rebuild: 1,
+			want: malformed(`holds property "ghost"`),
 		},
 		{
 			name: "undeclared property on a composed child", edits: edit(sbTagT2, `{"key":["t2"],"type":6,"properties":{"code":"t2","ghost":1},"provenance":null}`),
-			want: malformed(`holds property "ghost"`), rebuild: 1,
+			want: malformed(`holds property "ghost"`),
 		},
 		{
 			name: "two roots at one address", edits: edit(sbC2, sbC2+`,`+sbC2),
-			want: one(diag.E_DUPLICATE_PK, `duplicate primary key ["c2"]`), schemaless: true, rebuild: 1,
+			want: one(diag.E_DUPLICATE_PK, `duplicate primary key ["c2"]`), schemaless: true,
 		},
 		{
 			name: "value outside its bounds", edits: edit(`"age":30`, `"age":500`),
@@ -331,7 +305,7 @@ func sbRows() []sbRow {
 		// One edge.
 		{
 			name: "undeclared edge property", edits: edit(sbKnows, `"KNOWS":[{"target_type":4,"target_key":["p2"],"properties":{"ghost":1,"note":"n"}}]`),
-			want: malformed(`holds edge property "ghost"`), rebuild: 1,
+			want: malformed(`holds edge property "ghost"`),
 		},
 		{
 			name: "edge with no target row", edits: edit(sbMentor, `"MENTOR":[{"target_type":null,"target_key":["p2"],"properties":{}}]`),
@@ -347,7 +321,7 @@ func sbRows() []sbRow {
 		},
 		{
 			name: "edge under an undeclared relation", edits: edit(sbMentor, sbMentor+`,"XA":[{"target_type":1,"target_key":["c1"],"properties":{}}]`),
-			want: one(diag.E_GRAPH_UNKNOWN_RELATION, `under "XA"`), rebuild: 1,
+			want: one(diag.E_GRAPH_UNKNOWN_RELATION, `under "XA"`),
 		},
 		{
 			name: "edge to another type", edits: edit(sbMentor, `"MENTOR":[{"target_type":1,"target_key":["c1"],"properties":{}}]`),
@@ -367,32 +341,31 @@ func sbRows() []sbRow {
 		},
 		{
 			name: "edge target key of another arity", edits: edit(sbMentor, `"MENTOR":[{"target_type":4,"target_key":["p2","x"],"properties":{}}]`),
-			want: malformed("carries a 2-part target key"), rebuild: 1,
+			want: malformed("carries a 2-part target key"),
 		},
 		{
 			name: "edge to no root", edits: edit(sbMentor, `"MENTOR":[{"target_type":4,"target_key":["p7"],"properties":{}}]`),
-			want: one(diag.E_SNAPSHOT_DANGLING_REFERENCE, `references sb#Person[["p7"]] which does not exist`), schemaless: true, rebuild: 1,
+			want: one(diag.E_SNAPSHOT_DANGLING_REFERENCE, `references sb#Person[["p7"]] which does not exist`), schemaless: true,
 		},
 		{
 			name: "two edges under a (one) association", edits: edit(sbMentor, `"MENTOR":[{"target_type":4,"target_key":["p2"],"properties":{}},{"target_type":4,"target_key":["p1"],"properties":{}}]`),
-			want: one(diag.E_GRAPH_CARDINALITY, `(one) association "MENTOR"`), rebuild: 1,
+			want: one(diag.E_GRAPH_CARDINALITY, `(one) association "MENTOR"`),
 		},
 
 		// One composition slot.
 		{
 			name: "children under an undeclared composition", edits: edit(sbSeal, `"NOPE":[{"key":["t9"],"type":6,"properties":{"code":"t9"},"provenance":null}],`+sbSeal),
-			want: one(diag.E_SNAPSHOT_INVALID_COMPOSED, "does not declare as a composition"), rebuild: 1,
+			want: one(diag.E_SNAPSHOT_INVALID_COMPOSED, "does not declare as a composition"),
 		},
 		{
 			name: "two children under a (one) composition", edits: [][2]string{
 				{sbSeal, `"SEAL":[{"key":["s1"],"type":5,"properties":{"code":"s1"},"provenance":null},{"key":["s3"],"type":5,"properties":{"code":"s3"},"provenance":null}]`},
-				{sbSealDup + `,`, ``},
 			},
-			want: one(diag.E_DUPLICATE_COMPOSED_PK, "(one) cardinality violated"), rebuild: 1,
+			want: one(diag.E_DUPLICATE_COMPOSED_PK, "(one) cardinality violated"),
 		},
 		{
 			name: "two (many) siblings at one key", edits: edit(sbTagT2, sbTagT1),
-			want: one(diag.E_DUPLICATE_COMPOSED_PK, "holds children 0 and 1 at key"), rebuild: 1,
+			want: one(diag.E_DUPLICATE_COMPOSED_PK, "holds children 0 and 1 at key"),
 		},
 		{
 			name: "composed child with no row", edits: edit(sbTagT2, `{"key":["t2"],"type":null,"properties":{"code":"t2"},"provenance":null}`),
@@ -400,13 +373,13 @@ func sbRows() []sbRow {
 		},
 		{
 			name: "composed child of another type", edits: edit(sbTagT2, `{"key":["t2"],"type":5,"properties":{"code":"t2"},"provenance":null}`),
-			want: one(diag.E_SNAPSHOT_TYPE_MISMATCH, "which the composition declares as sb#Tag"), rebuild: 1,
+			want: one(diag.E_SNAPSHOT_TYPE_MISMATCH, "which the composition declares as sb#Tag"),
 		},
 
 		// One duplicate record.
 		{
 			name: "duplicate with no row", edits: edit(sbRootDup, `{"type":null,"key":["c1"],`+sbDupInstance+`,"conflict":{"type":1,"key":["c1"]}}`),
-			want: malformed("duplicate record 1 carries no types-table row"), schemaless: true,
+			want: malformed("duplicate record 0 carries no types-table row"), schemaless: true,
 		},
 		{
 			name: "duplicate instance stating another row", edits: edit(sbDupInstance, `"instance":{"key":["c1"],"type":4,"properties":{"id":"c1"},"provenance":null}`),
@@ -422,14 +395,14 @@ func sbRows() []sbRow {
 		},
 		{
 			name: "duplicate instance with an undeclared property", edits: edit(sbDupInstance, `"instance":{"key":["c1"],"properties":{"ghost":1,"id":"c1"},"provenance":null}`),
-			want: malformed(`holds property "ghost"`), rebuild: 1,
+			want: malformed(`holds property "ghost"`),
 		},
 		{
 			name: "duplicate instance whose key disagrees with its property", edits: edit(sbDupInstance, `"instance":{"key":["c1"],"properties":{"id":"cz"},"provenance":null}`),
-			want: malformed(`disagrees with property "id"`), rebuild: 1,
+			want: malformed(`disagrees with property "id"`),
 		},
 		{
-			name: "root duplicate of a part type", edits: edit(sbDups, sbDups+`{"type":6,"key":["t1"],"instance":{"key":["t1"],"properties":{"code":"t1"},"provenance":null},"conflict":{"type":6,"key":["t1"]}},`),
+			name: "duplicate of a part type", edits: edit(sbDups, sbDups+`{"type":6,"key":["t1"],"instance":{"key":["t1"],"properties":{"code":"t1"},"provenance":null},"conflict":{"type":6,"key":["t1"]}},`),
 			want: one(diag.E_SNAPSHOT_INVALID_ROOT, "duplicate record 0 denotes sb#Tag"),
 		},
 		{
@@ -446,112 +419,37 @@ func sbRows() []sbRow {
 		},
 		{
 			name: "duplicate conflict row out of range", edits: edit(sbDupInstance+`,"conflict":{"type":1,"key":["c1"]}`, sbDupInstance+`,"conflict":{"type":99,"key":["c1"]}`),
-			want: malformed("duplicate record 1 conflict references types table row 99"), schemaless: true,
+			want: malformed("duplicate record 0 conflict references types table row 99"), schemaless: true,
 		},
 		{
-			name: "root duplicate with parent coordinates", edits: edit(sbDupInstance+`,"conflict":{"type":1,"key":["c1"]}`, sbDupInstance+`,"conflict":{"type":1,"key":["c1"]},"parent_key":["o1"]`),
-			want: malformed("states no relation but carries parent coordinates"), schemaless: true,
+			name: "duplicate stating a parent key", edits: edit(sbDupInstance+`,"conflict":{"type":1,"key":["c1"]}`, sbDupInstance+`,"conflict":{"type":1,"key":["c1"]},"parent_key":["o1"]`),
+			want: malformed("states a parent or a relation"), schemaless: true,
 		},
 		{
-			name: "root duplicate whose conflict is another root", edits: edit(sbDupInstance+`,"conflict":{"type":1,"key":["c1"]}`, sbDupInstance+`,"conflict":{"type":1,"key":["c2"]}`),
-			want: malformed("a root duplicate's conflict is the root at its own type and key"), schemaless: true,
+			name: "duplicate stating a relation", edits: edit(sbDupInstance+`,"conflict":{"type":1,"key":["c1"]}`, sbDupInstance+`,"conflict":{"type":1,"key":["c1"]},"relation":"TAGS"`),
+			want: malformed("states a parent or a relation"), schemaless: true,
 		},
 		{
-			name: "composed duplicate with no parent row", edits: edit(`"conflict":{"type":6,"key":["t1"]},"parent_type":3,`, `"conflict":{"type":6,"key":["t1"]},`),
-			want: malformed("with no parent coordinates"), schemaless: true,
+			name: "duplicate of a part at its parent", edits: edit(sbDups, sbDups+sbTagDup+`,`),
+			want: malformed("states a parent or a relation"), schemaless: true,
 		},
 		{
-			name: "composed duplicate parent row out of range", edits: edit(`"conflict":{"type":6,"key":["t1"]},"parent_type":3,`, `"conflict":{"type":6,"key":["t1"]},"parent_type":99,`),
-			want: malformed("duplicate record 3 parent references types table row 99"), schemaless: true,
-		},
-		{
-			name: "composed duplicate under no root", edits: edit(`"parent_key":["o1"],"relation":"TAGS"`, `"parent_key":["o9"],"relation":"TAGS"`),
-			want: one(diag.E_SNAPSHOT_DANGLING_REFERENCE, "does not resolve to a root instance"), schemaless: true,
-		},
-		{
-			name: "composed duplicate with no child at its key", edits: edit(sbTagDup, strings.ReplaceAll(sbTagDup, `"t1"`, `"t9"`)),
-			want: one(diag.E_SNAPSHOT_DANGLING_REFERENCE, "references non-existent instance"), schemaless: true, rebuild: 1,
-		},
-		{
-			name: "composed duplicate of another type than its composition", edits: edit(`{"type":5,"key":["s2"],"instance"`, `{"type":6,"key":["s2"],"instance"`),
-			want: one(diag.E_SNAPSHOT_TYPE_MISMATCH, `which the composition "SEAL" declares as sb#Seal`), rebuild: 1,
-		},
-		{
-			name: "composed duplicate of another type whose stated conflict is its slot's", edits: edit(sbSealDup, strings.Replace(sbSealDup, `{"type":5,"key":["s2"]`, `{"type":6,"key":["s2"]`, 1)),
-			want: one(diag.E_SNAPSHOT_TYPE_MISMATCH, `which the composition "SEAL" declares as sb#Seal`), rebuild: 1,
-		},
-		{
-			name: "composed duplicate of another type whose stated conflict is not in its slot", edits: edit(sbSealDup, strings.Replace(strings.Replace(sbSealDup, `{"type":5,"key":["s2"]`, `{"type":6,"key":["s2"]`, 1), sbSealConflict, `"conflict":{"type":5,"key":["s9"]}`, 1)),
-			want: one(diag.E_SNAPSHOT_TYPE_MISMATCH, `which the composition "SEAL" declares as sb#Seal`), rebuild: 1,
-		},
-		{
-			name: "composed duplicate of a keyless part whose stated conflict is another type", edits: edit(`"conflict":{"type":0,"key":null},"parent_type":3,"parent_key":["o1"],"relation":"BOX"`, `"conflict":{"type":3,"key":null},"parent_type":3,"parent_key":["o1"],"relation":"BOX"`),
-			// RebuildSnapshot derives a duplicate's conflict and reads no stated one.
-			want: one(diag.E_SNAPSHOT_DANGLING_REFERENCE, "references non-existent instance"), schemaless: true,
-		},
-		{
-			name: "composed duplicate with no row", edits: edit(sbTagDup, strings.Replace(sbTagDup, `{"type":6,`, `{"type":null,`, 1)),
-			want: malformed("duplicate record"),
-		},
-		{
-			name: "composed duplicate with no row whose stated conflict is a sibling at another key", edits: edit(sbTagDup, strings.Replace(strings.Replace(sbTagDup, `{"type":6,`, `{"type":null,`, 1), sbTagConflict, `"conflict":{"type":6,"key":["t2"]}`, 1)),
-			want: malformed("duplicate record"),
-		},
-		{
-			name: "composed duplicate whose conflict is a sibling at another key", edits: edit(`"conflict":{"type":6,"key":["t1"]}`, `"conflict":{"type":6,"key":["t2"]}`),
-			want: malformed("its conflict is the child at its own key"),
-		},
-		{
-			name: "keyed (many) duplicate with an empty conflict key", edits: edit(sbTagConflict, `"conflict":{"type":6,"key":[]}`),
-			want: malformed("states no conflict key; under the (many) composition"),
-		},
-		{
-			name: "keyed (many) duplicate with a null conflict key", edits: edit(sbTagConflict, `"conflict":{"type":6,"key":null}`),
-			want: malformed("states no conflict key; under the (many) composition"),
-		},
-		{
-			name: "keyed (many) duplicate with an empty conflict key beside a sole sibling", edits: [][2]string{
-				{sbTags, `"TAGS":[` + sbTagT1 + `]`},
-				{sbTagConflict, `"conflict":{"type":6,"key":[]}`},
-			},
-			want: malformed("states no conflict key; under the (many) composition"),
-		},
-		{
-			name: "keyed (many) duplicate with an empty conflict key of another type", edits: edit(sbTagConflict, `"conflict":{"type":5,"key":[]}`),
-			want: malformed("states no conflict key; under the (many) composition"),
-		},
-		// The document graph.RebuildSnapshot and snapshot.Marshal of v0.21.0 wrote
-		// for a keyed child with no key and its duplicate: two breaks, and the
-		// null conflict key is no third.
-		{
-			name: "keyed (many) duplicate and its sole sibling with no keys and a null conflict key", edits: [][2]string{
-				{sbTags, `"TAGS":[{"key":[],"type":6,"properties":{"code":"t1"},"provenance":null}]`},
-				{sbTagDup, `{"type":6,"key":[],"instance":{"key":[],"properties":{"code":"t1"},"provenance":null},"conflict":{"type":6,"key":null},"parent_type":3,"parent_key":["o1"],"relation":"TAGS"}`},
-			},
-			want: []sbWant{
-				sbError(diag.E_SNAPSHOT_MALFORMED, "which is empty"),
-				sbError(diag.E_SNAPSHOT_MALFORMED, "which is empty"),
-			}, rebuild: 2,
-		},
-		{name: "keyed (one) duplicate with a null conflict key", edits: edit(sbSealConflict, `"conflict":{"type":5,"key":null}`)},
-		{name: "keyed (one) duplicate with an empty conflict key", edits: edit(sbSealConflict, `"conflict":{"type":5,"key":[]}`)},
-		{
-			name: "keyed (one) duplicate with a null conflict key of another type", edits: edit(sbSealConflict, `"conflict":{"type":6,"key":null}`),
-			want: one(diag.E_SNAPSHOT_DANGLING_REFERENCE, "references non-existent instance"), schemaless: true,
+			name: "duplicate whose conflict is another root", edits: edit(sbDupInstance+`,"conflict":{"type":1,"key":["c1"]}`, sbDupInstance+`,"conflict":{"type":1,"key":["c2"]}`),
+			want: malformed("a duplicate's conflict is the root at its own type and key"), schemaless: true,
 		},
 
 		// One unresolved record.
 		{
 			name: "record with an undocumented reason", edits: edit(sbMentorLost, strings.Replace(sbMentorLost, "target_missing", "bogus", 1)),
-			want: malformed(`states reason "bogus"`), schemaless: true, rebuild: 1,
+			want: malformed(`states reason "bogus"`), schemaless: true,
 		},
 		{
 			name: "absent record with a target key", edits: edit(sbAbsent, strings.Replace(sbAbsent, `"target_key":null`, `"target_key":["c1"]`, 1)),
-			want: malformed("but carries a target key"), schemaless: true, rebuild: 1, required: 1,
+			want: malformed("but carries a target key"), schemaless: true, required: 1,
 		},
 		{
 			name: "absent record with edge properties", edits: edit(sbAbsent, strings.Replace(sbAbsent, `"reason":"absent"`, `"reason":"absent","properties":{"since":1}`, 1)),
-			want: malformed("but carries edge properties"), schemaless: true, rebuild: 1, required: 1,
+			want: malformed("but carries edge properties"), schemaless: true, required: 1,
 		},
 		{
 			name: "record with no source row", edits: edit(sbKnowsLost, strings.Replace(sbKnowsLost, `"source_type":4`, `"source_type":null`, 1)),
@@ -583,11 +481,11 @@ func sbRows() []sbRow {
 		},
 		{
 			name: "record with an undeclared edge property", edits: edit(sbKnowsLost, strings.Replace(sbKnowsLost, `{"note":"m"}`, `{"ghost":1,"note":"m"}`, 1)),
-			want: malformed(`holds edge property "ghost"`), rebuild: 1,
+			want: malformed(`holds edge property "ghost"`),
 		},
 		{
 			name: "record under an undeclared relation", edits: edit(sbMentorLost, strings.Replace(sbMentorLost, "MENTOR", "NOPE", 1)),
-			want: one(diag.E_GRAPH_UNKNOWN_RELATION, `under "NOPE"`), rebuild: 1,
+			want: one(diag.E_GRAPH_UNKNOWN_RELATION, `under "NOPE"`),
 		},
 		{
 			name: "record of another target type", edits: edit(sbMentorLost, strings.Replace(sbMentorLost, `"target_type":4`, `"target_type":1`, 1)),
@@ -595,11 +493,11 @@ func sbRows() []sbRow {
 		},
 		{
 			name: "record target key of another arity", edits: edit(sbMentorLost, strings.Replace(sbMentorLost, `["p9"]`, `["p9","x"]`, 1)),
-			want: malformed("carries a 2-part target key"), rebuild: 1,
+			want: malformed("carries a 2-part target key"),
 		},
 		{
 			name: "record target key component not a scalar", edits: edit(sbMentorLost, strings.Replace(sbMentorLost, `["p9"]`, `[["p9"]]`, 1)),
-			want: malformed("whose component 0 is not a scalar"), schemaless: true, rebuild: 1,
+			want: malformed("whose component 0 is not a scalar"), schemaless: true,
 		},
 		{
 			name: "record sourced at no root", edits: edit(sbMentorLost, strings.Replace(sbMentorLost, `["p2"]`, `["p7"]`, 1)),
@@ -627,23 +525,23 @@ func sbRows() []sbRow {
 		{name: "record edge property within its bounds", edits: edit(sbAbsent, sbLost("p2", "EMPLOYER", 1, `["c9"]`, `{"since":3000}`))},
 		{
 			name: "record edge property outside its bounds beside an undeclared one", edits: edit(sbAbsent, sbLost("p2", "EMPLOYER", 1, `["c9"]`, `{"ghost":1,"since":9999}`)),
-			want: malformed(`holds edge property "ghost"`), rebuild: 1, required: 1,
+			want: malformed(`holds edge property "ghost"`), required: 1,
 		},
 		{
 			name: "record of another arity with an edge property outside its bounds", edits: edit(sbAbsent, sbLost("p2", "EMPLOYER", 1, `["c9","x"]`, `{"since":9999}`)),
-			want: malformed("carries a 2-part target key"), rebuild: 1, required: 1,
+			want: malformed("carries a 2-part target key"), required: 1,
 		},
 		{
 			name: "record with no target key and an edge property outside its bounds", edits: edit(sbAbsent, sbLost("p2", "EMPLOYER", 1, `[]`, `{"since":9999}`)),
-			want: malformed("carries a 0-part target key"), rebuild: 1, required: 1,
+			want: malformed("carries a 0-part target key"), required: 1,
 		},
 		{
 			name: "record under an undeclared relation with an edge property", edits: edit(sbUnresolved, sbUnresolved+sbLost("p2", "NOPE", 1, `["c9"]`, `{"since":9999}`)+`,`),
-			want: one(diag.E_GRAPH_UNKNOWN_RELATION, `under "NOPE"`), rebuild: 1,
+			want: one(diag.E_GRAPH_UNKNOWN_RELATION, `under "NOPE"`),
 		},
 		{
 			name: "record under a composition with an edge property", edits: edit(sbUnresolved, sbUnresolved+sbLost("o1", "TAGS", 6, `["t9"]`, `{"since":9999}`)+`,`),
-			want: one(diag.E_GRAPH_UNKNOWN_RELATION, `under "TAGS"`), rebuild: 1,
+			want: one(diag.E_GRAPH_UNKNOWN_RELATION, `under "TAGS"`),
 		},
 		{
 			name: "record of another target type with an edge property of another kind", edits: edit(sbUnresolved, sbUnresolved+sbLost("p2", "KNOWS", 1, `["c9"]`, `{"note":7}`)+`,`),
@@ -651,54 +549,54 @@ func sbRows() []sbRow {
 		},
 		{
 			name: "record with an undocumented reason and an edge property outside its bounds", edits: edit(sbAbsent, strings.Replace(sbLost("p2", "EMPLOYER", 1, `["c9"]`, `{"since":9999}`), "target_missing", "bogus", 1)),
-			want: malformed(`states reason "bogus"`), schemaless: true, rebuild: 1, required: 1,
+			want: malformed(`states reason "bogus"`), schemaless: true, required: 1,
 		},
 		{
 			name: "record outside its bounds beside an edge under a (one) association", edits: edit(sbUnresolved, sbUnresolved+sbLost("p1", "EMPLOYER", 1, `["c9"]`, `{"since":9999}`)+`,`),
-			want: one(diag.E_GRAPH_CARDINALITY, `(one) association "EMPLOYER"`), required: 3, rebuild: 1,
+			want: one(diag.E_GRAPH_CARDINALITY, `(one) association "EMPLOYER"`), required: 3,
 		},
 		{
 			name: "record outside its bounds of a root the walk refused", edits: [][2]string{
 				{sbP2, `{"key":["p2"],"properties":{"ghost":1,"id":"p2"},"provenance":null}`},
 				{sbAbsent, sbLost("p2", "EMPLOYER", 1, `["c9"]`, `{"since":9999}`)},
 			},
-			want: malformed(`holds property "ghost"`), rebuild: 1,
+			want: malformed(`holds property "ghost"`),
 		},
 		{
 			name: "two records outside their bounds under a (one) association", edits: edit(sbAbsent, sbLost("p2", "EMPLOYER", 1, `["c8"]`, `{"since":8888}`)+`,`+sbLost("p2", "EMPLOYER", 1, `["c9"]`, `{"since":9999}`)),
-			want: []sbWant{sbError(diag.E_GRAPH_CARDINALITY, `(one) association "EMPLOYER"`)}, required: 3, rebuild: 1,
+			want: []sbWant{sbError(diag.E_GRAPH_CARDINALITY, `(one) association "EMPLOYER"`)}, required: 3,
 		},
 
 		// The records together.
 		{
 			name: "absent record under an optional association", edits: edit(sbMentorLost, strings.Replace(strings.Replace(sbMentorLost, "target_missing", "absent", 1), `["p9"]`, `null`, 1)),
-			want: malformed("which is optional"), rebuild: 1,
+			want: malformed("which is optional"),
 		},
 		{
 			name: "empty record twice under a (many) association", edits: edit(sbEmpty, sbEmpty+`,`+sbEmpty),
-			want: malformed("holds an empty record beside another record"), required: 1, rebuild: 1,
+			want: malformed("holds an empty record beside another record"), required: 1,
 		},
 		{
 			name: "target_missing record naming a root", edits: edit(sbMentorLost, strings.Replace(sbMentorLost, `["p9"]`, `["p1"]`, 1)),
-			want: malformed("which a root holds"), rebuild: 1,
+			want: malformed("which a root holds"),
 		},
 		{
 			name: "root with no record under a required association", edits: edit(sbAbsent+`,`, ``),
-			want: malformed(`holds no edge and no record under the required association "EMPLOYER"`), required: 1, rebuild: 1,
+			want: malformed(`holds no edge and no record under the required association "EMPLOYER"`), required: 1,
 		},
 
 		// One break that two rules claimed.
 		{
 			name: "refused edge whose target is no root", edits: edit(sbMentor, sbMentor+`,"XA":[{"target_type":1,"target_key":["gone"],"properties":{}}]`),
-			want: one(diag.E_GRAPH_UNKNOWN_RELATION, `under "XA"`), rebuild: 1,
+			want: one(diag.E_GRAPH_UNKNOWN_RELATION, `under "XA"`),
 		},
 		{
 			name: "edge target key of another arity holding a non-scalar", edits: edit(sbMentor, `"MENTOR":[{"target_type":4,"target_key":[["x"],"y"],"properties":{}}]`),
-			want: malformed("carries a 2-part target key"), rebuild: 1,
+			want: malformed("carries a 2-part target key"),
 		},
 		{
 			name: "required record whose source names no root beside the fixture's", edits: edit(sbAbsent, sbAbsent+`,`+sbRecord("p77", "EMPLOYER", "absent")),
-			want: one(diag.E_SNAPSHOT_DANGLING_REFERENCE, `p77`), rebuild: 1,
+			want: one(diag.E_SNAPSHOT_DANGLING_REFERENCE, `p77`),
 		},
 		{
 			name: "absent record with no target row under a required association", edits: edit(sbAbsent, strings.Replace(sbAbsent, `"target_type":1`, `"target_type":null`, 1)),
@@ -714,7 +612,7 @@ func sbRows() []sbRow {
 		},
 		{
 			name: "absent record with a non-scalar target key", edits: edit(sbAbsent, strings.Replace(sbAbsent, `"target_key":null`, `"target_key":[[1]]`, 1)),
-			want: malformed("but carries a target key"), schemaless: true, rebuild: 1, required: 1,
+			want: malformed("but carries a target key"), schemaless: true, required: 1,
 		},
 		{
 			name: "record under an undeclared relation with a non-scalar target key", edits: edit(sbMentorLost, strings.Replace(strings.Replace(sbMentorLost, "MENTOR", "NOPE", 1), `["p9"]`, `[["p9"]]`, 1)),
@@ -723,53 +621,32 @@ func sbRows() []sbRow {
 		{
 			name: "two children of a (one) composition at one key", edits: [][2]string{
 				{sbSeal, `"SEAL":[{"key":["s1"],"type":5,"properties":{"code":"s1"},"provenance":null},{"key":["s1"],"type":5,"properties":{"code":"s1"},"provenance":null}]`},
-				{sbSealDup + `,`, ``},
 			},
-			want: one(diag.E_DUPLICATE_COMPOSED_PK, "(one) cardinality violated"), rebuild: 1,
+			want: one(diag.E_DUPLICATE_COMPOSED_PK, "(one) cardinality violated"),
 		},
 		{
-			name: "two children of a (one) composition beside its duplicate", edits: edit(sbSeal, `"SEAL":[{"key":["s1"],"type":5,"properties":{"code":"s1"},"provenance":null},{"key":["s3"],"type":5,"properties":{"code":"s3"},"provenance":null}]`),
-			want: one(diag.E_DUPLICATE_COMPOSED_PK, "(one) cardinality violated"), rebuild: 1,
-		},
-		{
-			name: "composed duplicate under a keyless (many) slot of two", edits: edit(sbDups, sbDups+lineDup("LINES", 3, "o1")),
-			want: malformed("where no child conflicts"), rebuild: 1,
-		},
-		{
-			name: "composed duplicate under a keyless (many) slot of none", edits: [][2]string{{sbLines, ``}, {sbDups, sbDups + lineDup("LINES", 3, "o1")}},
-			want: malformed("where no child conflicts"), rebuild: 1,
-		},
-		{
-			name: "composed duplicate under an undeclared relation", edits: edit(sbDups, sbDups+lineDup("NOPE", 3, "o1")),
-			want: one(diag.E_SNAPSHOT_INVALID_COMPOSED, "does not declare as a composition"), rebuild: 1,
-		},
-		{
-			name: "composed duplicate under an association", edits: edit(sbDups, sbDups+lineDup("KNOWS", 4, "p1")),
-			want: one(diag.E_SNAPSHOT_INVALID_COMPOSED, "does not declare as a composition"), rebuild: 1,
-		},
-		{
-			name: "root duplicate whose conflict is no root", edits: edit(sbDupInstance+`,"conflict":{"type":1,"key":["c1"]}`, sbDupInstance+`,"conflict":{"type":1,"key":["zz"]}`),
+			name: "duplicate whose conflict is no root", edits: edit(sbDupInstance+`,"conflict":{"type":1,"key":["c1"]}`, sbDupInstance+`,"conflict":{"type":1,"key":["zz"]}`),
 			want: one(diag.E_SNAPSHOT_DANGLING_REFERENCE, "duplicate conflict"), schemaless: true,
 		},
 		{
-			name: "root duplicate whose conflict key is empty", edits: edit(sbDupInstance+`,"conflict":{"type":1,"key":["c1"]}`, sbDupInstance+`,"conflict":{"type":1,"key":[]}`),
+			name: "duplicate whose conflict key is empty", edits: edit(sbDupInstance+`,"conflict":{"type":1,"key":["c1"]}`, sbDupInstance+`,"conflict":{"type":1,"key":[]}`),
 			want: one(diag.E_SNAPSHOT_DANGLING_REFERENCE, "duplicate conflict"), schemaless: true,
 		},
 		{
-			name: "root duplicate whose conflict key has another arity", edits: edit(sbDupInstance+`,"conflict":{"type":1,"key":["c1"]}`, sbDupInstance+`,"conflict":{"type":1,"key":["c1","x"]}`),
+			name: "duplicate whose conflict key has another arity", edits: edit(sbDupInstance+`,"conflict":{"type":1,"key":["c1"]}`, sbDupInstance+`,"conflict":{"type":1,"key":["c1","x"]}`),
 			want: one(diag.E_SNAPSHOT_DANGLING_REFERENCE, "duplicate conflict"), schemaless: true,
 		},
 		{
 			name: "absent record beside an edge under a (one) association", edits: edit(sbUnresolved, sbUnresolved+sbRecord("p1", "EMPLOYER", "absent")+`,`),
-			want: malformed("holds an absent record beside another record"), rebuild: 1,
+			want: malformed("holds an absent record beside another record"),
 		},
 		{
 			name: "absent record twice under a (one) association", edits: edit(sbAbsent, sbAbsent+`,`+sbAbsent),
-			want: malformed("holds an absent record beside another record"), required: 1, rebuild: 1,
+			want: malformed("holds an absent record beside another record"), required: 1,
 		},
 		{
 			name: "absent record twice beside an edge under a (one) association", edits: edit(sbUnresolved, sbUnresolved+sbRecord("p1", "EMPLOYER", "absent")+`,`+sbRecord("p1", "EMPLOYER", "absent")+`,`),
-			want: malformed("holds an absent record beside another record"), rebuild: 1,
+			want: malformed("holds an absent record beside another record"),
 		},
 
 		// Two breaks in one association: the record fact refuses the absent or
@@ -782,7 +659,7 @@ func sbRows() []sbRow {
 			want: []sbWant{
 				sbError(diag.E_SNAPSHOT_MALFORMED, "holds an absent record beside another record"),
 				sbError(diag.E_GRAPH_CARDINALITY, `(one) association "EMPLOYER" of sb#Person[["p1"]] holds 2 records`),
-			}, rebuild: 2,
+			},
 		},
 		{
 			name: "empty record beside an edge and a target_missing record under a (one) association", edits: edit(sbUnresolved,
@@ -790,7 +667,7 @@ func sbRows() []sbRow {
 			want: []sbWant{
 				sbError(diag.E_SNAPSHOT_MALFORMED, "holds an empty record beside another record"),
 				sbError(diag.E_GRAPH_CARDINALITY, `(one) association "EMPLOYER" of sb#Person[["p1"]] holds 2 records`),
-			}, required: 3, rebuild: 2,
+			}, required: 3,
 		},
 		{
 			name: "absent record twice beside two edges under a (one) association", edits: [][2]string{
@@ -800,14 +677,14 @@ func sbRows() []sbRow {
 			want: []sbWant{
 				sbError(diag.E_SNAPSHOT_MALFORMED, "holds an absent record beside another record"),
 				sbError(diag.E_GRAPH_CARDINALITY, `(one) association "EMPLOYER" of sb#Person[["p1"]] holds 2 records`),
-			}, rebuild: 2,
+			},
 		},
 
 		// A record a fact refuses is no (one) count and no record beside an
 		// absent one.
 		{
 			name: "absent record under an optional (one) association beside an edge", edits: edit(sbUnresolved, sbUnresolved+sbOptional("p1")+`,`),
-			want: malformed("which is optional"), rebuild: 1,
+			want: malformed("which is optional"),
 		},
 		{
 			name: "absent record under an optional (one) association beside two edges", edits: [][2]string{
@@ -817,26 +694,26 @@ func sbRows() []sbRow {
 			want: []sbWant{
 				sbError(diag.E_SNAPSHOT_MALFORMED, "which is optional"),
 				sbError(diag.E_GRAPH_CARDINALITY, `(one) association "MENTOR" of sb#Person[["p1"]] holds 2 records`),
-			}, rebuild: 2,
+			},
 		},
 		{
 			name: "absent record twice under an optional (one) association", edits: edit(sbMentorLost, sbOptional("p2")+`,`+sbOptional("p2")),
 			want: []sbWant{
 				sbError(diag.E_SNAPSHOT_MALFORMED, "which is optional"),
 				sbError(diag.E_SNAPSHOT_MALFORMED, "which is optional"),
-			}, rebuild: 2,
+			},
 		},
 		{
 			name: "target_missing record naming a root beside an edge under an optional (one) association", edits: edit(sbUnresolved, sbUnresolved+sbLost("p1", "MENTOR", 4, `["p2"]`, `{}`)+`,`),
-			want: malformed("which a root holds"), rebuild: 1,
+			want: malformed("which a root holds"),
 		},
 		{
 			name: "target_missing record naming a root beside an edge under a required (one) association", edits: edit(sbUnresolved, sbUnresolved+sbLost("p1", "EMPLOYER", 1, `["c2"]`, `{"since":1999}`)+`,`),
-			want: malformed("which a root holds"), rebuild: 1,
+			want: malformed("which a root holds"),
 		},
 		{
 			name: "absent record beside a target_missing record naming a root", edits: edit(sbAbsent, sbAbsent+`,`+sbLost("p2", "EMPLOYER", 1, `["c1"]`, `{"since":1999}`)),
-			want: malformed("which a root holds"), rebuild: 1,
+			want: malformed("which a root holds"),
 		},
 		{
 			name: "refused absent record beside an absent record and two edges under a (one) association", edits: [][2]string{
@@ -847,48 +724,47 @@ func sbRows() []sbRow {
 				sbError(diag.E_SNAPSHOT_MALFORMED, "but carries a target key"),
 				sbError(diag.E_SNAPSHOT_MALFORMED, "holds an absent record beside another record"),
 				sbError(diag.E_GRAPH_CARDINALITY, `(one) association "EMPLOYER" of sb#Person[["p1"]] holds 2 records`),
-			}, rebuild: 3,
+			},
 		},
 		{
 			name: "two roots at one address each with a (one) edge", edits: edit(sbP2, sbP2+`,`+p3+`,`+p3),
-			want: one(diag.E_DUPLICATE_PK, `duplicate primary key ["p3"]`), schemaless: true, rebuild: 1,
+			want: one(diag.E_DUPLICATE_PK, `duplicate primary key ["p3"]`), schemaless: true,
 		},
 		{
 			name: "record with an undocumented reason and no target key", edits: edit(sbAbsent, strings.Replace(sbAbsent, `"absent"`, `"bogus"`, 1)),
-			want: malformed(`states reason "bogus"`), schemaless: true, rebuild: 1, required: 1,
+			want: malformed(`states reason "bogus"`), schemaless: true, required: 1,
 		},
 		{
 			name: "(many) sibling whose key is its neighbour's and not its property's", edits: edit(sbTagT2, `{"key":["t1"],"type":6,"properties":{"code":"t2"},"provenance":null}`),
-			want: malformed(`disagrees with property "code"`), rebuild: 1,
+			want: malformed(`disagrees with property "code"`),
 		},
 
 		{
-			name: "two children of a keyless (one) composition beside its duplicate", edits: edit(sbOuterBox, `"BOX":[{"key":null,"type":0,"properties":{"n":7},"provenance":null},`+sbOuterBox[len(`"BOX":[`):]),
-			want: one(diag.E_DUPLICATE_COMPOSED_PK, "(one) cardinality violated"), rebuild: 1,
+			name: "two children of a keyless (one) composition", edits: edit(sbOuterBox, `"BOX":[{"key":null,"type":0,"properties":{"n":7},"provenance":null},`+sbOuterBox[len(`"BOX":[`):]),
+			want: one(diag.E_DUPLICATE_COMPOSED_PK, "(one) cardinality violated"),
 		},
 		{
 			name: "two roots at one address, the second holding a child", edits: edit(sbLastOrder, `,"provenance":null},{"key":["o1"],"properties":{"id":"o1"},"composed":{"BOX":[{"key":null,"type":0,"properties":{"n":9},"provenance":null}]},"provenance":null}]},{"type":4,"items":[`),
-			want: one(diag.E_DUPLICATE_PK, `duplicate primary key ["o1"]`), schemaless: true, rebuild: 1,
+			want: one(diag.E_DUPLICATE_PK, `duplicate primary key ["o1"]`), schemaless: true,
 		},
 		{
 			name: "two roots at one address, the second holding an edge the first has an absent record for", edits: edit(sbP2, sbP2+`,{"key":["p2"],"properties":{"id":"p2"},"edges":{"EMPLOYER":[{"target_type":1,"target_key":["c1"],"properties":{}}]},"provenance":null}`),
-			want: one(diag.E_DUPLICATE_PK, `duplicate primary key ["p2"]`), schemaless: true, rebuild: 1,
+			want: one(diag.E_DUPLICATE_PK, `duplicate primary key ["p2"]`), schemaless: true,
 		},
 		{
 			name: "refused record that names a root", edits: edit(sbKnowsLost, strings.Replace(strings.Replace(sbKnowsLost, `{"note":"m"}`, `{"ghost":1,"note":"m"}`, 1), `["p8"]`, `["p1"]`, 1)),
-			want: malformed(`holds edge property "ghost"`), rebuild: 1,
+			want: malformed(`holds edge property "ghost"`),
 		},
 
 		{
 			name: "(many) sibling at the key of one whose key is not its property's", edits: [][2]string{
 				{sbTagT1, `{"key":["t2"],"type":6,"properties":{"code":"t1"},"provenance":null}`},
-				{`,` + sbTagDup, ``},
 			},
-			want: malformed(`disagrees with property "code"`), rebuild: 1,
+			want: malformed(`disagrees with property "code"`),
 		},
 		{
 			name: "record with an undocumented reason beside an edge under a (one) association", edits: edit(sbUnresolved, sbUnresolved+`{"source_type":4,"source_key":["p1"],"relation":"EMPLOYER","target_type":1,"target_key":["c9"],"required":true,"reason":"bogus"},`),
-			want: malformed(`states reason "bogus"`), schemaless: true, rebuild: 1,
+			want: malformed(`states reason "bogus"`), schemaless: true,
 		},
 
 		// An element that states nothing is one break.
@@ -910,46 +786,38 @@ func sbRows() []sbRow {
 		},
 		{
 			name: "record with a null reason", edits: edit(sbKnowsLost, strings.Replace(sbKnowsLost, `"reason":"target_missing"`, `"reason":null`, 1)),
-			want: malformed("states no reason"), schemaless: true, rebuild: 1,
+			want: malformed("states no reason"), schemaless: true,
 		},
 		{
 			name: "record with a null reason and a null target key", edits: edit(sbKnowsLost, strings.Replace(strings.Replace(sbKnowsLost, `"reason":"target_missing"`, `"reason":null`, 1), `"target_key":["p8"]`, `"target_key":null`, 1)),
-			want: malformed("states no reason"), schemaless: true, rebuild: 1,
+			want: malformed("states no reason"), schemaless: true,
 		},
 		{
 			name: "absent record with a null reason", edits: edit(sbAbsent, strings.Replace(sbAbsent, `"reason":"absent"`, `"reason":null`, 1)),
-			want: malformed("states no reason"), required: 1, schemaless: true, rebuild: 1,
+			want: malformed("states no reason"), required: 1, schemaless: true,
 		},
 
-		// A child whose row the walk refused states its key in its slot.
+		// A child's row is judged wherever it sits among its slot's children.
 		{
-			name: "composed child with no row at its duplicate's key", edits: edit(sbTagT1, `{"key":["t1"],"type":null,"properties":{"code":"t1"},"provenance":null}`),
-			want: malformed("composed child under sb#Order.TAGS carries no types-table row"), schemaless: true,
-		},
-		{
-			name: "composed child with a row out of range at its duplicate's key", edits: edit(sbTagT1, `{"key":["t1"],"type":99,"properties":{"code":"t1"},"provenance":null}`),
+			name: "composed child with a row out of range", edits: edit(sbTagT1, `{"key":["t1"],"type":99,"properties":{"code":"t1"},"provenance":null}`),
 			want: malformed("references types table row 99"), schemaless: true,
 		},
 		{
-			name: "composed child of another type at its duplicate's key", edits: edit(sbTagT1, `{"key":["t1"],"type":5,"properties":{"code":"t1"},"provenance":null}`),
-			want: one(diag.E_SNAPSHOT_TYPE_MISMATCH, "which the composition declares as sb#Tag"), rebuild: 1,
-		},
-		{
-			name: "(one) composed child with no row beside its duplicate", edits: edit(sbSeal, `"SEAL":[{"key":["s1"],"type":null,"properties":{"code":"s1"},"provenance":null}]`),
+			name: "(one) composed child with no row", edits: edit(sbSeal, `"SEAL":[{"key":["s1"],"type":null,"properties":{"code":"s1"},"provenance":null}]`),
 			want: malformed("composed child under sb#Order.SEAL carries no types-table row"), schemaless: true,
 		},
 
 		// Every reference check runs before the (one) count and the record facts.
 		{
 			name: "edge to no root beside an accepted one under a (one) association", edits: edit(sbMentor, `"MENTOR":[{"target_type":4,"target_key":["p2"],"properties":{}},{"target_type":4,"target_key":["p7"],"properties":{}}]`),
-			want: one(diag.E_SNAPSHOT_DANGLING_REFERENCE, `references sb#Person[["p7"]]`), rebuild: 1,
+			want: one(diag.E_SNAPSHOT_DANGLING_REFERENCE, `references sb#Person[["p7"]]`),
 		},
 		{
 			name: "edge to no root beside an absent record", edits: [][2]string{
 				{sbEmployer, `"EMPLOYER":[{"target_type":1,"target_key":["c7"],"properties":{"since":1999}}]`},
 				{sbUnresolved, sbUnresolved + sbRecord("p1", "EMPLOYER", "absent") + `,`},
 			},
-			want: one(diag.E_SNAPSHOT_DANGLING_REFERENCE, `references sb#Company[["c7"]]`), required: 3, rebuild: 1,
+			want: one(diag.E_SNAPSHOT_DANGLING_REFERENCE, `references sb#Company[["c7"]]`), required: 3,
 		},
 		{
 			name: "edge to a refused root's stated address beside an accepted one under a (one) association", edits: [][2]string{
@@ -959,19 +827,18 @@ func sbRows() []sbRow {
 			want: []sbWant{
 				sbError(diag.E_SNAPSHOT_MALFORMED, `disagrees with property "id"`),
 				sbError(diag.E_GRAPH_CARDINALITY, `(one) association "EMPLOYER"`),
-			}, rebuild: 2,
+			},
 		},
 
 		// Two breaks, each reported once.
 		{
 			name: "two (many) siblings at the key of one whose key is not its property's", edits: [][2]string{
 				{sbTagT1, `{"key":["t2"],"type":6,"properties":{"code":"t1"},"provenance":null},` + sbTagT2},
-				{`,` + sbTagDup, ``},
 			},
 			want: []sbWant{
 				sbError(diag.E_SNAPSHOT_MALFORMED, `disagrees with property "code"`),
 				sbError(diag.E_DUPLICATE_COMPOSED_PK, "holds children 1 and 2 at key"),
-			}, rebuild: 2,
+			},
 		},
 		{
 			name: "two roots at one address with no record under their required associations", edits: edit(sbP2, sbP2+`,`+sbP4+`,`+sbP4),
@@ -979,24 +846,23 @@ func sbRows() []sbRow {
 				sbError(diag.E_DUPLICATE_PK, `duplicate primary key ["p4"]`),
 				sbError(diag.E_SNAPSHOT_MALFORMED, `holds no edge and no record under the required association "CLIENTS"`),
 				sbError(diag.E_SNAPSHOT_MALFORMED, `holds no edge and no record under the required association "EMPLOYER"`),
-			}, rebuild: 3,
+			},
 		},
 		{
 			name: "two roots with empty keys", edits: edit(sbC2, sbC2+`,{"key":[],"properties":{"id":"c8"},"provenance":null},{"key":[],"properties":{"id":"c9"},"provenance":null}`),
 			want: []sbWant{
 				sbError(diag.E_SNAPSHOT_MALFORMED, "which is empty"),
 				sbError(diag.E_SNAPSHOT_MALFORMED, "which is empty"),
-			}, rebuild: 2,
+			},
 		},
 		{
 			name: "two (many) siblings with empty keys", edits: [][2]string{
 				{sbTags, `"TAGS":[{"key":[],"type":6,"properties":{"code":"t1"},"provenance":null},{"key":[],"type":6,"properties":{"code":"t2"},"provenance":null}]`},
-				{`,` + sbTagDup, ``},
 			},
 			want: []sbWant{
 				sbError(diag.E_SNAPSHOT_MALFORMED, "which is empty"),
 				sbError(diag.E_SNAPSHOT_MALFORMED, "which is empty"),
-			}, rebuild: 2,
+			},
 		},
 		{
 			// The refused edge is held, so the required association is not
@@ -1006,7 +872,7 @@ func sbRows() []sbRow {
 		},
 		{
 			name: "refused edge beside an accepted one under a (one) association", edits: edit(sbMentor, `"MENTOR":[{"target_type":4,"target_key":["p2"],"properties":{}},{"target_type":4,"target_key":["p1","x"],"properties":{}}]`),
-			want: malformed("carries a 2-part target key"), rebuild: 1,
+			want: malformed("carries a 2-part target key"),
 		},
 	}
 }
@@ -1090,9 +956,6 @@ func TestRead_TheFixtureIsClean(t *testing.T) {
 	}
 	_, res := snapshot.Info(t.Context(), []byte(doc))
 	sbCheck(t, res, nil, sbMode{}, 0)
-	if res := snapshot.RebuildDocument([]byte(doc), s); !res.OK() {
-		t.Errorf("RebuildSnapshot over the fixture's parts: %s", res)
-	}
 }
 
 func TestRead_OneBreakDrawsOneIssue(t *testing.T) {
@@ -1131,98 +994,12 @@ func TestRead_OneBreakDrawsOneIssue(t *testing.T) {
 				t.Errorf("%d issues for %d breaks:\n%s", n, len(row.want), res)
 			}
 		})
-		if row.rebuild > 0 {
-			t.Run(row.name+"/RebuildSnapshot", func(t *testing.T) {
-				t.Parallel()
-				rebuilt := snapshot.RebuildDocument([]byte(edited), s)
-				if n := sbFailures(rebuilt); n != row.rebuild || strings.Contains(rebuilt.String(), "cannot be built") {
-					t.Errorf("RebuildSnapshot reports %d issues over the document's parts, want %d:\n%s", n, row.rebuild, rebuilt)
-				}
-				if row.rebuild == 1 {
-					if n := sbFailures(snapshot.Verify(t.Context(), []byte(edited), s, snapshot.WithIssueLimit(0))); n != 1 {
-						t.Errorf("Verify reports %d issues where RebuildSnapshot reports 1", n)
-					}
-				}
-			})
-		}
-	}
-}
-
-// A duplicate under a name that is no composition names its slot in the
-// details the same fact carries on an instance.
-func TestRead_ADuplicateUnderNoCompositionNamesItsSlot(t *testing.T) {
-	t.Parallel()
-	s, doc := singleBreakDoc(t)
-	edited := editOnce(t, doc, `"parent_key":["o1"],"relation":"TAGS"`, `"parent_key":["o1"],"relation":"NOPE"`)
-	res := snapshot.Verify(t.Context(), []byte(edited), s, snapshot.WithIssueLimit(0))
-	if res.Len() != 1 {
-		t.Fatalf("%d issues, want 1: %s", res.Len(), res)
-	}
-	for issue := range res.Issues() {
-		got := map[string]string{}
-		for _, d := range issue.Details() {
-			got[d.Key] = d.Value
-		}
-		if issue.Code() != diag.E_SNAPSHOT_INVALID_COMPOSED || got[diag.DetailKeyTypeName] != "sb#Order" || got[diag.DetailKeyRelationName] != "NOPE" {
-			t.Errorf("issue %s with details %v, want %s naming sb#Order and NOPE", issue.Code(), got, diag.E_SNAPSHOT_INVALID_COMPOSED)
-		}
-	}
-}
-
-// A duplicate's own type is a fact apart from its slot's children: under a
-// slot the walk refused for holding two children, a duplicate of another type
-// than the composition's draws its own issue, and resolves no conflict. Under
-// a slot the walk refused for its name, the name is the one break.
-func TestRead_ADuplicateUnderARefusedSlotKeepsItsOwnPosition(t *testing.T) {
-	t.Parallel()
-	s, doc := singleBreakDoc(t)
-	twoSeals := strings.Replace(sbSeal, `,"provenance":null}]`, `,"provenance":null},{"key":["s3"],"type":5,"properties":{"code":"s3"},"provenance":null}]`, 1)
-	for name, c := range map[string]struct {
-		edits [][2]string
-		want  []diag.Code
-	}{
-		"a Tag recorded under a (one) slot of two Seals": {
-			[][2]string{{sbSeal, twoSeals}, {sbSealDup, strings.Replace(sbSealDup, `{"type":5,"key":["s2"]`, `{"type":6,"key":["s2"]`, 1)}},
-			[]diag.Code{diag.E_DUPLICATE_COMPOSED_PK, diag.E_SNAPSHOT_TYPE_MISMATCH},
-		},
-		"a Seal recorded under a (one) slot of two Seals": {
-			[][2]string{{sbSeal, twoSeals}},
-			[]diag.Code{diag.E_DUPLICATE_COMPOSED_PK},
-		},
-		"a Seal recorded under the association its children sit in": {
-			[][2]string{
-				{sbP1, strings.Replace(sbP1, `"edges":{`, `"composed":{"KNOWS":[{"key":["s9"],"type":5,"properties":{"code":"s9"},"provenance":null}]},"edges":{`, 1)},
-				{`"parent_type":3,"parent_key":["o1"],"relation":"SEAL"`, `"parent_type":4,"parent_key":["p1"],"relation":"KNOWS"`},
-			},
-			[]diag.Code{diag.E_SNAPSHOT_INVALID_COMPOSED},
-		},
-		"a Seal recorded under the undeclared slot its children sit in": {
-			[][2]string{{sbSeal, strings.Replace(sbSeal, `"SEAL"`, `"NOPE"`, 1)}, {`"relation":"SEAL"`, `"relation":"NOPE"`}},
-			[]diag.Code{diag.E_SNAPSHOT_INVALID_COMPOSED},
-		},
-	} {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-			edited := doc
-			for _, e := range c.edits {
-				edited = editOnce(t, edited, e[0], e[1])
-			}
-			res := snapshot.Verify(t.Context(), []byte(edited), s, snapshot.WithIssueLimit(0))
-			if sbFailures(res) != len(c.want) {
-				t.Errorf("%d issues, want %v:\n%s", sbFailures(res), c.want, res)
-			}
-			for _, code := range c.want {
-				if !hasCode(res, code) {
-					t.Errorf("no %s:\n%s", code, res)
-				}
-			}
-		})
 	}
 }
 
 // An unresolved record a check refused names no reference to resolve, as a
 // refused edge names none: a refused record whose source no root stands at is
-// one break, as RebuildSnapshot reports it.
+// one break.
 func TestRead_ARefusedRecordNamesNoSource(t *testing.T) {
 	t.Parallel()
 	s, doc := singleBreakDoc(t)
@@ -1237,9 +1014,6 @@ func TestRead_ARefusedRecordNamesNoSource(t *testing.T) {
 			res := snapshot.Verify(t.Context(), edited, s, snapshot.WithIssueLimit(0))
 			if sbFailures(res) != 1 || hasCode(res, diag.E_SNAPSHOT_DANGLING_REFERENCE) {
 				t.Errorf("%d issues, want the record's one refusal and no dangling source:\n%s", sbFailures(res), res)
-			}
-			if n := sbFailures(snapshot.RebuildDocument(edited, s)); n != 1 {
-				t.Errorf("RebuildSnapshot reports %d issues, want 1", n)
 			}
 		})
 	}
@@ -1300,31 +1074,22 @@ func TestRead_AReferenceARefusedUnitStatesIsJudgedNoFurther(t *testing.T) {
 		sbRootDupConflict = `"conflict":{"type":1,"key":["c1"]}`
 	)
 	sbNullOrder := [2]string{`{"type":3,"items":[` + sbO1, `{"type":null,"items":[` + sbO1}
-	sbRepeatOrder := [2]string{`{"type":3,"items":[` + sbO1, `{"type":3,"items":[]},{"type":3,"items":[` + sbO1}
-	sbOrderOX := [2]string{sbO1, `{"key":["ox"],"properties":{"id":"o1"},"composed":{`}
-	sbTagNoKey := [2]string{sbTagConflict, `"conflict":{"type":6,"key":[]}`}
-	const (
-		sbSealS1 = `{"key":["s1"],"type":5,"properties":{"code":"s1"},"provenance":null}`
-		sbSealS3 = `{"key":["s3"],"type":5,"properties":{"code":"s3"},"provenance":null}`
-	)
+	const sbSealS1 = `{"key":["s1"],"type":5,"properties":{"code":"s1"},"provenance":null}`
 	for name, c := range map[string]struct {
 		edits [][2]string
 		want  int
 	}{
 		"an edge to a root whose key is not its property's":                   {[][2]string{{sbC2, sbCX}}, 1},
 		"records whose source's key is not its property's":                    {[][2]string{{sbP2, `{"key":["px"],"properties":{"id":"p2"},"provenance":null}`}}, 1},
-		"duplicates under a root in a group with no row":                      {[][2]string{{`{"type":3,"items":[` + sbO1, `{"type":null,"items":[` + sbO1}}, 1},
 		"an edge to a root in a group that repeats a row":                     {[][2]string{{sbC1 + `,` + sbC2 + `]}`, sbC1 + `]},{"type":1,"items":[` + sbC2 + `]}`}}, 1},
-		"a conflict naming a child whose key is not its property":             {[][2]string{{sbSeal, strings.Replace(sbSeal, `"key":["s1"]`, `"key":["sx"]`, 1)}}, 1},
 		"an edge to the key property of a root in a group that repeats a row": {[][2]string{{sbC1 + `,` + sbC2 + `]}`, sbC1 + `]},{"type":1,"items":[` + sbCX + `]}`}}, 1},
 		"an edge to the key property of a root in a group with no row":        {[][2]string{{sbC1 + `,` + sbC2 + `]}`, sbC1 + `]},{"type":null,"items":[` + sbCX + `]}`}}, 1},
-		"a root duplicate's conflict a refused unit states, not its own key": {[][2]string{
+		"a duplicate's conflict a refused unit states, not its own key": {[][2]string{
 			{sbC2, sbCX}, {sbRootDupConflict, `"conflict":{"type":1,"key":["c2"]}`},
 		}, 2},
-		"a root duplicate of a refused root whose conflict is its own key": {[][2]string{
+		"a duplicate of a refused root whose conflict is its own key": {[][2]string{
 			{sbC2, sbCX}, {sbRootDup, `{"type":1,"key":["c2"],"instance":{"key":["c2"],"properties":{"id":"c2"},"provenance":null},"conflict":{"type":1,"key":["c2"]}}`},
 		}, 1},
-		"a composed duplicate naming no composition under a stated parent": {[][2]string{sbNullOrder, {`"relation":"SEAL"`, `"relation":"NOPE"`}}, 2},
 		"a record under a stated source naming a target a root holds": {[][2]string{
 			{sbP2, sbPX}, {`"target_key":["p8"]`, `"target_key":["p1"]`},
 		}, 2},
@@ -1344,40 +1109,9 @@ func TestRead_AReferenceARefusedUnitStatesIsJudgedNoFurther(t *testing.T) {
 		}, 2},
 		"every root of a group with no row":        {[][2]string{{`{"type":1,"items":[` + sbC1, `{"type":null,"items":[` + sbC1}}, 1},
 		"every root of a group that repeats a row": {[][2]string{{`{"type":1,"items":[` + sbC1 + `,` + sbC2 + `]}`, `{"type":1,"items":[` + sbC3 + `]},{"type":1,"items":[` + sbC1 + `,` + sbC2 + `]}`}}, 1},
-		"a conflict naming another child beside a stated one": {[][2]string{
-			{sbSeal, strings.Replace(sbSeal, `"key":["s1"]`, `"key":["sx"]`, 1)},
-			{sbSealConflict, `"conflict":{"type":5,"key":["s9"]}`},
-		}, 2},
-		"a keyed duplicate with no conflict key under a parent in a group that repeats a row": {[][2]string{sbRepeatOrder, sbTagNoKey}, 2},
-		"a keyed duplicate with no conflict key under a parent in a group with no row":        {[][2]string{sbNullOrder, sbTagNoKey}, 2},
-		"a keyed duplicate with no conflict key under a stated parent":                        {[][2]string{sbOrderOX, sbTagNoKey}, 2},
-		"a keyed duplicate with no conflict key under a refused parent's stored key": {[][2]string{
-			sbOrderOX, sbTagNoKey, {`"parent_key":["o1"],"relation":"TAGS"}`, `"parent_key":["ox"],"relation":"TAGS"}`},
-		}, 2},
-		"a duplicate under a refused parent's slot that its own composition does not name": {[][2]string{
-			sbOrderOX, {`"SEAL":[{"key":["s1"]`, `"NOPE":[{"key":["s1"]`}, {`"relation":"SEAL"}`, `"relation":"NOPE"}`},
-		}, 2},
-		"a duplicate under a refused parent's stored key in a slot its composition does not name": {[][2]string{
-			sbOrderOX,
-			{`"SEAL":[{"key":["s1"]`, `"NOPE":[{"key":["s1"]`},
-			{`"parent_key":["o1"],"relation":"SEAL"}`, `"parent_key":["ox"],"relation":"NOPE"}`},
-		}, 2},
-		"a duplicate under the sound root at a refused root's stated address keeps its dangling conflict": {[][2]string{
-			{sbLastOrder, `,"provenance":null},{"key":["ox"],"properties":{"id":"o1"},"composed":{"SEAL":[` + sbSealS1 + `,` + sbSealS3 + `]},"provenance":null}]},{"type":4,"items":[`},
-			{sbSealConflict, `"conflict":{"type":5,"key":["s9"]}`},
-		}, 3},
-		"a duplicate under the sound root at a refused root's stated address keeps its slot's name": {[][2]string{
+		"the sound root at a refused root's stated address, the refused root holding an undeclared slot": {[][2]string{
 			{sbLastOrder, `,"provenance":null},{"key":["ox"],"properties":{"id":"o1"},"composed":{"NOPE":[` + sbSealS1 + `]},"provenance":null}]},{"type":4,"items":[`},
-			{`"relation":"SEAL"}`, `"relation":"NOPE"}`},
-		}, 3},
-		"a duplicate under a sound root at an address a refused root shares keeps its slot's name": {[][2]string{
-			{sbLastOrder, `,"provenance":null},{"key":["o1"],"properties":{"id":"o6"},"composed":{"NOPE":[` + sbSealS1 + `]},"provenance":null}]},{"type":4,"items":[`},
-			{`"relation":"SEAL"}`, `"relation":"NOPE"}`},
-		}, 3},
-		"a duplicate under two sound roots at a refused root's stated address keeps its slot's name": {[][2]string{
-			{sbLastOrder, `,"provenance":null},{"key":["o1"],"properties":{"id":"o1"},"provenance":null},{"key":["ox"],"properties":{"id":"o1"},"composed":{"NOPE":[` + sbSealS1 + `]},"provenance":null}]},{"type":4,"items":[`},
-			{`"relation":"SEAL"}`, `"relation":"NOPE"}`},
-		}, 4},
+		}, 2},
 		"a (one) association of the sound root at a refused root's stated address keeps its count": {[][2]string{
 			{sbP2, sbP2 + `,{"key":["px"],"properties":{"id":"p1"},"composed":{"EMPLOYER":[` + sbInnerBox + `]},"provenance":null}`},
 			{sbEmployer, sbEmployerTwice},
@@ -1488,22 +1222,19 @@ type Watcher {
 }
 
 // A duplicate whose stored key the reader refuses has no address, so no
-// conflict is resolved for it: the refusal is its one issue, as RebuildSnapshot
-// reports it once.
+// conflict is resolved for it: the refusal is its one issue.
 func TestRead_ADuplicateWhoseKeyIsRefusedResolvesNoConflict(t *testing.T) {
 	t.Parallel()
 	s, doc := singleBreakDoc(t)
 	for name, c := range map[string]struct{ from, to string }{
-		"a root duplicate whose key has another arity": {
+		"a duplicate whose key has another arity": {
 			sbRootDup,
 			`{"type":1,"key":["c1","x"],"instance":{"key":["c1","x"],"properties":{"id":"c1"},"provenance":null},"conflict":{"type":1,"key":["c1"]}}`,
 		},
-		"a root duplicate whose key is no scalar": {
+		"a duplicate whose key is no scalar": {
 			sbRootDup,
 			`{"type":1,"key":[["c1"]],"instance":{"key":[["c1"]],"properties":{"id":"c1"},"provenance":null},"conflict":{"type":1,"key":["c1"]}}`,
 		},
-		"a composed duplicate whose key has another arity": {sbTagDup, strings.ReplaceAll(sbTagDup, `"key":["t1"],"instance":{"key":["t1"]`, `"key":["t1","x"],"instance":{"key":["t1","x"]`)},
-		"a composed duplicate whose key is empty":          {sbTagDup, strings.ReplaceAll(sbTagDup, `"key":["t1"],"instance":{"key":["t1"]`, `"key":[],"instance":{"key":[]`)},
 	} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
@@ -1511,9 +1242,6 @@ func TestRead_ADuplicateWhoseKeyIsRefusedResolvesNoConflict(t *testing.T) {
 			res := snapshot.Verify(t.Context(), edited, s, snapshot.WithIssueLimit(0))
 			if n := sbFailures(res); n != 1 || !strings.Contains(res.String(), "stores key") {
 				t.Errorf("%d issues, want the key's one refusal:\n%s", n, res)
-			}
-			if n := sbFailures(snapshot.RebuildDocument(edited, s)); n != 1 {
-				t.Errorf("RebuildSnapshot reports %d issues, want 1", n)
 			}
 		})
 	}
@@ -1529,6 +1257,92 @@ func TestRead_RecordsUnderAManyAssociationAreNoOverflow(t *testing.T) {
 	if res := snapshot.Verify(t.Context(), edited, s, snapshot.WithIssueLimit(0)); sbFailures(res) != 0 {
 		t.Errorf("two records under a (many) association are refused:\n%s", res)
 	}
+}
+
+// An edge with no usable target row is one break: its key has no type to be read
+// under, and no association check runs beside the row's refusal.
+func TestRead_AnEdgeWithNoTargetRowIsOneBreak(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	s := loadReaderSchema(t)
+	doc := readerDoc(t, s,
+		map[string]any{"$type": "Person", "id": "p0"},
+		map[string]any{"$type": "Person", "id": "p1", "BOSS": map[string]any{"_target_id": "p0"}, "KNOWS": []any{map[string]any{"_target_id": "p0"}}},
+	)
+	doc = sbIntegrity.ReplaceAllString(doc, `"integrity_hash":""`)
+	known := regexp.MustCompile(`"KNOWS":\[\{[^}]*\}[^}]*\}\]`)
+	if !known.MatchString(doc) {
+		t.Fatalf("no KNOWS edge in %s", doc)
+	}
+	for name, edge := range map[string]string{
+		"a null edge":        `null`,
+		"a null row":         `{"target_type":null,"target_key":["p0"],"properties":{}}`,
+		"no row":             `{"target_key":["p0"],"properties":{}}`,
+		"a row out of range": `{"target_type":99,"target_key":["p0"],"properties":{}}`,
+	} {
+		edited := []byte(known.ReplaceAllLiteralString(doc, `"KNOWS":[`+edge+`]`))
+		_, l := snapshot.Load(ctx, edited, s)
+		for surface, res := range map[string]diag.Result{"Load": l, "Verify": snapshot.Verify(ctx, edited, s)} {
+			if res.Len() != 1 || !res.HasCode(diag.E_SNAPSHOT_MALFORMED) {
+				t.Errorf("%s, %s: %s, want one %s", name, surface, res, diag.E_SNAPSHOT_MALFORMED)
+			}
+		}
+	}
+}
+
+// A missing target row takes nothing from what the edge states beside it: the
+// relation it stands under and its target key are each judged.
+func TestRead_AnEdgeWithNoTargetRowStillAnswersForItsOtherBreaks(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	s := loadReaderSchema(t)
+	doc := readerDoc(t, s,
+		map[string]any{"$type": "Person", "id": "p0"},
+		map[string]any{"$type": "Person", "id": "p1", "KNOWS": []any{map[string]any{"_target_id": "p0"}}},
+	)
+	doc = sbIntegrity.ReplaceAllString(doc, `"integrity_hash":""`)
+	known := regexp.MustCompile(`"KNOWS":\[\{[^}]*\}[^}]*\}\]`)
+	if !known.MatchString(doc) {
+		t.Fatalf("no KNOWS edge in %s", doc)
+	}
+	for name, row := range map[string]struct {
+		edit string
+		want map[diag.Code]int
+	}{
+		"an undeclared relation": {
+			`"NOPE":[{"target_type":null,"target_key":["p0"],"properties":{}}]`,
+			map[diag.Code]int{diag.E_SNAPSHOT_MALFORMED: 1, diag.E_GRAPH_UNKNOWN_RELATION: 1},
+		},
+		"a null element under an undeclared relation": {
+			`"NOPE":[null]`,
+			map[diag.Code]int{diag.E_SNAPSHOT_MALFORMED: 1, diag.E_GRAPH_UNKNOWN_RELATION: 1},
+		},
+		"an unreadable key": {
+			`"KNOWS":[{"target_type":null,"target_key":[[1]],"properties":{}}]`,
+			map[diag.Code]int{diag.E_SNAPSHOT_MALFORMED: 2},
+		},
+	} {
+		edited := []byte(known.ReplaceAllLiteralString(doc, row.edit))
+		_, l := snapshot.Load(ctx, edited, s)
+		for surface, res := range map[string]diag.Result{"Load": l, "Verify": snapshot.Verify(ctx, edited, s)} {
+			if res.Len() != sbTotal(row.want) {
+				t.Errorf("%s, %s: %s, want %v", name, surface, res, row.want)
+			}
+			for code := range row.want {
+				if !res.HasCode(code) {
+					t.Errorf("%s, %s: %s, want %s", name, surface, res, code)
+				}
+			}
+		}
+	}
+}
+
+func sbTotal(counts map[diag.Code]int) int {
+	n := 0
+	for _, c := range counts {
+		n += c
+	}
+	return n
 }
 
 // Children past the composed depth limit each draw E_SNAPSHOT_DEPTH_EXCEEDED,
@@ -1586,59 +1400,10 @@ part type K {
 	}
 }
 
-// Only a root holds composition slots: a keyed child's own children fill no
-// slot a duplicate is resolved in, and a root of the child's part type holds
-// none, so a duplicate parented at that root has no conflict to resolve.
-func TestRead_OnlyARootHoldsSlots(t *testing.T) {
-	t.Parallel()
-	s, res := schema.LoadString(t.Context(), `schema "dk"
-
-type R {
-	id String primary
-	*-> K (_:many) K
-}
-
-part type K {
-	code String primary
-	*-> K (_:many) K
-}
-`, "dk.yammm")
-	if res.HasErrors() {
-		t.Fatalf("schema: %s", res)
-	}
-	vi, res := instance.NewValidator(s).ValidateOne(t.Context(), "R", instance.RawInstance{Properties: map[string]any{
-		"id": "r1", "K": []any{map[string]any{"code": "a", "K": []any{map[string]any{"code": "b"}}}},
-	}})
-	if res.HasErrors() {
-		t.Fatalf("validate: %s", res)
-	}
-	g := graph.New(s)
-	if r := g.Add(t.Context(), vi); r.HasErrors() {
-		t.Fatalf("add: %s", r)
-	}
-	data, res := snapshot.Marshal(t.Context(), g.Snapshot())
-	if res.HasErrors() {
-		t.Fatalf("marshal: %s", res)
-	}
-	doc := sbIntegrity.ReplaceAllString(string(data), `"integrity_hash":""`)
-	// A root of the part type at the child's key, holding another child, and a
-	// duplicate parented at that root whose conflict is the nested child's key.
-	doc = editOnce(t, doc, `"provenance":null}]}],"diagnostics":{"duplicates":[]`,
-		`"provenance":null}]},{"type":0,"items":[{"key":["a"],"properties":{"code":"a"},"composed":{"K":[`+
-			`{"key":["c"],"type":0,"properties":{"code":"c"},"provenance":null}]},"provenance":null}]}],"diagnostics":{"duplicates":[`+
-			`{"type":0,"key":["b"],"instance":{"key":["b"],"properties":{"code":"b"},"provenance":null},"conflict":{"type":0,"key":["b"]},`+
-			`"parent_type":0,"parent_key":["a"],"relation":"K"}]`)
-	res = snapshot.Verify(t.Context(), []byte(doc), s, snapshot.WithIssueLimit(0))
-	if res.Len() != 1 || !hasCode(res, diag.E_SNAPSHOT_INVALID_ROOT) {
-		t.Errorf("%s, want the root's E_SNAPSHOT_INVALID_ROOT alone: it holds no slot, so the duplicate has no conflict to resolve", res)
-	}
-}
-
 // A root whose key property no longer gives its stored key still stands at
 // that address: every reference to it resolves, and the key's refusal is the
-// edit's one issue, as RebuildSnapshot reports it. A root whose stored key was
-// edited states its old address in its key property, so a reference to the old
-// one is judged no further at both layers.
+// edit's one issue. A root whose stored key was edited states its old address in
+// its key property, so a reference to the old one is judged no further.
 func TestRead_ARootWhoseKeyIsRefusedStillStandsAtItsAddress(t *testing.T) {
 	t.Parallel()
 	s, doc := singleBreakDoc(t)
@@ -1646,7 +1411,7 @@ func TestRead_ARootWhoseKeyIsRefusedStillStandsAtItsAddress(t *testing.T) {
 		"a referenced Company's key property":         {sbC2, strings.Replace(sbC2, `{"id":"c2"}`, `{"id":"cx"}`, 1)},
 		"a Person with edges and records":             {sbP2, strings.Replace(sbP2, `{"id":"p2"}`, `{"id":"px"}`, 1)},
 		"a Person with no key property":               {sbP2, strings.Replace(sbP2, `{"id":"p2"}`, `{}`, 1)},
-		"an Order with composed duplicates":           {sbO1, strings.Replace(sbO1, `{"id":"o1"}`, `{"id":"ox"}`, 1)},
+		"an Order with composed children":             {sbO1, strings.Replace(sbO1, `{"id":"o1"}`, `{"id":"ox"}`, 1)},
 		"a Person's stored key, its references stale": {sbP2, strings.Replace(sbP2, `["p2"]`, `["pz"]`, 1)},
 		// p9 is the target of p2's MENTOR record; a root there whose key is refused
 		// is no root graph.Add holds.
@@ -1662,18 +1427,14 @@ func TestRead_ARootWhoseKeyIsRefusedStillStandsAtItsAddress(t *testing.T) {
 			if !strings.Contains(res.String(), "stores key") {
 				t.Errorf("no key refusal:\n%s", res)
 			}
-			if n := sbFailures(snapshot.RebuildDocument(edited, s)); n != 1 {
-				t.Errorf("RebuildSnapshot reports %d issues, want 1", n)
-			}
 		})
 	}
 }
 
 // At an address two roots stand at, an unresolved record names the address, not
 // a root: it counts toward no (one) association, and no absent or empty record
-// there is judged beside another. A composed duplicate parented there resolves
-// no conflict. The required-association fact is judged, over every edge the
-// roots there hold. A root whose key a check refused holds its records toward
+// there is judged beside another. The required-association fact is judged, over
+// every edge the roots there hold. A root whose key a check refused holds its records toward
 // no (one) association, as it holds its edges. Each document is one break.
 func TestRead_AnAddressNoSoundRootHoldsAloneJudgesNoRecord(t *testing.T) {
 	t.Parallel()
@@ -1713,9 +1474,6 @@ func TestRead_AnAddressNoSoundRootHoldsAloneJudgesNoRecord(t *testing.T) {
 		"a refused root, a root at its address with a MENTOR edge and a MENTOR record": {
 			[][2]string{roots(p4("pz", ""), p4("p4", sbMentor)), records(mentorLost("p9"), sbRecord("p4", "CLIENTS", "empty"), sbRecord("p4", "EMPLOYER", "absent"))}, diag.E_SNAPSHOT_MALFORMED,
 		},
-		"two Orders at one address, the composed duplicates the second's": {
-			[][2]string{{sbO1, `{"key":["o1"],"properties":{"id":"o1"},"provenance":null},` + sbO1}}, diag.E_DUPLICATE_PK,
-		},
 	} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
@@ -1727,17 +1485,13 @@ func TestRead_AnAddressNoSoundRootHoldsAloneJudgesNoRecord(t *testing.T) {
 			if sbFailures(res) != 1 || !hasCode(res, c.want) {
 				t.Errorf("%d issues, want one %s:\n%s", sbFailures(res), c.want, res)
 			}
-			if n := sbFailures(snapshot.RebuildDocument([]byte(edited), s)); n != 1 {
-				t.Errorf("RebuildSnapshot reports %d issues, want 1", n)
-			}
 		})
 	}
 }
 
 // The reader nests each edge in its root, so at an address two roots share
 // each root's own (one) of two edges is a second break it reports, whichever
-// root holds the edges; RebuildSnapshot, whose parts cannot say which root an
-// edge there is the edge of, reports the duplicate alone.
+// root holds the edges.
 func TestRead_ASharedAddressKeepsEachRootsOwnOverflow(t *testing.T) {
 	t.Parallel()
 	s, doc := singleBreakDoc(t)
@@ -1762,9 +1516,6 @@ func TestRead_ASharedAddressKeepsEachRootsOwnOverflow(t *testing.T) {
 			}
 			if sbFailures(res) != 1+overflows || !hasCode(res, diag.E_DUPLICATE_PK) || cardinality != overflows {
 				t.Errorf("%d issues, want the duplicate and %d (one) overflow:\n%s", sbFailures(res), overflows, res)
-			}
-			if n := sbFailures(snapshot.RebuildDocument(edited, s)); n != 1 {
-				t.Errorf("RebuildSnapshot reports %d issues, want 1", n)
 			}
 		})
 	}

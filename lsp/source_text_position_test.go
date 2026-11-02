@@ -8,15 +8,13 @@ import (
 	"time"
 
 	"github.com/simon-lentz/yammm/lsp"
-	"github.com/simon-lentz/yammm/lsp/internal/lsputil"
 	"github.com/simon-lentz/yammm/lsp/internal/protocol"
 	"github.com/simon-lentz/yammm/lsp/internal/testutil"
 )
 
 // A position is a line and a count of code units from that line's start in
-// the text the client holds (LSP 3.17, "Position"): UTF-16 units, or bytes
-// under the utf-8 position encoding. For an open document that text is what
-// didOpen sent. For a file the server read from disk it is the text an editor
+// the text the client holds (LSP 3.17, "Position"), in UTF-16 units. For an
+// open document that text is what didOpen sent. For a file the server read from disk it is the text an editor
 // shows when it opens the file, and an editor decodes a leading byte order
 // mark away, so the mark is no character of line 1.
 //
@@ -78,25 +76,14 @@ type positionAnswers struct {
 	cityFault   span // `id Absent primary`, line 1, after one wide rune
 }
 
-var answersByEncoding = map[lsputil.PositionEncoding]positionAnswers{
-	// é is one unit and 😀 is two.
-	lsputil.PositionEncodingUTF16: {
-		markWidth:   1,
-		schemaName:  span{0, 0, 12},
-		region:      span{0, 28, 34},
-		city:        span{3, 5, 9},
-		regionFault: span{0, 37, 55},
-		cityFault:   span{1, 21, 38},
-	},
-	// é is two bytes and 😀 is four.
-	lsputil.PositionEncodingUTF8: {
-		markWidth:   3,
-		schemaName:  span{0, 0, 12},
-		region:      span{0, 31, 37},
-		city:        span{3, 5, 9},
-		regionFault: span{0, 40, 58},
-		cityFault:   span{1, 23, 40},
-	},
+// answers holds the UTF-16 answers: é is one unit and 😀 is two.
+var answers = positionAnswers{
+	markWidth:   1,
+	schemaName:  span{0, 0, 12},
+	region:      span{0, 28, 34},
+	city:        span{3, 5, 9},
+	regionFault: span{0, 37, 55},
+	cityFault:   span{1, 21, 38},
 }
 
 func symbolNamed(symbols []protocol.DocumentSymbol, name string) (protocol.DocumentSymbol, bool) {
@@ -130,7 +117,7 @@ var sourceCases = []sourceCase{
 
 // startPositionServer writes entry and dep, opens dep as c says, then opens
 // entry, so entry's analysis reads the dependency from where the case puts it.
-func startPositionServer(t *testing.T, c sourceCase, enc lsputil.PositionEncoding, dep string) (h *testutil.Harness, entryPath, depPath string) {
+func startPositionServer(t *testing.T, c sourceCase, dep string) (h *testutil.Harness, entryPath, depPath string) {
 	t.Helper()
 	root, err := filepath.EvalSymlinks(t.TempDir())
 	if err != nil {
@@ -149,9 +136,8 @@ func startPositionServer(t *testing.T, c sourceCase, enc lsputil.PositionEncodin
 		}
 	}
 
-	h, srv := newTestHarnessWithServerConfig(t, root, lsp.Config{ModuleRoot: root, DebounceDelay: time.Millisecond})
+	h, _ = newTestHarnessWithServerConfig(t, root, lsp.Config{ModuleRoot: root, DebounceDelay: time.Millisecond})
 	t.Cleanup(h.Close)
-	srv.Workspace().SetPositionEncoding(enc)
 
 	if c.open {
 		sent := dep
@@ -193,82 +179,79 @@ func expectSettled(t *testing.T, h *testutil.Harness, what string, want span, re
 func TestPositions_CountTheTextTheClientHolds(t *testing.T) {
 	t.Parallel()
 
-	for _, enc := range []lsputil.PositionEncoding{lsputil.PositionEncodingUTF16, lsputil.PositionEncodingUTF8} {
-		answers := answersByEncoding[enc]
-		for _, c := range sourceCases {
-			var lead uint32
-			if c.sentMarked {
-				lead = answers.markWidth
+	for _, c := range sourceCases {
+		var lead uint32
+		if c.sentMarked {
+			lead = answers.markWidth
+		}
+
+		t.Run(c.name+"/definition", func(t *testing.T) {
+			t.Parallel()
+			h, entryPath, depPath := startPositionServer(t, c, positionSoundDep)
+
+			definition := func(line, char int) func() string {
+				return func() string {
+					loc, err := h.Definition(entryPath, line, char)
+					if err != nil || loc == nil {
+						return fmt.Sprintf("no location (%v)", err)
+					}
+					return spanOf(loc.Range).String()
+				}
+			}
+			for _, q := range []struct {
+				what       string
+				line, char int
+				want       span
+			}{
+				{"the import alias reaches the schema name on line 0", 2, 17, answers.schemaName.shifted(lead)},
+				{"d.Region reaches Region on line 0", 4, 18, answers.region.shifted(lead)},
+				{"d.City reaches City on line 3", 8, 18, answers.city},
+			} {
+				expectSettled(t, h, q.what, q.want, definition(q.line, q.char))
 			}
 
-			t.Run(fmt.Sprintf("%s/%s/definition", enc, c.name), func(t *testing.T) {
-				t.Parallel()
-				h, entryPath, depPath := startPositionServer(t, c, enc, positionSoundDep)
-
-				definition := func(line, char int) func() string {
-					return func() string {
-						loc, err := h.Definition(entryPath, line, char)
-						if err != nil || loc == nil {
-							return fmt.Sprintf("no location (%v)", err)
-						}
-						return spanOf(loc.Range).String()
-					}
+			if !c.open {
+				return
+			}
+			region := answers.region.shifted(lead)
+			expectSettled(t, h, "the open dependency's own Region symbol", region, func() string {
+				symbols, err := h.DocumentSymbols(depPath)
+				if err != nil {
+					return err.Error()
 				}
-				for _, q := range []struct {
-					what       string
-					line, char int
-					want       span
-				}{
-					{"the import alias reaches the schema name on line 0", 2, 17, answers.schemaName.shifted(lead)},
-					{"d.Region reaches Region on line 0", 4, 18, answers.region.shifted(lead)},
-					{"d.City reaches City on line 3", 8, 18, answers.city},
-				} {
-					expectSettled(t, h, q.what, q.want, definition(q.line, q.char))
+				if region, ok := symbolNamed(symbols, "Region"); ok {
+					return spanOf(region.SelectionRange).String()
 				}
-
-				if !c.open {
-					return
-				}
-				region := answers.region.shifted(lead)
-				expectSettled(t, h, "the open dependency's own Region symbol", region, func() string {
-					symbols, err := h.DocumentSymbols(depPath)
-					if err != nil {
-						return err.Error()
-					}
-					if region, ok := symbolNamed(symbols, "Region"); ok {
-						return spanOf(region.SelectionRange).String()
-					}
-					return "no Region symbol"
-				})
-
-				// The client asks at its own position of Region's second
-				// letter, and the hover's range is Region in its own text.
-				expectSettled(t, h, "a hover on Region in the open dependency", region, func() string {
-					hover, err := h.Hover(depPath, int(region.line), int(region.start)+1)
-					if err != nil || hover == nil || hover.Range == nil {
-						return fmt.Sprintf("no hover range (%v)", err)
-					}
-					return spanOf(*hover.Range).String()
-				})
+				return "no Region symbol"
 			})
 
-			t.Run(fmt.Sprintf("%s/%s/diagnostics", enc, c.name), func(t *testing.T) {
-				t.Parallel()
-				h, _, depPath := startPositionServer(t, c, enc, positionFaultyDep)
-
-				unknownType := func(line uint32) func() string {
-					return func() string {
-						for _, d := range h.Diagnostics(testutil.PathToURI(depPath)) {
-							if d.Code != nil && d.Code.Value == "E_UNKNOWN_TYPE" && d.Range.Start.Line == line {
-								return spanOf(d.Range).String()
-							}
-						}
-						return "no diagnostic"
-					}
+			// The client asks at its own position of Region's second
+			// letter, and the hover's range is Region in its own text.
+			expectSettled(t, h, "a hover on Region in the open dependency", region, func() string {
+				hover, err := h.Hover(depPath, int(region.line), int(region.start)+1)
+				if err != nil || hover == nil || hover.Range == nil {
+					return fmt.Sprintf("no hover range (%v)", err)
 				}
-				expectSettled(t, h, "the unknown type on line 0", answers.regionFault.shifted(lead), unknownType(0))
-				expectSettled(t, h, "the unknown type on line 1", answers.cityFault, unknownType(1))
+				return spanOf(*hover.Range).String()
 			})
-		}
+		})
+
+		t.Run(c.name+"/diagnostics", func(t *testing.T) {
+			t.Parallel()
+			h, _, depPath := startPositionServer(t, c, positionFaultyDep)
+
+			unknownType := func(line uint32) func() string {
+				return func() string {
+					for _, d := range h.Diagnostics(testutil.PathToURI(depPath)) {
+						if d.Code != nil && d.Code.Value == "E_UNKNOWN_TYPE" && d.Range.Start.Line == line {
+							return spanOf(d.Range).String()
+						}
+					}
+					return "no diagnostic"
+				}
+			}
+			expectSettled(t, h, "the unknown type on line 0", answers.regionFault.shifted(lead), unknownType(0))
+			expectSettled(t, h, "the unknown type on line 1", answers.cityFault, unknownType(1))
+		})
 	}
 }

@@ -2,14 +2,12 @@ package csv
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
-	"fmt"
-	"io"
 	"strings"
 	"testing"
 
 	"github.com/simon-lentz/yammm/graph"
-	"github.com/simon-lentz/yammm/internal/instancetest"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -73,7 +71,7 @@ func TestWriters_AnUnrepresentableValueIsRefusedAsOneClass(t *testing.T) {
 			snap: func(t *testing.T) (graph.Snapshot, schema.Schema) {
 				t.Helper()
 				s := loadListRenderingSchema(t)
-				return bypassGrid(t, s, []any{"a", nil}), s
+				return heldGrid(t, s, `["a",null]`), s
 			},
 		},
 		{
@@ -81,7 +79,7 @@ func TestWriters_AnUnrepresentableValueIsRefusedAsOneClass(t *testing.T) {
 			snap: func(t *testing.T) (graph.Snapshot, schema.Schema) {
 				t.Helper()
 				s := loadListRenderingSchema(t)
-				return bypassGrid(t, s, map[string]any{"k": "v"}), s
+				return heldGrid(t, s, `{"k":"v"}`), s
 			},
 		},
 	} {
@@ -94,19 +92,50 @@ func TestWriters_AnUnrepresentableValueIsRefusedAsOneClass(t *testing.T) {
 			if !errors.Is(err, ErrUnrepresentable) {
 				t.Errorf("MarshalSnapshot: %v does not match ErrUnrepresentable", err)
 			}
-			err = a.WriteSnapshot(context.Background(), func(string) (io.Writer, error) {
-				return io.Discard, nil
-			}, snap)
-			if !errors.Is(err, ErrUnrepresentable) {
-				t.Errorf("WriteSnapshot: %v does not match ErrUnrepresentable", err)
+		})
+	}
+}
+
+// Each value a document can hold that a cell cannot carry back is refused under its
+// own sentinel and the class, naming its site, at a property and at an edge property.
+func TestWriters_ADocumentValueNoCellCarriesIsRefusedUnderItsSentinel(t *testing.T) {
+	t.Parallel()
+	s := loadUTF8CSVSchema(t)
+	for _, c := range []struct {
+		name     string
+		props    map[string]any
+		label    any
+		site     string
+		sentinel error
+	}{
+		{"a number no float64 holds", map[string]any{"text": json.Number("1e400")}, "ok", `property "text"`, errUnreadNumber},
+		{"the same in a list", map[string]any{"tags": []any{"ok", json.Number("1e400")}}, "ok", `property "tags": list element 1`, errUnreadNumber},
+		{"the same on an edge", nil, json.Number("1e400"), `edge property "label"`, errUnreadNumber},
+		{"a map", map[string]any{"text": map[string]any{"k": "v"}}, "ok", `property "text": a map`, errNoCellSpelling},
+		{"a map in a list", map[string]any{"tags": []any{map[string]any{"k": "v"}}}, "ok", `property "tags": list element 0: a map`, errNoCellSpelling},
+		{"a map on an edge", nil, map[string]any{"k": "v"}, `edge property "label"`, errNoCellSpelling},
+		{"a list on an edge", nil, []any{"a", "b"}, `edge property "label"`, errNoCellSpelling},
+		{"a null list element", map[string]any{"tags": []any{"ok", nil}}, "ok", `property "tags": list element 1`, errNullListElement},
+		{"a CR LF in a cell", map[string]any{"text": "a\r\nb"}, "ok", `column "text"`, errCRLF},
+		{"a CR LF in a list element", map[string]any{"tags": []any{"a\r\nb"}}, "ok", `column "tags"`, errCRLF},
+		{"a list of one empty element", map[string]any{"tags": []any{""}}, "ok", `property "tags"`, errListOfOneEmptyElement},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			_, err := New(WithSchema(s)).MarshalSnapshot(t.Context(), heldUTF8(t, s, c.props, c.label))
+			if !errors.Is(err, ErrUnrepresentable) || !errors.Is(err, c.sentinel) {
+				t.Fatalf("MarshalSnapshot: %v does not match ErrUnrepresentable and %v", err, c.sentinel)
+			}
+			if !strings.Contains(err.Error(), c.site) {
+				t.Errorf("the refusal does not name %s: %v", c.site, err)
 			}
 		})
 	}
 }
 
-// A separator the parser cannot find again is the adapter's own configuration,
-// not the snapshot's data, and the write side says so with the class whose
-// parse-side twin is E_CSV_CONFIG.
+// A delimiter encoding/csv refuses is the adapter's own configuration, not the
+// snapshot's data, and the write side says so with the class whose parse-side
+// twin is E_CSV_CONFIG.
 func TestWriters_ARefusedSettingIsAConfigurationRefusal(t *testing.T) {
 	t.Parallel()
 	s := loadTestSchema(t, "basic.yammm")
@@ -114,15 +143,10 @@ func TestWriters_ARefusedSettingIsAConfigurationRefusal(t *testing.T) {
 		"Entity": {{"id": "e1", "name": "Ann"}},
 	})
 
-	// Every setting the adapter cannot use is refused before a writer is
-	// requested: a caller that creates a file per type must not be left with an
-	// empty one for a fault that was knowable before any output.
 	for _, c := range []struct {
 		name string
 		opt  Option
 	}{
-		{`the separator \|`, WithListSeparator(`\|`)},
-		{"the separator a CR LF b", WithListSeparator("a\r\nb")},
 		{"the delimiter a quote", WithDelimiter('"')},
 		{"the delimiter NUL", WithDelimiter(0)},
 		{"the delimiter CR", WithDelimiter('\r')},
@@ -130,19 +154,12 @@ func TestWriters_ARefusedSettingIsAConfigurationRefusal(t *testing.T) {
 		{"the delimiter U+FFFD", WithDelimiter('\uFFFD')},
 		{"the delimiter beyond Unicode", WithDelimiter(0x110000)},
 	} {
-		requested := 0
-		err := New(WithSchema(s), c.opt).WriteSnapshot(context.Background(), func(string) (io.Writer, error) {
-			requested++
-			return io.Discard, nil
-		}, snap)
+		_, err := New(WithSchema(s), c.opt).MarshalSnapshot(context.Background(), snap)
 		if !errors.Is(err, ErrConfig) {
-			t.Errorf("%s: WriteSnapshot: %v does not match ErrConfig", c.name, err)
-		}
-		if requested != 0 {
-			t.Errorf("%s: %d writers requested before the refusal", c.name, requested)
-		}
-		if _, err := New(WithSchema(s), c.opt).MarshalSnapshot(context.Background(), snap); !errors.Is(err, ErrConfig) {
 			t.Errorf("%s: MarshalSnapshot: %v does not match ErrConfig", c.name, err)
+		}
+		if errors.Is(err, ErrUnrepresentable) {
+			t.Errorf("%s: a configuration refusal must not read as a data refusal: %v", c.name, err)
 		}
 
 		// A snapshot denoting no type walks no per-type loop, so a check that
@@ -150,12 +167,6 @@ func TestWriters_ARefusedSettingIsAConfigurationRefusal(t *testing.T) {
 		empty := buildSnapshot(t, s, nil)
 		if _, err := New(WithSchema(s), c.opt).MarshalSnapshot(context.Background(), empty); !errors.Is(err, ErrConfig) {
 			t.Errorf("%s: MarshalSnapshot of an empty snapshot: %v does not match ErrConfig", c.name, err)
-		}
-		err = New(WithSchema(s), c.opt).WriteSnapshot(context.Background(), func(string) (io.Writer, error) {
-			return io.Discard, nil
-		}, empty)
-		if !errors.Is(err, ErrConfig) {
-			t.Errorf("%s: WriteSnapshot of an empty snapshot: %v does not match ErrConfig", c.name, err)
 		}
 	}
 
@@ -165,78 +176,18 @@ func TestWriters_ARefusedSettingIsAConfigurationRefusal(t *testing.T) {
 	composed, cs := compositionSnapshot(t, map[string][]map[string]any{
 		"Order": {{"order_id": "o1", "lines": lines("a")}},
 	})
-	_, err := New(WithSchema(cs), WithListSeparator(`\|`)).MarshalSnapshot(context.Background(), composed)
+	_, err := New(WithSchema(cs), WithDelimiter('"')).MarshalSnapshot(context.Background(), composed)
 	if !errors.Is(err, ErrConfig) || errors.Is(err, ErrUnrepresentable) {
 		t.Errorf("both faults: %v, want ErrConfig alone", err)
 	}
-
-	for _, sep := range []string{`\|`, "a\r\nb"} {
-		a := New(WithSchema(s), WithListSeparator(sep))
-
-		_, err := a.MarshalSnapshot(context.Background(), snap)
-		if !errors.Is(err, ErrConfig) {
-			t.Errorf("%q: MarshalSnapshot: %v does not match ErrConfig", sep, err)
-		}
-		if errors.Is(err, ErrUnrepresentable) {
-			t.Errorf("%q: a configuration refusal must not read as a data refusal: %v", sep, err)
-		}
-		err = a.WriteSnapshot(context.Background(), func(string) (io.Writer, error) {
-			return io.Discard, nil
-		}, snap)
-		if !errors.Is(err, ErrConfig) {
-			t.Errorf("%q: WriteSnapshot: %v does not match ErrConfig", sep, err)
-		}
-	}
 }
 
-// The classes separate what a message cannot: an I/O failure, a nil argument
-// and a refusal of the data reach a caller through one return value, and only
+// The classes separate what a message cannot: a nil argument and a refusal of
+// the data reach a caller through one return value, and only
 // the last two say which they are.
-func TestWriters_TheRefusalClassesDoNotCoverIOOrAZeroSnapshot(t *testing.T) {
+func TestWriters_TheRefusalClassesDoNotCoverAZeroSnapshot(t *testing.T) {
 	t.Parallel()
-	s := loadTestSchema(t, "basic.yammm")
-
-	// All THREE of the writer's I/O checks, because csv.Writer buffers through
-	// bufio and which one reports depends on how much text the call pushes past
-	// the buffer: a narrow type reports at the flush alone and would leave the
-	// header and row checks unguarded.
-	var wide strings.Builder
-	wide.WriteString("schema \"wide\"\n\ntype W {\n\tidentifier String primary\n")
-	for i := range 320 {
-		fmt.Fprintf(&wide, "\tcolumn_number_%04d String\n", i)
-	}
-	wide.WriteString("}\n")
-	wideSchema, res := schema.LoadString(context.Background(), wide.String(), "wide.yammm")
-	if res.HasErrors() {
-		t.Fatalf("load wide schema: %s", res)
-	}
-
-	many := make([]map[string]any, 0, 200)
-	for i := range 200 {
-		many = append(many, map[string]any{"id": fmt.Sprintf("e%03d", i), "name": strings.Repeat("x", 40)})
-	}
-
-	for _, c := range []struct {
-		where  string
-		schema schema.Schema
-		rows   map[string][]map[string]any
-	}{
-		{"csv flush", s, map[string][]map[string]any{"Entity": {{"id": "e1", "name": "Alice"}}}},
-		{"csv write header", wideSchema, map[string][]map[string]any{"W": {{"identifier": "w1"}}}},
-		{"csv write row", s, map[string][]map[string]any{"Entity": many}},
-	} {
-		_, ioErr := writeToFailingWriter(t, c.schema, c.rows)
-		if !strings.Contains(ioErr.Error(), c.where) {
-			t.Fatalf("the fixture did not reach %s, so it guards nothing: %v", c.where, ioErr)
-		}
-		if errors.Is(ioErr, ErrUnrepresentable) || errors.Is(ioErr, ErrConfig) {
-			t.Errorf("%s: an I/O failure matched a refusal class: %v", c.where, ioErr)
-		}
-	}
-
-	nilErr := New().WriteSnapshot(context.Background(), func(string) (io.Writer, error) {
-		return io.Discard, nil
-	}, graph.Snapshot{})
+	_, nilErr := New().MarshalSnapshot(context.Background(), graph.Snapshot{})
 	if !errors.Is(nilErr, ErrZeroSnapshot) {
 		t.Errorf("a zero snapshot = %v, want ErrZeroSnapshot", nilErr)
 	}
@@ -245,17 +196,9 @@ func TestWriters_TheRefusalClassesDoNotCoverIOOrAZeroSnapshot(t *testing.T) {
 	}
 }
 
-// bypassGrid builds Grid g1 holding tags through instancetest, which runs no
-// validation: the validator refuses a null list element and a map under a
-// List<String>, so only a bypass-built snapshot holds either.
-func bypassGrid(t *testing.T, s schema.Schema, tags any) graph.Snapshot {
+// heldGrid reads Grid g1 holding tags, as JSON, from a document: the validator
+// refuses a null list element and a map under a List<String>.
+func heldGrid(t *testing.T, s schema.Schema, tags string) graph.Snapshot {
 	t.Helper()
-	grid, _ := s.Type("Grid")
-	g := graph.New(s)
-	inst := instancetest.VI("Grid", instancetest.TypeID(grid.ID()), instancetest.PK("g1"),
-		instancetest.Props(map[string]any{"id": "g1", "tags": tags}))
-	if res := g.Add(context.Background(), inst); !res.OK() {
-		t.Fatalf("add: %s", res)
-	}
-	return g.Snapshot()
+	return heldDocument(t, s, "Grid", `{"key":["g1"],"properties":{"id":"g1","tags":`+tags+`},"provenance":null}`)
 }

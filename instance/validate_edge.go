@@ -77,7 +77,7 @@ func (v *Validator) validateEdgeData(
 	relPath path.Builder,
 ) (ValidEdgeData, bool) {
 	// An explicit null is a shape error whatever the multiplicity.
-	if isAbsent(rawValue) {
+	if IsAbsent(rawValue) {
 		collector.Collect(shapeMismatch(rel, "edge "+rel.Name()+": null is not a valid edge value",
 			expectedShapeForRelation(rel), "null", prov, relPath))
 		return ValidEdgeData{}, false
@@ -108,7 +108,7 @@ func (v *Validator) validateEdgeData(
 		if refused {
 			return ValidEdgeData{}, true
 		}
-		return NewValidEdgeData(targets), false
+		return ValidEdgeData{&validEdgeDataState{targets: targets}}, false
 	}
 
 	obj, ok := toMapOfAny(rawValue)
@@ -121,7 +121,7 @@ func (v *Validator) validateEdgeData(
 	if target == nil {
 		return ValidEdgeData{}, refused
 	}
-	return NewValidEdgeData([]ValidEdgeTarget{*target}), false
+	return ValidEdgeData{&validEdgeDataState{targets: []ValidEdgeTarget{*target}}}, false
 }
 
 // shapeMismatch builds an E_EDGE_SHAPE_MISMATCH carrying the expected and got
@@ -150,14 +150,6 @@ func checkIssue(err error, message string) *diag.IssueBuilder {
 		code = ErrConstraintFail
 	}
 	return diag.NewIssue(diag.Error, code, message+": "+err.Error())
-}
-
-// isAbsent reports whether v is the absent value: a value that holds none
-// ([value.Absent]), bare or at some depth — a typed nil pointer is the shape
-// adapter/gogen emits for an absent optional scalar, and a nil slice for an
-// absent optional list. Every writer writes such a value as null ([ScalarOf]).
-func isAbsent(v any) bool {
-	return value.Absent(v)
 }
 
 // isRefused reports whether v is a [Refused] value: one its producer reported,
@@ -261,20 +253,7 @@ func (v *Validator) validateEdgeTarget(
 	// Get target type to extract PK fields, resolved by the relation's
 	// completion-recorded absolute identity so relations declared on imported
 	// types or inherited cross-schema resolve against the true target.
-	targetType, found := resolveRelationTarget(v.schema, rel)
-	if !found {
-		// Unreachable through public construction (every entry point rejects
-		// a dangling target); kept as defense for models built outside them.
-		issue := diag.NewIssue(
-			diag.Error,
-			ErrTypeNotFound,
-			fmt.Sprintf("edge target type %q not found", rel.Target().String()),
-		).WithDetail(diag.DetailKeyRelationName, rel.Name()).
-			WithDetail(diag.DetailKeyTargetType, rel.Target().String())
-		withProvenance(issue, prov, targetPath.String())
-		targetCollector.Collect(issue.Build())
-		return nil, false
-	}
+	targetType, _ := resolveRelationTarget(v.schema, rel)
 
 	eo := v.resolveEdgeObject(rel, targetType, obj, targetCollector, prov, targetPath)
 
@@ -331,7 +310,7 @@ func (v *Validator) validateEdgeTarget(
 		}
 
 		// Present but null is invalid, whatever the constraint.
-		if isAbsent(val) {
+		if IsAbsent(val) {
 			expectedType := strings.ToLower(schema.ResolveAlias(pk.Constraint()).Kind().String())
 			issue := diag.NewIssue(
 				diag.Error,
@@ -429,7 +408,7 @@ func (v *Validator) validateEdgeTarget(
 			refused = true
 			continue
 		}
-		if isAbsent(fieldVal) {
+		if IsAbsent(fieldVal) {
 			continue
 		}
 		present[prop.Name()] = true
@@ -491,8 +470,7 @@ func (v *Validator) validateEdgeTarget(
 		edgeProperties = immutable.WrapProperties(edgeProps, immutable.WithClone(true))
 	}
 
-	target := NewValidEdgeTarget(targetKey, edgeProperties)
-	return &target, false
+	return &ValidEdgeTarget{targetKey: targetKey, properties: edgeProperties}, false
 }
 
 // kindOf returns a human-readable shape name for a value: the JSON shape for

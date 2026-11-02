@@ -37,9 +37,6 @@ func TestCheckValue_AJSONNumberThatIsNoLiteralIsRefused(t *testing.T) {
 					t.Errorf("%q %s at %s: CanonicalValue = %#v, want a refusal", text, carrier.name, c.Kind(), v)
 				}
 			}
-			if v, ok := instance.ScalarOf(carrier.v); ok {
-				t.Errorf("%q %s: ScalarOf = %#v, true; want no form", text, carrier.name, v)
-			}
 		}
 	}
 }

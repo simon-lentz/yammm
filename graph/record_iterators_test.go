@@ -9,6 +9,7 @@ import (
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/instance"
+	"github.com/simon-lentz/yammm/internal/snapparts"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -134,14 +135,14 @@ type Person {
 				t.Fatal(res)
 			}
 			person := mustTypeID(t, s, "Person")
-			snap, res := graph.RebuildSnapshot(s, graph.SnapshotParts{
+			snap := rebuild(s, snapparts.Parts{
 				Types: []schema.TypeID{person},
-				Instances: []graph.InstanceParts{{
+				Instances: []snapparts.Instance{{
 					TypeID:     person,
 					PrimaryKey: immutable.WrapKey([]any{"p1"}),
 					Properties: immutable.WrapProperties(map[string]any{"id": "p1"}),
 				}},
-				Unresolved: []graph.UnresolvedParts{{
+				Unresolved: []snapparts.Unresolved{{
 					SourceType: person,
 					SourceKey:  immutable.WrapKey([]any{"p1"}),
 					Relation:   "EMPLOYER",
@@ -150,9 +151,6 @@ type Person {
 					Properties: immutable.WrapProperties(map[string]any{}),
 				}},
 			})
-			if res.HasErrors() {
-				t.Fatal(res)
-			}
 			held := slices.Collect(snap.Unresolved())
 			if len(held) != 1 {
 				t.Fatalf("Unresolved yielded %d records, want 1", len(held))

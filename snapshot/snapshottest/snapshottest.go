@@ -6,7 +6,6 @@ package snapshottest
 
 import (
 	"context"
-	"strconv"
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
@@ -18,8 +17,8 @@ import (
 	"github.com/simon-lentz/yammm/snapshot"
 )
 
-// BuildSnapshot adds the given pre-validated instances to a fresh graph
-// over s and returns its snapshot — the shared constructor for round-trip
+// BuildSnapshot adds the given instances, each validated over s itself, to a
+// fresh graph over s and returns its snapshot — the shared constructor for round-trip
 // fixtures. A duplicate primary key is recorded in the snapshot, so a fixture
 // may build one on purpose; any other refusal fails tb, because the refused
 // instance would be missing from the snapshot the test then asserts on.
@@ -105,16 +104,12 @@ type instProjection struct {
 	Provenance *provProjection
 }
 
-// dupProjection carries the duplicate's full coordinate set: a conflict that
-// re-resolves to a different instance, or parent coordinates lost on the
-// wire, are losses the rejected instance's own tree cannot show.
+// dupProjection carries the duplicate's conflict: one that re-resolves to a
+// different instance is a loss the rejected instance's own tree cannot show.
 type dupProjection struct {
 	Instance     instProjection
 	ConflictType string
 	ConflictKey  string
-	ParentType   string
-	ParentKey    string
-	Relation     string
 }
 
 // provProjection distinguishes an instance carrying provenance from one
@@ -152,10 +147,8 @@ type unresProjection struct {
 // the test with a (-want +got) diff on mismatch. Values compare under go-cmp's
 // rules, dynamic type included: an int64/float64 mismatch is a real defect, not a
 // wire artifact to tolerate, a negative zero equals zero, and a type with an Equal
-// method, as time.Time, compares by it. Two deliberate exceptions stand: a nil
-// list or map compares equal to an empty one, and a float32 compares equal to the
-// float64 Load returns for it, because that float64 converts back to the float32
-// and the wire keeps no width (see [widenFloat32]).
+// method compares by it. One deliberate exception stands: a nil list or map
+// compares equal to an empty one.
 func DiffSnapshots(tb testing.TB, want, got graph.Snapshot) {
 	tb.Helper()
 	if d := cmp.Diff(project(want), project(got), cmpopts.EquateEmpty()); d != "" {
@@ -180,7 +173,7 @@ func project(s graph.Snapshot) snapProjection {
 					Relation:   e.Relation(),
 					TargetType: e.Target().TypeID().String(),
 					TargetPK:   e.Target().PrimaryKey().String(),
-					Properties: widenFloat32Map(e.Properties().Clone()),
+					Properties: e.Properties().Clone(),
 				})
 			}
 			p.Instances[key] = append(p.Instances[key], ip)
@@ -191,11 +184,6 @@ func project(s graph.Snapshot) snapProjection {
 			Instance:     projectInstanceTree(d.Instance()),
 			ConflictType: d.Conflict().TypeID().String(),
 			ConflictKey:  d.Conflict().PrimaryKey().String(),
-			Relation:     d.Relation(),
-		}
-		if !d.Parent().IsZero() {
-			dp.ParentType = d.Parent().TypeID().String()
-			dp.ParentKey = d.Parent().PrimaryKey().String()
 		}
 		p.Duplicates = append(p.Duplicates, dp)
 	}
@@ -208,7 +196,7 @@ func project(s graph.Snapshot) snapProjection {
 			TargetKey:  u.TargetKey(),
 			Required:   u.Required(),
 			Reason:     u.Reason(),
-			Properties: widenFloat32Map(u.Properties().Clone()),
+			Properties: u.Properties().Clone(),
 		})
 	}
 	return p
@@ -224,7 +212,7 @@ func projectInstanceTree(inst graph.Instance) instProjection {
 		TypeName:   inst.TypeName(),
 		TypeID:     inst.TypeID().String(),
 		PK:         inst.PrimaryKey().String(),
-		Properties: widenFloat32Map(inst.Properties().Clone()),
+		Properties: inst.Properties().Clone(),
 	}
 	if rels := inst.ComposedRelations(); len(rels) > 0 {
 		ip.Composed = make(map[string][]instProjection, len(rels))
@@ -242,38 +230,4 @@ func projectInstanceTree(inst graph.Instance) instProjection {
 		}
 	}
 	return ip
-}
-
-// widenFloat32Map applies [widenFloat32] to every value in a cloned
-// property map.
-func widenFloat32Map(m map[string]any) map[string]any {
-	for k, v := range m {
-		m[k] = widenFloat32(v)
-	}
-	return m
-}
-
-// widenFloat32 projects a float32 as the float64 Load hands every reader —
-// the one its 32-bit shortest wire form parses to, or its own value where that
-// form would round to another float32, which the writer then writes in its
-// 64-bit form — recursively through containers. Two snapshots that differ only
-// in float width at the same 32-bit value project identically; a narrowed or
-// drifted value still shows.
-func widenFloat32(v any) any {
-	switch n := v.(type) {
-	case float32:
-		f, err := strconv.ParseFloat(strconv.FormatFloat(float64(n), 'g', -1, 32), 64)
-		if err != nil || float32(f) != n {
-			return float64(n)
-		}
-		return f
-	case []any:
-		for i, e := range n {
-			n[i] = widenFloat32(e)
-		}
-		return n
-	case map[string]any:
-		return widenFloat32Map(n)
-	}
-	return v
 }

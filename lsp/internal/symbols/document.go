@@ -20,7 +20,7 @@ type SnapshotView struct {
 
 // DocumentSymbolsFor returns document symbols for the given document within a snapshot.
 // Returns nil when no symbols are available.
-func DocumentSymbolsFor(snap SnapshotView, docURI string, docSourceID location.SourceID, docVersion int, enc lsputil.PositionEncoding, logger *slog.Logger) []protocol.DocumentSymbol {
+func DocumentSymbolsFor(snap SnapshotView, docURI string, docSourceID location.SourceID, docVersion int, logger *slog.Logger) []protocol.DocumentSymbol {
 	if snap.EntryVersion != docVersion {
 		logger.Debug(
 			"serving stale snapshot for documentSymbol",
@@ -35,7 +35,7 @@ func DocumentSymbolsFor(snap SnapshotView, docURI string, docSourceID location.S
 		return nil
 	}
 
-	return BuildDocumentSymbols(idx, snap.Sources, enc)
+	return BuildDocumentSymbols(idx, snap.Sources)
 }
 
 // SymbolParentKey creates a unique key for parent lookup to prevent name collisions.
@@ -51,9 +51,8 @@ type DocSymWithKey struct {
 }
 
 // BuildDocumentSymbols converts a SymbolIndex to hierarchical DocumentSymbols.
-// The sources parameter provides source content for position encoding conversion.
-// The enc parameter is the negotiated LSP position encoding (UTF-16 or UTF-8).
-func BuildDocumentSymbols(idx *SymbolIndex, sources *lsputil.Texts, enc lsputil.PositionEncoding) []protocol.DocumentSymbol {
+// The sources parameter provides source content for UTF-16 position conversion.
+func BuildDocumentSymbols(idx *SymbolIndex, sources *lsputil.Texts) []protocol.DocumentSymbol {
 	if idx == nil || len(idx.Symbols) == 0 {
 		return nil
 	}
@@ -122,7 +121,7 @@ func BuildDocumentSymbols(idx *SymbolIndex, sources *lsputil.Texts, enc lsputil.
 	// Process all symbols
 	for i := range idx.Symbols {
 		sym := &idx.Symbols[i]
-		docSym := SymbolToDocumentSymbol(sym, sources, enc)
+		docSym := SymbolToDocumentSymbol(sym, sources)
 		symKey := SymbolParentKey(sym.Kind, sym.Name)
 
 		switch sym.Kind {
@@ -190,9 +189,8 @@ func AttachChildren(syms []DocSymWithKey, childrenByParent map[string][]DocSymWi
 }
 
 // SymbolToDocumentSymbol converts a Symbol to a protocol.DocumentSymbol.
-// The sources parameter provides source content for position encoding conversion.
-// The enc parameter is the negotiated LSP position encoding (UTF-16 or UTF-8).
-func SymbolToDocumentSymbol(sym *Symbol, sources *lsputil.Texts, enc lsputil.PositionEncoding) protocol.DocumentSymbol {
+// The sources parameter provides source content for UTF-16 position conversion.
+func SymbolToDocumentSymbol(sym *Symbol, sources *lsputil.Texts) protocol.DocumentSymbol {
 	kind := SymbolKindToLSP(sym.Kind)
 
 	// Build detail string
@@ -202,8 +200,8 @@ func SymbolToDocumentSymbol(sym *Symbol, sources *lsputil.Texts, enc lsputil.Pos
 	}
 
 	// Convert spans to LSP ranges (with automatic fallback to naive conversion)
-	symRange := lsputil.SpanToProtocolRange(sources, sym.Range, enc)
-	selRange := lsputil.SpanToProtocolRange(sources, sym.Selection, enc)
+	symRange := lsputil.SpanToProtocolRange(sources, sym.Range)
+	selRange := lsputil.SpanToProtocolRange(sources, sym.Selection)
 
 	return protocol.DocumentSymbol{
 		Name:           sym.Name,

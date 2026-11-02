@@ -33,11 +33,10 @@ var (
 // fakeResolver implements Resolver with settable return values.
 // Place in test files since it's only used for handler unit tests.
 type fakeResolver struct {
-	unit     *workspace.Unit
-	units    []workspace.Unit
-	encoding lsputil.PositionEncoding
-	docSnap  *docstate.Snapshot
-	uriMap   map[string]string
+	unit    *workspace.Unit
+	units   []workspace.Unit
+	docSnap *docstate.Snapshot
+	uriMap  map[string]string
 }
 
 func (f *fakeResolver) ResolveUnit(_ string, _, _ int, _ bool) *workspace.Unit {
@@ -46,13 +45,6 @@ func (f *fakeResolver) ResolveUnit(_ string, _, _ int, _ bool) *workspace.Unit {
 
 func (f *fakeResolver) ResolveAllUnits(_ string) []workspace.Unit {
 	return f.units
-}
-
-func (f *fakeResolver) PositionEncoding() lsputil.PositionEncoding {
-	if f.encoding == "" {
-		return lsputil.PositionEncodingUTF16
-	}
-	return f.encoding
 }
 
 func (f *fakeResolver) GetDocumentSnapshot(_ string) *docstate.Snapshot {
@@ -138,7 +130,7 @@ func buildTestSnapshot(t *testing.T) (*analysis.Snapshot, *docstate.Snapshot) {
 
 	// Build the symbol index from the parsed schema so spans are
 	// parser-generated rather than hand-crafted.
-	idx := symbols.BuildSymbolIndex(s, reg)
+	idx := symbols.BuildSymbolIndex(s)
 
 	snapshot := &analysis.Snapshot{
 		EntrySourceID:   sourceID,
@@ -196,7 +188,7 @@ func buildCrossSchemaSnapshot(t *testing.T) (*analysis.Snapshot, *docstate.Snaps
 		entryPath: []byte(entryContent),
 	}
 
-	snapshot, err := analyzer.Analyze(t.Context(), entryPath, overlays, tmpDir, lsputil.PositionEncodingUTF16)
+	snapshot, err := analyzer.Analyze(t.Context(), entryPath, overlays, tmpDir)
 	require.NoError(t, err)
 	require.NotNil(t, snapshot)
 	require.False(t, snapshot.Schema.IsZero(), "schema should parse successfully")

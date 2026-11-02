@@ -227,7 +227,7 @@ func NewAnalyzer(logger *slog.Logger) *Analyzer {
 //
 // The ctx parameter supports cancellation; if cancelled, Analyze returns the
 // partial snapshot with an error.
-func (a *Analyzer) Analyze(ctx context.Context, entryPath string, overlays map[string][]byte, moduleRoot string, posEncoding lsputil.PositionEncoding, opts ...schema.LoadOption) (*Snapshot, error) {
+func (a *Analyzer) Analyze(ctx context.Context, entryPath string, overlays map[string][]byte, moduleRoot string, opts ...schema.LoadOption) (*Snapshot, error) {
 	a.logger.Debug(
 		"starting analysis",
 		slog.String("entry", entryPath),
@@ -328,12 +328,12 @@ func (a *Analyzer) Analyze(ctx context.Context, entryPath string, overlays map[s
 			slog.String("entry", entryPath),
 		)
 		// Return partial snapshot with diagnostics
-		snapshot.LSPDiagnostics = a.convertDiagnostics(diagResult, sourceRegistry, entryPath, posEncoding)
+		snapshot.LSPDiagnostics = a.convertDiagnostics(diagResult, sourceRegistry, entryPath)
 		return snapshot, errors.New("load schema: fatal diagnostics")
 	}
 
 	// Convert diagnostics to LSP format
-	snapshot.LSPDiagnostics = a.convertDiagnostics(diagResult, sourceRegistry, entryPath, posEncoding)
+	snapshot.LSPDiagnostics = a.convertDiagnostics(diagResult, sourceRegistry, entryPath)
 
 	// Build symbol indices for navigation
 	if !schemaResult.IsZero() {
@@ -372,7 +372,7 @@ func (a *Analyzer) Analyze(ctx context.Context, entryPath string, overlays map[s
 //
 // The analyzer stays root-agnostic. Resolving the root is the workspace's job,
 // and this method takes the result of that failure rather than repeating it.
-func (a *Analyzer) SnapshotForResult(entryPath string, result diag.Result, posEncoding lsputil.PositionEncoding) (*Snapshot, error) {
+func (a *Analyzer) SnapshotForResult(entryPath string, result diag.Result) (*Snapshot, error) {
 	entrySourceID, idErr := canonicalSourceID(entryPath)
 	if idErr != nil {
 		a.logger.Warn(
@@ -389,7 +389,7 @@ func (a *Analyzer) SnapshotForResult(entryPath string, result diag.Result, posEn
 		Result:          result,
 		Sources:         sourceRegistry,
 		SymbolsBySource: make(map[location.SourceID]*symbols.SymbolIndex),
-		LSPDiagnostics:  a.convertDiagnostics(result, sourceRegistry, entryPath, posEncoding),
+		LSPDiagnostics:  a.convertDiagnostics(result, sourceRegistry, entryPath),
 	}
 
 	if result.HasFatal() {
@@ -399,19 +399,17 @@ func (a *Analyzer) SnapshotForResult(entryPath string, result diag.Result, posEn
 }
 
 // buildSymbolIndices builds symbol indices for the schema and its imports.
-// The seen map prevents infinite recursion if the schema loader permits cycles
-// (or if imports resolve to the same canonical file via different paths).
+// The seen map visits each schema of the closure once: every path through
+// stacked diamond imports would otherwise cost 2^levels visits.
 func (a *Analyzer) buildSymbolIndices(snapshot *Snapshot, s schema.Schema, seen map[location.SourceID]struct{}) {
 	sourceID := s.SourceID()
 
-	// Check for cycle/duplicate - skip if already processed
 	if _, ok := seen[sourceID]; ok {
 		return
 	}
 	seen[sourceID] = struct{}{}
 
-	// Build index for this schema (pass sources for precise name span computation)
-	snapshot.SymbolsBySource[sourceID] = symbols.BuildSymbolIndex(s, snapshot.Sources)
+	snapshot.SymbolsBySource[sourceID] = symbols.BuildSymbolIndex(s)
 
 	// Build indices for imported schemas
 	for imp := range s.Imports() {
@@ -446,7 +444,7 @@ func (a *Analyzer) extractImportPaths(s schema.Schema, seen map[string]struct{})
 
 // convertDiagnostics converts diag.Result to LSP diagnostics.
 // entryPath is used as the fallback URI for span-less diagnostics (e.g., I/O errors).
-func (a *Analyzer) convertDiagnostics(result diag.Result, sources *lsputil.Texts, entryPath string, enc lsputil.PositionEncoding) []URIDiagnostic {
+func (a *Analyzer) convertDiagnostics(result diag.Result, sources *lsputil.Texts, entryPath string) []URIDiagnostic {
 	// Compute entry URI once for span-less diagnostics
 	entryURI := entryPath
 	if !lsputil.HasURIScheme(entryPath) {
@@ -477,9 +475,9 @@ func (a *Analyzer) convertDiagnostics(result diag.Result, sources *lsputil.Texts
 				uri = lsputil.PathToURI(sourcePath)
 			}
 
-			diagRange = lsputil.SpanToProtocolRange(sources, span, enc)
+			diagRange = lsputil.SpanToProtocolRange(sources, span)
 
-			relatedInfo = a.ConvertRelatedInfo(issue.Related(), sources, enc)
+			relatedInfo = a.ConvertRelatedInfo(issue.Related(), sources)
 		}
 
 		src := diagnosticSource
@@ -518,7 +516,7 @@ func convertSeverity(sev diag.Severity) *protocol.DiagnosticSeverity {
 }
 
 // ConvertRelatedInfo converts location.RelatedInfo to LSP DiagnosticRelatedInformation.
-func (a *Analyzer) ConvertRelatedInfo(related []location.RelatedInfo, sources *lsputil.Texts, enc lsputil.PositionEncoding) []protocol.DiagnosticRelatedInformation {
+func (a *Analyzer) ConvertRelatedInfo(related []location.RelatedInfo, sources *lsputil.Texts) []protocol.DiagnosticRelatedInformation {
 	if len(related) == 0 {
 		return nil
 	}
@@ -536,7 +534,7 @@ func (a *Analyzer) ConvertRelatedInfo(related []location.RelatedInfo, sources *l
 		}
 
 		// Convert span to LSP range
-		relRange := lsputil.SpanToProtocolRange(sources, rel.Span, enc)
+		relRange := lsputil.SpanToProtocolRange(sources, rel.Span)
 
 		result = append(result, protocol.DiagnosticRelatedInformation{
 			Location: protocol.Location{

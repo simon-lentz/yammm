@@ -1,19 +1,17 @@
 package graph
 
 import (
-	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/schema"
 )
 
-// Duplicate records an instance the graph rejected: one with a duplicate primary
-// key, or a second child of a (one) composition slot.
+// Duplicate records a root the graph rejected for a primary key that already
+// exists for its type.
 //
-// When [Graph.Add] meets a primary key that already exists for the same type, a
-// Duplicate is created to track both the new instance (which is rejected) and
-// the existing instance (which remains in the graph). [Graph.AddOrMerge]
-// creates one only for an incoming instance carrying composed children; a merge
-// creates none. Its fields are read
+// When [Graph.Add] meets such a key, a Duplicate is created to track both the
+// new instance (which is rejected) and the existing instance (which remains in
+// the graph). [BatchAssembler.AddValidOrMerge] creates one only for an incoming
+// instance carrying composed children; a merge creates none. Its fields are read
 // through methods, so no caller can set one.
 //
 // # Composed Children Not Included
@@ -22,8 +20,7 @@ import (
 // [Graph.Add] builds the whole tree before it meets the duplicate, and records
 // a childless copy of the rejected root: a duplicate installs nothing. If you need
 // to inspect composed children from duplicate data, access them from the original
-// [instance.ValidInstance] passed to [Graph.Add], [Graph.AddOrMerge],
-// [Graph.AddComposed], [BatchAssembler.AddValid] or
+// [instance.ValidInstance] passed to [Graph.Add], [BatchAssembler.AddValid] or
 // [BatchAssembler.AddValidOrMerge].
 //
 // Duplicates are accessed via [Snapshot.Duplicates].
@@ -34,16 +31,12 @@ func (d Duplicate) IsZero() bool { return d.duplicateState == nil }
 
 // duplicateState is the record a [Duplicate] names.
 type duplicateState struct {
-	instance   Instance
-	conflict   Instance
-	parent     Instance
-	relation   string
-	diagnostic diag.Issue
+	instance Instance
+	conflict Instance
 }
 
-// Instance returns a childless copy of the rejected instance: one that Add,
-// AddOrMerge or AddComposed did not install, or the instance of a [DuplicateParts]
-// that [RebuildSnapshot] took.
+// Instance returns a childless copy of the rejected instance: one that an add
+// did not install, or a duplicate record a document held.
 func (d Duplicate) Instance() Instance {
 	if d.IsZero() {
 		return Instance{}
@@ -51,47 +44,13 @@ func (d Duplicate) Instance() Instance {
 	return d.instance
 }
 
-// Conflict returns the instance in the graph the rejected one collided with,
-// which remains in the graph: the root at the rejected instance's type and key,
-// or the occupant of the parent's slot at its key, or a (one) slot's sole
-// occupant.
+// Conflict returns the root the rejected instance collided with, which remains
+// in the graph: the root at the rejected instance's type and key.
 func (d Duplicate) Conflict() Instance {
 	if d.IsZero() {
 		return Instance{}
 	}
 	return d.conflict
-}
-
-// Parent returns the composing parent for a composed-child duplicate, and the zero Instance
-// for a root duplicate. With [Duplicate.Relation] it locates a conflict no
-// index holds.
-func (d Duplicate) Parent() Instance {
-	if d.IsZero() {
-		return Instance{}
-	}
-	return d.parent
-}
-
-// Relation returns the composing relation name for a composed-child duplicate,
-// and "" for a root duplicate.
-func (d Duplicate) Relation() string {
-	if d.IsZero() {
-		return ""
-	}
-	return d.relation
-}
-
-// Diagnostic returns the E_DUPLICATE_PK or E_DUPLICATE_COMPOSED_PK issue that
-// reported the conflict.
-//
-// For snapshots loaded from persisted .ys files the issue is zero-valued,
-// because construction diagnostics are transient and not persisted. Code that
-// runs on both constructed and loaded snapshots guards on [diag.Issue.IsZero].
-func (d Duplicate) Diagnostic() diag.Issue {
-	if d.IsZero() {
-		return diag.Issue{}
-	}
-	return d.diagnostic
 }
 
 // UnresolvedEdge records an association edge the graph could not resolve: one
@@ -205,15 +164,11 @@ func (u UnresolvedEdge) Properties() immutable.Properties {
 	return u.properties
 }
 
-// newDuplicate creates a Duplicate record. parent and relation are the
-// composing coordinates, zero for a root duplicate.
-func newDuplicate(instance, conflict, parent Instance, relation string, diagnostic diag.Issue) Duplicate {
+// newDuplicate creates a Duplicate record.
+func newDuplicate(instance, conflict Instance) Duplicate {
 	return Duplicate{&duplicateState{
-		instance:   instance,
-		conflict:   conflict,
-		parent:     parent,
-		relation:   relation,
-		diagnostic: diagnostic,
+		instance: instance,
+		conflict: conflict,
 	}}
 }
 

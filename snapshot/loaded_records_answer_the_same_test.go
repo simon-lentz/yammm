@@ -9,6 +9,7 @@ import (
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/instance"
+	"github.com/simon-lentz/yammm/internal/instancetest"
 	"github.com/simon-lentz/yammm/internal/recordtest"
 	"github.com/simon-lentz/yammm/internal/yammmtest"
 	"github.com/simon-lentz/yammm/location"
@@ -79,13 +80,13 @@ func loadedRecordsSnapshot(t *testing.T) graph.Snapshot {
 }
 
 // A .ys file persists no span, no construction diagnostic and no validator claim:
-// [graph.Instance.Validated] and [graph.Duplicate.Diagnostic] document the loaded answer.
+// [graph.Instance.Validated] documents the loaded answer.
 func loadedRecordsOptions() recordtest.Options {
 	return recordtest.Options{
 		OmitTypes: []reflect.Type{reflect.TypeFor[location.Span]()},
 		SkipMethod: func(owner, method string) bool {
 			switch owner + "." + method {
-			case "Instance.Validated", "Snapshot.Diagnostics", "Duplicate.Diagnostic":
+			case "Instance.Validated", "Snapshot.Diagnostics":
 				return true
 			}
 			return false
@@ -178,9 +179,6 @@ func checkRecordIdentity(t *testing.T, snap graph.Snapshot) {
 
 	if got := o1.ComposedCount("LINES"); got != 2 {
 		t.Errorf("ComposedCount = %d, want 2", got)
-	}
-	if !o1.HasComposed("LINES") {
-		t.Error("HasComposed must report LINES")
 	}
 	if got := len(slices.Collect(o1.Composed("LINES"))); got != 2 {
 		t.Errorf("Composed yields %d, want 2", got)
@@ -310,17 +308,8 @@ func TestAdd_AnEdgeWithNoPropertyHoldsTheZeroProperties(t *testing.T) {
 	if res := g.Add(ctx, company); res.HasErrors() {
 		t.Fatal(res)
 	}
-	order, ok := s.Type("Order")
-	if !ok {
-		t.Fatal("no type Order")
-	}
-	target := instance.NewValidEdgeData([]instance.ValidEdgeTarget{
-		instance.NewValidEdgeTarget(immutable.WrapKey([]any{"c1"}), immutable.WrapProperties(map[string]any{})),
-	})
-	key := immutable.WrapKey([]any{"o1"})
-	inst := instance.NewValidInstance("Order", order.ID(), key,
-		immutable.WrapProperties(map[string]any{"id": "o1"}),
-		map[string]instance.ValidEdgeData{"PLACED_BY": target, "AUDITED_BY": target}, nil, location.Provenance{})
+	target := map[string]any{"_target_id": "c1"}
+	inst := instancetest.Valid(t, s, "Order", map[string]any{"id": "o1", "placed_by": target, "audited_by": target})
 	if res := g.Add(ctx, inst); res.HasErrors() {
 		t.Fatal(res)
 	}

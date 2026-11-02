@@ -42,7 +42,7 @@ func TestRenderSymbol_EveryKindRendersFromItsIndex(t *testing.T) {
 	if res.HasErrors() {
 		t.Fatal(res)
 	}
-	idx := symbols.BuildSymbolIndex(s, nil)
+	idx := symbols.BuildSymbolIndex(s)
 	seen := map[symbols.SymbolKind]bool{}
 	for i := range idx.Symbols {
 		sym := &idx.Symbols[i]

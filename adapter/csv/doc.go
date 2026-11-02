@@ -23,10 +23,10 @@
 // well, close the paragraph. A cell, or a relation group's target segment (a
 // key component's under [WithSchema] alone), whose text does not coerce to the
 // type its member declares draws [E_CSV_COERCE]: the data needs cleaning, and
-// the row is still produced with that text held as an [instance.Refused], so
-// the validator reports nothing more for it and refuses the row. A setting the adapter cannot use draws
-// [E_CSV_CONFIG] — a list separator the parser could not find again, a
-// delimiter [encoding/csv] refuses, [Adapter.ParseWithTypeColumn] with no
+// the row is still produced with that text held as an [instance.Refused].
+// Where the validator reads that key as the member's, it reports nothing more
+// for the value and refuses the row. A setting the adapter cannot use draws
+// [E_CSV_CONFIG] — a delimiter [encoding/csv] refuses, [Adapter.ParseWithTypeColumn] with no
 // [WithTypeColumn] or with a name holding a CR LF, which no header can hold —
 // before the parse reads a byte, and carries no span, since
 // it names the configuration and not the input. Input that is not well formed
@@ -75,18 +75,16 @@
 //
 // # Cancellation
 //
-// Every entry point observes its context at each record or instance it
-// handles; a parse reads the byte order mark and the header before its first
+// A parse reads the byte order mark and the header before its first context
 // check. Both parse
 // methods check before each record is read and stop with a Fatal
 // E_CONTEXT_CANCELLED carrying the span of the last record the reader returned
 // without an error, or none before the first, keeping the records read before
-// it; a record the reader refuses leaves the span where it was. Fatal because
-// [diag.Result.HasFatal] is documented to mean the run did not finish. Both
-// writers check once per type
-// and again once per instance and return an error wrapping the context's:
-// [Adapter.MarshalSnapshot] returns no output, and [Adapter.WriteSnapshot]
-// flushes what it wrote first, so a destination still parses as far as it goes.
+// it; a record the reader refuses leaves the span where it was.
+// [diag.Result.HasFatal] reports that issue. [Adapter.MarshalSnapshot] first
+// walks the instances for a composed child with no check. It then checks once
+// per type and again once per instance, and returns no output and an error
+// wrapping the context's.
 //
 // # Column Mapping
 //
@@ -131,12 +129,10 @@
 // validator to judge as it judges that JSON object, unless a plain column of
 // the same name holds a value (two values for one key, below).
 //
-// [WithStrictPropertyNames] matches names exactly instead, as
-// [instance.WithStrictPropertyNames] makes the validator match them. Give the
-// parser the validator's setting: [instance.RecommendedOptions] sets it. A
-// parser that folds for a strict validator writes a mis-cased column's empty
-// value under the header's spelling, so the row draws the validator's unknown
-// field where the file means no value.
+// The parser folds as a default validator does. Under
+// [instance.WithStrictPropertyNames], which [instance.RecommendedOptions] sets,
+// a mis-cased column's empty value stays under the header's spelling, so the row
+// draws the validator's unknown field where the file means no value.
 //
 // A key that claims no member is carried as its text, as a JSON key is, for
 // the validator to report as unknown, shadowed or colliding, and
@@ -197,26 +193,16 @@
 // a cell carries the text the validator stores — including foreign-key columns,
 // whose components render through the TARGET type's primary-key constraints,
 // and list elements, which render through the element constraint. A scalar the
-// constraint cannot render, a pointer to one read as the scalar, is written as
-// it arrived when it reads back: an
-// export returns an error rather than a diag.Result, so one malformed cell must
-// not fail the file. A string that is not valid UTF-8 and a number this parser
-// does not read back as a number are refused, and so is a value with no
-// spelling in a cell: one of no form ([instance.ScalarOf]), such as a composite
-// value or a json.Number that is no number literal, and a time or a UUID its
-// column does not render (under Empty Cells).
+// constraint cannot render is written as it arrived: an export returns an error
+// rather than a diag.Result, so one malformed cell must not fail the file. A
+// json.Number no column reads back as a number is refused, and so is a value
+// with no spelling in a cell (under Empty Cells).
 //
 // # List Properties
 //
-// List values use the list separator — "|" by default, configurable with
-// [WithListSeparator]. Both sides escape through one shared helper pair: the
-// backslash escapes itself and every occurrence of the separator's first
-// byte, so the separator is found only between elements, and an element
-// holding any part of it splits back unchanged. A separator the parser
-// cannot find again is refused: one that begins with the backslash, and one
-// holding a CR LF, which [encoding/csv]'s reader turns into LF. A parse reports
-// it as [E_CSV_CONFIG] and a write returns it marked [ErrConfig], because the
-// separator is the adapter's own setting and no snapshot can satisfy it.
+// List values use the list separator, "|". Both sides escape through one shared
+// helper pair: the backslash escapes itself and every separator, so the separator
+// is found only between elements, and an element holding it splits back unchanged.
 //
 // A nested collection — a List of Lists, a List of Vectors — renders by the
 // same rule at every depth: an inner list renders as a list cell does, and the
@@ -228,9 +214,7 @@
 // Vector element or an edge segment — so a Float is written in positional
 // notation ([strconv.FormatFloat] with 'f' and the shortest precision, with
 // ".0" after a whole value) everywhere, never with an exponent. A Vector's elements render as Floats, as
-// the validator coerces them, so a float32, which only an instance nothing
-// validated can hold, is widened to float64 in a Float, a List<Float> and a
-// Vector alike.
+// the validator coerces them.
 //
 // # Empty Cells
 //
@@ -263,12 +247,11 @@
 // property is never null, so an optional one, or a required one whose kind has
 // no empty value, is absent on that target.
 //
-// Written plainly, these values do not read back unchanged. The writer
-// refuses the ones that would lose data, with an error marked
-// [ErrUnrepresentable] so a caller separates a refusal of the data from an I/O
-// failure and from [ErrConfig] without matching the message text; it writes the
-// documented limitations rather than refuse them, and writes one shape specially
-// so that it reads back:
+// Written plainly, these values do not read back unchanged. The writer refuses
+// the ones that lose data, with an error marked [ErrUnrepresentable], so a
+// caller tells a refusal of the data from the writer's other errors, [ErrConfig]
+// among them, and matches no message text. It writes the documented limitations
+// rather than refuse them, and writes one shape specially so that it reads back:
 //
 //   - An optional property holding "" or an empty list writes the cell null
 //     writes, so it reads back as null, and an optional edge property holding
@@ -283,26 +266,18 @@
 //     edge properties are all absent or "" writes the cell an absent edge
 //     writes. The writer refuses both with an error naming the instance,
 //     rather than let an element or an association vanish on the way back.
-//   - A null list element, and a value its constraint cannot render: one of
-//     no form ([github.com/simon-lentz/yammm/instance.ScalarOf]), such as a
-//     map, an array, a struct, a channel or a pointer to one, or a json.Number
-//     whose text is no JSON number literal; a time.Time
-//     outside a Timestamp or a Date, or one there whose text does not read
-//     back; and a uuid.UUID outside a UUID. The list grammar has no spelling
-//     for either: a null
-//     element would be written as an empty one, and a composite as Go's
-//     rendering of it, which reads back as a string. A validated graph holds
-//     neither. The writer refuses both with an error naming the property or
-//     edge property, or the association and the target key component.
-//   - A string that is not valid UTF-8, and a number no column of this parser
-//     reads back as a number: a NaN, an infinity, and a json.Number that spells
-//     a number no finite float64 holds, where no Integer or Float constraint
-//     converts it. A cell carries a string's bytes, which the validator refuses on
-//     the way back, or the parser under a Date or Timestamp, and such a number
-//     would read back as text or not at all.
-//     A validated graph holds neither. The writer refuses each with an error
-//     naming the property or edge property, or the association and the target
-//     key component, a list element included.
+//   - A null list element, a map, and a list at an edge property. The list
+//     grammar has no spelling for any of them: a null element would be written as
+//     an empty one, and a composite as Go's rendering of it, which reads back as a
+//     string. A validated graph holds none. The writer refuses each with an
+//     error naming the property or edge property. A list at a property writes its
+//     list cell whatever the constraint, so a document's list at a String reads
+//     back as text.
+//   - A number no column of this parser reads back as a number: a json.Number
+//     that spells a number no finite float64 holds, where no Integer or Float
+//     constraint converts it, which would read back as text or not at all. A
+//     validated graph holds none. The writer refuses it with an error naming the
+//     property or edge property, a list element included.
 //   - A cell whose text holds a CR LF: [encoding/csv]'s reader turns every CR
 //     LF into LF, inside a quoted field too. The writer refuses it with an
 //     error naming the column and the instance. A lone CR is written. A file
@@ -321,7 +296,7 @@
 // that row. The claim is [instance.ClaimEdgeKeys]'s over the group read as one
 // target: a key for each filled cell, and for each empty cell that holds its
 // member's empty value (under Empty Cells). So an exact spelling decides
-// wherever it is filled, and, unless names are strict, a folded one where that
+// wherever it is filled, and a folded one where that
 // target holds no exact spelling of its member and no other folded one is
 // filled. Where two deciding columns disagree the group writes nothing and
 // claims nothing, and the row draws [diag.E_ADAPTER_PARSE] naming the relation.
@@ -341,7 +316,7 @@
 // group, it decides which filled columns claim a member, as the paragraph
 // above states.
 //
-// During snapshot serialization ([Adapter.MarshalSnapshot], [Adapter.WriteSnapshot]),
+// During snapshot serialization ([Adapter.MarshalSnapshot]),
 // edge columns are populated from the snapshot's edge index via [graph.Snapshot]
 // edge lookup. An association that holds an unresolved record and no edge
 // writes the empty group an absent association writes, and the writer returns
@@ -358,9 +333,9 @@
 // CSV is a flat format, so a row has no column for a composed child. The parser
 // assembles no composition: a group whose field names one is carried as one
 // object of text, for the validator to judge as it judges that JSON object.
-// Both writers refuse a snapshot in which any instance
+// [Adapter.MarshalSnapshot] refuses a snapshot in which any instance
 // holds a composed child with an [ErrUnrepresentable] error naming the type,
-// the instance and the composition, before they produce any output. A
+// the instance and the composition, before it produces any output. A
 // composition with no children loses nothing and is written. The JSON adapter
 // carries compositions.
 //

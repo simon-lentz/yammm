@@ -8,7 +8,7 @@
 //
 // The neo4j adapter lives alongside [github.com/simon-lentz/yammm/adapter/json]
 // in the adapter layer. It depends on library packages (schema, graph,
-// instance, immutable, diag, location); library packages never depend on
+// instance, immutable, diag); library packages never depend on
 // adapters.
 //
 // # Neo4j Driver Dependency (Type-Only)
@@ -46,8 +46,8 @@
 //
 // Beside a name Neo4j refuses as an identifier (Cypher Reserved Words, below)
 // and two labels that sanitize alike ([Adapter.DetectLabelCollisions]), the one
-// shape a valid schema can hit here is a list whose ELEMENT is itself a
-// collection: List<List<T>>, List<Vector[N]>, or a list of a list-typed alias.
+// shape a valid schema can hit here is a list whose ELEMENT resolves to a
+// collection: a List or a Vector, written directly or through an alias.
 // Those are legal yammm and validate normally, but Neo4j has no nested
 // collection property type, so [ErrUnsupportedListElem] surfaces as
 // [E_NEO4J_UNSUPPORTED_TYPE] under every option that decides which constraints
@@ -63,8 +63,8 @@
 // Vector is fine — it maps to LIST<FLOAT NOT NULL>; it is only a Vector nested
 // INSIDE a list that has no expression.) The write path refuses a value of
 // such a property by its type, before any element is read, with
-// [ErrUnsupportedListElem]: [Adapter.BatchNodeQueries],
-// [Coerce] and [CoerceParams] return an error for a value that holds one, an
+// [ErrUnsupportedListElem]: [Adapter.BatchNodeQueries]
+// and [CoerceParams] return an error for a value that holds one, an
 // empty list included, and read a value that holds none as nil, which
 // BatchNodeQueries writes as null. CoerceParams refuses a nested param map (a
 // map[string]any) or a rows value under such a key as it does under any
@@ -158,9 +158,8 @@
 // # Graph Shape
 //
 // [Adapter.ShapeForSchema] converts a schema into a [GraphShape] describing
-// the Neo4j node structure (labels, primary keys, required fields and
-// @writeOnce keys per type).
-// The shape is required input for write query generation.
+// the Neo4j node structure (labels, primary keys and @writeOnce keys per type).
+// The shape is required input for write query generation, and exports no field.
 //
 // # Write Surface
 //
@@ -168,33 +167,117 @@
 // complete [graph.Snapshot] for high-throughput batch writes. They are the
 // write surface, and the package has no single-item write.
 //
-// Both require a [GraphShape] that [Adapter.ShapeForSchema] built from a schema
-// with the snapshot's SourceID, and refuse one built by hand or from another:
-// a shape the adapter did not build carries no key constraints, so merge keys
-// would reach the driver uncoerced while the same properties are coerced from
-// the schema. [GraphShape.Types] is keyed by [schema.TypeID], so two closure
-// types sharing one bare name each get their own label. Two root types render
+// Both require a [GraphShape] that [Adapter.ShapeForSchema] built from the
+// snapshot's schema object, and refuse any other: another load can declare a key
+// another way, so a merge key would reach the driver under one type while the
+// same property is coerced from this schema to another. A shape is keyed by
+// [schema.TypeID], so two closure types sharing one bare name each get their own
+// label. Two root types render
 // one label only where their sanitized schema and type names compose one
-// label, as two SCHEMA names that sanitize alike do, or a type name holding the
-// separator beside a schema name that ends in what precedes it;
-// [Adapter.ShapeForSchema] refuses that closure.
+// label, as two SCHEMA names that sanitize alike do, or schema "a" with type B__C
+// and schema "a__B" with type C; [Adapter.ShapeForSchema] refuses that closure.
 //
 // An error marked [ErrUnrepresentable], as the JSON and CSV adapters mark theirs,
 // refuses these values: one its constraint's coercion refuses, a nested collection's, a map at a
-// property the schema declares, a string that is not valid UTF-8, a value of no form, a time or a UUID its constraint does
-// not render, a [encoding/json.Number] no driver number holds, or a primary key
-// that is absent or holds no value. A uint64 past int64 at a String passes these
-// checks, reaches the driver and draws its own unmarked OverflowError. An integer
+// property the schema declares, a list or a map a document nests more than 256
+// levels deep, a [encoding/json.Number] no driver number holds, or a primary key
+// that is absent or holds no value. An integer
 // at a Float position passes them and rounds to its nearest float64. No snapshot these writers accept holds a property the schema does not
-// declare, since every constructor refuses one. Of the values the mark refuses, a validated snapshot holds only a nested
+// declare: the validator keeps one out of a graph, and
+// [github.com/simon-lentz/yammm/snapshot.Load] and [graph.NewFromSnapshot] refuse
+// one. Of the values the mark refuses, a validated snapshot holds only a nested
 // collection's, which the validator accepts; any other is held only by a
-// snapshot whose values no validator refused at Error. [Coerce], [CoerceParams]
-// and [CoerceRelProps] mark their refusals of a value so too. No other error
+// snapshot whose values no validator refused at Error. [CoerceParams] marks its
+// refusals of a value so too. No other error
 // carries the class: a caller's own, such as a constraint
 // [schema.CheckConstraint] refuses, a constraint at a nested map's or a rows
 // param's own key, a [GraphShape] the adapter did not build for the snapshot's
 // schema or a relationship type that is no valid identifier, and a cancelled
 // context.
+//
+// # Parameter Coercion
+//
+// One rule converts a value to the driver-native type its [schema.Constraint]
+// requires, so the value satisfies Neo4j TYPE constraints. The write path applies
+// it once it has read each json.Number as the driver's number. [CoerceParams]
+// applies it to the parameters of hand-built Cypher and reads no form. The rule takes the full
+// constraint, not just its kind, so a Timestamp's custom layout is honored; a
+// DataType reference is resolved internally.
+//
+//   - Float: an int, int8 to int64, uint, uint8 to uint64 or float32 ->
+//     float64 (a uintptr or a named type is a coercion failure); a
+//     float64 passes through. Repairs the JSON round-trip where a whole-number
+//     Float decodes as int64 and Neo4j rejects it against an IS :: FLOAT
+//     constraint. A non-numeric value is a coercion failure and returns an error.
+//   - Integer: an int, int8 to int64, uint, uint8 to uint64 -> int64 (a uintptr
+//     or a named type is a coercion failure); an int64 passes
+//     through. A float is a coercion failure and returns an error, whole or
+//     not, as the validator's Integer rule refuses it: converting it would
+//     send an integer the caller's data never wrote. A json.Number is a
+//     coercion failure too, at an Integer and at a Float, though the validator
+//     reads one: a caller that decodes JSON with UseNumber converts each
+//     number to an int64 or a float64 before it calls CoerceParams. A uint past the
+//     int64 range is a failure too, as it is for a list element.
+//   - Timestamp: a string -> time.Time (Neo4j ZONED DATETIME), parsed against the
+//     constraint's custom Go layout when it declares one (Timestamp["…"]) and
+//     against RFC3339 otherwise; a time.Time passes through. A string that does
+//     not parse, or any non-string non-time.Time value, is a coercion failure
+//     and returns an error. The instant is always expressed in a location the
+//     driver can send, under one rule: a location named "Offset", the driver's
+//     own offset form, is sent as it is; any other named location is kept only
+//     when the host's tz database resolves it AND the resolved offset agrees
+//     with the one the value carries; time.Local, a location named "Local", an
+//     unnamed location, any other unresolvable name and a name whose offset
+//     disagrees are all re-expressed in the value's own offset. A consumer that
+//     must keep IANA names on a host without a tz database imports time/tzdata.
+//   - Date: a "2006-01-02" string, a time.Time, OR a dbtype.Date -> dbtype.Date
+//     (Neo4j DATE). A string that does not parse, or any other non-temporal
+//     value, is a coercion failure and returns an error. All three arms are
+//     normalised to midnight UTC: a date carries no time of day, and the driver
+//     derives its day number by a division that truncates toward zero, so a
+//     pre-1970 instant carrying a clock would land a day late.
+//   - Every other (non-transforming) kind passes a value through unchanged, save
+//     a []any, a map and a value at a List whose element is a collection. A []any
+//     is element-coerced at a List or a Vector and refused at any other kind,
+//     since a scalar cannot hold a list. The other two are refused below.
+//     The rule does not ask whether the driver takes such a value: the driver
+//     refuses a uuid.UUID and a uint64 past int64, among others.
+//
+// A map is refused under every constraint, whatever its key and element types:
+// Neo4j stores no map as a property value. A nil map holds no value and returns
+// nil.
+//
+// The four transforming kinds above are strict: they error on a value they can
+// neither pass through as already-native nor repair, rather than handing a
+// wrong-typed value to the driver. A list element is judged the same way, since a
+// list must build a homogeneous typed slice. The non-transforming kinds stay
+// lenient as a scalar, save a map, refused above, and a List whose element is a
+// collection, a type Neo4j cannot store, where a value that holds one is refused:
+// a correct value of any other needs no repair here, and instance validation is
+// its type authority. On the validated node path a
+// transforming kind only ever receives the types its strict set accepts (Float:
+// float64; Integer: int64; Timestamp and Date: the string the validator stores),
+// so strictness fires only on a value no validator refused at Error: a hand-built
+// direct-Cypher param, or one snapshot.Load read without revalidating at Error.
+//
+// A []any at a List or a Vector is element-coerced, which also requires a Go string
+// of a String, UUID, Enum or Pattern element and a bool of a Boolean element, where a
+// scalar of those kinds passes through. The write path refuses a value that holds
+// one at a List whose element is a collection by its type first, so a JSON number
+// literal reaches the rule as the int64 or float64 it spells, which an Integer refuses when it is a
+// float; a literal no finite float64 holds, or no int64 holds outside a Float
+// where the .ys reader left it a json.Number, is refused before the rule. A value of any other Go type at a collection constraint
+// is returned unchanged, save a map, refused above, and a value at a List whose
+// element is a List or a Vector: Neo4j has no nested collection property type, so a
+// value there that holds one, an empty list included, is an error wrapping
+// [ErrUnsupportedListElem].
+//
+// A value that holds none ([github.com/simon-lentz/yammm/instance.IsAbsent]),
+// such as a nil pointer, slice or map, is returned as nil, which the driver writes as null, and a
+// nil constraint ("no type to coerce against") passes any other value through
+// unchanged. A kind added to [schema.ConstraintKind] after the rule's switch was
+// written surfaces as a lint failure via its //exhaustive:enforce directive, rather
+// than as a silent driver-side PROPERTY_TYPE rejection in production.
 //
 // # Composition Ownership
 //
@@ -223,7 +306,8 @@
 // through its parent composition, and only a store that must address each node
 // separately needs an address. For a keyless (many) part the segment is
 // positional and NOT a stable identity across writes — safe under replace
-// semantics, which never match an existing part node by key.
+// semantics, which delete a root's earlier parts first, so a key matches only a
+// part node the same write created.
 //
 // The address is a flat JSON array: the owning root's LABEL, the root's key
 // values, then one two-element segment per composition hop, except a (one)
@@ -246,16 +330,14 @@
 // # Write-Once Derivation
 //
 // [ImmutableKeysFor] returns a type's @writeOnce-annotated properties (own and
-// inherited). [Adapter.ShapeForSchema] records them on each [NodeShape], and the
+// inherited). [Adapter.ShapeForSchema] records them on the shape, and the
 // node write path selects the immutable-key shape per type from that set,
 // so a @writeOnce property is set on node creation and never rewritten on a
 // subsequent MERGE.
 //
 // The guarantee does not depend on the caller holding a [schema.Type]: the keys
-// travel on the shape, which every write entry point already receives. Nothing
-// in the write surface removes a key from that set; a caller that sets
-// [NodeShape.ImmutableKeys] to an empty, non-nil slice on a shape it holds opts that type's @writeOnce
-// properties back into being rewritten.
+// travel on the shape, which every write entry point already receives, and a
+// caller cannot change them.
 //
 // # Cypher Builders
 //
@@ -371,8 +453,8 @@
 // the schema could declare: a vector index whose dimension or similarity
 // differs; a definition change under a name the database already holds; an index
 // in a state that serves no queries and will not recover on its own (FAILED; a
-// POPULATING index is unverified); and a desired index the server would refuse
-// to create, because its name or its whole definition is already taken. There
+// POPULATING index is unverified); and a desired index the server will not
+// create, because its name or its whole definition is already taken. There
 // the Actual is the blocker: an index of any kind or on any label, a
 // constraint's backing index, an index that realises another declaration of
 // this schema, or, when the caller passes constraints as alsoBlocking, a
@@ -439,9 +521,10 @@
 //
 // # Sealed Schemas
 //
-// All schemas passed to the adapter must be sealed, which is always
-// the case for schemas returned by [github.com/simon-lentz/yammm/schema.Load]
-// or [github.com/simon-lentz/yammm/schema.Builder.Build]. Sealed schemas
+// A schema comes only from [github.com/simon-lentz/yammm/schema.Load],
+// [github.com/simon-lentz/yammm/schema.LoadString] or
+// [github.com/simon-lentz/yammm/schema.LoadSourcesWithEntry], and each returns
+// it sealed. Sealed schemas
 // guarantee that alias chains are fully resolved, inheritance is
 // linearized, and type identities are assigned.
 //
@@ -456,8 +539,7 @@
 //
 // # Dependencies
 //
-//	adapter/neo4j  ──imports──▶  schema, graph, instance, immutable, diag, location,
+//	adapter/neo4j  ──imports──▶  schema, graph, instance, immutable, diag,
 //	                             adapter/internal/constraintof, adapter/internal/refusal,
-//	                             github.com/google/uuid,
 //	                             github.com/neo4j/neo4j-go-driver/v6/neo4j/dbtype
 package neo4j

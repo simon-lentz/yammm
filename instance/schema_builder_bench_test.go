@@ -4,7 +4,6 @@ import (
 	"testing"
 
 	"github.com/simon-lentz/yammm/instance"
-	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -53,18 +52,19 @@ func BenchmarkSchemaBuilder_FullCycle(b *testing.B) {
 
 func benchSchema(b *testing.B) schema.Schema {
 	b.Helper()
-	s, result := schema.NewBuilder().
-		WithName("bench").
-		AddType("Company").
-		WithPrimaryKey("id", schema.NewStringConstraint()).
-		Done().
-		AddType("Person").
-		WithPrimaryKey("id", schema.NewStringConstraint()).
-		WithProperty("name", schema.NewStringConstraint()).
-		WithOptionalProperty("nickname", schema.NewStringConstraint()).
-		WithRelation("WORKS_AT", schema.LocalTypeRef("Company", location.Span{}), true, false).
-		Done().
-		Build()
+	s, result := schema.LoadString(b.Context(), `schema "bench"
+
+type Company {
+	id String primary
+}
+
+type Person {
+	id String primary
+	name String required
+	nickname String
+	--> WORKS_AT (_:one) Company
+}
+`, "bench.yammm")
 	if result.HasErrors() {
 		b.Fatalf("benchmark schema build: %s", result)
 	}

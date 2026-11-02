@@ -10,7 +10,6 @@ import (
 
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/instance"
-	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
 	"github.com/simon-lentz/yammm/snapshot/snapshottest"
 )
@@ -18,19 +17,19 @@ import (
 // importTestSchema creates a schema with Person (→EMPLOYER→ Company) and Company.
 func importTestSchema(t *testing.T) schema.Schema {
 	t.Helper()
-	s, result := schema.NewBuilder().
-		WithName("import_test").
-		WithSourceID(location.MustNewSourceID("test://import.yammm")).
-		AddType("Person").
-		WithPrimaryKey("id", schema.NewStringConstraint()).
-		WithProperty("name", schema.NewStringConstraint()).
-		WithRelation("EMPLOYER", schema.NewTypeRef("", "Company", location.Span{}), true, false).
-		Done().
-		AddType("Company").
-		WithPrimaryKey("id", schema.NewStringConstraint()).
-		WithProperty("title", schema.NewStringConstraint()).
-		Done().
-		Build()
+	s, result := schema.LoadString(t.Context(), `schema "import_test"
+
+type Person {
+	id String primary
+	name String required
+	--> EMPLOYER (_:one) Company
+}
+
+type Company {
+	id String primary
+	title String required
+}
+`, "import.yammm")
 	if result.HasErrors() {
 		t.Fatalf("importTestSchema: %s", result)
 	}
@@ -40,19 +39,19 @@ func importTestSchema(t *testing.T) schema.Schema {
 // importTestSchemaRequired creates a schema with required EMPLOYER relation.
 func importTestSchemaRequired(t *testing.T) schema.Schema {
 	t.Helper()
-	s, result := schema.NewBuilder().
-		WithName("import_test_req").
-		WithSourceID(location.MustNewSourceID("test://import_req.yammm")).
-		AddType("Person").
-		WithPrimaryKey("id", schema.NewStringConstraint()).
-		WithProperty("name", schema.NewStringConstraint()).
-		WithRelation("EMPLOYER", schema.NewTypeRef("", "Company", location.Span{}), false, false).
-		Done().
-		AddType("Company").
-		WithPrimaryKey("id", schema.NewStringConstraint()).
-		WithProperty("title", schema.NewStringConstraint()).
-		Done().
-		Build()
+	s, result := schema.LoadString(t.Context(), `schema "import_test_req"
+
+type Person {
+	id String primary
+	name String required
+	--> EMPLOYER (one) Company
+}
+
+type Company {
+	id String primary
+	title String required
+}
+`, "import_req.yammm")
 	if result.HasErrors() {
 		t.Fatalf("importTestSchemaRequired: %s", result)
 	}

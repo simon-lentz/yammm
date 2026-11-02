@@ -21,7 +21,7 @@ import (
 // shadowing behavior:
 //
 //	// Create base scope
-//	base := eval.PropertyScopeFromMap(props)
+//	base := eval.PropertyScopeOf(immutable.WrapMap(props))
 //
 //	// Add variables from another source
 //	combined := base.WithVar("x", 1).WithVar("y", 2)
@@ -48,26 +48,6 @@ type Scope interface {
 	WithVar(name string, value any) Scope
 }
 
-// EmptyScope returns an empty Scope with no bindings.
-func EmptyScope() Scope {
-	return &mapScope{
-		vars: make(map[string]immutable.Value),
-	}
-}
-
-// PropertyScopeFromMap returns a Scope backed by a raw property map, with
-// $self bound to it. The map is wrapped ONCE, with WithClone so the caller's
-// map is isolated: the property lookup reads the wrap as a Properties and
-// $self reads it as a Map, sharing the entries. A second wrap for $self
-// doubled every instance's scope-building allocations.
-func PropertyScopeFromMap(props map[string]any) Scope {
-	m := immutable.WrapMap(props, immutable.WithClone(true))
-	return &propertyScope{
-		props: immutable.PropertiesOf(m),
-		vars:  map[string]immutable.Value{expr.SelfVariable: immutable.Wrap(m)},
-	}
-}
-
 // PropertyScopeOf returns a Scope over a map that is already wrapped, with
 // $self bound to it. Nothing is copied: the caller holds the map as a memo
 // and hands the same one to every evaluation that reads it.
@@ -76,29 +56,6 @@ func PropertyScopeOf(m immutable.Map[string]) Scope {
 		props: immutable.PropertiesOf(m),
 		vars:  map[string]immutable.Value{expr.SelfVariable: immutable.Wrap(m)},
 	}
-}
-
-// mapScope is a simple variable-only scope.
-type mapScope struct {
-	vars map[string]immutable.Value
-}
-
-func (s *mapScope) Lookup(name string) (immutable.Value, bool) {
-	v, ok := s.vars[name]
-	return v, ok
-}
-
-// LookupFold on a variable-only scope is an exact lookup: variable names
-// never fold, whichever spelling reaches them.
-func (s *mapScope) LookupFold(name string) (immutable.Value, bool) {
-	return s.Lookup(name)
-}
-
-func (s *mapScope) WithVar(name string, value any) Scope {
-	newVars := make(map[string]immutable.Value, len(s.vars)+1)
-	maps.Copy(newVars, s.vars)
-	newVars[name] = immutable.Wrap(value)
-	return &mapScope{vars: newVars}
 }
 
 // propertyScope is a scope backed by immutable.Properties.

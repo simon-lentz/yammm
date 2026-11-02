@@ -146,9 +146,9 @@ func TestAddressableTag_RefusesATransitivelyImportedType(t *testing.T) {
 }
 
 // TestAddressableTag_RefusesANameTheAliasedSchemaDoesNotDeclare drives the arm a
-// caller reaches by building a TypeID itself. [schema.NewTypeID] is exported, so
-// the schema path may be one this schema imports while the name is one that
-// schema never declared, and the alias alone must not be taken as proof.
+// caller reaches with a TypeID from another load of an imported path: the schema
+// path may be one this schema imports while the name is one that schema never
+// declared, and the alias alone must not be taken as proof.
 //
 // Mutation: dropping the name-exists check in the alias arm turns this red.
 func TestAddressableTag_RefusesANameTheAliasedSchemaDoesNotDeclare(t *testing.T) {

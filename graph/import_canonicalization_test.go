@@ -8,7 +8,8 @@ import (
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/instance"
-	"github.com/simon-lentz/yammm/location"
+	"github.com/simon-lentz/yammm/internal/instancetest"
+	"github.com/simon-lentz/yammm/internal/snapparts"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -30,12 +31,11 @@ type Run {
 	return s
 }
 
-func instantKeyInstance(t *testing.T, s schema.Schema, key, prop string) instance.ValidInstance {
+// instantKeyInstance validates one Run over s. Over the String spelling of the
+// schema its raw text reaches the graph as it stands.
+func instantKeyInstance(t *testing.T, s schema.Schema, at string) instance.ValidInstance {
 	t.Helper()
-	return instance.NewValidInstance("Run", mustTypeID(t, s, "Run"),
-		immutable.WrapKey([]any{key}),
-		immutable.WrapProperties(map[string]any{"at": prop}),
-		nil, nil, location.Provenance{})
+	return instancetest.Valid(t, s, "Run", map[string]any{"at": at})
 }
 
 // TestNewFromSnapshot_ReKeysUnderTheImportingSchema pins that an imported
@@ -54,7 +54,7 @@ func TestNewFromSnapshot_ReKeysUnderTheImportingSchema(t *testing.T) {
 	}
 
 	persisted := graph.New(before)
-	if r := persisted.Add(t.Context(), instantKeyInstance(t, before, rawInstant, rawInstant)); !r.OK() {
+	if r := persisted.Add(t.Context(), instantKeyInstance(t, before, rawInstant)); !r.OK() {
 		t.Fatalf("add under the String key: %s", r)
 	}
 	// The String constraint canonicalizes nothing, so the persisted address is
@@ -83,7 +83,7 @@ func TestNewFromSnapshot_ReKeysUnderTheImportingSchema(t *testing.T) {
 
 	// The second half of the defect: with the index holding one spelling and
 	// Add canonicalizing another, the re-Add found no conflict.
-	res := g.Add(t.Context(), instantKeyInstance(t, after, rawInstant, rawInstant))
+	res := g.Add(t.Context(), instantKeyInstance(t, after, rawInstant))
 	if !hasIssueCode(res, diag.E_DUPLICATE_PK) {
 		t.Errorf("re-adding the imported instance did not draw E_DUPLICATE_PK: %s", res)
 	}
@@ -101,7 +101,7 @@ func TestNewFromSnapshot_ReKeyIsANoOpOnTheCommonPath(t *testing.T) {
 	runID := mustTypeID(t, s, "Run")
 
 	src := graph.New(s)
-	if r := src.Add(t.Context(), instantKeyInstance(t, s, rawInstant, rawInstant)); !r.OK() {
+	if r := src.Add(t.Context(), instantKeyInstance(t, s, rawInstant)); !r.OK() {
 		t.Fatalf("add: %s", r)
 	}
 	before := slices.Collect(src.Snapshot().InstancesOf(runID))[0].PrimaryKey().String()
@@ -115,64 +115,59 @@ func TestNewFromSnapshot_ReKeyIsANoOpOnTheCommonPath(t *testing.T) {
 	}
 }
 
-// TestAdd_KeyComponentAgreesAcrossSpellings pins that Graph.Add accepts an
-// instance whose key component and key property spell one value two ways. The
-// two were compared raw, so Add refused with E_GRAPH_INVALID_PK a record
-// RebuildSnapshot accepts and stores consistently — the Add path contradicting
-// the model the same range installed, that one value has one spelling.
-// Comparing the two raw again turns this red.
-func TestAdd_KeyComponentAgreesAcrossSpellings(t *testing.T) {
+// A key component and a key property that spell one value two ways store one
+// spelling.
+func TestRebuild_KeyComponentAgreesAcrossSpellings(t *testing.T) {
 	t.Parallel()
-	s := instantKeySchema(t, "Timestamp")
+	s := loadSchemaAt(t, `schema "key_and_property"
+
+type Run {
+	at Timestamp primary
+	alt Timestamp
+}
+`, "key_and_property.yammm")
 	runID := mustTypeID(t, s, "Run")
 
-	g := graph.New(s)
-	if res := g.Add(t.Context(), instantKeyInstance(t, s, rawInstant, canonInstant)); !res.OK() {
-		t.Fatalf("two spellings of one instant were refused as a disagreement: %s", res)
-	}
-	if got := slices.Collect(g.Snapshot().InstancesOf(runID))[0].PrimaryKey().String(); got != graph.FormatKey(canonInstant) {
-		t.Errorf("the stored address is %s, want the canonical %s", got, graph.FormatKey(canonInstant))
-	}
-
-	// The rebuild path is the control: it accepted this record all along.
-	if _, res := graph.RebuildSnapshot(s, graph.SnapshotParts{
+	snap := rebuild(s, snapparts.Parts{
 		Types: []schema.TypeID{runID},
-		Instances: []graph.InstanceParts{
+		Instances: []snapparts.Instance{
 			{
 				TypeID:     runID,
 				PrimaryKey: immutable.WrapKey([]any{rawInstant}),
 				Properties: immutable.WrapProperties(map[string]any{"at": canonInstant}),
 			},
 		},
-	}); res.HasErrors() {
-		t.Errorf("RebuildSnapshot refused the record it used to accept: %s", res)
+	})
+	inst := slices.Collect(snap.InstancesOf(runID))[0]
+	if got, want := inst.PrimaryKey().String(), graph.FormatKey(canonInstant); got != want {
+		t.Errorf("key = %s, want %s", got, want)
+	}
+	if at, _ := inst.Property("at"); at.Unwrap() != canonInstant {
+		t.Errorf("at = %v, want %s", at.Unwrap(), canonInstant)
 	}
 }
 
-// TestAdd_KeyComponentStillRefusesADifferentValue is the counter-control: the
-// canonical comparison must not accept a key that genuinely disagrees with its
-// property, which is the whole reason the check exists.
-func TestAdd_KeyComponentStillRefusesADifferentValue(t *testing.T) {
+// Under an importing schema that makes the key a Timestamp, a key and a key
+// property that spell one instant two ways agree. Comparing the two raw turns this
+// red.
+func TestNewFromSnapshot_AKeyAndItsPropertyAgreeAcrossSpellings(t *testing.T) {
 	t.Parallel()
-	s := instantKeySchema(t, "Timestamp")
-	const other = "2021-06-07T08:09:10Z"
-
-	res := graph.New(s).Add(t.Context(), instantKeyInstance(t, s, canonInstant, other))
-	if res.OK() {
-		t.Fatal("a key naming a different instant than its property was accepted")
-	}
-	if !hasIssueCode(res, diag.E_GRAPH_INVALID_PK) {
-		t.Errorf("want E_GRAPH_INVALID_PK; got %s", res)
+	before, after := instantKeySchema(t, "String"), instantKeySchema(t, "Timestamp")
+	runID := mustTypeID(t, before, "Run")
+	persisted := rebuild(before, snapparts.Parts{Instances: []snapparts.Instance{{
+		TypeID:     runID,
+		PrimaryKey: immutable.WrapKey([]any{rawInstant}),
+		Properties: immutable.WrapProperties(map[string]any{"at": canonInstant}),
+	}}})
+	imported := mustImport(t, after, persisted).Snapshot()
+	if got, want := slices.Collect(imported.InstancesOf(runID))[0].PrimaryKey().String(), graph.FormatKey(canonInstant); got != want {
+		t.Errorf("imported key = %s, want %s", got, want)
 	}
 }
 
 // TestAdd_EdgePropertiesAreCanonicalized pins that the Add path stores an
-// association edge's own properties in the form the rebuild path stores them.
-// The staged edge passed them through raw while it canonicalized the target
-// key beside them, so one value reached the wire two ways depending on which
-// path built the graph. It is driven through instance.NewValidInstance, the
-// bypass that runs no validation: the Validator canonicalizes first and shows
-// this clean.
+// association edge's own properties in the form the rebuild path stores them,
+// so one value reaches the wire one way whichever path built the graph.
 func TestAdd_EdgePropertiesAreCanonicalized(t *testing.T) {
 	t.Parallel()
 	const src = `schema "edge_properties"
@@ -188,17 +183,13 @@ type Doc {
 	}
 }
 `
-	s, res := schema.LoadString(t.Context(), src, "edge_properties.yammm")
-	if res.HasErrors() {
-		t.Fatalf("load: %s", res)
-	}
-	docID, noteID := mustTypeID(t, s, "Doc"), mustTypeID(t, s, "Note")
+	s := loadSchemaAt(t, src, "edge_properties.yammm")
 
-	note := instance.NewValidInstance("Note", noteID, immutable.WrapKey([]any{"n1"}),
-		immutable.WrapProperties(map[string]any{"id": "n1"}), nil, nil, location.Provenance{})
-	doc := instance.NewValidInstance("Doc", docID, immutable.WrapKey([]any{"d1"}),
-		immutable.WrapProperties(map[string]any{"id": "d1"}),
-		edgeData("CITES", map[string]any{"seen_at": rawInstant}, []any{"n1"}), nil, location.Provenance{})
+	note := instancetest.Valid(t, s, "Note", map[string]any{"id": "n1"})
+	doc := instancetest.Valid(t, s, "Doc", map[string]any{
+		"id":    "d1",
+		"cites": map[string]any{"_target_id": "n1", "seen_at": rawInstant},
+	})
 
 	g := graph.New(s)
 	if r := g.Add(t.Context(), note); !r.OK() {
@@ -247,8 +238,8 @@ type Doc {
 	}
 	docID, noteID := mustTypeID(t, s, "Doc"), mustTypeID(t, s, "Note")
 
-	// Built through RebuildSnapshot with the canonicalizer INACTIVE, so the
-	// persisted edge property keeps the raw spelling for the import to meet.
+	// Rebuilt with the canonicalizer INACTIVE, so the persisted edge property keeps
+	// the raw spelling for the import to meet.
 	inert, ires := schema.LoadString(t.Context(), `schema "import_edge_properties"
 
 type Note {
@@ -265,23 +256,20 @@ type Doc {
 	if ires.HasErrors() {
 		t.Fatalf("load the inert schema: %s", ires)
 	}
-	parts := graph.SnapshotParts{
+	parts := snapparts.Parts{
 		Types: []schema.TypeID{docID, noteID},
-		Instances: []graph.InstanceParts{
+		Instances: []snapparts.Instance{
 			{TypeID: docID, PrimaryKey: immutable.WrapKey([]any{"d1"}), Properties: immutable.WrapProperties(map[string]any{"id": "d1"})},
 			{TypeID: noteID, PrimaryKey: immutable.WrapKey([]any{"n1"}), Properties: immutable.WrapProperties(map[string]any{"id": "n1"})},
 		},
-		Edges: []graph.EdgeParts{{
+		Edges: []snapparts.Edge{{
 			Relation:   "CITES",
 			SourceType: docID, SourceKey: immutable.WrapKey([]any{"d1"}),
 			TargetKey:  immutable.WrapKey([]any{"n1"}),
 			Properties: immutable.WrapProperties(map[string]any{"seen_at": rawInstant}),
 		}},
 	}
-	persisted, pres := graph.RebuildSnapshot(inert, parts)
-	if pres.HasErrors() {
-		t.Fatalf("RebuildSnapshot: %s", pres)
-	}
+	persisted := rebuild(inert, parts)
 	if v, _ := slices.Collect(persisted.Edges())[0].Properties().Get("seen_at"); v.Unwrap() != rawInstant {
 		t.Fatalf("the persisted edge property is %v, want the raw %s", v.Unwrap(), rawInstant)
 	}
@@ -299,9 +287,7 @@ type Doc {
 	}
 }
 
-// composedOneSlotSchema declares a (one) composition beside a (_:many) one, so
-// the cardinality guard has both the shape it refuses and the shape it must
-// leave alone.
+// composedOneSlotSchema declares a (one) composition beside a (_:many) one.
 func composedOneSlotSchema(t *testing.T) schema.Schema {
 	t.Helper()
 	const src = `schema "composed_one_slot"
@@ -327,57 +313,44 @@ part type Line {
 	return s
 }
 
-func composedOneSlotPart(t *testing.T, s schema.Schema, typeName, prop, key string) graph.InstanceParts {
+func composedOneSlotPart(t *testing.T, s schema.Schema, typeName, prop, key string) snapparts.Instance {
 	t.Helper()
-	return graph.InstanceParts{
+	return snapparts.Instance{
 		TypeID:     mustTypeID(t, s, typeName),
 		PrimaryKey: immutable.WrapKey([]any{key}),
 		Properties: immutable.WrapProperties(map[string]any{prop: key}),
 	}
 }
 
-// TestRebuildSnapshot_RefusesASecondOccupantInAOneSlot pins the premise the
-// (one) composed key rests on. The composed key segment carries no
-// discriminating element for a (one) hop, on the ground that such a slot holds
-// exactly one child — and no layer enforced it, so this PUBLIC entry point
-// accepted two occupants with no diagnostic and the adapter then minted one
-// byte-identical _composed_key for both. Removing the guard turns this red.
-func TestRebuildSnapshot_RefusesASecondOccupantInAOneSlot(t *testing.T) {
+// A rebuild holds the children each slot states: one occupant of a (one) slot, and
+// as many as a (many) slot carries.
+func TestRebuild_HoldsTheChildrenEachSlotStates(t *testing.T) {
 	t.Parallel()
 	s := composedOneSlotSchema(t)
 	orderID := mustTypeID(t, s, "Order")
 
-	parts := func(relation string, children ...graph.InstanceParts) graph.SnapshotParts {
+	parts := func(relation string, children ...snapparts.Instance) snapparts.Parts {
 		root := composedOneSlotPart(t, s, "Order", "id", "o1")
-		root.Composed = map[string][]graph.InstanceParts{relation: children}
-		return graph.SnapshotParts{
+		root.Composed = map[string][]snapparts.Instance{relation: children}
+		return snapparts.Parts{
 			Types: []schema.TypeID{orderID},
-			Instances: []graph.InstanceParts{
+			Instances: []snapparts.Instance{
 				root,
 			},
 		}
 	}
 
-	_, res := graph.RebuildSnapshot(s, parts("ADDRESS",
-		composedOneSlotPart(t, s, "Address", "street", "first"),
-		composedOneSlotPart(t, s, "Address", "street", "second")))
-	if !res.HasErrors() {
-		t.Fatal("two occupants of a (one) composition were accepted")
+	count := func(snap graph.Snapshot, relation string) int {
+		return slices.Collect(snap.InstancesOf(orderID))[0].ComposedCount(relation)
 	}
-	if !hasIssueCode(res, diag.E_DUPLICATE_COMPOSED_PK) {
-		t.Errorf("want E_DUPLICATE_COMPOSED_PK; got %s", res)
+	if n := count(rebuild(s, parts("ADDRESS",
+		composedOneSlotPart(t, s, "Address", "street", "first"))), "ADDRESS"); n != 1 {
+		t.Errorf("a (one) slot holds %d children, want 1", n)
 	}
-
-	// The controls: one occupant is the shape the slot is for, and a (many)
-	// slot carries as many as it likes.
-	if _, res := graph.RebuildSnapshot(s, parts("ADDRESS",
-		composedOneSlotPart(t, s, "Address", "street", "first"))); res.HasErrors() {
-		t.Errorf("a sole occupant of a (one) composition was refused: %s", res)
-	}
-	if _, res := graph.RebuildSnapshot(s, parts("LINES",
+	if n := count(rebuild(s, parts("LINES",
 		composedOneSlotPart(t, s, "Line", "sku", "a"),
-		composedOneSlotPart(t, s, "Line", "sku", "b"))); res.HasErrors() {
-		t.Errorf("two occupants of a (many) composition were refused: %s", res)
+		composedOneSlotPart(t, s, "Line", "sku", "b"))), "LINES"); n != 2 {
+		t.Errorf("a (many) slot holds %d children, want 2", n)
 	}
 }
 

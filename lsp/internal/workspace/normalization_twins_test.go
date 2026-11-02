@@ -43,17 +43,8 @@ func TestOpenDocuments_NormalizationTwinsLeaveEveryAnalysisLoading(t *testing.T)
 	}
 
 	ws := newTestWorkspace(t, quietLogger(), Config{})
-	analyzed := make(chan string, 16)
-	ws.setAnalysisCompletedHook(func(u string) {
-		select {
-		case analyzed <- u:
-		default:
-		}
-	})
 	for _, f := range files {
-		uri := lsputil.PathToURI(f.path)
-		ws.OpenDocument(uri, 1, f.text)
-		waitFor(t, analyzed, uri)
+		ws.OpenDocument(lsputil.PathToURI(f.path), 1, f.text)
 	}
 
 	for _, f := range files[1:] {

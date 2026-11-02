@@ -1,13 +1,10 @@
 package instance
 
-import "log/slog"
-
 // Option configures the Validator.
 type Option func(*validatorConfig)
 
 // validatorConfig holds validator configuration.
 type validatorConfig struct {
-	logger               *slog.Logger
 	strictPropertyNames  bool
 	allowUnknownFields   bool
 	maxIssuesPerInstance int
@@ -43,28 +40,15 @@ func WithAllowUnknownFields(allow bool) Option {
 }
 
 // WithIssueLimit sets the maximum number of diagnostic issues one instance
-// stores. Validation always completes: past the limit the collector keeps the
-// most severe issues seen, and [github.com/simon-lentz/yammm/diag.Result.DroppedCount]
-// and [github.com/simon-lentz/yammm/diag.Result.LimitReached] report the rest
-// exactly, on the batch result too. Set to 0 for unlimited. Default is 100,
-// matching [github.com/simon-lentz/yammm/schema.WithIssueLimit].
+// stores, with 0 for unlimited and 100 by default. Reaching the limit stops no
+// validation: the collector keeps the most severe issues seen.
+// [github.com/simon-lentz/yammm/diag.Result.DroppedCount] and
+// [github.com/simon-lentz/yammm/diag.Result.LimitReached] count the drops exactly,
+// on a batch result as well. A cancelled row is the exception, as
+// [Validator.Validate] states.
 func WithIssueLimit(limit int) Option {
 	return func(c *validatorConfig) {
 		c.maxIssuesPerInstance = max(limit, 0)
-	}
-}
-
-// WithLogger provides a structured logger for validation diagnostics: a
-// debug record when an instance's property name is normalized (an edge
-// property or a foreign-key field name logs none), and — at Debug — the
-// evaluator's trace of every invariant it evaluates, one record per
-// s-expression plus the operation's start and end, each logged with the
-// context passed to Validate, so a request id it carries is on every record.
-// If not provided, logging is disabled. Symmetric with
-// [github.com/simon-lentz/yammm/schema.WithLogger].
-func WithLogger(logger *slog.Logger) Option {
-	return func(c *validatorConfig) {
-		c.logger = logger
 	}
 }
 

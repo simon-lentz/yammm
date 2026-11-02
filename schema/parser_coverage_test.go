@@ -16,7 +16,7 @@ import (
 func parseSchema(t *testing.T, schemaSource string) (*schema.TestModel, diag.Result) {
 	t.Helper()
 	reg := source.NewRegistry()
-	sourceID := location.MustNewSourceID("test://coverage.yammm")
+	sourceID := location.NewSourceID("test://coverage.yammm")
 	err := reg.Register(sourceID, []byte(schemaSource))
 	require.NoError(t, err)
 
@@ -1487,7 +1487,7 @@ type Source {
 					}
 				}
 				require.NotNil(t, rel, "should have a relation")
-				assert.Equal(t, tt.wantQualified, rel.Target.IsQualified())
+				assert.Equal(t, tt.wantQualified, rel.Target.Qualifier != "")
 			} else {
 				assert.False(t, result.OK(), "expected errors")
 			}
@@ -2484,14 +2484,14 @@ type Foo {
 func TestParse_NilTypeRefHandling(t *testing.T) {
 	t.Parallel()
 
-	// Test TypeRef.String() and IsQualified() methods
+	// Test TypeRef.String() and Qualifier
 	ref := schema.TestASTTypeRef{Name: "Test"}
 	assert.Equal(t, "Test", ref.String())
-	assert.False(t, ref.IsQualified())
+	assert.Empty(t, ref.Qualifier)
 
 	qualRef := schema.TestASTTypeRef{Qualifier: "pkg", Name: "Test"}
 	assert.Equal(t, "pkg.Test", qualRef.String())
-	assert.True(t, qualRef.IsQualified())
+	assert.NotEmpty(t, qualRef.Qualifier)
 }
 
 func TestRelationKind_AllValues(t *testing.T) {
@@ -2522,10 +2522,10 @@ type Child extends base.Entity, base.Auditable {
 
 	child := model.Types[0]
 	require.Len(t, child.Inherits, 2)
-	assert.True(t, child.Inherits[0].IsQualified())
+	assert.NotEmpty(t, child.Inherits[0].Qualifier)
 	assert.Equal(t, "base", child.Inherits[0].Qualifier)
 	assert.Equal(t, "Entity", child.Inherits[0].Name)
-	assert.True(t, child.Inherits[1].IsQualified())
+	assert.NotEmpty(t, child.Inherits[1].Qualifier)
 	assert.Equal(t, "base", child.Inherits[1].Qualifier)
 	assert.Equal(t, "Auditable", child.Inherits[1].Name)
 }
@@ -2724,7 +2724,7 @@ type Machine {
 		if typ.Name == "Machine" {
 			require.Len(t, typ.Relations, 1)
 			rel := typ.Relations[0]
-			assert.True(t, rel.Target.IsQualified())
+			assert.NotEmpty(t, rel.Target.Qualifier)
 			assert.Equal(t, "parts", rel.Target.Qualifier)
 			assert.Equal(t, "Component", rel.Target.Name)
 		}

@@ -18,7 +18,6 @@ type importState struct {
 	resolvedSourceID location.SourceID // the resolved canonical source identity
 	schema           Schema            // the resolved schema (set after loading)
 	span             location.Span     // source location
-	sealed           bool              // true after loading is complete; prevents further mutation
 }
 
 // newImport creates a new Import. This is primarily for internal use;
@@ -55,8 +54,8 @@ func (i Import) ResolvedPath() string {
 	return i.resolvedSourceID.String()
 }
 
-// Schema returns the resolved schema. Every Schema a load or a Build returns has
-// each import resolved, so an Import read from one never answers zero here.
+// Schema returns the resolved schema. Every Schema a load returns has each
+// import resolved, so an Import read from one never answers zero here.
 func (i Import) Schema() Schema {
 	return i.schema
 }
@@ -66,36 +65,8 @@ func (i Import) Span() location.Span {
 	return i.span
 }
 
-// --- Internal methods used during loading ---
-
-// seal prevents further mutation of the import.
-// Called during loading after resolution is complete.
-func (i Import) seal() {
-	if i.sealed {
-		panic("import: sealed twice")
-	}
-	i.sealed = true
-}
-
-// isSealed reports whether the import has been sealed.
-func (i Import) isSealed() bool {
-	return i.sealed
-}
-
-// setResolvedSourceID sets the resolved source identity (called during loading).
-// Panics if called after seal().
-func (i Import) setResolvedSourceID(id location.SourceID) {
-	if i.sealed {
-		panic("import: cannot mutate sealed import")
-	}
-	i.resolvedSourceID = id
-}
-
-// setSchema sets the resolved schema (called during loading).
-// Panics if called after seal().
+// setSchema sets the resolved schema. The load calls it once, before the Import
+// is observable.
 func (i Import) setSchema(s Schema) {
-	if i.sealed {
-		panic("import: cannot mutate sealed import")
-	}
 	i.schema = s
 }

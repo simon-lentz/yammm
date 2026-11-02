@@ -148,7 +148,7 @@ func TestParity_EverySurfaceAgrees(t *testing.T) {
 		}},
 		{"a group row out of range", fromBody, func(t *testing.T, d []byte) []byte {
 			t.Helper()
-			out := bytes.Replace(d, []byte(`{"type":0,`), []byte(`{"type":99,`), 1)
+			out := bytes.Replace(d, []byte(`{"type":1,"items"`), []byte(`{"type":99,"items"`), 1)
 			if bytes.Equal(out, d) {
 				t.Fatalf("fixture shape changed; no group row to re-point:\n%s", d)
 			}

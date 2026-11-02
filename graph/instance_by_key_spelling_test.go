@@ -6,8 +6,8 @@ import (
 
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/immutable"
-	"github.com/simon-lentz/yammm/instance"
-	"github.com/simon-lentz/yammm/location"
+	"github.com/simon-lentz/yammm/internal/instancetest"
+	"github.com/simon-lentz/yammm/internal/snapparts"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -28,23 +28,20 @@ func TestInstanceByKey_AnySpellingOnEveryPath(t *testing.T) {
 	}
 	built := g.Snapshot()
 
-	rebuilt, res := graph.RebuildSnapshot(s, graph.SnapshotParts{
+	rebuilt := rebuild(s, snapparts.Parts{
 		Types: []schema.TypeID{runID},
-		Instances: []graph.InstanceParts{
+		Instances: []snapparts.Instance{
 			{
 				TypeID: runID, PrimaryKey: immutable.WrapKey([]any{rawInstant}),
 				Properties: immutable.WrapProperties(map[string]any{"at": rawInstant}),
 			},
 		},
 	})
-	if res.HasErrors() {
-		t.Fatalf("RebuildSnapshot: %s", res)
-	}
 
 	paths := []struct {
 		name string
 		snap graph.Snapshot
-	}{{"Add", built}, {"RebuildSnapshot", rebuilt}}
+	}{{"Add", built}, {"rebuild", rebuilt}}
 	for _, path := range paths {
 		own := slices.Collect(path.snap.InstancesOf(runID))[0].PrimaryKey().String()
 		spellings := []struct {
@@ -83,8 +80,7 @@ func TestInstanceByKey_RefusedAddressMisses(t *testing.T) {
 	if r := g.Add(t.Context(), runInstance(t, s, rawInstant, "")); !r.OK() {
 		t.Fatalf("add: %s", r)
 	}
-	tag := instance.NewValidInstance("Tag", tagID, immutable.WrapKey([]any{"t1"}),
-		immutable.WrapProperties(map[string]any{"name": "t1"}), nil, nil, location.Provenance{})
+	tag := instancetest.Valid(t, s, "Tag", map[string]any{"name": "t1"})
 	if r := g.Add(t.Context(), tag); !r.OK() {
 		t.Fatalf("add tag: %s", r)
 	}

@@ -274,8 +274,8 @@ func TestCollector_DroppedErrorStillCounts(t *testing.T) {
 }
 
 func TestCollector_Result_Sorted(t *testing.T) {
-	source := location.MustNewSourceID("test://b.yammm")
-	sourceA := location.MustNewSourceID("test://a.yammm")
+	source := location.NewSourceID("test://b.yammm")
+	sourceA := location.NewSourceID("test://a.yammm")
 
 	c := NewCollector(0)
 
@@ -503,7 +503,7 @@ func TestCollector_NegativeLimit(t *testing.T) {
 }
 
 func TestCompareIssues_SpanBackedBeforePathOnly(t *testing.T) {
-	source := location.MustNewSourceID("test://a.yammm")
+	source := location.NewSourceID("test://a.yammm")
 
 	spanBacked := NewIssue(Error, E_SYNTAX, "span-backed").
 		WithSpan(location.Point(source, 1, 1)).
@@ -546,7 +546,7 @@ func TestCompareIssues_PathOnlyOrdering(t *testing.T) {
 }
 
 func TestCompareIssues_SeverityTieBreaker(t *testing.T) {
-	source := location.MustNewSourceID("test://a.yammm")
+	source := location.NewSourceID("test://a.yammm")
 
 	// Same span, same code, different severity
 	errorIssue := NewIssue(Error, E_SYNTAX, "same message").
@@ -563,7 +563,7 @@ func TestCompareIssues_SeverityTieBreaker(t *testing.T) {
 }
 
 func TestCompareIssues_MessageTieBreaker(t *testing.T) {
-	source := location.MustNewSourceID("test://a.yammm")
+	source := location.NewSourceID("test://a.yammm")
 
 	// Same span, same code, same severity, different message
 	issueA := NewIssue(Error, E_SYNTAX, "aaa").
@@ -579,7 +579,7 @@ func TestCompareIssues_MessageTieBreaker(t *testing.T) {
 }
 
 func TestCompareIssues_HintTieBreaker(t *testing.T) {
-	source := location.MustNewSourceID("test://a.yammm")
+	source := location.NewSourceID("test://a.yammm")
 
 	// Same everything except hint
 	issueA := NewIssue(Error, E_SYNTAX, "msg").
@@ -597,7 +597,7 @@ func TestCompareIssues_HintTieBreaker(t *testing.T) {
 }
 
 func TestCompareIssues_DetailsTieBreaker(t *testing.T) {
-	source := location.MustNewSourceID("test://a.yammm")
+	source := location.NewSourceID("test://a.yammm")
 
 	// Same everything except details
 	issueA := NewIssue(Error, E_SYNTAX, "msg").
@@ -628,8 +628,8 @@ func TestCompareIssues_DetailsTieBreaker(t *testing.T) {
 }
 
 func TestCompareIssues_RelatedTieBreaker(t *testing.T) {
-	source := location.MustNewSourceID("test://a.yammm")
-	relSource := location.MustNewSourceID("test://related.yammm")
+	source := location.NewSourceID("test://a.yammm")
+	relSource := location.NewSourceID("test://related.yammm")
 
 	// Same everything except related info
 	issueA := NewIssue(Error, E_SYNTAX, "msg").
@@ -653,7 +653,7 @@ func TestCompareIssues_RelatedTieBreaker(t *testing.T) {
 }
 
 func TestCompareIssues_TotalOrder_IdenticalIssuesEqual(t *testing.T) {
-	source := location.MustNewSourceID("test://a.yammm")
+	source := location.NewSourceID("test://a.yammm")
 
 	issue := NewIssue(Error, E_SYNTAX, "msg").
 		WithSpan(location.Point(source, 1, 1)).
@@ -670,7 +670,7 @@ func TestCompareIssues_TotalOrder_IdenticalIssuesEqual(t *testing.T) {
 func TestCompareIssues_HybridIssues_DifferentPaths(t *testing.T) {
 	// This test verifies the fix for the total order bug where hybrid issues
 	// with identical spans but different paths would incorrectly compare equal.
-	source := location.MustNewSourceID("test://schema.yammm")
+	source := location.NewSourceID("test://schema.yammm")
 
 	// Two hybrid issues: same span, same everything, but different instance paths
 	issue1 := NewIssue(Error, E_TYPE_MISMATCH, "expected integer").
@@ -699,7 +699,7 @@ func TestCompareIssues_HybridIssues_DifferentPaths(t *testing.T) {
 
 func TestCompareIssues_HybridIssues_DifferentSourceNames(t *testing.T) {
 	// Verify sourceName tie-breaker for hybrid issues
-	source := location.MustNewSourceID("test://schema.yammm")
+	source := location.NewSourceID("test://schema.yammm")
 
 	issue1 := NewIssue(Error, E_TYPE_MISMATCH, "expected integer").
 		WithSpan(location.Point(source, 10, 5)).
@@ -720,7 +720,7 @@ func TestCompareIssues_HybridIssues_DifferentSourceNames(t *testing.T) {
 func TestCompareIssues_SchemaOnlyBeforeHybrid(t *testing.T) {
 	// When span, code, severity, message, hint are all equal,
 	// schema-only (sourceName="", path="") should sort before hybrid
-	source := location.MustNewSourceID("test://schema.yammm")
+	source := location.NewSourceID("test://schema.yammm")
 
 	schemaOnly := NewIssue(Error, E_SYNTAX, "msg").
 		WithSpan(location.Point(source, 1, 1)).
@@ -746,7 +746,7 @@ func TestCollector_DeterministicOrdering_Concurrent(t *testing.T) {
 		issuesPerG    = 20
 	)
 
-	source := location.MustNewSourceID("test://a.yammm")
+	source := location.NewSourceID("test://a.yammm")
 
 	// Run multiple times to detect non-determinism
 	var referenceOrder []string
@@ -800,8 +800,8 @@ func TestCollector_DeterministicOrdering_Concurrent(t *testing.T) {
 
 func TestCollector_DeterministicOrdering_MixedIssueTypes(t *testing.T) {
 	// Verify ordering with mix of span-backed, path-only, and hybrid issues
-	sourceA := location.MustNewSourceID("test://a.yammm")
-	sourceB := location.MustNewSourceID("test://b.yammm")
+	sourceA := location.NewSourceID("test://a.yammm")
+	sourceB := location.NewSourceID("test://b.yammm")
 
 	c := NewCollector(0)
 

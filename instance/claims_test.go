@@ -1,10 +1,7 @@
 package instance_test
 
 import (
-	"context"
-	"log/slog"
 	"strings"
-	"sync"
 	"testing"
 
 	"github.com/simon-lentz/yammm/diag"
@@ -46,7 +43,7 @@ func TestClaimKeys_DecidesEachKeyAsTheValidatorDoes(t *testing.T) {
 	works, _ := person.RelationByField("works_at")
 	pets, _ := person.RelationByField("pets")
 
-	c := instance.ClaimKeys(person, []string{"id", "name", "NAME", "AA", "Aa", "BB", "Works_At", "PETS", "zzz"}, false)
+	c := instance.ClaimKeys(person, []string{"id", "name", "NAME", "AA", "Aa", "BB", "Works_At", "PETS", "zzz"})
 	for key, want := range map[string]string{"id": "id", "name": "name", "BB": "bb"} {
 		if p, ok := c.Property(key); !ok || p.Name() != want {
 			t.Errorf("Property(%q) = %v, want %s", key, p, want)
@@ -62,14 +59,6 @@ func TestClaimKeys_DecidesEachKeyAsTheValidatorDoes(t *testing.T) {
 	if !okWorks || !okPets || gotWorks != works || gotPets != pets {
 		t.Errorf("folded relation keys do not claim their relations")
 	}
-
-	strict := instance.ClaimKeys(person, []string{"id", "BB", "Works_At"}, true)
-	_, foldedProperty := strict.Property("BB")
-	_, foldedRelation := strict.Relation("Works_At")
-	_, exact := strict.Property("id")
-	if foldedProperty || foldedRelation || !exact {
-		t.Errorf("under strict names only the exact key claims")
-	}
 }
 
 // ClaimEdgeKeys answers per key of one target object: a foreign-key field of
@@ -82,7 +71,7 @@ func TestClaimEdgeKeys_DecidesEachKeyAsTheValidatorDoes(t *testing.T) {
 	works, _ := person.RelationByField("works_at")
 	keys := []string{"_target_id", "_TARGET_ID", "TITLE", "note", "zzz"}
 
-	c := instance.ClaimEdgeKeys(works, company, keys, false)
+	c := instance.ClaimEdgeKeys(works, company, keys)
 	if k, ok := c.Key("_target_id"); !ok || k.Name() != "id" {
 		t.Errorf("Key(_target_id) = %v, want id", k)
 	}
@@ -100,11 +89,8 @@ func TestClaimEdgeKeys_DecidesEachKeyAsTheValidatorDoes(t *testing.T) {
 		t.Errorf("an unknown key claims something")
 	}
 
-	if _, ok := instance.ClaimEdgeKeys(works, schema.Type{}, keys, false).Key("_target_id"); ok {
+	if _, ok := instance.ClaimEdgeKeys(works, schema.Type{}, keys).Key("_target_id"); ok {
 		t.Errorf("with no target a key claims a foreign-key field")
-	}
-	if _, ok := instance.ClaimEdgeKeys(works, company, keys, true).Property("TITLE"); ok {
-		t.Errorf("under strict names a folded edge property claims")
 	}
 }
 
@@ -169,38 +155,4 @@ func TestCollisions_ALimitKeepsTheFirstInOrder(t *testing.T) {
 			t.Errorf("%s: kept %s, want the collision on %s", c.name, res, c.want)
 		}
 	}
-}
-
-// records keeps every log record's attributes.
-type records struct {
-	mu    sync.Mutex
-	attrs []map[string]string
-}
-
-func (r *records) Enabled(context.Context, slog.Level) bool { return true }
-func (r *records) Handle(_ context.Context, rec slog.Record) error {
-	m := map[string]string{"msg": rec.Message}
-	rec.Attrs(func(a slog.Attr) bool { m[a.Key] = a.Value.String(); return true })
-	r.mu.Lock()
-	r.attrs = append(r.attrs, m)
-	r.mu.Unlock()
-	return nil
-}
-func (r *records) WithAttrs([]slog.Attr) slog.Handler { return r }
-func (r *records) WithGroup(string) slog.Handler      { return r }
-
-// A folded key's debug record names the input key and the property it resolved
-// to.
-func TestFoldedKey_TheDebugRecordNamesInputAndProperty(t *testing.T) {
-	h := &records{}
-	v := instance.NewValidator(loadSrc(t, claimsSchema), instance.WithLogger(slog.New(h)))
-	if _, res := v.ValidateOne(t.Context(), "Person", instance.RawInstance{Properties: map[string]any{"id": "p", "NAME": "n"}}); !res.OK() {
-		t.Fatalf("validate: %s", res)
-	}
-	for _, a := range h.attrs {
-		if a["msg"] == "property name normalized" && a["input"] == "NAME" && a["resolved"] == "name" {
-			return
-		}
-	}
-	t.Errorf("no record names input NAME and resolved name: %v", h.attrs)
 }

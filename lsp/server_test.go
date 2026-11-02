@@ -385,7 +385,7 @@ func TestIntegration_FormattingRoundTrip_ASCII(t *testing.T) {
 
 	testutil.AssertFormattingApplied(t, edits)
 
-	result := testutil.ApplyEdits(string(unformatted), edits, "utf-16")
+	result := testutil.ApplyEdits(string(unformatted), edits)
 	yammmtest.Golden(t, "lsp/formatting/formatted.yammm", []byte(result))
 }
 
@@ -409,52 +409,45 @@ func TestFormatting_UsesTokenStreamFormatterForIntraLineSpacing(t *testing.T) {
 
 	require.NotEmpty(t, edits, "expected formatting edits for intra-line spacing normalization")
 
-	result := testutil.ApplyEdits(content, edits, "utf-16")
+	result := testutil.ApplyEdits(content, edits)
 	assert.Contains(t, result, "type A {", "expected formatted text to normalize type spacing")
 }
 
-func TestFormatting_UTF8PositionEncoding(t *testing.T) {
+func TestNewServer_TakesANilLogger(t *testing.T) {
+	t.Parallel()
+
+	server := lsp.NewServer(nil, lsp.Config{})
+	defer server.Close()
+
+	assert.NotNil(t, server.Workspace())
+}
+
+func TestFormatting_MultibyteDocumentEditStartsAtTheOrigin(t *testing.T) {
 	t.Parallel()
 
 	content := "schema \"日本語\"\n\ntype Person {    \n\tname String\n}\n"
 
-	tests := []struct {
-		name     string
-		encoding lsp.PositionEncoding
-	}{
-		{"UTF-16", lsp.PositionEncodingUTF16},
-		{"UTF-8", lsp.PositionEncodingUTF8},
+	tmpDir := t.TempDir()
+	filePath := filepath.Join(tmpDir, "test.yammm")
+	err := os.WriteFile(filePath, []byte(content), 0o600)
+	require.NoError(t, err, "failed to write file")
+
+	h := newTestHarness(t, tmpDir)
+	defer h.Close()
+
+	err = h.OpenDocument("test.yammm", content)
+	require.NoError(t, err, "OpenDocument failed")
+
+	edits, err := h.Formatting("test.yammm")
+	require.NoError(t, err, "Formatting failed")
+
+	if len(edits) == 0 {
+		return
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-
-			tmpDir := t.TempDir()
-			filePath := filepath.Join(tmpDir, "test.yammm")
-			err := os.WriteFile(filePath, []byte(content), 0o600)
-			require.NoError(t, err, "failed to write file")
-
-			h, server := newTestHarnessWithServer(t, tmpDir)
-			defer h.Close()
-
-			server.Workspace().SetPositionEncoding(tt.encoding)
-
-			err = h.OpenDocument("test.yammm", content)
-			require.NoError(t, err, "OpenDocument failed")
-
-			edits, err := h.Formatting("test.yammm")
-			require.NoError(t, err, "Formatting failed")
-
-			if len(edits) == 0 {
-				return
-			}
-
-			edit := edits[0]
-			assert.Equal(t, uint32(0), edit.Range.Start.Line, "edit range should start at line 0")
-			assert.Equal(t, uint32(0), edit.Range.Start.Character, "edit range should start at character 0")
-		})
-	}
+	edit := edits[0]
+	assert.Equal(t, uint32(0), edit.Range.Start.Line, "edit range should start at line 0")
+	assert.Equal(t, uint32(0), edit.Range.Start.Character, "edit range should start at character 0")
 }
 
 func TestIntegration_FormattingRoundTrip_Multibyte(t *testing.T) {
@@ -463,48 +456,32 @@ func TestIntegration_FormattingRoundTrip_Multibyte(t *testing.T) {
 	unformatted := "schema \"日本語\"\n\ntype   Person{\n    name String  primary // 名前\n    tag String\n}\n// 最後 😀\n"
 	expected := "schema \"日本語\"\n\ntype Person {\n\tname String primary // 名前\n\ttag  String\n}\n// 最後 😀\n"
 
-	tests := []struct {
-		name     string
-		encoding lsp.PositionEncoding
-	}{
-		{"UTF-16", lsp.PositionEncodingUTF16},
-		{"UTF-8", lsp.PositionEncodingUTF8},
-	}
+	tmpDir := t.TempDir()
+	filePath := filepath.Join(tmpDir, "test.yammm")
+	err := os.WriteFile(filePath, []byte(unformatted), 0o600)
+	require.NoError(t, err, "failed to write file")
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
+	h := newTestHarness(t, tmpDir)
+	defer h.Close()
 
-			tmpDir := t.TempDir()
-			filePath := filepath.Join(tmpDir, "test.yammm")
-			err := os.WriteFile(filePath, []byte(unformatted), 0o600)
-			require.NoError(t, err, "failed to write file")
+	err = h.OpenDocument("test.yammm", unformatted)
+	require.NoError(t, err, "OpenDocument failed")
 
-			h, server := newTestHarnessWithServer(t, tmpDir)
-			defer h.Close()
+	edits, err := h.Formatting("test.yammm")
+	require.NoError(t, err, "Formatting failed")
 
-			server.Workspace().SetPositionEncoding(tt.encoding)
+	require.NotEmpty(t, edits, "expected formatting edits, got none")
 
-			err = h.OpenDocument("test.yammm", unformatted)
-			require.NoError(t, err, "OpenDocument failed")
+	result := testutil.ApplyEdits(unformatted, edits)
+	assert.Equal(t, expected, result, "round-trip result != expected")
 
-			edits, err := h.Formatting("test.yammm")
-			require.NoError(t, err, "Formatting failed")
-
-			require.NotEmpty(t, edits, "expected formatting edits, got none")
-
-			result := testutil.ApplyEdits(unformatted, edits, string(tt.encoding))
-			assert.Equal(t, expected, result, "round-trip result != expected")
-
-			ctx := t.Context()
-			s, _ := schema.LoadString(ctx, result, "test.yammm")
-			require.NoError(t, err, "formatted output failed to parse")
-			assert.Equal(t, "日本語", s.Name(), "schema name mismatch")
-		})
-	}
+	ctx := t.Context()
+	s, _ := schema.LoadString(ctx, result, "test.yammm")
+	require.NoError(t, err, "formatted output failed to parse")
+	assert.Equal(t, "日本語", s.Name(), "schema name mismatch")
 }
 
-func TestCompletion_UTF8Mode_Integration(t *testing.T) {
+func TestCompletion_MultibyteDocument_Integration(t *testing.T) {
 	t.Parallel()
 
 	content := "schema \"日本語テスト\"\n\ntype 人物 {\n\t名前 String\n}\n"
@@ -534,10 +511,8 @@ func TestCompletion_UTF8Mode_Integration(t *testing.T) {
 			err := os.WriteFile(filePath, []byte(content), 0o600)
 			require.NoError(t, err, "failed to write file")
 
-			h, server := newTestHarnessWithServer(t, tmpDir)
+			h := newTestHarness(t, tmpDir)
 			defer h.Close()
-
-			server.Workspace().SetPositionEncoding(lsp.PositionEncodingUTF8)
 
 			err = h.OpenDocument(filePath, content)
 			require.NoError(t, err, "OpenDocument failed")
@@ -551,7 +526,7 @@ func TestCompletion_UTF8Mode_Integration(t *testing.T) {
 	}
 }
 
-func TestCompletion_UTF8Mode_NoPanic(t *testing.T) {
+func TestCompletion_TypeBodyOffersItems(t *testing.T) {
 	t.Parallel()
 
 	tmpDir := t.TempDir()
@@ -560,10 +535,8 @@ func TestCompletion_UTF8Mode_NoPanic(t *testing.T) {
 	err := os.WriteFile(filePath, []byte(content), 0o600)
 	require.NoError(t, err, "failed to write file")
 
-	h, server := newTestHarnessWithServer(t, tmpDir)
+	h := newTestHarness(t, tmpDir)
 	defer h.Close()
-
-	server.Workspace().SetPositionEncoding(lsp.PositionEncodingUTF8)
 
 	err = h.OpenDocument(filePath, content)
 	require.NoError(t, err, "OpenDocument failed")
@@ -1111,7 +1084,7 @@ func TestMarkdownIntegration_StaleVersionRejection(t *testing.T) {
 	h.Sync()
 
 	uri := testutil.PathToURI(mdPath)
-	text, ok := server.Workspace().GetMarkdownCurrentText(uri)
+	text, ok := server.Workspace().MarkdownCurrentTextForTest(uri)
 	require.True(t, ok, "markdown document should still be tracked")
 	assert.Equal(t, updatedContent, text, "stale v1 change should not overwrite v2 content")
 }

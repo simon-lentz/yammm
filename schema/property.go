@@ -123,12 +123,6 @@ type propertyState struct {
 
 // newProperty creates a new Property.
 //
-// This is a low-level API primarily for:
-//   - Internal use during schema parsing and completion
-//   - Advanced use cases like building schemas programmatically via Builder
-//
-// Most users should load schemas from .yammm files using the load package.
-//
 // The dataTypeRef parameter captures the syntactic reference (with span) when the
 // constraint is an alias to a named DataType. Pass zero-value DataTypeRef for
 // built-in constraints. This enables LSP navigation to DataType definitions.
@@ -303,7 +297,8 @@ func (p Property) CanNarrowFrom(parent Property) bool {
 
 // Equal reports whether two properties are structurally equal.
 // Compares: name (case-sensitive), optionality, PK status, constraint.
-// NOT compared: span, docs, scope, annotations. Scope is excluded because
+// It does not compare span, docs, scope, annotations, the data type reference or
+// the origin. Scope is excluded because
 // properties inherited from different ancestors should be considered equal for
 // deduplication purposes during type completion—two ancestors may define
 // identical properties, and we want to merge them rather than flag a conflict.

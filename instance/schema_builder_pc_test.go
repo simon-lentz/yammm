@@ -6,7 +6,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -19,19 +18,19 @@ import (
 // unexported access.
 func pcTestSchema(t *testing.T) schema.Schema {
 	t.Helper()
-	s, result := schema.NewBuilder().
-		WithName("pctest").
-		AddType("Address").
-		AsPart().
-		WithPrimaryKey("id", schema.NewStringConstraint()).
-		Done().
-		AddType("Person").
-		WithPrimaryKey("id", schema.NewStringConstraint()).
-		WithProperty("name", schema.NewStringConstraint()).
-		WithRelation("KNOWS", schema.LocalTypeRef("Person", location.Span{}), false, true).
-		WithComposition("ADDRESSES", schema.LocalTypeRef("Address", location.Span{}), false, true).
-		Done().
-		Build()
+	s, result := schema.LoadString(t.Context(), `schema "pctest"
+
+part type Address {
+	id String primary
+}
+
+type Person {
+	id String primary
+	name String required
+	--> KNOWS (one:many) Person
+	*-> ADDRESSES (one:many) Address
+}
+`, "pctest.yammm")
 	if result.HasErrors() {
 		t.Fatalf("pcTestSchema: %s", result)
 	}

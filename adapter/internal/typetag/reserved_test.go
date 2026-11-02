@@ -2,19 +2,33 @@ package typetag
 
 import (
 	"errors"
+	"os"
+	"strings"
 	"testing"
 	"unicode/utf8"
-
-	"github.com/simon-lentz/yammm/internal/parse"
 )
 
+// grammarVocabulary reads the parser's vocabulary from the names file its own
+// test holds equal to the maps its lookahead groups are checked against.
+func grammarVocabulary(t *testing.T) map[string]bool {
+	t.Helper()
+	data, err := os.ReadFile("../../../internal/parse/testdata/reserved_words.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	words := map[string]bool{}
+	for w := range strings.FieldsSeq(string(data)) {
+		words[w] = true
+	}
+	return words
+}
+
 // TestReservedVocabularyMatchesTheGrammar holds this package's two reserved
-// maps equal to [parse.ReservedKeywords], which the parser composes from the
-// maps its own lookahead groups are checked against, and holds the two maps to
-// the split the grammar's LC_WORD and UC_WORD branches make. Both lists are
-// hand-written, in different packages, and only this test couples them.
+// maps equal to the parser's vocabulary, and holds the two maps to the split the
+// grammar's LC_WORD and UC_WORD branches make. Both lists are hand-written, in
+// different packages, and only this test couples them.
 func TestReservedVocabularyMatchesTheGrammar(t *testing.T) {
-	grammar := parse.ReservedKeywords()
+	grammar := grammarVocabulary(t)
 
 	for kw := range grammar {
 		if !isReservedName(kw) {
@@ -56,7 +70,7 @@ func TestReservedVocabularyMatchesTheGrammar(t *testing.T) {
 // refused before any vocabulary is read. The maps' own split is pinned by
 // [TestReservedVocabularyMatchesTheGrammar].
 func TestValidate_RefusesEveryReservedSpelling(t *testing.T) {
-	for kw := range parse.ReservedKeywords() {
+	for kw := range grammarVocabulary(t) {
 		t.Run(kw, func(t *testing.T) {
 			assertDetail(t, kw+".Person", DetailAliasReserved)
 

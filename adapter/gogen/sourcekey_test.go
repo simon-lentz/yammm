@@ -51,11 +51,11 @@ func TestKeyRoot_NoRelativeFormIsAnError(t *testing.T) {
 		id   location.SourceID
 	}{
 		"a synthetic source outside a synthetic root": {keyRoot{synthetic: "embedded://app"}, location.NewSourceID("embedded://other/a.yammm")},
-		"a file source under a synthetic root":        {keyRoot{synthetic: "embedded://app"}, location.MustSourceIDFromPath(filepath.Join(t.TempDir(), "a.yammm"))},
-		"a synthetic source under a file root":        {keyRoot{dir: location.MustCanonicalPath(t.TempDir())}, location.NewSourceID("string://a.yammm")},
-		"the root directory itself":                   {keyRoot{dir: location.MustCanonicalPath(dir)}, location.MustSourceIDFromPath(dir)},
-		"a zero source":                               {keyRoot{dir: location.MustCanonicalPath(dir)}, location.SourceID{}},
-		"a file source with no root":                  {keyRoot{}, location.MustSourceIDFromPath(filepath.Join(dir, "a.yammm"))},
+		"a file source under a synthetic root":        {keyRoot{synthetic: "embedded://app"}, sourceIDOf(t, filepath.Join(t.TempDir(), "a.yammm"))},
+		"a synthetic source under a file root":        {keyRoot{dir: canonicalOf(t, t.TempDir())}, location.NewSourceID("string://a.yammm")},
+		"the root directory itself":                   {keyRoot{dir: canonicalOf(t, dir)}, sourceIDOf(t, dir)},
+		"a zero source":                               {keyRoot{dir: canonicalOf(t, dir)}, location.SourceID{}},
+		"a file source with no root":                  {keyRoot{}, sourceIDOf(t, filepath.Join(dir, "a.yammm"))},
 	} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
@@ -64,4 +64,22 @@ func TestKeyRoot_NoRelativeFormIsAnError(t *testing.T) {
 			}
 		})
 	}
+}
+
+func sourceIDOf(t *testing.T, path string) location.SourceID {
+	t.Helper()
+	id, err := location.SourceIDFromPath(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return id
+}
+
+func canonicalOf(t *testing.T, path string) location.CanonicalPath {
+	t.Helper()
+	cp, err := location.NewCanonicalPath(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return cp
 }

@@ -21,7 +21,7 @@ import (
 // its wire encoding by the zone abbreviation: it sends an offset only when
 // Zone() reports "Offset", and otherwise sends Location().String() as a
 // time-zone identifier — empty, for an unnamed location, which the server
-// rejects. Coerce now re-expresses such an instant in the driver's own offset
+// rejects. CoerceParams re-expresses such an instant in the driver's own offset
 // form.
 //
 // The unrepaired shape is written alongside as the control. Without it the test
@@ -37,7 +37,7 @@ func TestCoerce_OffsetBearingTimestampReachesTheServer(t *testing.T) {
 		t.Fatalf("parse %q: %v", text, err)
 	}
 
-	// The control: what Coerce produced before the repair. It runs on its own
+	// The control: an instant in an unnamed zone, unrepaired. It runs on its own
 	// pool, because the server rejects it and a rejected query leaves its
 	// connection needing a RESET — which the assertion below must not inherit.
 	if _, err := neo4jdriver.ExecuteQuery(ctx, isolatedDriver(t), "RETURN $v AS v",
@@ -48,10 +48,7 @@ func TestCoerce_OffsetBearingTimestampReachesTheServer(t *testing.T) {
 		t.Logf("unrepaired shape rejected as expected: %v", err)
 	}
 
-	coerced, err := n4j.Coerce(schema.NewTimestampConstraint(), text)
-	if err != nil {
-		t.Fatalf("Coerce(%q): %v", text, err)
-	}
+	coerced := coerceTimestamp(t, text)
 
 	echoed := echoParam(t, ctx, coerced)
 	got, ok := echoed.(time.Time)
@@ -119,10 +116,7 @@ func TestCoerce_TextDerivedInstantIsAcceptedWhateverTheHostZone(t *testing.T) {
 		t.Logf("host-zoned shape rejected as expected: %v", err)
 	}
 
-	coerced, err := n4j.Coerce(schema.NewTimestampConstraint(), text)
-	if err != nil {
-		t.Fatalf("Coerce(%q): %v", text, err)
-	}
+	coerced := coerceTimestamp(t, text)
 
 	echoed := echoParam(t, ctx, coerced)
 	got, ok := echoed.(time.Time)
@@ -163,10 +157,7 @@ func TestCoerce_HostLocalTimeValueIsAcceptedWhateverTheHostZone(t *testing.T) {
 		t.Logf("host-zoned shape rejected as expected: %v", err)
 	}
 
-	coerced, err := n4j.Coerce(schema.NewTimestampConstraint(), want)
-	if err != nil {
-		t.Fatalf("Coerce: %v", err)
-	}
+	coerced := coerceTimestamp(t, want)
 	echoed := echoParam(t, ctx, coerced)
 	got, ok := echoed.(time.Time)
 	if !ok {
@@ -182,7 +173,7 @@ func TestCoerce_HostLocalTimeValueIsAcceptedWhateverTheHostZone(t *testing.T) {
 
 // TestCoerce_UnresolvableZoneNameIsAcceptedAsOffset covers a caller-built
 // location whose name no tz database holds: sent by name the server refuses
-// it, so Coerce sends the offset.
+// it, so CoerceParams sends the offset.
 func TestCoerce_UnresolvableZoneNameIsAcceptedAsOffset(t *testing.T) {
 	ctx := context.Background()
 	driver(t)
@@ -195,10 +186,7 @@ func TestCoerce_UnresolvableZoneNameIsAcceptedAsOffset(t *testing.T) {
 		t.Logf("unresolvable name rejected as expected: %v", err)
 	}
 
-	coerced, err := n4j.Coerce(schema.NewTimestampConstraint(), want)
-	if err != nil {
-		t.Fatalf("Coerce: %v", err)
-	}
+	coerced := coerceTimestamp(t, want)
 	echoed := echoParam(t, ctx, coerced)
 	got, ok := echoed.(time.Time)
 	if !ok {
@@ -224,10 +212,7 @@ func TestCoerce_ResolvableZoneNameRoundTripsByName(t *testing.T) {
 	}
 
 	want := time.Date(2026, 8, 19, 12, 0, 0, 0, berlin)
-	coerced, err := n4j.Coerce(schema.NewTimestampConstraint(), want)
-	if err != nil {
-		t.Fatalf("Coerce: %v", err)
-	}
+	coerced := coerceTimestamp(t, want)
 	echoed := echoParam(t, ctx, coerced)
 	got, ok := echoed.(time.Time)
 	if !ok {
@@ -239,4 +224,15 @@ func TestCoerce_ResolvableZoneNameRoundTripsByName(t *testing.T) {
 	if got.Location().String() != "Europe/Berlin" {
 		t.Errorf("round trip returned location %q, want Europe/Berlin", got.Location())
 	}
+}
+
+// coerceTimestamp is the value a hand-built parameter map sends for raw at a
+// Timestamp.
+func coerceTimestamp(t *testing.T, raw any) any {
+	t.Helper()
+	params, err := n4j.CoerceParams(map[string]any{"v": raw}, n4j.ParamTypes{"v": schema.NewTimestampConstraint()})
+	if err != nil {
+		t.Fatalf("CoerceParams(%v): %v", raw, err)
+	}
+	return params["v"]
 }

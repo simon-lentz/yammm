@@ -1,7 +1,6 @@
 package expr
 
 import (
-	"regexp"
 	"slices"
 	"strings"
 )
@@ -200,15 +199,6 @@ func StringLiteral(expr Expression) (string, bool) {
 	}
 	str, ok := lit.Val.(string)
 	return str, ok
-}
-
-// IsRegexpLiteral checks if an expression is a regexp literal.
-func IsRegexpLiteral(expr Expression) bool {
-	if lit, ok := expr.(*Literal); ok {
-		_, isRe := lit.Val.(*regexp.Regexp)
-		return isRe
-	}
-	return false
 }
 
 // ArgsLiteral extracts a []Expression from a literal expression.

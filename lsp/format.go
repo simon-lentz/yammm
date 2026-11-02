@@ -57,7 +57,7 @@ func formattingHandler(ws Resolver, logger *slog.Logger, tokenStream func(string
 		lines := strings.Split(doc.Text, "\n")
 		lastLine := len(lines) - 1
 		lastLineContent := []byte(lines[lastLine])
-		lastChar := lsputil.ByteLenToCharLen(lastLineContent, len(lastLineContent), ws.PositionEncoding())
+		lastChar := lsputil.ByteToUTF16Offset(lastLineContent, 0, len(lastLineContent))
 
 		return []protocol.TextEdit{
 			{

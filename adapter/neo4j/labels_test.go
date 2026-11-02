@@ -213,11 +213,10 @@ func TestDetectLabelCollisions_NoCollision(t *testing.T) {
 
 // TestLabel_SanitizationCollision pins the collision mechanism that
 // [Adapter.DetectLabelCollisions] guards against: distinct raw names whose
-// sanitized forms coincide. Such names can no longer enter a schema — both
-// the parser and [schema.NewBuilder] enforce the DSL name productions, on
-// which [SanitizeIdentifier] is the identity function — so the detector's
-// collision branch is defense-in-depth for construction paths that bypass
-// both front doors.
+// sanitized forms coincide. Such names can no longer enter a schema — the parser
+// enforces the DSL name productions, on which [SanitizeIdentifier] is the identity
+// function — so the detector's collision branch is defense-in-depth for
+// construction paths outside the parser.
 func TestLabel_SanitizationCollision(t *testing.T) {
 	t.Parallel()
 

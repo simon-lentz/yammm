@@ -6,7 +6,6 @@ import (
 
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/instance"
-	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -343,17 +342,17 @@ func TestSchemaBuilder_CrossSchemaTargets(t *testing.T) {
 
 // TestValidate_DanglingQualifiedTargetRejectedAtBuild pins that the dangling
 // cross-schema relation target the instance layer once had to handle at
-// validation time is now rejected at schema construction: a registry-less
-// Builder draws E_UNKNOWN_TYPE and nils the schema, so no validator can see a
+// validation time is now rejected at load: the unresolved reference draws
+// E_UNKNOWN_TYPE and nils the schema, so no validator can see a
 // zero-TargetID relation through a public entry point.
 func TestValidate_DanglingQualifiedTargetRejectedAtBuild(t *testing.T) {
-	s, result := schema.NewBuilder().
-		WithName("app").
-		AddType("Node").
-		WithPrimaryKey("id", schema.NewStringConstraint()).
-		WithRelation("LINKED", schema.NewTypeRef("ext", "Thing", location.Span{}), true, false).
-		Done().
-		Build()
+	s, result := schema.LoadString(t.Context(), `schema "app"
+
+type Node {
+	id String primary
+	--> LINKED (_:one) ext.Thing
+}
+`, "app.yammm")
 	if !s.IsZero() {
 		t.Fatal("a dangling qualified relation target must nil the schema")
 	}

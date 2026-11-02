@@ -6,8 +6,7 @@ import (
 	"testing"
 
 	"github.com/simon-lentz/yammm/graph"
-	"github.com/simon-lentz/yammm/immutable"
-	"github.com/simon-lentz/yammm/instance"
+	"github.com/simon-lentz/yammm/internal/instancetest"
 	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
 )
@@ -21,11 +20,9 @@ func TestMarshalObject_WritesMarkupCharactersAsThemselves(t *testing.T) {
 	if err := res.Err(); err != nil {
 		t.Fatalf("load: %v", err)
 	}
-	ty, _ := s.Type("Rule")
 	const text = "endDate > startDate && size < 10"
 	g := graph.New(s)
-	inst := instance.NewValidInstance("Rule", ty.ID(), immutable.WrapKey([]any{"r<1>"}),
-		immutable.WrapProperties(map[string]any{"id": "r<1>", "text": text}), nil, nil, location.Provenance{})
+	inst := instancetest.Valid(t, s, "Rule", map[string]any{"id": "r<1>", "text": text})
 	if r := g.Add(ctx, inst); r.Err() != nil {
 		t.Fatalf("add: %v", r.Err())
 	}

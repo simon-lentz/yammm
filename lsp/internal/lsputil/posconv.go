@@ -1,7 +1,6 @@
 package lsputil
 
 import (
-	"bytes"
 	"unicode/utf8"
 
 	"github.com/simon-lentz/yammm/location"
@@ -18,33 +17,18 @@ func ToUInteger(n int) protocol.UInteger {
 	return protocol.UInteger(n) //nolint:gosec // clamped to non-negative
 }
 
-// ByteLenToCharLen converts a byte length to a character count in the given encoding.
-// For UTF-8, byte length IS character length. For UTF-16, converts byte offset
-// to UTF-16 code units. Content is the raw bytes of the text being measured.
-func ByteLenToCharLen(content []byte, byteLen int, enc PositionEncoding) int {
-	switch enc {
-	case PositionEncodingUTF8:
-		return byteLen
-	default:
-		return ByteToUTF16Offset(content, 0, byteLen)
-	}
-}
-
-// ByteOffsetFromLSP converts an LSP position to a byte offset.
+// ByteOffsetFromLSP converts an LSP position, whose character counts UTF-16
+// code units, to a byte offset.
 //
-// It handles:
-//   - UTF-16 encoding: character offset is in UTF-16 code units
-//   - UTF-8 encoding: character offset IS byte offset from line start
-//
-// Mid-surrogate positions (UTF-16): If char points to the second code unit
-// of a surrogate pair, we floor to the start of that rune.
+// Mid-surrogate positions: If char points to the second code unit of a
+// surrogate pair, we floor to the start of that rune.
 //
 // The character is counted in the text the client holds of the source, which
 // [Texts] defines.
 //
 // Returns (offset, false) if the source is not found or the line is invalid.
 // Callers should bail out when ok is false to avoid incorrect navigation.
-func ByteOffsetFromLSP(sources *Texts, id location.SourceID, line, char int, enc PositionEncoding) (int, bool) {
+func ByteOffsetFromLSP(sources *Texts, id location.SourceID, line, char int) (int, bool) {
 	// Handle nil registry
 	if sources == nil {
 		return 0, false
@@ -62,16 +46,7 @@ func ByteOffsetFromLSP(sources *Texts, id location.SourceID, line, char int, enc
 		return 0, false // content unavailable
 	}
 
-	switch enc {
-	case PositionEncodingUTF16:
-		return UTF16CharToByteOffset(content, lineStart, char), true
-	case PositionEncodingUTF8:
-		// UTF-8 encoding: character offset IS byte offset from line start
-		// Clamp to end-of-line (not end-of-file) to match UTF16CharToByteOffset behavior
-		return ClampToLineEnd(content, lineStart, lineStart+char), true
-	default:
-		return UTF16CharToByteOffset(content, lineStart, char), true // default UTF-16
-	}
+	return UTF16CharToByteOffset(content, lineStart, char), true
 }
 
 // UTF16CharToByteOffset converts a UTF-16 character offset to a byte offset.
@@ -116,35 +91,10 @@ func UTF16CharToByteOffset(content []byte, lineStart, charOffset int) int {
 	return pos
 }
 
-// ClampToLineEnd ensures offset doesn't exceed the end of the current line.
-// Returns the lesser of: offset, position of next newline, or content length.
-// This is used for UTF-8 encoding mode to match the behavior of UTF16CharToByteOffset
-// which stops at newline boundaries.
-//
-// For conceptual correctness, offsets before lineStart are clamped to lineStart
-// (though LSP inputs should never be negative).
-func ClampToLineEnd(content []byte, lineStart, offset int) int {
-	if offset < lineStart {
-		return lineStart
-	}
-	// Use slice-based scanning for efficiency
-	lineContent := content[lineStart:]
-	if idx := bytes.IndexByte(lineContent, '\n'); idx >= 0 {
-		lineEnd := lineStart + idx
-		if offset > lineEnd {
-			return lineEnd
-		}
-	} else if offset > len(content) {
-		return len(content)
-	}
-	return offset
-}
-
 // PositionFromLSP converts an LSP position to an internal location.Position.
-// It converts the client's column, in UTF-16 units or in bytes as the
-// negotiated encoding says, to a rune column through the text registered for
-// the source, counting line 1 of a file read from disk from after a leading
-// byte order mark.
+// It converts the client's column, in UTF-16 units, to a rune column through
+// the text registered for the source, counting line 1 of a file read from disk
+// from after a leading byte order mark.
 //
 // This is the primary entry point for inbound LSP position conversion.
 // The hover and definition providers use it instead of naive column
@@ -156,33 +106,15 @@ func PositionFromLSP(
 	sources *Texts,
 	sourceID location.SourceID,
 	lspLine, lspChar int,
-	enc PositionEncoding,
 ) (location.Position, bool) {
 	// Convert LSP position to byte offset
-	byteOffset, ok := ByteOffsetFromLSP(sources, sourceID, lspLine, lspChar, enc)
+	byteOffset, ok := ByteOffsetFromLSP(sources, sourceID, lspLine, lspChar)
 	if !ok {
 		return location.Position{}, false
 	}
 
 	// Use source registry's PositionAt for accurate line/column computation
 	return sources.PositionAt(sourceID, byteOffset), true
-}
-
-// CharToByteOnLine converts an LSP character offset to a byte offset within
-// a single line's content, respecting the negotiated position encoding.
-//
-// For UTF-16: delegates to UTF16CharToByteOffset (handles surrogate pairs).
-// For UTF-8: character offset IS byte offset; clamped to line length.
-//
-// lineContent is the raw bytes of the line (no newline). The returned offset
-// is relative to the start of lineContent.
-func CharToByteOnLine(lineContent []byte, char int, enc PositionEncoding) int {
-	switch enc {
-	case PositionEncodingUTF8:
-		return min(char, len(lineContent))
-	default:
-		return UTF16CharToByteOffset(lineContent, 0, char)
-	}
 }
 
 // ByteToUTF16Offset converts a byte offset on a line to UTF-16 code units.
@@ -234,18 +166,14 @@ func ByteToUTF16Offset(content []byte, lineStart, targetByte int) int {
 }
 
 // SpanToLSPRange converts a location.Span to an LSP Range. For a source that
-// sources holds, it converts each byte offset to UTF-16 units or UTF-8 bytes
-// and counts each character in the text the client holds of the source, which
-// [Texts] defines. For a source that sources does not hold, for a position
-// with no byte offset, and for a line the held text does not reach, it returns
-// the rune column less one in either encoding; an end that is not known takes
-// the start's position.
+// sources holds, it converts each byte offset to UTF-16 units and counts each
+// character in the text the client holds of the source, which [Texts] defines.
+// For a source that sources does not hold, for a position with no byte offset,
+// and for a line the held text does not reach, it returns the rune column less
+// one; an end that is not known takes the start's position.
 // It returns zero positions and false for a nil sources, a zero span and a
 // span whose start is not known.
-//
-// The encoding parameter should be the negotiated position encoding from
-// the client (default UTF-16).
-func SpanToLSPRange(sources *Texts, span location.Span, enc PositionEncoding) (start, end [2]int, ok bool) {
+func SpanToLSPRange(sources *Texts, span location.Span) (start, end [2]int, ok bool) {
 	if span.IsZero() || !span.Start.IsKnown() {
 		return [2]int{}, [2]int{}, false
 	}
@@ -264,15 +192,7 @@ func SpanToLSPRange(sources *Texts, span location.Span, enc PositionEncoding) (s
 	if hasContent && span.Start.Byte >= 0 {
 		lineStartByte, lineOk := sources.characterOrigin(span.Source, span.Start.Line)
 		if lineOk {
-			switch enc {
-			case PositionEncodingUTF16:
-				startChar = ByteToUTF16Offset(content, lineStartByte, span.Start.Byte)
-			case PositionEncodingUTF8:
-				// UTF-8 mode: character offset IS byte offset from line start
-				startChar = max(span.Start.Byte-lineStartByte, 0)
-			default:
-				startChar = ByteToUTF16Offset(content, lineStartByte, span.Start.Byte)
-			}
+			startChar = ByteToUTF16Offset(content, lineStartByte, span.Start.Byte)
 		} else {
 			startChar = span.Start.Column - 1 // fallback to rune column
 		}
@@ -289,15 +209,7 @@ func SpanToLSPRange(sources *Texts, span location.Span, enc PositionEncoding) (s
 		if hasContent && span.End.Byte >= 0 {
 			lineStartByte, lineOk := sources.characterOrigin(span.Source, span.End.Line)
 			if lineOk {
-				switch enc {
-				case PositionEncodingUTF16:
-					endChar = ByteToUTF16Offset(content, lineStartByte, span.End.Byte)
-				case PositionEncodingUTF8:
-					// UTF-8 mode: character offset IS byte offset from line start
-					endChar = max(span.End.Byte-lineStartByte, 0)
-				default:
-					endChar = ByteToUTF16Offset(content, lineStartByte, span.End.Byte)
-				}
+				endChar = ByteToUTF16Offset(content, lineStartByte, span.End.Byte)
 			} else {
 				endChar = span.End.Column - 1 // fallback to rune column
 			}
@@ -314,8 +226,8 @@ func SpanToLSPRange(sources *Texts, span location.Span, enc PositionEncoding) (s
 // [SpanToLSPRange]. When that gives no range (a zero span, an unknown start or
 // nil sources), the range is the span's own lines and columns, each less one
 // and at least zero.
-func SpanToProtocolRange(sources *Texts, span location.Span, enc PositionEncoding) protocol.Range {
-	start, end, ok := SpanToLSPRange(sources, span, enc)
+func SpanToProtocolRange(sources *Texts, span location.Span) protocol.Range {
+	start, end, ok := SpanToLSPRange(sources, span)
 	if ok {
 		return protocol.Range{
 			Start: protocol.Position{

@@ -1,14 +1,12 @@
 package graph_test
 
 import (
+	"os"
 	"path/filepath"
 	"slices"
-	"strings"
 	"testing"
 
-	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/graph"
-	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/instance"
 	"github.com/simon-lentz/yammm/internal/instancetest"
 	"github.com/simon-lentz/yammm/internal/yammmtest"
@@ -33,6 +31,41 @@ func loadFromDisk(t *testing.T) schema.Schema {
 	return s
 }
 
+// loadFromDiskAt copies testdata/composed.yammm to file and loads it through
+// [schema.Load].
+func loadFromDiskAt(t *testing.T, file string) schema.Schema {
+	t.Helper()
+	text, err := os.ReadFile(filepath.Join("testdata", "composed.yammm"))
+	if err != nil {
+		t.Fatalf("read testdata: %v", err)
+	}
+	if err := os.WriteFile(file, text, 0o600); err != nil {
+		t.Fatalf("write schema: %v", err)
+	}
+	s, res := schema.Load(t.Context(), file)
+	if res.HasErrors() {
+		t.Fatalf("load %s: %s", file, res.String())
+	}
+	return s
+}
+
+// orderWithNotes validates an Order over s holding one Section with a Note per
+// id. Its required slots hold what they require.
+func orderWithNotes(t *testing.T, s schema.Schema, ids ...string) instance.ValidInstance {
+	t.Helper()
+	notes := make([]any, len(ids))
+	for i, id := range ids {
+		notes[i] = map[string]any{"note_id": id, "body": "b"}
+	}
+	return instancetest.Valid(t, s, "Order", map[string]any{
+		"order_id": "o1",
+		"customer": "c",
+		"sections": []any{map[string]any{"section_id": "s1", "heading": "h", "notes": notes}},
+		"invoice":  []any{map[string]any{"invoice_id": "inv1", "amount": "10"}},
+		"stamp":    []any{map[string]any{"mark": "paid"}},
+	})
+}
+
 // TestFileLoadedSchema_RendersAnAbsolutePath is the control. It asserts the
 // property that makes the tests below meaningful: loaded from disk, this
 // schema's type identities carry the checkout's path. If this ever fails the
@@ -51,152 +84,18 @@ func TestFileLoadedSchema_RendersAnAbsolutePath(t *testing.T) {
 	}
 }
 
-// TestDuplicateComposedPK_DetailIsAPrimaryKey pins the contract
-// [diag.DetailKeyPrimaryKey]'s own godoc states -- "the primary key value".
-//
-// The duplicate is two Notes sharing a note_id under one Section, so the
-// reporting site is reached through the inline builder's recursion at depth
-// two. A detail that instead carried a writer's composed address would be
-// wrong twice over: rooted at the Section rather than the Order, and bearing
-// this checkout's absolute path.
-func TestDuplicateComposedPK_DetailIsAPrimaryKey(t *testing.T) {
-	t.Parallel()
-	s := loadFromDisk(t)
-	ctx := t.Context()
-
-	note := func(id string) instance.ValidInstance {
-		return instancetest.VI(
-			"Note",
-			instancetest.TypeID(mustTypeID(t, s, "Note")),
-			instancetest.PK(id),
-			instancetest.Props(map[string]any{"note_id": id, "body": "b"}),
-		)
-	}
-	section := instancetest.VI(
-		"Section",
-		instancetest.TypeID(mustTypeID(t, s, "Section")),
-		instancetest.PK("s1"),
-		instancetest.Props(map[string]any{"section_id": "s1", "heading": "h"}),
-		instancetest.Composed(map[string]immutable.Value{
-			"NOTES": immutable.Wrap([]any{note("n1"), note("n1")}),
-		}),
-	)
-	order := instancetest.VI(
-		"Order",
-		instancetest.TypeID(mustTypeID(t, s, "Order")),
-		instancetest.PK("o1"),
-		instancetest.Props(map[string]any{"order_id": "o1", "customer": "c"}),
-		instancetest.Composed(map[string]immutable.Value{
-			"SECTIONS": immutable.Wrap([]any{section}),
-		}),
-	)
-
-	res := graph.New(s).Add(ctx, order)
-	if res.OK() {
-		t.Fatal("two sibling Notes sharing a primary key were accepted")
-	}
-
-	var got string
-	var found bool
-	for issue := range res.Issues() {
-		if issue.Code() != diag.E_DUPLICATE_COMPOSED_PK {
-			continue
-		}
-		for _, d := range issue.Details() {
-			if d.Key == diag.DetailKeyPrimaryKey {
-				got, found = d.Value, true
-			}
-		}
-	}
-	if !found {
-		t.Fatal("E_DUPLICATE_COMPOSED_PK carried no primary_key detail")
-	}
-	if want := graph.FormatKey("n1"); got != want {
-		t.Errorf("primary_key detail = %q, want the duplicated key %q", got, want)
-	}
-}
-
-// TestDiagnosticDetails_CarryNoSchemaPath guards the class rather than the one
-// site: a detail whose key promises a key, a name or a field must not carry
-// the loading machine's filesystem layout. [diag.DetailKeyTypeSchema] is
-// exempt by contract -- naming the schema a type came from is what it is for.
-func TestDiagnosticDetails_CarryNoSchemaPath(t *testing.T) {
-	t.Parallel()
-	s := loadFromDisk(t)
-	root := filepath.Dir(mustTypeID(t, s, "Order").SchemaPath().String())
-
-	note := func(id string) instance.ValidInstance {
-		return instancetest.VI(
-			"Note",
-			instancetest.TypeID(mustTypeID(t, s, "Note")),
-			instancetest.PK(id),
-			instancetest.Props(map[string]any{"note_id": id, "body": "b"}),
-		)
-	}
-	section := instancetest.VI(
-		"Section",
-		instancetest.TypeID(mustTypeID(t, s, "Section")),
-		instancetest.PK("s1"),
-		instancetest.Props(map[string]any{"section_id": "s1", "heading": "h"}),
-		instancetest.Composed(map[string]immutable.Value{
-			"NOTES": immutable.Wrap([]any{note("n1"), note("n1")}),
-		}),
-	)
-	order := instancetest.VI(
-		"Order",
-		instancetest.TypeID(mustTypeID(t, s, "Order")),
-		instancetest.PK("o1"),
-		instancetest.Props(map[string]any{"order_id": "o1", "customer": "c"}),
-		instancetest.Composed(map[string]immutable.Value{
-			"SECTIONS": immutable.Wrap([]any{section}),
-		}),
-	)
-
-	res := graph.New(s).Add(t.Context(), order)
-	for issue := range res.Issues() {
-		for _, d := range issue.Details() {
-			if d.Key == diag.DetailKeyTypeSchema {
-				continue
-			}
-			if strings.Contains(d.Value, root) {
-				t.Errorf("%s detail %q carries the schema's directory: %q",
-					issue.Code(), d.Key, d.Value)
-			}
-		}
-	}
-}
-
 // TestFileLoadedSchema_OneCompositionShapes exercises the two shapes this
 // corpus had never carried: a (one) slot to a keyed part, and a (one) slot to
 // a keyless one. Every other composition here is (_:many) to a keyed part, so
 // nothing loaded from disk reached the address a (one) slot writes.
 func TestFileLoadedSchema_OneCompositionShapes(t *testing.T) {
 	t.Parallel()
-	s := loadFromDisk(t)
+	yammmtest.RequireNoModuleRoot(t, schema.FindModuleRoot)
+	file := filepath.Join(t.TempDir(), "composed.yammm")
+	s := loadFromDiskAt(t, file)
 	ctx := t.Context()
 
-	invoice := instancetest.VI(
-		"Invoice",
-		instancetest.TypeID(mustTypeID(t, s, "Invoice")),
-		instancetest.PK("inv1"),
-		instancetest.Props(map[string]any{"invoice_id": "inv1", "amount": "10"}),
-	)
-	stamp := instancetest.VI(
-		"Stamp",
-		instancetest.TypeID(mustTypeID(t, s, "Stamp")),
-		instancetest.NoKey(),
-		instancetest.Props(map[string]any{"mark": "paid"}),
-	)
-	order := instancetest.VI(
-		"Order",
-		instancetest.TypeID(mustTypeID(t, s, "Order")),
-		instancetest.PK("o1"),
-		instancetest.Props(map[string]any{"order_id": "o1", "customer": "c"}),
-		instancetest.Composed(map[string]immutable.Value{
-			"INVOICE": immutable.Wrap([]any{invoice}),
-			"STAMP":   immutable.Wrap([]any{stamp}),
-		}),
-	)
+	order := orderWithNotes(t, s, "n1")
 
 	g := graph.New(s)
 	if res := g.Add(ctx, order); !res.OK() {
@@ -227,14 +126,5 @@ func TestFileLoadedSchema_OneCompositionShapes(t *testing.T) {
 		if r.IsMany() {
 			t.Errorf("%s is declared (many); the fixture's whole point is a (one) slot", rel)
 		}
-	}
-
-	if res := g.AddComposed(ctx, orderType.ID(), graph.FormatKey("o1"), "INVOICE", instancetest.VI(
-		"Invoice",
-		instancetest.TypeID(mustTypeID(t, s, "Invoice")),
-		instancetest.PK("inv2"),
-		instancetest.Props(map[string]any{"invoice_id": "inv2", "amount": "20"}),
-	)); res.OK() {
-		t.Error("a second occupant of the (one) INVOICE slot was accepted")
 	}
 }

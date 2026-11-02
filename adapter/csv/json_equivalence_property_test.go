@@ -73,8 +73,7 @@ var (
 
 // A row parses as the JSON adapter parses the document the row states, and the
 // validator answers the two alike, for every header the generator draws under
-// every mode a caller can match: folding and strict, with and without
-// WithSchema, unknown fields refused and allowed. The document is built by the
+// every mode a caller can match: with and without WithSchema, unknown fields refused and allowed. The document is built by the
 // rule the package documentation states, and which key claims a member is
 // asked of the validator itself, by validating the row's keys alone.
 func TestColumnMapping_GeneratedHeadersParseAsTheJSONEquivalent(t *testing.T) {
@@ -96,25 +95,23 @@ func TestColumnMapping_GeneratedHeadersParseAsTheJSONEquivalent(t *testing.T) {
 			file.WriteString(csvLine(append([]string{"p1"}, row...)))
 		}
 		csvText := file.String()
-		for _, strict := range []bool{false, true} {
-			for _, withSchema := range []bool{true, false} {
-				checked++
-				o := oracle{s: s, person: person, strict: strict, withSchema: withSchema, stats: stats}
-				docs := make([]string, len(rows))
-				var csvOnly []string
-				for k, row := range rows {
-					var more []string
-					docs[k], more = o.document(t.Context(), header, row)
-					csvOnly = append(csvOnly, more...)
-				}
-				why := checkEquivalence(t, o, csvText, docs, csvOnly)
-				if why == "" {
-					continue
-				}
-				failures++
-				if failures <= 12 {
-					t.Errorf("strict=%v WithSchema=%v\ncsv:\n%sjson: %s\n%s", strict, withSchema, csvText, strings.Join(docs, "\n      "), why)
-				}
+		for _, withSchema := range []bool{true, false} {
+			checked++
+			o := oracle{s: s, person: person, withSchema: withSchema, stats: stats}
+			docs := make([]string, len(rows))
+			var csvOnly []string
+			for k, row := range rows {
+				var more []string
+				docs[k], more = o.document(t.Context(), header, row)
+				csvOnly = append(csvOnly, more...)
+			}
+			why := checkEquivalence(t, o, csvText, docs, csvOnly)
+			if why == "" {
+				continue
+			}
+			failures++
+			if failures <= 12 {
+				t.Errorf("WithSchema=%v\ncsv:\n%sjson: %s\n%s", withSchema, csvText, strings.Join(docs, "\n      "), why)
 			}
 		}
 	}
@@ -130,7 +127,7 @@ func checkEquivalence(t *testing.T, o oracle, csvText string, docs, csvOnly []st
 	if len(byType["Person"]) != len(docs) {
 		t.Fatalf("the oracle's documents do not parse: %s\n%s", docs, jres)
 	}
-	opts := []Option{WithStrictPropertyNames(o.strict)}
+	var opts []Option
 	if o.withSchema {
 		opts = append(opts, WithSchema(o.s))
 	}
@@ -148,7 +145,7 @@ func checkEquivalence(t *testing.T, o oracle, csvText string, docs, csvOnly []st
 			why = append(why, fmt.Sprintf("row %d: properties differ\n  csv:  %#v\n  json: %#v", k, raws[k].Properties, fromJSON.Properties))
 		}
 		for _, allow := range []bool{false, true} {
-			vo := []instance.Option{instance.WithStrictPropertyNames(o.strict), instance.WithAllowUnknownFields(allow)}
+			vo := []instance.Option{instance.WithAllowUnknownFields(allow)}
 			if differ := judgedAlike(t, o.s, raws[k], fromJSON, vo...); differ != "" {
 				why = append(why, fmt.Sprintf("row %d, allow=%v: %s", k, allow, differ))
 			}
@@ -219,10 +216,10 @@ func csvLine(fields []string) string {
 // oracle builds the document a row states, by the rule the package
 // documentation states, asking the validator which key claims each member.
 type oracle struct {
-	s                  schema.Schema
-	person             schema.Type
-	strict, withSchema bool
-	stats              map[string]int
+	s          schema.Schema
+	person     schema.Type
+	withSchema bool
+	stats      map[string]int
 }
 
 func (o oracle) count(rule string) {
@@ -249,7 +246,7 @@ func quoted(s string) string {
 // resolved asks the validator which of keys it reads as a member when an object
 // holds exactly those keys: every key it reports neither unknown nor colliding.
 func (o oracle) resolved(ctx context.Context, obj map[string]any, keys []string, unknownCode diag.Code) map[string]bool {
-	_, res := instance.NewValidator(o.s, instance.WithStrictPropertyNames(o.strict)).
+	_, res := instance.NewValidator(o.s).
 		ValidateOne(ctx, "Person", instance.RawInstance{Properties: obj})
 	out := make(map[string]bool, len(keys))
 	for _, k := range keys {
@@ -294,12 +291,8 @@ func (o oracle) resolvedEdgeKeys(ctx context.Context, rel schema.Relation, keys 
 	return o.resolved(ctx, map[string]any{"id": "p1", "name": "n", rel.FieldName(): value}, keys, instance.ErrUnknownEdgeField)
 }
 
-// fold is the ASCII fold, or "" under strict names or for a name holding
-// another byte.
+// fold is the ASCII fold, or "" for a name holding another byte.
 func (o oracle) fold(name string) string {
-	if o.strict {
-		return ""
-	}
 	lower, ok := instance.FoldKey(name)
 	if !ok {
 		return ""

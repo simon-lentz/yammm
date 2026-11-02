@@ -9,16 +9,15 @@ import (
 	"github.com/simon-lentz/yammm/instance"
 	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/location/path"
-	"github.com/simon-lentz/yammm/schema"
 )
 
 func TestRecommendedOptions(t *testing.T) {
-	s := mustBuild(t, schema.NewBuilder().
-		WithName("test").
-		WithSourceID(location.MustNewSourceID("test://test.yammm")).
-		AddType("Person").
-		WithPrimaryKey("id", schema.StringConstraint{}).
-		Done())
+	s := mustLoad(t, `schema "test"
+
+type Person {
+	id String primary
+}
+`)
 
 	// RecommendedOptions should return valid options
 	opts := instance.RecommendedOptions()
@@ -38,13 +37,13 @@ func TestRecommendedOptions(t *testing.T) {
 
 func TestOptionsWithProvenance(t *testing.T) {
 	// Test that provenance functions are covered in various scenarios
-	s := mustBuild(t, schema.NewBuilder().
-		WithName("test").
-		WithSourceID(location.MustNewSourceID("test://test.yammm")).
-		AddType("Person").
-		WithPrimaryKey("id", schema.StringConstraint{}).
-		WithProperty("name", schema.StringConstraint{}).
-		Done())
+	s := mustLoad(t, `schema "test"
+
+type Person {
+	id String primary
+	name String required
+}
+`)
 
 	validator := instance.NewValidator(s)
 

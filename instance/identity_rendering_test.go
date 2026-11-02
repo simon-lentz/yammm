@@ -59,7 +59,7 @@ func TestComposedChild_TypeNameIsTheEntryRelativeForm(t *testing.T) {
 	if len(children) != 1 {
 		t.Fatalf("got %d children, want 1", len(children))
 	}
-	if want, got := schema.TagForm(s, children[0].TypeID()), children[0].TypeName(); got != want {
+	if want, got := schema.TagForm(s, children[0].Type().ID()), children[0].TypeName(); got != want {
 		t.Errorf("TypeName = %q, want TagForm %q", got, want)
 	}
 }

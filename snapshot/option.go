@@ -13,7 +13,7 @@ type Option func(*config)
 type config struct {
 	indent    string
 	createdAt time.Time
-	// createdAtText is a header's created_at carried byte-for-byte, set by
+	// createdAtText is a header's created_at carried as text, set by
 	// [WithCreatedAtFrom]; it wins over createdAt.
 	createdAtText string
 	metadata      map[string]string
@@ -66,8 +66,8 @@ func withCreatedAtText(text string) Option {
 	}
 }
 
-// WithCreatedAtFrom carries header's created_at into the new document byte for
-// byte, for a caller re-marshaling a document it has read.
+// WithCreatedAtFrom carries header's created_at text into the new document, for a
+// caller re-marshaling a document it has read.
 //
 // Prefer it over [WithCreatedAt] whenever the timestamp comes from an existing
 // header: [WithCreatedAt] writes its time at second precision in UTC, so it
@@ -125,7 +125,7 @@ type loadConfig struct {
 	issueLimit int
 }
 
-// defaultIssueLimit matches schema.Load's default.
+// defaultIssueLimit equals the cap schema.Load holds.
 const defaultIssueLimit = 100
 
 // defaultLoadConfig is the state every read surface starts from. The surfaces
@@ -150,7 +150,7 @@ func applyLoadOptions(opts []LoadOption) loadConfig {
 // collector keeps the most severe issues seen, and [github.com/simon-lentz/yammm/diag.Result.DroppedCount],
 // [github.com/simon-lentz/yammm/diag.Result.LimitReached] and
 // [github.com/simon-lentz/yammm/diag.Result.TruncationNote] report the rest
-// exactly. Set to 0 for unlimited. Default is 100, matching schema.Load.
+// exactly. Set to 0 for unlimited. Default is 100, the cap schema.Load holds.
 // Under [WithRevalidation] the revalidator caps each row at the same limit,
 // so the load has one cap.
 func WithIssueLimit(limit int) LoadOption {

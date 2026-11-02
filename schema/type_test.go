@@ -63,7 +63,7 @@ func TestType_SettersWorkBeforeSeal(t *testing.T) {
 }
 
 func TestNewType(t *testing.T) {
-	sourceID := location.MustNewSourceID("test://type")
+	sourceID := location.NewSourceID("test://type")
 	span := location.Span{
 		Source: sourceID,
 		Start:  location.Position{Line: 5, Column: 1, Byte: 50},
@@ -82,7 +82,7 @@ func TestNewType(t *testing.T) {
 }
 
 func TestType_SourceID(t *testing.T) {
-	sourceID := location.MustNewSourceID("test://source")
+	sourceID := location.NewSourceID("test://source")
 	typ := schema.TestNewType("Test", sourceID, location.Span{}, "", false, false)
 
 	assert.Equal(t, sourceID, typ.SourceID())
@@ -107,7 +107,7 @@ func TestType_SetSchemaName_PanicsWhenSealed(t *testing.T) {
 
 func TestType_Span(t *testing.T) {
 	span := location.Span{
-		Source: location.MustNewSourceID("test://span"),
+		Source: location.NewSourceID("test://span"),
 		Start:  location.Position{Line: 10, Column: 1, Byte: 100},
 		End:    location.Position{Line: 15, Column: 1, Byte: 150},
 	}
@@ -141,7 +141,7 @@ func TestType_IsPart(t *testing.T) {
 }
 
 func TestType_ID(t *testing.T) {
-	sourceID := location.MustNewSourceID("test://schema")
+	sourceID := location.NewSourceID("test://schema")
 	typ := schema.TestNewType("Person", sourceID, location.Span{}, "", false, false)
 
 	id := typ.ID()
@@ -533,7 +533,7 @@ func TestType_Inherits(t *testing.T) {
 
 func TestType_SuperTypes_Iterator(t *testing.T) {
 	typ := schema.TestNewType("Employee", location.SourceID{}, location.Span{}, "", false, false)
-	sourceID := location.MustNewSourceID("test://schema")
+	sourceID := location.NewSourceID("test://schema")
 	resolved := schema.NewResolvedTypeRef(
 		schema.NewTypeRef("", "Person", location.Span{}),
 		schema.NewTypeID(sourceID, "Person"),
@@ -550,7 +550,7 @@ func TestType_SuperTypes_Iterator(t *testing.T) {
 
 func TestType_SuperTypes(t *testing.T) {
 	typ := schema.TestNewType("Employee", location.SourceID{}, location.Span{}, "", false, false)
-	sourceID := location.MustNewSourceID("test://schema")
+	sourceID := location.NewSourceID("test://schema")
 	resolved := schema.NewResolvedTypeRef(
 		schema.NewTypeRef("", "Person", location.Span{}),
 		schema.NewTypeID(sourceID, "Person"),
@@ -564,7 +564,7 @@ func TestType_SuperTypes(t *testing.T) {
 
 func TestType_SubTypes_Iterator(t *testing.T) {
 	typ := schema.TestNewType("Person", location.SourceID{}, location.Span{}, "", false, false)
-	sourceID := location.MustNewSourceID("test://schema")
+	sourceID := location.NewSourceID("test://schema")
 	resolved := schema.NewResolvedTypeRef(
 		schema.NewTypeRef("", "Employee", location.Span{}),
 		schema.NewTypeID(sourceID, "Employee"),
@@ -581,7 +581,7 @@ func TestType_SubTypes_Iterator(t *testing.T) {
 
 func TestType_SubTypes(t *testing.T) {
 	typ := schema.TestNewType("Person", location.SourceID{}, location.Span{}, "", false, false)
-	sourceID := location.MustNewSourceID("test://schema")
+	sourceID := location.NewSourceID("test://schema")
 	resolved := schema.NewResolvedTypeRef(
 		schema.NewTypeRef("", "Employee", location.Span{}),
 		schema.NewTypeID(sourceID, "Employee"),
@@ -594,7 +594,7 @@ func TestType_SubTypes(t *testing.T) {
 }
 
 func TestType_IsSubTypeOf(t *testing.T) {
-	sourceID := location.MustNewSourceID("test://schema")
+	sourceID := location.NewSourceID("test://schema")
 	employeeType := schema.TestNewType("Employee", sourceID, location.Span{}, "", false, false)
 	personID := schema.NewTypeID(sourceID, "Person")
 	resolved := schema.NewResolvedTypeRef(

@@ -29,7 +29,7 @@ import "./defaults"                        // alias auto-derived as "defaults"
 
 - The `as alias` clause is optional. When omitted, the alias is auto-derived from the last path segment of the import path.
 - Aliases must start with a letter (a-z, A-Z).
-- Reserved keywords cannot be used as aliases: `schema`, `import`, `as`, `type`, `datatype`, `abstract`, `part`, `extends`, `includes`, `required`, `primary`, `one`, `many`, `in`. The literals `true`, `false`, and `nil` are also reserved. Built-in type names (`Integer`, `Float`, `Boolean`, `String`, `Enum`, `Pattern`, `Timestamp`, `Date`, `UUID`, `Vector`, `List`) are reserved because the lexer tokenizes them as literal tokens rather than identifiers.
+- Reserved keywords cannot be used as aliases: `schema`, `import`, `as`, `type`, `datatype`, `abstract`, `part`, `extends`, `includes`, `required`, `primary`, `one`, `many`, `in`. The literals `true`, `false`, and `nil` are also reserved. Built-in type names (`Integer`, `Float`, `Boolean`, `String`, `Enum`, `Pattern`, `Timestamp`, `Date`, `UUID`, `Vector`, `List`) are reserved too. The lexer reads every keyword as a plain word: the grammar refuses a written alias that spells one (`E_SYNTAX`), and a derived alias that spells one draws `E_INVALID_ALIAS`.
 - Circular imports are detected and rejected.
 - Paths are sandboxed and cannot escape the module root.
 - The module root is the directory holding the nearest `yammm.mod` marker above the schema, unless the caller supplies one explicitly; failing both, it is the schema's own directory.
@@ -49,8 +49,8 @@ type Tags = List<String[1, 50]>
 
 - Declared with uppercase names using `type Name = BuiltInType`.
 - Aliases preserve the declared case (not lowercased internally).
-- Can chain: alias A wraps a built-in, alias B wraps A.
-- Cycles are detected and rejected during schema completion.
+- An alias target must be a built-in, so `type B = A` over an alias `A` draws `E_SYNTAX`. A `List` target can name another alias as its element.
+- Cycles through `List` elements are detected and rejected during schema completion.
 - Imported aliases require qualification: `common.Money`.
 
 ---

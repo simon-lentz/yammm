@@ -32,7 +32,7 @@
 //
 // This package is the single authority on what a value IS. A predeclared type
 // is answered by a type switch; anything else is read in the one form [Scalar]
-// defines, which every writer of the module writes. A pointer or an interface
+// defines. A pointer or an interface
 // is read through, at most 64 deep, to the strata and value of the scalar or
 // the nil it holds, and a longer chain, as one that points to itself is, has
 // neither; a slice is a list only when it is bare, as [ListElems] reads one,

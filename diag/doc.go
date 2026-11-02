@@ -18,8 +18,7 @@
 //     ([Issue.Related], [Issue.Details]) return defensive copies.
 //   - Stable error codes: [Code] values are stable identifiers that tools can
 //     match on, even when message text changes. The code set is open: adapters
-//     and consumers register codes through [NewCode], and [AllCodes] lists
-//     every code registered.
+//     and consumers register codes through [NewCode].
 //   - Deterministic ordering: [Collector.Result] sorts issues by location, a span
 //     in [location.Compare] order, then by code, so output is stable across runs.
 //   - Builder pattern: [IssueBuilder] is the only valid construction path for
@@ -32,12 +31,11 @@
 // A YAMMM operation that produces a value and diagnostics returns (T, [Result]),
 // and one that produces diagnostics alone returns a [Result]. Other surfaces carry
 // diagnostics in their own shape. snapshot.ScanDir yields each file's Result on
-// its entry. schema.ModuleRootIssue and graph.Duplicate's Diagnostic return a bare
-// [Issue]. format.TokenStream's error for a source that does not parse is a
-// *format.SyntaxError that holds an [Issue]. Each Add method and Finalize of graph.BatchAssembler returns an error
-// whose cause is a [*ContextualError], unless it is
-// graph.ErrAssemblerFinalized or wraps instance.ErrRefusedValue, and the finalized
-// snapshot's Diagnostics hold the rest.
+// its entry. schema.ModuleRootIssue returns a bare [Issue].
+// format.TokenStream's error for a source that does not parse is a
+// *format.SyntaxError that holds an [Issue]. Each Add method of graph.BatchAssembler
+// returns an error whose cause is a [*ContextualError], unless it wraps
+// instance.ErrRefusedValue, and the graph's snapshot's Diagnostics hold the rest.
 // A Result reads:
 //
 //   - [Result.HasFatal]: any Fatal issue, such as an I/O failure, a cancellation,
@@ -48,8 +46,9 @@
 //   - [Result.OK]: success (may still include warnings/info/hints)
 //
 // A serializer that reports issues returns ([]byte, [Result]), as
-// snapshot.Marshal does. An operation that can only succeed or fail returns
-// (T, error).
+// snapshot.Marshal does. An operation that can fail and reports no issues
+// returns an error, alone or after its value, or false as its last value where
+// the caller needs no reason.
 //
 // # Severity Semantics
 //
@@ -171,6 +170,5 @@
 //	E_UPDATE_METADATA_BODY_OFFSET     Fatal     snapshot.UpdateMetadata (body-offset tracker cannot resolve)
 //	W_UPDATE_METADATA_FALLBACK        Warning   snapshot.UpdateMetadataOrReMarshal (fallback to Load+Marshal)
 //
-// See the Godoc on each individual [Code] for the failure-mode
-// contract, detail-field conventions, and consumer recovery guidance.
+// The Godoc on each code states its failure mode.
 package diag

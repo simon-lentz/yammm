@@ -14,9 +14,8 @@ import (
 // the node-property slot reported the same failure.
 //
 // The path is defensive: CoerceValue is not reachable-in-failure after
-// CheckValue passes through any constructor this library exposes — the schema
-// Builder cannot attach a constraint to an edge property, and the DSL cannot
-// express a malformed one. That is why the classifier is pinned here directly
+// CheckValue passes through any constructor this library exposes: the DSL cannot
+// express a malformed constraint. That is why the classifier is pinned here directly
 // rather than through the validator: an end-to-end test would need an input no
 // caller can construct.
 //

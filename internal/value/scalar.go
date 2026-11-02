@@ -10,20 +10,16 @@ import (
 	"github.com/simon-lentz/yammm/immutable"
 )
 
-// Scalar returns v in the one form every reader and writer of the module reads
-// a scalar in, through pointers and interfaces: a string, bool, int64, uint64,
+// Scalar returns v in the one form the validator reads a scalar in ([Classify]),
+// through pointers and interfaces: a string, bool, int64, uint64,
 // float32 or float64 for a value of that kind, a named type as its base value;
 // a json.Number that is a JSON number literal ([immutable.IsNumberLiteral]), a
 // time.Time or a uuid.UUID as itself; nil for a value that holds none
 // ([Absent]), a nil slice or map included. It reports false for every other
 // value: a json.Number holding other text, a struct, an array, a map, a slice,
 // a channel, a function, a complex number, and a chain of more than
-// [maxPointerDepth] pointers and interfaces.
-//
-// A list or a map reaches a writer wrapped, as an immutable.Slice or Map,
-// which the writer walks; one behind a pointer is no list, as [ListElems]
-// reads one. A writer writes a time.Time or a uuid.UUID only where its
-// constraint renders it.
+// [maxPointerDepth] pointers and interfaces. A list behind a pointer is no list,
+// as [ListElems] reads one.
 func Scalar(v any) (any, bool) {
 	held, ok := form(v)
 	if n, isNumber := held.(json.Number); isNumber && !immutable.IsNumberLiteral(n) {
@@ -91,8 +87,8 @@ func NumberLiteral(v any) (json.Number, bool) {
 	return literal(rv)
 }
 
-// Absent reports whether v holds no value, as [Scalar] reads it and every
-// writer writes it: nil, or a pointer, an interface, a map, a slice, a channel,
+// Absent reports whether v holds no value, as [Scalar] reads it: nil, or a
+// pointer, an interface, a map, a slice, a channel,
 // a function or an unsafe pointer that is nil, bare or at some depth. A nil
 // slice or map is no empty list or map: encoding/json writes it as null, and a
 // nil [immutable] container ([immutable.IsNilContainer]) holds no value either.

@@ -13,7 +13,7 @@ import (
 
 func registerTestSource(t *testing.T, reg *source.Registry, content, name string) location.SourceID {
 	t.Helper()
-	sourceID := location.MustNewSourceID("test://" + name)
+	sourceID := location.NewSourceID("test://" + name)
 	err := reg.Register(sourceID, []byte(content))
 	require.NoError(t, err)
 	return sourceID
@@ -107,7 +107,7 @@ func TestSources_ContentBySource_Valid(t *testing.T) {
 func TestSources_ContentBySource_NotFound(t *testing.T) {
 	reg := source.NewRegistry()
 	s := schema.NewSources(reg)
-	unknownID := location.MustNewSourceID("test://unknown")
+	unknownID := location.NewSourceID("test://unknown")
 
 	content, ok := s.ContentBySource(unknownID)
 
@@ -171,7 +171,7 @@ func TestSources_Has_Valid(t *testing.T) {
 	s := schema.NewSources(reg)
 
 	assert.True(t, s.Has(sourceID))
-	assert.False(t, s.Has(location.MustNewSourceID("test://unknown")))
+	assert.False(t, s.Has(location.NewSourceID("test://unknown")))
 }
 
 func TestSources_Len_Valid(t *testing.T) {

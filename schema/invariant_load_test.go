@@ -6,7 +6,6 @@ import (
 
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/schema"
-	"github.com/simon-lentz/yammm/schema/expr"
 )
 
 func hasIssue(res diag.Result, code diag.Code, fragment string) bool {
@@ -26,26 +25,6 @@ func TestLoad_RefusesAnEmptyInvariantMessage(t *testing.T) {
 	_, res := schema.LoadString(t.Context(), "schema \"s\"\ntype T {\n    id String primary\n    ! \"\" id != \"\"\n}\n", "s.yammm")
 	if !hasIssue(res, diag.E_INVALID_INVARIANT, "message must not be empty") {
 		t.Errorf("want E_INVALID_INVARIANT naming the empty message; got %v", res.Err())
-	}
-	_, res = schema.NewBuilder().WithName("s").
-		AddType("T").WithPrimaryKey("id", schema.NewStringConstraint()).
-		WithInvariant("", expr.SExpr{expr.Op("!="), expr.SExpr{expr.Op("p"), expr.NewLiteral("id")}, expr.NewLiteral("")}, "").
-		Done().Build()
-	if !hasIssue(res, diag.E_INVALID_INVARIANT, "message must not be empty") {
-		t.Errorf("Builder: want E_INVALID_INVARIANT naming the empty message; got %v", res.Err())
-	}
-}
-
-// An invariant without an expression is refused at load by the same rule,
-// and nothing downstream tolerates the state.
-func TestBuild_RefusesANilInvariantExpression(t *testing.T) {
-	t.Parallel()
-	_, res := schema.NewBuilder().WithName("s").
-		AddType("T").WithPrimaryKey("id", schema.NewStringConstraint()).
-		WithInvariant("m", nil, "").
-		Done().Build()
-	if !hasIssue(res, diag.E_INVALID_INVARIANT, "has no expression") {
-		t.Errorf("want E_INVALID_INVARIANT naming the absent expression; got %v", res.Err())
 	}
 }
 

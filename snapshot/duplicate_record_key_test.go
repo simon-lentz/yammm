@@ -7,9 +7,7 @@ import (
 
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/graph"
-	"github.com/simon-lentz/yammm/immutable"
-	"github.com/simon-lentz/yammm/instance"
-	"github.com/simon-lentz/yammm/location"
+	"github.com/simon-lentz/yammm/internal/instancetest"
 	"github.com/simon-lentz/yammm/schema"
 	"github.com/simon-lentz/yammm/snapshot"
 )
@@ -42,27 +40,17 @@ func respellAfter(t *testing.T, data []byte, marker, from, to string) []byte {
 func TestLoad_DuplicateRecordKeyAgreesAcrossSpellings(t *testing.T) {
 	t.Parallel()
 	s := foreignSpellingSchema(t)
-	sensorType, _ := s.Type("Sensor")
-	readingType, _ := s.Type("Reading")
-
-	reading := func() instance.ValidInstance {
-		return instance.NewValidInstance("Reading", readingType.ID(),
-			immutable.WrapKey([]any{canonicalStamp}),
-			immutable.WrapProperties(map[string]any{"taken_at": canonicalStamp}),
-			nil, nil, location.Provenance{})
-	}
-	sensor := instance.NewValidInstance("Sensor", sensorType.ID(),
-		immutable.WrapKey([]any{canonicalStamp}),
-		immutable.WrapProperties(map[string]any{"observed_at": canonicalStamp}),
-		nil, map[string]immutable.Value{"READINGS": immutable.Wrap([]any{reading()})}, location.Provenance{})
+	sensor := instancetest.Valid(t, s, "Sensor", map[string]any{
+		"observed_at": canonicalStamp,
+		"readings":    []any{map[string]any{"taken_at": canonicalStamp}},
+	})
 
 	g := graph.New(s)
 	if r := g.Add(t.Context(), sensor); !r.OK() {
 		t.Fatalf("add: %s", r)
 	}
-	if r := g.AddComposed(t.Context(), sensorType.ID(), graph.FormatKey(canonicalStamp),
-		"READINGS", reading()); r.OK() {
-		t.Fatal("a duplicate sibling was accepted")
+	if r := g.Add(t.Context(), instancetest.Valid(t, s, "Sensor", map[string]any{"observed_at": canonicalStamp})); r.OK() {
+		t.Fatal("a duplicate root was accepted")
 	}
 
 	data, mr := snapshot.Marshal(t.Context(), g.Snapshot())
@@ -117,16 +105,10 @@ part type Line {
 // first key, which a JSON round trip through a Go map does not preserve.
 func oneSlotDocument(t *testing.T, s schema.Schema) (sole, twoOccupants []byte) {
 	t.Helper()
-	orderType, _ := s.Type("Order")
-	addressType, _ := s.Type("Address")
-
-	order := instance.NewValidInstance("Order", orderType.ID(),
-		immutable.WrapKey([]any{"o1"}),
-		immutable.WrapProperties(map[string]any{"id": "o1"}), nil,
-		map[string]immutable.Value{"ADDRESS": immutable.Wrap([]any{
-			instance.NewValidInstance("Address", addressType.ID(), immutable.WrapKey([]any{"first"}),
-				immutable.WrapProperties(map[string]any{"street": "first"}), nil, nil, location.Provenance{}),
-		})}, location.Provenance{})
+	order := instancetest.Valid(t, s, "Order", map[string]any{
+		"id":      "o1",
+		"address": []any{map[string]any{"street": "first"}},
+	})
 
 	g := graph.New(s)
 	if r := g.Add(t.Context(), order); !r.OK() {

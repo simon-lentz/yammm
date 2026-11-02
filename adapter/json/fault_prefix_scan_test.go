@@ -197,7 +197,7 @@ func rewriteIsExact(data []byte) bool {
 func assertPlacementAgrees(t *testing.T, doc []byte, from int, judge func([]byte) prefixVerdict) {
 	t.Helper()
 	want, faulty := prefixFault(t, doc, from, judge)
-	_, result := New().ParseObject(t.Context(), location.MustNewSourceID("test://data/scan.json"), doc)
+	_, result := New().ParseObject(t.Context(), location.NewSourceID("test://data/scan.json"), doc)
 	var faults []int
 	for issue := range result.Issues() {
 		if isDecoderFault(issue) {

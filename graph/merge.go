@@ -2,29 +2,13 @@ package graph
 
 import (
 	"cmp"
-	"context"
 	"fmt"
-	"log/slog"
 	"maps"
 	"slices"
 
 	"github.com/simon-lentz/yammm/diag"
-	"github.com/simon-lentz/yammm/instance"
-	"github.com/simon-lentz/yammm/internal/trace"
 	"github.com/simon-lentz/yammm/schema"
 )
-
-// AddOrMerge adds inst as [Graph.Add] does, or, when the graph already holds an
-// instance of its type at its primary key and inst carries no composed
-// children, installs inst's association records on the held instance and keeps
-// nothing else of inst. It reports whether it merged; a merge records no
-// [Duplicate] and raises no error, and one that would give a (one) association
-// a second target is refused with an E_GRAPH_CARDINALITY for each such
-// association. The package doc's Merge
-// on a Duplicate Key section states the rules. Panics as [Graph.Add] does.
-func (g *Graph) AddOrMerge(ctx context.Context, inst instance.ValidInstance) (merged bool, res diag.Result) {
-	return g.add(ctx, inst, "graph.AddOrMerge", "yammm.graph.add_or_merge", true)
-}
 
 // recordSlot addresses one source instance's association.
 type recordSlot struct {
@@ -59,8 +43,8 @@ func (g *Graph) installPendingEdge(p *pendingEdge) {
 }
 
 // resolvePending turns every unresolved record naming target, at typeID and
-// key, into an edge, and returns how many it resolved.
-func (g *Graph) resolvePending(typeID schema.TypeID, key string, target Instance) int {
+// key, into an edge.
+func (g *Graph) resolvePending(typeID schema.TypeID, key string, target Instance) {
 	pk := pendingKey{targetTypeID: typeID, targetKey: key}
 	list := g.pending[pk]
 	for _, pend := range list {
@@ -68,7 +52,6 @@ func (g *Graph) resolvePending(typeID schema.TypeID, key string, target Instance
 		g.installEdge(newEdge(pend.relation, pend.source, target, pend.properties))
 	}
 	delete(g.pending, pk)
-	return len(list)
 }
 
 // removePending drops p from the graph's unresolved records.
@@ -122,7 +105,7 @@ func (g *Graph) sourceIndex() {
 }
 
 // holdsTarget reports whether h holds an edge to, or an unresolved record
-// naming, the target at key. A nil h holds none.
+// naming, the target at key, which is not empty. A nil h holds none.
 func (h *heldRecords) holdsTarget(key string) bool {
 	if h == nil {
 		return false
@@ -133,7 +116,7 @@ func (h *heldRecords) holdsTarget(key string) bool {
 		}
 	}
 	for _, p := range h.pending {
-		if p.reasonDetail == "" && p.targetKey == key {
+		if p.targetKey == key {
 			return true
 		}
 	}
@@ -213,7 +196,7 @@ func (g *Graph) planMerge(typ schema.Type, held Instance, staged []stagedEdge) (
 // held, an unresolved record where it is not. A record under a required
 // association retires held's "absent" or "empty" record there, which stands
 // alone by the package doc's Records fact. Called under g.mu.
-func (g *Graph) commitMerge(ctx context.Context, held Instance, plan []stagedEdge) {
+func (g *Graph) commitMerge(held Instance, plan []stagedEdge) {
 	for _, se := range plan {
 		if h := g.bySource[recordSlot{held, se.relation}]; h != nil {
 			for _, p := range slices.Clone(h.pending) {
@@ -236,10 +219,4 @@ func (g *Graph) commitMerge(ctx context.Context, held Instance, plan []stagedEdg
 			isRequired: se.isRequired,
 		})
 	}
-	trace.Debug(
-		ctx, g.config.logger, "merged on duplicate primary key",
-		slog.String("type", held.TypeName()),
-		slog.String("pk", held.PrimaryKey().String()),
-		slog.Int("records", len(plan)),
-	)
 }

@@ -155,10 +155,9 @@ func run(stdout, stderr io.Writer, args []string) error {
 		logger.Info("received signal, shutting down", slog.String("signal", sig.String()))
 		_ = server.Close() // ordered shutdown: workspace.Shutdown() + jrpc2.Stop(); Close always returns nil
 
-		// Close stdin to unblock RunStdio's read operation.
-		// When running manually (not connected to an LSP client), the JSON-RPC
-		// connection's Close() doesn't close the underlying stdin, leaving
-		// RunStdio blocked on os.Stdin.Read().
+		// Close stdin, which ends RunStdio's read on a pollable descriptor. On Unix the
+		// read of a blocking one outlives this close, and the bounded wait below ends
+		// the process.
 		if err := os.Stdin.Close(); err != nil {
 			logger.Debug("error closing stdin", slog.Any("error", err))
 		}

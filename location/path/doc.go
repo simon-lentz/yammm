@@ -1,8 +1,8 @@
 // Package path provides canonical JSONPath-like syntax for identifying
-// positions within validated instance data.
+// positions within instance data, validated or not.
 //
 // This package lives in the location layer because instance paths are
-// diagnostic/tracing infrastructure — they answer "where in the data
+// diagnostic infrastructure — they answer "where in the data
 // structure?" alongside the source location types (Span, Position, SourceID)
 // that answer "where in the source file?".
 //
@@ -22,8 +22,8 @@
 //
 // Primary key-based indices use the format [field=value], where the value's
 // written form records its kind; Parse reads an integer back as an int64 (a
-// uint64 above the int64 range), a float as a float64, and any other value as
-// a string:
+// uint64 above the int64 range), a float as a float64, a boolean as a bool, and
+// a quoted value as a string:
 //
 //   - String: [name="Alice"] (quoted)
 //   - Integer of any of Go's sized or unsized integer types, int through
@@ -47,13 +47,15 @@
 //	\uXXXX for any other control character
 //
 // Parse decodes a quoted string as RFC 8259 section 7 does: it also accepts
-// \/ and a \uXXXX surrogate pair, and it refuses an unpaired surrogate and a
-// raw control character. Invalid UTF-8 in a key is written as U+FFFD.
+// \/ and a \uXXXX surrogate pair, and it refuses a raw control character. It also
+// refuses an unpaired surrogate, which the RFC does not. Invalid UTF-8 in a key is
+// written as U+FFFD.
 //
 // # Builder Pattern
 //
-// The [Builder] type is immutable; each method returns a new Builder with
-// the appended segment. This enables safe concurrent use:
+// The [Builder] type is immutable: [Builder.Key], [Builder.Index] and [Builder.PK]
+// return a Builder with the appended segment and leave the receiver as it was, and
+// [Builder.PK] with no fields appends none. This enables safe concurrent use:
 //
 //	p := path.Root().Key("Person").PK(path.PKField{Name: "id", Value: 42})
 //	fmt.Println(p.String()) // $.Person[id=42]
@@ -67,6 +69,6 @@
 //
 // # Thread Safety
 //
-// All types in this package are immutable and safe for concurrent use.
+// A Builder is immutable and safe for concurrent use.
 // The zero value of Builder represents the root path ($); use [Root] for clarity.
 package path

@@ -15,9 +15,9 @@ import (
 
 // MaxComposedDepth is the deepest composed nesting a validated instance may
 // hold: a root is depth 0, its composed children depth 1, and a child at a
-// depth past this bound draws [ErrCompositionDepthExceeded]. The .ys wire
-// enforces the same number on write and read, so every validated instance is
-// one a snapshot can carry.
+// depth past this bound draws [ErrCompositionDepthExceeded]. The .ys reader
+// refuses a document nested past the same number, so no validated instance is
+// nested deeper than a snapshot can carry.
 const MaxComposedDepth = 32
 
 // pkPathFromInstance builds a PK-based path segment for a validated instance.
@@ -113,7 +113,7 @@ func (v *Validator) validateComposition(
 	depth int,
 ) (immutable.Value, bool) {
 	// An explicit null is a shape error whatever the optionality.
-	if isAbsent(rawValue) {
+	if IsAbsent(rawValue) {
 		collector.Collect(shapeMismatch(rel, fmt.Sprintf("composition %q: null is not a valid composition value", rel.Name()),
 			"array", "null", prov, relPath))
 		return immutable.Value{}, false
@@ -146,8 +146,8 @@ func (v *Validator) validateComposition(
 
 	// A composition always arrives as an array, so its multiplicity is not
 	// settled by the shape the way a (one) association's object form is. A
-	// slot given more children than it holds is the fact graph assembly
-	// reports under the same code.
+	// slot given more children than it holds draws the code the graph import
+	// raises for the same fact.
 	if !rel.IsMany() && len(arr) > 1 {
 		issue := diag.NewIssue(
 			diag.Error,
@@ -206,7 +206,7 @@ func (v *Validator) validateComposition(
 	// the faulty child; an outer level must not stack a second entry under
 	// the same keys.
 	relationDetails := diag.PathRelation(rel.Name(), rel.FieldName())
-	validChildren, childType := v.validateComposedBatch(ctx, rel, childRaws, childBases, childDepth, func(_ int, res diag.Result) {
+	validChildren, childType := v.validateComposedBatch(ctx, rel, childRaws, childBases, childDepth, func(res diag.Result) {
 		collector.MergeFunc(res, func(issue diag.Issue) diag.Issue {
 			if hasDetailKey(issue, diag.DetailKeyRelationName) || hasDetailKey(issue, diag.DetailKeyJSONField) {
 				return issue

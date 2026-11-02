@@ -9,7 +9,9 @@ import (
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/instance"
-	"github.com/simon-lentz/yammm/location"
+	"github.com/simon-lentz/yammm/internal/instancetest"
+	"github.com/simon-lentz/yammm/internal/snapparts"
+	"github.com/simon-lentz/yammm/internal/snappartstest"
 	"github.com/simon-lentz/yammm/schema"
 	"github.com/simon-lentz/yammm/snapshot"
 )
@@ -157,27 +159,30 @@ func loadStoredKeySchema(t *testing.T) schema.Schema {
 	return s
 }
 
-func (c storedKeyCase) parts(t *testing.T, s schema.Schema) graph.SnapshotParts {
+func (c storedKeyCase) parts(t *testing.T, s schema.Schema) snapparts.Parts {
 	t.Helper()
 	id := mustTypeID(t, s, c.typ.name)
-	ip := graph.InstanceParts{TypeID: id, PrimaryKey: immutable.WrapKey(c.key()), Properties: immutable.WrapProperties(c.props())}
+	ip := snapparts.Instance{TypeID: id, PrimaryKey: immutable.WrapKey(c.key()), Properties: immutable.WrapProperties(c.props())}
 	if !c.typ.composed {
-		return graph.SnapshotParts{Types: []schema.TypeID{id}, Instances: []graph.InstanceParts{ip}}
+		return snapparts.Parts{Types: []schema.TypeID{id}, Instances: []snapparts.Instance{ip}}
 	}
 	holder := mustTypeID(t, s, "Holder")
-	return graph.SnapshotParts{Types: []schema.TypeID{holder}, Instances: []graph.InstanceParts{{
+	return snapparts.Parts{Types: []schema.TypeID{holder}, Instances: []snapparts.Instance{{
 		TypeID: holder, PrimaryKey: holderKey(), Properties: immutable.WrapProperties(holderProps()),
-		Composed: map[string][]graph.InstanceParts{"PARTS": {ip}},
+		Composed: map[string][]snapparts.Instance{"PARTS": {ip}},
 	}}}
 }
 
+// add offers a legal shape to Graph.Add as a validator states it: the stored key's
+// spelling is the key property's input.
 func (c storedKeyCase) add(t *testing.T, s schema.Schema) bool {
 	t.Helper()
-	id := mustTypeID(t, s, c.typ.name)
-	inst := instance.NewValidInstance(c.typ.name, id, immutable.WrapKey(c.key()), immutable.WrapProperties(c.props()), nil, nil, location.Provenance{})
+	props := propsOf(c.typ.names, c.key())
+	var inst instance.ValidInstance
 	if c.typ.composed {
-		inst = instance.NewValidInstance("Holder", mustTypeID(t, s, "Holder"), holderKey(), immutable.WrapProperties(holderProps()),
-			nil, map[string]immutable.Value{"PARTS": immutable.Wrap([]any{inst})}, location.Provenance{})
+		inst = instancetest.Valid(t, s, "Holder", map[string]any{"id": "h1", "parts": []any{props}})
+	} else {
+		inst = instancetest.Valid(t, s, c.typ.name, props)
 	}
 	return graph.New(s).Add(context.Background(), inst).OK()
 }
@@ -200,17 +205,14 @@ type keyWireGroup struct {
 func keyWireFrame(t *testing.T, s schema.Schema) (head, tail string, rows map[string]int) {
 	t.Helper()
 	var ids []schema.TypeID
-	var insts []graph.InstanceParts
+	var insts []snapparts.Instance
 	for _, kt := range keyedTypes() {
 		c := storedKeyCase{kt, keyShapes()[0]}
 		p := c.parts(t, s)
 		ids = append(ids, p.Types...)
 		insts = append(insts, p.Instances...)
 	}
-	built, res := graph.RebuildSnapshot(s, graph.SnapshotParts{Types: ids, Instances: insts})
-	if res.HasErrors() {
-		t.Fatalf("the legal frame was refused: %s", res)
-	}
+	built := snappartstest.Loaded(t, s, snapparts.Parts{Types: ids, Instances: insts})
 	data, mres := snapshot.Marshal(context.Background(), built)
 	if mres.HasErrors() {
 		t.Fatalf("marshal: %s", mres)
@@ -255,14 +257,14 @@ func (c storedKeyCase) wire(t *testing.T, head, tail string, rows map[string]int
 	return []byte(head + string(body) + tail)
 }
 
-// TestStoredKey_EveryImplementationAgrees holds the key rule over the class of
-// key kinds (a String, a UUID and a Timestamp, both canonicalizing, and a
-// composite key ending in a Date)
-// at a root and at a composed child, crossed with every way a stored key can
-// stand beside its key properties. Graph.Add, graph.RebuildSnapshot,
-// snapshot.Load and snapshot.Verify each accept exactly the legal shapes; a key
-// property that is absent or null is refused whatever the stored key holds.
-func TestStoredKey_EveryImplementationAgrees(t *testing.T) {
+// TestStoredKey_TheReadersAcceptExactlyTheLegalShapes holds the key rule over the
+// class of key kinds (a String, a UUID and a Timestamp, both canonicalizing, and a
+// composite key ending in a Date) at a root and at a composed child, crossed with
+// every way a stored key can stand beside its key properties. snapshot.Load and
+// snapshot.Verify each accept exactly the legal shapes; a key property that is
+// absent or null is refused whatever the stored key holds. Graph.Add accepts each
+// legal shape; a validator states no other.
+func TestStoredKey_TheReadersAcceptExactlyTheLegalShapes(t *testing.T) {
 	t.Parallel()
 	s := loadStoredKeySchema(t)
 	head, tail, rows := keyWireFrame(t, s)
@@ -273,12 +275,8 @@ func TestStoredKey_EveryImplementationAgrees(t *testing.T) {
 			n++
 			t.Run(c.String(), func(t *testing.T) {
 				t.Parallel()
-				if got := c.add(t, s); got != shape.legal {
-					t.Errorf("Graph.Add accepted=%v, want %v", got, shape.legal)
-				}
-				_, rres := graph.RebuildSnapshot(s, c.parts(t, s))
-				if got := !rres.HasErrors(); got != shape.legal {
-					t.Errorf("RebuildSnapshot accepted=%v, want %v: %s", got, shape.legal, rres)
+				if shape.legal && !c.add(t, s) {
+					t.Error("Graph.Add refused a legal shape")
 				}
 				data := c.wire(t, head, tail, rows)
 				_, lres := snapshot.Load(context.Background(), data, s, snapshot.WithIntegrityCheck(false))

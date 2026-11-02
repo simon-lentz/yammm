@@ -3,6 +3,7 @@ package neo4j
 import (
 	"testing"
 
+	"github.com/simon-lentz/yammm/instance"
 	"github.com/simon-lentz/yammm/internal/raceskip"
 	"github.com/simon-lentz/yammm/schema"
 )
@@ -54,20 +55,21 @@ func TestCoerceParams_JudgingALoadedSchemasTypesAllocatesNothing(t *testing.T) {
 		t.Errorf("CoerceParams allocates %v per call judging accepted types; want 0", allocs)
 	}
 	for name, c := range types {
+		one := ParamTypes{"v": c}
 		if allocs := testing.AllocsPerRun(100, func() {
-			if _, err := Coerce(c, nil); err != nil {
+			if _, err := CoerceParams(nil, one); err != nil {
 				t.Fatal(err)
 			}
 		}); allocs != 0 {
-			t.Errorf("Coerce allocates %v per call judging %s (%s); want 0", allocs, name, c)
+			t.Errorf("CoerceParams allocates %v per call judging %s (%s); want 0", allocs, name, c)
 		}
 	}
 }
 
-// Coerce passes a typed collection a Vector or a scalar List holds at no cost
+// The value rule passes a typed collection a Vector or a scalar List holds at no cost
 // beyond reading its form: only a List can nest, so a Vector is never judged for
 // it, and judging a List's element allocates nothing.
-func TestCoerce_ATypedCollectionCostsOnlyItsForm(t *testing.T) {
+func TestCoerceValue_ATypedCollectionCostsOnlyItsForm(t *testing.T) {
 	raceskip.Skip(t)
 	for name, tc := range map[string]struct {
 		c   schema.Constraint
@@ -77,13 +79,13 @@ func TestCoerce_ATypedCollectionCostsOnlyItsForm(t *testing.T) {
 		"List<Float>":  {schema.NewListConstraint(schema.NewFloatConstraint()), []float64{1, 2, 3}},
 		"List<String>": {schema.NewListConstraint(schema.NewStringConstraint()), []string{"a"}},
 	} {
-		form := testing.AllocsPerRun(100, func() { _ = holdsNone(tc.raw) })
+		form := testing.AllocsPerRun(100, func() { _ = instance.IsAbsent(tc.raw) })
 		if allocs := testing.AllocsPerRun(100, func() {
-			if _, err := Coerce(tc.c, tc.raw); err != nil {
+			if _, err := coerceValue(tc.c, tc.raw); err != nil {
 				t.Fatal(err)
 			}
 		}); allocs != form {
-			t.Errorf("Coerce allocates %v per call at %s; want %v, the cost of reading its form", allocs, name, form)
+			t.Errorf("coerceValue allocates %v per call at %s; want %v, the cost of reading its form", allocs, name, form)
 		}
 	}
 }

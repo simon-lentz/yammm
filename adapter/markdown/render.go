@@ -622,8 +622,7 @@ func (g *generator) relationTarget(rel schema.Relation) string {
 // writeInvariantList writes the type's invariants: the failure message as the
 // bullet (an inherited invariant carries a " — from <Owner>" marker, mirroring
 // the property table), the documentation indented beneath it, then the
-// declaration source in a yammm fence when the span and source content allow
-// extraction.
+// declaration source in a yammm fence.
 func (g *generator) writeInvariantList(t schema.Type, invs []schema.Invariant) {
 	from := inheritedFrom(g, t, schema.Type.Invariants)
 	g.buf.WriteString("**Invariants**\n")
@@ -634,59 +633,37 @@ func (g *generator) writeInvariantList(t schema.Type, invs []schema.Invariant) {
 			g.writeAuthorText(doc, true)
 			g.buf.WriteString("\n")
 		}
-		if src, ok := g.invariantSource(inv); ok {
-			var fence bytes.Buffer
-			writeFence(&fence, "yammm", src)
-			g.buf.WriteString("\n" + indentUnderBullet(fence.String()))
-		}
+		var fence bytes.Buffer
+		writeFence(&fence, "yammm", g.invariantSource(inv))
+		g.buf.WriteString("\n" + indentUnderBullet(fence.String()))
 	}
 }
 
-// invariantSource extracts the invariant's declaration text from its source,
-// and returns ok=false — degrading the invariant to message-only — when byte
-// offsets are unknown or the schema carries no source content (a
-// Builder-built schema). The comments the span starts with — the doc comment,
-// which renders separately, and any other before the "!" — are stripped,
-// whatever they hold, so the fence starts at the declaration.
-func (g *generator) invariantSource(inv schema.Invariant) (string, bool) {
+// invariantSource extracts the invariant's declaration text from its source.
+// The comments the span starts with — the doc comment, which renders separately,
+// and any other before the "!" — are stripped, whatever they hold, so the fence
+// starts at the declaration.
+func (g *generator) invariantSource(inv schema.Invariant) string {
 	span := inv.Span()
-	if !span.Start.HasByte() || !span.End.HasByte() {
-		return "", false
-	}
-	content, ok := g.sourceContent(span.Source)
-	if !ok {
-		return "", false
-	}
-	start, end := span.Start.Byte, span.End.Byte
-	if start < 0 || end > len(content) || start >= end {
-		return "", false
-	}
-	text := withoutLeadingComments(string(content[start:end]))
+	content := g.sourceContent(span.Source)
+	end := span.End.Byte
+	text := withoutLeadingComments(string(content[span.Start.Byte:end]))
 	at := end - len(text)
-	text = strings.TrimRight(dedent(lineEndings.Replace(text), lineIndent(content, at)), " \t\n")
-	return text, text != ""
+	return dedent(lineEndings.Replace(text), lineIndent(content, at))
 }
 
-// withoutLeadingComments returns text from its first character that is
-// neither white space nor inside a comment; when a comment does not end, it
-// returns text from that comment on.
+// withoutLeadingComments returns text from its first character that is neither
+// white space nor inside a comment. text ends at a declaration's last token, so
+// every comment in it ends.
 func withoutLeadingComments(text string) string {
 	for {
 		text = strings.TrimLeft(text, " \t\r\n")
 		if rest, ok := strings.CutPrefix(text, "/*"); ok {
-			_, after, closed := strings.Cut(rest, "*/")
-			if !closed {
-				return text
-			}
-			text = after
+			_, text, _ = strings.Cut(rest, "*/")
 			continue
 		}
 		if rest, ok := strings.CutPrefix(text, "//"); ok {
-			i := strings.IndexAny(rest, "\r\n")
-			if i < 0 {
-				return text
-			}
-			text = rest[i:]
+			text = rest[strings.IndexAny(rest, "\r\n"):]
 			continue
 		}
 		return text
@@ -709,15 +686,13 @@ func lineIndent(content []byte, pos int) string {
 // sourceContent returns a source's content, read from the schema once per
 // source: each read copies the whole source, and a source holds many
 // invariants.
-func (g *generator) sourceContent(id location.SourceID) ([]byte, bool) {
+func (g *generator) sourceContent(id location.SourceID) []byte {
 	if content, ok := g.contents[id]; ok {
-		return content, true
+		return content
 	}
-	content, ok := g.sources.ContentBySource(id)
-	if ok {
-		g.contents[id] = content
-	}
-	return content, ok
+	content, _ := g.sources.ContentBySource(id)
+	g.contents[id] = content
+	return content
 }
 
 // dedent removes from each continuation line the part of indent, the

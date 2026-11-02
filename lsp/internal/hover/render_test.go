@@ -8,7 +8,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/simon-lentz/yammm/internal/yammmtest"
-	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
 
 	"github.com/simon-lentz/yammm/lsp/internal/symbols"
@@ -65,14 +64,13 @@ func TestRenderSymbol_Golden(t *testing.T) {
 			root: "/project",
 			build: func(t *testing.T) *symbols.Symbol {
 				t.Helper()
-				s, result := schema.NewBuilder().
-					WithName("test").
-					WithSourceID(location.MustNewSourceID("test://types.yammm")).
-					AddType("Person").
-					WithTypeDocumentation("A person entity.").
-					WithPrimaryKey("id", schema.NewStringConstraint()).
-					Done().
-					Build()
+				s, result := schema.LoadString(t.Context(), `schema "test"
+
+/* A person entity. */
+type Person {
+	id String primary
+}
+`, "types.yammm")
 				require.False(t, result.HasErrors())
 				return &symbols.Symbol{Name: "Person", Kind: symbols.SymbolType, SourceID: s.SourceID(), Data: mustType(t, s, "Person")}
 			},
@@ -81,14 +79,12 @@ func TestRenderSymbol_Golden(t *testing.T) {
 			name: "abstract type",
 			build: func(t *testing.T) *symbols.Symbol {
 				t.Helper()
-				s, result := schema.NewBuilder().
-					WithName("test").
-					WithSourceID(location.MustNewSourceID("test://types.yammm")).
-					AddType("Entity").
-					AsAbstract().
-					WithPrimaryKey("id", schema.NewStringConstraint()).
-					Done().
-					Build()
+				s, result := schema.LoadString(t.Context(), `schema "test"
+
+abstract type Entity {
+	id String primary
+}
+`, "types.yammm")
 				require.False(t, result.HasErrors())
 				return &symbols.Symbol{Name: "Entity", Kind: symbols.SymbolType, SourceID: s.SourceID(), Data: mustType(t, s, "Entity")}
 			},
@@ -97,14 +93,12 @@ func TestRenderSymbol_Golden(t *testing.T) {
 			name: "part type",
 			build: func(t *testing.T) *symbols.Symbol {
 				t.Helper()
-				s, result := schema.NewBuilder().
-					WithName("test").
-					WithSourceID(location.MustNewSourceID("test://types.yammm")).
-					AddType("Wheel").
-					AsPart().
-					WithPrimaryKey("id", schema.NewStringConstraint()).
-					Done().
-					Build()
+				s, result := schema.LoadString(t.Context(), `schema "test"
+
+part type Wheel {
+	id String primary
+}
+`, "types.yammm")
 				require.False(t, result.HasErrors())
 				return &symbols.Symbol{Name: "Wheel", Kind: symbols.SymbolType, SourceID: s.SourceID(), Data: mustType(t, s, "Wheel")}
 			},
@@ -113,14 +107,13 @@ func TestRenderSymbol_Golden(t *testing.T) {
 			name: "property",
 			build: func(t *testing.T) *symbols.Symbol {
 				t.Helper()
-				s, result := schema.NewBuilder().
-					WithName("test").
-					WithSourceID(location.MustNewSourceID("test://p.yammm")).
-					AddType("Person").
-					WithPrimaryKey("id", schema.NewStringConstraint()).
-					WithProperty("name", schema.NewStringConstraint()).
-					Done().
-					Build()
+				s, result := schema.LoadString(t.Context(), `schema "test"
+
+type Person {
+	id String primary
+	name String required
+}
+`, "p.yammm")
 				require.False(t, result.HasErrors())
 				prop, ok := mustType(t, s, "Person").Property("name")
 				require.True(t, ok)
@@ -131,17 +124,17 @@ func TestRenderSymbol_Golden(t *testing.T) {
 			name: "association",
 			build: func(t *testing.T) *symbols.Symbol {
 				t.Helper()
-				s, result := schema.NewBuilder().
-					WithName("test").
-					WithSourceID(location.MustNewSourceID("test://test.yammm")).
-					AddType("Address").
-					WithPrimaryKey("id", schema.NewStringConstraint()).
-					Done().
-					AddType("Person").
-					WithPrimaryKey("id", schema.NewStringConstraint()).
-					WithRelation("ADDRESSES", schema.LocalTypeRef("Address", location.Span{}), false, true).
-					Done().
-					Build()
+				s, result := schema.LoadString(t.Context(), `schema "test"
+
+type Address {
+	id String primary
+}
+
+type Person {
+	id String primary
+	--> ADDRESSES (one:many) Address
+}
+`, "test.yammm")
 				require.False(t, result.HasErrors())
 				rel, ok := mustType(t, s, "Person").Relation("ADDRESSES")
 				require.True(t, ok)
@@ -152,18 +145,17 @@ func TestRenderSymbol_Golden(t *testing.T) {
 			name: "composition",
 			build: func(t *testing.T) *symbols.Symbol {
 				t.Helper()
-				s, result := schema.NewBuilder().
-					WithName("test").
-					WithSourceID(location.MustNewSourceID("test://test.yammm")).
-					AddType("Wheel").
-					AsPart().
-					WithPrimaryKey("id", schema.NewStringConstraint()).
-					Done().
-					AddType("Car").
-					WithPrimaryKey("id", schema.NewStringConstraint()).
-					WithComposition("WHEELS", schema.LocalTypeRef("Wheel", location.Span{}), false, true).
-					Done().
-					Build()
+				s, result := schema.LoadString(t.Context(), `schema "test"
+
+part type Wheel {
+	id String primary
+}
+
+type Car {
+	id String primary
+	*-> WHEELS (one:many) Wheel
+}
+`, "test.yammm")
 				require.False(t, result.HasErrors())
 				rel, ok := mustType(t, s, "Car").Relation("WHEELS")
 				require.True(t, ok)
@@ -186,34 +178,30 @@ func TestRenderSymbol_Golden(t *testing.T) {
 			root: yammmtest.HostAbs("/project"),
 			build: func(t *testing.T) *symbols.Symbol {
 				t.Helper()
-				sourceID, err := location.SourceIDFromPath(yammmtest.HostAbs("/project/schemas/person.yammm"))
-				require.NoError(t, err)
-				s, result := schema.NewBuilder().
-					WithName("test").
-					WithSourceID(sourceID).
-					AddType("TestType").
-					WithPrimaryKey("id", schema.NewStringConstraint()).
-					Done().
-					Build()
+				entry := yammmtest.HostAbs("/project/schemas/person.yammm")
+				s, result := schema.LoadSourcesWithEntry(t.Context(), map[string][]byte{entry: []byte(`schema "test"
+
+type TestType {
+	id String primary
+}
+`)}, entry, "")
 				require.False(t, result.HasErrors())
-				return &symbols.Symbol{Name: "TestType", Kind: symbols.SymbolType, SourceID: sourceID, Data: mustType(t, s, "TestType")}
+				return &symbols.Symbol{Name: "TestType", Kind: symbols.SymbolType, SourceID: s.SourceID(), Data: mustType(t, s, "TestType")}
 			},
 		},
 		{
 			name: "type with absolute source path when no root",
 			build: func(t *testing.T) *symbols.Symbol {
 				t.Helper()
-				sourceID, err := location.SourceIDFromPath(yammmtest.HostAbs("/project/person.yammm"))
-				require.NoError(t, err)
-				s, result := schema.NewBuilder().
-					WithName("test").
-					WithSourceID(sourceID).
-					AddType("TestType").
-					WithPrimaryKey("id", schema.NewStringConstraint()).
-					Done().
-					Build()
+				entry := yammmtest.HostAbs("/project/person.yammm")
+				s, result := schema.LoadSourcesWithEntry(t.Context(), map[string][]byte{entry: []byte(`schema "test"
+
+type TestType {
+	id String primary
+}
+`)}, entry, "")
 				require.False(t, result.HasErrors())
-				return &symbols.Symbol{Name: "TestType", Kind: symbols.SymbolType, SourceID: sourceID, Data: mustType(t, s, "TestType")}
+				return &symbols.Symbol{Name: "TestType", Kind: symbols.SymbolType, SourceID: s.SourceID(), Data: mustType(t, s, "TestType")}
 			},
 		},
 	}

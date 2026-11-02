@@ -7,9 +7,9 @@ import (
 	"errors"
 	"fmt"
 	"slices"
-	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/graph"
@@ -23,32 +23,15 @@ import (
 // start and once per type group during emission, returning Fatal
 // E_CONTEXT_CANCELLED on cancellation.
 //
-// A property value the wire cannot carry as itself — a non-finite float, a
-// string that is not valid UTF-8 (a map's key included), a json.Number whose
-// text is no JSON number literal (an empty one, which encoding/json writes as
-// 0, among them), a time.Time or a uuid.UUID its constraint
-// does not render as text that reads back, or a value of no form every writer writes
-// ([github.com/simon-lentz/yammm/instance.ScalarOf]), such as a struct —
-// returns nil bytes with Error E_SNAPSHOT_MALFORMED
-// naming the property and where it sits: the root or duplicate record by type
-// and key, the composition path to a composed child, and for an edge property
-// the relation. Only a value no validator judged is one. It reaches the
-// snapshot on an unjudged instance through [graph.Graph.Add],
-// [graph.Graph.AddComposed], [graph.RebuildSnapshot],
-// [graph.BatchAssembler.AddValid] or [graph.BatchAssembler.AddValidOrMerge], or
-// through [graph.Graph.AddOrMerge], which installs an unjudged instance's edge
-// properties on the instance the graph holds. A snapshot nested
-// deeper than the reader accepts returns nil bytes with Error
-// E_SNAPSHOT_DEPTH_EXCEEDED — the same code and severity the reader raises, so
-// the bound reads identically from both sides. Fatal E_INTERNAL marks only a
-// broken invariant of the snapshot itself. Panics if snap is zero.
+// Every snapshot came from a validator or a document, so the wire has a form for
+// every value it holds, and no tree in it is nested deeper than the reader
+// accepts. Fatal E_INTERNAL marks only a broken invariant of the snapshot
+// itself. Panics if snap is zero.
 //
-// Three further refusals, each Error: an indent that is not JSON whitespace, which
-// would produce bytes that are not JSON ([diag.E_SNAPSHOT_MALFORMED]); a
-// metadata key or value that is not valid UTF-8, which encoding/json would
-// write as U+FFFD ([diag.E_SNAPSHOT_MALFORMED]); and a denoted type whose
-// schema is outside the entry schema's import closure, which the document has
-// no portable name for ([diag.E_SNAPSHOT_UNKNOWN_TYPE]).
+// Three further refusals, each Error [diag.E_SNAPSHOT_MALFORMED]: an indent that is
+// not JSON whitespace, which would produce bytes that are not JSON, and a metadata
+// key or value, or an instance provenance's source name or raw path, that is not
+// valid UTF-8, which encoding/json would write as U+FFFD.
 func Marshal(ctx context.Context, snap graph.Snapshot, opts ...Option) ([]byte, diag.Result) {
 	if snap.IsZero() {
 		panic("snapshot.Marshal: zero Snapshot")
@@ -82,18 +65,6 @@ func Marshal(ctx context.Context, snap graph.Snapshot, opts ...Option) ([]byte, 
 	// identity lives in the types table, every other position is a row index.
 	names := newSchemaNames(s)
 	view := newWriterView(snap, names)
-	// Refused before a byte is written: a type the closure cannot name has no
-	// portable rendering, and writing its source path instead would put a
-	// machine-local path into the one field the re-key exists to keep free of
-	// them — in a document that would otherwise look well-formed.
-	if id, ok := names.requireDenotable(snap.Types()); !ok {
-		c := diag.NewCollector(0)
-		c.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_UNKNOWN_TYPE,
-			fmt.Sprintf("cannot write type %s: its schema is not in the entry schema's import closure, so the document has no portable name for it", id)).
-			WithDetail(diag.DetailKeyTypeName, id.String()).
-			Build())
-		return nil, c.Result()
-	}
 	tt := buildTypeTable(view, names)
 
 	groups, err := marshalInstances(ctx, view, s, tt)
@@ -254,7 +225,7 @@ func marshalInstances(ctx context.Context, view *writerView, s schema.Schema, tt
 		}
 		items := make([]instWire, 0, len(group.instances))
 		for _, inst := range group.instances {
-			w, err := marshalInstance(inst, view.snap, s, tt, false, 0)
+			w, err := marshalInstance(inst, view.snap, s, tt, false)
 			if err != nil {
 				return nil, err
 			}
@@ -274,26 +245,12 @@ func marshalInstance(
 	s schema.Schema,
 	tt *typeTable,
 	carryType bool,
-	depth int,
 ) (instWire, error) {
-	// The same bound the reader enforces, so Marshal never writes a document
-	// Load and Verify refuse whole.
-	if depth > maxComposedDepth {
-		return instWire{}, &depthExceededError{
-			depth: depth,
-			ref:   tt.ref(inst.TypeID()),
-			key:   inst.PrimaryKey().String(),
-		}
-	}
 	id := inst.TypeID()
 	t, _ := s.TypeByID(id)
-	props, bad := wireProps(inst.Properties(), t)
-	if bad != "" {
-		return instWire{}, &unwritableValueError{ref: tt.ref(id), key: inst.PrimaryKey().String(), property: bad}
-	}
 	w := instWire{
 		Key:        inst.PrimaryKey().Clone(),
-		Properties: props,
+		Properties: wireProps(inst.Properties(), t),
 	}
 
 	if carryType {
@@ -314,14 +271,10 @@ func marshalInstance(
 		if err != nil {
 			return instWire{}, err
 		}
-		eprops, bad := wireEdgeProps(e.Properties(), rel)
-		if bad != "" {
-			return instWire{}, &unwritableValueError{ref: tt.ref(id), key: inst.PrimaryKey().String(), relation: e.Relation(), property: bad}
-		}
 		ew := edgeWire{
 			TargetType: row,
 			TargetKey:  e.Target().PrimaryKey().Clone(),
-			Properties: eprops,
+			Properties: wireEdgeProps(e.Properties(), rel),
 		}
 		if ew.Properties == nil {
 			ew.Properties = map[string]any{}
@@ -336,13 +289,7 @@ func marshalInstance(
 		for _, relName := range compRels {
 			childWires := make([]instWire, 0, inst.ComposedCount(relName))
 			for child := range inst.Composed(relName) {
-				i := len(childWires)
-				cw, err := marshalInstance(child, snap, s, tt, true, depth+1)
-				if ue, ok := errors.AsType[*unwritableValueError](err); ok {
-					// Readdressed at each level, so the refusal names the root.
-					ue.ref, ue.key = tt.ref(id), inst.PrimaryKey().String()
-					ue.path = append([]string{fmt.Sprintf("%s[%d]", relName, i)}, ue.path...)
-				}
+				cw, err := marshalInstance(child, snap, s, tt, true)
 				if err != nil {
 					return instWire{}, err
 				}
@@ -353,13 +300,17 @@ func marshalInstance(
 		w.Composed = compMap
 	}
 
-	w.Provenance = marshalProvenance(inst)
+	prov, err := marshalProvenance(inst)
+	if err != nil {
+		return instWire{}, err
+	}
+	w.Provenance = prov
 	return w, nil
 }
 
 // marshalDiagnostics builds the diagnostics section. Every duplicate record
 // states its conflict's address. Every constructor of a snapshot gives a
-// duplicate a conflict, a composed one a parent, and an unresolved record a source.
+// duplicate a conflict and an unresolved record a source.
 func marshalDiagnostics(view *writerView, s schema.Schema, tt *typeTable) (diagWire, error) {
 	dupWires := make([]dupWire, 0, len(view.duplicates))
 	for _, d := range view.duplicates {
@@ -367,10 +318,7 @@ func marshalDiagnostics(view *writerView, s schema.Schema, tt *typeTable) (diagW
 		if err != nil {
 			return diagWire{}, err
 		}
-		inst, err := marshalInstance(d.Instance(), view.snap, s, tt, false, 0)
-		if ue, ok := errors.AsType[*unwritableValueError](err); ok {
-			ue.duplicate = true
-		}
+		inst, err := marshalInstance(d.Instance(), view.snap, s, tt, false)
 		if err != nil {
 			return diagWire{}, err
 		}
@@ -378,26 +326,12 @@ func marshalDiagnostics(view *writerView, s schema.Schema, tt *typeTable) (diagW
 		if err != nil {
 			return diagWire{}, err
 		}
-		conflict := &conflictWire{Type: conflictRow}
-		if key := d.Conflict().PrimaryKey(); key.Len() > 0 {
-			conflict.Key = key.Clone()
-		}
-		dw := dupWire{
+		dupWires = append(dupWires, dupWire{
 			Type:     row,
 			Key:      d.Instance().PrimaryKey().Clone(),
 			Instance: inst,
-			Conflict: conflict,
-		}
-		if d.Relation() != "" {
-			parentRow, err := tt.rowRef(d.Parent().TypeID(), "duplicate parent type")
-			if err != nil {
-				return diagWire{}, err
-			}
-			dw.ParentType = parentRow
-			dw.ParentKey = d.Parent().PrimaryKey().Clone()
-			dw.Relation = d.Relation()
-		}
-		dupWires = append(dupWires, dw)
+			Conflict: &conflictWire{Type: conflictRow, Key: d.Conflict().PrimaryKey().Clone()},
+		})
 	}
 
 	unresWires := make([]unresolvedWire, 0, len(view.unresolved))
@@ -433,11 +367,7 @@ func marshalDiagnostics(view *writerView, s schema.Schema, tt *typeTable) (diagW
 			if srcType, ok := s.TypeByID(sourceID); ok {
 				rel, _ = srcType.Relation(u.Relation())
 			}
-			uprops, bad := wireEdgeProps(u.Properties(), rel)
-			if bad != "" {
-				return diagWire{}, &unwritableValueError{ref: tt.ref(sourceID), key: u.Source().PrimaryKey().String(), relation: u.Relation(), property: bad}
-			}
-			uw.Properties = uprops
+			uw.Properties = wireEdgeProps(u.Properties(), rel)
 		}
 		unresWires = append(unresWires, uw)
 	}
@@ -445,13 +375,17 @@ func marshalDiagnostics(view *writerView, s schema.Schema, tt *typeTable) (diagW
 	return diagWire{Duplicates: dupWires, Unresolved: unresWires}, nil
 }
 
+// errInvalidProvenance marks a provenance text that is not valid UTF-8, which
+// [Marshal] refuses as it refuses such metadata.
+var errInvalidProvenance = errors.New("provenance text is not valid UTF-8")
+
 // marshalProvenance converts an instance's provenance to its wire form,
 // preferring the raw path a load kept, for a path that failed to parse or
 // parsed to another spelling.
-func marshalProvenance(inst graph.Instance) *provenanceWire {
+func marshalProvenance(inst graph.Instance) (*provenanceWire, error) {
 	prov := inst.Provenance()
 	if prov.IsZero() {
-		return nil
+		return nil, nil //nolint:nilnil // an instance with no provenance writes none, which is no failure
 	}
 	// A recorded raw path is written back verbatim, INCLUDING an empty one.
 	// Reading RawPath() alone could not tell a recorded "" from no record, so
@@ -462,7 +396,11 @@ func marshalProvenance(inst graph.Instance) *provenanceWire {
 	if prov.HasRawPath() {
 		pathStr = prov.RawPath()
 	}
-	return &provenanceWire{SourceName: prov.SourceName(), Path: pathStr}
+	if !utf8.ValidString(prov.SourceName()) || !utf8.ValidString(pathStr) {
+		return nil, fmt.Errorf("%w: source name %s, path %s of %s[%s]", errInvalidProvenance,
+			diag.QuoteValue(prov.SourceName()), diag.QuoteValue(pathStr), inst.TypeName(), diag.ValueText(inst.PrimaryKey().String()))
+	}
+	return &provenanceWire{SourceName: prov.SourceName(), Path: pathStr}, nil
 }
 
 // assembleDocument builds the full .ys document with integrity hash.
@@ -759,32 +697,13 @@ func writeJSONString(b *strings.Builder, s string) {
 	b.Write(encoded)
 }
 
-// marshalFatalErr reports a marshal failure: Error E_SNAPSHOT_MALFORMED for a
-// value the wire cannot carry, Error E_SNAPSHOT_DEPTH_EXCEEDED for a tree nested
-// past the reader's bound, Fatal E_INTERNAL for any other.
+// marshalFatalErr reports a marshal failure. A text [errInvalidProvenance] names
+// is the caller's to correct; any other failure is a broken invariant of the
+// snapshot: every value a snapshot holds is one the wire carries.
 func marshalFatalErr(section string, err error) diag.Result {
 	c := diag.NewCollector(0)
-	// A value the wire cannot carry is caller data held by an instance no
-	// validator judged, not a fault of the writer.
-	if ue, ok := errors.AsType[*unwritableValueError](err); ok {
-		b := diag.NewIssue(diag.Error, diag.E_SNAPSHOT_MALFORMED, "snapshot.Marshal: "+ue.Error()).
-			WithDetail(diag.DetailKeyTypeName, ue.ref).
-			WithDetail(diag.DetailKeyPrimaryKey, ue.key).
-			WithDetail(diag.DetailKeyPropertyName, ue.property)
-		if ue.relation != "" {
-			b = b.WithDetail(diag.DetailKeyRelationName, ue.relation)
-		}
-		c.Collect(b.Build())
-		return c.Result()
-	}
-	// The composed-nesting bound is a property of the snapshot, not of the
-	// writer, and the reader already names it. Reporting it as an internal
-	// failure would leave a caller unable to tell the two apart.
-	if de, ok := errors.AsType[*depthExceededError](err); ok {
-		c.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_DEPTH_EXCEEDED, de.Error()).
-			WithDetail(diag.DetailKeyDepth, strconv.Itoa(de.depth)).
-			WithDetail(diag.DetailKeyTypeName, de.ref).
-			Build())
+	if errors.Is(err, errInvalidProvenance) {
+		c.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_MALFORMED, "snapshot.Marshal: "+err.Error()).Build())
 		return c.Result()
 	}
 	c.Collect(diag.NewIssue(diag.Fatal, diag.E_INTERNAL,

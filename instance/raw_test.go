@@ -12,7 +12,7 @@ import (
 func TestNewProvenance(t *testing.T) {
 	sourceName := "test.json"
 	p := path.Root().Key("users").Index(0)
-	span := location.Range(location.SourceID{}, 10, 1, 20, 50)
+	span := location.RangeWithBytes(location.SourceID{}, 10, 1, -1, 20, 50, -1)
 
 	prov := location.NewProvenance(sourceName, p, span)
 
@@ -48,7 +48,7 @@ func TestProvenance_Path(t *testing.T) {
 
 func TestProvenance_Span(t *testing.T) {
 	t.Run("non_nil", func(t *testing.T) {
-		span := location.Range(location.SourceID{}, 1, 1, 10, 100)
+		span := location.RangeWithBytes(location.SourceID{}, 1, 1, -1, 10, 100, -1)
 		prov := location.NewProvenance("test.json", path.Root(), span)
 		assert.Equal(t, span, prov.Span())
 	})

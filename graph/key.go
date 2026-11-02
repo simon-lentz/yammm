@@ -1,21 +1,14 @@
 package graph
 
 import (
-	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
-	"slices"
 	"strings"
-	"time"
-	"unicode/utf8"
 
-	"github.com/google/uuid"
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/immutable"
-	"github.com/simon-lentz/yammm/internal/value"
-	"github.com/simon-lentz/yammm/schema"
 )
 
 // FormatKey renders primary key components as the JSON array string the
@@ -24,8 +17,8 @@ import (
 // It renders the values AS GIVEN and canonicalizes nothing; the graph does,
 // at every address it receives. The graph indexes an instance by the key it
 // carries. For a Timestamp, Date or UUID key whose constraint renders the value,
-// the key is the canonical text that value took at entry — so [Graph.AddComposed] and
-// [Snapshot.InstanceByKey] canonicalize an address that misses as spelled under
+// the key is the canonical text that value took at entry — so
+// [Snapshot.InstanceByKey] canonicalizes an address that misses as spelled under
 // the type's key constraints, and FormatKey over each text spelling of one
 // instant at one offset addresses it, as does a time.Time at a Timestamp key with
 // no layout. A time.Time at a Date key, or at a Timestamp key whose layout does not read
@@ -46,8 +39,8 @@ import (
 // names the components it does not read back as written.
 //
 // FormatKey panics if any value cannot be JSON-marshaled (e.g., channels,
-// functions, cyclic structs). This is a programmer error: the key rule refuses
-// such a component, so no key a graph holds reaches it.
+// functions, cyclic structs). This is a programmer error: no key a graph holds
+// holds such a component.
 func FormatKey(values ...any) string {
 	data, err := json.Marshal(values)
 	if err != nil {
@@ -72,21 +65,18 @@ func FormatKey(values ...any) string {
 //     value that encoding/json renders as such a literal, which no value of
 //     its documented component types is.
 //
-// The round-trip law holds over normalized components — a string that is
-// valid UTF-8, int64, bool, nil, and non-whole float64: ParseKey(FormatKey(vs...))
+// The round-trip law holds over these normalized components: a valid UTF-8
+// string, int64, bool, nil and finite non-whole float64. ParseKey(FormatKey(vs...))
 // returns vs, and FormatKey(ParseKey(s)...) returns s for any s that FormatKey
 // produced from such values. Two carve-outs are documented rather than hidden:
 // FormatKey renders float64(5) as the literal 5, which ParseKey reads back as
 // int64(5) at the same rendering, and a float64 negative zero as -0, which
-// ParseKey reads back as int64(0), rendered 0. The snapshot wire has the same
-// asymmetry, for the same reason.
+// ParseKey reads back as int64(0), rendered 0.
 //
 // The string must hold exactly one JSON array and nothing else; surrounding
 // whitespace is tolerated, trailing content is not. A component that is itself
 // an array or object is an error naming its index: FormatKey's documented
 // domain is scalars.
-//
-// Use [ParseKeyStrings] when every component must be a string.
 func ParseKey(s string) ([]any, error) {
 	raw, err := decodeKeyArray(s)
 	if err != nil {
@@ -104,27 +94,6 @@ func ParseKey(s string) ([]any, error) {
 			return nil, fmt.Errorf("graph.ParseKey: component %d is not a representable number: %v", i, diag.ValueText(fmt.Sprint(norm)))
 		}
 		out[i] = norm
-	}
-	return out, nil
-}
-
-// ParseKeyStrings decodes a [FormatKey] string whose every component is a JSON
-// string, which is the shape of a key over String-typed primary key properties.
-//
-// It shares [ParseKey]'s decoding and adds the string requirement: a component
-// of any other type is an error naming its index.
-func ParseKeyStrings(s string) ([]string, error) {
-	raw, err := decodeKeyArray(s)
-	if err != nil {
-		return nil, err
-	}
-	out := make([]string, len(raw))
-	for i, v := range raw {
-		str, ok := v.(string)
-		if !ok {
-			return nil, fmt.Errorf("graph.ParseKeyStrings: component %d is %T, want string", i, immutable.NormalizeValue(v))
-		}
-		out[i] = str
 	}
 	return out, nil
 }
@@ -150,76 +119,4 @@ func decodeKeyArray(s string) ([]any, error) {
 		return nil, fmt.Errorf("graph: parsing key %s: trailing content after the array", diag.QuoteValue(s))
 	}
 	return out, nil
-}
-
-// unreadableComponent returns the index of the first component of k that
-// [ParseKey] cannot read back at the same rendering, or -1: one of no form every
-// writer writes ([value.Scalar]: a struct, an array, a list or a map among
-// them, as a json.Number that is no JSON number literal is), a string that is
-// not valid UTF-8, each invalid byte of which the rendering writes as U+FFFD, a
-// number no finite float64 holds, or a number ParseKey reads back at another
-// rendering, as a float64 negative zero reads back as 0, whose address a
-// reload would move. A component whose rendering differs from its form's is
-// refused too: the key's address renders the component through its
-// type's methods, and every writer writes the form. So is a time.Time or a
-// uuid.UUID whose key property's constraint does not render it, which no writer
-// writes; a keyless part's key has no key property, so a time or a UUID there
-// is refused. A string, a bool and an int64 settle without rendering. k has typ's key arity when typ declares a key.
-func unreadableComponent(typ schema.Type, k immutable.Key) int {
-	pks := slices.Collect(typ.PrimaryKeys())
-	for i := range k.Len() {
-		var c schema.Constraint
-		if i < len(pks) {
-			c = pks[i].Constraint()
-		}
-		raw := k.Get(i).Unwrap()
-		switch u := raw.(type) {
-		case string:
-			if !utf8.ValidString(u) {
-				return i
-			}
-			continue
-		case bool, int64, nil:
-			continue
-		}
-		held, ok := value.Scalar(raw)
-		if !ok {
-			return i
-		}
-		switch u := held.(type) {
-		case string:
-			if !utf8.ValidString(u) {
-				return i
-			}
-		case time.Time:
-			if !keyRenders(c, schema.KindTimestamp, schema.KindDate) {
-				return i
-			}
-		case uuid.UUID:
-			if !keyRenders(c, schema.KindUUID) {
-				return i
-			}
-		}
-		b, err := json.Marshal(held)
-		if err != nil {
-			return i
-		}
-		if r, err := json.Marshal(raw); err != nil || !bytes.Equal(r, b) {
-			return i
-		}
-		// A component must render back unchanged, or a reload moves the address:
-		// a uint64 or a json.Number past int64 reads back as the nearest float64,
-		// which can render otherwise.
-		rendered := "[" + string(b) + "]"
-		if back, err := ParseKey(rendered); err != nil || FormatKey(back...) != rendered {
-			return i
-		}
-	}
-	return -1
-}
-
-// keyRenders reports whether c, resolved through its aliases, is of one of
-// kinds: the kinds that render a time.Time or a uuid.UUID as text.
-func keyRenders(c schema.Constraint, kinds ...schema.ConstraintKind) bool {
-	return c != nil && slices.Contains(kinds, schema.ResolveAlias(c).Kind())
 }

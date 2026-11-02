@@ -7,7 +7,6 @@ import (
 	"unicode/utf8"
 
 	"github.com/simon-lentz/yammm/diag"
-	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -125,47 +124,6 @@ func TestLoadString_ADuplicateAliasShowsEachImportsPath(t *testing.T) {
 		}
 	}
 	if want := duplicateAliasMessage(`"./d\xZZ"`, `"./e\xZZ"`); len(got) != 1 || got[0] != want {
-		t.Errorf("duplicate alias diagnostics:\n%s\nwant:\n%s", strings.Join(got, "\n--\n"), want)
-	}
-}
-
-// TestBuilder_ADuplicateAliasShowsEachImportsPath pins that a Builder's
-// imports, which have no source spelling, show their paths quoted.
-func TestBuilder_ADuplicateAliasShowsEachImportsPath(t *testing.T) {
-	t.Parallel()
-	registry := schema.NewRegistry()
-	for _, name := range []string{"one", "two"} {
-		dep, result := schema.NewBuilder().
-			WithName(name).
-			WithSourceID(location.MustNewSourceID("test://"+name+".yammm")).
-			AddType("Base").
-			WithPrimaryKey("id", schema.NewUUIDConstraint()).
-			Done().
-			Build()
-		if dep.IsZero() || result.HasErrors() {
-			t.Fatalf("the imported schema %q does not build: %v", name, result)
-		}
-		if err := registry.Register(dep); err != nil {
-			t.Fatal(err)
-		}
-	}
-	_, result := schema.NewBuilder().
-		WithName("entry").
-		WithSourceID(location.MustNewSourceID("test://entry.yammm")).
-		WithRegistry(registry).
-		AddImport("one", "d").
-		AddImport("two", "d").
-		AddType("T").
-		WithPrimaryKey("id", schema.NewUUIDConstraint()).
-		Done().
-		Build()
-	var got []string
-	for iss := range result.Issues() {
-		if iss.Code() == diag.E_DUPLICATE_IMPORT {
-			got = append(got, iss.Code().String()+" "+iss.Message())
-		}
-	}
-	if want := duplicateAliasMessage(`"one"`, `"two"`); len(got) != 1 || got[0] != want {
 		t.Errorf("duplicate alias diagnostics:\n%s\nwant:\n%s", strings.Join(got, "\n--\n"), want)
 	}
 }

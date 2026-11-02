@@ -761,12 +761,12 @@ func ownedLabelsFor(t *testing.T, ctx context.Context, a *n4j.Adapter, label str
 	if !found {
 		t.Fatalf("label %q is not schema__Type shaped", label)
 	}
-	s, res := schema.NewBuilder().
-		WithName(schemaName).
-		AddType(typeName).
-		WithPrimaryKey("id", schema.NewStringConstraint()).
-		Done().
-		Build()
+	s, res := schema.LoadString(ctx, fmt.Sprintf(`schema %q
+
+type %s {
+	id String primary
+}
+`, schemaName, typeName), schemaName+".yammm")
 	if res.HasErrors() {
 		t.Fatalf("building a schema for label %q: %v", label, res.Err())
 	}

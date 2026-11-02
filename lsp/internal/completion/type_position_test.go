@@ -7,7 +7,6 @@ import (
 	"testing"
 
 	"github.com/simon-lentz/yammm/lsp/internal/analysis"
-	"github.com/simon-lentz/yammm/lsp/internal/lsputil"
 )
 
 func TestTypePositions_AFailedLoadCompletesBuiltinsAlone(t *testing.T) {
@@ -17,7 +16,7 @@ func TestTypePositions_AFailedLoadCompletesBuiltinsAlone(t *testing.T) {
 	if err := os.WriteFile(bad, text, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	snap, err := analysis.NewAnalyzer(nil).Analyze(t.Context(), bad, map[string][]byte{bad: text}, dir, lsputil.PositionEncodingUTF16)
+	snap, err := analysis.NewAnalyzer(nil).Analyze(t.Context(), bad, map[string][]byte{bad: text}, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -42,7 +41,7 @@ func TestPropertyTypeCompletions_ImportedDatatypesComeFromTheImport(t *testing.T
 	if err := os.WriteFile(filepath.Join(dir, "parts.yammm"), []byte("schema \"parts\"\n\ntype Word = String\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	snap, err := analysis.NewAnalyzer(nil).Analyze(t.Context(), entry, map[string][]byte{entry: text}, dir, lsputil.PositionEncodingUTF16)
+	snap, err := analysis.NewAnalyzer(nil).Analyze(t.Context(), entry, map[string][]byte{entry: text}, dir)
 	if err != nil || !snap.Result.OK() {
 		t.Fatal(err, snap.Result)
 	}

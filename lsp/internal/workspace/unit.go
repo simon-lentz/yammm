@@ -26,12 +26,6 @@ type BlockRemap struct {
 	blockIndex int
 }
 
-// NewBlockRemap creates a BlockRemap for the given markdown snapshot and block index.
-// Intended for use in tests; production code obtains BlockRemap via ResolveUnit.
-func NewBlockRemap(mdSnap *MarkdownDocumentSnapshot, blockIndex int) *BlockRemap {
-	return &BlockRemap{mdSnap: mdSnap, blockIndex: blockIndex}
-}
-
 // Block returns the code block associated with this remap.
 func (r *BlockRemap) Block() markdown.CodeBlock {
 	return r.mdSnap.Blocks[r.blockIndex]

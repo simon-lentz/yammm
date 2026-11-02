@@ -133,7 +133,6 @@ func TestNewWorkspace(t *testing.T) {
 	ws := newTestWorkspace(t, logger, cfg)
 
 	require.NotNil(t, ws, "NewWorkspace() returned nil")
-	assert.Equal(t, lsputil.PositionEncodingUTF16, ws.posEncoding, "posEncoding")
 }
 
 func TestWorkspace_AddRoot(t *testing.T) {
@@ -298,21 +297,6 @@ func TestWorkspace_FindModuleRoot_NonExistentRoot(t *testing.T) {
 	// The root is stored under that answer, which here is the path as typed.
 	require.Len(t, ws.roots, 1)
 	assert.Equal(t, yammmtest.HostAbs("/nonexistent/project"), ws.roots[0])
-}
-
-func TestWorkspace_SetPositionEncoding(t *testing.T) {
-	t.Parallel()
-
-	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
-	ws := newTestWorkspace(t, logger, Config{})
-
-	ws.SetPositionEncoding(lsputil.PositionEncodingUTF8)
-
-	ws.mu.RLock()
-	enc := ws.posEncoding
-	ws.mu.RUnlock()
-
-	assert.Equal(t, lsputil.PositionEncodingUTF8, enc, "posEncoding")
 }
 
 func TestWorkspace_DocumentLifecycle(t *testing.T) {
@@ -564,13 +548,6 @@ func TestWorkspace_ConcurrentDocumentAccess(t *testing.T) {
 	}
 
 	wg.Wait()
-}
-
-func TestPositionEncodingConstants(t *testing.T) {
-	t.Parallel()
-
-	assert.Equal(t, "utf-16", string(lsputil.PositionEncodingUTF16))
-	assert.Equal(t, "utf-8", string(lsputil.PositionEncodingUTF8))
 }
 
 func TestDocument_SourceID(t *testing.T) {
@@ -2572,7 +2549,7 @@ func TestMarkdownDocumentChanged_RejectsStale(t *testing.T) {
 	w.markdownDocumentChanged(uri, 2, "updated")
 	w.markdownDocumentChanged(uri, 1, "stale")
 
-	text, ok := w.GetMarkdownCurrentText(uri)
+	text, ok := w.MarkdownCurrentTextForTest(uri)
 	require.True(t, ok)
 	assert.Equal(t, "updated", text)
 }
@@ -2586,9 +2563,19 @@ func TestMarkdownDocumentChanged_AcceptsZeroVersion(t *testing.T) {
 	w.markdownDocumentOpened(uri, 0, "original")
 	w.markdownDocumentChanged(uri, 0, "updated")
 
-	text, ok := w.GetMarkdownCurrentText(uri)
+	text, ok := w.MarkdownCurrentTextForTest(uri)
 	require.True(t, ok)
 	assert.Equal(t, "updated", text)
+}
+
+func TestMarkdownCurrentTextForTest_AnswersNoTextForADocumentNotOpen(t *testing.T) {
+	t.Parallel()
+
+	w := newTestWorkspace(t, slog.Default(), Config{})
+
+	text, ok := w.MarkdownCurrentTextForTest("file:///test/unopened.md")
+	assert.False(t, ok)
+	assert.Empty(t, text)
 }
 
 func TestMarkdownDocumentClosed_CleansUp(t *testing.T) {
@@ -2767,11 +2754,10 @@ func TestAnalyzeMarkdownAndPublish_SnippetBlockWithSchemaSkipsPrefix(t *testing.
 	assert.Equal(t, 0, snap.Blocks[0].PrefixLines, "block with schema declaration should have PrefixLines=0")
 }
 
-// TestAnalyzeMarkdownAndPublish_VersionGate exercises the version-discard
-// path for real: the completion hook changes the document to a newer
-// version inside the window between analysis finishing and the gate
-// re-checking, so the gate must discard the stale results — no blocks or
-// snapshots stored, no diagnostics published.
+// TestAnalyzeMarkdownAndPublish_VersionGate changes the document to a newer
+// version between analysis finishing and the gate re-checking, so the gate must
+// discard the stale results — no blocks or snapshots stored, no diagnostics
+// published.
 func TestAnalyzeMarkdownAndPublish_VersionGate(t *testing.T) {
 	t.Parallel()
 
@@ -2785,13 +2771,10 @@ func TestAnalyzeMarkdownAndPublish_VersionGate(t *testing.T) {
 	content := "# Test\n\n```yammm\nschema \"test\"\n\ntype Broken {\n\tid Unknown primary\n}\n```\n"
 	w.markdownDocumentOpened(uri, 1, content)
 
-	w.setAnalysisCompletedHook(func(hookURI string) {
-		if hookURI == uri {
-			w.markdownDocumentChanged(uri, 2, content)
-		}
-	})
-
-	w.AnalyzeMarkdownAndPublish(t.Context(), uri)
+	run, ok := w.analyzeMarkdown(t.Context(), uri)
+	require.True(t, ok)
+	w.markdownDocumentChanged(uri, 2, content)
+	w.publishMarkdownAnalysis(uri, run)
 
 	// The gate saw version 2 != entry version 1: results discarded.
 	w.mu.RLock()
@@ -2803,7 +2786,6 @@ func TestAnalyzeMarkdownAndPublish_VersionGate(t *testing.T) {
 	assert.Empty(t, collector.DiagnosticsFor(uri), "stale analysis must not publish diagnostics")
 
 	// A re-run at the current version stores and publishes normally.
-	w.setAnalysisCompletedHook(nil)
 	w.AnalyzeMarkdownAndPublish(t.Context(), uri)
 	snap := w.GetMarkdownDocumentSnapshot(uri)
 	require.NotNil(t, snap)
@@ -2812,11 +2794,11 @@ func TestAnalyzeMarkdownAndPublish_VersionGate(t *testing.T) {
 	assert.NotEmpty(t, collector.DiagnosticsFor(uri), "invalid block must publish diagnostics once current")
 }
 
-// TestAnalyzeAndPublish_VersionGate exercises the version-discard path on
-// the .yammm analysis pipeline, mirroring the markdown gate test: the
-// completion hook changes the document to a newer version inside the window
-// between analysis finishing and the gate re-checking, so the gate must
-// discard the stale snapshot — nothing stored, no diagnostics published.
+// TestAnalyzeAndPublish_VersionGate exercises the version-discard path on the
+// .yammm analysis pipeline, mirroring the markdown gate test: the document
+// changes to a newer version between analysis finishing and the gate
+// re-checking, so the gate must discard the stale snapshot — nothing stored, no
+// diagnostics published.
 func TestAnalyzeAndPublish_VersionGate(t *testing.T) {
 	t.Parallel()
 
@@ -2830,13 +2812,10 @@ func TestAnalyzeAndPublish_VersionGate(t *testing.T) {
 	content := "schema \"test\"\n\ntype Broken {\n\tid Unknown primary\n}\n"
 	w.documentOpened(uri, 1, content)
 
-	w.setAnalysisCompletedHook(func(hookURI string) {
-		if hookURI == uri {
-			w.documentChanged(uri, 2, content)
-		}
-	})
-
-	w.analyzeAndPublish(t.Context(), uri)
+	run, ok := w.analyzeDocument(t.Context(), uri)
+	require.True(t, ok)
+	w.documentChanged(uri, 2, content)
+	w.publishDocumentAnalysis(uri, run)
 
 	// The gate saw version 2 != entry version 1: results discarded.
 	w.mu.RLock()
@@ -2846,7 +2825,6 @@ func TestAnalyzeAndPublish_VersionGate(t *testing.T) {
 	assert.Empty(t, collector.DiagnosticsFor(uri), "stale analysis must not publish diagnostics")
 
 	// A re-run at the current version stores and publishes normally.
-	w.setAnalysisCompletedHook(nil)
 	w.analyzeAndPublish(t.Context(), uri)
 	w.mu.RLock()
 	snap := w.snapshots[uri]
@@ -3107,7 +3085,7 @@ func TestRemapDocumentSymbolRanges(t *testing.T) {
 			t.Parallel()
 
 			mdSnap := &MarkdownDocumentSnapshot{Blocks: tt.blocks}
-			remap := NewBlockRemap(mdSnap, tt.blockIndex)
+			remap := &BlockRemap{mdSnap: mdSnap, blockIndex: tt.blockIndex}
 			result := RemapDocumentSymbolRanges(tt.symbols, remap)
 
 			if tt.wantNil {

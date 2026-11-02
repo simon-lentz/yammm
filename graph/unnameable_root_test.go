@@ -9,15 +9,15 @@ import (
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/immutable"
-	"github.com/simon-lentz/yammm/instance"
-	"github.com/simon-lentz/yammm/location"
+	"github.com/simon-lentz/yammm/internal/instancetest"
+	"github.com/simon-lentz/yammm/internal/snapparts"
 	"github.com/simon-lentz/yammm/schema"
 )
 
 // The root type the entry schema cannot name.
 //
 // A root is keyed by name in every output document, and a type reached only
-// through an intermediate import has no name form. Both constructors refuse one
+// through an intermediate import has no name form. Add and the reader refuse one
 // so no writer has to check for a rendered-name collision: two types the entry
 // schema can name never render alike.
 
@@ -89,100 +89,10 @@ func unnameableFixture(t *testing.T) (schema.Schema, schema.TypeID) {
 	return s, typ.ID()
 }
 
-func beaconParts(id schema.TypeID, key string) graph.InstanceParts {
-	return graph.InstanceParts{
-		TypeID:     id,
-		PrimaryKey: immutable.WrapKey([]any{key}),
-		Properties: immutable.WrapProperties(map[string]any{"id": key, "power": float64(1)}),
-	}
-}
-
-// TestRebuildSnapshot_UnnameableRootRefused pins the constructor refusal the
-// writers rely on. This is the path a persisted document takes, and it is the
-// only way a snapshot could otherwise come to hold such a root.
-//
-// Mutation: dropping the schema.Addressable arm from validatePartsRootTypes
-// turns this red.
-func TestRebuildSnapshot_UnnameableRootRefused(t *testing.T) {
-	t.Parallel()
-	s, deepBeacon := unnameableFixture(t)
-
-	_, result := graph.RebuildSnapshot(s, graph.SnapshotParts{
-		Types: []schema.TypeID{deepBeacon},
-		Instances: []graph.InstanceParts{
-			beaconParts(deepBeacon, "d1"),
-		},
-	})
-	if !result.HasErrors() {
-		t.Fatal("a root the entry schema cannot name was accepted")
-	}
-	if !resultHasCode(result, diag.E_INTERNAL) {
-		t.Errorf("refusal reported %s, want %s", result, diag.E_INTERNAL)
-	}
-	if msg := result.String(); !strings.Contains(msg, "intermediate import") {
-		t.Errorf("refusal %q does not say why the type has no name", msg)
-	}
-}
-
-// TestRebuildSnapshot_UnnameableRootDuplicateRefused covers the other position
-// a root identity occupies. A root duplicate is a rejected root instance, and
-// its conflict is the root at its own type and key; a type the entry schema
-// cannot name holds no root, so the record has no conflict. A COMPOSED
-// duplicate may name a part type and is judged against its slot instead.
-func TestRebuildSnapshot_UnnameableRootDuplicateRefused(t *testing.T) {
-	t.Parallel()
-	s, deepBeacon := unnameableFixture(t)
-
-	// No types entry names the type, so the types-entry rule, which refuses it
-	// too, is not what refuses the record: a root duplicate's conflict is a
-	// root at its own type, and no root of this type can exist.
-	_, result := graph.RebuildSnapshot(s, graph.SnapshotParts{
-		Duplicates: []graph.DuplicateParts{{
-			Instance: beaconParts(deepBeacon, "d1"),
-		}},
-	})
-	if !result.HasErrors() {
-		t.Fatal("a root duplicate the entry schema cannot name was accepted")
-	}
-	if !resultHasCode(result, diag.E_INTERNAL) {
-		t.Errorf("refusal reported %s, want %s", result, diag.E_INTERNAL)
-	}
-	if msg := result.String(); !strings.Contains(msg, "duplicate record 0") || !strings.Contains(msg, "of a type that is reachable only through an intermediate import") {
-		t.Errorf("refusal %q does not name the duplicate position", msg)
-	}
-	if msg := result.String(); strings.Contains(msg, "zero type identity") {
-		t.Errorf("the fixture raised an identity error of its own, so the refusal under test is not what failed it: %s", msg)
-	}
-}
-
-// TestRebuildSnapshot_UnnameableDenotedTypeRefused covers the type a snapshot
-// DENOTES without holding an instance of it. Naming it in Types with no instances
-// bypassed the root rule entirely, and every writer still keyed its output by the
-// denoted type's name — so the writers refused a snapshot both constructors had
-// accepted.
-//
-// Mutation: deleting the validatePartsDenotedTypes call turns this red.
-func TestRebuildSnapshot_UnnameableDenotedTypeRefused(t *testing.T) {
-	t.Parallel()
-	s, deepBeacon := unnameableFixture(t)
-
-	_, result := graph.RebuildSnapshot(s, graph.SnapshotParts{
-		Types: []schema.TypeID{deepBeacon},
-	})
-	if !result.HasErrors() {
-		t.Fatal("a snapshot denoting a type the entry schema cannot name was assembled")
-	}
-	if msg := result.String(); !strings.Contains(msg, "types entry") {
-		t.Errorf("refusal %q does not name the types entry", msg)
-	}
-}
-
-// TestRebuildSnapshot_KeepsAnUnnameableComposedChild is the other half of the
-// rule: a composed child is addressed through its parent, never by name, so any
-// type in the closure stays legal there — a transitively imported part type
-// included. Narrowing the rule to every instance rather than every ROOT would
-// drop this subtree.
-func TestRebuildSnapshot_KeepsAnUnnameableComposedChild(t *testing.T) {
+// TestRebuild_KeepsAnUnnameableComposedChild is the other half of the rule: a
+// composed child is addressed through its parent, never by name, so any type in
+// the closure stays legal there, a transitively imported part type included.
+func TestRebuild_KeepsAnUnnameableComposedChild(t *testing.T) {
 	t.Parallel()
 	s, _ := unnameableFixture(t)
 
@@ -200,14 +110,14 @@ func TestRebuildSnapshot_KeepsAnUnnameableComposedChild(t *testing.T) {
 		t.Fatal("fixture is vacuous: the entry schema can name deep.Shard")
 	}
 
-	built, result := graph.RebuildSnapshot(s, graph.SnapshotParts{
+	built := rebuild(s, snapparts.Parts{
 		Types: []schema.TypeID{basin},
-		Instances: []graph.InstanceParts{
+		Instances: []snapparts.Instance{
 			{
 				TypeID:     basin,
 				PrimaryKey: immutable.WrapKey([]any{"b1"}),
 				Properties: immutable.WrapProperties(map[string]any{"id": "b1"}),
-				Composed: map[string][]graph.InstanceParts{
+				Composed: map[string][]snapparts.Instance{
 					"PIECES": {{
 						TypeID:     shard.ID(),
 						PrimaryKey: immutable.WrapKey([]any{"s1"}),
@@ -217,9 +127,6 @@ func TestRebuildSnapshot_KeepsAnUnnameableComposedChild(t *testing.T) {
 			},
 		},
 	})
-	if result.HasErrors() {
-		t.Fatalf("a composed child of a transitively imported part type was refused: %s", result)
-	}
 	roots := slices.Collect(built.InstancesOf(basin))
 	if len(roots) != 1 {
 		t.Fatalf("got %d roots, want 1", len(roots))
@@ -233,9 +140,9 @@ func TestRebuildSnapshot_KeepsAnUnnameableComposedChild(t *testing.T) {
 	}
 }
 
-// TestGraphAdd_UnnameableRootRefused pins that Add applies the same rule the
-// constructors do, by the same predicate rather than by its own copy, and that
-// the refusal carries the transitive-import hint and the declaring schema under
+// TestGraphAdd_UnnameableRootRefused pins that Add applies the rule by the shared
+// predicate rather than by its own copy, and that the refusal carries the
+// transitive-import hint and the declaring schema under
 // any spelling of the name: the identity decides, not a dot in the caller's
 // string.
 //
@@ -250,11 +157,12 @@ func TestGraphAdd_UnnameableRootRefused(t *testing.T) {
 	deep, _ := base.Schema().ImportByAlias("deep")
 	typ, _ := deep.Schema().Type("Beacon")
 
-	for _, spelling := range []string{schema.TagForm(s, typ.ID()), "Beacon"} {
-		valid := instance.NewValidInstance(spelling, typ.ID(),
-			immutable.WrapKey([]any{"d1"}),
-			immutable.WrapProperties(map[string]any{"id": "d1", "power": float64(1)}),
-			nil, nil, location.Provenance{})
+	for _, c := range []struct {
+		over     schema.Schema
+		spelling string
+	}{{base.Schema(), "deep.Beacon"}, {deep.Schema(), "Beacon"}} {
+		spelling := c.spelling
+		valid := instancetest.Valid(t, c.over, spelling, map[string]any{"id": "d1", "power": float64(1)})
 
 		addResult := graph.New(s).Add(context.Background(), valid)
 		if !addResult.HasErrors() {

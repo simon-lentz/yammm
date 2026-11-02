@@ -73,14 +73,12 @@ var (
 	ErrUnsupportedListElem = errors.New("neo4j adapter: unsupported list element type")
 
 	// ErrUnrepresentable marks a value [Adapter.BatchNodeQueries],
-	// [Adapter.BatchEdgeQueries], [Coerce], [CoerceParams] or [CoerceRelProps]
+	// [Adapter.BatchEdgeQueries] or [CoerceParams]
 	// refuses because Neo4j would not store it as held: one its constraint's
 	// coercion refuses, a nested collection's (beside [ErrUnsupportedListElem]), a
-	// map, a string that is not valid UTF-8, a value of no form, a time or a UUID
-	// its constraint does not render, a number no driver number holds, or a
-	// primary key that is absent or holds no value. It is the class, matched with
-	// errors.Is; each message but Coerce's, which is handed no name, names the
-	// property, the param or the key. It
+	// map, a list or a map nested more than 256 levels deep, a number no driver
+	// number holds, or a primary key that is absent or holds no value. It is the class, matched with
+	// errors.Is; each message names the property, the param or the key. It
 	// separates a refusal of the data from a caller's own error, such as a
 	// constraint [schema.CheckConstraint] refuses or a [GraphShape] the adapter
 	// did not build, which no message text can.

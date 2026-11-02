@@ -10,7 +10,8 @@ import (
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/instance"
-	"github.com/simon-lentz/yammm/location"
+	"github.com/simon-lentz/yammm/internal/instancetest"
+	"github.com/simon-lentz/yammm/internal/snapparts"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -43,8 +44,7 @@ func typeIDOf(t *testing.T, s schema.Schema, name string) schema.TypeID {
 
 func rootInstance(t *testing.T, s schema.Schema, name, key string) instance.ValidInstance {
 	t.Helper()
-	return instance.NewValidInstance(name, typeIDOf(t, s, name),
-		immutable.WrapKey([]any{key}), immutable.WrapProperties(map[string]any{"id": key}), nil, nil, location.Provenance{})
+	return instancetest.Valid(t, s, name, map[string]any{"id": key})
 }
 
 // requireRefused asserts the import is refused with a nil graph and an issue
@@ -125,14 +125,14 @@ func TestNewFromSnapshot_RefusesAnUnresolvedRecordUnderAnAssociationTheImporting
 	without := loadEntry(t, "schema \"entry\"\n\ntype Person {\n\tid String primary\n}\n")
 
 	personID := typeIDOf(t, with, "Person")
-	snap, res := graph.RebuildSnapshot(with, graph.SnapshotParts{
+	snap := rebuild(with, snapparts.Parts{
 		Types: []schema.TypeID{personID},
-		Instances: []graph.InstanceParts{{
+		Instances: []snapparts.Instance{{
 			TypeID:     personID,
 			PrimaryKey: immutable.WrapKey([]any{"p1"}),
 			Properties: immutable.WrapProperties(map[string]any{"id": "p1"}),
 		}},
-		Unresolved: []graph.UnresolvedParts{{
+		Unresolved: []snapparts.Unresolved{{
 			SourceType: personID,
 			SourceKey:  immutable.WrapKey([]any{"p1"}),
 			Relation:   "WORKS_AT",
@@ -140,9 +140,6 @@ func TestNewFromSnapshot_RefusesAnUnresolvedRecordUnderAnAssociationTheImporting
 			Reason:     "target_missing",
 		}},
 	})
-	if res.HasErrors() {
-		t.Fatalf("RebuildSnapshot: %s", res)
-	}
 	requireRefused(t, without, snap, diag.E_GRAPH_UNKNOWN_RELATION, `under "WORKS_AT", which its type does not declare as an association`)
 }
 
@@ -156,14 +153,14 @@ func TestNewFromSnapshot_NamesADeclaredAssociationWhole(t *testing.T) {
 	one := loadEntry(t, fmt.Sprintf(tmpl, "\tid String primary\n", long))
 
 	personID := typeIDOf(t, two, "Person")
-	snap, res := graph.RebuildSnapshot(two, graph.SnapshotParts{
+	snap := rebuild(two, snapparts.Parts{
 		Types: []schema.TypeID{personID},
-		Instances: []graph.InstanceParts{{
+		Instances: []snapparts.Instance{{
 			TypeID:     personID,
 			PrimaryKey: immutable.WrapKey([]any{"p1"}),
 			Properties: immutable.WrapProperties(map[string]any{"id": "p1"}),
 		}},
-		Unresolved: []graph.UnresolvedParts{{
+		Unresolved: []snapparts.Unresolved{{
 			SourceType: personID,
 			SourceKey:  immutable.WrapKey([]any{"p1"}),
 			Relation:   long,
@@ -171,9 +168,6 @@ func TestNewFromSnapshot_NamesADeclaredAssociationWhole(t *testing.T) {
 			Reason:     "target_missing",
 		}},
 	})
-	if res.HasErrors() {
-		t.Fatalf("RebuildSnapshot: %s", res)
-	}
 	requireRefused(t, one, snap, diag.E_GRAPH_INVALID_PK, `under "`+long+`" carries a 2-part target key; the target declares 1`)
 }
 
@@ -184,30 +178,27 @@ func TestNewFromSnapshot_RefusesTwoChildrenInASlotTheImportingSchemaMakesOne(t *
 	one := loadEntry(t, strings.Replace(tmpl, "%s", "one", 1))
 
 	orderID, lineID := typeIDOf(t, many, "Order"), typeIDOf(t, many, "Line")
-	line := func(sku string) graph.InstanceParts {
-		return graph.InstanceParts{
+	line := func(sku string) snapparts.Instance {
+		return snapparts.Instance{
 			TypeID:     lineID,
 			Properties: immutable.WrapProperties(map[string]any{"sku": sku}),
 		}
 	}
-	snap, res := graph.RebuildSnapshot(many, graph.SnapshotParts{
+	snap := rebuild(many, snapparts.Parts{
 		Types: []schema.TypeID{orderID},
-		Instances: []graph.InstanceParts{{
+		Instances: []snapparts.Instance{{
 			TypeID:     orderID,
 			PrimaryKey: immutable.WrapKey([]any{"o1"}),
 			Properties: immutable.WrapProperties(map[string]any{"id": "o1"}),
-			Composed:   map[string][]graph.InstanceParts{"LINES": {line("a"), line("b")}},
+			Composed:   map[string][]snapparts.Instance{"LINES": {line("a"), line("b")}},
 		}},
 	})
-	if res.HasErrors() {
-		t.Fatalf("RebuildSnapshot: %s", res)
-	}
 	requireRefused(t, one, snap, diag.E_DUPLICATE_COMPOSED_PK, `Order[["o1"]] composition "LINES": (one) cardinality violated, got 2 children`)
 }
 
 // Two keys the snapshot's schema holds apart can be one address under the
 // importing schema's key constraint. The import installed one and dropped the
-// other; it refuses them as RebuildSnapshot refuses two parts at one address.
+// other; it refuses them as the reader refuses two roots at one address.
 func TestNewFromSnapshot_RefusesTwoRootsAtOneAddressUnderTheImportingSchema(t *testing.T) {
 	t.Parallel()
 	asString := loadEntry(t, "schema \"entry\"\n\ntype Run {\n\tat String primary\n}\n")
@@ -215,8 +206,7 @@ func TestNewFromSnapshot_RefusesTwoRootsAtOneAddressUnderTheImportingSchema(t *t
 
 	src := graph.New(asString)
 	for _, at := range []string{"2030-01-01T00:00:00Z", "2030-01-01T00:00:00+00:00"} {
-		inst := instance.NewValidInstance("Run", typeIDOf(t, asString, "Run"), immutable.WrapKey([]any{at}),
-			immutable.WrapProperties(map[string]any{"at": at}), nil, nil, location.Provenance{})
+		inst := instancetest.Valid(t, asString, "Run", map[string]any{"at": at})
 		if r := src.Add(t.Context(), inst); !r.OK() {
 			t.Fatalf("add %s: %s", at, r)
 		}
@@ -253,11 +243,8 @@ func TestNewFromSnapshot_RefusesARootTheImportingSchemaCannotName(t *testing.T) 
 	if r1.HasErrors() || r2.HasErrors() {
 		t.Fatal(r1, r2)
 	}
-	b, _ := direct.ImportByAlias("base")
-	beacon, _ := b.Schema().Type("Beacon")
 	src := graph.New(direct)
-	if r := src.Add(ctx, instance.NewValidInstance("base.Beacon", beacon.ID(), immutable.WrapKey([]any{"b1"}),
-		immutable.WrapProperties(map[string]any{"id": "b1"}), nil, nil, location.Provenance{})); !r.OK() {
+	if r := src.Add(ctx, instancetest.Valid(t, direct, "base.Beacon", map[string]any{"id": "b1"})); !r.OK() {
 		t.Fatalf("add: %s", r)
 	}
 	requireRefused(t, through, src.Snapshot(), diag.E_GRAPH_TYPE_NOT_FOUND, "reachable only through an intermediate import")
@@ -270,9 +257,8 @@ func TestNewFromSnapshot_RefusesAnUndeclaredNameOnADuplicate(t *testing.T) {
 	with := loadEntry(t, "schema \"entry\"\n\ntype P {\n\tid String primary\n\tnickname String\n}\n")
 	without := loadEntry(t, "schema \"entry\"\n\ntype P {\n\tid String primary\n}\n")
 	src := graph.New(with)
-	p := typeIDOf(t, with, "P")
-	src.Add(t.Context(), instance.NewValidInstance("P", p, immutable.WrapKey([]any{"p1"}), immutable.WrapProperties(map[string]any{"id": "p1"}), nil, nil, location.Provenance{}))
-	src.Add(t.Context(), instance.NewValidInstance("P", p, immutable.WrapKey([]any{"p1"}), immutable.WrapProperties(map[string]any{"id": "p1", "nickname": "x"}), nil, nil, location.Provenance{}))
+	src.Add(t.Context(), instancetest.Valid(t, with, "P", map[string]any{"id": "p1"}))
+	src.Add(t.Context(), instancetest.Valid(t, with, "P", map[string]any{"id": "p1", "nickname": "x"}))
 	if len(slices.Collect(src.Snapshot().Duplicates())) != 1 {
 		t.Fatal("fixture is vacuous: no duplicate")
 	}
@@ -285,12 +271,8 @@ func TestNewFromSnapshot_DerivesRequiredUnderTheImportingSchema(t *testing.T) {
 	t.Parallel()
 	optional := loadEntry(t, "schema \"entry\"\n\ntype C {\n\tid String primary\n}\n\ntype P {\n\tid String primary\n\t--> AT (_:one) C\n}\n")
 	required := loadEntry(t, "schema \"entry\"\n\ntype C {\n\tid String primary\n}\n\ntype P {\n\tid String primary\n\t--> AT (one:one) C\n}\n")
-	p := typeIDOf(t, optional, "P")
 	src := graph.New(optional)
-	src.Add(t.Context(), instance.NewValidInstance("P", p, immutable.WrapKey([]any{"p1"}), immutable.WrapProperties(map[string]any{"id": "p1"}),
-		map[string]instance.ValidEdgeData{"AT": instance.NewValidEdgeData([]instance.ValidEdgeTarget{
-			instance.NewValidEdgeTarget(immutable.WrapKey([]any{"c9"}), immutable.Properties{}),
-		})}, nil, location.Provenance{}))
+	src.Add(t.Context(), instancetest.Valid(t, optional, "P", map[string]any{"id": "p1", "at": map[string]any{"_target_id": "c9"}}))
 	if res := src.Check(t.Context()); res.HasErrors() {
 		t.Fatalf("control: an optional unresolved record failed Check: %s", res)
 	}
@@ -303,34 +285,159 @@ func TestNewFromSnapshot_DerivesRequiredUnderTheImportingSchema(t *testing.T) {
 	}
 }
 
-// One schema change fixes every entry that denotes a type no root can hold, so a
-// repeated entry is no second break.
-func TestRebuildSnapshot_ARepeatedEntryOfATypeNoRootHoldsIsOneBreak(t *testing.T) {
+func TestNewFromSnapshot_RefusesARootTheImportingSchemaGivesNoKey(t *testing.T) {
 	t.Parallel()
-	s := loadEntry(t, "schema \"entry\"\n\nabstract type Thing {\n\tid String primary\n}\n\ntype P {\n\tid String primary\n}\n")
-	thing := typeIDOf(t, s, "Thing")
-	_, res := graph.RebuildSnapshot(s, graph.SnapshotParts{Types: []schema.TypeID{thing, thing, thing}})
-	got := 0
-	for range res.Issues() {
-		got++
+	keyed := loadEntry(t, "schema \"entry\"\n\ntype Company {\n\tid String primary\n}\n")
+	keyless := loadEntry(t, "schema \"entry\"\n\npart type Company {\n\tid String\n}\n\ntype H {\n\tid String primary\n\t*-> CS (many) Company\n}\n")
+	src := graph.New(keyed)
+	if r := src.Add(t.Context(), rootInstance(t, keyed, "Company", "c1")); !r.OK() {
+		t.Fatalf("add: %s", r)
 	}
-	if got != 1 || !strings.Contains(res.String(), "types entry 0") {
-		t.Errorf("RebuildSnapshot draws %d issues, want the first entry's alone: %s", got, res)
+	requireRefused(t, keyless, src.Snapshot(), diag.E_GRAPH_MISSING_PK, "declares no primary key")
+}
+
+// The importing schema can declare a key of another arity than the stored one, and
+// a key where the stored part has none.
+func TestNewFromSnapshot_RefusesAStoredKeyOfAnotherArity(t *testing.T) {
+	t.Parallel()
+	const order = "schema \"entry\"\n\ntype Order {\n\tid String primary\n\t*-> LINES (many) Line\n}\n\npart type Line {\n\tsku String%s\n}\n"
+	for _, c := range []struct {
+		name, built, bound string
+		typeName           string
+		raw                map[string]any
+		phrase             string
+	}{
+		{
+			name:     "two components under one key property",
+			built:    "schema \"entry\"\n\ntype P {\n\ta String primary\n\tb String primary\n}\n",
+			bound:    "schema \"entry\"\n\ntype P {\n\ta String primary\n\tb String\n}\n",
+			typeName: "P",
+			raw:      map[string]any{"a": "x", "b": "y"},
+			phrase:   "primary key has 2 components; type declares 1",
+		},
+		{
+			name:     "a keyless part the importing schema gives a key",
+			built:    fmt.Sprintf(order, ""),
+			bound:    fmt.Sprintf(order, " primary"),
+			typeName: "Order",
+			raw:      map[string]any{"id": "o1", "LINES": []any{map[string]any{"sku": "a"}}},
+			phrase:   "primary key is empty",
+		},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			snap := snapshotOf(t, loadEntry(t, c.built), c.typeName, c.raw)
+			requireRefused(t, loadEntry(t, c.bound), snap, diag.E_GRAPH_INVALID_PK, c.phrase)
+		})
 	}
 }
 
-// A root duplicate's conflict is the root at its own type and key, as Graph.Add
-// records it, so a record of an abstract type, which holds no root, has none.
-func TestRebuildSnapshot_RefusesARootDuplicateOfATypeNoRootHolds(t *testing.T) {
+// An identity of a schema outside the importing closure is named with its schema
+// path, so the refusal says which schema's type it is.
+func TestNewFromSnapshot_NamesAnIdentityOfAnotherSchemaByItsPath(t *testing.T) {
 	t.Parallel()
-	s := loadEntry(t, "schema \"entry\"\n\nabstract type Thing {\n\tid String primary\n}\n\ntype P {\n\tid String primary\n}\n")
-	p, thing := typeIDOf(t, s, "P"), typeIDOf(t, s, "Thing")
-	p1 := graph.InstanceParts{TypeID: p, PrimaryKey: immutable.WrapKey([]any{"p1"}), Properties: immutable.WrapProperties(map[string]any{"id": "p1"})}
-	dp := graph.DuplicateParts{
-		Instance: graph.InstanceParts{TypeID: thing, PrimaryKey: immutable.WrapKey([]any{"p1"}), Properties: immutable.WrapProperties(map[string]any{"id": "p1"})},
+	const src = "schema \"entry\"\n\ntype P {\n\tid String primary\n}\n"
+	other, res := schema.LoadString(t.Context(), src, "other.yammm")
+	if res.HasErrors() {
+		t.Fatalf("load: %s", res)
 	}
-	_, res := graph.RebuildSnapshot(s, graph.SnapshotParts{Types: []schema.TypeID{p}, Instances: []graph.InstanceParts{p1}, Duplicates: []graph.DuplicateParts{dp}})
-	if !res.HasCode(diag.E_INTERNAL) || !strings.Contains(res.String(), "duplicate record 0") || !strings.Contains(res.String(), "of a type that is abstract") {
-		t.Errorf("RebuildSnapshot = %s, want the record refused", res)
+	snap := snapshotOf(t, other, "P", map[string]any{"id": "p1"})
+	requireRefused(t, loadEntry(t, src), snap, diag.E_GRAPH_TYPE_NOT_FOUND, "other.yammm")
+}
+
+// The identity rule walks below an instance whose own identity the importing
+// schema drops, so a child's identity is one break of its own.
+func TestNewFromSnapshot_WalksBelowAnIdentityTheImportingSchemaDrops(t *testing.T) {
+	t.Parallel()
+	built := loadEntry(t, "schema \"entry\"\n\ntype Order {\n\tid String primary\n\t*-> ITEMS (_:many) Item\n}\n\npart type Item {\n\tcode String primary\n}\n")
+	bound := loadEntry(t, "schema \"entry\"\n\ntype Keep {\n\tid String primary\n}\n")
+	snap := snapshotOf(t, built, "Order", map[string]any{"id": "o1", "ITEMS": []any{map[string]any{"code": "a"}}})
+	requireRefused(t, bound, snap, diag.E_GRAPH_TYPE_NOT_FOUND, "at composed child position")
+}
+
+// stampedChildSchema declares a keyed part whose key is of the given kind.
+func stampedChildSchema(t *testing.T, kind string) schema.Schema {
+	t.Helper()
+	return loadEntry(t, fmt.Sprintf("schema \"entry\"\n\ntype Run {\n\tid String primary\n\t*-> STAMPS (_:many) Stamp\n}\n\npart type Stamp {\n\tat %s primary\n}\n", kind))
+}
+
+// Two keys the snapshot's schema holds apart can be one key under the importing
+// schema's constraint, and a (many) slot holds one child at a key.
+func TestNewFromSnapshot_RefusesTwoSiblingsAtOneKeyUnderTheImportingSchema(t *testing.T) {
+	t.Parallel()
+	snap := snapshotOf(t, stampedChildSchema(t, "String"), "Run", map[string]any{"id": "r1", "STAMPS": []any{
+		map[string]any{"at": canonInstant}, map[string]any{"at": rawInstant},
+	}})
+	requireRefused(t, stampedChildSchema(t, "Timestamp"), snap, diag.E_DUPLICATE_COMPOSED_PK, "holds children 0 and 1 at key")
+}
+
+// A record the key rule refuses holds no address, whichever stands first: a child
+// repeats no sibling's key, and a root is no second root. Each input draws the key
+// rule's issue alone.
+func TestNewFromSnapshot_ARefusedKeyHoldsNoAddress(t *testing.T) {
+	t.Parallel()
+	const later = "2030-01-01T00:00:00Z"
+	for _, c := range []struct {
+		name             string
+		firstAt, lastAt  string
+		firstKey, lastKy string
+	}{
+		{"the first refused", later, canonInstant, rawInstant, canonInstant},
+		{"the last refused", canonInstant, later, rawInstant, canonInstant},
+	} {
+		t.Run("children, "+c.name, func(t *testing.T) {
+			t.Parallel()
+			built, bound := stampedChildSchema(t, "String"), stampedChildSchema(t, "Timestamp")
+			run, stamp := typeIDOf(t, built, "Run"), typeIDOf(t, built, "Stamp")
+			child := func(key, at string) snapparts.Instance {
+				return snapparts.Instance{TypeID: stamp, PrimaryKey: immutable.WrapKey([]any{key}), Properties: immutable.WrapProperties(map[string]any{"at": at})}
+			}
+			snap := rebuild(built, snapparts.Parts{Instances: []snapparts.Instance{{
+				TypeID: run, PrimaryKey: immutable.WrapKey([]any{"r1"}), Properties: immutable.WrapProperties(map[string]any{"id": "r1"}),
+				Composed: map[string][]snapparts.Instance{"STAMPS": {child(c.firstKey, c.firstAt), child(c.lastKy, c.lastAt)}},
+			}}})
+			_, res := graph.NewFromSnapshot(bound, snap)
+			if failures(res) != 1 || !res.HasCode(diag.E_GRAPH_INVALID_PK) {
+				t.Errorf("%s, want one E_GRAPH_INVALID_PK", res)
+			}
+		})
+		t.Run("roots, "+c.name, func(t *testing.T) {
+			t.Parallel()
+			built, bound := instantKeySchema(t, "String"), instantKeySchema(t, "Timestamp")
+			run := typeIDOf(t, built, "Run")
+			root := func(key, at string) snapparts.Instance {
+				return snapparts.Instance{TypeID: run, PrimaryKey: immutable.WrapKey([]any{key}), Properties: immutable.WrapProperties(map[string]any{"at": at})}
+			}
+			snap := rebuild(built, snapparts.Parts{Instances: []snapparts.Instance{root(c.firstKey, c.firstAt), root(c.lastKy, c.lastAt)}})
+			_, res := graph.NewFromSnapshot(bound, snap)
+			if failures(res) != 1 || !res.HasCode(diag.E_GRAPH_INVALID_PK) {
+				t.Errorf("%s, want one E_GRAPH_INVALID_PK", res)
+			}
+		})
+	}
+}
+
+// Keyless parts have no key to repeat, so a (many) slot holds any number of them.
+func TestNewFromSnapshot_KeepsKeylessSiblings(t *testing.T) {
+	t.Parallel()
+	const src = "schema \"entry\"\n\ntype Order {\n\tid String primary\n\t*-> LINES (many) Line\n}\n\npart type Line {\n\tsku String\n}\n"
+	built, bound := loadEntry(t, src), loadEntry(t, src)
+	snap := snapshotOf(t, built, "Order", map[string]any{"id": "o1", "LINES": []any{map[string]any{"sku": "a"}, map[string]any{"sku": "a"}}})
+	order := slices.Collect(mustImport(t, bound, snap).Snapshot().InstancesOf(typeIDOf(t, bound, "Order")))[0]
+	if n := order.ComposedCount("LINES"); n != 2 {
+		t.Errorf("%d children, want 2", n)
+	}
+}
+
+// The import re-keys a composed child under the importing schema, as it does a
+// root.
+func TestNewFromSnapshot_RekeysAComposedChild(t *testing.T) {
+	t.Parallel()
+	bound := stampedChildSchema(t, "Timestamp")
+	snap := snapshotOf(t, stampedChildSchema(t, "String"), "Run", map[string]any{"id": "r1", "STAMPS": []any{map[string]any{"at": rawInstant}}})
+	root := slices.Collect(mustImport(t, bound, snap).Snapshot().InstancesOf(typeIDOf(t, bound, "Run")))[0]
+	child := slices.Collect(root.Composed("STAMPS"))[0]
+	if got, want := child.PrimaryKey().String(), graph.FormatKey(canonInstant); got != want {
+		t.Errorf("child key = %s, want %s", got, want)
 	}
 }

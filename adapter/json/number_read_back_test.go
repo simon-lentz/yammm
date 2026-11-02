@@ -1,7 +1,7 @@
 package json
 
 import (
-	"context"
+	"bytes"
 	stdjson "encoding/json"
 	"errors"
 	"fmt"
@@ -12,9 +12,11 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/simon-lentz/yammm/internal/snapparts"
+
 	"github.com/simon-lentz/yammm/graph"
-	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/instance"
+	"github.com/simon-lentz/yammm/internal/snappartstest"
 	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
 )
@@ -38,48 +40,33 @@ type Holder {
 }
 `
 
-// heldNumbers are the texts a json.Number can hold: the literals a document
-// spells, the literals no float64 holds, which snapshot.Load returns as they
-// were written, and text only a Go caller can put in one.
+// heldNumbers are the number literals a document spells, those no float64 holds
+// among them, which snapshot.Load returns as they were written.
 var heldNumbers = []string{
-	"0", "-0", "5", "-5", "007", "+5", "1.5", "-1.5", "1e2", "1E2", "1e-2", "0.0", "-0.0",
+	"0", "5", "-5", "1.5", "-1.5", "1e2", "1E2", "1e-2", "0.0", "-0.0",
 	"9223372036854775807", "9223372036854775808", "-9223372036854775809", "99999999999999999999",
 	"1e308", "1.7976931348623157e308", "1.7976931348623159e308", "1e309", "1e400", "-1e400", "1.5e999",
-	"1e-400", "", " ", "abc", "NaN", "Inf", "-Inf", "+Inf", "0x10", "0x1p4", "1_000", ".5", "5.", "1e", "1e+", " 5", "5 ", "5\n", "1,5", "١٢",
+	"1e-400",
+	strings.Repeat("9", 400), "0." + strings.Repeat("0", 400) + "1", "1" + strings.Repeat("0", 400) + ".0",
 }
 
-func init() {
-	heldNumbers = append(heldNumbers, strings.Repeat("9", 400), "0."+strings.Repeat("0", 400)+"1", "1"+strings.Repeat("0", 400)+".0")
-}
-
-// numberSnapshot builds Holder h1 through instance.NewValidInstance, which
-// runs no validation, holding props beside its key and one LINK to Target t1
-// whose w is weight.
+// numberSnapshot reads a document holding props beside Holder h1's key, and weight
+// as the w on its one LINK to Target t1.
 func numberSnapshot(t *testing.T, s schema.Schema, props map[string]any, weight any) graph.Snapshot {
 	t.Helper()
-	targetT, _ := s.Type("Target")
-	holderT, _ := s.Type("Holder")
 	all := map[string]any{"id": "h1"}
 	maps.Copy(all, props)
 	edge := map[string]any{}
 	if weight != nil {
 		edge["w"] = weight
 	}
-	g := graph.New(s)
-	for _, inst := range []instance.ValidInstance{
-		instance.NewValidInstance("Target", targetT.ID(), immutable.WrapKey([]any{"t1"}),
-			immutable.WrapProperties(map[string]any{"key": "t1"}), nil, nil, location.Provenance{}),
-		instance.NewValidInstance("Holder", holderT.ID(), immutable.WrapKey([]any{"h1"}),
-			immutable.WrapProperties(all),
-			map[string]instance.ValidEdgeData{"LINK": instance.NewValidEdgeData([]instance.ValidEdgeTarget{
-				instance.NewValidEdgeTarget(immutable.WrapKey([]any{"t1"}), immutable.WrapProperties(edge)),
-			})}, nil, location.Provenance{}),
-	} {
-		if r := g.Add(context.Background(), inst); r.HasErrors() {
-			t.Fatalf("graph.Add: %s", r)
-		}
-	}
-	return g.Snapshot()
+	return snappartstest.Loaded(t, s, snapparts.Parts{
+		Instances: []snapparts.Instance{
+			heldRoot(t, s, "Target", "t1", map[string]any{"key": "t1"}),
+			heldRoot(t, s, "Holder", "h1", all),
+		},
+		Edges: []snapparts.Edge{heldEdge(t, s, "Holder", "h1", "LINK", "t1", edge)},
+	})
 }
 
 // readBackHolder parses data with the adapter's own parser and validates the
@@ -101,9 +88,8 @@ func readBackHolder(t *testing.T, s schema.Schema, data []byte) (instance.ValidI
 // as that number, at every position a Float stands in; a number they would not
 // read back so is refused as the class, naming its site and the fault, and
 // nothing else is. At a String, where no numeric kind stores the number in its
-// own form first, the same numbers are written and the same refused. The
-// standard library says which text is a number a float64 holds: encoding/json
-// for the literal and strconv for the float.
+// own form first, the same numbers are written and the same refused. strconv says
+// which text is a number a float64 holds.
 func TestMarshalObject_ANumberIsReadBackOrRefused(t *testing.T) {
 	t.Parallel()
 	s, res := schema.LoadString(t.Context(), numberJSONSchema, "numbers.yammm")
@@ -113,7 +99,7 @@ func TestMarshalObject_ANumberIsReadBackOrRefused(t *testing.T) {
 	for _, text := range heldNumbers {
 		n := stdjson.Number(text)
 		nearest, ferr := strconv.ParseFloat(text, 64)
-		readable := stdjson.Valid([]byte(text)) && strings.TrimSpace(text) == text && ferr == nil
+		readable := ferr == nil
 
 		for _, p := range []struct {
 			name, mentions string
@@ -182,7 +168,7 @@ func TestMarshalObject_ANumberIsReadBackOrRefused(t *testing.T) {
 						t.Fatalf("written as %s, which does not read back: %v", data, rerr)
 					}
 					got, ok := p.read(inst)
-					if !ok || ferr != nil || math.Float64bits(got) != math.Float64bits(nearest) {
+					if !ok || math.Float64bits(got) != math.Float64bits(nearest) {
 						t.Errorf("written as %s and read back as %v (%t), want the float64 nearest %q", data, got, ok, text)
 					}
 				}
@@ -214,6 +200,22 @@ func TestMarshalObject_AnIntegerLiteralIsReadBackAtAnInteger(t *testing.T) {
 		v, _ := inst.Property("n")
 		if got, ok := v.Unwrap().(int64); !ok || got != want {
 			t.Errorf("%s read back as %v (%T), want the int64 %d", text, v.Unwrap(), v.Unwrap(), want)
+		}
+	}
+}
+
+// At a String no numeric kind stores a number first, so a literal that reads back
+// is written as the literal it is, never as a JSON string.
+func TestMarshalObject_ANumberAtAStringIsWrittenAsItsLiteral(t *testing.T) {
+	t.Parallel()
+	s, res := schema.LoadString(t.Context(), numberJSONSchema, "numbers.yammm")
+	if res.HasErrors() {
+		t.Fatalf("load schema: %s", res)
+	}
+	for _, text := range []string{"5", "1.5"} {
+		data, err := New().MarshalObject(t.Context(), numberSnapshot(t, s, map[string]any{"s": stdjson.Number(text)}, nil))
+		if err != nil || !bytes.Contains(data, []byte(`"s":`+text+`,`)) && !bytes.Contains(data, []byte(`"s":`+text+`}`)) {
+			t.Errorf("json.Number(%s) at a String wrote %s, %v; want the literal unquoted", text, data, err)
 		}
 	}
 }

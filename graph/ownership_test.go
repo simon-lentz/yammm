@@ -5,7 +5,6 @@ import (
 	"testing"
 
 	"github.com/simon-lentz/yammm/graph"
-	"github.com/simon-lentz/yammm/instance"
 )
 
 // Ownership Isolation Tests for the graph package
@@ -16,7 +15,7 @@ import (
 //
 // 1. Each Snapshot returns independent, deep-copied instances (isolation)
 // 2. Within a single snapshot, references are consistent
-// 3. Composed children added via AddComposed are correctly accessible
+// 3. Composed children are correctly accessible
 // 4. Instance data is preserved through graph operations
 
 // TestGraph_SnapshotIsolation verifies that each call to Snapshot() returns
@@ -26,20 +25,14 @@ func TestGraph_SnapshotIsolation(t *testing.T) {
 	g := graph.New(s)
 	ctx := t.Context()
 
-	// Add parent
-	parent := mustValidInstance(t, s, "Parent",
-		[]any{"p1"}, map[string]any{"name": "Parent 1"})
-
-	g.Add(ctx, parent)
-
-	// Add children via AddComposed
-	child1 := mustValidPartInstance(t, s, "Child",
+	child1 := partData(t, s, "Child",
 		[]any{"c1"}, map[string]any{"name": "Child 1"})
-	child2 := mustValidPartInstance(t, s, "Child",
+	child2 := partData(t, s, "Child",
 		[]any{"c2"}, map[string]any{"name": "Child 2"})
-
-	g.AddComposed(ctx, mustTypeID(t, s, "Parent"), graph.FormatKey("p1"), "CHILDREN", child1)
-	g.AddComposed(ctx, mustTypeID(t, s, "Parent"), graph.FormatKey("p1"), "CHILDREN", child2)
+	parent := parentWith(t, s, "Parent", []any{"p1"}, map[string]any{"name": "Parent 1"}, "CHILDREN", child1, child2)
+	if err := g.Add(ctx, parent).Err(); err != nil {
+		t.Fatalf("Add should succeed: %v", err)
+	}
 
 	// Get multiple snapshots
 	snap1 := g.Snapshot()
@@ -93,31 +86,23 @@ func TestGraph_SnapshotIsolation(t *testing.T) {
 }
 
 // TestGraph_ComposedChildAccess verifies that composed children added via
-// AddComposed are correctly accessible with their original data preserved.
+// Add are correctly accessible with their original data preserved.
 func TestGraph_ComposedChildAccess(t *testing.T) {
 	s := testSchemaWithComposition(t)
 	g := graph.New(s)
 	ctx := t.Context()
 
-	// Add parent
-	parent := mustValidInstance(t, s, "Parent",
-		[]any{"p1"}, map[string]any{"name": "Parent 1"})
-
-	g.Add(ctx, parent)
-
-	// Add children with specific data
-	child1 := mustValidPartInstance(t, s, "Child",
+	// Children with specific data
+	child1 := partData(t, s, "Child",
 		[]any{"c1"}, map[string]any{"name": "First Child"})
-	child2 := mustValidPartInstance(t, s, "Child",
+	child2 := partData(t, s, "Child",
 		[]any{"c2"}, map[string]any{"name": "Second Child"})
-	child3 := mustValidPartInstance(t, s, "Child",
+	child3 := partData(t, s, "Child",
 		[]any{"c3"}, map[string]any{"name": "Third Child"})
 
-	for _, child := range []instance.ValidInstance{child1, child2, child3} {
-		result := g.AddComposed(ctx, mustTypeID(t, s, "Parent"), graph.FormatKey("p1"), "CHILDREN", child)
-		if err := result.Err(); err != nil {
-			t.Errorf("AddComposed should succeed: %v", err)
-		}
+	parent := parentWith(t, s, "Parent", []any{"p1"}, map[string]any{"name": "Parent 1"}, "CHILDREN", child1, child2, child3)
+	if err := g.Add(ctx, parent).Err(); err != nil {
+		t.Errorf("Add should succeed: %v", err)
 	}
 
 	// Access composed children via snapshot
@@ -169,61 +154,6 @@ func TestGraph_ComposedChildAccess(t *testing.T) {
 
 		if name != expectedName {
 			t.Errorf("Child %s: expected name %q, got %q", pkStr, expectedName, name)
-		}
-	}
-}
-
-// TestSnapshot_Isolation_FromAddComposed verifies that a snapshot taken before
-// AddComposed is isolated from composed children added afterwards.
-// This is the core immutability guarantee.
-func TestSnapshot_Isolation_FromAddComposed(t *testing.T) {
-	s := testSchemaWithComposition(t)
-	g := graph.New(s)
-	ctx := t.Context()
-
-	// Add parent
-	parent := mustValidInstance(t, s, "Parent",
-		[]any{"p1"}, map[string]any{"name": "Parent 1"})
-	g.Add(ctx, parent)
-
-	// Take snapshot BEFORE adding composed child
-	snap1 := g.Snapshot()
-
-	// Add composed child AFTER snapshot
-	child := mustValidPartInstance(t, s, "Child",
-		[]any{"c1"}, map[string]any{"name": "Child 1"})
-	g.AddComposed(ctx, mustTypeID(t, s, "Parent"), graph.FormatKey("p1"), "CHILDREN", child)
-
-	// Take second snapshot
-	snap2 := g.Snapshot()
-
-	// snap1 should show ZERO children (immutable snapshot)
-	parents1 := slices.Collect(snap1.InstancesOf(mustTypeID(t, s, "Parent")))
-	if len(parents1) != 1 {
-		t.Fatalf("Expected 1 parent in snap1, got %d", len(parents1))
-	}
-	children1 := slices.Collect(parents1[0].Composed("CHILDREN"))
-	if len(children1) != 0 {
-		t.Errorf("snap1 should have 0 children, got %d (snapshot not isolated!)", len(children1))
-	}
-
-	// snap2 should show ONE child
-	parents2 := slices.Collect(snap2.InstancesOf(mustTypeID(t, s, "Parent")))
-	if len(parents2) != 1 {
-		t.Fatalf("Expected 1 parent in snap2, got %d", len(parents2))
-	}
-	children2 := slices.Collect(parents2[0].Composed("CHILDREN"))
-	if len(children2) != 1 {
-		t.Errorf("snap2 should have 1 child, got %d", len(children2))
-	}
-
-	// Verify the child data in snap2
-	if len(children2) > 0 {
-		nameVal, ok := children2[0].Property("name")
-		if !ok {
-			t.Error("Expected name property on child")
-		} else if name, ok := nameVal.String(); !ok || name != "Child 1" {
-			t.Errorf("Expected child name 'Child 1', got %q", name)
 		}
 	}
 }

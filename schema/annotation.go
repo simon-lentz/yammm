@@ -3,7 +3,6 @@ package schema
 import (
 	"fmt"
 	"slices"
-	"strconv"
 	"strings"
 
 	"github.com/simon-lentz/yammm/location"
@@ -56,15 +55,15 @@ func (k AnnotationArgKind) String() string {
 // echo the argument in its source spelling.
 //
 // A quoted string is distinguished from a bare literal (number, boolean, regex)
-// because only the string's text was unquoted, so only it must be re-quoted to
-// reproduce the source; the others are already their own spelling. Both are
+// because only the string's text was unquoted, so only it holds its source
+// spelling apart, in raw; the others are already their own spelling. Both are
 // "literals" for eligibility ([AnnotationArg.isLiteral]).
 type annotationTokenKind uint8
 
 const (
 	tokenIdentifier annotationTokenKind = iota
 	tokenLiteral                        // a bare literal: number, boolean, regex — text is the source spelling
-	tokenString                         // a quoted string literal — text is UNQUOTED, source adds the quotes
+	tokenString                         // a quoted string literal — text is UNQUOTED, raw is the source spelling
 )
 
 // AnnotationArg is one argument of an annotation. It is a value type; the
@@ -79,8 +78,7 @@ type AnnotationArg struct {
 
 	// raw is the argument's source text for a quoted string, whose text field
 	// holds the UNQUOTED value; empty for every other kind (their text is
-	// already the source spelling) and for Builder-constructed arguments,
-	// which have no source. Read only by [AnnotationArg.displayText].
+	// already the source spelling). Read only by [AnnotationArg.displayText].
 	raw string
 }
 
@@ -108,11 +106,7 @@ func (a AnnotationArg) isLiteral() bool {
 // own spelling. Used by diagnostics that echo an argument back to the user.
 func (a AnnotationArg) displayText() string {
 	if a.tokenKind == tokenString {
-		if a.raw != "" {
-			return a.raw
-		}
-		// Builder-constructed arguments have no source text to preserve.
-		return strconv.Quote(a.text)
+		return a.raw
 	}
 	return a.text
 }
@@ -176,34 +170,13 @@ func (a Annotation) setArgKind(i int, kind AnnotationArgKind) {
 	a.args[i].kind = kind
 }
 
-// identity returns the annotation's deduplication key: name followed by the
-// ordered arguments, NUL-separated so a single arg "a,b" cannot collide with two
-// args "a", "b". Two type-level annotations are exact duplicates iff their
-// identities match (see mergeAnnotations).
-//
-// Each argument contributes its TOKEN KIND as well as its text, because text
-// alone is the unquoted value: a bare identifier `cosine` and the string literal
-// `"cosine"` are different source, mean different things to validation, and must
-// not compare equal — one is a keyword the loader accepts, the other a literal
-// it rejects.
-//
-// The encoding is length-prefixed rather than NUL-separated: an argument's text
-// is the UNQUOTED value of a string literal, which can itself contain a NUL byte
-// (written in source with a \x00 escape), so a NUL delimiter alone could be
-// forged to make two different argument lists produce the same key. Writing each
-// text's byte length before
-// its bytes makes the encoding self-delimiting and therefore injective,
-// whatever the text contains.
+// identity returns the annotation's deduplication key: the name, which as a
+// grammar word holds no NUL, then each argument's token kind and length-prefixed
+// text. The kind tells a bare `cosine` from the string `"cosine"`, and the length
+// keeps apart two argument lists whose values hold a NUL through a \x00 escape.
 func (a Annotation) identity() string {
 	const sep = "\x00"
 	var b strings.Builder
-	// The NAME is length-prefixed for the same reason the arguments are: it is
-	// the first field, so without a length its bytes run straight into the
-	// first argument's encoding and a name chosen to look like that encoding
-	// makes two different annotations produce one key. The DSL grammar cannot
-	// spell such a name, but [TypeBuilder.WithTypeAnnotation] and
-	// [TypeBuilder.WithPropertyAnnotation] take one as a plain string.
-	fmt.Fprintf(&b, "%d%s", len(a.name), sep)
 	b.WriteString(a.name)
 	for _, arg := range a.args {
 		fmt.Fprintf(&b, "%s%d%s%d%s", sep, arg.tokenKind, sep, len(arg.text), sep)

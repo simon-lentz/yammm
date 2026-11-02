@@ -1,13 +1,12 @@
 package graph_test
 
 import (
+	"strconv"
 	"testing"
 
 	"github.com/simon-lentz/yammm/graph"
-	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/instance"
 	"github.com/simon-lentz/yammm/internal/instancetest"
-	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -19,29 +18,17 @@ import (
 // fixed one. Read it as a relative measure between tree shapes, which is what
 // it was added for, and not as an absolute per-Add cost.
 func BenchmarkAdd_WithComposedChildren(b *testing.B) {
-	s, parentID, childID := benchFixture(b)
+	s := benchFixture(b)
 	ctx := b.Context()
 
 	kids := make([]any, 8)
 	for i := range kids {
-		kids[i] = instancetest.VI(
-			"Child",
-			instancetest.TypeID(childID),
-			instancetest.PK(string(rune('a'+i))),
-			instancetest.Props(map[string]any{"id": string(rune('a' + i)), "name": "child"}),
-		)
+		kids[i] = map[string]any{"id": string(rune('a' + i)), "name": "child"}
 	}
-	composed := map[string]immutable.Value{"CHILDREN": immutable.Wrap(kids)}
 
 	insts := make([]instance.ValidInstance, b.N)
 	for i := range insts {
-		insts[i] = instancetest.VI(
-			"Parent",
-			instancetest.TypeID(parentID),
-			instancetest.PK(i),
-			instancetest.Props(map[string]any{"id": i, "name": "parent"}),
-			instancetest.Composed(composed),
-		)
+		insts[i] = instancetest.Valid(b, s, "Parent", map[string]any{"id": strconv.Itoa(i), "name": "parent", "children": kids})
 	}
 
 	g := graph.New(s)
@@ -57,17 +44,12 @@ func BenchmarkAdd_WithComposedChildren(b *testing.B) {
 // BenchmarkAdd_PlainInstance measures the same on an instance with no edges
 // and no compositions — the shape the guard can do nothing but skip.
 func BenchmarkAdd_PlainInstance(b *testing.B) {
-	s, parentID, _ := benchFixture(b)
+	s := benchFixture(b)
 	ctx := b.Context()
 
 	insts := make([]instance.ValidInstance, b.N)
 	for i := range insts {
-		insts[i] = instancetest.VI(
-			"Parent",
-			instancetest.TypeID(parentID),
-			instancetest.PK(i),
-			instancetest.Props(map[string]any{"id": i, "name": "parent"}),
-		)
+		insts[i] = instancetest.Valid(b, s, "Parent", map[string]any{"id": strconv.Itoa(i), "name": "parent"})
 	}
 
 	g := graph.New(s)
@@ -82,32 +64,23 @@ func BenchmarkAdd_PlainInstance(b *testing.B) {
 
 // benchFixture builds the benchmark schema without a zero-value *testing.T,
 // whose Fatalf would panic on a nil runner instead of failing the benchmark.
-func benchFixture(b *testing.B) (schema.Schema, schema.TypeID, schema.TypeID) {
+func benchFixture(b *testing.B) schema.Schema {
 	b.Helper()
-	s, res := schema.NewBuilder().
-		WithName("composition").
-		WithSourceID(location.MustNewSourceID("test://bench_composition.yammm")).
-		AddType("Child").
-		AsPart().
-		WithPrimaryKey("id", schema.StringConstraint{}).
-		WithProperty("name", schema.StringConstraint{}).
-		Done().
-		AddType("Parent").
-		WithPrimaryKey("id", schema.StringConstraint{}).
-		WithProperty("name", schema.StringConstraint{}).
-		WithComposition("CHILDREN", schema.LocalTypeRef("Child", location.Span{}), true, true).
-		Done().
-		Build()
+	s, res := schema.LoadString(b.Context(), `schema "composition"
+
+part type Child {
+	id String primary
+	name String required
+}
+
+type Parent {
+	id String primary
+	name String required
+	*-> CHILDREN (many) Child
+}
+`, "bench_composition.yammm")
 	if res.HasErrors() {
 		b.Fatalf("build bench schema: %s", res.String())
 	}
-	parent, ok := s.Type("Parent")
-	if !ok {
-		b.Fatal("Parent not in the bench schema")
-	}
-	child, ok := s.Type("Child")
-	if !ok {
-		b.Fatal("Child not in the bench schema")
-	}
-	return s, parent.ID(), child.ID()
+	return s
 }

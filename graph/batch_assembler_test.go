@@ -9,36 +9,45 @@ import (
 	"strings"
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/graph"
-	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/instance"
-	"github.com/simon-lentz/yammm/location"
+	"github.com/simon-lentz/yammm/internal/instancetest"
 	"github.com/simon-lentz/yammm/schema"
 	"github.com/simon-lentz/yammm/snapshot"
 	"github.com/simon-lentz/yammm/snapshot/snapshottest"
 )
+
+// checkedSnapshot ends a batch as a caller does: it checks the graph, then takes
+// its snapshot, which holds the graph whatever the check said.
+func checkedSnapshot(ctx context.Context, ba *graph.BatchAssembler) (graph.Snapshot, error) {
+	res := ba.Graph().Check(ctx)
+	snap := ba.Graph().Snapshot()
+	if res.HasErrors() {
+		return snap, res.WithContext("check")
+	}
+	return snap, nil
+}
 
 // batchAssemblerTestSchema returns a schema with Person + Company plus an
 // optional employer association so we can exercise both happy-path adds and
 // (with the required-association variant below) Check-failure paths.
 func batchAssemblerTestSchema(t *testing.T) schema.Schema {
 	t.Helper()
-	s, result := schema.NewBuilder().
-		WithName("batchassembler").
-		WithSourceID(location.MustNewSourceID("test://batchassembler.yammm")).
-		AddType("Company").
-		WithPrimaryKey("id", schema.StringConstraint{}).
-		WithProperty("name", schema.StringConstraint{}).
-		Done().
-		AddType("Person").
-		WithPrimaryKey("id", schema.StringConstraint{}).
-		WithProperty("name", schema.StringConstraint{}).
-		WithRelation("EMPLOYER", schema.LocalTypeRef("Company", location.Span{}), true, false).
-		Done().
-		Build()
+	s, result := schema.LoadString(t.Context(), `schema "batchassembler"
+
+type Company {
+	id String primary
+	name String required
+}
+
+type Person {
+	id String primary
+	name String required
+	--> EMPLOYER (_:one) Company
+}
+`, "batchassembler.yammm")
 	if result.HasErrors() {
 		t.Fatalf("schema build failed: %s", result.String())
 	}
@@ -47,23 +56,23 @@ func batchAssemblerTestSchema(t *testing.T) schema.Schema {
 
 // batchAssemblerRequiredEmployerSchema is the same shape as the above but
 // with `employer` declared as a REQUIRED association — used by the
-// FinalizeError test to deterministically trigger an unresolved-required
+// unresolved-required test to deterministically trigger an unresolved-required
 // failure on Check.
 func batchAssemblerRequiredEmployerSchema(t *testing.T) schema.Schema {
 	t.Helper()
-	s, result := schema.NewBuilder().
-		WithName("batchassembler_required").
-		WithSourceID(location.MustNewSourceID("test://batchassembler_required.yammm")).
-		AddType("Company").
-		WithPrimaryKey("id", schema.StringConstraint{}).
-		WithProperty("name", schema.StringConstraint{}).
-		Done().
-		AddType("Person").
-		WithPrimaryKey("id", schema.StringConstraint{}).
-		WithProperty("name", schema.StringConstraint{}).
-		WithRelation("EMPLOYER", schema.LocalTypeRef("Company", location.Span{}), false, false).
-		Done().
-		Build()
+	s, result := schema.LoadString(t.Context(), `schema "batchassembler_required"
+
+type Company {
+	id String primary
+	name String required
+}
+
+type Person {
+	id String primary
+	name String required
+	--> EMPLOYER (one) Company
+}
+`, "batchassembler_required.yammm")
 	if result.HasErrors() {
 		t.Fatalf("schema build failed: %s", result.String())
 	}
@@ -91,7 +100,7 @@ func companyRaw(id, name string) instance.RawInstance {
 }
 
 // personRawWithEmployer attaches a missing-employer reference, used by
-// the FinalizeError test against the required-employer schema.
+// the unresolved-required test against the required-employer schema.
 func personRawWithEmployer(id, name, employerID string) instance.RawInstance {
 	return instance.RawInstance{
 		Properties: map[string]any{
@@ -106,17 +115,7 @@ func personRawWithEmployer(id, name, employerID string) instance.RawInstance {
 // the public instance constructor — useful for AddValid tests.
 func mustValidPerson(t *testing.T, s schema.Schema, id, name string) instance.ValidInstance {
 	t.Helper()
-	typ, ok := s.Type("Person")
-	if !ok {
-		t.Fatalf("Person type not found")
-	}
-	return instance.NewValidInstance(
-		"Person",
-		typ.ID(),
-		immutable.WrapKey([]any{id}),
-		immutable.WrapProperties(map[string]any{"id": id, "name": name}),
-		nil, nil, location.Provenance{},
-	)
+	return instancetest.Valid(t, s, "Person", map[string]any{"id": id, "name": name})
 }
 
 // -----------------------------------------------------------------------------
@@ -165,17 +164,17 @@ func TestBatchAssembler_HappyPath_Default(t *testing.T) {
 			t.Fatalf("assembler: Add %q: %v", rec.typeName, err)
 		}
 	}
-	res, err := ba.Finalize(ctx)
+	res, err := checkedSnapshot(ctx, ba)
 	if err != nil {
-		t.Fatalf("assembler: Finalize: %v", err)
+		t.Fatalf("assembler: Check: %v", err)
 	}
-	if res.Snapshot.IsZero() {
-		t.Fatal("assembler: res.Snapshot is nil")
+	if res.IsZero() {
+		t.Fatal("assembler: res is nil")
 	}
-	if res.Snapshot.Diagnostics().HasErrors() {
-		t.Errorf("assembler: snapshot diagnostics has errors: %s", res.Snapshot.Diagnostics().String())
+	if res.Diagnostics().HasErrors() {
+		t.Errorf("assembler: snapshot diagnostics has errors: %s", res.Diagnostics().String())
 	}
-	asmBytes, asmRes := snapshot.Marshal(ctx, res.Snapshot)
+	asmBytes, asmRes := snapshot.Marshal(ctx, res)
 	if asmRes.HasErrors() {
 		t.Fatalf("assembler: marshal: %s", asmRes.String())
 	}
@@ -234,9 +233,9 @@ func TestBatchAssembler_CancelledAdd_ReachesSnapshotDiagnostics(t *testing.T) {
 		t.Fatalf("Add with a cancelled assembler context: %v; want E_CONTEXT_CANCELLED", err)
 	}
 
-	res, _ := ba.Finalize(t.Context())
-	if !res.Snapshot.Diagnostics().HasCode(diag.E_CONTEXT_CANCELLED) {
-		t.Errorf("Snapshot.Diagnostics() = %s; want the cancellation Add returned", res.Snapshot.Diagnostics())
+	res := ba.Graph().Snapshot()
+	if !res.Diagnostics().HasCode(diag.E_CONTEXT_CANCELLED) {
+		t.Errorf("Snapshot.Diagnostics() = %s; want the cancellation Add returned", res.Diagnostics())
 	}
 }
 
@@ -250,11 +249,11 @@ func TestBatchAssembler_AddValidationFailure_ReachesSnapshotDiagnostics(t *testi
 		t.Fatalf("Add error is not *diag.ContextualError: %T (%v)", err, err)
 	}
 
-	res, err := ba.Finalize(t.Context())
+	res, err := checkedSnapshot(t.Context(), ba)
 	if err != nil {
-		t.Fatalf("Finalize over an empty graph: %v", err)
+		t.Fatalf("Check over an empty graph: %v", err)
 	}
-	got := res.Snapshot.Diagnostics().CodeCounts(diag.Error)
+	got := res.Diagnostics().CodeCounts(diag.Error)
 	want := ce.Result.CodeCounts(diag.Error)
 	if len(want) == 0 || !maps.Equal(got, want) {
 		t.Errorf("Snapshot.Diagnostics() error codes = %v, want the Add error's %v", got, want)
@@ -278,11 +277,11 @@ func TestBatchAssembler_ARefusedValueIsRefusedWithNoDiagnostic(t *testing.T) {
 	if got := ba.Count(); got != 0 {
 		t.Errorf("Count() = %d, want 0", got)
 	}
-	res, err := ba.Finalize(t.Context())
+	res, err := checkedSnapshot(t.Context(), ba)
 	if err != nil {
-		t.Fatalf("Finalize over an empty graph: %v", err)
+		t.Fatalf("Check over an empty graph: %v", err)
 	}
-	if d := res.Snapshot.Diagnostics(); d.Len() != 0 {
+	if d := res.Diagnostics(); d.Len() != 0 {
 		t.Errorf("Snapshot.Diagnostics() = %s, want none", d)
 	}
 }
@@ -304,10 +303,11 @@ func TestBatchAssembler_AddValidOfANilNamesARefusedValue(t *testing.T) {
 }
 
 // -----------------------------------------------------------------------------
-// Test 3: Finalize error — FinalizeResult contract (Snapshot non-nil on error).
+// Test 3: Check reports an unresolved required association, and the snapshot
+// holds the graph it judged.
 // -----------------------------------------------------------------------------
 
-func TestBatchAssembler_FinalizeError_FinalizeResultContract(t *testing.T) {
+func TestBatchAssembler_UnresolvedRequired_CheckReportsAndTheSnapshotHoldsTheAdds(t *testing.T) {
 	s := batchAssemblerRequiredEmployerSchema(t)
 	ctx := t.Context()
 
@@ -317,57 +317,33 @@ func TestBatchAssembler_FinalizeError_FinalizeResultContract(t *testing.T) {
 		t.Fatalf("Add: %v", err)
 	}
 
-	res, err := ba.Finalize(ctx)
-	if err == nil {
-		t.Fatal("expected Finalize error from unresolved required association")
+	res := ba.Graph().Check(ctx)
+	if !res.HasErrors() {
+		t.Fatal("expected a Check error from the unresolved required association")
 	}
-	// LOAD-BEARING: res.Snapshot must be non-nil even on the error path —
-	// the FinalizeResult struct exists to encode this contract at the type
-	// level so callers do not have to gate on `err == nil`.
-	if res.Snapshot.IsZero() {
-		t.Fatal("res.Snapshot is nil on Finalize error path; contract violated")
+	// Check's result does not merge into the snapshot's collector; see
+	// graph/doc.go's "Diagnostics Lifecycle" section.
+	if !res.HasCode(diag.E_UNRESOLVED_REQUIRED) {
+		t.Errorf("expected E_UNRESOLVED_REQUIRED in the result; got: %s", res.String())
 	}
-
-	var ce *diag.ContextualError
-	if !errors.As(err, &ce) {
-		t.Fatalf("error is not *diag.ContextualError: %T", err)
+	snap := ba.Graph().Snapshot()
+	if snap.IsZero() {
+		t.Fatal("zero snapshot after a failed Check")
 	}
-	if ce.Tag != "batch_finalize" {
-		t.Errorf("Tag: got %q, want \"batch_finalize\"", ce.Tag)
-	}
-
-	// The returned Result should contain the unresolved-required diagnostic
-	// from Check. The snapshot's Diagnostics() carries the construction-time
-	// issues from Add (none here) — the two surfaces are not byte-identical
-	// because Check returns a fresh result that does NOT merge into the
-	// snapshot's collector (see graph/doc.go's "Diagnostics Lifecycle"
-	// section). The contract under test: ce.Result must contain at least
-	// one E_UNRESOLVED_REQUIRED issue.
-	foundUnresolved := false
-	for issue := range ce.Result.Errors() {
-		if issue.Code() == diag.E_UNRESOLVED_REQUIRED {
-			foundUnresolved = true
-			break
-		}
-	}
-	if !foundUnresolved {
-		t.Errorf("expected E_UNRESOLVED_REQUIRED in error result; got: %s", ce.Result.String())
-	}
-	// The Person is still inspectable in the partial snapshot.
-	if persons := slices.Collect(res.Snapshot.InstancesOf(mustTypeID(t, s, "Person"))); len(persons) != 1 {
-		t.Errorf("expected 1 Person in partial snapshot, got %d", len(persons))
+	if persons := slices.Collect(snap.InstancesOf(mustTypeID(t, s, "Person"))); len(persons) != 1 {
+		t.Errorf("expected 1 Person in the snapshot, got %d", len(persons))
 	}
 }
 
 // -----------------------------------------------------------------------------
-// Test 4: Finalize success with warnings — warnings reachable on success path.
+// Test 4: a clean Check leaves clean snapshot diagnostics.
 // -----------------------------------------------------------------------------
 
-// TestBatchAssembler_FinalizeSuccess_CarriesCleanDiagnostics pins the success
+// TestBatchAssembler_CleanBatch_CarriesCleanDiagnostics pins the success
 // path's diagnostics surface. It does not pin warnings: no construction-time
 // diagnostic in this package is warning-severity, so there is nothing to
 // build a warning fixture from.
-func TestBatchAssembler_FinalizeSuccess_CarriesCleanDiagnostics(t *testing.T) {
+func TestBatchAssembler_CleanBatch_CarriesCleanDiagnostics(t *testing.T) {
 	s := batchAssemblerTestSchema(t)
 	ctx := t.Context()
 
@@ -375,55 +351,25 @@ func TestBatchAssembler_FinalizeSuccess_CarriesCleanDiagnostics(t *testing.T) {
 	if err := ba.Add("Person", personRaw("alice", "Alice")); err != nil {
 		t.Fatalf("Add: %v", err)
 	}
-	res, err := ba.Finalize(ctx)
+	res, err := checkedSnapshot(ctx, ba)
 	if err != nil {
-		t.Fatalf("Finalize: %v", err)
+		t.Fatalf("Check: %v", err)
 	}
-	if res.Snapshot.IsZero() {
-		t.Fatal("res.Snapshot is nil")
+	if res.IsZero() {
+		t.Fatal("res is nil")
 	}
 	// Diagnostics surface is reachable and clean for the happy path.
-	if res.Snapshot.Diagnostics().HasErrors() {
+	if res.Diagnostics().HasErrors() {
 		t.Errorf("unexpected errors on snapshot diagnostics: %s",
-			res.Snapshot.Diagnostics().String())
+			res.Diagnostics().String())
 	}
 }
 
 // -----------------------------------------------------------------------------
-// Test 5: Post-Finalize Add returns ErrAssemblerFinalized (errors.Is).
+// Test 6: AddValid runs no validator and increments counters.
 // -----------------------------------------------------------------------------
 
-func TestBatchAssembler_PostFinalize_AddReturnsError(t *testing.T) {
-	s := batchAssemblerTestSchema(t)
-	ctx := t.Context()
-
-	ba := graph.NewBatchAssembler(ctx, s)
-	if err := ba.Add("Person", personRaw("alice", "Alice")); err != nil {
-		t.Fatalf("pre-finalize Add: %v", err)
-	}
-	if _, err := ba.Finalize(ctx); err != nil {
-		t.Fatalf("Finalize: %v", err)
-	}
-
-	// Post-Finalize Add must return a sentinel error that errors.Is
-	// matches against graph.ErrAssemblerFinalized.
-	postErr := ba.Add("Person", personRaw("bob", "Bob"))
-	if !errors.Is(postErr, graph.ErrAssemblerFinalized) {
-		t.Errorf("post-Finalize Add: errors.Is(err, ErrAssemblerFinalized) = false; err = %v", postErr)
-	}
-
-	// Same for AddValid.
-	postValidErr := ba.AddValid(mustValidPerson(t, s, "carol", "Carol"))
-	if !errors.Is(postValidErr, graph.ErrAssemblerFinalized) {
-		t.Errorf("post-Finalize AddValid: errors.Is(err, ErrAssemblerFinalized) = false; err = %v", postValidErr)
-	}
-}
-
-// -----------------------------------------------------------------------------
-// Test 6: AddValid bypasses validator and increments counters.
-// -----------------------------------------------------------------------------
-
-func TestBatchAssembler_AddValid_BypassesValidator(t *testing.T) {
+func TestBatchAssembler_AddValid_RunsNoValidator(t *testing.T) {
 	s := batchAssemblerTestSchema(t)
 	ctx := t.Context()
 
@@ -436,11 +382,11 @@ func TestBatchAssembler_AddValid_BypassesValidator(t *testing.T) {
 		t.Errorf("Count() after AddValid: got %d, want 1", got)
 	}
 
-	res, err := ba.Finalize(ctx)
+	res, err := checkedSnapshot(ctx, ba)
 	if err != nil {
-		t.Fatalf("Finalize: %v", err)
+		t.Fatalf("Check: %v", err)
 	}
-	if persons := slices.Collect(res.Snapshot.InstancesOf(mustTypeID(t, s, "Person"))); len(persons) != 1 {
+	if persons := slices.Collect(res.InstancesOf(mustTypeID(t, s, "Person"))); len(persons) != 1 {
 		t.Errorf("expected 1 Person, got %d", len(persons))
 	}
 }
@@ -516,115 +462,12 @@ func TestBatchAssembler_Concurrent_Default(t *testing.T) {
 		t.Errorf("Count: got %d, want %d", got, expected)
 	}
 
-	res, err := ba.Finalize(ctx)
+	res, err := checkedSnapshot(ctx, ba)
 	if err != nil {
-		t.Fatalf("Finalize: %v", err)
+		t.Fatalf("Check: %v", err)
 	}
-	if persons := slices.Collect(res.Snapshot.InstancesOf(mustTypeID(t, s, "Person"))); len(persons) != expected {
+	if persons := slices.Collect(res.InstancesOf(mustTypeID(t, s, "Person"))); len(persons) != expected {
 		t.Errorf("snapshot Person count: got %d, want %d", len(persons), expected)
-	}
-}
-
-// -----------------------------------------------------------------------------
-// Concurrent Add-vs-Finalize ordering: the load-bearing regression pin.
-//
-// Every Add that returns
-// nil must occur before Finalize's snapshot. A naive design where Finalize
-// drains the validator pool would violate this in pool mode (the validator
-// is returned to the pool before Graph.Add runs). The implementation
-// serializes Finalize against in-flight Adds with a sync.RWMutex: each Add
-// holds the read lock for its full duration and Finalize takes the write
-// lock, which blocks until every outstanding Add has released — so no Add
-// that returned nil can be missing from the snapshot.
-// -----------------------------------------------------------------------------
-
-func TestBatchAssembler_Concurrent_AddVsFinalize_Ordering(t *testing.T) {
-	s := batchAssemblerTestSchema(t)
-	ctx := t.Context()
-
-	{
-		t.Run("default", func(t *testing.T) {
-			ba := graph.NewBatchAssembler(ctx, s)
-
-			const numWorkers = 8
-			const perWorker = 200
-
-			// successAttempts collects the (worker, j) pairs that returned nil.
-			// We compare them against the Person instances present in the
-			// final snapshot to assert the ordering guarantee.
-			var successMu sync.Mutex
-			successKeys := make(map[string]struct{})
-
-			var startBarrier sync.WaitGroup
-			startBarrier.Add(1)
-
-			var workersWg sync.WaitGroup
-			for i := range numWorkers {
-				workersWg.Go(func() {
-					startBarrier.Wait()
-					for j := range perWorker {
-						id := fmt.Sprintf("p-%d-%d", i, j)
-						err := ba.Add("Person", personRaw(id, id))
-						switch {
-						case err == nil:
-							successMu.Lock()
-							successKeys[id] = struct{}{}
-							successMu.Unlock()
-						case errors.Is(err, graph.ErrAssemblerFinalized):
-							// Acceptable: arrived after Finalize.
-						default:
-							t.Errorf("unexpected Add error for %s: %v", id, err)
-							return
-						}
-					}
-				})
-			}
-
-			// Coordinator: release the barrier, then call Finalize after a small
-			// delay so workers have time to be in-flight.
-			done := make(chan struct{})
-			var finalRes graph.FinalizeResult
-			var finalErr error
-			go func() {
-				defer close(done)
-				startBarrier.Done()
-				time.Sleep(2 * time.Millisecond)
-				finalRes, finalErr = ba.Finalize(ctx)
-			}()
-
-			workersWg.Wait()
-			<-done
-
-			if finalErr != nil {
-				t.Fatalf("Finalize: %v", finalErr)
-			}
-
-			// Every key reported as a successful Add must be
-			// in the final snapshot.
-			persons := slices.Collect(finalRes.Snapshot.InstancesOf(mustTypeID(t, s, "Person")))
-			snapKeys := make(map[string]struct{}, len(persons))
-			for _, p := range persons {
-				snapKeys[p.PrimaryKey().String()] = struct{}{}
-			}
-
-			successMu.Lock()
-			defer successMu.Unlock()
-			for id := range successKeys {
-				keyStr := fmt.Sprintf("[%q]", id)
-				if _, ok := snapKeys[keyStr]; !ok {
-					t.Errorf("ordering violation: Add(%s) returned nil but is not in the snapshot", id)
-				}
-			}
-			// Conversely, every snapshot key must be one of our successKeys
-			// (no spurious instances).
-			for k := range snapKeys {
-				// k looks like ["p-3-17"]
-				id := k[2 : len(k)-2]
-				if _, ok := successKeys[id]; !ok {
-					t.Errorf("snapshot has key %s not in successKeys (spurious instance)", k)
-				}
-			}
-		})
 	}
 }
 
@@ -659,11 +502,11 @@ func TestBatchAssembler_Concurrent_AddValid(t *testing.T) {
 		t.Errorf("Count: got %d, want %d", got, expected)
 	}
 
-	res, err := ba.Finalize(ctx)
+	res, err := checkedSnapshot(ctx, ba)
 	if err != nil {
-		t.Fatalf("Finalize: %v", err)
+		t.Fatalf("Check: %v", err)
 	}
-	if persons := slices.Collect(res.Snapshot.InstancesOf(mustTypeID(t, s, "Person"))); len(persons) != expected {
+	if persons := slices.Collect(res.InstancesOf(mustTypeID(t, s, "Person"))); len(persons) != expected {
 		t.Errorf("snapshot Person count: got %d, want %d", len(persons), expected)
 	}
 }
@@ -751,17 +594,17 @@ func TestNewBatchAssemblerFromSnapshot_ResumeAddsOnTopOfSeed(t *testing.T) {
 		t.Errorf("Count(): got %d, want 1 (seeded instances must not be counted)", got)
 	}
 
-	res, err := ba.Finalize(ctx)
+	res, err := checkedSnapshot(ctx, ba)
 	if err != nil {
-		t.Fatalf("Finalize: %v", err)
+		t.Fatalf("Check: %v", err)
 	}
-	if got := len(slices.Collect(res.Snapshot.InstancesOf(mustTypeID(t, s, "Person")))); got != 2 {
+	if got := len(slices.Collect(res.InstancesOf(mustTypeID(t, s, "Person")))); got != 2 {
 		t.Errorf("Person count: got %d, want 2 (seeded alice + new bob)", got)
 	}
-	if got := len(slices.Collect(res.Snapshot.InstancesOf(mustTypeID(t, s, "Company")))); got != 1 {
+	if got := len(slices.Collect(res.InstancesOf(mustTypeID(t, s, "Company")))); got != 1 {
 		t.Errorf("Company count: got %d, want 1", got)
 	}
-	edges := slices.Collect(res.Snapshot.Edges())
+	edges := slices.Collect(res.Edges())
 	if len(edges) != 1 {
 		t.Fatalf("edge count: got %d, want 1", len(edges))
 	}
@@ -783,7 +626,7 @@ func TestNewBatchAssemblerFromSnapshot_ResumeAddsOnTopOfSeed(t *testing.T) {
 
 // -----------------------------------------------------------------------------
 // Test 17: A new Add through the assembler resolves an unresolved REQUIRED
-// edge imported from the seed, so Finalize succeeds.
+// edge imported from the seed, so Check succeeds.
 // -----------------------------------------------------------------------------
 
 func TestNewBatchAssemblerFromSnapshot_ResolvesSeededUnresolved(t *testing.T) {
@@ -805,24 +648,24 @@ func TestNewBatchAssemblerFromSnapshot_ResolvesSeededUnresolved(t *testing.T) {
 		t.Fatalf("Add(acme): %v", err)
 	}
 
-	res, err := ba.Finalize(ctx)
+	res, err := checkedSnapshot(ctx, ba)
 	if err != nil {
-		t.Fatalf("Finalize: %v (the resumed batch supplied the missing target)", err)
+		t.Fatalf("Check: %v (the resumed batch supplied the missing target)", err)
 	}
-	if got := len(slices.Collect(res.Snapshot.Edges())); got != 1 {
+	if got := len(slices.Collect(res.Edges())); got != 1 {
 		t.Errorf("edge count: got %d, want 1 (seeded pending edge resolved by new Add)", got)
 	}
-	if got := len(slices.Collect(res.Snapshot.Unresolved())); got != 0 {
+	if got := len(slices.Collect(res.Unresolved())); got != 0 {
 		t.Errorf("unresolved count: got %d, want 0", got)
 	}
 }
 
 // -----------------------------------------------------------------------------
 // Test 18: An unresolved REQUIRED edge imported from the seed and never
-// completed fails Finalize — Check covers seeded and new state alike.
+// completed fails Check, which covers seeded and new state alike.
 // -----------------------------------------------------------------------------
 
-func TestNewBatchAssemblerFromSnapshot_SeededUnresolvedFailsFinalize(t *testing.T) {
+func TestNewBatchAssemblerFromSnapshot_SeededUnresolvedFailsCheck(t *testing.T) {
 	s := batchAssemblerRequiredEmployerSchema(t)
 	ctx := t.Context()
 
@@ -833,38 +676,18 @@ func TestNewBatchAssemblerFromSnapshot_SeededUnresolvedFailsFinalize(t *testing.
 
 	// Add nothing: the imported unresolved REQUIRED edge must fail Check.
 	ba := mustSeed(t, ctx, s, seed)
-	res, err := ba.Finalize(ctx)
-	if err == nil {
-		t.Fatal("expected Finalize error from seeded unresolved required association")
+	res := ba.Graph().Check(ctx)
+	if !res.HasCode(diag.E_UNRESOLVED_REQUIRED) {
+		t.Errorf("expected E_UNRESOLVED_REQUIRED from the seeded association; got: %s", res.String())
 	}
-	var ce *diag.ContextualError
-	if !errors.As(err, &ce) {
-		t.Fatalf("error is not *diag.ContextualError: %T", err)
-	}
-	if ce.Tag != "batch_finalize" {
-		t.Errorf("Tag: got %q, want \"batch_finalize\"", ce.Tag)
-	}
-	foundUnresolved := false
-	for issue := range ce.Result.Errors() {
-		if issue.Code() == diag.E_UNRESOLVED_REQUIRED {
-			foundUnresolved = true
-			break
-		}
-	}
-	if !foundUnresolved {
-		t.Errorf("expected E_UNRESOLVED_REQUIRED in error result; got: %s", ce.Result.String())
-	}
-	if res.Snapshot.IsZero() {
-		t.Fatal("res.Snapshot is nil on Finalize error path; contract violated")
-	}
-	if got := len(slices.Collect(res.Snapshot.Unresolved())); got != 1 {
-		t.Errorf("unresolved count on partial snapshot: got %d, want 1", got)
+	if got := len(slices.Collect(ba.Graph().Snapshot().Unresolved())); got != 1 {
+		t.Errorf("unresolved count on the snapshot: got %d, want 1", got)
 	}
 }
 
 // -----------------------------------------------------------------------------
 // Test 19: A new Add colliding with a seeded (type, PK) is rejected as a
-// duplicate; the rejection is recorded on the snapshot, not via Finalize.
+// duplicate; the rejection is recorded on the snapshot, not by Check.
 // -----------------------------------------------------------------------------
 
 func TestNewBatchAssemblerFromSnapshot_DuplicateAgainstSeeded(t *testing.T) {
@@ -903,22 +726,22 @@ func TestNewBatchAssemblerFromSnapshot_DuplicateAgainstSeeded(t *testing.T) {
 		t.Errorf("Count() after failed Add: got %d, want 0", got)
 	}
 
-	// Duplicates do not gate Finalize (Check covers unresolved-required
+	// Duplicates do not gate the batch (Check covers unresolved-required
 	// only); the rejection is recorded on the snapshot instead.
-	res, err := ba.Finalize(ctx)
+	res, err := checkedSnapshot(ctx, ba)
 	if err != nil {
-		t.Fatalf("Finalize: %v", err)
+		t.Fatalf("Check: %v", err)
 	}
-	if got := len(slices.Collect(res.Snapshot.InstancesOf(mustTypeID(t, s, "Person")))); got != 1 {
+	if got := len(slices.Collect(res.InstancesOf(mustTypeID(t, s, "Person")))); got != 1 {
 		t.Errorf("Person count: got %d, want 1 (seeded alice only)", got)
 	}
-	if got := len(slices.Collect(res.Snapshot.Duplicates())); got != 1 {
+	if got := len(slices.Collect(res.Duplicates())); got != 1 {
 		t.Errorf("Duplicates count: got %d, want 1", got)
 	}
 	// The seed contributed no construction diagnostics; the duplicate from
-	// THIS batch is the only issue on the finalized snapshot.
-	if !res.Snapshot.Diagnostics().HasErrors() {
-		t.Error("expected E_DUPLICATE_PK on finalized snapshot diagnostics")
+	// THIS batch is the only issue on the snapshot.
+	if !res.Diagnostics().HasErrors() {
+		t.Error("expected E_DUPLICATE_PK on snapshot diagnostics")
 	}
 }
 
@@ -976,12 +799,12 @@ func TestNewBatchAssemblerFromSnapshot_EquivalentToManualSeededLoop(t *testing.T
 					t.Fatalf("Add(%s): %v", rec.typeName, err)
 				}
 			}
-			res, err := ba.Finalize(ctx)
+			res, err := checkedSnapshot(ctx, ba)
 			if err != nil {
-				t.Fatalf("Finalize: %v", err)
+				t.Fatalf("Check: %v", err)
 			}
-			snapshottest.DiffSnapshots(t, manualSnap, res.Snapshot)
-			asmBytes, asmRes := snapshot.Marshal(ctx, res.Snapshot)
+			snapshottest.DiffSnapshots(t, manualSnap, res)
+			asmBytes, asmRes := snapshot.Marshal(ctx, res)
 			if asmRes.HasErrors() {
 				t.Fatalf("marshal: %s", asmRes.String())
 			}
@@ -1010,11 +833,11 @@ func TestNewBatchAssemblerFromSnapshot_YSRoundTripResume(t *testing.T) {
 	if err := ba1.Add("Person", personRawWithEmployer("alice", "Alice", "acme")); err != nil {
 		t.Fatalf("run 1: Add(alice): %v", err)
 	}
-	res1, err := ba1.Finalize(ctx)
+	res1, err := checkedSnapshot(ctx, ba1)
 	if err != nil {
-		t.Fatalf("run 1: Finalize: %v", err)
+		t.Fatalf("run 1: Check: %v", err)
 	}
-	data, mRes := snapshot.Marshal(ctx, res1.Snapshot)
+	data, mRes := snapshot.Marshal(ctx, res1)
 	if mRes.HasErrors() {
 		t.Fatalf("run 1: marshal: %s", mRes.String())
 	}
@@ -1035,23 +858,23 @@ func TestNewBatchAssemblerFromSnapshot_YSRoundTripResume(t *testing.T) {
 	if got := ba2.Count(); got != 1 {
 		t.Errorf("run 2: Count(): got %d, want 1", got)
 	}
-	res2, err := ba2.Finalize(ctx)
+	res2, err := checkedSnapshot(ctx, ba2)
 	if err != nil {
-		t.Fatalf("run 2: Finalize: %v", err)
+		t.Fatalf("run 2: Check: %v", err)
 	}
 
-	if got := len(slices.Collect(res2.Snapshot.InstancesOf(mustTypeID(t, s, "Person")))); got != 2 {
+	if got := len(slices.Collect(res2.InstancesOf(mustTypeID(t, s, "Person")))); got != 2 {
 		t.Errorf("Person count: got %d, want 2", got)
 	}
-	if got := len(slices.Collect(res2.Snapshot.InstancesOf(mustTypeID(t, s, "Company")))); got != 1 {
+	if got := len(slices.Collect(res2.InstancesOf(mustTypeID(t, s, "Company")))); got != 1 {
 		t.Errorf("Company count: got %d, want 1", got)
 	}
-	if got := len(slices.Collect(res2.Snapshot.Edges())); got != 2 {
+	if got := len(slices.Collect(res2.Edges())); got != 2 {
 		t.Errorf("edge count: got %d, want 2 (alice edge survives the round trip; bob edge resolves against the loaded instance)", got)
 	}
 
 	// The resumed batch's snapshot persists cleanly in turn.
-	if _, mRes2 := snapshot.Marshal(ctx, res2.Snapshot); mRes2.HasErrors() {
+	if _, mRes2 := snapshot.Marshal(ctx, res2); mRes2.HasErrors() {
 		t.Fatalf("run 2: marshal: %s", mRes2.String())
 	}
 }
@@ -1064,91 +887,3 @@ func TestNewBatchAssemblerFromSnapshot_YSRoundTripResume(t *testing.T) {
 // happen to not use it. The package-level imports are all genuinely used,
 // but referencing context here documents the binding to caller intent.
 var _ = context.Background
-
-// TestBatchAssembler_Finalize_SecondCallReturnsTheFirstError pins the error half
-// of the memoization. Returning nil on the second call would tell a caller with
-// a retry or defer-and-recheck loop that an incomplete graph is complete.
-func TestBatchAssembler_Finalize_SecondCallReturnsTheFirstError(t *testing.T) {
-	s := batchAssemblerTestSchema(t)
-	ctx := t.Context()
-
-	// batchAssemblerTestSchema's employer is optional, so an unresolved target
-	// does not fail Check. This fixture makes it required.
-	required, res := schema.NewBuilder().
-		WithName("required_employer").
-		WithSourceID(location.MustNewSourceID("test://required_employer.yammm")).
-		AddType("Company").
-		WithPrimaryKey("id", schema.StringConstraint{}).
-		Done().
-		AddType("Person").
-		WithPrimaryKey("id", schema.StringConstraint{}).
-		WithRelation("EMPLOYER", schema.LocalTypeRef("Company", location.Span{}), false, false).
-		Done().
-		Build()
-	if res.HasErrors() {
-		t.Fatalf("schema build: %s", res.String())
-	}
-	_ = s
-
-	ba := graph.NewBatchAssembler(ctx, required)
-	if err := ba.Add("Person", instance.RawInstance{Properties: map[string]any{
-		"id":       "alice",
-		"employer": map[string]any{"_target_id": "missing-co"},
-	}}); err != nil {
-		t.Fatalf("Add: %v", err)
-	}
-
-	first, err1 := ba.Finalize(ctx)
-	if err1 == nil {
-		t.Fatal("the fixture did not produce a failing Check")
-	}
-	second, err2 := ba.Finalize(ctx)
-	if err2 == nil {
-		t.Fatal("the second Finalize reported success for a batch that failed")
-	}
-	if err1.Error() != err2.Error() {
-		t.Errorf("second Finalize error = %q, want the first call's %q", err2, err1)
-	}
-	if second.Snapshot != first.Snapshot {
-		t.Error("the second Finalize re-took the snapshot")
-	}
-}
-
-// TestBatchAssembler_Finalize_CancellationIsNotMemoized pins the one outcome
-// Finalize does not store. The assembler refuses further Adds once Finalize
-// runs, so if an expired deadline were memoized there would be no recovery at
-// all for a batch whose records are all present and valid.
-func TestBatchAssembler_Finalize_CancellationIsNotMemoized(t *testing.T) {
-	s := batchAssemblerTestSchema(t)
-	ba := graph.NewBatchAssembler(t.Context(), s)
-	if err := ba.Add("Person", personRaw("alice", "Alice")); err != nil {
-		t.Fatalf("Add: %v", err)
-	}
-
-	cancelled, cancel := context.WithCancel(t.Context())
-	cancel()
-	if _, err := ba.Finalize(cancelled); err == nil {
-		t.Fatal("Finalize with a cancelled context reported success")
-	}
-
-	// The retry salvages the batch: the records were never in doubt.
-	res, err := ba.Finalize(t.Context())
-	if err != nil {
-		t.Fatalf("the retry could not salvage the batch: %v", err)
-	}
-	if res.Snapshot.IsZero() {
-		t.Fatal("res.Snapshot is nil")
-	}
-	if n := len(slices.Collect(res.Snapshot.InstancesOf(mustTypeID(t, s, "Person")))); n != 1 {
-		t.Errorf("salvaged snapshot holds %d Person instances, want 1", n)
-	}
-
-	// And the completed outcome IS memoized from then on.
-	again, err := ba.Finalize(t.Context())
-	if err != nil {
-		t.Fatalf("third Finalize: %v", err)
-	}
-	if again.Snapshot != res.Snapshot {
-		t.Error("the completed result was not memoized after the successful retry")
-	}
-}

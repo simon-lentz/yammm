@@ -39,7 +39,7 @@ func TestPositionTable_AgreesWithSourceRegistry(t *testing.T) {
 	for name, text := range positionCorpus {
 		t.Run(name, func(t *testing.T) {
 			content := []byte(text)
-			id := location.MustNewSourceID("test://position/" + name)
+			id := location.NewSourceID("test://position/" + name)
 			reg := source.NewRegistry()
 			if err := reg.Register(id, content); err != nil {
 				t.Fatalf("register: %v", err)
@@ -125,7 +125,7 @@ func TestParseObject_PositionsOnOneLineCostTheDocumentLinearly(t *testing.T) {
 		b.WriteString(`}]}`)
 		doc := b.String()
 		table := newPositionTable([]byte(doc))
-		_, result := New().parseObject(t.Context(), location.MustNewSourceID("test://data/minified.json"), []byte(doc), table)
+		_, result := New().parseObject(t.Context(), location.NewSourceID("test://data/minified.json"), []byte(doc), table)
 		decoded := table.counted
 		fresh := newPositionTable([]byte(doc))
 		issues := 0

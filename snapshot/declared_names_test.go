@@ -5,8 +5,9 @@ import (
 	"testing"
 
 	"github.com/simon-lentz/yammm/diag"
-	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/immutable"
+	"github.com/simon-lentz/yammm/internal/snapparts"
+	"github.com/simon-lentz/yammm/internal/snappartstest"
 	"github.com/simon-lentz/yammm/schema"
 	"github.com/simon-lentz/yammm/snapshot"
 )
@@ -46,9 +47,9 @@ func declaredNamesDocument(t *testing.T) (schema.Schema, string) {
 	targetT, _ := s.Type("Target")
 	pieceT, _ := s.Type("Piece")
 	hk := immutable.WrapKey([]any{"h1"})
-	snap, r := graph.RebuildSnapshot(s, graph.SnapshotParts{
+	snap := snappartstest.Loaded(t, s, snapparts.Parts{
 		Types: []schema.TypeID{holderT.ID(), targetT.ID()},
-		Instances: []graph.InstanceParts{
+		Instances: []snapparts.Instance{
 			{
 				TypeID: targetT.ID(), PrimaryKey: immutable.WrapKey([]any{"t1"}),
 				Properties: immutable.WrapProperties(map[string]any{"key": "t1"}),
@@ -56,32 +57,27 @@ func declaredNamesDocument(t *testing.T) (schema.Schema, string) {
 			{
 				TypeID: holderT.ID(), PrimaryKey: hk,
 				Properties: immutable.WrapProperties(map[string]any{"id": "h1", "note": "ROOT"}),
-				Composed: map[string][]graph.InstanceParts{"PIECES": {{
+				Composed: map[string][]snapparts.Instance{"PIECES": {{
 					TypeID:     pieceT.ID(),
 					Properties: immutable.WrapProperties(map[string]any{"label": "CHILD"}),
 				}}},
 			},
 		},
-		Edges: []graph.EdgeParts{{
+		Edges: []snapparts.Edge{{
 			Relation: "OWNER", SourceType: holderT.ID(), SourceKey: hk,
 			TargetKey:  immutable.WrapKey([]any{"t1"}),
 			Properties: immutable.WrapProperties(map[string]any{"since": "EDGE"}),
 		}},
-		Duplicates: []graph.DuplicateParts{{
-			Instance: graph.InstanceParts{
-				TypeID: holderT.ID(), PrimaryKey: hk,
-				Properties: immutable.WrapProperties(map[string]any{"id": "h1", "note": "DUP"}),
-			},
+		Duplicates: []snapparts.Instance{{
+			TypeID: holderT.ID(), PrimaryKey: hk,
+			Properties: immutable.WrapProperties(map[string]any{"id": "h1", "note": "DUP"}),
 		}},
-		Unresolved: []graph.UnresolvedParts{{
+		Unresolved: []snapparts.Unresolved{{
 			SourceType: holderT.ID(), SourceKey: hk, Relation: "OWNER",
 			TargetKey: immutable.WrapKey([]any{"t9"}), Reason: "target_missing",
 			Properties: immutable.WrapProperties(map[string]any{"since": "UNRES"}),
 		}},
 	})
-	if err := r.Err(); err != nil {
-		t.Fatalf("RebuildSnapshot: %v", err)
-	}
 	data, mres := snapshot.Marshal(t.Context(), snap)
 	if mres.HasErrors() {
 		t.Fatalf("Marshal: %s", mres)

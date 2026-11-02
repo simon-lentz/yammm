@@ -10,13 +10,12 @@ import (
 )
 
 // AtPosition returns the definition location for the symbol at the given position.
-// The line and char parameters are LSP-encoding coordinates.
+// The char parameter counts UTF-16 code units.
 // Returns nil when no definition is found or when snapshot is nil (pre-first-analysis).
 func AtPosition(
 	snapshot *analysis.Snapshot,
 	doc *docstate.Snapshot,
 	line, char int,
-	enc lsputil.PositionEncoding,
 	mapURI func(string) string,
 	logger *slog.Logger,
 ) *protocol.Location {
@@ -43,7 +42,6 @@ func AtPosition(
 		doc.SourceID,
 		line,
 		char,
-		enc,
 	)
 	if !ok {
 		return nil
@@ -51,7 +49,7 @@ func AtPosition(
 
 	ref := idx.ReferenceAtPosition(internalPos)
 	if ref != nil {
-		loc := ResolveReference(snapshot, ref, doc.SourceID, enc, mapURI)
+		loc := ResolveReference(snapshot, ref, doc.SourceID, mapURI)
 		if loc == nil {
 			logger.Debug(
 				"could not resolve reference",
@@ -64,7 +62,7 @@ func AtPosition(
 
 	sym := idx.SymbolAtPosition(internalPos)
 	if sym != nil {
-		return ResolveSymbol(snapshot, sym, enc, mapURI)
+		return ResolveSymbol(snapshot, sym, mapURI)
 	}
 
 	logger.Debug(

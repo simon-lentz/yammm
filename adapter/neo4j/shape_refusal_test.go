@@ -5,8 +5,11 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/simon-lentz/yammm/internal/snapparts"
+
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/immutable"
+	"github.com/simon-lentz/yammm/internal/snappartstest"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -37,9 +40,9 @@ func shapeFixtureSnapshot(t *testing.T) graph.Snapshot {
 	}
 	id := typ.ID()
 
-	snap, rres := graph.RebuildSnapshot(s, graph.SnapshotParts{
+	return snappartstest.Loaded(t, s, snapparts.Parts{
 		Types: []schema.TypeID{id},
-		Instances: []graph.InstanceParts{
+		Instances: []snapparts.Instance{
 			{
 				TypeID:     id,
 				PrimaryKey: immutable.WrapKey([]any{"b1"}),
@@ -47,10 +50,6 @@ func shapeFixtureSnapshot(t *testing.T) graph.Snapshot {
 			},
 		},
 	})
-	if rres.HasErrors() {
-		t.Fatalf("assembling the shape fixture: %s", rres)
-	}
-	return snap
 }
 
 // A nil GraphShape is refused by name rather than failing later with a
@@ -70,13 +69,13 @@ func TestBatchNodeQueries_NilShapeRefused(t *testing.T) {
 // with the stored property matches nothing and duplicates the node on every
 // re-ingestion.
 //
-// Mutation: dropping the schemaID check in requireShapeFor turns this red.
+// Mutation: dropping the zero-schema check in requireShapeFor turns this red.
 func TestBatchNodeQueries_UnbuiltShapeRefused(t *testing.T) {
 	t.Parallel()
 	snap := shapeFixtureSnapshot(t)
 
 	_, err := New().BatchNodeQueries(context.Background(), snap, &GraphShape{
-		Types: map[schema.TypeID]NodeShape{},
+		types: map[schema.TypeID]nodeShape{},
 	})
 	if err == nil {
 		t.Fatal("a shape the adapter did not build was accepted")
@@ -91,7 +90,7 @@ func TestBatchNodeQueries_UnbuiltShapeRefused(t *testing.T) {
 // partially-overlapping schemas would match some TypeIDs and silently miss
 // others.
 //
-// Mutation: dropping the schemaID equality check turns this red.
+// Mutation: dropping the schema comparison turns this red.
 func TestBatchNodeQueries_ShapeFromAnotherSchemaRefused(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -113,5 +112,43 @@ func TestBatchNodeQueries_ShapeFromAnotherSchemaRefused(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "but the snapshot carries schema") {
 		t.Errorf("error %q does not name the schema mismatch", err)
+	}
+}
+
+// Two loads of one source name share a SourceID and nothing else, so a shape from
+// the first can hold a String key constraint where the snapshot's load holds a
+// Date. The merge key would then reach the driver as a string beside a native
+// date in the properties.
+func TestBatchQueries_ShapeFromAnotherLoadOfOneSourceRefused(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	a := New()
+	snap := shapeFixtureSnapshot(t)
+
+	sources := map[string]string{
+		"the same text": shapeFixtureSource,
+		"another key":   strings.Replace(shapeFixtureSource, "id String primary", "id Date primary", 1),
+	}
+	for name, src := range sources {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			other, res := schema.LoadString(ctx, src, "entry.yammm")
+			if other.IsZero() {
+				t.Fatalf("second load: %s", res)
+			}
+			if other.SourceID() != snap.Schema().SourceID() {
+				t.Fatalf("second load's SourceID = %s, want the snapshot's %s", other.SourceID(), snap.Schema().SourceID())
+			}
+			shape, sres := a.ShapeForSchema(ctx, other)
+			if shape == nil {
+				t.Fatalf("ShapeForSchema: %s", sres)
+			}
+			if _, err := a.BatchNodeQueries(ctx, snap, shape); err == nil || !strings.Contains(err.Error(), "another load") {
+				t.Errorf("BatchNodeQueries error = %v, want one naming another load", err)
+			}
+			if _, err := a.BatchEdgeQueries(ctx, snap, shape); err == nil || !strings.Contains(err.Error(), "another load") {
+				t.Errorf("BatchEdgeQueries error = %v, want one naming another load", err)
+			}
+		})
 	}
 }

@@ -15,7 +15,7 @@ import (
 )
 
 // AtPosition returns hover info for the given position within a document.
-// The line and char parameters are LSP-encoding coordinates.
+// The char parameter counts UTF-16 code units.
 // Returns nil, nil when no hover info is found.
 //
 //nolint:nilnil // LSP protocol: nil result means "no hover info"
@@ -23,14 +23,13 @@ func AtPosition(
 	snapshot *analysis.Snapshot,
 	doc *docstate.Snapshot,
 	line, char int,
-	enc lsputil.PositionEncoding,
 	logger *slog.Logger,
 ) (*protocol.Hover, error) {
 	// Annotation hover is parse-independent: an annotation name is not a symbol,
 	// so recognize @name / @@name under the cursor from the line text and return
 	// the registry documentation directly, before any symbol lookup (which would
 	// otherwise resolve to the enclosing type symbol).
-	if h := annotationHoverAt(doc, line, char, enc); h != nil {
+	if h := annotationHoverAt(doc, line, char); h != nil {
 		return h, nil
 	}
 
@@ -56,7 +55,6 @@ func AtPosition(
 		doc.SourceID,
 		line,
 		char,
-		enc,
 	)
 	if !ok {
 		return nil, nil
@@ -66,7 +64,7 @@ func AtPosition(
 	if ref != nil {
 		targetSym := snapshot.ResolveTypeReference(ref, doc.SourceID)
 		if targetSym != nil {
-			return BuildHoverForSymbolWithRange(targetSym, snapshot, &ref.Span, enc)
+			return BuildHoverForSymbolWithRange(targetSym, snapshot, &ref.Span)
 		}
 	}
 
@@ -75,16 +73,15 @@ func AtPosition(
 		return nil, nil
 	}
 
-	return BuildHoverForSymbolWithRange(sym, snapshot, nil, enc)
+	return BuildHoverForSymbolWithRange(sym, snapshot, nil)
 }
 
 // annotationHoverAt returns hover content for an annotation name under the
 // cursor, or nil if the cursor is not on one. It is a line heuristic — it reads
 // only the document text, so it works without a parsed schema. The LSP char is
-// UTF-16 (or the negotiated encoding), so it is converted to a byte column
-// before scanning; annotation names remain ASCII but a preceding token on the
-// line may be multi-byte.
-func annotationHoverAt(doc *docstate.Snapshot, line, char int, enc lsputil.PositionEncoding) *protocol.Hover {
+// UTF-16, so it is converted to a byte column before scanning; annotation names
+// remain ASCII but a preceding token on the line may be multi-byte.
+func annotationHoverAt(doc *docstate.Snapshot, line, char int) *protocol.Hover {
 	if doc == nil {
 		return nil
 	}
@@ -93,7 +90,7 @@ func annotationHoverAt(doc *docstate.Snapshot, line, char int, enc lsputil.Posit
 		return nil
 	}
 	l := lines[line]
-	col := lsputil.CharToByteOnLine([]byte(l), char, enc)
+	col := lsputil.UTF16CharToByteOffset([]byte(l), 0, char)
 	placement, name, start, end, ok := annotationTokenAt(l, col, doc.LineStartsInBlockComment(line))
 	if !ok {
 		return nil
@@ -106,8 +103,8 @@ func annotationHoverAt(doc *docstate.Snapshot, line, char int, enc lsputil.Posit
 	if spec.ArgHint() != "" {
 		value += "\n\n*Arguments:* " + spec.ArgHint()
 	}
-	// start/end are byte columns; the protocol wants the negotiated encoding, so
-	// they convert back out the same way SpanToLSPRange converts every other
+	// start/end are byte columns; the protocol wants UTF-16 units, so they
+	// convert back out the same way SpanToLSPRange converts every other
 	// hover range. Annotation names are ASCII, but a preceding token on the line
 	// (a Pattern or Enum literal) may not be, and an un-converted byte column
 	// would put the client's highlight to the right of the token.
@@ -117,11 +114,11 @@ func annotationHoverAt(doc *docstate.Snapshot, line, char int, enc lsputil.Posit
 		Range: &protocol.Range{
 			Start: protocol.Position{
 				Line:      lsputil.ToUInteger(line),
-				Character: lsputil.ToUInteger(lsputil.ByteLenToCharLen(lineBytes, start, enc)),
+				Character: lsputil.ToUInteger(lsputil.ByteToUTF16Offset(lineBytes, 0, start)),
 			},
 			End: protocol.Position{
 				Line:      lsputil.ToUInteger(line),
-				Character: lsputil.ToUInteger(lsputil.ByteLenToCharLen(lineBytes, end, enc)),
+				Character: lsputil.ToUInteger(lsputil.ByteToUTF16Offset(lineBytes, 0, end)),
 			},
 		},
 	}
@@ -183,7 +180,6 @@ func BuildHoverForSymbolWithRange(
 	sym *symbols.Symbol,
 	snapshot *analysis.Snapshot,
 	overrideRange *location.Span,
-	enc lsputil.PositionEncoding,
 ) (*protocol.Hover, error) {
 	if sym == nil || snapshot == nil {
 		return nil, nil
@@ -206,7 +202,7 @@ func BuildHoverForSymbolWithRange(
 	}
 
 	// Use proper UTF-16 conversion for the hover range
-	start, end, ok := lsputil.SpanToLSPRange(snapshot.Sources, rangeSpan, enc)
+	start, end, ok := lsputil.SpanToLSPRange(snapshot.Sources, rangeSpan)
 	if !ok {
 		// Fallback to naive conversion if span conversion fails
 		return &protocol.Hover{

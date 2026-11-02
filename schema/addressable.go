@@ -26,8 +26,8 @@ func AddressableTag(s Schema, id TypeID) (string, bool) {
 	if !ok {
 		return "", false
 	}
-	// A caller may build any TypeID, so the name is checked against the schema
-	// the alias resolves to rather than assumed to exist in it.
+	// An id from another load can name a type this import lacks, so the name is
+	// checked against the schema the alias resolves to.
 	if _, ok := imp.Schema().Type(id.Name()); !ok {
 		return "", false
 	}

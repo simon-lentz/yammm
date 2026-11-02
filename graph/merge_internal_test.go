@@ -5,30 +5,36 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/instance"
 	"github.com/simon-lentz/yammm/internal/instancetest"
 	"github.com/simon-lentz/yammm/schema"
 )
 
-// indexedInstance builds a bypass instance of typ keyed id, naming each
-// relation's targets by key.
+// indexedInstance validates an instance of typ keyed id, naming each relation's
+// targets by key.
 func indexedInstance(t *testing.T, s schema.Schema, typ, id string, edges map[string][]string) instance.ValidInstance {
 	t.Helper()
 	tt, ok := s.Type(typ)
 	if !ok {
 		t.Fatalf("no type %s", typ)
 	}
-	data := make(map[string]instance.ValidEdgeData, len(edges))
-	for rel, keys := range edges {
-		ts := make([]instance.ValidEdgeTarget, len(keys))
-		for i, k := range keys {
-			ts[i] = instance.NewValidEdgeTarget(immutable.WrapKey([]any{k}), immutable.WrapProperties(nil))
+	data := map[string]any{"id": id}
+	for name, keys := range edges {
+		rel, ok := tt.Relation(name)
+		if !ok {
+			t.Fatalf("no relation %s on %s", name, typ)
 		}
-		data[rel] = instance.NewValidEdgeData(ts)
+		targets := make([]any, len(keys))
+		for i, k := range keys {
+			targets[i] = map[string]any{"_target_id": k}
+		}
+		if rel.IsMany() {
+			data[rel.FieldName()] = targets
+		} else {
+			data[rel.FieldName()] = targets[0]
+		}
 	}
-	return instancetest.VI(typ, instancetest.TypeID(tt.ID()), instancetest.PK(id),
-		instancetest.Props(map[string]any{"id": id}), instancetest.Edges(data))
+	return instancetest.Valid(t, s, typ, data)
 }
 
 // assertIndexMatchesARebuild fails unless g.bySource holds exactly what an
@@ -128,7 +134,7 @@ type Issue {
 	}
 	merge := func(step, id string, edges map[string][]string) {
 		t.Helper()
-		if merged, r := g.AddOrMerge(t.Context(), indexedInstance(t, s, "Issue", id, edges)); r.HasErrors() || !merged {
+		if merged, r := g.add(t.Context(), indexedInstance(t, s, "Issue", id, edges), true); r.HasErrors() || !merged {
 			t.Fatalf("%s: merged %v, %s", step, merged, r)
 		}
 		assertIndexMatchesARebuild(t, g, step)

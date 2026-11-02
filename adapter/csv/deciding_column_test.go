@@ -57,8 +57,8 @@ func holds(members string, verdict ...string) decidingWant {
 // A column that claims its member on a row decides that row's target count,
 // whatever the header's other spellings of the member are: an empty column
 // beside it changes nothing. Each row is held against the JSON document it
-// states, under folding and strict names, with and without WithSchema, through
-// both entry points. A nil noSchema or strictNoSchema is the mode before it.
+// states, with and without WithSchema, through both entry points. A nil noSchema
+// is the mode before it.
 func TestEdgeGroup_AClaimingColumnDecidesTheTargetCount(t *testing.T) {
 	t.Parallel()
 	s, res := schema.LoadString(t.Context(), decidingSchema, "deciding.yammm")
@@ -91,225 +91,176 @@ func TestEdgeGroup_AClaimingColumnDecidesTheTargetCount(t *testing.T) {
 		name, header, record string
 		fold                 decidingWant
 		noSchema             *decidingWant
-		strict               decidingWant
-		strictNoSchema       *decidingWant
 	}{
 		// An optional String: the exact column empty, the folded one filled.
 		{
 			name: "exact empty, folded holds two segments for one target", header: knowsTag, record: "f1,,a|b",
-			fold:   clash(),
-			strict: holds(`"knows":[{"_target_code":"f1","TAG":"a|b"}]`, unknownEdge),
+			fold: clash(),
 		},
 		{
 			name: "exact empty, folded holds two segments for two targets", header: knowsTag, record: "f1|f2,,a|b",
-			fold:   holds(twoTagged),
-			strict: holds(twoTagged, unknownEdge, unknownEdge),
+			fold: holds(twoTagged),
 		},
 		{
 			name: "exact empty, folded holds three segments for two targets", header: knowsTag, record: "f1|f2,,a|b|c",
-			fold:   clash(),
-			strict: decidingWant{members: twoBare, csvErrors: []string{parseError}},
+			fold: clash(),
 		},
 		{
 			name: "exact empty, folded holds one segment", header: knowsTag, record: "f1,,a",
-			fold:   holds(`"knows":[{"_target_code":"f1","TAG":"a"}]`),
-			strict: holds(`"knows":[{"_target_code":"f1","TAG":"a"}]`, unknownEdge),
+			fold: holds(`"knows":[{"_target_code":"f1","TAG":"a"}]`),
 		},
 		{
 			name: "exact empty, folded holds one segment with an escaped separator", header: knowsTag, record: `f1,,a\|b`,
-			fold:   holds(`"knows":[{"_target_code":"f1","TAG":"a|b"}]`),
-			strict: holds(`"knows":[{"_target_code":"f1","TAG":"a|b"}]`, unknownEdge),
+			fold: holds(`"knows":[{"_target_code":"f1","TAG":"a|b"}]`),
 		},
 		{
 			name: "exact empty, folded holds an escaped separator and a bare one", header: knowsTag, record: `f1,,a\|b|c`,
-			fold:   clash(),
-			strict: holds(`"knows":[{"_target_code":"f1","TAG":"a\\|b|c"}]`, unknownEdge),
+			fold: clash(),
 		},
 		// The reverse, and both filled.
 		{
 			name: "exact holds two segments for one target, folded empty", header: knowsTag, record: "f1,a|b,",
-			fold: clash(), strict: clash(),
+			fold: clash(),
 		},
 		{
 			name: "exact holds two segments for two targets, folded empty", header: knowsTag, record: "f1|f2,a|b,",
-			fold:   holds(`"knows":[{"_target_code":"f1","tag":"a"},{"_target_code":"f2","tag":"b"}]`),
-			strict: holds(`"knows":[{"_target_code":"f1","tag":"a"},{"_target_code":"f2","tag":"b"}]`),
+			fold: holds(`"knows":[{"_target_code":"f1","tag":"a"},{"_target_code":"f2","tag":"b"}]`),
 		},
 		{
 			name: "exact filled shadows a folded column of two segments", header: knowsTag, record: "f1,x,a|b",
-			fold:   holds(`"knows":[{"_target_code":"f1","tag":"x","TAG":"a|b"}]`, unknownEdge),
-			strict: holds(`"knows":[{"_target_code":"f1","tag":"x","TAG":"a|b"}]`, unknownEdge),
+			fold: holds(`"knows":[{"_target_code":"f1","tag":"x","TAG":"a|b"}]`, unknownEdge),
 		},
 		{
 			name: "exact empty on the second target alone, folded filled on both", header: knowsTag, record: "f1|f2,x|,a|b",
-			fold:   holds(`"knows":[{"_target_code":"f1","tag":"x","TAG":"a"},{"_target_code":"f2","TAG":"b"}]`, unknownEdge),
-			strict: holds(`"knows":[{"_target_code":"f1","tag":"x","TAG":"a"},{"_target_code":"f2","TAG":"b"}]`, unknownEdge, unknownEdge),
+			fold: holds(`"knows":[{"_target_code":"f1","tag":"x","TAG":"a"},{"_target_code":"f2","TAG":"b"}]`, unknownEdge),
 		},
 		// Two folded spellings and no exact one.
 		{
 			name: "two folded, one holds two segments for one target", header: knowsTags, record: "f1,a|b,",
-			fold:   clash(),
-			strict: holds(`"knows":[{"_target_code":"f1","TAG":"a|b"}]`, unknownEdge),
+			fold: clash(),
 		},
 		{
 			name: "two folded, one holds two segments for two targets", header: knowsTags, record: "f1|f2,a|b,",
-			fold:   holds(twoTagged),
-			strict: holds(twoTagged, unknownEdge, unknownEdge),
+			fold: holds(twoTagged),
 		},
 		{
 			name: "two folded, both filled", header: knowsTags, record: "f1,a|b,c",
-			fold:   holds(`"knows":[{"_target_code":"f1","TAG":"a|b","Tag":"c"}]`, collision),
-			strict: holds(`"knows":[{"_target_code":"f1","TAG":"a|b","Tag":"c"}]`, unknownEdge, unknownEdge),
+			fold: holds(`"knows":[{"_target_code":"f1","TAG":"a|b","Tag":"c"}]`, collision),
 		},
 		{
 			name: "two folded, each filled on its own target", header: knowsTags, record: "f1|f2,a|,|b",
-			fold:   holds(`"knows":[{"_target_code":"f1","TAG":"a"},{"_target_code":"f2","Tag":"b"}]`),
-			strict: holds(`"knows":[{"_target_code":"f1","TAG":"a"},{"_target_code":"f2","Tag":"b"}]`, unknownEdge, unknownEdge),
+			fold: holds(`"knows":[{"_target_code":"f1","TAG":"a"},{"_target_code":"f2","Tag":"b"}]`),
 		},
 		// An Integer and a Date, which have no empty value.
 		{
 			name: "Integer: exact empty, folded holds two segments for one target", header: knowsWeight, record: "f1,,5|6",
-			fold:   clash(),
-			strict: holds(`"knows":[{"_target_code":"f1","WEIGHT":"5|6"}]`, unknownEdge),
+			fold: clash(),
 		},
 		{
 			name: "Integer: exact empty, folded holds two segments for two targets", header: knowsWeight, record: "f1|f2,,5|6",
-			fold:   holds(`"knows":[{"_target_code":"f1","WEIGHT":5},{"_target_code":"f2","WEIGHT":6}]`),
-			strict: holds(`"knows":[{"_target_code":"f1","WEIGHT":"5"},{"_target_code":"f2","WEIGHT":"6"}]`, unknownEdge, unknownEdge),
+			fold: holds(`"knows":[{"_target_code":"f1","WEIGHT":5},{"_target_code":"f2","WEIGHT":6}]`),
 		},
 		{
 			name: "Integer: the folded column alone is filled", header: knowsWeight, record: ",,1|2",
-			fold:           holds(`"knows":[{"_target_code":"","WEIGHT":1},{"_target_code":"","WEIGHT":2}]`),
-			noSchema:       p(holds(`"knows":[{"WEIGHT":1},{"WEIGHT":2}]`, missingFK, missingFK)),
-			strict:         holds(`"knows":[{"_target_code":"","WEIGHT":"1|2"}]`, unknownEdge),
-			strictNoSchema: p(holds(`"knows":[{"WEIGHT":"1|2"}]`, missingFK, unknownEdge)),
+			fold:     holds(`"knows":[{"_target_code":"","WEIGHT":1},{"_target_code":"","WEIGHT":2}]`),
+			noSchema: p(holds(`"knows":[{"WEIGHT":1},{"WEIGHT":2}]`, missingFK, missingFK)),
 		},
 		{
 			name: "Integer: two folded, one holds three segments for two targets", header: "knows._target_code,knows.Weight,knows.WEIGHT", record: "f1|f2,,1|2|3",
-			fold:   clash(),
-			strict: decidingWant{members: twoBare, csvErrors: []string{parseError}},
+			fold: clash(),
 		},
 		{
 			name: "Date: exact empty, folded holds two segments for one target", header: knowsDay, record: "f1,,2020-01-01|2020-01-02",
-			fold:   clash(),
-			strict: holds(`"knows":[{"_target_code":"f1","DAY":"2020-01-01|2020-01-02"}]`, unknownEdge),
+			fold: clash(),
 		},
 		{
 			name: "Date: exact empty, folded holds two segments for two targets", header: knowsDay, record: "f1|f2,,2020-01-01|2020-01-02",
-			fold:   holds(`"knows":[{"_target_code":"f1","DAY":"2020-01-01"},{"_target_code":"f2","DAY":"2020-01-02"}]`),
-			strict: holds(`"knows":[{"_target_code":"f1","DAY":"2020-01-01"},{"_target_code":"f2","DAY":"2020-01-02"}]`, unknownEdge, unknownEdge),
+			fold: holds(`"knows":[{"_target_code":"f1","DAY":"2020-01-01"},{"_target_code":"f2","DAY":"2020-01-02"}]`),
 		},
 		// A required String, whose empty exact column holds "" and so claims.
 		{
 			name: "required String: exact empty shadows the folded column", header: "rates._target_code,rates.label,rates.LABEL", record: "f1,,a|b",
-			fold:   holds(`"rates":[{"_target_code":"f1","label":"","LABEL":"a|b"}]`, unknownEdge),
-			strict: holds(`"rates":[{"_target_code":"f1","label":"","LABEL":"a|b"}]`, unknownEdge),
+			fold: holds(`"rates":[{"_target_code":"f1","label":"","LABEL":"a|b"}]`, unknownEdge),
 		},
 		{
 			name: "required String: two folded, one holds two segments for one target", header: "rates._target_code,rates.LABEL,rates.Label", record: "f1,a|b,",
-			fold:   clash(),
-			strict: holds(`"rates":[{"_target_code":"f1","LABEL":"a|b"}]`, required, unknownEdge),
+			fold: clash(),
 		},
 		{
 			name: "required String: two folded, one holds two segments for two targets", header: "rates._target_code,rates.LABEL,rates.Label", record: "f1|f2,a|b,",
-			fold:   holds(`"rates":[{"_target_code":"f1","LABEL":"a"},{"_target_code":"f2","LABEL":"b"}]`),
-			strict: holds(`"rates":[{"_target_code":"f1","LABEL":"a"},{"_target_code":"f2","LABEL":"b"}]`, required, required, unknownEdge, unknownEdge),
+			fold: holds(`"rates":[{"_target_code":"f1","LABEL":"a"},{"_target_code":"f2","LABEL":"b"}]`),
 		},
 		// A (one) association.
 		{
 			name: "(one): exact empty, folded holds two segments for one target", header: hiredTag, record: "f1,,a|b",
-			fold:   clash(),
-			strict: holds(`"hired_by":{"_target_code":"f1","TAG":"a|b"}`, unknownEdge),
+			fold: clash(),
 		},
 		{
 			name: "(one): exact empty, folded holds one segment", header: hiredTag, record: "f1,,a",
-			fold:   holds(`"hired_by":{"_target_code":"f1","TAG":"a"}`),
-			strict: holds(`"hired_by":{"_target_code":"f1","TAG":"a"}`, unknownEdge),
+			fold: holds(`"hired_by":{"_target_code":"f1","TAG":"a"}`),
 		},
 		{
 			name: "(one): two folded, one holds two segments for one target", header: "hired_by._target_code,hired_by.TAG,hired_by.Tag", record: "f1,a|b,",
-			fold:   clash(),
-			strict: holds(`"hired_by":{"_target_code":"f1","TAG":"a|b"}`, unknownEdge),
+			fold: clash(),
 		},
 		{
 			name: "(one): exact empty, folded holds two segments for two targets", header: hiredTag, record: "f1|f2,,a|b",
-			fold:   holds(`"hired_by":[{"_target_code":"f1","TAG":"a"},{"_target_code":"f2","TAG":"b"}]`, edgeShape),
-			strict: holds(`"hired_by":[{"_target_code":"f1","TAG":"a"},{"_target_code":"f2","TAG":"b"}]`, edgeShape),
+			fold: holds(`"hired_by":[{"_target_code":"f1","TAG":"a"},{"_target_code":"f2","TAG":"b"}]`, edgeShape),
 		},
 		// A key component.
 		{
 			name: "String key: two folded, one holds two segments", header: "knows._Target_code,knows._TARGET_CODE", record: "c1|c2,",
-			fold:   holds(`"knows":[{"_Target_code":"c1"},{"_Target_code":"c2"}]`),
-			strict: holds(`"knows":[{"_Target_code":"c1|c2"}]`, missingFK, unknownEdge),
+			fold: holds(`"knows":[{"_Target_code":"c1"},{"_Target_code":"c2"}]`),
 		},
 		{
 			name: "String key: exact empty holds the empty key, folded holds two segments", header: keyPair, record: ",f1|f2",
-			fold:           holds(`"knows":[{"_target_code":"","_TARGET_CODE":"f1|f2"}]`, unknownEdge),
-			noSchema:       p(holds(`"knows":[{"_TARGET_CODE":"f1"},{"_TARGET_CODE":"f2"}]`)),
-			strict:         holds(`"knows":[{"_target_code":"","_TARGET_CODE":"f1|f2"}]`, unknownEdge),
-			strictNoSchema: p(holds(`"knows":[{"_TARGET_CODE":"f1|f2"}]`, missingFK, unknownEdge)),
+			fold:     holds(`"knows":[{"_target_code":"","_TARGET_CODE":"f1|f2"}]`, unknownEdge),
+			noSchema: p(holds(`"knows":[{"_TARGET_CODE":"f1"},{"_TARGET_CODE":"f2"}]`)),
 		},
 		{
 			name: "String key: exact filled, folded holds two segments", header: keyPair, record: "f1,a|b",
 			fold:     holds(`"knows":[{"_target_code":"f1","_TARGET_CODE":"a|b"}]`, unknownEdge),
 			noSchema: p(clash()),
-			strict:   holds(`"knows":[{"_target_code":"f1","_TARGET_CODE":"a|b"}]`, unknownEdge),
 		},
 		{
 			name: "Date key: exact empty, folded alone holds two segments", header: bookedKeys, record: ",,2020-01-01|2020-01-02",
-			fold:           holds(`"booked":[{"_target_sid":"","_TARGET_D":"2020-01-01"},{"_target_sid":"","_TARGET_D":"2020-01-02"}]`),
-			noSchema:       p(holds(`"booked":[{"_TARGET_D":"2020-01-01"},{"_TARGET_D":"2020-01-02"}]`, partialFK, partialFK)),
-			strict:         holds(`"booked":[{"_target_sid":"","_TARGET_D":"2020-01-01|2020-01-02"}]`, partialFK, unknownEdge),
-			strictNoSchema: p(holds(`"booked":[{"_TARGET_D":"2020-01-01|2020-01-02"}]`, missingFK, unknownEdge)),
+			fold:     holds(`"booked":[{"_target_sid":"","_TARGET_D":"2020-01-01"},{"_target_sid":"","_TARGET_D":"2020-01-02"}]`),
+			noSchema: p(holds(`"booked":[{"_TARGET_D":"2020-01-01"},{"_TARGET_D":"2020-01-02"}]`, partialFK, partialFK)),
 		},
 		{
 			name: "Date key: exact empty, folded holds two segments for two targets", header: bookedKeys, record: "s1|s2,,2020-01-01|2020-01-02",
-			fold:   holds(`"booked":[{"_target_sid":"s1","_TARGET_D":"2020-01-01"},{"_target_sid":"s2","_TARGET_D":"2020-01-02"}]`),
-			strict: holds(`"booked":[{"_target_sid":"s1","_TARGET_D":"2020-01-01"},{"_target_sid":"s2","_TARGET_D":"2020-01-02"}]`, partialFK, partialFK, unknownEdge, unknownEdge),
+			fold: holds(`"booked":[{"_target_sid":"s1","_TARGET_D":"2020-01-01"},{"_target_sid":"s2","_TARGET_D":"2020-01-02"}]`),
 		},
 		{
 			name: "Date key: exact empty, folded holds two segments for one target", header: bookedKeys, record: "s1,,2020-01-01|2020-01-02",
-			fold:   clash(),
-			strict: holds(`"booked":[{"_target_sid":"s1","_TARGET_D":"2020-01-01|2020-01-02"}]`, partialFK, unknownEdge),
+			fold: clash(),
 		},
 		// A column naming no member decides nothing.
 		{
 			name: "no member: two segments for one target are taken whole", header: noMember, record: "f1,x|y",
-			fold:   holds(`"knows":[{"_target_code":"f1","zzz":"x|y"}]`, unknownEdge),
-			strict: holds(`"knows":[{"_target_code":"f1","zzz":"x|y"}]`, unknownEdge),
+			fold: holds(`"knows":[{"_target_code":"f1","zzz":"x|y"}]`, unknownEdge),
 		},
 		{
 			name: "no member: one segment with an escaped separator is unescaped", header: noMember, record: `f1,x\|y`,
-			fold:   holds(`"knows":[{"_target_code":"f1","zzz":"x|y"}]`, unknownEdge),
-			strict: holds(`"knows":[{"_target_code":"f1","zzz":"x|y"}]`, unknownEdge),
+			fold: holds(`"knows":[{"_target_code":"f1","zzz":"x|y"}]`, unknownEdge),
 		},
 		{
 			name: "no member: an escaped separator and a bare one are taken whole", header: noMember, record: `f1,x\|y|z`,
-			fold:   holds(`"knows":[{"_target_code":"f1","zzz":"x\\|y|z"}]`, unknownEdge),
-			strict: holds(`"knows":[{"_target_code":"f1","zzz":"x\\|y|z"}]`, unknownEdge),
+			fold: holds(`"knows":[{"_target_code":"f1","zzz":"x\\|y|z"}]`, unknownEdge),
 		},
 		{
 			name: "no member: a target property that is no key", header: "ref._target_id,ref._target_code", record: "x1,p|q",
-			fold:           holds(`"ref":{"_target_id":"x1","_target_code":"p|q"}`, unknownEdge),
-			noSchema:       p(clash()),
-			strict:         holds(`"ref":{"_target_id":"x1","_target_code":"p|q"}`, unknownEdge),
-			strictNoSchema: p(clash()),
+			fold:     holds(`"ref":{"_target_id":"x1","_target_code":"p|q"}`, unknownEdge),
+			noSchema: p(clash()),
 		},
 	} {
-		for _, mode := range []struct {
-			strict, withSchema bool
-		}{{false, true}, {false, false}, {true, true}, {true, false}} {
+		for _, withSchema := range []bool{true, false} {
 			want := row.fold
-			switch {
-			case mode.strict && !mode.withSchema && row.strictNoSchema != nil:
-				want = *row.strictNoSchema
-			case mode.strict:
-				want = row.strict
-			case !mode.withSchema && row.noSchema != nil:
+			if !withSchema && row.noSchema != nil {
 				want = *row.noSchema
 			}
 			for _, typeColumn := range []bool{false, true} {
-				name := fmt.Sprintf("%s/strict=%v/schema=%v/typeColumn=%v", row.name, mode.strict, mode.withSchema, typeColumn)
+				name := fmt.Sprintf("%s/schema=%v/typeColumn=%v", row.name, withSchema, typeColumn)
 				t.Run(name, func(t *testing.T) {
 					t.Parallel()
 					doc := `{"id":"p1"}`
@@ -322,8 +273,8 @@ func TestEdgeGroup_AClaimingColumnDecidesTheTargetCount(t *testing.T) {
 					}
 					fromJSON := byType["Person"][0]
 
-					opts := []Option{WithStrictPropertyNames(mode.strict)}
-					if mode.withSchema {
+					var opts []Option
+					if withSchema {
 						opts = append(opts, WithSchema(s))
 					}
 					var raws []instance.RawInstance
@@ -351,7 +302,7 @@ func TestEdgeGroup_AClaimingColumnDecidesTheTargetCount(t *testing.T) {
 						t.Errorf("parse Error codes = %q, want %q\n%s", codes, wantCodes, pres)
 					}
 					for _, allow := range []bool{false, true} {
-						vo := []instance.Option{instance.WithStrictPropertyNames(mode.strict), instance.WithAllowUnknownFields(allow)}
+						vo := []instance.Option{instance.WithAllowUnknownFields(allow)}
 						fromCSV, document := verdict(t, s, raws[0], vo...), verdict(t, s, fromJSON, vo...)
 						if !slices.Equal(fromCSV, document) {
 							t.Errorf("allow=%v: the validator answers the two differently\ncsv:  %q\njson: %q", allow, fromCSV, document)

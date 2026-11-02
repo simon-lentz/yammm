@@ -64,7 +64,7 @@ func describe(result diag.Result) string {
 // map keeps the last value, which drops the first array's whole batch, and
 // every instance the document states is in the entry.
 func TestParseObject_ARepeatedTypeKeyIsReportedAndRead(t *testing.T) {
-	id := location.MustNewSourceID("test://data/repeated_key.json")
+	id := location.NewSourceID("test://data/repeated_key.json")
 	cases := []struct {
 		name   string
 		doc    string
@@ -129,7 +129,7 @@ func TestParseObject_ARepeatedTypeKeyIsReportedAndRead(t *testing.T) {
 // after the root object is refused where it starts, whether or not it would
 // read as a JSON value, and that the root object's instances are still parsed.
 func TestParseObject_TrailingContentIsRefused(t *testing.T) {
-	id := location.MustNewSourceID("test://data/trailing.json")
+	id := location.NewSourceID("test://data/trailing.json")
 	const root = `{"A": [{"id": "1"}]}`
 	// The root is 20 bytes, so a tail's first byte is column 21 of line 1.
 	refused := []struct {
@@ -205,7 +205,7 @@ func TestParseObject_TrailingContentIsRefused(t *testing.T) {
 // inside one object, at any depth of an instance, is reported at each repeat
 // and the instance is still produced, holding the value the decoder kept.
 func TestParseObject_ARepeatedMemberIsReported(t *testing.T) {
-	id := location.MustNewSourceID("test://data/repeated_member.json")
+	id := location.NewSourceID("test://data/repeated_member.json")
 	cases := []struct {
 		name   string
 		elem   string
@@ -382,7 +382,7 @@ func TestParseObject_ARepeatedMemberIsReported(t *testing.T) {
 // array is an entry of the result even when it yields no instance, so a caller
 // ranging over the result sees every type the document names.
 func TestParseObject_AnEmptyArrayKeepsItsKey(t *testing.T) {
-	id := location.MustNewSourceID("test://data/empty.json")
+	id := location.NewSourceID("test://data/empty.json")
 	cases := []struct {
 		name  string
 		doc   string
@@ -424,7 +424,7 @@ type Person {
 	if !loadResult.OK() {
 		t.Fatalf("load:%s", describe(loadResult))
 	}
-	parsed, result := parseForProvenance(t, location.MustNewSourceID("test://data/unknown.json"), `{"Person": [], "Nobody": []}`)
+	parsed, result := parseForProvenance(t, location.NewSourceID("test://data/unknown.json"), `{"Person": [], "Nobody": []}`)
 	if !result.OK() {
 		t.Fatalf("parse refused:%s", describe(result))
 	}
@@ -449,7 +449,7 @@ type Person {
 // decoder cannot read on, parsing stops at the first fault: nothing after it
 // is read, so no diagnostic names a read that never happened.
 func TestParseObject_AnUnreadableDocumentReportsOneFault(t *testing.T) {
-	id := location.MustNewSourceID("test://data/unreadable.json")
+	id := location.NewSourceID("test://data/unreadable.json")
 	cases := []struct {
 		name     string
 		doc      string
@@ -499,7 +499,7 @@ func TestParseObject_AnUnreadableDocumentReportsOneFault(t *testing.T) {
 // past every nested object and array, so the key after it is read from its own
 // place.
 func TestParseObject_AValueThatIsNotAnArrayIsSkippedWhole(t *testing.T) {
-	id := location.MustNewSourceID("test://data/skip.json")
+	id := location.NewSourceID("test://data/skip.json")
 	for _, doc := range []string{
 		`{"A": {"x": [1, [2, {"y": []}]]}, "B": [{"id": "1"}]}`,
 		`{"A": {"x": {"y": {}}}, "B": [{"id": "1"}]}`,

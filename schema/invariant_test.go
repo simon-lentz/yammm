@@ -12,7 +12,7 @@ import (
 
 func TestNewInvariant(t *testing.T) {
 	span := location.Span{
-		Source: location.MustNewSourceID("test://invariant"),
+		Source: location.NewSourceID("test://invariant"),
 		Start:  location.Position{Line: 10, Column: 1, Byte: 100},
 		End:    location.Position{Line: 10, Column: 50, Byte: 150},
 	}
@@ -67,7 +67,7 @@ func TestInvariant_Expression(t *testing.T) {
 
 func TestInvariant_Span(t *testing.T) {
 	span := location.Span{
-		Source: location.MustNewSourceID("test://span"),
+		Source: location.NewSourceID("test://span"),
 		Start:  location.Position{Line: 15, Column: 5, Byte: 200},
 		End:    location.Position{Line: 15, Column: 40, Byte: 235},
 	}

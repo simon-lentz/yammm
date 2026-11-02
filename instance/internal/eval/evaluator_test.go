@@ -1,15 +1,11 @@
 package eval_test
 
 import (
-	"context"
-	"log/slog"
 	"regexp"
 	"testing"
 
 	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/instance/internal/eval"
-	"github.com/simon-lentz/yammm/internal/trace"
-	"github.com/simon-lentz/yammm/internal/yammmtest"
 	"github.com/simon-lentz/yammm/schema/expr"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -681,130 +677,4 @@ func TestEvaluator_SliceConversion(t *testing.T) {
 	t.Run("non_slice_errors", func(t *testing.T) {
 		evalErr(t, makeBuiltinCall(lit(int64(42)), "sum", nil, nil, nil), "expects a list")
 	})
-}
-
-// --- Logging ---
-
-func TestEvaluator_Logging(t *testing.T) {
-	h := yammmtest.NewRecordHandler(slog.LevelDebug)
-	ev := eval.NewEvaluator(eval.WithLogger(slog.New(h)))
-
-	_, err := ev.Evaluate(t.Context(), sx("+", lit(int64(2)), lit(int64(3))), eval.EmptyScope())
-	if err != nil {
-		t.Fatalf("Evaluate failed: %v", err)
-	}
-
-	records := h.Records()
-	if !yammmtest.HasAttr(records, "op", "yammm.eval.expr") {
-		t.Error("expected yammm.eval.expr operation to be logged")
-	}
-	if !yammmtest.HasMessage(records, "evaluating s-expression") {
-		t.Error("expected 'evaluating s-expression' message")
-	}
-}
-
-func TestEvaluator_Logging_SExprOp(t *testing.T) {
-	h := yammmtest.NewRecordHandler(slog.LevelDebug)
-	ev := eval.NewEvaluator(eval.WithLogger(slog.New(h)))
-
-	_, err := ev.Evaluate(t.Context(), sx("*", lit(int64(4)), lit(int64(5))), eval.EmptyScope())
-	if err != nil {
-		t.Fatalf("Evaluate failed: %v", err)
-	}
-
-	if !yammmtest.HasAttr(h.Records(), "op", "*") {
-		t.Error("expected op=* attribute in s-expression log")
-	}
-}
-
-func TestEvaluator_NoLogging_WhenNilLogger(t *testing.T) {
-	// No logger — must not panic.
-	evalEq(t, sx("+", lit(int64(2)), lit(int64(3))), int64(5))
-}
-
-// ctxRecorder keeps the context each record was logged with, which the
-// shared record handler discards.
-type ctxRecorder struct {
-	ctxs []context.Context
-	recs []slog.Record
-}
-
-func (r *ctxRecorder) Enabled(context.Context, slog.Level) bool { return true }
-func (r *ctxRecorder) Handle(ctx context.Context, rec slog.Record) error {
-	r.ctxs = append(r.ctxs, ctx)
-	r.recs = append(r.recs, rec)
-	return nil
-}
-func (r *ctxRecorder) WithAttrs([]slog.Attr) slog.Handler { return r }
-func (r *ctxRecorder) WithGroup(string) slog.Handler      { return r }
-
-// The context passed to Evaluate reaches every trace record the evaluation
-// writes: a request id on it is on the operation's start record and on the
-// per-node records, at the top level and inside a lambda body.
-func TestEvaluate_TraceCarriesTheCallersContext(t *testing.T) {
-	h := &ctxRecorder{}
-	ev := eval.NewEvaluator(eval.WithLogger(slog.New(h)))
-	ctx := trace.WithRequestID(t.Context(), "req-42")
-
-	body := sx(">", sx("$", lit("0")), lit(int64(1)))
-	e := makeBuiltinCall(list(int64(1), int64(2), int64(3)), "all", nil, nil, body)
-	if _, err := ev.EvaluateBool(ctx, e, eval.EmptyScope()); err != nil {
-		t.Fatalf("EvaluateBool: %v", err)
-	}
-
-	if !yammmtest.HasAttr(h.recs, "request_id", "req-42") {
-		t.Error("the operation's start record does not carry the caller's request id")
-	}
-	// Six records: the op's start and end, and one per node reached — the
-	// call, its receiver list, and the body evaluated per element.
-	if len(h.ctxs) < 6 {
-		t.Fatalf("expected the per-node trace, got %d records", len(h.ctxs))
-	}
-	for i, c := range h.ctxs {
-		if id, ok := trace.RequestIDFrom(c); !ok || id != "req-42" {
-			t.Errorf("record %d (%q) was logged without the caller's context", i, h.recs[i].Message)
-		}
-	}
-}
-
-// TestEvaluate_EveryArmCarriesTheCallersContext runs the context assertion
-// over the evaluator's special forms and its builtin arms rather than over
-// one shape. One shape reaches only the nodes it walks, so a context dropped
-// on an arm it never enters is invisible; these shapes between them enter
-// the member, index, list, ternary, boolean, comparison, guard, lambda and
-// nested-call arms, and each asserts every record it produced.
-func TestEvaluate_EveryArmCarriesTheCallersContext(t *testing.T) {
-	nums := func() expr.SExpr { return list(int64(1), int64(2), int64(3)) }
-	shapes := map[string]expr.Expression{
-		"list body":     makeBuiltinCall(nums(), "all", nil, nil, sx(">", sx("$", lit("0")), lit(int64(0)))),
-		"lambda param":  makeBuiltinCall(nums(), "all", nil, []string{"n"}, sx(">", sx("$", lit("n")), lit(int64(0)))),
-		"nested calls":  sx(">", makeBuiltinCall(makeBuiltinCall(nums(), "map", nil, nil, sx("+", sx("$", lit("0")), lit(int64(1)))), "sum", nil, nil, nil), lit(int64(0))),
-		"index":         sx(">", sx("@", nums(), lit(int64(0))), lit(int64(0))),
-		"ternary":       sx("?", sx(">", lit(int64(2)), lit(int64(1))), lit(true), lit(false)),
-		"and":           sx("&&", sx(">", lit(int64(2)), lit(int64(1))), sx("<", lit(int64(1)), lit(int64(2)))),
-		"or":            sx("||", sx("<", lit(int64(2)), lit(int64(1))), sx(">", lit(int64(2)), lit(int64(1)))),
-		"not":           sx("!", sx("<", lit(int64(2)), lit(int64(1)))),
-		"guard":         sx(">", makeBuiltinCall(lit(nil), "default", []expr.Expression{lit(int64(5))}, nil, nil), lit(int64(0))),
-		"arithmetic":    sx(">", sx("-", sx("*", lit(int64(3)), lit(int64(4))), lit(int64(2))), lit(int64(0))),
-		"membership":    sx("in", lit(int64(2)), nums()),
-		"argument call": sx(">", makeBuiltinCall(lit("north"), "compare", []expr.Expression{lit("a")}, nil, nil), lit(int64(0))),
-	}
-	for name, e := range shapes {
-		t.Run(name, func(t *testing.T) {
-			h := &ctxRecorder{}
-			ev := eval.NewEvaluator(eval.WithLogger(slog.New(h)))
-			ctx := trace.WithRequestID(t.Context(), "req-"+name)
-			if _, err := ev.EvaluateBool(ctx, e, eval.EmptyScope()); err != nil {
-				t.Fatalf("EvaluateBool: %v", err)
-			}
-			if len(h.ctxs) < 3 {
-				t.Fatalf("expected a per-node trace, got %d records", len(h.ctxs))
-			}
-			for i, c := range h.ctxs {
-				if id, ok := trace.RequestIDFrom(c); !ok || id != "req-"+name {
-					t.Errorf("record %d (%q) was logged without the caller's context", i, h.recs[i].Message)
-				}
-			}
-		})
-	}
 }

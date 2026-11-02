@@ -272,7 +272,7 @@ func TestContextualError_LogValue_IssuesArrayShape(t *testing.T) {
 func TestContextualError_LogValue_AttributeGolden(t *testing.T) {
 	t.Parallel()
 	// Build a full-shape issue: span, path, code, hint, details.
-	source := location.MustNewSourceID("test://schema.yammm")
+	source := location.NewSourceID("test://schema.yammm")
 	span := location.Point(source, 10, 4)
 	issue := diag.NewIssue(diag.Error, testCodeError, "full-shape issue").
 		WithSpan(span).

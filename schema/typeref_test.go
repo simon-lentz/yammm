@@ -11,7 +11,7 @@ import (
 
 func TestNewTypeRef(t *testing.T) {
 	span := location.Span{
-		Source: location.MustNewSourceID("test://typeref"),
+		Source: location.NewSourceID("test://typeref"),
 		Start:  location.Position{Line: 5, Column: 10, Byte: 50},
 		End:    location.Position{Line: 5, Column: 20, Byte: 60},
 	}
@@ -21,12 +21,12 @@ func TestNewTypeRef(t *testing.T) {
 	assert.Equal(t, "users", ref.Qualifier())
 	assert.Equal(t, "Person", ref.Name())
 	assert.Equal(t, span, ref.Span())
-	assert.True(t, ref.IsQualified())
+	assert.NotEmpty(t, ref.Qualifier())
 }
 
 func TestLocalTypeRef(t *testing.T) {
 	span := location.Span{
-		Source: location.MustNewSourceID("test://local"),
+		Source: location.NewSourceID("test://local"),
 		Start:  location.Position{Line: 1, Column: 1, Byte: 0},
 		End:    location.Position{Line: 1, Column: 10, Byte: 10},
 	}
@@ -36,7 +36,7 @@ func TestLocalTypeRef(t *testing.T) {
 	assert.Empty(t, ref.Qualifier())
 	assert.Equal(t, "Customer", ref.Name())
 	assert.Equal(t, span, ref.Span())
-	assert.False(t, ref.IsQualified())
+	assert.Empty(t, ref.Qualifier())
 }
 
 func TestTypeRef_Qualifier(t *testing.T) {
@@ -65,7 +65,7 @@ func TestTypeRef_Name(t *testing.T) {
 
 func TestTypeRef_Span(t *testing.T) {
 	span := location.Span{
-		Source: location.MustNewSourceID("test://span"),
+		Source: location.NewSourceID("test://span"),
 		Start:  location.Position{Line: 10, Column: 5, Byte: 100},
 		End:    location.Position{Line: 10, Column: 15, Byte: 110},
 	}
@@ -75,14 +75,6 @@ func TestTypeRef_Span(t *testing.T) {
 	result := ref.Span()
 	assert.Equal(t, span.Source, result.Source)
 	assert.Equal(t, 10, result.Start.Line)
-}
-
-func TestTypeRef_IsQualified(t *testing.T) {
-	qualified := schema.NewTypeRef("alias", "Type", location.Span{})
-	unqualified := schema.NewTypeRef("", "Type", location.Span{})
-
-	assert.True(t, qualified.IsQualified())
-	assert.False(t, unqualified.IsQualified())
 }
 
 func TestTypeRef_IsZero(t *testing.T) {
@@ -115,7 +107,7 @@ func TestTypeRef_String_Local(t *testing.T) {
 
 func TestNewDataTypeRef(t *testing.T) {
 	span := location.Span{
-		Source: location.MustNewSourceID("test://datatype"),
+		Source: location.NewSourceID("test://datatype"),
 		Start:  location.Position{Line: 3, Column: 5, Byte: 30},
 		End:    location.Position{Line: 3, Column: 15, Byte: 40},
 	}
@@ -125,27 +117,12 @@ func TestNewDataTypeRef(t *testing.T) {
 	assert.Equal(t, "types", ref.Qualifier())
 	assert.Equal(t, "Email", ref.Name())
 	assert.Equal(t, span, ref.Span())
-	assert.True(t, ref.IsQualified())
-}
-
-func TestLocalDataTypeRef(t *testing.T) {
-	span := location.Span{
-		Source: location.MustNewSourceID("test://local-dt"),
-		Start:  location.Position{Line: 2, Column: 1, Byte: 10},
-		End:    location.Position{Line: 2, Column: 10, Byte: 20},
-	}
-
-	ref := schema.LocalDataTypeRef("PhoneNumber", span)
-
-	assert.Empty(t, ref.Qualifier())
-	assert.Equal(t, "PhoneNumber", ref.Name())
-	assert.Equal(t, span, ref.Span())
-	assert.False(t, ref.IsQualified())
+	assert.NotEmpty(t, ref.Qualifier())
 }
 
 func TestDataTypeRef_Accessors(t *testing.T) {
 	span := location.Span{
-		Source: location.MustNewSourceID("test://dt-accessors"),
+		Source: location.NewSourceID("test://dt-accessors"),
 		Start:  location.Position{Line: 5, Column: 1, Byte: 50},
 		End:    location.Position{Line: 5, Column: 20, Byte: 70},
 	}
@@ -155,14 +132,6 @@ func TestDataTypeRef_Accessors(t *testing.T) {
 	assert.Equal(t, "common", ref.Qualifier())
 	assert.Equal(t, "Currency", ref.Name())
 	assert.Equal(t, span, ref.Span())
-}
-
-func TestDataTypeRef_IsQualified(t *testing.T) {
-	qualified := schema.NewDataTypeRef("pkg", "DataType", location.Span{})
-	unqualified := schema.NewDataTypeRef("", "DataType", location.Span{})
-
-	assert.True(t, qualified.IsQualified())
-	assert.False(t, unqualified.IsQualified())
 }
 
 func TestDataTypeRef_IsZero(t *testing.T) {
@@ -186,7 +155,7 @@ func TestDataTypeRef_String_Local(t *testing.T) {
 }
 
 func TestNewResolvedTypeRef(t *testing.T) {
-	sourceID := location.MustNewSourceID("test://schema")
+	sourceID := location.NewSourceID("test://schema")
 	ref := schema.NewTypeRef("pkg", "Type", location.Span{})
 	id := schema.NewTypeID(sourceID, "Type")
 
@@ -198,7 +167,7 @@ func TestNewResolvedTypeRef(t *testing.T) {
 
 func TestResolvedTypeRef_Ref(t *testing.T) {
 	ref := schema.NewTypeRef("users", "Person", location.Span{})
-	id := schema.NewTypeID(location.MustNewSourceID("test://users"), "Person")
+	id := schema.NewTypeID(location.NewSourceID("test://users"), "Person")
 
 	resolved := schema.NewResolvedTypeRef(ref, id)
 
@@ -208,7 +177,7 @@ func TestResolvedTypeRef_Ref(t *testing.T) {
 }
 
 func TestResolvedTypeRef_ID(t *testing.T) {
-	sourceID := location.MustNewSourceID("test://schema")
+	sourceID := location.NewSourceID("test://schema")
 	ref := schema.NewTypeRef("", "Customer", location.Span{})
 	id := schema.NewTypeID(sourceID, "Customer")
 
@@ -239,7 +208,7 @@ func TestResolvedTypeRef_Qualifier(t *testing.T) {
 
 func TestResolvedTypeRef_Span(t *testing.T) {
 	span := location.Span{
-		Source: location.MustNewSourceID("test://span"),
+		Source: location.NewSourceID("test://span"),
 		Start:  location.Position{Line: 5, Column: 1, Byte: 50},
 		End:    location.Position{Line: 5, Column: 20, Byte: 70},
 	}
@@ -288,27 +257,15 @@ func TestResolvedTypeRef_IsZero_NonZeroRef(t *testing.T) {
 
 func TestResolvedTypeRef_IsZero_NonZeroID(t *testing.T) {
 	ref := schema.TypeRef{}
-	id := schema.NewTypeID(location.MustNewSourceID("test://schema"), "Type")
+	id := schema.NewTypeID(location.NewSourceID("test://schema"), "Type")
 
 	resolved := schema.NewResolvedTypeRef(ref, id)
 
 	assert.False(t, resolved.IsZero())
 }
 
-func TestResolvedTypeRef_IsLocal(t *testing.T) {
-	localRef := schema.NewTypeRef("", "LocalType", location.Span{})
-	qualifiedRef := schema.NewTypeRef("pkg", "ImportedType", location.Span{})
-	id := schema.TypeID{}
-
-	localResolved := schema.NewResolvedTypeRef(localRef, id)
-	qualifiedResolved := schema.NewResolvedTypeRef(qualifiedRef, id)
-
-	assert.True(t, localResolved.IsLocal())
-	assert.False(t, qualifiedResolved.IsLocal())
-}
-
 func TestResolvedTypeRef_Equal_SameTypeID(t *testing.T) {
-	sourceID := location.MustNewSourceID("test://schema")
+	sourceID := location.NewSourceID("test://schema")
 	id := schema.NewTypeID(sourceID, "Person")
 
 	// Same type resolved via different syntactic paths
@@ -323,8 +280,8 @@ func TestResolvedTypeRef_Equal_SameTypeID(t *testing.T) {
 }
 
 func TestResolvedTypeRef_Equal_DifferentTypeID(t *testing.T) {
-	sourceID1 := location.MustNewSourceID("test://schema1")
-	sourceID2 := location.MustNewSourceID("test://schema2")
+	sourceID1 := location.NewSourceID("test://schema1")
+	sourceID2 := location.NewSourceID("test://schema2")
 	id1 := schema.NewTypeID(sourceID1, "Person")
 	id2 := schema.NewTypeID(sourceID2, "Person")
 
@@ -339,7 +296,7 @@ func TestResolvedTypeRef_Equal_DifferentTypeID(t *testing.T) {
 }
 
 func TestResolvedTypeRef_Equal_DifferentNames(t *testing.T) {
-	sourceID := location.MustNewSourceID("test://schema")
+	sourceID := location.NewSourceID("test://schema")
 	id1 := schema.NewTypeID(sourceID, "Person")
 	id2 := schema.NewTypeID(sourceID, "Employee")
 
@@ -362,7 +319,7 @@ func TestResolvedTypeRef_Equal_ZeroValues(t *testing.T) {
 }
 
 func TestResolvedTypeRef_Equal_Reflexive(t *testing.T) {
-	sourceID := location.MustNewSourceID("test://schema")
+	sourceID := location.NewSourceID("test://schema")
 	id := schema.NewTypeID(sourceID, "Type")
 	ref := schema.NewTypeRef("", "Type", location.Span{})
 
@@ -374,17 +331,17 @@ func TestResolvedTypeRef_Equal_Reflexive(t *testing.T) {
 }
 
 func TestResolvedTypeRef_Equal_IgnoresSyntacticDifferences(t *testing.T) {
-	sourceID := location.MustNewSourceID("test://common")
+	sourceID := location.NewSourceID("test://common")
 	id := schema.NewTypeID(sourceID, "Entity")
 
 	// Different spans (different source locations)
 	span1 := location.Span{
-		Source: location.MustNewSourceID("test://file1"),
+		Source: location.NewSourceID("test://file1"),
 		Start:  location.Position{Line: 1, Column: 1, Byte: 0},
 		End:    location.Position{Line: 1, Column: 10, Byte: 10},
 	}
 	span2 := location.Span{
-		Source: location.MustNewSourceID("test://file2"),
+		Source: location.NewSourceID("test://file2"),
 		Start:  location.Position{Line: 5, Column: 5, Byte: 50},
 		End:    location.Position{Line: 5, Column: 15, Byte: 60},
 	}
@@ -402,7 +359,7 @@ func TestResolvedTypeRef_Equal_IgnoresSyntacticDifferences(t *testing.T) {
 
 func TestResolvedTypeRefFromType_SameSchema(t *testing.T) {
 	// Type and viewing perspective are in the same schema → no qualifier
-	sourceID := location.MustNewSourceID("test://app")
+	sourceID := location.NewSourceID("test://app")
 	span := location.Span{
 		Source: sourceID,
 		Start:  location.Position{Line: 1, Column: 1, Byte: 0},
@@ -417,12 +374,11 @@ func TestResolvedTypeRefFromType_SameSchema(t *testing.T) {
 	assert.Empty(t, resolved.Qualifier())
 	assert.Equal(t, "User", resolved.Name())
 	assert.Equal(t, "User", resolved.String())
-	assert.True(t, resolved.IsLocal())
 }
 
 func TestResolvedTypeRefFromType_DifferentSchema(t *testing.T) {
 	// Type is in app schema but viewing from common schema → uses schema name as qualifier
-	appSourceID := location.MustNewSourceID("test://app")
+	appSourceID := location.NewSourceID("test://app")
 	span := location.Span{
 		Source: appSourceID,
 		Start:  location.Position{Line: 1, Column: 1, Byte: 0},
@@ -437,11 +393,10 @@ func TestResolvedTypeRefFromType_DifferentSchema(t *testing.T) {
 	assert.Equal(t, "app", resolved.Qualifier())
 	assert.Equal(t, "User", resolved.Name())
 	assert.Equal(t, "app.User", resolved.String())
-	assert.False(t, resolved.IsLocal())
 }
 
 func TestResolvedTypeRefFromType_PreservesTypeID(t *testing.T) {
-	sourceID := location.MustNewSourceID("test://schema")
+	sourceID := location.NewSourceID("test://schema")
 	span := location.Span{
 		Source: sourceID,
 		Start:  location.Position{Line: 5, Column: 1, Byte: 40},
@@ -459,7 +414,7 @@ func TestResolvedTypeRefFromType_PreservesTypeID(t *testing.T) {
 }
 
 func TestResolvedTypeRefFromType_PreservesSpan(t *testing.T) {
-	sourceID := location.MustNewSourceID("test://schema")
+	sourceID := location.NewSourceID("test://schema")
 	span := location.Span{
 		Source: sourceID,
 		Start:  location.Position{Line: 10, Column: 5, Byte: 100},

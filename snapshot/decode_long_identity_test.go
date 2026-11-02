@@ -97,23 +97,10 @@ func TestInfo_AWrittenTypeIdentityIsCutByItsParts(t *testing.T) {
 			want:       `duplicate instance ` + owner + `[["a"]] declares type row 1 (` + part + `) but its record states row 0 (` + owner + `)`,
 		},
 		{
-			name:       "root duplicate whose conflict is absent",
+			name:       "duplicate whose conflict is absent",
 			duplicates: `{"type":0,"key":["z"],"instance":{"key":["z"],"properties":{},"provenance":null},"conflict":{"type":0,"key":["z"]}}`,
 			code:       diag.E_SNAPSHOT_DANGLING_REFERENCE,
 			want:       `duplicate conflict ` + owner + `[["z"]] references non-existent instance`,
-		},
-		{
-			name:       "composed duplicate whose parent is absent",
-			duplicates: `{"type":1,"key":["k"],"instance":{"key":["k"],"properties":{},"provenance":null},"conflict":{"type":1,"key":["k"]},"parent_type":0,"parent_key":["nope"],"relation":"PARTS"}`,
-			code:       diag.E_SNAPSHOT_DANGLING_REFERENCE,
-			want:       `duplicate parent ` + owner + `[["nope"]] does not resolve to a root instance`,
-		},
-		{
-			name:       "composed duplicate whose conflict is absent",
-			instances:  rootA,
-			duplicates: fmt.Sprintf(`{"type":1,"key":["k"],"instance":{"key":["k"],"properties":{},"provenance":null},"conflict":{"type":1,"key":["k"]},"parent_type":0,"parent_key":["a"],"relation":%q}`, lidRelation),
-			code:       diag.E_SNAPSHOT_DANGLING_REFERENCE,
-			want:       `duplicate conflict ` + part + `[["k"]] under ` + owner + `[["a"]].` + lidCut(lidRelation) + ` references non-existent instance`,
 		},
 		{
 			name:       "unresolved record whose source is absent",
@@ -164,12 +151,6 @@ func TestLoad_ANameTheDocumentWritesIsCut(t *testing.T) {
 		code                   diag.Code
 		want                   string
 	}{
-		{
-			name:       "duplicate under a relation the parent does not declare",
-			duplicates: fmt.Sprintf(`{"type":0,"key":["c1"],"instance":{"key":["c1"],"properties":{"id":"c1"},"provenance":null},"conflict":{"type":0,"key":["c1"]},"parent_type":1,"parent_key":["p1"],"relation":%q}`, lidRelation),
-			code:       diag.E_SNAPSHOT_INVALID_COMPOSED,
-			want:       `duplicate record 0 names "` + lidRelation[:32] + `"… (40 bytes), which lid#Person does not declare as a composition`,
-		},
 		{
 			name:       "required record stating an undocumented reason",
 			unresolved: fmt.Sprintf(`{"source_type":1,"source_key":["p1"],"relation":"EMPLOYER","target_type":0,"target_key":null,"required":true,"reason":%q}`, lidReason),

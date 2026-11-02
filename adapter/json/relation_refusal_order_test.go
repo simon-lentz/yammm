@@ -2,15 +2,14 @@ package json
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
-	"math"
 	"strings"
 	"testing"
 
-	"github.com/simon-lentz/yammm/graph"
-	"github.com/simon-lentz/yammm/immutable"
-	"github.com/simon-lentz/yammm/instance"
-	"github.com/simon-lentz/yammm/location"
+	"github.com/simon-lentz/yammm/internal/snapparts"
+
+	"github.com/simon-lentz/yammm/internal/snappartstest"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -37,24 +36,18 @@ func TestWriters_TwoRefusedRelationsNameTheFirstInRelationOrder(t *testing.T) {
 	if res.HasErrors() {
 		t.Fatalf("load schema: %s", res)
 	}
-	stationT, _ := s.Type("Station")
-	readingT, _ := s.Type("Reading")
-	target := instance.NewValidEdgeData([]instance.ValidEdgeTarget{
-		instance.NewValidEdgeTarget(immutable.WrapKey([]any{"s1"}), immutable.WrapProperties(map[string]any{"weight": math.Inf(1)})),
+	weight := map[string]any{"weight": json.Number("1e400")}
+	snap := snappartstest.Loaded(t, s, snapparts.Parts{
+		Instances: []snapparts.Instance{
+			heldRoot(t, s, "Station", "s1", map[string]any{"id": "s1"}),
+			heldRoot(t, s, "Reading", "r1", map[string]any{"id": "r1"}),
+		},
+		Edges: []snapparts.Edge{
+			heldEdge(t, s, "Reading", "r1", "ALPHA", "s1", weight),
+			heldEdge(t, s, "Reading", "r1", "BETA", "s1", weight),
+		},
 	})
-	g := graph.New(s)
-	for _, inst := range []instance.ValidInstance{
-		instance.NewValidInstance("Station", stationT.ID(), immutable.WrapKey([]any{"s1"}),
-			immutable.WrapProperties(map[string]any{"id": "s1"}), nil, nil, location.Provenance{}),
-		instance.NewValidInstance("Reading", readingT.ID(), immutable.WrapKey([]any{"r1"}),
-			immutable.WrapProperties(map[string]any{"id": "r1"}),
-			map[string]instance.ValidEdgeData{"ALPHA": target, "BETA": target}, nil, location.Provenance{}),
-	} {
-		if r := g.Add(ctx, inst); r.HasErrors() {
-			t.Fatalf("graph.Add: %s", r)
-		}
-	}
-	_, err := New().MarshalObject(ctx, g.Snapshot())
+	_, err := New().MarshalObject(ctx, snap)
 	if !errors.Is(err, ErrUnrepresentable) {
 		t.Fatalf("MarshalObject: %v does not match ErrUnrepresentable", err)
 	}

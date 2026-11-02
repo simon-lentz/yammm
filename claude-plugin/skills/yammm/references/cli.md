@@ -86,8 +86,8 @@ Formats `.yammm` files (consistent indentation, ordering). Use `-w` / `--write` 
 modify files in place.
 
 `--check` writes nothing. It prints the path of every unformatted file, one per
-line, and exits 1 when the list is not empty — the shape `gofmt -l` uses, so it
-drops into a pre-commit hook without a shell loop. Every path is checked, so one
+line, as `gofmt -l` does, and exits 1 when the list is not empty, which `gofmt -l`
+does not. A pre-commit hook needs only that exit code. Every path is checked, so one
 run reports every offender. `--check` and `--write` together are a usage error
 (exit 2). A file the grammar does not match, or that holds an escape the
 language does not have outside an invariant expression or an annotation
@@ -202,7 +202,7 @@ yammm snapshot update-metadata --set env=prod --set version=3 output.ys
 yammm snapshot update-metadata --unset env output.ys
 ```
 
-Rewrites metadata on an existing `.ys` file. It reuses the snapshot body verbatim and recomputes only the integrity hash. There is no fallback: the command calls the strict primitive, so a document the fast path cannot rewrite is reported and the command exits non-zero rather than re-serializing. `created_at` is preserved byte for byte.
+Rewrites metadata on an existing `.ys` file. It reuses the snapshot body verbatim and recomputes only the integrity hash. There is no fallback: the command calls the strict primitive, so a document the fast path cannot rewrite is reported and the command exits non-zero rather than re-serializing. `created_at` keeps its text, and its JSON escapes are written anew.
 
 | Flag | Description |
 | ---- | ----------- |
@@ -415,18 +415,19 @@ Two consequences worth knowing:
 - **An unchanged, still-passing schema may emit new stderr output.** Warnings
   that already existed but that no command printed are now visible. The
   `-_`-in-a-constraint-bound warning (`E_INVALID_CONSTRAINT`, "minus sign before
-  '_' (unbounded) has no effect") is the common one; `yammm snapshot verify`,
+  '_' (unbounded) has no effect") is one; `yammm snapshot verify`,
   `yammm snapshot info` without `--header-only`, `yammm export`, and
   `yammm snapshot save --into` additionally surface the
   snapshot decoder's `W_SNAPSHOT_PATH_FALLBACK` on otherwise unchanged `.ys`
   files. From v0.15.0, `E_SNAPSHOT_UNSUPPORTED_HASH_ALGORITHM` is an Error on
-  these body-reading commands — the document is refused, not warned about;
-  only header-only reads (`yammm snapshot info --header-only`, `--dir`) keep
-  it a Warning.
+  these body-reading commands — the document is refused, not warned about.
+  `yammm snapshot info --header-only` and `--dir` read the header and the types
+  table alone and report it as a Warning. `yammm snapshot update-metadata` reports that Warning
+  from its header read, then refuses the document with the Error.
 
 This is what makes `W_ANNOTATION_SHADOWED` reachable — the only signal that a
-subtype's property re-declaration dropped an inherited `@writeOnce` or `@index`
-annotation. **Do not read a zero exit code as "no diagnostics."** Read the
+subtype's property re-declaration dropped an inherited property annotation.
+**Do not read a zero exit code as "no diagnostics."** Read the
 output.
 
 With `--format json`, each command writes exactly one JSON document to stderr,

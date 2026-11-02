@@ -9,10 +9,8 @@ import (
 	"testing"
 
 	"github.com/simon-lentz/yammm/graph"
-	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/instance"
 	"github.com/simon-lentz/yammm/internal/raceskip"
-	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
 	"github.com/simon-lentz/yammm/snapshot"
 )
@@ -38,37 +36,34 @@ var (
 func loadBenchInputs(tb testing.TB) benchInputs {
 	tb.Helper()
 	benchInputsOnce.Do(func() {
-		s, sres := schema.NewBuilder().
-			WithName("test").
-			WithSourceID(location.MustNewSourceID("test://bench.yammm")).
-			AddType("Person").
-			WithPrimaryKey("id", schema.NewStringConstraint()).
-			WithProperty("name", schema.NewStringConstraint()).
-			WithProperty("email", schema.NewStringConstraint()).
-			WithProperty("role", schema.NewStringConstraint()).
-			Done().
-			Build()
+		s, sres := schema.LoadString(tb.Context(), `schema "test"
+
+type Person {
+	id String primary
+	name String required
+	email String required
+	role String required
+}
+`, "bench.yammm")
 		if sres.HasErrors() {
 			tb.Fatalf("bench schema: %v", sres.Err())
 		}
 
-		typ, _ := s.Type("Person")
+		v := instance.NewValidator(s)
 		g := graph.New(s)
 		ctx := context.Background()
 		// 100_000 instances of about 147 bytes each: about 14.7 MB.
 		const n = 100_000
 		for i := range n {
-			inst := instance.NewValidInstance(
-				"Person", typ.ID(),
-				immutable.WrapKey([]any{fmt.Sprintf("p%06d", i)}),
-				immutable.WrapProperties(map[string]any{
-					"id":    fmt.Sprintf("p%06d", i),
-					"name":  fmt.Sprintf("Person %06d", i),
-					"email": fmt.Sprintf("person%06d@example.org", i),
-					"role":  "contributor",
-				}),
-				nil, nil, location.Provenance{},
-			)
+			inst, vres := v.ValidateOne(ctx, "Person", instance.RawInstance{Properties: map[string]any{
+				"id":    fmt.Sprintf("p%06d", i),
+				"name":  fmt.Sprintf("Person %06d", i),
+				"email": fmt.Sprintf("person%06d@example.org", i),
+				"role":  "contributor",
+			}})
+			if vres.HasErrors() {
+				tb.Fatalf("bench validate: %v", vres.Err())
+			}
 			if res := g.Add(ctx, inst); res.HasErrors() {
 				tb.Fatalf("bench add: %v", res.Err())
 			}

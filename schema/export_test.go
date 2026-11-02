@@ -1,14 +1,8 @@
 package schema
 
 import (
-	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/location"
 )
-
-// TestRegisterFailureIssue renders a Registry.Register error as the loader does.
-var TestRegisterFailureIssue = func(reg *Registry, s Schema, err error) diag.Issue {
-	return (&loader{registry: reg}).registerFailureIssue(s, err)
-}
 
 // Test-only exports for schema_test files in this directory.
 // These are compiled only during `go test ./schema/...` and do not
@@ -34,7 +28,6 @@ var (
 	TestSealType     = Type.seal
 	TestSealRelation = Relation.seal
 	TestSealDataType = DataType.seal
-	TestSealImport   = Import.seal
 )
 
 // IsSealed accessors.
@@ -43,7 +36,6 @@ var (
 	TestIsSealedType     = Type.isSealed
 	TestIsSealedRelation = Relation.isSealed
 	TestIsSealedDataType = DataType.isSealed
-	TestIsSealedImport   = Import.isSealed
 )
 
 // Schema mutators.
@@ -86,8 +78,7 @@ var TestSetDataTypeConstraint = DataType.setConstraint
 
 // Import mutators.
 var (
-	TestSetImportResolvedSourceID = Import.setResolvedSourceID
-	TestSetImportSchema           = Import.setSchema
+	TestSetImportSchema = Import.setSchema
 )
 
 // Internal functions from merged packages.
@@ -95,8 +86,6 @@ var (
 	TestCompleteModel       = completeModel
 	TestNewParser           = newParser
 	TestIsValidAlias        = isValidAlias
-	TestIsReservedKeyword   = isReservedKeyword
-	TestReservedKeywords    = reservedKeywords
 	TestDeriveAliasFromPath = deriveAliasFromPath
 )
 
@@ -112,11 +101,8 @@ type (
 	TestASTTypeRef    = astTypeRef
 )
 
-// Internal interfaces.
-type (
-	TestCompletionRegistry = completionRegistry
-	TestResolvedImportMap  = resolvedImportMap
-)
+// TestResolvedImportMap is the completer's resolved-import table.
+type TestResolvedImportMap = resolvedImportMap
 
 // TestResolvedImport builds a resolved (non-deferred) entry for a
 // [TestResolvedImportMap] passed to the completeModel bridge. The
@@ -127,5 +113,8 @@ var TestResolvedImport = func(sourceID location.SourceID) importResolution {
 	return importResolution{sourceID: sourceID}
 }
 
-// Load options whose parameter types live in internal packages.
-var TestWithSourceRegistry = withSourceRegistry
+// NewTypeID builds an identity no schema has to declare, for tests of how the
+// package treats one.
+func NewTypeID(schemaPath location.SourceID, name string) TypeID {
+	return TypeID{schemaPath: schemaPath, name: name}
+}

@@ -1,6 +1,6 @@
 # Diagnostics Reference
 
-yammm reports problems as structured diagnostics in a `diag.Result`. A function that returns one returns it last, after its value when it has one: `schema.Load` returns `(Schema, diag.Result)`, and `Graph.Add` returns a `diag.Result` alone. Each issue has a stable error code, a severity and a message, and a source location where one applies. Some entry points return a Go `error` instead, among them the JSON and CSV adapters' writers and `gogen.Marshal`, `jschema.Marshal` and `markdown.Marshal`. `graph.BatchAssembler`'s `Add`, `AddValid`, `AddValidOrMerge` and `Finalize` return an `error` too; when the cause is a failed result, the error carries that `diag.Result`, and `diag.AsContextualError` recovers it.
+yammm reports problems as structured diagnostics in a `diag.Result`. A function that returns one returns it last, after its value when it has one: `schema.Load` returns `(Schema, diag.Result)`, and `Graph.Add` returns a `diag.Result` alone. Each issue has a stable error code, a severity and a message, and a source location where one applies. Some entry points return a Go `error` instead, among them the JSON and CSV adapters' writers and `gogen.Marshal`, `jschema.Marshal` and `markdown.Marshal`. `graph.BatchAssembler`'s `Add`, `AddValid` and `AddValidOrMerge` return an `error` too; when the cause is a failed result, the error carries that `diag.Result`, and `diag.AsContextualError` recovers it.
 
 ---
 
@@ -54,11 +54,11 @@ Each issue contains:
 
 One load pass reports every *independent* error in a schema and its import closure -- each exactly once:
 
-- **All import failures are reported**, each at its own declaration; a broken import does not hide its siblings or the schema's own semantic errors. A shared broken import (diamond graphs) is compiled once: its own errors appear once, plus one `E_UPSTREAM_FAIL` per importer.
+- **All import failures are reported**, each at its own declaration, save `E_IMPORT_NOT_ALLOWED`, one issue at the first import; a broken import does not hide its siblings or the schema's own semantic errors. A shared broken import (diamond graphs) is compiled once: its own errors appear once, plus one `E_UPSTREAM_FAIL` per import declaration that names it.
 - **References through a failed import are deferred, not re-blamed.** The import failure is the single root-cause diagnostic; `extends`, relation targets, and property datatypes reached through that alias stay silent until the import is fixed. A qualifier that names no declared import at all is a genuine `E_UNKNOWN_TYPE`.
 - **An alias binds once (keep-first).** A repeated alias is reported once (`E_DUPLICATE_IMPORT`) and the later declaration is inert; references resolve against the first binding.
-- **`LoadString` / markdown blocks**: the imports-not-allowed rejection (`E_IMPORT_NOT_ALLOWED`) no longer suppresses the source's other diagnostics.
-- **Truncation is visible**: past the issue limit (default 100), the CLI's text output appends a dropped-issues note, and the JSON output carries `limitReached` / `droppedCount`.
+- **`LoadString` / markdown blocks**: the imports-not-allowed rejection (`E_IMPORT_NOT_ALLOWED`) does not suppress the source's other diagnostics.
+- **Truncation is visible**: one load stores at most 100 issues. Past that cap, the CLI's text output appends a dropped-issues note, and the JSON output carries `limitReached` / `droppedCount`.
 
 The all-or-nothing contract is unchanged: any error still yields a zero schema.
 
@@ -91,7 +91,7 @@ The all-or-nothing contract is unchanged: any error still yields a zero schema.
 
 | Code | Meaning |
 | ---- | ------- |
-| `E_SYNTAX` | Syntax error in `.yammm` source, or a Builder documentation string no doc comment can carry |
+| `E_SYNTAX` | Syntax error in `.yammm` source |
 
 ### Import
 
@@ -99,11 +99,11 @@ The all-or-nothing contract is unchanged: any error still yields a zero schema.
 | ---- | ------- |
 | `E_IMPORT_RESOLVE` | Import path could not be resolved |
 | `E_IMPORT_CYCLE` | Circular import dependency |
-| `E_INVALID_ALIAS` | Import alias is not a valid identifier |
+| `E_INVALID_ALIAS` | An import with no `as` derives a reserved keyword from its path as its alias. An `as` alias the grammar refuses, a reserved keyword included, is `E_SYNTAX` |
 | `E_PATH_ESCAPE` | Import path escapes allowed directory |
 | `E_IMPORT_NOT_ALLOWED` | Imports not permitted in this context |
-| `E_DUPLICATE_IMPORT` | Same schema imported under multiple aliases |
-| `E_IMPORT_ALIAS_COLLISION` | Import alias collides with a local type name |
+| `E_DUPLICATE_IMPORT` | One schema imported more than once, or two imports that share one alias |
+| `E_IMPORT_ALIAS_COLLISION` | Import alias collides with a local type or datatype name |
 
 ### Schema Compilation
 
@@ -115,7 +115,6 @@ The all-or-nothing contract is unchanged: any error still yields a zero schema.
 | `E_DUPLICATE_RELATION` | Relation defined more than once on a type |
 | `E_CASE_COLLISION` | Two property names of a type, or two edge-property names of an association, differ only by case |
 | `E_PROPERTY_RELATION_COLLISION` | A property's lower-cased name equals a relation's field name |
-| `E_RESERVED_PREFIX` | Name uses a reserved prefix |
 | `E_INVALID_ASSOCIATION_TARGET` | Association targets an invalid type, or a part type declares or inherits an association |
 | `E_INVALID_COMPOSITION_TARGET` | Composition targets an invalid type |
 | `E_INVALID_CONSTRAINT` | Constraint definition is invalid |
@@ -123,21 +122,18 @@ The all-or-nothing contract is unchanged: any error still yields a zero schema.
 | `E_DUPLICATE_INVARIANT` | One invariant message declared twice on a type |
 | `E_INVARIANT_CONFLICT` | Two inherited definitions of one invariant message differ (a literal with no value matches any literal of its kind) |
 | `E_REVERSE_CLAUSE_REMOVED` | Schema carries the reverse clause removed in v0.15.0 (v0.15+) |
-| `E_INVALID_NAME` | A name the schema refuses: an identifier's format, an empty schema name, a member named `self`, a name the Builder takes that the DSL cannot state, or an invariant reading a relation in a casing other than its name or field name |
+| `E_INVALID_NAME` | A name the schema refuses: a relation name that is not UPPER_SNAKE, an empty schema name, a property or relation field named `self`, or an invariant reading a relation in a casing other than its name or field name |
 | `E_UPSTREAM_FAIL` | Imported schema failed to compile |
 | `E_PROPERTY_CONFLICT` | Conflicting property definitions from inheritance |
 | `E_UNKNOWN_TYPE` | Referenced type or datatype not found (`extends`, relation target, a property datatype, or a datatype declaration's reference such as a `List` element) |
 | `E_DUPLICATE_TYPE` | Type name defined multiple times |
-| `E_DUPLICATE_SCHEMA` | Two schemas in one registry, or in one import closure, declare one name |
+| `E_DUPLICATE_SCHEMA` | Two schemas in one load declare one name, and both compile with no error. A schema with an error takes no name |
 | `E_RELATION_COLLISION` | A type carries two relation definitions under one field name that do not merge: an inherited one that differs from another it carries, or an association and a composition (two relations one type declares under one exact name are `E_DUPLICATE_RELATION`) |
-| `E_MISSING_SOURCE_ID` | Required SourceID is missing |
-| `E_INVALID_SYNTHETIC_ID` | Synthetic SourceID has invalid format |
 | `E_LIST_ON_EDGE` | List type used in relationship property |
 | `E_INVALID_PRIMARY_KEY_TYPE` | Type not allowed as primary key |
 | `E_NO_PRIMARY_KEY` | Concrete type declares or inherits no primary key |
 | `E_LOAD_IO_FAILURE` | I/O error during schema loading, or a load whose arguments or options the loader refuses |
 | `E_LOAD_MODULE_ROOT_MALFORMED` | A `yammm.mod` module-root marker holds content other than comment lines, is not a regular file, is larger than the size limit, or is a link that resolves to no file |
-| `E_LOAD_SOURCE_CHANGED` | A source a shared registry holds that a load cannot reuse. At a re-registration: its bytes or its structural hash differ, or the registered schema carries no sources. At an import: the load holds bytes for it, no other compile of it is bound, and the registry's compile differs in bytes or carries none |
 | `E_UNKNOWN_ANNOTATION` | Annotation name the built-in registry holds at neither placement (one it holds only at the other placement is `E_INVALID_ANNOTATION`) |
 | `E_UNKNOWN_ANNOTATION_TARGET` | Annotation property-reference argument names no property of the type |
 | `E_INVALID_ANNOTATION` | Annotation placement, arity, argument-kind, keyword, or duplicate violation, or conflicting annotations a type inherits for one property |
@@ -155,15 +151,14 @@ The all-or-nothing contract is unchanged: any error still yields a zero schema.
 | `E_TYPE_MISMATCH` | Value has wrong type for its property |
 | `E_MISSING_REQUIRED` | Required property is missing |
 | `E_UNKNOWN_FIELD` | Unexpected field in instance data |
-| `E_CONSTRAINT_FAIL` | Constraint check failed (bounds, pattern, enum) |
+| `E_CONSTRAINT_FAIL` | A value fails its declared constraint |
 | `E_INVARIANT_FAIL` | Invariant expression evaluated to false |
 | `E_EVAL_ERROR` | Error during expression evaluation |
 | `E_MISSING_FK_TARGET` | Foreign key target is missing |
 | `E_PARTIAL_COMPOSITE_FK` | Partial composite foreign key |
 | `E_UNKNOWN_EDGE_FIELD` | Unknown field in edge data |
-| `E_EDGE_SHAPE_MISMATCH` | Edge has wrong shape |
+| `E_EDGE_SHAPE_MISMATCH` | An edge's or a composition's value has a shape its relation does not take |
 | `E_UNRESOLVED_REQUIRED_COMPOSITION` | Required composition is unresolved |
-| `E_COMPOSITION_NOT_FOUND` | Referenced composition not found |
 | `E_COMPOSITION_DEPTH_EXCEEDED` | Composed nesting deeper than the bound (32) |
 | `E_INVALID_TYPE_TAG` | A JSON top-level key or CSV type-column value is not a type name |
 | `E_CASE_FOLD_COLLISION` | Input fields collide after case-folding |
@@ -175,29 +170,28 @@ The all-or-nothing contract is unchanged: any error still yields a zero schema.
 | `E_DUPLICATE_PK` | Duplicate primary key: two instances added to a graph, two roots whose stored keys the key rule both accepts, in a snapshot or a `.ys` document, or two roots of a data command's input, one of them refused. A read under a schema counts only roots of a type that can hold one |
 | `E_DUPLICATE_COMPOSED_PK` | Two children of one `(many)` composition share a primary key, or a `(one)` composition holds several |
 | `E_UNRESOLVED_REQUIRED` | Required association is unresolved |
-| `E_GRAPH_TYPE_NOT_FOUND` | Type not found in graph operations |
-| `E_GRAPH_PARENT_NOT_FOUND` | Parent node not found for composed child |
+| `E_GRAPH_TYPE_NOT_FOUND` | A root's type at `Graph.Add`, or a root's or types entry's type in an imported snapshot, that the graph's schema neither declares nor directly imports, or a type identity an imported snapshot states that the schema does not resolve |
 | `E_GRAPH_INVALID_COMPOSITION` | Invalid composition in graph operations |
 | `E_GRAPH_MISSING_PK` | A root, or an imported snapshot's types entry, whose type declares no primary key |
-| `E_GRAPH_CARDINALITY` | A `(one)` association holds more than one record: several targets at `Graph.Add` or `Graph.AddOrMerge`, a merge at `Graph.AddOrMerge` that would add a second target, several edges and unresolved records no check refused, in a snapshot or `.ys` document (v0.15+) |
+| `E_GRAPH_CARDINALITY` | A `(one)` association holds more than one record: a merge at `BatchAssembler.AddValidOrMerge` that would add a second target, several edges and unresolved records no check refused, in a snapshot or `.ys` document (v0.15+) |
 | `E_GRAPH_UNKNOWN_RELATION` | Instance data or an association record under a relation name the type does not declare in that slot, or an association record naming a target type the schema resolves, other than the declared one (v0.15+) |
-| `E_GRAPH_ABSTRACT_TYPE` | Instance of an abstract type rejected by the graph, or an imported snapshot's types entry naming a type the importing schema makes abstract (v0.15+) |
-| `E_GRAPH_INVALID_PK` | A keyed type's primary key empty, of the wrong arity, with a key property absent or null, or disagreeing with its own key properties; any instance's key, a keyless part's included, with a component that does not read back as the value every writer writes (such as one of no form, a string that is not valid UTF-8, a `json.Number` that is no JSON number literal or spells a number no finite `float64` holds, a number `graph.ParseKey` reads back at another rendering, one whose rendering differs from its own value's, or a `time.Time` or `uuid.UUID` no key property's constraint renders, as in every keyless part's key); or an association target key of the wrong arity or with such a component (v0.15+) |
+| `E_GRAPH_ABSTRACT_TYPE` | An imported snapshot's root or types entry naming a type the importing schema makes abstract (v0.15+) |
+| `E_GRAPH_INVALID_PK` | A keyed type's primary key empty, of the wrong arity, with a key property absent or null, or disagreeing with its own key properties; or an association target key of the wrong arity (v0.15+) |
 
 ### Snapshot
 
 | Code | Meaning |
 | ---- | ------- |
-| `E_SNAPSHOT_MALFORMED` | `.ys` file not valid JSON, a wrong outer shape (the four top-level keys in order, each once and none null, nothing after them, and no object repeating a member name or spelling a declared one in another case), or content a structural rule refuses, such as an undeclared name, a stored key its key properties contradict, a key or target key component `graph.ParseKey` cannot read back, a target key of the wrong arity, an undocumented reason, a record contradicting itself, records `graph.Add` would not derive, or a duplicate with no conflict or another one, or a header past `MaxHeaderSize`; from `snapshot.Marshal`, an indent that is not JSON whitespace, a metadata key or value that is not valid UTF-8, or a property value the wire cannot carry; from `snapshot.UpdateMetadata`, such metadata too, or a document whose first byte is not `{` |
+| `E_SNAPSHOT_MALFORMED` | `.ys` file not valid JSON, a wrong outer shape (the four top-level keys in order, each once and none null, nothing after them, and no object repeating a member name or spelling a declared one in another case), or content a structural rule refuses, such as an undeclared name, a stored key its key properties contradict, a key or target key component `graph.ParseKey` cannot read back, a target key of the wrong arity, an undocumented reason, a record contradicting itself, records `graph.Add` would not derive, a duplicate with no conflict or another one, a duplicate stating a parent or a relation, a string holding invalid UTF-8 or half a surrogate pair, or a header past `MaxHeaderSize`; from `snapshot.Marshal`, an indent that is not JSON whitespace, a metadata key or value that is not valid UTF-8, or a provenance source name or raw path that is not valid UTF-8; from `snapshot.UpdateMetadata`, such metadata too, or a document whose first byte is not `{` |
 | `E_SNAPSHOT_UNSUPPORTED_VERSION` | Format version not recognized |
 | `E_SNAPSHOT_UNSUPPORTED_FEATURE` | Unrecognized feature flag in header |
 | `E_SNAPSHOT_INCOMPATIBLE_SCHEMA` | Schema structural hash mismatch |
-| `E_SNAPSHOT_UNKNOWN_TYPE` | Type in `.ys` file not in schema, or a snapshot type `Marshal` cannot name from the entry schema's import closure |
-| `E_SNAPSHOT_TYPE_MISMATCH` | A type row that contradicts its position: a root's that is not its group's, a duplicate instance's that is not its record's, a composed child's or association record's target row that is not the relation's declared target, or a composed duplicate's row that is not its composition's declared target |
-| `E_SNAPSHOT_DANGLING_REFERENCE` | An edge target, a duplicate's root conflict or parent, or an unresolved record's source names no root instance, or a composed conflict names no occupant of its slot; none for an address a refused unit states |
-| `E_SNAPSHOT_INVALID_COMPOSED` | Composed child carries edges, or composed children or a composed duplicate record stand under a name the parent's type does not declare as a composition |
-| `E_SNAPSHOT_INVALID_ROOT` | An instances group, empty or not, or a root duplicate record names a type that cannot be a root: abstract, part, or no primary key |
-| `E_SNAPSHOT_UNNAMEABLE_TYPE` | An instances group or a root duplicate record names a type the entry schema reaches only through an intermediate import, so it has no name form |
+| `E_SNAPSHOT_UNKNOWN_TYPE` | A `.ys` file's types table names a type the schema's import closure does not declare |
+| `E_SNAPSHOT_TYPE_MISMATCH` | A type row that contradicts its position: a root's that is not its group's, a duplicate instance's that is not its record's, or a composed child's or association record's target row that is not the relation's declared target |
+| `E_SNAPSHOT_DANGLING_REFERENCE` | An edge target, a duplicate's conflict, or an unresolved record's source names no root instance; none for an address a refused unit states |
+| `E_SNAPSHOT_INVALID_COMPOSED` | Composed child carries edges, or composed children stand under a name the parent's type does not declare as a composition |
+| `E_SNAPSHOT_INVALID_ROOT` | An instances group, empty or not, or a duplicate record names a type that cannot be a root: abstract, part, or no primary key |
+| `E_SNAPSHOT_UNNAMEABLE_TYPE` | An instances group or a duplicate record names a type the entry schema reaches only through an intermediate import, so it has no name form |
 | `W_SNAPSHOT_VALUE_DROPPED` | A write path held a value it could not write at that position and left it out |
 | `E_SNAPSHOT_COMPOSED_ON_DUPLICATE` | Duplicate record has composed children |
 | `E_SNAPSHOT_EDGES_ON_DUPLICATE` | Duplicate record has edges |
@@ -208,7 +202,7 @@ The all-or-nothing contract is unchanged: any error still yields a zero schema.
 | `E_SNAPSHOT_IO` | A file that fails to open during `snapshot.ScanDir`, a directory `ScanDirSlice` fails to read (v0.3+), or a reader `snapshot.HeaderOnlyRead` reads failing with an error that is not a truncation, Fatal (unreleased; on the line after v0.21.0, not in v0.21.1) |
 | `E_UPDATE_METADATA_BODY_OFFSET` | `snapshot.UpdateMetadata` body-offset tracker could not resolve the reused-body byte range (v0.3+) |
 | `W_UPDATE_METADATA_FALLBACK` | `snapshot.UpdateMetadataOrReMarshal` fell back from the fast path to `Load + Marshal` (Warning, v0.3+) |
-| `W_SNAPSHOT_VALUE_NONCONFORMING` | A root's or a composed child's stored `Timestamp`, `Date` or `UUID` value does not conform to its schema constraint; reported only under `snapshot.WithValueConformance`, and not a full re-validation (Warning, v0.13+) |
+| `W_SNAPSHOT_VALUE_NONCONFORMING` | A root's or a composed child's stored `Timestamp`, `Date` or `UUID` value, or a list of them, does not conform to its schema constraint. Reported only under `snapshot.WithValueConformance`, and not a full re-validation (Warning, v0.13+) |
 | `W_SNAPSHOT_UNRESOLVED_REQUIRED` | A loaded document carries an unresolved record, one no structural check refused, for an association the schema declares required (read from the schema, never the record); reported only under `snapshot.WithRevalidation`, at that option's severity (v0.15+) |
 | `W_SNAPSHOT_PATH_EXTENSION` | A snapshot was written to a path that does not end in `.ys`; the write succeeded, and a reader that discovers snapshots by extension will not find it |
 

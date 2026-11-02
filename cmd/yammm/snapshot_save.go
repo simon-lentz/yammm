@@ -145,8 +145,8 @@ func runSnapshotSave(cmd *cobra.Command, args []string, sink *cli.DiagnosticSink
 		opts = append(opts, snapshot.WithMetadata(merged))
 	}
 
-	// Marshal reports a failure, a value it could not put on the wire included,
-	// as a diagnostic, so it reaches the sink and the exit rule decides.
+	// Marshal reports a failure as a diagnostic, so it reaches the sink and the
+	// exit rule decides.
 	data, marshalResult := snapshot.Marshal(cmd.Context(), snap, opts...)
 	sink.Add(marshalResult)
 	if marshalResult.Err() != nil {

@@ -6,8 +6,8 @@ import (
 
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/graph"
-	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/instance"
+	"github.com/simon-lentz/yammm/internal/instancetest"
 	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/location/path"
 )
@@ -616,7 +616,7 @@ func TestUnresolvedEdge_NilReceiver(t *testing.T) {
 
 func TestDuplicate_NilReceiver(t *testing.T) {
 	var d graph.Duplicate
-	if !d.Instance().IsZero() || !d.Conflict().IsZero() || !d.Parent().IsZero() || d.Relation() != "" || !d.Diagnostic().IsZero() {
+	if !d.Instance().IsZero() || !d.Conflict().IsZero() {
 		t.Error("a nil Duplicate's accessors should return zero values")
 	}
 }
@@ -749,12 +749,6 @@ func TestGraph_Check_UnresolvedRequired_HasProvenanceSpan(t *testing.T) {
 	g := graph.New(s)
 	ctx := t.Context()
 
-	// Get the Person type for creating the instance
-	personType, ok := s.Type("Person")
-	if !ok {
-		t.Fatal("Person type not found")
-	}
-
 	// Create provenance with a specific span
 	prov := location.NewProvenance(
 		"test.json",
@@ -765,27 +759,10 @@ func TestGraph_Check_UnresolvedRequired_HasProvenanceSpan(t *testing.T) {
 		},
 	)
 
-	// Create edge data for missing reference
-	targets := []instance.ValidEdgeTarget{
-		instance.NewValidEdgeTarget(
-			immutable.WrapKey([]any{"missing-company"}),
-			immutable.Properties{},
-		),
-	}
-	edges := map[string]instance.ValidEdgeData{
-		"EMPLOYER": instance.NewValidEdgeData(targets),
-	}
-
-	// Create instance with provenance
-	inst := instance.NewValidInstance(
-		"Person",
-		personType.ID(),
-		immutable.WrapKey([]any{"alice"}),
-		immutable.WrapProperties(map[string]any{"id": "alice", "name": "Alice"}),
-		edges,
-		nil,
-		prov,
-	)
+	inst := instancetest.ValidRaw(t, s, "Person", instance.RawInstance{
+		Properties: map[string]any{"id": "alice", "name": "Alice", "employer": map[string]any{"_target_id": "missing-company"}},
+		Provenance: prov,
+	})
 
 	g.Add(ctx, inst)
 

@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"errors"
-	"io"
 	"reflect"
 	"strings"
 	"testing"
@@ -12,8 +11,10 @@ import (
 	jsonadapter "github.com/simon-lentz/yammm/adapter/json"
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/graph"
+	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/instance"
-	"github.com/simon-lentz/yammm/internal/instancetest"
+	"github.com/simon-lentz/yammm/internal/snapparts"
+	"github.com/simon-lentz/yammm/internal/snappartstest"
 	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
 )
@@ -371,12 +372,6 @@ func TestEmptyCell_LoneTargetWhoseGroupRendersEmptyIsRefused(t *testing.T) {
 			t.Errorf("error %q does not name %s", err, want)
 		}
 	}
-
-	var sink bytes.Buffer
-	err = New(WithSchema(s)).WriteSnapshot(context.Background(), func(string) (io.Writer, error) { return &sink, nil }, snap)
-	if err == nil || !strings.Contains(err.Error(), `"ONE"`) {
-		t.Errorf("WriteSnapshot: got %v, want the same refusal", err)
-	}
 }
 
 // A list holding one empty element renders the cell an empty list renders, so
@@ -397,10 +392,6 @@ func TestEmptyCell_ListOfOneEmptyElementIsRefused(t *testing.T) {
 		}
 		if !strings.Contains(err.Error(), "one empty element") || !strings.Contains(err.Error(), "h1") {
 			t.Errorf("error %q does not name the property's cause and the instance", err)
-		}
-		var sink bytes.Buffer
-		if err := New(WithSchema(s)).WriteSnapshot(context.Background(), func(string) (io.Writer, error) { return &sink, nil }, snap); err == nil || !strings.Contains(err.Error(), "one empty element") {
-			t.Errorf("%v: WriteSnapshot: got %v, want the same refusal", props, err)
 		}
 	}
 }
@@ -700,26 +691,6 @@ func TestEmptyCell_LoneEmptyKeyedTargetWithAnEdgeValueRoundTrips(t *testing.T) {
 	}
 }
 
-// A refused WriteSnapshot flushes what it wrote before the refusal, as a
-// cancelled one does, so the destination still parses as far as it goes.
-func TestEmptyCell_RefusedWriteSnapshotFlushesTheRowsBeforeIt(t *testing.T) {
-	t.Parallel()
-	s := loadEmptyCellSchema(t)
-	snap := emptyCellSnapshot(t, s, []typedRow{
-		{"Holder", map[string]any{"id": "a1", "note": "n", "tags": []any{"t"}}},
-		{"Holder", map[string]any{"id": "b1", "note": "n", "tags": []any{""}}},
-	})
-	var sink bytes.Buffer
-	err := New(WithSchema(s)).WriteSnapshot(context.Background(), func(string) (io.Writer, error) { return &sink, nil }, snap)
-	if err == nil || !strings.Contains(err.Error(), "one empty element") {
-		t.Fatalf("WriteSnapshot: got %v, want the list refusal", err)
-	}
-	lines := strings.Split(strings.TrimSuffix(sink.String(), "\n"), "\n")
-	if len(lines) != 2 || !strings.HasPrefix(lines[0], "count,id,") || !strings.Contains(lines[1], ",a1,") {
-		t.Fatalf("got %q, want the header and a1's row", sink.String())
-	}
-}
-
 func TestCoerceStringValue_AFailedListIsAnUntypedNil(t *testing.T) {
 	t.Parallel()
 	for _, c := range []schema.Constraint{
@@ -833,47 +804,13 @@ func TestEmptyCell_UndeclaredEdgePropertyColumnIsSkippedWhenEmpty(t *testing.T) 
 	}
 }
 
-// A single-field row goes through writeRecord's quoted path, whose flush and
-// raw write each report a device failure as a row failure.
-func TestEmptyCell_QuotedEmptyRowReportsAWriterFailure(t *testing.T) {
-	t.Parallel()
-	s := loadEmptyCellSchema(t)
-	snap := emptyCellSnapshot(t, s, []typedRow{{"Solo", map[string]any{"code": ""}}})
-	for _, failOn := range []int{1, 2} { // 1: the flush of the header; 2: the quoted field
-		w := &nthFailingWriter{failOn: failOn}
-		err := New(WithSchema(s)).WriteSnapshot(context.Background(), func(string) (io.Writer, error) { return w, nil }, snap)
-		if err == nil || !strings.Contains(err.Error(), "csv write row") {
-			t.Errorf("failing write %d: got %v, want a row failure", failOn, err)
-		}
-	}
-}
-
-// nthFailingWriter fails its failOn-th Write and accepts every other.
-type nthFailingWriter struct {
-	failOn, calls int
-}
-
-func (w *nthFailingWriter) Write(p []byte) (int, error) {
-	w.calls++
-	if w.calls == w.failOn {
-		return 0, errDevice
-	}
-	return len(p), nil
-}
-
-// A bypass-built snapshot can hold a null property, which the validator never
-// produces. It writes empty text, never a spelling of null.
-func TestEmptyCell_BypassBuiltNullWritesEmptyText(t *testing.T) {
+// A document can hold a null property, which the validator never produces. It
+// writes empty text, never a spelling of null.
+func TestEmptyCell_AHeldNullWritesEmptyText(t *testing.T) {
 	t.Parallel()
 	s := canonicalTestSchema(t)
-	g := graph.New(s)
-	sensorID, _ := s.Type("Sensor")
-	sensor := instancetest.VI("Sensor", instancetest.TypeID(sensorID.ID()), instancetest.PK("s1"),
-		instancetest.Props(map[string]any{"id": "s1", "created_at": nil, "samples": []any{"2026-08-19T13:00:00Z"}}))
-	if res := g.Add(context.Background(), sensor); !res.OK() {
-		t.Fatalf("add: %s", res.String())
-	}
-	out, err := New().MarshalSnapshot(context.Background(), g.Snapshot())
+	snap := heldSensor(t, s, map[string]any{"id": "s1", "created_at": nil, "samples": []any{"2026-08-19T13:00:00Z"}})
+	out, err := New().MarshalSnapshot(context.Background(), snap)
 	if err != nil {
 		t.Fatalf("MarshalSnapshot: %v", err)
 	}
@@ -882,43 +819,38 @@ func TestEmptyCell_BypassBuiltNullWritesEmptyText(t *testing.T) {
 	}
 }
 
-// A null list element, a nil value a pointer holds among them, and a composite
-// value — a map, an array, a struct — have no spelling in a cell: the list
-// grammar would write the element as "" and the composite as Go's %v of it. Each is refused as the class, naming the
-// property, at any position in a list.
+// heldSensor reads a document of Sensor s1 holding props, with the absent record
+// its required FEED takes.
+func heldSensor(t *testing.T, s schema.Schema, props map[string]any) graph.Snapshot {
+	t.Helper()
+	return snappartstest.Loaded(t, s, snapparts.Parts{
+		Instances: []snapparts.Instance{heldRoot(t, s, "Sensor", "s1", props)},
+		Unresolved: []snapparts.Unresolved{{
+			SourceType: heldTypeID(t, s, "Sensor"), SourceKey: immutable.WrapKey([]any{"s1"}), Relation: "FEED", Reason: "absent",
+		}},
+	})
+}
+
+// A null list element and a map have no spelling in a cell: the list grammar would
+// write the element as "" and the map as Go's %v of it. Each is refused as the
+// class, naming the property, at any position in a list.
 func TestWriters_AValueACellCannotSpellIsRefused(t *testing.T) {
 	t.Parallel()
 	s := canonicalTestSchema(t)
-	sensorID, _ := s.Type("Sensor")
-	var nilText *string
-	var nilSlice []int
 	for _, c := range []struct {
 		name, mentions string
 		samples        any
+		sentinel       error
 	}{
-		{"a null list element", "list element 1: a null list element", []any{"2026-08-19T13:00:00Z", nil}},
-		{"a nil pointer as a list element", "list element 1: a null list element", []any{"2026-08-19T13:00:00Z", nilText}},
-		{"a pointer to a nil pointer as a list element", "list element 1: a null list element", []any{"2026-08-19T13:00:00Z", &nilText}},
-		{"a pointer to a nil slice as a list element", "list element 1: a null list element", []any{"2026-08-19T13:00:00Z", &nilSlice}},
-		{"a nil slice as a list element", "list element 1: a null list element", []any{"2026-08-19T13:00:00Z", []any(nil)}},
-		{"a nil map as a list element", "list element 1: a null list element", []any{"2026-08-19T13:00:00Z", map[string]any(nil)}},
-		{"a map value", "a map: a value no column renders, such as a map, an array, a struct, or a time or a UUID its column does not render, has no spelling", map[string]any{"at": "2026-08-19T13:00:00Z"}},
-		{"a map list element", "list element 0: a map: a value no column renders", []any{map[string]any{"at": "x"}}},
-		{"an int-keyed map", "a value of type map[int]interface {}: a value no column renders", map[int]any{1: "x"}},
-		{"an array", "a value of type [2]string: a value no column renders", [2]string{"a", "b"}},
-		{"a struct", "a value of type struct { A int }: a value no column renders", struct{ A int }{1}},
+		{"a null list element", "list element 1: a null list element", []any{"2026-08-19T13:00:00Z", nil}, errNullListElement},
+		{"a map value", "a map: a map, or a list at an edge property, has no spelling", map[string]any{"at": "2026-08-19T13:00:00Z"}, errNoCellSpelling},
+		{"a map list element", "list element 0: a map: a map, or a list at an edge property", []any{map[string]any{"at": "x"}}, errNoCellSpelling},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
-			g := graph.New(s)
-			sensor := instancetest.VI("Sensor", instancetest.TypeID(sensorID.ID()), instancetest.PK("s1"),
-				instancetest.Props(map[string]any{"id": "s1", "samples": c.samples}))
-			if res := g.Add(context.Background(), sensor); !res.OK() {
-				t.Fatalf("add: %s", res.String())
-			}
-			_, err := New().MarshalSnapshot(context.Background(), g.Snapshot())
-			if !errors.Is(err, ErrUnrepresentable) {
-				t.Fatalf("MarshalSnapshot: %v does not match ErrUnrepresentable", err)
+			_, err := New().MarshalSnapshot(context.Background(), heldSensor(t, s, map[string]any{"id": "s1", "samples": c.samples}))
+			if !errors.Is(err, ErrUnrepresentable) || !errors.Is(err, c.sentinel) {
+				t.Fatalf("MarshalSnapshot: %v does not match ErrUnrepresentable and %v", err, c.sentinel)
 			}
 			if !strings.Contains(err.Error(), `property "samples": `+c.mentions) {
 				t.Errorf("the refusal does not name the site: %v", err)

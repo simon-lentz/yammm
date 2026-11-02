@@ -1,16 +1,12 @@
 package symbols
 
 import (
-	"bytes"
 	"cmp"
 	"fmt"
 	"slices"
-	"unicode/utf8"
 
 	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
-
-	"github.com/simon-lentz/yammm/lsp/internal/lsputil"
 )
 
 // SymbolKind represents the kind of a symbol.
@@ -106,9 +102,7 @@ type SymbolIndex struct {
 }
 
 // ExtractSymbols extracts all declaration symbols from a schema.
-// The sources parameter is optional; if provided, it enables more precise
-// name span computation for types without parser-generated NameSpan.
-func ExtractSymbols(s schema.Schema, sources *lsputil.Texts) []Symbol {
+func ExtractSymbols(s schema.Schema) []Symbol {
 	if s.IsZero() {
 		return nil
 	}
@@ -118,53 +112,47 @@ func ExtractSymbols(s schema.Schema, sources *lsputil.Texts) []Symbol {
 	sourceID := s.SourceID()
 
 	// Add schema symbol
-	if !s.Span().IsZero() {
-		symbols = append(symbols, Symbol{
-			Name:      schemaName,
-			Kind:      SymbolSchema,
-			SourceID:  sourceID,
-			Range:     s.Span(),
-			Selection: s.Span(), // Use full span as selection for schema
-			Detail:    fmt.Sprintf("schema %q", schemaName),
-		})
-	}
+	symbols = append(symbols, Symbol{
+		Name:      schemaName,
+		Kind:      SymbolSchema,
+		SourceID:  sourceID,
+		Range:     s.Span(),
+		Selection: s.Span(), // Use full span as selection for schema
+		Detail:    fmt.Sprintf("schema %q", schemaName),
+	})
 
 	// Add imports
 	for imp := range s.Imports() {
-		if !imp.Span().IsZero() {
-			symbols = append(symbols, Symbol{
-				Name:       imp.Alias(),
-				Kind:       SymbolImport,
-				SourceID:   sourceID,
-				Range:      imp.Span(),
-				Selection:  imp.Span(),
-				ParentName: schemaName,
-				Detail:     fmt.Sprintf("import %q as %s", imp.Path(), imp.Alias()),
-				Data:       imp,
-			})
-		}
+		symbols = append(symbols, Symbol{
+			Name:       imp.Alias(),
+			Kind:       SymbolImport,
+			SourceID:   sourceID,
+			Range:      imp.Span(),
+			Selection:  imp.Span(),
+			ParentName: schemaName,
+			Detail:     fmt.Sprintf("import %q as %s", imp.Path(), imp.Alias()),
+			Data:       imp,
+		})
 	}
 
 	// Add data types
 	for dt := range s.DataTypes() {
 		name := dt.Name()
-		if !dt.Span().IsZero() {
-			symbols = append(symbols, Symbol{
-				Name:       name,
-				Kind:       SymbolDataType,
-				SourceID:   sourceID,
-				Range:      dt.Span(),
-				Selection:  dt.Span(),
-				ParentName: schemaName,
-				Detail:     fmt.Sprintf("datatype %s = %s", name, dt.Constraint().String()),
-				Data:       dt,
-			})
-		}
+		symbols = append(symbols, Symbol{
+			Name:       name,
+			Kind:       SymbolDataType,
+			SourceID:   sourceID,
+			Range:      dt.Span(),
+			Selection:  dt.Span(),
+			ParentName: schemaName,
+			Detail:     fmt.Sprintf("datatype %s = %s", name, dt.Constraint().String()),
+			Data:       dt,
+		})
 	}
 
 	// Add types and their members
 	for t := range s.Types() {
-		symbols = append(symbols, extractTypeSymbols(t, schemaName, sourceID, sources)...)
+		symbols = append(symbols, extractTypeSymbols(t, schemaName, sourceID)...)
 	}
 
 	// Sort by span start for binary search
@@ -174,12 +162,7 @@ func ExtractSymbols(s schema.Schema, sources *lsputil.Texts) []Symbol {
 }
 
 // extractTypeSymbols extracts symbols from a single type.
-// The sources parameter is optional; if provided, enables precise name span fallback.
-func extractTypeSymbols(t schema.Type, schemaName string, sourceID location.SourceID, sources *lsputil.Texts) []Symbol {
-	if t.Span().IsZero() {
-		return nil
-	}
-
+func extractTypeSymbols(t schema.Type, schemaName string, sourceID location.SourceID) []Symbol {
 	var symbols []Symbol
 
 	// Type symbol
@@ -191,24 +174,12 @@ func extractTypeSymbols(t schema.Type, schemaName string, sourceID location.Sour
 		detail = "part " + detail
 	}
 
-	// Use the precise name span from parser when available;
-	// fall back to heuristic for programmatically-created types
-	nameSpan := t.NameSpan()
-	if nameSpan.IsZero() {
-		// Get source content for precise fallback computation
-		var content []byte
-		if sources != nil {
-			content, _ = sources.ContentBySource(sourceID)
-		}
-		nameSpan = computeTypeNameSpan(t, content)
-	}
-
 	symbols = append(symbols, Symbol{
 		Name:       t.Name(),
 		Kind:       SymbolType,
 		SourceID:   sourceID,
 		Range:      t.Span(),
-		Selection:  nameSpan,
+		Selection:  t.NameSpan(),
 		ParentName: schemaName,
 		Detail:     detail,
 		Data:       t,
@@ -218,66 +189,58 @@ func extractTypeSymbols(t schema.Type, schemaName string, sourceID location.Sour
 
 	// Properties (own only, not inherited)
 	for prop := range t.Properties() {
-		if !prop.Span().IsZero() {
-			symbols = append(symbols, Symbol{
-				Name:       prop.Name(),
-				Kind:       SymbolProperty,
-				SourceID:   sourceID,
-				Range:      prop.Span(),
-				Selection:  prop.Span(),
-				ParentName: typeName,
-				Detail:     FormatPropertyDetail(prop),
-				Data:       prop,
-			})
-		}
+		symbols = append(symbols, Symbol{
+			Name:       prop.Name(),
+			Kind:       SymbolProperty,
+			SourceID:   sourceID,
+			Range:      prop.Span(),
+			Selection:  prop.Span(),
+			ParentName: typeName,
+			Detail:     FormatPropertyDetail(prop),
+			Data:       prop,
+		})
 	}
 
 	// Associations
 	for rel := range t.Associations() {
-		if !rel.Span().IsZero() {
-			symbols = append(symbols, Symbol{
-				Name:       rel.Name(),
-				Kind:       SymbolAssociation,
-				SourceID:   sourceID,
-				Range:      rel.Span(),
-				Selection:  rel.Span(),
-				ParentName: typeName,
-				Detail:     formatRelationDetail(rel, "-->"),
-				Data:       rel,
-			})
-		}
+		symbols = append(symbols, Symbol{
+			Name:       rel.Name(),
+			Kind:       SymbolAssociation,
+			SourceID:   sourceID,
+			Range:      rel.Span(),
+			Selection:  rel.Span(),
+			ParentName: typeName,
+			Detail:     formatRelationDetail(rel, "-->"),
+			Data:       rel,
+		})
 	}
 
 	// Compositions
 	for rel := range t.Compositions() {
-		if !rel.Span().IsZero() {
-			symbols = append(symbols, Symbol{
-				Name:       rel.Name(),
-				Kind:       SymbolComposition,
-				SourceID:   sourceID,
-				Range:      rel.Span(),
-				Selection:  rel.Span(),
-				ParentName: typeName,
-				Detail:     formatRelationDetail(rel, "*->"),
-				Data:       rel,
-			})
-		}
+		symbols = append(symbols, Symbol{
+			Name:       rel.Name(),
+			Kind:       SymbolComposition,
+			SourceID:   sourceID,
+			Range:      rel.Span(),
+			Selection:  rel.Span(),
+			ParentName: typeName,
+			Detail:     formatRelationDetail(rel, "*->"),
+			Data:       rel,
+		})
 	}
 
 	// Invariants
 	for inv := range t.Invariants() {
-		if !inv.Span().IsZero() {
-			symbols = append(symbols, Symbol{
-				Name:       inv.Name(),
-				Kind:       SymbolInvariant,
-				SourceID:   sourceID,
-				Range:      inv.Span(),
-				Selection:  inv.Span(),
-				ParentName: typeName,
-				Detail:     "invariant: " + inv.Name(),
-				Data:       inv,
-			})
-		}
+		symbols = append(symbols, Symbol{
+			Name:       inv.Name(),
+			Kind:       SymbolInvariant,
+			SourceID:   sourceID,
+			Range:      inv.Span(),
+			Selection:  inv.Span(),
+			ParentName: typeName,
+			Detail:     "invariant: " + inv.Name(),
+			Data:       inv,
+		})
 	}
 
 	return symbols
@@ -295,20 +258,18 @@ func ExtractReferences(s schema.Schema) []ReferenceSymbol {
 	for t := range s.Types() {
 		// Extends references
 		for ref := range t.Inherits() {
-			if !ref.Span().IsZero() {
-				refs = append(refs, ReferenceSymbol{
-					Kind:       RefExtends,
-					Span:       ref.Span(),
-					TargetName: ref.Name(),
-					Qualifier:  ref.Qualifier(),
-				})
-			}
+			refs = append(refs, ReferenceSymbol{
+				Kind:       RefExtends,
+				Span:       ref.Span(),
+				TargetName: ref.Name(),
+				Qualifier:  ref.Qualifier(),
+			})
 		}
 
 		// Property datatype references
 		for prop := range t.Properties() {
 			dtRef := prop.DataTypeRef()
-			if !dtRef.IsZero() && !dtRef.Span().IsZero() {
+			if !dtRef.IsZero() {
 				refs = append(refs, ReferenceSymbol{
 					Kind:       RefDataType,
 					Span:       dtRef.Span(),
@@ -321,18 +282,16 @@ func ExtractReferences(s schema.Schema) []ReferenceSymbol {
 		// Relation target references
 		for rel := range t.Associations() {
 			target := rel.Target()
-			if !target.Span().IsZero() {
-				refs = append(refs, ReferenceSymbol{
-					Kind:       RefTarget,
-					Span:       target.Span(),
-					TargetName: target.Name(),
-					Qualifier:  target.Qualifier(),
-				})
-			}
+			refs = append(refs, ReferenceSymbol{
+				Kind:       RefTarget,
+				Span:       target.Span(),
+				TargetName: target.Name(),
+				Qualifier:  target.Qualifier(),
+			})
 			// Edge property datatype references
 			for prop := range rel.Properties() {
 				dtRef := prop.DataTypeRef()
-				if !dtRef.IsZero() && !dtRef.Span().IsZero() {
+				if !dtRef.IsZero() {
 					refs = append(refs, ReferenceSymbol{
 						Kind:       RefDataType,
 						Span:       dtRef.Span(),
@@ -344,14 +303,12 @@ func ExtractReferences(s schema.Schema) []ReferenceSymbol {
 		}
 		for rel := range t.Compositions() {
 			target := rel.Target()
-			if !target.Span().IsZero() {
-				refs = append(refs, ReferenceSymbol{
-					Kind:       RefTarget,
-					Span:       target.Span(),
-					TargetName: target.Name(),
-					Qualifier:  target.Qualifier(),
-				})
-			}
+			refs = append(refs, ReferenceSymbol{
+				Kind:       RefTarget,
+				Span:       target.Span(),
+				TargetName: target.Name(),
+				Qualifier:  target.Qualifier(),
+			})
 		}
 	}
 
@@ -362,10 +319,8 @@ func ExtractReferences(s schema.Schema) []ReferenceSymbol {
 }
 
 // BuildSymbolIndex builds a complete symbol index for a schema.
-// The sources parameter is optional; if provided, enables more precise
-// name span computation for types without parser-generated NameSpan.
-func BuildSymbolIndex(s schema.Schema, sources *lsputil.Texts) *SymbolIndex {
-	syms := ExtractSymbols(s, sources)
+func BuildSymbolIndex(s schema.Schema) *SymbolIndex {
+	syms := ExtractSymbols(s)
 
 	// Build name index for O(1) lookup by name
 	nameIdx := make(map[string][]*Symbol, len(syms))
@@ -500,11 +455,6 @@ func positionCompare(a, b location.Position) int {
 	)
 }
 
-// PositionBefore returns true if a comes before b.
-func PositionBefore(a, b location.Position) bool {
-	return positionCompare(a, b) < 0
-}
-
 // IsSmaller returns true if a is smaller (more specific) than b.
 func IsSmaller(a, b location.Span) bool {
 	// Compare by line count first
@@ -518,98 +468,4 @@ func IsSmaller(a, b location.Span) bool {
 		return (a.End.Column - a.Start.Column) < (b.End.Column - b.Start.Column)
 	}
 	return false
-}
-
-// computeTypeNameSpan computes a selection span for a type's name.
-// This is a fallback for programmatically-created types that don't have NameSpan set.
-// Prefer using Type.NameSpan() which provides accurate byte-level positions from the parser.
-//
-// If sourceContent is provided, this function searches for the actual name position
-// in the source text, handling non-standard spacing. If sourceContent is nil or the
-// search fails, it falls back to a fixed-offset approximation based on modifiers:
-//   - "type Name" (offset 5)
-//   - "abstract type Name" (offset 14)
-//   - "part type Name" (offset 10)
-//   - "part abstract type Name" or "abstract part type Name" (offset 19)
-//
-// The selection span covers just the name, enabling precise go-to-definition.
-func computeTypeNameSpan(t schema.Type, sourceContent []byte) location.Span {
-	span := t.Span()
-	if span.IsZero() {
-		return span
-	}
-
-	typeName := t.Name()
-
-	// If we have source content and valid byte offsets, search for actual name position
-	if len(sourceContent) > 0 && span.Start.Byte >= 0 {
-		startByte := span.Start.Byte
-		endByte := len(sourceContent)
-		if span.End.Byte > 0 && span.End.Byte < endByte {
-			endByte = span.End.Byte
-		}
-
-		if startByte < endByte {
-			snippet := sourceContent[startByte:endByte]
-
-			// Find "type" keyword first, then find the name after it
-			typeKeywordIdx := bytes.Index(snippet, []byte("type"))
-			if typeKeywordIdx >= 0 {
-				afterType := snippet[typeKeywordIdx+4:] // len("type") = 4
-
-				// Skip whitespace after "type"
-				nameStart := 0
-				for nameStart < len(afterType) && (afterType[nameStart] == ' ' || afterType[nameStart] == '\t') {
-					nameStart++
-				}
-
-				// Verify we found the expected name
-				nameBytes := []byte(typeName)
-				if nameStart < len(afterType) && bytes.HasPrefix(afterType[nameStart:], nameBytes) {
-					// Calculate actual byte offsets
-					actualNameStart := startByte + typeKeywordIdx + 4 + nameStart
-					actualNameEnd := actualNameStart + len(nameBytes)
-
-					// Compute column by counting runes from span start to name start
-					columnOffset := utf8.RuneCount(snippet[:typeKeywordIdx+4+nameStart])
-					startCol := span.Start.Column + columnOffset
-					endCol := startCol + utf8.RuneCountInString(typeName)
-
-					return location.Span{
-						Source: span.Source,
-						Start:  location.NewPosition(span.Start.Line, startCol, actualNameStart),
-						End:    location.NewPosition(span.Start.Line, endCol, actualNameEnd),
-					}
-				}
-			}
-		}
-	}
-
-	// Fallback: calculate offset to the type name based on modifiers
-	// This is used when source content is unavailable or search failed
-	var offset int
-	switch {
-	case t.IsAbstract() && t.IsPart():
-		// "part abstract type " or "abstract part type " = 19 characters
-		offset = 19
-	case t.IsAbstract():
-		// "abstract type " = 14 characters
-		offset = 14
-	case t.IsPart():
-		// "part type " = 10 characters
-		offset = 10
-	default:
-		// "type " = 5 characters
-		offset = 5
-	}
-
-	// Compute start and end positions for the name (byte offset unknown: -1)
-	startCol := span.Start.Column + offset
-	endCol := startCol + utf8.RuneCountInString(typeName)
-
-	return location.Span{
-		Source: span.Source,
-		Start:  location.NewPosition(span.Start.Line, startCol, -1),
-		End:    location.NewPosition(span.Start.Line, endCol, -1),
-	}
 }

@@ -3,12 +3,10 @@ package docs_test
 import (
 	"context"
 	"errors"
-	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	csvadapter "github.com/simon-lentz/yammm/adapter/csv"
 	jsonadapter "github.com/simon-lentz/yammm/adapter/json"
@@ -16,9 +14,7 @@ import (
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/format"
 	"github.com/simon-lentz/yammm/graph"
-	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
-	"github.com/simon-lentz/yammm/snapshot"
 )
 
 // The Go snippets in API.md are prose: nothing compiles them, so a signature
@@ -175,42 +171,6 @@ func TestDocumentedIntrospectionQueries(t *testing.T) {
 	}
 }
 
-// TestDocumentedScanFilterShape compiles API.md's "Pre-open filtering" example.
-// The snippet is prose that no other gate reads, so a signature change to
-// WithScanFilter, ScanCandidate or ScanDirWith would leave it stating a call
-// that no longer exists.
-func TestDocumentedScanFilterShape(t *testing.T) {
-	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "a.ys"), []byte("{}"), 0o600); err != nil {
-		t.Fatalf("seed: %v", err)
-	}
-
-	cutoff := time.Now().Add(-7 * 24 * time.Hour)
-	recent := snapshot.WithScanFilter(func(c snapshot.ScanCandidate) bool {
-		info, err := c.Info()
-		return err == nil && !info.ModTime().Before(cutoff)
-	})
-
-	var seen int
-	for entry, err := range snapshot.ScanDirWith(t.Context(), dir, recent) {
-		if err != nil {
-			t.Fatalf("ScanDirWith: %v", err)
-		}
-		seen++
-		if entry.ModTime.IsZero() {
-			t.Error("the documented entry carries no ModTime")
-		}
-	}
-	if seen != 1 {
-		t.Errorf("the documented filter admitted %d entries, want 1", seen)
-	}
-
-	entries, result := snapshot.ScanDirSliceWith(t.Context(), dir, recent)
-	if result.HasErrors() || len(entries) != 1 {
-		t.Errorf("ScanDirSliceWith: %d entries, result %v", len(entries), result.Err())
-	}
-}
-
 // The pins below were chosen by the 2026-08-25 documentation audit: each one
 // compiles a call shape API.md or SPEC.md states, so a signature change that
 // would leave the prose silently wrong breaks the build instead.
@@ -227,28 +187,6 @@ func TestDocumentedSchemaIdentity(t *testing.T) {
 	hex, ok := strings.CutPrefix(h, "sha256:")
 	if !ok || len(hex) != 64 {
 		t.Errorf("StructuralHash returned %q; the documented shape is sha256:<64 hex>", h)
-	}
-}
-
-// TestDocumentedBuilderExample runs API.md's headline builder chain verbatim.
-// The documented example omitted a primary key and could never have built; the
-// assertion is that the corrected one does.
-func TestDocumentedBuilderExample(t *testing.T) {
-	t.Parallel()
-	s, result := schema.NewBuilder().
-		WithName("MySchema").
-		WithSourceID(location.MustNewSourceID("test://my-schema.yammm")).
-		AddType("Person").
-		WithPrimaryKey("name", schema.NewStringConstraint()).
-		WithOptionalProperty("age", schema.IntegerBetween(0, 150)).
-		Done().
-		AddType("Car").
-		WithPrimaryKey("vin", schema.NewStringConstraint()).
-		WithRelation("OWNER", schema.NewTypeRef("", "Person", location.Span{}), false, false).
-		Done().
-		Build()
-	if err := result.Err(); err != nil || s.IsZero() {
-		t.Fatalf("the documented builder example does not build: %v", err)
 	}
 }
 
@@ -286,12 +224,12 @@ func TestDocumentedKeyFunctions(t *testing.T) {
 	if got := graph.FormatKey("us", 12345); got != `["us",12345]` {
 		t.Errorf("FormatKey returned %q; the documented form is [\"us\",12345]", got)
 	}
-	parts, err := graph.ParseKeyStrings(`["us","ca"]`)
+	parts, err := graph.ParseKey(`["us","ca"]`)
 	if err != nil {
-		t.Fatalf("ParseKeyStrings: %v", err)
+		t.Fatalf("ParseKey: %v", err)
 	}
 	if len(parts) != 2 || parts[0] != "us" || parts[1] != "ca" {
-		t.Errorf("ParseKeyStrings returned %v; the documented round trip is [us ca]", parts)
+		t.Errorf("ParseKey returned %v; the documented round trip is [us ca]", parts)
 	}
 }
 
@@ -306,18 +244,10 @@ func TestDocumentedAdapterParseSurface(t *testing.T) {
 	_ = (*csvadapter.Adapter).ParseTyped
 	_ = (*csvadapter.Adapter).ParseWithTypeColumn
 
-	// Pinned as typed values, not bare method values. A bare `_ = (*T).M`
-	// compiles under ANY signature, so it could not see adapter/csv's write
-	// surface lose its vestigial variadic — the Serialization fence shows these
-	// calls, and nothing compiled it. The json and neo4j writers keep their
-	// write options, which is why only csv is pinned this way.
-	var (
-		marshalSnapshot func(*csvadapter.Adapter, context.Context, graph.Snapshot) (map[string][]byte, error)
-		writeSnapshot   func(*csvadapter.Adapter, context.Context, func(string) (io.Writer, error), graph.Snapshot) error
-	)
-	marshalSnapshot = (*csvadapter.Adapter).MarshalSnapshot
-	writeSnapshot = (*csvadapter.Adapter).WriteSnapshot
-	_, _ = marshalSnapshot, writeSnapshot
+	// A typed value: a bare `_ = (*T).M` compiles under any signature, and the
+	// Serialization fence shows this call with nothing else compiling it.
+	pin := func(func(*csvadapter.Adapter, context.Context, graph.Snapshot) (map[string][]byte, error)) {}
+	pin((*csvadapter.Adapter).MarshalSnapshot)
 }
 
 // TestDocumentedFormatSurface pins the format package facts the Formatting
@@ -334,15 +264,15 @@ func TestDocumentedFormatSurface(t *testing.T) {
 	// The documented signatures, held as typed values so a shape change fails
 	// here rather than only in the prose.
 	var (
-		wrap, align, indent func(string) string
-		width               func(string) int
-		notPreserved        error
-		syntaxIssue         func(*format.SyntaxError) diag.Issue
+		indent       func(string) string
+		width        func(string) int
+		notPreserved error
+		syntaxIssue  func(*format.SyntaxError) diag.Issue
 	)
-	wrap, align, indent, width = format.WrapLongLines, format.AlignColumns, format.NormalizeIndentation, format.DisplayWidth
+	indent, width = format.NormalizeIndentation, format.DisplayWidth
 	notPreserved = format.ErrNotPreserved
 	syntaxIssue = func(e *format.SyntaxError) diag.Issue { return e.Issue }
-	_, _, _, _, _, _ = wrap, align, indent, width, notPreserved, syntaxIssue
+	_, _, _, _ = indent, width, notPreserved, syntaxIssue
 }
 
 // TestDocumentedModuleRootDiscovery pins the module-root discovery surface the
@@ -357,11 +287,10 @@ func TestDocumentedModuleRootDiscovery(t *testing.T) {
 	// The three documented signatures, held as typed values so a shape change
 	// fails here rather than only in the prose.
 	var (
-		find         func(string) (string, bool, error)
-		buildIssue   func(error) diag.Issue
-		isResolution func(string) bool
+		find       func(string) (string, bool, error)
+		buildIssue func(error) diag.Issue
 	)
-	find, buildIssue, isResolution = schema.FindModuleRoot, schema.ModuleRootIssue, diag.IsImportResolutionCode
+	find, buildIssue = schema.FindModuleRoot, schema.ModuleRootIssue
 
 	dir := t.TempDir()
 	root, found, err := find(dir)
@@ -390,12 +319,7 @@ func TestDocumentedModuleRootDiscovery(t *testing.T) {
 		t.Errorf("ModuleRootIssue produced %v, want E_LOAD_MODULE_ROOT_MALFORMED", code)
 	}
 
-	// The family predicate and the origin vocabulary the section enumerates.
-	for _, code := range []diag.Code{diag.E_IMPORT_RESOLVE, diag.E_PATH_ESCAPE, diag.E_IMPORT_CYCLE} {
-		if !isResolution(code.String()) {
-			t.Errorf("%s is documented as a member of the import-resolution family", code)
-		}
-	}
+	// The origin vocabulary the section enumerates.
 	for _, origin := range []string{
 		diag.ModuleRootExplicit, diag.ModuleRootDiscovered,
 		diag.ModuleRootSynthetic, diag.ModuleRootDefault, diag.ModuleRootNone,

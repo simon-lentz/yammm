@@ -8,8 +8,6 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/simon-lentz/yammm/graph"
-	"github.com/simon-lentz/yammm/immutable"
-	"github.com/simon-lentz/yammm/instance"
 	"github.com/simon-lentz/yammm/internal/instancetest"
 	"github.com/simon-lentz/yammm/schema"
 )
@@ -50,8 +48,7 @@ type Sensor {
 	return s
 }
 
-// marshalBypassBuilt builds a graph through instance.NewValidInstance, which
-// receives no schema and runs no validation, from native Go values.
+// marshalNativeValues validates native Go values and writes the graph they build.
 //
 // It does not prove the writer's canonicalization arm runs for these kinds:
 // Graph.Add rewrites a Timestamp, a Date and a UUID to its stored form before
@@ -59,39 +56,25 @@ type Sensor {
 // test below green. They pin the END-TO-END text a native value exports as. The
 // writer's own arm is load-bearing for numbers alone, which Add leaves as they
 // arrived, and [TestMarshalObject_RendersAVectorElementThroughFloat] pins it.
-func marshalBypassBuilt(t *testing.T) string {
+func marshalNativeValues(t *testing.T) string {
 	t.Helper()
 	ctx := context.Background()
 	s := canonicalTestSchema(t)
 	g := graph.New(s)
 
-	station := instancetest.VI(
-		"Station",
-		instancetest.TypeID(mustTypeID(t, s, "Station")),
-		instancetest.PK(canonicalWhen),
-		instancetest.Props(map[string]any{"at": canonicalWhen}),
-	)
+	station := instancetest.Valid(t, s, "Station", map[string]any{"at": canonicalWhen})
 	if res := g.Add(ctx, station); res.HasErrors() {
 		t.Fatalf("adding Station: %s", res)
 	}
 
-	sensor := instancetest.VI(
-		"Sensor",
-		instancetest.TypeID(mustTypeID(t, s, "Sensor")),
-		instancetest.PK("s1"),
-		instancetest.Props(map[string]any{
-			"id":         "s1",
-			"created_at": canonicalWhen,
-			"run_id":     uuid.MustParse(canonicalUUIDStr),
-			"installed":  canonicalWhen,
-			"samples":    []any{canonicalWhen, "2026-08-19T13:00:00+00:00"},
-		}),
-		instancetest.Edges(map[string]instance.ValidEdgeData{
-			"FEED": instance.NewValidEdgeData([]instance.ValidEdgeTarget{
-				instance.NewValidEdgeTarget(immutable.WrapKey([]any{canonicalWhen}), immutable.Properties{}),
-			}),
-		}),
-	)
+	sensor := instancetest.Valid(t, s, "Sensor", map[string]any{
+		"id":         "s1",
+		"created_at": canonicalWhen,
+		"run_id":     uuid.MustParse(canonicalUUIDStr),
+		"installed":  canonicalWhen,
+		"samples":    []any{canonicalWhen, "2026-08-19T13:00:00+00:00"},
+		"feed":       map[string]any{"_target_at": canonicalWhen},
+	})
 	if res := g.Add(ctx, sensor); res.HasErrors() {
 		t.Fatalf("adding Sensor: %s", res)
 	}
@@ -103,12 +86,12 @@ func marshalBypassBuilt(t *testing.T) string {
 	return string(data)
 }
 
-// TestMarshalObject_CanonicalizesBypassBuiltProperties pins the text a native
+// TestMarshalObject_CanonicalizesNativeProperties pins the text a native
 // property exports as. A uuid.UUID is [16]byte, which encoding/json would write
 // as an array of sixteen numbers rather than a string.
-func TestMarshalObject_CanonicalizesBypassBuiltProperties(t *testing.T) {
+func TestMarshalObject_CanonicalizesNativeProperties(t *testing.T) {
 	t.Parallel()
-	got := marshalBypassBuilt(t)
+	got := marshalNativeValues(t)
 
 	for _, want := range []string{
 		`"created_at":"` + canonicalRFC3339 + `"`,
@@ -128,7 +111,7 @@ func TestMarshalObject_CanonicalizesBypassBuiltProperties(t *testing.T) {
 // elements, which a suite of scalar cases would not reach.
 func TestMarshalObject_CanonicalizesListElements(t *testing.T) {
 	t.Parallel()
-	got := marshalBypassBuilt(t)
+	got := marshalNativeValues(t)
 
 	want := `"samples":["` + canonicalRFC3339 + `","2026-08-19T13:00:00Z"]`
 	if !strings.Contains(got, want) {
@@ -142,7 +125,7 @@ func TestMarshalObject_CanonicalizesListElements(t *testing.T) {
 // as RFC 3339, which is the wrong text under a declared layout.
 func TestMarshalObject_CanonicalizesForeignKeyComponents(t *testing.T) {
 	t.Parallel()
-	got := marshalBypassBuilt(t)
+	got := marshalNativeValues(t)
 
 	// The control: the target's own property renders through the declared
 	// layout, so the FK has something to agree with.

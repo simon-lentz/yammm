@@ -68,8 +68,7 @@
 //
 // The class diagram deliberately keeps constraint detail out: class members
 // are the property name plus a bare kind label (String, Enum, List, …; a
-// named DataType shows its name), because full constraint forms overflow
-// diagram boxes. The per-type tables carry the detail: the Type column
+// named DataType shows its name). The per-type tables carry the detail: the Type column
 // renders each constraint's DSL form (String[1, 100], Enum["a", "b"],
 // List<FipsCode>) and the Modifiers column carries primary / required plus
 // a "from <Owner>" marker on inherited rows — the property table is
@@ -124,12 +123,7 @@
 // loses as much of the white space up to the declaration's column as it
 // starts with and keeps the rest, a CR LF or
 // a lone CR is a line end, and the comments the span starts with, the doc
-// comment first, are stripped whatever they hold, since the doc renders apart. When no
-// source text is available — a Builder-built schema, or a span without
-// byte offsets — the fence is omitted and the message stands with its doc
-// comment, if it has one:
-// degrading one fence beats rejecting the schema, so [Marshal] does NOT
-// require a source-backed schema.
+// comment first, are stripped whatever they hold, since the doc renders apart.
 //
 // # Output Guarantees
 //
@@ -157,7 +151,7 @@
 // table or a heading inside it is the author's own and is not checked; that
 // holds in a description cell too. The text is the schema's documentation,
 // whose continuation lines lost the indentation they all share, byte for byte,
-// when the parser read the comment or the Builder took the string, so layout
+// when the parser read the comment, so layout
 // that indents every continuation line alike makes no indented code block;
 // lines indented by different bytes, such as a tab on one and spaces on
 // another, share none and keep theirs. Its line ends are written as LF, a CR LF or a lone CR each being a
@@ -215,10 +209,8 @@
 // The schema must be completed (aliases resolved, inheritance linearized) —
 // always true for a schema returned by
 // [github.com/simon-lentz/yammm/schema.Load],
-// [github.com/simon-lentz/yammm/schema.LoadString],
-// [github.com/simon-lentz/yammm/schema.LoadSourcesWithEntry], or
-// [github.com/simon-lentz/yammm/schema.Builder.Build]. Source backing is
-// optional (see Invariants).
+// [github.com/simon-lentz/yammm/schema.LoadString], or
+// [github.com/simon-lentz/yammm/schema.LoadSourcesWithEntry].
 //
 // # Configuration
 //

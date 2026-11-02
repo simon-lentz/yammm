@@ -102,26 +102,6 @@ func TestCodeCategory_String(t *testing.T) {
 	}
 }
 
-func TestAllCodes(t *testing.T) {
-	codes := AllCodes()
-
-	// Verify we have a reasonable number of codes
-	if len(codes) < 40 {
-		t.Errorf("AllCodes() returned %d codes; expected at least 40", len(codes))
-	}
-
-	// Verify the slice is a copy (modifications don't affect internal state)
-	original := AllCodes()
-	codes[0] = Code{}
-	afterMod := AllCodes()
-	if afterMod[0].IsZero() {
-		t.Error("AllCodes() should return a copy, not the internal slice")
-	}
-	if original[0].IsZero() {
-		t.Error("original should not be affected by modifications to copy")
-	}
-}
-
 func TestAllCodes_Uniqueness(t *testing.T) {
 	// Critical test: verify all code strings are unique
 	codes := AllCodes()
@@ -154,7 +134,7 @@ func TestAllCodes_NoZeroValues(t *testing.T) {
 	}
 }
 
-func TestCodesByCategory(t *testing.T) {
+func TestCodes_EachCategoryHoldsItsRequiredCodes(t *testing.T) {
 	tests := []struct {
 		cat         CodeCategory
 		minExpected int
@@ -199,10 +179,10 @@ func TestCodesByCategory(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.cat.String(), func(t *testing.T) {
-			codes := CodesByCategory(tt.cat)
+			codes := codesIn(tt.cat)
 
 			if len(codes) < tt.minExpected {
-				t.Errorf("CodesByCategory(%s) returned %d codes; expected at least %d",
+				t.Errorf("category %s holds %d codes; expected at least %d",
 					tt.cat, len(codes), tt.minExpected)
 			}
 
@@ -221,7 +201,7 @@ func TestCodesByCategory(t *testing.T) {
 			}
 			for _, required := range tt.mustContain {
 				if !codeSet[required.String()] {
-					t.Errorf("CodesByCategory(%s) missing required code %s",
+					t.Errorf("category %s misses required code %s",
 						tt.cat, required)
 				}
 			}
@@ -229,22 +209,7 @@ func TestCodesByCategory(t *testing.T) {
 	}
 }
 
-func TestCodesByCategory_ReturnsNewSlice(t *testing.T) {
-	// Verify modifications don't affect internal state
-	codes1 := CodesByCategory(CategorySchema)
-	if len(codes1) == 0 {
-		t.Skip("no schema codes to test with")
-	}
-
-	codes1[0] = Code{}
-	codes2 := CodesByCategory(CategorySchema)
-
-	if codes2[0].IsZero() {
-		t.Error("CodesByCategory should return a new slice each time")
-	}
-}
-
-func TestCodesByCategory_AllCategoriesCovered(t *testing.T) {
+func TestCodes_EveryCodeIsInOneListedCategory(t *testing.T) {
 	// Verify every code in AllCodes appears in exactly one category
 	allByCategory := make(map[string]bool)
 	categories := []CodeCategory{
@@ -259,7 +224,7 @@ func TestCodesByCategory_AllCategoriesCovered(t *testing.T) {
 	}
 
 	for _, cat := range categories {
-		for _, c := range CodesByCategory(cat) {
+		for _, c := range codesIn(cat) {
 			if allByCategory[c.String()] {
 				t.Errorf("code %s appears in multiple categories", c)
 			}
@@ -269,7 +234,7 @@ func TestCodesByCategory_AllCategoriesCovered(t *testing.T) {
 
 	for _, c := range AllCodes() {
 		if !allByCategory[c.String()] {
-			t.Errorf("code %s not returned by any CodesByCategory call", c)
+			t.Errorf("code %s is in no listed category", c)
 		}
 	}
 }
@@ -417,18 +382,28 @@ func TestNewCodeDuplicatePanics(t *testing.T) {
 // rather than silently mis-rendering in the markdown surface or shipping an
 // issue with no provenance.
 func TestIsImportDeclarationCode_PartitionsEveryImportCode(t *testing.T) {
-	imports := CodesByCategory(CategoryImport)
+	imports := codesIn(CategoryImport)
 	if len(imports) == 0 {
 		t.Fatal("CategoryImport has no codes; the partition guard would pass vacuously")
 	}
 	for _, code := range imports {
 		isDecl := IsImportDeclarationCode(code.String())
-		isRes := IsImportResolutionCode(code.String())
+		isRes := code == E_IMPORT_RESOLVE || code == E_IMPORT_CYCLE || code == E_PATH_ESCAPE
 		if isDecl == isRes {
-			t.Errorf("import code %s: IsImportDeclarationCode=%v, IsImportResolutionCode=%v; "+
-				"every CategoryImport code must satisfy exactly one — add it to "+
-				"one switch and not the other",
+			t.Errorf("import code %s: declaration %v, resolution %v; "+
+				"every CategoryImport code is exactly one of them",
 				code, isDecl, isRes)
 		}
 	}
+}
+
+// codesIn returns the registered codes of one category.
+func codesIn(cat CodeCategory) []Code {
+	var out []Code
+	for _, c := range AllCodes() {
+		if c.Category() == cat {
+			out = append(out, c)
+		}
+	}
+	return out
 }

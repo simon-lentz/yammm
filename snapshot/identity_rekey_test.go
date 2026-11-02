@@ -9,6 +9,8 @@ import (
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/immutable"
+	"github.com/simon-lentz/yammm/internal/snapparts"
+	"github.com/simon-lentz/yammm/internal/snappartstest"
 	"github.com/simon-lentz/yammm/schema"
 	"github.com/simon-lentz/yammm/snapshot"
 )
@@ -60,19 +62,19 @@ func TestImportSnapshot_KeepsATransitivelyImportedComposedChild(t *testing.T) {
 	}
 
 	basePart := mustTypeIDIn(t, s, "base", "Part")
-	built, result := graph.RebuildSnapshot(s, graph.SnapshotParts{
+	built := snappartstest.Loaded(t, s, snapparts.Parts{
 		Types: []schema.TypeID{siteID},
-		Instances: []graph.InstanceParts{
+		Instances: []snapparts.Instance{
 			{
 				TypeID:     siteID,
 				PrimaryKey: immutable.WrapKey([]any{"site1"}),
 				Properties: immutable.WrapProperties(map[string]any{"id": "site1"}),
-				Composed: map[string][]graph.InstanceParts{
+				Composed: map[string][]snapparts.Instance{
 					"IMPORTED": {{
 						TypeID:     basePart,
 						PrimaryKey: immutable.WrapKey([]any{"bp1"}),
 						Properties: immutable.WrapProperties(map[string]any{"name": "bp1", "mass": float64(1)}),
-						Composed: map[string][]graph.InstanceParts{
+						Composed: map[string][]snapparts.Instance{
 							"DEEP": {{
 								TypeID:     deepPart,
 								PrimaryKey: immutable.WrapKey([]any{"dp1"}),
@@ -84,9 +86,6 @@ func TestImportSnapshot_KeepsATransitivelyImportedComposedChild(t *testing.T) {
 			},
 		},
 	})
-	if result.HasErrors() {
-		t.Fatalf("assembling: %s", result)
-	}
 
 	after := mustImport(t, s, built).Snapshot()
 	roots := slices.Collect(after.InstancesOf(siteID))
@@ -133,30 +132,27 @@ func sameNameBeacons(t *testing.T, s schema.Schema) (graph.Snapshot, schema.Type
 			t.Fatalf("fixture is vacuous: %s is not addressable, so it cannot hold a root", id)
 		}
 	}
-	beacon := func(id schema.TypeID, key string) graph.InstanceParts {
-		return graph.InstanceParts{
+	beacon := func(id schema.TypeID, key string) snapparts.Instance {
+		return snapparts.Instance{
 			TypeID:     id,
 			PrimaryKey: immutable.WrapKey([]any{key}),
 			Properties: immutable.WrapProperties(map[string]any{"id": key, "power": float64(1)}),
 		}
 	}
-	built, result := graph.RebuildSnapshot(s, graph.SnapshotParts{
+	built := snappartstest.Loaded(t, s, snapparts.Parts{
 		Types: []schema.TypeID{localBeacon, importedBeacon},
-		Instances: []graph.InstanceParts{
+		Instances: []snapparts.Instance{
 			beacon(localBeacon, "local1"),
 			beacon(importedBeacon, "imported1"),
 		},
 	})
-	if result.HasErrors() {
-		t.Fatalf("assembling: %s", result)
-	}
 	return built, localBeacon, importedBeacon
 }
 
-// TestRebuildSnapshot_SeparatesOneNameTwoSchemasDeclare pins the assembly path.
-// A name-keyed Instances map cannot even express this input; an identity-keyed
-// one must carry both groups through.
-func TestRebuildSnapshot_SeparatesOneNameTwoSchemasDeclare(t *testing.T) {
+// TestLoad_SeparatesOneNameTwoSchemasDeclare pins the reader's path. A name-keyed
+// group map cannot even express this input; an identity-keyed one must carry both
+// groups through.
+func TestLoad_SeparatesOneNameTwoSchemasDeclare(t *testing.T) {
 	t.Parallel()
 	s := loadIdentitySchema(t)
 
@@ -228,16 +224,16 @@ func TestImportSnapshot_ResolvesJSONFieldForImportedSource(t *testing.T) {
 	}
 
 	basinID := mustTypeIDIn(t, s, "base", "Basin")
-	built, result := graph.RebuildSnapshot(s, graph.SnapshotParts{
+	built := snappartstest.Loaded(t, s, snapparts.Parts{
 		Types: []schema.TypeID{basinID},
-		Instances: []graph.InstanceParts{
+		Instances: []snapparts.Instance{
 			{
 				TypeID:     basinID,
 				PrimaryKey: immutable.WrapKey([]any{"b1"}),
 				Properties: immutable.WrapProperties(map[string]any{"id": "b1"}),
 			},
 		},
-		Unresolved: []graph.UnresolvedParts{{
+		Unresolved: []snapparts.Unresolved{{
 			SourceType: basinID,
 			SourceKey:  immutable.WrapKey([]any{"b1"}),
 			Relation:   "NEAR",
@@ -245,9 +241,6 @@ func TestImportSnapshot_ResolvesJSONFieldForImportedSource(t *testing.T) {
 			Reason:     "target_missing",
 		}},
 	})
-	if result.HasErrors() {
-		t.Fatalf("assembling: %s", result)
-	}
 
 	checked := mustImport(t, s, built).Check(ctx)
 

@@ -31,7 +31,7 @@ generator path:
 The two paths are independent: the data path carries instances, while the
 generators are schema-in, bytes-out and never touch instance data.
 
-An operation that reports diagnostics returns a `diag.Result`, beside the value where the call produces one, with stable error codes and precise source locations. Some operations return an `error` instead, among them the JSON and CSV adapters' write methods, the Neo4j adapter's batch query builders, the three generators, and `graph.BatchAssembler`'s `Add`, `AddValid`, `AddValidOrMerge` and `Finalize`. Loaded schemas and validated instances are immutable and thread-safe; a snapshot has no method that changes it and is safe for concurrent reads, and a record is a handle, so no caller holds its address.
+An operation that reports diagnostics returns a `diag.Result`, beside the value where the call produces one, with stable error codes and precise source locations. Some operations return an `error` instead, among them the JSON and CSV adapters' write methods, the Neo4j adapter's batch query builders, the three generators, and `graph.BatchAssembler`'s `Add`, `AddValid` and `AddValidOrMerge`. Loaded schemas and validated instances are immutable and thread-safe; a snapshot has no method that changes it and is safe for concurrent reads, and a record is a handle, so no caller holds its address.
 
 ---
 
@@ -66,7 +66,7 @@ Load schemas, validate raw data, build instance graphs, persist snapshots, and e
 ## Key Design Principles
 
 - **Immutability**: Loaded schemas and validated instances are immutable and thread-safe; a snapshot has no method that changes it and is safe for concurrent reads, and a record is a handle, so no caller holds its address.
-- **Structured diagnostics**: An operation that reports diagnostics returns a `diag.Result`, beside the value where the call produces one. The JSON and CSV write methods, the Neo4j batch query builders, the generators and `graph.BatchAssembler`'s add and finalize methods return an `error`. Stable error codes (`E_*`). Precise source locations.
+- **Structured diagnostics**: An operation that reports diagnostics returns a `diag.Result`, beside the value where the call produces one. The JSON and CSV write methods, the Neo4j batch query builders, the generators and `graph.BatchAssembler`'s `Add`, `AddValid` and `AddValidOrMerge` return an `error`. Stable error codes (`E_*`). Precise source locations.
 - **Layer discipline**: Foundation (`location`, `diag`, `immutable`) -> Primary API (`schema`, `instance`, `graph`, `snapshot`) -> Adapters (`json`, `csv`, `neo4j`). Adapters import the library; the library never imports adapters.
 - **Deterministic output**: Snapshots, graph traversal, and diagnostic ordering are deterministic and reproducible.
 

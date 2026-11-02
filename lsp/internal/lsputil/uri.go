@@ -9,25 +9,6 @@ import (
 	"strings"
 )
 
-// PositionEncoding represents the position encoding used for LSP communication.
-// LSP 3.17 introduced position encoding negotiation; prior versions assumed UTF-16.
-type PositionEncoding string
-
-const (
-	// PositionEncodingUTF16 counts positions in UTF-16 code units.
-	// This is the default for LSP compatibility: VS Code and most editors
-	// use UTF-16 internally (JavaScript strings), and LSP < 3.17 mandates it.
-	// Multi-byte Unicode characters (e.g., emoji, CJK) require conversion
-	// from YAMMM's internal rune-based Column to UTF-16 code units.
-	PositionEncodingUTF16 PositionEncoding = "utf-16"
-
-	// PositionEncodingUTF8 counts positions in UTF-8 bytes.
-	// Some newer editors (e.g., Neovim with LSP 3.17) prefer this encoding
-	// as it avoids UTF-16 surrogate pair complexity. When negotiated,
-	// positions map directly to byte offsets within lines.
-	PositionEncodingUTF8 PositionEncoding = "utf-8"
-)
-
 // URIToPath converts a file:// URI to a filesystem path.
 //
 // On POSIX systems: file:///path/to/file -> /path/to/file

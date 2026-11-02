@@ -6,12 +6,9 @@ import (
 	"encoding/csv"
 	"encoding/json"
 	"fmt"
-	"io"
-	"math"
 	"slices"
 	"strconv"
 	"strings"
-	"unicode/utf8"
 
 	"github.com/simon-lentz/yammm/adapter/internal/constraintof"
 	"github.com/simon-lentz/yammm/adapter/internal/refusal"
@@ -57,63 +54,14 @@ func (a *Adapter) MarshalSnapshot(
 		schemaType, _ := result.Schema().TypeByID(typeID)
 		instances := slices.Collect(result.InstancesOf(typeID))
 
-		var buf bytes.Buffer
-		if err := a.writeSnapshotTypeTo(ctx, &buf, instances, result, schemaType); err != nil {
+		data, err := a.snapshotTypeCSV(ctx, instances, result, schemaType)
+		if err != nil {
 			return nil, fmt.Errorf("type %q: %w", typeName, err)
 		}
-		output[typeName] = buf.Bytes()
+		output[typeName] = data
 	}
 
 	return output, nil
-}
-
-// WriteSnapshot writes a graph snapshot to per-type writers. The writerFor
-// function is called once per type to obtain the destination writer.
-//
-// Returns [ErrZeroSnapshot] if result is zero, and refuses a setting the adapter
-// cannot use, with [ErrConfig], and a snapshot holding a composed child before
-// it requests any writer: see [refuseComposedChildren]. Every other refusal
-// under the package doc's Empty Cells is found at its instance, after that
-// type's writer was requested: the rows before it are flushed, so that
-// destination parses as far as it goes, and no later type's writer is
-// requested.
-func (a *Adapter) WriteSnapshot(
-	ctx context.Context,
-	writerFor func(typeName string) (io.Writer, error),
-	result graph.Snapshot,
-) error {
-	if result.IsZero() {
-		return ErrZeroSnapshot
-	}
-	if err := a.configError(); err != nil {
-		return err
-	}
-	if err := refuseComposedChildren(result); err != nil {
-		return err
-	}
-	for _, typeID := range result.Types() {
-		if err := ctx.Err(); err != nil {
-			return fmt.Errorf("csv write snapshot: %w", err)
-		}
-
-		typeName, ok := schema.AddressableTag(result.Schema(), typeID)
-		if !ok {
-			return unnameableDenotedType(typeID)
-		}
-		w, err := writerFor(typeName)
-		if err != nil {
-			return fmt.Errorf("writer for type %q: %w", typeName, err)
-		}
-
-		schemaType, _ := result.Schema().TypeByID(typeID)
-		instances := slices.Collect(result.InstancesOf(typeID))
-
-		if err := a.writeSnapshotTypeTo(ctx, w, instances, result, schemaType); err != nil {
-			return fmt.Errorf("type %q: %w", typeName, err)
-		}
-	}
-
-	return nil
 }
 
 // refuseComposedChildren returns an error naming the first instance, in type
@@ -154,71 +102,47 @@ func unnameableDenotedType(id schema.TypeID) error {
 	return fmt.Errorf("csv adapter: snapshot denotes type %s, which the entry schema cannot name, so per-type output has no name for it; no constructor builds such a snapshot, so an invariant is broken", id)
 }
 
-// writeSnapshotTypeTo writes graph.Instance values from a snapshot as CSV rows.
-// It uses snap.EdgesFrom for edge resolution instead of ValidInstance edge data.
-func (a *Adapter) writeSnapshotTypeTo(
+// snapshotTypeCSV renders graph.Instance values from a snapshot as CSV rows. It
+// uses snap.EdgesFrom for edge resolution instead of ValidInstance edge data.
+func (a *Adapter) snapshotTypeCSV(
 	ctx context.Context,
-	w io.Writer,
 	instances []graph.Instance,
 	snap graph.Snapshot,
 	schemaType schema.Type,
-) error {
+) ([]byte, error) {
 	columns, err := buildColumnList(schemaType, snap.Schema())
 	if err != nil {
-		return err
+		return nil, err
 	}
 
-	writer := csv.NewWriter(w)
+	var buf bytes.Buffer
+	writer := csv.NewWriter(&buf)
 	writer.Comma = a.config.delimiter
 
-	if err := writer.Write(columns); err != nil {
-		return fmt.Errorf("csv write header: %w", err)
-	}
+	writer.Write(columns) //nolint:errcheck,gosec // a bytes.Buffer never fails, and configError judged the delimiter
 
 	for _, inst := range instances {
 		if err := ctx.Err(); err != nil {
-			writer.Flush()
-			return fmt.Errorf("csv write: %w", err)
+			return nil, fmt.Errorf("csv write: %w", err)
 		}
 
 		row, err := a.instanceToRow(inst.Properties(), snapshotEdges(inst, snap), columns, schemaType, snap.Schema())
 		if err != nil {
-			// Flushed as the cancellation branch is, so a refused export still
-			// parses as far as it goes.
+			return nil, fmt.Errorf("instance %s: %w", diag.ValueText(inst.PrimaryKey().String()), err)
+		}
+		// csv.Writer writes a row whose only field is empty as a blank line, which
+		// csv.Reader skips, so the instance would vanish on the way back. A quoted
+		// empty field reads back as one empty field.
+		if len(row) == 1 && row[0] == "" {
 			writer.Flush()
-			return fmt.Errorf("instance %s: %w", diag.ValueText(inst.PrimaryKey().String()), err)
+			buf.WriteString(`""` + "\n")
+			continue
 		}
-		if err := writeRecord(writer, w, row); err != nil {
-			return err
-		}
+		writer.Write(row) //nolint:errcheck,gosec // a bytes.Buffer never fails, and configError judged the delimiter
 	}
 
 	writer.Flush()
-	if err := writer.Error(); err != nil {
-		return fmt.Errorf("csv flush: %w", err)
-	}
-	return nil
-}
-
-// writeRecord writes one row through writer, whose destination is w. A row
-// whose only field is empty is written as a quoted empty field: [csv.Writer]
-// writes it as a blank line, which [csv.Reader] skips, so the instance would
-// vanish on the way back. A quoted empty field reads back as one empty field.
-func writeRecord(writer *csv.Writer, w io.Writer, row []string) error {
-	if len(row) != 1 || row[0] != "" {
-		if err := writer.Write(row); err != nil {
-			return fmt.Errorf("csv write row: %w", err)
-		}
-		return nil
-	}
-	writer.Flush()
-	if err := writer.Error(); err != nil {
-		return fmt.Errorf("csv write row: %w", err)
-	}
-	if _, err := io.WriteString(w, `""`+"\n"); err != nil {
-		return fmt.Errorf("csv write row: %w", err)
-	}
-	return nil
+	return buf.Bytes(), nil
 }
 
 // snapshotEdges groups an instance's outgoing edges by relation name.
@@ -242,8 +166,7 @@ func snapshotEdges(inst graph.Instance, snap graph.Snapshot) map[string][]graph.
 // leading underscore, so the dotted grammar is unambiguous. The target
 // type supplies the component names; an unresolvable target is an error,
 // because the writer would otherwise emit columns its own parser cannot
-// name. Both [schema.Load] and [schema.NewBuilder] refuse a schema whose
-// association target does not resolve, so no snapshot reaches that arm and it
+// name. A load refuses a schema whose association target does not resolve, so no snapshot reaches that arm and it
 // carries no refusal class.
 func buildColumnList(schemaType schema.Type, s schema.Schema) ([]string, error) {
 	// Collect property names.
@@ -339,13 +262,9 @@ func (a *Adapter) relationCells(rel schema.Relation, s schema.Schema, edges []gr
 	if len(edges) == 0 {
 		return nil
 	}
-	target, ok := s.TypeByID(rel.TargetID())
-	if !ok {
-		// buildColumnList already refused this shape; nothing to render.
-		return nil
-	}
-	// Every constructor holds an edge to its association's declared target,
-	// and a (one) association to one record.
+	// buildColumnList resolved this target. Every constructor holds an edge to its
+	// association's declared target, and a (one) association to one record.
+	target, _ := s.TypeByID(rel.TargetID())
 	field := rel.FieldName()
 	var group []string
 
@@ -355,14 +274,10 @@ func (a *Adapter) relationCells(rel schema.Relation, s schema.Schema, edges []gr
 		group = append(group, col)
 		segs := make([]string, len(edges))
 		for j, e := range edges {
-			raw := e.Target().PrimaryKey().Get(i).Unwrap()
-			text, err := cellOf(raw, pk.Constraint())
-			if err != nil {
-				return fmt.Errorf("csv adapter: association %q: target key component %d, of type %T: %w", rel.Name(), i, raw, err)
-			}
-			segs[j] = escapeListElem(text, a.config.listSep)
+			text, _ := cellOf(e.Target().PrimaryKey().Get(i).Unwrap(), pk.Constraint()) //nolint:errcheck // a load refuses a key component that has no cell
+			segs[j] = escapeListElem(text)
 		}
-		cells[col] = strings.Join(segs, a.config.listSep)
+		cells[col] = strings.Join(segs, listSeparator)
 	}
 
 	for p := range rel.Properties() {
@@ -370,15 +285,15 @@ func (a *Adapter) relationCells(rel schema.Relation, s schema.Schema, edges []gr
 		group = append(group, col)
 		segs := make([]string, len(edges))
 		for j, e := range edges {
-			if v, ok := e.Properties().Get(p.Name()); ok && !v.IsNil() {
+			if v, ok := e.Properties().Get(p.Name()); ok {
 				text, err := cellOf(v.Unwrap(), p.Constraint())
 				if err != nil {
 					return fmt.Errorf("csv adapter: association %q: edge property %q, of type %T: %w", rel.Name(), p.Name(), v.Unwrap(), err)
 				}
-				segs[j] = escapeListElem(text, a.config.listSep)
+				segs[j] = escapeListElem(text)
 			}
 		}
-		cells[col] = strings.Join(segs, a.config.listSep)
+		cells[col] = strings.Join(segs, listSeparator)
 	}
 
 	for _, col := range group {
@@ -389,92 +304,49 @@ func (a *Adapter) relationCells(rel schema.Relation, s schema.Schema, edges []gr
 	return refusal.New(ErrUnrepresentable, "csv adapter: association %q: its target's key and every edge property render empty, so its columns would read back as no association", rel.Name())
 }
 
-// cellText renders one scalar value as [scalarCell] renders it, or returns the
-// refusal it owes: [errNoCellSpelling] for a value no cell spells,
-// [errInvalidUTF8] for text that is not valid UTF-8, and [errUnreadNumber] for
-// a float or a json.Number whose cell [floatFromCell] does not read. A Float
-// column reads every number an Integer column reads, so a cell it refuses
-// reads back as a number in no column.
-func cellText(v any) (string, error) {
-	text, unjudged, ok := scalarCell(v)
-	if !ok {
-		return "", errNoCellSpelling
-	}
-	if !utf8.ValidString(text) {
-		return "", errInvalidUTF8
-	}
-	if unjudged {
-		if _, err := floatFromCell(text); err != nil {
-			return "", errUnreadNumber
-		}
-	}
-	return text, nil
-}
-
-// scalarCell renders one value in a form [instance.ScalarOf] returns as cell
-// text; every value reaches it from [cellOf], which reads it through ScalarOf
-// first. A finite float
-// carries a decimal point whatever constraint holds it, as the JSON and .ys
-// writers mark one: a whole float under an Integer is written 5.0, which the
-// Integer column refuses on the way back, rather than 5, which it would read
-// as the integer the snapshot never held. A cell carries no type, so a String
-// column reads the same float back as the text 5.0. unjudged reports a number whose text
-// may be none the parser reads: a float, which can be a NaN or an infinity,
-// and a json.Number, whose text is its cell; an integer's digits always read.
-// ok is false for a value no cell spells: a map, an array, a struct or another
-// value that is no scalar, which a bypass-built snapshot can hold.
-func scalarCell(v any) (text string, unjudged, ok bool) {
-	if v == nil {
-		return "", false, true
-	}
-	switch x := v.(type) {
-	case json.Number:
-		return string(x), true, true
-	case string:
-		return x, false, true
-	case bool:
-		return strconv.FormatBool(x), false, true
-	case int64:
-		return strconv.FormatInt(x, 10), false, true
-	case uint64:
-		return strconv.FormatUint(x, 10), false, true
-	case float32:
-		return floatCell(float64(x), 32), true, true
-	case float64:
-		return floatCell(x, 64), true, true
-	}
-	return "", false, false
-}
-
-// floatCell writes f in plain decimal notation at bitSize, with ".0" appended
-// to a finite whole value so the cell reads as a float. The parser reads a
-// cell at 64 bits, so a float32 whose 32-bit text rounds back to another
-// float32 there is written in its 64-bit form, which reads back as itself.
-func floatCell(f float64, bitSize int) string {
-	s := strconv.FormatFloat(f, 'f', -1, bitSize)
-	if back, err := strconv.ParseFloat(s, 64); bitSize == 32 && err == nil && float32(back) != float32(f) {
-		s = strconv.FormatFloat(f, 'f', -1, 64)
-	}
-	if !math.IsNaN(f) && !math.IsInf(f, 0) && !strings.Contains(s, ".") {
+// floatCell writes f in plain decimal notation, with ".0" appended to a whole
+// value so the cell reads as a float, as the JSON and .ys writers mark one: a
+// whole float under an Integer is written 5.0, which the Integer column refuses on
+// the way back, rather than 5, which it would read as the integer the snapshot
+// never held. A cell carries no type, so a String column reads the same float
+// back as the text 5.0.
+func floatCell(f float64) string {
+	s := strconv.FormatFloat(f, 'f', -1, 64)
+	if !strings.Contains(s, ".") {
 		s += ".0"
 	}
 	return s
 }
 
-// cellOf renders raw as cell text in the form its constraint stores, after
-// reading it in the one form every writer writes ([instance.ScalarOf]), and
-// renders that form when the constraint cannot: an export has no diagnostic
-// channel, so one malformed cell must not fail the whole file. A value of no
-// such form is [errNoCellSpelling]; every other refusal is [cellText]'s.
+// cellOf renders raw as cell text in the form its constraint stores, and renders
+// it as it stands when the constraint cannot: an export has no diagnostic
+// channel, so one malformed cell must not fail the whole file. A list or a map is
+// [errNoCellSpelling]. A json.Number whose cell [floatFromCell] does not read is
+// [errUnreadNumber]: a Float column reads every number an Integer column reads,
+// so a cell it refuses reads back as a number in no column.
 func cellOf(raw any, c schema.Constraint) (string, error) {
-	held, ok := instance.ScalarOf(raw)
-	if !ok {
-		return "", errNoCellSpelling
-	}
-	if canonical, err := instance.CanonicalValue(held, c); err == nil {
+	held := raw
+	if canonical, err := instance.CanonicalValue(raw, c); err == nil {
 		held = canonical
 	}
-	return cellText(held)
+	switch x := held.(type) {
+	case nil:
+		return "", nil
+	case string:
+		return x, nil
+	case bool:
+		return strconv.FormatBool(x), nil
+	case int64:
+		return strconv.FormatInt(x, 10), nil
+	case float64:
+		return floatCell(x), nil
+	case json.Number:
+		if _, err := floatFromCell(string(x)); err != nil {
+			return "", errUnreadNumber
+		}
+		return string(x), nil
+	}
+	return "", errNoCellSpelling
 }
 
 // errNullListElement refuses a null list element: the list grammar writes it
@@ -482,21 +354,15 @@ func cellOf(raw any, c schema.Constraint) (string, error) {
 // for a List<String>, an empty list for a List<List<T>> — or is refused. It carries [ErrUnrepresentable] and keeps its own text.
 var errNullListElement = refusal.New(ErrUnrepresentable, "a null list element has no spelling in a cell, so the element would not survive the round trip")
 
-// errNoCellSpelling refuses a value the list grammar has no spelling for: one
-// no column renders, such as a map, an array or a struct, a pointer to one, or
-// a time or a UUID its column does not render. It carries [ErrUnrepresentable] and
-// keeps its own text.
-var errNoCellSpelling = refusal.New(ErrUnrepresentable, "a value no column renders, such as a map, an array, a struct, or a time or a UUID its column does not render, has no spelling in a cell, so the value would not survive the round trip")
-
-// errInvalidUTF8 refuses a string that is not valid UTF-8: a cell would carry
-// its bytes, and the validator refuses the row that reads them back. It carries
+// errNoCellSpelling refuses a value the list grammar has no spelling for: a map
+// anywhere, or a list at an edge property. [Adapter.valueToString] writes a list
+// at a property as its list cell, whatever the constraint. It carries
 // [ErrUnrepresentable] and keeps its own text.
-var errInvalidUTF8 = refusal.New(ErrUnrepresentable, "a string that is not valid UTF-8 reads back as a value the validator refuses, so the value would not survive the round trip")
+var errNoCellSpelling = refusal.New(ErrUnrepresentable, "a map, or a list at an edge property, has no spelling in a cell, so the value would not survive the round trip")
 
-// errUnreadNumber refuses a number whose cell no column of this adapter's
-// parser reads as a number: a NaN, an infinity, and a json.Number that spells a
-// number no finite float64 holds. It
-// carries [ErrUnrepresentable] and keeps its own text.
+// errUnreadNumber refuses a number whose cell no column of this adapter's parser
+// reads as a number: a json.Number that spells a number no finite float64 holds.
+// It carries [ErrUnrepresentable] and keeps its own text.
 var errUnreadNumber = refusal.New(ErrUnrepresentable, "a number whose cell this adapter reads back as a number in no column, so the value would not survive the round trip")
 
 // errListOfOneEmptyElement refuses a list whose one element renders as "": the
@@ -510,9 +376,6 @@ var errListOfOneEmptyElement = refusal.New(ErrUnrepresentable, "a list holding o
 // stores, null as "". A collection renders each element by this same rule and
 // escapes it, which inverts the parser's recursion at every depth.
 func (a *Adapter) valueToString(val immutable.Value, c schema.Constraint) (string, error) {
-	if val.IsNil() {
-		return "", nil
-	}
 	if _, ok := val.Map(); ok {
 		return "", fmt.Errorf("a map: %w", errNoCellSpelling)
 	}
@@ -528,19 +391,17 @@ func (a *Adapter) valueToString(val immutable.Value, c schema.Constraint) (strin
 	elem := constraintof.Element(c)
 	parts := make([]string, s.Len())
 	for i, v := range s.Iter2() {
-		// IsNil reads a nil container; the one form reads a nil behind a
-		// pointer.
-		if held, ok := instance.ScalarOf(v.Unwrap()); v.IsNil() || (ok && held == nil) {
+		if v.IsNil() {
 			return "", fmt.Errorf("list element %d: %w", i, errNullListElement)
 		}
 		text, err := a.valueToString(v, elem)
 		if err != nil {
 			return "", fmt.Errorf("list element %d: %w", i, err)
 		}
-		parts[i] = escapeListElem(text, a.config.listSep)
+		parts[i] = escapeListElem(text)
 	}
 	if len(parts) == 1 && parts[0] == "" {
 		return "", errListOfOneEmptyElement
 	}
-	return strings.Join(parts, a.config.listSep), nil
+	return strings.Join(parts, listSeparator), nil
 }

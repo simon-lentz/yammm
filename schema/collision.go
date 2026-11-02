@@ -8,9 +8,6 @@ import (
 	"github.com/simon-lentz/yammm/location"
 )
 
-// reservedPrefix is rejected for property and relation names.
-const reservedPrefix = "_target_"
-
 // detectCollisions checks for naming collisions in all types.
 func (c *completer) detectCollisions() {
 	for _, t := range c.schema.types {
@@ -22,31 +19,6 @@ func (c *completer) detectCollisions() {
 // are collected; there is no failure signal — the completer's final error
 // gate decides whether a schema is produced.
 func (c *completer) detectTypeCollisions(t Type) {
-	// Check reserved prefixes on own properties.
-	// We intentionally check Properties() (own) not AllProperties() (all)
-	// because inherited properties are validated when their declaring type is checked,
-	// avoiding duplicate errors when parent and child are in the same schema.
-	for p := range t.Properties() {
-		if strings.HasPrefix(strings.ToLower(p.Name()), reservedPrefix) {
-			c.errorf(p.Span(), diag.E_RESERVED_PREFIX,
-				"property %q uses reserved prefix %q", p.Name(), reservedPrefix)
-		}
-	}
-
-	// Check reserved prefixes on own relations
-	for r := range t.Associations() {
-		if strings.HasPrefix(strings.ToLower(r.FieldName()), reservedPrefix) {
-			c.errorf(r.Span(), diag.E_RESERVED_PREFIX,
-				"relation %q uses reserved prefix %q", r.Name(), reservedPrefix)
-		}
-	}
-	for r := range t.Compositions() {
-		if strings.HasPrefix(strings.ToLower(r.FieldName()), reservedPrefix) {
-			c.errorf(r.Span(), diag.E_RESERVED_PREFIX,
-				"relation %q uses reserved prefix %q", r.Name(), reservedPrefix)
-		}
-	}
-
 	c.checkPropertyCaseCollisions(t)
 	c.checkEdgePropertyCaseCollisions(t)
 	c.checkPropertyRelationCollisions(t)
@@ -340,9 +312,6 @@ func (c *completer) resolveRelationTarget(r Relation, kind string) {
 }
 
 // validateCompositionTarget checks that a composition target is a concrete part type.
-// A registry-less completion resolves no cross-schema target, and no such schema
-// builds: the Builder refuses imports without a registry, and a qualifier naming
-// no import draws E_UNKNOWN_TYPE.
 func (c *completer) validateCompositionTarget(t Type, r Relation) {
 	// An unresolved target was reported or deferred when targets resolved.
 	target := c.resolveTypeID(r.TargetID())
@@ -353,13 +322,6 @@ func (c *completer) validateCompositionTarget(t Type, r Relation) {
 	if !target.IsPart() {
 		c.errorf(r.Span(), diag.E_INVALID_COMPOSITION_TARGET,
 			"composition %q in type %q must reference a part type, but %q is not a part",
-			r.Name(), t.Name(), target.Name())
-		return
-	}
-
-	if target.IsAbstract() {
-		c.errorf(r.Span(), diag.E_INVALID_COMPOSITION_TARGET,
-			"composition %q in type %q must reference a concrete type, but %q is abstract",
 			r.Name(), t.Name(), target.Name())
 	}
 }

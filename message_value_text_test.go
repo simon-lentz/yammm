@@ -1,12 +1,14 @@
 package yammm_test
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
-	"math"
 	"strings"
 	"testing"
 	"unicode/utf8"
+
+	"github.com/simon-lentz/yammm/internal/snapparts"
 
 	csvadapter "github.com/simon-lentz/yammm/adapter/csv"
 	jsonadapter "github.com/simon-lentz/yammm/adapter/json"
@@ -15,6 +17,8 @@ import (
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/instance"
+	"github.com/simon-lentz/yammm/internal/instancetest"
+	"github.com/simon-lentz/yammm/internal/snappartstest"
 	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
 	"github.com/simon-lentz/yammm/snapshot"
@@ -106,7 +110,7 @@ func (c *echoChecker) err(where string, err error) {
 }
 
 // Every message the data paths write about a long value repeats its head
-// alone, and every message and detail is valid UTF-8, whichever door the
+// alone, and every message and detail is valid UTF-8, whichever path the
 // value came through.
 func TestMessages_RepeatAValueCutToItsHead(t *testing.T) {
 	t.Parallel()
@@ -140,40 +144,52 @@ func TestMessages_RepeatAValueCutToItsHead(t *testing.T) {
 		}
 		c.result("graph.Add", g.Add(ctx, inst))
 	}
-	c.result("graph.Add", g.Add(ctx, instance.NewValidInstance("T", typ.ID(), immutable.WrapKey([]any{"h1"}),
-		immutable.WrapProperties(map[string]any{"id": "h1", "te\xffxt": "x"}), nil, nil, location.Provenance{})))
-	c.result("graph.AddComposed", g.AddComposed(ctx, typ.ID(), `["absent `+longText+`"]`, "NONE",
-		instance.NewValidInstance("T", typ.ID(), immutable.WrapKey([]any{"c"}), immutable.WrapProperties(map[string]any{"id": "c"}), nil, nil, location.Provenance{})))
+	root := func(key string, props map[string]any) snapparts.Instance {
+		return snapparts.Instance{TypeID: typ.ID(), PrimaryKey: immutable.WrapKey([]any{key}), Properties: immutable.WrapProperties(props)}
+	}
+	const marker = "marker"
+	clean := snappartstest.Document(t, s, snapparts.Parts{
+		Types:     []schema.TypeID{typ.ID()},
+		Instances: []snapparts.Instance{root("h1", map[string]any{"id": "h1", "s": marker})},
+	})
+	for _, spelled := range []string{longText + "\xff", `\ud800` + longText} {
+		_, r = snapshot.Load(ctx, bytes.Replace(clean, []byte(marker), []byte(spelled), 1), s)
+		refused := false
+		for issue := range r.Issues() {
+			refused = refused || issue.Code() == diag.E_SNAPSHOT_MALFORMED
+		}
+		if !refused {
+			t.Errorf("snapshot.Load of a string spelled %.20q drew no E_SNAPSHOT_MALFORMED: %.200s", spelled, r)
+		}
+		c.result("snapshot.Load", r)
+	}
 	_, err := graph.ParseKey(longText)
 	c.err("graph.ParseKey", err)
 
-	bypass := graph.New(s)
-	bypass.Add(ctx, instance.NewValidInstance("T", typ.ID(), immutable.WrapKey([]any{longText}),
-		immutable.WrapProperties(map[string]any{"id": longText, "u": longText, "d": longText, "ts": longText, "tf": longText}), nil, nil, location.Provenance{}))
-	for range 2 {
-		inst, _ := v.ValidateOne(ctx, "T", instance.RawInstance{Properties: map[string]any{"id": longText + "2"}})
-		bypass.Add(ctx, inst)
-	}
-	data, r := snapshot.Marshal(ctx, bypass.Snapshot())
-	c.result("snapshot.Marshal", r)
-	if data != nil {
-		_, r = snapshot.Load(ctx, data, s, snapshot.WithRevalidation(diag.Warning), snapshot.WithValueConformance(true))
-		c.result("snapshot.Load", r)
-	}
+	second := root(longText+"2", map[string]any{"id": longText + "2"})
+	data := snappartstest.Document(t, s, snapparts.Parts{
+		Types: []schema.TypeID{typ.ID()},
+		Instances: []snapparts.Instance{
+			root(longText, map[string]any{"id": longText, "u": longText, "d": longText, "ts": longText, "tf": longText}),
+			second,
+		},
+		Duplicates: []snapparts.Instance{second},
+	})
+	_, r = snapshot.Load(ctx, data, s, snapshot.WithRevalidation(diag.Warning), snapshot.WithValueConformance(true))
+	c.result("snapshot.Load", r)
 
-	unwritable := graph.New(s)
-	unwritable.Add(ctx, instance.NewValidInstance("T", typ.ID(), immutable.WrapKey([]any{longText}),
-		immutable.WrapProperties(map[string]any{"id": longText, "f": math.NaN()}), nil, nil, location.Provenance{}))
-	_, err = jsonadapter.New().MarshalObject(ctx, unwritable.Snapshot())
+	unwritable := snappartstest.Loaded(t, s, snapparts.Parts{
+		Types:     []schema.TypeID{typ.ID()},
+		Instances: []snapparts.Instance{root(longText, map[string]any{"id": longText, "f": json.Number(longDigits + "e400")})},
+	})
+	_, err = jsonadapter.New().MarshalObject(ctx, unwritable)
 	c.err("json writer", err)
-	_, err = csvadapter.New().MarshalSnapshot(ctx, unwritable.Snapshot())
+	_, err = csvadapter.New().MarshalSnapshot(ctx, unwritable)
 	c.err("csv writer", err)
-	pt, _ := s.Type("P")
 	composed := graph.New(s)
-	composed.Add(ctx, instance.NewValidInstance("T", typ.ID(), immutable.WrapKey([]any{longText}), immutable.WrapProperties(map[string]any{"id": longText}), nil,
-		map[string]immutable.Value{"PARTS": immutable.Wrap([]any{
-			instance.NewValidInstance("P", pt.ID(), immutable.WrapKey([]any{"c"}), immutable.WrapProperties(map[string]any{"pid": "c"}), nil, nil, location.Provenance{}),
-		})}, location.Provenance{}))
+	if r := composed.Add(ctx, instancetest.Valid(t, s, "T", map[string]any{"id": longText, "parts": []any{map[string]any{"pid": "c"}}})); r.HasErrors() {
+		t.Fatal(r)
+	}
 	_, err = csvadapter.New().MarshalSnapshot(ctx, composed.Snapshot())
 	c.err("csv writer", err)
 	ls, res := schema.LoadString(ctx, "schema \"links\"\n\ntype L {\n\tid String primary\n\t--> TO (many) M {\n\t\tw Float\n\t}\n}\n\ntype M {\n\tid String primary\n}\n", "links.yammm")
@@ -182,16 +198,21 @@ func TestMessages_RepeatAValueCutToItsHead(t *testing.T) {
 	}
 	lt, _ := ls.Type("L")
 	mt, _ := ls.Type("M")
-	linked := graph.New(ls)
-	linked.Add(ctx, instance.NewValidInstance("M", mt.ID(), immutable.WrapKey([]any{longText}), immutable.WrapProperties(map[string]any{"id": longText}), nil, nil, location.Provenance{}))
-	linked.Add(ctx, instance.NewValidInstance("L", lt.ID(), immutable.WrapKey([]any{"l"}), immutable.WrapProperties(map[string]any{"id": "l"}),
-		map[string]instance.ValidEdgeData{"TO": instance.NewValidEdgeData([]instance.ValidEdgeTarget{
-			instance.NewValidEdgeTarget(immutable.WrapKey([]any{longText}), immutable.WrapProperties(map[string]any{"w": math.NaN()})),
-		})}, nil, location.Provenance{}))
-	_, err = jsonadapter.New().MarshalObject(ctx, linked.Snapshot())
+	linked := snappartstest.Loaded(t, ls, snapparts.Parts{
+		Types: []schema.TypeID{lt.ID(), mt.ID()},
+		Instances: []snapparts.Instance{
+			{TypeID: mt.ID(), PrimaryKey: immutable.WrapKey([]any{longText}), Properties: immutable.WrapProperties(map[string]any{"id": longText})},
+			{TypeID: lt.ID(), PrimaryKey: immutable.WrapKey([]any{"l"}), Properties: immutable.WrapProperties(map[string]any{"id": "l"})},
+		},
+		Edges: []snapparts.Edge{{
+			Relation: "TO", SourceType: lt.ID(), SourceKey: immutable.WrapKey([]any{"l"}), TargetKey: immutable.WrapKey([]any{longText}),
+			Properties: immutable.WrapProperties(map[string]any{"w": json.Number("1e400")}),
+		}},
+	})
+	_, err = jsonadapter.New().MarshalObject(ctx, linked)
 	c.err("json writer", err)
 
-	csvSource := location.MustNewSourceID("test://echo.csv")
+	csvSource := location.NewSourceID("test://echo.csv")
 	row := "x," + strings.Repeat(longText+",", 5) + longText + "\n" + "y," + longDigits + "," + longDigits + "e400,,,,\n"
 	_, r = csvadapter.New().ParseTyped(ctx, csvSource, "T", strings.NewReader("id,n,f,b,d,ts,tf\n"+row), typ)
 	if r.OK() {
@@ -200,11 +221,11 @@ func TestMessages_RepeatAValueCutToItsHead(t *testing.T) {
 	c.result("csv", r)
 
 	for _, k := range []schema.Constraint{schema.NewTimestampConstraint(), schema.NewTimestampConstraintFormatted("2006-01-02"), schema.NewDateConstraint()} {
-		_, err := neo4jadapter.Coerce(k, longText)
-		c.err("neo4j.Coerce", err)
+		_, err := neo4jadapter.CoerceParams(map[string]any{"v": longText}, neo4jadapter.ParamTypes{"v": k})
+		c.err("neo4j.CoerceParams", err)
 	}
 
-	for _, where := range []string{"validator", "graph.Add", "graph.AddComposed", "graph.ParseKey", "snapshot.Load", "json writer", "csv writer", "csv", "neo4j.Coerce"} {
+	for _, where := range []string{"validator", "graph.Add", "graph.ParseKey", "snapshot.Load", "json writer", "csv writer", "csv", "neo4j.CoerceParams"} {
 		if c.judged[where] == 0 {
 			t.Errorf("%s wrote no message to judge", where)
 		}

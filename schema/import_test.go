@@ -5,15 +5,14 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/simon-lentz/yammm/internal/yammmtest"
 	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
 )
 
 func TestNewImport(t *testing.T) {
-	sourceID := location.MustNewSourceID("test://types")
+	sourceID := location.NewSourceID("test://types")
 	span := location.Span{
-		Source: location.MustNewSourceID("test://schema"),
+		Source: location.NewSourceID("test://schema"),
 		Start:  location.Position{Line: 2, Column: 1, Byte: 10},
 		End:    location.Position{Line: 2, Column: 25, Byte: 35},
 	}
@@ -66,7 +65,7 @@ func TestImport_Alias(t *testing.T) {
 }
 
 func TestImport_ResolvedSourceID(t *testing.T) {
-	sourceID := location.MustNewSourceID("file:///absolute/path/types.yammm")
+	sourceID := location.NewSourceID("file:///absolute/path/types.yammm")
 
 	imp := schema.TestNewImport("./types.yammm", "types", sourceID, location.Span{})
 
@@ -80,7 +79,7 @@ func TestImport_ResolvedSourceID_Zero(t *testing.T) {
 }
 
 func TestImport_ResolvedPath_WithSourceID(t *testing.T) {
-	sourceID := location.MustNewSourceID("test://resolved/path")
+	sourceID := location.NewSourceID("test://resolved/path")
 
 	imp := schema.TestNewImport("./types.yammm", "types", sourceID, location.Span{})
 
@@ -116,7 +115,7 @@ func TestImport_Schema_Resolved(t *testing.T) {
 
 func TestImport_Span(t *testing.T) {
 	span := location.Span{
-		Source: location.MustNewSourceID("test://span"),
+		Source: location.NewSourceID("test://span"),
 		Start:  location.Position{Line: 3, Column: 1, Byte: 20},
 		End:    location.Position{Line: 3, Column: 30, Byte: 50},
 	}
@@ -129,52 +128,14 @@ func TestImport_Span(t *testing.T) {
 	assert.Equal(t, 20, result.Start.Byte)
 }
 
-// TestImport_Seal_PreventsMutation drives every post-seal mutation through
-// one panic table: a sealed Import must reject each setter.
-func TestImport_Seal_PreventsMutation(t *testing.T) {
-	tests := []struct {
-		name   string
-		mutate func(s schema.Import)
-	}{
-		{"SetResolvedSourceID", func(s schema.Import) {
-			schema.TestSetImportResolvedSourceID(s, location.MustNewSourceID("test://new"))
-		}},
-		{"SetSchema", func(s schema.Import) {
-			schema.TestSetImportSchema(s, schema.TestNewSchema("test", location.SourceID{}, location.Span{}, ""))
-		}},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			s := schema.TestNewImport("./types.yammm", "types", location.SourceID{}, location.Span{})
-			schema.TestSealImport(s)
-			yammmtest.AssertPanics(t, func() { tt.mutate(s) })
-		})
-	}
-}
-
-func TestImport_SettersWorkBeforeSeal(t *testing.T) {
+func TestImport_SetSchema_NamesOneRecord(t *testing.T) {
 	imp := schema.TestNewImport("./types.yammm", "types", location.SourceID{}, location.Span{})
-
-	// These should not panic before sealing
-	newSourceID := location.MustNewSourceID("test://updated")
-	schema.TestSetImportResolvedSourceID(imp, newSourceID)
-	assert.Equal(t, newSourceID, imp.ResolvedSourceID())
 
 	s := schema.TestNewSchema("types", location.SourceID{}, location.Span{}, "")
 	schema.TestSetImportSchema(imp, s)
 	if s != imp.Schema() {
 		t.Error("s and imp.Schema() do not name one record")
 	}
-}
-
-func TestImport_SetResolvedSourceID_UpdatesValue(t *testing.T) {
-	imp := schema.TestNewImport("./types.yammm", "types", location.SourceID{}, location.Span{})
-
-	newID := location.MustNewSourceID("test://updated")
-	schema.TestSetImportResolvedSourceID(imp, newID)
-
-	assert.Equal(t, newID, imp.ResolvedSourceID())
 }
 
 func TestImport_SetSchema_UpdatesValue(t *testing.T) {
@@ -187,15 +148,4 @@ func TestImport_SetSchema_UpdatesValue(t *testing.T) {
 		t.Error("s and imp.Schema() do not name one record")
 	}
 	assert.Equal(t, "imported", imp.Schema().Name())
-}
-
-func TestImport_IsSealed(t *testing.T) {
-	imp := schema.TestNewImport("./types.yammm", "types", location.SourceID{}, location.Span{})
-
-	// New import should not be sealed
-	assert.False(t, schema.TestIsSealedImport(imp), "new import should not be sealed")
-
-	// After sealing, IsSealed should return true
-	schema.TestSealImport(imp)
-	assert.True(t, schema.TestIsSealedImport(imp), "sealed import should report IsSealed() == true")
 }

@@ -94,13 +94,13 @@ func TestCoerce_DeclaredLayoutAlsoCarriesTheDriverZoneName(t *testing.T) {
 
 func coerceTime(t *testing.T, c schema.Constraint, in any) time.Time {
 	t.Helper()
-	got, err := neo4j.Coerce(c, in)
+	got, err := neo4j.CoerceParams(map[string]any{"v": in}, neo4j.ParamTypes{"v": c})
 	if err != nil {
-		t.Fatalf("Coerce(%#v): %v", in, err)
+		t.Fatalf("CoerceParams(%#v): %v", in, err)
 	}
-	tt, ok := got.(time.Time)
+	tt, ok := got["v"].(time.Time)
 	if !ok {
-		t.Fatalf("Coerce returned %T, want time.Time", got)
+		t.Fatalf("CoerceParams returned %T, want time.Time", got["v"])
 	}
 	return tt
 }

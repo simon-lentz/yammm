@@ -10,9 +10,7 @@ import (
 	"math"
 	"slices"
 	"time"
-	"unicode/utf8"
 
-	"github.com/google/uuid"
 	"github.com/neo4j/neo4j-go-driver/v6/neo4j/dbtype"
 	"github.com/simon-lentz/yammm/adapter/internal/constraintof"
 	"github.com/simon-lentz/yammm/adapter/internal/refusal"
@@ -121,12 +119,12 @@ func WithEdgeChunkSize(size int) WriteOption {
 // whole (see [NodeQueryKind]). A phase with more rows than the chunk size
 // produces several queries.
 //
-// Requires a [GraphShape] that [Adapter.ShapeForSchema] built from a schema with
-// this snapshot's non-zero SourceID, and refuses one built by hand, from another
-// SourceID or from a zero one: a shape the adapter did not build carries no key constraints, so merge keys would reach
-// the driver uncoerced while the same properties are coerced from the schema.
-// [GraphShape.Types] is keyed by [schema.TypeID], so two closure types sharing
-// one bare name each get their own label.
+// Requires a [GraphShape] that [Adapter.ShapeForSchema] built from this snapshot's
+// schema object, and refuses any other, another load of one source included:
+// that load can declare a key another way, so a merge key would reach the driver
+// under one type while the same property is coerced from this schema to another.
+// A shape is keyed by [schema.TypeID], so two closure types sharing one bare name
+// each get their own label.
 func (a *Adapter) BatchNodeQueries(
 	ctx context.Context,
 	result graph.Snapshot,
@@ -148,7 +146,7 @@ func (a *Adapter) BatchNodeQueries(
 			return nil, fmt.Errorf("batch node queries: %w", err)
 		}
 		typeName := schema.TagForm(result.Schema(), typeID)
-		nodeShape, ok := shapes.Types[typeID]
+		nodeShape, ok := shapes.types[typeID]
 		if !ok {
 			return nil, fmt.Errorf("no shape for type %s", typeID)
 		}
@@ -159,7 +157,7 @@ func (a *Adapter) BatchNodeQueries(
 		}
 
 		// The effective immutable set is the type's derived @writeOnce keys.
-		writeOnceKeys := derivedImmutableKeys(&nodeShape, schemaType)
+		writeOnceKeys := nodeShape.immutableKeys
 		km := mutableKeys
 		if len(writeOnceKeys) > 0 {
 			km = immutableKeys
@@ -192,7 +190,7 @@ func (a *Adapter) BatchNodeQueries(
 			rows = append(rows, row)
 		}
 
-		stmt := buildBatchNodeMergeQuery(nodeShape.Label, nodeShape.PrimaryKeys, km)
+		stmt := buildBatchNodeMergeQuery(nodeShape.label, nodeShape.primaryKeys, km)
 		for _, chunk := range chunkSlice(rows, cfg.nodeChunkSize) {
 			queries = append(queries, &BatchNodeQuery{
 				Statement: stmt,
@@ -214,12 +212,12 @@ func (a *Adapter) BatchNodeQueries(
 // BatchEdgeQueries generates UNWIND-batched MERGE queries for edges,
 // grouped by (sourceType, relationType, targetType) signature.
 //
-// Returns one [BatchEdgeQuery] per signature per chunk. [GraphShape.Types] is
-// keyed by [schema.TypeID], so two closure types sharing one bare name each get
-// their own label.
+// Returns one [BatchEdgeQuery] per signature per chunk. A shape is keyed by
+// [schema.TypeID], so two closure types sharing one bare name each get their own
+// label.
 //
-// shapes must come from [Adapter.ShapeForSchema] over a schema with this
-// snapshot's non-zero SourceID; [Adapter.BatchNodeQueries] states what else is
+// shapes must come from [Adapter.ShapeForSchema] over this snapshot's schema
+// object, and [Adapter.BatchNodeQueries] states what else is
 // refused. It must cover the whole import closure, not just the entry schema: every
 // edge's source and target type is looked up in it, and a missing entry returns
 // "no shape for source type ..." or "no shape for target type ..." with no
@@ -274,11 +272,11 @@ func (a *Adapter) BatchEdgeQueries(
 		}
 		sigEdges := groups[sig]
 
-		srcShape, ok := shapes.Types[sig.sourceType]
+		srcShape, ok := shapes.types[sig.sourceType]
 		if !ok {
 			return nil, fmt.Errorf("no shape for source type %s", sig.sourceType)
 		}
-		tgtShape, ok := shapes.Types[sig.targetType]
+		tgtShape, ok := shapes.types[sig.targetType]
 		if !ok {
 			return nil, fmt.Errorf("no shape for target type %s", sig.targetType)
 		}
@@ -308,7 +306,7 @@ func (a *Adapter) BatchEdgeQueries(
 		// chokepoint, and a hub node at the end of a thousand edges paid for it
 		// a thousand times.
 		keyCache := make(map[string]map[string]any)
-		endpointKeys := func(inst graph.Instance, shape *NodeShape) (map[string]any, error) {
+		endpointKeys := func(inst graph.Instance, shape *nodeShape) (map[string]any, error) {
 			id := inst.TypeID().String() + "\x00" + inst.PrimaryKey().String()
 			if cached, ok := keyCache[id]; ok {
 				return cached, nil
@@ -342,7 +340,7 @@ func (a *Adapter) BatchEdgeQueries(
 			if hasProps {
 				if edge.HasProperties() {
 					held := edge.Properties().Clone()
-					if k, err := formProps(held, relConstraint(rel)); err != nil {
+					if k, err := firstRefusedProp(held, relConstraint(rel)); err != nil {
 						return nil, fmt.Errorf("relation %q: property %q: %w", sig.relType, k, err)
 					}
 					relProps, err := coerceRelProps(held, rel)
@@ -359,9 +357,9 @@ func (a *Adapter) BatchEdgeQueries(
 		}
 
 		stmt := BuildBatchRelationshipMergeQuery(
-			srcShape.Label, srcShape.PrimaryKeys,
+			srcShape.label, srcShape.primaryKeys,
 			sig.relType,
-			tgtShape.Label, tgtShape.PrimaryKeys,
+			tgtShape.label, tgtShape.primaryKeys,
 			hasProps,
 		)
 		for _, chunk := range chunkSlice(rows, cfg.edgeChunkSize) {
@@ -391,8 +389,8 @@ func (a *Adapter) BatchEdgeQueries(
 // selection is affected.
 //
 // A value that holds one at a List whose element is a collection is refused
-// first ([nestedCollection]). Every other value is then read in its one form,
-// declared or not, and a value [heldForm] refuses is an error too.
+// first ([nestedCollection]). Every other value is then read by [heldForm],
+// declared or not, and a value it refuses is an error too.
 func propsToParamMap(props immutable.Properties, schemaType schema.Type) (map[string]any, error) {
 	raw := props.Clone()
 	for _, key := range slices.Sorted(maps.Keys(raw)) {
@@ -403,7 +401,7 @@ func propsToParamMap(props immutable.Properties, schemaType schema.Type) (map[st
 		c := constraintof.Property(schemaType, key)
 		// A property type Neo4j cannot store is refused before its value is read,
 		// as coerceScalar refuses it, so no element's own fault takes its place.
-		if err := nestedCollection(c); err != nil && !holdsNone(val) {
+		if err := nestedCollection(c); err != nil {
 			return nil, fmt.Errorf("property %q: %w", key, refusal.Mark(ErrUnrepresentable, err))
 		}
 		val, err := heldForm(val, c)
@@ -419,58 +417,36 @@ func propsToParamMap(props immutable.Properties, schemaType schema.Type) (map[st
 	return raw, nil
 }
 
-// errInvalidText refuses a string that is not valid UTF-8. The driver sends a
-// string's bytes unchecked and the server stores U+FFFD for each invalid
-// sequence with no error, so the node would hold another value than the
-// snapshot does, and two strings that differ in invalid bytes alone would be
-// stored as one. A validated string is valid UTF-8, so only a bypass-built
-// snapshot holds such a string.
-var errInvalidText = refusal.New(ErrUnrepresentable, "holds a string that is not valid UTF-8, which the server would store with U+FFFD in place of each invalid sequence")
+// errNoForm refuses a list or a map nested past [maxFormDepth]. Only a snapshot
+// whose values no validator judged holds one.
+var errNoForm = refusal.New(ErrUnrepresentable, "holds a list or a map nested past the depth this adapter writes")
 
-// errNoForm refuses a value that is no scalar, list or string-keyed map: the
-// one form every writer of this module writes ([instance.ScalarOf]). Only a
-// bypass-built snapshot holds one.
-var errNoForm = refusal.New(ErrUnrepresentable, "holds a value that is no scalar, list or string-keyed map, which no writer of this module writes as itself")
-
-// errUnrendered refuses a time.Time or a uuid.UUID at a position whose
-// constraint does not render it: a Timestamp or Date renders a time, a UUID
-// renders a uuid.UUID. Only a bypass-built snapshot holds one.
-var errUnrendered = refusal.New(ErrUnrepresentable, "holds a time or a UUID its constraint does not render, which no writer of this module writes as itself")
-
-// errUnheldNumber refuses a JSON number literal no driver number holds: an
-// integer literal no int64 holds outside a Float position, and a literal no
-// finite float64 holds. The driver would store another number. Only a
-// bypass-built snapshot holds one.
+// errUnheldNumber refuses a json.Number no driver number holds: a literal no
+// finite float64 holds, or an integer literal no int64 holds outside a Float that
+// is nested past the 64 levels the .ys reader normalizes, since nearer the top
+// that reader reads it as a float64, which the driver stores. Only a snapshot
+// whose values no validator judged holds one.
 var errUnheldNumber = refusal.New(ErrUnrepresentable, "holds a json.Number no int64 or finite float64 holds, so the server would store another number")
 
-// formProps rewrites each value of props in its one form ([heldForm]) at the
-// constraint constraintOf returns for its name, and returns the least name
-// whose value is refused, with its fault. A batch of sound rows allocates
-// nothing for the check.
-func formProps(props map[string]any, constraintOf func(string) schema.Constraint) (string, error) {
+// firstRefusedProp returns the least name in props whose value [heldForm] refuses
+// at the constraint constraintOf returns for it, with its fault. A batch of sound
+// rows allocates nothing for the check.
+func firstRefusedProp(props map[string]any, constraintOf func(string) schema.Constraint) (string, error) {
 	var bad string
 	var badErr error
 	for k, v := range props {
-		f, err := heldForm(v, constraintOf(k))
-		if err != nil {
-			if badErr == nil || k < bad {
-				bad, badErr = k, err
-			}
-			continue
+		if _, err := heldForm(v, constraintOf(k)); err != nil && (badErr == nil || k < bad) {
+			bad, badErr = k, err
 		}
-		props[k] = f
 	}
 	return bad, badErr
 }
 
-// heldForm returns v in the one form every writer writes ([instance.ScalarOf]),
-// the driver's own value for each scalar, at c, the constraint v's position
-// declares, or nil. A list and a string-keyed map are read element by element;
-// one nested past [maxFormDepth], as a cycle is, has no form ([errNoForm]). A
-// string or a map's key that is not valid UTF-8, which the driver sends as its
-// bytes, is [errInvalidText]; a time or a UUID c does not render is
-// [errUnrendered]. A uuid.UUID is returned as its text, which the driver sends,
-// and a json.Number as the driver's number ([driverNumber]).
+// heldForm returns v, a value a validator or a document holds, as the driver's
+// own value at c, the constraint v's position declares, or nil. A list and a
+// string-keyed map are read element by element; one nested past [maxFormDepth]
+// is [errNoForm]. A json.Number is returned as the driver's number
+// ([driverNumber]).
 func heldForm(v any, c schema.Constraint) (any, error) {
 	f, _, err := heldFormAt(v, c, 0)
 	return f, err
@@ -487,13 +463,6 @@ func heldFormAt(x any, c schema.Constraint, depth int) (any, bool, error) {
 		return nil, false, errNoForm
 	}
 	switch t := x.(type) {
-	case nil, bool, int64, float64:
-		return x, false, nil
-	case string:
-		if !utf8.ValidString(t) {
-			return nil, false, errInvalidText
-		}
-		return x, false, nil
 	case []any:
 		if t == nil {
 			return nil, true, nil
@@ -522,9 +491,6 @@ func heldFormAt(x any, c schema.Constraint, depth int) (any, bool, error) {
 		}
 		var out map[string]any
 		for k, e := range t {
-			if !utf8.ValidString(k) {
-				return nil, false, errInvalidText
-			}
 			f, changed, err := heldFormAt(e, nil, depth+1)
 			if err != nil {
 				return nil, false, err
@@ -540,33 +506,14 @@ func heldFormAt(x any, c schema.Constraint, depth int) (any, bool, error) {
 			return x, false, nil
 		}
 		return out, true, nil
-	}
-	held, ok := instance.ScalarOf(x)
-	if !ok {
-		return nil, false, errNoForm
-	}
-	switch h := held.(type) {
-	case string:
-		if !utf8.ValidString(h) {
-			return nil, false, errInvalidText
-		}
-	case time.Time:
-		if !renders(c, schema.KindTimestamp, schema.KindDate) {
-			return nil, false, errUnrendered
-		}
-	case uuid.UUID:
-		if !renders(c, schema.KindUUID) {
-			return nil, false, errUnrendered
-		}
-		return h.String(), true, nil
 	case json.Number:
-		n, err := driverNumber(h, c)
+		n, err := driverNumber(t, c)
 		if err != nil {
 			return nil, false, err
 		}
 		return n, true, nil
 	}
-	return held, true, nil
+	return x, false, nil
 }
 
 // driverNumber reads a JSON number literal as the driver's number, as the
@@ -618,7 +565,7 @@ func nestedCollection(c schema.Constraint) error {
 // can carry them. Per-element conversion delegates
 // to [coerceScalar] (the Float width-repair and Date/Timestamp parse rules) or, for
 // Integer elements, to [widenInt64] (every Go int/uint width -> int64, a float
-// refused, mirroring Coerce's Float repair), so the repair rules live in
+// refused, mirroring the Float repair), so the repair rules live in
 // one place; coerceSlice owns only the slice typing. Scalar Integer positions
 // route through the same [widenInt64], so an element and a scalar of that kind
 // cannot disagree.
@@ -736,7 +683,7 @@ func coerceSlice(raw []any, c schema.Constraint) (any, error) {
 // widenInt64 widens a Go integer of any width to int64 for an
 // Integer-constrained position, so a value hand-built with a narrower or
 // unsigned type reaches the driver as a Cypher INTEGER — the same width repair
-// [Coerce] applies for Float, in the other direction.
+// [coerceScalar] applies for Float, in the other direction.
 //
 // A float is never an Integer, whole or not, so it is not widened: the driver
 // would otherwise receive an integer the caller never wrote, and the
@@ -777,25 +724,6 @@ func widenInt64(v any) (int64, bool) {
 	}
 }
 
-// CoerceRelProps returns a copy of props with each property rel declares
-// coerced to the driver-native type its constraint requires, through the same
-// [Coerce] rule the adapter's own write path applies to edge properties once it
-// has read each value in its one form
-// ([github.com/simon-lentz/yammm/instance.ScalarOf]), which CoerceRelProps does
-// not do. A value that holds none is returned as nil, as Coerce returns it,
-// declared or not. props is never mutated and the result shares no top-level
-// storage with it; a zero rel, or one with no declared properties, returns a
-// copy with every other value unchanged, and a nil map returns nil. Keys are processed in sorted order, so
-// when several fail the error names the lexicographically-first failing
-// property on every run.
-//
-// Call this for an edge property map that sits below the one nesting level
-// [CoerceParams] walks — the rel_props map inside a $rows row of a hand-built
-// relationship MERGE — where [ParamTypesForType] cannot reach.
-func CoerceRelProps(props map[string]any, rel schema.Relation) (map[string]any, error) {
-	return coerceRelProps(maps.Clone(props), rel)
-}
-
 // coerceRelProps coerces a relationship property map against the relation's
 // declared property constraints, so typed edge properties (e.g. a Timestamp or
 // Float on an association) reach the driver as native types. A value that holds
@@ -805,21 +733,19 @@ func CoerceRelProps(props map[string]any, rel schema.Relation) (map[string]any, 
 // Edge properties are scalar by language rule: List and Vector types on a
 // relationship are rejected at schema-load (diag.E_LIST_ON_EDGE /
 // diag.E_INVALID_CONSTRAINT, both alias-aware), so a declared edge property's
-// constraint is never a List. A []any value a caller passes to
-// [CoerceRelProps] still reaches coerceValue's list arm, which refuses it
-// against the scalar constraint. The arm is shared rather than special-casing
-// a scalar-only path, so this stays correct if that rule ever changes.
+// constraint is never a List. A []any value still reaches coerceValue's list
+// arm, which refuses it against the scalar constraint.
 //
 // Any other property not declared on rel passes through unchanged, for a zero
 // relation or one with no declared properties too. Properties are processed
 // in sorted key order, so a coercion error names the lexicographically-first
 // failing property on every run (matching [CoerceParams] and [propsToParamMap]).
-// Mutates and returns props; [CoerceRelProps] is the copying entry point.
+// Mutates and returns props.
 func coerceRelProps(props map[string]any, rel schema.Relation) (map[string]any, error) {
 	declares := !rel.IsZero() && rel.HasProperties()
 	for _, k := range slices.Sorted(maps.Keys(props)) {
 		v := props[k]
-		if holdsNone(v) {
+		if instance.IsAbsent(v) {
 			props[k] = nil
 			continue
 		}
@@ -861,11 +787,9 @@ func relConstraint(rel schema.Relation) func(string) schema.Constraint {
 // A MERGE binds the key and SETs the property from two different maps, so a key
 // left raw where its property is coerced makes the two carry different Go types
 // for every transforming kind (Date, Timestamp, Float): the pattern matches no
-// stored node, and each write inserts another duplicate. The key is read in its
-// one form first ([heldForm]); a shape carrying no constraint for the key then
-// passes that form through, which is what a shape that never declared the
-// key's type can honestly do.
-func coerceKey(shape *NodeShape, name string, raw any) (any, error) {
+// stored node, and each write inserts another duplicate. The key is read by
+// [heldForm] first.
+func coerceKey(shape *nodeShape, name string, raw any) (any, error) {
 	c := shape.keyConstraints[name]
 	held, err := heldForm(raw, c)
 	if err != nil {
@@ -881,8 +805,8 @@ func coerceKey(shape *NodeShape, name string, raw any) (any, error) {
 // extractKeyProps extracts the shape's primary key properties from immutable
 // properties, coercing each against its declared constraint. All keys must be
 // present and hold a value: a nil pointer to a string is a nil key.
-func extractKeyProps(props immutable.Properties, shape *NodeShape) (map[string]any, error) {
-	keyNames := shape.PrimaryKeys
+func extractKeyProps(props immutable.Properties, shape *nodeShape) (map[string]any, error) {
+	keyNames := shape.primaryKeys
 	if len(keyNames) == 0 {
 		return nil, errors.New("no primary keys defined")
 	}
@@ -899,7 +823,7 @@ func extractKeyProps(props immutable.Properties, shape *NodeShape) (map[string]a
 			continue
 		}
 		unwrapped := val.Unwrap()
-		if holdsNone(unwrapped) {
+		if instance.IsAbsent(unwrapped) {
 			nilKeys = append(nilKeys, name)
 			continue
 		}

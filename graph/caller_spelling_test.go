@@ -4,12 +4,11 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/simon-lentz/yammm/diag"
-	"github.com/simon-lentz/yammm/location"
-
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/instance"
+	"github.com/simon-lentz/yammm/internal/instancetest"
+	"github.com/simon-lentz/yammm/internal/snapparts"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -20,7 +19,7 @@ const (
 
 // callerSpellingSchema declares a Timestamp-keyed root that composes a part and
 // associates to a Timestamp-keyed peer, so every address the graph receives
-// — a composed parent, an edge endpoint, an unresolved target — has a
+// — an edge endpoint, an unresolved target — has a
 // canonical spelling distinct from the one a caller may hold.
 func callerSpellingSchema(t *testing.T) schema.Schema {
 	t.Helper()
@@ -47,80 +46,20 @@ type Tag {
 	return s
 }
 
-func runInstance(t *testing.T, s schema.Schema, at string, next string) instance.ValidInstance {
+// runInstance validates a Run over s, its key and its NEXT target spelled as given.
+func runInstance(t *testing.T, s schema.Schema, at, next string) instance.ValidInstance {
 	t.Helper()
-	runID := mustTypeID(t, s, "Run")
-	var edges map[string]instance.ValidEdgeData
+	data := map[string]any{"at": at}
 	if next != "" {
-		edges = map[string]instance.ValidEdgeData{"NEXT": instance.NewValidEdgeData([]instance.ValidEdgeTarget{
-			instance.NewValidEdgeTarget(immutable.WrapKey([]any{next}), immutable.WrapProperties(nil)),
-		})}
+		data["next"] = []any{map[string]any{"_target_at": next}}
 	}
-	return instance.NewValidInstance("Run", runID, immutable.WrapKey([]any{at}),
-		immutable.WrapProperties(map[string]any{"at": at}), edges, nil, location.Provenance{})
-}
-
-// TestAddComposed_ParentAddressedByTheCallersSpelling pins that the natural
-// sequence — Add an instance, then AddComposed with that instance's own key
-// string — attaches whatever spelling the caller holds: the graph
-// canonicalizes the parent address it receives, as it canonicalizes the key
-// it installs.
-func TestAddComposed_ParentAddressedByTheCallersSpelling(t *testing.T) {
-	t.Parallel()
-	s := callerSpellingSchema(t)
-	runID := mustTypeID(t, s, "Run")
-	stepID := mustTypeID(t, s, "Step")
-	run := runInstance(t, s, rawInstant, "")
-	step := instance.NewValidInstance("Step", stepID, immutable.WrapKey([]any{"s1"}),
-		immutable.WrapProperties(map[string]any{"n": "s1"}), nil, nil, location.Provenance{})
-
-	for _, spelling := range []string{run.PrimaryKey().String(), graph.FormatKey(canonInstant)} {
-		g := graph.New(s)
-		if r := g.Add(t.Context(), run); !r.OK() {
-			t.Fatalf("add: %s", r)
-		}
-		if r := g.AddComposed(t.Context(), runID, spelling, "STEPS", step); !r.OK() {
-			t.Fatalf("AddComposed by %s: %s", spelling, r)
-		}
-		inst := slices.Collect(g.Snapshot().InstancesOf(runID))[0]
-		if got := len(slices.Collect(inst.Composed("STEPS"))); got != 1 {
-			t.Errorf("AddComposed by %s attached %d children, want 1", spelling, got)
-		}
-	}
-}
-
-// TestAddComposed_RefusedParentKeepsTheCallersSpelling pins that a parent the
-// graph does not hold is reported under the spelling the caller wrote: a
-// refused address addresses nothing, so nothing canonicalizes it.
-func TestAddComposed_RefusedParentKeepsTheCallersSpelling(t *testing.T) {
-	t.Parallel()
-	s := callerSpellingSchema(t)
-	runID := mustTypeID(t, s, "Run")
-	stepID := mustTypeID(t, s, "Step")
-	step := instance.NewValidInstance("Step", stepID, immutable.WrapKey([]any{"s1"}),
-		immutable.WrapProperties(map[string]any{"n": "s1"}), nil, nil, location.Provenance{})
-	g := graph.New(s)
-	r := g.AddComposed(t.Context(), runID, graph.FormatKey(rawInstant), "STEPS", step)
-	if r.OK() {
-		t.Fatal("a parent the graph does not hold attached a child")
-	}
-	found := false
-	for is := range r.Issues() {
-		for _, d := range is.Details() {
-			if d.Key == diag.DetailKeyPrimaryKey && d.Value == graph.FormatKey(rawInstant) {
-				found = true
-			}
-		}
-	}
-	if !found {
-		t.Errorf("the refusal does not carry the caller's spelling: %s", r)
-	}
+	return instancetest.Valid(t, s, "Run", data)
 }
 
 // TestUnresolvedTarget_OneAddressOnEveryPath pins that a forward reference
 // whose target key the caller spelled
 // non-canonically carries the canonical target key whether the record was
-// built through Add or through RebuildSnapshot, so the two entry points
+// built through Add or rebuilt from a document's parts, so the two paths
 // produce one record from one input.
 func TestUnresolvedTarget_OneAddressOnEveryPath(t *testing.T) {
 	t.Parallel()
@@ -137,63 +76,56 @@ func TestUnresolvedTarget_OneAddressOnEveryPath(t *testing.T) {
 		t.Errorf("Add path: unresolved target = %v, want one record at %s", added, want)
 	}
 
-	rebuilt, res := graph.RebuildSnapshot(s, graph.SnapshotParts{
+	rebuilt := rebuild(s, snapparts.Parts{
 		Types: []schema.TypeID{runID},
-		Instances: []graph.InstanceParts{
+		Instances: []snapparts.Instance{
 			{
 				TypeID: runID, PrimaryKey: immutable.WrapKey([]any{"2021-01-01T00:00:00Z"}),
 				Properties: immutable.WrapProperties(map[string]any{"at": "2021-01-01T00:00:00Z"}),
 			},
 		},
-		Unresolved: []graph.UnresolvedParts{{
+		Unresolved: []snapparts.Unresolved{{
 			SourceType: runID, SourceKey: immutable.WrapKey([]any{"2021-01-01T00:00:00Z"}),
 			Relation: "NEXT", TargetKey: immutable.WrapKey([]any{rawInstant}),
 			Reason: "target_missing",
 		}},
 	})
-	if res.HasErrors() {
-		t.Fatalf("RebuildSnapshot: %s", res)
-	}
 	if got := slices.Collect(rebuilt.Unresolved()); len(got) != 1 || got[0].TargetKey() != want {
 		t.Errorf("rebuild path: unresolved target = %v, want one record at %s", got, want)
 	}
 }
 
-// TestRebuildSnapshot_SourceAddressesMoveWithTheInstances pins the two
-// rebuild-path sites a mutation left green: an edge's source key and an
-// unresolved record's source key are canonicalized before the lookup, so a
-// caller's spelling of either resolves against the index step 1 rewrote and
+// TestRebuild_SourceAddressesMoveWithTheInstances pins two rebuild-path sites:
+// an edge's source key and an unresolved record's source key are canonicalized
+// before the lookup, so either spelling resolves against the rewritten index and
 // the record carries the canonical form.
-func TestRebuildSnapshot_SourceAddressesMoveWithTheInstances(t *testing.T) {
+func TestRebuild_SourceAddressesMoveWithTheInstances(t *testing.T) {
 	t.Parallel()
 	s := callerSpellingSchema(t)
 	runID := mustTypeID(t, s, "Run")
 	const other = "2021-01-01T00:00:00Z"
-	parts := func(at string) graph.InstanceParts {
-		return graph.InstanceParts{
+	parts := func(at string) snapparts.Instance {
+		return snapparts.Instance{
 			TypeID: runID, PrimaryKey: immutable.WrapKey([]any{at}),
 			Properties: immutable.WrapProperties(map[string]any{"at": at}),
 		}
 	}
-	snap, res := graph.RebuildSnapshot(s, graph.SnapshotParts{
+	snap := rebuild(s, snapparts.Parts{
 		Types: []schema.TypeID{runID},
-		Instances: []graph.InstanceParts{
+		Instances: []snapparts.Instance{
 			parts(rawInstant),
 			parts(other),
 		},
-		Edges: []graph.EdgeParts{{
+		Edges: []snapparts.Edge{{
 			SourceType: runID, SourceKey: immutable.WrapKey([]any{rawInstant}),
 			Relation: "NEXT", TargetKey: immutable.WrapKey([]any{other}),
 		}},
-		Unresolved: []graph.UnresolvedParts{{
+		Unresolved: []snapparts.Unresolved{{
 			SourceType: runID, SourceKey: immutable.WrapKey([]any{rawInstant}),
 			Relation: "NEXT", TargetKey: immutable.WrapKey([]any{"2022-01-01T00:00:00Z"}),
 			Reason: "target_missing",
 		}},
 	})
-	if res.HasErrors() {
-		t.Fatalf("RebuildSnapshot: %s", res)
-	}
 	if e := slices.Collect(snap.Edges()); len(e) != 1 || e[0].Source().PrimaryKey().String() != graph.FormatKey(canonInstant) {
 		t.Errorf("edge source = %v, want the canonical instant", e)
 	}

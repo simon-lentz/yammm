@@ -27,7 +27,9 @@
 //     package in the file's directory, every tracked package whose code or
 //     tests import it, and ./docs, which holds the documentation's own tests;
 //     a file in a directory that holds no tracked package, as a file a package
-//     embeds from below it, needs pkgs.
+//     embeds from below it, needs pkgs. ./diag's TestModuleCitesRegisteredCodes
+//     judges a code a comment or a Markdown file cites, so a mutant of a
+//     citation in docs/*.md names ./diag in pkgs: the set leaves it out.
 //
 // A mutant directory that breaks a rule is refused by name before anything is
 // copied, every such mutant in one report, and the run exits 2.

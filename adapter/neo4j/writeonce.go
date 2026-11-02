@@ -34,17 +34,3 @@ func ImmutableKeysFor(t schema.Type) []string {
 	slices.Sort(keys)
 	return slices.Compact(keys)
 }
-
-// derivedImmutableKeys returns a type's @writeOnce keys for the write path.
-//
-// [Adapter.ShapeForSchema] records them on the shape, which every write entry
-// point receives. A nil ImmutableKeys means the
-// shape never computed them (hand-built, or built before the field existed)
-// rather than "this type has none"; only then is the schema type consulted, so
-// the common unannotated type costs no per-node walk.
-func derivedImmutableKeys(shape *NodeShape, schemaType schema.Type) []string {
-	if shape != nil && shape.ImmutableKeys != nil {
-		return shape.ImmutableKeys
-	}
-	return ImmutableKeysFor(schemaType)
-}

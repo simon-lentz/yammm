@@ -4,7 +4,6 @@
 //
 // This package implements the schema layer, which is responsible for:
 //   - Loading and parsing schema definitions from *.yammm files
-//   - Building schemas programmatically using the [Builder] API
 //   - Providing an immutable, thread-safe schema representation
 //   - Supporting cross-schema imports and inheritance
 //
@@ -59,29 +58,10 @@
 //
 // Load functions accept [LoadOption] values to configure behavior, among them:
 //
-//   - [WithRegistry]: schema registry for cross-schema type resolution
 //   - [WithModuleRoot]: root directory for module-style imports
-//   - [WithSourcesOnly]: resolve imports only against the in-memory sources and
-//     the schemas a shared registry already holds
+//   - [WithSourcesOnly]: resolve imports only against the in-memory sources
 //   - [WithSyntheticRoot]: synthetic identities for in-memory sources
-//   - [WithIssueLimit]: maximum diagnostic issues to collect (default 100)
 //   - [WithImportsAllowed]: with false, refuse import declarations
-//   - [WithLogger]: structured logger for the load's progress; diagnostics go to the result
-//
-// # Builder API
-//
-// [NewBuilder] provides programmatic schema construction:
-//
-//	s, result := schema.NewBuilder().
-//	    WithName("People").
-//	    AddType("Person").
-//	        WithPrimaryKey("id", schema.NewUUIDConstraint()).
-//	        WithProperty("name", schema.StringLenBetween(1, 100)).
-//	        WithOptionalProperty("age", schema.IntegerBetween(0, 150)).
-//	        Done().
-//	    Build()
-//
-// The builder completes and seals the schema when [Builder.Build] is called.
 //
 // # Constraint System
 //
@@ -96,41 +76,6 @@
 // and unbounded variants (e.g., [NewStringConstraint], [StringLenBetween]); the
 // other kinds take no bounds. Use [ResolveAlias] to
 // unwrap alias chains.
-//
-// # Registry
-//
-// [Registry] provides thread-safe, append-only storage for cross-schema type
-// resolution. Register schemas after loading and pass the registry to
-// subsequent [Load] calls via [WithRegistry]:
-//
-//	reg := schema.NewRegistry()
-//	reg.Register(baseSchema)
-//	s, result := schema.Load(ctx, "derived.yammm", schema.WithRegistry(reg))
-//
-// # Shared-Registry Semantics
-//
-// Passing the same *Registry to multiple Load calls in one process is safe
-// and efficient (since v0.3.0). Coordinated behaviors make shared-Registry
-// usage first-class, among them:
-//
-//   - [Registry.Register] is idempotent for exact-match: registering the same
-//     SourceID twice with the same bytes for every source both carry, the
-//     same [StructuralHash], and sources on both schemas or on neither is a no-op. The bytes decide first, since the
-//     hash excludes annotations and documentation: changed bytes under one
-//     SourceID are an error naming the change, and matching bytes with
-//     divergent hashes an error reporting both hashes.
-//   - loadImport short-circuits cross-Load via the shared Registry: when an
-//     import's SourceID is already registered, the loader skips the parse,
-//     compile, and re-register pipeline and reuses the existing Schema,
-//     unless the source is still loading, which is an import cycle, or the
-//     registered closure conflicts with the load's. Either fails the import.
-//     This is where cross-pipeline schema-caching actually pays off — the
-//     idempotence contract alone only makes the final re-register a no-op
-//     after an unnecessary parse has already happened.
-//
-// The default Load behavior (fresh Registry per call when WithRegistry is
-// absent) is unchanged. See [WithRegistry] for the top-level-reparse
-// asymmetry note and the SourceID-discipline caveat.
 //
 // # Structural Hash
 //
@@ -168,7 +113,7 @@
 //
 // # Immutability
 //
-// A loaded or built schema is immutable, and so is every value it hands out
+// A loaded schema is immutable, and so is every value it hands out
 // save two it shares with the caller: the expression [Invariant.Expression]
 // returns and each pattern in the slice [PatternConstraint.CompiledPatterns]
 // returns. A caller must not change either, nor call [regexp.Regexp.Longest] on
@@ -178,39 +123,35 @@
 //   - Safe sharing across goroutines
 //
 // An accessor over records, or over the references that name them, returns an
-// iterator, and an accessor over plain values returns a fresh slice. A [Registry]
-// and the builders change through their own methods.
+// iterator, and an accessor over plain values returns a fresh slice.
 //
 // # Completion and Sealing
 //
 // Schemas undergo a completion phase that resolves their references and checks
 // what they declare, among its steps:
-//   - Import declarations record their targets' SourceIDs; the loader and
-//     [Builder] set each target schema
+//   - Import declarations record their targets' SourceIDs; the loader sets each
+//     target schema
 //   - Type inheritance is computed ([Type.SuperTypes])
 //   - Relation targets are resolved
 //   - Property collisions are detected across the inheritance hierarchy
 //   - Alias constraints are resolved to their underlying types
 //
 // After completion, schemas are sealed to prevent further mutation. The
-// [Load] family handles completion automatically. The [NewBuilder] API
-// completes the schema when [Builder.Build] is called.
+// [Load] family handles completion automatically.
 //
 // # Type Identity
 //
 // Types are identified by [TypeID], a tuple of (SourceID, name). This enables
 // cross-schema type resolution and proper handling of imported types.
-// Under a non-zero SourceID, two handles name one type if and only if their
-// TypeIDs are equal. A Builder schema with no SourceID gives one TypeID to every
-// type of one name. == on two [Type] handles compares records, so two compiles of
-// one source differ under it, and a load that reuses a compile holds that compile's
-// records.
+// Within one load, two handles name one type if and only if their TypeIDs are
+// equal, because a load holds one compile of each source. == on two [Type] handles
+// compares records, and a graph judges a record by the schema object, so two loads
+// of one source give equal TypeIDs and different records.
 //
 // # Thread Safety
 //
-// A loaded or built schema is safe for concurrent reads while no caller changes
-// one of the two values the Immutability section names as shared. [Registry] is
-// safe for concurrent use (read-write).
+// A loaded schema is safe for concurrent reads while no caller changes one of the
+// two values the Immutability section names as shared.
 //
 // # Dependencies
 //

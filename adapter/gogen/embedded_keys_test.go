@@ -156,7 +156,7 @@ func TestMarshal_SymlinkedImportDirKeysByImportText(t *testing.T) {
 
 // TestMarshal_SourceImportedByTwoPathsIsRefused pins the refusal of one source
 // two import paths reach under two keys: a store holding both keys fails to
-// re-load, since the loader refuses one schema name registered twice.
+// re-load, since the loader refuses one schema name declared twice.
 func TestMarshal_SourceImportedByTwoPathsIsRefused(t *testing.T) {
 	root := t.TempDir()
 	writeTree(t, root, map[string]string{

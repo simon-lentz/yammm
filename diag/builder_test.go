@@ -25,7 +25,7 @@ func TestNewIssue(t *testing.T) {
 }
 
 func TestIssueBuilder_WithSpan(t *testing.T) {
-	source := location.MustNewSourceID("test://schema.yammm")
+	source := location.NewSourceID("test://schema.yammm")
 	span := location.Point(source, 10, 5)
 
 	issue := NewIssue(Error, E_SYNTAX, "test").
@@ -64,7 +64,7 @@ func TestIssueBuilder_WithHint(t *testing.T) {
 }
 
 func TestIssueBuilder_WithRelated(t *testing.T) {
-	source := location.MustNewSourceID("test://schema.yammm")
+	source := location.NewSourceID("test://schema.yammm")
 	related1 := location.RelatedInfo{
 		Span:    location.Point(source, 5, 1),
 		Message: "previous definition here",
@@ -92,7 +92,7 @@ func TestIssueBuilder_WithRelated(t *testing.T) {
 }
 
 func TestIssueBuilder_WithRelated_Variadic(t *testing.T) {
-	source := location.MustNewSourceID("test://schema.yammm")
+	source := location.NewSourceID("test://schema.yammm")
 	related := []location.RelatedInfo{
 		{Span: location.Point(source, 5, 1), Message: "first"},
 		{Span: location.Point(source, 10, 1), Message: "second"},
@@ -175,7 +175,7 @@ func TestIssueBuilder_WithExpectedGot(t *testing.T) {
 }
 
 func TestIssueBuilder_FluentChaining(t *testing.T) {
-	source := location.MustNewSourceID("test://schema.yammm")
+	source := location.NewSourceID("test://schema.yammm")
 	span := location.Point(source, 10, 5)
 	related := location.RelatedInfo{
 		Span:    location.Point(source, 5, 1),
@@ -208,7 +208,7 @@ func TestIssueBuilder_FluentChaining(t *testing.T) {
 }
 
 func TestIssueBuilder_BuildImmutability(t *testing.T) {
-	source := location.MustNewSourceID("test://schema.yammm")
+	source := location.NewSourceID("test://schema.yammm")
 
 	builder := NewIssue(Error, E_DUPLICATE_TYPE, "test").
 		WithRelated(location.RelatedInfo{
@@ -249,7 +249,7 @@ func TestIssueBuilder_BuildImmutability(t *testing.T) {
 }
 
 func TestIssueBuilder_BuildDeepCopy(t *testing.T) {
-	source := location.MustNewSourceID("test://schema.yammm")
+	source := location.NewSourceID("test://schema.yammm")
 
 	// Create builder with slices
 	builder := NewIssue(Error, E_DUPLICATE_TYPE, "test").

@@ -39,7 +39,7 @@ func TestSourceID_Rel(t *testing.T) {
 		})
 	}
 	for name, id := range map[string]SourceID{
-		"a synthetic source": MustNewSourceID("embedded://app/a.yammm"),
+		"a synthetic source": NewSourceID("embedded://app/a.yammm"),
 		"a zero source":      {},
 	} {
 		if got, ok := id.Rel(CanonicalPath{path: "/r"}); ok {

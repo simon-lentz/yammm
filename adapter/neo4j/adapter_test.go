@@ -20,7 +20,7 @@ func TestAdapter_ShapesUnaffectedByEdition(t *testing.T) {
 	if err := result.Err(); err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := shape.Types[typeID(t, s, "Entity")]; !ok {
+	if _, ok := shape.types[typeID(t, s, "Entity")]; !ok {
 		t.Error("shapes should be unaffected by edition")
 	}
 }
@@ -70,8 +70,8 @@ func TestAdapter_LabelOptionConsistency(t *testing.T) {
 			if err := result.Err(); err != nil {
 				t.Fatal(err)
 			}
-			if ns, ok := shape.Types[typeID(t, s, "Entity")]; !ok || ns.Label != tc.wantLabel {
-				t.Errorf("shape label = %q; want %q", shape.Types[typeID(t, s, "Entity")].Label, tc.wantLabel)
+			if ns, ok := shape.types[typeID(t, s, "Entity")]; !ok || ns.label != tc.wantLabel {
+				t.Errorf("shape label = %q; want %q", shape.types[typeID(t, s, "Entity")].label, tc.wantLabel)
 			}
 
 			graphResult := buildGraphResult(t, s, v, map[string][]map[string]any{
@@ -134,13 +134,13 @@ func TestAdapter_LabelConsistency(t *testing.T) {
 		directLabel := a.Label(ctx, s.Name(), typeName)
 
 		// 2. Shape label.
-		ns, ok := shape.Types[t2.ID()]
+		ns, ok := shape.types[t2.ID()]
 		if !ok {
 			t.Errorf("type %q missing from shape", typeName)
 			continue
 		}
-		if ns.Label != directLabel {
-			t.Errorf("type %q: shape.Label=%q != Label()=%q", typeName, ns.Label, directLabel)
+		if ns.label != directLabel {
+			t.Errorf("type %q: shape.Label=%q != Label()=%q", typeName, ns.label, directLabel)
 		}
 
 		// 3. Constraint label.

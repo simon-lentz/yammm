@@ -20,21 +20,11 @@ type CanonicalPath struct {
 // for p: absolute, clean, symlink-resolved and spelled on disk, then NFC with
 // forward slashes. It fails where ResolveHostPath does.
 func NewCanonicalPath(p string) (CanonicalPath, error) {
-	host, err := resolveHostPath(p, false)
+	host, err := ResolveHostPath(p)
 	if err != nil {
 		return CanonicalPath{}, fmt.Errorf("canonicalize path %q: %w", p, err)
 	}
 	return identityOf(host), nil
-}
-
-// MustCanonicalPath is like NewCanonicalPath but panics on error.
-// Use only in initialization code where the path is known to be valid.
-func MustCanonicalPath(p string) CanonicalPath {
-	cp, err := NewCanonicalPath(p)
-	if err != nil {
-		panic("location.MustCanonicalPath: " + err.Error())
-	}
-	return cp
 }
 
 // String returns the canonical path string.

@@ -51,21 +51,6 @@ func TestBuildBatchNodeMergeQuery_ImmutableKeys_Golden(t *testing.T) {
 // design intent.
 // -----------------------------------------------------------------------------
 
-func TestBuildRelationshipMergeQuery_ReturnSuffix(t *testing.T) {
-	t.Parallel()
-	for _, hasProps := range []bool{false, true} {
-		got := buildRelationshipMergeQuery(
-			"A", []string{"x"},
-			"KNOWS",
-			"B", []string{"y"},
-			hasProps,
-		)
-		if !strings.HasSuffix(got, returnCountSuffix) {
-			t.Errorf("hasProps=%t: expected suffix %q, got %q", hasProps, returnCountSuffix, got)
-		}
-	}
-}
-
 func TestBuildBatchRelationshipMergeQuery_ReturnSuffix(t *testing.T) {
 	t.Parallel()
 	for _, hasProps := range []bool{false, true} {
@@ -78,44 +63,6 @@ func TestBuildBatchRelationshipMergeQuery_ReturnSuffix(t *testing.T) {
 		if !strings.HasSuffix(got, returnCountSuffix) {
 			t.Errorf("hasProps=%t: expected suffix %q, got %q", hasProps, returnCountSuffix, got)
 		}
-	}
-}
-
-func TestBuildRelationshipMergeQuery_NoProps_Golden(t *testing.T) {
-	t.Parallel()
-	got := buildRelationshipMergeQuery(
-		"A", []string{"x"},
-		"KNOWS",
-		"B", []string{"y"},
-		false,
-	)
-	want := "MATCH (from:A {x: $from_key_x})\n" +
-		"MATCH (to:B {y: $to_key_y})\n" +
-		"MERGE (from)-[r:KNOWS]->(to)\n" +
-		"RETURN count(*) AS matched_rows"
-	if got != want {
-		t.Errorf("shape mismatch\n got: %q\nwant: %q", got, want)
-	}
-	if strings.Contains(got, "SET r +=") {
-		t.Errorf("hasProps=false must not emit SET r += clause: %q", got)
-	}
-}
-
-func TestBuildRelationshipMergeQuery_WithProps_Golden(t *testing.T) {
-	t.Parallel()
-	got := buildRelationshipMergeQuery(
-		"A", []string{"x"},
-		"KNOWS",
-		"B", []string{"y"},
-		true,
-	)
-	want := "MATCH (from:A {x: $from_key_x})\n" +
-		"MATCH (to:B {y: $to_key_y})\n" +
-		"MERGE (from)-[r:KNOWS]->(to)\n" +
-		"SET r += $rel_props\n" +
-		"RETURN count(*) AS matched_rows"
-	if got != want {
-		t.Errorf("shape mismatch\n got: %q\nwant: %q", got, want)
 	}
 }
 
@@ -179,23 +126,6 @@ func TestBuildBatchNodeMergeQuery_CompositeKeys(t *testing.T) {
 	want := "UNWIND $rows AS row\n" +
 		"MERGE (n:X {a: row.key_a, b: row.key_b, c: row.key_c})\n" +
 		"SET n += row.props"
-	if got != want {
-		t.Errorf("composite keys mismatch\n got: %q\nwant: %q", got, want)
-	}
-}
-
-func TestBuildRelationshipMergeQuery_CompositeKeys(t *testing.T) {
-	t.Parallel()
-	got := buildRelationshipMergeQuery(
-		"Src", []string{"a", "b"},
-		"REL",
-		"Tgt", []string{"x", "y"},
-		false,
-	)
-	want := "MATCH (from:Src {a: $from_key_a, b: $from_key_b})\n" +
-		"MATCH (to:Tgt {x: $to_key_x, y: $to_key_y})\n" +
-		"MERGE (from)-[r:REL]->(to)\n" +
-		"RETURN count(*) AS matched_rows"
 	if got != want {
 		t.Errorf("composite keys mismatch\n got: %q\nwant: %q", got, want)
 	}

@@ -10,7 +10,6 @@ import (
 
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/internal/yammmtest"
-	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -95,65 +94,21 @@ func TestLoad_AnInvariantOverAnUnknownTargetDrawsOnlyTheRootCause(t *testing.T) 
 	}
 }
 
-// The part type's ancestor is reached only through a member no source imports, so its
-// schema is not in the load's own table.
 func TestLoad_APartInheritsAnAssociationThroughAnAncestorItNeverImports(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
-	reg := schema.NewRegistry()
+	key := filepath.Join(dir, "x.yammm")
 	sources := map[string][]byte{
 		filepath.Join(dir, "c.yammm"): []byte("schema \"c\"\n\nabstract type C {\n\textra String\n}\n"),
 		filepath.Join(dir, "b.yammm"): []byte("schema \"b\"\n\nimport \"./c\" as c\n\ntype W {\n\tid String primary\n}\n\nabstract type B extends c.C {\n\t--> TO_W (one) W\n}\n"),
+		key:                           []byte("schema \"x\"\n\nimport \"./b\" as b\n\npart type X extends b.B {\n\tmine String\n}\n"),
 	}
-	if _, res := schema.LoadSourcesWithEntry(t.Context(), sources, filepath.Join(dir, "b.yammm"), dir, schema.WithRegistry(reg)); res.HasErrors() {
-		t.Fatal(res)
-	}
-	key := filepath.Join(dir, "x.yammm")
-	x := map[string][]byte{key: []byte("schema \"x\"\n\nimport \"./b\" as b\n\npart type X extends b.B {\n\tmine String\n}\n")}
-	_, res := schema.LoadSourcesWithEntry(t.Context(), x, key, dir, schema.WithRegistry(reg), schema.WithSourcesOnly(true))
+	_, res := schema.LoadSourcesWithEntry(t.Context(), sources, key, dir, schema.WithSourcesOnly(true))
 	var codes []string
 	for issue := range res.Issues() {
 		codes = append(codes, issue.Code().String())
 	}
 	yammmtest.Diff(t, []string{diag.E_INVALID_ASSOCIATION_TARGET.String()}, codes)
-}
-
-func TestBuilder_TwoImportsThatShareASourcelessMemberBuild(t *testing.T) {
-	t.Parallel()
-	dir := t.TempDir()
-	memberID := location.MustSourceIDFromPath(filepath.Join(dir, "m.yammm"))
-	member, res := schema.NewBuilder().WithName("m").WithSourceID(memberID).
-		AddType("M").WithPrimaryKey("id", schema.NewStringConstraint()).Done().Build()
-	if res.HasErrors() {
-		t.Fatal(res)
-	}
-	building := schema.NewRegistry()
-	if err := building.Register(member); err != nil {
-		t.Fatal(err)
-	}
-	shared := schema.NewRegistry()
-	ids := map[string]location.SourceID{}
-	for _, name := range []string{"r1", "r2"} {
-		ids[name] = location.MustSourceIDFromPath(filepath.Join(dir, name+".yammm"))
-		route, res := schema.NewBuilder().WithName(name).WithSourceID(ids[name]).WithRegistry(building).
-			WithImportResolver(func(p string) (location.SourceID, bool) { return memberID, p == "./m" }).
-			AddImport("./m", "m").AddType(strings.ToUpper(name)).WithPrimaryKey("id", schema.NewStringConstraint()).Done().Build()
-		if res.HasErrors() {
-			t.Fatal(res)
-		}
-		if err := shared.Register(route); err != nil {
-			t.Fatal(err)
-		}
-	}
-	top, res := schema.NewBuilder().WithName("top").WithSourceID(location.MustNewSourceID("test://top.yammm")).WithRegistry(shared).
-		WithImportResolver(func(p string) (location.SourceID, bool) {
-			id, ok := ids[strings.TrimPrefix(p, "./")]
-			return id, ok
-		}).
-		AddImport("./r1", "a").AddImport("./r2", "b").AddType("K").WithPrimaryKey("id", schema.NewStringConstraint()).Done().Build()
-	if res.HasErrors() || top.IsZero() {
-		t.Errorf("Build = %v", res)
-	}
 }
 
 // A walk that visits a shared import once per route takes 2^depth steps, so at this
@@ -180,20 +135,10 @@ func deepDiamond(dir string) map[string][]byte {
 func TestDeepDiamond_EveryWalkVisitsAMemberOnce(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
-	reg := schema.NewRegistry()
-	top, res := schema.LoadSourcesWithEntry(t.Context(), deepDiamond(dir), filepath.Join(dir, "a0.yammm"), dir, schema.WithRegistry(reg))
-	if res.HasErrors() {
-		t.Fatal(res)
-	}
-	built, res := schema.NewBuilder().WithName("dtop").WithSourceID(location.MustNewSourceID("test://dtop.yammm")).WithRegistry(reg).
-		WithImportResolver(func(string) (location.SourceID, bool) { return top.SourceID(), true }).
-		AddImport("./a0", "t").AddType("K").WithPrimaryKey("id", schema.NewStringConstraint()).Done().Build()
-	if res.HasErrors() || built.IsZero() {
-		t.Fatal(res)
-	}
 	key := filepath.Join(dir, "next.yammm")
-	entry := map[string][]byte{key: []byte("schema \"next\"\n\nimport \"./a0\" as t\n\ntype K {\n\tid String primary\n}\n")}
-	if _, res := schema.LoadSourcesWithEntry(t.Context(), entry, key, dir, schema.WithRegistry(reg), schema.WithSourcesOnly(true)); res.HasErrors() {
+	sources := deepDiamond(dir)
+	sources[key] = []byte("schema \"next\"\n\nimport \"./a0\" as t\n\ntype K {\n\tid String primary\n}\n")
+	if _, res := schema.LoadSourcesWithEntry(t.Context(), sources, key, dir, schema.WithSourcesOnly(true)); res.HasErrors() {
 		t.Fatal(res)
 	}
 }

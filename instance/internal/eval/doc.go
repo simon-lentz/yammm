@@ -7,13 +7,13 @@
 // # Scope
 //
 // The [Scope] interface provides variable bindings for expression evaluation.
-// Properties are accessed via the scope's Lookup method, and variables can
-// be bound using WithVar.
+// A bare property name reads through the scope's LookupFold method, a $ variable
+// reads through its Lookup method, and WithVar binds a variable.
 //
-//	scope := eval.PropertyScopeFromMap(map[string]any{
+//	scope := eval.PropertyScopeOf(immutable.WrapMap(map[string]any{
 //	    "name": "Alice",
 //	    "age":  30,
-//	})
+//	}))
 //	result, err := evaluator.Evaluate(ctx, expr, scope)
 //
 // # Evaluator
@@ -42,14 +42,6 @@
 //   - Control flow: Then, Lest, With
 //   - Pattern matching: Match
 //   - Utility: TypeOf, IsNil, Default, Coalesce
-//
-// # Configuration
-//
-// The evaluator accepts minimal configuration via [NewEvaluator] options.
-// Currently only [WithLogger] is available for debug observability. The
-// evaluator's behavior is primarily determined by the schema's expression
-// definitions rather than runtime configuration. Future options may include
-// custom function registration or error recovery strategies.
 //
 // # Thread Safety
 //

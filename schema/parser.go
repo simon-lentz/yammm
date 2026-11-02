@@ -60,10 +60,10 @@ func (p *schemaParser) Parse(source []byte) *model {
 	return m
 }
 
-// importDecl resolves an import's alias and returns nil for a reserved one,
-// dropping the declaration. The parser records only an alias the source wrote,
-// because deriving one from the path is a loading decision; the reserved-word
-// refusal belongs with it for the same reason.
+// importDecl resolves an import's alias and returns nil when the path derives a
+// reserved one, dropping the declaration. The parser records only an alias the
+// source wrote, and its grammar refuses a reserved word there. Deriving one from
+// the path is a loading decision, so its refusal belongs here.
 func (p *schemaParser) importDecl(imp *parse.Import) *importDecl {
 	alias := imp.Alias
 	if !imp.HasAlias {
@@ -72,12 +72,12 @@ func (p *schemaParser) importDecl(imp *parse.Import) *importDecl {
 			return &importDecl{PathRefused: true, Span: imp.Span}
 		}
 		alias = deriveAliasFromPath(imp.Path)
-	}
-	if isReservedKeyword(alias) {
-		p.collector.Collect(diag.NewIssue(diag.Error, diag.E_INVALID_ALIAS,
-			fmt.Sprintf("import alias %q is a reserved keyword; use 'as <alias>' to choose another", alias)).
-			WithSpan(imp.Span).Build())
-		return nil
+		if parse.IsReserved(alias) {
+			p.collector.Collect(diag.NewIssue(diag.Error, diag.E_INVALID_ALIAS,
+				fmt.Sprintf("import alias %q is a reserved keyword; use 'as <alias>' to choose another", alias)).
+				WithSpan(imp.Span).Build())
+			return nil
+		}
 	}
 	return &importDecl{Path: imp.Path, PathRefused: imp.PathRefused, PathRaw: imp.PathRaw, Alias: alias, Span: imp.Span}
 }

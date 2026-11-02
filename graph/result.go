@@ -14,20 +14,17 @@ import (
 // Values reports that the snapshot holds at least one instance and that
 // every root and composed child entered through the validator — an empty
 // built snapshot attests false, so a vacuous truth cannot be re-marshalled as
-// its attestation. Rejected duplicates' payloads are outside the claim; a
-// payload [Graph.AddOrMerge] merged is inside it when the merge installs a
-// record, and outside it when the merge installs nothing.
+// its attestation. Rejected duplicates' payloads are outside the claim.
 // Associations reports that no unresolved record is Required.
 //
 // On a built snapshot both dimensions are computed. On a loaded snapshot
-// they carry the header's claim verbatim. Nothing protects the claim: the
-// integrity hash stops no deliberate change, and [RebuildSnapshot] accepts
-// caller-assembled parts. The snapshot package's re-validation
-// load option is the reader's remedy when a claim is not enough.
+// they carry the header's claim verbatim. Nothing protects the claim: anyone
+// can recompute the integrity hash, so it stops no deliberate change. The
+// snapshot package's re-validation load option is the reader's remedy when a
+// claim is not enough.
 //
 // A snapshot may carry NO claim, which [Snapshot.Attestation] reports as nil.
-// A v4 document that omits the attestation carries none, as do parts built with
-// a nil one, and silence
+// A v4 document that omits the attestation carries none, and silence
 // is not the same statement as a claim that both dimensions are false — the
 // absence is represented as absence so it cannot be read as the stronger
 // negative one.
@@ -47,25 +44,24 @@ type Attestation struct {
 // Types are identified by [schema.TypeID], never by name; see the package doc
 // for why, and [schema.TagForm] for rendering one as a name.
 //
-// Every collection accessor produces deterministically sorted output,
-// independent of Add() call order or concurrency ([Snapshot.EdgesFrom] in
-// [Snapshot.Edges]' order), and every ordering below
+// Every collection accessor produces deterministically sorted output
+// ([Snapshot.EdgesFrom] in [Snapshot.Edges]' order), Add() call order and
+// concurrency move only records that tie in every arm, and every ordering below
 // compares types by TypeID so two types rendering one name still sort apart:
 //   - [Snapshot.Types]: lexicographic by the TypeID's String
 //   - [Snapshot.InstancesOf]: lexicographic by primary key string
 //   - [Snapshot.Edges]: (sourceType, sourceKey, relation, targetType,
 //     targetKey, edge properties)
-//   - [Snapshot.Duplicates]: (type, primaryKey, relation, conflictType,
-//     conflictKey, parent slot, instance properties, instance provenance)
+//   - [Snapshot.Duplicates]: (type, primaryKey, instance properties,
+//     instance provenance)
 //   - [Snapshot.Unresolved]: (sourceType, sourceKey, relation, targetType,
 //     targetKey, reason, required, edge properties)
 //
-// Every arm of each tuple is compared. A properties arm compares a rendering that
-// writes each value as %T|%#v, and a provenance arm a rendering of its source name
-// and span start, so records those renderings make equal tie in that arm. Among
-// the ties are float64(1) and int64(1) inside a list or map, a zero and an empty
-// Properties, a [time.Time] at one wall clock under two unnamed zones, and two
-// non-zero provenance values that differ only elsewhere.
+// Each sort compares every arm its tuple names. A properties arm compares a rendering that
+// writes each value as %T|%#v, so records that rendering makes equal tie in that arm.
+// A provenance arm compares the source name, the path a document writes, and the
+// span. Among the ties are float64(1) and int64(1) inside a list or map, and a
+// zero and an empty Properties.
 //
 // No instance map is exposed, so there is no iteration order to be surprised
 // by: [Snapshot.AllInstances] yields every root instance in the order above,
@@ -133,7 +129,8 @@ func (r Snapshot) Schema() schema.Schema {
 }
 
 // Types returns every type the snapshot denotes, ordered by TypeID: each
-// root's type, and each type [SnapshotParts.Types] named with no instance.
+// root's type, and each type a document holds an instances group for with no
+// item. A types table row with no such group denotes no type.
 // Every one can hold a root under the package doc's "Root type eligibility",
 // so [schema.AddressableTag] accepts it; a composed child's type is a part
 // type and is never denoted, so walk [Instance.ComposedRelations] for a
@@ -184,8 +181,7 @@ func (r Snapshot) AllInstances() iter.Seq[Instance] {
 // InstanceByKey looks up a single instance by type identity and primary key.
 //
 // The key is a [FormatKey]-form address. The address is tried as spelled, then
-// canonicalized under the type's key constraints and tried again, as
-// [Graph.AddComposed] resolves the parent address it receives, so one instant at
+// canonicalized under the type's key constraints and tried again, so one instant at
 // two offsets is two addresses. The exact spelling is the common case, so a
 // Timestamp, Date or UUID key is parsed only on a miss. [Instance.PrimaryKey]'s String is the
 // address the instance carries; a string [ParseKey] refuses addresses nothing.
@@ -240,8 +236,8 @@ func (r Snapshot) EdgesFrom(inst Instance) iter.Seq[Edge] {
 
 // Diagnostics returns validation issues from graph construction.
 //
-// This includes the issues of [Graph.Add], [Graph.AddOrMerge] and
-// [Graph.AddComposed] calls, and a [BatchAssembler]'s validator results, its
+// This includes the issues of [Graph.Add] calls, and a [BatchAssembler]'s adds
+// and validator results, its
 // validation failures among them, and zero-instance refusals. A record
 // [BatchAssembler.Add] refuses for its one fault, an [instance.Refused] value,
 // adds none: its producer's result holds its issue. [BatchAssembler.AddValid] of
@@ -282,9 +278,8 @@ func (r Snapshot) Attestation() *Attestation {
 
 // Duplicates returns the [Duplicate] records of rejected instances in sorted order.
 //
-// Duplicates are sorted by the tuple (type, primaryKey, relation,
-// conflictType, conflictKey, parent slot, rejected instance's properties,
-// rejected instance's provenance).
+// Duplicates are sorted by the tuple (type, primaryKey, rejected instance's
+// properties, rejected instance's provenance).
 // It yields nothing if no duplicates were detected.
 func (r Snapshot) Duplicates() iter.Seq[Duplicate] {
 	// One return lets the compiler resolve the closure at the call, so a range over it keeps its variables off the heap.
@@ -313,7 +308,7 @@ func (r Snapshot) Unresolved() iter.Seq[UnresolvedEdge] {
 
 // newSnapshot creates a Snapshot, establishing the ordering its accessors
 // document rather than trusting a caller to have done it. Both constructors —
-// [Graph.Snapshot] and [RebuildSnapshot] — reach the same shape here, so a
+// [Graph.Snapshot] and [rebuildSnapshot] — reach the same shape here, so a
 // third one cannot get it wrong.
 //
 // It takes ownership of every slice it is handed: types, each per-type instance
@@ -321,7 +316,7 @@ func (r Snapshot) Unresolved() iter.Seq[UnresolvedEdge] {
 // re-sliced to drop repeats. Pass slices nothing else holds.
 //
 // Composed children are deliberately untouched: their order is the caller's,
-// and a keyless child's position IS its identity ([InstanceParts]).
+// and a keyless child's position IS its identity.
 func newSnapshot(
 	s schema.Schema,
 	canon *canonicalizer,

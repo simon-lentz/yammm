@@ -2,15 +2,14 @@ package yammm_test
 
 import (
 	"context"
-	"math"
+	"errors"
 	"strings"
 	"testing"
 
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/graph"
-	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/instance"
-	"github.com/simon-lentz/yammm/location"
+	"github.com/simon-lentz/yammm/internal/instancetest"
 	"github.com/simon-lentz/yammm/schema"
 	"github.com/simon-lentz/yammm/snapshot"
 )
@@ -50,7 +49,7 @@ abstract type A {
 // longTypeName is a type name the cut shortens.
 var longTypeName = "L" + strings.Repeat("Z", 100)
 
-// The import doors read a snapshot of pairFrom under pairTo. Both load under
+// NewFromSnapshot reads a snapshot of pairFrom under pairTo. Both load under
 // one source name, so a type both declare has one identity in both.
 var (
 	pairFrom = `schema "pair"
@@ -105,27 +104,17 @@ func TestMessages_RepeatAKeyCutToItsHead(t *testing.T) {
 	if res.HasErrors() {
 		t.Fatal(res)
 	}
-	typeOf := func(s schema.Schema, name string) schema.TypeID {
-		t.Helper()
-		typ, ok := s.Type(name)
-		if !ok {
-			t.Fatalf("schema %s declares no type %s", s.Name(), name)
-		}
-		return typ.ID()
-	}
-	tID, uID, pID, nID, aID := typeOf(s, "T"), typeOf(s, "U"), typeOf(s, "P"), typeOf(s, "N"), typeOf(s, "A")
-	undeclared := schema.NewTypeID(tID.SchemaPath(), "Nope")
 	c := &echoChecker{t: t, judged: map[string]int{}}
 
-	var doors []string
+	var paths []string
 	result := func(where string, r diag.Result) {
 		t.Helper()
-		doors = append(doors, where)
+		paths = append(paths, where)
 		c.result(where, r)
 	}
 	fail := func(where string, err error) {
 		t.Helper()
-		doors = append(doors, where)
+		paths = append(paths, where)
 		c.err(where, err)
 	}
 	shows := func(where, got, want string) {
@@ -145,76 +134,27 @@ func TestMessages_RepeatAKeyCutToItsHead(t *testing.T) {
 	// head is the cut form of a key over one longText component.
 	head := `["` + strings.Repeat("Z", 30) + `… (4100 bytes)`
 
-	k := func(v ...any) immutable.Key { return immutable.WrapKey(v) }
-	p := func(m map[string]any) immutable.Properties { return immutable.WrapProperties(m) }
-	vi := func(name string, id schema.TypeID, key immutable.Key, props map[string]any,
-		edges map[string]instance.ValidEdgeData, composed map[string]immutable.Value,
-	) instance.ValidInstance {
-		return instance.NewValidInstance(name, id, key, p(props), edges, composed, location.Provenance{})
+	valid := func(typeName string, props map[string]any) instance.ValidInstance {
+		t.Helper()
+		return instancetest.Valid(t, s, typeName, props)
 	}
-	to := func(keys ...string) instance.ValidEdgeData {
-		targets := make([]instance.ValidEdgeTarget, len(keys))
-		for i, key := range keys {
-			targets[i] = instance.NewValidEdgeTarget(k(key), p(nil))
+	needs := map[string]any{"_target_id": "u"}
+	assembler := graph.NewBatchAssembler(ctx, s)
+	for _, record := range []instance.ValidInstance{
+		valid("U", map[string]any{"id": "u"}),
+		valid("U", map[string]any{"id": "u2"}),
+		valid("T", map[string]any{"id": longText, "needs": needs, "maybe": map[string]any{"_target_id": "u"}}),
+	} {
+		if err := assembler.AddValid(record); err != nil {
+			t.Fatal(err)
 		}
-		return instance.NewValidEdgeData(targets)
 	}
-	needs := map[string]instance.ValidEdgeData{"NEEDS": to("u")}
-	part := func(key string) instance.ValidInstance {
-		return vi("P", pID, k(key), map[string]any{"pid": key}, nil, nil)
+	_, mergeErr := assembler.AddValidOrMerge(valid("T", map[string]any{"id": longText, "needs": needs, "maybe": map[string]any{"_target_id": "u2"}}))
+	refused, isContextual := errors.AsType[*diag.ContextualError](mergeErr)
+	if !isContextual {
+		t.Fatalf("AddValidOrMerge a second (one) target: %v", mergeErr)
 	}
-	parts := func(children ...instance.ValidInstance) immutable.Value {
-		list := make([]any, len(children))
-		for i, child := range children {
-			list[i] = child
-		}
-		return immutable.Wrap(list)
-	}
-
-	g := graph.New(s)
-	if r := g.Add(ctx, vi("U", uID, k("u"), map[string]any{"id": "u"}, nil, nil)); r.HasErrors() {
-		t.Fatal(r)
-	}
-	if r := g.Add(ctx, vi("U", uID, k("u2"), map[string]any{"id": "u2"}, nil, nil)); r.HasErrors() {
-		t.Fatal(r)
-	}
-	result("Add an undeclared composition", g.Add(ctx, vi("T", tID, k("c1"), map[string]any{"id": "c1"}, needs,
-		map[string]immutable.Value{longText: parts(part("x"))})))
-	result("Add a composed child of a long type name", g.Add(ctx, vi("T", tID, k("c2"), map[string]any{"id": "c2"}, needs,
-		map[string]immutable.Value{"PARTS": parts(vi(longText, pID, k("x"), map[string]any{"pid": "y"}, nil, nil))})))
-	result("Add sibling children at one key", g.Add(ctx, vi("T", tID, k("c3"), map[string]any{"id": "c3"}, needs,
-		map[string]immutable.Value{"PARTS": parts(part(longText), part(longText))})))
-	result("Add an undeclared type", g.Add(ctx, vi(longText, undeclared, k("a"), map[string]any{}, nil, nil)))
-	result("Add a keyless type", g.Add(ctx, vi(longText, nID, k("a"), map[string]any{"x": "a"}, nil, nil)))
-	result("Add a part type", g.Add(ctx, vi(longText, pID, k("a"), map[string]any{"pid": "a"}, nil, nil)))
-	result("Add an abstract type", g.Add(ctx, vi(longText, aID, k("a"), map[string]any{"id": "a"}, nil, nil)))
-	result("Add a key its property disagrees with", g.Add(ctx, vi(longText, tID, k("a"), map[string]any{"id": "b"}, needs, nil)))
-	result("Add a long key its property disagrees with", g.Add(ctx, vi("T", tID, k(longText), map[string]any{"id": longText + "x"}, needs, nil)))
-	undeclaredProperty := g.Add(ctx, vi("T", tID, k("c4"), map[string]any{"id": "c4", "nope": 1}, needs, nil))
-	result("Add an undeclared property", undeclaredProperty)
-	shows("Add an undeclared property", messages(undeclaredProperty), `type "T" declares no property "nope"`)
-
-	if r := g.Add(ctx, vi("T", tID, k("h"), map[string]any{"id": "h"}, needs, nil)); r.HasErrors() {
-		t.Fatal(r)
-	}
-	result("AddComposed an undeclared relation", g.AddComposed(ctx, tID, `["h"]`, longText, part("x")))
-	result("AddComposed a child of a long type name", g.AddComposed(ctx, tID, `["h"]`, "PARTS",
-		vi(longText, pID, k("x"), map[string]any{"pid": "y"}, nil, nil)))
-	if r := g.AddComposed(ctx, tID, `["h"]`, "PARTS", part(longText)); r.HasErrors() {
-		t.Fatal(r)
-	}
-	result("AddComposed a repeated child key", g.AddComposed(ctx, tID, `["h"]`, "PARTS", part(longText)))
-	mistyped := g.AddComposed(ctx, tID, `["h"]`, "PARTS", vi("Nope", undeclared, k("x"), map[string]any{"pid": "x"}, nil, nil))
-	result("AddComposed a child of an undeclared type", mistyped)
-	shows("AddComposed a child of an undeclared type", messages(mistyped), `child type "Nope" does not match relation target "P"`)
-
-	if r := g.Add(ctx, vi("T", tID, k(longText), map[string]any{"id": longText},
-		map[string]instance.ValidEdgeData{"NEEDS": to("u"), "MAYBE": to("u")}, nil)); r.HasErrors() {
-		t.Fatal(r)
-	}
-	_, merged := g.AddOrMerge(ctx, vi("T", tID, k(longText), map[string]any{"id": longText},
-		map[string]instance.ValidEdgeData{"NEEDS": to("u"), "MAYBE": to("u2")}, nil))
-	result("AddOrMerge a second (one) target", merged)
+	result("AddValidOrMerge a second (one) target", refused.Result)
 
 	for _, key := range []string{"[" + longDigits + "e99999]", "null " + longText, `[] "` + longText + `"`} {
 		_, err := graph.ParseKey(key)
@@ -226,103 +166,6 @@ func TestMessages_RepeatAKeyCutToItsHead(t *testing.T) {
 		shows("ParseKey a cut array", err.Error(), `graph: parsing key "[1,": `)
 	}
 
-	ip := func(id schema.TypeID, key string, props map[string]any) graph.InstanceParts {
-		return graph.InstanceParts{TypeID: id, PrimaryKey: k(key), Properties: p(props)}
-	}
-	tp := func(key string) graph.InstanceParts { return ip(tID, key, map[string]any{"id": key}) }
-	u := ip(uID, "u", map[string]any{"id": "u"})
-	needsEdge := func(source string) graph.EdgeParts {
-		return graph.EdgeParts{Relation: "NEEDS", SourceType: tID, SourceKey: k(source), TargetKey: k("u")}
-	}
-	types := []schema.TypeID{tID, uID}
-	rebuild := func(where string, parts graph.SnapshotParts) diag.Result {
-		t.Helper()
-		parts.Types = types
-		_, r := graph.RebuildSnapshot(s, parts)
-		result(where, r)
-		return r
-	}
-	rebuild("RebuildSnapshot an edge from no root", graph.SnapshotParts{
-		Instances: []graph.InstanceParts{u},
-		Edges:     []graph.EdgeParts{needsEdge(longText)},
-	})
-	rebuild("RebuildSnapshot an edge to no root", graph.SnapshotParts{
-		Instances: []graph.InstanceParts{u, tp("t")},
-		Edges: []graph.EdgeParts{needsEdge("t"), {
-			Relation: "LINKS", SourceType: tID, SourceKey: k("t"), TargetKey: k(longText),
-			Properties: p(map[string]any{"w": 1}),
-		}},
-	})
-	composedDuplicate := tp(longText)
-	composedDuplicate.Composed = map[string][]graph.InstanceParts{"PARTS": {ip(pID, "x", map[string]any{"pid": "x"})}}
-	rebuild("RebuildSnapshot a duplicate with children", graph.SnapshotParts{
-		Instances: []graph.InstanceParts{u, tp(longText)},
-		Edges:     []graph.EdgeParts{needsEdge(longText)}, Duplicates: []graph.DuplicateParts{{Instance: composedDuplicate}},
-	})
-	rebuild("RebuildSnapshot a duplicate of no root", graph.SnapshotParts{
-		Instances:  []graph.InstanceParts{u},
-		Duplicates: []graph.DuplicateParts{{Instance: tp(longText)}},
-	})
-	rebuild("RebuildSnapshot a record of no root", graph.SnapshotParts{
-		Instances:  []graph.InstanceParts{u},
-		Unresolved: []graph.UnresolvedParts{{SourceType: tID, SourceKey: k(longText), Relation: "MAYBE", Reason: "target_missing", TargetKey: k("q")}},
-	})
-	unresolvable := rebuild("RebuildSnapshot an edge from an undeclared type", graph.SnapshotParts{
-		Instances: []graph.InstanceParts{u},
-		Edges:     []graph.EdgeParts{{Relation: "NEEDS", SourceType: undeclared, SourceKey: k(longText), TargetKey: k("u")}},
-	})
-	shows("RebuildSnapshot an edge from an undeclared type", messages(unresolvable), "edge source position, key "+head)
-	rebuild("RebuildSnapshot a duplicate under an undeclared relation", graph.SnapshotParts{
-		Instances:  []graph.InstanceParts{u, tp("t")},
-		Edges:      []graph.EdgeParts{needsEdge("t")},
-		Duplicates: []graph.DuplicateParts{{Instance: ip(pID, "x", map[string]any{"pid": "x"}), ParentType: tID, ParentKey: k("t"), Relation: longText}},
-	})
-	wrong := tp(longText)
-	wrong.Composed = map[string][]graph.InstanceParts{"PARTS": {ip(uID, "w", map[string]any{"id": "w"})}}
-	rebuild("RebuildSnapshot a child of another type", graph.SnapshotParts{
-		Instances: []graph.InstanceParts{u, wrong},
-		Edges:     []graph.EdgeParts{needsEdge(longText)},
-	})
-	siblings := tp(longText)
-	siblings.Composed = map[string][]graph.InstanceParts{"PARTS": {ip(pID, longText, map[string]any{"pid": longText}), ip(pID, longText, map[string]any{"pid": longText})}}
-	rebuild("RebuildSnapshot sibling children at one key", graph.SnapshotParts{
-		Instances: []graph.InstanceParts{u, siblings},
-		Edges:     []graph.EdgeParts{needsEdge(longText)},
-	})
-	rebuild("RebuildSnapshot two roots at one key", graph.SnapshotParts{
-		Instances: []graph.InstanceParts{u, tp(longText), tp(longText)},
-		Edges:     []graph.EdgeParts{needsEdge(longText)},
-	})
-	rebuild("RebuildSnapshot a key its property disagrees with", graph.SnapshotParts{Instances: []graph.InstanceParts{u, ip(tID, longText, map[string]any{"id": "other"})}})
-	rebuild("RebuildSnapshot an undeclared property", graph.SnapshotParts{
-		Instances: []graph.InstanceParts{u, ip(tID, longText, map[string]any{"id": longText, longText + "p": 1})},
-		Edges:     []graph.EdgeParts{needsEdge(longText)},
-	})
-	rebuild("RebuildSnapshot an undeclared edge property", graph.SnapshotParts{
-		Instances: []graph.InstanceParts{u, tp("t")},
-		Edges:     []graph.EdgeParts{needsEdge("t"), {Relation: "LINKS", SourceType: tID, SourceKey: k("t"), TargetKey: k("u"), Properties: p(map[string]any{longText: 1})}},
-	})
-	rebuild("RebuildSnapshot an absent record under an optional association", graph.SnapshotParts{
-		Instances:  []graph.InstanceParts{u, tp(longText)},
-		Edges:      []graph.EdgeParts{needsEdge(longText)},
-		Unresolved: []graph.UnresolvedParts{{SourceType: tID, SourceKey: k(longText), Relation: "MAYBE", Reason: "absent"}},
-	})
-	rebuild("RebuildSnapshot an absent record beside an edge", graph.SnapshotParts{
-		Instances:  []graph.InstanceParts{u, tp(longText)},
-		Edges:      []graph.EdgeParts{needsEdge(longText)},
-		Unresolved: []graph.UnresolvedParts{{SourceType: tID, SourceKey: k(longText), Relation: "NEEDS", Reason: "absent"}},
-	})
-	rebuild("RebuildSnapshot a record naming a held target", graph.SnapshotParts{
-		Instances:  []graph.InstanceParts{u, ip(uID, longText, map[string]any{"id": longText}), tp("t")},
-		Edges:      []graph.EdgeParts{needsEdge("t")},
-		Unresolved: []graph.UnresolvedParts{{SourceType: tID, SourceKey: k("t"), Relation: "MAYBE", Reason: "target_missing", TargetKey: k(longText)}},
-	})
-	rebuild("RebuildSnapshot a root with no required record", graph.SnapshotParts{Instances: []graph.InstanceParts{u, tp(longText)}})
-	rebuild("RebuildSnapshot a second (one) edge", graph.SnapshotParts{
-		Instances: []graph.InstanceParts{u, ip(uID, "u2", map[string]any{"id": "u2"}), tp(longText)},
-		Edges:     []graph.EdgeParts{needsEdge(longText), {Relation: "NEEDS", SourceType: tID, SourceKey: k(longText), TargetKey: k("u2")}},
-	})
-
 	from, res := schema.LoadString(ctx, pairFrom, "pair.yammm")
 	if res.HasErrors() {
 		t.Fatal(res)
@@ -331,34 +174,17 @@ func TestMessages_RepeatAKeyCutToItsHead(t *testing.T) {
 	if res.HasErrors() {
 		t.Fatal(res)
 	}
-	fromT, fromL, fromP := typeOf(from, "T"), typeOf(from, longTypeName), typeOf(from, "P")
 	old := graph.New(from)
-	if r := old.Add(ctx, vi(longTypeName, fromL, k("l"), map[string]any{"id": "l"}, nil, nil)); r.HasErrors() {
+	if r := old.Add(ctx, instancetest.Valid(t, from, longTypeName, map[string]any{"id": "l"})); r.HasErrors() {
 		t.Fatal(r)
 	}
-	if r := old.Add(ctx, vi("T", fromT, k("t"), map[string]any{"id": "t"}, map[string]instance.ValidEdgeData{"NEEDS": to("l")},
-		map[string]immutable.Value{"PARTS": parts(vi("P", fromP, k(longText), map[string]any{"pid": longText}, nil, nil))})); r.HasErrors() {
+	if r := old.Add(ctx, instancetest.Valid(t, from, "T", map[string]any{
+		"id": "t", "needs": map[string]any{"_target_id": "l"}, "parts": []any{map[string]any{"pid": longText}},
+	})); r.HasErrors() {
 		t.Fatal(r)
-	}
-	if r := old.AddComposed(ctx, fromT, `["t"]`, "PARTS", vi("P", fromP, k(longText), map[string]any{"pid": longText}, nil, nil)); !r.HasErrors() {
-		t.Fatal("AddComposed accepted a repeated child key")
 	}
 	_, r := graph.NewFromSnapshot(into, old.Snapshot())
 	result("NewFromSnapshot under another schema", r)
-
-	unwritable := graph.New(s)
-	unwritable.Add(ctx, vi("T", tID, k(longText), map[string]any{"id": longText, "f": math.NaN()}, needs, nil))
-	_, r = snapshot.Marshal(ctx, unwritable.Snapshot())
-	result("Marshal an unwritable value", r)
-	chain := part(longText)
-	for range 34 {
-		chain = vi("P", pID, k(longText), map[string]any{"pid": longText}, nil, map[string]immutable.Value{"SUB": parts(chain)})
-	}
-	deep := graph.New(s)
-	deep.Add(ctx, vi("U", uID, k("u"), map[string]any{"id": "u"}, nil, nil))
-	deep.Add(ctx, vi("T", tID, k("d"), map[string]any{"id": "d"}, needs, map[string]immutable.Value{"PARTS": parts(chain)}))
-	_, r = snapshot.Marshal(ctx, deep.Snapshot())
-	result("Marshal a composed chain past the depth bound", r)
 
 	empty, r := snapshot.Marshal(ctx, graph.New(s).Snapshot())
 	if r.HasErrors() {
@@ -421,9 +247,6 @@ func TestMessages_RepeatAKeyCutToItsHead(t *testing.T) {
 		return out + parent + `}`
 	}
 	conflict := func(row, key string) string { return `{"type":` + row + `,"key":["` + key + `"]}` }
-	under := func(parentKey, relation string) string {
-		return `,"parent_type":1,"parent_key":["` + parentKey + `"],"relation":"` + relation + `"`
-	}
 	partInstance := func(key string) string {
 		return `{"key":["` + key + `"],"properties":{"pid":"` + key + `"},"provenance":null}`
 	}
@@ -475,6 +298,12 @@ func TestMessages_RepeatAKeyCutToItsHead(t *testing.T) {
 	load("Load an undeclared property", doc(ts(item(Z, id(Z)+`,"`+Z2+`":1`, needsU, ""))+","+us("u"), "", ""))
 	load("Load an undeclared edge property", doc(ts(item(Z, id(Z), needsU+`,"LINKS":[{"target_type":2,"target_key":["u"],"properties":{"w":1,"`+Z2+`":1}}]`, ""))+","+us("u"), "", ""))
 
+	deep := child("0", Z)
+	for range instance.MaxComposedDepth + 2 {
+		deep = `{"key":["` + Z + `"],"type":0,"properties":{"pid":"` + Z + `"},"composed":{"SUB":[` + deep + `]},"provenance":null}`
+	}
+	load("Load a composed chain past the depth bound", doc(ts(item("t", id("t"), needsU, `"PARTS":[`+deep+`]`))+","+us("u"), "", ""))
+
 	load("Load a duplicate of another type row", doc(ts(root(Z))+","+us("u"),
 		dup("1", Z, `{"key":["`+Z+`"],"type":0,"properties":{"id":"`+Z+`"},"provenance":null}`, conflict("1", Z), ""), ""))
 	load("Load a duplicate whose instance has another key", doc(ts(root(Z))+","+us("u"),
@@ -489,19 +318,8 @@ func TestMessages_RepeatAKeyCutToItsHead(t *testing.T) {
 		dup("1", Z, item(Z, id(Z), "", ""), conflict("1", Z2), ""), ""))
 	load("Load a duplicate of another root", doc(ts(root(Z), root(Z2))+","+us("u"),
 		dup("1", Z, item(Z, id(Z), "", ""), conflict("1", Z2), ""), ""))
-	load("Load a duplicate relation with no parent", doc(ts(root(Z))+","+us("u"),
+	load("Load a duplicate stating a relation", doc(ts(root(Z))+","+us("u"),
 		dup("0", "c", partInstance("c"), conflict("0", "c"), `,"relation":"`+Z+`"`), ""))
-	load("Load a duplicate of no parent", doc(ts(root("t"))+","+us("u"),
-		dup("0", "c", partInstance("c"), conflict("0", "c"), under(Z, "PARTS")), ""))
-	withChild := func(key string) string { return item(Z, id(Z), needsU, `"PARTS":[`+child("0", key)+`]`) }
-	load("Load a duplicate stating no conflict key", doc(ts(withChild("c"))+","+us("u"),
-		dup("0", Z, partInstance(Z), `{"type":0,"key":[]}`, under(Z, "PARTS")), ""))
-	load("Load a duplicate of no child", doc(ts(withChild("c"))+","+us("u"),
-		dup("0", Z2, partInstance(Z2), conflict("0", Z2), under(Z, "PARTS")), ""))
-	load("Load a duplicate of another child", doc(ts(withChild(Z))+","+us("u"),
-		dup("0", Z2, partInstance(Z2), conflict("0", Z), under(Z, "PARTS")), ""))
-	load("Load a duplicate under an undeclared composition", doc(ts(root("t"))+","+us("u"),
-		dup("0", "c", partInstance("c"), conflict("0", "c"), under("t", Z)), ""))
 
 	load("Load a record of no root", doc(ts(root("t"))+","+us("u"), "", record(Z, "MAYBE", `["gone"]`, "target_missing")))
 	load("Load an absent record under an optional association", doc(ts(root(Z))+","+us("u"), "", record(Z, "MAYBE", "null", "absent")))
@@ -523,7 +341,7 @@ func TestMessages_RepeatAKeyCutToItsHead(t *testing.T) {
 	_, r = snapshot.UpdateMetadataOrReMarshal(ctx, []byte(stamped), map[string]string{"k": "v"}, s)
 	result("UpdateMetadataOrReMarshal a long created_at", r)
 
-	for _, where := range doors {
+	for _, where := range paths {
 		if c.judged[where] == 0 {
 			t.Errorf("%s wrote no message to judge", where)
 		}

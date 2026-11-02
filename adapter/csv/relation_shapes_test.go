@@ -6,6 +6,8 @@ import (
 
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/immutable"
+	"github.com/simon-lentz/yammm/internal/snapparts"
+	"github.com/simon-lentz/yammm/internal/snappartstest"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -35,9 +37,9 @@ type Employee extends Staff {
 }
 `
 
-// kinSnapshot rebuilds one Employee and two Companies, with the edges given.
-// graph.RebuildSnapshot reconstructs a document and does not validate one.
-func kinSnapshot(t *testing.T, edges func(employee schema.TypeID) []graph.EdgeParts) (graph.Snapshot, schema.Schema) {
+// kinSnapshot reads a document of one Employee and two Companies, with the edges
+// given.
+func kinSnapshot(t *testing.T, edges func(employee schema.TypeID) []snapparts.Edge) (graph.Snapshot, schema.Schema) {
 	t.Helper()
 	s, res := schema.LoadString(t.Context(), kinSchema, "kin.yammm")
 	if res.HasErrors() {
@@ -45,15 +47,15 @@ func kinSnapshot(t *testing.T, edges func(employee schema.TypeID) []graph.EdgePa
 	}
 	companyT, _ := s.Type("Company")
 	employeeT, _ := s.Type("Employee")
-	company := func(id string, key ...any) graph.InstanceParts {
-		return graph.InstanceParts{
+	company := func(id string, key ...any) snapparts.Instance {
+		return snapparts.Instance{
 			TypeID: companyT.ID(), PrimaryKey: immutable.WrapKey(key),
 			Properties: immutable.WrapProperties(map[string]any{"company_id": id, "region": "eu"}),
 		}
 	}
-	snap, r := graph.RebuildSnapshot(s, graph.SnapshotParts{
+	return snappartstest.Loaded(t, s, snapparts.Parts{
 		Types: []schema.TypeID{companyT.ID(), employeeT.ID()},
-		Instances: []graph.InstanceParts{
+		Instances: []snapparts.Instance{
 			company("c1", "c1", "eu"),
 			company("c2", "c2", "eu"),
 			{
@@ -62,15 +64,11 @@ func kinSnapshot(t *testing.T, edges func(employee schema.TypeID) []graph.EdgePa
 			},
 		},
 		Edges: edges(employeeT.ID()),
-	})
-	if err := r.Err(); err != nil {
-		t.Fatalf("RebuildSnapshot refused the parts, so the case has no subject: %v", err)
-	}
-	return snap, s
+	}), s
 }
 
-func kinEdge(from schema.TypeID, rel string, key ...any) graph.EdgeParts {
-	return graph.EdgeParts{
+func kinEdge(from schema.TypeID, rel string, key ...any) snapparts.Edge {
+	return snapparts.Edge{
 		Relation: rel, SourceType: from, SourceKey: immutable.WrapKey([]any{"e1"}),
 		TargetKey: immutable.WrapKey(key), Properties: immutable.WrapProperties(nil),
 	}
@@ -80,8 +78,8 @@ func kinEdge(from schema.TypeID, rel string, key ...any) graph.EdgeParts {
 // the list separator.
 func TestMarshalSnapshot_InheritedAssociationsOfBothMultiplicitiesAreWritten(t *testing.T) {
 	t.Parallel()
-	snap, s := kinSnapshot(t, func(e schema.TypeID) []graph.EdgeParts {
-		return []graph.EdgeParts{
+	snap, s := kinSnapshot(t, func(e schema.TypeID) []snapparts.Edge {
+		return []snapparts.Edge{
 			kinEdge(e, "WORKS_AT", "c1", "eu"),
 			kinEdge(e, "ADVISES", "c1", "eu"), kinEdge(e, "ADVISES", "c2", "eu"),
 		}

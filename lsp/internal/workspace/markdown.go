@@ -95,18 +95,6 @@ func (w *Workspace) GetMarkdownDocumentSnapshot(uri string) *MarkdownDocumentSna
 	}
 }
 
-// GetMarkdownCurrentText returns the current text of a markdown document.
-func (w *Workspace) GetMarkdownCurrentText(uri string) (string, bool) {
-	w.mu.RLock()
-	defer w.mu.RUnlock()
-
-	md := w.markdownDocs[uri]
-	if md == nil {
-		return "", false
-	}
-	return md.Text, true
-}
-
 // scheduleMarkdownAnalysis schedules a debounced analysis for a markdown document.
 func (w *Workspace) scheduleMarkdownAnalysis(uri string) {
 	w.sched.schedule(uri, w.AnalyzeMarkdownAndPublish)
@@ -114,12 +102,28 @@ func (w *Workspace) scheduleMarkdownAnalysis(uri string) {
 
 // AnalyzeMarkdownAndPublish analyzes a markdown document's code blocks and publishes diagnostics.
 func (w *Workspace) AnalyzeMarkdownAndPublish(analyzeCtx context.Context, uri string) {
+	if run, ok := w.analyzeMarkdown(analyzeCtx, uri); ok {
+		w.publishMarkdownAnalysis(uri, run)
+	}
+}
+
+// markdownAnalysis is one analysis of a markdown document at the version it read.
+type markdownAnalysis struct {
+	entryVersion int
+	blocks       []markdown.CodeBlock
+	snapshots    []*analysis.Snapshot
+}
+
+// analyzeMarkdown analyzes the document's current code blocks. It reports false
+// when the document is not open, its path cannot be resolved or analyzeCtx was
+// cancelled.
+func (w *Workspace) analyzeMarkdown(analyzeCtx context.Context, uri string) (markdownAnalysis, bool) {
 	// Read text and version under lock
 	w.mu.RLock()
 	md := w.markdownDocs[uri]
 	if md == nil {
 		w.mu.RUnlock()
-		return
+		return markdownAnalysis{}, false
 	}
 	text := md.Text
 	entryVersion := md.Version
@@ -136,7 +140,7 @@ func (w *Workspace) AnalyzeMarkdownAndPublish(analyzeCtx context.Context, uri st
 			slog.String("uri", uri),
 			slog.Any("error", fmt.Errorf("%w: %w", lsperr.ErrInvalidURI, err)),
 		)
-		return
+		return markdownAnalysis{}, false
 	}
 	// The file is spelled on disk before a block's identity is built on it, so
 	// that identity equals the overlay key the analyzer files the block under.
@@ -147,7 +151,7 @@ func (w *Workspace) AnalyzeMarkdownAndPublish(analyzeCtx context.Context, uri st
 			slog.String("uri", uri),
 			slog.Any("error", err),
 		)
-		return
+		return markdownAnalysis{}, false
 	}
 
 	validBlocks := make([]markdown.CodeBlock, 0, len(blocks))
@@ -178,7 +182,7 @@ func (w *Workspace) AnalyzeMarkdownAndPublish(analyzeCtx context.Context, uri st
 		overlays := map[string][]byte{
 			virtualPath: []byte(block.Content),
 		}
-		snapshot, err := w.sched.analyzer.Analyze(analyzeCtx, virtualPath, overlays, "", w.PositionEncoding(), schema.WithImportsAllowed(false))
+		snapshot, err := w.sched.analyzer.Analyze(analyzeCtx, virtualPath, overlays, "", schema.WithImportsAllowed(false))
 		if err != nil {
 			w.logger.Warn("markdown block analysis failed",
 				slog.String("uri", uri), slog.Int("block", i), slog.Any("error", err))
@@ -193,17 +197,20 @@ func (w *Workspace) AnalyzeMarkdownAndPublish(analyzeCtx context.Context, uri st
 			slog.String("uri", uri),
 			slog.Any("error", analyzeCtx.Err()),
 		)
-		return
+		return markdownAnalysis{}, false
 	}
+	return markdownAnalysis{entryVersion: entryVersion, blocks: validBlocks, snapshots: snapshots}, true
+}
 
-	if hook := w.analysisCompletedHookFn(); hook != nil {
-		hook(uri)
-	}
+// publishMarkdownAnalysis stores and publishes run unless the document moved
+// past the version run read.
+func (w *Workspace) publishMarkdownAnalysis(uri string, run markdownAnalysis) {
+	validBlocks, snapshots := run.blocks, run.snapshots
 
 	// Version-gate and store results atomically
 	w.mu.Lock()
-	md = w.markdownDocs[uri]
-	if md == nil || md.Version != entryVersion {
+	md := w.markdownDocs[uri]
+	if md == nil || md.Version != run.entryVersion {
 		w.mu.Unlock()
 		w.logger.Debug("skipping stale markdown analysis results", slog.String("uri", uri))
 		return

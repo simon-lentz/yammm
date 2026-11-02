@@ -50,9 +50,6 @@ var (
 	// ErrUnresolvedRequiredComposition indicates a required composition is absent/empty.
 	ErrUnresolvedRequiredComposition = diag.E_UNRESOLVED_REQUIRED_COMPOSITION
 
-	// ErrCompositionNotFound indicates a composition relation was not found on the parent type.
-	ErrCompositionNotFound = diag.E_COMPOSITION_NOT_FOUND
-
 	// ErrCompositionDepthExceeded indicates composed nesting deeper than [MaxComposedDepth].
 	ErrCompositionDepthExceeded = diag.E_COMPOSITION_DEPTH_EXCEEDED
 

@@ -17,9 +17,7 @@ import (
 type adapterConfig struct {
 	delimiter  rune
 	typeColumn string // empty = no type column
-	listSep    string // "" only outside New; the zero delimiter refuses before any list
 	schema     schema.Schema
-	strict     bool // match names exactly, as a strict validator does
 }
 
 // Adapter parses CSV data into RawInstance values and serializes
@@ -38,7 +36,6 @@ type Option func(*adapterConfig)
 func New(opts ...Option) *Adapter {
 	cfg := adapterConfig{
 		delimiter: ',',
-		listSep:   "|",
 	}
 	for _, opt := range opts {
 		opt(&cfg)
@@ -50,9 +47,9 @@ func New(opts ...Option) *Adapter {
 // alike. The default is ','; a TSV file takes '\t', and keeps [encoding/csv]'s
 // quoting. A delimiter [encoding/csv] refuses — 0, '"', '\r', '\n',
 // U+FFFD or an invalid rune — is refused before a parse reads or a write
-// requests a writer, as a refused list separator is: as an Error
-// [E_CSV_CONFIG] diagnostic, or as an error marked [ErrConfig], each naming the
-// delimiter and quoting [encoding/csv]'s refusal text.
+// starts: as an Error [E_CSV_CONFIG] diagnostic, or as an error marked
+// [ErrConfig], each naming the delimiter and quoting [encoding/csv]'s refusal
+// text.
 func WithDelimiter(r rune) Option {
 	return func(c *adapterConfig) {
 		c.delimiter = r
@@ -63,38 +60,10 @@ func WithDelimiter(r rune) Option {
 // in [Adapter.ParseWithTypeColumn]. That method needs a name: with none, or
 // with one holding a CR LF, which [encoding/csv] reads back as LF so that no
 // header holds it, its result carries an Error [E_CSV_CONFIG] and no byte is
-// read. [Adapter.ParseTyped] and the writers do not read the option.
+// read. [Adapter.ParseTyped] and [Adapter.MarshalSnapshot] do not read the option.
 func WithTypeColumn(name string) Option {
 	return func(c *adapterConfig) {
 		c.typeColumn = name
-	}
-}
-
-// WithListSeparator sets the separator for list elements, vector elements
-// and edge-column segments, on the write side and the parse side alike.
-// The default is "|", and an empty separator is ignored, so the separator
-// already set is kept. An element holding any part of the separator splits back unchanged, at
-// every depth of a nested list. A separator that begins
-// with a backslash, the escape character, or holds a CR LF, which
-// [encoding/csv] reads back as LF, is refused before a parse reads or a write
-// requests a writer: as an Error [E_CSV_CONFIG] diagnostic, or as an error
-// marked [ErrConfig].
-func WithListSeparator(sep string) Option {
-	return func(c *adapterConfig) {
-		if sep != "" {
-			c.listSep = sep
-		}
-	}
-}
-
-// WithStrictPropertyNames matches column names exactly, as
-// [instance.WithStrictPropertyNames] makes the validator match keys; the
-// default folds them, as the validator's default does. Give the parser the
-// validator's setting: a column the parser resolves and the validator does not
-// is reported as an unknown field.
-func WithStrictPropertyNames(strict bool) Option {
-	return func(c *adapterConfig) {
-		c.strict = strict
 	}
 }
 
@@ -114,15 +83,11 @@ func WithSchema(s schema.Schema) Option {
 	}
 }
 
-// configError refuses a setting this adapter cannot use, before a parse reads a
-// byte and before a write requests a writer: a list separator the parser could
-// not find again, or a delimiter [encoding/csv] refuses. It carries [ErrConfig];
-// a parse reports the same text under [E_CSV_CONFIG]. A setting is knowable
-// before any input or output, so both sides ask here and nowhere later.
+// configError refuses a delimiter [encoding/csv] refuses, before a parse reads a
+// byte and before a write starts. It carries [ErrConfig]; a parse reports the
+// same text under [E_CSV_CONFIG]. A setting is knowable before any input or
+// output, so both sides ask here and nowhere later.
 func (a *Adapter) configError() error {
-	if err := listSepError(a.config.listSep); err != nil {
-		return err
-	}
 	return delimiterError(a.config.delimiter)
 }
 

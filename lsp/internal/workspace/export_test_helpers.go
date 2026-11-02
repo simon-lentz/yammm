@@ -15,6 +15,17 @@ func (w *Workspace) MarkdownDocumentOpenedForTest(uri string, version int, text 
 	w.markdownDocumentOpened(uri, version, text)
 }
 
+// MarkdownCurrentTextForTest returns the current text of an open markdown document.
+func (w *Workspace) MarkdownCurrentTextForTest(uri string) (string, bool) {
+	w.mu.RLock()
+	defer w.mu.RUnlock()
+	md := w.markdownDocs[uri]
+	if md == nil {
+		return "", false
+	}
+	return md.Text, true
+}
+
 // SetMarkdownBlocksForTest injects blocks and snapshots into an open markdown
 // document's internal state. This exists solely for test code that needs to
 // set up specific block configurations (e.g., nil snapshots) that cannot be

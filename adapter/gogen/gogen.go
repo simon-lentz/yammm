@@ -81,13 +81,8 @@ func mergedInitialisms(extra []string) map[string]bool {
 	return out
 }
 
-// Marshal renders a loaded, resolved schema (and its import closure) as formatted,
-// type-checked Go source. The schema must be completed (aliases resolved,
-// inheritance linearized) AND source-backed — i.e. loaded via schema.Load,
-// schema.LoadString, or schema.LoadSourcesWithEntry. A schema built
-// programmatically via schema.Builder without retained source content has a zero
-// Sources(); Marshal returns an error for it, because the embedded source
-// and its round-trip self-check require the source.
+// Marshal renders a loaded schema (and its import closure) as formatted,
+// type-checked Go source that embeds the sources the load held.
 func Marshal(s schema.Schema, opts ...Option) ([]byte, error) {
 	g, err := newGenerator(s, opts...)
 	if err != nil {

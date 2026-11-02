@@ -26,7 +26,7 @@ func TestCollectOverlays_KeysADocumentByItsHostPath(t *testing.T) {
 	}
 	const text = "schema \"main\"\n"
 
-	d := NewOverlay()
+	d := &Overlay{}
 	d.OpenDocument(yammmtest.FileURI("/work/cafe%CC%81/main.yammm"), id, host, 1, text)
 
 	want := map[string][]byte{host: []byte(text)}
@@ -100,7 +100,7 @@ func TestCollectOverlays_OneKeyPerSourceTheFirstOpenedWinning(t *testing.T) {
 	for _, row := range rows {
 		t.Run(row.name, func(t *testing.T) {
 			t.Parallel()
-			d := NewOverlay()
+			d := &Overlay{}
 			for _, o := range row.opened {
 				d.OpenDocument(o.uri, o.id, o.host, 1, o.text)
 			}

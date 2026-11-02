@@ -11,13 +11,13 @@ import (
 
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/instance"
+	"github.com/simon-lentz/yammm/internal/value"
 	"github.com/simon-lentz/yammm/schema"
 )
 
-// The validator judges a value as the one form every writer writes it in: for
-// each carrier and each scalar kind, CheckValue reads the value as it reads its
-// form, and CanonicalValue stores what it stores for the form, so a writer
-// never writes a value the validator would judge or store as another.
+// The validator judges a value as its one form: for each carrier and each scalar
+// kind, CheckValue reads the value as it reads its form, and CanonicalValue stores
+// what it stores for the form.
 func TestCheckValue_JudgesAValueAsItsForm(t *testing.T) {
 	t.Parallel()
 	type named string
@@ -71,7 +71,7 @@ func TestCheckValue_JudgesAValueAsItsForm(t *testing.T) {
 		{"a nil map", nilMap},
 		{"a nil map keyed by no string", map[int]int(nil)},
 	} {
-		form, hasForm := instance.ScalarOf(c.v)
+		form, hasForm := value.Scalar(c.v)
 		for _, k := range []schema.Constraint{
 			schema.NewStringConstraint(), schema.NewIntegerConstraint(),
 			schema.NewFloatConstraint(), schema.NewBooleanConstraint(),
@@ -124,7 +124,7 @@ func TestCheckValue_ANilCarrierInAListIsANullElement(t *testing.T) {
 }
 
 // A pointer or an interface that is nil, and a nil value a pointer holds, hold
-// no value, as every writer writes them: the Validator reads it as an absent property, so an optional one is
+// no value: the Validator reads it as an absent property, so an optional one is
 // accepted and stores nothing and a required one is missing, and as a list
 // element it is a null element.
 func TestValidateOne_ANilCarrierIsAnAbsentValue(t *testing.T) {

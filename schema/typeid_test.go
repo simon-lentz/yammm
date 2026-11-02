@@ -56,7 +56,7 @@ func TestTypeRef_Syntactic(t *testing.T) {
 		ref := schema.LocalTypeRef("User", location.Span{})
 		assert.Equal(t, "User", ref.Name())
 		assert.Empty(t, ref.Qualifier())
-		assert.False(t, ref.IsQualified())
+		assert.Empty(t, ref.Qualifier())
 		assert.Equal(t, "User", ref.String())
 	})
 
@@ -64,7 +64,7 @@ func TestTypeRef_Syntactic(t *testing.T) {
 		ref := schema.NewTypeRef("parts", "Wheel", location.Span{})
 		assert.Equal(t, "Wheel", ref.Name())
 		assert.Equal(t, "parts", ref.Qualifier())
-		assert.True(t, ref.IsQualified())
+		assert.NotEmpty(t, ref.Qualifier())
 		assert.Equal(t, "parts.Wheel", ref.String())
 	})
 }

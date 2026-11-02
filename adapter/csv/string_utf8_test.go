@@ -3,9 +3,6 @@ package csv
 import (
 	"bytes"
 	"context"
-	"encoding/json"
-	"errors"
-	"io"
 	"maps"
 	"strings"
 	"testing"
@@ -13,9 +10,9 @@ import (
 
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/graph"
-	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/instance"
-	"github.com/simon-lentz/yammm/internal/instancetest"
+	"github.com/simon-lentz/yammm/internal/snapparts"
+	"github.com/simon-lentz/yammm/internal/snappartstest"
 	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
 )
@@ -99,83 +96,31 @@ func TestParseTyped_ACellThatIsNotValidUTF8YieldsNoValidInstance(t *testing.T) {
 	}
 }
 
-// utf8Bypass builds Holder h1 through instancetest, which runs no validation,
-// holding props beside its key and one LINK to Target t1 carrying label.
-func utf8Bypass(t *testing.T, s schema.Schema, props map[string]any, label any) graph.Snapshot {
+// heldUTF8 reads a document holding props beside Holder h1's key, and label on its
+// one LINK to Target t1.
+func heldUTF8(t *testing.T, s schema.Schema, props map[string]any, label any) graph.Snapshot {
 	t.Helper()
-	target, _ := s.Type("Target")
-	holder, _ := s.Type("Holder")
 	all := map[string]any{"id": "h1"}
 	maps.Copy(all, props)
-	g := graph.New(s)
-	for _, inst := range []instance.ValidInstance{
-		instancetest.VI("Target", instancetest.TypeID(target.ID()), instancetest.PK("t1"),
-			instancetest.Props(map[string]any{"key": "t1"})),
-		instancetest.VI("Holder", instancetest.TypeID(holder.ID()), instancetest.PK("h1"),
-			instancetest.Props(all),
-			instancetest.Edges(map[string]instance.ValidEdgeData{
-				"LINK": instance.NewValidEdgeData([]instance.ValidEdgeTarget{
-					instance.NewValidEdgeTarget(immutable.WrapKey([]any{"t1"}), immutable.WrapProperties(map[string]any{"label": label})),
-				}),
-			})),
-	} {
-		if res := g.Add(context.Background(), inst); !res.OK() {
-			t.Fatalf("add: %s", res)
-		}
-	}
-	return g.Snapshot()
-}
-
-// A validated string is valid UTF-8, so only a bypass-built snapshot holds one
-// that is not, and a document holding it would read back refused. Both writers
-// refuse it as the class, wherever the string stands.
-func TestWriters_AStringThatIsNotValidUTF8IsRefusedAsTheClass(t *testing.T) {
-	t.Parallel()
-	s := loadUTF8CSVSchema(t)
-	for _, c := range []struct {
-		name, mentions string
-		props          map[string]any
-		label          any
-	}{
-		{"a property", `property "text"`, map[string]any{"text": "a\xffb"}, "ok"},
-		{"a list element", `property "tags": list element 1`, map[string]any{"tags": []any{"ok", "a\xffb"}}, "ok"},
-		{"an edge property", `edge property "label"`, nil, "a\xffb"},
-	} {
-		t.Run(c.name, func(t *testing.T) {
-			t.Parallel()
-			snap := utf8Bypass(t, s, c.props, c.label)
-			a := New(WithSchema(s))
-			if _, err := a.MarshalSnapshot(context.Background(), snap); !errors.Is(err, ErrUnrepresentable) {
-				t.Errorf("MarshalSnapshot: %v does not match ErrUnrepresentable", err)
-			} else if !utf8.ValidString(err.Error()) {
-				t.Errorf("the refusal is not valid UTF-8: %q", err.Error())
-			} else if !strings.Contains(err.Error(), c.mentions) || !strings.Contains(err.Error(), "not valid UTF-8") {
-				t.Errorf("the refusal does not name %s and the fault: %v", c.mentions, err)
-			}
-			err := a.WriteSnapshot(context.Background(), func(string) (io.Writer, error) { return io.Discard, nil }, snap)
-			if !errors.Is(err, ErrUnrepresentable) {
-				t.Errorf("WriteSnapshot: %v does not match ErrUnrepresentable", err)
-			}
-		})
-	}
+	return snappartstest.Loaded(t, s, snapparts.Parts{
+		Instances: []snapparts.Instance{
+			heldRoot(t, s, "Target", "t1", map[string]any{"key": "t1"}),
+			heldRoot(t, s, "Holder", "h1", all),
+		},
+		Edges: []snapparts.Edge{heldEdge(t, s, "Holder", "h1", "LINK", "t1", map[string]any{"label": label})},
+	})
 }
 
 // What the writer writes reads back as the bytes the snapshot holds, U+FFFD
-// included; a string it cannot write so is refused, never rewritten.
+// included.
 func TestMarshalSnapshot_AStringReadsBackAsTheBytesHeld(t *testing.T) {
 	t.Parallel()
 	s := loadUTF8CSVSchema(t)
 	holder, _ := s.Type("Holder")
-	for _, text := range []string{"a�b", "é✓", "a\xffb", "\xc3"} {
-		snap := utf8Bypass(t, s, map[string]any{"text": text, "tags": []any{"ok", text}}, text)
+	for _, text := range []string{"a�b", "é✓"} {
+		snap := heldUTF8(t, s, map[string]any{"text": text, "tags": []any{"ok", text}}, text)
 		a := New(WithSchema(s))
 		files, err := a.MarshalSnapshot(context.Background(), snap)
-		if !utf8.ValidString(text) {
-			if !errors.Is(err, ErrUnrepresentable) {
-				t.Errorf("MarshalSnapshot(%q) = %v; want a refusal matching ErrUnrepresentable", text, err)
-			}
-			continue
-		}
 		if err != nil {
 			t.Fatalf("MarshalSnapshot(%q) refused valid text: %v", text, err)
 		}
@@ -197,17 +142,5 @@ func TestMarshalSnapshot_AStringReadsBackAsTheBytesHeld(t *testing.T) {
 		if got := link[0].(map[string]any)["label"]; got != text {
 			t.Errorf("label read back as %q, want %q", got, text)
 		}
-	}
-}
-
-// A json.Number holding a byte that is no part of a character is no number
-// literal, so it is refused as a value no cell spells, as every writer refuses
-// a value of no form.
-func TestMarshalSnapshot_ANumberHoldingAnInvalidByteIsRefusedAsNoForm(t *testing.T) {
-	t.Parallel()
-	s := loadUTF8CSVSchema(t)
-	_, err := New(WithSchema(s)).MarshalSnapshot(context.Background(), utf8Bypass(t, s, map[string]any{"text": json.Number("1\xff")}, "ok"))
-	if !errors.Is(err, ErrUnrepresentable) || !strings.Contains(err.Error(), "has no spelling in a cell") {
-		t.Errorf("MarshalSnapshot = %v; want a refusal naming a value no cell spells", err)
 	}
 }

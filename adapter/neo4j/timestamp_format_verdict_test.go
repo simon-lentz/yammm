@@ -65,24 +65,14 @@ func TestTimestampFormat_EveryDoorGivesTheConstructorsVerdict(t *testing.T) {
 		} {
 			answers := map[string]string{
 				"CheckConstraint": errAnswer(schema.CheckConstraint(c)),
-				"Build as a property": buildAnswer(func(sb *schema.Builder) *schema.Builder {
-					return sb.AddDataType("At", direct).AddType("Car").WithPrimaryKey("vin", schema.NewStringConstraint()).WithProperty("v", c).Done()
-				}),
 			}
-			_, err := Coerce(c, nil)
-			answers["Coerce"] = errAnswer(err)
-			_, err = CoerceParams(nil, ParamTypes{"v": c})
+			_, err := CoerceParams(nil, ParamTypes{"v": c})
 			answers["CoerceParams"] = errAnswer(err)
 			for door, got := range answers {
 				if refused := got != "ok"; refused != row.refused || (refused && !strings.Contains(got, fault)) {
 					t.Errorf("%s, %s, %s = %s; want refused %v with %s", row.class, position, door, got, row.refused, fault)
 				}
 			}
-		}
-		if got := buildAnswer(func(sb *schema.Builder) *schema.Builder {
-			return sb.AddDataType("V", direct).AddType("Car").WithPrimaryKey("vin", schema.NewStringConstraint()).Done()
-		}); (got != "ok") != row.refused {
-			t.Errorf("%s, Build as a datatype = %s; want refused %v", row.class, got, row.refused)
 		}
 		if direct.Format() != row.format {
 			t.Errorf("%s: Format = %q; want the format as given", row.class, direct.Format())

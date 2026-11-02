@@ -22,9 +22,7 @@ import (
 
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/graph"
-	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/instance"
-	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
 	"github.com/simon-lentz/yammm/snapshot"
 )
@@ -190,22 +188,6 @@ func TestUpdateMetadata_CreatedAtPreserved(t *testing.T) {
 	require.NoError(t, res.Err())
 	assert.Equal(t, origHeader.CreatedAt, outHeader.CreatedAt,
 		"CreatedAt must be preserved byte-for-byte when no override is provided")
-}
-
-func TestUpdateMetadata_CreatedAtOverridden(t *testing.T) {
-	ctx := context.Background()
-	origTime := time.Date(2026, 4, 17, 12, 0, 0, 0, time.UTC)
-	newTime := time.Date(2026, 5, 1, 9, 30, 0, 0, time.UTC)
-	data := makeSnapshotBytes(ctx, t, snapshot.WithCreatedAt(origTime))
-
-	out, res := snapshot.UpdateMetadata(ctx, data,
-		map[string]string{"phase": "link"},
-		snapshot.WithUpdateCreatedAt(newTime))
-	require.NoError(t, res.Err())
-
-	outHeader, headerRes := snapshot.HeaderOnly(ctx, out)
-	require.NoError(t, headerRes.Err())
-	assert.Equal(t, newTime.Format(time.RFC3339), outHeader.CreatedAt)
 }
 
 func TestUpdateMetadata_EmptyMetadata(t *testing.T) {
@@ -574,33 +556,32 @@ func seedCorpus(dir string) error {
 	// Must mirror testSchema exactly so TestUpdateMetadata_GoldenCorpus's
 	// Load call with testSchema accepts the fixtures — schema hashes must
 	// match.
-	s, schemaRes := schema.NewBuilder().
-		WithName("test").
-		WithSourceID(location.MustNewSourceID("test://test.yammm")).
-		AddType("Person").
-		WithPrimaryKey("id", schema.NewStringConstraint()).
-		WithProperty("name", schema.NewStringConstraint()).
-		WithRelation("EMPLOYER", schema.NewTypeRef("", "Company", location.Span{}), false, false).
-		Done().
-		AddType("Company").
-		WithPrimaryKey("id", schema.NewStringConstraint()).
-		WithProperty("title", schema.NewStringConstraint()).
-		Done().
-		Build()
+	s, schemaRes := schema.LoadString(context.Background(), `schema "test"
+
+type Person {
+	id String primary
+	name String required
+	--> EMPLOYER (one) Company
+}
+
+type Company {
+	id String primary
+	title String required
+}
+`, "test.yammm")
 	if schemaRes.HasErrors() {
 		return schemaRes.Err()
 	}
 
-	// A tiny populated snapshot for deterministic content.
-	typ, _ := s.Type("Person")
-	inst := instance.NewValidInstance(
-		"Person", typ.ID(),
-		immutable.WrapKey([]any{"p1"}),
-		immutable.WrapProperties(map[string]any{"id": "p1", "name": "Alice"}),
-		nil, nil, location.Provenance{},
-	)
+	// A tiny validated graph for deterministic content.
+	valid, res := instance.NewValidator(s).ValidateOne(ctx, "Person", instance.RawInstance{
+		Properties: map[string]any{"id": "p1", "name": "Alice"},
+	})
+	if res.HasErrors() {
+		return res.Err()
+	}
 	g := graph.New(s)
-	if res := g.Add(ctx, inst); res.HasErrors() {
+	if res := g.Add(ctx, valid); res.HasErrors() {
 		return res.Err()
 	}
 	snap := g.Snapshot()
@@ -687,10 +668,8 @@ func TestUpdateMetadataOrReMarshal_FallbackRecoversNonMarshalShape(t *testing.T)
 		t.Fatalf("the fast path accepted a non-Marshal shape: %v", fastRes)
 	}
 
-	when := time.Date(2026, 8, 17, 12, 0, 0, 0, time.UTC)
 	newMeta := map[string]string{"stage": "fallback"}
-	out, outRes := snapshot.UpdateMetadataOrReMarshal(ctx, spaced, newMeta, s,
-		snapshot.WithUpdateCreatedAt(when))
+	out, outRes := snapshot.UpdateMetadataOrReMarshal(ctx, spaced, newMeta, s)
 	if outRes.HasErrors() {
 		t.Fatalf("the fallback failed: %v", outRes)
 	}
@@ -721,8 +700,7 @@ func TestUpdateMetadataOrReMarshal_FallbackRecoversNonMarshalShape(t *testing.T)
 	if err := loadRes.Err(); err != nil {
 		t.Fatalf("load: %v", err)
 	}
-	want, wantRes := snapshot.Marshal(ctx, loaded,
-		snapshot.WithMetadata(newMeta), snapshot.WithCreatedAt(when))
+	want, wantRes := snapshot.Marshal(ctx, loaded, snapshot.WithMetadata(newMeta))
 	if err := wantRes.Err(); err != nil {
 		t.Fatalf("floor marshal: %v", err)
 	}

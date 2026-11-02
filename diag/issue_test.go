@@ -8,7 +8,7 @@ import (
 )
 
 func TestIssue_Accessors(t *testing.T) {
-	source := location.MustNewSourceID("test://schema.yammm")
+	source := location.NewSourceID("test://schema.yammm")
 	span := location.Point(source, 10, 5)
 	related := []location.RelatedInfo{
 		{Span: location.Point(source, 5, 1), Message: "previous definition here"},
@@ -53,7 +53,7 @@ func TestIssue_Accessors(t *testing.T) {
 }
 
 func TestIssue_HasSpan(t *testing.T) {
-	source := location.MustNewSourceID("test://schema.yammm")
+	source := location.NewSourceID("test://schema.yammm")
 
 	tests := []struct {
 		name  string
@@ -98,7 +98,7 @@ func TestIssue_HasSpan(t *testing.T) {
 }
 
 func TestIssue_IsZero(t *testing.T) {
-	source := location.MustNewSourceID("test://schema.yammm")
+	source := location.NewSourceID("test://schema.yammm")
 
 	tests := []struct {
 		name  string
@@ -247,7 +247,7 @@ func TestIssue_IsValid(t *testing.T) {
 }
 
 func TestIssue_Related_DefensiveCopy(t *testing.T) {
-	source := location.MustNewSourceID("test://schema.yammm")
+	source := location.NewSourceID("test://schema.yammm")
 	original := []location.RelatedInfo{
 		{Span: location.Point(source, 5, 1), Message: "original"},
 	}
@@ -330,7 +330,7 @@ func TestIssue_Details_NilForEmpty(t *testing.T) {
 }
 
 func TestIssue_Clone(t *testing.T) {
-	source := location.MustNewSourceID("test://schema.yammm")
+	source := location.NewSourceID("test://schema.yammm")
 	original := Issue{
 		span:       location.Point(source, 10, 5),
 		sourceName: "data.json",
@@ -468,7 +468,7 @@ func TestIssue_LogValue_MinimalIssue(t *testing.T) {
 }
 
 func TestIssue_LogValue_FullIssue(t *testing.T) {
-	source := location.MustNewSourceID("test://schema.yammm")
+	source := location.NewSourceID("test://schema.yammm")
 	issue := NewIssue(Error, E_DUPLICATE_TYPE, "full issue").
 		WithSpan(location.Point(source, 7, 3)).
 		WithPath("data.json", "$.Widget[0].name").
@@ -549,7 +549,7 @@ func TestIssue_LogValue_OmitsEmptyFields(t *testing.T) {
 }
 
 func TestIssue_LogValue_SchemaOnly_OmitsPath(t *testing.T) {
-	source := location.MustNewSourceID("test://schema.yammm")
+	source := location.NewSourceID("test://schema.yammm")
 	issue := NewIssue(Error, E_DUPLICATE_TYPE, "schema-only").
 		WithSpan(location.Point(source, 1, 1)).
 		Build()

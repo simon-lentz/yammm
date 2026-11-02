@@ -183,7 +183,7 @@ func TestValidate_ANilContainerAtARelationAgreesWithItsJSONForm(t *testing.T) {
 }
 
 // A nil immutable container holds no value, as immutable.Value.IsNil reads it:
-// at a property it is the absent case, and ScalarOf reads it as nil.
+// at a property it is the absent case, and IsAbsent reports it.
 func TestValidate_ANilImmutableContainerIsNull(t *testing.T) {
 	t.Parallel()
 	v := instance.NewValidator(loadT(t, nilContainerSchema))
@@ -193,8 +193,8 @@ func TestValidate_ANilImmutableContainerIsNull(t *testing.T) {
 		"a nil Key":           immutable.WrapKey(nil),
 		"a nil int-keyed Map": immutable.WrapMap(map[int]any(nil)),
 	} {
-		if held, ok := instance.ScalarOf(none); !ok || held != nil {
-			t.Errorf("ScalarOf(%s) = %v, %v; want nil, true", name, held, ok)
+		if !instance.IsAbsent(none) {
+			t.Errorf("IsAbsent(%s) = false", name)
 		}
 		for _, prop := range []string{"optTags", "name"} {
 			props := maps.Clone(base)
@@ -220,8 +220,8 @@ func TestValidate_AStructEmbeddingANilContainerIsAStruct(t *testing.T) {
 		"a nil Slice":      struct{ immutable.Slice }{},
 		"a nil Properties": struct{ immutable.Properties }{},
 	} {
-		if held, ok := instance.ScalarOf(embedding); ok {
-			t.Errorf("ScalarOf(a struct embedding %s) = %v, true; want no scalar", name, held)
+		if instance.IsAbsent(embedding) {
+			t.Errorf("IsAbsent(a struct embedding %s) = true", name)
 		}
 		for _, prop := range []string{"optTags", "name"} {
 			props := maps.Clone(base)

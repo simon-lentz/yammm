@@ -16,6 +16,7 @@ import (
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/instance"
+	"github.com/simon-lentz/yammm/internal/snapparts"
 	"github.com/simon-lentz/yammm/internal/value"
 	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/location/path"
@@ -69,6 +70,10 @@ type streamDecoder struct {
 	// bodyOffset is the byte offset of the body suffix UpdateMetadata
 	// reuses verbatim; -1 until decodeHeader captures it.
 	bodyOffset int64
+
+	// typesEnd is the byte offset just past the types table, zero until
+	// decodeHeader decodes it.
+	typesEnd int64
 }
 
 // newStreamDecoder creates a new streamDecoder from raw .ys bytes.
@@ -216,6 +221,7 @@ func (sd *streamDecoder) decodeHeader() error {
 			if err := dec.Decode(&sd.typeTable); err != nil {
 				return fmt.Errorf("failed to decode types table: %w", err)
 			}
+			sd.typesEnd = dec.InputOffset()
 			sd.resolveTypeTable()
 			return nil
 		}
@@ -232,11 +238,11 @@ func (sd *streamDecoder) decodeHeader() error {
 // decodeSections decodes the instances and diagnostics sections by
 // re-scanning the raw data. Its callers run [checkDocument] before the header,
 // so it decodes a body whose four keys are present, ordered, unique and
-// non-null, and in which no object repeats a member name or spells a declared
-// one in another case: encoding/json keeps the last of two members of one
-// name, merges two objects under one struct field, and matches a struct
-// field's name in any case, so either would decode as data Marshal never
-// wrote.
+// non-null, in which no object repeats a member name or spells a declared one in
+// another case, and in which every string is valid text: encoding/json keeps the
+// last of two members of one name, merges two objects under one struct field,
+// matches a struct field's name in any case, and writes U+FFFD over text that is
+// not valid, so each would decode as data Marshal never wrote.
 func (sd *streamDecoder) decodeSections() ([]instanceGroupWire, diagWire, error) {
 	dec := json.NewDecoder(bytes.NewReader(sd.data))
 	dec.UseNumber()
@@ -278,19 +284,12 @@ func (sd *streamDecoder) decodeSections() ([]instanceGroupWire, diagWire, error)
 	return groups, diags, nil
 }
 
-// slotCoord addresses one root instance's relation slot. Only root parents
-// carry addressable slots: a duplicate's parent coordinates must resolve in
-// the root instance index, so deeper slots are never referenced.
+// slotCoord addresses one root instance's association, or with the relation
+// left empty the root itself.
 type slotCoord struct {
-	parentRow int
-	parentKey string
-	relation  string
-}
-
-// slotChild is one occupant of a slot, by table row and key string.
-type slotChild struct {
-	row int
-	key string
+	row      int
+	key      string
+	relation string
 }
 
 // edgeRef is an edge no check of its own refused, for the reference check. slot
@@ -305,14 +304,13 @@ type edgeRef struct {
 }
 
 // docIndex carries the structural facts one walk of the instances section
-// produces: root existence, slot occupancy, and edge references. ones counts
+// produces: root existence and edge references. ones counts
 // the records under each (one) association, edges and unresolved records
 // together, and is allocated at the first such record.
 //
 // A unit a check refused feeds none of them: an edge or an unresolved record
-// feeds no reference and no (one) count, and a slot in refusedSlots or
-// unheldSlots or a record in refusedRecords is read by no later check. One
-// break then draws one issue. The reference check refuses edges too, so an edge
+// feeds no reference and no (one) count, and a record in refusedRecords is read
+// by no later check. One break then draws one issue. The reference check refuses edges too, so an edge
 // waits in refs until [streamDecoder.validateEdgeRefs] feeds it. The record facts
 // refuse records too, so an unresolved record waits in pending until
 // [docIndex.countPending] counts it.
@@ -321,7 +319,6 @@ type docIndex struct {
 	// it: one of a type that can hold a root, whose stored key checkStoredKey
 	// accepts.
 	exists map[int]map[string]bool
-	slots  map[slotCoord][]slotChild
 	refs   []edgeRef
 	// ones counts the records under each (one) association of each sound root,
 	// and order holds each such association in the order met.
@@ -335,19 +332,12 @@ type docIndex struct {
 	revalidate []rootAt
 	// soundRoots counts the sound roots at each address, relation left empty.
 	soundRoots map[slotCoord]int
-	// edges counts the edges of each root that stands at an address, per
-	// relation name, keyed as a slot, an edge the reader refused among them:
-	// the document holds it there.
+	// edges counts the edges of each root, per relation name, keyed as a slot, an
+	// edge the reader refused among them: the document holds it there.
 	// soundEdges counts the edges no check refused. checkRecordFacts reads
 	// both: a refused edge is held, and no record beside another.
 	edges      map[slotCoord]int
 	soundEdges map[slotCoord]int
-	// refusedSlots holds each composition slot the walk refused of a root that
-	// holds its address.
-	refusedSlots map[slotCoord]bool
-	// unheldSlots holds the same of a root whose key a check refused, at both
-	// its addresses; [docIndex.slotRefused] reads it.
-	unheldSlots map[slotCoord]bool
 	// refusedRecords holds the index of each unresolved record a check refused.
 	refusedRecords map[int]bool
 	// refusedRoots holds each address, relation left empty, whose holder a
@@ -358,32 +348,22 @@ type docIndex struct {
 	danglingOnes map[oneCoord]int
 	// shared holds each address two roots stand at, their keys sound or not,
 	// relation left empty. An unresolved record there names the address, not a
-	// root: it counts toward no (one) association, stands beside no other
-	// record, and a duplicate parented there resolves no conflict.
+	// root: it counts toward no (one) association and stands beside no other
+	// record.
 	shared map[slotCoord]bool
 	// stated holds each address a refused unit states, relation left empty:
 	// the address a root's key properties name where checkStoredKey refused
 	// its stored key, and both addresses of each root in a group entry the
 	// walk refused for repeating a row, its stored key's and its key
-	// properties'. statedChildren holds the same for a root's
-	// direct composed child, by slot. A reference there that no root or child
-	// resolves draws no issue: the refusal is the break's one issue. A
-	// schema-less read names no key property, so it states stored keys alone.
-	stated         map[slotCoord]bool
-	statedChildren map[slotCoord]map[slotChild]bool
+	// properties'. A reference there that no root resolves draws no issue: the
+	// refusal is the break's one issue. A schema-less read names no key
+	// property, so it states stored keys alone.
+	stated map[slotCoord]bool
 	// unrowed holds each root of a group entry whose types row the walk
 	// refused. Its row is unknown, so both its addresses are stated at every
 	// row; unrowedAt holds each row's canonical keys, built on first use.
-	// refusedChildren holds each root's direct composed child the walk refused for
-	// its row, by slot: one with no row, or one of a type other than the composition's.
-	unrowed         []instWire
-	unrowedAt       map[int]map[string]bool
-	refusedChildren map[slotCoord][]instWire
-	// refusedChildrenAt holds the addresses of refusedChildren as read at a row,
-	// built on first use, so a slot is read once however many duplicates name it.
-	refusedChildrenAt map[int]map[slotChild]map[string]bool
-	// occupants holds slots as a set per slot, built on first use.
-	occupants map[slotCoord]map[slotChild]bool
+	unrowed   []instWire
+	unrowedAt map[int]map[string]bool
 }
 
 // rootExists reports whether a root stands at the address, its key sound or
@@ -400,33 +380,9 @@ func markSlot(set *map[slotCoord]bool, slot slotCoord) {
 	(*set)[slot] = true
 }
 
-// slotRefused reports whether a duplicate parented at slot meets a refusal of
-// the slot the walk made: the holder's, or, where no sound root stands at the
-// address, a refused root's.
-func (idx *docIndex) slotRefused(slot slotCoord) bool {
-	return idx.refusedSlots[slot] || idx.unheldSlots[slot] && !idx.exists[slot.parentRow][slot.parentKey]
-}
-
 // unjudged reports whether two roots stand at the address.
 func (idx *docIndex) unjudged(row int, key string) bool {
-	return idx.shared[slotCoord{parentRow: row, parentKey: key}]
-}
-
-// occupies reports whether child stands in slot. A slot is read once, however
-// many duplicates name it.
-func (idx *docIndex) occupies(slot slotCoord, child slotChild) bool {
-	set, indexed := idx.occupants[slot]
-	if !indexed {
-		set = make(map[slotChild]bool, len(idx.slots[slot]))
-		for _, occ := range idx.slots[slot] {
-			set[occ] = true
-		}
-		if idx.occupants == nil {
-			idx.occupants = make(map[slotCoord]map[slotChild]bool)
-		}
-		idx.occupants[slot] = set
-	}
-	return set[child]
+	return idx.shared[slotCoord{row: row, key: key}]
 }
 
 // held reports whether a sound root holds the address alone.
@@ -438,23 +394,13 @@ func (idx *docIndex) state(row int, key string) {
 	if idx.stated == nil {
 		idx.stated = make(map[slotCoord]bool)
 	}
-	idx.stated[slotCoord{parentRow: row, parentKey: key}] = true
-}
-
-func (idx *docIndex) stateChild(slot slotCoord, child slotChild) {
-	if idx.statedChildren == nil {
-		idx.statedChildren = make(map[slotCoord]map[slotChild]bool)
-	}
-	if idx.statedChildren[slot] == nil {
-		idx.statedChildren[slot] = make(map[slotChild]bool)
-	}
-	idx.statedChildren[slot][child] = true
+	idx.stated[slotCoord{row: row, key: key}] = true
 }
 
 // refusedAddress reports whether a refused unit states the root address, so a
 // reference there that resolves to no root is judged no further.
 func (sd *streamDecoder) refusedAddress(idx *docIndex, row int, key string) bool {
-	if idx.stated[slotCoord{parentRow: row, parentKey: key}] {
+	if idx.stated[slotCoord{row: row, key: key}] {
 		return true
 	}
 	if len(idx.unrowed) == 0 {
@@ -475,41 +421,6 @@ func (sd *streamDecoder) refusedAddress(idx *docIndex, row int, key string) bool
 		idx.unrowedAt[row] = at
 	}
 	return at[key]
-}
-
-// childStated reports whether a refused child of slot states the address, so a
-// conflict there that no occupant resolves is judged no further. An empty key
-// names a slot's sole occupant, which a child the walk refused can be.
-func (sd *streamDecoder) childStated(idx *docIndex, slot slotCoord, row int, rawKey []any, key string) bool {
-	if idx.statedChildren[slot][slotChild{row: row, key: key}] {
-		return true
-	}
-	children := idx.refusedChildren[slot]
-	if len(children) == 0 {
-		return false
-	}
-	if len(rawKey) == 0 {
-		return true
-	}
-	at := slotChild{row: row, key: slot.parentKey + "\x00" + slot.relation}
-	if idx.refusedChildrenAt[slot.parentRow] == nil {
-		if idx.refusedChildrenAt == nil {
-			idx.refusedChildrenAt = make(map[int]map[slotChild]map[string]bool)
-		}
-		idx.refusedChildrenAt[slot.parentRow] = make(map[slotChild]map[string]bool)
-	}
-	stated, ok := idx.refusedChildrenAt[slot.parentRow][at]
-	if !ok {
-		stated = make(map[string]bool, len(children))
-		for _, child := range children {
-			stated[sd.canonicalWireKey(row, child.Key)] = true
-			if s, ok := sd.statedKey(row, child); ok {
-				stated[s] = true
-			}
-		}
-		idx.refusedChildrenAt[slot.parentRow][at] = stated
-	}
-	return stated[key]
 }
 
 func (idx *docIndex) refuseRecord(ui int) {
@@ -583,7 +494,6 @@ func sortedNames[V any](m map[string]V, buf []string) []string {
 func (sd *streamDecoder) walkInstances(ctx context.Context, groups []instanceGroupWire) (*docIndex, error) {
 	idx := &docIndex{
 		exists: make(map[int]map[string]bool, len(groups)),
-		slots:  make(map[slotCoord][]slotChild),
 	}
 
 	seenRows := make(map[int]int, len(groups))
@@ -616,13 +526,7 @@ func (sd *streamDecoder) walkInstances(ctx context.Context, groups []instanceGro
 		}
 		for ii := range g.Items {
 			start := sd.mark()
-			// A type that cannot hold a root is the entry's one refusal, so a
-			// reference to any root of it is judged no further, and it holds no
-			// address and no count.
-			if !eligible {
-				idx.state(row, sd.canonicalWireKey(row, g.Items[ii].Key))
-			}
-			sd.walkInstance(row, g.Items[ii], 0, nil, eligible, idx)
+			sd.walkInstance(row, g.Items[ii], 0, eligible, idx)
 			// Revalidation judges the values of a root the structural pass
 			// accepted whole. A refused one already refuses the document, and the
 			// validator would report its break again under another code.
@@ -635,11 +539,11 @@ func (sd *streamDecoder) walkInstances(ctx context.Context, groups []instanceGro
 }
 
 // checkRootTypeEligible refuses a type that cannot hold a root instance, by the
-// graph package doc's "Root type eligibility" section, at the first group or root
-// duplicate position that names it, and reports whether the type can hold one. An
-// empty group is held to it too: adapter/json and adapter/csv key their output by a
-// denoted type's name. No load option excuses a member, and a schema-less read
-// checks none.
+// graph package doc's "Root type eligibility" section, at the first group, or
+// duplicate record stating no parent, that names it, and reports whether the type
+// can hold one. An empty group is held to it too: adapter/json and adapter/csv key
+// their output by a denoted type's name. No load option excuses a member, and a
+// schema-less read checks none.
 func (sd *streamDecoder) checkRootTypeEligible(row int, position string) bool {
 	if sd.schema.IsZero() || row >= len(sd.tableIDs) {
 		return true
@@ -669,7 +573,7 @@ func (sd *streamDecoder) checkRootTypeEligible(row int, position string) bool {
 			Build())
 		return false
 	}
-	// Graph.Add's order, so a type breaking two rules draws the rule Add names.
+	// The graph package's order, so a type breaking two rules draws the rule it names.
 	var rule string
 	switch {
 	case !t.HasPrimaryKey():
@@ -691,10 +595,9 @@ func (sd *streamDecoder) checkRootTypeEligible(row int, position string) bool {
 
 // walkInstance validates one instance at its table row and registers its
 // structural facts, and reports whether its stored key is one a later check
-// may compare. slot is non-nil only for a root's direct composed child. Every
-// loop that can collect runs in a fixed order, so a capped collector keeps the
-// same issues on every read.
-func (sd *streamDecoder) walkInstance(row int, inst instWire, depth int, slot *slotCoord, eligible bool, idx *docIndex) bool {
+// may compare. Every loop that can collect runs in a fixed order, so a capped
+// collector keeps the same issues on every read.
+func (sd *streamDecoder) walkInstance(row int, inst instWire, depth int, eligible bool, idx *docIndex) bool {
 	if depth > maxComposedDepth {
 		sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_DEPTH_EXCEEDED,
 			fmt.Sprintf("composed nesting depth %d exceeds limit %d", depth, maxComposedDepth)).
@@ -726,31 +629,21 @@ func (sd *streamDecoder) walkInstance(row int, inst instWire, depth int, slot *s
 	// rebuilt instance will carry — so two roots that spell one instant at one
 	// offset two ways are one address here, as they are in the graph.
 	keyStr := sd.canonicalWireKey(row, inst.Key)
-	statedAt := ""
-	if !keyed {
+	if !keyed && depth == 0 {
 		if stated, ok := sd.statedKey(row, inst); ok && stated != keyStr {
-			switch {
-			case depth == 0:
-				idx.state(row, stated)
-				statedAt = stated
-			case slot != nil:
-				idx.stateChild(*slot, slotChild{row: row, key: stated})
-			}
+			idx.state(row, stated)
 		}
 	}
-	// addressed reports that this root holds its address. One that does not
-	// feeds no slot there: they are the holder's.
-	//
-	// A root of a type that declares a key stands at its stored address, so a
-	// reference to it resolves. Only a root of a type that can hold one, whose
-	// key checkStoredKey accepts, holds the address, whichever comes first: a
-	// refused one is no duplicate and owns no slot or count there. own is the
-	// root's ordinal among the sound roots at the address, -1 for no such root:
-	// each one's own (one) edges are a count, as the document nests them in it.
+	// Every root stands at its stored address, so a reference to it resolves and
+	// is judged no further. Only a root of a type that can hold one, whose key
+	// checkStoredKey accepts, holds the address, whichever comes first: a refused
+	// one is no duplicate and owns no count there. own is the root's ordinal among
+	// the sound roots at the address, -1 for no such root: each one's own (one)
+	// edges are a count, as the document nests them in it.
 	sound := keyed && eligible
-	addressed, own, secondHolder := false, -1, false
-	if depth == 0 && sd.declaresKey(row) {
-		addr := slotCoord{parentRow: row, parentKey: keyStr}
+	own := -1
+	if depth == 0 {
+		addr := slotCoord{row: row, key: keyStr}
 		holder, present := idx.exists[row][keyStr]
 		if present {
 			if idx.shared == nil {
@@ -768,32 +661,26 @@ func (sd *streamDecoder) walkInstance(row int, inst instWire, depth int, slot *s
 		switch {
 		case !present:
 			idx.exists[row][keyStr] = sound
-			addressed = sound
 		case !sound:
 		case !holder:
 			idx.exists[row][keyStr] = true
-			addressed = true
 		default:
 			// Two roots at one address is not data the wire can carry: the format
 			// has a diagnostics section for a rejected duplicate, and the graph
 			// layer puts it there. Admitting the pair produced a snapshot whose
-			// own accessors disagreed — RebuildSnapshot appends every instance to
-			// the type's slice while its index keeps only the last, so InstancesOf
+			// own accessors disagreed — the rebuild appends every instance to the
+			// type's slice while its index keeps only the last, so InstancesOf
 			// reported two and every edge on that key bound to one.
 			sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_DUPLICATE_PK,
 				fmt.Sprintf("duplicate primary key %s for type %s", diag.ValueText(keyStr), sd.refQuoted(row))).
 				WithDetail(diag.DetailKeyTypeName, sd.refAt(row)).
 				WithDetail(diag.DetailKeyPrimaryKey, keyStr).
 				Build())
-			secondHolder = true
 		}
-	}
-	if slot != nil {
-		idx.slots[*slot] = append(idx.slots[*slot], slotChild{row: row, key: keyStr})
 	}
 
 	if depth == 0 {
-		sd.walkEdges(row, inst, keyStr, own, sd.declaresKey(row), idx)
+		sd.walkEdges(row, inst, keyStr, own, idx)
 	}
 
 	var relations [4]string
@@ -802,88 +689,52 @@ func (sd *streamDecoder) walkInstance(row int, inst instWire, depth int, slot *s
 		start := sd.mark()
 		target, judged := sd.checkComposedSlot(row, relName, len(children))
 		slotRefused := sd.refusedSince(start)
-		var childSlot *slotCoord
-		if addressed {
-			childSlot = &slotCoord{parentRow: row, parentKey: keyStr, relation: relName}
-		}
-		refuseSlot := func() {
-			switch {
-			case addressed:
-				markSlot(&idx.refusedSlots, *childSlot)
-			case secondHolder:
-				// Whichever root comes first, a slot either refused is refused.
-				markSlot(&idx.refusedSlots, slotCoord{parentRow: row, parentKey: keyStr, relation: relName})
-			case depth == 0 && !sound:
-				markSlot(&idx.unheldSlots, slotCoord{parentRow: row, parentKey: keyStr, relation: relName})
-				if statedAt != "" {
-					markSlot(&idx.unheldSlots, slotCoord{parentRow: row, parentKey: statedAt, relation: relName})
-				}
-			}
-		}
-		if slotRefused {
-			refuseSlot()
-		}
 		keyOK := make([]bool, len(children))
 		for i, child := range children {
 			// The writer emits a row at every non-root position, so an absent
 			// one is malformed rather than a value to recover from context.
-			childStart := sd.mark()
 			childRow, ok := sd.requireRow(child.Type, func() string {
 				return fmt.Sprintf("composed child under %s.%s", sd.refText(row), diag.ValueText(relName))
 			})
 			if ok && judged {
 				sd.checkComposedChildType(row, relName, childRow, child.Key, target)
 			}
-			if childSlot != nil && sd.refusedSince(childStart) {
-				if idx.refusedChildren == nil {
-					idx.refusedChildren = make(map[slotCoord][]instWire)
-				}
-				idx.refusedChildren[*childSlot] = append(idx.refusedChildren[*childSlot], child)
-			}
 			if !ok {
 				continue
 			}
-			keyOK[i] = sd.walkInstance(childRow, child, depth+1, childSlot, true, idx)
+			keyOK[i] = sd.walkInstance(childRow, child, depth+1, true, idx)
 		}
 		if judged && !slotRefused {
-			start := sd.mark()
 			sd.checkSiblingKeys(row, formatWireKey(inst.Key), relName, target, children, keyOK)
-			// Two children at one key refuse the slot as two under a (one) slot do:
-			// it holds no occupants a duplicate's conflict is resolved against.
-			if sd.refusedSince(start) {
-				refuseSlot()
-			}
 		}
 	}
 	return keyed
 }
 
 // walkEdges holds each edge of the root at row to the facts it shows by itself
-// and feeds the index. Every edge of a root that stands at an address counts as
-// held there. An edge a check refused names no reference, and every other waits
-// in refs for [streamDecoder.validateEdgeRefs]; own is the root's ordinal among
-// the sound roots at its address.
-func (sd *streamDecoder) walkEdges(row int, inst instWire, keyStr string, own int, stands bool, idx *docIndex) {
+// and feeds the index. Every edge counts as held at the root's address. An edge a
+// check refused names no reference, and every other waits in refs for
+// [streamDecoder.validateEdgeRefs]; own is the root's ordinal among the sound
+// roots at its address.
+func (sd *streamDecoder) walkEdges(row int, inst instWire, keyStr string, own int, idx *docIndex) {
 	var relations [4]string
 	for _, relName := range sortedNames(inst.Edges, relations[:0]) {
-		slot := slotCoord{parentRow: row, parentKey: keyStr, relation: relName}
+		slot := slotCoord{row: row, key: keyStr, relation: relName}
 		if len(inst.Edges[relName]) == 0 {
 			sd.checkEdgeListName(row, inst.Key, relName)
 			continue
 		}
 		for ei, e := range inst.Edges[relName] {
-			if stands {
-				if idx.edges == nil {
-					idx.edges = make(map[slotCoord]int)
-				}
-				idx.edges[slot]++
+			if idx.edges == nil {
+				idx.edges = make(map[slotCoord]int)
 			}
+			idx.edges[slot]++
 			start := sd.mark()
 			sd.checkDeclaredEdgeProperties(row, inst.Key, relName, e.Properties)
 			targetRow, _ := sd.requireRow(e.TargetType, func() string {
 				return fmt.Sprintf("edge %d under %s.%s", ei, sd.refText(row), diag.ValueText(relName))
 			})
-			rel := sd.checkAssociation(fmt.Sprintf("edge %d", ei), row, inst.Key, relName, e.TargetType, e.TargetKey, "", true)
+			rel := sd.checkAssociation(fmt.Sprintf("edge %d", ei), row, inst.Key, relName, e.TargetType, e.TargetKey, "", !e.statesNothing())
 			if sd.refusedSince(start) {
 				continue
 			}
@@ -896,33 +747,6 @@ func (sd *streamDecoder) walkEdges(row int, inst instWire, keyStr string, own in
 			})
 		}
 	}
-}
-
-// declaresKey reports whether the type at row declares a primary key, the one
-// kind of type whose root holds an address. A schema-less read, or a row that
-// resolves to no type, compares every root's key as written.
-func (sd *streamDecoder) declaresKey(row int) bool {
-	if sd.schema.IsZero() || row < 0 || row >= len(sd.tableIDs) {
-		return true
-	}
-	t, ok := sd.schema.TypeByID(sd.tableIDs[row])
-	return !ok || t.HasPrimaryKey()
-}
-
-// declaresComposition reports whether the type at row declares relation as a
-// composition. A row that resolves to no type reports true: it judges no name.
-// It reads the schema: only a slot the walk refused reaches it, and a schema-less
-// walk refuses no slot.
-func (sd *streamDecoder) declaresComposition(row int, relation string) bool {
-	if row < 0 || row >= len(sd.tableIDs) {
-		return true
-	}
-	t, ok := sd.schema.TypeByID(sd.tableIDs[row])
-	if !ok {
-		return true
-	}
-	rel, ok := t.Relation(relation)
-	return ok && rel.Kind() == schema.RelationComposition
 }
 
 // checkEdgeListName holds the name of a root's empty or null edge list to the
@@ -948,8 +772,8 @@ func (sd *streamDecoder) checkEdgeListName(row int, key []any, relation string) 
 		Build())
 }
 
-// checkComposedSlot holds one slot to the rules graph.Add applies when it
-// attaches a child, and returns the composition's declared target for the
+// checkComposedSlot holds one slot to the rules a validator holds a parent's
+// children to, and returns the composition's declared target for the
 // per-child check. A slot under a name the parent's type does not declare as a
 // composition is refused: no declared target exists to read a child back as. A
 // (one) slot holding several children is refused: the (one) composed key
@@ -986,8 +810,8 @@ func (sd *streamDecoder) checkComposedSlot(row int, relation string, occupants i
 	return rel.TargetID(), true
 }
 
-// checkSiblingKeys refuses two children of one slot at one canonical key, as
-// graph.Add refuses them. The caller passes no slot checkComposedSlot refused,
+// checkSiblingKeys refuses two children of one slot at one canonical key, as a
+// validator refuses them. The caller passes no slot checkComposedSlot refused,
 // so a slot holding two children is a (many) one. A keyless part has no key to
 // repeat, a child of another type is checkComposedChildType's to report, and a
 // child whose key keyOK does not vouch for is checkStoredKey's.
@@ -1021,7 +845,7 @@ func (sd *streamDecoder) checkSiblingKeys(row int, parentKey, relation string, t
 }
 
 // checkComposedChildType refuses a composed child whose type row names a type
-// other than its composition's declared target. graph.Add matches the target by
+// other than its composition's declared target. The graph matches the target by
 // identity and nothing wider, and a writer renders the child under the
 // composition's field, so such a child reads back as the target: a silent
 // retype. A row that did not resolve is resolveTypeTable's to report.
@@ -1044,8 +868,7 @@ func (sd *streamDecoder) checkComposedChildType(parentRow int, relation string, 
 }
 
 // checkStoredKey refuses an instance whose stored key is not the key its own
-// properties state, by the rule graph.Add and graph.RebuildSnapshot apply: the
-// key is non-empty, has one component per declared primary key, and each
+// properties state, by the graph package doc's Keys fact: the key is non-empty, has one component per declared primary key, and each
 // component agrees with its property, which is present and not null. Agreement
 // is judged in canonical form, so two spellings of one instant at one offset agree. Without
 // it an edge to the instance is written as a foreign key that reads back
@@ -1261,7 +1084,7 @@ func (sd *streamDecoder) revalidate(ctx context.Context, unresolved []unresolved
 			unrowed = append(unrowed, u)
 			continue
 		}
-		source := slotCoord{parentRow: row, parentKey: sd.canonicalWireKey(row, u.SourceKey)}
+		source := slotCoord{row: row, key: sd.canonicalWireKey(row, u.SourceKey)}
 		switch {
 		case idx.refusedRecords[ui]:
 			markSlot(&refused, source)
@@ -1278,7 +1101,7 @@ func (sd *streamDecoder) revalidate(ctx context.Context, unresolved []unresolved
 			return fmt.Errorf("context cancelled: %w", err)
 		}
 		key := sd.canonicalWireKey(r.row, r.item.Key)
-		if address := (slotCoord{parentRow: r.row, parentKey: key}); !refused[address] && !idx.unjudged(r.row, key) &&
+		if address := (slotCoord{row: r.row, key: key}); !refused[address] && !idx.unjudged(r.row, key) &&
 			!names.may(address) {
 			sd.revalidateRoot(ctx, r.row, *r.item, unresolved, lost[address])
 		}
@@ -1403,9 +1226,8 @@ func (sd *streamDecoder) rebuildRawProperties(t schema.Type, inst instWire) map[
 
 // wireTypeMatches reports whether a nullable wire row denotes want. The graph
 // layer resolves an edge target and a composed child by the relation's
-// declared target ALONE — every staged edge in graph/build.go carries
-// rel.TargetID(), and its composed check is `child.TypeID() != rel.TargetID()`
-// — so the wire's own row is either the same identity or a contradiction.
+// declared target ALONE — every staged edge carries rel.TargetID(), and a slot
+// check refuses a child of any other identity — so the wire's own row is either the same identity or a contradiction.
 // There is no subtype widening to allow for.
 //
 // An unresolvable row matches: requireRow reports it where it stands.
@@ -1505,7 +1327,7 @@ func (sd *streamDecoder) checkProvenancePath(inst instWire, row int) {
 
 // checkDeclaredProperties refuses a stored property name the row's type does not
 // declare, own or inherited. The validator stores values under declared names
-// alone and [graph.Graph.Add] refuses any other, so such a document describes a
+// alone, so such a document describes a
 // graph no caller could have built, and every writer downstream would have to
 // drop the name or write it as the field it spells. Structural, like the other
 // refusals no option excuses; a schema-less read makes no claim.
@@ -1617,13 +1439,11 @@ func (sd *streamDecoder) checkValueConformance(inst instWire, row int) {
 }
 
 // validateDiagnostics validates duplicate and unresolved records against the
-// walked index. Every conflict resolves at its stated address: a root
-// conflict through the instance index, a composed conflict through the
-// parent's slot, where a null stated key needs a sole occupant. A record a
-// check refused is held to no fact that reads what the check refused: a
-// duplicate whose position holds no conflict, or whose stored key is refused,
-// has none resolved, and an unresolved record a check refused feeds no (one)
-// count and is no record beside an absent or empty one.
+// walked index. Every conflict resolves at its stated address through the
+// instance index. A record a check refused is held to no fact that reads what
+// the check refused: a duplicate that states a parent, or whose stored key is
+// refused, has no conflict resolved, and an unresolved record a check refused
+// feeds no (one) count and is no record beside an absent or empty one.
 func (sd *streamDecoder) validateDiagnostics(diags diagWire, idx *docIndex) {
 	for di, dup := range diags.Duplicates {
 		if dup.statesNothing() {
@@ -1640,6 +1460,14 @@ func (sd *streamDecoder) validateDiagnostics(diags diagWire, idx *docIndex) {
 		dupRef, dupText := "(no types-table row)", "(no types-table row)"
 		if rowOK {
 			dupRef, dupText = sd.refAt(row), sd.refText(row)
+		}
+
+		// A duplicate records a rejected root, and no root has a parent. The one
+		// refusal stands for the record's position, so no root rule judges it.
+		statesParent := dup.ParentType != nil || len(dup.ParentKey) > 0 || dup.Relation != ""
+		if statesParent {
+			sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_MALFORMED,
+				fmt.Sprintf("duplicate record %d states a parent or a relation; a duplicate records a rejected root, which has neither", di)).Build())
 		}
 
 		if rowOK && dup.Instance.Type != nil && *dup.Instance.Type != row {
@@ -1668,10 +1496,7 @@ func (sd *streamDecoder) validateDiagnostics(diags diagWire, idx *docIndex) {
 			sd.checkProvenancePath(dup.Instance, row)
 			sd.checkDeclaredProperties(row, dup.Instance.Key, dup.Instance.Properties)
 			keyed = sd.checkStoredKey(row, dup.Instance)
-			// A ROOT duplicate is a rejected root instance, so its type must be
-			// able to hold one. A COMPOSED duplicate is not: a part type is
-			// exactly what belongs there, and Relation is what separates them.
-			if dup.Relation == "" {
+			if !statesParent {
 				eligible = sd.checkRootTypeEligible(row, fmt.Sprintf("duplicate record %d", di))
 			}
 		}
@@ -1701,8 +1526,7 @@ func (sd *streamDecoder) validateDiagnostics(diags diagWire, idx *docIndex) {
 			sd.collector.Collect(b.Build())
 		}
 
-		// A conflict the record does not state is one break, and its position is
-		// still judged.
+		// A conflict the record does not state is one break.
 		var conflictRow int
 		var conflictKey string
 		conflictOK := dup.Conflict != nil
@@ -1718,112 +1542,29 @@ func (sd *streamDecoder) validateDiagnostics(diags diagWire, idx *docIndex) {
 				fmt.Sprintf("duplicate record %d (%s[%s]) carries no conflict block", di, dupText, diag.ValueText(keyStr))).Build())
 		}
 
-		if dup.Relation == "" {
-			// Parent coordinates address a slot, and a root duplicate has none.
-			if dup.ParentType != nil || len(dup.ParentKey) > 0 {
-				sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_MALFORMED,
-					fmt.Sprintf("duplicate record %d states no relation but carries parent coordinates", di)).Build())
-			}
-			// No root is of a type that cannot hold one, and a refused key is no
-			// address, so either record has no conflict to resolve.
-			if !eligible || !keyed || !conflictOK {
-				continue
-			}
-			// A conflict a refused unit states is judged no further for its
-			// existence alone: its type and key are still the record's own.
-			if !idx.rootExists(conflictRow, conflictKey) && !sd.refusedAddress(idx, conflictRow, conflictKey) {
-				sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_DANGLING_REFERENCE,
-					fmt.Sprintf("duplicate conflict %s[%s] references non-existent instance",
-						sd.refText(conflictRow), diag.ValueText(conflictKey))).
-					WithDetail(diag.DetailKeyTypeName, sd.refAt(conflictRow)).
-					WithDetail(diag.DetailKeyPrimaryKey, conflictKey).
-					Build())
-				continue
-			}
-			// graph.Add records a root duplicate against the root at its own
-			// type and key, and graph.RebuildSnapshot derives it so. A conflict
-			// standing at the key the record itself states adds no break to that key's.
-			if rowOK && (conflictRow != row || conflictKey != carried && conflictKey != stated) {
-				sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_MALFORMED,
-					fmt.Sprintf("duplicate record %d states conflict %s[%s]; a root duplicate's conflict is the root at its own type and key, %s[%s]",
-						di, sd.refText(conflictRow), diag.ValueText(conflictKey), dupText, diag.ValueText(carried))).Build())
-			}
+		// No root is of a type that cannot hold one, and a refused key is no
+		// address, so either record has no conflict to resolve.
+		if statesParent || !eligible || !keyed || !conflictOK {
 			continue
 		}
-
-		if dup.ParentType == nil {
-			sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_MALFORMED,
-				fmt.Sprintf("duplicate record %d carries relation %s with no parent coordinates", di, diag.QuoteValue(dup.Relation))).Build())
-			continue
-		}
-		parentRow, ok := sd.requireRow(dup.ParentType, func() string {
-			return fmt.Sprintf("duplicate record %d parent", di)
-		})
-		if !ok {
-			continue
-		}
-		parentKey := sd.canonicalWireKey(parentRow, dup.ParentKey)
-		slot := slotCoord{parentRow: parentRow, parentKey: parentKey, relation: dup.Relation}
-		// A parent a refused unit states draws no issue for its existence; the
-		// checks below that read the record and its parent's type still run.
-		statedParent := false
-		if !idx.rootExists(parentRow, parentKey) {
-			if !sd.refusedAddress(idx, parentRow, parentKey) {
-				sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_DANGLING_REFERENCE,
-					fmt.Sprintf("duplicate parent %s[%s] does not resolve to a root instance",
-						sd.refText(parentRow), diag.ValueText(parentKey))).
-					WithDetail(diag.DetailKeyTypeName, sd.refAt(parentRow)).
-					WithDetail(diag.DetailKeyPrimaryKey, parentKey).
-					Build())
-				continue
-			}
-			statedParent = true
-		}
-		// A slot the walk refused for its name is the walk's one issue; one it
-		// refused for its children still judges the record's own position, but
-		// holds no occupants the record's conflict is resolved against.
-		slotRefused := idx.slotRefused(slot)
-		if slotRefused && !sd.declaresComposition(parentRow, dup.Relation) {
-			continue
-		}
-		rel, ok := sd.checkDuplicateSlot(di, row, rowOK, slot)
-		if !ok {
-			continue
-		}
-		// A keyed (many) slot holds its conflict at a key, so a record with a key
-		// of its own states one, whatever the slot holds. By length: an empty
-		// JSON array decodes non-nil.
-		if keyed && conflictOK && !rel.IsZero() && rel.IsMany() && len(dup.Conflict.Key) == 0 && len(dup.Instance.Key) > 0 {
-			sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_MALFORMED,
-				fmt.Sprintf("duplicate record %d states no conflict key; under the (many) composition %q its conflict is the child at its own key, %s",
-					di, slot.relation, diag.ValueText(carried))).Build())
-			continue
-		}
-		// A stated parent, a parent whose key the walk refused, or an address
-		// two roots share holds no slot the record's conflict is resolved in.
-		if statedParent || slotRefused || !keyed || !conflictOK || !idx.held(parentRow, parentKey) {
-			continue
-		}
-		occupant, found := sd.conflictInSlot(idx, slot, conflictRow, dup.Conflict.Key, conflictKey)
-		if !found && sd.childStated(idx, slot, conflictRow, dup.Conflict.Key, conflictKey) {
-			continue
-		}
-		if !found {
+		// A conflict a refused unit states is judged no further for its
+		// existence alone: its type and key are still the record's own.
+		if !idx.rootExists(conflictRow, conflictKey) && !sd.refusedAddress(idx, conflictRow, conflictKey) {
 			sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_DANGLING_REFERENCE,
-				fmt.Sprintf("duplicate conflict %s[%s] under %s[%s].%s references non-existent instance",
-					sd.refText(conflictRow), diag.ValueText(conflictKey), sd.refText(parentRow), diag.ValueText(parentKey), diag.ValueText(dup.Relation))).
+				fmt.Sprintf("duplicate conflict %s[%s] references non-existent instance",
+					sd.refText(conflictRow), diag.ValueText(conflictKey))).
 				WithDetail(diag.DetailKeyTypeName, sd.refAt(conflictRow)).
 				WithDetail(diag.DetailKeyPrimaryKey, conflictKey).
 				Build())
 			continue
 		}
-		// graph.AddComposed records a keyed (many) duplicate against the child at
-		// its own key. A (one) slot's occupant is its sole child. A conflict
-		// standing at the key the record itself states adds no break to that key's.
-		if rowOK && !rel.IsZero() && rel.IsMany() && occupant.key != carried && occupant.key != stated {
+		// graph.Add records a duplicate against the root at its own type and key,
+		// and the rebuild derives it so. A conflict standing at the key
+		// the record itself states adds no break to that key's.
+		if rowOK && (conflictRow != row || conflictKey != carried && conflictKey != stated) {
 			sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_MALFORMED,
-				fmt.Sprintf("duplicate record %d states conflict %s[%s]; under the (many) composition %q its conflict is the child at its own key, %s",
-					di, sd.refText(occupant.row), diag.ValueText(occupant.key), slot.relation, diag.ValueText(carried))).Build())
+				fmt.Sprintf("duplicate record %d states conflict %s[%s]; a duplicate's conflict is the root at its own type and key, %s[%s]",
+					di, sd.refText(conflictRow), diag.ValueText(conflictKey), dupText, diag.ValueText(carried))).Build())
 		}
 	}
 
@@ -1838,7 +1579,7 @@ func (sd *streamDecoder) validateDiagnostics(diags diagWire, idx *docIndex) {
 		switch {
 		case refused:
 			idx.refuseRecord(ui)
-		case !rel.IsZero() && !rel.IsMany() && idx.held(slot.parentRow, slot.parentKey):
+		case !rel.IsZero() && !rel.IsMany() && idx.held(slot.row, slot.key):
 			// A record of a root whose key a check refused, or of an address two
 			// roots share, counts toward no (one) association.
 			idx.pending = append(idx.pending, pendingOne{ui: ui, at: oneCoord{slot: slot}})
@@ -1862,7 +1603,7 @@ func (sd *streamDecoder) checkRecord(ui int, u unresolvedWire, idx *docIndex) (s
 	if ok {
 		sd.checkDeclaredEdgeProperties(sourceRow, u.SourceKey, u.Relation, u.Properties)
 		sourceKey := sd.canonicalWireKey(sourceRow, u.SourceKey)
-		slot = slotCoord{parentRow: sourceRow, parentKey: sourceKey, relation: u.Relation}
+		slot = slotCoord{row: sourceRow, key: sourceKey, relation: u.Relation}
 		rel = sd.checkAssociation(fmt.Sprintf("unresolved record %d", ui), sourceRow, u.SourceKey,
 			u.Relation, u.TargetType, u.TargetKey, u.Reason, documented)
 		// A record a check refused names no reference to resolve, as a refused
@@ -1882,7 +1623,7 @@ func (sd *streamDecoder) checkRecord(ui int, u unresolvedWire, idx *docIndex) (s
 }
 
 // checkRecordFacts holds the unresolved records to the facts graph.Add derives
-// them by, as graph.RebuildSnapshot does: every root holds an edge or a record
+// them by: every root holds an edge or a record
 // under each required association of its type; an absent or empty record stands
 // alone, once, and only under a required association; and a target_missing
 // record names a target no root holds. Every record counts as held where it
@@ -1906,7 +1647,7 @@ func (sd *streamDecoder) checkRecordFacts(diags diagWire, idx *docIndex) {
 		if !ok {
 			continue
 		}
-		records[ui] = record{slot: slotCoord{parentRow: row, parentKey: sd.canonicalWireKey(row, u.SourceKey), relation: u.Relation}, ok: true}
+		records[ui] = record{slot: slotCoord{row: row, key: sd.canonicalWireKey(row, u.SourceKey), relation: u.Relation}, ok: true}
 		if rel, ok := sd.associationAt(row, u.Relation); ok {
 			records[ui].rel = rel
 		}
@@ -1924,19 +1665,18 @@ func (sd *streamDecoder) checkRecordFacts(diags diagWire, idx *docIndex) {
 				idx.refuseRecord(ui)
 				sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_MALFORMED,
 					fmt.Sprintf("unresolved record %d states reason %q under %q of %s[%s], which is optional, where graph.Add records none",
-						ui, u.Reason, u.Relation, sd.refText(rec.slot.parentRow), diag.ValueText(rec.slot.parentKey))).Build())
+						ui, u.Reason, u.Relation, sd.refText(rec.slot.row), diag.ValueText(rec.slot.key))).Build())
 			}
 		case "target_missing":
-			targetRow, ok := sd.rowAt(u.TargetType)
-			if ok && targetRow < len(sd.tableIDs) && sd.tableIDs[targetRow] == rec.rel.TargetID() {
-				// A root whose key a check refused is one graph.Add holds not, so a
-				// record naming it is no second break.
-				if key := sd.canonicalWireKey(targetRow, u.TargetKey); idx.exists[targetRow][key] {
-					idx.refuseRecord(ui)
-					sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_MALFORMED,
-						fmt.Sprintf("unresolved record %d names target %s[%s], which a root holds, where graph.Add resolves an edge",
-							ui, sd.refText(targetRow), diag.ValueText(key))).Build())
-				}
+			// checkRecord accepted the record, so its target row is the association's
+			// declared target. A root whose key a check refused is one graph.Add holds
+			// not, so a record naming it is no second break.
+			targetRow, _ := sd.rowAt(u.TargetType)
+			if key := sd.canonicalWireKey(targetRow, u.TargetKey); idx.exists[targetRow][key] {
+				idx.refuseRecord(ui)
+				sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_MALFORMED,
+					fmt.Sprintf("unresolved record %d names target %s[%s], which a root holds, where graph.Add resolves an edge",
+						ui, sd.refText(targetRow), diag.ValueText(key))).Build())
 			}
 		}
 	}
@@ -1972,7 +1712,7 @@ func (sd *streamDecoder) checkRecordFacts(diags diagWire, idx *docIndex) {
 		if idx.refusedRecords[ui] || (u.Reason != "absent" && u.Reason != "empty") {
 			continue
 		}
-		if beside[rec.slot] < 2 || !idx.held(rec.slot.parentRow, rec.slot.parentKey) {
+		if beside[rec.slot] < 2 || !idx.held(rec.slot.row, rec.slot.key) {
 			continue
 		}
 		// Every absent and empty record of the slot is the one break, reported
@@ -1982,7 +1722,7 @@ func (sd *streamDecoder) checkRecordFacts(diags diagWire, idx *docIndex) {
 			reported[rec.slot] = true
 			sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_MALFORMED,
 				fmt.Sprintf("%q of %s[%s] holds an %s record beside another record, where graph.Add records it alone",
-					u.Relation, sd.refText(rec.slot.parentRow), diag.ValueText(rec.slot.parentKey), u.Reason)).Build())
+					u.Relation, sd.refText(rec.slot.row), diag.ValueText(rec.slot.key), u.Reason)).Build())
 		}
 	}
 	// A record whose source row resolves to none could name any root at its
@@ -2019,9 +1759,9 @@ func (sd *streamDecoder) checkRecordFacts(diags diagWire, idx *docIndex) {
 				continue
 			}
 			for _, relation := range required {
-				if slot := (slotCoord{parentRow: row, parentKey: key, relation: relation}); held[slot]+missing[slot] == 0 &&
+				if slot := (slotCoord{row: row, key: key, relation: relation}); held[slot]+missing[slot] == 0 &&
 					!names.may(slot) {
-					markSlot(&idx.refusedRoots, slotCoord{parentRow: row, parentKey: key})
+					markSlot(&idx.refusedRoots, slotCoord{row: row, key: key})
 					sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_MALFORMED,
 						fmt.Sprintf("root %s[%s] holds no edge and no record under the required association %q, where graph.Add records an absent one",
 							sd.refText(row), diag.ValueText(key), relation)).Build())
@@ -2043,13 +1783,13 @@ type recordNames struct {
 // slot's address in the canonical form of slot's row, under slot's relation, or
 // under any where slot leaves it empty.
 func (n *recordNames) may(slot slotCoord) bool {
-	at := slotCoord{parentRow: slot.parentRow, relation: slot.relation}
+	at := slotCoord{row: slot.row, relation: slot.relation}
 	keys, read := n.keys[at]
 	if !read {
 		keys = make(map[string]bool)
 		for _, u := range n.records {
 			if slot.relation == "" || u.Relation == slot.relation {
-				keys[n.sd.canonicalWireKey(slot.parentRow, u.SourceKey)] = true
+				keys[n.sd.canonicalWireKey(slot.row, u.SourceKey)] = true
 			}
 		}
 		if n.keys == nil {
@@ -2057,7 +1797,7 @@ func (n *recordNames) may(slot slotCoord) bool {
 		}
 		n.keys[at] = keys
 	}
-	return keys[slot.parentKey]
+	return keys[slot.key]
 }
 
 // unresolvedReasons is the closed set graph.UnresolvedEdge documents. The
@@ -2068,8 +1808,7 @@ var unresolvedReasons = map[string]bool{"target_missing": true, "absent": true, 
 
 // checkUnresolvedReason holds a record to the reasons graph.UnresolvedEdge
 // documents, and a reason naming no target to carry no target key or edge
-// properties, as graph.RebuildSnapshot does; Verify and Info then report what
-// Load refuses. It reports whether the reason is a documented one.
+// properties; Verify and Info then report what Load refuses. It reports whether the reason is a documented one.
 func (sd *streamDecoder) checkUnresolvedReason(ui int, u unresolvedWire) bool {
 	if u.Reason == "" {
 		sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_MALFORMED,
@@ -2211,99 +1950,34 @@ func (sd *streamDecoder) checkAssociation(what string, sourceRow int, sourceKey 
 func (sd *streamDecoder) checkOnes(idx *docIndex) {
 	for at, n := range idx.danglingOnes {
 		if n+idx.ones[at] > 1 {
-			markSlot(&idx.refusedRoots, slotCoord{parentRow: at.slot.parentRow, parentKey: at.slot.parentKey})
+			markSlot(&idx.refusedRoots, slotCoord{row: at.slot.row, key: at.slot.key})
 		}
 	}
 	for _, at := range idx.order {
 		if n, slot := idx.ones[at], at.slot; n > 1 {
-			markSlot(&idx.refusedRoots, slotCoord{parentRow: slot.parentRow, parentKey: slot.parentKey})
+			markSlot(&idx.refusedRoots, slotCoord{row: slot.row, key: slot.key})
 			sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_GRAPH_CARDINALITY,
 				fmt.Sprintf("(one) association %q of %s[%s] holds %d records",
-					slot.relation, sd.refText(slot.parentRow), diag.ValueText(slot.parentKey), n)).
-				WithDetail(diag.DetailKeyTypeName, sd.refAt(slot.parentRow)).
+					slot.relation, sd.refText(slot.row), diag.ValueText(slot.key), n)).
+				WithDetail(diag.DetailKeyTypeName, sd.refAt(slot.row)).
 				WithDetail(diag.DetailKeyRelationName, slot.relation).
 				Build())
 		}
 	}
 }
 
-// checkDuplicateSlot holds a composed duplicate record at row to the position
-// graph.AddComposed records one at and graph.RebuildSnapshot derives its
-// conflict from: slot is a composition its parent's type declares, the
-// record's type is that composition's declared target, and the composition is
-// not a keyless (many) one, which holds no conflict. It judges the position
-// alone, whatever the slot holds. It returns the composition, zero on a
-// schema-less read, and false where it refused the record.
-func (sd *streamDecoder) checkDuplicateSlot(di, row int, rowOK bool, slot slotCoord) (schema.Relation, bool) {
-	if sd.schema.IsZero() || slot.parentRow >= len(sd.tableIDs) {
-		return schema.Relation{}, true
-	}
-	pt, ok := sd.schema.TypeByID(sd.tableIDs[slot.parentRow])
-	if !ok {
-		return schema.Relation{}, true
-	}
-	rel, ok := pt.Relation(slot.relation)
-	if !ok || rel.Kind() != schema.RelationComposition {
-		sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_INVALID_COMPOSED,
-			fmt.Sprintf("duplicate record %d names %s, which %s does not declare as a composition",
-				di, diag.QuoteValue(slot.relation), sd.refText(slot.parentRow))).
-			WithDetail(diag.DetailKeyTypeName, sd.refAt(slot.parentRow)).
-			WithDetail(diag.DetailKeyRelationName, slot.relation).
-			Build())
-		return schema.Relation{}, false
-	}
-	if rowOK && row < len(sd.tableIDs) && sd.tableIDs[row] != rel.TargetID() {
-		sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_TYPE_MISMATCH,
-			fmt.Sprintf("duplicate record %d is typed %s, which the composition %q declares as %s",
-				di, sd.refText(row), slot.relation, sd.identRef(rel.TargetID()))).Build())
-		return schema.Relation{}, false
-	}
-	if target, ok := sd.schema.TypeByID(rel.TargetID()); ok && rel.IsMany() && !target.HasPrimaryKey() {
-		sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_MALFORMED,
-			fmt.Sprintf("duplicate record %d is under the keyless (many) composition %q, where no child conflicts",
-				di, slot.relation)).Build())
-		return schema.Relation{}, false
-	}
-	return rel, true
-}
-
-// conflictInSlot returns the occupant the stated conflict address resolves to
-// in the slot: a non-empty key selects among the occupants, an empty one
-// addresses a sole occupant. The caller has refused an empty one that a keyed
-// (many) duplicate with a key of its own states, so that arm reads a (one)
-// slot, a keyed (many) slot whose duplicate holds no key, or any slot on a
-// schema-less read. The arm is chosen by length, not nil-ness, because an
-// empty JSON array decodes non-nil.
-func (sd *streamDecoder) conflictInSlot(idx *docIndex, slot slotCoord, conflictRow int, rawKey []any, keyStr string) (slotChild, bool) {
-	occupants := idx.slots[slot]
-	if len(rawKey) > 0 {
-		want := slotChild{row: conflictRow, key: keyStr}
-		if idx.occupies(slot, want) {
-			return want, true
-		}
-		return slotChild{}, false
-	}
-	if len(occupants) == 1 && occupants[0].row == conflictRow {
-		return occupants[0], true
-	}
-	return slotChild{}, false
-}
-
 // validateEdgeRefs holds each edge's target to a root, and feeds the record
 // facts and the (one) counts. A target a refused unit states is that unit's
 // break, so the edge stays in both. An edge that names no root is refused: it
 // stays held where it stands, and is no record beside another and no count. Of
-// a sound root, an edge feeds that root's (one) counts, and only
-// the holder's, ordinal 0, counts beside its records.
+// a sound root, an edge feeds that root's (one) counts.
 func (sd *streamDecoder) validateEdgeRefs(idx *docIndex) {
 	for _, ref := range idx.refs {
 		if idx.rootExists(ref.targetRow, ref.targetKey) || sd.refusedAddress(idx, ref.targetRow, ref.targetKey) {
-			if ref.own == 0 {
-				if idx.soundEdges == nil {
-					idx.soundEdges = make(map[slotCoord]int)
-				}
-				idx.soundEdges[ref.slot]++
+			if idx.soundEdges == nil {
+				idx.soundEdges = make(map[slotCoord]int)
 			}
+			idx.soundEdges[ref.slot]++
 			if ref.own >= 0 && ref.one {
 				idx.countOne(oneCoord{slot: ref.slot, root: ref.own})
 			}
@@ -2315,13 +1989,13 @@ func (sd *streamDecoder) validateEdgeRefs(idx *docIndex) {
 			}
 			idx.danglingOnes[oneCoord{slot: ref.slot, root: ref.own}]++
 		}
-		sourceRef := sd.refAt(ref.slot.parentRow)
+		sourceRef := sd.refAt(ref.slot.row)
 		targetRef := sd.refAt(ref.targetRow)
 		sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_DANGLING_REFERENCE,
 			fmt.Sprintf("edge in %s[%s] references %s[%s] which does not exist",
-				sd.refText(ref.slot.parentRow), diag.ValueText(ref.slot.parentKey), sd.refText(ref.targetRow), diag.ValueText(ref.targetKey))).
+				sd.refText(ref.slot.row), diag.ValueText(ref.slot.key), sd.refText(ref.targetRow), diag.ValueText(ref.targetKey))).
 			WithDetail(diag.DetailKeyTypeName, sourceRef).
-			WithDetail(diag.DetailKeyPrimaryKey, ref.slot.parentKey).
+			WithDetail(diag.DetailKeyPrimaryKey, ref.slot.key).
 			WithDetail(diag.DetailKeyTargetType, targetRef).
 			WithDetail(diag.DetailKeyTargetPK, ref.targetKey).
 			WithHint("ensure the target instance is included in the snapshot").
@@ -2371,14 +2045,14 @@ func (sd *streamDecoder) validateBody(ctx context.Context, groups []instanceGrou
 // loadDocument materializes a validated document. It runs after the
 // pipeline's gate, so every reference is already validated and nothing here
 // collects a diagnostic.
-func (sd *streamDecoder) loadDocument(groups []instanceGroupWire, diags diagWire) graph.SnapshotParts {
+func (sd *streamDecoder) loadDocument(groups []instanceGroupWire, diags diagWire) snapparts.Parts {
 	types := make([]schema.TypeID, 0, len(groups))
 	total := 0
 	for _, g := range groups {
 		total += len(g.Items)
 	}
-	instParts := make([]graph.InstanceParts, 0, total)
-	var edgeParts []graph.EdgeParts
+	instParts := make([]snapparts.Instance, 0, total)
+	var edgeParts []snapparts.Edge
 
 	for _, g := range groups {
 		row := *g.Type
@@ -2392,7 +2066,7 @@ func (sd *streamDecoder) loadDocument(groups []instanceGroupWire, diags diagWire
 			// document identical.
 			for _, relName := range slices.Sorted(maps.Keys(item.Edges)) {
 				for _, e := range item.Edges[relName] {
-					edgeParts = append(edgeParts, graph.EdgeParts{
+					edgeParts = append(edgeParts, snapparts.Edge{
 						Relation:   relName,
 						SourceType: id,
 						SourceKey:  ip.PrimaryKey,
@@ -2404,20 +2078,14 @@ func (sd *streamDecoder) loadDocument(groups []instanceGroupWire, diags diagWire
 		}
 	}
 
-	dupParts := make([]graph.DuplicateParts, 0, len(diags.Duplicates))
+	dupParts := make([]snapparts.Instance, 0, len(diags.Duplicates))
 	for _, dw := range diags.Duplicates {
-		dp := graph.DuplicateParts{Instance: sd.instanceParts(*dw.Type, dw.Instance)}
-		if dw.Relation != "" {
-			dp.ParentType = sd.tableIDs[*dw.ParentType]
-			dp.ParentKey = immutable.WrapKey(normalizeSlice(dw.ParentKey))
-			dp.Relation = dw.Relation
-		}
-		dupParts = append(dupParts, dp)
+		dupParts = append(dupParts, sd.instanceParts(*dw.Type, dw.Instance))
 	}
 
-	unresParts := make([]graph.UnresolvedParts, 0, len(diags.Unresolved))
+	unresParts := make([]snapparts.Unresolved, 0, len(diags.Unresolved))
 	for _, uw := range diags.Unresolved {
-		up := graph.UnresolvedParts{
+		up := snapparts.Unresolved{
 			SourceType: sd.tableIDs[*uw.SourceType],
 			SourceKey:  immutable.WrapKey(normalizeSlice(uw.SourceKey)),
 			Relation:   uw.Relation,
@@ -2435,12 +2103,12 @@ func (sd *streamDecoder) loadDocument(groups []instanceGroupWire, diags diagWire
 	// Collapsing that to a zero value made the next Marshal write
 	// {"values":false,"associations":false}, turning silence into a claim the
 	// document never made.
-	var att *graph.Attestation
+	var att *snapparts.Attestation
 	if a := sd.header.Attestation; a != nil {
-		att = &graph.Attestation{Values: a.Values, Associations: a.Associations}
+		att = &snapparts.Attestation{Values: a.Values, Associations: a.Associations}
 	}
 
-	return graph.SnapshotParts{
+	return snapparts.Parts{
 		Types:       types,
 		Instances:   instParts,
 		Edges:       edgeParts,
@@ -2450,21 +2118,21 @@ func (sd *streamDecoder) loadDocument(groups []instanceGroupWire, diags diagWire
 	}
 }
 
-// instanceParts converts a validated wire instance to InstanceParts. The
-// wire carries no instance name, and neither do the parts: RebuildSnapshot
-// renders it from the identity.
-func (sd *streamDecoder) instanceParts(row int, inst instWire) graph.InstanceParts {
+// instanceParts converts a validated wire instance to its parts. The wire
+// carries no instance name, and neither do the parts: the rebuild renders it
+// from the identity.
+func (sd *streamDecoder) instanceParts(row int, inst instWire) snapparts.Instance {
 	id := sd.tableIDs[row]
-	ip := graph.InstanceParts{
+	ip := snapparts.Instance{
 		TypeID:     id,
 		PrimaryKey: immutable.WrapKey(normalizeSlice(inst.Key)),
 		Properties: immutable.WrapProperties(normalizeMap(inst.Properties)),
 	}
 
 	if len(inst.Composed) > 0 {
-		ip.Composed = make(map[string][]graph.InstanceParts, len(inst.Composed))
+		ip.Composed = make(map[string][]snapparts.Instance, len(inst.Composed))
 		for relName, children := range inst.Composed {
-			childParts := make([]graph.InstanceParts, 0, len(children))
+			childParts := make([]snapparts.Instance, 0, len(children))
 			for _, child := range children {
 				childParts = append(childParts, sd.instanceParts(*child.Type, child))
 			}
@@ -2547,51 +2215,34 @@ func (sd *streamDecoder) verifyIntegrity() string {
 // emptyJSONString is the integrity_hash value the canonical form carries.
 var emptyJSONString = []byte(`""`)
 
-// integrityHashSpans locates the integrity_hash value and returns the bytes
-// on either side of it. The canonical form is prefix + `""` + suffix, which
-// the caller hashes segment by segment rather than materializing.
+// integrityHashSpans returns the bytes on either side of the value of the
+// header's own integrity_hash member. The canonical form is prefix + `""` +
+// suffix, which the caller hashes segment by segment rather than materializing.
+// It reads the header's members by name: a schema name, a metadata key or a
+// source name can hold the same bytes.
 func integrityHashSpans(data []byte) (prefix, suffix []byte, ok bool) {
-	// Find the integrity_hash key in the data.
-	// The key appears as "integrity_hash" followed by : and the value.
-	keyBytes := []byte(`"integrity_hash"`)
-	idx := bytes.Index(data, keyBytes)
-	if idx < 0 {
-		return nil, nil, false
-	}
-
-	// Advance past the key to find the colon.
-	pos := idx + len(keyBytes)
-	for pos < len(data) && (data[pos] == ' ' || data[pos] == '\t' || data[pos] == '\n' || data[pos] == '\r') {
-		pos++
-	}
-	if pos >= len(data) || data[pos] != ':' {
-		return nil, nil, false
-	}
-	pos++ // skip colon
-
-	// Skip whitespace after colon.
-	for pos < len(data) && (data[pos] == ' ' || data[pos] == '\t' || data[pos] == '\n' || data[pos] == '\r') {
-		pos++
-	}
-	if pos >= len(data) || data[pos] != '"' {
-		return nil, nil, false
-	}
-
-	// Find the end of the quoted string value.
-	valueStart := pos // position of opening quote
-	pos++             // skip opening quote
-	for pos < len(data) && data[pos] != '"' {
-		if data[pos] == '\\' {
-			pos++ // skip escaped char
+	dec := json.NewDecoder(bytes.NewReader(data))
+	// The document's brace, the header's name and the header's brace.
+	for range 3 {
+		if _, err := dec.Token(); err != nil {
+			return nil, nil, false
 		}
-		pos++
 	}
-	if pos >= len(data) {
-		return nil, nil, false
+	for dec.More() {
+		name, err := dec.Token()
+		if err != nil {
+			return nil, nil, false
+		}
+		var member json.RawMessage
+		if err := dec.Decode(&member); err != nil {
+			return nil, nil, false
+		}
+		if name == "integrity_hash" {
+			end := dec.InputOffset()
+			return data[:end-int64(len(member))], data[end:], true
+		}
 	}
-	valueEnd := pos + 1 // position after closing quote
-
-	return data[:valueStart], data[valueEnd:], true
+	return nil, nil, false
 }
 
 // sha256Sum hashes the concatenation of segments and formats the digest as
@@ -2616,8 +2267,8 @@ func formatWireKey(key []any) string {
 
 // canonicalWireKey renders a wire key as the address the rebuilt instance
 // will carry: each component under a Timestamp, Date or UUID primary-key
-// constraint of the row's type is rewritten to its canonical text, as
-// graph.RebuildSnapshot rewrites it. A component the constraint cannot render,
+// constraint of the row's type is rewritten to its canonical text, as the
+// rebuild rewrites it. A component the constraint cannot render,
 // a row that resolves to no type, or a schema-less read leave the key as
 // written. Every position that addresses an instance goes through it, so the
 // document's index and the graph's agree on what one key is.

@@ -60,7 +60,7 @@ func TestRenderer_WithSourceProvider_Nil(t *testing.T) {
 	// WithSourceProvider(nil) should be safe
 	r := NewRenderer(WithSourceProvider(nil), WithExcerpts(true))
 
-	source := location.MustNewSourceID("test://file.yammm")
+	source := location.NewSourceID("test://file.yammm")
 	issue := NewIssue(Error, E_SYNTAX, "error").
 		WithSpan(location.Point(source, 1, 1)).
 		Build()
@@ -74,7 +74,7 @@ func TestRenderer_WithSourceProvider_Nil(t *testing.T) {
 
 func TestRenderer_WithExcerpts(t *testing.T) {
 	provider := newMockSourceProvider()
-	source := location.MustNewSourceID("test://file.yammm")
+	source := location.NewSourceID("test://file.yammm")
 	provider.Add(source, "line one\nline two\nline three\n")
 
 	r := NewRenderer(
@@ -103,7 +103,7 @@ func TestRenderer_WithExcerpts(t *testing.T) {
 
 func TestRenderer_WithExcerpts_Disabled(t *testing.T) {
 	provider := newMockSourceProvider()
-	source := location.MustNewSourceID("test://file.yammm")
+	source := location.NewSourceID("test://file.yammm")
 	provider.Add(source, "source content\n")
 
 	r := NewRenderer(
@@ -190,7 +190,7 @@ func TestRenderer_FormatIssue_Location(t *testing.T) {
 		{
 			name: "with span",
 			issue: NewIssue(Error, E_SYNTAX, "msg").
-				WithSpan(location.Point(location.MustNewSourceID("test://a.yammm"), 10, 5)).
+				WithSpan(location.Point(location.NewSourceID("test://a.yammm"), 10, 5)).
 				Build(),
 			contains: "test://a.yammm:10:5",
 		},
@@ -228,7 +228,7 @@ func TestRenderer_FormatIssue_Hint(t *testing.T) {
 }
 
 func TestRenderer_FormatIssue_Related(t *testing.T) {
-	source := location.MustNewSourceID("test://related.yammm")
+	source := location.NewSourceID("test://related.yammm")
 	issue := NewIssue(Error, E_DUPLICATE_TYPE, "type collision").
 		WithRelated(location.RelatedInfo{
 			Message: "first definition here",
@@ -316,7 +316,7 @@ func TestRenderer_extractLine(t *testing.T) {
 
 func TestRenderer_Excerpt_PointSpan(t *testing.T) {
 	provider := newMockSourceProvider()
-	source := location.MustNewSourceID("test://file.yammm")
+	source := location.NewSourceID("test://file.yammm")
 	provider.Add(source, "  token here\n")
 
 	r := NewRenderer(
@@ -338,7 +338,7 @@ func TestRenderer_Excerpt_PointSpan(t *testing.T) {
 
 func TestRenderer_Excerpt_RangeSpan(t *testing.T) {
 	provider := newMockSourceProvider()
-	source := location.MustNewSourceID("test://file.yammm")
+	source := location.NewSourceID("test://file.yammm")
 	provider.Add(source, "  token here\n")
 
 	r := NewRenderer(
@@ -365,7 +365,7 @@ func TestRenderer_Excerpt_RangeSpan(t *testing.T) {
 
 func TestRenderer_Excerpt_UnknownPosition(t *testing.T) {
 	provider := newMockSourceProvider()
-	source := location.MustNewSourceID("test://file.yammm")
+	source := location.NewSourceID("test://file.yammm")
 	provider.Add(source, "content\n")
 
 	r := NewRenderer(
@@ -395,7 +395,7 @@ func TestRenderer_Excerpt_SourceNotAvailable(t *testing.T) {
 		WithExcerpts(true),
 	)
 
-	source := location.MustNewSourceID("test://missing.yammm")
+	source := location.NewSourceID("test://missing.yammm")
 	issue := NewIssue(Error, E_SYNTAX, "error").
 		WithSpan(location.Point(source, 1, 1)).
 		Build()
@@ -475,7 +475,7 @@ func TestRenderer_WriteLocation_SourceNameOnly(t *testing.T) {
 // source name, else nothing.
 func TestRenderer_WriteLocation_Precedence(t *testing.T) {
 	r := NewRenderer()
-	source := location.MustNewSourceID("test://schema.yammm")
+	source := location.NewSourceID("test://schema.yammm")
 
 	tests := []struct {
 		name     string

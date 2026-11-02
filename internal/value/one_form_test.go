@@ -205,8 +205,7 @@ func TestTypeStrata_AMapChannelFunctionOrUnsafePointerHasNone(t *testing.T) {
 	}
 }
 
-// A nil value is nil whatever carries it, as Scalar reads it and every writer
-// writes it: a nil pointer, map, slice, channel, function or unsafe pointer,
+// A nil value is nil whatever carries it, as Scalar reads it: a nil pointer, map, slice, channel, function or unsafe pointer,
 // bare or behind a pointer or an interface, a bare nil slice or string-keyed
 // map included.
 func TestTypeStrata_ANilValueIsNilThroughEveryCarrier(t *testing.T) {

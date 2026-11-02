@@ -15,7 +15,7 @@ import (
 // only the constraint it returns.
 func TestSchemaParser_TakesTheParsersEnumValues(t *testing.T) {
 	src := "schema \"s\"\n\ntype Kind = Enum[\"a\", \"b\", \"c\", \"d\", \"e\", \"f\", \"g\", \"h\", \"i\"]\n"
-	id := location.MustNewSourceID("test://s.yammm")
+	id := location.NewSourceID("test://s.yammm")
 	file, issues := parse.Parse([]byte(src), id)
 	if len(issues) != 0 {
 		t.Fatalf("parse: %v", issues)

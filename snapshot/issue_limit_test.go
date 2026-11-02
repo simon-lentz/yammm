@@ -6,40 +6,25 @@ import (
 	"testing"
 
 	"github.com/simon-lentz/yammm/diag"
-	"github.com/simon-lentz/yammm/graph"
-	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/instance"
 	"github.com/simon-lentz/yammm/internal/instancetest"
 	"github.com/simon-lentz/yammm/schema"
 	"github.com/simon-lentz/yammm/snapshot"
 )
 
-// revalDocumentWithFailures marshals n bypass-built Things, each violating
-// the count bound, so re-validation reports at least one finding per Thing.
+// revalDocumentWithFailures is a document of n Things, each violating the count
+// bound, so re-validation reports at least one finding per Thing.
 func revalDocumentWithFailures(t *testing.T, s schema.Schema, n int) []byte {
 	t.Helper()
-	thing, _ := s.Type("Thing")
-	g := graph.New(s)
+	insts := make([]instance.ValidInstance, 0, n)
 	for i := range n {
 		id := fmt.Sprintf("t%d", i)
-		vi := instancetest.VI(
-			"Thing",
-			instancetest.TypeID(thing.ID()),
-			instancetest.PK(id),
-			instancetest.Props(map[string]any{"id": id, "count": int64(99)}),
-			instancetest.Composed(map[string]immutable.Value{
-				"ITEMS": immutable.Wrap([]instance.ValidInstance{revalItem(t, s, "sku-"+id)}),
-			}),
-		)
-		if r := g.Add(t.Context(), vi); !r.OK() {
-			t.Fatalf("Add %s: %s", id, r.String())
-		}
+		insts = append(insts, instancetest.Valid(t, s, "Thing", map[string]any{
+			"id": id, "count": int64(5),
+			"items": []any{map[string]any{"sku": "sku-" + id}},
+		}))
 	}
-	data, mres := snapshot.Marshal(t.Context(), g.Snapshot())
-	if mres.HasErrors() {
-		t.Fatalf("Marshal: %s", mres.String())
-	}
-	return data
+	return revalDocumentOf(t, s, insts, revalEdit{`"count":5`, `"count":99`})
 }
 
 // unlimitedFindings is the oracle for the capped runs: the whole walk's count,
@@ -89,7 +74,7 @@ func TestLoad_WithIssueLimit_BoundsTheStoredIssuesNotTheWalk(t *testing.T) {
 	}
 }
 
-// TestLoad_IssueLimitDefaultsTo100 pins parity with schema.WithIssueLimit:
+// TestLoad_IssueLimitDefaultsTo100 pins parity with schema.Load's cap:
 // an existing WithRevalidation caller that passes no limit now stores at
 // most 100 issues and reports the rest.
 func TestLoad_IssueLimitDefaultsTo100(t *testing.T) {
@@ -152,16 +137,12 @@ func findingProperties(res diag.Result) []string {
 func TestLoad_WithIssueLimit_KeepsTheFindingsRaisedFirst(t *testing.T) {
 	t.Parallel()
 	s := revalLoadSchema(t)
-	data := revalDocument(t, s,
-		instancetest.Props(map[string]any{"id": "t1", "count": int64(99), "state": "neither", "code": "bad"}),
-		instancetest.Composed(map[string]immutable.Value{
-			"ITEMS": immutable.Wrap([]instance.ValidInstance{revalItem(t, s, "sku-1")}),
-		}),
-		instancetest.Edges(map[string]instance.ValidEdgeData{
-			"OWNER": instance.NewValidEdgeData([]instance.ValidEdgeTarget{
-				instance.NewValidEdgeTarget(immutable.WrapKey([]any{"x1"}), immutable.Properties{}),
-			}),
-		}),
+	owned := revalThing()
+	owned["owner"] = map[string]any{"_target_id": "x1"}
+	data := revalDocument(t, s, owned,
+		revalEdit{`"count":5`, `"count":99`},
+		revalEdit{`"state":"on"`, `"state":"neither"`},
+		revalEdit{`"code":"c-9"`, `"code":"bad"`},
 	)
 
 	_, all := snapshot.Load(t.Context(), data, s,
@@ -224,24 +205,13 @@ func TestVerify_HonorsIssueLimit(t *testing.T) {
 func TestLoad_RevalidationSharesTheLoadsIssueLimit(t *testing.T) {
 	t.Parallel()
 	s := revalLoadSchema(t)
-	thing, _ := s.Type("Thing")
-	item, _ := s.Type("Item")
-	g := graph.New(s)
-	items := make([]instance.ValidInstance, 0, 101)
+	items := make([]any, 0, 101)
 	for i := range 101 {
-		items = append(items, instancetest.VI("Item", instancetest.TypeID(item.ID()),
-			instancetest.Props(map[string]any{"sku": fmt.Sprintf("bad-%d", i)})))
+		items = append(items, map[string]any{"sku": fmt.Sprintf("sku-%d", i)})
 	}
-	vi := instancetest.VI("Thing", instancetest.TypeID(thing.ID()), instancetest.PK("t1"),
-		instancetest.Props(map[string]any{"id": "t1", "count": int64(5)}),
-		instancetest.Composed(map[string]immutable.Value{"ITEMS": immutable.Wrap(items)}))
-	if r := g.Add(t.Context(), vi); !r.OK() {
-		t.Fatalf("Add: %s", r)
-	}
-	data, mres := snapshot.Marshal(t.Context(), g.Snapshot())
-	if mres.HasErrors() {
-		t.Fatalf("Marshal: %s", mres)
-	}
+	data := revalDocumentOf(t, s, []instance.ValidInstance{
+		instancetest.Valid(t, s, "Thing", map[string]any{"id": "t1", "count": int64(5), "items": items}),
+	}, revalEdit{`"sku":"sku-`, `"sku":"bad-`})
 
 	tests := []struct {
 		name        string

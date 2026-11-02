@@ -25,11 +25,9 @@ import (
 	"github.com/google/uuid"
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/graph"
-	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/instance"
 	"github.com/simon-lentz/yammm/internal/instancetest"
 	"github.com/simon-lentz/yammm/internal/yammmtest"
-	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
 	"github.com/simon-lentz/yammm/snapshot"
 	"github.com/simon-lentz/yammm/snapshot/snapshottest"
@@ -37,19 +35,19 @@ import (
 
 func testSchema(t *testing.T) schema.Schema {
 	t.Helper()
-	s, result := schema.NewBuilder().
-		WithName("test").
-		WithSourceID(location.MustNewSourceID("test://test.yammm")).
-		AddType("Person").
-		WithPrimaryKey("id", schema.NewStringConstraint()).
-		WithProperty("name", schema.NewStringConstraint()).
-		WithRelation("EMPLOYER", schema.NewTypeRef("", "Company", location.Span{}), false, false).
-		Done().
-		AddType("Company").
-		WithPrimaryKey("id", schema.NewStringConstraint()).
-		WithProperty("title", schema.NewStringConstraint()).
-		Done().
-		Build()
+	s, result := schema.LoadString(t.Context(), `schema "test"
+
+type Person {
+	id String primary
+	name String required
+	--> EMPLOYER (one) Company
+}
+
+type Company {
+	id String primary
+	title String required
+}
+`, "test.yammm")
 	if result.HasErrors() {
 		t.Fatalf("testSchema: %s", result)
 	}
@@ -89,20 +87,19 @@ type Company {
 
 func testSchemaWithComposition(t *testing.T) schema.Schema {
 	t.Helper()
-	s, result := schema.NewBuilder().
-		WithName("test_comp").
-		WithSourceID(location.MustNewSourceID("test://test_comp.yammm")).
-		AddType("Parent").
-		WithPrimaryKey("id", schema.NewStringConstraint()).
-		WithProperty("name", schema.NewStringConstraint()).
-		WithComposition("CHILDREN", schema.NewTypeRef("", "Child", location.Span{}), true, true).
-		Done().
-		AddType("Child").
-		AsPart().
-		WithPrimaryKey("id", schema.NewStringConstraint()).
-		WithProperty("value", schema.NewStringConstraint()).
-		Done().
-		Build()
+	s, result := schema.LoadString(t.Context(), `schema "test_comp"
+
+type Parent {
+	id String primary
+	name String required
+	*-> CHILDREN (many) Child
+}
+
+part type Child {
+	id String primary
+	value String required
+}
+`, "test_comp.yammm")
 	if result.HasErrors() {
 		t.Fatalf("testSchemaWithComposition: %s", result)
 	}
@@ -121,53 +118,51 @@ func mustTypeID(t *testing.T, s schema.Schema, typeName string) schema.TypeID {
 
 func mustValidInstance(t *testing.T, s schema.Schema, typeName string, pk []any, props map[string]any) instance.ValidInstance {
 	t.Helper()
-	return instancetest.VI(
-		typeName,
-		instancetest.TypeID(mustTypeID(t, s, typeName)),
-		instancetest.PK(pk...),
-		instancetest.Props(keyedProps(t, s, typeName, pk, props)),
-	)
+	return instancetest.Valid(t, s, typeName, keyedProps(t, s, typeName, pk, props))
+}
+
+// edgeInput returns relName's input field on typeName and the target object
+// naming key, with edgeProps beside the foreign key.
+func edgeInput(t *testing.T, s schema.Schema, typeName, relName string, key []any, edgeProps map[string]any) (string, map[string]any) {
+	t.Helper()
+	typ, ok := s.Type(typeName)
+	if !ok {
+		t.Fatalf("Type %q not found in schema", typeName)
+	}
+	rel, ok := typ.Relation(relName)
+	if !ok {
+		t.Fatalf("Type %q declares no relation %q", typeName, relName)
+	}
+	target, ok := s.TypeByID(rel.TargetID())
+	if !ok {
+		t.Fatalf("relation %q targets no type", relName)
+	}
+	obj := make(map[string]any, len(key)+len(edgeProps))
+	maps.Copy(obj, edgeProps)
+	i := 0
+	for pk := range target.PrimaryKeys() {
+		obj["_target_"+pk.Name()] = key[i]
+		i++
+	}
+	return rel.FieldName(), obj
 }
 
 func mustValidInstanceWithEdge(t *testing.T, s schema.Schema, typeName string, pk []any, props map[string]any, relName string, targetKeys [][]any) instance.ValidInstance { //nolint:unparam // test helper kept general
 	t.Helper()
-	targets := make([]instance.ValidEdgeTarget, len(targetKeys))
-	for i, tk := range targetKeys {
-		targets[i] = instance.NewValidEdgeTarget(immutable.WrapKey(tk), immutable.WrapProperties(nil))
-	}
-	return instancetest.VI(
-		typeName,
-		instancetest.TypeID(mustTypeID(t, s, typeName)),
-		instancetest.PK(pk...),
-		instancetest.Props(keyedProps(t, s, typeName, pk, props)),
-		instancetest.Edges(map[string]instance.ValidEdgeData{relName: instance.NewValidEdgeData(targets)}),
-	)
-}
-
-func mustValidPartInstance(t *testing.T, s schema.Schema, typeName string, pk []any, props map[string]any) instance.ValidInstance {
-	t.Helper()
-	return instancetest.VI(
-		typeName,
-		instancetest.TypeID(mustTypeID(t, s, typeName)),
-		instancetest.PK(pk...),
-		instancetest.Props(keyedProps(t, s, typeName, pk, props)),
-	)
+	data := keyedProps(t, s, typeName, pk, props)
+	field, obj := edgeInput(t, s, typeName, relName, targetKeys[0], nil)
+	data[field] = obj
+	return instancetest.Valid(t, s, typeName, data)
 }
 
 // mustValidInstanceWithEdgeProps builds a ValidInstance with a single edge
 // that carries schema-declared edge properties.
 func mustValidInstanceWithEdgeProps(t *testing.T, s schema.Schema, typeName string, pk []any, props map[string]any, relName string, targetKey []any, edgeProps map[string]any) instance.ValidInstance { //nolint:unparam // test helper kept general
 	t.Helper()
-	targets := []instance.ValidEdgeTarget{
-		instance.NewValidEdgeTarget(immutable.WrapKey(targetKey), immutable.WrapProperties(edgeProps)),
-	}
-	return instancetest.VI(
-		typeName,
-		instancetest.TypeID(mustTypeID(t, s, typeName)),
-		instancetest.PK(pk...),
-		instancetest.Props(keyedProps(t, s, typeName, pk, props)),
-		instancetest.Edges(map[string]instance.ValidEdgeData{relName: instance.NewValidEdgeData(targets)}),
-	)
+	data := keyedProps(t, s, typeName, pk, props)
+	field, obj := edgeInput(t, s, typeName, relName, targetKey, edgeProps)
+	data[field] = obj
+	return instancetest.Valid(t, s, typeName, data)
 }
 
 // keyedProps returns props holding each primary-key property the key states,
@@ -284,15 +279,15 @@ func TestMarshalLoad_RoundTrip_Empty(t *testing.T) {
 
 func TestMarshalLoad_RoundTrip_WithComposition(t *testing.T) {
 	s := testSchemaWithComposition(t)
-	parent := mustValidInstance(t, s, "Parent", []any{"p1"}, map[string]any{"id": "p1", "name": "Dad"})
+	parent := instancetest.Valid(t, s, "Parent", map[string]any{
+		"id": "p1", "name": "Dad",
+		"children": []any{map[string]any{"id": "ch1", "value": "hello"}},
+	})
 
 	g := graph.New(s)
-	ctx := context.Background()
-	g.Add(ctx, parent)
-
-	// Add composed child via AddComposed.
-	child := mustValidPartInstance(t, s, "Child", []any{"ch1"}, map[string]any{"id": "ch1", "value": "hello"})
-	g.AddComposed(ctx, mustTypeID(t, s, "Parent"), graph.FormatKey("p1"), "CHILDREN", child)
+	if res := g.Add(context.Background(), parent); res.HasErrors() {
+		t.Fatalf("Add: %s", res)
+	}
 
 	snap := g.Snapshot()
 	snapshottest.AssertRoundTrip(t, snap, s)
@@ -365,13 +360,12 @@ func TestVerify_SchemaMismatch(t *testing.T) {
 	data, _ := snapshot.Marshal(ctx, snap)
 
 	// Build a different schema.
-	otherSchema, result := schema.NewBuilder().
-		WithName("other").
-		WithSourceID(location.MustNewSourceID("test://other.yammm")).
-		AddType("Widget").
-		WithPrimaryKey("id", schema.NewStringConstraint()).
-		Done().
-		Build()
+	otherSchema, result := schema.LoadString(t.Context(), `schema "other"
+
+type Widget {
+	id String primary
+}
+`, "other.yammm")
 	if result.HasErrors() {
 		t.Fatalf("build other schema: %s", result)
 	}
@@ -1110,13 +1104,12 @@ func TestHeaderInfo_SchemaHashMatches(t *testing.T) {
 	require.NotEmpty(t, realHash, "precondition: schema.StructuralHash should return non-empty")
 
 	// A second schema with a different type set hashes differently.
-	s2, res := schema.NewBuilder().
-		WithName("other").
-		WithSourceID(location.MustNewSourceID("test://other.yammm")).
-		AddType("OnlyType").
-		WithPrimaryKey("id", schema.NewStringConstraint()).
-		Done().
-		Build()
+	s2, res := schema.LoadString(t.Context(), `schema "other"
+
+type OnlyType {
+	id String primary
+}
+`, "other.yammm")
 	require.NoError(t, res.Err())
 	otherHash := schema.StructuralHash(s2)
 	require.NotEqual(t, realHash, otherHash, "precondition: different schemas should hash differently")
@@ -1308,9 +1301,6 @@ func TestMarshalLoad_DuplicateRoundTrip(t *testing.T) {
 	dup := slices.Collect(loaded.Duplicates())[0]
 	if dup.Instance().TypeName() != "Company" {
 		t.Errorf("duplicate type: got %q, want %q", dup.Instance().TypeName(), "Company")
-	}
-	if !dup.Diagnostic().IsZero() {
-		t.Error("loaded duplicate should not have diagnostic")
 	}
 }
 

@@ -513,7 +513,7 @@ func (a *Adapter) nodeClaims(p *plan, mask []byte) instance.Claims {
 		}
 	}
 	keys = append(keys, a.emptyFoldedColumns(p, mask, keys)...)
-	c := instance.ClaimKeys(p.typ, keys, a.config.strict)
+	c := instance.ClaimKeys(p.typ, keys)
 	p.claimMemo[string(mask)] = c
 	return c
 }
@@ -524,9 +524,6 @@ func (a *Adapter) nodeClaims(p *plan, mask []byte) instance.Claims {
 // both absent, as a JSON object that holds neither is. A folding column the
 // mask leaves unmarked is an empty one.
 func (a *Adapter) emptyFoldedColumns(p *plan, mask []byte, keys []string) []string {
-	if a.config.strict {
-		return nil
-	}
 	folded := make(map[string]bool, len(keys))
 	for _, key := range keys {
 		if lower, ok := instance.FoldKey(key); ok {
@@ -589,7 +586,7 @@ func (a *Adapter) shapeOf(p *plan, sp *spelling, record []string) groupShape {
 		if record[i] == "" {
 			continue
 		}
-		g.segs[j] = splitListElems(record[i], a.config.listSep)
+		g.segs[j] = splitListElems(record[i])
 		if !decides[j] {
 			continue
 		}
@@ -653,7 +650,7 @@ func (a *Adapter) holdsKey(p *plan, m suffixMember, text string) bool {
 
 // writeProperty writes a claimed column's cell: its property's empty value,
 // or the cell coerced, or its text as an [instance.Refused] where it does not
-// coerce, so the validator reports nothing more for it.
+// coerce, so a validator that has a member claim the key reports nothing more for it.
 func (a *Adapter) writeProperty(p *plan, props map[string]any, name string, prop schema.Property, val string, span location.Span, typeName string, collector *diag.Collector) {
 	if val == "" {
 		props[name] = a.emptyValue(p, emptyOf{prop: prop})
@@ -780,7 +777,7 @@ func (a *Adapter) edgeClaims(p *plan, sp *spelling, mask []byte) instance.EdgeCl
 		}
 	}
 	keys = append(keys, a.emptyFoldedSuffixes(p, sp, mask, keys)...)
-	c := instance.ClaimEdgeKeys(sp.rel, sp.target, keys, a.config.strict)
+	c := instance.ClaimEdgeKeys(sp.rel, sp.target, keys)
 	sp.claimMemo[string(mask)] = c
 	return c
 }
@@ -790,9 +787,6 @@ func (a *Adapter) edgeClaims(p *plan, sp *spelling, mask []byte) instance.EdgeCl
 // folds onto, when it is the one such suffix in the group. A folding suffix
 // the mask leaves unmarked is an empty one.
 func (a *Adapter) emptyFoldedSuffixes(p *plan, sp *spelling, mask []byte, keys []string) []string {
-	if a.config.strict {
-		return nil
-	}
 	folded := make(map[string]bool, len(keys))
 	for _, key := range keys {
 		if lower, ok := instance.FoldKey(key); ok {

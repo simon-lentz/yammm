@@ -45,7 +45,7 @@ type NotifyFunc func(method string, params any)
 // Lock ordering: debounceMu must never be acquired while holding mu.
 // Methods that need both must release mu before acquiring debounceMu.
 type Workspace struct {
-	// mu protects: docs, snapshots, posEncoding, deps, mapper, roots.
+	// mu protects: docs, snapshots, deps, mapper, roots.
 	mu sync.RWMutex
 
 	logger *slog.Logger
@@ -70,9 +70,6 @@ type Workspace struct {
 	// Latest analysis snapshots keyed by entry URI
 	snapshots map[string]*analysis.Snapshot
 
-	// Position encoding negotiated with client
-	posEncoding lsputil.PositionEncoding
-
 	// deps tracks forward and reverse import dependencies between entry files.
 	deps depGraph
 
@@ -87,14 +84,6 @@ type Workspace struct {
 	// Separate from mu because publishDiagnostics is called outside the
 	// workspace lock (to avoid deadlock on I/O).
 	diagHash diagHashState
-
-	// analysisCompletedHook, when non-nil, runs after an analysis completes
-	// and before the version gate re-checks the document — on both the
-	// .yammm path (analyzeAndPublish) and the markdown path
-	// (AnalyzeMarkdownAndPublish). It exists so tests can deterministically
-	// interleave a document change into the window the gate protects;
-	// production leaves it nil. Protected by mu; invoked outside it.
-	analysisCompletedHook func(uri string)
 }
 
 // NewWorkspace creates a new workspace.
@@ -113,16 +102,12 @@ func NewWorkspace(logger *slog.Logger, cfg Config) *Workspace {
 	bgCtx, bgCancel := context.WithCancel(context.Background())
 
 	return &Workspace{
-		logger:      logger.With(slog.String("component", "workspace")),
-		config:      cfg,
-		roots:       make([]string, 0),
-		snapshots:   make(map[string]*analysis.Snapshot),
-		posEncoding: lsputil.PositionEncodingUTF16,
+		logger:    logger.With(slog.String("component", "workspace")),
+		config:    cfg,
+		roots:     make([]string, 0),
+		snapshots: make(map[string]*analysis.Snapshot),
 		diagHash: diagHashState{
 			hashes: make(map[string]uint64),
-		},
-		docs: docstate.Overlay{
-			Open: make(map[string]*docstate.Document),
 		},
 		markdownDocs: make(map[string]*markdownDocument),
 		deps: depGraph{
@@ -143,24 +128,6 @@ func (w *Workspace) SetNotifier(fn NotifyFunc) {
 	w.notifyMu.Lock()
 	w.notifyFn = fn
 	w.notifyMu.Unlock()
-}
-
-// setAnalysisCompletedHook installs the test-only hook that runs after an
-// analysis completes and before the version gate re-checks the document,
-// on both the .yammm and markdown paths.
-func (w *Workspace) setAnalysisCompletedHook(h func(uri string)) {
-	w.mu.Lock()
-	w.analysisCompletedHook = h
-	w.mu.Unlock()
-}
-
-// analysisCompletedHookFn snapshots the installed hook under lock; callers
-// invoke the returned hook outside the lock, since it may mutate the
-// workspace.
-func (w *Workspace) analysisCompletedHookFn() func(uri string) {
-	w.mu.RLock()
-	defer w.mu.RUnlock()
-	return w.analysisCompletedHook
 }
 
 // OpenDocument stores document state and triggers immediate analysis.
@@ -271,20 +238,6 @@ func (w *Workspace) RemoveRoot(uri string) {
 	}
 }
 
-// SetPositionEncoding sets the position encoding to use.
-func (w *Workspace) SetPositionEncoding(enc lsputil.PositionEncoding) {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	w.posEncoding = enc
-}
-
-// PositionEncoding returns the negotiated position encoding.
-func (w *Workspace) PositionEncoding() lsputil.PositionEncoding {
-	w.mu.RLock()
-	defer w.mu.RUnlock()
-	return w.posEncoding
-}
-
 // documentOpened opens a document under the identity and host path
 // [location.ResolveSourcePath] mints. A path the resolver refuses is opened with
 // no identity, so its analysis reports the refusal.
@@ -373,6 +326,21 @@ func (w *Workspace) scheduleAnalysis(uri string) {
 
 // analyzeAndPublish analyzes a document and publishes diagnostics.
 func (w *Workspace) analyzeAndPublish(analyzeCtx context.Context, uri string) {
+	if run, ok := w.analyzeDocument(analyzeCtx, uri); ok {
+		w.publishDocumentAnalysis(uri, run)
+	}
+}
+
+// documentAnalysis is one analysis of a document at the version it read.
+type documentAnalysis struct {
+	entryVersion int
+	snapshot     *analysis.Snapshot
+	err          error
+}
+
+// analyzeDocument analyzes the document's current text. It reports false when
+// the document is not open, its URI is invalid or analyzeCtx was cancelled.
+func (w *Workspace) analyzeDocument(analyzeCtx context.Context, uri string) (documentAnalysis, bool) {
 	// Read Version and overlays directly from docs.Open under RLock.
 	// This intentionally bypasses GetSnapshot to avoid copying LineState
 	// and Text into a Snapshot that would be immediately discarded — we
@@ -384,7 +352,7 @@ func (w *Workspace) analyzeAndPublish(analyzeCtx context.Context, uri string) {
 			slog.String("uri", uri),
 			slog.Any("error", fmt.Errorf("%w: %w", lsperr.ErrInvalidURI, err)),
 		)
-		return
+		return documentAnalysis{}, false
 	}
 
 	// One resolution names the entry and its overlay key, so a link retargeted
@@ -394,7 +362,7 @@ func (w *Workspace) analyzeAndPublish(analyzeCtx context.Context, uri string) {
 	doc, ok := w.docs.Open[uri]
 	if !ok {
 		w.mu.Unlock()
-		return
+		return documentAnalysis{}, false
 	}
 	if resolveErr == nil && (doc.SourceID != sourceID || doc.HostPath != canonicalPath) {
 		doc.SourceID, doc.HostPath = sourceID, canonicalPath
@@ -421,9 +389,9 @@ func (w *Workspace) analyzeAndPublish(analyzeCtx context.Context, uri string) {
 	if rootErr != nil {
 		result := diag.NewCollectorUnlimited()
 		result.Collect(schema.ModuleRootIssue(rootErr))
-		snapshot, err = w.sched.analyzer.SnapshotForResult(canonicalPath, result.Result(), w.PositionEncoding())
+		snapshot, err = w.sched.analyzer.SnapshotForResult(canonicalPath, result.Result())
 	} else {
-		snapshot, err = w.sched.analyzer.Analyze(analyzeCtx, canonicalPath, overlays, moduleRoot, w.PositionEncoding())
+		snapshot, err = w.sched.analyzer.Analyze(analyzeCtx, canonicalPath, overlays, moduleRoot)
 	}
 
 	if analyzeCtx.Err() != nil {
@@ -432,12 +400,15 @@ func (w *Workspace) analyzeAndPublish(analyzeCtx context.Context, uri string) {
 			slog.String("uri", uri),
 			slog.Any("error", analyzeCtx.Err()),
 		)
-		return
+		return documentAnalysis{}, false
 	}
+	return documentAnalysis{entryVersion: entryVersion, snapshot: snapshot, err: err}, true
+}
 
-	if hook := w.analysisCompletedHookFn(); hook != nil {
-		hook(uri)
-	}
+// publishDocumentAnalysis stores and publishes run unless the document moved
+// past the version run read.
+func (w *Workspace) publishDocumentAnalysis(uri string, run documentAnalysis) {
+	snapshot, entryVersion := run.snapshot, run.entryVersion
 
 	w.mu.RLock()
 	currentDoc := w.docs.Open[uri]
@@ -453,11 +424,11 @@ func (w *Workspace) analyzeAndPublish(analyzeCtx context.Context, uri string) {
 		return
 	}
 
-	if err != nil {
+	if run.err != nil {
 		w.logger.Error(
 			"analysis failed",
 			slog.String("uri", uri),
-			slog.Any("error", err),
+			slog.Any("error", run.err),
 		)
 		if snapshot != nil {
 			snapshot.EntryVersion = entryVersion

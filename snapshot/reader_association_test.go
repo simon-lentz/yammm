@@ -14,9 +14,9 @@ import (
 )
 
 // The reader holds every association record, and every root or root duplicate,
-// to the rules graph.RebuildSnapshot holds its parts to, in the walk Verify and
-// Load share. Each refusal case hand-edits a Marshal-produced document and
-// asserts the refusal of the fault it names.
+// to the rules Graph.Add builds them by, in the walk Verify and Load share. Each
+// refusal case hand-edits a Marshal-produced document and asserts the refusal of
+// the fault it names.
 
 const readerSchema = `schema "rd"
 

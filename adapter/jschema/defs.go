@@ -206,7 +206,7 @@ func dataTypeNamed(sc schema.Schema, name string) (schema.DataType, bool) {
 	if !ok {
 		return schema.DataType{}, false
 	}
-	// A schema a load or a Build returned has every import wired.
+	// A schema a load returned has every import wired.
 	return imp.Schema().DataType(local)
 }
 

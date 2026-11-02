@@ -44,11 +44,6 @@ func (r TypeRef) Span() location.Span {
 	return r.span
 }
 
-// IsQualified reports whether this is a qualified (imported) type reference.
-func (r TypeRef) IsQualified() bool {
-	return r.qualifier != ""
-}
-
 // IsZero reports whether this is the zero value.
 func (r TypeRef) IsZero() bool {
 	return r.qualifier == "" && r.name == "" && r.span.IsZero()
@@ -75,11 +70,6 @@ func NewDataTypeRef(qualifier, name string, span location.Span) DataTypeRef {
 	return DataTypeRef{qualifier: qualifier, name: name, span: span}
 }
 
-// LocalDataTypeRef creates a DataTypeRef for a local (unqualified) data type.
-func LocalDataTypeRef(name string, span location.Span) DataTypeRef {
-	return DataTypeRef{name: name, span: span}
-}
-
 // Qualifier returns the import alias, or empty string for local data types.
 func (r DataTypeRef) Qualifier() string {
 	return r.qualifier
@@ -93,11 +83,6 @@ func (r DataTypeRef) Name() string {
 // Span returns the source location of this data type reference.
 func (r DataTypeRef) Span() location.Span {
 	return r.span
-}
-
-// IsQualified reports whether this is a qualified (imported) data type reference.
-func (r DataTypeRef) IsQualified() bool {
-	return r.qualifier != ""
 }
 
 // IsZero reports whether this is the zero value.
@@ -179,12 +164,6 @@ func (r ResolvedTypeRef) String() string {
 // IsZero reports whether this is the zero value.
 func (r ResolvedTypeRef) IsZero() bool {
 	return r.ref.IsZero() && r.id.IsZero()
-}
-
-// IsLocal reports whether this type reference is local (unqualified).
-// Returns true if there is no import qualifier.
-func (r ResolvedTypeRef) IsLocal() bool {
-	return r.ref.qualifier == ""
 }
 
 // Equal reports whether two ResolvedTypeRefs refer to the same type.

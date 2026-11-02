@@ -40,7 +40,7 @@ func TestParse_AnEmptyCellCostsNoMoreThanAFilledOne(t *testing.T) {
 	}
 	person, _ := s.Type("Person")
 	a := csv.New(csv.WithSchema(s))
-	src := location.MustNewSourceID("test://empty.csv")
+	src := location.NewSourceID("test://empty.csv")
 	perRow := func(cells string) float64 {
 		cost := func(rows int) float64 {
 			var b strings.Builder

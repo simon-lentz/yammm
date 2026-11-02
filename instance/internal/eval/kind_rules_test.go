@@ -2,14 +2,12 @@ package eval_test
 
 import (
 	"encoding/json"
-	"log/slog"
 	"math"
 	"testing"
 	"time"
 
 	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/instance/internal/eval"
-	"github.com/simon-lentz/yammm/internal/yammmtest"
 	"github.com/simon-lentz/yammm/schema"
 	"github.com/simon-lentz/yammm/schema/expr"
 )
@@ -126,46 +124,6 @@ func TestDatatypeCheck_IsTheCheckerRule(t *testing.T) {
 			}
 		})
 	}
-}
-
-// The trace op that brackets Evaluate ends with the evaluation's error, so a
-// failed evaluation is logged as one; a successful one carries no error.
-func TestEvaluate_EndsTheTraceOpWithItsError(t *testing.T) {
-	t.Parallel()
-	h := yammmtest.NewRecordHandler(slog.LevelDebug)
-	ev := eval.NewEvaluator(eval.WithLogger(slog.New(h)))
-	if _, err := ev.Evaluate(t.Context(), lit(int64(42)), eval.EmptyScope()); err != nil {
-		t.Fatal(err)
-	}
-	if !yammmtest.HasAttr(h.Records(), "op", "yammm.eval.expr") {
-		t.Fatal("the trace op was never logged")
-	}
-	if hasAttrKey(h.Records(), "error") {
-		t.Error("a successful evaluation logged an error attribute")
-	}
-	if _, err := ev.Evaluate(t.Context(), sx("/", lit(int64(1)), lit(int64(0))), eval.EmptyScope()); err == nil {
-		t.Fatal("control: 1/0 did not error")
-	}
-	if !yammmtest.HasAttr(h.Records(), "error", "division by zero") {
-		t.Error("the failed evaluation's op ended without its error")
-	}
-}
-
-func hasAttrKey(records []slog.Record, key string) bool {
-	for _, r := range records {
-		found := false
-		r.Attrs(func(a slog.Attr) bool {
-			if a.Key == key {
-				found = true
-				return false
-			}
-			return true
-		})
-		if found {
-			return true
-		}
-	}
-	return false
 }
 
 // Member access folds a property's name by immutable.Properties' rule — ASCII

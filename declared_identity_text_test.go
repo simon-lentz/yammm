@@ -8,9 +8,7 @@ import (
 
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/graph"
-	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/instance"
-	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
 	"github.com/simon-lentz/yammm/snapshot"
 )
@@ -19,7 +17,7 @@ const (
 	declaredSchemaName = "fleet_vehicles_with_a_name_past_the_cut"
 	declaredTypeName   = "VehicleWithANameThatRunsPastTheCut"
 	declaredPartName   = "SpareWheelWithANameThatRunsPastTheCut"
-	declaredPath       = "/Users/someone/projects/fleet-data/schemas/"
+	declaredRoot       = "embedded://fleet/Users/someone/projects/fleet-data/schemas"
 )
 
 const declaredSchema = `schema "` + declaredSchemaName + `"
@@ -52,25 +50,10 @@ part type ` + declaredPartName + ` {
 func TestMessages_NameADeclaredIdentityWhole(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	s, res := schema.LoadString(ctx, declaredSchema, declaredPath+"vehicles.yammm")
+	s, res := schema.LoadSourcesWithEntry(ctx, map[string][]byte{"vehicles.yammm": []byte(declaredSchema)},
+		"vehicles.yammm", "", schema.WithSourcesOnly(true), schema.WithSyntheticRoot(declaredRoot))
 	if res.HasErrors() {
 		t.Fatal(res)
-	}
-	other, res := schema.LoadString(ctx, "schema \"elsewhere\"\n\npart type Wheel {\n\tposition String primary\n}\n", declaredPath+"elsewhere.yammm")
-	if res.HasErrors() {
-		t.Fatal(res)
-	}
-	vehicle, _ := s.Type(declaredTypeName)
-	wheel, _ := s.Type("Wheel")
-	longPart, _ := s.Type(declaredPartName)
-	strangerType, _ := other.Type("Wheel")
-	part := func(typeName string, id schema.TypeID) instance.ValidInstance {
-		return instance.NewValidInstance(typeName, id, immutable.WrapKey([]any{"left"}),
-			immutable.WrapProperties(map[string]any{"position": "left"}), nil, nil, location.Provenance{})
-	}
-	root := func(vin string, composed map[string]immutable.Value) instance.ValidInstance {
-		return instance.NewValidInstance(declaredTypeName, vehicle.ID(), immutable.WrapKey([]any{vin}),
-			immutable.WrapProperties(map[string]any{"vin": vin}), nil, composed, location.Provenance{})
 	}
 	messages := func(r diag.Result) string {
 		var b strings.Builder
@@ -85,18 +68,6 @@ func TestMessages_NameADeclaredIdentityWhole(t *testing.T) {
 			t.Errorf("%s: no message names %q whole: %s", where, want, r)
 		}
 	}
-
-	g := graph.New(s)
-	r := g.Add(ctx, root("v1", map[string]immutable.Value{"SPARE": immutable.Wrap([]any{part("Wheel", strangerType.ID())})}))
-	wantWhole("graph.Add", r, wheel.ID().String())
-	if strings.Contains(messages(r), strangerType.ID().String()) {
-		t.Errorf("graph.Add: a message names the caller's identity %q whole: %s", strangerType.ID(), r)
-	}
-	wantWhole("graph.Add", g.Add(ctx, root("v2", map[string]immutable.Value{"SPARE": immutable.Wrap([]any{part(declaredPartName, longPart.ID())})})),
-		`"`+declaredPartName+`"`)
-	path := vehicle.ID().SchemaPath().String()
-	wantWhole("graph.AddComposed", g.AddComposed(ctx, schema.NewTypeID(vehicle.ID().SchemaPath(), "Undeclared"), `["v1"]`, "SPARE", part("Wheel", wheel.ID())),
-		path+":Undeclared")
 
 	marshal := func(raws ...map[string]any) []byte {
 		t.Helper()
@@ -147,7 +118,7 @@ func TestMessages_NameADeclaredIdentityWhole(t *testing.T) {
 		wantWhole("snapshot.Load", r, c.want)
 	}
 	duplicated := marshal(map[string]any{"vin": "v1"}, map[string]any{"vin": "v1", "year": 2020})
-	_, r = snapshot.Load(ctx, edit(duplicated, `,"conflict":{"type":0,"key":["v1"]}`, ""), s)
+	_, r := snapshot.Load(ctx, edit(duplicated, `,"conflict":{"type":0,"key":["v1"]}`, ""), s)
 	wantWhole("snapshot.Load", r, "("+ref+"[")
 	_, r = snapshot.Info(ctx, edit(data, `"v2"`, `"v1"`))
 	wantWhole("snapshot.Info", r, `#"`+declaredTypeName[:32]+`"…`)

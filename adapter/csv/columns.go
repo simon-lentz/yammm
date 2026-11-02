@@ -20,7 +20,7 @@ const (
 )
 
 // edgeMember is what a dotted column's suffix names within the association
-// its spelling names: the member it spells exactly or, unless strict, by fold.
+// its spelling names: the member it spells exactly or by fold.
 // Which key claims the member is decided per target by [instance.ClaimEdgeKeys].
 type edgeMember uint8
 
@@ -36,7 +36,7 @@ type column struct {
 	name     string
 	kind     columnKind
 	exact    schema.Property // columnPlain: the property the name spells exactly
-	folds    schema.Property // columnPlain: the property the name folds onto, unless strict
+	folds    schema.Property // columnPlain: the property the name folds onto
 	spelling int             // columnDotted: its field spelling in [plan.spellings]
 	suffix   string          // columnDotted: the text after the dot, as written
 }
@@ -98,7 +98,7 @@ func (a *Adapter) planColumns(columns []string, schemaType schema.Type) *plan {
 		field, suffix, dotted := strings.Cut(name, ".")
 		if !dotted {
 			c.kind = columnPlain
-			c.exact, c.folds = propertyNamed(schemaType, name, a.config.strict)
+			c.exact, c.folds = propertyNamed(schemaType, name)
 			plainOf[name] = i
 			continue
 		}
@@ -125,14 +125,11 @@ func (a *Adapter) planColumns(columns []string, schemaType schema.Type) *plan {
 	return p
 }
 
-// propertyNamed returns the property name spells exactly, or else, unless
-// strict, the one it folds onto.
-func propertyNamed(t schema.Type, name string, strict bool) (exact, folds schema.Property) {
+// propertyNamed returns the property name spells exactly, or else the one it
+// folds onto.
+func propertyNamed(t schema.Type, name string) (exact, folds schema.Property) {
 	if prop, ok := t.Property(name); ok {
 		return prop, schema.Property{}
-	}
-	if strict {
-		return schema.Property{}, schema.Property{}
 	}
 	lower, ok := instance.FoldKey(name)
 	if !ok {
@@ -146,12 +143,11 @@ func propertyNamed(t schema.Type, name string, strict bool) (exact, folds schema
 	return schema.Property{}, prop
 }
 
-// associationNamed returns the association field spells exactly or, unless
-// strict, by fold. A composition is not one: the parser assembles no composed
+// associationNamed returns the association field spells exactly or by fold. A composition is not one: the parser assembles no composed
 // child, so its group is carried as text for the validator to judge.
 func (a *Adapter) associationNamed(t schema.Type, field string) schema.Relation {
 	rel, ok := t.RelationByField(field)
-	if !ok && !a.config.strict {
+	if !ok {
 		if lower, folds := instance.FoldKey(field); folds {
 			rel, ok = t.RelationByField(lower)
 		}
@@ -180,7 +176,6 @@ func (a *Adapter) planSuffixes(p *plan, sp *spelling) {
 		suffix := p.columns[i].suffix
 		m := &sp.members[j]
 		lower, folds := instance.FoldKey(suffix)
-		folds = folds && !a.config.strict
 		switch {
 		case strings.HasPrefix(suffix, keyPrefix) || folds && strings.HasPrefix(lower, keyPrefix):
 			if sp.target.IsZero() {

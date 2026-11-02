@@ -138,18 +138,6 @@ func faultRows() []faultRow {
 	}
 }
 
-func buildAnswer(build func(*schema.Builder) *schema.Builder) string {
-	s, res := build(schema.NewBuilder().WithName("fleet")).Build()
-	if !s.IsZero() && res.OK() {
-		return "ok"
-	}
-	var out []string
-	for issue := range res.Issues() {
-		out = append(out, fmt.Sprintf("%s: %s", issue.Code(), issue.Message()))
-	}
-	return strings.Join(out, " ;; ")
-}
-
 func errAnswer(err error) string {
 	if err == nil {
 		return "ok"
@@ -163,15 +151,7 @@ func TestConstraintFaults_EveryDoorGivesTheRecordedAnswer(t *testing.T) {
 	var b strings.Builder
 	for _, row := range faultRows() {
 		fmt.Fprintf(&b, "%s\n", row.name)
-		fmt.Fprintf(&b, "\tBuild property: %s\n", buildAnswer(func(sb *schema.Builder) *schema.Builder {
-			return sb.AddType("Car").WithPrimaryKey("vin", schema.NewStringConstraint()).WithProperty("v", row.c).Done()
-		}))
-		fmt.Fprintf(&b, "\tBuild datatype: %s\n", buildAnswer(func(sb *schema.Builder) *schema.Builder {
-			return sb.AddDataType("V", row.c).AddType("Car").WithPrimaryKey("vin", schema.NewStringConstraint()).Done()
-		}))
 		fmt.Fprintf(&b, "\tCheckConstraint: %s\n", errAnswer(schema.CheckConstraint(row.c)))
-		got, err := Coerce(row.c, "x")
-		fmt.Fprintf(&b, "\tCoerce: %#v, %s\n", got, errAnswer(err))
 		params, err := CoerceParams(map[string]any{"v": "x"}, ParamTypes{"v": row.c})
 		fmt.Fprintf(&b, "\tCoerceParams: %v, %s\n", params, errAnswer(err))
 	}

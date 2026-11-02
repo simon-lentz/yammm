@@ -24,7 +24,7 @@ var sbUnderCounts = []sbUnderCount{
 	{
 		cause: "One schema change fixes every position that names a type, so a type that cannot hold a root is one break.",
 		a:     []string{"group of a part type", "root of a part type"},
-		b:     []string{"root duplicate of a part type"},
+		b:     []string{"duplicate of a part type"},
 	},
 	{
 		cause: "A refused stored key is that one break, so a record's key is not compared with it.",
@@ -54,7 +54,7 @@ var sbUnderCounts = []sbUnderCount{
 		},
 	},
 	{
-		cause: "No check judges the records or the slots at an address two roots stand at.",
+		cause: "No check judges the records at an address two roots stand at.",
 		a: []string{
 			"absent record twice under a (one) association",
 			"empty record twice under a (many) association",
@@ -64,18 +64,6 @@ var sbUnderCounts = []sbUnderCount{
 		},
 		b: []string{
 			"two roots at one address, the second holding an edge the first has an absent record for",
-		},
-	},
-	{
-		cause: "No check judges the records or the slots at an address two roots stand at.",
-		a: []string{
-			"composed duplicate of a keyless part whose stated conflict is another type",
-			"composed duplicate whose conflict is a sibling at another key",
-			"composed duplicate with no child at its key",
-			"keyed (one) duplicate with a null conflict key of another type",
-		},
-		b: []string{
-			"two roots at one address, the second holding a child",
 		},
 	},
 	{
@@ -174,29 +162,23 @@ var sbUnderCounts = []sbUnderCount{
 	{
 		cause: "A duplicate record a check refused resolves no conflict.",
 		a: []string{
-			"composed duplicate parent row out of range",
-			"composed duplicate with no parent row",
+			"duplicate stating a parent key",
+			"duplicate stating a relation",
 		},
 		b: []string{
-			"composed duplicate under no root",
-			"composed duplicate whose conflict is a sibling at another key",
-			"keyed (many) duplicate with a null conflict key",
-			"keyed (many) duplicate with an empty conflict key",
-			"keyed (many) duplicate with an empty conflict key beside a sole sibling",
-			"keyed (many) duplicate with an empty conflict key of another type",
+			"duplicate whose conflict is another root",
+			"duplicate whose conflict is no root",
+			"duplicate whose conflict key is empty",
+			"duplicate whose conflict key has another arity",
 		},
 	},
 	{
-		cause: "A duplicate record a check refused resolves no conflict.",
+		cause: "A record states a parent once, whichever of its fields say so.",
 		a: []string{
-			"composed duplicate under no root",
+			"duplicate stating a parent key",
 		},
 		b: []string{
-			"composed duplicate whose conflict is a sibling at another key",
-			"keyed (many) duplicate with a null conflict key",
-			"keyed (many) duplicate with an empty conflict key",
-			"keyed (many) duplicate with an empty conflict key beside a sole sibling",
-			"keyed (many) duplicate with an empty conflict key of another type",
+			"duplicate stating a relation",
 		},
 	},
 	{
@@ -208,91 +190,7 @@ var sbUnderCounts = []sbUnderCount{
 			"duplicate instance stating another row",
 			"duplicate instance whose key disagrees with its property",
 			"duplicate instance with an undeclared property",
-			"root duplicate whose conflict is another root",
-		},
-	},
-	{
-		cause: "A duplicate record a check refused resolves no conflict.",
-		a: []string{
-			"composed duplicate of another type than its composition",
-			"composed duplicate of another type whose stated conflict is its slot's",
-		},
-		b: []string{
-			"keyed (one) duplicate with a null conflict key of another type",
-		},
-	},
-	{
-		cause: "A duplicate record a check refused resolves no conflict.",
-		a: []string{
-			"composed duplicate with no row",
-		},
-		b: []string{
-			"composed duplicate whose conflict is a sibling at another key",
-		},
-	},
-	{
-		cause: "A slot refused for its name is the one issue of the duplicate that names it.",
-		a: []string{
-			"children under an undeclared composition",
-		},
-		b: []string{
-			"composed duplicate under an undeclared relation",
-		},
-	},
-	{
-		cause: "A slot refused for its children holds no occupant a conflict resolves against.",
-		a: []string{
-			"two (many) siblings at one key",
-		},
-		b: []string{
-			"composed duplicate whose conflict is a sibling at another key",
-			"composed duplicate with no child at its key",
-		},
-	},
-	{
-		cause: "A slot refused for its children holds no occupant a conflict resolves against.",
-		a: []string{
-			"composed duplicate of a keyless part whose stated conflict is another type",
-		},
-		b: []string{
-			"two children of a keyless (one) composition beside its duplicate",
-		},
-	},
-	{
-		cause: "A slot refused for its children holds no occupant a conflict resolves against.",
-		a: []string{
-			"keyed (one) duplicate with a null conflict key of another type",
-		},
-		b: []string{
-			"two children of a (one) composition beside its duplicate",
-		},
-	},
-	{
-		cause: "A conflict a refused child states is judged no further.",
-		a: []string{
-			"composed child of another type",
-			"composed child with no row",
-		},
-		b: []string{
-			"composed duplicate whose conflict is a sibling at another key",
-		},
-	},
-	{
-		cause: "A conflict a refused child states is judged no further.",
-		a: []string{
-			"composed duplicate whose conflict is a sibling at another key",
-		},
-		b: []string{
-			"(many) sibling whose key is its neighbour's and not its property's",
-		},
-	},
-	{
-		cause: "A conflict a refused child states is judged no further.",
-		a: []string{
-			"keyed (one) duplicate with a null conflict key of another type",
-		},
-		b: []string{
-			"(one) composed child with no row beside its duplicate",
+			"duplicate whose conflict is another root",
 		},
 	},
 	{
@@ -370,8 +268,7 @@ func sbRevalidated(row sbRow) int {
 // rows draws the sum of what the rows draw apart. It draws no more in any mode.
 // It draws less only for a cause [sbUnderCounts] names, or where a revalidation
 // finding is lost because a check refused its root, so revalidation does not run
-// it. RebuildSnapshot draws what the reader draws over every pair of rows both
-// judge. The table is exact: every pair it names draws less.
+// it. The table is exact: every pair it names draws less.
 func TestRead_TwoBreaksDrawTheIssuesOfEach(t *testing.T) {
 	t.Parallel()
 	s, doc := singleBreakDoc(t)
@@ -415,16 +312,6 @@ func TestRead_TwoBreaksDrawTheIssuesOfEach(t *testing.T) {
 			plain = pairs
 		}
 	}
-	for pair, n := range plain {
-		a, b := rows[pair[0]], rows[pair[1]]
-		if a.rebuild == 0 || b.rebuild == 0 {
-			continue
-		}
-		text, _ := sbApply(doc, a.edits, b.edits)
-		if rebuilt := sbJudged(snapshot.RebuildDocument([]byte(text), s)); rebuilt != n {
-			t.Errorf("%q and %q: RebuildSnapshot draws %d issues, the reader %d", a.name, b.name, rebuilt, n)
-		}
-	}
 }
 
 // sbLostToRevalidation reports whether a pair's count under revalidation holds
@@ -433,10 +320,6 @@ func sbLostToRevalidation(mode sbMode, plain, n, revalued int) bool {
 	return mode.reval && revalued > 0 && n >= plain && n <= plain+revalued
 }
 
-// A reference check runs before the (one) count and the record facts at both
-// layers, so an edge to no root under a (one) association draws the dangling
-// reference alone, and the edge is no count: a (one) association with an edge
-// to p2 and an edge to p7 holds one record.
 // An element that states a value for one field is held to its facts.
 func TestRead_AnElementOfOneFieldStatesSomething(t *testing.T) {
 	t.Parallel()
@@ -484,65 +367,12 @@ func TestRead_AnElementOfEmptyValuesStatesNothing(t *testing.T) {
 	}
 }
 
-// A refused child states its key in its slot, whichever spelling the duplicate's
-// conflict reads. A conflict that names it elsewhere is its own break, and a slot
-// a nested root's refusal leaves undeclared is refused for its own name.
-func TestRead_ARefusedChildAndItsDuplicateDrawTheirOwnBreaks(t *testing.T) {
-	t.Parallel()
-	s, doc := singleBreakDoc(t)
-	for _, c := range []struct {
-		name    string
-		edits   [][2]string
-		phrases []string
-	}{
-		{
-			"a child with no row whose key property states the duplicate's key",
-			[][2]string{{sbTagT1, `{"key":["tz"],"type":null,"properties":{"code":"t1"},"provenance":null}`}},
-			[]string{"carries no types-table row"},
-		},
-		{
-			"a nested root of a refused key under a slot its type does not declare, a duplicate naming it",
-			[][2]string{
-				{sbFirstGroup, sbFirstGroup + `{"type":null,"items":[{"key":[{"a":1}],"properties":{},"provenance":null}]},`},
-				{sbOuterBox + `:{`, `"BOX":[{"key":[{"a":1}],"type":0,"properties":{"n":1},"composed":{"NOPE":[` + sbInnerBox + `],`},
-				{sbDups, sbDups + `{"type":0,"key":null,"instance":{"key":null,"properties":{"n":5},"provenance":null},"conflict":{"type":0,"key":null},"parent_type":0,"parent_key":[{"a":1}],"relation":"NOPE"},`},
-			},
-			[]string{`duplicate record 0 names "NOPE"`, `holds composed children under "NOPE"`, "whose component 0 is not a scalar", "instances entry 0 carries no types-table row"},
-		},
-		{
-			"a child of another type, a duplicate at another key stating it as the conflict",
-			[][2]string{
-				{sbTagT1, `{"key":["t1"],"type":5,"properties":{"code":"t1"},"provenance":null}`},
-				{sbTagDup, strings.Replace(strings.ReplaceAll(sbTagDup, `"t1"`, `"t9"`), `"conflict":{"type":6,"key":["t9"]}`, `"conflict":{"type":5,"key":["t1"]}`, 1)},
-			},
-			[]string{"states conflict sb#Seal", "is typed sb#Seal"},
-		},
-	} {
-		t.Run(c.name, func(t *testing.T) {
-			t.Parallel()
-			edited := doc
-			for _, e := range c.edits {
-				edited = editOnce(t, edited, e[0], e[1])
-			}
-			res := snapshot.Verify(t.Context(), []byte(edited), s, snapshot.WithIssueLimit(0))
-			for _, phrase := range c.phrases {
-				if !strings.Contains(res.String(), phrase) {
-					t.Errorf("no issue naming %q: %s", phrase, res)
-				}
-			}
-			if sbFailures(res) != len(c.phrases) {
-				t.Errorf("%d issues, want %d: %s", sbFailures(res), len(c.phrases), res)
-			}
-		})
-	}
-}
-
 // Under a cap, the document's reference checks arrive after the record checks, so
 // the record's issue is the one kept.
 func TestRead_ACapKeepsARecordsIssueOverAnEdges(t *testing.T) {
 	t.Parallel()
 	s, doc := singleBreakDoc(t)
-	edited := editOnce(t, editOnce(t, doc, sbMentor, `"MENTOR":[{"target_type":4,"target_key":["p7"],"properties":{}}]`), sbTagConflict, `"conflict":{"type":6,"key":["t9"]}`)
+	edited := editOnce(t, editOnce(t, doc, sbMentor, `"MENTOR":[{"target_type":4,"target_key":["p7"],"properties":{}}]`), sbRootDup, `{"type":1,"key":["c1"],`+sbDupInstance+`,"conflict":{"type":1,"key":["c9"]}}`)
 	res := snapshot.Verify(t.Context(), []byte(edited), s, snapshot.WithIssueLimit(1))
 	if !strings.Contains(res.String(), "duplicate conflict") {
 		t.Errorf("want the duplicate's issue kept: %s", res)
@@ -593,8 +423,7 @@ func TestRead_ADanglingEdgeBesideAnotherRecordStopsRevalidation(t *testing.T) {
 }
 
 // A break of a record's key or conflict leaves every other fact of that record
-// judged. The rebuild derives no conflict from the record, and a document's parent
-// key reaches its parts only with a parent type: rebuilt is what it draws.
+// judged.
 func TestRead_EachBreakOfARecordDrawsItsOwnIssue(t *testing.T) {
 	t.Parallel()
 	const (
@@ -605,62 +434,50 @@ func TestRead_EachBreakOfARecordDrawsItsOwnIssue(t *testing.T) {
 	)
 	unresolved := func(record string) [][2]string { return [][2]string{{sbUnresolved, sbUnresolved + record + `,`}} }
 	instanceOf := func(to string) [][2]string { return [][2]string{{sbDupInstance, to}} }
-	tagDup := func(to string) [][2]string { return [][2]string{{sbTagDup, to}} }
 	for _, c := range []struct {
-		name          string
-		edits         [][2]string
-		read, rebuilt int
+		name  string
+		edits [][2]string
+		read  int
 	}{
-		{"a record of no root with no target row", unresolved(`{"source_type":4,"source_key":["p7"],"relation":"KNOWS","target_type":null,"target_key":["p8"],"required":false,"reason":"target_missing"}`), 1, 1},
-		{"a record of no root with a target row past the table", unresolved(`{"source_type":4,"source_key":["p7"],"relation":"KNOWS","target_type":99,"target_key":["p8"],"required":false,"reason":"target_missing"}`), 1, 1},
-		{"an absent record of no root with no target row", unresolved(`{"source_type":4,"source_key":["p7"],"relation":"EMPLOYER","target_type":null,"target_key":null,"required":true,"reason":"absent"}`), 1, 1},
+		{"a record of no root with no target row", unresolved(`{"source_type":4,"source_key":["p7"],"relation":"KNOWS","target_type":null,"target_key":["p8"],"required":false,"reason":"target_missing"}`), 1},
+		{"a record of no root with a target row past the table", unresolved(`{"source_type":4,"source_key":["p7"],"relation":"KNOWS","target_type":99,"target_key":["p8"],"required":false,"reason":"target_missing"}`), 1},
+		{"an absent record of no root with no target row", unresolved(`{"source_type":4,"source_key":["p7"],"relation":"EMPLOYER","target_type":null,"target_key":null,"required":true,"reason":"absent"}`), 1},
 
-		{"a root duplicate of a null instance", instanceOf(`"instance":null`), 1, 1},
-		{"a root duplicate of an empty instance", instanceOf(`"instance":{}`), 1, 1},
-		{"a root duplicate whose instance has a null key", instanceOf(`"instance":{"key":null,"properties":{"id":"c1"},"provenance":null}`), 1, 1},
-		{"a root duplicate whose instance key disagrees with the record and its property", instanceOf(`"instance":{"key":["cx"],"properties":{"id":"c1"},"provenance":null}`), 1, 1},
-		{"a root duplicate whose conflict is at the record's key, not the instance's", instanceOf(`"instance":{"key":["cx"],"properties":{"id":"cx"},"provenance":null}`), 1, 1},
+		{"a duplicate of a null instance", instanceOf(`"instance":null`), 1},
+		{"a duplicate of an empty instance", instanceOf(`"instance":{}`), 1},
+		{"a duplicate whose instance has a null key", instanceOf(`"instance":{"key":null,"properties":{"id":"c1"},"provenance":null}`), 1},
+		{"a duplicate whose instance key disagrees with the record and its property", instanceOf(`"instance":{"key":["cx"],"properties":{"id":"c1"},"provenance":null}`), 1},
+		{"a duplicate whose conflict is at the record's key, not the instance's", instanceOf(`"instance":{"key":["cx"],"properties":{"id":"cx"},"provenance":null}`), 1},
 
-		{"a root duplicate of a part type whose own key is refused", [][2]string{
+		{"a duplicate of a part type whose own key is refused", [][2]string{
 			{sbDups, sbDups + `{"type":6,"key":["tx"],"instance":{"key":["tx"],"properties":{"code":"t1"},"provenance":null},"conflict":{"type":6,"key":["tx"]}},`},
-		}, 2, 2},
-		{"a root duplicate's key and conflict at another address, with no root there", [][2]string{{sbRootDup, `{"type":1,"key":["zz"],` + sbDupInstance + `,"conflict":{"type":1,"key":["zz"]}}`}}, 2, 0},
-		{"a composed duplicate's key and conflict at another address, with no child there", tagDup(`{"type":6,"key":["t9"],` + tagInstance + `,"conflict":{"type":6,"key":["t9"]},"parent_type":3,"parent_key":["o1"],"relation":"TAGS"}`), 2, 0},
-		{"a composed duplicate's key and conflict at another child", tagDup(`{"type":6,"key":["t2"],` + tagInstance + `,"conflict":{"type":6,"key":["t2"]},"parent_type":3,"parent_key":["o1"],"relation":"TAGS"}`), 1, 0},
+		}, 2},
+		{"a duplicate's key and conflict at another address, with no root there", [][2]string{{sbRootDup, `{"type":1,"key":["zz"],` + sbDupInstance + `,"conflict":{"type":1,"key":["zz"]}}`}}, 2},
 
-		{"no conflict, a slot its type does not declare", tagDup(`{"type":6,"key":["t1"],` + tagInstance + `,"conflict":null,"parent_type":3,"parent_key":["o1"],"relation":"NOPE"}`), 2, 1},
-		{"a conflict row past the table, a parent that is no root", tagDup(`{"type":6,"key":["t1"],` + tagInstance + `,"conflict":{"type":99,"key":["t1"]},"parent_type":3,"parent_key":["o9"],"relation":"TAGS"}`), 2, 1},
-		{"a root duplicate with a conflict row past the table and a parent key", [][2]string{{sbRootDup, rootDupStart + sbDupInstance + `,"conflict":{"type":99,"key":["c1"]},"parent_key":["o1"]}`}}, 2, 0},
-		{"no conflict, a relation and no parent row", tagDup(`{"type":6,"key":["t1"],` + tagInstance + `,"conflict":null,"relation":"TAGS"}`), 2, 1},
-		{"a Seal under TAGS with a conflict row past the table", tagDup(`{"type":5,"key":["t1"],"instance":{"key":["t1"],"properties":{"code":"t1"},"provenance":null},"conflict":{"type":99,"key":["t1"]},"parent_type":3,"parent_key":["o1"],"relation":"TAGS"}`), 2, 1},
+		{"a duplicate with a conflict row past the table and a parent key", [][2]string{{sbRootDup, rootDupStart + sbDupInstance + `,"conflict":{"type":99,"key":["c1"]},"parent_key":["o1"]}`}}, 2},
+		{"no conflict, and a relation", [][2]string{{sbRootDup, rootDupStart + sbDupInstance + `,"conflict":null,"relation":"TAGS"}`}}, 2},
 
-		{"a keyless root, a duplicate naming it as its parent", [][2]string{
-			{sbLastGroup, boxRoot},
-			{sbDups, sbDups + `{"type":0,"key":null,"instance":{"key":null,"properties":{"n":3},"provenance":null},"conflict":{"type":0,"key":null},"parent_type":0,"parent_key":null,"relation":"BOX"},`},
-		}, 1, 1},
-		{"a root and a root duplicate of a part type", [][2]string{
+		{"a root and a duplicate of a part type", [][2]string{
 			{sbLastGroup, tagRoot},
 			{sbDups, sbDups + `{"type":6,"key":["t1"],` + tagInstance + `,"conflict":{"type":6,"key":["t1"]}},`},
-		}, 1, 1},
+		}, 1},
 		{"two roots of a part type at one key", [][2]string{
 			{sbLastGroup, `}]},{"type":6,"items":[{"key":["t1"],"properties":{"code":"t1"},"provenance":null},{"key":["t1"],"properties":{"code":"t1"},"provenance":null}]}],"diagnostics"`},
-		}, 1, 1},
-		{"two root duplicates of a part type", [][2]string{
+		}, 1},
+		{"two duplicates of a part type", [][2]string{
 			{sbDups, sbDups + `{"type":6,"key":["t1"],` + tagInstance + `,"conflict":{"type":6,"key":["t1"]}},{"type":6,"key":["t2"],"instance":{"key":["t2"],"properties":{"code":"t2"},"provenance":null},"conflict":{"type":6,"key":["t2"]}},`},
-		}, 1, 1},
-		{"a keyless root and a root duplicate of a part type", [][2]string{
+		}, 1},
+		{"a keyless root and a duplicate of a part type", [][2]string{
 			{sbLastGroup, boxRoot},
 			{sbDups, sbDups + `{"type":0,"key":null,"instance":{"key":null,"properties":{"n":3},"provenance":null},"conflict":{"type":0,"key":null}},`},
-		}, 1, 1},
-		{"two sound roots at one address, the first holding a slot its type does not declare, a duplicate naming it", [][2]string{
+		}, 1},
+		{"two sound roots at one address, the first holding a slot its type does not declare", [][2]string{
 			{sbO1, sbO1 + `"NOPE":[` + sbTagT1 + `],`},
 			{sbLastOrder, `,"provenance":null},{"key":["o1"],"properties":{"id":"o1"},"provenance":null}]},{"type":4,"items":[`},
-			{sbDups, sbDups + `{"type":6,"key":["t9"],"instance":{"key":["t9"],"properties":{"code":"t9"},"provenance":null},"conflict":{"type":6,"key":["t9"]},"parent_type":3,"parent_key":["o1"],"relation":"NOPE"},`},
-		}, 2, 2},
-		{"two sound roots at one address, the second holding a slot its type does not declare, a duplicate naming it", [][2]string{
+		}, 2},
+		{"two sound roots at one address, the second holding a slot its type does not declare", [][2]string{
 			{sbLastOrder, `,"provenance":null},{"key":["o1"],"properties":{"id":"o1"},"composed":{"NOPE":[` + sbTagT1 + `]},"provenance":null}]},{"type":4,"items":[`},
-			{sbDups, sbDups + `{"type":6,"key":["t9"],"instance":{"key":["t9"],"properties":{"code":"t9"},"provenance":null},"conflict":{"type":6,"key":["t9"]},"parent_type":3,"parent_key":["o1"],"relation":"NOPE"},`},
-		}, 2, 2},
+		}, 2},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
@@ -671,10 +488,6 @@ func TestRead_EachBreakOfARecordDrawsItsOwnIssue(t *testing.T) {
 			read := snapshot.Verify(t.Context(), []byte(doc), s, snapshot.WithIssueLimit(0))
 			if sbFailures(read) != c.read {
 				t.Errorf("the reader draws %d issues, want %d: %s", sbFailures(read), c.read, read)
-			}
-			rebuilt := snapshot.RebuildDocument([]byte(doc), s)
-			if sbFailures(rebuilt) != c.rebuilt {
-				t.Errorf("RebuildSnapshot draws %d issues, want %d: %s", sbFailures(rebuilt), c.rebuilt, rebuilt)
 			}
 		})
 	}
@@ -723,7 +536,6 @@ func TestRead_AKeyPropertyStatesItsNumberInAnySpelling(t *testing.T) {
 	const (
 		n10     = `{"key":["n10"],"properties":{"id":"n10"},"provenance":null}`
 		link    = `"LINK":[{"target_type":1,"target_key":["n20"],"properties":{}}]`
-		k7      = `{"key":["k7"],"type":0,"properties":{"code":"k7"},"provenance":null}`
 		dups    = `"duplicates":[`
 		records = `"unresolved":[`
 	)
@@ -733,8 +545,8 @@ func TestRead_AKeyPropertyStatesItsNumberInAnySpelling(t *testing.T) {
 	edgeTo := func(key string) [2]string {
 		return [2]string{link, `"LINK":[{"target_type":1,"target_key":[` + key + `],"properties":{}}]`}
 	}
-	dupOf := func(parent, key, conflict string) [2]string {
-		return [2]string{dups, dups + `{"type":0,"key":[` + key + `],"instance":{"key":[` + key + `],"properties":{"code":` + key + `},"provenance":null},"conflict":{"type":0,"key":[` + conflict + `]},"parent_type":1,"parent_key":[` + parent + `],"relation":"P"}`}
+	dupOf := func(key string) [2]string {
+		return [2]string{dups, dups + `{"type":1,"key":[` + key + `],"instance":{"key":[` + key + `],"properties":{"id":` + key + `},"provenance":null},"conflict":{"type":1,"key":[` + key + `]}}`}
 	}
 	recordOf := func(key string) [2]string {
 		return [2]string{records, records + `{"source_type":1,"source_key":[` + key + `],"relation":"LINK","target_type":1,"target_key":["n99"],"required":false,"reason":"target_missing"}`}
@@ -749,10 +561,9 @@ func TestRead_AKeyPropertyStatesItsNumberInAnySpelling(t *testing.T) {
 		{"1 and an edge to 1", [][2]string{stated(`1`), edgeTo(`1`)}, 1},
 		{"a number past int64 and an edge to its nearest float", [][2]string{stated(`18446744073709551615`), edgeTo(`18446744073709552000`)}, 1},
 		{"1.0 and a record of 1", [][2]string{stated(`1.0`), recordOf(`1`)}, 1},
-		{"1.0 and a duplicate whose parent is 1", [][2]string{stated(`1.0`), dupOf(`1`, `"k7"`, `"k7"`)}, 1},
-		{"1.0 and a duplicate whose conflict is 1", [][2]string{{k7, `{"key":["k9"],"type":0,"properties":{"code":1.0},"provenance":null}`}, dupOf(`"n30"`, `1`, `1`)}, 1},
-		{"-0.0 and a duplicate whose parent is -0.0", [][2]string{stated(`-0.0`), dupOf(`-0.0`, `"k7"`, `"k7"`)}, 2},
-		{"-0e0 and a duplicate whose parent is -0e0", [][2]string{stated(`-0e0`), dupOf(`-0e0`, `"k7"`, `"k7"`)}, 2},
+		{"1.0 and a duplicate whose conflict is 1", [][2]string{stated(`1.0`), dupOf(`1`)}, 1},
+		{"-0.0 and a duplicate whose conflict is -0.0", [][2]string{stated(`-0.0`), dupOf(`-0.0`)}, 2},
+		{"-0e0 and a duplicate whose conflict is -0e0", [][2]string{stated(`-0e0`), dupOf(`-0e0`)}, 2},
 		{"-0.0 and a record of -0.0", [][2]string{stated(`-0.0`), recordOf(`-0.0`)}, 2},
 	} {
 		t.Run(c.name, func(t *testing.T) {
@@ -767,10 +578,6 @@ func TestRead_AKeyPropertyStatesItsNumberInAnySpelling(t *testing.T) {
 			}
 			if sbFailures(read) != c.want {
 				t.Errorf("the reader draws %d issues, want %d: %s", sbFailures(read), c.want, read)
-			}
-			rebuilt := snapshot.RebuildDocument([]byte(edited), s)
-			if sbFailures(rebuilt) != c.want {
-				t.Errorf("RebuildSnapshot draws %d issues, want %d: %s", sbFailures(rebuilt), c.want, rebuilt)
 			}
 		})
 	}
@@ -815,8 +622,8 @@ func TestRead_ARecordOfTwoRefusedRowsDrawsTheIssueOfEach(t *testing.T) {
 }
 
 // A root of a type that cannot hold one is its entry's one refusal, so it owes no
-// required association and is in no (one) count, at the reader and the rebuild. A
-// break its records show by themselves stays its own.
+// required association and is in no (one) count. A break its records show by
+// themselves stays its own.
 func TestRead_ARootOfATypeThatCannotHoldOneHoldsNoAddress(t *testing.T) {
 	t.Parallel()
 	s, res := schema.LoadString(t.Context(), rootlessTypeSchema, "rl.yammm")
@@ -860,10 +667,6 @@ func TestRead_ARootOfATypeThatCannotHoldOneHoldsNoAddress(t *testing.T) {
 			read := snapshot.Verify(t.Context(), []byte(edited), s, snapshot.WithIssueLimit(0))
 			if sbFailures(read) != c.want || !hasCode(read, diag.E_SNAPSHOT_INVALID_ROOT) {
 				t.Errorf("the reader draws %d issues, want %d: %s", sbFailures(read), c.want, read)
-			}
-			rebuilt := snapshot.RebuildDocument([]byte(edited), s)
-			if sbFailures(rebuilt) != c.want {
-				t.Errorf("RebuildSnapshot draws %d issues, want %d: %s", sbFailures(rebuilt), c.want, rebuilt)
 			}
 		})
 	}
@@ -980,28 +783,10 @@ func TestRead_RecordsOfNoSourceRowCostLinearly(t *testing.T) {
 	}
 }
 
-// The duplicates of one slot read its refused children once, so their cost grows
-// with the slot, never with its square.
-func TestRead_DuplicatesBesideRefusedChildrenCostLinearly(t *testing.T) {
-	s, doc := singleBreakDoc(t)
-	allocations := func(k int) float64 {
-		var children, records strings.Builder
-		for i := range k {
-			fmt.Fprintf(&children, `{"key":["x%d"],"type":99,"properties":{"code":"s%d"},"provenance":null},`, i, i)
-			fmt.Fprintf(&records, `{"type":6,"key":["d%d"],"instance":{"key":["d%d"],"properties":{"code":"d%d"},"provenance":null},"conflict":{"type":6,"key":["d%d"]},"parent_type":3,"parent_key":["o1"],"relation":"TAGS"},`, i, i, i, i)
-		}
-		edited := []byte(editOnce(t, editOnce(t, doc, sbTagT1, children.String()+sbTagT1), sbDups, sbDups+records.String()))
-		return testing.AllocsPerRun(1, func() {
-			if res := snapshot.Verify(t.Context(), edited, s, snapshot.WithIssueLimit(0)); res.OK() {
-				t.Fatal("the document is accepted")
-			}
-		})
-	}
-	if small, large := allocations(100), allocations(400); large > 6*small {
-		t.Errorf("%.0f allocations at 100 duplicates and %.0f at 400, want growth near 4 times", small, large)
-	}
-}
-
+// A reference check runs before the (one) count and the record facts, so an edge
+// to no root under a (one) association draws the dangling reference alone, and the
+// edge is no count: a (one) association with an edge to p2 and an edge to p7 holds
+// one record.
 func TestRead_AReferenceCheckRunsBeforeTheOneCount(t *testing.T) {
 	t.Parallel()
 	s, doc := singleBreakDoc(t)
@@ -1009,9 +794,5 @@ func TestRead_AReferenceCheckRunsBeforeTheOneCount(t *testing.T) {
 	read := snapshot.Verify(t.Context(), edited, s, snapshot.WithIssueLimit(0))
 	if sbFailures(read) != 1 || !hasCode(read, diag.E_SNAPSHOT_DANGLING_REFERENCE) {
 		t.Errorf("the reader draws %s, want the dangling reference alone", read)
-	}
-	rebuilt := snapshot.RebuildDocument(edited, s)
-	if sbFailures(rebuilt) != 1 || !strings.Contains(rebuilt.String(), `edge target`) {
-		t.Errorf("RebuildSnapshot draws %s, want the edge's reference alone", rebuilt)
 	}
 }

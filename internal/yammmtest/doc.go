@@ -1,6 +1,6 @@
 // Package yammmtest provides the repo-wide test support shared by package
 // test suites: golden-file comparison behind a single -update flag,
-// structural diffs via go-cmp, and a record-capturing slog handler.
+// structural diffs via go-cmp, and a context that counts its cancellation checks.
 //
 // # Golden files
 //

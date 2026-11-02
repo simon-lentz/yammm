@@ -1,71 +1,13 @@
 package schema
 
 import (
-	"maps"
 	"strings"
 )
-
-// reservedKeywordsMap contains all words that cannot be used as import aliases.
-// The rule table holds no keywords, so each of these lexes as an ordinary word
-// and the refusal is a parser decision.
-//
-// This map must remain synchronized with the grammar. The Grammar-Alias
-// Synchronization Test in alias_test.go verifies this.
-var reservedKeywordsMap = map[string]bool{
-	// DSL keywords (from lc_keyword rule and others)
-	"schema":   true,
-	"import":   true,
-	"as":       true,
-	"type":     true,
-	"datatype": true,
-	"required": true,
-	"primary":  true,
-	"extends":  true,
-	"includes": true,
-	"abstract": true,
-	"part":     true,
-	"one":      true,
-	"many":     true,
-	"in":       true,
-
-	// Built-in type keywords (from datatypeKeyword rule)
-	"Integer":   true,
-	"Float":     true,
-	"Boolean":   true,
-	"String":    true,
-	"Enum":      true,
-	"Pattern":   true,
-	"Timestamp": true,
-	"Date":      true,
-	"UUID":      true,
-	"Vector":    true,
-	"List":      true,
-
-	// Boolean literals
-	"true":  true,
-	"false": true,
-
-	// Nil literal keyword
-	"nil": true,
-}
-
-// reservedKeywords returns a copy of all reserved keywords that cannot be used
-// as import aliases. This is primarily for testing and diagnostic purposes.
-func reservedKeywords() map[string]bool {
-	return maps.Clone(reservedKeywordsMap)
-}
-
-// isReservedKeyword returns true if the alias is a reserved keyword that cannot
-// be used as an import alias. The rule table holds no keywords, so a reserved
-// word lexes as an ordinary identifier; refusing it here is a parser decision.
-func isReservedKeyword(alias string) bool {
-	return reservedKeywordsMap[alias]
-}
 
 // isValidAlias returns true if the alias is a valid identifier per the grammar.
 // Valid aliases must start with a letter (A-Z or a-z) and contain only letters,
 // digits, and underscores. This does NOT check for reserved keywords; use
-// isReservedKeyword for that.
+// [parse.IsReserved] for that.
 func isValidAlias(alias string) bool {
 	if alias == "" {
 		return false

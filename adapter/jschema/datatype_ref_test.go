@@ -87,15 +87,21 @@ type Doc {
 	}
 }
 
-// A Builder-built property names its datatype as a parsed one does.
-func TestMarshal_BuilderDataTypePropertyIsARef(t *testing.T) {
-	s, res := schema.NewBuilder().WithName("b").
-		AddDataType("Code", schema.StringLenBetween(1, 3)).
-		AddDataType("Codes", schema.NewListConstraint(schema.NewAliasConstraint("Code", nil))).
-		AddType("Doc").WithPrimaryKey("id", schema.NewStringConstraint()).
-		WithProperty("c", schema.NewAliasConstraint("Code", nil)).
-		WithProperty("cs", schema.NewListConstraint(schema.NewAliasConstraint("Code", nil))).
-		WithProperty("all", schema.NewAliasConstraint("Codes", nil)).Done().Build()
+// A property that names a datatype is a reference to its definition.
+func TestMarshal_DataTypePropertyIsARef(t *testing.T) {
+	s, res := schema.LoadString(t.Context(), `schema "b"
+
+type Code = String[1, 3]
+
+type Codes = List<Code>
+
+type Doc {
+	id String primary
+	c Code required
+	cs List<Code> required
+	all Codes required
+}
+`, "b.yammm")
 	if res.HasErrors() {
 		t.Fatal(res.Err())
 	}

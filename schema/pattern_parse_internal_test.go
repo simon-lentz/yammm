@@ -14,7 +14,7 @@ import (
 // object, so a source's pattern is compiled once a load.
 func TestSchemaParser_KeepsTheParsersRegexps(t *testing.T) {
 	src := "schema \"s\"\n\ntype Zip = Pattern[\"^[0-9]{5}$\"]\n\ntype T {\n\tid String primary\n\tboth Pattern[\"^a\", \"b$\"]\n\tzips List<Pattern[\"^z\"]>\n}\n"
-	id := location.MustNewSourceID("test://s.yammm")
+	id := location.NewSourceID("test://s.yammm")
 	file, issues := parse.Parse([]byte(src), id)
 	if len(issues) != 0 {
 		t.Fatalf("parse: %v", issues)

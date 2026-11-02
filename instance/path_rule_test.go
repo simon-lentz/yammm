@@ -174,8 +174,6 @@ func TestFatal_CarriesProvenance(t *testing.T) {
 
 // The provenance a caller supplies reaches every diagnostic about the
 // instance: the object-level ones at the object, the span where one exists.
-// A batch-wide failure is about no instance: it keeps the source, at its
-// root, with no span.
 func TestProvenance_ReachesEveryDiagnostic(t *testing.T) {
 	src := location.NewSourceID("data.json")
 	span := location.Span{Source: src, Start: location.Position{Line: 7, Column: 3, Byte: 40}, End: location.Position{Line: 7, Column: 9, Byte: 46}}
@@ -207,13 +205,6 @@ func TestProvenance_ReachesEveryDiagnostic(t *testing.T) {
 		is := mustIssue(t, res, instance.ErrTypeNotFound)
 		if is.Path() != "$.Doc[2]" || is.SourceName() != "data.json" || is.Span() != span {
 			t.Errorf("path=%q source=%q span=%v", is.Path(), is.SourceName(), is.Span())
-		}
-	})
-	t.Run("composition_not_found", func(t *testing.T) {
-		_, res := v.ValidateForComposition(t.Context(), "Doc", "NOPE", []instance.RawInstance{{Provenance: prov}})
-		is := mustIssue(t, res, instance.ErrCompositionNotFound)
-		if is.Path() != "$" || is.SourceName() != "data.json" || is.Span() != (location.Span{}) {
-			t.Errorf("path=%q source=%q span=%v, want the batch's source at its root with no span", is.Path(), is.SourceName(), is.Span())
 		}
 	})
 }

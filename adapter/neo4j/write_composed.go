@@ -159,17 +159,17 @@ func composedQueries(ctx context.Context, result graph.Snapshot, shapes *GraphSh
 			continue
 		}
 
-		rootShape, ok := shapes.Types[typeID]
+		rootShape, ok := shapes.types[typeID]
 		if !ok {
 			return nil, fmt.Errorf("no shape for type %s", typeID)
 		}
 		partLabels := make([]string, len(partIDs))
 		for i, id := range partIDs {
-			partShape, ok := shapes.Types[id]
+			partShape, ok := shapes.types[id]
 			if !ok {
 				return nil, fmt.Errorf("no shape for part type %s (composed under %s)", id, typeID)
 			}
-			partLabels[i] = partShape.Label
+			partLabels[i] = partShape.label
 		}
 
 		instances := slices.Collect(result.InstancesOf(typeID))
@@ -191,7 +191,7 @@ func composedQueries(ctx context.Context, result graph.Snapshot, shapes *GraphSh
 			}
 		}
 
-		stmt := buildCompositionReplaceQuery(rootShape.Label, rootShape.PrimaryKeys, relNames, partLabels)
+		stmt := buildCompositionReplaceQuery(rootShape.label, rootShape.primaryKeys, relNames, partLabels)
 		for _, chunk := range chunkSlice(replaceRows, cfg.nodeChunkSize) {
 			replace = append(replace, &BatchNodeQuery{
 				Statement: stmt,
@@ -256,7 +256,7 @@ func composedQueries(ctx context.Context, result graph.Snapshot, shapes *GraphSh
 func collectCreateRows(
 	s schema.Schema,
 	shapes *GraphShape,
-	rootShape *NodeShape,
+	rootShape *nodeShape,
 	rootType schema.Type,
 	root graph.Instance,
 	rootKeyProps map[string]any,
@@ -273,7 +273,7 @@ func collectCreateRows(
 		var parentCK string
 		if depth > 1 {
 			var err error
-			if parentCK, err = composedKey(rootShape.Label, rootKeyValues, path); err != nil {
+			if parentCK, err = composedKey(rootShape.label, rootKeyValues, path); err != nil {
 				return fmt.Errorf("composed parent %s: %w", parentType.Name(), err)
 			}
 		}
@@ -286,7 +286,7 @@ func collectCreateRows(
 			if !ok {
 				return fmt.Errorf("composition %q: target %s not in schema", relName, rel.TargetID())
 			}
-			partShape, ok := shapes.Types[rel.TargetID()]
+			partShape, ok := shapes.types[rel.TargetID()]
 			if !ok {
 				return fmt.Errorf("no shape for part type %s", rel.TargetID())
 			}
@@ -310,14 +310,14 @@ func collectCreateRows(
 					keyOrIndex = i
 				}
 				childPath := append(slices.Clip(path), composedStep{relation: relName, keyOrIndex: keyOrIndex})
-				ck, err := composedKey(rootShape.Label, rootKeyValues, childPath)
+				ck, err := composedKey(rootShape.label, rootKeyValues, childPath)
 				if err != nil {
 					return fmt.Errorf("composition %q child %d: %w", relName, i, err)
 				}
 
 				props, err := propsToParamMap(child.Properties(), partType)
 				if err != nil {
-					return fmt.Errorf("part %s: %w", partShape.Label, err)
+					return fmt.Errorf("part %s: %w", partShape.label, err)
 				}
 				if props == nil {
 					// The zero Properties clone to a nil map, and the composed key
@@ -330,20 +330,20 @@ func collectCreateRows(
 				key := composedGroupKey{
 					depth:     depth,
 					relName:   relName,
-					partLabel: partShape.Label,
+					partLabel: partShape.label,
 				}
 				if depth == 1 {
-					key.parentLabel = rootShape.Label
+					key.parentLabel = rootShape.label
 					for k, v := range rootKeyProps {
 						row[batchKeyParamPrefix+k] = v
 					}
-					row["_parent_keys"] = rootShape.PrimaryKeys
+					row["_parent_keys"] = rootShape.primaryKeys
 				} else {
-					parentShape, ok := shapes.Types[parent.TypeID()]
+					parentShape, ok := shapes.types[parent.TypeID()]
 					if !ok {
 						return fmt.Errorf("no shape for composed parent type %s", parent.TypeID())
 					}
-					key.parentLabel = parentShape.Label
+					key.parentLabel = parentShape.label
 					key.parentByCK = true
 					row["parent_ck"] = parentCK
 				}

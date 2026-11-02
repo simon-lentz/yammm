@@ -48,8 +48,8 @@ func TestWrite_AValueThatHoldsNoneReachesTheDriverAsNil(t *testing.T) {
 		"a nil slice at a List<String>":   {schema.NewListConstraint(schema.NewStringConstraint()), []any(nil)},
 		"a nil slice under no constraint": {nil, []any(nil)},
 	} {
-		if got, err := Coerce(tc.c, tc.raw); err != nil || got != nil {
-			t.Errorf("Coerce(%s) = %#v, %v; want nil", name, got, err)
+		if got, err := coerceScalar(tc.c, tc.raw); err != nil || got != nil {
+			t.Errorf("coerceScalar(%s) = %#v, %v; want nil", name, got, err)
 		}
 		out, err := CoerceParams(map[string]any{"p": tc.raw}, ParamTypes{"p": tc.c})
 		if err != nil || out["p"] != nil {
@@ -59,15 +59,15 @@ func TestWrite_AValueThatHoldsNoneReachesTheDriverAsNil(t *testing.T) {
 
 	rel := slices.Collect(typ.Associations())[0]
 	for name, v := range map[string]any{"a nil slice": []any(nil), "a nil map": map[string]any(nil)} {
-		out, err := CoerceRelProps(map[string]any{"note": v}, rel)
+		out, err := coerceRelProps(map[string]any{"note": v}, rel)
 		if err != nil || out["note"] != nil {
-			t.Errorf("CoerceRelProps(%s at a String) = %#v, %v; want nil", name, out["note"], err)
+			t.Errorf("coerceRelProps(%s at a String) = %#v, %v; want nil", name, out["note"], err)
 		}
 	}
 }
 
-// The one form of a nil slice or map is nil, as instance.ScalarOf reads it, at
-// a declared position or not, and so is a nested param map's field.
+// A nil slice or map holds no value (instance.IsAbsent), so it is nil at a declared
+// position or not, and so is a nested param map's field.
 func TestHeldForm_ANilSliceOrMapHasTheFormNil(t *testing.T) {
 	t.Parallel()
 	list := schema.NewListConstraint(schema.NewStringConstraint())
@@ -128,9 +128,9 @@ type T {
 }
 
 // A row that holds none reaches the driver as null, so CoerceParams returns the
-// rows as a list that can hold one. CoerceRelProps returns a value that holds
+// rows as a list that can hold one. coerceRelProps returns a value that holds
 // none as nil where the relation declares no property, and under no relation.
-func TestCoerce_ARowOrAnUndeclaredValueThatHoldsNoneIsNil(t *testing.T) {
+func TestCoerceScalar_ARowOrAnUndeclaredValueThatHoldsNoneIsNil(t *testing.T) {
 	t.Parallel()
 	out, err := CoerceParams(map[string]any{"rows": []map[string]any{nil, {"id": "a"}}}, nil)
 	if err != nil {
@@ -144,9 +144,9 @@ func TestCoerce_ARowOrAnUndeclaredValueThatHoldsNoneIsNil(t *testing.T) {
 		t.Errorf("rows[1] = %#v; want the row", rows[1])
 	}
 	for name, rel := range map[string]schema.Relation{"no relation": {}, "a relation": slices.Collect(nilValueType(t).Associations())[0]} {
-		got, err := CoerceRelProps(map[string]any{"undeclared": []any(nil), "kept": "x"}, rel)
+		got, err := coerceRelProps(map[string]any{"undeclared": []any(nil), "kept": "x"}, rel)
 		if err != nil || got["undeclared"] != nil || got["kept"] != "x" {
-			t.Errorf("CoerceRelProps under %s = %#v, %v; want undeclared nil and kept unchanged", name, got, err)
+			t.Errorf("coerceRelProps under %s = %#v, %v; want undeclared nil and kept unchanged", name, got, err)
 		}
 	}
 }
@@ -154,7 +154,7 @@ func TestCoerce_ARowOrAnUndeclaredValueThatHoldsNoneIsNil(t *testing.T) {
 // A key that holds none behind a carrier is a nil key, as a nil one is.
 func TestExtractKeyProps_AKeyThatHoldsNoneIsANilKey(t *testing.T) {
 	t.Parallel()
-	shape := &NodeShape{Label: "T", PrimaryKeys: []string{"id"}}
+	shape := &nodeShape{label: "T", primaryKeys: []string{"id"}}
 	var nilString *string
 	for name, none := range map[string]any{"a pointer to a nil pointer": &nilString, "a nil slice": []any(nil)} {
 		_, err := extractKeyProps(immutable.WrapProperties(map[string]any{"id": none}), shape)

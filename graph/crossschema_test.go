@@ -5,9 +5,7 @@ import (
 	"testing"
 
 	"github.com/simon-lentz/yammm/graph"
-	"github.com/simon-lentz/yammm/immutable"
-	"github.com/simon-lentz/yammm/instance"
-	"github.com/simon-lentz/yammm/location"
+	"github.com/simon-lentz/yammm/internal/instancetest"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -23,14 +21,7 @@ func TestGraph_StrictResolution_LocalOnly(t *testing.T) {
 	ctx := t.Context()
 
 	// Add a local User instance (should succeed)
-	userType, _ := mainSchema.Type("User")
-	user := instance.NewValidInstance(
-		"User",
-		userType.ID(),
-		immutable.WrapKey([]any{"u1"}),
-		immutable.WrapProperties(map[string]any{"id": "u1", "username": "alice"}),
-		nil, nil, location.Provenance{},
-	)
+	user := instancetest.Valid(t, mainSchema, "User", map[string]any{"id": "u1", "username": "alice"})
 
 	result := g.Add(ctx, user)
 	if err := result.Err(); err != nil {
@@ -42,13 +33,7 @@ func TestGraph_StrictResolution_LocalOnly(t *testing.T) {
 	// identity and not under any main-schema one. The rendering is not the
 	// address; that is the whole of the v0.12.0 identity break.
 	entityType, _ := commonSchema.Type("Entity")
-	entity := instance.NewValidInstance(
-		"Entity",
-		entityType.ID(),
-		immutable.WrapKey([]any{"e1"}),
-		immutable.WrapProperties(map[string]any{"id": "e1", "name": "Entity 1"}),
-		nil, nil, location.Provenance{},
-	)
+	entity := instancetest.Valid(t, commonSchema, "Entity", map[string]any{"id": "e1", "name": "Entity 1"})
 
 	if res := g.Add(ctx, entity); !res.OK() {
 		t.Fatalf("Add resolves by identity, so the unqualified name is irrelevant: %s", res.String())
@@ -65,19 +50,12 @@ func TestGraph_StrictResolution_LocalOnly(t *testing.T) {
 
 func TestGraph_StrictResolution_QualifiedLookup(t *testing.T) {
 	// "c.Entity" matches imported c.Entity
-	mainSchema, commonSchema := testMultiSchemaSetup(t)
+	mainSchema, _ := testMultiSchemaSetup(t)
 	g := graph.New(mainSchema)
 	ctx := t.Context()
 
 	// Add Entity using qualified name "c.Entity"
-	entityType, _ := commonSchema.Type("Entity")
-	entity := instance.NewValidInstance(
-		"c.Entity", // Qualified name matches the import alias
-		entityType.ID(),
-		immutable.WrapKey([]any{"e1"}),
-		immutable.WrapProperties(map[string]any{"id": "e1", "name": "Entity 1"}),
-		nil, nil, location.Provenance{},
-	)
+	entity := instancetest.Valid(t, mainSchema, "c.Entity", map[string]any{"id": "e1", "name": "Entity 1"})
 
 	result := g.Add(ctx, entity)
 	if err := result.Err(); err != nil {
@@ -92,45 +70,14 @@ func TestGraph_StrictResolution_QualifiedLookup(t *testing.T) {
 	}
 }
 
-func TestGraph_StrictResolution_UnknownAlias(t *testing.T) {
-	// Instance from completely unknown schema should panic
+func TestGraph_InstanceByKey_Qualified(t *testing.T) {
+	// Lookup by alias-qualified type name
 	mainSchema, _ := testMultiSchemaSetup(t)
 	g := graph.New(mainSchema)
 	ctx := t.Context()
 
-	// Create an instance with unknown alias prefix - schema not in import chain
-	unknownType := schema.NewTypeID(location.MustNewSourceID("test://unknown.yammm"), "SomeType")
-	inst := instance.NewValidInstance(
-		"unknown.SomeType",
-		unknownType,
-		immutable.WrapKey([]any{"x1"}),
-		immutable.WrapProperties(map[string]any{"id": "x1"}),
-		nil, nil, location.Provenance{},
-	)
-
-	defer func() {
-		if r := recover(); r == nil {
-			t.Error("Add with unknown schema should panic")
-		}
-	}()
-	g.Add(ctx, inst)
-}
-
-func TestGraph_InstanceByKey_Qualified(t *testing.T) {
-	// Lookup by alias-qualified type name
-	mainSchema, commonSchema := testMultiSchemaSetup(t)
-	g := graph.New(mainSchema)
-	ctx := t.Context()
-
 	// Add Entity
-	entityType, _ := commonSchema.Type("Entity")
-	entity := instance.NewValidInstance(
-		"c.Entity",
-		entityType.ID(),
-		immutable.WrapKey([]any{"e1"}),
-		immutable.WrapProperties(map[string]any{"id": "e1", "name": "Entity 1"}),
-		nil, nil, location.Provenance{},
-	)
+	entity := instancetest.Valid(t, mainSchema, "c.Entity", map[string]any{"id": "e1", "name": "Entity 1"})
 
 	g.Add(ctx, entity)
 
@@ -156,31 +103,17 @@ func TestGraph_InstanceByKey_Qualified(t *testing.T) {
 
 func TestGraph_Types_InstanceTagForm(t *testing.T) {
 	// Types() returns mixed local/qualified names
-	mainSchema, commonSchema := testMultiSchemaSetup(t)
+	mainSchema, _ := testMultiSchemaSetup(t)
 	g := graph.New(mainSchema)
 	ctx := t.Context()
 
 	// Add local User
-	userType, _ := mainSchema.Type("User")
-	user := instance.NewValidInstance(
-		"User",
-		userType.ID(),
-		immutable.WrapKey([]any{"u1"}),
-		immutable.WrapProperties(map[string]any{"id": "u1", "username": "alice"}),
-		nil, nil, location.Provenance{},
-	)
+	user := instancetest.Valid(t, mainSchema, "User", map[string]any{"id": "u1", "username": "alice"})
 
 	g.Add(ctx, user)
 
 	// Add imported Entity
-	entityType, _ := commonSchema.Type("Entity")
-	entity := instance.NewValidInstance(
-		"c.Entity",
-		entityType.ID(),
-		immutable.WrapKey([]any{"e1"}),
-		immutable.WrapProperties(map[string]any{"id": "e1", "name": "Entity 1"}),
-		nil, nil, location.Provenance{},
-	)
+	entity := instancetest.Valid(t, mainSchema, "c.Entity", map[string]any{"id": "e1", "name": "Entity 1"})
 
 	g.Add(ctx, entity)
 
@@ -208,42 +141,19 @@ func TestGraph_Types_InstanceTagForm(t *testing.T) {
 
 func TestGraph_Edge_CrossSchema(t *testing.T) {
 	// Association from local to imported type
-	mainSchema, commonSchema := testMultiSchemaSetup(t)
+	mainSchema, _ := testMultiSchemaSetup(t)
 	g := graph.New(mainSchema)
 	ctx := t.Context()
 
 	// First add Entity (target)
-	entityType, _ := commonSchema.Type("Entity")
-	entity := instance.NewValidInstance(
-		"c.Entity",
-		entityType.ID(),
-		immutable.WrapKey([]any{"e1"}),
-		immutable.WrapProperties(map[string]any{"id": "e1", "name": "Entity 1"}),
-		nil, nil, location.Provenance{},
-	)
+	entity := instancetest.Valid(t, mainSchema, "c.Entity", map[string]any{"id": "e1", "name": "Entity 1"})
 
 	g.Add(ctx, entity)
 
 	// Add User with edge to Entity
-	userType, _ := mainSchema.Type("User")
-	targets := []instance.ValidEdgeTarget{
-		instance.NewValidEdgeTarget(
-			immutable.WrapKey([]any{"e1"}),
-			immutable.Properties{},
-		),
-	}
-	edges := map[string]instance.ValidEdgeData{
-		"ENTITY": instance.NewValidEdgeData(targets),
-	}
-	user := instance.NewValidInstance(
-		"User",
-		userType.ID(),
-		immutable.WrapKey([]any{"u1"}),
-		immutable.WrapProperties(map[string]any{"id": "u1", "username": "alice"}),
-		edges,
-		nil,
-		location.Provenance{},
-	)
+	user := instancetest.Valid(t, mainSchema, "User", map[string]any{
+		"id": "u1", "username": "alice", "entity": map[string]any{"_target_id": "e1"},
+	})
 
 	result := g.Add(ctx, user)
 	if err := result.Err(); err != nil {
@@ -273,82 +183,43 @@ func TestGraph_MultiImport_Disambiguation(t *testing.T) {
 	// Multiple imports can be disambiguated by alias
 	// Schema A imports B as "b" and C as "c"
 	// Both B and C have a type called "Resource"
-	reg := schema.NewRegistry()
+	members := loadClosure(t, "a.yammm", map[string]string{
+		"b.yammm": `schema "schema_b"
 
-	// Schema B with Resource
-	schemaB, result := schema.NewBuilder().
-		WithName("schema_b").
-		WithSourceID(location.MustNewSourceID("test://b.yammm")).
-		AddType("Resource").
-		WithPrimaryKey("id", schema.StringConstraint{}).
-		WithProperty("nameB", schema.StringConstraint{}).
-		Done().
-		Build()
+type Resource {
+	id String primary
+	nameB String required
+}
+`,
+		"c.yammm": `schema "schema_c"
 
-	if result.HasErrors() {
-		t.Fatalf("Failed to build schema B: %s", result.String())
-	}
-	if err := reg.Register(schemaB); err != nil {
-		t.Fatalf("Failed to register schema B: %v", err)
-	}
+type Resource {
+	id String primary
+	nameC String required
+}
+`,
+		"a.yammm": `schema "schema_a"
 
-	// Schema C with Resource (same type name!)
-	schemaC, result := schema.NewBuilder().
-		WithName("schema_c").
-		WithSourceID(location.MustNewSourceID("test://c.yammm")).
-		AddType("Resource").
-		WithPrimaryKey("id", schema.StringConstraint{}).
-		WithProperty("nameC", schema.StringConstraint{}).
-		Done().
-		Build()
+import "b" as b
+import "c" as c
 
-	if result.HasErrors() {
-		t.Fatalf("Failed to build schema C: %s", result.String())
-	}
-	if err := reg.Register(schemaC); err != nil {
-		t.Fatalf("Failed to register schema C: %v", err)
-	}
-
-	// Schema A imports both B and C
-	schemaA, result := schema.NewBuilder().
-		WithName("schema_a").
-		WithSourceID(location.MustNewSourceID("test://a.yammm")).
-		WithRegistry(reg).
-		AddImport("schema_b", "b").
-		AddImport("schema_c", "c").
-		AddType("Container").
-		WithPrimaryKey("id", schema.StringConstraint{}).
-		Done().
-		Build()
-
-	if result.HasErrors() {
-		t.Fatalf("Failed to build schema A: %s", result.String())
-	}
+type Container {
+	id String primary
+}
+`,
+	})
+	schemaA := members["schema_a"]
 
 	g := graph.New(schemaA)
 	ctx := t.Context()
 
 	// Add b.Resource
-	resourceB, _ := schemaB.Type("Resource")
-	instB := instance.NewValidInstance(
-		"b.Resource",
-		resourceB.ID(),
-		immutable.WrapKey([]any{"r1"}),
-		immutable.WrapProperties(map[string]any{"id": "r1", "nameB": "Resource from B"}),
-		nil, nil, location.Provenance{},
-	)
+	instB := instancetest.Valid(t, schemaA, "b.Resource", map[string]any{"id": "r1", "nameB": "Resource from B"})
 
 	g.Add(ctx, instB)
 
 	// Add c.Resource
-	resourceC, _ := schemaC.Type("Resource")
-	instC := instance.NewValidInstance(
-		"c.Resource",
-		resourceC.ID(),
-		immutable.WrapKey([]any{"r1"}), // Same PK is OK - different types
-		immutable.WrapProperties(map[string]any{"id": "r1", "nameC": "Resource from C"}),
-		nil, nil, location.Provenance{},
-	)
+	instC := instancetest.Valid(t, schemaA, "c.Resource", map[string]any{"id": "r1", "nameC": "Resource from C"})
 
 	g.Add(ctx, instC)
 

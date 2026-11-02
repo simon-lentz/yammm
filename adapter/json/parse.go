@@ -92,8 +92,7 @@ func (a *Adapter) parseObject(ctx context.Context, source location.SourceID, dat
 	keys := 0
 	for dec.More() {
 		// Checked per top-level key, the unit of work this loop reads, as the
-		// CSV parser checks per record. Fatal because HasFatal is documented to
-		// mean the run did not finish.
+		// CSV parser checks per record.
 		if err := ctx.Err(); err != nil {
 			collector.Collect(diag.NewIssue(diag.Fatal, diag.E_CONTEXT_CANCELLED,
 				fmt.Sprintf("json parse cancelled after %d top-level keys", keys)).Build())

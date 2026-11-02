@@ -16,7 +16,7 @@
 //
 // Primary API — the load, validate, assemble, persist pipeline:
 //
-//   - [github.com/simon-lentz/yammm/schema]: Type system, constraints, annotations, schema loading, and programmatic building
+//   - [github.com/simon-lentz/yammm/schema]: Type system, constraints, annotations, and schema loading
 //   - [github.com/simon-lentz/yammm/schema/expr]: Expression AST types for invariants
 //   - [github.com/simon-lentz/yammm/instance]: Instance validation and constraint checking
 //   - [github.com/simon-lentz/yammm/graph]: Instance graph construction and integrity checking
@@ -40,7 +40,7 @@
 // snapshot fixtures. In-module suites also use packages under internal/, among
 // them internal/instancetest, which builds instance fixtures, and
 // internal/yammmtest, the repo-wide support for golden files, structural diffs
-// and log capture.
+// and a context that counts its cancellation checks.
 //
 // Adapters depend on library packages; library packages never depend on adapters.
 //

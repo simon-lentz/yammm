@@ -43,8 +43,8 @@ var BuiltinTypes = []string{
 // Complete returns completion items for the given position.
 // snapshot may be nil -- graceful degradation provides keywords, snippets,
 // and built-in types without a schema.
-// The line and char parameters are LSP-encoding coordinates.
-func Complete(snapshot *analysis.Snapshot, doc *docstate.Snapshot, line, char int, enc lsputil.PositionEncoding, logger *slog.Logger) []protocol.CompletionItem {
+// The char parameter counts UTF-16 code units.
+func Complete(snapshot *analysis.Snapshot, doc *docstate.Snapshot, line, char int, logger *slog.Logger) []protocol.CompletionItem {
 	if snapshot != nil && snapshot.EntryVersion != doc.Version {
 		logger.Debug(
 			"serving stale snapshot for completion",
@@ -62,7 +62,6 @@ func Complete(snapshot *analysis.Snapshot, doc *docstate.Snapshot, line, char in
 			doc.SourceID,
 			line,
 			char,
-			enc,
 		); ok {
 			byteOffset = offset
 			usedRegistry = true
@@ -76,7 +75,7 @@ func Complete(snapshot *analysis.Snapshot, doc *docstate.Snapshot, line, char in
 		}
 	}
 	if !usedRegistry {
-		byteOffset = ComputeByteOffsetFromText(doc.Text, line, char, enc)
+		byteOffset = ComputeByteOffsetFromText(doc.Text, line, char)
 	}
 
 	ctx, ann := DetectContext(doc, line, byteOffset)
@@ -118,13 +117,13 @@ func Complete(snapshot *analysis.Snapshot, doc *docstate.Snapshot, line, char in
 
 // ComputeByteOffsetFromText computes a byte offset within a line from document text.
 // This is used when no source registry is available (before first analysis).
-// It respects the negotiated position encoding (UTF-16 or UTF-8).
-func ComputeByteOffsetFromText(text string, lspLine, lspChar int, enc lsputil.PositionEncoding) int {
+// lspChar counts UTF-16 code units.
+func ComputeByteOffsetFromText(text string, lspLine, lspChar int) int {
 	lines := strings.Split(text, "\n")
 	if lspLine >= len(lines) {
 		return lspChar // fallback
 	}
-	return lsputil.CharToByteOnLine([]byte(lines[lspLine]), lspChar, enc)
+	return lsputil.UTF16CharToByteOffset([]byte(lines[lspLine]), 0, lspChar)
 }
 
 // TopLevelCompletions returns completions for top-level context.

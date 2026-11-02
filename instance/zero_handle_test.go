@@ -16,9 +16,6 @@ func TestZeroValidRecords_ReportZeroAndHoldNothing(t *testing.T) {
 	if !valid.IsZero() {
 		t.Error("the zero ValidInstance must report zero")
 	}
-	if valid.Validated() {
-		t.Error("the zero ValidInstance must not report validated")
-	}
 	if got := valid.TypeName(); got != "" {
 		t.Errorf("TypeName = %q, want empty", got)
 	}
@@ -41,9 +38,6 @@ func TestZeroValidRecords_ReportZeroAndHoldNothing(t *testing.T) {
 	}
 	if got := slices.Collect(data.Targets()); len(got) != 0 {
 		t.Errorf("Targets = %v, want none", got)
-	}
-	if instance.NewValidEdgeData(nil).IsZero() {
-		t.Error("a constructed ValidEdgeData must not report zero")
 	}
 }
 

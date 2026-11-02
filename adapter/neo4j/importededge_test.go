@@ -1,13 +1,14 @@
-package neo4j_test
+package neo4j
 
 import (
 	"context"
 	"strings"
 	"testing"
 
-	"github.com/simon-lentz/yammm/adapter/neo4j"
-	"github.com/simon-lentz/yammm/graph"
+	"github.com/simon-lentz/yammm/internal/snapparts"
+
 	"github.com/simon-lentz/yammm/immutable"
+	"github.com/simon-lentz/yammm/internal/snappartstest"
 	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
 )
@@ -48,29 +49,26 @@ func TestBatchEdgeQueries_ImportedSourceTypeWritesUnderClosureShape(t *testing.T
 	}
 	id := basin.ID()
 
-	node := func(k string) graph.InstanceParts {
-		return graph.InstanceParts{
+	node := func(k string) snapparts.Instance {
+		return snapparts.Instance{
 			TypeID:     id,
 			PrimaryKey: immutable.WrapKey([]any{k}),
 			Properties: immutable.WrapProperties(map[string]any{"id": k}),
 		}
 	}
-	built, res := graph.RebuildSnapshot(s, graph.SnapshotParts{
+	built := snappartstest.Loaded(t, s, snapparts.Parts{
 		Types: []schema.TypeID{id},
-		Instances: []graph.InstanceParts{
+		Instances: []snapparts.Instance{
 			node("b1"),
 			node("b2"),
 		},
-		Edges: []graph.EdgeParts{{
+		Edges: []snapparts.Edge{{
 			Relation:   "NEAR",
 			SourceType: id, SourceKey: immutable.WrapKey([]any{"b1"}),
 			TargetKey:  immutable.WrapKey([]any{"b2"}),
 			Properties: immutable.WrapProperties(map[string]any{"seen": "2026-08-17T12:00:00Z"}),
 		}},
 	})
-	if res.HasErrors() {
-		t.Fatalf("assembling: %s", res)
-	}
 
 	// The fixture is only meaningful while the rendered name is unresolvable
 	// through the schema's local table — that is what splits the two lookups.
@@ -78,13 +76,13 @@ func TestBatchEdgeQueries_ImportedSourceTypeWritesUnderClosureShape(t *testing.T
 		t.Fatal("fixture is vacuous: the rendered name resolves, so the lookups agree")
 	}
 
-	a := neo4j.New()
+	a := New()
 	shapes, shapeRes := a.ShapeForSchema(ctx, s)
 	if shapeRes.HasErrors() {
 		t.Fatalf("shape: %s", shapeRes)
 	}
 
-	if _, ok := shapes.Types[id]; !ok {
+	if _, ok := shapes.types[id]; !ok {
 		t.Fatal("the closure walk did not produce a shape for the imported source type")
 	}
 
@@ -176,24 +174,24 @@ func TestShapeForSchema_TransitivelyImportedTypeKeepsItsOwnLabel(t *testing.T) {
 		t.Fatal("fixture is vacuous: the entry schema can name the deep Hub")
 	}
 
-	a := neo4j.New()
+	a := New()
 	shapes, shapeRes := a.ShapeForSchema(ctx, s)
 	if shapeRes.HasErrors() {
 		t.Fatalf("shape: %s", shapeRes)
 	}
 
-	localShape, ok := shapes.Types[local.ID()]
+	localShape, ok := shapes.types[local.ID()]
 	if !ok {
 		t.Fatal("the entry schema's Hub has no shape")
 	}
-	deepShape, ok := shapes.Types[deep.ID()]
+	deepShape, ok := shapes.types[deep.ID()]
 	if !ok {
 		t.Fatal("the deep Hub has no shape: the closure walk keyed the two identities as one")
 	}
-	if localShape.Label == deepShape.Label {
-		t.Fatalf("the two identities share label %q", localShape.Label)
+	if localShape.label == deepShape.label {
+		t.Fatalf("the two identities share label %q", localShape.label)
 	}
-	if !strings.Contains(deepShape.Label, "deep") {
-		t.Errorf("the deep Hub's label is %q, not one derived from its declaring schema", deepShape.Label)
+	if !strings.Contains(deepShape.label, "deep") {
+		t.Errorf("the deep Hub's label is %q, not one derived from its declaring schema", deepShape.label)
 	}
 }

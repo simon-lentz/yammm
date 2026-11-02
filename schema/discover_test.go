@@ -324,7 +324,11 @@ func TestModuleRootIssue_Shape(t *testing.T) {
 	for _, d := range issue.Details() {
 		details[d.Key] = d.Value
 	}
-	if got, want := details[diag.DetailKeyModuleRoot], location.MustSourceIDFromPath(filepath.Join("/tmp", "proj")).String(); got != want {
+	root, err := location.SourceIDFromPath(filepath.Join("/tmp", "proj"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := details[diag.DetailKeyModuleRoot], root.String(); got != want {
 		t.Errorf("module_root detail = %q, want the marker's directory %q", got, want)
 	}
 	if got := details[diag.DetailKeyModuleRootOrigin]; got != diag.ModuleRootDiscovered {

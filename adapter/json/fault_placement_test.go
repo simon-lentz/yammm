@@ -56,7 +56,7 @@ func issueWithSpan(result diag.Result, msg string, byteOffset, line, column int)
 // documents put that byte away from the start of the read that failed.
 func TestParseObject_PlacesAFaultAtTheOffendingByte(t *testing.T) {
 	t.Parallel()
-	id := location.MustNewSourceID("test://data/fault.json")
+	id := location.NewSourceID("test://data/fault.json")
 	cases := []struct {
 		name         string
 		doc          string
@@ -164,7 +164,7 @@ func TestParseObject_PlacesAFaultAtTheOffendingByte(t *testing.T) {
 // moves the span alone: the detail keeps the decoder's own words.
 func TestParseObject_AFaultStillNamesWhatTheDecoderSaid(t *testing.T) {
 	t.Parallel()
-	_, result := parseForProvenance(t, location.MustNewSourceID("test://data/detail.json"), `{"A": [{oops}]}`)
+	_, result := parseForProvenance(t, location.NewSourceID("test://data/detail.json"), `{"A": [{oops}]}`)
 	if got := detailAt(result, "error reading array element"); !strings.Contains(got, "invalid character 'o'") {
 		t.Errorf("detail %q, want the decoder's message", got)
 	}
@@ -174,7 +174,7 @@ func TestParseObject_AFaultStillNamesWhatTheDecoderSaid(t *testing.T) {
 // draws one diagnostic for it, whichever read site met it.
 func TestParseObject_AFaultIsReportedOnce(t *testing.T) {
 	t.Parallel()
-	id := location.MustNewSourceID("test://data/once.json")
+	id := location.NewSourceID("test://data/once.json")
 	for _, doc := range []string{
 		`{"A": [{oops}]}`,
 		`{"A": [{"x": 1}] "B": []}`,
@@ -199,7 +199,7 @@ func TestParseObject_AFaultIsReportedOnce(t *testing.T) {
 // JSON draws no decoder fault, and that faultOffset reads it whole.
 func TestParseObject_ReadsWhatJsoncAccepts(t *testing.T) {
 	t.Parallel()
-	id := location.MustNewSourceID("test://data/jsonc.json")
+	id := location.NewSourceID("test://data/jsonc.json")
 	for _, doc := range []string{
 		`{"A": [,]}`,
 		`{,}`,
@@ -240,7 +240,7 @@ func TestFaultOffset_ReadsATokenTheInputCutsShort(t *testing.T) {
 // comma or a colon skips a tab and a carriage return as it skips a space.
 func TestParseObject_ReadStartSkipsEveryBlank(t *testing.T) {
 	t.Parallel()
-	id := location.MustNewSourceID("test://data/blank.json")
+	id := location.NewSourceID("test://data/blank.json")
 	cases := []struct {
 		name, doc, msg string
 		byteOffset     int
@@ -273,7 +273,7 @@ func TestParseObject_ReadStartSkipsEveryBlank(t *testing.T) {
 // document whose one element holds a long string and then a fault, beside the
 // same document with the fault removed.
 func BenchmarkParseObject_FaultPlacement(b *testing.B) {
-	id := location.MustNewSourceID("test://data/bench.json")
+	id := location.NewSourceID("test://data/bench.json")
 	for _, size := range []int{1 << 10, 1 << 16, 1 << 20} {
 		long := strings.Repeat("x", size)
 		for _, c := range []struct{ name, doc string }{

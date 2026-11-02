@@ -15,9 +15,8 @@ import (
 // Instance provides read access to instance data. It is safe for
 // concurrent read access from multiple goroutines.
 //
-// Instances are created internally, by [Graph.Add], [Graph.AddOrMerge],
-// [Graph.AddComposed], [RebuildSnapshot] and the snapshot copies
-// [Graph.Snapshot] and the import take.
+// Instances are created internally, by [Graph.Add], the snapshot package's reader
+// and the snapshot copies [Graph.Snapshot] and the import take.
 // A root is accessed via [Snapshot.AllInstances], [Snapshot.InstancesOf], or
 // [Snapshot.InstanceByKey]; a composed child via [Instance.Composed]; and the
 // instances an edge, a duplicate or an unresolved record names via that
@@ -163,12 +162,6 @@ func (i Instance) ComposedCount(relationName string) int {
 	return len(i.composed[relationName])
 }
 
-// HasComposed reports whether the instance has any composed children
-// for the given relation.
-func (i Instance) HasComposed(relationName string) bool {
-	return i.ComposedCount(relationName) > 0
-}
-
 // ComposedRelations returns the names of all relations that have composed children.
 // The returned slice is sorted lexicographically for deterministic iteration.
 func (i Instance) ComposedRelations() []string {
@@ -183,9 +176,8 @@ func (i Instance) ComposedRelations() []string {
 	return result
 }
 
-// newInstance creates an Instance from graph-internal data. [Graph.Add],
-// [Graph.AddComposed] and [RebuildSnapshot] build through it; a snapshot copy
-// is taken by cloneInstance.
+// newInstance creates an Instance from graph-internal data. [Graph.Add] and
+// [rebuildSnapshot] build through it; a snapshot copy is taken by cloneInstance.
 func newInstance(
 	typeName string,
 	typeID schema.TypeID,

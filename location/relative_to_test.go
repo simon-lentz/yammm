@@ -47,7 +47,7 @@ func TestSourceID_RelativeTo(t *testing.T) {
 		{"the filesystem root itself", SourceID{cp: fsRoot}, fsRoot, "", false},
 		{"a sibling directory that shares the root's prefix", file("pq", "a.yammm"), mustRoot(filepath.Join(base, "p")), "", false},
 		{"a source above the root", file("a.yammm"), mustRoot(filepath.Join(base, "sub")), "", false},
-		{"a synthetic source", MustNewSourceID("test://a.yammm"), root, "", false},
+		{"a synthetic source", NewSourceID("test://a.yammm"), root, "", false},
 		{"a zero root", file("a.yammm"), CanonicalPath{}, "", false},
 		{"a zero source", SourceID{}, root, "", false},
 	}

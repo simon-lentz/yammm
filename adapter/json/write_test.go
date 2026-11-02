@@ -9,16 +9,17 @@ import (
 	"testing"
 	"time"
 
+	"github.com/simon-lentz/yammm/internal/snapparts"
+
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/simon-lentz/yammm/graph"
-	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/instance"
 	"github.com/simon-lentz/yammm/internal/instancetest"
+	"github.com/simon-lentz/yammm/internal/snappartstest"
 	"github.com/simon-lentz/yammm/internal/yammmtest"
-	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -35,106 +36,103 @@ func mustBuild(t *testing.T, s schema.Schema, result interface{ HasErrors() bool
 
 func testSchemaSimple(t *testing.T) schema.Schema {
 	t.Helper()
-	s, result := schema.NewBuilder().
-		WithName("simple").
-		WithSourceID(location.MustNewSourceID("test://simple.yammm")).
-		AddType("Person").
-		WithPrimaryKey("id", schema.StringConstraint{}).
-		WithProperty("name", schema.StringConstraint{}).
-		WithProperty("age", schema.IntegerConstraint{}).
-		Done().
-		Build()
+	s, result := schema.LoadString(t.Context(), `schema "simple"
+
+type Person {
+	id String primary
+	name String required
+	age Integer required
+}
+`, "simple.yammm")
 	return mustBuild(t, s, result)
 }
 
 func testSchemaMultiType(t *testing.T) schema.Schema {
 	t.Helper()
-	s, result := schema.NewBuilder().
-		WithName("multi").
-		WithSourceID(location.MustNewSourceID("test://multi.yammm")).
-		AddType("Person").
-		WithPrimaryKey("id", schema.StringConstraint{}).
-		WithProperty("name", schema.StringConstraint{}).
-		Done().
-		AddType("Company").
-		WithPrimaryKey("id", schema.StringConstraint{}).
-		WithProperty("name", schema.StringConstraint{}).
-		Done().
-		Build()
+	s, result := schema.LoadString(t.Context(), `schema "multi"
+
+type Person {
+	id String primary
+	name String required
+}
+
+type Company {
+	id String primary
+	name String required
+}
+`, "multi.yammm")
 	return mustBuild(t, s, result)
 }
 
 func testSchemaWithAssociation(t *testing.T) schema.Schema {
 	t.Helper()
-	s, result := schema.NewBuilder().
-		WithName("association").
-		WithSourceID(location.MustNewSourceID("test://association.yammm")).
-		AddType("Company").
-		WithPrimaryKey("id", schema.StringConstraint{}).
-		WithProperty("name", schema.StringConstraint{}).
-		Done().
-		AddType("Person").
-		WithPrimaryKey("id", schema.StringConstraint{}).
-		WithProperty("name", schema.StringConstraint{}).
-		WithRelation("EMPLOYER", schema.LocalTypeRef("Company", location.Span{}), true, false). // optional one
-		Done().
-		Build()
+	s, result := schema.LoadString(t.Context(), `schema "association"
+
+type Company {
+	id String primary
+	name String required
+}
+
+type Person {
+	id String primary
+	name String required
+	--> EMPLOYER (_:one) Company
+}
+`, "association.yammm")
 	return mustBuild(t, s, result)
 }
 
 func testSchemaWithManyAssociation(t *testing.T) schema.Schema {
 	t.Helper()
-	s, result := schema.NewBuilder().
-		WithName("many_association").
-		WithSourceID(location.MustNewSourceID("test://many_association.yammm")).
-		AddType("Company").
-		WithPrimaryKey("id", schema.StringConstraint{}).
-		WithProperty("name", schema.StringConstraint{}).
-		Done().
-		AddType("Person").
-		WithPrimaryKey("id", schema.StringConstraint{}).
-		WithProperty("name", schema.StringConstraint{}).
-		WithRelation("EMPLOYERS", schema.LocalTypeRef("Company", location.Span{}), true, true). // optional many
-		Done().
-		Build()
+	s, result := schema.LoadString(t.Context(), `schema "many_association"
+
+type Company {
+	id String primary
+	name String required
+}
+
+type Person {
+	id String primary
+	name String required
+	--> EMPLOYERS (many) Company
+}
+`, "many_association.yammm")
 	return mustBuild(t, s, result)
 }
 
 func testSchemaWithComposition(t *testing.T) schema.Schema {
 	t.Helper()
-	s, result := schema.NewBuilder().
-		WithName("composition").
-		WithSourceID(location.MustNewSourceID("test://composition.yammm")).
-		AddType("Item").
-		AsPart().
-		WithPrimaryKey("sku", schema.StringConstraint{}).
-		WithProperty("qty", schema.IntegerConstraint{}).
-		Done().
-		AddType("Order").
-		WithPrimaryKey("id", schema.StringConstraint{}).
-		WithProperty("customer", schema.StringConstraint{}).
-		WithComposition("ITEMS", schema.LocalTypeRef("Item", location.Span{}), true, true). // optional many
-		Done().
-		Build()
+	s, result := schema.LoadString(t.Context(), `schema "composition"
+
+part type Item {
+	sku String primary
+	qty Integer required
+}
+
+type Order {
+	id String primary
+	customer String required
+	*-> ITEMS (many) Item
+}
+`, "composition.yammm")
 	return mustBuild(t, s, result)
 }
 
 func testSchemaWithOneComposition(t *testing.T) schema.Schema {
 	t.Helper()
-	s, result := schema.NewBuilder().
-		WithName("one_composition").
-		WithSourceID(location.MustNewSourceID("test://one_composition.yammm")).
-		AddType("Engine").
-		AsPart().
-		WithPrimaryKey("serial", schema.StringConstraint{}).
-		WithProperty("displacement", schema.IntegerConstraint{}).
-		Done().
-		AddType("Car").
-		WithPrimaryKey("vin", schema.StringConstraint{}).
-		WithProperty("model", schema.StringConstraint{}).
-		WithComposition("ENGINE", schema.LocalTypeRef("Engine", location.Span{}), true, false). // optional one
-		Done().
-		Build()
+	s, result := schema.LoadString(t.Context(), `schema "one_composition"
+
+part type Engine {
+	serial String primary
+	displacement Integer required
+}
+
+type Car {
+	vin String primary
+	model String required
+	*-> ENGINE (_:one) Engine
+}
+`, "one_composition.yammm")
 	return mustBuild(t, s, result)
 }
 
@@ -142,19 +140,19 @@ func testSchemaWithOneComposition(t *testing.T) schema.Schema {
 // to a multi-word field name, to pin that the writer keys on the field name.
 func testSchemaWithCamelCaseRelation(t *testing.T) schema.Schema {
 	t.Helper()
-	s, result := schema.NewBuilder().
-		WithName("camelcase").
-		WithSourceID(location.MustNewSourceID("test://camelcase.yammm")).
-		AddType("Proxy").
-		WithPrimaryKey("id", schema.StringConstraint{}).
-		WithProperty("url", schema.StringConstraint{}).
-		Done().
-		AddType("Service").
-		WithPrimaryKey("id", schema.StringConstraint{}).
-		WithProperty("name", schema.StringConstraint{}).
-		WithRelation("HTTP_PROXY", schema.LocalTypeRef("Proxy", location.Span{}), true, false).
-		Done().
-		Build()
+	s, result := schema.LoadString(t.Context(), `schema "camelcase"
+
+type Proxy {
+	id String primary
+	url String required
+}
+
+type Service {
+	id String primary
+	name String required
+	--> HTTP_PROXY (_:one) Proxy
+}
+`, "camelcase.yammm")
 	return mustBuild(t, s, result)
 }
 
@@ -190,18 +188,17 @@ type Reading {
 // writer's rendering of each stored form has a fixture.
 func testSchemaTemporal(t *testing.T) schema.Schema {
 	t.Helper()
-	s, result := schema.NewBuilder().
-		WithName("temporal").
-		WithSourceID(location.MustNewSourceID("test://temporal.yammm")).
-		AddType("Event").
-		WithPrimaryKey("id", schema.NewStringConstraint()).
-		WithProperty("occurred_at", schema.NewTimestampConstraint()).
-		WithProperty("logged_at", schema.NewTimestampConstraintFormatted("2006-01-02 15:04:05")).
-		WithProperty("run_id", schema.NewUUIDConstraint()).
-		WithProperty("installed", schema.NewDateConstraint()).
-		WithProperty("service_days", schema.NewListConstraint(schema.NewDateConstraint())).
-		Done().
-		Build()
+	s, result := schema.LoadString(t.Context(), `schema "temporal"
+
+type Event {
+	id String primary
+	occurred_at Timestamp required
+	logged_at Timestamp["2006-01-02 15:04:05"] required
+	run_id UUID
+	installed Date required
+	service_days List<Date>
+}
+`, "temporal.yammm")
 	return mustBuild(t, s, result)
 }
 
@@ -217,42 +214,6 @@ func mustTypeID(t *testing.T, s schema.Schema, typeName string) schema.TypeID {
 	return typ.ID()
 }
 
-func mustValidInstance(t *testing.T, s schema.Schema, typeName string, pk []any, props map[string]any) instance.ValidInstance {
-	t.Helper()
-	return instancetest.VI(
-		typeName,
-		instancetest.TypeID(mustTypeID(t, s, typeName)),
-		instancetest.PK(pk...),
-		instancetest.Props(props),
-	)
-}
-
-func mustValidInstanceWithEdge(
-	t *testing.T,
-	s schema.Schema,
-	typeName string,
-	pk []any,
-	props map[string]any,
-	relationName string,
-	targetKeys [][]any,
-) instance.ValidInstance {
-	t.Helper()
-	targets := make([]instance.ValidEdgeTarget, len(targetKeys))
-	for i, targetKey := range targetKeys {
-		targets[i] = instance.NewValidEdgeTarget(
-			immutable.WrapKey(targetKey),
-			immutable.WrapProperties(nil),
-		)
-	}
-	return instancetest.VI(
-		typeName,
-		instancetest.TypeID(mustTypeID(t, s, typeName)),
-		instancetest.PK(pk...),
-		instancetest.Props(props),
-		instancetest.Edges(map[string]instance.ValidEdgeData{relationName: instance.NewValidEdgeData(targets)}),
-	)
-}
-
 // mustAdd adds instances to the graph, failing fast on any add issue so a
 // broken fixture cannot silently produce an empty graph.
 func mustAdd(t *testing.T, g *graph.Graph, instances ...instance.ValidInstance) {
@@ -261,14 +222,6 @@ func mustAdd(t *testing.T, g *graph.Graph, instances ...instance.ValidInstance) 
 		if err := g.Add(context.Background(), inst).Err(); err != nil {
 			t.Fatalf("graph.Add(%s): %v", inst.TypeName(), err)
 		}
-	}
-}
-
-// mustAddComposed attaches a composed part instance, failing fast on issues.
-func mustAddComposed(t *testing.T, g *graph.Graph, parentType schema.TypeID, parentKey, relation string, part instance.ValidInstance) {
-	t.Helper()
-	if err := g.AddComposed(context.Background(), parentType, parentKey, relation, part).Err(); err != nil {
-		t.Fatalf("graph.AddComposed(%s.%s): %v", parentType, relation, err)
 	}
 }
 
@@ -300,6 +253,7 @@ func TestMarshalObject_Golden(t *testing.T) {
 		name   string
 		schema func(*testing.T) schema.Schema
 		build  func(*testing.T, schema.Schema, *graph.Graph)
+		snap   func(*testing.T, schema.Schema) graph.Snapshot
 		opts   []WriteOption
 	}{
 		{
@@ -312,7 +266,7 @@ func TestMarshalObject_Golden(t *testing.T) {
 			schema: testSchemaSimple,
 			build: func(t *testing.T, s schema.Schema, g *graph.Graph) {
 				t.Helper()
-				mustAdd(t, g, mustValidInstance(t, s, "Person", []any{"p1"}, map[string]any{
+				mustAdd(t, g, instancetest.Valid(t, s, "Person", map[string]any{
 					"id": "p1", "name": "Alice", "age": int64(30),
 				}))
 			},
@@ -324,8 +278,8 @@ func TestMarshalObject_Golden(t *testing.T) {
 				t.Helper()
 				mustAdd(
 					t, g,
-					mustValidInstance(t, s, "Person", []any{"p1"}, map[string]any{"id": "p1", "name": "Alice", "age": int64(30)}),
-					mustValidInstance(t, s, "Person", []any{"p2"}, map[string]any{"id": "p2", "name": "Bob", "age": int64(25)}),
+					instancetest.Valid(t, s, "Person", map[string]any{"id": "p1", "name": "Alice", "age": int64(30)}),
+					instancetest.Valid(t, s, "Person", map[string]any{"id": "p2", "name": "Bob", "age": int64(25)}),
 				)
 			},
 		},
@@ -336,8 +290,8 @@ func TestMarshalObject_Golden(t *testing.T) {
 				t.Helper()
 				mustAdd(
 					t, g,
-					mustValidInstance(t, s, "Person", []any{"p1"}, map[string]any{"id": "p1", "name": "Alice"}),
-					mustValidInstance(t, s, "Company", []any{"c1"}, map[string]any{"id": "c1", "name": "Acme Inc"}),
+					instancetest.Valid(t, s, "Person", map[string]any{"id": "p1", "name": "Alice"}),
+					instancetest.Valid(t, s, "Company", map[string]any{"id": "c1", "name": "Acme Inc"}),
 				)
 			},
 		},
@@ -348,9 +302,10 @@ func TestMarshalObject_Golden(t *testing.T) {
 				t.Helper()
 				mustAdd(
 					t, g,
-					mustValidInstance(t, s, "Company", []any{"c1"}, map[string]any{"id": "c1", "name": "Acme Inc"}),
-					mustValidInstanceWithEdge(t, s, "Person", []any{"p1"},
-						map[string]any{"id": "p1", "name": "Alice"}, "EMPLOYER", [][]any{{"c1"}}),
+					instancetest.Valid(t, s, "Company", map[string]any{"id": "c1", "name": "Acme Inc"}),
+					instancetest.Valid(t, s, "Person", map[string]any{
+						"id": "p1", "name": "Alice", "employer": map[string]any{"_target_id": "c1"},
+					}),
 				)
 			},
 		},
@@ -361,10 +316,12 @@ func TestMarshalObject_Golden(t *testing.T) {
 				t.Helper()
 				mustAdd(
 					t, g,
-					mustValidInstance(t, s, "Company", []any{"c1"}, map[string]any{"id": "c1", "name": "Acme Inc"}),
-					mustValidInstance(t, s, "Company", []any{"c2"}, map[string]any{"id": "c2", "name": "Beta Corp"}),
-					mustValidInstanceWithEdge(t, s, "Person", []any{"p1"},
-						map[string]any{"id": "p1", "name": "Alice"}, "EMPLOYERS", [][]any{{"c1"}, {"c2"}}),
+					instancetest.Valid(t, s, "Company", map[string]any{"id": "c1", "name": "Acme Inc"}),
+					instancetest.Valid(t, s, "Company", map[string]any{"id": "c2", "name": "Beta Corp"}),
+					instancetest.Valid(t, s, "Person", map[string]any{
+						"id": "p1", "name": "Alice",
+						"employers": []any{map[string]any{"_target_id": "c1"}, map[string]any{"_target_id": "c2"}},
+					}),
 				)
 			},
 		},
@@ -377,9 +334,10 @@ func TestMarshalObject_Golden(t *testing.T) {
 				// array (schema cardinality, not runtime count).
 				mustAdd(
 					t, g,
-					mustValidInstance(t, s, "Company", []any{"c1"}, map[string]any{"id": "c1", "name": "Acme Inc"}),
-					mustValidInstanceWithEdge(t, s, "Person", []any{"p1"},
-						map[string]any{"id": "p1", "name": "Alice"}, "EMPLOYERS", [][]any{{"c1"}}),
+					instancetest.Valid(t, s, "Company", map[string]any{"id": "c1", "name": "Acme Inc"}),
+					instancetest.Valid(t, s, "Person", map[string]any{
+						"id": "p1", "name": "Alice", "employers": []any{map[string]any{"_target_id": "c1"}},
+					}),
 				)
 			},
 		},
@@ -388,13 +346,13 @@ func TestMarshalObject_Golden(t *testing.T) {
 			schema: testSchemaWithComposition,
 			build: func(t *testing.T, s schema.Schema, g *graph.Graph) {
 				t.Helper()
-				mustAdd(t, g, mustValidInstance(t, s, "Order", []any{"o1"}, map[string]any{
+				mustAdd(t, g, instancetest.Valid(t, s, "Order", map[string]any{
 					"id": "o1", "customer": "Alice",
+					"items": []any{
+						map[string]any{"sku": "SKU-A", "qty": int64(2)},
+						map[string]any{"sku": "SKU-B", "qty": int64(1)},
+					},
 				}))
-				mustAddComposed(t, g, mustTypeID(t, s, "Order"), `["o1"]`, "ITEMS",
-					mustValidInstance(t, s, "Item", []any{"SKU-A"}, map[string]any{"sku": "SKU-A", "qty": int64(2)}))
-				mustAddComposed(t, g, mustTypeID(t, s, "Order"), `["o1"]`, "ITEMS",
-					mustValidInstance(t, s, "Item", []any{"SKU-B"}, map[string]any{"sku": "SKU-B", "qty": int64(1)}))
 			},
 		},
 		{
@@ -402,11 +360,10 @@ func TestMarshalObject_Golden(t *testing.T) {
 			schema: testSchemaWithComposition,
 			build: func(t *testing.T, s schema.Schema, g *graph.Graph) {
 				t.Helper()
-				mustAdd(t, g, mustValidInstance(t, s, "Order", []any{"o1"}, map[string]any{
+				mustAdd(t, g, instancetest.Valid(t, s, "Order", map[string]any{
 					"id": "o1", "customer": "Alice",
+					"items": []any{map[string]any{"sku": "SKU-A", "qty": int64(2)}},
 				}))
-				mustAddComposed(t, g, mustTypeID(t, s, "Order"), `["o1"]`, "ITEMS",
-					mustValidInstance(t, s, "Item", []any{"SKU-A"}, map[string]any{"sku": "SKU-A", "qty": int64(2)}))
 			},
 		},
 		{
@@ -414,11 +371,10 @@ func TestMarshalObject_Golden(t *testing.T) {
 			schema: testSchemaWithOneComposition,
 			build: func(t *testing.T, s schema.Schema, g *graph.Graph) {
 				t.Helper()
-				mustAdd(t, g, mustValidInstance(t, s, "Car", []any{"VIN123"}, map[string]any{
+				mustAdd(t, g, instancetest.Valid(t, s, "Car", map[string]any{
 					"vin": "VIN123", "model": "Sedan",
+					"engine": []any{map[string]any{"serial": "ENG001", "displacement": int64(2000)}},
 				}))
-				mustAddComposed(t, g, mustTypeID(t, s, "Car"), `["VIN123"]`, "ENGINE",
-					mustValidInstance(t, s, "Engine", []any{"ENG001"}, map[string]any{"serial": "ENG001", "displacement": int64(2000)}))
 			},
 		},
 		{
@@ -429,9 +385,10 @@ func TestMarshalObject_Golden(t *testing.T) {
 				// HTTP_PROXY must serialize under its field name, http_proxy.
 				mustAdd(
 					t, g,
-					mustValidInstance(t, s, "Proxy", []any{"px1"}, map[string]any{"id": "px1", "url": "http://proxy.example.com"}),
-					mustValidInstanceWithEdge(t, s, "Service", []any{"svc1"},
-						map[string]any{"id": "svc1", "name": "API Gateway"}, "HTTP_PROXY", [][]any{{"px1"}}),
+					instancetest.Valid(t, s, "Proxy", map[string]any{"id": "px1", "url": "http://proxy.example.com"}),
+					instancetest.Valid(t, s, "Service", map[string]any{
+						"id": "svc1", "name": "API Gateway", "http_proxy": map[string]any{"_target_id": "px1"},
+					}),
 				)
 			},
 		},
@@ -440,13 +397,12 @@ func TestMarshalObject_Golden(t *testing.T) {
 			schema: testSchemaTemporal,
 			build: func(t *testing.T, s schema.Schema, g *graph.Graph) {
 				t.Helper()
-				// Bypass-built from native Go values, which Graph.Add rewrites to
-				// their stored form before the writer sees them: the golden pins
-				// the text a native value exports as, end to end.
+				// Native Go values, which reach the writer in their stored form:
+				// the golden pins the text a native value exports as, end to end.
 				plusTwo := time.FixedZone("", 2*60*60)
 				mustAdd(
 					t, g,
-					mustValidInstance(t, s, "Event", []any{"e1"}, map[string]any{
+					instancetest.Valid(t, s, "Event", map[string]any{
 						"id":          "e1",
 						"occurred_at": time.Date(2026, 8, 19, 12, 0, 0, 500_000_000, time.UTC),
 						"logged_at":   time.Date(2026, 8, 19, 12, 0, 0, 0, time.UTC),
@@ -459,7 +415,7 @@ func TestMarshalObject_Golden(t *testing.T) {
 					}),
 					// A Timestamp keeps its offset; a Date is the calendar day in the
 					// value's own location, so 00:30 +02:00 is the 19th, not the 18th.
-					mustValidInstance(t, s, "Event", []any{"e2"}, map[string]any{
+					instancetest.Valid(t, s, "Event", map[string]any{
 						"id":          "e2",
 						"occurred_at": time.Date(2026, 8, 19, 14, 0, 0, 0, plusTwo),
 						"logged_at":   time.Date(2026, 8, 19, 12, 0, 0, 0, plusTwo),
@@ -473,26 +429,24 @@ func TestMarshalObject_Golden(t *testing.T) {
 			// edge property's is pinned by its own test — and every spelling that
 			// decides what the indicator has to do: a whole value, a fraction, a negative
 			// zero, and exponents encoding/json writes in both notations. A float held
-			// under an Integer keeps its indicator. Bypass-built, because a float32, a
-			// Vector element at its own width and a float under an Integer reach the
-			// writer no other way, and Graph.Add leaves a number as it arrived.
+			// under an Integer keeps its indicator. A float under an Integer is no
+			// validated value, so a document holds these.
 			name:   "float_kinds",
 			schema: testSchemaFloats,
-			build: func(t *testing.T, s schema.Schema, g *graph.Graph) {
+			snap: func(t *testing.T, s schema.Schema) graph.Snapshot {
 				t.Helper()
-				mustAdd(
-					t, g,
-					mustValidInstance(t, s, "Reading", []any{"r1"}, map[string]any{
+				return snappartstest.Loaded(t, s, snapparts.Parts{Instances: []snapparts.Instance{
+					heldRoot(t, s, "Reading", "r1", map[string]any{
 						"id":     "r1",
 						"ratio":  float64(1),
 						"scaled": float64(2), // whole, so the alias must resolve for the indicator to appear
 						"ratios": []any{float64(3), float64(-0.25), math.Copysign(0, -1), float64(1e-7)},
 						"at":     []any{float64(1e21), float64(5)},
-						"narrow": float32(0.1),
+						"narrow": 0.10000000149011612,
 						"count":  int64(4),
 						"held":   float64(6),
 					}),
-				)
+				}})
 			},
 		},
 	}
@@ -500,11 +454,17 @@ func TestMarshalObject_Golden(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			s := tc.schema(t)
-			g := graph.New(s)
-			tc.build(t, s, g)
+			var snap graph.Snapshot
+			if tc.snap != nil {
+				snap = tc.snap(t, s)
+			} else {
+				g := graph.New(s)
+				tc.build(t, s, g)
+				snap = g.Snapshot()
+			}
 
 			adapter := newAdapter(t)
-			data, err := adapter.MarshalObject(context.Background(), g.Snapshot(), append(tc.opts, WithIndent("  "))...)
+			data, err := adapter.MarshalObject(context.Background(), snap, append(tc.opts, WithIndent("  "))...)
 			if err != nil {
 				t.Fatalf("MarshalObject: %v", err)
 			}
@@ -516,7 +476,7 @@ func TestMarshalObject_Golden(t *testing.T) {
 func TestMarshalObject_WithIndent(t *testing.T) {
 	s := testSchemaSimple(t)
 	g := graph.New(s)
-	mustAdd(t, g, mustValidInstance(t, s, "Person", []any{"p1"}, map[string]any{
+	mustAdd(t, g, instancetest.Valid(t, s, "Person", map[string]any{
 		"id": "p1", "name": "Alice", "age": int64(30),
 	}))
 	result := g.Snapshot()
@@ -549,10 +509,10 @@ func TestMarshalObject_Deterministic(t *testing.T) {
 	for i := range 10 {
 		mustAdd(
 			t, g,
-			mustValidInstance(t, s, "Person", []any{string(rune('a' + i))}, map[string]any{
+			instancetest.Valid(t, s, "Person", map[string]any{
 				"id": string(rune('a' + i)), "name": "Person" + string(rune('A'+i)),
 			}),
-			mustValidInstance(t, s, "Company", []any{string(rune('z' - i))}, map[string]any{
+			instancetest.Valid(t, s, "Company", map[string]any{
 				"id": string(rune('z' - i)), "name": "Company" + string(rune('Z'-i)),
 			}),
 		)
@@ -585,10 +545,10 @@ func TestMarshalObject_Deterministic_MultipleSnapshots(t *testing.T) {
 			idx := (i + run) % 5
 			mustAdd(
 				t, g,
-				mustValidInstance(t, s, "Person", []any{string(rune('a' + idx))}, map[string]any{
+				instancetest.Valid(t, s, "Person", map[string]any{
 					"id": string(rune('a' + idx)), "name": "Person" + string(rune('A'+idx)),
 				}),
-				mustValidInstance(t, s, "Company", []any{string(rune('z' - idx))}, map[string]any{
+				instancetest.Valid(t, s, "Company", map[string]any{
 					"id": string(rune('z' - idx)), "name": "Company" + string(rune('Z'-idx)),
 				}),
 			)
@@ -608,7 +568,7 @@ func TestMarshalObject_Deterministic_MultipleSnapshots(t *testing.T) {
 func TestWriteObject_WritesToBuffer(t *testing.T) {
 	s := testSchemaSimple(t)
 	g := graph.New(s)
-	mustAdd(t, g, mustValidInstance(t, s, "Person", []any{"p1"}, map[string]any{
+	mustAdd(t, g, instancetest.Valid(t, s, "Person", map[string]any{
 		"id": "p1", "name": "Alice", "age": int64(30),
 	}))
 
@@ -629,7 +589,7 @@ func TestWriteObject_WritesToBuffer(t *testing.T) {
 func TestWriteObject_ShortWrite(t *testing.T) {
 	s := testSchemaSimple(t)
 	g := graph.New(s)
-	mustAdd(t, g, mustValidInstance(t, s, "Person", []any{"p1"}, map[string]any{
+	mustAdd(t, g, instancetest.Valid(t, s, "Person", map[string]any{
 		"id": "p1", "name": "Alice", "age": int64(30),
 	}))
 
@@ -664,14 +624,13 @@ func (w *limitedWriter) Write(p []byte) (int, error) {
 // testSchemaWithTimestamp is the smallest schema carrying a Timestamp property.
 func testSchemaWithTimestamp(t *testing.T) schema.Schema {
 	t.Helper()
-	s, result := schema.NewBuilder().
-		WithName("stamped").
-		WithSourceID(location.MustNewSourceID("test://stamped.yammm")).
-		AddType("Event").
-		WithPrimaryKey("id", schema.StringConstraint{}).
-		WithProperty("observed_at", schema.TimestampConstraint{}).
-		Done().
-		Build()
+	s, result := schema.LoadString(t.Context(), `schema "stamped"
+
+type Event {
+	id String primary
+	observed_at Timestamp required
+}
+`, "stamped.yammm")
 	return mustBuild(t, s, result)
 }
 
@@ -686,10 +645,8 @@ func TestMarshalObject_TimestampRendersPerRepresentation(t *testing.T) {
 	g := graph.New(s)
 	mustAdd(
 		t, g,
-		mustValidInstance(t, s, "Event", []any{"a"},
-			map[string]any{"id": "a", "observed_at": when}),
-		mustValidInstance(t, s, "Event", []any{"b"},
-			map[string]any{"id": "b", "observed_at": when.Format(time.RFC3339)}),
+		instancetest.Valid(t, s, "Event", map[string]any{"id": "a", "observed_at": when}),
+		instancetest.Valid(t, s, "Event", map[string]any{"id": "b", "observed_at": when.Format(time.RFC3339)}),
 	)
 
 	data, err := newAdapter(t).MarshalObject(context.Background(), g.Snapshot())

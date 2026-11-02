@@ -5,9 +5,7 @@ import (
 	"testing"
 
 	"github.com/simon-lentz/yammm/graph"
-	"github.com/simon-lentz/yammm/immutable"
-	"github.com/simon-lentz/yammm/instance"
-	"github.com/simon-lentz/yammm/location"
+	"github.com/simon-lentz/yammm/internal/instancetest"
 	"github.com/simon-lentz/yammm/schema"
 	"github.com/simon-lentz/yammm/snapshot"
 )
@@ -69,24 +67,17 @@ func FuzzUpdateMetadata(f *testing.F) {
 // helper shape as the T-suite applies.
 func buildFuzzSeed(tb testing.TB, opts ...snapshot.Option) []byte {
 	tb.Helper()
-	s, sres := schema.NewBuilder().
-		WithName("test").
-		WithSourceID(location.MustNewSourceID("test://test.yammm")).
-		AddType("Person").
-		WithPrimaryKey("id", schema.NewStringConstraint()).
-		WithProperty("name", schema.NewStringConstraint()).
-		Done().
-		Build()
+	s, sres := schema.LoadString(tb.Context(), `schema "test"
+
+type Person {
+	id String primary
+	name String required
+}
+`, "test.yammm")
 	if sres.HasErrors() {
 		tb.Fatalf("fuzz seed schema: %v", sres.Err())
 	}
-	typ, _ := s.Type("Person")
-	inst := instance.NewValidInstance(
-		"Person", typ.ID(),
-		immutable.WrapKey([]any{"p1"}),
-		immutable.WrapProperties(map[string]any{"id": "p1", "name": "Alice"}),
-		nil, nil, location.Provenance{},
-	)
+	inst := instancetest.Valid(tb, s, "Person", map[string]any{"id": "p1", "name": "Alice"})
 	g := graph.New(s)
 	if res := g.Add(context.Background(), inst); res.HasErrors() {
 		tb.Fatalf("fuzz seed add: %v", res.Err())

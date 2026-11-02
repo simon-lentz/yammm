@@ -8,7 +8,6 @@ import (
 
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/internal/instancetest"
-	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
 	"github.com/simon-lentz/yammm/snapshot"
 	"github.com/simon-lentz/yammm/snapshot/snapshottest"
@@ -107,19 +106,9 @@ func TestRoundTrip_CrossSchemaInstance(t *testing.T) {
 	ctx := context.Background()
 	s := loadCrossSchema(t)
 
-	basin, ok := s.ResolveType(schema.NewTypeRef("base", "Basin", location.Span{}))
-	if !ok {
-		t.Fatal("base.Basin did not resolve through the entry schema")
-	}
-
 	anchor := mustValidInstance(t, s, "Anchor", []any{"a1"},
 		map[string]any{"id": "a1", "depth": float64(3)})
-	imported := instancetest.VI(
-		"Basin",
-		instancetest.TypeID(basin.ID()),
-		instancetest.PK("b1"),
-		instancetest.Props(map[string]any{"id": "b1", "area": float64(7)}),
-	)
+	imported := instancetest.Valid(t, s, "base.Basin", map[string]any{"id": "b1", "area": float64(7)})
 	snap := snapshottest.BuildSnapshot(t, s, anchor, imported)
 
 	data, result := snapshot.Marshal(ctx, snap)

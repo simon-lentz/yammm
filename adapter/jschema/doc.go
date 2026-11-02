@@ -13,9 +13,8 @@
 // instance nor graph. It maps a completed schema to one JSON document,
 // nothing more, and returns a plain error rather than the
 // [github.com/simon-lentz/yammm/diag.Result] the library's loading, validation
-// and graph code threads through, because its failures are a schema that breaks its preconditions or
-// a generator bug (see Error Conditions), not data diagnostics with source
-// locations.
+// and graph code threads through, because its failures are library defects
+// (see Error Conditions), not data diagnostics with source locations.
 //
 // # The Target Contract
 //
@@ -238,11 +237,8 @@
 // The schema must be completed (aliases resolved, inheritance linearized) —
 // always true for a schema returned by
 // [github.com/simon-lentz/yammm/schema.Load],
-// [github.com/simon-lentz/yammm/schema.LoadString],
-// [github.com/simon-lentz/yammm/schema.LoadSourcesWithEntry], or
-// [github.com/simon-lentz/yammm/schema.Builder.Build]. jschema does not
-// require a source-backed schema (nothing is embedded), so Builder-built
-// schemas are accepted.
+// [github.com/simon-lentz/yammm/schema.LoadString], or
+// [github.com/simon-lentz/yammm/schema.LoadSourcesWithEntry].
 //
 // # Configuration
 //
@@ -252,13 +248,15 @@
 //
 // # Error Conditions
 //
-// [Marshal] returns an error (never partial or invalid output) when:
+// [Marshal] returns an error (never partial or invalid output) only on a library
+// defect, since a load refuses a schema with an unresolved reference. A zero
+// Schema panics instead. The defects are:
 //
-//   - a non-zero schema breaks Preconditions (a zero Schema panics instead): an association
-//     target or a datatype reference does not resolve;
-//   - a generator bug, such as a member with no registered $defs key, a
-//     constraint the mapper cannot render, or an emitted document that fails
-//     the self-check (invalid JSON or an unresolvable $ref).
+//   - an association target or a datatype reference that does not resolve
+//   - a member with no registered $defs key, a constraint the mapper cannot
+//     render, a description attached to a fragment that is not an object, or an
+//     emitted document that fails the self-check (invalid JSON, no JSON object,
+//     or an unresolvable $ref)
 //
 // No name collision fails: every claimant of a contested key takes its exact
 // key.

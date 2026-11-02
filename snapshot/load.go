@@ -5,6 +5,7 @@ import (
 
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/graph"
+	"github.com/simon-lentz/yammm/internal/snapparts"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -26,18 +27,15 @@ import (
 // root the structural checks left whole, with its composed children, edges and
 // target_missing records, back through the real validator;
 // [WithValueConformance] is the narrower canonical-form check. Whatever the
-// options say, Load refuses a document that breaks the .ys format or a fact of
-// the graph package doc's "Structural facts", save that
+// options say, Load refuses a document that breaks the .ys format, a string of
+// invalid UTF-8 or half a surrogate pair among such breaks, or a fact of the
+// graph package doc's "Structural facts", save that
 // [WithIntegrityCheck](false) skips the integrity hash, and an empty stored hash
 // is skipped under any option.
 //
-// A dynamic numeric value materializes as an int64 or a float64, save the two
-// cases this paragraph ends on: the wire carries no width, so a float32
-// stored at write time returns as a float64 that converts back to the original
-// float32 — the float64 its shortest 32-bit wire form parses to, or its own
-// value where that form would round twice. A literal no finite float64 can
-// hold returns as a json.Number, unconverted, and so does a number nested more
-// than 64 levels deep in a dynamic value.
+// A dynamic numeric value materializes as an int64 or a float64. A literal no
+// finite float64 can hold returns as a json.Number, unconverted, and so does a
+// number nested more than 64 levels deep in a dynamic value.
 //
 // The returned Snapshot's Schema() method returns the schema provided to
 // Load, not the schema used at original construction time.
@@ -77,10 +75,5 @@ func Load(ctx context.Context, data []byte, s schema.Schema, opts ...LoadOption)
 		return graph.Snapshot{}, sd.collector.Result()
 	}
 
-	snap, result := graph.RebuildSnapshot(s, sd.loadDocument(groups, diags))
-	if result.HasErrors() {
-		sd.collector.Merge(result)
-		return graph.Snapshot{}, sd.collector.Result()
-	}
-	return snap, sd.collector.Result()
+	return snapparts.Rebuild[graph.Snapshot](s, sd.loadDocument(groups, diags)), sd.collector.Result()
 }

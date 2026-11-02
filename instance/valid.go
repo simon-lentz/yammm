@@ -12,7 +12,8 @@ import (
 	"github.com/simon-lentz/yammm/schema"
 )
 
-// ValidInstance is the immutable output of successful validation.
+// ValidInstance is the immutable output of successful validation. A non-zero
+// one comes from a [Validator] alone.
 //
 // ValidInstance contains the validated properties, extracted primary key,
 // validated edge data, composed children and provenance. All values are immutable and safe to share.
@@ -24,16 +25,12 @@ func (v ValidInstance) IsZero() bool { return v.validInstanceState == nil }
 // validInstanceState is the record a [ValidInstance] names.
 type validInstanceState struct {
 	typeName   string
-	typeID     schema.TypeID
+	typ        schema.Type
 	primaryKey immutable.Key
 	properties immutable.Properties
 	edges      map[string]ValidEdgeData
 	composed   map[string]immutable.Value
 	provenance location.Provenance
-
-	// validated is set only by newValidatedInstance, which the validator
-	// alone calls. A bypass-built instance always reports false.
-	validated bool
 
 	// scope is the instance's invariant scope, built once by
 	// [Validator.scopeOf] and shared by the instance's own invariants and by
@@ -49,37 +46,10 @@ type scopeMemo struct {
 	m    immutable.Map[string]
 }
 
-// NewValidInstance asserts the caller's claim that the data is valid. It
-// performs no validation, and the result reports
-// [ValidInstance.Validated] == false. Use [Validator] to produce a
-// validated instance.
-func NewValidInstance(
+// newValidInstance adopts edges and composed, which the validator owns.
+func newValidInstance(
 	typeName string,
-	typeID schema.TypeID,
-	pk immutable.Key,
-	props immutable.Properties,
-	edges map[string]ValidEdgeData,
-	composed map[string]immutable.Value,
-	provenance location.Provenance,
-) ValidInstance {
-	// The caller keeps its maps; the instance must not see a later mutation.
-	return ValidInstance{&validInstanceState{
-		typeName:   typeName,
-		typeID:     typeID,
-		primaryKey: pk,
-		properties: props,
-		edges:      maps.Clone(edges),
-		composed:   maps.Clone(composed),
-		provenance: provenance,
-	}}
-}
-
-// newValidatedInstance is the validator's constructor: the shape of
-// [NewValidInstance] over maps the validator owns (so no clone), plus the
-// validated bit only this package can set.
-func newValidatedInstance(
-	typeName string,
-	typeID schema.TypeID,
+	typ schema.Type,
 	pk immutable.Key,
 	props immutable.Properties,
 	edges map[string]ValidEdgeData,
@@ -88,21 +58,13 @@ func newValidatedInstance(
 ) ValidInstance {
 	return ValidInstance{&validInstanceState{
 		typeName:   typeName,
-		typeID:     typeID,
+		typ:        typ,
 		primaryKey: pk,
 		properties: props,
 		edges:      edges,
 		composed:   composed,
 		provenance: provenance,
-		validated:  true,
 	}}
-}
-
-// Validated reports whether this instance was produced by [Validator].
-// No exported constructor can set it: false means asserted, not proven, or the
-// zero handle.
-func (v ValidInstance) Validated() bool {
-	return !v.IsZero() && v.validated
 }
 
 // TypeName returns the name of the validated type.
@@ -113,12 +75,14 @@ func (v ValidInstance) TypeName() string {
 	return v.typeName
 }
 
-// TypeID returns the schema type ID.
-func (v ValidInstance) TypeID() schema.TypeID {
+// Type returns the type that validated this instance: one handle of the schema
+// load its validator was built over. Two loads of one source hold two handles,
+// so == tells them apart where a [schema.TypeID] cannot.
+func (v ValidInstance) Type() schema.Type {
 	if v.IsZero() {
-		return schema.TypeID{}
+		return schema.Type{}
 	}
-	return v.typeID
+	return v.typ
 }
 
 // PrimaryKey returns the extracted primary key.
@@ -188,7 +152,8 @@ func (v ValidInstance) Edges() iter.Seq2[string, ValidEdgeData] {
 	return maps.All(edges)
 }
 
-// Compositions returns an iterator over all compositions.
+// Compositions returns an iterator over all compositions. Each value holds an
+// [immutable.Slice] of non-zero ValidInstance values, in input order.
 // The iteration order is not guaranteed to be deterministic.
 func (v ValidInstance) Compositions() iter.Seq2[string, immutable.Value] {
 	// One return lets the compiler resolve the closure at the call, so a range over it keeps its variables off the heap.
@@ -213,13 +178,6 @@ type validEdgeDataState struct {
 	targets []ValidEdgeTarget
 }
 
-// NewValidEdgeData asserts the caller's claim that the targets are valid.
-// It performs no validation; use [Validator] for validated edge data.
-func NewValidEdgeData(targets []ValidEdgeTarget) ValidEdgeData {
-	// The caller keeps its slice; the edge must not see a later mutation.
-	return ValidEdgeData{&validEdgeDataState{targets: slices.Clone(targets)}}
-}
-
 // Targets returns an iterator over the edge's targets in input order.
 func (e ValidEdgeData) Targets() iter.Seq[ValidEdgeTarget] {
 	// One return lets the compiler resolve the closure at the call, so a range over it keeps its variables off the heap.
@@ -242,16 +200,6 @@ func (e ValidEdgeData) IsEmpty() bool {
 type ValidEdgeTarget struct {
 	targetKey  immutable.Key
 	properties immutable.Properties
-}
-
-// NewValidEdgeTarget asserts the caller's claim that the key and
-// properties are valid. It performs no validation; use [Validator] for
-// validated edge targets.
-func NewValidEdgeTarget(targetKey immutable.Key, props immutable.Properties) ValidEdgeTarget {
-	return ValidEdgeTarget{
-		targetKey:  targetKey,
-		properties: props,
-	}
 }
 
 // TargetKey returns the foreign key referencing the target instance.

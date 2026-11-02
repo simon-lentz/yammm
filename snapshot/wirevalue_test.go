@@ -2,14 +2,13 @@ package snapshot_test
 
 import (
 	"context"
-	"math"
 	"strings"
 	"testing"
 
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/immutable"
-	"github.com/simon-lentz/yammm/instance"
-	"github.com/simon-lentz/yammm/internal/instancetest"
+	"github.com/simon-lentz/yammm/internal/snapparts"
+	"github.com/simon-lentz/yammm/internal/snappartstest"
 	"github.com/simon-lentz/yammm/internal/yammmtest"
 	"github.com/simon-lentz/yammm/schema"
 	"github.com/simon-lentz/yammm/snapshot"
@@ -67,53 +66,41 @@ func sensorProps(id string, reading any, samples []any) map[string]any {
 	}
 }
 
+// buildWireTestSnapshot holds reading and samples as stated, and a float at every
+// other position. A number the writer heals is one no validator stores, and the
+// golden's header claims nothing about its values, so the fixture is a document.
 func buildWireTestSnapshot(t *testing.T, s schema.Schema, reading any, samples []any) graph.Snapshot {
 	t.Helper()
-	ctx := context.Background()
-	g := graph.New(s)
+	stationID := mustTypeID(t, s, "Station")
+	sensorID := mustTypeID(t, s, "Sensor")
+	gain := wrapProps(map[string]any{"gain": float64(2)})
+	sensor := func(id string, reading any, samples []any) snapparts.Instance {
+		return snapparts.Instance{TypeID: sensorID, PrimaryKey: wrapKey(id), Properties: wrapProps(sensorProps(id, reading, samples))}
+	}
 
-	station := mustValidInstance(t, s, "Station", []any{"st1"}, map[string]any{"id": "st1"})
-	g.Add(ctx, station)
-
-	edge := map[string]instance.ValidEdgeData{"FEED": instance.NewValidEdgeData([]instance.ValidEdgeTarget{
-		instance.NewValidEdgeTarget(wrapKey("st1"), wrapProps(map[string]any{"gain": float64(2)})),
-	})}
-	sensor := instancetest.VI(
-		"Sensor",
-		instancetest.TypeID(mustTypeID(t, s, "Sensor")),
-		instancetest.PK("s1"),
-		instancetest.Props(sensorProps("s1", reading, samples)),
-		instancetest.Edges(edge),
-	)
-	g.Add(ctx, sensor)
-
-	part := mustValidPartInstance(t, s, "Part", []any{"p1"}, map[string]any{"name": "p1", "weight": float64(3)})
-	g.AddComposed(ctx, mustTypeID(t, s, "Sensor"), graph.FormatKey("s1"), "PARTS", part)
-
-	// Same PK as sensor: rejected into the duplicates section, floats intact.
-	dup := instancetest.VI(
-		"Sensor",
-		instancetest.TypeID(mustTypeID(t, s, "Sensor")),
-		instancetest.PK("s1"),
-		instancetest.Props(sensorProps("s1", float64(7), []any{float64(4)})),
-	)
-	g.Add(ctx, dup)
-
-	// Edge to a missing station: an unresolved (target_missing) record whose
-	// gain property rides the diagnostics section.
-	ghostEdge := map[string]instance.ValidEdgeData{"FEED": instance.NewValidEdgeData([]instance.ValidEdgeTarget{
-		instance.NewValidEdgeTarget(wrapKey("ghost"), wrapProps(map[string]any{"gain": float64(2)})),
-	})}
-	stray := instancetest.VI(
-		"Sensor",
-		instancetest.TypeID(mustTypeID(t, s, "Sensor")),
-		instancetest.PK("s2"),
-		instancetest.Props(sensorProps("s2", float64(6), []any{float64(8)})),
-		instancetest.Edges(ghostEdge),
-	)
-	g.Add(ctx, stray)
-
-	return g.Snapshot()
+	s1 := sensor("s1", reading, samples)
+	s1.Composed = map[string][]snapparts.Instance{"PARTS": {{
+		TypeID: mustTypeID(t, s, "Part"), PrimaryKey: wrapKey("p1"),
+		Properties: wrapProps(map[string]any{"name": "p1", "weight": float64(3)}),
+	}}}
+	return snappartstest.Loaded(t, s, snapparts.Parts{
+		Attestation: &snapparts.Attestation{Associations: true},
+		Instances: []snapparts.Instance{
+			{TypeID: stationID, PrimaryKey: wrapKey("st1"), Properties: wrapProps(map[string]any{"id": "st1"})},
+			s1,
+			sensor("s2", float64(6), []any{float64(8)}),
+		},
+		Edges: []snapparts.Edge{{
+			Relation: "FEED", SourceType: sensorID, SourceKey: wrapKey("s1"), TargetKey: wrapKey("st1"), Properties: gain,
+		}},
+		// Same key as s1, floats intact.
+		Duplicates: []snapparts.Instance{sensor("s1", float64(7), []any{float64(4)})},
+		// A missing station: the gain property rides the diagnostics section.
+		Unresolved: []snapparts.Unresolved{{
+			SourceType: sensorID, SourceKey: wrapKey("s2"), Relation: "FEED", TargetKey: wrapKey("ghost"),
+			Reason: "target_missing", Properties: gain,
+		}},
+	})
 }
 
 // TestMarshal_FloatEmissionEveryPosition pins the emitted form at every
@@ -255,60 +242,6 @@ func wrapKey(parts ...any) immutable.Key { return immutable.WrapKey(parts) }
 
 func wrapProps(m map[string]any) immutable.Properties { return immutable.WrapProperties(m) }
 
-// TestAssertRoundTrip_Float32Property drives a float32 through the round-trip
-// criterion: the exact float64 widening compares equal under DiffSnapshots,
-// and converting the loaded value back returns the original 32 bits. Bits
-// 363742205 is the value whose 32-bit text rounds twice at 64 bits, which the
-// writer writes in its 64-bit form.
-func TestAssertRoundTrip_Float32Property(t *testing.T) {
-	t.Parallel()
-	ctx := context.Background()
-	s := loadIdentitySchema(t)
-	anchorID := mustTypeIDIn(t, s, "", "Anchor")
-
-	for _, want := range []float32{0.1, math.Float32frombits(363742205)} {
-		built, result := graph.RebuildSnapshot(s, graph.SnapshotParts{
-			Types: []schema.TypeID{anchorID},
-			Instances: []graph.InstanceParts{
-				{
-					TypeID:     anchorID,
-					PrimaryKey: immutable.WrapKey([]any{"a1"}),
-					Properties: immutable.WrapProperties(map[string]any{"id": "a1", "depth": want}),
-				},
-			},
-		})
-		if result.HasErrors() {
-			t.Fatalf("assembling: %s", result)
-		}
-
-		snapshottest.AssertRoundTrip(t, built, s)
-
-		data, res := snapshot.Marshal(ctx, built)
-		if err := res.Err(); err != nil {
-			t.Fatalf("marshal: %v", err)
-		}
-		loaded, res := snapshot.Load(ctx, data, s)
-		if err := res.Err(); err != nil {
-			t.Fatalf("load: %v", err)
-		}
-		inst, ok := loaded.InstanceByKey(anchorID, graph.FormatKey("a1"))
-		if !ok {
-			t.Fatal("instance missing after round trip")
-		}
-		v, ok := inst.Property("depth")
-		if !ok {
-			t.Fatal("depth missing after round trip")
-		}
-		got, ok := v.Unwrap().(float64)
-		if !ok {
-			t.Fatalf("depth returned as %T, want float64", v.Unwrap())
-		}
-		if float32(got) != want {
-			t.Errorf("32-bit fidelity lost: went in %v, returned %v", want, got)
-		}
-	}
-}
-
 // listIntSchema declares a List whose element constraint is not Float, which
 // is the arm the float healer must leave alone.
 const listIntSchema = `schema "listint"
@@ -354,8 +287,8 @@ func TestMarshal_ListOfIntegerElementsStayIntShaped(t *testing.T) {
 
 // TestMarshal_Float64ArmEmitsAtFullWidth pins the width wireNumeric's float64
 // arm emits at. A value carrying more mantissa than float32 holds renders
-// differently at bitSize 32, so emitting it through wireFloat32 silently
-// truncates a property the document declared as a Float.
+// differently at bitSize 32, which would truncate a property the document
+// declared as a Float.
 func TestMarshal_Float64ArmEmitsAtFullWidth(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()

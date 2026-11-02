@@ -28,7 +28,7 @@ const specRefPath = "../docs/SPEC.md"
 //
 // It catches a code added to the registry and not yet documented. The other
 // direction, a documented name that is no registered code, is
-// [github.com/simon-lentz/yammm/docs.TestModuleCitesRegisteredCodes]'s, over
+// [TestModuleCitesRegisteredCodes]'s, over
 // the whole module.
 func TestRegisteredCodesDocumented(t *testing.T) {
 	// Both documents enumerate the whole code set, so both are oracles: a

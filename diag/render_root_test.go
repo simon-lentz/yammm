@@ -152,7 +152,7 @@ func TestModuleRoot_TextLocations(t *testing.T) {
 		{
 			name: "a synthetic source",
 			setup: func(*testing.T) (string, location.SourceID, string) {
-				return base, location.MustNewSourceID("test://a.yammm"), "test://a.yammm"
+				return base, location.NewSourceID("test://a.yammm"), "test://a.yammm"
 			},
 		},
 		{

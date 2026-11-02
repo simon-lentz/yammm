@@ -5,8 +5,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/immutable"
+	"github.com/simon-lentz/yammm/internal/instancetest"
+	"github.com/simon-lentz/yammm/internal/snapparts"
 	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/location/path"
 	"github.com/simon-lentz/yammm/schema"
@@ -21,17 +22,9 @@ import (
 // drive the pairs that two earlier attempts at "total" left equal. In-package
 // because the comparators are unexported and are the thing under test.
 
-func orderingTypeID(name string) schema.TypeID {
-	return schema.NewTypeID(location.MustNewSourceID("test://ordering.yammm"), name)
-}
-
-func orderingInstance(t *testing.T, name, key string) Instance {
+func orderingTypeID(t *testing.T, name string) schema.TypeID {
 	t.Helper()
-	return rebuildInstance(tagForms(schema.Schema{}), InstanceParts{
-		TypeID:     orderingTypeID(name),
-		PrimaryKey: immutable.WrapKey([]any{key}),
-		Properties: immutable.WrapProperties(map[string]any{"id": key}),
-	})
+	return instancetest.TypeID(t, "ordering.yammm", name)
 }
 
 // TestCompareProps_SeparatorsDoNotCollide drives the values a rendered
@@ -147,68 +140,24 @@ func TestCompareProps_OrdersCompositeValuesByContent(t *testing.T) {
 	}
 }
 
-// TestCompareDuplicates_ParentDiscriminates drives two composed-child
-// duplicates rejected from different parent slots. The wire carries the parent
-// coordinates, so they are different records; a comparator that ignores the
-// parent leaves their order to the input.
-func TestCompareDuplicates_ParentDiscriminates(t *testing.T) {
-	t.Parallel()
-
-	child := orderingInstance(t, "Child", "c1")
-	conflict := orderingInstance(t, "Child", "c1")
-	parentA := orderingInstance(t, "Parent", "p1")
-	parentB := orderingInstance(t, "Parent", "p2")
-
-	a := newDuplicate(child, conflict, parentA, "CHILDREN", diag.Issue{})
-	b := newDuplicate(child, conflict, parentB, "CHILDREN", diag.Issue{})
-
-	if compareDuplicates(a, b) == 0 {
-		t.Error("two duplicates differing only in the parent slot compare equal, so their order on the wire is whatever the input order was")
-	}
-	if compareDuplicates(a, b) != -compareDuplicates(b, a) {
-		t.Error("compareDuplicates is not antisymmetric across the parent arm")
-	}
-	if c := compareDuplicates(a, a); c != 0 {
-		t.Errorf("compareDuplicates(a, a) = %d, want 0", c)
-	}
-}
-
-// TestCompareDuplicates_RootAndComposedDoNotCollide pins the boundary between a
-// root duplicate, which has no parent, and a composed one that does.
-func TestCompareDuplicates_RootAndComposedDoNotCollide(t *testing.T) {
-	t.Parallel()
-
-	inst := orderingInstance(t, "Child", "c1")
-	conflict := orderingInstance(t, "Child", "c1")
-	parent := orderingInstance(t, "Parent", "p1")
-
-	root := newDuplicate(inst, conflict, Instance{}, "", diag.Issue{})
-	composed := newDuplicate(inst, conflict, parent, "CHILDREN", diag.Issue{})
-
-	if compareDuplicates(root, composed) == 0 {
-		t.Error("a root duplicate and a composed one compare equal")
-	}
-}
-
-// TestCompareDuplicates_PropertiesDiscriminate drives the final arm: two
-// rejections of one key against one conflict, from one slot, differing only
-// in the rejected instance's payload. Every earlier arm ties, so nothing but
+// TestCompareDuplicates_PropertiesDiscriminate drives the properties arm: two
+// rejections of one key differing only in the rejected instance's payload. Every earlier arm ties, so nothing but
 // the properties can separate them and the wire order would otherwise be the
 // input order.
 func TestCompareDuplicates_PropertiesDiscriminate(t *testing.T) {
 	t.Parallel()
 
 	withName := func(name string) Instance {
-		return rebuildInstance(tagForms(schema.Schema{}), InstanceParts{
-			TypeID:     orderingTypeID("Person"),
+		return rebuildInstance(tagForms(schema.Schema{}), snapparts.Instance{
+			TypeID:     orderingTypeID(t, "Person"),
 			PrimaryKey: immutable.WrapKey([]any{"p1"}),
 			Properties: immutable.WrapProperties(map[string]any{"id": "p1", "name": name}),
 		})
 	}
 	conflict := withName("first")
 
-	a := newDuplicate(withName("alice"), conflict, Instance{}, "", diag.Issue{})
-	b := newDuplicate(withName("bob"), conflict, Instance{}, "", diag.Issue{})
+	a := newDuplicate(withName("alice"), conflict)
+	b := newDuplicate(withName("bob"), conflict)
 
 	if compareDuplicates(a, b) == 0 {
 		t.Error("two rejections differing only in the instance payload compare equal, so their order on the wire is the input order")
@@ -248,7 +197,7 @@ func TestCompareDuplicates_ProvenanceDiscriminates(t *testing.T) {
 	t.Parallel()
 
 	at := func(line int) Instance {
-		return newInstance("Person", orderingTypeID("Person"),
+		return newInstance("Person", orderingTypeID(t, "Person"),
 			immutable.WrapKey([]any{"p1"}),
 			immutable.WrapProperties(map[string]any{"id": "p1"}),
 			location.NewProvenance("people.json", path.Root().Index(line),
@@ -257,8 +206,8 @@ func TestCompareDuplicates_ProvenanceDiscriminates(t *testing.T) {
 	}
 	conflict := at(1)
 
-	a := newDuplicate(at(7), conflict, Instance{}, "", diag.Issue{})
-	b := newDuplicate(at(9), conflict, Instance{}, "", diag.Issue{})
+	a := newDuplicate(at(7), conflict)
+	b := newDuplicate(at(9), conflict)
 
 	if compareDuplicates(a, b) == 0 {
 		t.Error("two rejections differing only in source position compare equal, so their order on the wire is the input order")
@@ -312,7 +261,7 @@ func TestRenderValue_SeparatorAppearsOnceForEveryStoredType(t *testing.T) {
 		map[int]any{1: "a"},
 		immutable.WrapProperties(map[string]any{"a": int64(1)}),
 		immutable.WrapKey([]any{int64(1)}),
-		immutable.WrapMap(map[schema.TypeID]any{orderingTypeID("T"): int64(1)}),
+		immutable.WrapMap(map[schema.TypeID]any{orderingTypeID(t, "T"): int64(1)}),
 	}
 	for _, in := range values {
 		v, ok := immutable.WrapProperties(map[string]any{"p": in}).Get("p")
@@ -327,5 +276,44 @@ func TestRenderValue_SeparatorAppearsOnceForEveryStoredType(t *testing.T) {
 		if prefix, _, _ := strings.Cut(got, "|"); prefix != wantType {
 			t.Errorf("renderValue's type half reads %q for %T, want %q", prefix, in, wantType)
 		}
+	}
+}
+
+// TestCompareDuplicates_ProvenanceOrdersByWhatADocumentWrites holds the arm to a
+// document's source name and path before any span, since a load's spans are zero.
+func TestCompareDuplicates_ProvenanceOrdersByWhatADocumentWrites(t *testing.T) {
+	t.Parallel()
+	dup := func(prov location.Provenance) Duplicate {
+		inst := func(p location.Provenance) Instance {
+			return newInstance("Person", orderingTypeID(t, "Person"),
+				immutable.WrapKey([]any{"p1"}),
+				immutable.WrapProperties(map[string]any{"id": "p1"}), p, false)
+		}
+		return newDuplicate(inst(prov), inst(location.Provenance{}))
+	}
+	at := func(line int) location.Span { return location.Span{Start: location.Position{Line: line}} }
+	root := path.Root()
+	for _, c := range []struct {
+		name          string
+		before, after location.Provenance
+	}{
+		{"no provenance before one", location.Provenance{}, location.NewProvenance("", root, location.Span{})},
+		{"source name before path", location.NewProvenance("a", root.Index(2), at(0)), location.NewProvenance("b", root.Index(1), at(0))},
+		{"path before span", location.NewProvenance("a", root.Index(1), at(9)), location.NewProvenance("a", root.Index(2), at(1))},
+		{"raw path over the parsed path", location.NewProvenance("a", root, at(0)).WithRawPath("x"), location.NewProvenance("a", root, at(0)).WithRawPath("y")},
+		{"span start", location.NewProvenance("a", root, at(1)), location.NewProvenance("a", root, at(2))},
+		{"span end", location.NewProvenance("a", root, location.Span{End: location.Position{Column: 1}}), location.NewProvenance("a", root, location.Span{End: location.Position{Column: 2}})},
+		{"span start byte", location.NewProvenance("a", root, location.Span{Start: location.Position{Byte: 1}}), location.NewProvenance("a", root, location.Span{Start: location.Position{Byte: 2}})},
+		{"span source", location.NewProvenance("a", root, location.Span{Source: location.NewSourceID("test://a")}), location.NewProvenance("a", root, location.Span{Source: location.NewSourceID("test://b")})},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			if got := compareDuplicates(dup(c.before), dup(c.after)); got >= 0 {
+				t.Errorf("compareDuplicates(before, after) = %d, want negative", got)
+			}
+			if got := compareDuplicates(dup(c.after), dup(c.before)); got <= 0 {
+				t.Errorf("compareDuplicates(after, before) = %d, want positive", got)
+			}
+		})
 	}
 }

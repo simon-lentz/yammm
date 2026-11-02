@@ -8,7 +8,6 @@ import (
 	"testing"
 
 	"github.com/simon-lentz/yammm/diag"
-	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -88,39 +87,6 @@ func TestLoad_ImportsWithNoPathValueAndNoAliasDrawTheirOwnDiagnosticsAlone(t *te
 	got := loadIssues(t, source, nil)
 	if want := []string{invalidUTF8, invalidUTF8}; !slices.Equal(got, want) {
 		t.Errorf("issues:\n  %s\nwant:\n  %s", strings.Join(got, "\n  "), strings.Join(want, "\n  "))
-	}
-}
-
-// TestBuilder_AnImportWithAnEmptyAliasIsRefused pins that the alias rules
-// still read a Builder's import whose alias is empty: its path has a value, so
-// it is no declaration the completer passes over.
-func TestBuilder_AnImportWithAnEmptyAliasIsRefused(t *testing.T) {
-	t.Parallel()
-	dep, depResult := schema.NewBuilder().
-		WithName("common").
-		WithSourceID(location.MustNewSourceID("test://common.yammm")).
-		AddType("Base").
-		WithPrimaryKey("id", schema.NewUUIDConstraint()).
-		Done().
-		Build()
-	if dep.IsZero() || depResult.HasErrors() {
-		t.Fatalf("the imported schema does not build: %v", depResult)
-	}
-	registry := schema.NewRegistry()
-	if err := registry.Register(dep); err != nil {
-		t.Fatal(err)
-	}
-	built, result := schema.NewBuilder().
-		WithName("entry").
-		WithSourceID(location.MustNewSourceID("test://entry.yammm")).
-		WithRegistry(registry).
-		AddImport("common", "").
-		AddType("T").
-		WithPrimaryKey("id", schema.NewUUIDConstraint()).
-		Done().
-		Build()
-	if !built.IsZero() || !result.HasCode(diag.E_INVALID_ALIAS) {
-		t.Errorf("Build = %v, %v; want no schema and E_INVALID_ALIAS", built, result)
 	}
 }
 

@@ -47,13 +47,13 @@ func TestCoerceDate_ServerStoresTheWallClockDate(t *testing.T) {
 		{"the epoch itself", time.Date(1970, 1, 1, 13, 0, 0, 0, time.UTC), "1970-01-01"},
 		{"post-1970 with a time of day", time.Date(2001, 7, 20, 18, 0, 0, 0, time.UTC), "2001-07-20"},
 	} {
-		v, err := n4j.Coerce(prop.Constraint(), tc.in)
+		params, err := n4j.CoerceParams(map[string]any{"v": tc.in}, n4j.ParamTypes{"v": prop.Constraint()})
 		if err != nil {
-			t.Errorf("%s: Coerce: %v", tc.name, err)
+			t.Errorf("%s: CoerceParams: %v", tc.name, err)
 			continue
 		}
 		out, err := neo4jdriver.ExecuteQuery(ctx, d, "RETURN toString($v) AS stored",
-			map[string]any{"v": v}, neo4jdriver.EagerResultTransformer)
+			params, neo4jdriver.EagerResultTransformer)
 		if err != nil {
 			t.Errorf("%s: %v", tc.name, err)
 			continue

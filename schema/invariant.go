@@ -27,12 +27,6 @@ type invariantState struct {
 }
 
 // newInvariant creates a new Invariant.
-//
-// This is a low-level API primarily for:
-//   - Internal use during schema parsing
-//   - Advanced use cases like building schemas programmatically via Builder
-//
-// Most users should load schemas from .yammm files using the load package.
 func newInvariant(name string, e expr.Expression, span location.Span, doc string) Invariant {
 	return Invariant{&invariantState{
 		name: name,

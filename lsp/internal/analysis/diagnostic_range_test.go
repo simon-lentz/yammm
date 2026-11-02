@@ -12,16 +12,25 @@ import (
 	"unicode/utf8"
 
 	"github.com/simon-lentz/yammm/internal/yammmtest"
-	"github.com/simon-lentz/yammm/lsp/internal/lsputil"
 )
+
+// wantDiagnosticStarts holds the fixture line's diagnostic columns in UTF-16
+// units. The pattern-limit diagnostic starts at the Pattern construct and the
+// compile diagnostic at the fourth pattern, where bytes, runes and units disagree:
+//
+//	title Pattern["🎉日", "🎉日", "🎉日", "("]
+//	       ^7                                     every count
+//	                                    ^36       UTF-16 units
+//	                                    ^48       bytes
+//	                                    ^33       runes
+var wantDiagnosticStarts = []uint32{7, 36}
 
 // A parse diagnostic's span survives the conversion into an editor range.
 //
-// This is the one place a parse span meets the negotiated position encoding:
-// hover and go-to-definition convert symbol spans, not diagnostics. The parser
-// reports byte offsets and rune columns; an editor wants UTF-16 code units on
-// UTF-16 clients, so a span that is right in bytes can still land in the wrong
-// column, and only a multibyte fixture shows it.
+// This is the one place a parse span meets the client's UTF-16 count: hover and
+// go-to-definition convert symbol spans, not diagnostics. The parser reports
+// byte offsets and rune columns, so a span that is right in bytes can still land
+// in the wrong column, and only a multibyte fixture shows it.
 func TestAnalyze_DiagnosticRangesConvertFromParseSpans(t *testing.T) {
 	t.Parallel()
 
@@ -34,66 +43,51 @@ func TestAnalyze_DiagnosticRangesConvertFromParseSpans(t *testing.T) {
 		"\ttitle Pattern[\"🎉日\", \"🎉日\", \"🎉日\", \"(\"]\n" +
 		"}\n"
 
-	// Compared across encodings below: a pass-through conversion would make the
-	// two identical, which the bounds check alone would not notice.
-	starts := map[lsputil.PositionEncoding][]uint32{}
-
-	for _, enc := range []lsputil.PositionEncoding{
-		lsputil.PositionEncodingUTF16,
-		lsputil.PositionEncodingUTF8,
-	} {
-		dir := t.TempDir()
-		path := filepath.Join(dir, "main.yammm")
-		if err := os.WriteFile(path, []byte(src), 0o600); err != nil {
-			t.Fatalf("write fixture: %v", err)
-		}
-
-		// A failing load still returns its snapshot: the diagnostics are the
-		// point, and converting them is what this exercises.
-		a := NewAnalyzer(slog.New(slog.NewTextHandler(io.Discard, nil)))
-		snap, _ := a.Analyze(t.Context(), path, map[string][]byte{path: []byte(src)}, dir, enc)
-		if snap == nil {
-			t.Fatalf("%s: analyze returned no snapshot", enc)
-		}
-		if len(snap.LSPDiagnostics) == 0 {
-			t.Fatalf("%s: the fixture reports no diagnostics, so nothing is converted", enc)
-		}
-
-		lines := strings.Split(src, "\n")
-		for _, ud := range snap.LSPDiagnostics {
-			start, end := ud.Diagnostic.Range.Start, ud.Diagnostic.Range.End
-			if int(start.Line) >= len(lines) {
-				t.Errorf("%s: range starts on line %d, past the %d-line source", enc, start.Line, len(lines))
-				continue
-			}
-			line := lines[start.Line]
-			if want := columnUnits(line, enc); int(start.Character) > want {
-				t.Errorf("%s: range starts at character %d, past the %d units on line %d (%q)",
-					enc, start.Character, want, start.Line, line)
-			}
-			if end.Line == start.Line && end.Character < start.Character {
-				t.Errorf("%s: range is inverted: %d..%d", enc, start.Character, end.Character)
-			}
-			starts[enc] = append(starts[enc], start.Character)
-		}
+	dir := t.TempDir()
+	path := filepath.Join(dir, "main.yammm")
+	if err := os.WriteFile(path, []byte(src), 0o600); err != nil {
+		t.Fatalf("write fixture: %v", err)
 	}
 
-	utf8Cols, utf16Cols := starts[lsputil.PositionEncodingUTF8], starts[lsputil.PositionEncodingUTF16]
-	if len(utf8Cols) != len(utf16Cols) {
-		t.Fatalf("diagnostic counts differ by encoding: %d and %d", len(utf8Cols), len(utf16Cols))
+	// A failing load still returns its snapshot: the diagnostics are the
+	// point, and converting them is what this exercises.
+	a := NewAnalyzer(slog.New(slog.NewTextHandler(io.Discard, nil)))
+	snap, _ := a.Analyze(t.Context(), path, map[string][]byte{path: []byte(src)}, dir)
+	if snap == nil {
+		t.Fatal("analyze returned no snapshot")
 	}
-	if slices.Equal(utf8Cols, utf16Cols) {
-		t.Errorf("every column is identical under both encodings (%v); the span was "+
-			"passed through rather than converted", utf8Cols)
+	if len(snap.LSPDiagnostics) == 0 {
+		t.Fatal("the fixture reports no diagnostics, so nothing is converted")
+	}
+
+	lines := strings.Split(src, "\n")
+	var starts []uint32
+	for _, ud := range snap.LSPDiagnostics {
+		start, end := ud.Diagnostic.Range.Start, ud.Diagnostic.Range.End
+		if int(start.Line) >= len(lines) {
+			t.Errorf("range starts on line %d, past the %d-line source", start.Line, len(lines))
+			continue
+		}
+		line := lines[start.Line]
+		if want := len(utf16.Encode([]rune(line))); int(start.Character) > want {
+			t.Errorf("range starts at character %d, past the %d units on line %d (%q)",
+				start.Character, want, start.Line, line)
+		}
+		if end.Line == start.Line && end.Character < start.Character {
+			t.Errorf("range is inverted: %d..%d", start.Character, end.Character)
+		}
+		starts = append(starts, start.Character)
+	}
+	if !slices.Equal(starts, wantDiagnosticStarts) {
+		t.Errorf("starts = %v, want %v", starts, wantDiagnosticStarts)
 	}
 }
 
 // TestAnalyze_DiagnosticRangesConvertAcrossSymlinkedPaths pins the conversion
 // when the client's path crosses a symlink (macOS /tmp → /private): each
-// diagnostic's range is counted in the encoding asked for, not in rune
-// columns, which are identical under both encodings and which the final
-// assertion catches. The workspace path is deliberately NOT pre-resolved, so
-// the analysis meets the path the client sent.
+// diagnostic's range is counted in UTF-16 units, not in rune columns. The
+// workspace path is deliberately NOT pre-resolved, so the analysis meets the
+// path the client sent.
 func TestAnalyze_DiagnosticRangesConvertAcrossSymlinkedPaths(t *testing.T) {
 	t.Parallel()
 
@@ -124,55 +118,25 @@ func TestAnalyze_DiagnosticRangesConvertAcrossSymlinkedPaths(t *testing.T) {
 		t.Fatalf("write fixture: %v", err)
 	}
 
-	starts := map[lsputil.PositionEncoding][]uint32{}
-	for _, enc := range []lsputil.PositionEncoding{
-		lsputil.PositionEncodingUTF16,
-		lsputil.PositionEncodingUTF8,
-	} {
-		a := NewAnalyzer(slog.New(slog.NewTextHandler(io.Discard, nil)))
-		snap, _ := a.Analyze(t.Context(), path, map[string][]byte{path: []byte(src)}, linkDir, enc)
-		if snap == nil {
-			t.Fatalf("%s: analyze returned no snapshot", enc)
-		}
-		if len(snap.LSPDiagnostics) == 0 {
-			t.Fatalf("%s: the fixture reports no diagnostics, so nothing is converted", enc)
-		}
-		for _, ud := range snap.LSPDiagnostics {
-			starts[enc] = append(starts[enc], ud.Diagnostic.Range.Start.Character)
-		}
+	a := NewAnalyzer(slog.New(slog.NewTextHandler(io.Discard, nil)))
+	snap, _ := a.Analyze(t.Context(), path, map[string][]byte{path: []byte(src)}, linkDir)
+	if snap == nil {
+		t.Fatal("analyze returned no snapshot")
 	}
-
-	// Exact columns, not merely a pair that differs. The pattern-limit
-	// diagnostic starts at the Pattern construct and the compile diagnostic at
-	// the fourth pattern; on this line the three unit systems disagree there,
-	// so a wrong answer cannot hide behind a right one.
-	//
-	//	title Pattern["🎉日", "🎉日", "🎉日", "("]
-	//	       ^7                                     both encodings
-	//	                                    ^36       UTF-16 units
-	//	                                    ^48       UTF-8 bytes
-	//	                                    ^33       runes — the fallback this pins against
-	wantUTF16 := []uint32{7, 36}
-	wantUTF8 := []uint32{7, 48}
-
-	if got := starts[lsputil.PositionEncodingUTF16]; !slices.Equal(got, wantUTF16) {
-		t.Errorf("UTF-16 starts = %v, want %v — rune columns would be [7 33]", got, wantUTF16)
+	if len(snap.LSPDiagnostics) == 0 {
+		t.Fatal("the fixture reports no diagnostics, so nothing is converted")
 	}
-	if got := starts[lsputil.PositionEncodingUTF8]; !slices.Equal(got, wantUTF8) {
-		t.Errorf("UTF-8 starts = %v, want %v — rune columns would be [7 33]", got, wantUTF8)
+	var starts []uint32
+	for _, ud := range snap.LSPDiagnostics {
+		starts = append(starts, ud.Diagnostic.Range.Start.Character)
 	}
-}
-
-// columnUnits returns the length of a line in the units the encoding counts.
-func columnUnits(line string, enc lsputil.PositionEncoding) int {
-	if enc == lsputil.PositionEncodingUTF8 {
-		return len(line)
+	if !slices.Equal(starts, wantDiagnosticStarts) {
+		t.Errorf("starts = %v, want %v", starts, wantDiagnosticStarts)
 	}
-	return len(utf16.Encode([]rune(line)))
 }
 
 // The fixture only proves anything while its three column counts disagree.
-func TestAnalyze_DiagnosticRangeFixtureDistinguishesEncodings(t *testing.T) {
+func TestAnalyze_DiagnosticRangeFixtureDistinguishesItsCounts(t *testing.T) {
 	t.Parallel()
 
 	const line = "\ttitle Pattern[\"🎉日\", \"🎉日\", \"🎉日\", \"(\"]"

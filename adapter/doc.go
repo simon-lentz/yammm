@@ -17,9 +17,8 @@
 //     the Neo4j driver's dbtype package, each only when that adapter is
 //     imported.
 //
-//   - Clear library/consumer boundary: The adapter package explicitly imports
-//     the library to use it, mirroring how downstream consumers structure their
-//     own adapters.
+//   - Clear library/consumer boundary: Each adapter subpackage imports the
+//     library to use it, as a downstream consumer's own adapter does.
 //
 //   - Extensibility signal: Users see adapter/json and understand they can
 //     create adapter/myformat using the same pattern.
@@ -60,9 +59,8 @@
 //	                                github.com/yuin/goldmark/text,
 //	                                github.com/yuin/goldmark/util,
 //	                                golang.org/x/net/html
-//	adapter/neo4j     ──imports──▶  schema, graph, instance, immutable, diag, location,
+//	adapter/neo4j     ──imports──▶  schema, graph, instance, immutable, diag,
 //	                                adapter/internal/constraintof, adapter/internal/refusal,
-//	                                github.com/google/uuid,
 //	                                github.com/neo4j/neo4j-go-driver/v6/neo4j/dbtype
 //
 // # Layering Discipline
@@ -74,16 +72,14 @@
 // adapter is the sole exception: it imports internal/ident, the module's
 // rune-aware identifier-casing transform, to derive Go identifiers, and no
 // other production package imports it. The rule binds production code
-// alone: adapter tests import the module's test support (internal/yammmtest,
-// internal/instancetest, internal/raceskip) and the internals a test checks
-// against (internal/source, internal/parse).
+// alone: an adapter test can import a core internal package, as test support or
+// as the internals the test checks against.
 //
-// The adapter layer's own internal packages — adapter/internal/typetag for a
-// type tag's syntax, which the JSON and CSV adapters share,
-// adapter/internal/refusal for a refusal's class, which the Neo4j writer marks
-// through too, and adapter/internal/constraintof for the constraint a value
-// renders through, which the Neo4j writer reads too — are
-// not an exception to this rule: they are the adapters', not the core's.
+// An internal package under adapter/ is not an exception to this rule: it is the
+// adapters', not the core's. adapter/internal holds the three the adapters
+// share: typetag for a type tag's syntax, which the JSON and CSV adapters read,
+// and refusal for a refusal's class and constraintof for the constraint a value
+// renders through, which the CSV, JSON and Neo4j adapters read.
 //
 // # Subpackages
 //

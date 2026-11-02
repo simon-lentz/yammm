@@ -200,8 +200,8 @@ type Tags = List<String[1, 50]>
 
 - Must be declared with an uppercase identifier
 - Aliases preserve the declared case (not lowercased internally)
-- Can chain: alias A wraps a built-in, alias B wraps A
-- Alias cycles are detected and rejected during schema completion (not during parsing)
+- An alias target must be a built-in, so `type B = A` over an alias `A` draws `E_SYNTAX`. A `List` target can name another alias as its element
+- Alias cycles through `List` elements are detected and rejected during schema completion (not during parsing)
 - Imported aliases require qualification: `common.Money`
 
 ---

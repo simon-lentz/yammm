@@ -13,56 +13,53 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/simon-lentz/yammm/instance"
-	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
 )
 
-// personSchema is the canonical programmatic fixture used by most shape tests.
-// Covers: simple and composite PKs, one/many associations, one/many compositions.
-// Note: compositions target concrete part types per schema/collision.go:274–287;
-// no abstract composition targets are exercised here (the schema layer would
-// reject them at Build time, making such fixtures unrealizable).
+// personSchema is the fixture used by most shape tests. It covers simple and
+// composite PKs, one/many associations, and one/many compositions.
 func personSchema(t *testing.T) schema.Schema {
 	t.Helper()
-	return mustBuild(t, schema.NewBuilder().
-		WithName("test").
-		AddType("Address").
-		AsPart().
-		WithPrimaryKey("id", schema.NewStringConstraint()).
-		WithProperty("street", schema.NewStringConstraint()).
-		Done().
-		AddType("Note").
-		AsPart().
-		WithProperty("body", schema.NewStringConstraint()).
-		Done().
-		AddType("Company").
-		WithPrimaryKey("id", schema.NewStringConstraint()).
-		Done().
-		AddType("Vehicle").
-		AsAbstract().
-		WithPrimaryKey("vin", schema.NewStringConstraint()).
-		Done().
-		AddType("Part").
-		WithPrimaryKey("publisher_id", schema.NewStringConstraint()).
-		WithPrimaryKey("book_id", schema.NewStringConstraint()).
-		Done().
-		AddType("Person").
-		WithPrimaryKey("id", schema.NewStringConstraint()).
-		WithProperty("name", schema.NewStringConstraint()).
-		WithOptionalProperty("nickname", schema.NewStringConstraint()).
-		WithRelation("WORKS_AT", schema.LocalTypeRef("Company", location.Span{}), true, false).
-		WithRelation("KNOWS", schema.LocalTypeRef("Person", location.Span{}), true, true).
-		WithRelation("HAS_PART", schema.LocalTypeRef("Part", location.Span{}), true, false).
-		WithComposition("ADDRESSES", schema.LocalTypeRef("Address", location.Span{}), true, true).
-		WithComposition("PRIMARY_NOTE", schema.LocalTypeRef("Note", location.Span{}), true, false).
-		Done())
+	return mustLoad(t, `schema "test"
+
+part type Address {
+	id String primary
+	street String required
+}
+
+part type Note {
+	body String required
+}
+
+type Company {
+	id String primary
+}
+
+abstract type Vehicle {
+	vin String primary
+}
+
+type Part {
+	publisher_id String primary
+	book_id String primary
+}
+
+type Person {
+	id String primary
+	name String required
+	nickname String
+	--> WORKS_AT (_:one) Company
+	--> KNOWS (many) Person
+	--> HAS_PART (_:one) Part
+	*-> ADDRESSES (many) Address
+	*-> PRIMARY_NOTE (_:one) Note
+}
+`)
 }
 
 // edgePropsSchema loads a schema with an association that declares two
 // required edge properties and another that declares one optional edge
-// property. The DSL path is required because the programmatic schema.Builder
-// does not expose edge-property declaration at the TypeBuilder level.
-// Optional edge properties omit the 'required' keyword, which the SPEC's
+// property. Optional edge properties omit the 'required' keyword, which the SPEC's
 // RelProperty production makes optional.
 func edgePropsSchema(t *testing.T) schema.Schema {
 	t.Helper()
@@ -360,15 +357,17 @@ func TestSchemaBuilder_Cardinality_ManyZeroCalls(t *testing.T) {
 
 func TestSchemaBuilder_RelationNameFormParity(t *testing.T) {
 	// Both DSL form and FieldName form resolve to the same relation.
-	s := mustBuild(t, schema.NewBuilder().
-		WithName("test").
-		AddType("Company").
-		WithPrimaryKey("id", schema.NewStringConstraint()).
-		Done().
-		AddType("Person").
-		WithPrimaryKey("id", schema.NewStringConstraint()).
-		WithRelation("WORKS_AT", schema.LocalTypeRef("Company", location.Span{}), true, false).
-		Done())
+	s := mustLoad(t, `schema "test"
+
+type Company {
+	id String primary
+}
+
+type Person {
+	id String primary
+	--> WORKS_AT (_:one) Company
+}
+`)
 
 	bA, err := instance.BuilderFor(s, "Person")
 	require.NoError(t, err)
@@ -496,10 +495,10 @@ func TestSchemaBuilder_NotConcurrentSafe_DocumentedShape(t *testing.T) {
 
 // ---------- helpers ----------
 
-// mustBuild is reused from validator_test.go — redefined here only if this
+// mustLoad is reused from validator_test.go — redefined here only if this
 // test file compiles standalone. Since we're in the same package
-// (instance_test), validator_test.go's mustBuild is already available.
-// This file intentionally does NOT redefine mustBuild / mustLoadString.
+// (instance_test), validator_test.go's mustLoad is already available.
+// This file intentionally does NOT redefine mustLoad / mustLoadString.
 
 // assertPropertiesEqual compares two Properties maps by JSON-marshaling both
 // with sorted keys. Use this where map iteration-order might otherwise

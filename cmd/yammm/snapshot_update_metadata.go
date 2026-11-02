@@ -88,10 +88,8 @@ func runSnapshotUpdateMetadata(cmd *cobra.Command, args []string, sink *cli.Diag
 		delete(newMeta, k)
 	}
 
-	// No UpdateOption needed: UpdateMetadata preserves the existing
-	// CreatedAt byte-for-byte by default, which is the right behavior
-	// for an in-place metadata rewrite. Operators who want to change
-	// CreatedAt re-save with snapshot save --timestamp.
+	// UpdateMetadata keeps the existing CreatedAt's text. Operators
+	// who want to change it re-save with snapshot save --timestamp.
 	out, updateRes := snapshot.UpdateMetadata(ctx, data, newMeta)
 	sink.Add(updateRes)
 	if updateRes.HasErrors() {

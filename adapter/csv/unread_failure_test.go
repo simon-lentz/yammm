@@ -74,11 +74,11 @@ func describe(issue diag.Issue) string {
 // "kind" where the method takes one.
 var entryPoints = map[string]func(context.Context, io.Reader) diag.Result{
 	"ParseTyped": func(ctx context.Context, r io.Reader) diag.Result {
-		_, res := New().ParseTyped(ctx, location.MustNewSourceID("test://x.csv"), "P", r, schema.Type{})
+		_, res := New().ParseTyped(ctx, location.NewSourceID("test://x.csv"), "P", r, schema.Type{})
 		return res
 	},
 	"ParseWithTypeColumn": func(ctx context.Context, r io.Reader) diag.Result {
-		_, res := New(WithTypeColumn("kind")).ParseWithTypeColumn(ctx, location.MustNewSourceID("test://x.csv"), r,
+		_, res := New(WithTypeColumn("kind")).ParseWithTypeColumn(ctx, location.NewSourceID("test://x.csv"), r,
 			func(string) schema.Type { return schema.Type{} })
 		return res
 	},

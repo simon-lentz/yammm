@@ -3,12 +3,12 @@ package snapshot_test
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"slices"
 	"strings"
 	"testing"
 
 	"github.com/simon-lentz/yammm/diag"
-	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
 	"github.com/simon-lentz/yammm/snapshot"
 )
@@ -65,13 +65,12 @@ func TestReaders_AFifthTopLevelKeyIsCut(t *testing.T) {
 // message shows whole.
 func longNamedSchema(t *testing.T, typeName string) schema.Schema {
 	t.Helper()
-	s, result := schema.NewBuilder().
-		WithName("test").
-		WithSourceID(location.MustNewSourceID("test://long_named.yammm")).
-		AddType(typeName).
-		WithPrimaryKey("id", schema.NewStringConstraint()).
-		Done().
-		Build()
+	s, result := schema.LoadString(t.Context(), fmt.Sprintf(`schema "test"
+
+type %s {
+	id String primary
+}
+`, typeName), "long_named.yammm")
 	if result.HasErrors() {
 		t.Fatalf("longNamedSchema: %s", result)
 	}

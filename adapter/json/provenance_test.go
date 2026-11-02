@@ -25,7 +25,7 @@ func firstIssue(result diag.Result) (diag.Issue, bool) {
 // instance's provenance: the document's identity, its path inside that
 // document, and the span of its opening brace.
 func TestParseObject_RecordsProvenancePerInstance(t *testing.T) {
-	id := location.MustNewSourceID("test://data/people.json")
+	id := location.NewSourceID("test://data/people.json")
 	doc := "{\n  \"Person\": [\n    {\"name\": \"ada\"},\n    {\"name\": \"grace\"}\n  ],\n  \"Company\": [\n    {\"name\": \"acme\"}\n  ]\n}\n"
 
 	parsed, result := parseForProvenance(t, id, doc)
@@ -73,7 +73,7 @@ func TestParseObject_RecordsProvenancePerInstance(t *testing.T) {
 // every element after the first needs: the decoder reports the comma, not the
 // element.
 func TestParseObject_ProvenanceStartsPastTheSeparator(t *testing.T) {
-	id := location.MustNewSourceID("test://data/sep.json")
+	id := location.NewSourceID("test://data/sep.json")
 	doc := `{"Person": [{"a": 1}, {"b": 2}]}`
 
 	parsed, _ := parseForProvenance(t, id, doc)
@@ -92,7 +92,7 @@ func TestParseObject_ProvenanceStartsPastTheSeparator(t *testing.T) {
 // later line the two measurements agree — jsonc preserves line breaks — and the
 // test cannot fail for the property it names.
 func TestParseObject_ProvenanceCountsColumnsOverTheOriginalBytes(t *testing.T) {
-	id := location.MustNewSourceID("test://data/comment.json")
+	id := location.NewSourceID("test://data/comment.json")
 	doc := `{"Person": [/* naïve */ {"a": 1}]}`
 
 	parsed, result := parseForProvenance(t, id, doc)
@@ -111,7 +111,7 @@ func TestParseObject_ProvenanceCountsColumnsOverTheOriginalBytes(t *testing.T) {
 // shifts no position: it is trimmed before the decoder runs and its length is
 // added back to every offset.
 func TestParseObject_ProvenanceSkipsTheByteOrderMark(t *testing.T) {
-	id := location.MustNewSourceID("test://data/bom.json")
+	id := location.NewSourceID("test://data/bom.json")
 	doc := string(rune(0xFEFF)) + `{"Person": [{"a": 1}]}`
 
 	parsed, result := parseForProvenance(t, id, doc)
@@ -128,7 +128,7 @@ func TestParseObject_ProvenanceSkipsTheByteOrderMark(t *testing.T) {
 // TestParseObject_DiagnosticsCarryASpan pins that every parse diagnostic
 // locates itself in the document the caller handed in.
 func TestParseObject_DiagnosticsCarryASpan(t *testing.T) {
-	id := location.MustNewSourceID("test://data/bad.json")
+	id := location.NewSourceID("test://data/bad.json")
 	cases := []struct {
 		name string
 		doc  string
@@ -163,7 +163,7 @@ func TestParseObject_DiagnosticsCarryASpan(t *testing.T) {
 // TestParseObject_DiagnosticCodesAreStable pins the code each parse refusal
 // reports, which no test asserted before.
 func TestParseObject_DiagnosticCodesAreStable(t *testing.T) {
-	id := location.MustNewSourceID("test://data/codes.json")
+	id := location.NewSourceID("test://data/codes.json")
 	cases := []struct {
 		name string
 		doc  string
@@ -194,7 +194,7 @@ func TestParseObject_DiagnosticCodesAreStable(t *testing.T) {
 // doc states: a failed element consumes its index, so the path keeps addressing
 // the document.
 func TestParseObject_PathIndexesTheDocumentNotTheResult(t *testing.T) {
-	id := location.MustNewSourceID("test://data/gap.json")
+	id := location.NewSourceID("test://data/gap.json")
 	// The middle element is a number, which fails to decode into a map without
 	// a syntax error, so the parser reports it and reads on.
 	doc := `{"Person": [{"a": 1}, 42, {"b": 2}]}`
@@ -220,7 +220,7 @@ func TestParseObject_PathIndexesTheDocumentNotTheResult(t *testing.T) {
 // plausible wrong one on DIFFERENT lines or columns, which a line-only
 // assertion cannot separate.
 func TestParseObject_DiagnosticSpansPinTheColumn(t *testing.T) {
-	id := location.MustNewSourceID("test://data/columns.json")
+	id := location.NewSourceID("test://data/columns.json")
 	cases := []struct {
 		name   string
 		doc    string

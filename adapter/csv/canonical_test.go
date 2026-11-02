@@ -8,8 +8,6 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/simon-lentz/yammm/graph"
-	"github.com/simon-lentz/yammm/immutable"
-	"github.com/simon-lentz/yammm/instance"
 	"github.com/simon-lentz/yammm/internal/instancetest"
 	"github.com/simon-lentz/yammm/schema"
 )
@@ -24,56 +22,30 @@ const (
 	canonicalUUIDStr = "0a35ef0f-9d40-4b6b-a0a1-0d1a5a0e1f2b"
 )
 
-// bypassCanonicalSnapshot builds a graph through instance.NewValidInstance,
-// which receives no schema and runs no validation, from native Go values.
+// nativeCanonicalSnapshot validates native Go values and builds their graph.
 //
 // It does not prove the writer's canonicalization arm runs for these kinds:
 // Graph.Add rewrites a Timestamp, a Date and a UUID to its stored form before
 // any writer sees it, so discarding the writer's canonical form leaves every
-// test below green. They pin the END-TO-END text a native value exports as. The
-// writer's own arm is load-bearing for numbers alone, which Add leaves as they
-// arrived, and [TestListRendering_ABypassBuiltFloat32RendersAsAFloatDoes] pins it.
-func bypassCanonicalSnapshot(t *testing.T, s schema.Schema) graph.Snapshot {
+// test below green. They pin the END-TO-END text a native value exports as.
+func nativeCanonicalSnapshot(t *testing.T, s schema.Schema) graph.Snapshot {
 	t.Helper()
 	ctx := context.Background()
 	g := graph.New(s)
 
-	stationID, ok := s.Type("Station")
-	if !ok {
-		t.Fatal("Station missing from the fixture schema")
-	}
-	sensorID, ok := s.Type("Sensor")
-	if !ok {
-		t.Fatal("Sensor missing from the fixture schema")
-	}
-
-	station := instancetest.VI(
-		"Station",
-		instancetest.TypeID(stationID.ID()),
-		instancetest.PK(canonicalWhen),
-		instancetest.Props(map[string]any{"at": canonicalWhen}),
-	)
+	station := instancetest.Valid(t, s, "Station", map[string]any{"at": canonicalWhen})
 	if res := g.Add(ctx, station); res.HasErrors() {
 		t.Fatalf("adding Station: %s", res)
 	}
 
-	sensor := instancetest.VI(
-		"Sensor",
-		instancetest.TypeID(sensorID.ID()),
-		instancetest.PK("s1"),
-		instancetest.Props(map[string]any{
-			"id":         "s1",
-			"created_at": canonicalWhen,
-			"run_id":     uuid.MustParse(canonicalUUIDStr),
-			"installed":  canonicalWhen,
-			"samples":    []any{canonicalWhen, "2026-08-19T13:00:00+00:00"},
-		}),
-		instancetest.Edges(map[string]instance.ValidEdgeData{
-			"FEED": instance.NewValidEdgeData([]instance.ValidEdgeTarget{
-				instance.NewValidEdgeTarget(immutable.WrapKey([]any{canonicalWhen}), immutable.Properties{}),
-			}),
-		}),
-	)
+	sensor := instancetest.Valid(t, s, "Sensor", map[string]any{
+		"id":         "s1",
+		"created_at": canonicalWhen,
+		"run_id":     uuid.MustParse(canonicalUUIDStr),
+		"installed":  canonicalWhen,
+		"samples":    []any{canonicalWhen, "2026-08-19T13:00:00+00:00"},
+		"feed":       map[string]any{"_target_at": canonicalWhen},
+	})
 	if res := g.Add(ctx, sensor); res.HasErrors() {
 		t.Fatalf("adding Sensor: %s", res)
 	}
@@ -112,7 +84,7 @@ type Sensor {
 func marshalCanonicalFixture(t *testing.T) map[string]string {
 	t.Helper()
 	s := canonicalTestSchema(t)
-	output, err := New().MarshalSnapshot(context.Background(), bypassCanonicalSnapshot(t, s))
+	output, err := New().MarshalSnapshot(context.Background(), nativeCanonicalSnapshot(t, s))
 	if err != nil {
 		t.Fatalf("MarshalSnapshot: %v", err)
 	}
@@ -123,10 +95,10 @@ func marshalCanonicalFixture(t *testing.T) map[string]string {
 	return got
 }
 
-// TestMarshalSnapshot_CanonicalizesBypassBuiltProperties pins the text a
+// TestMarshalSnapshot_CanonicalizesNativeProperties pins the text a
 // native property exports as: never Go's default time layout, in a cell whose
 // schema declares RFC 3339.
-func TestMarshalSnapshot_CanonicalizesBypassBuiltProperties(t *testing.T) {
+func TestMarshalSnapshot_CanonicalizesNativeProperties(t *testing.T) {
 	t.Parallel()
 	sensor := marshalCanonicalFixture(t)["Sensor"]
 
@@ -136,7 +108,7 @@ func TestMarshalSnapshot_CanonicalizesBypassBuiltProperties(t *testing.T) {
 		}
 	}
 	if strings.Contains(sensor, canonicalGoPrint) {
-		t.Errorf("a bypass-built time.Time rendered through Go's default layout\ngot: %s", sensor)
+		t.Errorf("a native time.Time rendered through Go's default layout\ngot: %s", sensor)
 	}
 }
 

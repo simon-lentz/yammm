@@ -66,11 +66,12 @@ var cypherReservedKeywords = map[string]struct{}{
 //
 // The order matters and the result is NOT guaranteed to be a valid identifier:
 // an input whose first invalid character precedes a digit ("«9x") has that
-// character stripped after the leading-digit test, so it returns "9x". The
-// output is checked by [ValidateIdentifier], and [Adapter.ShapeForSchema]
-// refuses such a schema with [E_NEO4J_INVALID_IDENTIFIER] naming the label —
-// repairing it here instead would silently accept a schema name the author
-// should see reported.
+// character stripped after the leading-digit test, so it returns "9x".
+// [Adapter.ShapeForSchema] judges the composed label with [ValidateIdentifier], and
+// refuses a label that is not valid with [E_NEO4J_INVALID_IDENTIFIER] naming it —
+// repairing it here instead would silently accept a schema name the author should
+// see reported. A composed label can be valid over an invalid result: "«9x" under
+// a label prefix, and "日本", which returns "" and composes "__A".
 //
 // This is the same transformation applied to each component in [Adapter.Label].
 func SanitizeIdentifier(s string) string {
@@ -120,8 +121,9 @@ func ValidateIdentifier(name, context string) error {
 
 // Label generates a namespaced Neo4j node label from schema and type names.
 //
-// The label is built as: prefix + sanitize(schemaName) + separator + sanitize(typeName).
-// If schemaName is empty, returns sanitize(typeName) only (legacy/unscoped behavior).
+// If typeName is empty or holds only white space, returns the empty string. Otherwise
+// the label is built as: prefix + sanitize(schemaName) + separator + sanitize(typeName).
+// If schemaName is empty or holds only white space, returns sanitize(typeName) alone.
 //
 // Examples:
 //
@@ -150,12 +152,13 @@ func (a *Adapter) Label(ctx context.Context, schemaName, typeName string) string
 // sanitization.
 //
 // The closure, because [Adapter.Label] composes a label from the declaring
-// SCHEMA's name as well as the type's: two type names cannot collide through
-// either front door — the parser and [schema.NewBuilder] enforce the DSL name
-// productions, on which [SanitizeIdentifier] is the identity — but two schema
-// names can, because a schema name is a free-form string checked only for
-// emptiness. Members named "geo-regions" and "geo_regions" sanitize alike and
-// render one label for every same-named type they declare.
+// SCHEMA's name as well as the type's. Sanitizing merges no two type names: the
+// parser enforces the DSL name productions, on which [SanitizeIdentifier] is the
+// identity. It can merge two schema names, because a schema name is a quoted string
+// the parser holds to no name production. Members named "geo-regions" and
+// "geo_regions" sanitize alike and render one label for every same-named type they
+// declare. A type name holding the separator can compose the same label too, as
+// schema "a" with B__C and schema "a__B" with C do.
 //
 // Returns a [diag.Result] containing one [E_NEO4J_LABEL_COLLISION] issue per
 // colliding label. Its type detail carries full type IDENTITIES, not display

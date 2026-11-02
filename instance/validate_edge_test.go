@@ -1,6 +1,7 @@
 package instance_test
 
 import (
+	"fmt"
 	"slices"
 	"testing"
 
@@ -10,7 +11,6 @@ import (
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/instance"
 	"github.com/simon-lentz/yammm/internal/yammmtest"
-	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -19,15 +19,26 @@ import (
 // relation's (optional, many) multiplicity.
 func fkSchema(t *testing.T, optional, many bool) schema.Schema {
 	t.Helper()
-	return mustBuild(t, schema.NewBuilder().
-		WithName("test").
-		AddType("Company").
-		WithPrimaryKey("id", schema.NewStringConstraint()).
-		Done().
-		AddType("Person").
-		WithPrimaryKey("id", schema.NewStringConstraint()).
-		WithRelation("EMPLOYER", schema.NewTypeRef("", "Company", location.Span{}), optional, many).
-		Done())
+	multiplicity := "one"
+	switch {
+	case optional && many:
+		multiplicity = "many"
+	case optional:
+		multiplicity = "_:one"
+	case many:
+		multiplicity = "one:many"
+	}
+	return mustLoad(t, fmt.Sprintf(`schema "test"
+
+type Company {
+	id String primary
+}
+
+type Person {
+	id String primary
+	--> EMPLOYER (%s) Company
+}
+`, multiplicity))
 }
 
 // compositeFKSchema builds the canonical composite-PK FK schema —
@@ -35,16 +46,18 @@ func fkSchema(t *testing.T, optional, many bool) schema.Schema {
 // "enrollment" relation to Enrollment.
 func compositeFKSchema(t *testing.T) schema.Schema {
 	t.Helper()
-	return mustBuild(t, schema.NewBuilder().
-		WithName("test").
-		AddType("Enrollment").
-		WithPrimaryKey("region", schema.NewStringConstraint()).
-		WithPrimaryKey("studentId", schema.NewStringConstraint()).
-		Done().
-		AddType("Person").
-		WithPrimaryKey("id", schema.NewStringConstraint()).
-		WithRelation("ENROLLMENT", schema.NewTypeRef("", "Enrollment", location.Span{}), true, false).
-		Done())
+	return mustLoad(t, `schema "test"
+
+type Enrollment {
+	region String primary
+	studentId String primary
+}
+
+type Person {
+	id String primary
+	--> ENROLLMENT (_:one) Enrollment
+}
+`)
 }
 
 // issueProjection renders a result's issues as a stable, JSON-serializable

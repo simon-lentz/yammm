@@ -8,16 +8,13 @@ import (
 
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/graph"
-	"github.com/simon-lentz/yammm/immutable"
-	"github.com/simon-lentz/yammm/instance"
 	"github.com/simon-lentz/yammm/internal/instancetest"
 	"github.com/simon-lentz/yammm/schema"
 	"github.com/simon-lentz/yammm/snapshot"
 )
 
 // The reader holds a document's records to the facts graph.Add derives them
-// by, as graph.RebuildSnapshot holds its parts: a document that loads is one
-// Add could have built.
+// by: a document that loads is one Add could have built.
 const readerFactsSchema = `schema "facts"
 
 type Company {
@@ -56,38 +53,17 @@ func readerFactsDoc(t *testing.T) (schema.Schema, string) {
 	if res.HasErrors() {
 		t.Fatalf("load schema: %s", res)
 	}
-	typeID := func(name string) schema.TypeID {
-		ty, ok := s.Type(name)
-		if !ok {
-			t.Fatalf("no type %s", name)
-		}
-		return ty.ID()
-	}
-	to := func(key string) instance.ValidEdgeData {
-		return instance.NewValidEdgeData([]instance.ValidEdgeTarget{
-			instance.NewValidEdgeTarget(immutable.WrapKey([]any{key}), immutable.WrapProperties(nil)),
-		})
-	}
+	to := map[string]any{"_target_id": "c1"}
 	g := graph.New(s)
 	for _, r := range []diag.Result{
-		g.Add(t.Context(), instancetest.VI("Company", instancetest.TypeID(typeID("Company")), instancetest.PK("c1"),
-			instancetest.Props(map[string]any{"id": "c1"}))),
-		g.Add(t.Context(), instancetest.VI("Company", instancetest.TypeID(typeID("Company")), instancetest.PK("o1"),
-			instancetest.Props(map[string]any{"id": "o1"}))),
-		g.Add(t.Context(), instancetest.VI("Employee", instancetest.TypeID(typeID("Employee")), instancetest.PK("e1"),
-			instancetest.Props(map[string]any{"id": "e1"}),
-			instancetest.Edges(map[string]instance.ValidEdgeData{"WORKS_AT": to("c1"), "AUDITS": to("c1")}))),
-		g.Add(t.Context(), instancetest.VI("Order", instancetest.TypeID(typeID("Order")), instancetest.PK("o1"),
-			instancetest.Props(map[string]any{"id": "o1"}))),
-		g.AddComposed(t.Context(), typeID("Order"), `["o1"]`, "LINES",
-			instancetest.VI("Line", instancetest.TypeID(typeID("Line")), instancetest.NoKey(),
-				instancetest.Props(map[string]any{"note": "a"}))),
-		g.AddComposed(t.Context(), typeID("Order"), `["o1"]`, "TAGS",
-			instancetest.VI("Tag", instancetest.TypeID(typeID("Tag")), instancetest.PK("t1"),
-				instancetest.Props(map[string]any{"code": "t1"}))),
-		g.AddComposed(t.Context(), typeID("Order"), `["o1"]`, "TAGS",
-			instancetest.VI("Tag", instancetest.TypeID(typeID("Tag")), instancetest.PK("t2"),
-				instancetest.Props(map[string]any{"code": "t2"}))),
+		g.Add(t.Context(), instancetest.Valid(t, s, "Company", map[string]any{"id": "c1"})),
+		g.Add(t.Context(), instancetest.Valid(t, s, "Company", map[string]any{"id": "o1"})),
+		g.Add(t.Context(), instancetest.Valid(t, s, "Employee", map[string]any{"id": "e1", "works_at": to, "audits": []any{to}})),
+		g.Add(t.Context(), instancetest.Valid(t, s, "Order", map[string]any{
+			"id":    "o1",
+			"lines": []any{map[string]any{"note": "a"}},
+			"tags":  []any{map[string]any{"code": "t1"}, map[string]any{"code": "t2"}},
+		})),
 	} {
 		if r.HasErrors() {
 			t.Fatalf("building the graph: %s", r)
@@ -170,44 +146,28 @@ func TestLoad_HoldsRecordsToTheFactsAddDerivesThemBy(t *testing.T) {
 			diag.E_SNAPSHOT_MALFORMED, `names target`,
 		},
 		{
-			"a root duplicate whose conflict is another type's root at its key",
+			"a duplicate whose conflict is another type's root at its key",
 			[]readerEdit{{
 				noDuplicate,
 				`"duplicates":[{"type":{Order},"key":["o1"],"instance":{"key":["o1"],"properties":{"id":"o1"},"provenance":null},"conflict":{"type":{Company},"key":["o1"]}}]`,
 			}},
-			diag.E_SNAPSHOT_MALFORMED, `a root duplicate's conflict is the root at its own type and key`,
+			diag.E_SNAPSHOT_MALFORMED, `a duplicate's conflict is the root at its own type and key`,
 		},
 		{
-			"a root duplicate whose conflict is another root",
+			"a duplicate whose conflict is another root",
 			[]readerEdit{{
 				noDuplicate,
 				`"duplicates":[{"type":{Company},"key":["c1"],"instance":{"key":["c1"],"properties":{"id":"c1"},"provenance":null},"conflict":{"type":{Employee},"key":["e1"]}}]`,
 			}},
-			diag.E_SNAPSHOT_MALFORMED, `a root duplicate's conflict is the root at its own type and key`,
+			diag.E_SNAPSHOT_MALFORMED, `a duplicate's conflict is the root at its own type and key`,
 		},
 		{
-			"a duplicate in a keyless (many) slot",
+			"a part type's duplicate under the parent v0.21.1 writes",
 			[]readerEdit{{
 				noDuplicate,
-				`"duplicates":[{"type":{Line},"key":null,"instance":{"key":null,"properties":{"note":"a"},"provenance":null},"conflict":{"type":{Line},"key":null},"parent_type":{Order},"parent_key":["o1"],"relation":"LINES"}]`,
+				`"duplicates":[{"type":{Tag},"key":["t1"],"instance":{"key":["t1"],"properties":{"code":"t1"},"provenance":null},"conflict":{"type":{Tag},"key":["t1"]},"parent_type":{Order},"parent_key":["o1"],"relation":"TAGS"}]`,
 			}},
-			diag.E_SNAPSHOT_MALFORMED, `is under the keyless (many) composition "LINES", where no child conflicts`,
-		},
-		{
-			"a keyed (many) duplicate whose conflict is at another key",
-			[]readerEdit{{
-				noDuplicate,
-				`"duplicates":[{"type":{Tag},"key":["t1"],"instance":{"key":["t1"],"properties":{"code":"t1"},"provenance":null},"conflict":{"type":{Tag},"key":["t2"]},"parent_type":{Order},"parent_key":["o1"],"relation":"TAGS"}]`,
-			}},
-			diag.E_SNAPSHOT_MALFORMED, `its conflict is the child at its own key`,
-		},
-		{
-			"a composed duplicate of a type its slot does not declare",
-			[]readerEdit{{
-				noDuplicate,
-				`"duplicates":[{"type":{Line},"key":null,"instance":{"key":null,"properties":{"note":"a"},"provenance":null},"conflict":{"type":{Tag},"key":["t1"]},"parent_type":{Order},"parent_key":["o1"],"relation":"TAGS"}]`,
-			}},
-			diag.E_SNAPSHOT_TYPE_MISMATCH, `which the composition "TAGS" declares as`,
+			diag.E_SNAPSHOT_MALFORMED, `states a parent or a relation`,
 		},
 	} {
 		t.Run(c.name, func(t *testing.T) {
@@ -246,11 +206,7 @@ func TestLoad_AcceptsEachRecordAddMakes(t *testing.T) {
 			records(unresolvedAt("AUDITS", "empty", true, "null")),
 		}},
 		{"a target_missing record beside an edge", []readerEdit{records(unresolvedAt("AUDITS", "target_missing", true, `["c9"]`))}},
-		{"a keyed (many) duplicate at its own key", []readerEdit{{
-			noDuplicate,
-			`"duplicates":[{"type":{Tag},"key":["t1"],"instance":{"key":["t1"],"properties":{"code":"t1"},"provenance":null},"conflict":{"type":{Tag},"key":["t1"]},"parent_type":{Order},"parent_key":["o1"],"relation":"TAGS"}]`,
-		}}},
-		{"a root duplicate at its own type and key", []readerEdit{{
+		{"a duplicate at its own type and key", []readerEdit{{
 			noDuplicate,
 			`"duplicates":[{"type":{Company},"key":["c1"],"instance":{"key":["c1"],"properties":{"id":"c1"},"provenance":null},"conflict":{"type":{Company},"key":["c1"]}}]`,
 		}}},
@@ -310,17 +266,13 @@ func TestVerify_RecordFactsCompareCanonicalKeysAndInheritedAssociations(t *testi
 	if res.HasErrors() {
 		t.Fatalf("load schema: %s", res)
 	}
-	slotT, _ := s.Type("Slot")
-	clerkT, _ := s.Type("Clerk")
 	g := graph.New(s)
 	for _, r := range []diag.Result{
-		g.Add(t.Context(), instancetest.VI("Slot", instancetest.TypeID(slotT.ID()), instancetest.PK("s1"),
-			instancetest.Props(map[string]any{"id": "s1"}))),
-		g.Add(t.Context(), instancetest.VI("Clerk", instancetest.TypeID(clerkT.ID()), instancetest.PK("2024-01-01T00:00:00Z"),
-			instancetest.Props(map[string]any{"at": "2024-01-01T00:00:00Z"}),
-			instancetest.Edges(map[string]instance.ValidEdgeData{"BOOKS": instance.NewValidEdgeData([]instance.ValidEdgeTarget{
-				instance.NewValidEdgeTarget(immutable.WrapKey([]any{"s1"}), immutable.WrapProperties(nil)),
-			})}))),
+		g.Add(t.Context(), instancetest.Valid(t, s, "Slot", map[string]any{"id": "s1"})),
+		g.Add(t.Context(), instancetest.Valid(t, s, "Clerk", map[string]any{
+			"at":    "2024-01-01T00:00:00Z",
+			"books": map[string]any{"_target_id": "s1"},
+		})),
 	} {
 		if r.HasErrors() {
 			t.Fatalf("building the graph: %s", r)
@@ -397,14 +349,6 @@ func TestLoad_OneBreakDrawsOnlyItsOwnRefusal(t *testing.T) {
 				records(`{"source_type":{Employee},"source_key":["e1"],"relation":"KNOWS","target_type":{Employee},"target_key":["e1"],"required":false,"reason":"target_missing"}`),
 			},
 			"which a root holds",
-		},
-		{
-			"a composed duplicate under a slot named for an association",
-			[]readerEdit{
-				{`"properties":{"id":"e1"},`, `"properties":{"id":"e1"},"composed":{"KNOWS":[{"type":{Company},"key":["c5"],"properties":{"id":"c5"},"provenance":null}]},`},
-				{noDuplicate, `"duplicates":[{"type":{Employee},"key":["e9"],"instance":{"key":["e9"],"properties":{"id":"e9"},"provenance":null},"conflict":{"type":{Company},"key":["c5"]},"parent_type":{Employee},"parent_key":["e1"],"relation":"KNOWS"}]`},
-			},
-			`which the composition "KNOWS"`,
 		},
 	} {
 		t.Run(c.name, func(t *testing.T) {

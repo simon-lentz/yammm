@@ -28,15 +28,15 @@
 // so on a filesystem that distinguishes normalization forms it may name no
 // file; read a file through the host path it was derived from.
 //
-// Create via NewCanonicalPath or MustCanonicalPath. The type uses an unexported
+// Create via NewCanonicalPath. The type uses an unexported
 // field to enforce construction through validated constructors only.
 //
 // # Host paths and identities
 //
 // [ResolveHostPath] answers one question — what does the filesystem call this
 // file — and every file-backed identity is that answer, normalized. The
-// constructors [SourceIDFromPath], [ResolveSourcePath], [NewCanonicalPath],
-// [CanonicalPath.Join] and [CanonicalizePathForSourceID] all resolve. Two
+// constructors [SourceIDFromPath], [ResolveSourcePath], [NewCanonicalPath] and
+// [CanonicalPath.Join] all resolve. Two
 // spellings that resolve to one host path therefore give one identity: the
 // spelling the filesystem holds, written in NFC, with a missing tail as typed. A file that two host paths reach — a
 // hard link, a firmlink or a bind mount — keeps two identities.
@@ -51,8 +51,10 @@
 //
 // This is a decision, not an oversight, and for a ".." the path itself holds it
 // is the same decision on every host. A ".." inside a link's target is another
-// matter, stated below. Windows normalizes a Win32 path's ".." textually before
-// the object manager sees it, so the text rule IS the host rule there. A POSIX
+// matter, stated below. Microsoft's path documentation states that Windows
+// normalizes a path it is handed, unless the path starts exactly with \\?\, and
+// removes each ".." with the segment before it, so the text rule IS the host rule
+// there. A POSIX
 // kernel instead takes the parent of the directory it actually reached, so on
 // Unix this package and the shell can name two different files for one path.
 //
@@ -79,10 +81,9 @@
 // concurrent lookup of another hard link of the same file rewrites. A firmlink is not a symbolic link, so
 // /System/Volumes/Data/Users and /Users stay two spellings, as a bind mount
 // does on Linux. On Windows the answer is the final path of the file
-// (GetFinalPathNameByHandleW), read from a handle opened with no access: the
-// kernel resolves it through every symbolic link, junction and mount point and
-// spells it in the volume's case with long names, so a path through a junction
-// gives the junction target's identity. An SMB component the user may not query
+// (GetFinalPathNameByHandleW), read from a handle opened with no access. That is
+// the path fully resolved, so a path through a junction gives the junction
+// target's identity. An SMB component the user may not query
 // falls back to the name as opened, which is not normalized. filepath.EvalSymlinks is not used
 // there: it follows a link named inside a target before a ".." that follows
 // it, where Windows evaluates the ".." first. On Linux filepath.EvalSymlinks
@@ -112,10 +113,9 @@
 // SourceID identifies a source within a build, up to NFC: on a host that keeps
 // both forms of a name, two files named in NFC and NFD take one SourceID. It
 // supports two modes:
-//   - File-backed: Created via SourceIDFromPath, MustSourceIDFromPath or
-//     ResolveSourcePath.
+//   - File-backed: Created via SourceIDFromPath or ResolveSourcePath.
 //     Stores a CanonicalPath directly.
-//   - Synthetic: Created via NewSourceID or MustNewSourceID for non-file sources
+//   - Synthetic: Created via NewSourceID for non-file sources
 //     like "<stdin>", "inline:test", or "test://unit/person.yammm".
 //
 // SourceID is comparable and safe for use as map keys. Case is not folded, it
@@ -140,18 +140,16 @@
 //   - Start: Inclusive start position
 //   - End: Exclusive end position (equals Start for point spans)
 //
-// Create spans via Point, PointWithByte, Range, or RangeWithBytes. The Range
-// constructors panic if end is before start by an order both positions know: the
-// line and column, and for RangeWithBytes the byte offsets too. A position with
+// Create spans via Point, PointWithByte, or RangeWithBytes. RangeWithBytes panics
+// if end is before start by an order both positions know: the byte offsets, or
+// the line and column. A position with
 // a zero line or column knows no line and column order, and one with both zero
 // knows no byte order ([Position.HasByte]). A span whose
-// two orders disagree is unsafe whichever one a reader takes, so it is refused
-// at construction rather than carried.
+// two orders disagree is unsafe whichever one a reader takes, so RangeWithBytes
+// refuses it. A Span struct literal gets no such check.
 //
-// Use IsZero() to check for "no location", IsValid() to check for LSP
-// compatibility, and IsGeometricallySafe() to validate spans from untrusted
-// sources or from struct literals, which the constructors never saw. It asks
-// the same question of both orders.
+// Use IsZero() to check for "no location" and IsValid() to check for LSP
+// compatibility.
 //
 // # RelatedInfo
 //
@@ -181,5 +179,5 @@
 //
 // The sub-package carries provenance paths, the x/text import is NFC
 // normalization, and the x/sys import, made on Windows alone, is the
-// final-path call. It can be imported by all other packages without cycles.
+// final-path call.
 package location

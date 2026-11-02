@@ -1,7 +1,6 @@
 package expr_test
 
 import (
-	"regexp"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -108,13 +107,6 @@ func TestStringLiteral(t *testing.T) {
 		_, ok := expr.StringLiteral(expr.Op("Len"))
 		assert.False(t, ok)
 	})
-}
-
-func TestIsRegexpLiteral(t *testing.T) {
-	re := regexp.MustCompile("test")
-	assert.True(t, expr.IsRegexpLiteral(expr.NewLiteral(re)))
-	assert.False(t, expr.IsRegexpLiteral(expr.NewLiteral("test")))
-	assert.False(t, expr.IsRegexpLiteral(expr.Op("+")))
 }
 
 func TestArgsLiteral(t *testing.T) {

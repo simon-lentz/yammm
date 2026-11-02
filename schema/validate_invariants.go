@@ -123,8 +123,7 @@ func (t staticType) typeName() string {
 }
 
 // unionTypes is the set of both operands' types, deduplicated and ordered by
-// identity so a union built in either order is one value. Identity, not the
-// record: two loads sharing a registry can hold two objects for one type.
+// identity so a union built in either order is one value.
 func unionTypes(a, b []Type) []Type {
 	out := make([]Type, 0, len(a)+len(b))
 	out = append(out, a...)
@@ -148,7 +147,8 @@ func (t staticType) element() staticType {
 // selfVariable is the name both layers bind to the instance, held once in
 // schema/expr so the completer, the checker and the evaluator cannot drift:
 // the evaluator's PropertyScopeOf seeds it and the checker's root scope binds
-// it. A member so named could never be read, so completion refuses it.
+// it. Neither the bare name nor $self reaches a member so named, so completion
+// refuses it.
 const selfVariable = expr.SelfVariable
 
 // staticScope is the lambda bindings in force at one point of the walk. Names
@@ -428,7 +428,7 @@ func (c *completer) validateInvariantExpressions() {
 		if c.hasUnresolvedSupertype(t) {
 			continue
 		}
-		// self is a bound variable at evaluation, where PropertyScopeFromMap
+		// self is a bound variable at evaluation, where PropertyScopeOf
 		// seeds it, so the checker binds it too and a parameter named self
 		// shadows it through child exactly as WithVar does.
 		scope := (&staticScope{}).child(selfVariable, instanceOf(t))
@@ -485,7 +485,10 @@ func (c *completer) typeSExpr(sexpr expr.SExpr, sc *staticScope, owner Type, inv
 
 	switch op {
 	case "p":
-		return c.typeProperty(children, sc, owner, inv)
+		// A call named p shares this op and holds its operand and call parts.
+		if len(children) == 1 {
+			return c.typeProperty(children, sc, owner, inv)
+		}
 	case "$":
 		return c.typeVariable(children, sc, owner, inv)
 	case ".":
@@ -501,14 +504,6 @@ func (c *completer) typeSExpr(sexpr expr.SExpr, sc *staticScope, owner Type, inv
 		}
 		return listOf(elem)
 	case "?":
-		if len(children) != 3 {
-			c.invariantErrorf(inv, diag.E_INVALID_INVARIANT,
-				"a conditional takes a condition and two branches in invariant %q on type %q", inv.Name(), owner.Name())
-			for _, child := range children {
-				c.typeExpr(child, sc, owner, inv)
-			}
-			return unknownType
-		}
 		c.typeExpr(children[0], sc, owner, inv)
 		then := c.typeExpr(children[1], sc, owner, inv)
 		otherwise := c.typeExpr(children[2], sc, owner, inv)
@@ -583,13 +578,7 @@ func (c *completer) walkCallParts(children []expr.Expression, sc *staticScope, o
 // typeProperty resolves a bare name: a member of the owner, else a lambda
 // variable named without its sigil, as the evaluator's scope resolves it.
 func (c *completer) typeProperty(children []expr.Expression, sc *staticScope, owner Type, inv Invariant) staticType {
-	if len(children) != 1 {
-		return unknownType
-	}
-	name, ok := expr.StringLiteral(children[0])
-	if !ok {
-		return unknownType
-	}
+	name, _ := expr.StringLiteral(children[0])
 	// A variable of exactly this name shadows a same-named member, as the
 	// evaluator's scope chain resolves a bare name (docs/SPEC.md).
 	if t, found := sc.lookupVar(name); found {
@@ -626,13 +615,7 @@ func (c *completer) relationSpelled(owner, t Type, name string, inv Invariant) b
 // numeric variable evaluates to nil when unbound; any other unbound name is a
 // guaranteed evaluation error, so it is refused here.
 func (c *completer) typeVariable(children []expr.Expression, sc *staticScope, owner Type, inv Invariant) staticType {
-	if len(children) != 1 {
-		return unknownType
-	}
-	name, ok := expr.StringLiteral(children[0])
-	if !ok {
-		return unknownType
-	}
+	name, _ := expr.StringLiteral(children[0])
 	if t, found := sc.lookupVar(name); found {
 		return t
 	}
@@ -673,20 +656,8 @@ func isNumericVar(name string) bool {
 
 // typeMember resolves receiver.name against what the receiver is known to be.
 func (c *completer) typeMember(children []expr.Expression, sc *staticScope, owner Type, inv Invariant) staticType {
-	if len(children) != 2 {
-		c.invariantErrorf(inv, diag.E_INVALID_INVARIANT,
-			"member access takes a receiver and one name in invariant %q on type %q", inv.Name(), owner.Name())
-		for _, child := range children {
-			c.typeExpr(child, sc, owner, inv)
-		}
-		return unknownType
-	}
 	recv := c.typeExpr(children[0], sc, owner, inv)
-	name, ok := expr.StringLiteral(children[1])
-	if !ok {
-		c.typeExpr(children[1], sc, owner, inv)
-		return unknownType
-	}
+	name, _ := expr.StringLiteral(children[1])
 
 	switch recv.kind {
 	case kindInstance:

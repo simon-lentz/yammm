@@ -135,9 +135,6 @@ linters:
       - path: "format/.*"
         linters:
           - revive
-      - path: "internal/trace/.*"
-        linters:
-          - revive
       - path: "schema/build/.*"
         linters:
           - revive

@@ -10,8 +10,8 @@ import (
 	jsonadapter "github.com/simon-lentz/yammm/adapter/json"
 	"github.com/simon-lentz/yammm/adapter/neo4j"
 	"github.com/simon-lentz/yammm/graph"
-	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/instance"
+	"github.com/simon-lentz/yammm/internal/instancetest"
 	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
 	"github.com/simon-lentz/yammm/snapshot"
@@ -64,40 +64,7 @@ func TestMessages_RepeatANameCutToItsHead(t *testing.T) {
 	_, r := v.ValidateOne(ctx, longText, instance.RawInstance{Properties: map[string]any{"id": "a"}})
 	c.result("validator", r)
 
-	g := graph.New(s)
-	bypass := func(key string, props map[string]any, edges map[string]instance.ValidEdgeData) instance.ValidInstance {
-		return instance.NewValidInstance("T", typ.ID(), immutable.WrapKey([]any{key}), immutable.WrapProperties(props), edges, nil, location.Provenance{})
-	}
-	c.result("graph.Add", g.Add(ctx, bypass("h1", map[string]any{"id": "h1", longText: "x"}, nil)))
-	c.result("graph.Add", g.Add(ctx, bypass("h2", map[string]any{"id": "h2"},
-		map[string]instance.ValidEdgeData{longText: instance.NewValidEdgeData(nil)})))
-	c.result("graph.Add", g.Add(ctx, bypass("h3", map[string]any{"id": "h3"},
-		map[string]instance.ValidEdgeData{"LINKS": instance.NewValidEdgeData([]instance.ValidEdgeTarget{
-			instance.NewValidEdgeTarget(immutable.WrapKey([]any{"u"}), immutable.WrapProperties(map[string]any{longText: 1})),
-		})})))
-	// The parent is held, so AddComposed reaches the relation and refuses it.
-	if r := g.Add(ctx, bypass("h4", map[string]any{"id": "h4"}, nil)); r.HasErrors() {
-		t.Fatalf("graph.Add h4: %s", r)
-	}
-	c.result("graph.AddComposed", g.AddComposed(ctx, typ.ID(), `["h4"]`, longText,
-		instance.NewValidInstance("P", typ.ID(), immutable.WrapKey([]any{"c"}), immutable.WrapProperties(map[string]any{"pid": "c"}), nil, nil, location.Provenance{})))
-
-	_, r = graph.RebuildSnapshot(s, graph.SnapshotParts{
-		Types: []schema.TypeID{typ.ID()},
-		Instances: []graph.InstanceParts{{
-			TypeID: typ.ID(), PrimaryKey: immutable.WrapKey([]any{"r"}),
-			Properties: immutable.WrapProperties(map[string]any{"id": "r"}),
-			Composed:   map[string][]graph.InstanceParts{longText: nil},
-		}},
-		Edges: []graph.EdgeParts{{Relation: longText, SourceType: typ.ID(), SourceKey: immutable.WrapKey([]any{"r"}), TargetKey: immutable.WrapKey([]any{"u"})}},
-		Unresolved: []graph.UnresolvedParts{
-			{SourceType: typ.ID(), SourceKey: immutable.WrapKey([]any{"r"}), Relation: "NEEDS", Reason: longText},
-			{SourceType: typ.ID(), SourceKey: immutable.WrapKey([]any{"r"}), Relation: longText, Reason: "absent"},
-		},
-	})
-	c.result("graph.RebuildSnapshot", r)
-
-	source := location.MustNewSourceID("test://names.json")
+	source := location.NewSourceID("test://names.json")
 	for _, doc := range []string{
 		`{"T": [{"id": "a", "` + longText + `": 1, "` + longText + `": 2}]}`,
 		`{"T": [], "` + longText + `": [], "` + longText + `": []}`,
@@ -107,7 +74,7 @@ func TestMessages_RepeatANameCutToItsHead(t *testing.T) {
 		c.result("json", r)
 	}
 
-	csvSource := location.MustNewSourceID("test://names.csv")
+	csvSource := location.NewSourceID("test://names.csv")
 	_, r = csvadapter.New().ParseTyped(ctx, csvSource, "T", strings.NewReader("id,"+longText+","+longText+"\na,1,2\n"), typ)
 	c.result("csv", r)
 	_, r = csvadapter.New(csvadapter.WithTypeColumn("type")).ParseWithTypeColumn(ctx, csvSource,
@@ -126,8 +93,7 @@ func TestMessages_RepeatANameCutToItsHead(t *testing.T) {
 	c.result("csv", r)
 
 	held := graph.New(s)
-	u, _ := s.Type("U")
-	held.Add(ctx, instance.NewValidInstance("U", u.ID(), immutable.WrapKey([]any{"u"}), immutable.WrapProperties(map[string]any{"id": "u"}), nil, nil, location.Provenance{}))
+	held.Add(ctx, instancetest.Valid(t, s, "U", map[string]any{"id": "u"}))
 	inst, vr := v.ValidateOne(ctx, "T", instance.RawInstance{Properties: map[string]any{
 		"id": "a", "links": []any{map[string]any{"_target_id": "u", "w": 1}},
 	}})
@@ -186,8 +152,6 @@ func TestMessages_RepeatANameCutToItsHead(t *testing.T) {
 		c.result("csv", r)
 	}
 
-	_, r = v.ValidateForComposition(ctx, "T", longText, []instance.RawInstance{{Properties: map[string]any{"pid": "c"}}})
-	c.result("validator", r)
 	_, err := instance.BuilderFor(s, longText)
 	c.err("instance.SchemaBuilder", err)
 	b, err := instance.BuilderFor(s, "T")
@@ -199,33 +163,6 @@ func TestMessages_RepeatANameCutToItsHead(t *testing.T) {
 	b, _ = instance.BuilderFor(s, "T")
 	_, err = b.Property("id", "a").EdgeTo(longText, "u").Build()
 	c.err("instance.SchemaBuilder", err)
-
-	undeclared := schema.NewTypeID(typ.ID().SchemaPath(), longText)
-	c.result("graph.AddComposed", g.AddComposed(ctx, undeclared, `["h4"]`, "PARTS",
-		instance.NewValidInstance("P", typ.ID(), immutable.WrapKey([]any{"c"}), immutable.WrapProperties(map[string]any{"pid": "c"}), nil, nil, location.Provenance{})))
-	c.result("graph.Add", g.Add(ctx, bypass("h5", map[string]any{"id": "h5"}, nil)))
-	c.result("graph.AddComposed", g.AddComposed(ctx, typ.ID(), `["h5"]`, "PARTS",
-		instance.NewValidInstance("P", undeclared, immutable.WrapKey([]any{"c"}), immutable.WrapProperties(map[string]any{"pid": "c"}), nil, nil, location.Provenance{})))
-	_, r = graph.RebuildSnapshot(s, graph.SnapshotParts{
-		Types: []schema.TypeID{typ.ID()},
-		Instances: []graph.InstanceParts{{
-			TypeID: undeclared, PrimaryKey: immutable.WrapKey([]any{"r"}),
-			Properties: immutable.WrapProperties(map[string]any{"id": "r"}),
-		}},
-		Duplicates: []graph.DuplicateParts{{
-			Instance: graph.InstanceParts{
-				TypeID: typ.ID(), PrimaryKey: immutable.WrapKey([]any{"r"}),
-				Properties: immutable.WrapProperties(map[string]any{"id": "r"}),
-			},
-			ParentType: undeclared, ParentKey: immutable.WrapKey([]any{longText}),
-		}},
-	})
-	c.result("graph.RebuildSnapshot", r)
-
-	_, r = csvadapter.New(csvadapter.WithListSeparator(`\`+longText)).ParseTyped(ctx, csvSource, "T", strings.NewReader("id\na\n"), typ)
-	c.result("csv", r)
-	_, r = csvadapter.New(csvadapter.WithListSeparator(longText+"\r\n")).ParseTyped(ctx, csvSource, "T", strings.NewReader("id\na\n"), typ)
-	c.result("csv", r)
 
 	_, err = neo4j.CoerceParams(map[string]any{longText: "x"}, neo4j.ParamTypes{longText: schema.NewFloatConstraint()})
 	c.err("neo4j.CoerceParams", err)
@@ -245,7 +182,7 @@ func TestMessages_RepeatANameCutToItsHead(t *testing.T) {
 	c.result("snapshot.Info", r)
 
 	for _, where := range []string{
-		"validator", "instance.SchemaBuilder", "graph.Add", "graph.AddComposed", "graph.RebuildSnapshot", "json", "csv",
+		"validator", "instance.SchemaBuilder", "json", "csv",
 		"neo4j.CoerceParams", "snapshot.Marshal", "snapshot.Load", "snapshot.Info",
 	} {
 		if c.judged[where] == 0 {

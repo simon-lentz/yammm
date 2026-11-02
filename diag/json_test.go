@@ -85,7 +85,7 @@ func TestFormatIssueJSON_AllSeverities(t *testing.T) {
 }
 
 func TestFormatIssueJSON_WithSpan(t *testing.T) {
-	source := location.MustNewSourceID("test://schema.yammm")
+	source := location.NewSourceID("test://schema.yammm")
 	issue := NewIssue(Error, E_SYNTAX, "error").
 		WithSpan(location.Span{
 			Source: source,
@@ -114,7 +114,7 @@ func TestFormatIssueJSON_WithSpan(t *testing.T) {
 // to ensure clean test vectors. The end byte is computed to stay in the same
 // domain as start (unknown stays unknown, known stays known with offset).
 func TestFormatIssueJSON_ByteOffsetEncoding(t *testing.T) {
-	source := location.MustNewSourceID("test://file.yammm")
+	source := location.NewSourceID("test://file.yammm")
 
 	tests := []struct {
 		name        string
@@ -205,7 +205,7 @@ func TestFormatIssueJSON_ByteOffsetEncoding(t *testing.T) {
 // UnknownPosition, whose Byte is -1, so the byte field is omitted from JSON
 // output.
 func TestFormatIssueJSON_UnknownPosition(t *testing.T) {
-	source := location.MustNewSourceID("test://file.json")
+	source := location.NewSourceID("test://file.json")
 
 	// Span with known source but unknown positions.
 	// Use UnknownPosition() which sets Line=0, Column=0, Byte=-1.
@@ -269,7 +269,7 @@ func TestFormatIssueJSON_UnknownPosition(t *testing.T) {
 // "byte": 0 even though Position{}.Byte == 0. The wire conversion checks
 // HasByte() which returns false when IsZero() is true, avoiding the footgun.
 func TestFormatIssueJSON_PositionZeroValueFootgun(t *testing.T) {
-	source := location.MustNewSourceID("test://file.json")
+	source := location.NewSourceID("test://file.json")
 
 	// Position{} has Byte=0 (Go zero value), but IsZero() returns true.
 	// The wire conversion uses HasByte() which returns false for zero positions,
@@ -318,7 +318,7 @@ func TestFormatIssueJSON_WithHint(t *testing.T) {
 }
 
 func TestFormatIssueJSON_WithRelated(t *testing.T) {
-	source := location.MustNewSourceID("test://file.yammm")
+	source := location.NewSourceID("test://file.yammm")
 	issue := NewIssue(Error, E_DUPLICATE_TYPE, "collision").
 		WithRelated(
 			location.RelatedInfo{
@@ -507,7 +507,7 @@ func TestFormatResultJSON_WithLimit(t *testing.T) {
 }
 
 func TestFormatIssueJSON_CompleteIssue(t *testing.T) {
-	source := location.MustNewSourceID("test://complete.yammm")
+	source := location.NewSourceID("test://complete.yammm")
 	issue := NewIssue(Error, E_DUPLICATE_TYPE, "complete test").
 		WithSpan(location.Span{
 			Source: source,
@@ -567,7 +567,7 @@ func TestFormatIssueJSON_RelatedWithoutSpan(t *testing.T) {
 
 // TestJSON_RoundTrip verifies that the JSON structure is stable.
 func TestJSON_RoundTrip(t *testing.T) {
-	source := location.MustNewSourceID("test://roundtrip.yammm")
+	source := location.NewSourceID("test://roundtrip.yammm")
 	original := NewIssue(Error, E_SYNTAX, "test message").
 		WithSpan(location.Span{
 			Source: source,

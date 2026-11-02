@@ -25,25 +25,7 @@ var errTooManyLinks = errors.New("too many levels of symbolic links")
 // The package documentation states what it answers for a path that does not
 // exist, one the process cannot traverse and one that can never exist.
 func ResolveHostPath(p string) (string, error) {
-	return resolveHostPath(p, false)
-}
-
-// ResolveSourcePath returns the identity of p and the host path it was derived
-// from, out of one resolution, so the two cannot disagree. It is
-// [SourceIDFromPath] for a caller that also reads the file, and it fails where
-// [ResolveHostPath] does.
-func ResolveSourcePath(p string) (SourceID, string, error) {
-	host, err := resolveHostPath(p, false)
-	if err != nil {
-		return SourceID{}, "", err
-	}
-	return SourceID{cp: identityOf(host)}, host, nil
-}
-
-// resolveHostPath is ResolveHostPath, where requireExist refuses a path whose
-// leaf the process cannot find rather than keeping it as typed.
-func resolveHostPath(p string, requireExist bool) (string, error) {
-	host, err := walkHostPath(p, requireExist)
+	host, err := walkHostPath(p)
 	if err == nil && !utf8.ValidString(host) {
 		// The working directory, a name on disk or a dangling link's target
 		// can hold bytes the typed path does not.
@@ -52,9 +34,21 @@ func resolveHostPath(p string, requireExist bool) (string, error) {
 	return host, err
 }
 
-// walkHostPath resolves p as resolveHostPath describes, before the result is
+// ResolveSourcePath returns the identity of p and the host path it was derived
+// from, out of one resolution, so the two cannot disagree. It is
+// [SourceIDFromPath] for a caller that also reads the file, and it fails where
+// [ResolveHostPath] does.
+func ResolveSourcePath(p string) (SourceID, string, error) {
+	host, err := ResolveHostPath(p)
+	if err != nil {
+		return SourceID{}, "", err
+	}
+	return SourceID{cp: identityOf(host)}, host, nil
+}
+
+// walkHostPath resolves p as [ResolveHostPath] describes, before the result is
 // judged.
-func walkHostPath(p string, requireExist bool) (string, error) {
+func walkHostPath(p string) (string, error) {
 	if p == "" {
 		return "", ErrEmptyPath
 	}
@@ -84,9 +78,6 @@ func walkHostPath(p string, requireExist bool) (string, error) {
 			}
 			// Removed between the stat and the spelling: walk on as absent.
 			err = serr
-		}
-		if requireExist {
-			return "", fmt.Errorf("resolve %q: %w", p, err)
 		}
 		switch {
 		case errors.Is(err, fs.ErrNotExist):

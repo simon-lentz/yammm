@@ -77,7 +77,7 @@ func TestDriverZone_AgreeingNameIsKept(t *testing.T) {
 // zero, so a pre-1970 instant with a time of day landed a day late — measured
 // against a live server as 1969-07-20T18:00:00Z stored as 1969-07-21.
 //
-// It drives [Coerce], not calendarDate, and covers all THREE Date arms: the
+// It drives [coerceScalar], not calendarDate, and covers all THREE Date arms: the
 // rule holds only where it is wired in, and the dbtype.Date arm passed its
 // input through for a release after the time.Time arm was fixed.
 func TestCoerceDate_KeepsTheWallClockDate(t *testing.T) {
@@ -105,19 +105,19 @@ func TestCoerceDate_KeepsTheWallClockDate(t *testing.T) {
 
 	for _, arm := range arms {
 		for _, tc := range instants {
-			out, err := Coerce(schema.DateConstraint{}, arm.wrap(tc.in))
+			out, err := coerceScalar(schema.DateConstraint{}, arm.wrap(tc.in))
 			if err != nil {
-				t.Errorf("%s/%s: Coerce: %v", arm.arm, tc.name, err)
+				t.Errorf("%s/%s: coerceScalar: %v", arm.arm, tc.name, err)
 				continue
 			}
 			d, ok := out.(dbtype.Date)
 			if !ok {
-				t.Errorf("%s/%s: Coerce returned %T, want dbtype.Date", arm.arm, tc.name, out)
+				t.Errorf("%s/%s: coerceScalar returned %T, want dbtype.Date", arm.arm, tc.name, out)
 				continue
 			}
 			got := time.Time(d)
 			if got.Format(time.DateOnly) != tc.want {
-				t.Errorf("%s/%s: Coerce(%s) = %s, want %s",
+				t.Errorf("%s/%s: coerceScalar(%s) = %s, want %s",
 					arm.arm, tc.name, tc.in.Format(time.RFC3339), got.Format(time.DateOnly), tc.want)
 			}
 			if h, m, sec := got.Clock(); h|m|sec != 0 {
@@ -129,11 +129,11 @@ func TestCoerceDate_KeepsTheWallClockDate(t *testing.T) {
 
 	// The string arm parses with time.DateOnly, which is midnight by
 	// construction; it is here so all three arms are named in one place.
-	out, err := Coerce(schema.DateConstraint{}, "1969-07-20")
+	out, err := coerceScalar(schema.DateConstraint{}, "1969-07-20")
 	if err != nil {
-		t.Fatalf("string arm: Coerce: %v", err)
+		t.Fatalf("string arm: coerceScalar: %v", err)
 	}
 	if got := time.Time(out.(dbtype.Date)); got.Format(time.DateOnly) != "1969-07-20" {
-		t.Errorf("string arm: Coerce = %s, want 1969-07-20", got.Format(time.DateOnly))
+		t.Errorf("string arm: coerceScalar = %s, want 1969-07-20", got.Format(time.DateOnly))
 	}
 }

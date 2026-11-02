@@ -1,18 +1,14 @@
 package snapshot_test
 
 import (
-	"maps"
 	"slices"
 	"testing"
-	"unicode/utf8"
 
-	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/graph"
-	"github.com/simon-lentz/yammm/immutable"
-	"github.com/simon-lentz/yammm/instance"
 	"github.com/simon-lentz/yammm/internal/instancetest"
 	"github.com/simon-lentz/yammm/schema"
 	"github.com/simon-lentz/yammm/snapshot"
+	"github.com/simon-lentz/yammm/snapshot/snapshottest"
 )
 
 const utf8WireSchema = `schema "utf8wire"
@@ -33,101 +29,29 @@ type Holder {
 }
 `
 
-// wireText is a named type over string, which the immutable layer holds as it
-// arrived.
-type wireText string
-
-// utf8WireSnapshot builds Holder h1 through instancetest, which runs no
-// validation, holding props beside its key and one LINK to target carrying
-// label. Target t1 is in the graph, so a LINK to any other key is unresolved.
-func utf8WireSnapshot(t *testing.T, props map[string]any, target string, label any) (schema.Schema, graph.Snapshot) {
+// utf8WireSnapshot holds Holder h1 with text in its text and in the last element of
+// its tags, and one LINK to Target t1 carrying text as its label.
+func utf8WireSnapshot(t *testing.T, text string) (schema.Schema, graph.Snapshot) {
 	t.Helper()
 	s, res := schema.LoadString(t.Context(), utf8WireSchema, "utf8wire.yammm")
 	if res.HasErrors() {
 		t.Fatalf("load schema: %s", res)
 	}
-	targetT, _ := s.Type("Target")
-	holderT, _ := s.Type("Holder")
-	all := map[string]any{"id": "h1"}
-	maps.Copy(all, props)
-	g := graph.New(s)
-	for _, inst := range []instance.ValidInstance{
-		instancetest.VI("Target", instancetest.TypeID(targetT.ID()), instancetest.PK("t1"),
-			instancetest.Props(map[string]any{"key": "t1"})),
-		instancetest.VI("Holder", instancetest.TypeID(holderT.ID()), instancetest.PK("h1"),
-			instancetest.Props(all),
-			instancetest.Edges(map[string]instance.ValidEdgeData{
-				"LINK": instance.NewValidEdgeData([]instance.ValidEdgeTarget{
-					instance.NewValidEdgeTarget(immutable.WrapKey([]any{target}), immutable.WrapProperties(map[string]any{"label": label})),
-				}),
-			})),
-	} {
-		if r := g.Add(t.Context(), inst); r.HasErrors() {
-			t.Fatalf("Add: %s", r)
-		}
-	}
-	return s, g.Snapshot()
-}
-
-// The wire is JSON, whose encoder writes each byte of an invalid UTF-8
-// sequence as U+FFFD: a document holding such a string would read back as
-// another value. A validated string is valid UTF-8, so only a bypass-built
-// snapshot holds one, and Marshal refuses it by name wherever it stands.
-func TestMarshal_RefusesAStringThatIsNotValidUTF8ByName(t *testing.T) {
-	t.Parallel()
-	const bad = "a\xffb"
-	holder := snapshot.TypeRef{Schema: "utf8wire", Name: "Holder"}.String()
-
-	for _, c := range []struct {
-		name     string
-		props    map[string]any
-		target   string
-		label    any
-		property string
-		relation string
-	}{
-		{"a String property", map[string]any{"text": bad}, "t1", "ok", "text", ""},
-		{"a named type over string", map[string]any{"text": wireText(bad)}, "t1", "ok", "text", ""},
-		{"a list element", map[string]any{"tags": []any{"ok", bad}}, "t1", "ok", "tags", ""},
-		{"a value the constraint cannot render", map[string]any{"day": bad}, "t1", "ok", "day", ""},
-		{"a map value", map[string]any{"text": map[string]any{"x": bad}}, "t1", "ok", "text", ""},
-		{"a map key", map[string]any{"text": map[string]any{bad: "x"}}, "t1", "ok", "text", ""},
-		{"an edge property", nil, "t1", bad, "label", "LINK"},
-		{"an unresolved record's property", nil, "t9", bad, "label", "LINK"},
-	} {
-		t.Run(c.name, func(t *testing.T) {
-			t.Parallel()
-			_, snap := utf8WireSnapshot(t, c.props, c.target, c.label)
-			data, res := snapshot.Marshal(t.Context(), snap)
-			if data != nil {
-				t.Errorf("Marshal wrote %d bytes for a string the wire cannot carry", len(data))
-			}
-			want := map[string]string{
-				diag.DetailKeyTypeName:     holder,
-				diag.DetailKeyPrimaryKey:   `["h1"]`,
-				diag.DetailKeyPropertyName: c.property,
-			}
-			if c.relation != "" {
-				want[diag.DetailKeyRelationName] = c.relation
-			}
-			requireUnwritable(t, res, want, `property "`+c.property+`"`, "a string that is not valid UTF-8")
-		})
-	}
+	holder := instancetest.Valid(t, s, "Holder", map[string]any{
+		"id": "h1", "text": text, "tags": []any{"ok", text},
+		"link": []any{map[string]any{"_target_key": "t1", "label": text}},
+	})
+	target := instancetest.Valid(t, s, "Target", map[string]any{"key": "t1"})
+	return s, snapshottest.BuildSnapshot(t, s, target, holder)
 }
 
 // What Marshal writes Load reads back as the bytes the snapshot holds, U+FFFD
-// included; a string it cannot write so is refused, never rewritten.
+// and a character past the Basic Multilingual Plane included.
 func TestMarshal_AStringReadsBackAsTheBytesHeld(t *testing.T) {
 	t.Parallel()
-	for _, text := range []string{"a�b", "é✓", "a\xffb", "\xc3"} {
-		s, snap := utf8WireSnapshot(t, map[string]any{"text": text, "tags": []any{"ok", text}}, "t1", text)
+	for _, text := range []string{"a\uFFFDb", "\u00e9\u2713", "\U0001F600"} {
+		s, snap := utf8WireSnapshot(t, text)
 		data, res := snapshot.Marshal(t.Context(), snap)
-		if !utf8.ValidString(text) {
-			if data != nil || !res.HasCode(diag.E_SNAPSHOT_MALFORMED) {
-				t.Errorf("Marshal(%q) wrote %d bytes, %s; want the refusal", text, len(data), res)
-			}
-			continue
-		}
 		if res.HasErrors() {
 			t.Fatalf("Marshal(%q) refused valid text: %s", text, res)
 		}

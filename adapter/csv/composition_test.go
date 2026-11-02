@@ -2,7 +2,6 @@ package csv
 
 import (
 	"context"
-	"io"
 	"strings"
 	"testing"
 
@@ -72,7 +71,7 @@ func lines(skus ...string) []any {
 
 // A CSV row is flat, so a composed child has no column. Both writers refuse
 // such a snapshot, naming the first offender in type order, then key order,
-// then composition order, before any output: WriteSnapshot requests no writer,
+// then composition order, before any output:
 // not even Account's, which sorts first and holds no child.
 func TestSnapshotWriters_RefuseAComposedChild(t *testing.T) {
 	t.Parallel()
@@ -102,19 +101,6 @@ func TestSnapshotWriters_RefuseAComposedChild(t *testing.T) {
 		requireRefusal(t, err)
 		if out != nil {
 			t.Errorf("a refused export returned output: %q", out)
-		}
-	})
-
-	t.Run("WriteSnapshot requests no writer", func(t *testing.T) {
-		t.Parallel()
-		var requested []string
-		err := New().WriteSnapshot(context.Background(), func(typeName string) (io.Writer, error) {
-			requested = append(requested, typeName)
-			return io.Discard, nil
-		}, snap)
-		requireRefusal(t, err)
-		if len(requested) != 0 {
-			t.Errorf("the refusal came after writers were requested for %v; a refused export writes nothing", requested)
 		}
 	})
 }
@@ -150,7 +136,7 @@ func TestMarshalSnapshot_ACompositionWithNoChildrenIsWritten(t *testing.T) {
 	}
 	orderType, _ := s.Type("Order")
 	raws, result := New().ParseTyped(context.Background(),
-		location.MustNewSourceID("test://Order.csv"), "Order", strings.NewReader(string(out["Order"])), orderType)
+		location.NewSourceID("test://Order.csv"), "Order", strings.NewReader(string(out["Order"])), orderType)
 	if !result.OK() {
 		t.Fatalf("re-parse: %s", result)
 	}

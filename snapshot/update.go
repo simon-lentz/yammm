@@ -12,33 +12,6 @@ import (
 	"github.com/simon-lentz/yammm/schema"
 )
 
-// UpdateOption configures [UpdateMetadata] and [UpdateMetadataOrReMarshal].
-type UpdateOption func(*updateConfig)
-
-type updateConfig struct {
-	createdAtSet bool
-	createdAt    time.Time
-}
-
-// WithUpdateCreatedAt overrides the created_at header field in the
-// resulting document, and a zero time overrides nothing. If not provided, the existing created_at (if any)
-// is kept, byte for byte when it is RFC 3339, except that the fallback path of
-// [UpdateMetadataOrReMarshal] drops, with a Warning, a value it cannot parse.
-func WithUpdateCreatedAt(t time.Time) UpdateOption {
-	return func(c *updateConfig) {
-		c.createdAtSet = true
-		c.createdAt = t
-	}
-}
-
-func applyUpdateOptions(opts []UpdateOption) updateConfig {
-	var cfg updateConfig
-	for _, o := range opts {
-		o(&cfg)
-	}
-	return cfg
-}
-
 // UpdateMetadata rewrites the header of an existing .ys document with a
 // new metadata map, reusing the body bytes verbatim and recomputing only
 // the integrity hash.
@@ -52,8 +25,9 @@ func applyUpdateOptions(opts []UpdateOption) updateConfig {
 //     canonical form (new header + existing body) and, for a body in
 //     [Marshal]'s bytes, matches what [Marshal] would produce for the same
 //     logical content, byte-for-byte.
-//   - CreatedAt is preserved from the existing header unless explicitly
-//     overridden via [WithUpdateCreatedAt].
+//   - CreatedAt keeps the existing header's decoded text, written as [Marshal]
+//     writes it. A header Marshal wrote keeps its bytes, and an empty or null
+//     created_at leaves no member.
 //   - Metadata replaces the existing map entirely; the caller is
 //     responsible for including pass-through fields in newMeta. There
 //     is no merge — intentionally. A merge would require a diff
@@ -89,33 +63,28 @@ func applyUpdateOptions(opts []UpdateOption) updateConfig {
 //	newMeta["pipeline_completed"] = "true"
 //	out, res := snapshot.UpdateMetadata(ctx, data, newMeta)
 //
-// Pass no option for created_at. Preservation is the default, and it is
-// byte-for-byte: parsing the field and handing it back re-formats it, which
-// rewrites a foreign header's fractional seconds and offset for no gain. A
-// caller that needs the timestamp as a value reads it with
-// [HeaderInfo.CreatedAtTime] and leaves the option alone.
-//
 // UpdateMetadata copies the body bytes verbatim and decodes no instance: it
 // re-verifies no integrity hash, resolves no schema, and of the body it
 // decodes the types table alone. It does refuse every input the failure modes
 // below name, because the output carries a freshly computed integrity hash, and a
-// malformed document must not come back with a hash that matches. Callers needing
+// document those modes name must not come back with a hash that matches. Callers needing
 // more than that pair UpdateMetadata with a prior [Verify] on the same bytes;
-// [HeaderOnly] is not that check, because it reads no instance either.
+// [HeaderOnly] is not that check, because it decodes no instance either.
 //
 // Diagnostics are capped at the same default [Load] uses (100); this surface
 // takes no option that raises it.
 //
 // Failure modes and error codes:
 //
-//   - [diag.E_SNAPSHOT_MALFORMED] — the input does not begin with '{', its
-//     header or types table does not parse, its header states no features
-//     field or a null one, its top level is not one closed JSON object holding the four
-//     keys the format fixes, in their fixed order, each once, none null and
-//     each valid JSON, with nothing after it, its types
-//     table states one identity on two rows, an object of the document repeats
-//     a member name or spells one the format declares in another case, or
-//     newMeta holds a key or value that is not valid UTF-8.
+//   - [diag.E_SNAPSHOT_MALFORMED] — the first byte of the input is not '{', the
+//     header or the types table does not parse, the header states no features
+//     field or a null one, the top level is not one closed JSON object holding the
+//     four keys the format fixes, in their fixed order, each once, none null and
+//     each valid JSON, with nothing after it, the types table states one identity
+//     on two rows, an object repeats a member name or spells one the format declares
+//     in another case, a string of the document is not valid UTF-8 or holds a
+//     surrogate escape that is half of no pair, or a key or value of newMeta is not
+//     valid UTF-8.
 //   - [diag.E_SNAPSHOT_UNSUPPORTED_FEATURE] — the header names a feature this
 //     version does not implement. Refused rather than carried through, because
 //     the output would claim support it does not have.
@@ -147,7 +116,6 @@ func UpdateMetadata(
 	ctx context.Context,
 	data []byte,
 	newMeta map[string]string,
-	opts ...UpdateOption,
 ) ([]byte, diag.Result) {
 	if err := ctx.Err(); err != nil {
 		c := diag.NewCollector(0)
@@ -233,17 +201,6 @@ func UpdateMetadata(
 		prefix = `{"yammm_snapshot":`
 	}
 
-	// Apply option overrides and preserve/override CreatedAt.
-	cfg := applyUpdateOptions(opts)
-	createdAt := sd.header.CreatedAt // byte-for-byte preserve by default
-	// A zero time preserves rather than stamping 0001-01-01T00:00:00Z over a
-	// good value. Marshal's config path drops a zero WithCreatedAt for the same
-	// reason; without this the two disagree on one option's zero value, and the
-	// caller that lost its timestamp has no way to tell which path ran.
-	if cfg.createdAtSet && !cfg.createdAt.IsZero() {
-		createdAt = cfg.createdAt.UTC().Format(time.RFC3339)
-	}
-
 	// Non-nil: decodeHeader reports a nil features field and the gate above
 	// returns on it, so no document reaching here carries one.
 	features := sd.header.Features
@@ -262,7 +219,7 @@ func UpdateMetadata(
 		SchemaHash:    sd.header.SchemaHash,
 		IntegrityHash: "", // canonical-form placeholder; filled in pass 2
 		Features:      features,
-		CreatedAt:     createdAt,
+		CreatedAt:     sd.header.CreatedAt,
 		Metadata:      meta,
 		// Verbatim, nil included: fabricating a claim on a pre-v0.15.0
 		// document would attest to a body nothing here read.
@@ -291,19 +248,18 @@ func UpdateMetadata(
 // back to [Load] + [Marshal] using s for the Load, unless ctx was cancelled or
 // newMeta holds a key or value that is not valid UTF-8 (both below). The
 // fallback carries the indent that follows a line feed directly after an opening
-// brace at the input's first byte, and any other input comes back compact. It also carries, when it
-// parses, the input's created_at across — byte-for-byte, as the fast path keeps
-// it — so the result differs from a direct Marshal only where the input document
-// did.
+// brace at the input's first byte, and any other input comes back compact. When the
+// input's created_at parses, the fallback also carries its text across, as the fast
+// path keeps it, so the result differs from a direct Marshal only where the input
+// document did.
 //
 // Panics if s is zero (programming error), on every call. Only the fallback reads
 // s, and a panic on that path alone hides the bug until a document is malformed.
 //
 // When the fallback path succeeds, the returned [diag.Result] carries a
 // Warning-severity [diag.W_UPDATE_METADATA_FALLBACK], the warnings the Load
-// and Marshal legs stored, and, unless the caller passed a non-zero
-// [WithUpdateCreatedAt], one further Warning if the input stated a created_at
-// this path could not parse. When its Load fails, the result is Load's alone,
+// and Marshal legs stored, and one further Warning if the input stated a
+// created_at this path could not parse. When its Load fails, the result is Load's alone,
 // so no break draws two issues. A cancelled Load may not have reached the break, so it keeps
 // the refusal beside its own result. When its Marshal fails, the result is
 // the refusal and Marshal's issues. Neither carries a W_UPDATE_METADATA_FALLBACK. The warning's details
@@ -321,8 +277,7 @@ func UpdateMetadata(
 // the caller would rather surface the failure than silently recover.
 //
 // Cost on the happy path matches [UpdateMetadata]. On the fallback path it
-// adds the refused UpdateMetadata and, unless [WithUpdateCreatedAt] gives a
-// non-zero time, a HeaderOnly to Load + Marshal, which [TestUpdateMetadataRatioFloor] holds at least
+// adds the refused UpdateMetadata and a HeaderOnly to Load + Marshal, which [TestUpdateMetadataRatioFloor] holds at least
 // three times slower on a 14.7 MB .ys; the W_UPDATE_METADATA_FALLBACK warning
 // makes the transition visible in consumer logs and dashboards.
 //
@@ -339,7 +294,6 @@ func UpdateMetadataOrReMarshal(
 	data []byte,
 	newMeta map[string]string,
 	s schema.Schema,
-	opts ...UpdateOption,
 ) ([]byte, diag.Result) {
 	// Checked before the fast path, not inside the fallback that dereferences
 	// it: a zero schema is a caller's bug on every input, and only some inputs
@@ -348,7 +302,7 @@ func UpdateMetadataOrReMarshal(
 	if s.IsZero() {
 		panic("snapshot.UpdateMetadataOrReMarshal: zero Schema")
 	}
-	out, res := UpdateMetadata(ctx, data, newMeta, opts...)
+	out, res := UpdateMetadata(ctx, data, newMeta)
 	if !res.HasErrors() {
 		return out, res
 	}
@@ -383,8 +337,7 @@ func UpdateMetadataOrReMarshal(
 	}
 
 	var fallbackWarnings []diag.Issue
-	marshalOpts := updateOptsToMarshalOpts(opts)
-	marshalOpts = append(marshalOpts, WithMetadata(newMeta))
+	marshalOpts := []Option{WithMetadata(newMeta)}
 	// The fallback must not lose what the input document stated. The primitive
 	// rebuilds the header in place and keeps both; Load + Marshal reconstructs
 	// it, so the indent and the created_at have to be carried across or a
@@ -393,27 +346,19 @@ func UpdateMetadataOrReMarshal(
 	if indent := detectIndent(data); indent != "" {
 		marshalOpts = append(marshalOpts, WithIndent(indent))
 	}
-	// The caller's stamp wins only when it is a real one. WithUpdateCreatedAt
-	// sets createdAtSet even for a zero time, and Marshal omits a zero stamp —
-	// so gating on the flag alone made the fallback DROP the input's created_at
-	// where the fast path keeps it, which is the fast/slow divergence this
-	// helper exists to close.
-	ucfg := applyUpdateOptions(opts)
-	if !ucfg.createdAtSet || ucfg.createdAt.IsZero() {
-		if hdr, hdrRes := HeaderOnly(ctx, data); !hdrRes.HasErrors() && hdr != nil && hdr.CreatedAt != "" {
-			// Parsed to know it is RFC 3339, then carried as bytes: a
-			// re-format through time.Time drops fractional seconds and the
-			// offset, which the fast path keeps.
-			if _, err := time.Parse(time.RFC3339Nano, hdr.CreatedAt); err == nil {
-				marshalOpts = append(marshalOpts, withCreatedAtText(hdr.CreatedAt))
-			} else {
-				// Dropping it silently loses a value the input stated. The
-				// primitive preserves the header's bytes whatever they say;
-				// this path cannot, so it reports what it could not carry.
-				fallbackWarnings = append(fallbackWarnings, diag.NewIssue(diag.Warning, diag.W_SNAPSHOT_VALUE_DROPPED,
-					fmt.Sprintf("input header states created_at %s, which is not RFC 3339; the re-marshalled document carries none", diag.QuoteValue(hdr.CreatedAt))).
-					Build())
-			}
+	if hdr, hdrRes := HeaderOnly(ctx, data); !hdrRes.HasErrors() && hdr != nil && hdr.CreatedAt != "" {
+		// Parsed to know it is RFC 3339, then carried as text: a
+		// re-format through time.Time drops fractional seconds and the
+		// offset, which the fast path keeps.
+		if _, err := time.Parse(time.RFC3339Nano, hdr.CreatedAt); err == nil {
+			marshalOpts = append(marshalOpts, withCreatedAtText(hdr.CreatedAt))
+		} else {
+			// Dropping it silently loses a value the input stated. The
+			// primitive keeps the header's text whatever it says. This
+			// path cannot, so it reports what it could not carry.
+			fallbackWarnings = append(fallbackWarnings, diag.NewIssue(diag.Warning, diag.W_SNAPSHOT_VALUE_DROPPED,
+				fmt.Sprintf("input header states created_at %s, which is not RFC 3339; the re-marshalled document carries none", diag.QuoteValue(hdr.CreatedAt))).
+				Build())
 		}
 	}
 	reMarshaled, marshalRes := Marshal(ctx, loaded, marshalOpts...)
@@ -505,17 +450,4 @@ func mergeResults(a, b diag.Result) diag.Result {
 	c.Merge(a)
 	c.Merge(b)
 	return c.Result()
-}
-
-// updateOptsToMarshalOpts converts the UpdateOption slice into the
-// equivalent Marshal Option slice for the fallback path. Today only
-// WithUpdateCreatedAt requires conversion; future UpdateOption
-// additions must extend this translator.
-func updateOptsToMarshalOpts(opts []UpdateOption) []Option {
-	cfg := applyUpdateOptions(opts)
-	var out []Option
-	if cfg.createdAtSet {
-		out = append(out, WithCreatedAt(cfg.createdAt))
-	}
-	return out
 }

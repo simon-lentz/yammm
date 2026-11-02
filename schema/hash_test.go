@@ -18,7 +18,7 @@ import (
 var zeroSpan = location.Span{}
 
 func testSourceID(name string) location.SourceID {
-	return location.MustNewSourceID("test://" + name)
+	return location.NewSourceID("test://" + name)
 }
 
 // buildMinimalSchema creates a sealed schema with optional types and data types.

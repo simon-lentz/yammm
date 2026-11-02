@@ -64,7 +64,7 @@ func documentVerdict(s schema.Schema, g *graph.Graph, fromBase bool, doc Validat
 				valid := b.valids[i]
 				result := added[valid]
 				holders = append(holders, holder{
-					at:             heldKey{id: valid.TypeID(), key: valid.PrimaryKey().String()},
+					at:             heldKey{id: valid.Type().ID(), key: valid.PrimaryKey().String()},
 					typeName:       valid.TypeName(),
 					prov:           valid.Provenance(),
 					installed:      !result.HasErrors(),

@@ -18,12 +18,6 @@ type Overlay struct {
 	OpenCounter int
 }
 
-// NewOverlay creates an initialized Overlay. Prefer this over Overlay{} to
-// avoid nil-map panics in OpenDocument.
-func NewOverlay() *Overlay {
-	return &Overlay{Open: make(map[string]*Document)}
-}
-
 // OpenDocument creates or replaces a document in the overlay.
 // Normalizes line endings and eagerly computes LineState for completion context.
 // The caller is responsible for resolving the canonical SourceID (symlinks, etc.).

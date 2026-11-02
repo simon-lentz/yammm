@@ -15,111 +15,11 @@ import (
 	"github.com/simon-lentz/yammm/schema"
 )
 
-// Coerce converts a single raw value to the Neo4j-driver-native type the given
-// schema constraint requires, so the value satisfies Neo4j TYPE constraints:
-//
-//   - Float: an int, int8 to int64, uint, uint8 to uint64 or float32 ->
-//     float64 (a uintptr or a named type is a coercion failure); a
-//     float64 passes through. Repairs the JSON round-trip where a whole-number
-//     Float decodes as int64 and Neo4j rejects it against an IS :: FLOAT
-//     constraint. A non-numeric value is a coercion failure and returns an error.
-//   - Integer: an int, int8 to int64, uint, uint8 to uint64 -> int64 (a uintptr
-//     or a named type is a coercion failure); an int64 passes
-//     through. A float is a coercion failure and returns an error, whole or
-//     not, as the validator's Integer rule refuses it: converting it would
-//     send an integer the caller's data never wrote. A json.Number is a
-//     coercion failure too, at an Integer and at a Float, though the validator
-//     reads one: a caller that decodes JSON with UseNumber converts each
-//     number to an int64 or a float64 before it calls Coerce. A uint past the
-//     int64 range is a failure too, as it is on the list path ([coerceSlice]),
-//     which applies the same rule per element.
-//   - Timestamp: a string -> time.Time (Neo4j ZONED DATETIME), parsed against the
-//     constraint's custom Go layout when it declares one (Timestamp["…"]) and
-//     against RFC3339 otherwise; a time.Time passes through. A string that does
-//     not parse, or any non-string non-time.Time value, is a coercion failure
-//     and returns an error. The instant is always expressed in a location the
-//     driver can send, under one rule: a location named "Offset", the driver's
-//     own offset form, is sent as it is; any other named location is kept only
-//     when the host's tz database resolves it AND the resolved offset agrees
-//     with the one the value carries; time.Local, a location named "Local", an
-//     unnamed location, any other unresolvable name and a name whose offset
-//     disagrees are all re-expressed in the value's own offset. A consumer that must keep IANA names on a host
-//     without a tz database imports time/tzdata.
-//   - Date: a "2006-01-02" string, a time.Time, OR a dbtype.Date -> dbtype.Date
-//     (Neo4j DATE). A string that does not parse, or any other non-temporal
-//     value, is a coercion failure and returns an error. All three arms are
-//     normalised to midnight UTC: a date carries no time of day, and the driver
-//     derives its day number by a division that truncates toward zero, so a
-//     pre-1970 instant carrying a clock would land a day late.
-//   - Every other (non-transforming) kind passes through unchanged, save a map
-//     and a value at a List whose element is a collection, each refused below.
-//     Coerce does not ask whether the driver takes such a value: the driver
-//     refuses a uuid.UUID, which only the write path renders, and a uint64 past
-//     int64, among others.
-//
-// A map is refused under every constraint, whatever its key and element types:
-// Neo4j stores no map as a property value. A nil map holds no value and returns
-// nil.
-//
-// The four transforming kinds above are strict: they error on a value they can
-// neither pass through as already-native nor repair, rather than handing a
-// wrong-typed value to the driver. This matches the list path ([coerceSlice]),
-// which must build a homogeneous typed slice and errors on a wrong-typed element.
-// The non-transforming kinds stay lenient, save a map, refused above, and a
-// List whose element is a collection, a type Neo4j cannot store, where a value
-// that holds one is refused: a correct value of any other needs no repair here,
-// since the write path's heldForm renders what the driver does not take (a
-// uuid.UUID at a UUID), and instance validation is its type authority. On the validated node path a transforming
-// kind only ever receives the types its strict set accepts (Float: float64;
-// Integer: int64; Timestamp and Date: the string the validator stores), so
-// strictness fires only on a value no validator refused at Error: a hand-built
-// direct-Cypher param, a snapshot a bypass constructor built, or one
-// snapshot.Load read without revalidating at Error.
-//
-// Coerce takes the full [schema.Constraint] (not just its kind) so a Timestamp's
-// custom layout is honored; a DataType reference is resolved internally.
-// It operates on scalar values — a List/collection value is element-coerced by
-// [CoerceParams], which also requires a Go string of a String, UUID, Enum or
-// Pattern element and a bool of a Boolean element, where Coerce passes a
-// scalar of those kinds through. The adapter write path refuses a value that
-// holds one at a List whose element is a collection by its type first, and reads
-// every other value and element in its one form before Coerce
-// ([github.com/simon-lentz/yammm/instance.ScalarOf]), so a named string, a pointer and a uuid.UUID at a UUID pass there, and a JSON
-// number literal reaches it as the int64 or float64 it spells, which an Integer
-// refuses when it is a float; a literal no int64 holds outside a Float, or no
-// finite float64 holds, is refused before Coerce. Calling Coerce with a
-// collection constraint returns a value that holds one unchanged, save a map,
-// refused above, and a value at a List whose element is a List or a Vector: Neo4j has no nested collection
-// property type, so a value there that holds one, an empty list included, is an
-// error wrapping [ErrUnsupportedListElem].
-//
-// A non-nil constraint is judged first by [schema.CheckConstraint]: Coerce
-// refuses what CheckConstraint refuses: what [schema.Builder.Build] refuses in a
-// hand-built constraint, and a DataType reference that resolves to no
-// constraint or to another reference alone, returning the value unchanged
-// with an error, whatever the value. A value that holds none, which
-// [github.com/simon-lentz/yammm/instance.ScalarOf] reads as nil, such as a nil
-// pointer, slice or map, is returned as nil, which the driver writes as null, and a nil
-// constraint ("no type to coerce against") passes any other value through
-// unchanged. The default arm is unreachable in
-// practice — schema.Constraint is sealed, so every value carries one of the
-// kinds above — but a kind added to the enum after this switch was written
-// surfaces as a lint failure via the //exhaustive:enforce directive, rather
-// than as a silent driver-side PROPERTY_TYPE rejection in production.
-func Coerce(constraint schema.Constraint, raw any) (any, error) {
-	if constraint != nil {
-		if err := schema.CheckConstraint(constraint); err != nil {
-			return raw, fmt.Errorf("coerce: %w", err)
-		}
-	}
-	cv, err := coerceScalar(constraint, raw)
-	return cv, refusal.Mark(ErrUnrepresentable, err)
-}
-
-// coerceScalar is [Coerce] with the constraint already judged: every internal
-// path reaches it with a constraint a loaded or judged schema holds.
+// coerceScalar applies the package doc's rule to one value. Every path reaches
+// it with a constraint a loaded or judged schema holds.
 func coerceScalar(constraint schema.Constraint, raw any) (any, error) {
-	if holdsNone(raw) {
+	// The driver packs a nil slice as an empty list, so it must reach the driver as nil.
+	if instance.IsAbsent(raw) {
 		//nolint:nilnil // a value that holds none coerces to nil with no error: it is an absent property, not a failure
 		return nil, nil
 	}
@@ -236,12 +136,12 @@ func coerceScalar(constraint schema.Constraint, raw any) (any, error) {
 
 // coerceValue coerces a single value against a schema constraint — the
 // per-value rule CoerceParams and the write path's property and key coercion
-// share; [Coerce] applies the scalar rule alone. A []any is element-coerced via
+// share. A []any is element-coerced via
 // [coerceSlice] against the constraint's List/Vector element type (and is an
 // error under a scalar constraint — a scalar cannot hold a list). Every other
 // value routes through the scalar rule, [coerceScalar]. A nil constraint passes
 // the value through unchanged. The constraint is one the caller has judged: a
-// loaded or built schema's, or one [CoerceParams] checked.
+// loaded schema's, or one [CoerceParams] checked.
 //
 // Shape note: a non-[]any value under a List or Vector constraint passes through
 // the scalar rule unchanged (it treats collection kinds as scalar-passthrough),
@@ -258,9 +158,8 @@ func coerceScalar(constraint schema.Constraint, raw any) (any, error) {
 // the direct-Cypher param path ([CoerceParams]) through this function keeps
 // list-element coercion from being silently skipped on any one path.
 //
-// A value that holds none reaches it as nil: every caller reads the value's one
-// form ([heldForm]) or asks [holdsNone] first, and the scalar rule returns nil
-// as nil.
+// A nil []any reaches it as nil, because [heldForm] and [coerceParam] each answer
+// one first. The scalar rule returns any other value that holds none as nil.
 func coerceValue(constraint schema.Constraint, raw any) (any, error) {
 	if constraint == nil {
 		return raw, nil
@@ -275,30 +174,11 @@ func coerceValue(constraint schema.Constraint, raw any) (any, error) {
 	return cv, refusal.Mark(ErrUnrepresentable, err)
 }
 
-// holdsNone reports whether raw holds no value, as every writer of this module
-// writes it: null. The driver packs a nil slice as an empty list, so a nil slice
-// must reach it as nil.
-func holdsNone(raw any) bool {
-	switch reflect.ValueOf(raw).Kind() {
-	case reflect.Invalid:
-		return true
-	case reflect.Bool, reflect.String, reflect.Array,
-		reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
-		reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr,
-		reflect.Float32, reflect.Float64, reflect.Complex64, reflect.Complex128:
-		// A value of one of these kinds holds itself. ScalarOf would box the form
-		// it reads, once for each of the three checks a param passes.
-		return false
-	}
-	held, ok := instance.ScalarOf(raw)
-	return ok && held == nil
-}
-
 // ParamTypes maps a Cypher parameter name to the schema constraint its value
 // must satisfy. Nested params are addressed with "outer.inner" dot-notation
 // (e.g. ParamTypes{"rows.unit_price": schema.NewFloatConstraint()} tags
-// unit_price inside each row of a $rows []map[string]any). Unknown keys
-// are a no-op.
+// unit_price inside each row of a $rows []map[string]any). A key no param holds
+// coerces nothing, and [CoerceParams] still judges its constraint.
 //
 // The value is the full [schema.Constraint], not just its
 // [schema.ConstraintKind]: element coercion of List properties needs the
@@ -308,7 +188,7 @@ type ParamTypes map[string]schema.Constraint
 
 // CoerceParams returns a new map with each value coerced against the constraint
 // declared for its key in types. A value that holds none, a param, a field of a
-// nested param map or a row, is returned as nil, as [Coerce] returns it, since
+// nested param map or a row, is returned as nil, since
 // the driver packs a nil slice as an empty list. Any other value under a key
 // absent from types passes through as given, save a nested map or rows, which
 // are walked. params is never mutated, and for a non-empty params the returned top-level map is a
@@ -327,17 +207,18 @@ type ParamTypes map[string]schema.Constraint
 // same offending key on every run — failures are reproducible rather than dependent on map iteration order.
 //
 // The non-nil constraints in types are judged by [schema.CheckConstraint] before
-// any value is coerced, so a hand-built constraint that [schema.Builder.Build]
-// would refuse is an error naming its key, whether or not params holds that
+// any value is coerced, so a hand-built constraint it refuses is an error naming
+// its key, whether or not params holds that
 // key. Of several refused keys the error names the first in sorted order. The
 // map returned with that error is nil, for an empty or a nil params too.
 //
-// Scalar values take [Coerce]'s rule, a nested collection's refusal included;
+// Scalar values take the rule the package doc states under Parameter Coercion, a
+// nested collection's refusal included;
 // []any list values are element-coerced against the List element type, and
 // refused under a List whose element is a collection (a List<Float> of int64s
 // reaches the driver as []float64, a List<Date> of strings as []dbtype.Date) —
 // the rule the adapter
-// write path applies once it has read each element in its one form, so a
+// write path applies once [heldForm] has read each number, so a
 // direct-Cypher boundary cannot silently skip list coercion.
 //
 // Call this at any direct-Cypher parameter boundary that writes schema-typed
@@ -386,7 +267,7 @@ func firstRefusedType(types ParamTypes) (string, error) {
 // key; any other value is coerced against its declared constraint via
 // [coerceValue], or returned as given under an undeclared key.
 func coerceParam(key string, value any, types ParamTypes) (any, error) {
-	if holdsNone(value) {
+	if instance.IsAbsent(value) {
 		//nolint:nilnil // a value that holds none coerces to nil with no error: it is a valid absent value, not a failure
 		return nil, nil
 	}
@@ -466,7 +347,7 @@ func coerceNested(outer string, m map[string]any, types ParamTypes) (map[string]
 	for _, k := range slices.Sorted(maps.Keys(m)) {
 		v := m[k]
 		dotKey := outer + "." + k
-		if holdsNone(v) {
+		if instance.IsAbsent(v) {
 			out[k] = nil
 			continue
 		}
@@ -541,8 +422,8 @@ const driverOffsetZoneName = "Offset"
 // before the resolvability check, which would otherwise keep it.
 const localZoneName = "Local"
 
-// THE TEMPORAL RULE, stated here in full; three releases restated it, and the
-// Coerce and driverZone godocs restate its arms.
+// THE TEMPORAL RULE, stated here in full; the package doc and driverZone's godoc
+// restate its arms.
 //
 // A temporal value is sent in the form the driver and the server will both read
 // back as the instant, zone and date yammm holds. One rule, two arms, and

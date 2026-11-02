@@ -11,23 +11,6 @@ import (
 // contract cannot drift apart.
 const batchKeyParamPrefix = "key_"
 
-// The single-relationship endpoint-key prefixes. The builder and its parameter
-// assembler spell them through these constants for the same reason
-// [batchKeyParamPrefix] exists: a template reading a key the assembler never
-// writes yields a MATCH against null, which merges nothing and reports no error.
-//
-// The single and batch contracts genuinely differ — `$from_key_<name>` against
-// `row.from_<name>` — because they are separate published parameter shapes, not
-// because one of them is stale. Nothing in an edge row can collide with an
-// endpoint key (a row holds only the two key sets and `rel_props`), so the batch
-// form has no reason to carry the extra segment. These two stay unexported: the
-// single-relationship template is internal, so nothing outside assembles its
-// params.
-const (
-	relFromKeyParamPrefix = "from_key_"
-	relToKeyParamPrefix   = "to_key_"
-)
-
 // The row-key prefixes of [BuildBatchRelationshipMergeQuery]'s `$rows`
 // parameter. Each row carries the source endpoint's key properties under
 // RelFromRowPrefix and the target's under RelToRowPrefix:
@@ -84,81 +67,25 @@ func buildBatchNodeMergeQuery(label string, keyNames []string, keys keyMutabilit
 	return b.String()
 }
 
-// buildRelationshipMergeQuery returns the Cypher template for a single
-// relationship MERGE between nodes identified by their (label, primary-key)
-// shapes. If hasProps is true, the generated query ends with
-// `SET r += $rel_props` so callers can pass edge properties.
-//
-// The generated query always ends with `RETURN count(*) AS matched_rows`.
-// Consumers implementing silent-failure detection on generated MERGEs
-// (e.g., a link-engine safety net) sum the column across calls;
-// consumers that don't care ignore it. Making the clause always-on keeps
-// the signature free of a trailing `hasReturnCount` bool and the emitted
-// output free of a flag-controlled shape branch.
-//
-// Return-value semantics (matched_rows). The returned column reflects
-// this call's MERGE match count only: 0 if no MERGE executed (structural
-// no-op — the silent-failure condition), 1 if the relationship exists
-// after the call. Consumers issuing multiple calls (e.g., a loop over
-// distinct (from, to) pairs) are responsible for summing the per-call
-// values themselves. For UNWIND-batched workloads, prefer
-// [BuildBatchRelationshipMergeQuery] and apply the same summing guidance
-// across chunk transactions.
-func buildRelationshipMergeQuery(
-	fromLabel string, fromKeyNames []string,
-	relType string,
-	toLabel string, toKeyNames []string,
-	hasProps bool,
-) string {
-	var b strings.Builder
-
-	b.WriteString("MATCH (from:")
-	b.WriteString(fromLabel)
-	b.WriteString(" {")
-	for i, name := range fromKeyNames {
-		if i > 0 {
-			b.WriteString(", ")
-		}
-		fmt.Fprintf(&b, "%s: $%s%s", name, relFromKeyParamPrefix, name)
-	}
-	b.WriteString("})\n")
-
-	b.WriteString("MATCH (to:")
-	b.WriteString(toLabel)
-	b.WriteString(" {")
-	for i, name := range toKeyNames {
-		if i > 0 {
-			b.WriteString(", ")
-		}
-		fmt.Fprintf(&b, "%s: $%s%s", name, relToKeyParamPrefix, name)
-	}
-	fmt.Fprintf(&b, "})\nMERGE (from)-[r:%s]->(to)", relType)
-
-	if hasProps {
-		b.WriteString("\nSET r += $rel_props")
-	}
-	b.WriteString("\nRETURN count(*) AS matched_rows")
-	return b.String()
-}
-
 // BuildBatchRelationshipMergeQuery returns the Cypher template for an
 // UNWIND-batched relationship MERGE between nodes identified by their
-// (label, primary-key) shapes. If hasProps is true, the generated query ends
-// with `SET r += row.rel_props` so callers can pass per-edge properties.
+// (label, primary-key) shapes. If hasProps is true, the generated query holds
+// `SET r += row.rel_props` before its RETURN, so callers can pass per-edge
+// properties.
 // Parameter shape:
 //
 //	{rows: [{from_<name>: v, to_<name>: v, [rel_props: map]}, ...]}
 //
 // The generated query always ends with `RETURN count(*) AS matched_rows`.
 // Consumers implementing silent-failure detection on generated MERGEs sum the
-// column; consumers that do not care ignore it. Making the clause always-on
-// keeps the signature free of a trailing bool and the emitted output free of a
-// flag-controlled shape branch.
+// column; consumers that do not care ignore it. The RETURN takes no flag of its
+// own, so hasProps is the signature's one bool and the SET clause is the emitted
+// query's one branch.
 //
 // Return-value semantics (matched_rows). Neo4j's transactional semantics
-// mean each chunk either fully commits (all matched_rows reflected in
-// the returned value) or fully rolls back (no matched_rows, driver
-// error surfaces to the caller). The returned column reflects the
+// mean a chunk run in its own transaction either fully commits (all
+// matched_rows reflected in the returned value) or fully rolls back (no
+// matched_rows, driver error surfaces to the caller). The returned column reflects the
 // MERGE match count within this chunk's transaction only — it is not
 // a session-spanning aggregate.
 //

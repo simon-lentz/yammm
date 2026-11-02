@@ -46,49 +46,6 @@ func TestMarshal_EmbedsTheSourceStore(t *testing.T) {
 	}
 }
 
-// TestMarshal_NotSourceBacked pins the precondition: a Builder-built schema retains
-// no source content (zero Sources()), so Marshal must reject it gracefully rather than
-// emit an embedded source store it cannot honor — and never panic on the zero Sources().
-func TestMarshal_NotSourceBacked(t *testing.T) {
-	s, res := schema.NewBuilder().
-		WithName("geo").
-		AddType("County").
-		WithPrimaryKey("id", schema.NewStringConstraint()).
-		Done().
-		Build()
-	if res.HasErrors() {
-		t.Fatalf("build: %v", res.Err())
-	}
-	if _, err := gogen.Marshal(s); err == nil {
-		t.Fatal("expected an error for a non-source-backed (Builder) schema")
-	} else if !strings.Contains(err.Error(), "not source-backed") {
-		t.Errorf("expected a 'not source-backed' error, got: %v", err)
-	}
-}
-
-// A Builder-built schema whose properties name a DataType, directly and as a
-// List element, draws the same documented refusal: the DataType field resolves
-// from the property's constraint, which a built schema holds as a loaded one
-// does, so no step before the source check fails first.
-func TestMarshal_NotSourceBackedWithDataTypeProperties(t *testing.T) {
-	s, res := schema.NewBuilder().
-		WithName("geo").
-		AddDataType("Code", schema.NewStringConstraint()).
-		AddType("County").
-		WithPrimaryKey("id", schema.NewStringConstraint()).
-		WithProperty("code", schema.NewAliasConstraint("Code", nil)).
-		WithProperty("codes", schema.NewListConstraint(schema.NewAliasConstraint("Code", nil))).
-		Done().
-		Build()
-	if res.HasErrors() {
-		t.Fatalf("build: %v", res.Err())
-	}
-	_, err := gogen.Marshal(s)
-	if err == nil || !strings.Contains(err.Error(), "not source-backed") {
-		t.Errorf("Marshal error = %v; want the not source-backed refusal", err)
-	}
-}
-
 // TestMarshal_Imports exercises a real imported (multi-source) schema end-to-end:
 // closure flatten, cross-schema reference + naming, the faithful cross-schema
 // Where-block PK, and the module-root-relative multi-source embedded store. A
@@ -867,33 +824,8 @@ func TestMarshal_ModuleRoot_CwdIndependent(t *testing.T) {
 	}
 }
 
-// TestMarshal_ModuleRoot_SharedRegistryDeterministic pins that a shared
-// Registry does not perturb the embedded keys: a second load of the same
-// entry cache-hits the import (the registry returns the first load's
-// schema pointer), and Marshal output stays byte-identical — keys derive
-// from the entry schema's recorded ModuleRoot, not from how its imports
-// were obtained.
-func TestMarshal_ModuleRoot_SharedRegistryDeterministic(t *testing.T) {
-	registry := schema.NewRegistry()
-	first := loadModrootSchema(t, schema.WithRegistry(registry))
-	second := loadModrootSchema(t, schema.WithRegistry(registry))
-
-	a, err := gogen.Marshal(first)
-	if err != nil {
-		t.Fatal(err)
-	}
-	b, err := gogen.Marshal(second)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !bytes.Equal(a, b) {
-		t.Error("shared-registry re-load changed Marshal output")
-	}
-}
-
 // loadModrootSchema loads the modroot fixture entry with the fixture tree's
-// top directory as the module root — the registry-style consumer load shape
-// (module root != entry directory).
+// top directory as the module root (module root != entry directory).
 func loadModrootSchema(t *testing.T, opts ...schema.LoadOption) schema.Schema {
 	t.Helper()
 	root, err := filepath.Abs(filepath.Join("testdata", "modroot"))

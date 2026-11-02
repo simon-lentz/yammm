@@ -11,8 +11,7 @@ import (
 )
 
 // instance_index correlates a diagnostic with the element of the batch the
-// CALLER passed: the root's index through Validate, the child's through
-// ValidateForComposition, and never both.
+// caller passed: the root's index, never its composed child's.
 func TestValidate_StampsInstanceIndexOnce(t *testing.T) {
 	v := instance.NewValidator(loadSrc(t, docSrc))
 	raws := []instance.RawInstance{
@@ -20,12 +19,6 @@ func TestValidate_StampsInstanceIndexOnce(t *testing.T) {
 		{Properties: map[string]any{"id": "d1", "lines": []any{map[string]any{"n": "b", "qty": "x"}}}},
 	}
 	_, res := v.Validate(t.Context(), "Doc", raws)
-	yammmtest.Diff(t, []string{"1"}, detailValues(mustIssue(t, res, instance.ErrTypeMismatch), diag.DetailKeyInstanceIndex))
-
-	_, res = v.ValidateForComposition(t.Context(), "Doc", "LINES", []instance.RawInstance{
-		{Properties: map[string]any{"n": "a", "qty": 1}},
-		{Properties: map[string]any{"n": "b", "qty": "x"}},
-	})
 	yammmtest.Diff(t, []string{"1"}, detailValues(mustIssue(t, res, instance.ErrTypeMismatch), diag.DetailKeyInstanceIndex))
 }
 

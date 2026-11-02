@@ -2,11 +2,16 @@ package snapshot_test
 
 import (
 	"context"
+	"maps"
 	"regexp"
 	"strings"
 	"testing"
 
 	"github.com/simon-lentz/yammm/diag"
+	"github.com/simon-lentz/yammm/immutable"
+	"github.com/simon-lentz/yammm/internal/snapparts"
+	"github.com/simon-lentz/yammm/internal/snappartstest"
+	"github.com/simon-lentz/yammm/schema"
 	"github.com/simon-lentz/yammm/snapshot"
 )
 
@@ -110,5 +115,126 @@ func TestRead_RootsWithUnreadableKeysAreNoDuplicates(t *testing.T) {
 		if res.Len() != 2 || hasCode(res, diag.E_DUPLICATE_PK) || !strings.Contains(res.String(), "is not a scalar graph.ParseKey reads back") {
 			t.Errorf("%s: %s, want two refusals of the key and no %s", surface, res, diag.E_DUPLICATE_PK)
 		}
+	}
+}
+
+// A sound root takes the address from the refused root before it, so the document
+// holds the target a record names, and a third root at the address is a duplicate.
+func TestRead_ASoundRootHoldsTheAddressARefusedRootStoodAt(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	s := loadReaderSchema(t)
+	doc := readerDoc(t, s,
+		map[string]any{"$type": "Company", "id": "c1"},
+		map[string]any{"$type": "Person", "id": "p0", "KNOWS": []any{map[string]any{"_target_id": "p8"}}},
+		map[string]any{"$type": "Person", "id": "p1", "BOSS": map[string]any{"_target_id": "p0"}, "WORKS_AT": map[string]any{"_target_id": "c1"}},
+	)
+	doc = regexp.MustCompile(`"integrity_hash":"[^"]*"`).ReplaceAllString(doc, `"integrity_hash":""`)
+	const (
+		root = `{"key":["p1"],"properties":{"id":"p1"}`
+		twin = `{"key":["p1"],"properties":{"id":"p9"},"provenance":null},`
+	)
+	refusedThenSound := editOnce(t, doc, root, twin+root)
+	if _, res := snapshot.Load(ctx, []byte(doc), s); res.HasErrors() {
+		t.Fatalf("control: %s", res)
+	}
+	for name, c := range map[string]struct {
+		doc  string
+		want map[diag.Code]int
+	}{
+		"refused then sound, a record names it": {
+			editOnce(t, refusedThenSound, `"target_key":["p8"]`, `"target_key":["p1"]`),
+			map[diag.Code]int{diag.E_SNAPSHOT_MALFORMED: 2},
+		},
+		"refused, sound, sound": {
+			editOnce(t, refusedThenSound, root, `{"key":["p1"],"properties":{"id":"p1"},"provenance":null},`+root),
+			map[diag.Code]int{diag.E_SNAPSHOT_MALFORMED: 1, diag.E_DUPLICATE_PK: 1},
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			_, l := snapshot.Load(ctx, []byte(c.doc), s)
+			for surface, res := range map[string]diag.Result{"Load": l, "Verify": snapshot.Verify(ctx, []byte(c.doc), s)} {
+				got := map[diag.Code]int{}
+				for issue := range res.Issues() {
+					got[issue.Code()]++
+				}
+				if !maps.Equal(got, c.want) {
+					t.Errorf("%s: %s, want %v", surface, res, c.want)
+				}
+			}
+		})
+	}
+}
+
+// A root of a type that cannot hold one still stands at its stored key, so a record
+// it states dangles from nowhere: the document draws the type's one refusal.
+func TestRead_ARootOfAnIneligibleTypeStandsAtItsKey(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	s, res := schema.LoadString(ctx, `schema "ineligible"
+
+abstract type Keyless {
+	v String
+	--> NEEDS (one) Target
+}
+
+type Target {
+	id String primary
+}
+`, "ineligible.yammm")
+	if res.HasErrors() {
+		t.Fatalf("schema: %s", res)
+	}
+	keyless := mustTypeID(t, s, "Keyless")
+	key := immutable.WrapKey([]any{"a"})
+	doc := snappartstest.Document(t, s, snapparts.Parts{
+		Instances:  []snapparts.Instance{{TypeID: keyless, PrimaryKey: key, Properties: immutable.WrapProperties(map[string]any{"v": "x"})}},
+		Unresolved: []snapparts.Unresolved{{SourceType: keyless, SourceKey: key, Relation: "NEEDS", Reason: "absent"}},
+	})
+	got := snapshot.Verify(ctx, doc, s)
+	if got.Len() != 1 || got.HasCode(diag.E_SNAPSHOT_DANGLING_REFERENCE) {
+		t.Errorf("Verify: %s, want the type's one refusal", got)
+	}
+}
+
+// A child's stored key is no root's address, nor is the key its properties state:
+// an edge naming that key dangles beside the child's own two breaks.
+func TestRead_AChildsStatedKeyIsNoRootsAddress(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	s, res := schema.LoadString(ctx, `schema "child_key"
+
+part type Item {
+	code String primary
+}
+
+type Holder {
+	id String primary
+	*-> ITEMS (_:many) Item
+	--> POINTS (_:one) Solid
+}
+
+type Solid {
+	id String primary
+}
+`, "child_key.yammm")
+	if res.HasErrors() {
+		t.Fatalf("schema: %s", res)
+	}
+	holder, solid := mustTypeID(t, s, "Holder"), mustTypeID(t, s, "Solid")
+	key := func(k string) immutable.Key { return immutable.WrapKey([]any{k}) }
+	doc := snappartstest.Document(t, s, snapparts.Parts{
+		Instances: []snapparts.Instance{{
+			TypeID: holder, PrimaryKey: key("h1"), Properties: immutable.WrapProperties(map[string]any{"id": "h1"}),
+			Composed: map[string][]snapparts.Instance{"ITEMS": {{
+				TypeID: solid, PrimaryKey: key("stored"), Properties: immutable.WrapProperties(map[string]any{"id": "stated"}),
+			}}},
+		}},
+		Edges: []snapparts.Edge{{Relation: "POINTS", SourceType: holder, SourceKey: key("h1"), TargetKey: key("stated")}},
+	})
+	got := snapshot.Verify(ctx, doc, s, snapshot.WithIssueLimit(0))
+	if !got.HasCode(diag.E_SNAPSHOT_DANGLING_REFERENCE) {
+		t.Errorf("Verify: %s, want %s for the edge", got, diag.E_SNAPSHOT_DANGLING_REFERENCE)
 	}
 }

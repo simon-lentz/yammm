@@ -9,8 +9,8 @@ import (
 	"github.com/simon-lentz/yammm/schema"
 )
 
-func TestCoerce_FloatIntRepair(t *testing.T) {
-	got, err := Coerce(schema.NewFloatConstraint(), int64(1860000))
+func TestCoerceScalar_FloatIntRepair(t *testing.T) {
+	got, err := coerceScalar(schema.NewFloatConstraint(), int64(1860000))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -19,8 +19,8 @@ func TestCoerce_FloatIntRepair(t *testing.T) {
 	}
 }
 
-func TestCoerce_TimestampParse(t *testing.T) {
-	got, err := Coerce(schema.NewTimestampConstraint(), "2024-01-01T00:00:00Z")
+func TestCoerceScalar_TimestampParse(t *testing.T) {
+	got, err := coerceScalar(schema.NewTimestampConstraint(), "2024-01-01T00:00:00Z")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -29,8 +29,8 @@ func TestCoerce_TimestampParse(t *testing.T) {
 	}
 }
 
-func TestCoerce_DateParse(t *testing.T) {
-	got, err := Coerce(schema.NewDateConstraint(), "2024-06-15")
+func TestCoerceScalar_DateParse(t *testing.T) {
+	got, err := coerceScalar(schema.NewDateConstraint(), "2024-06-15")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -39,8 +39,8 @@ func TestCoerce_DateParse(t *testing.T) {
 	}
 }
 
-func TestCoerce_DateFromTime(t *testing.T) {
-	got, err := Coerce(schema.NewDateConstraint(), time.Date(2024, 6, 15, 0, 0, 0, 0, time.UTC))
+func TestCoerceScalar_DateFromTime(t *testing.T) {
+	got, err := coerceScalar(schema.NewDateConstraint(), time.Date(2024, 6, 15, 0, 0, 0, 0, time.UTC))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -49,39 +49,39 @@ func TestCoerce_DateFromTime(t *testing.T) {
 	}
 }
 
-func TestCoerce_TimestampParseFailureErrors(t *testing.T) {
-	if _, err := Coerce(schema.NewTimestampConstraint(), "not-a-timestamp"); err == nil {
+func TestCoerceScalar_TimestampParseFailureErrors(t *testing.T) {
+	if _, err := coerceScalar(schema.NewTimestampConstraint(), "not-a-timestamp"); err == nil {
 		t.Fatal("want error on unparseable timestamp string, got nil")
 	}
 }
 
-func TestCoerce_DateParseFailureErrors(t *testing.T) {
-	if _, err := Coerce(schema.NewDateConstraint(), "06/15/2024"); err == nil {
+func TestCoerceScalar_DateParseFailureErrors(t *testing.T) {
+	if _, err := coerceScalar(schema.NewDateConstraint(), "06/15/2024"); err == nil {
 		t.Fatal("want error on unparseable date string, got nil")
 	}
 }
 
-func TestCoerce_PassThroughString(t *testing.T) {
-	got, err := Coerce(schema.NewStringConstraint(), "hello")
+func TestCoerceScalar_PassThroughString(t *testing.T) {
+	got, err := coerceScalar(schema.NewStringConstraint(), "hello")
 	if err != nil || got != "hello" {
 		t.Fatalf("string pass-through: got %#v, err %v", got, err)
 	}
 }
 
-func TestCoerce_NilPassThrough(t *testing.T) {
-	got, err := Coerce(schema.NewTimestampConstraint(), nil)
+func TestCoerceScalar_NilPassThrough(t *testing.T) {
+	got, err := coerceScalar(schema.NewTimestampConstraint(), nil)
 	if err != nil || got != nil {
 		t.Fatalf("nil pass-through: got %#v, err %v", got, err)
 	}
 }
 
-func TestCoerce_NilConstraintPassThrough(t *testing.T) {
+func TestCoerceScalar_NilConstraintPassThrough(t *testing.T) {
 	t.Parallel()
 	// A nil constraint means "no type to coerce against": pass the value through,
 	// matching coerceValue. A bad/unhandled kind is unreachable — schema.Constraint
 	// is a sealed interface, so every value carries a valid kind, and the
 	// exhaustiveness lint guards the switch.
-	got, err := Coerce(nil, "x")
+	got, err := coerceScalar(nil, "x")
 	if err != nil || got != "x" {
 		t.Fatalf("nil constraint should pass through: got %#v, err %v", got, err)
 	}
@@ -149,7 +149,7 @@ func TestCoerceParams_TemporalGood(t *testing.T) {
 }
 
 func TestCoerceParams_BadTemporalErrors(t *testing.T) {
-	// yammm's Coerce returns an error on an unparseable Timestamp/Date; the
+	// yammm's coerceScalar returns an error on an unparseable Timestamp/Date; the
 	// param boundary surfaces it (a naive passthrough would let these through).
 	if _, err := CoerceParams(
 		map[string]any{"ts": "not-a-timestamp"},
@@ -400,7 +400,7 @@ func TestCoerceParams_IntegerListWidthRepair(t *testing.T) {
 	}
 }
 
-func TestCoerce_FloatFromAllNumericTypes(t *testing.T) {
+func TestCoerceScalar_FloatFromAllNumericTypes(t *testing.T) {
 	t.Parallel()
 	// Every Go integer width and float32 must repair to float64, so a Float
 	// property never reaches the driver as a non-float numeric (Neo4j rejects an
@@ -425,7 +425,7 @@ func TestCoerce_FloatFromAllNumericTypes(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			got, err := Coerce(schema.NewFloatConstraint(), tc.in)
+			got, err := coerceScalar(schema.NewFloatConstraint(), tc.in)
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
@@ -512,7 +512,7 @@ func TestCoerceParams_DeterministicError(t *testing.T) {
 	}
 }
 
-func TestCoerce_StrictRejectsUnrepairableInput(t *testing.T) {
+func TestCoerceScalar_StrictRejectsUnrepairableInput(t *testing.T) {
 	t.Parallel()
 	// The transforming kinds (Float/Date/Timestamp) error on an input they can
 	// neither pass through as already-driver-native nor repair, rather than
@@ -532,29 +532,29 @@ func TestCoerce_StrictRejectsUnrepairableInput(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			if _, err := Coerce(tc.constraint, tc.in); err == nil {
-				t.Errorf("Coerce(%v, %#v): want error, got nil", tc.constraint, tc.in)
+			if _, err := coerceScalar(tc.constraint, tc.in); err == nil {
+				t.Errorf("coerceScalar(%v, %#v): want error, got nil", tc.constraint, tc.in)
 			}
 		})
 	}
 }
 
-func TestCoerce_IdempotentOnCanonicalTypes(t *testing.T) {
+func TestCoerceScalar_IdempotentOnCanonicalTypes(t *testing.T) {
 	t.Parallel()
 	// An already-driver-native value for a transforming kind passes through
 	// unchanged: coercion is idempotent and never rejects a correct value.
 	ts := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
 	d := dbtype.Date(time.Date(2024, 6, 15, 0, 0, 0, 0, time.UTC))
 
-	if got, err := Coerce(schema.NewFloatConstraint(), float64(3.14)); err != nil || got != float64(3.14) {
+	if got, err := coerceScalar(schema.NewFloatConstraint(), float64(3.14)); err != nil || got != float64(3.14) {
 		t.Errorf("Float float64: got %#v err %v, want 3.14", got, err)
 	}
-	if got, err := Coerce(schema.NewTimestampConstraint(), ts); err != nil {
+	if got, err := coerceScalar(schema.NewTimestampConstraint(), ts); err != nil {
 		t.Errorf("Timestamp time.Time: unexpected err %v", err)
 	} else if gt, ok := got.(time.Time); !ok || !gt.Equal(ts) {
 		t.Errorf("Timestamp time.Time: got %#v, want passthrough of %v", got, ts)
 	}
-	if got, err := Coerce(schema.NewDateConstraint(), d); err != nil {
+	if got, err := coerceScalar(schema.NewDateConstraint(), d); err != nil {
 		t.Errorf("Date dbtype.Date: unexpected err %v", err)
 	} else if gd, ok := got.(dbtype.Date); !ok || !time.Time(gd).Equal(time.Time(d)) {
 		t.Errorf("Date dbtype.Date: got %#v, want passthrough of %v", got, d)
@@ -612,10 +612,10 @@ func TestCoerceParams_TimestampListCustomFormat(t *testing.T) {
 	}
 }
 
-func TestCoerce_TimestampCustomFormatDirect(t *testing.T) {
+func TestCoerceScalar_TimestampCustomFormatDirect(t *testing.T) {
 	t.Parallel()
 	c := schema.NewTimestampConstraintFormatted("2006-01-02 15:04:05")
-	got, err := Coerce(c, "2024-01-01 12:30:00")
+	got, err := coerceScalar(c, "2024-01-01 12:30:00")
 	if err != nil {
 		t.Fatalf("custom-format timestamp should parse: %v", err)
 	}
@@ -624,7 +624,7 @@ func TestCoerce_TimestampCustomFormatDirect(t *testing.T) {
 	}
 	// The declared layout is exclusive (matching validation): a non-matching
 	// string — even a valid RFC3339 one — errors.
-	if _, err := Coerce(c, "2024-01-01T12:30:00Z"); err == nil {
+	if _, err := coerceScalar(c, "2024-01-01T12:30:00Z"); err == nil {
 		t.Error("RFC3339 string under a custom layout should error")
 	}
 }
@@ -686,11 +686,11 @@ func TestParamTypes_KeyNamedPropertyBelongsToWhicheverShapeAsks(t *testing.T) {
 	}
 }
 
-// Coerce and CoerceParams judge a hand-built constraint before they coerce
-// anything, refusing what the schema Builder refuses and a DataType reference
+// coerceScalar and CoerceParams judge a hand-built constraint before they coerce
+// anything, refusing what the DSL refuses and a DataType reference
 // with no resolved constraint, so neither reaches the driver as a value in the
 // wrong type.
-func TestCoerce_RefusesAConstraintNoSchemaHolds(t *testing.T) {
+func TestCoerceParams_RefusesAConstraintNoSchemaHolds(t *testing.T) {
 	unresolved := schema.NewAliasConstraint("Day", nil)
 	list := schema.NewListConstraint(schema.NewStringConstraint())
 	for name, tc := range map[string]struct {
@@ -703,12 +703,7 @@ func TestCoerce_RefusesAConstraintNoSchemaHolds(t *testing.T) {
 		"a pointer to a List":                 {&list, []any{"a"}, "none this package constructs"},
 		"inverted bounds, whatever the value": {schema.IntegerBetween(5, 1), nil, "integer bounds inverted"},
 	} {
-		t.Run("Coerce "+name, func(t *testing.T) {
-			if _, err := Coerce(tc.c, tc.raw); err == nil || !strings.Contains(err.Error(), tc.want) {
-				t.Errorf("Coerce = %v; want an error naming %q", err, tc.want)
-			}
-		})
-		t.Run("CoerceParams "+name, func(t *testing.T) {
+		t.Run(name, func(t *testing.T) {
 			got, err := CoerceParams(map[string]any{"v": tc.raw}, ParamTypes{"v": tc.c})
 			if err == nil || !strings.Contains(err.Error(), tc.want) || !strings.Contains(err.Error(), `param type "v"`) {
 				t.Errorf("CoerceParams = %v, %v; want an error naming the key and %q", got, err, tc.want)
@@ -726,18 +721,6 @@ func TestCoerceParams_CoercesThroughAResolvedReference(t *testing.T) {
 	}
 	if _, ok := got["days"].([]dbtype.Date); !ok {
 		t.Errorf("days = %T; want []dbtype.Date", got["days"])
-	}
-}
-
-// Coerce returns the value unchanged beside a judge's error, as every other
-// error arm does.
-func TestCoerce_ReturnsTheValueUnchangedBesideAJudgeError(t *testing.T) {
-	got, err := Coerce(schema.IntegerBetween(5, 1), int64(3))
-	if err == nil {
-		t.Fatal("Coerce accepted inverted bounds")
-	}
-	if got != int64(3) {
-		t.Errorf("Coerce returned %#v beside its error; want the value unchanged", got)
 	}
 }
 

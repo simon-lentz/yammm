@@ -10,10 +10,9 @@ import (
 	"golang.org/x/text/unicode/norm"
 )
 
-// TestConstructors_AgreeOnARealFile holds the three file-backed constructors to
+// TestConstructors_AgreeOnARealFile holds the two file-backed constructors to
 // one identity for one existing file. ResolveSourcePath promises the identity
-// SourceIDFromPath mints, and CanonicalizePathForSourceID promises to match
-// SourceIDFromPath; every file sits under a symlink-resolved directory, so no
+// SourceIDFromPath mints; every file sits under a symlink-resolved directory, so no
 // symlink separates them.
 func TestConstructors_AgreeOnARealFile(t *testing.T) {
 	t.Parallel()
@@ -76,18 +75,17 @@ func TestConstructors_AgreeOnARealFile(t *testing.T) {
 	}
 }
 
-// constructorAgreement runs the three file-backed constructors over one path
+// constructorAgreement runs the two file-backed constructors over one path
 // and reports whether they produced one identity, and whether it is NFC: the
-// three share one canonicalizer, so agreement alone cannot see a dropped step.
+// two share one canonicalizer, so agreement alone cannot see a dropped step.
 func constructorAgreement(p string) (string, bool) {
 	fromPath, errPath := SourceIDFromPath(p)
 	fromResolve, _, errResolve := ResolveSourcePath(p)
-	forKey, errKey := CanonicalizePathForSourceID(p)
-	detail := fmt.Sprintf("SourceIDFromPath=%q (err %v), ResolveSourcePath=%q (err %v), CanonicalizePathForSourceID=%q (err %v)",
-		fromPath.String(), errPath, fromResolve.String(), errResolve, forKey, errKey)
-	if errPath != nil || errResolve != nil || errKey != nil {
+	detail := fmt.Sprintf("SourceIDFromPath=%q (err %v), ResolveSourcePath=%q (err %v)",
+		fromPath.String(), errPath, fromResolve.String(), errResolve)
+	if errPath != nil || errResolve != nil {
 		return detail, false
 	}
 	id := fromPath.String()
-	return detail, fromResolve == fromPath && id == forKey && id == norm.NFC.String(id)
+	return detail, fromResolve == fromPath && id == norm.NFC.String(id)
 }

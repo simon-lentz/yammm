@@ -116,7 +116,6 @@ func (t Type) Span() location.Span {
 
 // NameSpan returns the precise source location of just the type name.
 // This is more accurate than Span() for go-to-definition operations.
-// Returns a zero span if not set (e.g., for programmatically-created types).
 func (t Type) NameSpan() location.Span {
 	return t.nameSpan
 }
@@ -321,7 +320,8 @@ func (t Type) AllAnnotations() iter.Seq[Annotation] {
 	}
 }
 
-// Inherits returns an iterator over the declared extends clause (syntactic refs).
+// Inherits returns an iterator over the declared extends clause (syntactic refs),
+// one per supertype named.
 func (t Type) Inherits() iter.Seq[TypeRef] {
 	return func(yield func(TypeRef) bool) {
 		for _, ref := range t.inherits {

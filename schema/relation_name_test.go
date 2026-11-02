@@ -5,7 +5,6 @@ import (
 	"testing"
 
 	"github.com/simon-lentz/yammm/diag"
-	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -42,17 +41,10 @@ type Order {
 	}
 }
 
-// TestBuilder_RelationNameIsUpperSnake pins that the Builder front door applies
-// the same production the parser does.
-func TestBuilder_RelationNameIsUpperSnake(t *testing.T) {
+func TestLoad_RelationNameIsUpperSnake(t *testing.T) {
 	t.Parallel()
 
-	camel := "works" + "At"
-	b := schema.NewBuilder().WithName("s").
-		AddType("Company").WithPrimaryKey("id", schema.NewStringConstraint()).Done().
-		AddType("Person").WithPrimaryKey("id", schema.NewStringConstraint()).
-		WithRelation(camel, schema.NewTypeRef("", "Company", location.Span{}), false, false).Done()
-	_, res := b.Build()
+	_, res := schema.LoadString(t.Context(), "schema \"s\"\n\ntype Company {\n\tid String primary\n}\n\ntype Person {\n\tid String primary\n\t--> worksAt (one) Company\n}\n", "s.yammm")
 	if !res.HasCode(diag.E_INVALID_NAME) {
 		t.Fatalf("a camelCase relation name must draw E_INVALID_NAME; got %v", res.Err())
 	}

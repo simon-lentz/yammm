@@ -227,18 +227,14 @@ func TestNewCanonicalPath_ErrorHandling(t *testing.T) {
 		if cp.IsZero() {
 			t.Error("result should not be zero")
 		}
-		if want := MustCanonicalPath("/nonexistent/target/12345").String(); cp.String() != want {
-			t.Errorf("NewCanonicalPath(dangling link) = %q, want its target %q", cp.String(), want)
+		want, err := NewCanonicalPath("/nonexistent/target/12345")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cp.String() != want.String() {
+			t.Errorf("NewCanonicalPath(dangling link) = %q, want its target %q", cp.String(), want.String())
 		}
 	})
-}
-
-func TestMustCanonicalPath(t *testing.T) {
-	// Should not panic for valid path
-	cp := MustCanonicalPath(".")
-	if cp.IsZero() {
-		t.Error("result should not be zero")
-	}
 }
 
 func TestCanonicalPath_IsZero(t *testing.T) {

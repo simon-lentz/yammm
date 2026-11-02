@@ -36,42 +36,6 @@ func TestLookupBuiltin_ArgsDoNotAliasTheCatalogue(t *testing.T) {
 	}
 }
 
-// TestBuiltins_ArgsDoNotAliasTheCatalogue is the same pin at the other
-// accessor. Builtins appends the map's values, so every returned spec shared
-// the catalogue's backing array before the clone. It drives Replace rather
-// than Substring: the catalogue is process-wide, so two tests corrupting one
-// row would each hide the other's failure.
-func TestBuiltins_ArgsDoNotAliasTheCatalogue(t *testing.T) {
-	find := func(name string) expr.BuiltinSpec {
-		t.Helper()
-		for _, s := range expr.Builtins() {
-			if s.Name == name {
-				return s
-			}
-		}
-		t.Fatalf("%s is not in the catalogue", name)
-		return expr.BuiltinSpec{}
-	}
-
-	first := find("Replace")
-	if len(first.Args) == 0 {
-		t.Fatal("Replace declares no argument kinds, so this pin asserts nothing")
-	}
-	want := first.Args[0]
-
-	first.Args[0] = expr.ArgPattern + 1 // a kind no catalogue row holds
-	if first.Args[0] == want {
-		t.Fatal("the mutation did not take, so this test cannot fail for the reason it names")
-	}
-
-	if got := find("Replace").Args[0]; got != want {
-		t.Errorf("a later Builtins call saw the first's mutation: Args[0] = %v, want %v", got, want)
-	}
-	if lookup, _ := expr.LookupBuiltin("Replace"); lookup.Args[0] != want {
-		t.Errorf("LookupBuiltin saw a Builtins caller's mutation: Args[0] = %v, want %v", lookup.Args[0], want)
-	}
-}
-
 // TestBuiltinSpec_ArgAtRepeatsTheLastKind pins the repeat-last rule ArgAt's
 // godoc states. It is vacuous on the catalogue as it stands — Coalesce is the
 // only unbounded builtin and its repeating kind is ArgAny — so the rule is

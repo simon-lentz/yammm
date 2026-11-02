@@ -19,7 +19,9 @@
 // [RawInstance] represents unvalidated input data with optional provenance
 // information for error reporting. [ValidInstance] is the immutable output
 // containing typed properties, validated edges and composed children, the
-// extracted primary key, and the provenance.
+// extracted primary key, and the provenance. It holds the [schema.Type] that
+// validated it, one handle of the validator's schema load, and
+// [github.com/simon-lentz/yammm/graph.Graph.Add] panics on a handle of another load.
 //
 // These two types use different access patterns by design:
 //   - [RawInstance] uses public struct fields (Properties, Provenance) because
@@ -58,10 +60,6 @@
 //   - Edge object validation (associations and compositions)
 //   - Invariant expression evaluation
 //
-// [Validator.ValidateForComposition] is another entry point for streaming
-// composition scenarios where composed children are validated separately
-// from their parent.
-//
 // A refused value at a property, a foreign-key field or an edge property draws
 // its producer's issue alone; anywhere else the validator judges a shape, it
 // reports the value as any other of the wrong shape. A key no member claims, or
@@ -82,20 +80,16 @@
 //   - [WithStrictPropertyNames]: require exact-case property names
 //   - [WithAllowUnknownFields]: allow extra properties without diagnostics
 //   - [WithIssueLimit]: cap the issues one instance stores
-//   - [WithLogger]: receive a debug record when an instance's property name is
-//     normalized, and the evaluator's Debug trace of every invariant evaluated,
-//     each record logged with the context passed to Validate
 //
 // # Value Functions
 //
 // [CheckValue] and [CanonicalValue] are the validator's two per-value rules —
-// does this value conform, and what is its stored form — exported for a
-// boundary this library does not own: a hand-built export, a direct-Cypher
-// parameter map, a pre-filter in front of a write the validator never sees.
-// Both accept a nil constraint, and a value that holds none (nil behind at
-// most 64 pointers and interfaces, as [ScalarOf] reads it, a nil slice or map
-// included) under a constraint [schema.CheckConstraint] accepts; both refuse a
-// constraint it refuses, whatever the value.
+// does this value conform, and what is its stored form — exported for code
+// outside the validator that reads a value under a constraint, as the adapter/json
+// and adapter/csv writers do.
+// Both accept a nil constraint, and a value that holds none ([IsAbsent]) under
+// a constraint [schema.CheckConstraint] accepts; both refuse a constraint it
+// refuses, whatever the value.
 //
 // # Thread Safety
 //
@@ -106,5 +100,5 @@
 // # Dependencies
 //
 //	instance  ──imports──▶  schema, diag, location, location/path, immutable,
-//	                        instance/internal/eval, internal/trace, internal/value
+//	                        instance/internal/eval, internal/value
 package instance

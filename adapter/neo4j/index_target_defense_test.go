@@ -13,20 +13,17 @@ import (
 // schema an entry point returns holds, so only these tests reach the re-checks.
 func defenseModel(t *testing.T) schema.Type {
 	t.Helper()
-	s, result := schema.NewBuilder().
-		WithName("defense").
-		AddType("Entity").
-		WithPrimaryKey("id", schema.NewStringConstraint()).
-		WithProperty("title", schema.NewStringConstraint()).
-		WithProperty("tags", schema.NewListConstraint(schema.NewStringConstraint())).
-		WithProperty("count", schema.NewIntegerConstraint()).
-		WithProperty("embedding", schema.NewVectorConstraint(3)).
-		WithProperty("flat", schema.NewVectorConstraint(3)).
-		WithPropertyAnnotation("title", "index").
-		WithPropertyAnnotation("title", "fulltext").
-		WithPropertyAnnotation("embedding", "vector", "cosine").
-		Done().
-		Build()
+	s, result := schema.LoadString(t.Context(), `schema "defense"
+
+type Entity {
+	id String primary
+	title String required @index @fulltext
+	tags List<String> required
+	count Integer required
+	embedding Vector[3] required @vector(cosine)
+	flat Vector[3] required
+}
+`, "defense.yammm")
 	if result.HasErrors() {
 		t.Fatalf("defense model must build cleanly: %v", result.Err())
 	}

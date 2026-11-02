@@ -12,10 +12,9 @@ import (
 )
 
 // encoding/json writes each byte of a string that is not UTF-8 as U+FFFD, so a
-// metadata key or value holding one would read back as other text, and two
-// such keys as one repeated member, which the reader refuses. Marshal and
-// UpdateMetadata refuse the metadata instead of writing a document Load
-// refuses or reads as another.
+// metadata key or value holding one would read back as other text, and two such
+// keys as one repeated member. Marshal and UpdateMetadata refuse the metadata
+// instead of writing a document that reads back as another.
 func TestMetadata_RefusesTextThatIsNotValidUTF8(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()

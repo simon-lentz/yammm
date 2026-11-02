@@ -22,19 +22,10 @@ type alignableLine struct {
 	raw     string // original line text
 }
 
-// AlignColumns pads the name column within alignment groups to produce
-// columnar output. Groups are contiguous runs of the same member kind,
-// broken by blank lines, comment lines, non-alignable lines, or kind changes.
-func AlignColumns(text string) string {
-	if text == "" {
-		return ""
-	}
-	return joinLines(alignColumns(classifyLexed(text)))
-}
-
-// alignColumns is AlignColumns over classified lines. Only a content line
-// can join a group; a blank or comment line ends the group and passes
-// through untouched, whatever its text looks like.
+// alignColumns pads the name column within alignment groups to produce
+// columnar output. Groups are contiguous runs of the same member kind, broken
+// by blank lines, comment lines, non-alignable lines, or kind changes; a blank
+// or comment line passes through untouched, whatever its text looks like.
 func alignColumns(ls []line) []line {
 	result := make([]line, 0, len(ls))
 	var group []alignableLine

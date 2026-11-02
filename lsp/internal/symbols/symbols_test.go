@@ -18,7 +18,7 @@ import (
 func TestExtractSymbols_ZeroSchema(t *testing.T) {
 	t.Parallel()
 
-	syms := symbols.ExtractSymbols(schema.Schema{}, nil)
+	syms := symbols.ExtractSymbols(schema.Schema{})
 	assert.Nil(t, syms, "ExtractSymbols(nil) should return nil")
 }
 
@@ -29,7 +29,7 @@ func TestExtractSymbols_EmptySchema(t *testing.T) {
 	s, result := schema.LoadString(ctx, `schema "empty"`, "empty.yammm")
 	require.False(t, result.HasErrors(), "load errors: %v", result)
 
-	syms := symbols.ExtractSymbols(s, nil)
+	syms := symbols.ExtractSymbols(s)
 	assert.Len(t, syms, 1, "should contain only the schema itself")
 	if len(syms) > 0 {
 		assert.Equal(t, symbols.SymbolSchema, syms[0].Kind)
@@ -49,7 +49,7 @@ type Person {
 	s, result := schema.LoadString(ctx, src, "person.yammm")
 	require.False(t, result.HasErrors(), "load errors: %v", result)
 
-	syms := symbols.ExtractSymbols(s, nil)
+	syms := symbols.ExtractSymbols(s)
 
 	// Should have schema + type
 	require.GreaterOrEqual(t, len(syms), 2, "should have at least schema + type symbols")
@@ -83,7 +83,7 @@ func TestBuildSymbolIndex(t *testing.T) {
 	s, result := schema.LoadString(ctx, `schema "Index"`, "index.yammm")
 	require.False(t, result.HasErrors(), "load errors: %v", result)
 
-	idx := symbols.BuildSymbolIndex(s, nil)
+	idx := symbols.BuildSymbolIndex(s)
 	require.NotNil(t, idx, "symbols.BuildSymbolIndex() returned nil")
 	// Symbols should not be nil (contains at least schema symbol)
 	assert.NotNil(t, idx.Symbols, "idx.Symbols is nil")
@@ -112,7 +112,7 @@ type Target {
 	s, result := schema.LoadString(ctx, src, "find.yammm")
 	require.False(t, result.HasErrors(), "load errors: %v", result)
 
-	idx := symbols.BuildSymbolIndex(s, nil)
+	idx := symbols.BuildSymbolIndex(s)
 
 	// Position on the type declaration line (line 3: "type Target {").
 	// Byte must be -1 (unknown) to force line/column comparison;
@@ -133,7 +133,7 @@ func TestReferenceAtPosition_Empty(t *testing.T) {
 func TestSnapshot_SymbolIndexAt(t *testing.T) {
 	t.Parallel()
 
-	sourceID := location.MustNewSourceID("test://snap.yammm")
+	sourceID := location.NewSourceID("test://snap.yammm")
 	idx := &symbols.SymbolIndex{
 		Symbols:    []symbols.Symbol{{Name: "Test", Kind: symbols.SymbolType}},
 		References: []symbols.ReferenceSymbol{},
@@ -150,7 +150,7 @@ func TestSnapshot_SymbolIndexAt(t *testing.T) {
 	assert.Equal(t, idx, got, "SymbolIndexAt() returned wrong index")
 
 	// Should return nil for unknown source
-	unknownID := location.MustNewSourceID("test://unknown.yammm")
+	unknownID := location.NewSourceID("test://unknown.yammm")
 	got = snapshot.SymbolIndexAt(unknownID)
 	assert.Nil(t, got, "SymbolIndexAt(unknown) should return nil")
 
@@ -163,7 +163,7 @@ func TestSnapshot_SymbolIndexAt(t *testing.T) {
 func TestSnapshot_FindSymbolByName(t *testing.T) {
 	t.Parallel()
 
-	sourceID := location.MustNewSourceID("test://find.yammm")
+	sourceID := location.NewSourceID("test://find.yammm")
 	idx := &symbols.SymbolIndex{
 		Symbols: []symbols.Symbol{
 			{Name: "Person", Kind: symbols.SymbolType},
@@ -201,7 +201,7 @@ func TestSnapshot_ResolveTypeReference_Nil(t *testing.T) {
 	t.Parallel()
 
 	var snapshot *analysis.Snapshot
-	sourceID := location.MustNewSourceID("test://ref.yammm")
+	sourceID := location.NewSourceID("test://ref.yammm")
 
 	sym := snapshot.ResolveTypeReference(nil, sourceID)
 	assert.Nil(t, sym, "ResolveTypeReference(nil) should return nil")
@@ -210,8 +210,8 @@ func TestSnapshot_ResolveTypeReference_Nil(t *testing.T) {
 func TestSnapshot_ResolveTypeReference_Local(t *testing.T) {
 	t.Parallel()
 
-	sourceID := location.MustNewSourceID("test://local.yammm")
-	typeSpan := location.Range(sourceID, 5, 1, 10, 1)
+	sourceID := location.NewSourceID("test://local.yammm")
+	typeSpan := location.RangeWithBytes(sourceID, 5, 1, -1, 10, 1, -1)
 
 	idx := &symbols.SymbolIndex{
 		Symbols: []symbols.Symbol{
@@ -240,7 +240,7 @@ func TestSnapshot_ResolveTypeReference_Local(t *testing.T) {
 func TestIsSmaller(t *testing.T) {
 	t.Parallel()
 
-	sourceID := location.MustNewSourceID("test://smaller.yammm")
+	sourceID := location.NewSourceID("test://smaller.yammm")
 
 	tests := []struct {
 		name   string
@@ -249,20 +249,20 @@ func TestIsSmaller(t *testing.T) {
 	}{
 		{
 			name:   "fewer lines is smaller",
-			a:      location.Range(sourceID, 5, 1, 6, 1),  // 1 line
-			b:      location.Range(sourceID, 1, 1, 10, 1), // 9 lines
+			a:      location.RangeWithBytes(sourceID, 5, 1, -1, 6, 1, -1),  // 1 line
+			b:      location.RangeWithBytes(sourceID, 1, 1, -1, 10, 1, -1), // 9 lines
 			expect: true,
 		},
 		{
 			name:   "same lines, narrower columns is smaller",
-			a:      location.Range(sourceID, 5, 5, 5, 15),  // 10 cols
-			b:      location.Range(sourceID, 5, 1, 5, 100), // 99 cols
+			a:      location.RangeWithBytes(sourceID, 5, 5, -1, 5, 15, -1),  // 10 cols
+			b:      location.RangeWithBytes(sourceID, 5, 1, -1, 5, 100, -1), // 99 cols
 			expect: true,
 		},
 		{
 			name:   "more lines is not smaller",
-			a:      location.Range(sourceID, 1, 1, 20, 1),
-			b:      location.Range(sourceID, 5, 1, 6, 1),
+			a:      location.RangeWithBytes(sourceID, 1, 1, -1, 20, 1, -1),
+			b:      location.RangeWithBytes(sourceID, 5, 1, -1, 6, 1, -1),
 			expect: false,
 		},
 	}
@@ -272,49 +272,6 @@ func TestIsSmaller(t *testing.T) {
 			t.Parallel()
 			got := symbols.IsSmaller(tt.a, tt.b)
 			assert.Equal(t, tt.expect, got, "isSmaller() result mismatch")
-		})
-	}
-}
-
-func TestPositionBefore(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		name   string
-		a, b   location.Position
-		expect bool
-	}{
-		{
-			name:   "earlier line is before",
-			a:      location.Position{Line: 1, Column: 10},
-			b:      location.Position{Line: 2, Column: 1},
-			expect: true,
-		},
-		{
-			name:   "same line, earlier column is before",
-			a:      location.Position{Line: 5, Column: 5},
-			b:      location.Position{Line: 5, Column: 10},
-			expect: true,
-		},
-		{
-			name:   "later line is not before",
-			a:      location.Position{Line: 10, Column: 1},
-			b:      location.Position{Line: 5, Column: 1},
-			expect: false,
-		},
-		{
-			name:   "same position is not before",
-			a:      location.Position{Line: 5, Column: 5},
-			b:      location.Position{Line: 5, Column: 5},
-			expect: false,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			got := symbols.PositionBefore(tt.a, tt.b)
-			assert.Equal(t, tt.expect, got, "positionBefore() result mismatch")
 		})
 	}
 }
@@ -337,7 +294,7 @@ part type Wheel {
 	s, result := schema.LoadString(ctx, src, "abstract.yammm")
 	require.False(t, result.HasErrors(), "load errors: %v", result)
 
-	syms := symbols.ExtractSymbols(s, nil)
+	syms := symbols.ExtractSymbols(s)
 
 	var entitySym, wheelSym *symbols.Symbol
 	for i := range syms {
@@ -386,11 +343,11 @@ func TestSpanToLSPRange_Conversion(t *testing.T) {
 	t.Parallel()
 
 	sources := lsputil.NewTexts()
-	sourceID := location.MustNewSourceID("test://range.yammm")
-	span := location.Range(sourceID, 5, 10, 7, 20) // 1-based
+	sourceID := location.NewSourceID("test://range.yammm")
+	span := location.RangeWithBytes(sourceID, 5, 10, -1, 7, 20, -1) // 1-based
 
 	// SpanToLSPRange falls back to rune column conversion when source is not registered
-	start, end, ok := lsputil.SpanToLSPRange(sources, span, lsputil.PositionEncodingUTF16)
+	start, end, ok := lsputil.SpanToLSPRange(sources, span)
 	require.True(t, ok, "SpanToLSPRange returned !ok")
 
 	// Extract values to satisfy linter (gosec false positive on array access after t.Fatal)
@@ -415,7 +372,7 @@ type ShortString = String[1, 50]
 	s, result := schema.LoadString(ctx, src, "datatype.yammm")
 	require.False(t, result.HasErrors(), "load errors: %v", result)
 
-	syms := symbols.ExtractSymbols(s, nil)
+	syms := symbols.ExtractSymbols(s)
 
 	// Should have schema + datatype
 	require.GreaterOrEqual(t, len(syms), 2, "should have at least schema + datatype symbols")
@@ -512,8 +469,8 @@ type User {
 func TestSnapshot_ResolveTypeReference_DataType(t *testing.T) {
 	t.Parallel()
 
-	sourceID := location.MustNewSourceID("test://resolve.yammm")
-	dtSpan := location.Range(sourceID, 3, 1, 3, 30)
+	sourceID := location.NewSourceID("test://resolve.yammm")
+	dtSpan := location.RangeWithBytes(sourceID, 3, 1, -1, 3, 30, -1)
 
 	idx := &symbols.SymbolIndex{
 		Symbols: []symbols.Symbol{
@@ -546,7 +503,7 @@ func TestSnapshot_ResolveTypeReference_DataType_NotType(t *testing.T) {
 	// Verify that RefDataType does NOT resolve to SymbolType
 	t.Parallel()
 
-	sourceID := location.MustNewSourceID("test://nottype.yammm")
+	sourceID := location.NewSourceID("test://nottype.yammm")
 
 	idx := &symbols.SymbolIndex{
 		Symbols: []symbols.Symbol{
@@ -577,14 +534,13 @@ func TestFormatPropertyDetail_WithConstraint(t *testing.T) {
 	// Tests that formatPropertyDetail correctly formats a property with a constraint.
 	t.Parallel()
 
-	s, result := schema.NewBuilder().
-		WithName("test").
-		WithSourceID(location.MustNewSourceID("test://test.yammm")).
-		AddType("Person").
-		WithPrimaryKey("id", schema.NewStringConstraint()).
-		WithOptionalProperty("name", schema.NewStringConstraint()).
-		Done().
-		Build()
+	s, result := schema.LoadString(t.Context(), `schema "test"
+
+type Person {
+	id String primary
+	name String
+}
+`, "test.yammm")
 	require.False(t, result.HasErrors(), "builder errors: %v", result)
 
 	typ, ok := s.Type("Person")

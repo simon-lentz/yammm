@@ -8,7 +8,6 @@ import (
 
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/internal/yammmtest"
-	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -19,9 +18,6 @@ func resolutionIssue(t *testing.T, res diag.Result, code diag.Code) (diag.Issue,
 	for issue := range res.Issues() {
 		if issue.Code() != code {
 			continue
-		}
-		if !diag.IsImportResolutionCode(issue.Code().String()) {
-			t.Fatalf("%s is not in the import-resolution family", code)
 		}
 		details := map[string]string{}
 		for _, d := range issue.Details() {
@@ -56,39 +52,6 @@ func assertProvenance(t *testing.T, issue diag.Issue, details map[string]string,
 	}
 	if !strings.Contains(issue.Message(), wantMessagePart) {
 		t.Errorf("message %q does not state the provenance in words (want %q)", issue.Message(), wantMessagePart)
-	}
-}
-
-// assertResolutionShape checks that every issue of the import-resolution
-// family in res carries the module root and its origin as details, and names
-// the root in its message (or says none is in play), whichever site raised it.
-func assertResolutionShape(t *testing.T, res diag.Result) {
-	t.Helper()
-	seen := 0
-	for issue := range res.Issues() {
-		if !diag.IsImportResolutionCode(issue.Code().String()) {
-			continue
-		}
-		seen++
-		details := map[string]string{}
-		for _, d := range issue.Details() {
-			details[d.Key] = d.Value
-		}
-		root, hasRoot := details[diag.DetailKeyModuleRoot]
-		origin, hasOrigin := details[diag.DetailKeyModuleRootOrigin]
-		if !hasRoot || !hasOrigin || origin == "" {
-			t.Errorf("%s %q carries module root %v and origin %q; the family carries both", issue.Code(), issue.Message(), hasRoot, origin)
-		}
-		words := root
-		if origin == diag.ModuleRootNone {
-			words = "no module root in play"
-		}
-		if !strings.Contains(issue.Message(), words) {
-			t.Errorf("%s %q does not state its root, %q", issue.Code(), issue.Message(), words)
-		}
-	}
-	if seen == 0 {
-		t.Errorf("no import-resolution issue in %v", res.Err())
 	}
 }
 
@@ -225,22 +188,4 @@ func TestImportCycleProvenance(t *testing.T) {
 	_, res := schema.Load(t.Context(), a, schema.WithModuleRoot(root))
 	issue, details := resolutionIssue(t, res, diag.E_IMPORT_CYCLE)
 	assertProvenance(t, issue, details, rootIdentity(t, root), diag.ModuleRootExplicit, "given explicitly")
-}
-
-// TestBuilderImportResolve_SameShape pins that the Builder's front door builds
-// the code the same way the loader does. A family that carries one shape at
-// one site and another at its sibling is the defect one builder per code
-// exists to prevent. The Builder resolves through a registry and never through
-// a root, so its origin is "none".
-func TestBuilderImportResolve_SameShape(t *testing.T) {
-	t.Parallel()
-
-	b := schema.NewBuilder().
-		WithName("main").
-		WithSourceID(location.MustNewSourceID("builder://main"))
-	b.AddImport("other", "other")
-	_, res := b.Build()
-
-	issue, details := resolutionIssue(t, res, diag.E_IMPORT_RESOLVE)
-	assertProvenance(t, issue, details, "", diag.ModuleRootNone, "no module root in play")
 }

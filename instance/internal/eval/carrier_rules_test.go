@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log/slog"
 	"math"
 	"reflect"
 	"strings"
@@ -12,7 +11,6 @@ import (
 
 	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/instance/internal/eval"
-	"github.com/simon-lentz/yammm/internal/yammmtest"
 	"github.com/simon-lentz/yammm/schema"
 	"github.com/simon-lentz/yammm/schema/expr"
 )
@@ -313,31 +311,6 @@ func TestIntegerLiteralOutsideInt64_IsItsNearestFloatAtAFloat(t *testing.T) {
 	}
 }
 
-// The trace op ends with the panic: a crashed evaluation is logged as one,
-// and the panic still propagates to the recover that owns it.
-func TestEvaluate_EndsTheTraceOpWithThePanic(t *testing.T) {
-	t.Parallel()
-	h := yammmtest.NewRecordHandler(slog.LevelDebug)
-	ev := eval.NewEvaluator(eval.WithLogger(slog.New(h)))
-	var recovered any
-	func() {
-		defer func() { recovered = recover() }()
-		_, _ = ev.Evaluate(t.Context(), sx("p", lit("x")), panicScope{})
-	}()
-	if recovered == nil {
-		t.Fatal("the panic did not propagate")
-	}
-	if !yammmtest.HasAttr(h.Records(), "error", "panic: scope boom") {
-		t.Error("the op ended without the panic as its error")
-	}
-}
-
-type panicScope struct{}
-
-func (panicScope) Lookup(string) (immutable.Value, bool)     { panic("scope boom") }
-func (panicScope) LookupFold(string) (immutable.Value, bool) { panic("scope boom") }
-func (panicScope) WithVar(string, any) eval.Scope            { panic("scope boom") }
-
 // A nil expression is an evaluation error, not a silent nil: the completer
 // refuses an invariant without one, so nothing downstream tolerates it.
 func TestEvaluate_NilExpressionIsAnError(t *testing.T) {
@@ -348,8 +321,7 @@ func TestEvaluate_NilExpressionIsAnError(t *testing.T) {
 }
 
 // The short direct-call form — a two- or three-element S-expression with no
-// args, params or body slots — is live code reachable through
-// schema.Builder, and evaluates as the five-element form does.
+// args, params or body slots — evaluates as the five-element form does.
 func TestEvaluator_DirectBuiltinCallShortForm(t *testing.T) {
 	t.Parallel()
 	ev := eval.NewEvaluator()

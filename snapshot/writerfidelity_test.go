@@ -6,13 +6,10 @@ import (
 	"testing"
 
 	"github.com/simon-lentz/yammm/diag"
-	"github.com/simon-lentz/yammm/graph"
-	"github.com/simon-lentz/yammm/immutable"
-	"github.com/simon-lentz/yammm/instance"
 	"github.com/simon-lentz/yammm/internal/instancetest"
-	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
 	"github.com/simon-lentz/yammm/snapshot"
+	"github.com/simon-lentz/yammm/snapshot/snapshottest"
 )
 
 // The writer states what the snapshot holds and mints nothing of its own.
@@ -73,15 +70,8 @@ type Doc {
 	const upper = "3F2504E0-4F89-11D3-9A0C-0305E82C3301"
 	const lower = "3f2504e0-4f89-11d3-9a0c-0305e82c3301"
 
-	ty, _ := s.Type("Doc")
-	g := graph.New(s)
-	g.Add(t.Context(), instancetest.VI(
-		"Doc",
-		instancetest.TypeID(ty.ID()),
-		instancetest.PK(upper),
-		instancetest.Props(map[string]any{"uid": upper, "other": upper}),
-	))
-	data, mres := snapshot.Marshal(t.Context(), g.Snapshot())
+	snap := snapshottest.BuildSnapshot(t, s, instancetest.Valid(t, s, "Doc", map[string]any{"uid": upper, "other": upper}))
+	data, mres := snapshot.Marshal(t.Context(), snap)
 	if mres.HasErrors() {
 		t.Fatalf("marshal: %s", mres)
 	}
@@ -133,56 +123,5 @@ func TestWriter_PreservesAnEmptyProvenancePath(t *testing.T) {
 	_, res2 := snapshot.Load(t.Context(), again, s)
 	if !res2.HasCode(diag.W_SNAPSHOT_PATH_FALLBACK) {
 		t.Errorf("the fallback warning vanished on the second read: %s", res2)
-	}
-}
-
-// A target key [graph.ParseKey] cannot read is refused where a snapshot is
-// built, by RebuildSnapshot and by Graph.Add, so no snapshot Marshal receives
-// holds one: an unresolved record's fields are read through methods alone.
-// TestParseTargetKey_RefusesAKeyParseKeyCannotRead pins Marshal's own guard.
-func TestWriter_RefusesATargetKeyItCannotParse(t *testing.T) {
-	t.Parallel()
-
-	s, res := schema.LoadString(t.Context(), bigKeySchema, "bigkey.yammm")
-	if res.HasErrors() {
-		t.Fatalf("load bigkey schema: %s", res)
-	}
-	typ, ok := s.Type("Ref")
-	if !ok {
-		t.Fatal("Ref missing")
-	}
-	id := typ.ID()
-
-	nested := immutable.WrapKey([]any{[]any{"nested"}})
-	if _, err := graph.ParseKey(nested.String()); err == nil {
-		t.Fatalf("fixture is vacuous: ParseKey reads %s", nested)
-	}
-	r1 := graph.InstanceParts{
-		TypeID:     id,
-		PrimaryKey: immutable.WrapKey([]any{"r1"}),
-		Properties: immutable.WrapProperties(map[string]any{"id": "r1"}),
-	}
-	_, res = graph.RebuildSnapshot(s, graph.SnapshotParts{
-		Types:     []schema.TypeID{id},
-		Instances: []graph.InstanceParts{r1},
-		Unresolved: []graph.UnresolvedParts{{
-			SourceType: id,
-			SourceKey:  immutable.WrapKey([]any{"r1"}),
-			Relation:   "POINTS",
-			TargetKey:  nested,
-			Reason:     "target_missing",
-		}},
-	})
-	if !res.HasCode(diag.E_GRAPH_INVALID_PK) || !strings.Contains(res.String(), "is not a scalar") {
-		t.Errorf("RebuildSnapshot = %s, want the target key refused", res)
-	}
-	g := graph.New(s)
-	add := g.Add(t.Context(), instance.NewValidInstance("Ref", id, immutable.WrapKey([]any{"r1"}),
-		immutable.WrapProperties(map[string]any{"id": "r1"}),
-		map[string]instance.ValidEdgeData{"POINTS": instance.NewValidEdgeData([]instance.ValidEdgeTarget{
-			instance.NewValidEdgeTarget(nested, immutable.Properties{}),
-		})}, nil, location.Provenance{}))
-	if !add.HasCode(diag.E_GRAPH_INVALID_PK) {
-		t.Errorf("Graph.Add = %s, want the target key refused", add)
 	}
 }

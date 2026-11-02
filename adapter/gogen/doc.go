@@ -77,8 +77,9 @@
 //	List<T>                       →  []T
 //
 // The library stores a Date as "2006-01-02" and a custom-layout Timestamp
-// through its declared layout, and adapter/json writes those strings, which a
-// bare time.Time cannot decode. The generated Date and per-layout types are
+// through its declared layout, and adapter/json writes those strings. A bare
+// time.Time decodes RFC 3339 alone, so it refuses a Date and every layout whose
+// text is not RFC 3339. The generated Date and per-layout types are
 // structs embedding time.Time — so every time.Time method but MarshalJSON and
 // UnmarshalJSON is promoted, and a value is built as Date{Time: t} — carrying MarshalJSON and UnmarshalJSON that
 // speak the stored form. A per-layout type's bare spelling is "Timestamp" plus
@@ -267,7 +268,7 @@
 //
 // Two import layouts a load accepts have no store the re-load can read, and
 // [Marshal] refuses both, naming the paths: one source imported by two paths under two
-// keys (a store holding both fails to re-load as one schema name registered
+// keys (a store holding both fails to re-load as one schema name declared
 // twice), and two sources
 // taking one key (a relative import through a symlink reads the link target's
 // neighbour on load and resolves by the key's text on re-load).
@@ -306,15 +307,10 @@
 //
 // # Preconditions
 //
-// The schema must be completed (aliases resolved, inheritance linearized) — always
-// true for a schema returned by [github.com/simon-lentz/yammm/schema.Load] or
-// [github.com/simon-lentz/yammm/schema.Builder.Build] — and it must be
-// source-backed: loaded via [github.com/simon-lentz/yammm/schema.Load],
+// The schema is one a load returned: [github.com/simon-lentz/yammm/schema.Load],
 // [github.com/simon-lentz/yammm/schema.LoadString], or
-// [github.com/simon-lentz/yammm/schema.LoadSourcesWithEntry]. A schema assembled
-// programmatically through [github.com/simon-lentz/yammm/schema.NewBuilder] without
-// retained source content has nothing to embed and nothing for the round-trip
-// check to re-load, so [Marshal] returns an error for it.
+// [github.com/simon-lentz/yammm/schema.LoadSourcesWithEntry]. It holds the sources
+// the embedded store carries and the round-trip check re-loads.
 //
 // # Configuration
 //
@@ -337,8 +333,6 @@
 //
 // [Marshal] returns an error (never partial or broken Go) when:
 //
-//   - the schema is non-zero and holds no retained source (e.g. built via
-//     [github.com/simon-lentz/yammm/schema.NewBuilder]; the zero Schema panics once the package name passes);
 //   - the [WithPackageName] value cannot head a package clause
 //     ([ErrInvalidPackageName]; [CheckPackageName] applies the same rule
 //     before a schema is loaded);
@@ -347,9 +341,6 @@
 //     no base, or a key is one the re-load's key rule refuses (see Embedded
 //     Source);
 //   - the module root the load recorded no longer resolves as a host path;
-//   - a load through a registry that holds a sourceless compile of an import
-//     left the schema's Sources without that import's bytes, so the embedded
-//     store does not re-load;
 //   - any other failure, which is a generator bug: emission meets a state it
 //     cannot write, such as an unresolved reference, alias or target, a kind
 //     it does not handle or whose constraint it does not carry, or a name with
@@ -378,8 +369,9 @@
 // and nothing else in the emitted file.
 //
 // They do reach the generator indirectly: a property inherited from several
-// ancestors carries the union of their annotations, so the merged view yields a
-// synthesized copy rather than the declared property. Every lookup keyed by a
+// direct supertypes carries the union of their merged views' annotations. Where
+// that union differs from the surviving property's own set, the merged view
+// holds a synthesized copy rather than the declared property. Every lookup keyed by a
 // property here therefore goes through [github.com/simon-lentz/yammm/schema.Property.Origin].
 //
 // # Dependencies

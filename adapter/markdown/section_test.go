@@ -6,7 +6,6 @@ import (
 	"testing"
 
 	"github.com/simon-lentz/yammm/schema"
-	"github.com/simon-lentz/yammm/schema/expr"
 )
 
 // loadSchema parses src as a single-source schema and fails the test on any
@@ -381,34 +380,6 @@ type Person {
 	want := "\n-   \"a\\*b\\*c and \\<b\\>x\\</b\\> \\[l\\](\\#person)\"\n"
 	if !strings.Contains(got, want) {
 		t.Errorf("section %q does not contain the bullet %q", got, want)
-	}
-}
-
-func TestEmitTypeSection_BuilderInvariantDegradesToMessage(t *testing.T) {
-	t.Parallel()
-
-	s, res := schema.NewBuilder().WithName("built").
-		AddType("Thing").
-		WithPrimaryKey("id", schema.NewStringConstraint()).
-		WithInvariant("always true", expr.NewLiteral(true), "").
-		Done().
-		Build()
-	if err := res.Err(); err != nil {
-		t.Fatalf("Build: %v", err)
-	}
-
-	got := sectionFor(t, s, "Thing")
-	want := "### Thing\n" +
-		"\n" +
-		"| Property | Type | Modifiers | Description |\n" +
-		"| --- | --- | --- | --- |\n" +
-		"| `id` | `String` | primary |  |\n" +
-		"\n" +
-		"**Invariants**\n" +
-		"\n" +
-		"-   \"always true\"\n"
-	if got != want {
-		t.Errorf("section = %q, want %q", got, want)
 	}
 }
 

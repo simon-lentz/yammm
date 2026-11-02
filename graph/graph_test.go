@@ -4,17 +4,14 @@ import (
 	"cmp"
 	"context"
 	"fmt"
-	"log/slog"
 	"slices"
-	"strings"
 	"testing"
 
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/graph"
-	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/instance"
+	"github.com/simon-lentz/yammm/internal/instancetest"
 	"github.com/simon-lentz/yammm/internal/yammmtest"
-	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -22,37 +19,18 @@ import (
 func testSchema(t *testing.T) schema.Schema {
 	t.Helper()
 
-	s, result := schema.NewBuilder().
-		WithName("test").
-		WithSourceID(location.MustNewSourceID("test://test.yammm")).
-		AddType("Person").
-		WithPrimaryKey("id", schema.StringConstraint{}).
-		WithProperty("name", schema.StringConstraint{}).
-		Done().
-		AddType("Company").
-		WithPrimaryKey("id", schema.StringConstraint{}).
-		WithProperty("name", schema.StringConstraint{}).
-		Done().
-		Build()
+	s, result := schema.LoadString(t.Context(), `schema "test"
 
-	if result.HasErrors() {
-		t.Fatalf("Failed to build test schema: %s", result.String())
-	}
-	return s
+type Person {
+	id String primary
+	name String required
 }
 
-// testSchemaWithPKLessType creates a schema with a type that has no PK.
-func testSchemaWithPKLessType(t *testing.T) schema.Schema {
-	t.Helper()
-
-	s, result := schema.NewBuilder().
-		WithName("test").
-		WithSourceID(location.MustNewSourceID("test://test.yammm")).
-		AddType("Abstract").
-		AsAbstract().
-		WithProperty("name", schema.StringConstraint{}).
-		Done().
-		Build()
+type Company {
+	id String primary
+	name String required
+}
+`, "test.yammm")
 
 	if result.HasErrors() {
 		t.Fatalf("Failed to build test schema: %s", result.String())
@@ -82,15 +60,8 @@ func TestGraph_Add_NilReceiver(t *testing.T) {
 	var g *graph.Graph
 	ctx := t.Context()
 	s := testSchema(t)
-	personType, _ := s.Type("Person")
 
-	inst := instance.NewValidInstance(
-		"Person",
-		personType.ID(),
-		immutable.WrapKey([]any{"alice"}),
-		immutable.WrapProperties(map[string]any{"id": "alice", "name": "Alice"}),
-		nil, nil, location.Provenance{},
-	)
+	inst := instancetest.Valid(t, s, "Person", map[string]any{"id": "alice", "name": "Alice"})
 
 	yammmtest.AssertPanics(t, func() { g.Add(ctx, inst) })
 }
@@ -110,34 +81,25 @@ func TestGraph_Add_NilInstance(t *testing.T) {
 
 func TestGraph_Add_SchemaMismatch(t *testing.T) {
 	// Instance validated against a completely different schema should fail
-	schemaA, _ := schema.NewBuilder().
-		WithName("schema_a").
-		WithSourceID(location.MustNewSourceID("test://a.yammm")).
-		AddType("TypeA").
-		WithPrimaryKey("id", schema.StringConstraint{}).
-		Done().
-		Build()
+	schemaA, _ := schema.LoadString(t.Context(), `schema "schema_a"
 
-	schemaB, _ := schema.NewBuilder().
-		WithName("schema_b").
-		WithSourceID(location.MustNewSourceID("test://b.yammm")).
-		AddType("TypeB").
-		WithPrimaryKey("id", schema.StringConstraint{}).
-		Done().
-		Build()
+type TypeA {
+	id String primary
+}
+`, "a.yammm")
+
+	schemaB, _ := schema.LoadString(t.Context(), `schema "schema_b"
+
+type TypeB {
+	id String primary
+}
+`, "b.yammm")
 
 	g := graph.New(schemaA)
 	ctx := t.Context()
 
 	// Create instance from schemaB
-	typeB, _ := schemaB.Type("TypeB")
-	inst := instance.NewValidInstance(
-		"TypeB",
-		typeB.ID(), // TypeID points to schemaB
-		immutable.WrapKey([]any{"x1"}),
-		immutable.WrapProperties(map[string]any{"id": "x1"}),
-		nil, nil, location.Provenance{},
-	)
+	inst := instancetest.Valid(t, schemaB, "TypeB", map[string]any{"id": "x1"})
 
 	defer func() {
 		if r := recover(); r == nil {
@@ -154,14 +116,7 @@ func TestGraph_Add_ImportedSchemaAllowed(t *testing.T) {
 	ctx := t.Context()
 
 	// Create instance from the imported schema (common)
-	entityType, _ := importedSchema.Type("Entity")
-	inst := instance.NewValidInstance(
-		"c.Entity",
-		entityType.ID(), // TypeID points to imported schema
-		immutable.WrapKey([]any{"e1"}),
-		immutable.WrapProperties(map[string]any{"id": "e1", "name": "Test Entity"}),
-		nil, nil, location.Provenance{},
-	)
+	inst := instancetest.Valid(t, importedSchema, "Entity", map[string]any{"id": "e1", "name": "Test Entity"})
 
 	result := g.Add(ctx, inst)
 	if !result.OK() {
@@ -175,14 +130,7 @@ func TestGraph_Add_ContextCancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel() // Cancel immediately
 
-	personType, _ := s.Type("Person")
-	inst := instance.NewValidInstance(
-		"Person",
-		personType.ID(),
-		immutable.WrapKey([]any{"alice"}),
-		immutable.WrapProperties(map[string]any{"id": "alice", "name": "Alice"}),
-		nil, nil, location.Provenance{},
-	)
+	inst := instancetest.Valid(t, s, "Person", map[string]any{"id": "alice", "name": "Alice"})
 
 	result := g.Add(ctx, inst)
 	if result.OK() {
@@ -206,14 +154,7 @@ func TestGraph_Add_Success(t *testing.T) {
 	g := graph.New(s)
 	ctx := t.Context()
 
-	personType, _ := s.Type("Person")
-	inst := instance.NewValidInstance(
-		"Person",
-		personType.ID(),
-		immutable.WrapKey([]any{"alice"}),
-		immutable.WrapProperties(map[string]any{"id": "alice", "name": "Alice"}),
-		nil, nil, location.Provenance{},
-	)
+	inst := instancetest.Valid(t, s, "Person", map[string]any{"id": "alice", "name": "Alice"})
 
 	result := g.Add(ctx, inst)
 	if err := result.Err(); err != nil {
@@ -244,28 +185,14 @@ func TestGraph_Add_DuplicatePK(t *testing.T) {
 	g := graph.New(s)
 	ctx := t.Context()
 
-	personType, _ := s.Type("Person")
-
 	// Add first instance
-	inst1 := instance.NewValidInstance(
-		"Person",
-		personType.ID(),
-		immutable.WrapKey([]any{"alice"}),
-		immutable.WrapProperties(map[string]any{"id": "alice", "name": "Alice"}),
-		nil, nil, location.Provenance{},
-	)
+	inst1 := instancetest.Valid(t, s, "Person", map[string]any{"id": "alice", "name": "Alice"})
 	if r := g.Add(ctx, inst1); !r.OK() {
 		t.Fatalf("First Add() failed: %s", r.String())
 	}
 
 	// Add duplicate
-	inst2 := instance.NewValidInstance(
-		"Person",
-		personType.ID(),
-		immutable.WrapKey([]any{"alice"}),
-		immutable.WrapProperties(map[string]any{"id": "alice", "name": "Alice 2"}),
-		nil, nil, location.Provenance{},
-	)
+	inst2 := instancetest.Valid(t, s, "Person", map[string]any{"id": "alice", "name": "Alice 2"})
 	result := g.Add(ctx, inst2)
 	if result.OK() {
 		t.Error("Add() with duplicate PK should fail")
@@ -282,49 +209,15 @@ func TestGraph_Add_DuplicatePK(t *testing.T) {
 	}
 }
 
-// TestGraph_Add_MissingPK pins the PK-less refusal. The fixture type is also
-// abstract, but the missing-key guard runs first, so the abstract guard is
-// reached only by [TestAdd_BypassGuard_AbstractType].
-func TestGraph_Add_MissingPK(t *testing.T) {
-	s := testSchemaWithPKLessType(t)
-	g := graph.New(s)
-	ctx := t.Context()
-
-	abstractType, _ := s.Type("Abstract")
-	inst := instance.NewValidInstance(
-		"Abstract",
-		abstractType.ID(),
-		immutable.Key{}, // No PK
-		immutable.WrapProperties(map[string]any{"name": "Test"}),
-		nil, nil, location.Provenance{},
-	)
-
-	result := g.Add(ctx, inst)
-	if result.OK() {
-		t.Error("Add() with PK-less type should fail")
-	}
-
-	// Check for E_GRAPH_MISSING_PK
-	assertHasCode(t, result, diag.E_GRAPH_MISSING_PK)
-}
-
 func TestGraph_Snapshot_DeterministicOrder(t *testing.T) {
 	s := testSchema(t)
 	g := graph.New(s)
 	ctx := t.Context()
 
-	personType, _ := s.Type("Person")
-
 	// Add instances in non-sorted order
 	names := []string{"charlie", "alice", "bob"}
 	for _, name := range names {
-		inst := instance.NewValidInstance(
-			"Person",
-			personType.ID(),
-			immutable.WrapKey([]any{name}),
-			immutable.WrapProperties(map[string]any{"id": name, "name": name}),
-			nil, nil, location.Provenance{},
-		)
+		inst := instancetest.Valid(t, s, "Person", map[string]any{"id": name, "name": name})
 		if r := g.Add(ctx, inst); !r.OK() {
 			t.Fatalf("Add(%s) failed: %s", name, r.String())
 		}
@@ -351,14 +244,7 @@ func TestGraph_InstanceByKey(t *testing.T) {
 	g := graph.New(s)
 	ctx := t.Context()
 
-	personType, _ := s.Type("Person")
-	inst := instance.NewValidInstance(
-		"Person",
-		personType.ID(),
-		immutable.WrapKey([]any{"alice"}),
-		immutable.WrapProperties(map[string]any{"id": "alice", "name": "Alice"}),
-		nil, nil, location.Provenance{},
-	)
+	inst := instancetest.Valid(t, s, "Person", map[string]any{"id": "alice", "name": "Alice"})
 
 	if r := g.Add(ctx, inst); !r.OK() {
 		t.Fatalf("Add() failed: %s", r.String())
@@ -451,9 +337,6 @@ func TestInstance_NilReceiver(t *testing.T) {
 	if i.ComposedCount("any") != 0 {
 		t.Error("nil.ComposedCount() should return 0")
 	}
-	if i.HasComposed("any") {
-		t.Error("nil.HasComposed() should return false")
-	}
 }
 
 func TestEdge_NilReceiver(t *testing.T) {
@@ -482,47 +365,20 @@ func TestEdge_NilReceiver(t *testing.T) {
 
 // Part Type Tests
 
-func TestGraph_Add_PartType_Rejected(t *testing.T) {
-	// Part type via Add() → E_GRAPH_INVALID_COMPOSITION
-	s := testSchemaWithComposition(t)
-	g := graph.New(s)
-	ctx := t.Context()
-
-	// Try to add a part type directly (should fail)
-	child := mustValidPartInstance(t, s, "Child",
-		[]any{"c1"}, map[string]any{"name": "Child 1"})
-
-	result := g.Add(ctx, child)
-	if result.OK() {
-		t.Error("Add should fail for part type added directly")
-	}
-
-	assertHasCode(t, result, diag.E_GRAPH_INVALID_COMPOSITION)
-}
-
 func TestGraph_PartType_NoPK_Positional(t *testing.T) {
 	// PK-less parts have positional identity - multiple can coexist
 	s := testSchemaWithPKLessChild(t)
 	g := graph.New(s)
 	ctx := t.Context()
 
-	// Add Container
-	container := mustValidInstance(t, s, "Container",
-		[]any{"box1"}, map[string]any{"name": "Box 1"})
-
-	if r := g.Add(ctx, container); !r.OK() {
-		t.Fatalf("Add container failed: %s", r.String())
+	// PK-less items with the same data keep their positional identity.
+	var items []map[string]any
+	for range 3 {
+		items = append(items, map[string]any{"value": "same-value"})
 	}
-
-	// Add multiple PK-less items with same data
-	for i := range 3 {
-		item := mustValidPKLessInstance(t, s, "Item",
-			map[string]any{"value": "same-value"})
-
-		result := g.AddComposed(ctx, mustTypeID(t, s, "Container"), graph.FormatKey("box1"), "ITEMS", item)
-		if err := result.Err(); err != nil {
-			t.Errorf("AddComposed item %d should succeed (positional identity): %v", i, err)
-		}
+	container := parentWith(t, s, "Container", []any{"box1"}, map[string]any{"name": "Box 1"}, "ITEMS", items...)
+	if err := g.Add(ctx, container).Err(); err != nil {
+		t.Errorf("Add should succeed: %v", err)
 	}
 
 	// Verify all 3 items are present
@@ -535,36 +391,23 @@ func TestGraph_PartType_NoPK_Positional(t *testing.T) {
 	assertComposedCount(t, containers[0], "ITEMS", 3)
 }
 
-func TestGraph_PartType_WithinParent_Uniqueness(t *testing.T) {
-	// Same PK in same parent = duplicate
+func TestGraph_PartType_SameKeyUnderTwoParentsIsNoDuplicate(t *testing.T) {
 	s := testSchemaWithComposition(t)
 	g := graph.New(s)
 	ctx := t.Context()
 
-	// Add Parent
-	parent := mustValidInstance(t, s, "Parent",
-		[]any{"p1"}, map[string]any{"name": "Parent 1"})
-
-	if r := g.Add(ctx, parent); !r.OK() {
-		t.Fatalf("Add parent failed: %s", r.String())
-	}
-
-	// Add first child
-	child1 := mustValidPartInstance(t, s, "Child",
-		[]any{"shared-pk"}, map[string]any{"name": "Child 1"})
-
-	result := g.AddComposed(ctx, mustTypeID(t, s, "Parent"), graph.FormatKey("p1"), "CHILDREN", child1)
-	if err := result.Err(); err != nil {
+	single := parentWith(t, s, "Parent", []any{"p1"}, map[string]any{"name": "Parent 1"}, "CHILDREN",
+		map[string]any{"id": "c1", "name": "Child 1"},
+	)
+	if err := g.Add(ctx, single).Err(); err != nil {
 		t.Errorf("First child should succeed: %v", err)
 	}
 
-	// Add second child with same PK - should fail
-	child2 := mustValidPartInstance(t, s, "Child",
-		[]any{"shared-pk"}, map[string]any{"name": "Child 2"})
-
-	result = g.AddComposed(ctx, mustTypeID(t, s, "Parent"), graph.FormatKey("p1"), "CHILDREN", child2)
-	if result.OK() {
-		t.Error("Second child with same PK should fail")
+	other := parentWith(t, s, "Parent", []any{"p2"}, map[string]any{"name": "Parent 2"}, "CHILDREN",
+		map[string]any{"id": "c1", "name": "Child 1"},
+	)
+	if err := g.Add(ctx, other).Err(); err != nil {
+		t.Errorf("A child at the same key under another parent should succeed: %v", err)
 	}
 }
 
@@ -574,20 +417,10 @@ func TestGraph_NestedComposition(t *testing.T) {
 	g := graph.New(s)
 	ctx := t.Context()
 
-	// Add Parent
-	parent := mustValidInstance(t, s, "Parent",
-		[]any{"p1"}, map[string]any{"name": "Parent 1"})
-
+	child := partData(t, s, "Child", []any{"c1"}, map[string]any{"name": "Child 1"})
+	parent := parentWith(t, s, "Parent", []any{"p1"}, map[string]any{"name": "Parent 1"}, "CHILDREN", child)
 	if r := g.Add(ctx, parent); !r.OK() {
-		t.Fatalf("Add parent failed: %s", r.String())
-	}
-
-	// Add Child
-	child := mustValidPartInstance(t, s, "Child",
-		[]any{"c1"}, map[string]any{"name": "Child 1"})
-
-	if r := g.AddComposed(ctx, mustTypeID(t, s, "Parent"), graph.FormatKey("p1"), "CHILDREN", child); !r.OK() {
-		t.Fatalf("AddComposed child failed: %s", r.String())
+		t.Fatalf("Add failed: %s", r.String())
 	}
 
 	// Verify structure
@@ -615,22 +448,9 @@ func TestGraph_Duplicates_Ordering(t *testing.T) {
 	g := graph.New(s)
 	ctx := t.Context()
 
-	personType, _ := s.Type("Person")
-	companyType, _ := s.Type("Company")
-
 	// Add first instances
-	alice := instance.NewValidInstance(
-		"Person", personType.ID(),
-		immutable.WrapKey([]any{"alice"}),
-		immutable.WrapProperties(map[string]any{"id": "alice", "name": "Alice"}),
-		nil, nil, location.Provenance{},
-	)
-	acme := instance.NewValidInstance(
-		"Company", companyType.ID(),
-		immutable.WrapKey([]any{"acme"}),
-		immutable.WrapProperties(map[string]any{"id": "acme", "name": "Acme"}),
-		nil, nil, location.Provenance{},
-	)
+	alice := instancetest.Valid(t, s, "Person", map[string]any{"id": "alice", "name": "Alice"})
+	acme := instancetest.Valid(t, s, "Company", map[string]any{"id": "acme", "name": "Acme"})
 
 	if r := g.Add(ctx, alice); !r.OK() {
 		t.Fatal(r.String())
@@ -640,18 +460,8 @@ func TestGraph_Duplicates_Ordering(t *testing.T) {
 	}
 
 	// Add duplicates in reverse order (Company before Person)
-	acmeDup := instance.NewValidInstance(
-		"Company", companyType.ID(),
-		immutable.WrapKey([]any{"acme"}),
-		immutable.WrapProperties(map[string]any{"id": "acme", "name": "Acme Dup"}),
-		nil, nil, location.Provenance{},
-	)
-	aliceDup := instance.NewValidInstance(
-		"Person", personType.ID(),
-		immutable.WrapKey([]any{"alice"}),
-		immutable.WrapProperties(map[string]any{"id": "alice", "name": "Alice Dup"}),
-		nil, nil, location.Provenance{},
-	)
+	acmeDup := instancetest.Valid(t, s, "Company", map[string]any{"id": "acme", "name": "Acme Dup"})
+	aliceDup := instancetest.Valid(t, s, "Person", map[string]any{"id": "alice", "name": "Alice Dup"})
 
 	g.Add(ctx, acmeDup)
 	g.Add(ctx, aliceDup)
@@ -736,17 +546,10 @@ func TestGraph_LargeGraph_Performance(t *testing.T) {
 	g := graph.New(s)
 	ctx := t.Context()
 
-	personType, _ := s.Type("Person")
-
 	// Add 1000 instances in random order (using a pattern that's not sorted)
 	for i := range 1000 {
 		pk := fmt.Sprintf("person-%04d", (i*7+13)%1000) // Scrambled order
-		inst := instance.NewValidInstance(
-			"Person", personType.ID(),
-			immutable.WrapKey([]any{pk}),
-			immutable.WrapProperties(map[string]any{"id": pk, "name": pk}),
-			nil, nil, location.Provenance{},
-		)
+		inst := instancetest.Valid(t, s, "Person", map[string]any{"id": pk, "name": pk})
 
 		if r := g.Add(ctx, inst); !r.OK() {
 			t.Fatalf("Add %s failed: %s", pk, r.String())
@@ -777,8 +580,6 @@ func TestGraph_SpecialChars_InKeys(t *testing.T) {
 	g := graph.New(s)
 	ctx := t.Context()
 
-	personType, _ := s.Type("Person")
-
 	specialKeys := []string{
 		"hello world",       // space
 		"with\"quote",       // quote
@@ -795,12 +596,7 @@ func TestGraph_SpecialChars_InKeys(t *testing.T) {
 	}
 
 	for _, key := range specialKeys {
-		inst := instance.NewValidInstance(
-			"Person", personType.ID(),
-			immutable.WrapKey([]any{key}),
-			immutable.WrapProperties(map[string]any{"id": key, "name": key}),
-			nil, nil, location.Provenance{},
-		)
+		inst := instancetest.Valid(t, s, "Person", map[string]any{"id": key, "name": key})
 
 		result := g.Add(ctx, inst)
 		if err := result.Err(); err != nil {
@@ -829,8 +625,6 @@ func TestGraph_Unicode_InKeys(t *testing.T) {
 	g := graph.New(s)
 	ctx := t.Context()
 
-	personType, _ := s.Type("Person")
-
 	unicodeKeys := []string{
 		"日本語",            // Japanese
 		"한국어",            // Korean
@@ -844,12 +638,7 @@ func TestGraph_Unicode_InKeys(t *testing.T) {
 	}
 
 	for _, key := range unicodeKeys {
-		inst := instance.NewValidInstance(
-			"Person", personType.ID(),
-			immutable.WrapKey([]any{key}),
-			immutable.WrapProperties(map[string]any{"id": key, "name": key}),
-			nil, nil, location.Provenance{},
-		)
+		inst := instancetest.Valid(t, s, "Person", map[string]any{"id": key, "name": key})
 
 		result := g.Add(ctx, inst)
 		if err := result.Err(); err != nil {
@@ -870,18 +659,11 @@ func TestGraph_CompositeKey_TwoComponents(t *testing.T) {
 	g := graph.New(s)
 	ctx := t.Context()
 
-	recordType, _ := s.Type("Record")
-
 	// Add records with different composite keys
 	regions := []string{"us-east", "us-west", "eu-west"}
 	for _, region := range regions {
 		for i := range 3 {
-			inst := instance.NewValidInstance(
-				"Record", recordType.ID(),
-				immutable.WrapKey([]any{region, fmt.Sprintf("id-%d", i)}),
-				immutable.WrapProperties(map[string]any{"region": region, "id": fmt.Sprintf("id-%d", i), "value": fmt.Sprintf("%s-%d", region, i)}),
-				nil, nil, location.Provenance{},
-			)
+			inst := instancetest.Valid(t, s, "Record", map[string]any{"region": region, "id": fmt.Sprintf("id-%d", i), "value": fmt.Sprintf("%s-%d", region, i)})
 
 			result := g.Add(ctx, inst)
 			if err := result.Err(); err != nil {
@@ -913,19 +695,17 @@ func TestGraph_CompositeKey_TwoComponents(t *testing.T) {
 
 func TestGraph_EmptyProperties(t *testing.T) {
 	// Instance with no properties beyond PK
-	s := testSchema(t)
-	g := graph.New(s)
 	ctx := t.Context()
 
-	personType, _ := s.Type("Person")
+	s := loadSchemaAt(t, `schema "test"
 
-	// Add person with minimal properties
-	inst := instance.NewValidInstance(
-		"Person", personType.ID(),
-		immutable.WrapKey([]any{"minimal"}),
-		immutable.WrapProperties(map[string]any{"id": "minimal"}), // The key property alone
-		nil, nil, location.Provenance{},
-	)
+type Person {
+	id String primary
+	name String
+}
+`, "test.yammm")
+	g := graph.New(s)
+	inst := instancetest.Valid(t, s, "Person", map[string]any{"id": "minimal"})
 
 	result := g.Add(ctx, inst)
 	if err := result.Err(); err != nil {
@@ -951,25 +731,15 @@ func TestGraph_ComposedRelations_Sorted(t *testing.T) {
 	g := graph.New(s)
 	ctx := t.Context()
 
-	// Add Document
-	doc := mustValidInstance(t, s, "Document",
-		[]any{"doc1"}, map[string]any{"title": "Doc 1"})
-
+	note := partData(t, s, "Note",
+		[]any{"n1"}, map[string]any{"text": "Note 1"})
+	tag := partData(t, s, "Tag",
+		[]any{"t1"}, map[string]any{})
+	doc := instancetest.Valid(t, s, "Document", composedData(t, s, "Document",
+		composedData(t, s, "Document", keyedProps(t, s, "Document", []any{"doc1"}, map[string]any{"title": "Doc 1"}), "TAGS", tag),
+		"NOTES", note))
 	if r := g.Add(ctx, doc); !r.OK() {
 		t.Fatalf("Add document failed: %s", r.String())
-	}
-
-	// Add children to both relations
-	note := mustValidPartInstance(t, s, "Note",
-		[]any{"n1"}, map[string]any{"text": "Note 1"})
-	tag := mustValidPartInstance(t, s, "Tag",
-		[]any{"t1"}, map[string]any{})
-
-	if r := g.AddComposed(ctx, mustTypeID(t, s, "Document"), graph.FormatKey("doc1"), "NOTES", note); !r.OK() {
-		t.Fatalf("AddComposed note failed: %s", r.String())
-	}
-	if r := g.AddComposed(ctx, mustTypeID(t, s, "Document"), graph.FormatKey("doc1"), "TAGS", tag); !r.OK() {
-		t.Fatalf("AddComposed tag failed: %s", r.String())
 	}
 
 	snap := g.Snapshot()
@@ -998,30 +768,20 @@ func TestGraph_MultipleCompositions(t *testing.T) {
 	g := graph.New(s)
 	ctx := t.Context()
 
-	// Add Document
-	doc := mustValidInstance(t, s, "Document",
-		[]any{"doc1"}, map[string]any{"title": "Doc 1"})
-
+	var notes, tags []map[string]any
+	for i := range 3 {
+		notes = append(notes, partData(t, s, "Note",
+			[]any{fmt.Sprintf("n%d", i)}, map[string]any{"text": fmt.Sprintf("Note %d", i)}))
+	}
+	for i := range 2 {
+		tags = append(tags, partData(t, s, "Tag",
+			[]any{fmt.Sprintf("t%d", i)}, map[string]any{}))
+	}
+	doc := instancetest.Valid(t, s, "Document", composedData(t, s, "Document",
+		composedData(t, s, "Document", keyedProps(t, s, "Document", []any{"doc1"}, map[string]any{"title": "Doc 1"}), "NOTES", notes...),
+		"TAGS", tags...))
 	if r := g.Add(ctx, doc); !r.OK() {
 		t.Fatalf("Add document failed: %s", r.String())
-	}
-
-	// Add multiple notes
-	for i := range 3 {
-		note := mustValidPartInstance(t, s, "Note",
-			[]any{fmt.Sprintf("n%d", i)}, map[string]any{"text": fmt.Sprintf("Note %d", i)})
-		if r := g.AddComposed(ctx, mustTypeID(t, s, "Document"), graph.FormatKey("doc1"), "NOTES", note); !r.OK() {
-			t.Fatalf("AddComposed note %d failed: %s", i, r.String())
-		}
-	}
-
-	// Add multiple tags
-	for i := range 2 {
-		tag := mustValidPartInstance(t, s, "Tag",
-			[]any{fmt.Sprintf("t%d", i)}, map[string]any{})
-		if r := g.AddComposed(ctx, mustTypeID(t, s, "Document"), graph.FormatKey("doc1"), "TAGS", tag); !r.OK() {
-			t.Fatalf("AddComposed tag %d failed: %s", i, r.String())
-		}
 	}
 
 	snap := g.Snapshot()
@@ -1039,33 +799,19 @@ func TestContract6_InstanceTagForm(t *testing.T) {
 	// All public APIs use instance tag form
 	// Local types: unqualified (e.g., "Person")
 	// Imported types: alias-qualified (e.g., "c.Entity")
-	mainSchema, commonSchema := testMultiSchemaSetup(t)
+	mainSchema, _ := testMultiSchemaSetup(t)
 	g := graph.New(mainSchema)
 	ctx := t.Context()
 
 	// Add local User
-	userType, _ := mainSchema.Type("User")
-	user := instance.NewValidInstance(
-		"User", // Unqualified for local type
-		userType.ID(),
-		immutable.WrapKey([]any{"u1"}),
-		immutable.WrapProperties(map[string]any{"id": "u1", "username": "alice"}),
-		nil, nil, location.Provenance{},
-	)
+	user := instancetest.Valid(t, mainSchema, "User", map[string]any{"id": "u1", "username": "alice"})
 
 	if r := g.Add(ctx, user); !r.OK() {
 		t.Fatalf("Add user failed: %s", r.String())
 	}
 
 	// Add imported Entity
-	entityType, _ := commonSchema.Type("Entity")
-	entity := instance.NewValidInstance(
-		"c.Entity", // Alias-qualified for imported type
-		entityType.ID(),
-		immutable.WrapKey([]any{"e1"}),
-		immutable.WrapProperties(map[string]any{"id": "e1", "name": "Entity 1"}),
-		nil, nil, location.Provenance{},
-	)
+	entity := instancetest.Valid(t, mainSchema, "c.Entity", map[string]any{"id": "e1", "name": "Entity 1"})
 
 	if r := g.Add(ctx, entity); !r.OK() {
 		t.Fatalf("Add entity failed: %s", r.String())
@@ -1111,68 +857,45 @@ func TestContract6_InstanceTagForm(t *testing.T) {
 func TestContract7_TypeIDIndexing(t *testing.T) {
 	// TypeID-based indexing avoids collisions between same-named types
 	// Two imports with same type name should be kept separate
-	reg := schema.NewRegistry()
+	members := loadClosure(t, "main.yammm", map[string]string{
+		"b.yammm": `schema "schema_b"
 
-	// Schema B with Product type
-	schemaB, _ := schema.NewBuilder().
-		WithName("schema_b").
-		WithSourceID(location.MustNewSourceID("test://b.yammm")).
-		AddType("Product").
-		WithPrimaryKey("id", schema.StringConstraint{}).
-		WithProperty("sourceB", schema.StringConstraint{}).
-		Done().
-		Build()
-	_ = reg.Register(schemaB)
+type Product {
+	id String primary
+	sourceB String required
+}
+`,
+		"c.yammm": `schema "schema_c"
 
-	// Schema C with Product type (same name!)
-	schemaC, _ := schema.NewBuilder().
-		WithName("schema_c").
-		WithSourceID(location.MustNewSourceID("test://c.yammm")).
-		AddType("Product").
-		WithPrimaryKey("id", schema.StringConstraint{}).
-		WithProperty("sourceC", schema.StringConstraint{}).
-		Done().
-		Build()
-	_ = reg.Register(schemaC)
+type Product {
+	id String primary
+	sourceC String required
+}
+`,
+		"main.yammm": `schema "main"
 
-	// Main schema imports both
-	mainSchema, _ := schema.NewBuilder().
-		WithName("main").
-		WithSourceID(location.MustNewSourceID("test://main.yammm")).
-		WithRegistry(reg).
-		AddImport("schema_b", "b").
-		AddImport("schema_c", "c").
-		AddType("Container").
-		WithPrimaryKey("id", schema.StringConstraint{}).
-		Done().
-		Build()
+import "b" as b
+import "c" as c
+
+type Container {
+	id String primary
+}
+`,
+	})
+	mainSchema := members["main"]
 
 	g := graph.New(mainSchema)
 	ctx := t.Context()
 
 	// Add b.Product with PK "p1"
-	productB, _ := schemaB.Type("Product")
-	instB := instance.NewValidInstance(
-		"b.Product",
-		productB.ID(),
-		immutable.WrapKey([]any{"p1"}), // Same PK
-		immutable.WrapProperties(map[string]any{"id": "p1", "sourceB": "from B"}),
-		nil, nil, location.Provenance{},
-	)
+	instB := instancetest.Valid(t, mainSchema, "b.Product", map[string]any{"id": "p1", "sourceB": "from B"})
 
 	if r := g.Add(ctx, instB); !r.OK() {
 		t.Fatalf("Add b.Product failed: %s", r.String())
 	}
 
 	// Add c.Product with same PK - should NOT be a duplicate
-	productC, _ := schemaC.Type("Product")
-	instC := instance.NewValidInstance(
-		"c.Product",
-		productC.ID(),
-		immutable.WrapKey([]any{"p1"}), // Same PK but different TypeID
-		immutable.WrapProperties(map[string]any{"id": "p1", "sourceC": "from C"}),
-		nil, nil, location.Provenance{},
-	)
+	instC := instancetest.Valid(t, mainSchema, "c.Product", map[string]any{"id": "p1", "sourceC": "from C"})
 
 	result := g.Add(ctx, instC)
 	if err := result.Err(); err != nil {
@@ -1189,62 +912,6 @@ func TestContract7_TypeIDIndexing(t *testing.T) {
 	}
 }
 
-func TestContract14_ComposedKeyFormat(t *testing.T) {
-	// Composed children are identified within their parent
-	// Verify that duplicate PK within same parent is detected
-	s := testSchemaWithComposition(t)
-	g := graph.New(s)
-	ctx := t.Context()
-
-	// Add parent
-	parent := mustValidInstance(t, s, "Parent",
-		[]any{"p1"}, map[string]any{"name": "Parent 1"})
-
-	if r := g.Add(ctx, parent); !r.OK() {
-		t.Fatalf("Add parent failed: %s", r.String())
-	}
-
-	// Add first child
-	child1 := mustValidPartInstance(t, s, "Child",
-		[]any{"c1"}, map[string]any{"name": "Child 1"})
-
-	if r := g.AddComposed(ctx, mustTypeID(t, s, "Parent"), graph.FormatKey("p1"), "CHILDREN", child1); !r.OK() {
-		t.Fatalf("AddComposed child1 failed: %s", r.String())
-	}
-
-	// Add duplicate - should fail with E_DUPLICATE_COMPOSED_PK
-	child2 := mustValidPartInstance(t, s, "Child",
-		[]any{"c1"}, map[string]any{"name": "Child 1 Dup"})
-
-	result := g.AddComposed(ctx, mustTypeID(t, s, "Parent"), graph.FormatKey("p1"), "CHILDREN", child2)
-	if result.OK() {
-		t.Error("Duplicate child PK should be rejected")
-	}
-
-	hasCode := false
-	for issue := range result.Issues() {
-		if issue.Code() == diag.E_DUPLICATE_COMPOSED_PK {
-			hasCode = true
-			// Verify diagnostic has parent context (type detail per)
-			details := issue.Details()
-			hasType := false
-			for _, d := range details {
-				if d.Key == diag.DetailKeyTypeName {
-					hasType = true
-					break
-				}
-			}
-			if !hasType {
-				t.Error("E_DUPLICATE_COMPOSED_PK should include type detail")
-			}
-			break
-		}
-	}
-	if !hasCode {
-		t.Error("Expected E_DUPLICATE_COMPOSED_PK")
-	}
-}
-
 func TestContract19_FailureSemantics(t *testing.T) {
 	// Data issues → result with diagnostics; programmer errors → panic;
 	// context cancellation → Fatal diagnostic in result
@@ -1252,21 +919,9 @@ func TestContract19_FailureSemantics(t *testing.T) {
 	g := graph.New(s)
 	ctx := t.Context()
 
-	personType, _ := s.Type("Person")
-
 	// Test case 1: Data issue (duplicate PK) → result with diagnostic
-	inst1 := instance.NewValidInstance(
-		"Person", personType.ID(),
-		immutable.WrapKey([]any{"alice"}),
-		immutable.WrapProperties(map[string]any{"id": "alice", "name": "Alice"}),
-		nil, nil, location.Provenance{},
-	)
-	inst2 := instance.NewValidInstance(
-		"Person", personType.ID(),
-		immutable.WrapKey([]any{"alice"}), // Duplicate
-		immutable.WrapProperties(map[string]any{"id": "alice", "name": "Alice 2"}),
-		nil, nil, location.Provenance{},
-	)
+	inst1 := instancetest.Valid(t, s, "Person", map[string]any{"id": "alice", "name": "Alice"})
+	inst2 := instancetest.Valid(t, s, "Person", map[string]any{"id": "alice", "name": "Alice 2"})
 
 	result1 := g.Add(ctx, inst1)
 	if !result1.OK() {
@@ -1318,16 +973,9 @@ func TestResult_Instances(t *testing.T) {
 	g := graph.New(s)
 	ctx := t.Context()
 
-	personType, _ := s.Type("Person")
-
 	// Add some instances
 	for i := range 3 {
-		inst := instance.NewValidInstance(
-			"Person", personType.ID(),
-			immutable.WrapKey([]any{fmt.Sprintf("person-%d", i)}),
-			immutable.WrapProperties(map[string]any{"id": fmt.Sprintf("person-%d", i), "name": fmt.Sprintf("Name %d", i)}),
-			nil, nil, location.Provenance{},
-		)
+		inst := instancetest.Valid(t, s, "Person", map[string]any{"id": fmt.Sprintf("person-%d", i), "name": fmt.Sprintf("Name %d", i)})
 		if r := g.Add(ctx, inst); !r.OK() {
 			t.Fatalf("Add failed: %s", r.String())
 		}
@@ -1350,14 +998,7 @@ func TestResult_DiagnosticsAndFlags(t *testing.T) {
 	g := graph.New(s)
 	ctx := t.Context()
 
-	personType, _ := s.Type("Person")
-
-	inst := instance.NewValidInstance(
-		"Person", personType.ID(),
-		immutable.WrapKey([]any{"test-person"}),
-		immutable.WrapProperties(map[string]any{"id": "test-person", "name": "Test"}),
-		nil, nil, location.Provenance{},
-	)
+	inst := instancetest.Valid(t, s, "Person", map[string]any{"id": "test-person", "name": "Test"})
 	result := g.Add(ctx, inst)
 
 	// Test OK and HasErrors on the add result
@@ -1396,37 +1037,9 @@ func TestGraph_Add_InlineCompositions(t *testing.T) {
 	g := graph.New(s)
 	ctx := t.Context()
 
-	// Create child instances
-	childType, _ := s.Type("Child")
-	child1 := instance.NewValidInstance(
-		"Child",
-		childType.ID(),
-		immutable.WrapKey([]any{"c1"}),
-		immutable.WrapProperties(map[string]any{"id": "c1", "name": "Child 1"}),
-		nil, nil, location.Provenance{},
-	)
-	child2 := instance.NewValidInstance(
-		"Child",
-		childType.ID(),
-		immutable.WrapKey([]any{"c2"}),
-		immutable.WrapProperties(map[string]any{"id": "c2", "name": "Child 2"}),
-		nil, nil, location.Provenance{},
-	)
-
-	// Create parent with inline children using composed map
-	parentType, _ := s.Type("Parent")
-	childrenSlice := immutable.WrapSlice([]any{child1, child2})
-	composed := map[string]immutable.Value{
-		"CHILDREN": immutable.Wrap(childrenSlice),
-	}
-
-	parent := instance.NewValidInstance(
-		"Parent",
-		parentType.ID(),
-		immutable.WrapKey([]any{"p1"}),
-		immutable.WrapProperties(map[string]any{"id": "p1", "name": "Parent 1"}),
-		nil, composed, location.Provenance{},
-	)
+	parent := parentWith(t, s, "Parent", []any{"p1"}, map[string]any{"name": "Parent 1"}, "CHILDREN",
+		partData(t, s, "Child", []any{"c1"}, map[string]any{"name": "Child 1"}),
+		partData(t, s, "Child", []any{"c2"}, map[string]any{"name": "Child 2"}))
 
 	result := g.Add(ctx, parent)
 	if err := result.Err(); err != nil {
@@ -1449,43 +1062,15 @@ func TestGraph_Add_NestedInlineCompositions(t *testing.T) {
 	g := graph.New(s)
 	ctx := t.Context()
 
-	// Create grandchild
-	grandchildType, _ := s.Type("GrandChild")
-	grandchild := instance.NewValidInstance(
-		"GrandChild",
-		grandchildType.ID(),
-		immutable.WrapKey([]any{"gc1"}),
-		immutable.WrapProperties(map[string]any{"id": "gc1", "name": "GrandChild 1"}),
-		nil, nil, location.Provenance{},
-	)
-
-	// Create child with inline grandchild
-	childType, _ := s.Type("Child")
-	grandchildrenSlice := immutable.WrapSlice([]any{grandchild})
-	childComposed := map[string]immutable.Value{
-		"GRAND_CHILDREN": immutable.Wrap(grandchildrenSlice),
-	}
-	child := instance.NewValidInstance(
-		"Child",
-		childType.ID(),
-		immutable.WrapKey([]any{"c1"}),
-		immutable.WrapProperties(map[string]any{"id": "c1", "name": "Child 1"}),
-		nil, childComposed, location.Provenance{},
-	)
-
-	// Create parent with inline child (which has inline grandchild)
-	parentType, _ := s.Type("Parent")
-	childrenSlice := immutable.WrapSlice([]any{child})
-	parentComposed := map[string]immutable.Value{
-		"CHILDREN": immutable.Wrap(childrenSlice),
-	}
-	parent := instance.NewValidInstance(
-		"Parent",
-		parentType.ID(),
-		immutable.WrapKey([]any{"p1"}),
-		immutable.WrapProperties(map[string]any{"id": "p1", "name": "Parent 1"}),
-		nil, parentComposed, location.Provenance{},
-	)
+	parent := instancetest.Valid(t, s, "Parent", map[string]any{
+		"id":   "p1",
+		"name": "Parent 1",
+		"children": []any{map[string]any{
+			"id":             "c1",
+			"name":           "Child 1",
+			"grand_children": []any{map[string]any{"id": "gc1", "name": "GrandChild 1"}},
+		}},
+	})
 
 	result := g.Add(ctx, parent)
 	if err := result.Err(); err != nil {
@@ -1512,24 +1097,24 @@ func TestGraph_Add_NestedInlineCompositions(t *testing.T) {
 
 func TestGraph_Add_InlineComposition_EmptySlice(t *testing.T) {
 	// Tests extractCompositions with empty composition slice
-	s := testSchemaWithComposition(t)
-	g := graph.New(s)
 	ctx := t.Context()
 
-	// Create parent with empty composed slice
-	parentType, _ := s.Type("Parent")
-	childrenSlice := immutable.WrapSlice([]any{})
-	composed := map[string]immutable.Value{
-		"CHILDREN": immutable.Wrap(childrenSlice),
-	}
+	// The composition is optional, which the validator takes empty.
+	s := loadSchemaAt(t, `schema "composition"
 
-	parent := instance.NewValidInstance(
-		"Parent",
-		parentType.ID(),
-		immutable.WrapKey([]any{"p1"}),
-		immutable.WrapProperties(map[string]any{"id": "p1", "name": "Parent 1"}),
-		nil, composed, location.Provenance{},
-	)
+part type Child {
+	id String primary
+	name String required
+}
+
+type Parent {
+	id String primary
+	name String required
+	*-> CHILDREN (_:many) Child
+}
+`, "composition.yammm")
+	g := graph.New(s)
+	parent := instancetest.Valid(t, s, "Parent", map[string]any{"id": "p1", "name": "Parent 1", "children": []any{}})
 
 	result := g.Add(ctx, parent)
 	if err := result.Err(); err != nil {
@@ -1542,143 +1127,22 @@ func TestGraph_Add_InlineComposition_EmptySlice(t *testing.T) {
 	assertComposedCount(t, parents[0], "CHILDREN", 0)
 }
 
-// Tests for Graph.Add's type-resolution branches. These were named for
-// resolveTypeName, which they never reached and which no longer exists —
-// Add resolves an identity through schema.Schema.TypeByID and Graph.ownsType.
-
-func TestGraph_Add_QualifiedTypeNotFound(t *testing.T) {
-	// An alias-qualified name whose type the imported schema does not declare.
-	mainSchema, _ := testMultiSchemaSetup(t)
-	g := graph.New(mainSchema)
-	ctx := t.Context()
-
-	fakeTypeID := schema.NewTypeID(location.MustNewSourceID("test://common.yammm"), "NonExistent")
-	inst := instance.NewValidInstance(
-		"c.NonExistent", // Valid alias, invalid type
-		fakeTypeID,
-		immutable.WrapKey([]any{"x1"}),
-		immutable.WrapProperties(map[string]any{"id": "x1"}),
-		nil, nil, location.Provenance{},
-	)
-
-	result := g.Add(ctx, inst)
-	if result.OK() {
-		t.Fatal("Add should fail for non-existent type in imported schema")
-	}
-	assertHasCode(t, result, diag.E_GRAPH_TYPE_NOT_FOUND)
-
-	// A type the closure does not hold is imported through nothing, so the
-	// transitive-import hint and its type_schema detail would mislead.
-	var sawHint, sawSchema bool
-	for issue := range result.Issues() {
-		if issue.Code() != diag.E_GRAPH_TYPE_NOT_FOUND {
-			continue
-		}
-		if strings.Contains(issue.Hint(), "transitively imported schema") {
-			sawHint = true
-		}
-		for _, d := range issue.Details() {
-			if d.Key == diag.DetailKeyTypeSchema && d.Value == "test://common.yammm" {
-				sawSchema = true
-			}
-		}
-	}
-	if sawHint || sawSchema {
-		t.Errorf("a type the schema does not declare drew the transitive-import hint (%v) or type_schema detail (%v)", sawHint, sawSchema)
-	}
-}
-
-func TestGraph_Add_UnknownSchemaPanics(t *testing.T) {
-	// Instance from completely unknown schema panics (schema mismatch)
-	mainSchema, _ := testMultiSchemaSetup(t)
-	g := graph.New(mainSchema)
-	ctx := t.Context()
-
-	// Try to add instance with unknown schema (not in import chain)
-	fakeTypeID := schema.NewTypeID(location.MustNewSourceID("test://unknown.yammm"), "SomeType")
-	inst := instance.NewValidInstance(
-		"unknown.SomeType", // Unknown alias
-		fakeTypeID,
-		immutable.WrapKey([]any{"x1"}),
-		immutable.WrapProperties(map[string]any{"id": "x1"}),
-		nil, nil, location.Provenance{},
-	)
-
-	defer func() {
-		if r := recover(); r == nil {
-			t.Error("Add with unknown schema should panic")
-		}
-	}()
-	g.Add(ctx, inst)
-}
-
-func TestGraph_Add_UnqualifiedTypeNotFound(t *testing.T) {
-	// Tests the "local type not found" branch
-	s := testSchema(t)
-	g := graph.New(s)
-	ctx := t.Context()
-
-	// Try to add instance with non-existent local type
-	fakeTypeID := schema.NewTypeID(location.MustNewSourceID("test://test.yammm"), "NonExistent")
-	inst := instance.NewValidInstance(
-		"NonExistent", // Unqualified, doesn't exist locally
-		fakeTypeID,
-		immutable.WrapKey([]any{"x1"}),
-		immutable.WrapProperties(map[string]any{"id": "x1"}),
-		nil, nil, location.Provenance{},
-	)
-
-	result := g.Add(ctx, inst)
-
-	// Should fail - local type not found
-	if result.OK() {
-		t.Error("Add should fail for non-existent local type")
-	}
-}
-
-// TestAddComposed_NestedComposition_Extracted tests that AddComposed extracts
-// nested compositions from streamed children.
-func TestAddComposed_NestedComposition_Extracted(t *testing.T) {
+func TestAdd_NestedCompositionReachesTheGrandchild(t *testing.T) {
 	s := testSchemaWithNestedComposition(t)
 	g := graph.New(s)
 	ctx := t.Context()
 
-	// Add parent first
-	parent := mustValidInstance(t, s, "Parent",
-		[]any{"p1"}, map[string]any{"name": "Parent 1"})
-
-	if r := g.Add(ctx, parent); !r.OK() {
-		t.Fatalf("Add parent failed: %s", r.String())
-	}
-
-	// Create grandchild
-	grandchildType, _ := s.Type("GrandChild")
-	grandchild := instance.NewValidInstance(
-		"GrandChild",
-		grandchildType.ID(),
-		immutable.WrapKey([]any{"gc1"}),
-		immutable.WrapProperties(map[string]any{"id": "gc1", "name": "GrandChild 1"}),
-		nil, nil, location.Provenance{},
-	)
-
-	// Create child with inline grandchild - this is the key: child has nested composition
-	childType, _ := s.Type("Child")
-	grandchildrenSlice := immutable.WrapSlice([]any{grandchild})
-	childComposed := map[string]immutable.Value{
-		"GRAND_CHILDREN": immutable.Wrap(grandchildrenSlice),
-	}
-	child := instance.NewValidInstance(
-		"Child",
-		childType.ID(),
-		immutable.WrapKey([]any{"c1"}),
-		immutable.WrapProperties(map[string]any{"id": "c1", "name": "Child 1"}),
-		nil, childComposed, location.Provenance{},
-	)
-
-	// AddComposed the child (with inline grandchild) to the parent
-	result := g.AddComposed(ctx, mustTypeID(t, s, "Parent"), graph.FormatKey("p1"), "CHILDREN", child)
-	if err := result.Err(); err != nil {
-		t.Fatalf("AddComposed should succeed: %v", err)
+	parent := instancetest.Valid(t, s, "Parent", map[string]any{
+		"id":   "p1",
+		"name": "Parent 1",
+		"children": []any{map[string]any{
+			"id":             "c1",
+			"name":           "Child 1",
+			"grand_children": []any{map[string]any{"id": "gc1", "name": "GrandChild 1"}},
+		}},
+	})
+	if err := g.Add(ctx, parent).Err(); err != nil {
+		t.Fatalf("Add should succeed: %v", err)
 	}
 
 	// Verify nested structure
@@ -1694,7 +1158,6 @@ func TestAddComposed_NestedComposition_Extracted(t *testing.T) {
 		t.Fatalf("Expected 1 child, got %d", len(children))
 	}
 
-	// Child should have grandchild (extracted from inline composition)
 	grandchildren := slices.Collect(children[0].Composed("GRAND_CHILDREN"))
 	if len(grandchildren) != 1 {
 		t.Fatalf("Expected 1 grandchild (nested composition should be extracted), got %d", len(grandchildren))
@@ -1709,118 +1172,6 @@ func TestAddComposed_NestedComposition_Extracted(t *testing.T) {
 	}
 }
 
-// TestAdd_OneCardinality_MultipleChildren_RefusesWholeRecord pins the guard's
-// outcome for an over-full (one) slot: the record is refused entire, so no
-// parent and no child install.
-func TestAdd_OneCardinality_MultipleChildren_RefusesWholeRecord(t *testing.T) {
-	s := testSchemaWithOneComposition(t) // Parent -> (one) Child
-	g := graph.New(s)
-	ctx := t.Context()
-
-	// Create two children
-	childType, _ := s.Type("Child")
-	child1 := instance.NewValidInstance(
-		"Child",
-		childType.ID(),
-		immutable.WrapKey([]any{"c1"}),
-		immutable.WrapProperties(map[string]any{"id": "c1", "name": "Child 1"}),
-		nil, nil, location.Provenance{},
-	)
-	child2 := instance.NewValidInstance(
-		"Child",
-		childType.ID(),
-		immutable.WrapKey([]any{"c2"}),
-		immutable.WrapProperties(map[string]any{"id": "c2", "name": "Child 2"}),
-		nil, nil, location.Provenance{},
-	)
-
-	// Create parent with TWO children (violates (one) cardinality)
-	parentType, _ := s.Type("Parent")
-	childrenSlice := immutable.WrapSlice([]any{child1, child2})
-	parentComposed := map[string]immutable.Value{
-		"CHILD": immutable.Wrap(childrenSlice),
-	}
-	parent := instance.NewValidInstance(
-		"Parent",
-		parentType.ID(),
-		immutable.WrapKey([]any{"p1"}),
-		immutable.WrapProperties(map[string]any{"id": "p1", "name": "Parent 1"}),
-		nil, parentComposed, location.Provenance{},
-	)
-
-	result := g.Add(ctx, parent)
-
-	if result.OK() {
-		t.Error("Add should fail for (one) cardinality violation")
-	}
-	assertHasCode(t, result, diag.E_DUPLICATE_COMPOSED_PK)
-
-	snap := g.Snapshot()
-	if parents := slices.Collect(snap.InstancesOf(mustTypeID(t, s, "Parent"))); len(parents) != 0 {
-		t.Fatalf("a refused record installed %d parents", len(parents))
-	}
-	if dups := slices.Collect(snap.Duplicates()); len(dups) != 0 {
-		t.Fatalf("a refused record left %d Duplicate records", len(dups))
-	}
-}
-
-// TestExtractCompositions_BareValidInstance tests that extractCompositions
-// handles bare ValidInstance (not wrapped in slice) defensively.
-func TestExtractCompositions_BareValidInstance(t *testing.T) {
-	s := testSchemaWithComposition(t)
-	g := graph.New(s)
-	ctx := t.Context()
-
-	// Create child
-	childType, _ := s.Type("Child")
-	child := instance.NewValidInstance(
-		"Child",
-		childType.ID(),
-		immutable.WrapKey([]any{"c1"}),
-		immutable.WrapProperties(map[string]any{"id": "c1", "name": "Child 1"}),
-		nil, nil, location.Provenance{},
-	)
-
-	// Create parent with bare ValidInstance (not wrapped in slice)
-	// This is defensive handling - the validator normally wraps in slice
-	parentType, _ := s.Type("Parent")
-	parentComposed := map[string]immutable.Value{
-		"CHILDREN": immutable.Wrap(child), // Bare instance, not slice
-	}
-	parent := instance.NewValidInstance(
-		"Parent",
-		parentType.ID(),
-		immutable.WrapKey([]any{"p1"}),
-		immutable.WrapProperties(map[string]any{"id": "p1", "name": "Parent 1"}),
-		nil, parentComposed, location.Provenance{},
-	)
-
-	result := g.Add(ctx, parent)
-	if err := result.Err(); err != nil {
-		t.Fatalf("Add should succeed: %v", err)
-	}
-
-	// Verify child was extracted from bare instance
-	snap := g.Snapshot()
-	parents := slices.Collect(snap.InstancesOf(mustTypeID(t, s, "Parent")))
-	if len(parents) != 1 {
-		t.Fatalf("Expected 1 parent, got %d", len(parents))
-	}
-
-	children := slices.Collect(parents[0].Composed("CHILDREN"))
-	if len(children) != 1 {
-		t.Fatalf("Expected 1 child (from bare ValidInstance), got %d", len(children))
-	}
-
-	// Verify child data
-	nameVal, ok := children[0].Property("name")
-	if !ok {
-		t.Error("Expected name property on child")
-	} else if name, ok := nameVal.String(); !ok || name != "Child 1" {
-		t.Errorf("Expected child name 'Child 1', got %q", name)
-	}
-}
-
 // TestAdd_PerOperationDiagnostics verifies that Add() returns per-operation results,
 // not cumulative results. A successful Add after a failed Add should return OK.
 func TestAdd_PerOperationDiagnostics(t *testing.T) {
@@ -1829,7 +1180,10 @@ func TestAdd_PerOperationDiagnostics(t *testing.T) {
 	ctx := t.Context()
 
 	// First add - use an invalid type to trigger an error
-	invalidInst := mustValidInstanceWithInvalidType(t, s, "NonExistent", []any{"x"}, nil)
+	if r := g.Add(ctx, mustValidInstance(t, s, "Person", []any{"dup"}, map[string]any{"name": "Dup"})); !r.OK() {
+		t.Fatal(r)
+	}
+	invalidInst := mustValidInstance(t, s, "Person", []any{"dup"}, map[string]any{"name": "Dup"})
 
 	result1 := g.Add(ctx, invalidInst)
 	if result1.OK() {
@@ -2001,91 +1355,6 @@ func TestCheck_UnresolvedRequired_TargetMissingReason(t *testing.T) {
 	}
 }
 
-// TestDuplicateComposedPK_PKDetail verifies that E_DUPLICATE_COMPOSED_PK
-// includes the duplicated primary key as the "pk" detail.
-func TestDuplicateComposedPK_PKDetail(t *testing.T) {
-	s := testSchemaWithComposition(t)
-	g := graph.New(s)
-	ctx := t.Context()
-
-	// Add parent
-	parent := mustValidInstance(t, s, "Parent",
-		[]any{"p1"}, map[string]any{"name": "Parent 1"})
-
-	if r := g.Add(ctx, parent); !r.OK() {
-		t.Fatalf("Add parent failed: %s", r.String())
-	}
-
-	// Add first child
-	child1 := mustValidPartInstance(t, s, "Child",
-		[]any{"c1"}, map[string]any{"name": "Child 1"})
-
-	result1 := g.AddComposed(ctx, mustTypeID(t, s, "Parent"), graph.FormatKey("p1"), "CHILDREN", child1)
-	if !result1.OK() {
-		t.Fatalf("First AddComposed should succeed: %s", result1.String())
-	}
-
-	// Add duplicate child (same PK)
-	child2 := mustValidPartInstance(t, s, "Child",
-		[]any{"c1"}, map[string]any{"name": "Child 1 Dup"})
-
-	result2 := g.AddComposed(ctx, mustTypeID(t, s, "Parent"), graph.FormatKey("p1"), "CHILDREN", child2)
-	if result2.OK() {
-		t.Fatal("Duplicate AddComposed should fail")
-	}
-
-	var issue diag.Issue
-	issueCount := 0
-	for i := range result2.Issues() {
-		issue = i
-		issueCount++
-	}
-	if issueCount != 1 {
-		t.Fatalf("Expected 1 issue, got %d", issueCount)
-	}
-
-	if issue.Code() != diag.E_DUPLICATE_COMPOSED_PK {
-		t.Fatalf("Expected E_DUPLICATE_COMPOSED_PK, got %s", issue.Code())
-	}
-
-	// The "pk" detail carries the duplicated PRIMARY KEY, which is what
-	// diag.DetailKeyPrimaryKey's godoc promises and what every other producer
-	// of that key puts there. A writer's composed address belongs to the store
-	// that mints one, not to a diagnostic.
-	var foundPK bool
-	for _, d := range issue.Details() {
-		if d.Key == "pk" {
-			foundPK = true
-			if expected := `["c1"]`; d.Value != expected {
-				t.Errorf("Expected pk %q, got %q", expected, d.Value)
-			}
-			break
-		}
-	}
-	if !foundPK {
-		t.Error("Expected pk detail in E_DUPLICATE_COMPOSED_PK issue")
-	}
-}
-
-// mustValidInstanceWithInvalidType creates a ValidInstance with a type
-// that won't match any type in the graph's schema - for testing error handling.
-// Uses the same schema but with a non-existent type to avoid a schema mismatch panic.
-func mustValidInstanceWithInvalidType(t *testing.T, s schema.Schema, typeName string, pkValues []any, _ map[string]any) instance.ValidInstance {
-	t.Helper()
-
-	// Create a TypeID that uses the same schema but a non-existent type name
-	// This will trigger a "type not found" diagnostic, not a schema mismatch panic
-	fakeTypeID := schema.NewTypeID(s.SourceID(), typeName)
-
-	return instance.NewValidInstance(
-		typeName,
-		fakeTypeID,
-		immutable.WrapKey(pkValues),
-		immutable.WrapProperties(map[string]any{}),
-		nil, nil, location.Provenance{},
-	)
-}
-
 // countIssues counts the number of issues in a diag.Result.
 func countIssues(result diag.Result) int {
 	count := 0
@@ -2115,11 +1384,6 @@ func TestNilContext_Panics(t *testing.T) {
 			wantMsg: "graph.Add: nil context",
 		},
 		{
-			name:    "AddComposed",
-			fn:      func() { g.AddComposed(nil, mustTypeID(t, s, "Person"), "[\"alice\"]", "rel", inst) }, //nolint:staticcheck // testing nil context panic
-			wantMsg: "graph.AddComposed: nil context",
-		},
-		{
 			name:    "Check",
 			fn:      func() { g.Check(nil) }, //nolint:staticcheck // testing nil context panic
 			wantMsg: "graph.Check: nil context",
@@ -2143,87 +1407,5 @@ func TestNilContext_Panics(t *testing.T) {
 			}()
 			tc.fn()
 		})
-	}
-}
-
-// TestGraph_WithLogger_TracesEachOperation pins what the trace hook emits.
-// Its counterpart below asserts the nil-logger path is silent, and neither
-// half means anything without the other.
-func TestGraph_WithLogger_TracesEachOperation(t *testing.T) {
-	s := testSchemaWithAssociation(t)
-	h := yammmtest.NewRecordHandler(slog.LevelDebug)
-	g := graph.New(s, graph.WithLogger(slog.New(h)))
-	ctx := t.Context()
-
-	// A Person whose employer has not arrived: one forward reference, then a
-	// Company that resolves it, then a duplicate Person.
-	person := mustValidInstanceWithEdge(t, s, "Person", []any{"alice"},
-		map[string]any{"name": "Alice"}, "EMPLOYER", [][]any{{"acme"}})
-	if r := g.Add(ctx, person); !r.OK() {
-		t.Fatalf("Add person: %s", r.String())
-	}
-	company := mustValidInstance(t, s, "Company", []any{"acme"}, map[string]any{"name": "Acme Corp"})
-	if r := g.Add(ctx, company); !r.OK() {
-		t.Fatalf("Add company: %s", r.String())
-	}
-	if r := g.Add(ctx, person); r.OK() {
-		t.Fatal("the duplicate primary key was accepted")
-	}
-	g.Check(ctx)
-
-	records := h.Records()
-	for _, msg := range []string{
-		"forward reference created",
-		"pending edges resolved",
-		"duplicate primary key",
-	} {
-		if !yammmtest.HasMessage(records, msg) {
-			t.Errorf("no trace record for %q", msg)
-		}
-	}
-	// Operation boundaries carry their name in the "op" attribute; the
-	// message is trace's own "operation started" / "operation ended".
-	for _, op := range []string{"yammm.graph.add", "yammm.graph.check"} {
-		if !yammmtest.HasAttr(records, "op", op) {
-			t.Errorf("no operation boundary traced for %q", op)
-		}
-	}
-	if !yammmtest.HasAttr(records, "target_pk", `["acme"]`) {
-		t.Error("the forward reference did not carry its target key")
-	}
-	if n := yammmtest.CountLevel(records, slog.LevelWarn); n != 1 {
-		t.Errorf("Warn records = %d, want 1 (the duplicate primary key)", n)
-	}
-}
-
-// TestGraph_NoLogging_WhenNilLogger pins the default: with no logger the same
-// sequence emits nothing and does not panic.
-func TestGraph_NoLogging_WhenNilLogger(t *testing.T) {
-	s := testSchemaWithAssociation(t)
-	company := mustValidInstance(t, s, "Company", []any{"acme"}, map[string]any{"name": "Acme Corp"})
-
-	// The handler is attached to a graph that is then NOT given it, so the
-	// comparison is against a run that did record. Asserting an unattached
-	// handler is empty proves nothing: no production change can turn it red.
-	attached := yammmtest.NewRecordHandler(slog.LevelDebug)
-	withLogger := graph.New(s, graph.WithLogger(slog.New(attached)))
-	if r := withLogger.Add(t.Context(), company); !r.OK() {
-		t.Fatalf("Add failed: %s", r.String())
-	}
-	withLogger.Check(t.Context())
-	if len(attached.Records()) == 0 {
-		t.Fatal("the control run recorded nothing, so the comparison below is vacuous")
-	}
-
-	silent := yammmtest.NewRecordHandler(slog.LevelDebug)
-	logger := slog.New(silent)
-	_ = logger // built and deliberately not passed to New
-	g := graph.New(s)
-	if r := g.Add(t.Context(), company); !r.OK() {
-		t.Fatalf("Add failed: %s", r.String())
-	}
-	g.Check(t.Context())
-	if n := len(silent.Records()); n != 0 {
-		t.Errorf("a graph built without WithLogger emitted %d records", n)
 	}
 }

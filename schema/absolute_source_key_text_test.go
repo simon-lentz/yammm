@@ -4,8 +4,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/simon-lentz/yammm/diag"
-	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -28,31 +26,5 @@ func TestLoadSources_AnAbsoluteKeyIsRefusedWithoutSchemeAdvice(t *testing.T) {
 		if !strings.Contains(msg, absoluteStart) || strings.Contains(msg, "scheme prefix") {
 			t.Errorf("key %q: %s", key, msg)
 		}
-	}
-}
-
-// The builder reports a synthetic source identifier shaped like an absolute
-// path with the same sentence.
-func TestBuilder_AnAbsoluteSyntheticSourceIDStatesTheStarts(t *testing.T) {
-	t.Parallel()
-	_, res := schema.NewBuilder().
-		WithName("s").
-		WithSourceID(location.NewSourceID("/abs/s.yammm")).
-		AddType("A").
-		WithProperty("id", schema.NewStringConstraint()).
-		Done().
-		Build()
-	found := false
-	for issue := range res.Issues() {
-		if issue.Code() != diag.E_INVALID_SYNTHETIC_ID {
-			continue
-		}
-		found = true
-		if msg := issue.Message(); !strings.HasSuffix(msg, absoluteStart) || strings.Contains(msg, "scheme prefix") {
-			t.Errorf("the issue reads %s", msg)
-		}
-	}
-	if !found {
-		t.Errorf("no E_INVALID_SYNTHETIC_ID: %s", res)
 	}
 }

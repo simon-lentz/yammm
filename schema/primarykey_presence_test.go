@@ -57,11 +57,9 @@ func TestCompletion_PrimaryKeyInheritedCrossSchema(t *testing.T) {
 
 // TestCompletion_PrimaryKeyDeferredCrossSchemaSupertype_NotFlagged pins the guard that
 // keeps the presence check from firing when a concrete type's only supertype is an
-// unresolved cross-schema reference — the registry is absent, as during single-file
-// analysis before imports are loaded. The primary key may be inherited from the
-// not-yet-visible parent, so emitting E_NO_PRIMARY_KEY here would be a false positive:
-// resolveTypeRef returns nil for a qualified ref when the registry is nil, so
-// hasUnresolvedSupertype skips the type.
+// unresolved cross-schema reference. The primary key may be inherited from the
+// parent the reference hides, so emitting E_NO_PRIMARY_KEY here would be a false
+// positive: hasUnresolvedSupertype skips the type.
 func TestCompletion_PrimaryKeyDeferredCrossSchemaSupertype_NotFlagged(t *testing.T) {
 	model := &schema.TestModel{
 		Name: "main",
@@ -91,7 +89,7 @@ func TestCompletion_PrimaryKeyDeferredCrossSchemaSupertype_NotFlagged(t *testing
 // TestCompletion_PrimaryKeyDeferredTransitiveSupertype_NotFlagged pins that the deferral
 // guard reaches the FULL inheritance chain, not only direct supertypes. Leaf's own
 // supertype is the LOCAL Mid (which resolves), but Mid in turn extends an unresolved
-// cross-schema supertype (registry absent), so Leaf's primary key may be inherited from
+// cross-schema supertype, so Leaf's primary key may be inherited from
 // the not-yet-visible root. A direct-only guard would resolve Leaf's supertype, see no
 // inherited key, and emit a false-positive E_NO_PRIMARY_KEY; the transitive walk skips
 // Leaf because the deferral lives one level up.

@@ -50,12 +50,6 @@ func TestParse_CodeSaysWhichFaultItIs(t *testing.T) {
 		// The adapter was built with a setting this parse cannot use. No record
 		// is read and the remedy is in the caller's code.
 		{
-			name: "a list separator the parser cannot find again", schemaFile: "basic.yammm", typeName: "Entity",
-			opts:     []Option{WithListSeparator(`\|`)},
-			input:    "id,name\ne1,Ann\n",
-			wantCode: E_CSV_CONFIG, wantSev: diag.Error, mentions: "list separator",
-		},
-		{
 			name: "a delimiter encoding/csv refuses", schemaFile: "basic.yammm", typeName: "Entity",
 			opts:     []Option{WithDelimiter('"')},
 			input:    "id,name\ne1,Ann\n",
@@ -134,7 +128,7 @@ func TestParse_CodeSaysWhichFaultItIs(t *testing.T) {
 			t.Parallel()
 			s := loadTestSchema(t, c.schemaFile)
 			st, _ := s.Type(c.typeName)
-			id := location.MustNewSourceID("test://data/codes.csv")
+			id := location.NewSourceID("test://data/codes.csv")
 
 			var r io.Reader = strings.NewReader(c.input)
 			if c.reader != nil {
@@ -227,24 +221,19 @@ func TestConfigCode_IsRegisteredAsAnAdapterCode(t *testing.T) {
 
 // A setting the adapter cannot use is refused before the parse reads a byte,
 // and the refusal names the configuration rather than the input, so it carries
-// no span. That holds for every such setting alike: the list separator and the
-// delimiter are one question, and encoding/csv answering the second at the
-// header read would give one class two shapes.
+// no span. encoding/csv answering for the delimiter at the header read would
+// give the class a second shape.
 func TestParse_ARefusedSettingIsReportedBeforeAnyRead(t *testing.T) {
 	t.Parallel()
 	s := loadTestSchema(t, "basic.yammm")
 	st, _ := s.Type("Entity")
-	id := location.MustNewSourceID("test://data/settings.csv")
+	id := location.NewSourceID("test://data/settings.csv")
 
 	for _, c := range []struct {
 		name    string
 		opt     Option
 		message string
 	}{
-		{
-			"a list separator the parser cannot find again", WithListSeparator(`\|`),
-			`csv adapter: list separator "\\|" begins with the escape character \, which the parser reads as an escape`,
-		},
 		{
 			"a delimiter encoding/csv refuses", WithDelimiter('"'),
 			`csv adapter: delimiter '"': csv: invalid field or comment delimiter`,
@@ -298,7 +287,7 @@ func TestParseWithTypeColumn_NoTypeColumnIsRefusedBeforeAnyRead(t *testing.T) {
 	st, _ := s.Type("Entity")
 	input := &countingReader{r: strings.NewReader("kind,id,name\nEntity,e1,Ann\n")}
 
-	byType, res := New().ParseWithTypeColumn(t.Context(), location.MustNewSourceID("test://data/nocol.csv"), input,
+	byType, res := New().ParseWithTypeColumn(t.Context(), location.NewSourceID("test://data/nocol.csv"), input,
 		func(string) schema.Type { return st })
 
 	if len(byType) != 0 || input.reads != 0 {

@@ -6,7 +6,6 @@ import (
 	"testing"
 
 	"github.com/simon-lentz/yammm/diag"
-	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -344,17 +343,16 @@ type Derived extends Base {
 }
 
 // An unresolved supertype defers the unknown-reference report: the property may
-// live on a not-yet-visible cross-schema ancestor.
+// live on an ancestor the failed reference hides.
 func TestAnnotation_Fulltext_DeferredSupertype_UnknownRefSilent(t *testing.T) {
 	t.Parallel()
-	_, res := schema.NewBuilder().
-		WithName("main").
-		AddType("Entity").
-		Extends(schema.NewTypeRef("ext", "Base", location.Span{})).
-		WithPrimaryKey("id", schema.NewStringConstraint()).
-		WithTypeAnnotation("fulltext", "ghost").
-		Done().
-		Build()
+	_, res := schema.LoadString(t.Context(), `schema "main"
+
+type Entity extends ext.Base {
+	id String primary
+	@@fulltext(ghost)
+}
+`, "main.yammm")
 	if res.HasCode(diag.E_UNKNOWN_ANNOTATION_TARGET) {
 		t.Errorf("@@fulltext under an unresolved supertype must defer the unknown-reference report, got: %v", res)
 	}
@@ -694,29 +692,6 @@ func TestAnnotation_SameLine_StaysValid(t *testing.T) {
 	} {
 		if _, res := loadNoErr(t, "schema \"main\"\ntype Doc {\n\t"+body+"\n}"); res.Len() != 0 {
 			t.Errorf("same-line annotations must load clean, got: %v", res)
-		}
-	}
-}
-
-// identity() is the key for both duplicate detection and inherited-annotation
-// dedup, so it must be injective. The name is the first field and needs its own
-// length prefix: without one its bytes run into the first argument's encoding,
-// and a name spelled to imitate that encoding collides with an unrelated
-// annotation. Reachable only through the Builder, which takes the name as a
-// plain string.
-func TestAnnotation_Identity_NameIsDelimited(t *testing.T) {
-	t.Parallel()
-	_, res := schema.NewBuilder().WithName("main").
-		AddType("U").
-		WithPrimaryKey("id", schema.NewStringConstraint()).
-		WithProperty("a", schema.NewStringConstraint()).
-		WithTypeAnnotation("index\x000\x001\x00a").
-		WithTypeAnnotation("index", "a").
-		Done().
-		Build()
-	for i := range res.Issues() {
-		if strings.Contains(i.Message(), "more than once") {
-			t.Errorf("two structurally different annotations must not collide as duplicates: %s", i.Message())
 		}
 	}
 }

@@ -7,11 +7,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/simon-lentz/yammm/internal/snapparts"
+
 	"github.com/google/uuid"
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/graph"
+	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/instance"
-	"github.com/simon-lentz/yammm/internal/instancetest"
+	"github.com/simon-lentz/yammm/internal/snappartstest"
 	"github.com/simon-lentz/yammm/internal/yammmtest"
 	"github.com/simon-lentz/yammm/schema"
 	"github.com/simon-lentz/yammm/snapshot"
@@ -108,17 +111,15 @@ func buildTemporalSnapshot(t *testing.T, s schema.Schema, native bool) graph.Sna
 		"_target_id": "st1",
 		"seen_at":    edgeSeenAt(native),
 	}
+	raw.Properties["readings"] = []any{map[string]any{
+		"name":     "r1",
+		"taken_at": edgeSeenAt(native),
+	}}
 	sensor, res := v.ValidateOne(ctx, "Sensor", raw)
 	if !res.OK() {
 		t.Fatalf("validating Sensor: %s", res)
 	}
 	g.Add(ctx, sensor)
-
-	reading := mustValidatePart(t, v, "Reading", map[string]any{
-		"name":     "r1",
-		"taken_at": edgeSeenAt(native),
-	})
-	g.AddComposed(ctx, mustTypeID(t, s, "Sensor"), graph.FormatKey("s1"), "READINGS", reading)
 
 	return g.Snapshot()
 }
@@ -137,15 +138,6 @@ func mustValidate(t *testing.T, v *instance.Validator, typeName string, props ma
 		t.Fatalf("validating %s: %s", typeName, res)
 	}
 	return vi
-}
-
-func mustValidatePart(t *testing.T, v *instance.Validator, typeName string, props map[string]any) instance.ValidInstance {
-	t.Helper()
-	vis, res := v.ValidateForComposition(t.Context(), "Sensor", "READINGS", []instance.RawInstance{{Properties: props}})
-	if !res.OK() {
-		t.Fatalf("validating composed %s: %s", typeName, res)
-	}
-	return vis[0]
 }
 
 // TestMarshal_TemporalKindsReachOneFixpoint is the assertion the defect fails:
@@ -205,37 +197,30 @@ func TestMarshal_TemporalKindsReachOneFixpoint(t *testing.T) {
 	}
 }
 
-// bypassSnapshot builds a graph through instance.NewValidInstance, which
-// receives no schema and runs no validation. It is the one path a value can
-// take into a graph without being canonicalized, and it is why the wire and
-// writer arms exist.
-func bypassSnapshot(t *testing.T, s schema.Schema, props map[string]any) graph.Snapshot {
+// loadedSensor loads a document holding Sensor s1 with props, text no validator
+// stored.
+func loadedSensor(t *testing.T, s schema.Schema, props map[string]any) graph.Snapshot {
 	t.Helper()
-	g := graph.New(s)
-	inst := instancetest.VI(
-		"Sensor",
-		instancetest.TypeID(mustTypeID(t, s, "Sensor")),
-		instancetest.PK("s1"),
-		instancetest.Props(props),
-	)
-	g.Add(t.Context(), inst)
-	return g.Snapshot()
+	return snappartstest.Loaded(t, s, snapparts.Parts{Instances: []snapparts.Instance{{
+		TypeID: mustTypeID(t, s, "Sensor"), PrimaryKey: immutable.WrapKey([]any{"s1"}),
+		Properties: immutable.WrapProperties(props),
+	}}})
 }
 
-// TestMarshal_CanonicalizesABypassBuiltValue kills the wire arm. A validated
-// value is already canonical by the time it reaches wireValue, so only a graph
-// built through the bypass constructor can prove the arm runs.
-func TestMarshal_CanonicalizesABypassBuiltValue(t *testing.T) {
+// TestMarshal_CanonicalizesALoadedValue holds text a document spells another way
+// to the canonical form on the wire: a Timestamp at the offset +00:00 and with
+// trailing zeros, a UUID in upper case, and a list element.
+func TestMarshal_CanonicalizesALoadedValue(t *testing.T) {
 	t.Parallel()
 	s := loadTemporalSchema(t)
 
-	snap := bypassSnapshot(t, s, map[string]any{
+	snap := loadedSensor(t, s, map[string]any{
 		"id":         "s1",
-		"created_at": time.Date(2026, 8, 19, 12, 0, 0, 500000000, time.UTC),
-		"logged_at":  time.Date(2026, 8, 19, 12, 0, 0, 0, time.UTC),
-		"run_id":     uuid.MustParse(canonicalRunID),
-		"installed":  time.Date(2026, 8, 19, 6, 0, 0, 0, time.UTC),
-		"samples":    []any{time.Date(2026, 8, 19, 12, 0, 0, 500000000, time.UTC)},
+		"created_at": "2026-08-19T12:00:00.500+00:00",
+		"logged_at":  canonicalLogged,
+		"run_id":     strings.ToUpper(canonicalRunID),
+		"installed":  canonicalInstalled,
+		"samples":    []any{"2026-08-19T12:00:00.500+00:00"},
 	})
 
 	data, result := snapshot.Marshal(context.Background(), snap)
@@ -252,7 +237,7 @@ func TestMarshal_CanonicalizesABypassBuiltValue(t *testing.T) {
 		`"samples":["` + canonicalCreated + `"]`,
 	} {
 		if !strings.Contains(doc, want) {
-			t.Errorf("bypass-built value not canonicalized on the wire: want %s\ngot: %s", want, doc)
+			t.Errorf("value not canonicalized on the wire: want %s\ngot: %s", want, doc)
 		}
 	}
 }
@@ -266,7 +251,7 @@ func TestMarshal_HealsOrPassesThroughNonConformingText(t *testing.T) {
 	ctx := context.Background()
 	s := loadTemporalSchema(t)
 
-	snap := bypassSnapshot(t, s, map[string]any{
+	snap := loadedSensor(t, s, map[string]any{
 		"id": "s1",
 		// Healable: a non-canonical spelling of a valid instant.
 		"created_at": "2026-08-19T12:00:00.500+00:00",
@@ -307,8 +292,8 @@ func TestMarshal_HealsOrPassesThroughNonConformingText(t *testing.T) {
 	}
 }
 
-// TestLoad_CanonicalizesNonConformingWireText proves the rebuild arm covers
-// the load path. A .ys can hold a non-canonical spelling — this library wrote
+// TestLoad_CanonicalizesNonConformingWireText proves the load path renders what
+// it reads. A .ys can hold a non-canonical spelling — this library wrote
 // such documents before the rule existed, and nothing re-validates on load —
 // so the graph a Load produces has to render it rather than carry it forward.
 //
@@ -342,7 +327,7 @@ func TestLoad_CanonicalizesNonConformingWireText(t *testing.T) {
 		t.Fatal("created_at missing after load")
 	}
 	if got := v.Unwrap(); got != canonicalCreated {
-		t.Errorf("loaded created_at = %#v, want %q — the rebuild arm did not render it", got, canonicalCreated)
+		t.Errorf("loaded created_at = %#v, want %q — Load did not render it", got, canonicalCreated)
 	}
 }
 

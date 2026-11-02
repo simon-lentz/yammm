@@ -2,12 +2,9 @@ package csv
 
 import (
 	"math"
-	"strconv"
 	"strings"
 	"testing"
 
-	"github.com/simon-lentz/yammm/graph"
-	"github.com/simon-lentz/yammm/internal/instancetest"
 	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
 )
@@ -43,7 +40,7 @@ type Reading {
 		{"at", "1.0 |2.0"},
 	} {
 		input := "id," + c.column + "\nr1,\"" + c.cell + "\"\n"
-		_, result := New().ParseTyped(t.Context(), location.MustNewSourceID("test://floats.csv"), "Reading", strings.NewReader(input), st)
+		_, result := New().ParseTyped(t.Context(), location.NewSourceID("test://floats.csv"), "Reading", strings.NewReader(input), st)
 		issue, ok := issueContaining(result, `column "`+c.column+`"`)
 		if !ok || issue.Code() != E_CSV_COERCE {
 			t.Errorf("%s = %q: want an E_CSV_COERCE naming the column, got %s", c.column, c.cell, result)
@@ -51,10 +48,8 @@ type Reading {
 	}
 }
 
-// scalarCell renders the scalar kinds a cell holds, and a nil as the empty
-// cell, which is what a bypass-built key component holding none writes. A
-// finite float carries a decimal point whatever its width, sign or value.
-func TestScalarCell_RendersEveryKindItNames(t *testing.T) {
+// cellOf renders the scalar kinds a cell holds, and a nil as the empty text.
+func TestCellOf_RendersEveryKindItNames(t *testing.T) {
 	t.Parallel()
 	for _, c := range []struct {
 		in   any
@@ -65,17 +60,12 @@ func TestScalarCell_RendersEveryKindItNames(t *testing.T) {
 		{float64(1e21), "1000000000000000000000.0"},
 		{float64(6), "6.0"},
 		{math.Copysign(0, -1), "-0.0"},
-		{float32(7), "7.0"},
-		{float32(0.1), "0.1"},
 		{0.25, "0.25"},
-		{math.NaN(), "NaN"},
-		{math.Inf(-1), "-Inf"},
 		{true, "true"},
 		{nil, ""},
-		{uint64(3), "3"},
 	} {
-		if got, _, ok := scalarCell(c.in); !ok || got != c.want {
-			t.Errorf("scalarCell(%#v) = %q, %v, want %q", c.in, got, ok, c.want)
+		if got, err := cellOf(c.in, nil); err != nil || got != c.want {
+			t.Errorf("cellOf(%#v) = %q, %v, want %q", c.in, got, err, c.want)
 		}
 	}
 }
@@ -133,13 +123,8 @@ type T {
 		t.Fatalf("load schema: %s", res)
 	}
 	st, _ := s.Type("T")
-	g := graph.New(s)
-	vi := instancetest.VI("T", instancetest.TypeID(st.ID()), instancetest.PK("a"),
-		instancetest.Props(map[string]any{"id": "a", "n": float64(6)}))
-	if r := g.Add(t.Context(), vi); r.HasErrors() {
-		t.Fatalf("add: %s", r)
-	}
-	files, err := New(WithSchema(s)).MarshalSnapshot(t.Context(), g.Snapshot())
+	snap := heldDocument(t, s, "T", `{"key":["a"],"properties":{"id":"a","n":6.0},"provenance":null}`)
+	files, err := New(WithSchema(s)).MarshalSnapshot(t.Context(), snap)
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
 	}
@@ -147,46 +132,8 @@ type T {
 	if got := string(files["T"]); got != want {
 		t.Fatalf("got %q, want %q", got, want)
 	}
-	_, pres := New().ParseTyped(t.Context(), location.MustNewSourceID("test://t.csv"), "T", strings.NewReader(want), st)
+	_, pres := New().ParseTyped(t.Context(), location.NewSourceID("test://t.csv"), "T", strings.NewReader(want), st)
 	if issue, ok := issueContaining(pres, `column "n"`); !ok || issue.Code() != E_CSV_COERCE {
 		t.Errorf("reading %q back drew %s, want an E_CSV_COERCE naming the column", want, pres)
-	}
-}
-
-// The parser reads a cell at 64 bits, so a float32's shortest 32-bit text is
-// rounded twice on the way back: for bits 363742205 (7.038531e-26) the float64
-// that text names rounds to the next float32. Such a value is written in its
-// 64-bit form, which reads back as itself; its neighbours keep theirs.
-func TestScalarCell_AFloat32ReadsBackAtSixtyFourBits(t *testing.T) {
-	t.Parallel()
-	twice := math.Float32frombits(363742205)
-	for _, c := range []struct {
-		v    float32
-		wide bool
-	}{
-		{twice, true},
-		{-twice, true},
-		{math.Float32frombits(363742204), false},
-		{math.Float32frombits(363742206), false},
-		{0.1, false},
-	} {
-		text, _, ok := scalarCell(c.v)
-		if !ok {
-			t.Fatalf("scalarCell(bits %d) refused", math.Float32bits(c.v))
-		}
-		back, err := floatFromCell(text)
-		if err != nil {
-			t.Fatalf("%s does not read back: %v", text, err)
-		}
-		if float32(back) != c.v {
-			t.Errorf("scalarCell(bits %d) = %s, which reads back as bits %d", math.Float32bits(c.v), text, math.Float32bits(float32(back)))
-		}
-		if strings.ContainsAny(text, "eE") {
-			t.Errorf("scalarCell(bits %d) = %s, which holds an exponent", math.Float32bits(c.v), text)
-		}
-		short := strconv.FormatFloat(float64(c.v), 'f', -1, 32)
-		if wide := text != short; wide != c.wide {
-			t.Errorf("scalarCell(bits %d) = %s; the 32-bit form is %s, wide = %v, want %v", math.Float32bits(c.v), text, short, wide, c.wide)
-		}
 	}
 }

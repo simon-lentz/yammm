@@ -1,7 +1,6 @@
 package schema_test
 
 import (
-	"slices"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -10,7 +9,7 @@ import (
 	"github.com/simon-lentz/yammm/schema"
 )
 
-func TestIsReservedKeyword(t *testing.T) {
+func TestIsReserved(t *testing.T) {
 	tests := []struct {
 		name     string
 		input    string
@@ -61,8 +60,8 @@ func TestIsReservedKeyword(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := schema.TestIsReservedKeyword(tt.input)
-			assert.Equal(t, tt.expected, result, "IsReservedKeyword(%q)", tt.input)
+			result := parse.IsReserved(tt.input)
+			assert.Equal(t, tt.expected, result, "IsReserved(%q)", tt.input)
 		})
 	}
 }
@@ -150,74 +149,4 @@ func TestDeriveAliasFromPath(t *testing.T) {
 			assert.Equal(t, tt.expected, result, "DeriveAliasFromPath(%q)", tt.input)
 		})
 	}
-}
-
-// TestGrammarAliasSynchronization verifies that this package's reserved-keyword
-// list matches the parser's own vocabulary, so an alias the loader accepts can
-// never be a spelling the grammar refuses to lex as a qualifier.
-//
-// The comparison is against [parse.ReservedKeywords], which the parser composes
-// from the maps its own positions test against. Both lists are hand-written, in
-// different packages, and only this test couples them.
-func TestGrammarAliasSynchronization(t *testing.T) {
-	grammarKeywords := parse.ReservedKeywords()
-	codeKeywords := schema.TestReservedKeywords()
-
-	// Convert to sorted slices for comparison
-	grammarList := mapToSortedSlice(grammarKeywords)
-	codeList := mapToSortedSlice(codeKeywords)
-
-	// Check for keywords in grammar but missing from code
-	var missingInCode []string
-	for kw := range grammarKeywords {
-		if !codeKeywords[kw] {
-			missingInCode = append(missingInCode, kw)
-		}
-	}
-	slices.Sort(missingInCode)
-
-	// Check for keywords in code but missing from grammar
-	var missingInGrammar []string
-	for kw := range codeKeywords {
-		if !grammarKeywords[kw] {
-			missingInGrammar = append(missingInGrammar, kw)
-		}
-	}
-	slices.Sort(missingInGrammar)
-
-	// Report discrepancies
-	if len(missingInCode) > 0 {
-		t.Errorf("Keywords in the parser but MISSING from alias.reservedKeywords: %v", missingInCode)
-	}
-	if len(missingInGrammar) > 0 {
-		t.Errorf("Keywords in alias.reservedKeywords but MISSING from the parser: %v", missingInGrammar)
-	}
-
-	// Log summary for debugging
-	t.Logf("Grammar keywords (%d): %v", len(grammarList), grammarList)
-	t.Logf("Code keywords (%d): %v", len(codeList), codeList)
-
-	// Verify exact match
-	assert.ElementsMatch(t, grammarList, codeList,
-		"Reserved keywords must exactly match grammar keywords")
-}
-
-func mapToSortedSlice(m map[string]bool) []string {
-	result := make([]string, 0, len(m))
-	for k := range m {
-		result = append(result, k)
-	}
-	slices.Sort(result)
-	return result
-}
-
-func TestReservedKeywordsReturnsDefensiveCopy(t *testing.T) {
-	kw1 := schema.TestReservedKeywords()
-	kw2 := schema.TestReservedKeywords()
-
-	// Modify kw1
-	kw1["new_keyword"] = true
-
-	// Verify kw2 is unaffected
-	assert.False(t, kw2["new_keyword"], "ReservedKeywords should return a defensive copy")
 }

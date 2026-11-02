@@ -7,7 +7,6 @@ import (
 	"testing"
 
 	"github.com/simon-lentz/yammm/diag"
-	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -49,9 +48,8 @@ type Base {
 // and instance layers document their target re-checks as defense in depth on
 // the strength of it, so it is proved here rather than assumed.
 //
-// The proof is by exhaustion over the two paths that can seal a schema —
-// [schema.Builder.Build] and the loader — reached through every public
-// entry point, crossed with every reference position a qualifier can occupy.
+// The proof is by exhaustion over the loader's public entry points, crossed with
+// every reference position a qualifier can occupy.
 func TestDanglingQualifiedReference_UnreachableThroughEveryEntryPoint(t *testing.T) {
 	t.Parallel()
 
@@ -83,101 +81,6 @@ func TestDanglingQualifiedReference_UnreachableThroughEveryEntryPoint(t *testing
 				assertRejected(t, s, result)
 			})
 		})
-	}
-}
-
-// Build is the second sealing path and takes no source text, so it is driven
-// through its own API rather than the table above.
-func TestDanglingQualifiedReference_UnreachableThroughBuilder(t *testing.T) {
-	t.Parallel()
-
-	t.Run("relation target", func(t *testing.T) {
-		t.Parallel()
-		s, result := schema.NewBuilder().
-			WithName("d").
-			WithSourceID(location.MustNewSourceID("test://d.yammm")).
-			AddType("Base").
-			WithPrimaryKey("id", schema.NewStringConstraint()).
-			WithRelation("LINKS", schema.NewTypeRef("nope", "Missing", location.Span{}), false, false).
-			Done().
-			Build()
-		assertRejected(t, s, result)
-	})
-
-	t.Run("extends", func(t *testing.T) {
-		t.Parallel()
-		s, result := schema.NewBuilder().
-			WithName("d").
-			WithSourceID(location.MustNewSourceID("test://d.yammm")).
-			AddType("Base").
-			WithPrimaryKey("id", schema.NewStringConstraint()).
-			Extends(schema.NewTypeRef("nope", "Missing", location.Span{})).
-			Done().
-			Build()
-		assertRejected(t, s, result)
-	})
-
-	t.Run("composition target", func(t *testing.T) {
-		t.Parallel()
-		s, result := schema.NewBuilder().
-			WithName("d").
-			WithSourceID(location.MustNewSourceID("test://d.yammm")).
-			AddType("Base").
-			WithPrimaryKey("id", schema.NewStringConstraint()).
-			WithComposition("PARTS", schema.NewTypeRef("nope", "Missing", location.Span{}), false, true).
-			Done().
-			Build()
-		assertRejected(t, s, result)
-	})
-
-	t.Run("qualified datatype", func(t *testing.T) {
-		t.Parallel()
-		s, result := schema.NewBuilder().
-			WithName("d").
-			WithSourceID(location.MustNewSourceID("test://d.yammm")).
-			AddType("Base").
-			WithPrimaryKey("id", schema.NewStringConstraint()).
-			WithProperty("weight", schema.NewAliasConstraint("nope.Grams", nil)).
-			Done().
-			Build()
-		assertRejected(t, s, result)
-	})
-}
-
-// The two halves must cover the same positions, or the proof is by exhaustion
-// over one path and by sampling over the other.
-func TestDanglingQualifiedReference_BothHalvesCoverEveryPosition(t *testing.T) {
-	t.Parallel()
-	builderPositions := map[string]bool{
-		"relation target":    true,
-		"extends":            true,
-		"composition target": true,
-		"qualified datatype": true,
-	}
-	for position := range danglingSources {
-		if !builderPositions[position] {
-			t.Errorf("position %q is proved through the loader but not through Builder.Build", position)
-		}
-	}
-	for position := range builderPositions {
-		if _, ok := danglingSources[position]; !ok {
-			t.Errorf("position %q is proved through Builder.Build but has no loader source", position)
-		}
-	}
-}
-
-// A schema that fails to seal is never registered, so a Registry cannot hand
-// one out either — the third way a caller might obtain a sealed schema.
-func TestDanglingQualifiedReference_NeverEntersTheRegistry(t *testing.T) {
-	t.Parallel()
-
-	reg := schema.NewRegistry()
-	src := danglingSources["relation target"]
-	if s, result := schema.LoadString(t.Context(), src, "d.yammm", schema.WithRegistry(reg)); !s.IsZero() {
-		t.Fatalf("load returned a schema: %s", result)
-	}
-	if got := len(slices.Collect(reg.All())); got != 0 {
-		t.Errorf("registry holds %d schema(s) after a failed load, want 0", got)
 	}
 }
 

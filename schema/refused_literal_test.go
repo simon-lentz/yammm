@@ -254,7 +254,7 @@ func TestLoad_ASourceWithNoRefusedTextAnswersAsV0210(t *testing.T) {
 		"surrogate: two of three":                          {added: []string{surrogate, lastOne}},
 		"surrogate: one of three beside one not compiling": {added: []string{surrogate, overThree}},
 		"surrogate: one of four beside one not compiling":  {gone: []string{overThree}, added: []string{surrogate, overFour}},
-		// The pattern limit counts every pattern written, as the Builder does.
+		// The pattern limit counts every pattern written.
 		"plain: pattern of three, one not compiling":      {added: []string{overThree}},
 		"plain: pattern of three, one a malformed escape": {added: []string{overThree}},
 		"plain: pattern of four, one not compiling":       {gone: []string{overThree}, added: []string{overFour}},

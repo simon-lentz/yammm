@@ -410,9 +410,9 @@ func (c *completer) reportIndexRedundancy(a Annotation, span location.Span, t, e
 // KNOWN LIMIT — descendants declared in OTHER schemas are invisible, because
 // completion records subtypes for local types only. An abstract mixin annotated
 // in one file and made concrete in another therefore draws nothing, while the
-// same model written in a single file is rejected. Closing that needs
-// registry-wide descendant visibility at validation time; until then the rule is
-// sound for what it can see and silent beyond it, which errs toward accepting.
+// same model written in a single file is rejected. Closing that needs load-wide
+// descendant visibility at validation time. Until then the rule is sound for what
+// it can see and silent beyond it, which errs toward accepting.
 func (c *completer) indexOnPrimaryKeyIsRedundant(t Type) (Type, bool) {
 	var first Type
 	for e := range c.concreteEmitters(t) {
@@ -751,9 +751,6 @@ func annotationDisplay(a Annotation) string {
 	}
 	texts := make([]string, 0, len(a.args))
 	for _, arg := range a.args {
-		// displayText re-quotes a string literal (whose stored text is unquoted)
-		// but leaves a number, boolean, or regex as its own spelling — echoing a
-		// spelling the source actually contained, whatever the literal's kind.
 		texts = append(texts, arg.displayText())
 	}
 	return PlacementType.String() + a.name + "(" + strings.Join(texts, ", ") + ")"

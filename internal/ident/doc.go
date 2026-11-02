@@ -9,12 +9,11 @@
 //
 // # CamelCase Conversion
 //
-// The [Capitalize], [ToUpperCamel], and [ToLowerCamel] functions provide
-// rune-aware CamelCase conversion with acronym preservation:
+// [ToUpperCamelInitialisms] provides rune-aware CamelCase conversion with acronym
+// preservation:
 //
-//	http_server -> HttpServer  (Capitalize/ToUpperCamel)
-//	http_server -> httpServer  (ToLowerCamel)
-//	HTTPServer  -> HTTPServer  (Capitalize preserves acronyms)
+//	http_server -> HttpServer
+//	HTTPServer  -> HTTPServer
 //
 // # Thread Safety
 //

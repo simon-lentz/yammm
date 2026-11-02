@@ -9,9 +9,8 @@ import (
 
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/graph"
-	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/instance"
-	"github.com/simon-lentz/yammm/location"
+	"github.com/simon-lentz/yammm/internal/instancetest"
 	"github.com/simon-lentz/yammm/schema"
 	"github.com/simon-lentz/yammm/snapshot"
 )
@@ -130,15 +129,8 @@ func foreignSpellingDocument(t *testing.T, s schema.Schema, edgeToo bool) []byte
 	t.Helper()
 	const canon = "2020-01-02T03:04:05Z"
 	const raw = "2020-01-02T03:04:05+00:00"
-	eventID, _ := s.Type("Event")
-	noteID, _ := s.Type("Note")
-	event := instance.NewValidInstance("Event", eventID.ID(), immutable.WrapKey([]any{canon}),
-		immutable.WrapProperties(map[string]any{"observed_at": canon}), nil, nil, location.Provenance{})
-	edges := map[string]instance.ValidEdgeData{"ABOUT": instance.NewValidEdgeData([]instance.ValidEdgeTarget{
-		instance.NewValidEdgeTarget(immutable.WrapKey([]any{canon}), immutable.WrapProperties(nil)),
-	})}
-	note := instance.NewValidInstance("Note", noteID.ID(), immutable.WrapKey([]any{"n1"}),
-		immutable.WrapProperties(map[string]any{"id": "n1"}), edges, nil, location.Provenance{})
+	event := instancetest.Valid(t, s, "Event", map[string]any{"observed_at": canon})
+	note := instancetest.Valid(t, s, "Note", map[string]any{"id": "n1", "about": map[string]any{"_target_observed_at": canon}})
 	g := graph.New(s)
 	for _, inst := range []instance.ValidInstance{event, note} {
 		if r := g.Add(t.Context(), inst); !r.OK() {
@@ -189,14 +181,11 @@ func TestLoad_ForeignSpellingOfAKeyLoadsAndResolves(t *testing.T) {
 func TestLoad_TwoSpellingsOfOneKeyAreOneDuplicate(t *testing.T) {
 	t.Parallel()
 	s := linkedTimestampSchema(t)
-	eventID, _ := s.Type("Event")
 	const first = "2020-01-02T03:04:05Z"
 	const second = "2021-06-07T08:09:10Z"
 	g := graph.New(s)
 	for _, at := range []string{first, second} {
-		ev := instance.NewValidInstance("Event", eventID.ID(), immutable.WrapKey([]any{at}),
-			immutable.WrapProperties(map[string]any{"observed_at": at}), nil, nil, location.Provenance{})
-		if r := g.Add(t.Context(), ev); !r.OK() {
+		if r := g.Add(t.Context(), instancetest.Valid(t, s, "Event", map[string]any{"observed_at": at})); !r.OK() {
 			t.Fatalf("add: %s", r)
 		}
 	}
@@ -226,14 +215,9 @@ func TestLoad_TwoSpellingsOfOneKeyAreOneDuplicate(t *testing.T) {
 func TestLoad_UnresolvedTargetIsCanonicalized(t *testing.T) {
 	t.Parallel()
 	s := linkedTimestampSchema(t)
-	noteID, _ := s.Type("Note")
 	const canon = "2020-01-02T03:04:05Z"
 	const raw = "2020-01-02T03:04:05+00:00"
-	edges := map[string]instance.ValidEdgeData{"ABOUT": instance.NewValidEdgeData([]instance.ValidEdgeTarget{
-		instance.NewValidEdgeTarget(immutable.WrapKey([]any{canon}), immutable.WrapProperties(nil)),
-	})}
-	note := instance.NewValidInstance("Note", noteID.ID(), immutable.WrapKey([]any{"n1"}),
-		immutable.WrapProperties(map[string]any{"id": "n1"}), edges, nil, location.Provenance{})
+	note := instancetest.Valid(t, s, "Note", map[string]any{"id": "n1", "about": map[string]any{"_target_observed_at": canon}})
 	g := graph.New(s)
 	if r := g.Add(t.Context(), note); !r.OK() {
 		t.Fatalf("add: %s", r)

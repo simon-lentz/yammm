@@ -23,17 +23,6 @@ import (
 	"github.com/simon-lentz/yammm/lsp/internal/workspace"
 )
 
-// PositionEncoding is an alias for lsputil.PositionEncoding within the lsp package.
-type PositionEncoding = lsputil.PositionEncoding
-
-const (
-	// PositionEncodingUTF16 counts positions in UTF-16 code units (default).
-	PositionEncodingUTF16 = lsputil.PositionEncodingUTF16
-
-	// PositionEncodingUTF8 counts positions in UTF-8 bytes.
-	PositionEncodingUTF8 = lsputil.PositionEncodingUTF8
-)
-
 const serverName = "yammm-lsp"
 
 // Config holds the server configuration.
@@ -84,16 +73,11 @@ func (c *Config) Validate(logger *slog.Logger) error {
 	return nil
 }
 
-// Option is a functional option for NewServer. Options are for dependency
-// injection in tests, not for configuration (Config handles that).
-type Option func(*Server)
-
 // Resolver is consumed by feature handlers (hover, completion, definition, symbols, formatting).
 // It provides read-only access to workspace state for resolving analysis units.
 type Resolver interface {
 	ResolveUnit(uri string, line, char int, snapshotRequired bool) *workspace.Unit
 	ResolveAllUnits(uri string) []workspace.Unit
-	PositionEncoding() lsputil.PositionEncoding
 	GetDocumentSnapshot(uri string) *docstate.Snapshot
 	RemapPathToURI(input string) string
 }
@@ -119,9 +103,6 @@ type Server struct {
 	jrpcSrv   *jrpc2.Server
 	workspace *workspace.Workspace
 
-	// posEncoding is the negotiated position encoding, set once during initialize.
-	posEncoding lsputil.PositionEncoding
-
 	// traceValue stores the current trace level (replaces protocol.SetTraceValue global).
 	// Accessed atomically because jrpc2 may dispatch setTrace and shutdown on different goroutines.
 	traceValue atomic.Value // stores protocol.TraceValue (string)
@@ -137,25 +118,17 @@ type Server struct {
 
 // NewServer creates a new YAMMM language server.
 // If logger is nil, slog.Default() is used.
-// Options are applied after default construction, allowing test-only overrides
-// (e.g., WithLogger). The variadic opts parameter is backward-compatible —
-// existing callers that pass no options continue to work unchanged.
-func NewServer(logger *slog.Logger, cfg Config, opts ...Option) *Server {
+func NewServer(logger *slog.Logger, cfg Config) *Server {
 	if logger == nil {
 		logger = slog.Default()
 	}
 	s := &Server{
-		logger:      logger.With(slog.String("component", "server")),
-		config:      cfg,
-		posEncoding: PositionEncodingUTF16, // default; overridden by initialize
+		logger: logger.With(slog.String("component", "server")),
+		config: cfg,
 		workspace: workspace.NewWorkspace(logger, workspace.Config{
 			ModuleRoot:    cfg.ModuleRoot,
 			DebounceDelay: cfg.DebounceDelay,
 		}),
-	}
-
-	for _, opt := range opts {
-		opt(s)
 	}
 
 	s.mux = handler.Map{
@@ -192,12 +165,6 @@ func NewServer(logger *slog.Logger, cfg Config, opts ...Option) *Server {
 	return s
 }
 
-// Mux returns the handler map for testing purposes.
-func (s *Server) Mux() handler.Map { return s.mux }
-
-// Workspace returns the workspace for testing purposes.
-func (s *Server) Workspace() *workspace.Workspace { return s.workspace }
-
 // RunStdio runs the server using stdio transport with LSP framing.
 // It wires the workspace notifier to use the jrpc2 server for push
 // notifications (diagnostics). Uses context.Background() so notifications
@@ -220,10 +187,10 @@ func (s *Server) RunStdio() error {
 //     b. bgCancel() — cancel in-flight analysis contexts
 //     c. stop pending debounce timers
 //     d. wg.Wait() with 3s timeout — wait for tracked goroutines
-//  2. jrpcSrv.Stop() — close connection, unblock RunStdio
+//  2. jrpcSrv.Stop() — close the connection's write side
 //
-// Close is idempotent. jrpc2.Stop() returns immediately; RunStdio
-// unblocks because the underlying channel is closed.
+// Close is idempotent. jrpc2.Stop() returns immediately. RunStdio returns only
+// after its read of the input ends, which Close does not do.
 // Returns nil unconditionally — jrpc2.Stop() is void.
 func (s *Server) Close() error {
 	s.closeOnce.Do(func() {
@@ -291,12 +258,6 @@ func (s *Server) initialize(_ context.Context, params *protocol.InitializeParams
 	case params.RootPath != nil:
 		s.workspace.AddRoot(lsputil.PathToURI(*params.RootPath))
 	}
-
-	// Use UTF-16 encoding (default for VS Code compatibility)
-	posEncoding := PositionEncodingUTF16
-	s.posEncoding = posEncoding
-	s.workspace.SetPositionEncoding(posEncoding)
-	s.logger.Info("using position encoding", slog.String("encoding", string(posEncoding)))
 
 	// Build capabilities manually (replaces CreateServerCapabilities)
 	syncKind := protocol.TextDocumentSyncKindFull

@@ -537,7 +537,7 @@ func TestChecks_PatternListRejectsATrailingComma(t *testing.T) {
 }
 
 // TestChecks_PatternArityCountsEveryWrittenPattern pins that the pattern limit
-// counts the patterns the source wrote, as the schema Builder counts them: a
+// counts the patterns the source wrote: a
 // pattern refused for its own fault keeps its diagnostic and still counts.
 func TestChecks_PatternArityCountsEveryWrittenPattern(t *testing.T) {
 	for _, tc := range []struct {

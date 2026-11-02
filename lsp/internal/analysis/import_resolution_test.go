@@ -5,7 +5,6 @@ import (
 	"testing"
 
 	"github.com/simon-lentz/yammm/location"
-	"github.com/simon-lentz/yammm/lsp/internal/lsputil"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -119,7 +118,7 @@ func TestAnalyze_ASnapshotSchemaHoldsOnlyResolvedImports(t *testing.T) {
 			for name, text := range tc.sources {
 				overlays[filepath.Join(root, name)] = []byte(text)
 			}
-			snapshot, _ := NewAnalyzer(nil).Analyze(t.Context(), filepath.Join(root, "main.yammm"), overlays, root, lsputil.PositionEncodingUTF16, tc.opts...)
+			snapshot, _ := NewAnalyzer(nil).Analyze(t.Context(), filepath.Join(root, "main.yammm"), overlays, root, tc.opts...)
 			if got := !snapshot.Schema.IsZero(); got != tc.loads {
 				t.Fatalf("snapshot holds a schema: %v, want %v; diagnostics: %s", got, tc.loads, snapshot.Result)
 			}
@@ -132,50 +131,4 @@ func TestAnalyze_ASnapshotSchemaHoldsOnlyResolvedImports(t *testing.T) {
 			assertImportsResolved(t, snapshot.Schema, map[location.SourceID]bool{})
 		})
 	}
-}
-
-// A schema a registry holds reaches the analyzer without the loader's wiring.
-// The Builder wires its imports, so the closure still holds no unresolved import.
-func TestAnalyze_ABuilderSchemaFromARegistryHoldsOnlyResolvedImports(t *testing.T) {
-	root := t.TempDir()
-	registry := schema.NewRegistry()
-	leaf, result := schema.NewBuilder().
-		WithName("leaf").
-		WithSourceID(location.MustNewSourceID("test://leaf.yammm")).
-		AddType("Wheel").WithPrimaryKey("id", schema.NewStringConstraint()).Done().
-		Build()
-	if result.HasErrors() {
-		t.Fatal(result)
-	}
-	if err := registry.Register(leaf); err != nil {
-		t.Fatal(err)
-	}
-	depPath := filepath.Join(root, "dep.yammm")
-	depID, err := location.SourceIDFromPath(depPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	built, result := schema.NewBuilder().
-		WithName("dep").
-		WithSourceID(depID).
-		WithRegistry(registry).
-		AddImport("leaf", "leaf").
-		Build()
-	if result.HasErrors() {
-		t.Fatal(result)
-	}
-	if err := registry.Register(built); err != nil {
-		t.Fatal(err)
-	}
-
-	main := filepath.Join(root, "main.yammm")
-	overlays := map[string][]byte{main: []byte("schema \"main\"\nimport \"./dep\" as dep\n")}
-	snapshot, err := NewAnalyzer(nil).Analyze(t.Context(), main, overlays, root, lsputil.PositionEncodingUTF16, schema.WithRegistry(registry))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if snapshot.Schema.IsZero() {
-		t.Fatalf("the load refused the registered import: %s", snapshot.Result)
-	}
-	assertImportsResolved(t, snapshot.Schema, map[location.SourceID]bool{})
 }

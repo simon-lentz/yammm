@@ -6,7 +6,6 @@ import (
 	"testing"
 
 	"github.com/simon-lentz/yammm/diag"
-	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -62,14 +61,13 @@ var referenceSpellings = []struct {
 
 const referenceLibSource = "schema \"lib\"\n\ntype Zip = Pattern[\"^[0-9]{5}$\"]\n"
 
-// referencePositions holds each place a source writes a datatype reference:
-// the DSL text around the name, and the constraint the Builder is given for
-// the same place. The Builder writes no edge property, so that row has none.
+// referencePositions holds each place a source writes a datatype reference: the
+// DSL text around the name, and the constraint that holds the same reference
+// where a Go caller can state one.
 var referencePositions = []struct {
-	name     string
-	dsl      func(ref string) string
-	wrap     func(c schema.Constraint) schema.Constraint
-	datatype bool
+	name string
+	dsl  func(ref string) string
+	wrap func(c schema.Constraint) schema.Constraint
 }{
 	{
 		name: "a property",
@@ -95,8 +93,7 @@ var referencePositions = []struct {
 		dsl: func(ref string) string {
 			return "type X = List<" + ref + ">\n\ntype Car {\n\tvin String primary\n}\n"
 		},
-		wrap:     func(c schema.Constraint) schema.Constraint { return schema.NewListConstraint(c) },
-		datatype: true,
+		wrap: func(c schema.Constraint) schema.Constraint { return schema.NewListConstraint(c) },
 	},
 	{
 		name: "an edge property",
@@ -156,28 +153,9 @@ func statedReference(t *testing.T, s schema.Schema) string {
 	return held(p.Constraint())
 }
 
-func referenceBuilder(t *testing.T) *schema.Builder {
-	t.Helper()
-	lib, res := schema.NewBuilder().WithName("lib").
-		WithSourceID(location.MustNewSourceID("test://refs/lib.yammm")).
-		AddDataType("Zip", schema.StringLenBetween(5, 5)).Build()
-	if lib.IsZero() {
-		t.Fatalf("build lib: %s", res.String())
-	}
-	reg := schema.NewRegistry()
-	if err := reg.Register(lib); err != nil {
-		t.Fatal(err)
-	}
-	return schema.NewBuilder().WithName("main").
-		WithSourceID(location.MustNewSourceID("test://refs/main.yammm")).
-		WithRegistry(reg).AddImport("lib", "lib").
-		AddDataType("T1", schema.IntegerBetween(1, 5))
-}
-
-// A datatype reference name is read alike at every door. What a .yammm source
-// cannot state, Build and CheckConstraint refuse as a constraint fault; what a
-// source states and no declaration answers is Build's E_UNKNOWN_TYPE.
-func TestReferenceName_EveryDoorGivesTheDSLsAnswer(t *testing.T) {
+// A datatype reference name is read alike by the DSL and CheckConstraint: what a
+// .yammm source cannot state, CheckConstraint refuses as a constraint fault.
+func TestReferenceName_CheckConstraintGivesTheDSLsAnswer(t *testing.T) {
 	for _, sp := range referenceSpellings {
 		for _, pos := range referencePositions {
 			t.Run(fmt.Sprintf("%q as %s", sp.name, pos.name), func(t *testing.T) {
@@ -187,36 +165,6 @@ func TestReferenceName_EveryDoorGivesTheDSLsAnswer(t *testing.T) {
 				if pos.wrap == nil {
 					return
 				}
-				b := referenceBuilder(t)
-				given := pos.wrap(schema.NewAliasConstraint(sp.name, nil))
-				car := b.AddType("Car").WithPrimaryKey("vin", schema.NewStringConstraint())
-				if pos.datatype {
-					b = car.Done().AddDataType("X", given)
-				} else {
-					b = car.WithOptionalProperty("x", given).Done()
-				}
-				built, res := b.Build()
-				switch sp.want {
-				case refResolves:
-					if built.IsZero() || res.HasErrors() {
-						t.Fatalf("Build refused a name the DSL resolves: %s", res.String())
-					}
-					if got := statedReference(t, built); got != sp.name {
-						t.Errorf("the built schema holds the reference %q; want %q", got, sp.name)
-					}
-				case refNamesNothing:
-					if !built.IsZero() || !hasCode(res, diag.E_UNKNOWN_TYPE) || hasCode(res, diag.E_INVALID_CONSTRAINT) {
-						t.Errorf("Build = %v, %s; want E_UNKNOWN_TYPE alone", built, res.String())
-					}
-				case refNotAName:
-					if !built.IsZero() || !hasCode(res, diag.E_INVALID_CONSTRAINT) || hasCode(res, diag.E_UNKNOWN_TYPE) {
-						t.Errorf("Build = %v, %s; want E_INVALID_CONSTRAINT alone", built, res.String())
-					}
-					if !strings.Contains(res.String(), fmt.Sprintf("datatype reference %q", sp.name)) {
-						t.Errorf("Build reported %s; want the reference named", res.String())
-					}
-				}
-
 				raw := pos.wrap(schema.NewAliasConstraint(sp.name, schema.NewStringConstraint()))
 				err := schema.CheckConstraint(raw)
 				if refused := sp.want == refNotAName; (err != nil) != refused {
@@ -228,7 +176,7 @@ func TestReferenceName_EveryDoorGivesTheDSLsAnswer(t *testing.T) {
 }
 
 // The zero AliasConstraint meets no constructor; its empty name is refused as
-// NewAliasConstraint("", nil) is, at Build and at CheckConstraint.
+// NewAliasConstraint("", nil) is.
 func TestReferenceName_TheZeroReferenceIsRefusedAsAnEmptyName(t *testing.T) {
 	for name, c := range map[string]schema.Constraint{
 		"the zero value": schema.AliasConstraint{},
@@ -237,12 +185,6 @@ func TestReferenceName_TheZeroReferenceIsRefusedAsAnEmptyName(t *testing.T) {
 		const want = `datatype reference "" is not one a .yammm source can write`
 		if err := schema.CheckConstraint(c); err == nil || !strings.Contains(err.Error(), want) {
 			t.Errorf("%s: CheckConstraint = %v; want %s", name, err, want)
-		}
-		s, res := schema.NewBuilder().WithName("main").
-			AddType("Car").WithPrimaryKey("vin", schema.NewStringConstraint()).
-			WithOptionalProperty("x", c).Done().Build()
-		if !s.IsZero() || !hasCode(res, diag.E_INVALID_CONSTRAINT) || !strings.Contains(res.String(), want) {
-			t.Errorf("%s: Build = %v, %s; want E_INVALID_CONSTRAINT naming the empty reference", name, s, res.String())
 		}
 	}
 }

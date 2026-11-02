@@ -69,7 +69,7 @@ func yammmErrors(t *testing.T, s schema.Schema, data []byte) []string {
 	t.Helper()
 	ctx := context.Background()
 	var errs []string
-	raws, res := yamjson.New().ParseObject(ctx, location.MustNewSourceID("test://jschema/contract.json"), data)
+	raws, res := yamjson.New().ParseObject(ctx, location.NewSourceID("test://jschema/contract.json"), data)
 	if res.HasErrors() {
 		errs = append(errs, res.Err().Error())
 	}
@@ -250,7 +250,7 @@ func yammmStageCodes(t *testing.T, s schema.Schema, data []byte) map[string][]di
 			codes[stage] = append(codes[stage], issue.Code())
 		}
 	}
-	raws, res := yamjson.New().ParseObject(ctx, location.MustNewSourceID("test://jschema/contract.json"), data)
+	raws, res := yamjson.New().ParseObject(ctx, location.NewSourceID("test://jschema/contract.json"), data)
 	collect("parse", res)
 	v := instance.NewValidator(s)
 	g := graph.New(s)
@@ -397,7 +397,7 @@ func TestContractAsymmetry_ValueAndNameReading(t *testing.T) {
 
 	t.Run("null reads as absent", func(t *testing.T) {
 		const data = `[{"fips":"12345","name":"Alpha","population":1,"active":true,"density":null}]`
-		raws, res := yamjson.New().ParseObject(t.Context(), location.MustNewSourceID("test://jschema/null.json"), []byte(`{"County":`+data+`}`))
+		raws, res := yamjson.New().ParseObject(t.Context(), location.NewSourceID("test://jschema/null.json"), []byte(`{"County":`+data+`}`))
 		if !res.OK() {
 			t.Fatalf("parse: %v", res)
 		}

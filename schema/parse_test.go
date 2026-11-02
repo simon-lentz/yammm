@@ -15,7 +15,7 @@ import (
 // registerSource is a helper to register a schema source for testing.
 func registerSource(t *testing.T, reg *source.Registry, content, name string) location.SourceID {
 	t.Helper()
-	sourceID := location.MustNewSourceID("test://" + name)
+	sourceID := location.NewSourceID("test://" + name)
 	err := reg.Register(sourceID, []byte(content))
 	require.NoError(t, err)
 	return sourceID
@@ -311,6 +311,33 @@ import "parts.yammm"
 // one never reaches this check — the alias position refuses reserved spellings
 // outright, so the import arrives with no alias and the leftover text draws the
 // syntax error instead.
+// importDecl checks only a derived alias, so the grammar must refuse every
+// reserved spelling a source writes after as.
+func TestParser_EveryWrittenReservedAliasIsASyntaxError(t *testing.T) {
+	reserved := []string{
+		"schema", "type", "datatype", "required", "primary", "extends", "includes",
+		"abstract", "one", "many", "import", "as", "part", "in", "nil", "true", "false",
+		"Integer", "Float", "Boolean", "String", "Enum", "Pattern", "Timestamp", "Date",
+		"UUID", "Vector", "List",
+	}
+	for _, word := range reserved {
+		t.Run(word, func(t *testing.T) {
+			src := "schema \"test\"\n\nimport \"foo.yammm\" as " + word + "\n"
+			reg := source.NewRegistry()
+			sourceID := registerSource(t, reg, src, "test.yammm")
+			collector := diag.NewCollector(0)
+
+			model := schema.TestNewParser(sourceID, collector).Parse([]byte(src))
+
+			result := collector.Result()
+			assert.True(t, result.HasCode(diag.E_SYNTAX), "want E_SYNTAX, got: %v", result)
+			for _, imp := range model.Imports {
+				assert.NotEqual(t, word, imp.Alias, "a reserved alias reached the model")
+			}
+		})
+	}
+}
+
 func TestParser_ReservedKeywordAlias(t *testing.T) {
 	tests := []struct {
 		name      string
@@ -492,7 +519,7 @@ func TestTypeRef_String(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			assert.Equal(t, tt.expected, tt.ref.String())
-			assert.Equal(t, tt.qualified, tt.ref.IsQualified())
+			assert.Equal(t, tt.qualified, tt.ref.Qualifier != "")
 		})
 	}
 }

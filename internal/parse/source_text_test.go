@@ -188,13 +188,13 @@ func TestParse_SourceRulesAcceptTheReplacementCharacter(t *testing.T) {
 	}
 }
 
-// TestSourceTextFault_JudgesTheFirstByte pins that a refused character at the
+// TestNextTextFault_JudgesTheFirstByte pins that a refused character at the
 // start of a string is found.
-func TestSourceTextFault_JudgesTheFirstByte(t *testing.T) {
+func TestNextTextFault_JudgesTheFirstByte(t *testing.T) {
 	t.Parallel()
 	for _, s := range []string{"\xff", "\x00a", "\uFEFFa"} {
-		if _, found := SourceTextFault(s); !found {
-			t.Errorf("SourceTextFault(%q) found nothing", s)
+		if _, found := nextTextFault(s, 0); !found {
+			t.Errorf("nextTextFault(%q) found nothing", s)
 		}
 	}
 }

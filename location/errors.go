@@ -18,7 +18,7 @@ import "errors"
 
 // ErrEmptySourceID is returned when a synthetic source ID is empty.
 //
-// Returned by: ValidateSyntheticSourceID. MustNewSourceID panics with its text.
+// Returned by: ValidateSyntheticSourceID.
 var ErrEmptySourceID = errors.New("location: synthetic source ID cannot be empty")
 
 // ErrAbsolutePathSourceID is returned when a synthetic source ID resembles
@@ -30,8 +30,7 @@ var ErrEmptySourceID = errors.New("location: synthetic source ID cannot be empty
 // embedded://) instead; a source key under a synthetic root takes a relative
 // path.
 //
-// Returned by: ValidateSyntheticSourceID, and MustNewSourceID panics with its
-// text. NormalizeSyntheticKey returns it wrapped, for a key that looks absolute as
+// Returned by: ValidateSyntheticSourceID. NormalizeSyntheticKey returns it wrapped, for a key that looks absolute as
 // given or once cleaned and in NFC. So do schema.SyntheticImportKey, for an
 // importer key or an import that does, and adapter/gogen.Marshal, for a source
 // whose embedded key does. A load under schema.WithSyntheticRoot reports such
@@ -44,8 +43,7 @@ var ErrAbsolutePathSourceID = errors.New("location: synthetic source ID looks li
 // character, a bidi or other format character, a space past ASCII, a private-use
 // or unassigned code point. Such a character would let two identities read alike.
 //
-// Returned by: ValidateSyntheticSourceID, and MustNewSourceID panics with its
-// text. NormalizeSyntheticKey, schema.SyntheticImportKey and adapter/gogen.Marshal return it
+// Returned by: ValidateSyntheticSourceID. NormalizeSyntheticKey, schema.SyntheticImportKey and adapter/gogen.Marshal return it
 // wrapped.
 var ErrUnprintableSourceID = errors.New("location: synthetic source ID holds a character that does not print")
 
@@ -55,9 +53,9 @@ var ErrUnprintableSourceID = errors.New("location: synthetic source ID holds a c
 // would name the working directory, because filepath.Abs("") does, and a
 // directory would get a valid-looking identity for a file that was never named.
 //
-// Returned by: ResolveHostPath, NewCanonicalPath, SourceIDFromPath,
-// ResolveSourcePath and CanonicalizePathForSourceID, and schema.FindModuleRoot
-// returns it wrapped. Their Must forms panic with its text.
+// Returned by: ResolveHostPath, NewCanonicalPath, SourceIDFromPath and
+// ResolveSourcePath, and returned wrapped by schema.FindModuleRoot and the yammm
+// command's operand checks.
 var ErrEmptyPath = errors.New("location: path is empty")
 
 // ErrInvalidUTF8Path is returned for a path that is not valid UTF-8, or that
@@ -67,19 +65,17 @@ var ErrEmptyPath = errors.New("location: path is empty")
 // An identity is text that reaches JSON wires — a diagnostic under --format
 // json, and a .ys document's schema_source and each instance's provenance
 // source_name — and encoding/json writes
-// an invalid byte as U+FFFD, which merges two names into one. NFC passes such
-// bytes through unchanged, so nothing else refuses them.
+// an invalid byte as U+FFFD, which merges two names into one.
 //
 // Returned by: ResolveHostPath, every file-backed constructor (NewCanonicalPath,
-// SourceIDFromPath, ResolveSourcePath, CanonicalizePathForSourceID and
-// CanonicalPath.Join), ValidateSyntheticSourceID and NormalizeSyntheticKey, and
-// schema.SyntheticImportKey and schema.FindModuleRoot return it wrapped. The
-// Must forms of the constructors and of ValidateSyntheticSourceID's
-// MustNewSourceID panic with its text. A schema load reports it as a Fatal
+// SourceIDFromPath, ResolveSourcePath and CanonicalPath.Join),
+// ValidateSyntheticSourceID and NormalizeSyntheticKey. Their callers return it
+// wrapped, as schema.SyntheticImportKey, schema.FindModuleRoot and the language
+// server's configuration check do, and the CLI's source operand check wraps it
+// in its own refusal. A schema load reports it as a Fatal
 // E_LOAD_IO_FAILURE for the entry path, an explicit module root, a LoadString
-// source name and a LoadSourcesWithEntry source key, and as an E_IMPORT_RESOLVE
-// error for an import, each carrying the error's text, so errors.Is cannot
-// match it there.
+// source name and a LoadSourcesWithEntry source key, and an import that resolves to
+// such a path draws E_IMPORT_RESOLVE, so errors.Is cannot match it in a load.
 var ErrInvalidUTF8Path = errors.New("location: path is not valid UTF-8")
 
 // ErrAbsoluteJoinElement is returned when CanonicalPath.Join receives an

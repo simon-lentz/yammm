@@ -7,6 +7,8 @@ import (
 
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/immutable"
+	"github.com/simon-lentz/yammm/internal/snapparts"
+	"github.com/simon-lentz/yammm/internal/snappartstest"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -38,7 +40,7 @@ type Beacon {
 `
 
 // sameNameSnapshot holds one instance of each Beacon.
-func sameNameSnapshot(t *testing.T) (graph.Snapshot, schema.Schema) {
+func sameNameSnapshot(t *testing.T) graph.Snapshot {
 	t.Helper()
 	s, res := schema.LoadSourcesWithEntry(t.Context(), map[string][]byte{
 		"entry.yammm": []byte(multiEntrySource),
@@ -69,9 +71,9 @@ func sameNameSnapshot(t *testing.T) (graph.Snapshot, schema.Schema) {
 		t.Fatalf("fixture is vacuous: both Beacons address as %q", localTag)
 	}
 
-	snap, rres := graph.RebuildSnapshot(s, graph.SnapshotParts{
+	return snappartstest.Loaded(t, s, snapparts.Parts{
 		Types: []schema.TypeID{local.ID(), imported.ID()},
-		Instances: []graph.InstanceParts{
+		Instances: []snapparts.Instance{
 			{
 				TypeID:     local.ID(),
 				PrimaryKey: immutable.WrapKey([]any{"l1"}),
@@ -84,10 +86,6 @@ func sameNameSnapshot(t *testing.T) (graph.Snapshot, schema.Schema) {
 			},
 		},
 	})
-	if rres.HasErrors() {
-		t.Fatalf("assembling: %s", rres)
-	}
-	return snap, s
 }
 
 // TestMarshalSnapshot_KeysByTheAddressableTag pins the output map's key. Keyed by
@@ -96,7 +94,7 @@ func sameNameSnapshot(t *testing.T) (graph.Snapshot, schema.Schema) {
 // Mutation: keying the map by typeID.Name() turns this red.
 func TestMarshalSnapshot_KeysByTheAddressableTag(t *testing.T) {
 	t.Parallel()
-	snap, _ := sameNameSnapshot(t)
+	snap := sameNameSnapshot(t)
 
 	out, err := New().MarshalSnapshot(context.Background(), snap)
 	if err != nil {
@@ -120,7 +118,7 @@ func TestMarshalSnapshot_KeysByTheAddressableTag(t *testing.T) {
 // turns this red.
 func TestMarshalSnapshot_ResolvesTheSchemaTypeByIdentity(t *testing.T) {
 	t.Parallel()
-	snap, _ := sameNameSnapshot(t)
+	snap := sameNameSnapshot(t)
 
 	out, err := New().MarshalSnapshot(context.Background(), snap)
 	if err != nil {

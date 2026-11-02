@@ -148,15 +148,6 @@ func nextTextFault(s string, from int) (textFault, bool) {
 	return textFault{}, false
 }
 
-// SourceTextFault describes the first character of s that no schema source
-// can hold past its start — a byte that is not valid UTF-8, a byte order mark,
-// or a NUL — and reports whether there is one. The schema Builder holds a documentation
-// string to it, since a doc comment is source text.
-func SourceTextFault(s string) (string, bool) {
-	f, ok := nextTextFault(s, 0)
-	return f.why, ok
-}
-
 // Lex returns every token in src, in source order, with nothing elided —
 // whitespace and comments included, EOF excluded. A caller needing the stream
 // alongside the node tree uses [LexAndParse] instead, which returns both from

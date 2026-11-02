@@ -104,14 +104,14 @@ func (a *Adapter) coerceStringValue(raw string, c schema.Constraint) (any, error
 	}
 }
 
-// parseListValue splits a string by the configured list separator
+// parseListValue splits a string by the list separator
 // and coerces each element using the list element constraint.
 func (a *Adapter) parseListValue(raw string, lc schema.ListConstraint) ([]any, error) {
 	if raw == "" {
 		return []any{}, nil
 	}
 
-	parts := splitListElems(raw, a.config.listSep)
+	parts := splitListElems(raw)
 	elem := schema.ResolveAlias(lc.Element())
 
 	result := make([]any, len(parts))
@@ -125,14 +125,13 @@ func (a *Adapter) parseListValue(raw string, lc schema.ListConstraint) ([]any, e
 	return result, nil
 }
 
-// parseVectorValue parses a separator-delimited string of floats.
-// The separator is the adapter's configured list separator (default "|").
+// parseVectorValue parses a string of floats joined on the list separator.
 func (a *Adapter) parseVectorValue(raw string) ([]any, error) {
 	if raw == "" {
 		return []any{}, nil
 	}
 
-	parts := splitListElems(raw, a.config.listSep)
+	parts := splitListElems(raw)
 	result := make([]any, len(parts))
 	for i, part := range parts {
 		v, err := floatFromCell(part)

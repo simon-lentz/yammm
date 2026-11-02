@@ -318,6 +318,6 @@ func TestWriterFailure_ARefusalOfTheDataExitsValidation(t *testing.T) {
 // which an export of a snapshot no validator judged can meet before or after a
 // nested collection's refusal, whichever property sorts first.
 func coercionRefusal() error {
-	_, err := adaptern4j.Coerce(schema.NewIntegerConstraint(), 2.5)
+	_, err := adaptern4j.CoerceParams(map[string]any{"v": 2.5}, adaptern4j.ParamTypes{"v": schema.NewIntegerConstraint()})
 	return err
 }

@@ -17,17 +17,17 @@ import (
 
 func sourceID(t *testing.T, name string) location.SourceID {
 	t.Helper()
-	return location.MustNewSourceID("test://" + name)
+	return location.NewSourceID("test://" + name)
 }
 
 // buildAndComplete runs TestCompleteModel with a fresh collector and a
 // test-name-derived SourceID — the canonical completion harness for every
-// case that needs no registry or resolved imports.
+// case that needs no loaded schemas or resolved imports.
 func buildAndComplete(t *testing.T, model *schema.TestModel) (schema.Schema, diag.Result) {
 	t.Helper()
 	collector := diag.NewCollector(0)
-	srcID := location.MustNewSourceID("test://" + strings.ReplaceAll(t.Name(), "/", "_") + ".yammm")
-	s := schema.TestCompleteModel(model, srcID, collector, nil, nil)
+	srcID := location.NewSourceID("test://" + strings.ReplaceAll(t.Name(), "/", "_") + ".yammm")
+	s := schema.TestCompleteModel(model, srcID, collector, nil, schema.TestResolvedImportMap{})
 	return s, collector.Result()
 }
 
@@ -258,36 +258,6 @@ func TestComplete_Errors(t *testing.T) {
 			wantCode: diag.E_CASE_COLLISION,
 		},
 		{
-			name: "reserved prefix",
-			model: &schema.TestModel{
-				Name: "test",
-				Types: []*schema.TestTypeDecl{
-					{
-						Name: "Person",
-						Properties: []*schema.TestPropertyDecl{
-							{
-								Name:       "_target_foo", // Reserved prefix
-								Constraint: schema.NewStringConstraint(),
-							},
-						},
-					},
-				},
-			},
-			wantCode: diag.E_RESERVED_PREFIX,
-		},
-		{
-			name: "invalid import alias keyword",
-			model: &schema.TestModel{
-				Name: "test",
-				Imports: []*schema.TestImportDecl{
-					{
-						Path:  "./other",
-						Alias: "type", // Reserved keyword
-					},
-				},
-			},
-		},
-		{
 			name: "composition target must be part",
 			model: &schema.TestModel{
 				Name: "test",
@@ -481,15 +451,6 @@ func TestComplete_Errors(t *testing.T) {
 				},
 			},
 			wantCode: diag.E_RELATION_COLLISION,
-		},
-		{
-			name: "import alias starts with number",
-			model: &schema.TestModel{
-				Name: "test",
-				Imports: []*schema.TestImportDecl{
-					{Path: "other", Alias: "123invalid"},
-				},
-			},
 		},
 		{
 			name: "import duplicate alias",
@@ -873,20 +834,7 @@ func TestComplete_CompositionTarget_Valid(t *testing.T) {
 	completeGolden(t, model)
 }
 
-type mockRegistry struct {
-	schemas map[location.SourceID]schema.Schema
-}
-
-func (m *mockRegistry) LookupBySourceID(id location.SourceID) (schema.Schema, bool) {
-	s, ok := m.schemas[id]
-	return s, ok
-}
-
-func (m *mockRegistry) LookupByName(_ string) (schema.Schema, bool) {
-	return schema.Schema{}, false // Not needed for these tests
-}
-
-func TestComplete_CrossSchemaInheritance_WithRegistry(t *testing.T) {
+func TestComplete_CrossSchemaInheritance_ThroughTheLoadedSchemas(t *testing.T) {
 	// Create base schema with a type we'll inherit from
 	baseSourceID := sourceID(t, "base.yammm")
 	baseModel := &schema.TestModel{
@@ -909,12 +857,7 @@ func TestComplete_CrossSchemaInheritance_WithRegistry(t *testing.T) {
 	require.False(t, baseSchema.IsZero())
 	require.False(t, baseCollector.HasErrors())
 
-	// Create registry with base schema
-	registry := &mockRegistry{
-		schemas: map[location.SourceID]schema.Schema{
-			baseSourceID: baseSchema,
-		},
-	}
+	loaded := map[location.SourceID]schema.Schema{baseSourceID: baseSchema}
 
 	// Create derived schema that inherits from base
 	derivedSourceID := sourceID(t, "derived.yammm")
@@ -948,9 +891,9 @@ func TestComplete_CrossSchemaInheritance_WithRegistry(t *testing.T) {
 	}
 
 	derivedCollector := diag.NewCollector(0)
-	derivedSchema := schema.TestCompleteModel(derivedModel, derivedSourceID, derivedCollector, registry, resolvedImports)
+	derivedSchema := schema.TestCompleteModel(derivedModel, derivedSourceID, derivedCollector, loaded, resolvedImports)
 
-	require.False(t, derivedSchema.IsZero(), "cross-schema inheritance should succeed with registry")
+	require.False(t, derivedSchema.IsZero(), "cross-schema inheritance should succeed through the loaded schemas")
 	assert.False(t, derivedCollector.HasErrors())
 
 	derived, ok := derivedSchema.Type("DerivedType")
@@ -970,44 +913,6 @@ func TestComplete_CrossSchemaInheritance_WithRegistry(t *testing.T) {
 	// Verify own property
 	_, hasName := derived.Property("name")
 	assert.True(t, hasName, "own property 'name' should be accessible")
-}
-
-func TestComplete_CrossSchemaInheritance_DeferredWithoutRegistry(t *testing.T) {
-	// When registry is nil, cross-schema references should be deferred
-	// (not an error, just unresolved)
-	model := &schema.TestModel{
-		Name: "test",
-		Imports: []*schema.TestImportDecl{
-			{
-				Path:  "other",
-				Alias: "other",
-			},
-		},
-		Types: []*schema.TestTypeDecl{
-			{
-				Name: "MyType",
-				Inherits: []*schema.TestASTTypeRef{
-					{Qualifier: "other", Name: "BaseType"},
-				},
-			},
-		},
-	}
-
-	collector := diag.NewCollector(0)
-	srcID := sourceID(t, "deferred.yammm")
-
-	// With nil registry, cross-schema references are deferred to linking phase
-	// The Complete function should not error for qualified refs when registry is nil
-	s := schema.TestCompleteModel(model, srcID, collector, nil, nil)
-
-	// Note: This behavior depends on implementation - if cross-schema refs
-	// without registry are deferred, this should succeed. If they error
-	// immediately, the schema will be nil.
-	// Based on code review of collision.go:validateCompositionTarget,
-	// qualified refs without registry are deferred (returns true).
-	if !s.IsZero() {
-		assert.False(t, collector.HasErrors(), "qualified refs without registry should be deferred, not error")
-	}
 }
 
 func TestComplete_DataType_Simple(t *testing.T) {
@@ -1373,22 +1278,9 @@ func TestComplete_RelationInheritance_Compositions(t *testing.T) {
 	completeGolden(t, model)
 }
 
-// Duplicate resolved SourceIDs are validated by the resolvers, not during
-// completion: the loader's check is pinned by
-// [TestLoad_SameFileTwoSpellings_SingleDuplicateReport] and the Builder's
-// dedup by [TestBuilder_DuplicateImportByResolvedSourceID]. A resolution
-// map reaching completion is already deduplicated.
-
-func TestComplete_Import_NilSkipped(t *testing.T) {
-	model := &schema.TestModel{
-		Name: "test",
-		Imports: []*schema.TestImportDecl{
-			nil, // nil entry should be skipped
-		},
-	}
-
-	completeGolden(t, model)
-}
+// Duplicate resolved SourceIDs are validated by the loader, not during
+// completion: [TestLoad_SameFileTwoSpellings_SingleDuplicateReport] pins it. A
+// resolution map reaching completion is already deduplicated.
 
 func TestComplete_Import_MissingResolution(t *testing.T) {
 	model := &schema.TestModel{

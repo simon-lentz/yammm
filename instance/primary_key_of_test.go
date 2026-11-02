@@ -142,8 +142,8 @@ func TestPrimaryKeyOf_AgreesWithValidate(t *testing.T) {
 						switch {
 						case ok != (!valid.IsZero()):
 							t.Errorf("%s: PrimaryKeyOf read a key = %v, Validate accepted = %v", name, ok, !valid.IsZero())
-						case ok && (id != valid.TypeID() || key.String() != valid.PrimaryKey().String()):
-							t.Errorf("%s: PrimaryKeyOf = %v %s, Validate stored %v %s", name, id, key, valid.TypeID(), valid.PrimaryKey())
+						case ok && (id != valid.Type().ID() || key.String() != valid.PrimaryKey().String()):
+							t.Errorf("%s: PrimaryKeyOf = %v %s, Validate stored %v %s", name, id, key, valid.Type().ID(), valid.PrimaryKey())
 						}
 					}
 				}

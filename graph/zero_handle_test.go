@@ -37,7 +37,6 @@ func TestZeroHandles_ReportZeroAndAnswerAsHoldingNothing(t *testing.T) {
 		"Edge.Target":           edge.Target().IsZero(),
 		"Duplicate.Instance":    dup.Instance().IsZero(),
 		"Duplicate.Conflict":    dup.Conflict().IsZero(),
-		"Duplicate.Parent":      dup.Parent().IsZero(),
 		"UnresolvedEdge.Source": unr.Source().IsZero(),
 	} {
 		if !zero {

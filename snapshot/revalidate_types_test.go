@@ -9,6 +9,8 @@ import (
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/instance"
+	"github.com/simon-lentz/yammm/internal/snapparts"
+	"github.com/simon-lentz/yammm/internal/snappartstest"
 	"github.com/simon-lentz/yammm/schema"
 	"github.com/simon-lentz/yammm/snapshot"
 )
@@ -116,14 +118,14 @@ func TestLoad_RefusesComposedChildTypeMismatch(t *testing.T) {
 	s := typeMismatchLoad(t)
 	sensor, card, tag := typeMismatchTypeID(t, s, "Sensor"), typeMismatchTypeID(t, s, "Card"), typeMismatchTypeID(t, s, "Tag")
 
-	built, res := graph.RebuildSnapshot(s, graph.SnapshotParts{
+	built := snappartstest.Loaded(t, s, snapparts.Parts{
 		Types: []schema.TypeID{sensor},
-		Instances: []graph.InstanceParts{
+		Instances: []snapparts.Instance{
 			{
 				TypeID:     sensor,
 				PrimaryKey: immutable.WrapKey([]any{"s1"}),
 				Properties: immutable.WrapProperties(map[string]any{"id": "s1"}),
-				Composed: map[string][]graph.InstanceParts{"CARDS": {{
+				Composed: map[string][]snapparts.Instance{"CARDS": {{
 					TypeID:     card,
 					PrimaryKey: immutable.WrapKey([]any{"4242"}),
 					Properties: immutable.WrapProperties(map[string]any{"last4": "4242"}),
@@ -134,7 +136,7 @@ func TestLoad_RefusesComposedChildTypeMismatch(t *testing.T) {
 				TypeID:     sensor,
 				PrimaryKey: immutable.WrapKey([]any{"s2"}),
 				Properties: immutable.WrapProperties(map[string]any{"id": "s2"}),
-				Composed: map[string][]graph.InstanceParts{"TAGS": {{
+				Composed: map[string][]snapparts.Instance{"TAGS": {{
 					TypeID:     tag,
 					PrimaryKey: immutable.WrapKey([]any{"t1"}),
 					Properties: immutable.WrapProperties(map[string]any{"label": "t1"}),
@@ -142,9 +144,6 @@ func TestLoad_RefusesComposedChildTypeMismatch(t *testing.T) {
 			},
 		},
 	})
-	if res.HasErrors() {
-		t.Fatalf("rebuild: %s", res)
-	}
 	data, mres := snapshot.Marshal(ctx, built)
 	if mres.HasErrors() {
 		t.Fatalf("marshal: %s", mres)

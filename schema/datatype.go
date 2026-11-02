@@ -22,12 +22,6 @@ type dataTypeState struct {
 }
 
 // newDataType creates a new DataType.
-//
-// This is a low-level API primarily for:
-//   - Internal use during schema parsing
-//   - Advanced use cases like building schemas programmatically via Builder
-//
-// Most users should load schemas from .yammm files using the load package.
 func newDataType(name string, constraint Constraint, span location.Span, doc string) DataType {
 	return DataType{&dataTypeState{
 		name:       name,

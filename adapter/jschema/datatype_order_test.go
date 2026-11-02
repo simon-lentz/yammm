@@ -1,7 +1,6 @@
 package jschema
 
 import (
-	"bytes"
 	"maps"
 	"slices"
 	"testing"
@@ -10,13 +9,11 @@ import (
 	"github.com/simon-lentz/yammm/schema"
 )
 
-// Completion resolves a datatype chain the same way from either front door and
-// in either declaration order. The check reads past resolution, through the
-// readers of the resolved constraint: the validator's verdict on each value and
-// the structural hash agree across the DSL in both orders and the Builder, and
-// the generated document agrees between the two front doors in one order ($defs
-// follows declaration order).
-func TestMarshal_DataTypeChainAgreesAcrossOrderAndFrontDoor(t *testing.T) {
+// Completion resolves a datatype chain the same way in either declaration order.
+// The check reads past resolution, through the readers of the resolved constraint:
+// the validator's verdict on each value and the structural hash agree across both
+// orders.
+func TestMarshal_DataTypeChainAgreesAcrossOrder(t *testing.T) {
 	const body = "type T {\n\tid String primary\n\tv A required\n\tw List<B> required\n}\n"
 	load := func(t *testing.T, datatypes string) schema.Schema {
 		t.Helper()
@@ -26,22 +23,10 @@ func TestMarshal_DataTypeChainAgreesAcrossOrderAndFrontDoor(t *testing.T) {
 		}
 		return s
 	}
-	built, res := schema.NewBuilder().WithName("p").
-		AddDataType("A", schema.NewListConstraint(schema.NewAliasConstraint("B", nil))).
-		AddDataType("B", schema.NewListConstraint(schema.NewAliasConstraint("C", nil))).
-		AddDataType("C", schema.IntegerBetween(0, 9)).
-		AddType("T").WithPrimaryKey("id", schema.NewStringConstraint()).
-		WithProperty("v", schema.NewAliasConstraint("A", nil)).
-		WithProperty("w", schema.NewListConstraint(schema.NewAliasConstraint("B", nil))).
-		Done().Build()
-	if res.HasErrors() {
-		t.Fatalf("build: %v", res.Err())
-	}
 	forward := load(t, "type A = List<B>\ntype B = List<C>\ntype C = Integer[0, 9]\n")
 	schemas := map[string]schema.Schema{
 		"the DSL, referenced before declared": forward,
 		"the DSL, declared before referenced": load(t, "type C = Integer[0, 9]\ntype B = List<C>\ntype A = List<B>\n"),
-		"the Builder":                         built,
 	}
 
 	values := []struct {
@@ -70,16 +55,5 @@ func TestMarshal_DataTypeChainAgreesAcrossOrderAndFrontDoor(t *testing.T) {
 	}
 	if got := slices.Compact(slices.Sorted(maps.Values(hashes))); len(got) != 1 {
 		t.Errorf("the structural hashes differ: %v", hashes)
-	}
-	fromDSL, err := Marshal(forward)
-	if err != nil {
-		t.Fatalf("Marshal the DSL's: %v", err)
-	}
-	fromBuilder, err := Marshal(built)
-	if err != nil {
-		t.Fatalf("Marshal the Builder's: %v", err)
-	}
-	if !bytes.Equal(fromDSL, fromBuilder) {
-		t.Errorf("the generated documents differ:\n%s\n----\n%s", fromDSL, fromBuilder)
 	}
 }

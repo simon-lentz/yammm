@@ -11,13 +11,13 @@ YAMMM is a Go library for defining schemas in a small DSL (`.yammm` files) and v
 ## Features
 
 - **Schema DSL**: Define types, properties, relationships, and constraints in `.yammm` files
-- **Runtime validation**: Validate Go maps, structs, and JSON against compiled schemas
+- **Runtime validation**: Validate Go maps and JSON against compiled schemas
 - **Relationship modeling**: Associations (references) and compositions (ownership) with multiplicity
 - **Invariants**: Boolean constraint expressions evaluated at validation time
-- **Schema annotations**: Declare validated `@index` / `@@index` / `@vector` / `@fulltext` / `@@fulltext` / `@writeOnce` metadata that adapters turn into store DDL
+- **Schema annotations**: Declare validated `@index` / `@@index` / `@vector` / `@fulltext` / `@@fulltext` metadata that adapters turn into store DDL, and `@writeOnce` properties that the Neo4j write path sets once
 - **Graph construction**: Build in-memory graphs from validated instances with integrity checking
 - **Graph persistence**: Save, load, verify, inspect, and edit-metadata-in-place graph snapshots (`.ys` format)
-- **Batch assembly**: Concurrent-safe validate → add → check → snapshot pipeline surface, resumable from a prior snapshot
+- **Batch assembly**: Concurrent-safe validate-and-add surface over one graph, resumable from a prior snapshot
 - **Structured diagnostics**: Stable error codes with source location tracking
 - **Cross-schema imports**: Modular schemas with sandboxed path resolution
 - **Go code generation**: Generate Go structs from schemas with `yammm gen --to go`
@@ -132,7 +132,7 @@ func main() {
 
 ### Assemble Batches
 
-For pipeline workloads, `graph.BatchAssembler` composes the validator and graph into a single concurrent-safe surface that encodes the validate → add → check → snapshot ordering:
+For pipeline workloads, `graph.BatchAssembler` composes the validator and graph into a single concurrent-safe surface that validates each record and adds it as one step. At the end of the batch, wait for the workers, then check the graph and take its snapshot through `BatchAssembler.Graph`:
 
 ```go
 ba := graph.NewBatchAssembler(ctx, s)
@@ -143,14 +143,13 @@ for i, rec := range records { // rec is an instance.RawInstance
     }
 }
 
-res, err := ba.Finalize(ctx) // res.Snapshot is not zero even on error
-if err != nil {
-    log.Fatal("batch failed:", err)
+if result := ba.Graph().Check(ctx); result.HasErrors() {
+    log.Fatal("batch failed:", result.Err())
 }
-data, result := snapshot.Marshal(ctx, res.Snapshot)
+data, result := snapshot.Marshal(ctx, ba.Graph().Snapshot())
 ```
 
-To resume a persisted batch on a later run, seed the assembler from a loaded snapshot with `graph.NewBatchAssemblerFromSnapshot(ctx, s, snap)`, which takes a snapshot bound to the schema as it stands and refuses one built against another schema that breaks any of the schema's structural facts, save that it derives the Records fact's records again and drops an absent record under a relation that is no association of the schema — new adds resolve against the seeded instances and `Finalize` checks the union. Snapshot metadata can be rewritten in place, without a full load/re-marshal round-trip, via `snapshot.UpdateMetadataOrReMarshal`.
+To resume a persisted batch on a later run, seed the assembler from a loaded snapshot with `graph.NewBatchAssemblerFromSnapshot(ctx, s, snap)`, which takes a snapshot bound to the schema as it stands and refuses one built against another schema that breaks any of the schema's structural facts, save that it derives the Records fact's records again and drops an absent record under a relation that is no association of the schema — new adds resolve against the seeded instances and `Graph().Check` covers the union. Snapshot metadata can be rewritten in place, without a full load/re-marshal round-trip, via `snapshot.UpdateMetadataOrReMarshal`.
 
 ### Build Instances Programmatically
 
@@ -167,29 +166,6 @@ raw, err := b.
     Property("year", int64(2003)).
     EdgeTo("OWNER", "550e8400-e29b-41d4-a716-446655440000").
     Build()
-```
-
-### Build Schemas Programmatically
-
-```go
-import (
-    "github.com/simon-lentz/yammm/location"
-    "github.com/simon-lentz/yammm/schema"
-)
-
-s, result := schema.NewBuilder().
-    WithName("example").
-    WithSourceID(location.MustNewSourceID("test://example.yammm")).
-    AddType("Person").
-        WithPrimaryKey("id", schema.NewStringConstraint()).
-        WithProperty("name", schema.NewStringConstraint()).
-        WithOptionalProperty("age", schema.IntegerBetween(0, 150)).
-        Done().
-    Build()
-
-if result.HasErrors() {
-    // Handle schema build errors
-}
 ```
 
 ## Architecture
@@ -210,7 +186,7 @@ Internal                 : internal/* (no compatibility guarantees)
 
 | Package | Purpose |
 | ------- | ------- |
-| `schema` | Type system, constraints, schema loading, and programmatic building |
+| `schema` | Type system, constraints, and schema loading |
 | `schema/expr` | Expression AST types for invariants |
 | `instance` | Instance validation and constraint checking |
 | `graph` | Instance graph construction and integrity checking |
@@ -235,7 +211,7 @@ Diagnostic-producing operations return `(T, diag.Result)`:
 - `result.HasErrors()`: An Error or a Fatal: a semantic failure (structured issues), or the condition above
 - `result.OK()`: Success (may have warnings). A validator's zero instance beside it held an `instance.Refused` value, which its producer reported
 
-Pure adapter transformations (JSON/CSV serialization, Cypher batch queries, Go source, JSON Schema, and Markdown generation) return their output beside a Go `error`, as `(T, error)`, but for `adapter/csv`'s `WriteSnapshot`, which returns the `error` alone, and `adapter/neo4j`'s `BuildBatchRelationshipMergeQuery`, a query template that cannot fail; the Neo4j adapter's schema-derived DDL and shape builders report through a `diag.Result`, and its drop-statement builders return `(string, error)`. Snapshot serialization (`snapshot.Marshal`) is diagnostic-producing and returns `(T, diag.Result)`.
+Pure adapter transformations (JSON/CSV serialization, Cypher batch queries, Go source, JSON Schema, and Markdown generation) return their output beside a Go `error`, as `(T, error)`, but for `adapter/neo4j`'s `BuildBatchRelationshipMergeQuery`, a query template that cannot fail; the Neo4j adapter's schema-derived DDL and shape builders report through a `diag.Result`, and its drop-statement builders return `(string, error)`. Snapshot serialization (`snapshot.Marshal`) is diagnostic-producing and returns `(T, diag.Result)`.
 
 ## Schema Language
 

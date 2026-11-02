@@ -8,9 +8,7 @@ import (
 )
 
 // Verify runs the checks [Load] runs on a .ys file before it materializes a
-// Snapshot. Returns diag.Result with the same diagnostic codes as Load. It skips
-// [graph.RebuildSnapshot]'s own check, whose refusal of a document those checks
-// passed is a reader bug.
+// Snapshot. Returns diag.Result with the same diagnostic codes as Load.
 //
 // Verify stops before materialization, so it builds no Snapshot and no graph
 // instance; under [WithRevalidation] a validator run that passes builds an instance

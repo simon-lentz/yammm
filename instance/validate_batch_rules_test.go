@@ -2,8 +2,9 @@ package instance_test
 
 import (
 	"context"
-	"log/slog"
 	"testing"
+
+	"github.com/simon-lentz/yammm/internal/yammmtest"
 
 	"github.com/google/uuid"
 	"github.com/simon-lentz/yammm/diag"
@@ -50,22 +51,18 @@ func TestRelationCollision_OnAnAssociationIsStillReported(t *testing.T) {
 
 // TestValidate_CancellationInsideAComposedBatchIsReportedOnce pins one
 // cancellation rule at every point that ends
-// work. A cancellation raised INSIDE a composed batch — the fold sits on a
-// child row — is exactly one E_CONTEXT_CANCELLED on the root row, not one per
+// work. A cancellation raised INSIDE a composed batch is exactly one E_CONTEXT_CANCELLED on the root row, not one per
 // nesting level.
 func TestValidate_CancellationInsideAComposedBatchIsReportedOnce(t *testing.T) {
 	t.Parallel()
 	s := loadT(t, "schema \"p\"\n\npart type Line {\n\tid String primary\n}\n\ntype T {\n\tid String primary\n\t*-> LINES (many) Line\n}\n")
 	raws := []instance.RawInstance{
 		{Properties: map[string]any{"id": "a", "lines": []any{map[string]any{"id": "l"}}}},
-		{Properties: map[string]any{"id": "b", "lines": []any{map[string]any{"ID": "l"}}}}, // the fold is on the child
-		{Properties: map[string]any{"id": "c", "lines": []any{map[string]any{"ID": "l"}}}},
+		{Properties: map[string]any{"id": "b", "lines": []any{map[string]any{"id": "l"}}}},
+		{Properties: map[string]any{"id": "c", "lines": "not a list of lines"}}, // a validated row would report this
 	}
-	ctx, cancel := context.WithCancel(t.Context())
-	defer cancel()
-	h := &countingCancelOnNormalize{cancel: cancel}
-	v := instance.NewValidator(s, instance.WithLogger(slog.New(h)))
-	valids, res := v.Validate(ctx, "T", raws)
+	v := instance.NewValidator(s)
+	valids, res := v.Validate(checkInSecondRow(t, v, "T", raws), "T", raws)
 	if valids != nil {
 		t.Errorf("a cancelled batch returned a slice of %d", len(valids))
 	}
@@ -76,30 +73,8 @@ func TestValidate_CancellationInsideAComposedBatchIsReportedOnce(t *testing.T) {
 	if idx, ok := detail(is, diag.DetailKeyInstanceIndex); !ok || idx != "1" {
 		t.Errorf("instance_index = %q, %v; want the row it stopped on, 1", idx, ok)
 	}
-	if h.normalizations != 1 {
-		t.Errorf("%d rows normalized a key after the cancellation began; no further row may be validated", h.normalizations-1)
-	}
-}
-
-func TestValidateForComposition_CancellationInsideANestedBatchIsReportedOnce(t *testing.T) {
-	t.Parallel()
-	s := loadT(t, "schema \"p\"\n\npart type Item {\n\tid String primary\n}\n\npart type Line {\n\tid String primary\n\t*-> ITEMS (many) Item\n}\n\ntype T {\n\tid String primary\n\t*-> LINES (many) Line\n}\n")
-	raws := []instance.RawInstance{
-		{Properties: map[string]any{"id": "a", "items": []any{map[string]any{"id": "i"}}}},
-		{Properties: map[string]any{"id": "b", "items": []any{map[string]any{"ID": "i"}}}},
-	}
-	ctx, cancel := context.WithCancel(t.Context())
-	defer cancel()
-	v := instance.NewValidator(s, instance.WithLogger(slog.New(cancelOnNormalize{cancel: cancel})))
-	valids, res := v.ValidateForComposition(ctx, "T", "LINES", raws)
-	if valids != nil {
-		t.Errorf("a cancelled batch returned a slice of %d", len(valids))
-	}
-	if n := countCode(res, diag.E_CONTEXT_CANCELLED); n != 1 {
-		t.Fatalf("%d E_CONTEXT_CANCELLED issues, want exactly 1: %v", n, res)
-	}
-	if idx, ok := detail(mustIssue(t, res, diag.E_CONTEXT_CANCELLED), diag.DetailKeyInstanceIndex); !ok || idx != "1" {
-		t.Errorf("instance_index = %q, %v; want 1", idx, ok)
+	if res.Len() != 1 {
+		t.Errorf("%d issues, want the cancellation alone; no further row may be validated: %v", res.Len(), res)
 	}
 }
 
@@ -111,38 +86,24 @@ func TestValidate_ACancelledRowsPartialDiagnosticsAreDropped(t *testing.T) {
 	s := loadT(t, "schema \"p\"\n\ntype T {\n\tid String primary\n\tn Integer\n}\n")
 	raws := []instance.RawInstance{
 		{Properties: map[string]any{"id": "a", "n": int64(1)}},
-		{Properties: map[string]any{"ID": "b", "n": "not a number"}}, // folds (cancels), and carries a type error
+		{Properties: map[string]any{"id": "b", "n": "not a number"}},
 	}
-	ctx, cancel := context.WithCancel(t.Context())
-	defer cancel()
-	v := instance.NewValidator(s, instance.WithLogger(slog.New(cancelOnNormalize{cancel: cancel})))
-	valids, res := v.Validate(ctx, "T", raws)
-	if valids != nil {
-		t.Errorf("a cancelled batch returned a slice of %d", len(valids))
-	}
-	if res.HasCode(instance.ErrTypeMismatch) {
-		t.Errorf("the cancelled row's partial E_TYPE_MISMATCH was merged into a nil-slice result: %v", codes(res))
-	}
-	if n := countCode(res, diag.E_CONTEXT_CANCELLED); n != 1 {
-		t.Errorf("%d E_CONTEXT_CANCELLED issues, want exactly 1", n)
-	}
-}
+	v := instance.NewValidator(s)
+	total := yammmtest.CountChecks(t.Context(), func(ctx context.Context) { v.Validate(ctx, "T", raws) })
 
-type countingCancelOnNormalize struct {
-	cancel         context.CancelFunc
-	normalizations int
-}
-
-func (*countingCancelOnNormalize) Enabled(context.Context, slog.Level) bool { return true }
-func (h *countingCancelOnNormalize) Handle(_ context.Context, r slog.Record) error {
-	if r.Message == "property name normalized" {
-		h.normalizations++
-		h.cancel()
+	for at := range total {
+		valids, res := v.Validate(yammmtest.NewCheckContext(t.Context(), at+1), "T", raws)
+		if valids != nil {
+			t.Errorf("check %d: a cancelled batch returned a slice of %d", at+1, len(valids))
+		}
+		if res.HasCode(instance.ErrTypeMismatch) {
+			t.Errorf("check %d: the cancelled row's partial E_TYPE_MISMATCH was merged into a nil-slice result: %v", at+1, codes(res))
+		}
+		if n := countCode(res, diag.E_CONTEXT_CANCELLED); n != 1 {
+			t.Errorf("check %d: %d E_CONTEXT_CANCELLED issues, want exactly 1", at+1, n)
+		}
 	}
-	return nil
 }
-func (h *countingCancelOnNormalize) WithAttrs([]slog.Attr) slog.Handler { return h }
-func (h *countingCancelOnNormalize) WithGroup(string) slog.Handler      { return h }
 
 // TestListProperty_RefusesAUUIDAsSixteenIntegers pins that the one list
 // reader takes slices, not arrays — a fixed-size

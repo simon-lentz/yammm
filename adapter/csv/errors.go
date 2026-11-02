@@ -14,13 +14,13 @@ import (
 var (
 	// E_CSV_COERCE indicates a cell, or a relation group's target segment, whose
 	// text does not coerce to the type its member declares. The row is still
-	// produced with that text held as an [instance.Refused], which the validator
-	// reports nothing more for, so a consumer counting this code counts data to clean.
+	// produced with that text held as an [instance.Refused]. Where the validator
+	// reads that key as the member's, it reports nothing more for the value, so a
+	// consumer counting this code counts data to clean.
 	E_CSV_COERCE = diag.NewCode("E_CSV_COERCE", diag.CategoryAdapter)
 
 	// E_CSV_CONFIG indicates the adapter was built with a setting this parse
-	// cannot use: a list separator the parser could not find again, a delimiter
-	// [encoding/csv] refuses, or [Adapter.ParseWithTypeColumn] with no
+	// cannot use: a delimiter [encoding/csv] refuses, or [Adapter.ParseWithTypeColumn] with no
 	// [WithTypeColumn] or with a name holding a CR LF, which no header can hold.
 	// No record is read, and the remedy is in the caller's code rather than in
 	// the file.
@@ -32,11 +32,10 @@ var (
 	// ErrZeroSnapshot is returned when a write method receives a zero graph snapshot.
 	ErrZeroSnapshot = errors.New("csv adapter: zero graph snapshot")
 
-	// ErrConfig marks a write refused for the reason [E_CSV_CONFIG] reports on
-	// the parse side: the adapter holds a setting it cannot use — a list
-	// separator the parser could not find again, or a delimiter [encoding/csv]
-	// refuses. It is the class, matched with errors.Is; the message names the
-	// setting, and for a delimiter it quotes [encoding/csv]'s refusal text.
+	// ErrConfig marks a write refused because the adapter holds a delimiter
+	// [encoding/csv] refuses, a reason [E_CSV_CONFIG] reports on the parse side.
+	// It is the class, matched with errors.Is. The message names the delimiter and
+	// quotes [encoding/csv]'s refusal text.
 	ErrConfig = errors.New("csv adapter: the adapter holds a setting it cannot use")
 
 	// ErrUnrepresentable marks a write refused because the snapshot holds what
@@ -44,7 +43,7 @@ var (
 	// unchanged: a value, an association whose columns would all be empty, or a
 	// composed child. It is the class, matched with errors.Is; the message names
 	// the instance and the property, the column, the association or the
-	// composition. It separates a refusal of the data from an I/O failure and
-	// from [ErrConfig], which no message text can.
+	// composition. It tells a refusal of the data from the writer's other errors,
+	// [ErrConfig] among them, and no message text can.
 	ErrUnrepresentable = errors.New("csv adapter: the snapshot holds a value CSV cannot represent")
 )

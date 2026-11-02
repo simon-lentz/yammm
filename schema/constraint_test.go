@@ -116,8 +116,8 @@ func TestEnumConstraint_DefensiveCopy(t *testing.T) {
 	assert.Equal(t, "b", values2[1], "Values() should return defensive copy")
 }
 
-// A constraint holds what its caller gave it, so the Builder can refuse a third
-// pattern the DSL refuses rather than build a narrower constraint silently.
+// A constraint holds what its caller gave it, so CheckConstraint can refuse a
+// third pattern the DSL refuses rather than judge a narrower constraint silently.
 func TestPatternConstraint_KeepsEveryPattern(t *testing.T) {
 	p1 := regexp.MustCompile("^a")
 	p2 := regexp.MustCompile("b$")

@@ -4,8 +4,8 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/immutable"
+	"github.com/simon-lentz/yammm/internal/snapparts"
 	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
 )
@@ -25,7 +25,7 @@ type Site {
 }
 `
 
-func TestRebuildSnapshot_FilesARootUnderItsOwnIdentity(t *testing.T) {
+func TestRebuild_FilesARootUnderItsOwnIdentity(t *testing.T) {
 	t.Parallel()
 	s, res := schema.LoadString(t.Context(), rootIdentityEntry, "entry.yammm")
 	if res.HasErrors() {
@@ -35,17 +35,14 @@ func TestRebuildSnapshot_FilesARootUnderItsOwnIdentity(t *testing.T) {
 	site := mustTypeID(t, s, "Site")
 
 	// Types names Anchor alone; the Site root still joins the reported types.
-	snap, res := graph.RebuildSnapshot(s, graph.SnapshotParts{
+	snap := rebuild(s, snapparts.Parts{
 		Types: []schema.TypeID{anchor},
-		Instances: []graph.InstanceParts{{
+		Instances: []snapparts.Instance{{
 			TypeID:     site,
 			PrimaryKey: immutable.WrapKey([]any{"x1"}),
 			Properties: immutable.WrapProperties(map[string]any{"id": "x1"}),
 		}},
 	})
-	if res.HasErrors() {
-		t.Fatalf("RebuildSnapshot: %s", res)
-	}
 	if n := len(slices.Collect(snap.InstancesOf(anchor))); n != 0 {
 		t.Errorf("InstancesOf(Anchor) = %d, want 0", n)
 	}
@@ -98,20 +95,17 @@ func loadAliased(t *testing.T, entry, alias string) (schema.Schema, schema.TypeI
 	return s, basin.ID()
 }
 
-func TestRebuildSnapshot_RendersARootsNameFromItsIdentity(t *testing.T) {
+func TestRebuild_RendersARootsNameFromItsIdentity(t *testing.T) {
 	t.Parallel()
 	s, basin := loadAliased(t, aliasEntryB, "b")
-	snap, res := graph.RebuildSnapshot(s, graph.SnapshotParts{
+	snap := rebuild(s, snapparts.Parts{
 		Types: []schema.TypeID{basin},
-		Instances: []graph.InstanceParts{{
+		Instances: []snapparts.Instance{{
 			TypeID:     basin,
 			PrimaryKey: immutable.WrapKey([]any{"b1"}),
 			Properties: immutable.WrapProperties(map[string]any{"id": "b1"}),
 		}},
 	})
-	if res.HasErrors() {
-		t.Fatalf("RebuildSnapshot: %s", res)
-	}
 	if got := slices.Collect(snap.InstancesOf(basin))[0].TypeName(); got != "b.Basin" {
 		t.Errorf("TypeName() = %q, want the alias-qualified b.Basin", got)
 	}
@@ -126,17 +120,14 @@ func TestNewFromSnapshot_RendersNamesUnderTheImportingSchema(t *testing.T) {
 	if basin != basinX {
 		t.Fatalf("the two entries resolve Basin to %s and %s, want one identity", basin, basinX)
 	}
-	snap, res := graph.RebuildSnapshot(sb, graph.SnapshotParts{
+	snap := rebuild(sb, snapparts.Parts{
 		Types: []schema.TypeID{basin},
-		Instances: []graph.InstanceParts{{
+		Instances: []snapparts.Instance{{
 			TypeID:     basin,
 			PrimaryKey: immutable.WrapKey([]any{"b1"}),
 			Properties: immutable.WrapProperties(map[string]any{"id": "b1"}),
 		}},
 	})
-	if res.HasErrors() {
-		t.Fatalf("RebuildSnapshot: %s", res)
-	}
 	got := slices.Collect(mustImport(t, sx, snap).Snapshot().InstancesOf(basin))[0].TypeName()
 	if got != "x.Basin" {
 		t.Errorf("imported TypeName() = %q, want x.Basin, the importing schema's rendering", got)

@@ -21,15 +21,15 @@
 // The output round-trips when the snapshot's [graph.Snapshot.Attestation]
 // reports Values — every instance entered through the validator — it holds no
 // unresolved edge ([graph.Snapshot.Unresolved] is empty), no invariant reads a
-// relation an input left empty, and neither [graph.Graph.AddComposed] nor
-// [graph.Graph.AddOrMerge] grew a relation an invariant reads, since an invariant
+// relation an input left empty, and [graph.BatchAssembler.AddValidOrMerge] grew
+// no relation an invariant reads, since an invariant
 // runs on each input alone: ParseObject plus
 // the validator accept every shape this writer emits. A loaded snapshot carries
 // its header's claim, and [graph.Attestation] states what that claim proves. An
 // unresolved edge is not written, nor is an empty relation, so an invariant that reads its relation, even
 // an optional one, can fail on the way back; persist such a snapshot in the .ys
 // format when its edges must survive. Any other snapshot is written as held —
-// each value in its one form, in the form its constraint stores where the
+// each value in the form its constraint stores where the
 // constraint renders it, a nil value as null at a property, inside a list or
 // as a map's value —
 // save the values the next paragraph refuses, and the validator judges the
@@ -38,23 +38,12 @@
 // Every constructor of a snapshot holds its structure to what [graph.Graph.Add]
 // builds, so every relation this writer meets renders in a shape its own
 // parser and the validator accept. A value can still have no JSON form that
-// reads back as itself, and only a snapshot whose values no validator refused
-// at Error holds one (one a bypass constructor built, or one snapshot.Load read
-// without revalidating at Error): a
-// non-finite float at any depth, which a validated Float never is; a string
-// that is not valid UTF-8, a map's key included, which encoding/json would
-// write with U+FFFD in place of each invalid byte; a json.Number that spells a
-// number no finite float64 holds, where no Integer or Float converts it; a
-// time.Time outside a Timestamp or a Date, or a uuid.UUID outside a UUID,
-// which render them, and a time whose text at its kind does not read back, as a year outside
-// 0 to 9999 does not; and a value of no form every writer of this module writes
-// ([github.com/simon-lentz/yammm/instance.ScalarOf]), such as a struct, an
-// array, a map keyed by no string or a json.Number whose text is no JSON
-// number literal, an empty one among them. A pointer is read as the scalar it points
-// to and a named type as its base value; no value's own MarshalJSON or
-// MarshalText is asked. Each refusal is an error marked [ErrUnrepresentable],
-// so a caller separates it from an I/O failure without matching the message
-// text.
+// reads back as itself: a json.Number that spells a number no finite float64
+// holds, where no Integer or Float converts it. Such a value enters only through
+// a snapshot.Load that does not revalidate at Error, and a graph or an assembler
+// seeded from that snapshot keeps it. The writer refuses it with an error
+// marked [ErrUnrepresentable], so a caller separates it from an I/O failure
+// without matching the message text.
 //
 // Use [WithIndent] for pretty-printed output. The object shape keys instances
 // by the name the entry schema addresses each root type by, and two such names
@@ -72,10 +61,9 @@
 //
 // Every valid type name whose value is an array is an entry of the result, an
 // empty array included, unless a fault or a cancellation stops the parse
-// before it is read. Four
-// shapes that a decoder would resolve silently are Error diagnostics instead,
-// because what a decoder keeps of them is one reader's convention and not the
-// document's meaning. Each is reported where it stands:
+// before it is read. A shape a decoder resolves silently is an Error diagnostic
+// instead, because what a decoder keeps of it is one reader's convention and not
+// the document's meaning. Each is reported where it stands:
 //
 //   - A type name repeated as a key of the root object. Decoding keeps the last
 //     array and drops the first batch whole; here the repeat is reported at its
@@ -87,6 +75,7 @@
 //     decoder keeps. Each repeat is reported where it stands, and the instance
 //     is produced holding the value the decoder kept, the last one the object
 //     states.
+//   - A null at a type name, which a decoder reads as a nil slice with no error.
 //   - A null element of an instance array, which a decoder reads as a nil map
 //     with no error.
 //   - Anything but white space and closed comments after the root object,
@@ -126,11 +115,11 @@
 // Every entry point observes its context at each unit of work it has.
 // [Adapter.ParseObject] checks once per
 // top-level key and returns the types read so far beside a Fatal
-// E_CONTEXT_CANCELLED, Fatal because [diag.Result.HasFatal] is documented to
-// mean the run did not finish. [Adapter.MarshalObject] checks once per type
+// E_CONTEXT_CANCELLED, which [diag.Result.HasFatal] reports.
+// [Adapter.MarshalObject] checks once per type
 // group and returns an error wrapping the context's; [Adapter.WriteObject]
 // checks again after the document is built and writes nothing if it is
-// cancelled by then. The CSV adapter's writers are finer, checking per
+// cancelled by then. The CSV adapter's writer is finer, checking per
 // instance, so one very large type group stops sooner there than here.
 //
 // # Provenance
@@ -187,6 +176,11 @@
 // nearest float64 at a Float property, refusing it there only when no finite
 // float64 holds it. The literal -0 stays a json.Number too, so a Float reads
 // it as the float64 -0. A float64 holds integers exactly only up to 2^53.
+//
+// The writer marks every float it writes, with ".0" where its digits hold no
+// '.', 'e' or 'E'. A value at a Float is a float wherever it came from, so a
+// whole value is written 1.0, the input 1 included, and it reads back as the
+// same float.
 //
 // # Dependencies
 //

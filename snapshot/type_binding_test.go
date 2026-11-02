@@ -3,8 +3,9 @@ package snapshot_test
 import (
 	"testing"
 
-	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/immutable"
+	"github.com/simon-lentz/yammm/internal/snapparts"
+	"github.com/simon-lentz/yammm/internal/snappartstest"
 	"github.com/simon-lentz/yammm/schema"
 	"github.com/simon-lentz/yammm/snapshot"
 )
@@ -52,9 +53,9 @@ func marshalCounty(t *testing.T, s schema.Schema) []byte {
 		t.Fatal("fixture is missing County")
 	}
 	id := county.ID()
-	built, res := graph.RebuildSnapshot(s, graph.SnapshotParts{
+	built := snappartstest.Loaded(t, s, snapparts.Parts{
 		Types: []schema.TypeID{id},
-		Instances: []graph.InstanceParts{
+		Instances: []snapparts.Instance{
 			{
 				TypeID:     id,
 				PrimaryKey: immutable.WrapKey([]any{"01001"}),
@@ -62,9 +63,6 @@ func marshalCounty(t *testing.T, s schema.Schema) []byte {
 			},
 		},
 	})
-	if res.HasErrors() {
-		t.Fatalf("rebuild: %v", res.Err())
-	}
 	data, res := snapshot.Marshal(t.Context(), built)
 	if res.HasErrors() {
 		t.Fatalf("marshal: %v", res.Err())

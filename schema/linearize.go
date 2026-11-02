@@ -62,9 +62,10 @@ func (c *completer) detectCycles() bool {
 		stack = stack[:len(stack)-1]
 	}
 
-	for name := range c.typeIndex {
-		if state[name] == unvisited {
-			dfs(name)
+	// Declaration order, so a cycle's message and span do not move between loads.
+	for _, t := range c.schema.types {
+		if state[t.Name()] == unvisited {
+			dfs(t.Name())
 		}
 	}
 
@@ -91,7 +92,7 @@ func buildCyclePath(stack []string, target string) []string {
 
 // resolveTypeRefName resolves a TypeRef to a type name.
 // For local refs, returns the name directly.
-// For qualified refs, looks up the imported schema if registry is available.
+// For qualified refs, looks up the imported schema.
 func (c *completer) resolveTypeRefName(ref TypeRef) string {
 	if ref.Name() == "" {
 		return ""
@@ -105,11 +106,7 @@ func (c *completer) resolveTypeRefName(ref TypeRef) string {
 		return ""
 	}
 
-	// Qualified type - requires registry lookup
-	if c.registry == nil {
-		return "" // Deferred
-	}
-
+	// Qualified type
 	importedSchema, ok := c.resolveImportedSchema(ref.Qualifier())
 	if !ok {
 		return ""
@@ -149,8 +146,7 @@ func (c *completer) completeTypes() {
 		seenSupers := make(map[TypeID]bool)
 
 		// A cross-schema inheritance cycle cannot form: it would need mutual
-		// import, which the loader refuses (E_IMPORT_CYCLE), and a Builder
-		// schema defers a qualified reference it cannot resolve. Marking the
+		// import, which the loader refuses (E_IMPORT_CYCLE). Marking the
 		// type itself keeps a local walk from adding a type to its own supers.
 		seenSupers[t.ID()] = true
 
@@ -159,14 +155,11 @@ func (c *completer) completeTypes() {
 		linearize = func(ref TypeRef) {
 			resolved := c.resolveTypeRef(ref)
 			if resolved.IsZero() {
-				// Defer a qualified ref when no registry is present to resolve it
-				// (a schema.Builder schema built without WithRegistry, or a direct
-				// completeModel caller), or when its qualifier names an import the
+				// Defer a qualified ref when its qualifier names an import the
 				// loader saw but could not resolve — the import failure already
 				// carries the root-cause diagnostic, and blaming every reference
-				// through the alias would bury it in noise. With a registry and a
-				// resolved import, a qualified supertype that still does not
-				// resolve is a genuine error (an undefined alias, or a type absent
+				// through the alias would bury it in noise. With a resolved
+				// import, a qualified supertype that still does not resolve is a genuine error (an undefined alias, or a type absent
 				// from the imported schema), mirroring validateRelationTarget;
 				// silently dropping it would strip the child of every inherited
 				// member with no diagnostic.
@@ -315,11 +308,7 @@ func (c *completer) resolveTypeRef(ref TypeRef) Type {
 		return c.typeIndex[ref.Name()]
 	}
 
-	// Qualified type - requires registry lookup
-	if c.registry == nil {
-		return Type{}
-	}
-
+	// Qualified type
 	importedSchema, ok := c.resolveImportedSchema(ref.Qualifier())
 	if !ok {
 		return Type{}
@@ -332,18 +321,17 @@ func (c *completer) resolveTypeRef(ref TypeRef) Type {
 // resolveImportedSchema resolves a non-empty import qualifier to the imported
 // schema through the resolution map — read by [completer.classifyQualifier], as
 // every qualifier-resolving site reads it — returning false when the qualifier
-// is absent or deferred, or when its resolved schema is not registered. It is
-// the completion-time counterpart to the runtime [Schema.ResolveType] /
+// is absent or deferred. It is the completion-time counterpart to the runtime [Schema.ResolveType] /
 // [Schema.ResolveDataType], which read the wired Import objects instead; routing
 // completion through classifyQualifier keeps a qualifier's deferred/resolved
-// state read in one place during a load, not two. The caller must have already
-// handled the registry-less case (no registry means the reference defers).
+// state read in one place during a load, not two.
 func (c *completer) resolveImportedSchema(qualifier string) (Schema, bool) {
 	state, sourceID := c.classifyQualifier(qualifier)
 	if state != aliasResolved {
 		return Schema{}, false
 	}
-	return c.registry.LookupBySourceID(sourceID)
+	s, ok := c.loaded[sourceID]
+	return s, ok
 }
 
 // resolveTypeID resolves a TypeID to a Type.
@@ -352,11 +340,7 @@ func (c *completer) resolveTypeID(id TypeID) Type {
 		return c.typeIndex[id.Name()]
 	}
 
-	if c.registry == nil {
-		return Type{}
-	}
-
-	importedSchema, ok := c.registry.LookupBySourceID(id.SchemaPath())
+	importedSchema, ok := c.loaded[id.SchemaPath()]
 	if !ok {
 		return Type{}
 	}
@@ -441,9 +425,6 @@ func (c *completer) mergeProperties(t Type, supers []ResolvedTypeRef) []Property
 	// Add inherited properties in linearized order
 	for _, superRef := range supers {
 		superType := c.resolveTypeID(superRef.ID())
-		if superType.IsZero() {
-			continue
-		}
 
 		for p := range superType.AllProperties() {
 			existing, ok := seen[p.Name()]
@@ -1068,14 +1049,8 @@ func (c *completer) flushShadowedAnnotations() {
 			"re-declaration of property %q drops annotation(s) %s inherited from %s; re-state them on this declaration to keep them",
 			g.own.Name(), strings.Join(display, ", "), g.from.Name(),
 		)
-		issue := diag.NewIssue(diag.Warning, diag.W_ANNOTATION_SHADOWED, msg)
-		if span := g.own.Span(); !span.IsZero() {
-			issue = issue.WithSpan(span)
-		}
-		if located := locatedRelated(related); len(located) > 0 {
-			issue = issue.WithRelated(located...)
-		}
-		c.collector.Collect(issue.Build())
+		c.collector.Collect(diag.NewIssue(diag.Warning, diag.W_ANNOTATION_SHADOWED, msg).
+			WithSpan(g.own.Span()).WithRelated(related...).Build())
 	}
 }
 
@@ -1278,9 +1253,6 @@ func (c *completer) mergeAnnotations(t Type, supers []ResolvedTypeRef) []Annotat
 
 	for _, superRef := range supers {
 		superType := c.resolveTypeID(superRef.ID())
-		if superType.IsZero() {
-			continue
-		}
 
 		for a := range superType.AllAnnotations() {
 			id := a.identity()
@@ -1324,9 +1296,6 @@ func (c *completer) mergeRelations(t Type, own []Relation, supers []ResolvedType
 
 	for _, superRef := range supers {
 		superType := c.resolveTypeID(superRef.ID())
-		if superType.IsZero() {
-			continue
-		}
 
 		var inherited []Relation
 		if kind == RelationAssociation {

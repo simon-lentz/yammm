@@ -47,8 +47,8 @@ func TestBatchNodeQueries_NestedComposedKeysUnderACanonicalRoot(t *testing.T) {
 
 	// LITERALS, not a second call to the renderer under test. Depth one carries
 	// the keyed child's own key; depth two carries the relation NAME ALONE,
-	// because a (one) slot holds exactly one child — the premise the reader and
-	// RebuildSnapshot now enforce; depth three indexes, the part being keyless.
+	// because a (one) slot holds exactly one child — the premise the reader
+	// enforces; depth three indexes, the part being keyless.
 	want := []string{
 		`["nested_test__Run",["2020-01-02T03:04:05Z"],["STEPS",["s1"]]]`,
 		`["nested_test__Run",["2020-01-02T03:04:05Z"],["STEPS",["s1"]],["SUMMARY"]]`,

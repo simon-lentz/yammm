@@ -13,14 +13,10 @@ import (
 // [TokenStream] returns no output with it.
 var ErrNotPreserved = errors.New("format: output does not preserve the source")
 
-// preserves is the formatter's postcondition: out carries in's non-trivia
-// tokens and comment texts, whitespace and a trailing comma before "]" or "{"
-// set aside. Those are the only things a formatter may change.
-func preserves(in, out string) error {
-	return preservesTokens(parse.Lex(lineEndingReplacer.Replace(in)), out)
-}
-
-// preservesTokens is preserves over a source already lexed.
+// preservesTokens is the formatter's postcondition over a source already lexed:
+// out carries in's non-trivia tokens and comment texts, whitespace and a trailing
+// comma before "]" or "{" set aside. Those are the only things a formatter may
+// change.
 func preservesTokens(in []parse.Token, out string) error {
 	a := significant(in)
 	b := significant(parse.Lex(out))

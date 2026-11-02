@@ -7,10 +7,11 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/simon-lentz/yammm/internal/snapparts"
+
 	"github.com/simon-lentz/yammm/diag"
-	"github.com/simon-lentz/yammm/graph"
-	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/instance"
+	"github.com/simon-lentz/yammm/internal/snappartstest"
 	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
 )
@@ -136,9 +137,9 @@ type Reading {
 
 // A Vector's elements render through the Float constraint, as a List's render
 // through its declared element constraint, whether the property names the
-// collection directly or through a datatype alias. Without the Float
-// constraint a value stored in 32 bits reaches the document at its own width,
-// where the same value in a List<Float> is widened.
+// collection directly or through a datatype alias. Without the Float constraint an
+// integer a document holds reaches the output as an integer, where the same value
+// in a List<Float> is written as a float.
 func TestMarshalObject_RendersAVectorElementThroughFloat(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -146,38 +147,28 @@ func TestMarshalObject_RendersAVectorElementThroughFloat(t *testing.T) {
 	if err := res.Err(); err != nil {
 		t.Fatalf("load: %v", err)
 	}
-	ty, ok := s.Type("Reading")
-	if !ok {
-		t.Fatal("no Reading type")
-	}
-	g := graph.New(s)
-	inst := instance.NewValidInstance("Reading", ty.ID(),
-		immutable.WrapKey([]any{"r"}),
-		immutable.WrapProperties(map[string]any{
+	snap := snappartstest.Loaded(t, s, snapparts.Parts{Instances: []snapparts.Instance{
+		heldRoot(t, s, "Reading", "r", map[string]any{
 			"id":               "r",
-			"embedding":        []any{float32(0.1), float32(2.5)},
-			"samples":          []any{float32(0.1), float32(2.5)},
-			"aliasedEmbedding": []any{float32(0.1), float32(2.5)},
-			"aliasedSamples":   []any{float32(0.1), float32(2.5)},
-		}), nil, nil, location.Provenance{})
-	if r := g.Add(ctx, inst); r.Err() != nil {
-		t.Fatalf("add: %v", r.Err())
-	}
+			"embedding":        []any{int64(7), 2.5},
+			"samples":          []any{int64(7), 2.5},
+			"aliasedEmbedding": []any{int64(7), 2.5},
+			"aliasedSamples":   []any{int64(7), 2.5},
+		}),
+	}})
 
-	data, err := New().MarshalObject(ctx, g.Snapshot())
+	data, err := New().MarshalObject(ctx, snap)
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
 	}
 	doc := string(data)
 
-	// float64(float32(0.1)) is 0.10000000149011612: the widened spelling the
-	// Float constraint stores. One per property, and a property declared
-	// through a datatype alias renders as the same shape declared directly —
-	// the alias reaches the writer unresolved, so a renderer that reads the
-	// constraint without resolving it loses the element rule.
-	const widened = "0.10000000149011612"
-	if got := strings.Count(doc, widened); got != 4 {
-		t.Errorf("0.1 renders widened %d times, want 4 (Vector, List<Float>, and each through an alias):\n%s", got, doc)
+	// One per property, and a property declared through a datatype alias renders as
+	// the same shape declared directly: the alias reaches the writer unresolved, so
+	// a renderer that reads the constraint without resolving it loses the element rule.
+	const asFloat = "[7.0,2.5]"
+	if got := strings.Count(doc, asFloat); got != 4 {
+		t.Errorf("7 renders as a float %d times, want 4 (Vector, List<Float>, and each through an alias):\n%s", got, doc)
 	}
 }
 

@@ -47,7 +47,7 @@ Inside a production, `"a" ... "z"` is a character range — the closed set from 
 
 ## Source Code Representation
 
-Source code is Unicode text encoded in UTF-8. A byte sequence that is not valid UTF-8 is a syntax error (`E_SYNTAX`), reported once for each run of one kind inside a comment or a string or regex literal, and once anywhere else, where the parser recovers from it as from any unexpected token, and so is the NUL character (U+0000), which a string literal writes with the `\0` escape instead. The text is not canonicalized, so a single accented code point is distinct from the same character constructed from combining an accent and a letter. For simplicity, this document will use the unqualified term _character_ to refer to a Unicode code point in the source text.
+Source code is Unicode text encoded in UTF-8. A byte sequence that is not valid UTF-8 is a syntax error (`E_SYNTAX`), and so is the NUL character (U+0000), which a string literal writes with the `\0` escape instead. Inside a comment or a string or regex literal, each run of one kind draws one report. Anywhere else, the sequence is an unexpected token, and the parser recovers from it as from any other: the recovery can skip a later sequence, which then draws no report of its own. The text is not canonicalized, so a single accented code point is distinct from the same character constructed from combining an accent and a letter. For simplicity, this document will use the unqualified term _character_ to refer to a Unicode code point in the source text.
 
 A schema file can start with one UTF-8 byte order mark (U+FEFF). The lexer skips it: it is no token, though line 1's columns count it. The language server is the exception: for a file it reads from disk, it counts line 1's characters from the first character after the mark. The formatter removes a leading one: `yammm fmt --check` reports a file that starts with one as unformatted, and `yammm fmt --write` removes it. A byte order mark anywhere else is a syntax error (`E_SYNTAX`), inside a comment or a literal too; a string literal writes U+FEFF with the `\uFEFF` escape. `yammm fmt` does not refuse a mark inside a comment or a string literal: it writes the mark back where it stands, and `yammm validate` refuses the file. The `yammm.mod` marker file is the exception, below.
 
@@ -198,7 +198,7 @@ includes    abstract    one    many    import
 
 Six spellings cannot be used as property names. The keywords `as`, `part`, and `in` would create parsing ambiguity in import declarations (`as`), type modifiers (`part`), and membership expressions (`in`) respectively. The literals `true`, `false`, and `nil` are also barred. The rule table is keywordless, so all six lex as ordinary words; what rejects them is a negative lookahead on the property-name production. All six are rejected where the property is declared, not where it is used.
 
-A seventh spelling, `self`, is grammatical and is refused at schema load rather than by the grammar (`E_INVALID_NAME`, at the declaration): `self` is bound to the instance in every invariant, at load and at evaluation alike, so a property so named could never be read. The rule is the schema layer's, and it applies to the parse front door and to the Go `Builder` alike.
+A seventh spelling, `self`, is grammatical, and on a type's property or a relation's field name is refused at schema load rather than by the grammar (`E_INVALID_NAME`, at the declaration): `self` is bound to the instance in every invariant, at load and at evaluation alike, so the bare name and `$self` reach the instance first, and a property so named has no read under its own name. The rule is the schema layer's.
 
 ### Operators and Punctuation
 
@@ -378,7 +378,8 @@ import "./common/types" as common   // explicit alias
 - Relative paths (`./parts`, `../common`) are resolved against the importing file's directory
 - Module-style paths (`internal/common`) are resolved against the module root (see `WithModuleRoot` option)
 - The `.yammm` extension is optional and will be appended if not present
-- Imports must resolve to `.yammm` files, not directories
+- Imports must resolve to `.yammm` files, not directories: an empty path, a path of separators alone, and a path whose last segment is `.` or `..`, names no file and draws `E_IMPORT_RESOLVE`. A trailing `/` after a file name is read past
+- The extension is part of the path that is resolved, so a relative path spelling the module root or an ancestor of it, such as `../z` from the root directory `z`, names a file above the root. A load looks among its in-memory sources first, so one that holds that file binds it. A load that then reads the disk draws `E_PATH_ESCAPE`, and a `WithSourcesOnly` load draws `E_IMPORT_RESOLVE`
 
 **The module root:** A directory is a module root when it holds a `yammm.mod` marker file. The loader resolves a schema's root in this order: the root the caller supplied (`WithModuleRoot`, or the `--module-root` flag), then the directory of the nearest ancestor holding a `yammm.mod`, then the schema file's own directory. The editor inserts its workspace folder between the second and the third.
 
@@ -410,7 +411,7 @@ import "./3rdparty" as thirdparty
 
 The two forms are alternatives, not a pair: importing one file twice draws `E_DUPLICATE_IMPORT` however the aliases differ.
 
-**Reserved keyword restriction:** Aliases cannot be reserved keywords. The rule table holds no keywords — every keyword lexes as an ordinary word — so this is a parser rule, applied to an explicit `as` alias and to a derived one alike. Reserved keywords include:
+**Reserved keyword restriction:** Aliases cannot be reserved keywords. The rule table holds no keywords — every keyword lexes as an ordinary word — so this is a parser rule. A written `as` clause that holds one is `E_SYNTAX`, and a path that derives one draws `E_INVALID_ALIAS`. Reserved keywords include:
 
 - DSL keywords: `schema`, `import`, `as`, `type`, `datatype`, `required`, `primary`, `extends`, `includes`, `abstract`, `part`, `one`, `many`, `in`
 - Built-in type keywords: `Integer`, `Float`, `Boolean`, `String`, `Enum`, `Pattern`, `Timestamp`, `Date`, `UUID`, `Vector`, `List`
@@ -538,6 +539,8 @@ Inheritance rules:
 - Child types may override inherited properties with compatible narrower constraints
 - A part type carries no association, declared or inherited (`E_INVALID_ASSOCIATION_TARGET`)
 - Relationship definitions must be unique after inheritance. Two relations of one kind reaching a type under one field name are an error when their definitions **differ** — a different declared spelling, target, multiplicity, or edge-property set; structurally identical ones are deduplicated keep-first with no diagnostic. An association and a composition that reach one type under one name are caught separately, after both merges, as `E_RELATION_COLLISION` naming both declarations. `E_RELATION_COLLISION` is reported once per collision per affected type: ancestors that merely carry a relation forward do not repeat it, and two ancestors declaring structurally identical rivals are one collision, since a single edit to the surviving declaration resolves both. The diagnostic's related locations name the surviving declaration and every rival
+
+**One edge per supertype:** An `extends` clause that names one supertype twice declares one edge.
 
 **Linearization order:** Ancestors are flattened **ancestors-first**: each supertype's own ancestors are appended before the supertype itself, left to right across the `extends` clause, with keep-first deduplication. For `D extends C`, `C extends B`, `B extends A` the order is `[A, B, C]`; for `D extends B, C` with both extending `A` it is `[A, B, C]`.
 
@@ -1142,7 +1145,7 @@ For **to-many associations**, use an array of edge objects:
 }
 ```
 
-**Reserved prefix:** The `_target_` prefix is reserved for foreign key fields. User-defined relation names cannot start with `_target_` (case-insensitive).
+**Reserved prefix:** The `_target_` prefix is reserved for foreign key fields. An identifier cannot start with an underscore, so no user-defined relation name starts with it.
 
 ## Annotations
 
@@ -1218,7 +1221,7 @@ Annotations are validated at load, after inheritance linearization. Violations p
 
 Property-level annotations travel with the property they decorate: a subtype that inherits a property unchanged inherits its annotations. Type-level annotations linearize like properties and relations, not like invariants — the subtype's own annotations first, then inherited ones in ancestors-first order, with exact duplicates (same name and argument list) deduplicated keep-first and no override by name. Two `@@index` members differing only in argument list are distinct indexes and both survive.
 
-Annotations **do not survive a property re-declaration.** When a subtype re-declares an inherited property — identically or by narrowing — without re-stating the inherited annotations, those annotations drop from the subtype and the load reports `W_ANNOTATION_SHADOWED` (a warning; the load still succeeds). Re-state the annotations on the re-declaration to keep them.
+Annotations **do not survive a property re-declaration.** When a subtype re-declares an inherited property — identically or by narrowing — without re-stating the inherited annotations, those annotations drop from the subtype. The load warns of the drop with `W_ANNOTATION_SHADOWED`, which does not fail it, for an annotation no direct supertype dropped, unless that annotation drew its own diagnostic or the re-declaration drew `E_PROPERTY_CONFLICT`. Re-state the annotations on the re-declaration to keep them.
 
 When a subtype does not re-declare an inherited property, its annotations are the **union across its direct supertypes' own resolved views**, independent of `extends` order. Because each supertype's view already reflects that supertype's decisions, this is transitive in the ordinary sense:
 
@@ -1236,7 +1239,7 @@ abstract type Other   extends Base { tag String }             // carries it
 type Doc extends Mutable, Other { id String primary }         // E_INVALID_ANNOTATION
 ```
 
-Resolve it on the subtype, which is authoritative: re-declare the property **with** the annotation to keep it, or **without** it to drop it. Two arms that both drop it agree, and are silent. `Leaf` draws no `W_ANNOTATION_SHADOWED` of its own if it re-declares the property, because by then there is nothing left to drop.
+Resolve it on the subtype, which is authoritative: re-declare the property **with** the annotation to keep it, or **without** it to drop it. Two arms that both drop it agree: the subtype draws neither `E_INVALID_ANNOTATION` nor a warning, and each arm draws its own `W_ANNOTATION_SHADOWED` at its re-declaration. `Leaf` draws no `W_ANNOTATION_SHADOWED` of its own if it re-declares the property, because by then there is nothing left to drop.
 
 Two nearest ancestors annotating the same property with the same annotation name but conflicting arguments — in practice only differing `@vector` similarities, since a `Vector[N]` property is equal regardless of its similarity keyword — is an unsatisfiable conflict, reported as `E_INVALID_ANNOTATION`. One shadowed annotation, and one such conflict, draws exactly one diagnostic however many ancestors carry the property forward.
 
@@ -1527,9 +1530,9 @@ type Order {
 
 **Numeric variables** (`$0`, `$1`, ...) are evaluator-local and default to `nil` when unset.
 
-**Named variables** are resolved through the evaluator's parent chain — lambda parameters first, then the instance's own members, so `$age` reads the property `age` when no parameter shadows it. A name bound by neither is rejected at schema load (`E_INVALID_INVARIANT`). Variable names are matched exactly: `$myVar` and `$myvar` are two names, where property names are matched case-insensitively. A lambda parameter may be named `$self`, and then shadows the instance for the body. A property may not be named `self`: the binding would leave it unreadable, so it is refused at load (`E_INVALID_NAME`).
+**Named variables** resolve in the invariant's scope — lambda parameters first, then the instance's own members, so `$age` reads the property `age` when no parameter shadows it. A name bound by neither, save `$self` below, is rejected at schema load (`E_INVALID_INVARIANT`). Variable names are matched exactly: `$myVar` and `$myvar` are two names, where property names are matched case-insensitively. A lambda parameter may be named `$self`, and then shadows the instance for the body. A property may not be named `self`: the binding reaches the instance first, so it is refused at load (`E_INVALID_NAME`).
 
-**`$self`** is bound when evaluating invariants against property maps and is inherited by child evaluators unless explicitly overridden.
+**`$self`** is bound when evaluating invariants against property maps. A lambda body's scope keeps the binding unless a parameter named `$self` overrides it.
 
 Lambda parameters shadow outer variables.
 
@@ -1724,7 +1727,7 @@ YAMMM uses structured diagnostics with stable error codes. The Go programmatic i
 
 ### Diagnostic Codes
 
-Codes are stable identifiers for programmatic matching. The authoritative list is the registry `diag.AllCodes()` returns: `diag/code.go` holds the built-in codes, and the adapter packages register their own on import. Categories and their codes:
+Codes are stable identifiers for programmatic matching. `diag/code.go` holds the built-in codes, and `adapter/neo4j` and `adapter/csv` register their own on import. Categories and their codes:
 
 **Sentinel** — internal conditions:
 
@@ -1735,7 +1738,7 @@ Codes are stable identifiers for programmatic matching. The authoritative list i
 **Schema** — schema compilation errors:
 
 - `E_DUPLICATE_TYPE` — type name conflicts
-- `E_DUPLICATE_SCHEMA` — two schemas in one registry, or in one import closure, declare one name
+- `E_DUPLICATE_SCHEMA` — two schemas in one load declare one name. A schema whose load reported an error takes no name and draws no such report
 - `E_INHERIT_CYCLE` — circular inheritance chain
 - `E_UNKNOWN_TYPE` — unresolvable type reference
 - `E_DUPLICATE_PROPERTY`, `E_UNKNOWN_PROPERTY` — a property declared twice on one type or an edge property twice on one association, or an invariant reading a member the type it reads does not declare
@@ -1743,20 +1746,17 @@ Codes are stable identifiers for programmatic matching. The authoritative list i
 - `E_DUPLICATE_INVARIANT`, `E_INVARIANT_CONFLICT` — an invariant message declared twice on one type, or inherited with two different expressions (a literal with no value matches any literal of its kind)
 - `E_CASE_COLLISION` — two property names of a type, or two edge property names of an association, differ only by case
 - `E_PROPERTY_RELATION_COLLISION` — property and relation share a name
-- `E_RESERVED_PREFIX` — name uses a reserved prefix
 - `E_INVALID_ASSOCIATION_TARGET`, `E_INVALID_COMPOSITION_TARGET` — relation definition errors
 - `E_INVALID_CONSTRAINT` — constraint definition error
 - `E_INVALID_INVARIANT` — an invariant's expression or message is invalid
-- `E_INVALID_NAME` — a name the schema refuses: an identifier whose format its production refuses, an empty schema name, a property or relation field named `self`, a name the `schema.Builder` takes that the DSL cannot state (a built-in type name as a type, datatype or relation name, a property named `as`, `part`, `in`, `nil`, `true` or `false`, or a schema name that is not UTF-8), or an invariant that reads a relation in a casing other than its name or its field name
+- `E_INVALID_NAME` — a name the schema refuses: a relation name that is not UPPER_SNAKE, an empty schema name, a property or relation field named `self`, or an invariant that reads a relation in a casing other than its name or its field name
 - `E_INVALID_PRIMARY_KEY_TYPE` — disallowed type for primary key
 - `E_NO_PRIMARY_KEY` — concrete type declares or inherits no primary key
 - `E_LIST_ON_EDGE` — List type used in relationship property
 - `E_PROPERTY_CONFLICT` — conflicting inherited properties
 - `E_UPSTREAM_FAIL` — imported schema failed to compile
-- `E_MISSING_SOURCE_ID`, `E_INVALID_SYNTHETIC_ID` — source identity errors
 - `E_LOAD_IO_FAILURE` — I/O error during schema loading, or a load whose arguments or options the loader refuses
 - `E_LOAD_MODULE_ROOT_MALFORMED` — a `yammm.mod` module-root marker holds content other than comment lines, is not a regular file, is larger than the size limit, or is a link that resolves to no file
-- `E_LOAD_SOURCE_CHANGED` — a source a shared registry holds that a load cannot reuse. At a re-registration its bytes or its structural hash differ, or the registered schema carries no sources. At an import the load holds bytes for it, no other compile of it is bound, and the registry's compile differs in bytes or carries none
 - `E_UNKNOWN_ANNOTATION`, `E_INVALID_ANNOTATION` — annotation name, placement, arity, argument kind or value, duplicate, or inherited-disagreement errors
 - `E_UNKNOWN_ANNOTATION_TARGET`, `E_INVALID_ANNOTATION_TARGET` — annotation target-property errors (unknown reference / ineligible property)
 - `W_ANNOTATION_SHADOWED` — a re-declaration silently drops an inherited property's annotations (warning)
@@ -1765,15 +1765,15 @@ Codes are stable identifiers for programmatic matching. The authoritative list i
 
 **Syntax** — parse errors:
 
-- `E_SYNTAX` — syntax error in schema source, or a `schema.Builder` documentation string no doc comment can carry
+- `E_SYNTAX` — syntax error in schema source
 
 **Import** — import resolution errors:
 
 - `E_IMPORT_RESOLVE` — import path could not be resolved
 - `E_IMPORT_CYCLE` — circular import dependency
-- `E_INVALID_ALIAS` — import alias is not a valid identifier
+- `E_INVALID_ALIAS` — an import with no `as` clause derives a reserved word as its alias from its path, such as `import "./schema"`. A written `as` clause that holds a reserved word is `E_SYNTAX`
 - `E_PATH_ESCAPE` — import path escapes allowed directory
-- `E_IMPORT_NOT_ALLOWED` — imports refused via `WithImportsAllowed(false)`
+- `E_IMPORT_NOT_ALLOWED` — imports refused via `WithImportsAllowed(false)`, and by `LoadString`, which takes none
 - `E_DUPLICATE_IMPORT` — the same schema imported multiple times, or two different schemas sharing one alias
 - `E_IMPORT_ALIAS_COLLISION` — import alias collides with local name
 
@@ -1793,9 +1793,8 @@ Codes are stable identifiers for programmatic matching. The authoritative list i
 - `E_UNKNOWN_EDGE_FIELD` — unknown field in edge data
 - `E_EDGE_SHAPE_MISMATCH` — an edge or a composition value has a JSON shape its relation does not take, such as an object where an array belongs or the reverse, a null or a scalar, or a composed child or a `(many)` edge element that is not an object
 - `E_UNRESOLVED_REQUIRED_COMPOSITION` — required composition unresolved
-- `E_COMPOSITION_NOT_FOUND` — referenced composition not found
-- `E_COMPOSITION_DEPTH_EXCEEDED` — composed nesting exceeds the depth limit (32), the same bound the snapshot writer and reader enforce; a validated instance is always one a snapshot can carry
-- `E_DUPLICATE_COMPOSED_PK` — a composition slot cannot hold this child: two children of one `(many)` slot share a primary key, or a `(one)` slot is given several. Listed here as well as under Graph: the validator raises it over the children it validates together, and graph assembly raises it again over children validated separately. `graph.RebuildSnapshot` and the import raise it over the parts and snapshots they are given, and `snapshot.Load` and `snapshot.Verify` raise it for two children of a keyed `(many)` slot at one canonical key and for a `(one)` slot a document holds several children in; `snapshot.Info` reads without a schema and makes no such claim
+- `E_COMPOSITION_DEPTH_EXCEEDED` — composed nesting exceeds the depth limit (32), the bound the `.ys` reader holds a document to with `E_SNAPSHOT_DEPTH_EXCEEDED`, so a snapshot can carry every nesting a validator accepts
+- `E_DUPLICATE_COMPOSED_PK` — a composition slot cannot hold this child: two children of one `(many)` slot share a primary key, or a `(one)` slot is given several. Listed here as well as under Graph: the validator raises it over the children it validates together. The import raises it over the snapshot it is given, and `snapshot.Load` and `snapshot.Verify` raise it for two children of a keyed `(many)` slot at one canonical key and for a `(one)` slot a document holds several children in; `snapshot.Info` reads without a schema and makes no such claim
 - `E_INVALID_TYPE_TAG` — a type tag that is not a type name by the grammar: a JSON document's top-level key, or a CSV type-column value
 - `E_CASE_FOLD_COLLISION` — multiple input fields map to the same schema property, relation field, edge property or `_target_` foreign-key field after case-folding. Property name matching is case-insensitive by default (see `WithStrictPropertyNames` in [API.md](API.md)). When two or more input fields fold to one schema property and none of them matches it exactly (schema `name`, input `Name` and `NAME`), the collision is reported and neither field is mapped. An input name that matches a schema property exactly is claimed first and never collides
 
@@ -1804,27 +1803,26 @@ Codes are stable identifiers for programmatic matching. The authoritative list i
 - `E_DUPLICATE_PK` — duplicate primary key
 - `E_DUPLICATE_COMPOSED_PK` — a composition slot cannot hold this child (also raised by the validator and the snapshot reader; see Instance)
 - `E_UNRESOLVED_REQUIRED` — required association unresolved
-- `E_GRAPH_TYPE_NOT_FOUND` — type not found in graph operations
-- `E_GRAPH_PARENT_NOT_FOUND` — parent node not found
+- `E_GRAPH_TYPE_NOT_FOUND` — at `Graph.Add`, a root whose type is in the load's closure, where the graph's schema neither declares nor directly imports it. At a snapshot's import, a type identity the importing schema cannot resolve, or a `types` entry denoting a type it neither declares nor directly imports
 - `E_GRAPH_INVALID_COMPOSITION` — invalid composition
 - `E_GRAPH_MISSING_PK` — a root, or an imported snapshot's types entry, whose type declares no primary key
-- `E_GRAPH_INVALID_PK` — a keyed type's primary key empty, of the wrong arity, with a key property absent or null, or disagreeing with the instance's own key properties; any instance's key, a keyless part's included, with a component that does not read back as the value every writer writes (such as one of no form, a string that is not valid UTF-8, a `json.Number` that is no JSON number literal or spells a number no finite `float64` holds, a number `graph.ParseKey` reads back at another rendering, one whose rendering differs from its own value's, or a `time.Time` or `uuid.UUID` no key property's constraint renders, as in every keyless part's key); or an association target key of the wrong arity or with such a component
-- `E_GRAPH_CARDINALITY` — a (one) association holds more than one record: several targets at `Graph.Add` or `Graph.AddOrMerge` or, for a part child, at `Graph.AddComposed`, a merge at `Graph.AddOrMerge` that would add a second target, several edges and unresolved records no check refused, in a snapshot or a `.ys` document
+- `E_GRAPH_INVALID_PK` — a keyed type's primary key empty, of the wrong arity, with a key property absent or null, or disagreeing with the instance's own key properties; or an association target key of the wrong arity
+- `E_GRAPH_CARDINALITY` — a (one) association holds more than one record: a merge at `BatchAssembler.AddValidOrMerge` that would add a second target, several edges and unresolved records no check refused, in a snapshot or a `.ys` document
 - `E_GRAPH_UNKNOWN_RELATION` — instance data or an association record under a relation name the type does not declare in that slot, or an association record naming a target type the schema resolves, other than the declared one
-- `E_GRAPH_ABSTRACT_TYPE` — the graph met an instance of an abstract type, or an imported snapshot's types entry names a type the importing schema makes abstract
+- `E_GRAPH_ABSTRACT_TYPE` — an imported snapshot's root or types entry names a type the importing schema makes abstract
 
 **Snapshot** — persistence errors:
 
-- `E_SNAPSHOT_MALFORMED` — invalid JSON, missing required fields, a wrong outer shape (the four top-level keys, in order, each once and none null, with nothing after them, and no object repeating a member name or spelling a declared one in another case), or content a structural rule refuses, such as an undeclared name, a stored key its key properties contradict, a key or target key component `graph.ParseKey` cannot read back, a target key of the wrong arity, an undocumented reason, a record contradicting itself, records `graph.Add` would not derive, or a duplicate with no conflict or another one. `snapshot.Marshal` raises it for input it refuses to write: an indent that is not JSON whitespace, a metadata key or value that is not valid UTF-8, or a property value the wire cannot carry; `snapshot.UpdateMetadata` raises it for such metadata too
-- `E_SNAPSHOT_UNSUPPORTED_VERSION` — unrecognized format version
+- `E_SNAPSHOT_MALFORMED` — invalid JSON, missing required fields, a wrong outer shape (the four top-level keys, in order, each once and none null, with nothing after them, and no object repeating a member name or spelling a declared one in another case), or content a structural rule refuses, such as an undeclared name, a stored key its key properties contradict, a key or target key component `graph.ParseKey` cannot read back, a target key of the wrong arity, an undocumented reason, a record contradicting itself, records `graph.Add` would not derive, a duplicate with no conflict or another one, a duplicate stating a parent or a relation (a `null` `parent_type`, and a `null` or empty `parent_key` or `relation`, state none, and the next `Marshal` drops the member), or a string holding invalid UTF-8 or a surrogate escape that is half of no pair, which `encoding/json` would silently read as U+FFFD. `snapshot.Marshal` raises it for input it refuses to write: an indent that is not JSON whitespace, or a metadata key or value, or a provenance source name or raw path, that is not valid UTF-8; `snapshot.UpdateMetadata` raises it for such metadata too
+- `E_SNAPSHOT_UNSUPPORTED_VERSION` — unrecognized format version. A surface that holds the whole document raises it only for a document whose outer shape, member names and text pass, which it judges first
 - `E_SNAPSHOT_UNSUPPORTED_FEATURE` — unrecognized feature flag
 - `E_SNAPSHOT_INCOMPATIBLE_SCHEMA` — schema structural hash mismatch
 - `E_SNAPSHOT_UNKNOWN_TYPE` — type name not found in schema
-- `E_SNAPSHOT_TYPE_MISMATCH` — an instance or duplicate record states a type row other than the one it is filed under, a composed duplicate record is typed other than its composition's declared target, or a composed child's or an association record's target row is not the relation's declared target
-- `E_SNAPSHOT_DANGLING_REFERENCE` — an edge target, a duplicate's conflict or parent, or an unresolved record's source not found; a reference to an address a refused unit states draws none, the unit's refusal being its one issue
-- `E_SNAPSHOT_INVALID_COMPOSED` — composed child carries edges, or composed children or a composed duplicate record stand under a name the parent's type does not declare as a composition
-- `E_SNAPSHOT_INVALID_ROOT` — an instances group, empty or not, or a root duplicate record names a type that cannot hold a root instance: abstract, a part type, or declaring no primary key. Refused whatever the load options say — none of the three describes a graph any caller could have built. One type draws one issue, however many positions name it, and a root of it holds no address: it owes no required association, it is in no `(one)` count, no duplicate's conflict resolves in its slots, and a second root at its key is no duplicate. A break its records or its slots show by themselves stays its own
-- `E_SNAPSHOT_UNNAMEABLE_TYPE` — an instances group, empty or not, or a root duplicate record names a type the entry schema reaches only through an intermediate import, so the schema has no name form for it. `adapter/json` and `adapter/csv` key their output by the name of each type a snapshot denotes, so such a document describes a snapshot they cannot render. Refused whatever the load options say, and the hint names the remedy, which is to import the declaring schema directly. One type draws one issue, and a root of it holds no address, as under `E_SNAPSHOT_INVALID_ROOT`
+- `E_SNAPSHOT_TYPE_MISMATCH` — an instance or duplicate record states a type row other than the one it is filed under, or a composed child's or an association record's target row is not the relation's declared target
+- `E_SNAPSHOT_DANGLING_REFERENCE` — an edge target, a duplicate's conflict, or an unresolved record's source not found; a reference to an address a refused unit states draws none, the unit's refusal being its one issue
+- `E_SNAPSHOT_INVALID_COMPOSED` — composed child carries edges, or composed children stand under a name the parent's type does not declare as a composition
+- `E_SNAPSHOT_INVALID_ROOT` — an instances group, empty or not, or a duplicate record names a type that cannot hold a root instance: abstract, a part type, or declaring no primary key. Refused whatever the load options say — none of the three describes a graph any caller could have built. One type draws one issue, however many positions name it, and a root of it holds no address: it owes no required association, it is in no `(one)` count, and a second root at its key is no duplicate. A break its records or its slots show by themselves stays its own
+- `E_SNAPSHOT_UNNAMEABLE_TYPE` — an instances group, empty or not, or a duplicate record names a type the entry schema reaches only through an intermediate import, so the schema has no name form for it. `adapter/json` and `adapter/csv` key their output by the name of each type a snapshot denotes, so such a document describes a snapshot they cannot render. Refused whatever the load options say, and the hint names the remedy, which is to import the declaring schema directly. One type draws one issue, and a root of it holds no address, as under `E_SNAPSHOT_INVALID_ROOT`
 - `E_DUPLICATE_PK` — two root instances in one group, both of whose stored keys the key rule accepts, state one primary key. Under a schema, only roots of a type that can hold a root count. Listed here as well as under Graph: `snapshot.Load`, `snapshot.Verify` and `snapshot.Info` emit it, because the wire has a diagnostics section for a rejected duplicate and two live instances at one address is not a shape it can carry. `Info` resolves no schema, so it judges no type and compares keys as the reader's number rule renders them, where `Load` and `Verify` also fold a timestamp or UUID key written two ways
 - `E_SNAPSHOT_COMPOSED_ON_DUPLICATE`, `E_SNAPSHOT_EDGES_ON_DUPLICATE` — illegal data on duplicate records
 - `E_SNAPSHOT_DEPTH_EXCEEDED` — composed nesting exceeds depth limit (32)
@@ -1839,12 +1837,12 @@ Codes are stable identifiers for programmatic matching. The authoritative list i
 - `W_SNAPSHOT_UNRESOLVED_REQUIRED` — under `WithRevalidation`, a loaded document carries an unresolved record, one no structural check refused, for a required association
 - `W_SNAPSHOT_PATH_EXTENSION` (Warning) — a snapshot was written to a path that does not end in `.ys`. The write succeeded; a reader that discovers snapshots by extension will not find it
 
-**Adapter** — format-specific errors. `E_ADAPTER_PARSE` and `E_ADAPTER_IO` are declared in `diag`, so they are always in `diag.AllCodes()`; every other code below is registered by its adapter package, so it appears there only once that package is linked:
+**Adapter** — format-specific errors. `E_ADAPTER_PARSE` and `E_ADAPTER_IO` are declared in `diag`; every other code below is registered by its adapter package when that package is linked:
 
 - `E_ADAPTER_PARSE` — parsing error in adapter input
 - `E_ADAPTER_IO` (Fatal) — an adapter's input failed to arrive: the reader a parse reads from returned an error that is neither the input's end nor a fault in its content. What was read before the failure is kept
 - `E_CSV_COERCE` — a CSV cell's text does not coerce to the type its member declares
-- `E_CSV_CONFIG` — the CSV adapter holds a setting the parse cannot use: a list separator it could not find again, a delimiter `encoding/csv` refuses, or `ParseWithTypeColumn` with no type column set or with one whose name holds a CR LF, which no header can hold. No record is read
+- `E_CSV_CONFIG` — the CSV adapter holds a setting the parse cannot use: a delimiter `encoding/csv` refuses, or `ParseWithTypeColumn` with no type column set or with one whose name holds a CR LF, which no header can hold. No record is read
 - `E_NEO4J_LABEL_COLLISION` — two types render the same Neo4j label
 - `E_NEO4J_INVALID_IDENTIFIER` — an identifier is not usable unquoted in generated Cypher
 - `E_NEO4J_UNSUPPORTED_TYPE` — a property kind the adapter cannot express
@@ -1887,9 +1885,12 @@ The hash format is `sha256:<hex>`. A structural hash version (currently `4`) is 
 This section is the normative statement of the language YAMMM **accepts** — a
 production describes what loads, not what the reference parser's own grammar
 admits. The two differ where the parser deliberately accepts a shape so a
-checker can report a better message than a parse error: an arity violation such
-as `Enum["a"]` parses and is then refused with `E_INVALID_CONSTRAINT`, never
-`E_SYNTAX`.
+checker can report a better message than a parse error: an `Enum` of fewer than
+two values, such as `Enum["a"]`, and a `Pattern` of more than two parse and are
+then refused with `E_INVALID_CONSTRAINT`, a relation name that is no reserved
+word and is not upper snake case, such as `worksAt`, draws `E_INVALID_NAME`, and
+a reverse clause draws `E_REVERSE_CLAUSE_REMOVED`. Every other wrong argument
+count to a type, such as `Integer[1]`, is `E_SYNTAX`.
 
 It is maintained by hand. Nothing checks it automatically, and no second grammar
 exists to check it against. Two non-terminals it names are defined elsewhere in

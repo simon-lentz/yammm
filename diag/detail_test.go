@@ -23,9 +23,6 @@ func TestDetailKeyConstants(t *testing.T) {
 		{"DetailKeyTargetPK", DetailKeyTargetPK},
 		{"DetailKeyImportPath", DetailKeyImportPath},
 		{"DetailKeyAlias", DetailKeyAlias},
-		{"DetailKeyName", DetailKeyName},
-		{"DetailKeyContext", DetailKeyContext},
-		{"DetailKeyID", DetailKeyID},
 	}
 
 	for _, k := range keys {
@@ -61,9 +58,6 @@ func TestDetailKeyConstants_Uniqueness(t *testing.T) {
 		DetailKeyTargetPK,
 		DetailKeyImportPath,
 		DetailKeyAlias,
-		DetailKeyName,
-		DetailKeyContext,
-		DetailKeyID,
 	}
 
 	seen := make(map[string]bool)

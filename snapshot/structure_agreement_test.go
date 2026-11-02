@@ -9,21 +9,17 @@ import (
 
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/graph"
-	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/instance"
-	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
 	"github.com/simon-lentz/yammm/snapshot"
 )
 
 // A snapshot's structural facts — type identity, composition slot, stored key
 // with its key properties, declared names and association shape — are one
-// invariant held at every constructor of a snapshot: Graph.Add,
-// RebuildSnapshot, the .ys decoder and the import. The class below builds one
+// invariant held by the .ys decoder and by the import. The class below builds one
 // legal graph under revisionBase and offers it, under every revision of that
-// schema, to five doors — Graph.Add, RebuildSnapshot, snapshot.Load,
-// NewFromSnapshot and NewBatchAssemblerFromSnapshot — which must agree, but
-// for the one fact Add's input cannot state (legalAtAdd).
+// schema, to snapshot.Load, NewFromSnapshot and NewBatchAssemblerFromSnapshot,
+// which must agree.
 
 const revisionBase = `schema "rev"
 
@@ -77,17 +73,6 @@ type revision struct {
 
 func (r revision) legal() bool {
 	return r.audit == 0 && r.key == 0 && r.badges == 0 && r.nickname == 0 && r.since == 0 && r.works == 0 && r.mentors == 0
-}
-
-// legalAtAdd is legal() for Graph.Add, whose edge target names a key and no
-// type: the relation's declared target decides it, so a retargeted relation is
-// not a fact Add's input can state.
-func (r revision) legalAtAdd() bool {
-	moved := r
-	if moved.works == 2 {
-		moved.works = 0
-	}
-	return moved.legal()
 }
 
 func (r revision) String() string {
@@ -227,61 +212,12 @@ func revisionGraph(t *testing.T, s schema.Schema) graph.Snapshot {
 	return snap
 }
 
-// addDoor offers every root of snap to Graph.Add under s, as instances that
-// carry what snap holds, and reports every refusal.
-func addDoor(t *testing.T, s schema.Schema, snap graph.Snapshot) diag.Result {
-	t.Helper()
-	g := graph.New(s)
-	c := diag.NewCollector(0)
-	for inst := range snap.AllInstances() {
-		c.Merge(g.Add(t.Context(), validInstanceOf(t, snap, inst)))
-	}
-	return c.Result()
-}
-
-func validInstanceOf(t *testing.T, snap graph.Snapshot, inst graph.Instance) instance.ValidInstance {
-	t.Helper()
-	targets := map[string][]instance.ValidEdgeTarget{}
-	for e := range snap.EdgesFrom(inst) {
-		targets[e.Relation()] = append(targets[e.Relation()], instance.NewValidEdgeTarget(e.Target().PrimaryKey(), e.Properties()))
-	}
-	for u := range snap.Unresolved() {
-		if u.Source().TypeID() != inst.TypeID() || u.Source().PrimaryKey().String() != inst.PrimaryKey().String() {
-			continue
-		}
-		vals, err := graph.ParseKey(u.TargetKey())
-		if err != nil {
-			t.Fatalf("parse %s: %v", u.TargetKey(), err)
-		}
-		targets[u.Relation()] = append(targets[u.Relation()], instance.NewValidEdgeTarget(immutable.WrapKey(vals), u.Properties()))
-	}
-	var edges map[string]instance.ValidEdgeData
-	for rel, ts := range targets {
-		if edges == nil {
-			edges = map[string]instance.ValidEdgeData{}
-		}
-		edges[rel] = instance.NewValidEdgeData(ts)
-	}
-	var composed map[string]immutable.Value
-	for _, rel := range inst.ComposedRelations() {
-		if composed == nil {
-			composed = map[string]immutable.Value{}
-		}
-		var children []instance.ValidInstance
-		for child := range inst.Composed(rel) {
-			children = append(children, validInstanceOf(t, snap, child))
-		}
-		composed[rel] = immutable.Wrap(children)
-	}
-	return instance.NewValidInstance(inst.TypeName(), inst.TypeID(), inst.PrimaryKey(), inst.Properties(), edges, composed, location.Provenance{})
-}
-
 var schemaHashField = regexp.MustCompile(`"schema_hash":"[^"]*"`)
 
-// loadDoor marshals snap and loads it against s as a writer that claims s
+// loadClaimingSchema marshals snap and loads it against s as a writer that claims s
 // would have written it: the header names s's hash, and the integrity hash
 // is not checked. A refusal then comes from the document's contents.
-func loadDoor(t *testing.T, s schema.Schema, snap graph.Snapshot) diag.Result {
+func loadClaimingSchema(t *testing.T, s schema.Schema, snap graph.Snapshot) diag.Result {
 	t.Helper()
 	data, mres := snapshot.Marshal(t.Context(), snap)
 	if mres.HasErrors() {
@@ -293,25 +229,18 @@ func loadDoor(t *testing.T, s schema.Schema, snap graph.Snapshot) diag.Result {
 	data = schemaHashField.ReplaceAll(data, fmt.Appendf(nil, `"schema_hash":%q`, schema.StructuralHash(s)))
 	_, res := snapshot.Load(t.Context(), data, s, snapshot.WithIntegrityCheck(false))
 	if res.HasCode(diag.E_SNAPSHOT_INCOMPATIBLE_SCHEMA) || res.HasCode(diag.E_SNAPSHOT_INTEGRITY_MISMATCH) {
-		t.Fatalf("the load door refused the header, not the contents: %s", res)
+		t.Fatalf("Load refused the header, not the contents: %s", res)
 	}
 	return res
 }
 
-// wantRules lists the issue each moved fact must draw at RebuildSnapshot, at
-// NewFromSnapshot, and at the decoder behind snapshot.Load. The import reports
-// Add's code where RebuildSnapshot, whose parts break the rule only through a
-// broken caller, reports E_INTERNAL; the decoder reports a snapshot code, or
-// Add's where the decoder shares it.
+// wantRules lists the issue each moved fact must draw at NewFromSnapshot and at the
+// decoder behind snapshot.Load. The decoder reports a snapshot code, or the import's
+// where it shares one.
 func wantRules(r revision) map[string][][2]string {
 	want := map[string][][2]string{}
-	both := func(code diag.Code, phrase string) {
-		want["RebuildSnapshot"] = append(want["RebuildSnapshot"], [2]string{code.String(), phrase})
+	imported := func(code diag.Code, phrase string) {
 		want["NewFromSnapshot"] = append(want["NewFromSnapshot"], [2]string{code.String(), phrase})
-	}
-	split := func(rebuild, imported diag.Code, phrase string) {
-		want["RebuildSnapshot"] = append(want["RebuildSnapshot"], [2]string{rebuild.String(), phrase})
-		want["NewFromSnapshot"] = append(want["NewFromSnapshot"], [2]string{imported.String(), phrase})
 	}
 	// A types-table row the schema does not declare stops the decoder before
 	// the body, so the body's rules are judged only where every row resolves.
@@ -321,57 +250,49 @@ func wantRules(r revision) map[string][][2]string {
 		}
 	}
 	if r.audit == 1 {
-		split(diag.E_INTERNAL, diag.E_GRAPH_TYPE_NOT_FOUND, "unresolvable type identity")
+		imported(diag.E_GRAPH_TYPE_NOT_FOUND, "unresolvable type identity")
 	}
 	switch r.key {
 	case 1:
-		both(diag.E_GRAPH_INVALID_PK, "of type Company")
+		imported(diag.E_GRAPH_INVALID_PK, "of type Company")
 		load(diag.E_SNAPSHOT_MALFORMED, `component 0 disagrees with property "code"`)
 	case 2:
-		both(diag.E_GRAPH_INVALID_PK, "of type Company")
+		imported(diag.E_GRAPH_INVALID_PK, "of type Company")
 		load(diag.E_SNAPSHOT_MALFORMED, "has 1 components; the type declares 2")
 	case 3:
-		both(diag.E_GRAPH_INVALID_PK, `primary key property "vat" is absent or null`)
+		imported(diag.E_GRAPH_INVALID_PK, `primary key property "vat" is absent or null`)
 		load(diag.E_SNAPSHOT_MALFORMED, `key property "vat": it is absent or null`)
 	}
 	if r.key == 2 && r.works == 0 {
-		both(diag.E_GRAPH_INVALID_PK, "carries a 1-part target key; the target declares 2")
+		imported(diag.E_GRAPH_INVALID_PK, "carries a 1-part target key; the target declares 2")
 		load(diag.E_SNAPSHOT_MALFORMED, "carries a 1-part target key; the target declares 2")
 	}
 	switch r.badges {
 	case 1:
-		both(diag.E_GRAPH_INVALID_COMPOSITION, "the composition declares")
+		imported(diag.E_GRAPH_INVALID_COMPOSITION, "the composition declares")
 		load(diag.E_SNAPSHOT_TYPE_MISMATCH, "which the composition declares as")
 	case 2:
-		both(diag.E_GRAPH_UNKNOWN_RELATION, "does not declare as a composition")
+		imported(diag.E_GRAPH_UNKNOWN_RELATION, "does not declare as a composition")
 		load(diag.E_SNAPSHOT_INVALID_COMPOSED, "which the type does not declare as a composition")
 	}
 	if r.nickname == 1 {
-		split(diag.E_INTERNAL, diag.E_UNKNOWN_FIELD, `holds property "nickname"`)
+		imported(diag.E_UNKNOWN_FIELD, `holds property "nickname"`)
 		load(diag.E_SNAPSHOT_MALFORMED, `holds property "nickname", which its type does not declare`)
 	}
 	if r.since == 1 && r.works != 1 {
-		split(diag.E_INTERNAL, diag.E_UNKNOWN_EDGE_FIELD, `holds edge property "since"`)
+		imported(diag.E_UNKNOWN_EDGE_FIELD, `holds edge property "since"`)
 		load(diag.E_SNAPSHOT_MALFORMED, `holds edge property "since", which the association does not declare`)
 	}
 	switch r.works {
 	case 1:
-		both(diag.E_GRAPH_UNKNOWN_RELATION, `under "WORKS_AT", which its type does not declare as an association`)
+		imported(diag.E_GRAPH_UNKNOWN_RELATION, `under "WORKS_AT", which its type does not declare as an association`)
 		load(diag.E_GRAPH_UNKNOWN_RELATION, `under "WORKS_AT", which the type does not declare as an association`)
 	case 2:
-		// Parts state no target type, so the rebuild resolves the edge's key under
-		// the declared target, Office, where no instance holds it. It judges every
-		// part before it resolves an edge, so any other move refuses first.
-		if r.legalAtAdd() {
-			want["RebuildSnapshot"] = append(want["RebuildSnapshot"],
-				[2]string{diag.E_INTERNAL.String(), "edge target string://rev.yammm:Office"})
-		}
-		want["NewFromSnapshot"] = append(want["NewFromSnapshot"],
-			[2]string{diag.E_GRAPH_UNKNOWN_RELATION.String(), "the association declares string://rev.yammm:Office"})
+		imported(diag.E_GRAPH_UNKNOWN_RELATION, "the association declares string://rev.yammm:Office")
 		load(diag.E_SNAPSHOT_TYPE_MISMATCH, "which the association declares as")
 	}
 	if r.mentors == 1 {
-		both(diag.E_GRAPH_CARDINALITY, `(one) association "MENTORS" of Person[["p1"]] holds 2 records`)
+		imported(diag.E_GRAPH_CARDINALITY, `(one) association "MENTORS" of Person[["p1"]] holds 2 records`)
 		load(diag.E_GRAPH_CARDINALITY, `(one) association "MENTORS"`)
 	}
 	return want
@@ -386,7 +307,7 @@ func hasRule(res diag.Result, code, phrase string) bool {
 	return false
 }
 
-func TestStructuralFacts_EveryConstructorAgreesAcrossEveryRevision(t *testing.T) {
+func TestStructuralFacts_TheReaderAndTheImportAgreeAcrossEveryRevision(t *testing.T) {
 	t.Parallel()
 	base := loadRevisionSchema(t, revisionBase)
 	snap := revisionGraph(t, base)
@@ -400,31 +321,24 @@ func TestStructuralFacts_EveryConstructorAgreesAcrossEveryRevision(t *testing.T)
 		t.Run(r.String(), func(t *testing.T) {
 			t.Parallel()
 			s2 := loadRevisionSchema(t, r.source())
-			outcomes := map[string]diag.Result{
-				"Graph.Add":       addDoor(t, s2, snap),
-				"snapshot.Load":   loadDoor(t, s2, snap),
-				"RebuildSnapshot": rebuildDoor(t, s2, snap),
-			}
+			outcomes := map[string]diag.Result{"snapshot.Load": loadClaimingSchema(t, s2, snap)}
 			g, ires := importInto(s2, snap)
 			outcomes["NewFromSnapshot"] = ires
 			ba, sres := seedInto(t.Context(), s2, snap)
 			outcomes["NewBatchAssemblerFromSnapshot"] = sres
-			for door, res := range outcomes {
+			for reader, res := range outcomes {
 				legal := r.legal()
-				if door == "Graph.Add" {
-					legal = r.legalAtAdd()
-				}
 				if legal == res.HasErrors() {
-					t.Errorf("%s: legal=%v, refused=%v: %s", door, legal, res.HasErrors(), res)
+					t.Errorf("%s: legal=%v, refused=%v: %s", reader, legal, res.HasErrors(), res)
 				}
 			}
 			if !r.legal() && (g != nil || ba != nil) {
 				t.Errorf("a refused import returned a graph (%v) or an assembler (%v)", g != nil, ba != nil)
 			}
-			for door, rules := range wantRules(r) {
+			for reader, rules := range wantRules(r) {
 				for _, w := range rules {
-					if !hasRule(outcomes[door], w[0], w[1]) {
-						t.Errorf("%s: no %s naming %q: %s", door, w[0], w[1], outcomes[door])
+					if !hasRule(outcomes[reader], w[0], w[1]) {
+						t.Errorf("%s: no %s naming %q: %s", reader, w[0], w[1], outcomes[reader])
 					}
 				}
 			}
@@ -433,14 +347,8 @@ func TestStructuralFacts_EveryConstructorAgreesAcrossEveryRevision(t *testing.T)
 	t.Logf("%d legal revisions, %d illegal", accepted, refused)
 }
 
-func rebuildDoor(t *testing.T, s schema.Schema, snap graph.Snapshot) diag.Result {
-	t.Helper()
-	_, res := graph.RebuildSnapshot(s, partsOf(t, snap))
-	return res
-}
-
-// The import door as S2's probe found it: a snapshot built under one schema
-// and imported into another with the same source id.
+// A snapshot built under one schema and imported into another with the same
+// source id.
 func TestNewFromSnapshot_RefusesWhatTheImportingSchemaBreaks(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
@@ -541,8 +449,8 @@ type Employee {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			ctx := t.Context()
-			s1, r1 := schema.LoadString(ctx, tc.src1, "door.yammm")
-			s2, r2 := schema.LoadString(ctx, tc.src2, "door.yammm")
+			s1, r1 := schema.LoadString(ctx, tc.src1, "import.yammm")
+			s2, r2 := schema.LoadString(ctx, tc.src2, "import.yammm")
 			if r1.HasErrors() || r2.HasErrors() {
 				t.Fatal(r1, r2)
 			}
@@ -567,7 +475,7 @@ type Employee {
 			}
 			// The same schema loaded twice is another pointer, so the import
 			// walks the snapshot, and a snapshot that holds finds nothing.
-			again, ra := schema.LoadString(ctx, tc.src1, "door.yammm")
+			again, ra := schema.LoadString(ctx, tc.src1, "import.yammm")
 			if ra.HasErrors() {
 				t.Fatal(ra)
 			}

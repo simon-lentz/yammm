@@ -1,17 +1,9 @@
 package snapshot
 
 import (
-	"context"
-	"fmt"
 	"reflect"
-	"strconv"
 	"strings"
 	"testing"
-
-	"github.com/simon-lentz/yammm/diag"
-	"github.com/simon-lentz/yammm/graph"
-	"github.com/simon-lentz/yammm/immutable"
-	"github.com/simon-lentz/yammm/schema"
 )
 
 // wireStructCases pins every wire struct's field order and tags —
@@ -131,135 +123,9 @@ func TestWireStructs_EveryStructIsPinned(t *testing.T) {
 	}
 }
 
-// deepSchema composes without a natural floor, so a tree can exceed the
-// reader's nesting limit.
-const deepSchema = `schema "deep"
-
-type Trunk {
-	id String primary
-	*-> KIDS (many) Node
-}
-
-part type Node {
-	id String primary
-	*-> KIDS (many) Node
-}
-`
-
-// nestedParts builds a chain of composed Node parts depth levels deep.
-func nestedParts(nodeID schema.TypeID, depth int) []graph.InstanceParts {
-	if depth == 0 {
-		return nil
-	}
-	node := graph.InstanceParts{
-		TypeID:     nodeID,
-		PrimaryKey: immutable.WrapKey([]any{fmt.Sprintf("n%d", depth)}),
-		Properties: immutable.WrapProperties(map[string]any{"id": fmt.Sprintf("n%d", depth)}),
-	}
-	if kids := nestedParts(nodeID, depth-1); kids != nil {
-		node.Composed = map[string][]graph.InstanceParts{"KIDS": kids}
-	}
-	return []graph.InstanceParts{node}
-}
-
-// TestMarshal_RefusesNestingBeyondTheReadersLimit pins the writer against the
-// reader's bound. The reader refuses composed nesting past maxComposedDepth and
-// nothing upstream bounds it, so an unbounded writer could produce a document
-// Load and Verify reject whole. Marshal refuses to write it instead. In-package
-// because the bound the two sides must share is unexported.
-func TestMarshal_RefusesNestingBeyondTheReadersLimit(t *testing.T) {
-	t.Parallel()
-	ctx := context.Background()
-	s, res := schema.LoadString(t.Context(), deepSchema, "deep.yammm")
-	if res.HasErrors() {
-		t.Fatalf("load deep schema: %s", res)
-	}
-	trunk, ok := s.Type("Trunk")
-	if !ok {
-		t.Fatal("Trunk missing")
-	}
-	node, ok := s.Type("Node")
-	if !ok {
-		t.Fatal("Node missing")
-	}
-
-	build := func(chain int) graph.Snapshot {
-		t.Helper()
-		root := graph.InstanceParts{
-			TypeID:     trunk.ID(),
-			PrimaryKey: immutable.WrapKey([]any{"t1"}),
-			Properties: immutable.WrapProperties(map[string]any{"id": "t1"}),
-			Composed:   map[string][]graph.InstanceParts{"KIDS": nestedParts(node.ID(), chain)},
-		}
-		built, res := graph.RebuildSnapshot(s, graph.SnapshotParts{
-			Types: []schema.TypeID{trunk.ID()},
-			Instances: []graph.InstanceParts{
-				root,
-			},
-		})
-		if res.HasErrors() {
-			t.Fatalf("assembling a %d-deep chain: %s", chain, res)
-		}
-		return built
-	}
-
-	// The control: the deepest tree the reader accepts must still marshal and
-	// load, or the writer's bound is off by one in the strict direction.
-	data, res := Marshal(ctx, build(maxComposedDepth))
-	if err := res.Err(); err != nil {
-		t.Fatalf("Marshal refused a tree at the reader's limit: %v", err)
-	}
-	if _, loadRes := Load(ctx, data, s); loadRes.HasErrors() {
-		t.Fatalf("Load refused a tree at its own limit: %v", loadRes)
-	}
-
-	// One level deeper is a document no read path accepts, and the writer must
-	// name the bound the way the reader names it — same code, same severity —
-	// or a caller cannot tell a snapshot too deep to write from a corrupt
-	// writer state.
-	_, deepRes := Marshal(ctx, build(maxComposedDepth+1))
-	if !deepRes.HasErrors() {
-		t.Fatal("Marshal wrote a tree nested past the reader's limit")
-	}
-	var found bool
-	for issue := range deepRes.Issues() {
-		if issue.Code() != diag.E_SNAPSHOT_DEPTH_EXCEEDED {
-			continue
-		}
-		found = true
-		if issue.Severity() != diag.Error {
-			t.Errorf("Marshal reported the depth bound at %s, the reader reports it at %s",
-				issue.Severity(), diag.Error)
-		}
-		// The payload, not only the code: a consumer branches on the detail and
-		// reads the message, and both can be wrong with the code right.
-		details := map[string]string{}
-		for _, d := range issue.Details() {
-			details[d.Key] = d.Value
-		}
-		if got := details[diag.DetailKeyDepth]; got != strconv.Itoa(maxComposedDepth+1) {
-			t.Errorf("depth detail = %q, want %q", got, strconv.Itoa(maxComposedDepth+1))
-		}
-		// The writer states the identity in the SAME form the reader does.
-		// Before the two were split — "path:name" from the writer against
-		// "schema#name" from the reader — for one code both halves share.
-		wantRef := TypeRef{Schema: "deep", Name: node.ID().Name()}.String()
-		if got := details[diag.DetailKeyTypeName]; got != wantRef {
-			t.Errorf("type-name detail = %q, want the reader's own form %q", got, wantRef)
-		}
-		if !strings.Contains(issue.Message(), "composed nesting depth") {
-			t.Errorf("message does not name the bound it reports: %q", issue.Message())
-		}
-	}
-	if !found {
-		t.Errorf("Marshal did not report %s for a tree past the bound: %v",
-			diag.E_SNAPSHOT_DEPTH_EXCEEDED, deepRes)
-	}
-}
-
 // Marshal refuses an unresolved record whose target key graph.ParseKey cannot
-// read, as an invariant break: no constructor builds one and no caller can
-// write one, so the guard is reached here alone.
+// read, as an invariant break: no snapshot holds one and no caller can write one,
+// so the guard is reached here alone.
 func TestParseTargetKey_RefusesAKeyParseKeyCannotRead(t *testing.T) {
 	t.Parallel()
 	for _, keyStr := range []string{`[["nested"]]`, `[{"a":1}]`, `["unterminated`, `[1e400]`} {

@@ -4,19 +4,17 @@ import (
 	"bytes"
 	"context"
 	"encoding/csv"
-	"errors"
 	"io"
 	"reflect"
 	"strings"
 	"testing"
-	"time"
 
 	jsonadapter "github.com/simon-lentz/yammm/adapter/json"
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/graph"
-	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/instance"
-	"github.com/simon-lentz/yammm/internal/instancetest"
+	"github.com/simon-lentz/yammm/internal/snapparts"
+	"github.com/simon-lentz/yammm/internal/snappartstest"
 	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
 )
@@ -224,55 +222,39 @@ func TestListRendering_AScalarHasOneSpellingInEveryCell(t *testing.T) {
 	}
 }
 
-// A float32 reaches the writer only through a bypass-built instance, which
-// nothing validates. A Vector's elements render through the Float constraint,
-// so it is widened to float64 as a Float and a List<Float> element are: in a
-// Vector, an aliased Vector, a nested list and an edge property alike.
-func TestListRendering_ABypassBuiltFloat32RendersAsAFloatDoes(t *testing.T) {
+// An integer at a Float position is no validated value. A Vector's elements render
+// through the Float constraint, so it is written as a float, as a Float and a
+// List<Float> element are: in a Vector, an aliased Vector, a nested list and an edge
+// property alike.
+func TestListRendering_AHeldIntegerRendersAsAFloatDoes(t *testing.T) {
 	t.Parallel()
 	s := loadListRenderingSchema(t)
-	grid, ok := s.Type("Grid")
-	if !ok {
-		t.Fatal("Grid missing from the fixture schema")
-	}
-	station, ok := s.Type("Station")
-	if !ok {
-		t.Fatal("Station missing from the fixture schema")
-	}
-	g := graph.New(s)
-	if res := g.Add(context.Background(), instancetest.VI("Station", instancetest.TypeID(station.ID()), instancetest.PK("sA"),
-		instancetest.Props(map[string]any{"code": "sA"}))); res.HasErrors() {
-		t.Fatalf("add Station: %s", res)
-	}
-	vi := instancetest.VI("Grid", instancetest.TypeID(grid.ID()), instancetest.PK("g1"),
-		instancetest.Props(map[string]any{
-			"id":      "g1",
-			"weight":  float32(0.1),
-			"weights": []any{float32(0.1)},
-			"at":      []any{float32(1e7), float32(0.1)},
-			"av":      []any{float32(1e7), float32(0.1)},
-			"points":  []any{[]any{float32(1e7), float32(1e-7)}},
-		}),
-		instancetest.Edges(map[string]instance.ValidEdgeData{
-			"STOPS": instance.NewValidEdgeData([]instance.ValidEdgeTarget{
-				instance.NewValidEdgeTarget(immutable.WrapKey([]any{"sA"}), immutable.WrapProperties(map[string]any{"w": float32(0.1)})),
+	snap := snappartstest.Loaded(t, s, snapparts.Parts{
+		Instances: []snapparts.Instance{
+			heldRoot(t, s, "Station", "sA", map[string]any{"code": "sA"}),
+			heldRoot(t, s, "Grid", "g1", map[string]any{
+				"id":      "g1",
+				"weight":  int64(7),
+				"weights": []any{int64(7)},
+				"at":      []any{int64(7), 0.5},
+				"av":      []any{int64(7), 0.5},
+				"points":  []any{[]any{int64(7), 0.5}},
 			}),
-		}))
-	if res := g.Add(context.Background(), vi); res.HasErrors() {
-		t.Fatalf("add: %s", res)
-	}
-	files, err := New().MarshalSnapshot(context.Background(), g.Snapshot())
+		},
+		Edges: []snapparts.Edge{heldEdge(t, s, "Grid", "g1", "STOPS", "sA", map[string]any{"w": int64(7)})},
+	})
+	files, err := New().MarshalSnapshot(context.Background(), snap)
 	if err != nil {
 		t.Fatalf("MarshalSnapshot: %v", err)
 	}
-	const tenth, tenMillion, tenMillionth = "0.10000000149011612", "10000000.0", "0.00000010000000116860974"
+	const seven, half = "7.0", "0.5"
 	for column, want := range map[string]string{
-		"weight":  tenth,
-		"weights": tenth,
-		"at":      tenMillion + "|" + tenth,
-		"av":      tenMillion + "|" + tenth,
-		"points":  tenMillion + `\|` + tenMillionth,
-		"stops.w": tenth,
+		"weight":  seven,
+		"weights": seven,
+		"at":      seven + "|" + half,
+		"av":      seven + "|" + half,
+		"points":  seven + `\|` + half,
+		"stops.w": seven,
 	} {
 		if got := cellsOf(t, files["Grid"], column)[0]; got != want {
 			t.Errorf("column %q: got %q, want %q", column, got, want)
@@ -280,28 +262,16 @@ func TestListRendering_ABypassBuiltFloat32RendersAsAFloatDoes(t *testing.T) {
 	}
 }
 
-// A value its constraint cannot render reaches the writer only through a
-// bypass-built instance. A scalar is written as it arrived, at the top of a
-// cell and inside a list alike, so the reader meets the value the snapshot
-// held; a composite such as a time.Time has no spelling a reader would read
-// back as it, and is refused.
+// A value its constraint cannot render is no validated value. A scalar is written
+// as it arrived, at the top of a cell and inside a list alike, so the reader meets
+// the value the snapshot held.
 func TestListRendering_AValueItsConstraintCannotRenderIsWrittenAsItArrived(t *testing.T) {
 	t.Parallel()
 	s := loadListRenderingSchema(t)
-	grid, ok := s.Type("Grid")
-	if !ok {
-		t.Fatal("Grid missing from the fixture schema")
-	}
-	build := func(props map[string]any) graph.Snapshot {
-		t.Helper()
-		g := graph.New(s)
-		vi := instancetest.VI("Grid", instancetest.TypeID(grid.ID()), instancetest.PK("g1"), instancetest.Props(props))
-		if res := g.Add(context.Background(), vi); res.HasErrors() {
-			t.Fatalf("add: %s", res)
-		}
-		return g.Snapshot()
-	}
-	files, err := New().MarshalSnapshot(context.Background(), build(map[string]any{"id": "g1", "n": "seven", "counts": []any{"eight", int64(9)}}))
+	snap := snappartstest.Loaded(t, s, snapparts.Parts{Instances: []snapparts.Instance{
+		heldRoot(t, s, "Grid", "g1", map[string]any{"id": "g1", "n": "seven", "counts": []any{"eight", int64(9)}}),
+	}})
+	files, err := New().MarshalSnapshot(context.Background(), snap)
 	if err != nil {
 		t.Fatalf("MarshalSnapshot: %v", err)
 	}
@@ -310,12 +280,6 @@ func TestListRendering_AValueItsConstraintCannotRenderIsWrittenAsItArrived(t *te
 	}
 	if got := cellsOf(t, files["Grid"], "counts")[0]; got != "eight|9" {
 		t.Errorf("counts: got %q, want eight|9", got)
-	}
-
-	when := time.Date(2026, 8, 19, 12, 0, 0, 0, time.UTC)
-	_, err = New().MarshalSnapshot(context.Background(), build(map[string]any{"id": "g1", "tags": []any{when, "b"}}))
-	if !errors.Is(err, ErrUnrepresentable) || !strings.Contains(err.Error(), "a value of type time.Time") {
-		t.Errorf("a time.Time in a List<String>: %v, want ErrUnrepresentable naming its type", err)
 	}
 }
 
@@ -340,83 +304,36 @@ func TestListRendering_AnInnerListOfOneEmptyElementIsRefused(t *testing.T) {
 		if err == nil || !strings.Contains(err.Error(), "one empty element") || !strings.Contains(err.Error(), `"rows"`) || !strings.Contains(err.Error(), c.where) {
 			t.Errorf("rows %v: got %v, want a refusal naming the property and %q", c.rows, err, c.where)
 		}
-		var sink bytes.Buffer
-		err = New(WithSchema(s)).WriteSnapshot(context.Background(), func(string) (io.Writer, error) { return &sink, nil }, snap)
-		if err == nil || !strings.Contains(err.Error(), "one empty element") {
-			t.Errorf("rows %v: WriteSnapshot: got %v, want the same refusal", c.rows, err)
-		}
 	}
 }
 
-// Under a separator whose end overlaps its start, such as "||", an element that
-// ends with the overlapping part — "a|" — would let a separator match begin
-// inside the element. Every element survives, in a list cell and in both kinds
-// of edge segment, under separators that overlap themselves and ones that do
-// not, one of them holding a backslash after its first byte.
-func TestListRendering_AMultiByteSeparatorSplitsOnlyBetweenElements(t *testing.T) {
+// An element holding the separator or the escape survives, in a list cell and in
+// both kinds of edge segment: the separator is found only between elements.
+func TestListRendering_TheSeparatorSplitsOnlyBetweenElements(t *testing.T) {
 	t.Parallel()
 	s := loadListRenderingSchema(t)
-	for _, sep := range []string{"||", "|x", "x|", "::", "→", "→→", `|\`, "aba"} {
-		snap := emptyCellSnapshot(t, s, []typedRow{
-			{"Station", map[string]any{"code": "a|"}},
-			{"Station", map[string]any{"code": "|b"}},
-			{"Station", map[string]any{"code": "x:"}},
-			{"Station", map[string]any{"code": "→"}},
-			{"Station", map[string]any{"code": "ab"}},
-			{"Grid", map[string]any{
-				"id":   "g1",
-				"tags": []any{"a|", "b", "|c", "x", ":", "→→", `\`, "ab", "a"},
-				"rows": []any{[]any{"a|", "|"}, []any{"x:", ":x"}, []any{"→", "ab"}},
-				"stops": []any{
-					map[string]any{"_target_code": "a|", "note": ":"},
-					map[string]any{"_target_code": "|b", "note": "x:"},
-					map[string]any{"_target_code": "x:", "note": "→"},
-					map[string]any{"_target_code": "→", "note": "ab"},
-					map[string]any{"_target_code": "ab", "note": `\`},
-				},
-			}},
-		})
-		a := New(WithSchema(s), WithListSeparator(sep))
-		files, again := csvRoundTrip(t, a, s, snap, []string{"Station", "Grid"})
-		assertSameGraph(t, snap, again, files)
-	}
-}
-
-// A separator the parser cannot find again is refused on both sides before a
-// byte is read or written: one beginning with the backslash, which the parser
-// reads as an escape, and one holding a CR LF, which encoding/csv reads back as
-// LF. The parse refusal is an Error.
-func TestListRendering_ASeparatorTheParserCannotFindIsRefused(t *testing.T) {
-	t.Parallel()
-	s := loadListRenderingSchema(t)
-	typ, _ := s.Type("Grid")
-	snap := emptyCellSnapshot(t, s, []typedRow{{"Grid", map[string]any{"id": "g1", "tags": []any{"a", "b"}}}})
-	for _, sep := range []string{`\`, `\|`, "\r\n", ";\r\n"} {
-		a := New(WithSchema(s), WithListSeparator(sep))
-
-		if _, err := a.MarshalSnapshot(context.Background(), snap); err == nil || !strings.Contains(err.Error(), "list separator") {
-			t.Errorf("%q: MarshalSnapshot: got %v, want a refusal naming the list separator", sep, err)
-		}
-		requested := false
-		err := a.WriteSnapshot(context.Background(), func(string) (io.Writer, error) {
-			requested = true
-			return io.Discard, nil
-		}, snap)
-		if err == nil || !strings.Contains(err.Error(), "list separator") || requested {
-			t.Errorf("%q: WriteSnapshot: got %v (writer requested: %v), want a refusal before any writer", sep, err, requested)
-		}
-
-		input := &countingReader{r: strings.NewReader("id,tags\ng1,a|b\n")}
-		raws, res := a.ParseTyped(context.Background(), location.NewSourceID("g.csv"), "Grid", input, typ)
-		if len(raws) != 0 || !hasSeverity(res, diag.Error, E_CSV_CONFIG, "list separator") || input.reads != 0 {
-			t.Errorf("%q: ParseTyped: got %d instances, %d reads and %s, want none, no read and an Error E_CSV_CONFIG naming the list separator", sep, len(raws), input.reads, res.String())
-		}
-		byType, res := New(WithSchema(s), WithListSeparator(sep), WithTypeColumn("type")).ParseWithTypeColumn(context.Background(), location.NewSourceID("g.csv"),
-			strings.NewReader("type,id,tags\nGrid,g1,a|b\n"), func(string) schema.Type { return typ })
-		if len(byType) != 0 || !hasSeverity(res, diag.Error, E_CSV_CONFIG, "list separator") {
-			t.Errorf("%q: ParseWithTypeColumn: got %v and %s, want none and an Error E_CSV_CONFIG naming the list separator", sep, byType, res.String())
-		}
-	}
+	snap := emptyCellSnapshot(t, s, []typedRow{
+		{"Station", map[string]any{"code": "a|"}},
+		{"Station", map[string]any{"code": "|b"}},
+		{"Station", map[string]any{"code": "x:"}},
+		{"Station", map[string]any{"code": "→"}},
+		{"Station", map[string]any{"code": "ab"}},
+		{"Grid", map[string]any{
+			"id":   "g1",
+			"tags": []any{"a|", "b", "|c", "x", ":", "→→", `\`, "ab", "a"},
+			"rows": []any{[]any{"a|", "|"}, []any{"x:", ":x"}, []any{"→", "ab"}},
+			"stops": []any{
+				map[string]any{"_target_code": "a|", "note": ":"},
+				map[string]any{"_target_code": "|b", "note": "x:"},
+				map[string]any{"_target_code": "x:", "note": "→"},
+				map[string]any{"_target_code": "→", "note": "ab"},
+				map[string]any{"_target_code": "ab", "note": `\`},
+			},
+		}},
+	})
+	a := New(WithSchema(s))
+	files, again := csvRoundTrip(t, a, s, snap, []string{"Station", "Grid"})
+	assertSameGraph(t, snap, again, files)
 }
 
 // countingReader counts the reads a parse makes of its input.
@@ -439,11 +356,10 @@ func hasSeverity(res diag.Result, severity diag.Severity, code diag.Code, mentio
 	return false
 }
 
-// WithListSeparator ignores the empty separator and keeps "|". An Adapter that
-// never went through New holds the empty one, which the splitter cannot use;
-// its zero delimiter refuses first, on both sides, before any list is escaped
-// or split, which is why no rule refuses the empty separator itself.
-func TestListRendering_TheEmptySeparatorIsNeverUsed(t *testing.T) {
+// A list renders under the "|" separator. An Adapter that never went through New
+// holds the zero delimiter, which refuses on both sides before any list is
+// escaped or split.
+func TestListRendering_TheZeroAdapterRefusesItsDelimiter(t *testing.T) {
 	t.Parallel()
 	s := loadListRenderingSchema(t)
 	typ, _ := s.Type("Grid")
@@ -452,7 +368,7 @@ func TestListRendering_TheEmptySeparatorIsNeverUsed(t *testing.T) {
 		{"Grid", map[string]any{"id": "g1", "tags": []any{"a", "b"}, "stops": []any{map[string]any{"_target_code": "sA", "note": "n"}}}},
 	})
 
-	files, err := New(WithListSeparator("")).MarshalSnapshot(context.Background(), snap)
+	files, err := New().MarshalSnapshot(context.Background(), snap)
 	if err != nil {
 		t.Fatalf("MarshalSnapshot: %v", err)
 	}
@@ -464,9 +380,6 @@ func TestListRendering_TheEmptySeparatorIsNeverUsed(t *testing.T) {
 	if _, err := zero.MarshalSnapshot(context.Background(), snap); err == nil || !strings.Contains(err.Error(), "delimiter") {
 		t.Errorf("zero Adapter: MarshalSnapshot: got %v, want the delimiter's refusal", err)
 	}
-	if err := zero.WriteSnapshot(context.Background(), func(string) (io.Writer, error) { return io.Discard, nil }, snap); err == nil || !strings.Contains(err.Error(), "delimiter") {
-		t.Errorf("zero Adapter: WriteSnapshot: got %v, want the delimiter's refusal", err)
-	}
 	raws, res := zero.ParseTyped(context.Background(), location.NewSourceID("g.csv"), "Grid", strings.NewReader("id,tags\ng1,a|b\n"), typ)
 	if len(raws) != 0 || !hasSeverity(res, diag.Error, E_CSV_CONFIG, "delimiter") {
 		t.Errorf("zero Adapter: ParseTyped: got %d instances and %s, want none and the delimiter's Error", len(raws), res.String())
@@ -474,27 +387,19 @@ func TestListRendering_TheEmptySeparatorIsNeverUsed(t *testing.T) {
 }
 
 // encoding/csv's reader turns every CR LF into LF, inside a quoted field too, so
-// a cell holding one would read back changed. Both writers refuse it, whether
-// the value holds it or a separator joins a CR to an LF; a lone CR is written.
+// a cell holding one would read back changed. The writer refuses it; a lone CR is
+// written.
 func TestListRendering_ACellHoldingACRLFIsRefused(t *testing.T) {
 	t.Parallel()
 	s := loadListRenderingSchema(t)
-	for _, c := range []struct {
-		sep   string
-		props map[string]any
-	}{
-		{"|", map[string]any{"id": "g1", "tags": []any{"a\r\nb"}}},
-		{"|", map[string]any{"id": "g1\r\n"}},
-		{"\n", map[string]any{"id": "g1", "tags": []any{"a\r", "b"}}},
-		{"\r", map[string]any{"id": "g1", "tags": []any{"a", "\nb"}}},
+	for _, props := range []map[string]any{
+		{"id": "g1", "tags": []any{"a\r\nb"}},
+		{"id": "g1\r\n"},
 	} {
-		snap := emptyCellSnapshot(t, s, []typedRow{{"Grid", c.props}})
-		a := New(WithSchema(s), WithListSeparator(c.sep))
+		snap := emptyCellSnapshot(t, s, []typedRow{{"Grid", props}})
+		a := New(WithSchema(s))
 		if _, err := a.MarshalSnapshot(context.Background(), snap); err == nil || !strings.Contains(err.Error(), "CR LF") {
-			t.Errorf("%q %v: MarshalSnapshot: got %v, want a refusal naming the CR LF", c.sep, c.props, err)
-		}
-		if err := a.WriteSnapshot(context.Background(), func(string) (io.Writer, error) { return io.Discard, nil }, snap); err == nil || !strings.Contains(err.Error(), "CR LF") {
-			t.Errorf("%q %v: WriteSnapshot: got %v, want the same refusal", c.sep, c.props, err)
+			t.Errorf("%v: MarshalSnapshot: got %v, want a refusal naming the CR LF", props, err)
 		}
 	}
 
@@ -504,28 +409,26 @@ func TestListRendering_ACellHoldingACRLFIsRefused(t *testing.T) {
 }
 
 // A cell the writer never produces still reads as the splitter defines it: a
-// file written under the whole-match escape, where only a whole separator was
-// escaped, reads back as it always did, and a trailing lone backslash is text.
+// trailing lone backslash is text.
 func TestListRendering_HandWrittenCellsReadAsTheSplitterDefines(t *testing.T) {
 	t.Parallel()
 	s := loadListRenderingSchema(t)
 	typ, _ := s.Type("Grid")
 	for _, c := range []struct {
-		sep, cell string
-		want      []any
+		cell string
+		want []any
 	}{
-		{"||", `a\||b||c`, []any{"a||b", "c"}},
-		{"||", `a\|b`, []any{"a|b"}},
-		{"|", `a|b\`, []any{"a", `b\`}},
-		{"|", `\`, []any{`\`}},
+		{`a|b\`, []any{"a", `b\`}},
+		{`\`, []any{`\`}},
+		{`a\|b`, []any{"a|b"}},
 	} {
 		in := "id,tags\ng1," + c.cell + "\n"
-		raws, res := New(WithSchema(s), WithListSeparator(c.sep)).ParseTyped(context.Background(), location.NewSourceID("g.csv"), "Grid", strings.NewReader(in), typ)
+		raws, res := New(WithSchema(s)).ParseTyped(context.Background(), location.NewSourceID("g.csv"), "Grid", strings.NewReader(in), typ)
 		if res.HasErrors() || len(raws) != 1 {
-			t.Fatalf("%q %q: got %d instances and %s", c.sep, c.cell, len(raws), res.String())
+			t.Fatalf("%q: got %d instances and %s", c.cell, len(raws), res.String())
 		}
 		if got := raws[0].Properties["tags"]; !reflect.DeepEqual(got, c.want) {
-			t.Errorf("%q %q: got %#v, want %#v", c.sep, c.cell, got, c.want)
+			t.Errorf("%q: got %#v, want %#v", c.cell, got, c.want)
 		}
 	}
 }

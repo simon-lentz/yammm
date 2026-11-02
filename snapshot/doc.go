@@ -4,8 +4,7 @@
 // The .ys format is a JSON-based persistence format that preserves structural
 // fidelity: instances with properties, primary keys, edges, compositions, provenance,
 // duplicates, and unresolved edge records all survive a Marshal/Load round-trip.
-// Provenance survives as source name and path, with a zero span, and a
-// duplicate's Diagnostic is not persisted.
+// Provenance survives as source name and path, with a zero span.
 //
 // The format includes a schema structural hash for compatibility verification, an
 // integrity hash for corruption detection, and a features array, which this
@@ -13,19 +12,24 @@
 //
 // # Validity Contract
 //
-// Validation happens at [github.com/simon-lentz/yammm/instance.Validator] —
-// the one door that sets the unforgeable
-// [github.com/simon-lentz/yammm/instance.ValidInstance.Validated] bit. The
-// exported bypass constructors assert a caller's claim and leave it false.
+// Validation happens at [github.com/simon-lentz/yammm/instance.Validator], the
+// one source of a [github.com/simon-lentz/yammm/instance.ValidInstance].
 //
 // The .ys header carries the writing library's attestation of values and
 // associations, whose rules [graph.Attestation] states. The integrity hash is an unkeyed SHA-256 of the
 // document: it detects corruption and an edit nobody rehashed, save in a document
 // whose stored hash is empty, which no check compares. Anyone can
-// recompute it, so it stops no deliberate edit. [graph.RebuildSnapshot] is exported,
-// so any process can assemble and sign a document whose header claims what
-// its instances never earned; the unforgeable point is the instance layer,
-// and the attestation is the writer's word, not a proof.
+// recompute it, so it stops no deliberate edit: any process can write a document
+// whose header claims what its instances never earned and hash it. The unforgeable
+// point is the instance layer, and the attestation is the writer's word, not a proof.
+//
+// Every reader of a document refuses text encoding/json would silently rewrite to
+// U+FFFD: a string holding invalid UTF-8 or a surrogate escape that is half of no
+// pair. [Load], [Verify], [Info], [HeaderOnly] and [UpdateMetadata] judge the text
+// of the whole document before its header, with [diag.E_SNAPSHOT_MALFORMED].
+// [HeaderOnlyRead] and [ScanDir] read up to the end of the types table and judge
+// that text last, with the same code. A fault they find first, such as an
+// unsupported version, is the one they report.
 //
 // [Load] refuses a document whose structure no caller of [graph.Graph.Add]
 // could have built: one that breaks a fact of the graph package doc's
@@ -111,9 +115,9 @@
 //
 // [HeaderOnly] reads header metadata from a .ys file without decoding the
 // instance body or verifying the integrity hash. Returns a [HeaderInfo] with
-// the header fields, the types array and the file size. It decodes the header and the types
-// table alone, and still scans the whole document to check its top-level
-// shape and the member names of every object;
+// the header fields, the types array and the file size. It decodes only the header
+// and the types table, and its scan of the whole document checks the top-level
+// shape, the member names of every object and the text of every string.
 // [HeaderOnlyRead] decodes the members up to the types table and that table,
 // and no further, though its decoder's buffer can read past them. Either suits dispatch-style
 // workloads that scan many .ys files to classify state or compare schema
@@ -173,12 +177,10 @@
 // surface on [ScanEntry.Result] and iteration continues. A failed stat raises
 // nothing and leaves the entry's size and modification time zero. Files whose
 // basename ends with [TmpSuffix] are skipped so crash-residual
-// staging files are not confused for complete snapshots. The directory is
-// cleaned before it is read, so each [ScanEntry.Path] names an entry of the
-// directory the scan listed.
+// staging files are not confused for complete snapshots. A directory name that is
+// not empty is cleaned before the read, so each [ScanEntry.Path] names an entry of
+// the listed directory. An empty name fails as a missing directory does.
 // [ScanDirSlice] is the materializing convenience wrapper.
-// [ScanDirWith] and [ScanDirSliceWith] are the same two under [ScanOption]
-// values, where [WithScanFilter] rejects a file before it is opened.
 //
 // [UpdateMetadata] rewrites the header of an existing .ys document
 // with a new metadata map, reusing the body bytes verbatim and
@@ -197,10 +199,9 @@
 // surfaces a Warning-severity [diag.W_UPDATE_METADATA_FALLBACK] on the
 // returned [diag.Result] so operators can observe fallback frequency.
 //
-// [WithUpdateCreatedAt] overrides the created_at header field on
-// [UpdateMetadata] and [UpdateMetadataOrReMarshal]; by default each keeps the
-// existing value, byte for byte when it is RFC 3339, except that the fallback
-// path drops, with a Warning, a value it cannot parse.
+// [UpdateMetadata] and [UpdateMetadataOrReMarshal] keep the text of the existing
+// created_at, except that the fallback path drops, with a Warning, a value it
+// cannot parse.
 //
 // # Marshal Options
 //
@@ -211,13 +212,6 @@
 //   - [WithCreatedAtFrom]: embed the creation timestamp another header states
 //   - [WithMetadata]: embed key-value metadata, each key and value valid UTF-8
 //
-// # Update Options
-//
-// [UpdateMetadata] and [UpdateMetadataOrReMarshal] accept [UpdateOption]
-// values:
-//
-//   - [WithUpdateCreatedAt]: override the existing created_at (preserved by default, save where the fallback cannot parse it)
-//
 // # Load Options
 //
 // [Load] and [Verify] accept [LoadOption] values:
@@ -227,27 +221,20 @@
 //   - [WithValueConformance]: report a root's or a composed child's stored Timestamp/Date/UUID values that do not conform to their constraints (Warning)
 //   - [WithRevalidation]: run each root the structural checks left whole, with its composed children, edges and target_missing records, back through the real validator, reported at the given severity
 //
-// # Scan Options
-//
-// [ScanDirWith] and [ScanDirSliceWith] accept [ScanOption] values:
-//
-//   - [WithScanFilter]: reject a file before it is opened
-//
 // # Error Handling
 //
 // The read, write and update functions return [diag.Result]; [WriteFile]
-// returns an error, and [ScanDir] and [ScanDirWith] yield a [diag.Result] per
-// entry, in [ScanEntry.Result]:
+// returns an error, and [ScanDir] yields a [diag.Result] per entry, in
+// [ScanEntry.Result]:
 //
 //   - Fatal: an I/O failure, a cancelled context, a body the metadata update
 //     cannot locate, or a broken invariant (E_INTERNAL)
 //   - Error: the input is refused. Among the causes are a schema hash
 //     mismatch, an integrity check failure, a structural break, and a
-//     version, feature or type this library does not read; at [Marshal], a
-//     value the wire cannot carry, a tree nested past the reader's bound, an
-//     indent that is not JSON whitespace, or a type whose schema is outside the
-//     entry schema's import closure; and at [Marshal] and the metadata update,
-//     a metadata key or value that is not valid UTF-8
+//     version, feature or type this library does not read; at [Marshal], an
+//     indent that is not JSON whitespace, or a provenance source name or raw path
+//     that is not valid UTF-8; and at [Marshal] and the metadata update, a
+//     metadata key or value that is not valid UTF-8
 //   - Any severity: a [WithRevalidation] finding takes the severity the
 //     caller passed
 //   - OK: success (may include warnings)
@@ -281,9 +268,11 @@
 // [[MinReadableVersion], currentVersion]. The two constants are ONE
 // value — this package reads only the version it writes — so widening
 // the range is a deliberate act rather than an edit that forgets to.
-// Documents outside the range surface an Error-severity
-// [diag.E_SNAPSHOT_UNSUPPORTED_VERSION] with the observed version and
-// the supported range named in the message. A v3 document is refused,
+// A document of the expected shape outside the range draws an Error-severity
+// [diag.E_SNAPSHOT_UNSUPPORTED_VERSION], whose message names the observed
+// version and the supported range. [Load], [Verify], [Info], [HeaderOnly] and
+// [UpdateMetadata] report one that also breaks the shape or the text rule as
+// [diag.E_SNAPSHOT_MALFORMED] instead. A v3 document is refused,
 // not migrated; an older reader rejects a v4 document the same way, so
 // an operator running an older binary sees a structured diagnostic
 // rather than a misread types section. See docs/API.md's Versioning Policy
@@ -291,12 +280,11 @@
 //
 // # Thread Safety
 //
-// All package functions are stateless and safe for concurrent use. A
-// [ScanCandidate] belongs to the filter call it is passed to.
+// All package functions are stateless and safe for concurrent use.
 //
 // # Dependencies
 //
-//	snapshot  ──imports──▶  graph, instance, schema, diag, location, location/path, immutable, internal/value, internal/hostpath
+//	snapshot  ──imports──▶  graph, instance, schema, diag, location, location/path, immutable, internal/value, internal/hostpath, internal/snapparts
 //
 // The instance edge exists for [WithRevalidation], whose re-validation runs
 // the real validator, so the option's fidelity is the validator's own, and for

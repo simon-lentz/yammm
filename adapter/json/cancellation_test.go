@@ -12,8 +12,7 @@ import (
 
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/graph"
-	"github.com/simon-lentz/yammm/immutable"
-	"github.com/simon-lentz/yammm/instance"
+	"github.com/simon-lentz/yammm/internal/instancetest"
 	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
 )
@@ -40,13 +39,7 @@ func cancelSnapshot(t *testing.T) graph.Snapshot {
 	}
 	g := graph.New(s)
 	for _, tn := range []string{"Alpha", "Beta"} {
-		ty, ok := s.Type(tn)
-		if !ok {
-			t.Fatalf("no %s type", tn)
-		}
-		inst := instance.NewValidInstance(tn, ty.ID(),
-			immutable.WrapKey([]any{"k1"}),
-			immutable.WrapProperties(map[string]any{"id": "k1"}), nil, nil, location.Provenance{})
+		inst := instancetest.Valid(t, s, tn, map[string]any{"id": "k1"})
 		if r := g.Add(ctx, inst); r.Err() != nil {
 			t.Fatalf("add %s: %v", tn, r.Err())
 		}

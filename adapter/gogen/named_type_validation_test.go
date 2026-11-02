@@ -130,7 +130,7 @@ func TestNamedTypes_StillCheckedAgainstTheirConstraint(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if _, res := v.ValidateOne(t.Context(), "County", instance.RawInstance{Properties: tc.props}); res.OK() {
-				t.Error("a named carrier bypassed its constraint")
+				t.Error("a named carrier escaped its constraint")
 			}
 		})
 	}

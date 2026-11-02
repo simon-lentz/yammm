@@ -1,10 +1,12 @@
 package instance
 
 import (
+	"os"
 	"strings"
 	"testing"
 
 	"github.com/simon-lentz/yammm/diag"
+	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/instance/internal/eval"
 	"github.com/simon-lentz/yammm/internal/parse"
 	"github.com/simon-lentz/yammm/location"
@@ -417,7 +419,7 @@ func TestInvariantContract_RefuseRows(t *testing.T) {
 	}
 	scope := eval.PropertyScopeOf(v.scopeOf(good))
 	empty := map[string]any{}
-	emptyScope := eval.PropertyScopeFromMap(empty)
+	emptyScope := eval.PropertyScopeOf(immutable.WrapMap(empty))
 
 	// Every row states what the EVALUATOR does with the shape the checker
 	// refuses: a fragment of the error it produces, or — where its arm cannot
@@ -742,8 +744,17 @@ func TestInvariantContract_EveryRetypedResultIsRefusedByItsConsumer(t *testing.T
 		expr.ResultBoolean: {`-> Abs > 0`, "takes a number"},
 	}
 
+	data, err := os.ReadFile("../schema/expr/testdata/builtin_names.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+
 	var checked int
-	for _, s := range expr.Builtins() {
+	for name := range strings.FieldsSeq(string(data)) {
+		s, ok := expr.LookupBuiltin(name)
+		if !ok {
+			t.Fatalf("builtin_names.txt names %s, which the catalogue does not hold", name)
+		}
 		c, retyped := consumer[s.Result]
 		if !retyped {
 			continue

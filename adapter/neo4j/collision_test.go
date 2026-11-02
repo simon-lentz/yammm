@@ -40,7 +40,7 @@ func TestLabelCollision_TwoSchemaNamesSanitizeAlike(t *testing.T) {
 	shape, shapeRes := a.ShapeForSchema(ctx, s)
 	if shape != nil {
 		t.Errorf("ShapeForSchema built a shape over a colliding closure (%d types); the collision must refuse",
-			len(shape.Types))
+			len(shape.types))
 	}
 	if !shapeRes.HasCode(E_NEO4J_LABEL_COLLISION) {
 		t.Errorf("ShapeForSchema refused without reporting %s", E_NEO4J_LABEL_COLLISION)

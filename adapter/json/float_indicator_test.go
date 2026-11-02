@@ -8,8 +8,8 @@ import (
 
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/graph"
-	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/instance"
+	"github.com/simon-lentz/yammm/internal/instancetest"
 	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
 )
@@ -51,14 +51,8 @@ func indicatorDoc(t *testing.T, props map[string]any) string {
 	if err := res.Err(); err != nil {
 		t.Fatalf("load: %v", err)
 	}
-	ty, ok := s.Type("Reading")
-	if !ok {
-		t.Fatal("no Reading type")
-	}
 	g := graph.New(s)
-	inst := instance.NewValidInstance("Reading", ty.ID(),
-		immutable.WrapKey([]any{"r1"}),
-		immutable.WrapProperties(props), nil, nil, location.Provenance{})
+	inst := instancetest.Valid(t, s, "Reading", props)
 	if r := g.Add(ctx, inst); r.Err() != nil {
 		t.Fatalf("add: %v", r.Err())
 	}
@@ -178,25 +172,10 @@ type Counter {
 	if err := res.Err(); err != nil {
 		t.Fatalf("load: %v", err)
 	}
-	ty, _ := sc.Type("Counter")
-	g := graph.New(sc)
-	for _, c := range []struct {
-		key  string
-		n    any
-		want string
-	}{
-		{"c1", int64(5), `"n":5}`},
-		{"c2", float64(6), `"n":6.0}`},
-	} {
-		inst := instance.NewValidInstance("Counter", ty.ID(),
-			immutable.WrapKey([]any{c.key}),
-			immutable.WrapProperties(map[string]any{"id": c.key, "n": c.n}),
-			nil, nil, location.Provenance{})
-		if r := g.Add(ctx, inst); r.Err() != nil {
-			t.Fatalf("add: %v", r.Err())
-		}
-	}
-	doc, err := New().MarshalObject(ctx, g.Snapshot())
+	snap := heldDocument(t, sc, "Counter",
+		`{"key":["c1"],"properties":{"id":"c1","n":5},"provenance":null},`+
+			`{"key":["c2"],"properties":{"id":"c2","n":6.0},"provenance":null}`)
+	doc, err := New().MarshalObject(ctx, snap)
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
 	}
@@ -231,12 +210,8 @@ func TestMarshalObject_IndentedOutputKeepsTheIndicator(t *testing.T) {
 	if err := res.Err(); err != nil {
 		t.Fatalf("load: %v", err)
 	}
-	ty, _ := s.Type("Reading")
 	g := graph.New(s)
-	inst := instance.NewValidInstance("Reading", ty.ID(),
-		immutable.WrapKey([]any{"r1"}),
-		immutable.WrapProperties(map[string]any{"id": "r1", "ratio": float64(1)}),
-		nil, nil, location.Provenance{})
+	inst := instancetest.Valid(t, s, "Reading", map[string]any{"id": "r1", "ratio": float64(1)})
 	if r := g.Add(ctx, inst); r.Err() != nil {
 		t.Fatalf("add: %v", r.Err())
 	}

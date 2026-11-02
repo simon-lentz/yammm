@@ -7,7 +7,6 @@ import (
 	"testing"
 
 	"github.com/simon-lentz/yammm/lsp/internal/docstate"
-	"github.com/simon-lentz/yammm/lsp/internal/lsputil"
 	"github.com/simon-lentz/yammm/lsp/internal/protocol"
 )
 
@@ -19,7 +18,7 @@ func TestAtPosition_PropertyAnnotationHover(t *testing.T) {
 	t.Parallel()
 	// Parse-independent: no snapshot. Cursor on "index" of a property @index.
 	doc := &docstate.Snapshot{Text: "schema \"m\"\ntype T {\n\tstate String @index\n}\n"}
-	h, err := AtPosition(nil, doc, 2, 16, lsputil.PositionEncodingUTF16, discardLogger())
+	h, err := AtPosition(nil, doc, 2, 16, discardLogger())
 	if err != nil {
 		t.Fatalf("hover error: %v", err)
 	}
@@ -35,7 +34,7 @@ func TestAtPosition_TypeAnnotationHover(t *testing.T) {
 	t.Parallel()
 	// Cursor on "index" of a type-level @@index member.
 	doc := &docstate.Snapshot{Text: "schema \"m\"\ntype T {\n\tid String primary\n\t@@index(id)\n}\n"}
-	h, err := AtPosition(nil, doc, 3, 5, lsputil.PositionEncodingUTF16, discardLogger())
+	h, err := AtPosition(nil, doc, 3, 5, discardLogger())
 	if err != nil {
 		t.Fatalf("hover error: %v", err)
 	}
@@ -51,7 +50,7 @@ func TestAtPosition_FulltextAnnotationHover(t *testing.T) {
 	t.Parallel()
 	// Cursor on "fulltext" of a property @fulltext.
 	doc := &docstate.Snapshot{Text: "schema \"m\"\ntype T {\n\ttitle String @fulltext\n}\n"}
-	h, err := AtPosition(nil, doc, 2, 18, lsputil.PositionEncodingUTF16, discardLogger())
+	h, err := AtPosition(nil, doc, 2, 18, discardLogger())
 	if err != nil {
 		t.Fatalf("hover error: %v", err)
 	}
@@ -67,7 +66,7 @@ func TestAtPosition_FulltextTypeAnnotationHover(t *testing.T) {
 	t.Parallel()
 	// Cursor on "fulltext" of a type-level @@fulltext member.
 	doc := &docstate.Snapshot{Text: "schema \"m\"\ntype T {\n\ttitle String\n\t@@fulltext(title)\n}\n"}
-	h, err := AtPosition(nil, doc, 3, 5, lsputil.PositionEncodingUTF16, discardLogger())
+	h, err := AtPosition(nil, doc, 3, 5, discardLogger())
 	if err != nil {
 		t.Fatalf("hover error: %v", err)
 	}
@@ -87,7 +86,7 @@ func TestAtPosition_FulltextTypeAnnotationHover(t *testing.T) {
 func TestAtPosition_AnnotationHover_MultibytePrefix(t *testing.T) {
 	t.Parallel()
 	doc := &docstate.Snapshot{Text: "Ω Ω Ω @index"}
-	h, err := AtPosition(nil, doc, 0, 7, lsputil.PositionEncodingUTF16, discardLogger())
+	h, err := AtPosition(nil, doc, 0, 7, discardLogger())
 	if err != nil {
 		t.Fatalf("hover error: %v", err)
 	}
@@ -117,7 +116,7 @@ func TestAtPosition_AnnotationHover_MultibytePrefix(t *testing.T) {
 func TestAtPosition_AnnotationHover_InStringNoHover(t *testing.T) {
 	t.Parallel()
 	doc := &docstate.Snapshot{Text: "schema \"m\"\ntype T {\n\temail Pattern[\"user@index.com\"]\n}\n"}
-	h, err := AtPosition(nil, doc, 2, 22, lsputil.PositionEncodingUTF16, discardLogger())
+	h, err := AtPosition(nil, doc, 2, 22, discardLogger())
 	if err != nil {
 		t.Fatalf("hover error: %v", err)
 	}
@@ -131,7 +130,7 @@ func TestAtPosition_AnnotationHover_InStringNoHover(t *testing.T) {
 func TestAtPosition_AnnotationHover_InCommentNoHover(t *testing.T) {
 	t.Parallel()
 	doc := &docstate.Snapshot{Text: "schema \"m\"\ntype T {\n\t/* see @vector */\n}\n"}
-	h, err := AtPosition(nil, doc, 2, 10, lsputil.PositionEncodingUTF16, discardLogger())
+	h, err := AtPosition(nil, doc, 2, 10, discardLogger())
 	if err != nil {
 		t.Fatalf("hover error: %v", err)
 	}
@@ -148,7 +147,7 @@ func TestAtPosition_AnnotationHover_InCommentNoHover(t *testing.T) {
 func TestAtPosition_AnnotationHover_InRegexNoHover(t *testing.T) {
 	t.Parallel()
 	doc := &docstate.Snapshot{Text: "schema \"m\"\ntype T {\n\t! \"bad\" tag =~ /^@index$/\n}\n"}
-	h, err := AtPosition(nil, doc, 2, 20, lsputil.PositionEncodingUTF16, discardLogger())
+	h, err := AtPosition(nil, doc, 2, 20, discardLogger())
 	if err != nil {
 		t.Fatalf("hover error: %v", err)
 	}

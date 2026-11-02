@@ -8,8 +8,9 @@ import (
 	"testing"
 
 	"github.com/simon-lentz/yammm/diag"
-	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/immutable"
+	"github.com/simon-lentz/yammm/internal/snapparts"
+	"github.com/simon-lentz/yammm/internal/snappartstest"
 	"github.com/simon-lentz/yammm/schema"
 	"github.com/simon-lentz/yammm/snapshot"
 )
@@ -18,9 +19,9 @@ import (
 //
 // A root is keyed by name in every output document, so a type reached only
 // through an intermediate import cannot hold one. This library cannot write
-// such a document — graph.RebuildSnapshot refuses it — but a foreign writer or
-// a document written before the rule can state one, and a reader that admitted
-// it would hand the caller a snapshot no adapter can key.
+// such a document, but a foreign writer or a document written before the rule can
+// state one, and a reader that admitted it would hand the caller a snapshot no
+// adapter can key.
 
 const unreachableRootEntry = `schema "entry"
 
@@ -46,9 +47,9 @@ type Beacon {
 
 // unnameableDocument marshals a legal Basin-only snapshot, then ADDS a types
 // table row for the transitively imported Beacon and points the populated group
-// at it. Both constructors now refuse such a type in SnapshotParts.Types, so the
-// document can only be built by editing the wire — which is exactly the shape a
-// foreign writer, or a document written before the rule, can carry.
+// at it. No snapshot holds such a type, so the document can only be built by
+// editing the wire — which is exactly the shape a foreign writer, or a document
+// written before the rule, can carry.
 func unnameableDocument(t *testing.T, items string) ([]byte, schema.Schema) {
 	t.Helper()
 	ctx := context.Background()
@@ -82,9 +83,9 @@ func unnameableDocument(t *testing.T, items string) ([]byte, schema.Schema) {
 	}
 	basin := basinType.ID()
 
-	built, res := graph.RebuildSnapshot(s, graph.SnapshotParts{
+	built := snappartstest.Loaded(t, s, snapparts.Parts{
 		Types: []schema.TypeID{basin},
-		Instances: []graph.InstanceParts{
+		Instances: []snapparts.Instance{
 			{
 				TypeID:     basin,
 				PrimaryKey: immutable.WrapKey([]any{"b1"}),
@@ -92,9 +93,6 @@ func unnameableDocument(t *testing.T, items string) ([]byte, schema.Schema) {
 			},
 		},
 	})
-	if res.HasErrors() {
-		t.Fatalf("assembling the legal base document: %s", res)
-	}
 	data, mres := snapshot.Marshal(ctx, built)
 	if mres.HasErrors() {
 		t.Fatalf("marshal: %s", mres)

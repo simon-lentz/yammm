@@ -36,23 +36,6 @@ func singleIssueResult(issue diag.Issue) diag.Result {
 	return c.Result()
 }
 
-// waitFor blocks until the analysis-completed hook reports want, or the test
-// deadline passes.
-func waitFor(t *testing.T, ch <-chan string, want string) {
-	t.Helper()
-	deadline := time.After(5 * time.Second)
-	for {
-		select {
-		case got := <-ch:
-			if got == want {
-				return
-			}
-		case <-deadline:
-			t.Fatalf("timed out waiting for analysis of %s", want)
-		}
-	}
-}
-
 // quietLogger keeps test output to real failures.
 func quietLogger() *slog.Logger {
 	return slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
@@ -276,7 +259,7 @@ func TestSnapshotForResult_KeepsAnalyzeContract(t *testing.T) {
 	entry := filepath.Join(t.TempDir(), "entry.yammm")
 
 	errorOnly := singleIssueResult(diag.NewIssue(diag.Error, diag.E_LOAD_MODULE_ROOT_MALFORMED, "bad marker").Build())
-	snap, err := a.SnapshotForResult(entry, errorOnly, lsputil.PositionEncodingUTF16)
+	snap, err := a.SnapshotForResult(entry, errorOnly)
 	if err != nil {
 		t.Errorf("SnapshotForResult on an Error-only result returned %v, want nil", err)
 	}
@@ -294,7 +277,7 @@ func TestSnapshotForResult_KeepsAnalyzeContract(t *testing.T) {
 	}
 
 	fatal := singleIssueResult(diag.NewIssue(diag.Fatal, diag.E_LOAD_IO_FAILURE, "cannot read marker").Build())
-	if _, err := a.SnapshotForResult(entry, fatal, lsputil.PositionEncodingUTF16); err == nil {
+	if _, err := a.SnapshotForResult(entry, fatal); err == nil {
 		t.Error("SnapshotForResult on a Fatal result returned nil, want the error Analyze returns")
 	}
 }
@@ -314,19 +297,22 @@ func TestFileChanged_MarkerReanalyzesOpenDocuments(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	analyzed := make(chan string, 8)
-	ws.setAnalysisCompletedHook(func(u string) {
-		select {
-		case analyzed <- u:
-		default:
-		}
-	})
 	ws.OpenDocument(uri, 1, string(content))
-	waitFor(t, analyzed, uri)
+	opened := ws.LatestSnapshot(uri)
+	if opened == nil {
+		t.Fatal("opening the document stored no snapshot")
+	}
 
 	markerURI := lsputil.PathToURI(filepath.Join(root, schema.ModuleRootMarker))
 	ws.FileChanged(markerURI, 2 /* Changed */)
-	waitFor(t, analyzed, uri)
+
+	deadline := time.Now().Add(5 * time.Second)
+	for ws.LatestSnapshot(uri) == opened {
+		if time.Now().After(deadline) {
+			t.Fatalf("timed out waiting for a new analysis of %s", uri)
+		}
+		time.Sleep(time.Millisecond)
+	}
 }
 
 // TestHostPath_RefusedPathMintsNoKey pins that a path the resolver refuses

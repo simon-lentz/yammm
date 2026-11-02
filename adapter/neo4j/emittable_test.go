@@ -116,9 +116,8 @@ func TestIndexes_InheritedPropertyAnnotations(t *testing.T) {
 // emittableTypes skips such a type after reporting it, so a detector built on
 // that gate would go silent for exactly the labels most likely to collide.
 //
-// The detector's positive branch itself cannot be reached through either schema
-// front door — SanitizeIdentifier is the identity function on the DSL name
-// productions, and NewBuilder rejects any name it is not (E_INVALID_NAME), so
+// The detector's positive branch itself cannot be reached through a load —
+// SanitizeIdentifier is the identity function on the DSL name productions, so
 // two distinct declared names cannot sanitize together. What is testable, and
 // what the split is actually about, is that the walk still SEES those types.
 func TestLabeledTypes_IncludesInvalidLabels(t *testing.T) {

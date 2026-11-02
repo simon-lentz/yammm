@@ -4,13 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log/slog"
 	"math"
 	"regexp"
 	"strings"
 
 	"github.com/simon-lentz/yammm/immutable"
-	"github.com/simon-lentz/yammm/internal/trace"
 	"github.com/simon-lentz/yammm/internal/value"
 	"github.com/simon-lentz/yammm/schema/expr"
 )
@@ -19,35 +17,17 @@ import (
 //
 // Evaluator is stateless and safe for concurrent use. All evaluation state
 // is contained in the Scope passed to each evaluation.
-type Evaluator struct {
-	cfg *evalConfig
-}
+type Evaluator struct{}
 
 // NewEvaluator creates a new expression evaluator.
-func NewEvaluator(opts ...Option) *Evaluator {
-	return &Evaluator{
-		cfg: applyOptions(opts),
-	}
+func NewEvaluator() *Evaluator {
+	return &Evaluator{}
 }
 
-// Evaluate evaluates an expression with the given scope. The context reaches
-// every trace record the evaluation writes, so a request id it carries is on
-// each of them; cancellation is the caller's to check between evaluations.
+// Evaluate evaluates an expression with the given scope. Cancellation is the
+// caller's to check between evaluations.
 // Returns the result value, or an error if evaluation fails.
-func (e *Evaluator) Evaluate(ctx context.Context, expression expr.Expression, scope Scope) (result any, err error) {
-	// The op ends with the evaluation's own error, which is not known until
-	// the return, hence the closure. A panic never assigns the named return,
-	// so it is recovered here to end the op with it and re-raised for the
-	// recover that owns it.
-	op := trace.Begin(ctx, e.cfg.logger, "yammm.eval.expr")
-	defer func() {
-		if r := recover(); r != nil {
-			op.End(fmt.Errorf("panic: %v", r))
-			panic(r)
-		}
-		op.End(err)
-	}()
-
+func (e *Evaluator) Evaluate(ctx context.Context, expression expr.Expression, scope Scope) (any, error) {
 	return e.evaluate(ctx, expression, scope)
 }
 
@@ -99,11 +79,6 @@ var operatorOps = map[string]bool{
 func (e *Evaluator) evalSExpr(ctx context.Context, sexpr expr.SExpr, scope Scope) (any, error) {
 	op := sexpr.Op()
 	children := sexpr.Children()
-
-	trace.Debug(
-		ctx, e.cfg.logger, "evaluating s-expression",
-		slog.String("op", op),
-	)
 
 	// Special forms that don't evaluate all children upfront
 	switch op {

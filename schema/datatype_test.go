@@ -12,7 +12,7 @@ import (
 func TestNewDataType(t *testing.T) {
 	constraint := schema.NewStringConstraint()
 	span := location.Span{
-		Source: location.MustNewSourceID("test://datatype"),
+		Source: location.NewSourceID("test://datatype"),
 		Start:  location.Position{Line: 1, Column: 1, Byte: 0},
 		End:    location.Position{Line: 1, Column: 10, Byte: 10},
 	}
@@ -53,7 +53,7 @@ func TestDataType_Constraint(t *testing.T) {
 
 func TestDataType_Span(t *testing.T) {
 	span := location.Span{
-		Source: location.MustNewSourceID("test://span"),
+		Source: location.NewSourceID("test://span"),
 		Start:  location.Position{Line: 5, Column: 1, Byte: 40},
 		End:    location.Position{Line: 5, Column: 20, Byte: 60},
 	}

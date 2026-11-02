@@ -7,12 +7,11 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/simon-lentz/yammm/graph"
+	"github.com/simon-lentz/yammm/internal/snapparts"
+
 	"github.com/simon-lentz/yammm/immutable"
-	"github.com/simon-lentz/yammm/instance"
-	"github.com/simon-lentz/yammm/location"
+	"github.com/simon-lentz/yammm/internal/snappartstest"
 	"github.com/simon-lentz/yammm/schema"
-	"github.com/simon-lentz/yammm/snapshot"
 
 	"github.com/simon-lentz/yammm/cmd/yammm/internal/cli"
 )
@@ -31,9 +30,9 @@ type Grid {
 }
 `
 
-// refusedSnapshot writes a .ys of one Grid holding props, and an edge to itself
-// holding edge, built past the validator: export reads a .ys without
-// revalidating it, so a value no validator would hold reaches the writer.
+// refusedSnapshot writes a .ys document of one Grid holding props, and an edge to
+// itself holding edge: export reads a .ys without revalidating it, so a value no
+// validator would hold reaches the writer.
 func refusedSnapshot(t *testing.T, dir string, props, edge map[string]any) (schemaPath, ysPath string) {
 	t.Helper()
 	schemaPath = filepath.Join(dir, "grid.yammm")
@@ -48,21 +47,16 @@ func refusedSnapshot(t *testing.T, dir string, props, edge map[string]any) (sche
 	grid, _ := s.Type("Grid")
 	all := map[string]any{"id": "g1"}
 	maps.Copy(all, props)
-	var edges map[string]instance.ValidEdgeData
+	key := immutable.WrapKey([]any{"g1"})
+	var edges []snapparts.Edge
 	if edge != nil {
-		edges = map[string]instance.ValidEdgeData{"NEXT": instance.NewValidEdgeData([]instance.ValidEdgeTarget{
-			instance.NewValidEdgeTarget(immutable.WrapKey([]any{"g1"}), immutable.WrapProperties(edge)),
-		})}
+		edges = []snapparts.Edge{{Relation: "NEXT", SourceType: grid.ID(), SourceKey: key, TargetKey: key, Properties: immutable.WrapProperties(edge)}}
 	}
-	g := graph.New(s)
-	if r := g.Add(ctx, instance.NewValidInstance("Grid", grid.ID(), immutable.WrapKey([]any{"g1"}),
-		immutable.WrapProperties(all), edges, nil, location.Provenance{})); r.HasErrors() {
-		t.Fatalf("graph.Add: %v", r.Err())
-	}
-	data, mres := snapshot.Marshal(ctx, g.Snapshot())
-	if err := mres.Err(); err != nil {
-		t.Fatalf("marshal: %v", err)
-	}
+	data := snappartstest.Document(t, s, snapparts.Parts{
+		Types:     []schema.TypeID{grid.ID()},
+		Instances: []snapparts.Instance{{TypeID: grid.ID(), PrimaryKey: key, Properties: immutable.WrapProperties(all)}},
+		Edges:     edges,
+	})
 	ysPath = filepath.Join(dir, "grid.ys")
 	if err := os.WriteFile(ysPath, data, 0o600); err != nil {
 		t.Fatal(err)

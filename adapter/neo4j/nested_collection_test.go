@@ -2,11 +2,11 @@ package neo4j
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"reflect"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/simon-lentz/yammm/schema"
 )
@@ -60,18 +60,17 @@ func TestBatchNodeQueries_RefusesAComposedPartsNestedCollectionValue(t *testing.
 }
 
 // A nested collection property is refused by its type before its value is read,
-// as Coerce refuses it, so an element of a bypass-built value that the one form
-// refuses draws the same refusal.
+// as coerceScalar refuses it, so an element of a held value that heldForm refuses
+// draws the same refusal.
 func TestBatchNodeQueries_RefusesANestedCollectionBeforeItsElements(t *testing.T) {
 	t.Parallel()
 	for name, value := range map[string]any{
-		"a string that is not valid UTF-8": []any{[]any{"ok"}, []any{"a\xffb"}},
-		"a value of no form":               []any{[]any{[2]string{"a", "b"}}},
-		"a time":                           []any{[]any{time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)}},
+		"a number no driver number holds": []any{[]any{"ok"}, []any{json.Number("1e400")}},
+		"a list nested past the depth":    []any{deepList(maxFormDepth+1, "x")},
 	} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
-			a, shape, snap := utf8Neo4jSnapshot(t, utf8Holder{props: map[string]any{"nested": value}})
+			a, shape, snap := holderSnapshot(t, holderValues{props: map[string]any{"nested": value}})
 			_, err := a.BatchNodeQueries(t.Context(), snap, shape)
 			if !errors.Is(err, ErrUnsupportedListElem) || !errors.Is(err, ErrUnrepresentable) {
 				t.Fatalf("BatchNodeQueries error = %v; want ErrUnsupportedListElem and ErrUnrepresentable", err)
@@ -94,32 +93,27 @@ func TestBatchNodeQueries_WritesAnAbsentNestedCollection(t *testing.T) {
 	if _, err := a.BatchNodeQueries(context.Background(), snap, shape); err != nil {
 		t.Fatalf("BatchNodeQueries: %v", err)
 	}
-	for name, value := range map[string]any{
-		"a nil []any":      []any(nil),
-		"a nil [][]string": [][]string(nil),
-	} {
-		a, shape, snap := utf8Neo4jSnapshot(t, utf8Holder{props: map[string]any{"nested": value}})
-		nodes, err := a.BatchNodeQueries(t.Context(), snap, shape)
-		if err != nil {
-			t.Fatalf("BatchNodeQueries, %s: %v", name, err)
-		}
-		for _, q := range nodes {
-			for _, row := range q.Params["rows"].([]map[string]any) {
-				props, _ := row["props"].(map[string]any)
-				if v, ok := props["nested"]; ok && v != nil {
-					t.Errorf("BatchNodeQueries, %s: sent %#v; want nil", name, v)
-				}
+	a, shape, snap = holderSnapshot(t, holderValues{props: map[string]any{"nested": nil}})
+	nodes, err := a.BatchNodeQueries(t.Context(), snap, shape)
+	if err != nil {
+		t.Fatalf("BatchNodeQueries, a null: %v", err)
+	}
+	for _, q := range nodes {
+		for _, row := range q.Params["rows"].([]map[string]any) {
+			props, _ := row["props"].(map[string]any)
+			if v, ok := props["nested"]; ok && v != nil {
+				t.Errorf("BatchNodeQueries, a null: sent %#v; want nil", v)
 			}
 		}
 	}
 }
 
-// Coerce and CoerceParams refuse a present value at a nested collection
+// coerceScalar and CoerceParams refuse a present value at a nested collection
 // constraint whatever Go type carries it, a typed slice included, and a nil
 // inner list too, which the driver would pack as an empty one. The refusal is the
-// one neo4jListElementType gives, whatever Go type carries the value, and Coerce
+// one neo4jListElementType gives, whatever Go type carries the value, and coerceScalar
 // returns the value with it, as its other refusals do.
-func TestCoerce_RefusesANestedCollectionValue(t *testing.T) {
+func TestCoerceScalar_RefusesANestedCollectionValue(t *testing.T) {
 	t.Parallel()
 	codes := schema.NewAliasConstraint("Codes", schema.NewListConstraint(schema.NewStringConstraint()))
 	for name, tc := range map[string]struct {
@@ -155,14 +149,14 @@ func TestCoerce_RefusesANestedCollectionValue(t *testing.T) {
 		for vname, raw := range tc.values {
 			at := name + ", " + vname
 			refusal := "neo4j adapter: unsupported list element type: list element kind " + tc.kind
-			got, err := Coerce(tc.c, raw)
+			got, err := coerceScalar(tc.c, raw)
 			if !errors.Is(err, ErrUnsupportedListElem) {
-				t.Errorf("Coerce(%s) error = %v; want ErrUnsupportedListElem", at, err)
+				t.Errorf("coerceScalar(%s) error = %v; want ErrUnsupportedListElem", at, err)
 			} else if err.Error() != refusal {
-				t.Errorf("Coerce(%s) error = %q; want %q", at, err, refusal)
+				t.Errorf("coerceScalar(%s) error = %q; want %q", at, err, refusal)
 			}
 			if !reflect.DeepEqual(got, raw) {
-				t.Errorf("Coerce(%s) returned %#v with its error; want the value unchanged", at, got)
+				t.Errorf("coerceScalar(%s) returned %#v with its error; want the value unchanged", at, got)
 			}
 			for key, params := range map[string]map[string]any{
 				"m":      {"m": raw},
@@ -178,8 +172,8 @@ func TestCoerce_RefusesANestedCollectionValue(t *testing.T) {
 				}
 			}
 		}
-		if got, err := Coerce(tc.c, nil); err != nil || got != nil {
-			t.Errorf("Coerce(%s, nil) = %#v, %v; want nil, nil", name, got, err)
+		if got, err := coerceScalar(tc.c, nil); err != nil || got != nil {
+			t.Errorf("coerceScalar(%s, nil) = %#v, %v; want nil, nil", name, got, err)
 		}
 	}
 }

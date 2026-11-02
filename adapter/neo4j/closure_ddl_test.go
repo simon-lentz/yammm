@@ -56,9 +56,9 @@ func TestClosureDDL_ImportedTypeGetsConstraintsIndexesAndOwnership(t *testing.T)
 		t.Fatalf("ShapeForSchema: %s", sres)
 	}
 	var basinLabel string
-	for id, ns := range shape.Types {
+	for id, ns := range shape.types {
 		if strings.HasSuffix(id.String(), ":Basin") {
-			basinLabel = ns.Label
+			basinLabel = ns.label
 		}
 	}
 	if basinLabel == "" {
@@ -102,9 +102,9 @@ func TestClosureDDL_EmitSetAndOwnSetAgree(t *testing.T) {
 	if shape == nil {
 		t.Fatalf("ShapeForSchema: %s", sres)
 	}
-	for id, ns := range shape.Types {
-		if !owned.Contains(ns.Label) {
-			t.Errorf("type %s is written under label %q, which OwnedLabels does not claim", id, ns.Label)
+	for id, ns := range shape.types {
+		if !owned.Contains(ns.label) {
+			t.Errorf("type %s is written under label %q, which OwnedLabels does not claim", id, ns.label)
 		}
 	}
 }

@@ -1,10 +1,10 @@
 package snapshot
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io"
-	"time"
 
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/graph"
@@ -104,7 +104,8 @@ type SnapshotInfo struct { //nolint:revive // intentional stutter — mirrors .y
 // one identity twice — when the document's top level is not the format's four
 // keys, in order, each once and none null, with nothing after them, when an
 // object repeats a member name or spells one the format declares in another
-// case, when a section does not decode, or when the context is cancelled. A document that decodes but fails a structural check returns a
+// case, when a string is not valid UTF-8 or holds a surrogate escape that is half
+// of no pair, when a section does not decode, or when the context is cancelled. A document that decodes but fails a structural check returns a
 // summary beside Error-severity diagnostics — an integrity mismatch reports
 // IntegrityStatus "mismatch", and an instances group whose row names no table
 // entry is reported and left out of the instance counts, while an edge or a
@@ -228,16 +229,19 @@ type HeaderInfo struct {
 // HeaderOnly is the right choice for dispatch-style workloads that scan
 // many .ys files to classify lifecycle state, compare schema hashes, or
 // inspect metadata annotations like CreatedAt. It decodes the header and
-// the types table alone, where [Info] decodes the body to populate its counts; its scan of
-// the whole document checks the outermost shape and every member name, below.
+// the types table alone, where [Info] decodes the body to populate its counts. Its
+// scan of the whole document checks the outermost shape, every member name and the
+// text of every string, as the next paragraph states.
 //
 // HeaderOnly holds the whole document, so it checks the outermost shape as
 // [Load] does: the top level must be the format's four keys, in order, each
-// once and none null, with nothing after them, and no object may repeat a
-// member name or spell one the format declares in another case.
+// once and none null, with nothing after them, no object may repeat a member
+// name or spell one the format declares in another case, and no string may be
+// invalid UTF-8 or hold a surrogate escape that is half of no pair.
 // [HeaderOnlyRead] and [ScanDir] read through a capped reader and stop at the
-// types table, holding any member before it up to the cap, so they cannot make
-// those checks. Their own documentation says so.
+// types table, holding any member before it up to the cap, so they cannot check
+// the whole document's shape or member names, as each one's doc states. They judge
+// text only up to the end of that table.
 //
 // Integrity is not verified. The returned [HeaderInfo.IntegrityHash] is
 // the value stored in the file, not a verification result. Callers that
@@ -319,7 +323,7 @@ const MaxHeaderSize = 16 * 1024 * 1024
 // HeaderOnlyRead reads header metadata from a .ys stream without
 // materializing the instance body. It is [HeaderOnly]'s counterpart for an
 // io.Reader, avoiding the caller-side requirement to read the entire document
-// into memory before dispatch; the differences are stated below.
+// into memory before dispatch. The paragraphs below state how the two differ.
 //
 // HeaderOnlyRead reads at most [MaxHeaderSize] bytes from r. Inputs whose
 // header section exceeds this bound are rejected with E_SNAPSHOT_MALFORMED
@@ -364,11 +368,15 @@ const MaxHeaderSize = 16 * 1024 * 1024
 // stops at the types table, holding any member before it up to the cap, so it
 // cannot check the document's outermost shape or its member names. A document whose sections are absent, repeated, out of
 // order, or followed by trailing bytes, or whose objects repeat a member name,
-// reads its header here without complaint; of these, only a first section
-// other than the header and a missing types section are refused. It does not
-// accept
-// such a document by omission — it does not see it. Use [HeaderOnly], [Verify]
-// or [Load] when that matters.
+// reads its header here without complaint. Of these, only a first section
+// other than the header and a missing types section are refused. Use [HeaderOnly],
+// [Verify] or [Load] when that matters.
+//
+// Text: HeaderOnlyRead judges the version, the features and the types table first,
+// and stops at a fault they hold, where [HeaderOnly] judges the text first. With no
+// such fault, E_SNAPSHOT_MALFORMED refuses a string up to the end of the table that
+// is not valid UTF-8 or that holds a surrogate escape that is half of no pair. A
+// string past the table goes unjudged.
 //
 // Returns (nil, result) with Error-severity diagnostics for malformed
 // input. Follows the library's standard (T, diag.Result) return pattern.
@@ -385,7 +393,9 @@ func HeaderOnlyRead(ctx context.Context, r io.Reader) (*HeaderInfo, diag.Result)
 	lr := newLimitReader(r, MaxHeaderSize)
 	cfg := defaultLoadConfig()
 	cfg.headerOnly = true
-	sd := newStreamDecoderFromReader(lr, schema.Schema{}, cfg)
+	// The decoder keeps no bytes it has decoded, so the text rule reads this copy.
+	var read bytes.Buffer
+	sd := newStreamDecoderFromReader(io.TeeReader(lr, &read), schema.Schema{}, cfg)
 
 	// Decode header + types only — no instance body, no integrity check.
 	if err := sd.decodeHeader(); err != nil {
@@ -404,6 +414,10 @@ func HeaderOnlyRead(ctx context.Context, r io.Reader) (*HeaderInfo, diag.Result)
 		return nil, sd.collector.Result()
 	}
 	if sd.collector.HasErrors() {
+		return nil, sd.collector.Result()
+	}
+	if err := checkText(read.Bytes()[:sd.typesEnd]); err != nil {
+		sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_MALFORMED, err.Error()).Build())
 		return nil, sd.collector.Result()
 	}
 
@@ -433,26 +447,6 @@ func (sd *streamDecoder) headerAttestation() *graph.Attestation {
 		return nil
 	}
 	return &graph.Attestation{Values: a.Values, Associations: a.Associations}
-}
-
-// CreatedAtTime parses the header's CreatedAt field.
-//
-// It reports false when CreatedAt is empty and when it is malformed, because a
-// caller that only wants the timestamp cannot act on the difference and a
-// caller that guesses picks the zero time, which sorts first and silently
-// corrupts any chronological ordering. A caller that must tell absent from
-// corrupt tests CreatedAt != "" first, then calls this.
-//
-// The layout is RFC 3339. yammm writes UTC at second precision, so a time
-// passed to [WithCreatedAt] does not round-trip its sub-second part. The parser
-// accepts more than yammm writes, deliberately: [UpdateMetadata] preserves a
-// foreign header's created_at bytes, and fractional seconds and non-UTC offsets both parse
-// under this layout and keep their offset in the result.
-func (h *HeaderInfo) CreatedAtTime() (time.Time, bool) {
-	if h == nil {
-		return time.Time{}, false
-	}
-	return parseCreatedAt(h.CreatedAt)
 }
 
 // SchemaHashMatches reports whether the header's SchemaHash equals the
@@ -485,21 +479,4 @@ func (h *HeaderInfo) SchemaHashMatches(s schema.Schema) bool {
 		return false
 	}
 	return h.SchemaHash == hash
-}
-
-// CreatedAtTime parses the header's CreatedAt field. See
-// [HeaderInfo.CreatedAtTime] for the empty-versus-malformed rule and the
-// precision the writers commit to.
-func (s SnapshotInfo) CreatedAtTime() (time.Time, bool) {
-	return parseCreatedAt(s.CreatedAt)
-}
-
-// parseCreatedAt is the one CreatedAt parser, so the two carriers cannot
-// disagree on what counts as a usable timestamp.
-func parseCreatedAt(createdAt string) (time.Time, bool) {
-	t, err := time.Parse(time.RFC3339, createdAt)
-	if err != nil {
-		return time.Time{}, false
-	}
-	return t, true
 }

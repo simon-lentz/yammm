@@ -6,8 +6,10 @@ import (
 	"testing"
 
 	"github.com/simon-lentz/yammm/graph"
+	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/instance"
-	"github.com/simon-lentz/yammm/internal/instancetest"
+	"github.com/simon-lentz/yammm/internal/snapparts"
+	"github.com/simon-lentz/yammm/internal/snappartstest"
 	"github.com/simon-lentz/yammm/schema"
 	"github.com/simon-lentz/yammm/snapshot"
 )
@@ -61,7 +63,7 @@ func TestAttestation_ValidatorBuiltRoundTripsTrue(t *testing.T) {
 		t.Fatalf("loaded snapshot attests %+v, want both true", att)
 	}
 
-	// The claim rides the header; the rebuilt instances stay unproven.
+	// The claim rides the header; the loaded instances stay unproven.
 	thing, _ := s.Type("Thing")
 	insts := slices.Collect(snap.InstancesOf(thing.ID()))
 	if len(insts) != 1 || insts[0].Validated() {
@@ -69,7 +71,7 @@ func TestAttestation_ValidatorBuiltRoundTripsTrue(t *testing.T) {
 	}
 }
 
-func TestAttestation_BypassBuiltRoundTripsFalse(t *testing.T) {
+func TestAttestation_AFalseClaimRoundTrips(t *testing.T) {
 	t.Parallel()
 	s, res := schema.LoadString(t.Context(), attWireSchema, "attwire.yammm")
 	if res.HasErrors() {
@@ -77,22 +79,19 @@ func TestAttestation_BypassBuiltRoundTripsFalse(t *testing.T) {
 	}
 	thing, _ := s.Type("Thing")
 
-	g := graph.New(s)
-	vi := instancetest.VI(
-		"Thing",
-		instancetest.TypeID(thing.ID()),
-		instancetest.PK("t1"),
-		instancetest.Props(map[string]any{"id": "t1"}),
-	)
-	if r := g.Add(t.Context(), vi); !r.OK() {
-		t.Fatalf("Add: %s", r.String())
-	}
-	data, mres := snapshot.Marshal(t.Context(), g.Snapshot())
+	built := snappartstest.Loaded(t, s, snapparts.Parts{
+		Instances: []snapparts.Instance{{
+			TypeID: thing.ID(), PrimaryKey: immutable.WrapKey([]any{"t1"}),
+			Properties: immutable.WrapProperties(map[string]any{"id": "t1"}),
+		}},
+		Attestation: &snapparts.Attestation{Associations: true},
+	})
+	data, mres := snapshot.Marshal(t.Context(), built)
 	if mres.HasErrors() {
 		t.Fatalf("Marshal: %s", mres.String())
 	}
 	if !bytes.Contains(data, []byte(`"attestation":{"values":false`)) {
-		t.Fatal("a bypass-built document did not write values=false")
+		t.Fatal("a false Values claim did not write values=false")
 	}
 
 	snap, lres := snapshot.Load(t.Context(), data, s)
@@ -100,7 +99,7 @@ func TestAttestation_BypassBuiltRoundTripsFalse(t *testing.T) {
 		t.Fatalf("Load: %s", lres.String())
 	}
 	if snap.Attestation().Values {
-		t.Fatal("a bypass-built document loaded with Values true")
+		t.Fatal("a false Values claim loaded with Values true")
 	}
 }
 

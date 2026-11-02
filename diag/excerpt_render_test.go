@@ -39,7 +39,7 @@ func wantExcerpt(num, text, marks string) string {
 func TestExcerpt_MarksSitUnderTheText(t *testing.T) {
 	t.Parallel()
 
-	src := location.MustNewSourceID("test://excerpt.yammm")
+	src := location.NewSourceID("test://excerpt.yammm")
 	point := func(line, col int) location.Span { return location.Point(src, line, col) }
 	span := func(startLine, startCol, endLine, endCol int) location.Span {
 		return location.Span{
@@ -107,7 +107,7 @@ func TestExcerpt_MarksSitUnderTheText(t *testing.T) {
 func TestExcerpt_LongLineShowsTheSpan(t *testing.T) {
 	t.Parallel()
 
-	src := location.MustNewSourceID("test://long.yammm")
+	src := location.NewSourceID("test://long.yammm")
 	rows := []struct {
 		name                string
 		length, col, marked int
@@ -125,7 +125,7 @@ func TestExcerpt_LongLineShowsTheSpan(t *testing.T) {
 			line := strings.Repeat("a", row.col-1) + strings.Repeat("X", row.marked) + strings.Repeat("b", row.length-row.col-row.marked+1)
 			span := location.Point(src, 1, row.col)
 			if row.marked > 1 {
-				span = location.Range(src, 1, row.col, 1, row.col+row.marked)
+				span = location.RangeWithBytes(src, 1, row.col, -1, 1, row.col+row.marked, -1)
 			}
 			if ok, detail := windowMarksTheSpan(line, excerptBlock(line+"\n", span)); !ok {
 				t.Error(detail)

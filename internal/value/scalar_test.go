@@ -19,10 +19,10 @@ type (
 
 func (selfMarshal) MarshalJSON() ([]byte, error) { return []byte(`"spelled"`), nil }
 
-// Scalar reads a value as the one form every writer writes: a scalar through
+// Scalar reads a value as its one form: a scalar through
 // any pointers and interfaces, a named type as its base value, three library
 // types as themselves, and nothing else.
-func TestScalar_ReadsTheOneFormEveryWriterWrites(t *testing.T) {
+func TestScalar_ReadsTheOneForm(t *testing.T) {
 	t.Parallel()
 	text := "a"
 	ptrText := &text

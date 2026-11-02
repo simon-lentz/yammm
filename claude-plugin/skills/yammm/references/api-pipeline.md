@@ -1,6 +1,6 @@
 # Go API Pipeline Reference
 
-The yammm Go library follows a four-stage pipeline: **load schema -> validate instances -> build graph -> persist/export**. An operation that reports diagnostics returns a `diag.Result`, beside the value where the call produces one, with stable error codes and, where a diagnostic has a source position, its span. Some operations return an `error` instead, among them the JSON and CSV adapters' write methods, the Neo4j adapter's `BatchNodeQueries` and `BatchEdgeQueries`, `gogen.Marshal`, `jschema.Marshal` and `markdown.Marshal`, `graph.BatchAssembler`'s `Add`, `AddValid`, `AddValidOrMerge` and `Finalize`, and `instance.BuilderFor`.
+The yammm Go library follows a four-stage pipeline: **load schema -> validate instances -> build graph -> persist/export**. An operation that reports diagnostics returns a `diag.Result`, beside the value where the call produces one, with stable error codes and, where a diagnostic has a source position, its span. Some operations return an `error` instead, among them the JSON and CSV adapters' write methods, the Neo4j adapter's `BatchNodeQueries` and `BatchEdgeQueries`, `gogen.Marshal`, `jschema.Marshal` and `markdown.Marshal`, `graph.BatchAssembler`'s `Add`, `AddValid` and `AddValidOrMerge`, and `instance.BuilderFor`.
 
 ---
 
@@ -71,21 +71,14 @@ sources := map[string][]byte{
 s, result := schema.LoadSourcesWithEntry(ctx, sources, "main.yammm", "/module/root")
 ```
 
-Use `LoadSourcesWithEntry` when the entry point is not the lexicographically first key:
-
-```go
-s, result := schema.LoadSourcesWithEntry(ctx, sources, "main.yammm", "/module/root")
-```
+The third argument names the entry source. An empty entry path selects the lexicographically smallest key.
 
 ### Load Options
 
 ```go
 schema.Load(ctx, path,
     schema.WithModuleRoot("/custom/root"),
-    schema.WithIssueLimit(100),
-    schema.WithLogger(logger),
     schema.WithImportsAllowed(false),
-    schema.WithRegistry(registry),
 )
 ```
 
@@ -96,27 +89,6 @@ schema.LoadSourcesWithEntry(ctx, sources, "main.yammm", "",
     schema.WithSyntheticRoot("embedded://app"), // identities under a root no checkout or mount point moves
 )
 ```
-
-### Builder API (Programmatic Schema Construction)
-
-```go
-s, result := schema.NewBuilder().
-    WithName("example").
-    AddDataType("Email", emailConstraint).
-    AddType("User").
-        WithPrimaryKey("id", uuidConstraint).
-        WithProperty("name", stringConstraint).
-        WithOptionalProperty("email", emailConstraint).
-        WithRelation("WORKS_AT", companyRef, false, false).
-        WithComposition("ADDRESSES", addressRef, true, true).
-        WithInvariant("name_not_empty", nameExpr, "").
-        AsAbstract().  // or AsPart()
-        Extends(parentRef).
-        Done().
-    Build()
-```
-
-`Build()` validates declared names against the DSL's own productions (`E_INVALID_NAME`): type and datatype names start with an uppercase letter and property names with a lowercase letter, both continuing with letters, digits, or underscores; relation names are UPPER_SNAKE — an uppercase letter, then uppercase letters, digits, or underscores. No type, datatype or relation name is one of the eleven built-in type names (`List`, `String`, `UUID` and the rest), and no property name is `as`, `part`, `in`, `nil`, `true` or `false`. Schema names and invariant names are free-form strings, and like every string value the Builder takes they are valid UTF-8. A documentation string holding `*/`, a NUL, a byte order mark or bytes that are not UTF-8 is `E_SYNTAX`, since no doc comment can carry it.
 
 ### Schema Type (Read API)
 
@@ -160,9 +132,6 @@ valids, result := v.Validate(ctx, "Product", raws)
 valid, result := v.ValidateOne(ctx, "Product", instance.RawInstance{
     Properties: map[string]any{"id": "abc-123", "name": "Widget"},
 })
-
-// Validate composed children (part types)
-children, result := v.ValidateForComposition(ctx, "Order", "ITEMS", rawItems)
 ```
 
 ### RawInstance (Input)
@@ -193,6 +162,7 @@ raw, err := b.
 ### ValidInstance (Output -- Immutable)
 
 ```go
+valid.Type()                       // schema.Type: one handle of the validator's schema load
 valid.TypeName()                   // string
 valid.PrimaryKey()                 // immutable.Key
 valid.Property("name")             // (immutable.Value, bool)
@@ -226,11 +196,9 @@ for _, inst := range validInstances {
         // handle duplicate PK, type not found, etc.
     }
 }
-
-// Add composed children to an existing parent
-orderType, _ := s.Type("Order")
-result := g.AddComposed(ctx, orderType.ID(), graph.FormatKey("order-123"), "ITEMS", childInstance)
 ```
+
+`Add` panics on an instance another schema load validated, so build the validator and the graph from one `schema.Schema`. One text loaded twice is two loads. A validator over a member of the import closure shares the entry schema's load, so `Add` adds an instance of a type the entry schema declares or directly imports. Any other type of the closure draws `E_GRAPH_TYPE_NOT_FOUND`.
 
 ### Check Graph Completeness
 
@@ -330,7 +298,7 @@ newMeta["pipeline_completed"] = "true"
 updated, result := snapshot.UpdateMetadataOrReMarshal(ctx, data, newMeta, s)
 ```
 
-`UpdateMetadataOrReMarshal(ctx, data, newMeta, s, opts...)` is the default entry point: it rewrites the header's metadata map (a full replace — clone the old map and mutate) while reusing the body bytes verbatim (fast path), and transparently falls back to `Load + Marshal` on any Error or Fatal but a cancellation and metadata that is not valid UTF-8, emitting `W_UPDATE_METADATA_FALLBACK` when the fallback succeeds so the transition is observable. The strict-fast-path primitive `UpdateMetadata(ctx, data, newMeta, opts...)` stays exported for consumers where a round-trip is unacceptable. CLI form: `yammm snapshot update-metadata --set k=v`.
+`UpdateMetadataOrReMarshal(ctx, data, newMeta, s)` is the default entry point: it rewrites the header's metadata map (a full replace — clone the old map and mutate) while reusing the body bytes verbatim (fast path), and transparently falls back to `Load + Marshal` on any Error or Fatal but a cancellation and metadata that is not valid UTF-8, emitting `W_UPDATE_METADATA_FALLBACK` when the fallback succeeds so the transition is observable. `UpdateMetadata(ctx, data, newMeta)` is the strict fast path alone, for a consumer that cannot accept a round-trip. CLI form: `yammm snapshot update-metadata --set k=v`.
 
 ---
 
@@ -339,8 +307,8 @@ updated, result := snapshot.UpdateMetadataOrReMarshal(ctx, data, newMeta, s)
 - **Loaded schemas** (`schema.Schema`) are immutable and safe for concurrent use
 - **Validated instances** (`instance.ValidInstance`) are immutable
 - **Graph snapshots** (`graph.Snapshot`) have no method that changes them, and a record is a handle, so no caller holds its address
-- **The `Graph` type** (`*graph.Graph`) is concurrent-safe for `Add` and `AddComposed` calls — multiple goroutines may add instances in parallel; the graph handles forward references and duplicate detection atomically. `Snapshot()` acquires a read lock, briefly blocking concurrent Adds, and returns a snapshot later Adds do not change
-- **`graph.BatchAssembler`** is the recommended high-level entry point for the validate→add→check→snapshot pipeline pattern: composes Validator + Graph, encodes the ordering invariant, concurrent-safe. Construct with `NewBatchAssembler` (empty graph) or `NewBatchAssemblerFromSnapshot` (graph seeded from a prior snapshot — the resume path: new adds resolve against, and may complete, the seeded state; it returns a `diag.Result` and takes a snapshot bound to the schema as it stands and refuses one built against another schema that breaks any of the schema's structural facts, save that it derives the Records fact's records again and drops an absent record under a relation that is no association of the schema). See the Batch Assembly section of `docs/API.md`
+- **The `Graph` type** (`*graph.Graph`) is concurrent-safe for `Add` calls — multiple goroutines may add instances in parallel; the graph handles forward references and duplicate detection atomically. `Snapshot()` acquires a read lock, briefly blocking concurrent Adds, and returns a snapshot later Adds do not change
+- **`graph.BatchAssembler`** composes a Validator and a Graph for the validate→add pipeline pattern, and is safe for concurrent use. `Add` validates a record before it adds it. The caller waits for its workers, then reads the graph through `Graph()` to check it and take its snapshot. Construct with `NewBatchAssembler` (empty graph) or `NewBatchAssemblerFromSnapshot` (graph seeded from a prior snapshot — the resume path: new adds resolve against, and may complete, the seeded state; it returns a `diag.Result` and takes a snapshot bound to the schema as it stands and refuses one built against another schema that breaks any of the schema's structural facts, save that it derives the Records fact's records again and drops an absent record under a relation that is no association of the schema). See the Batch Assembly section of `docs/API.md`
 - **Validators** (`*instance.Validator`) are safe for concurrent use (stateless after construction)
 
 ---
@@ -351,7 +319,7 @@ One package provides shared vocabulary for consumer test suites:
 
 - **`snapshot/snapshottest`** — `BuildSnapshot(tb, s, instances...)` constructs a snapshot from pre-validated instances; `AssertRoundTrip(tb, snap, s, opts...)` pins Marshal→Load structural equivalence; `AssertDeterministic(tb, snap, opts...)` pins byte-stable marshaling; `DiffSnapshots(tb, want, got)` is the underlying go-cmp comparison.
 
-Build its instances through `instance.Validator`, or with `instance.NewValidInstance` for a fixture with no validation pass. `internal/instancetest` is this module's own test support: Go refuses an import of an `internal/` package from another module.
+Build its instances through `instance.Validator`. `internal/instancetest` is this module's own test support: Go refuses an import of an `internal/` package from another module.
 
 ---
 
@@ -366,7 +334,7 @@ if result.HasErrors() {
 
 // 2. Parse data with the JSON adapter; the SourceID names the document in diagnostics
 adapter := jsonAdapter.New()
-parsed, result := adapter.ParseObject(ctx, location.MustNewSourceID("data://inventory.json"), jsonData)
+parsed, result := adapter.ParseObject(ctx, location.NewSourceID("data://inventory.json"), jsonData)
 if result.HasErrors() {
     return result.Err()
 }

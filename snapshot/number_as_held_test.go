@@ -2,6 +2,7 @@ package snapshot_test
 
 import (
 	"bytes"
+	"encoding/json"
 	"slices"
 	"testing"
 
@@ -9,7 +10,8 @@ import (
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/instance"
-	"github.com/simon-lentz/yammm/location"
+	"github.com/simon-lentz/yammm/internal/snapparts"
+	"github.com/simon-lentz/yammm/internal/snappartstest"
 	"github.com/simon-lentz/yammm/schema"
 	"github.com/simon-lentz/yammm/snapshot"
 )
@@ -36,14 +38,11 @@ func TestMarshal_AFloatHeldUnderAnIntegerIsWrittenAsHeld(t *testing.T) {
 		t.Fatalf("load schema: %s", res)
 	}
 	ty, _ := s.Type("T")
-	g := graph.New(s)
-	inst := instance.NewValidInstance("T", ty.ID(), immutable.WrapKey([]any{"a"}),
-		immutable.WrapProperties(map[string]any{"id": "a", "n": float64(6), "ns": []any{int64(1), float64(2)}}),
-		nil, nil, location.Provenance{})
-	if r := g.Add(ctx, inst); r.HasErrors() {
-		t.Fatalf("add: %s", r)
-	}
-	data, mres := snapshot.Marshal(ctx, g.Snapshot())
+	snap := snappartstest.Loaded(t, s, snapparts.Parts{Instances: []snapparts.Instance{{
+		TypeID: ty.ID(), PrimaryKey: immutable.WrapKey([]any{"a"}),
+		Properties: immutable.WrapProperties(map[string]any{"id": "a", "n": float64(6), "ns": []any{int64(1), float64(2)}}),
+	}}})
+	data, mres := snapshot.Marshal(ctx, snap)
 	if mres.HasErrors() {
 		t.Fatalf("marshal: %s", mres)
 	}
@@ -68,6 +67,37 @@ func TestMarshal_AFloatHeldUnderAnIntegerIsWrittenAsHeld(t *testing.T) {
 	_, rres := snapshot.Load(ctx, data, s, snapshot.WithRevalidation(diag.Error))
 	if !rres.HasCode(diag.E_TYPE_MISMATCH) {
 		t.Errorf("revalidation of a held float at an Integer drew %s, want E_TYPE_MISMATCH", rres)
+	}
+}
+
+// A number no finite float64 holds stays the literal the document spells: Marshal
+// writes it and Load reads it back as that literal.
+func TestMarshal_ANumberNoFloatHoldsReadsBackAsTheLiteral(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	s, res := schema.LoadString(ctx, asHeldSchema, "held.yammm")
+	if res.HasErrors() {
+		t.Fatalf("load schema: %s", res)
+	}
+	ty, _ := s.Type("T")
+	snap := snappartstest.Loaded(t, s, snapparts.Parts{Instances: []snapparts.Instance{{
+		TypeID: ty.ID(), PrimaryKey: immutable.WrapKey([]any{"a"}),
+		Properties: immutable.WrapProperties(map[string]any{"id": "a", "n": json.Number("1e400")}),
+	}}})
+	data, mres := snapshot.Marshal(ctx, snap)
+	if mres.HasErrors() {
+		t.Fatalf("marshal: %s", mres)
+	}
+	back, lres := snapshot.Load(ctx, data, s)
+	if lres.HasErrors() {
+		t.Fatalf("load: %s", lres)
+	}
+	inst, ok := back.InstanceByKey(ty.ID(), graph.FormatKey("a"))
+	if !ok {
+		t.Fatal("the instance did not load")
+	}
+	if n, _ := inst.Property("n"); n.Unwrap() != json.Number("1e400") {
+		t.Errorf("1e400 read back as %#v", n.Unwrap())
 	}
 }
 

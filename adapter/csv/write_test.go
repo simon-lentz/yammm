@@ -1,9 +1,7 @@
 package csv
 
 import (
-	"bytes"
 	"context"
-	"io"
 	"strings"
 	"testing"
 	"time"
@@ -61,28 +59,6 @@ func TestMarshalSnapshot_ZeroSnapshot(t *testing.T) {
 	a := New()
 	_, err := a.MarshalSnapshot(context.Background(), graph.Snapshot{})
 	assert.ErrorIs(t, err, ErrZeroSnapshot)
-}
-
-func TestWriteSnapshot_Basic(t *testing.T) {
-	t.Parallel()
-	s := loadTestSchema(t, "basic.yammm")
-	a := New()
-
-	snap := buildSnapshot(t, s, map[string][]map[string]any{
-		"Entity": {{"id": "e1", "name": "Alice"}},
-	})
-
-	writers := make(map[string]*bytes.Buffer)
-	err := a.WriteSnapshot(context.Background(), func(typeName string) (io.Writer, error) {
-		buf := &bytes.Buffer{}
-		writers[typeName] = buf
-		return buf, nil
-	}, snap)
-	require.NoError(t, err)
-
-	entityBuf, ok := writers["Entity"]
-	require.True(t, ok)
-	assert.Contains(t, entityBuf.String(), "e1")
 }
 
 func TestMarshalSnapshot_FKColumnsEmpty(t *testing.T) {

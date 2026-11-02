@@ -338,7 +338,7 @@ func TestReportError(t *testing.T) {
 		{
 			"a marked refusal is the one failure it marks",
 			Validationf("generate node queries: %w", markedRefusal()),
-			"error: generate node queries: coerce Integer: cannot convert float64 to int64\n",
+			"error: generate node queries: param \"v\": coerce Integer: cannot convert float64 to int64\n",
 		},
 	}
 	for _, tt := range tests {
@@ -482,6 +482,6 @@ func TestJoinExitErrors(t *testing.T) {
 // markedRefusal returns adapter/neo4j's refusal of a float at an Integer, which
 // wraps the coercion error and the adapter's class.
 func markedRefusal() error {
-	_, err := adaptern4j.Coerce(schema.NewIntegerConstraint(), 2.5)
+	_, err := adaptern4j.CoerceParams(map[string]any{"v": 2.5}, adaptern4j.ParamTypes{"v": schema.NewIntegerConstraint()})
 	return err
 }

@@ -49,8 +49,8 @@ func array(vs ...val) val { return val{kind: kindArray, arr: vs} }
 // scalar renders x as a JSON scalar with HTML escaping disabled, so text like
 // "endDate > startDate" survives into the output verbatim rather than as
 // \u003e escapes. Inputs are generator-controlled (strings, int64s, float64s,
-// bools), and a schema's Float bounds are finite because the DSL and the
-// Builder both refuse another; anything unmarshalable is a generator bug and
+// bools), and a schema's Float bounds are finite because the DSL refuses
+// another; anything unmarshalable is a generator bug and
 // panics rather than producing broken output.
 func scalar(x any) val {
 	var sb strings.Builder

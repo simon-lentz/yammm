@@ -4,12 +4,12 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/internal/yammmtest"
-	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -97,81 +97,6 @@ func TestImportPath_BackslashRefusalIsLoadBearing(t *testing.T) {
 	}
 }
 
-// TestBuilderImportPath_BackslashIsRefusedOnThePathRoute holds the Builder's
-// half of the rule: a relative path holding a backslash resolves to nothing and
-// draws the same sentence, even when a schema is registered under the SourceID
-// the path would name.
-func TestBuilderImportPath_BackslashIsRefusedOnThePathRoute(t *testing.T) {
-	t.Parallel()
-
-	depID, err := location.SourceIDFromPath(yammmtest.HostAbs(`/project/a\b.yammm`))
-	if err != nil {
-		t.Fatal(err)
-	}
-	dep, depRes := schema.NewBuilder().WithName("dep").WithSourceID(depID).
-		AddType("Dep").WithPrimaryKey("id", schema.NewUUIDConstraint()).Done().Build()
-	if dep.IsZero() {
-		t.Fatalf("the dependency did not build: %v", depRes.Err())
-	}
-	registry := schema.NewRegistry()
-	if err := registry.Register(dep); err != nil {
-		t.Fatal(err)
-	}
-	mainID, err := location.SourceIDFromPath(yammmtest.HostAbs("/project/main.yammm"))
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	s, res := schema.NewBuilder().WithName("main").WithSourceID(mainID).
-		WithRegistry(registry).AddImport(`./a\b`, "d").
-		AddType("T").WithPrimaryKey("id", schema.NewUUIDConstraint()).Done().Build()
-	if !s.IsZero() {
-		t.Fatalf("the Builder resolved a backslash path; res %v", res.Err())
-	}
-	var got []string
-	named := false
-	for issue := range res.Issues() {
-		got = append(got, issue.Code().String()+": "+issue.Message())
-		if issue.Code() == diag.E_IMPORT_RESOLVE && strings.Contains(issue.Message(), backslashRule) {
-			named = true
-		}
-	}
-	if !named {
-		t.Errorf("no E_IMPORT_RESOLVE naming the separator rule; got %q", got)
-	}
-}
-
-// TestBuilderImportPath_ASchemaNameMayHoldABackslash holds the separator rule
-// off case 3, the schema-name lookup: a name is not a path, and a schema
-// registered under a name holding a backslash still imports by that name.
-func TestBuilderImportPath_ASchemaNameMayHoldABackslash(t *testing.T) {
-	t.Parallel()
-
-	const name = `a\b`
-	dep, depRes := schema.NewBuilder().WithName(name).
-		WithSourceID(location.MustNewSourceID("builder://dep")).
-		AddType("Dep").WithPrimaryKey("id", schema.NewUUIDConstraint()).Done().Build()
-	if dep.IsZero() {
-		t.Fatalf("a schema named %q did not build: %v", name, depRes.Err())
-	}
-	registry := schema.NewRegistry()
-	if err := registry.Register(dep); err != nil {
-		t.Fatal(err)
-	}
-
-	s, res := schema.NewBuilder().WithName("main").
-		WithSourceID(location.MustNewSourceID("builder://main")).
-		WithRegistry(registry).AddImport(name, "d").
-		AddType("T").WithPrimaryKey("id", schema.NewUUIDConstraint()).Done().Build()
-	if s.IsZero() {
-		var got []string
-		for issue := range res.Issues() {
-			got = append(got, issue.Code().String()+": "+issue.Message())
-		}
-		t.Fatalf("a schema named %q did not import by name; got %q", name, got)
-	}
-}
-
 // TestImportPath_ModuleStyleRequiresAModuleRoot holds the sentence a
 // module-style import draws when no module root is in play. The clause after it
 // names the root's provenance; this row reads the refusal itself.
@@ -195,5 +120,193 @@ func TestImportPath_ModuleStyleRequiresAModuleRoot(t *testing.T) {
 	}
 	if !named {
 		t.Errorf("no E_IMPORT_RESOLVE naming the module-root requirement; got %q", got)
+	}
+}
+
+// writeImportRows writes each named file under root, parents included, with a
+// schema body of its own.
+func writeImportRows(t *testing.T, root string, names ...string) {
+	t.Helper()
+	for i, name := range names {
+		p := filepath.Join(root, filepath.FromSlash(name))
+		if err := os.MkdirAll(filepath.Dir(p), 0o750); err != nil {
+			t.Fatal(err)
+		}
+		body := "schema \"dep" + strconv.Itoa(i) + "\"\n\ntype Dep {\n\tid String primary\n}\n"
+		writeHostPathFile(t, p, body)
+	}
+}
+
+// TestImportPath_APathNamingNoFileIsRefused holds that a path with no file name
+// draws E_IMPORT_RESOLVE though the dotfile or the sibling file the extension rule
+// would reach is present.
+func TestImportPath_APathNamingNoFileIsRefused(t *testing.T) {
+	t.Parallel()
+	yammmtest.RequireNoModuleRoot(t, schema.FindModuleRoot)
+
+	rows := []struct{ name, entry, importPath string }{
+		{"empty", "main.yammm", ""},
+		{"the importer's directory", "main.yammm", "./"},
+		{"the importer's directory under the root", "sub/main.yammm", "./"},
+		{"a parent directory", "sub/deep/main.yammm", "../"},
+		{"a bare dot", "main.yammm", "."},
+		{"a bare dot dot", "main.yammm", ".."},
+		{"a dot segment last", "sub/main.yammm", "./a/."},
+		{"a dot dot segment last", "sub/main.yammm", "./a/.."},
+		{"a module-style dot dot segment last", "main.yammm", "a/.."},
+		{"a path of one separator", "main.yammm", "/"},
+		{"a path of separators", "main.yammm", "//"},
+	}
+	for _, row := range rows {
+		t.Run(row.name, func(t *testing.T) {
+			t.Parallel()
+			root := t.TempDir()
+			writeImportRows(t, root, ".yammm", "..yammm", "...yammm", "sub.yammm", "sub/a.yammm", "sub/deep.yammm", "a.yammm", "a/...yammm", "sub/a/...yammm", "sub/a/..yammm")
+			entry := filepath.Join(root, filepath.FromSlash(row.entry))
+			writeHostPathFile(t, entry, "schema \"main\"\n\nimport \""+row.importPath+"\" as d\n\ntype T {\n\tid String primary\n}\n")
+
+			s, res := schema.Load(t.Context(), entry, schema.WithModuleRoot(root))
+			if !s.IsZero() {
+				t.Fatalf("import %q loaded", row.importPath)
+			}
+			wantCounts(t, res, map[diag.Code]int{diag.E_IMPORT_RESOLVE: 1})
+			for issue := range res.Issues() {
+				if !strings.Contains(issue.Message(), "ends in none") {
+					t.Errorf("message = %q, want the file-name rule", issue.Message())
+				}
+			}
+		})
+	}
+}
+
+// TestImportPath_TrailingSeparatorsAreReadPast holds that a separator after a file
+// name changes nothing: the import binds that file though the dotfile the extension
+// rule would reach is present.
+func TestImportPath_TrailingSeparatorsAreReadPast(t *testing.T) {
+	t.Parallel()
+	yammmtest.RequireNoModuleRoot(t, schema.FindModuleRoot)
+
+	for _, importPath := range []string{"sub/b/", "sub/b//", "sub/b.yammm/", "./sub/b/", "./sub/b//", "./sub/b.yammm/"} {
+		t.Run(importPath, func(t *testing.T) {
+			t.Parallel()
+			root := t.TempDir()
+			writeHostPathFile(t, filepath.Join(root, "sub", "b.yammm"), "schema \"want\"\n")
+			writeHostPathFile(t, filepath.Join(root, "sub", "b", ".yammm"), "schema \"dotfile\"\n")
+			entry := filepath.Join(root, "main.yammm")
+			writeHostPathFile(t, entry, "schema \"main\"\n\nimport \""+importPath+"\" as d\n\ntype T {\n\tid String primary\n}\n")
+
+			s, res := schema.Load(t.Context(), entry, schema.WithModuleRoot(root))
+			if s.IsZero() {
+				t.Fatalf("import %q did not load: %v", importPath, res)
+			}
+			for imp := range s.Imports() {
+				if got := imp.Schema().Name(); got != "want" {
+					t.Errorf("import %q bound schema %q, want the file", importPath, got)
+				}
+			}
+		})
+	}
+}
+
+// TestImportPath_TwoSpellingsWithASeparatorAreADuplicateImport holds that the
+// separator names no other file, so the second import is a duplicate.
+func TestImportPath_TwoSpellingsWithASeparatorAreADuplicateImport(t *testing.T) {
+	t.Parallel()
+	yammmtest.RequireNoModuleRoot(t, schema.FindModuleRoot)
+
+	root := t.TempDir()
+	writeHostPathFile(t, filepath.Join(root, "b.yammm"), "schema \"dep\"\n")
+	entry := filepath.Join(root, "main.yammm")
+	writeHostPathFile(t, entry, "schema \"main\"\n\nimport \"b\" as x\nimport \"b/\" as y\n\ntype T {\n\tid String primary\n}\n")
+
+	_, res := schema.Load(t.Context(), entry, schema.WithModuleRoot(root))
+	wantCounts(t, res, map[diag.Code]int{diag.E_DUPLICATE_IMPORT: 1})
+}
+
+// TestLoadSources_APathOfSeparatorsBindsNoSourceKey holds that the in-memory arm
+// answers as the disk does, though a source sits under the key the extension rule
+// would reach.
+func TestLoadSources_APathOfSeparatorsBindsNoSourceKey(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	for _, importPath := range []string{"/", "//", "///"} {
+		sources := map[string][]byte{
+			"main.yammm": []byte("schema \"main\"\n\nimport \"" + importPath + "\" as d\n\ntype T {\n\tid String primary\n}\n"),
+			"/.yammm":    []byte("schema \"absolute\"\n"),
+		}
+		s, res := schema.LoadSourcesWithEntry(t.Context(), sources, "main.yammm", root)
+		if !s.IsZero() {
+			t.Fatalf("import %q loaded", importPath)
+		}
+		wantCounts(t, res, map[diag.Code]int{diag.E_IMPORT_RESOLVE: 1})
+	}
+}
+
+// TestSyntheticImportKey_TrailingSeparatorsAreReadPast holds the key rule to the
+// file the import names.
+func TestSyntheticImportKey_TrailingSeparatorsAreReadPast(t *testing.T) {
+	t.Parallel()
+	for _, importPath := range []string{"sub/b/", "sub/b//", "sub/b.yammm/", "./sub/b/"} {
+		key, err := schema.SyntheticImportKey("m.yammm", importPath)
+		if err != nil {
+			t.Errorf("SyntheticImportKey(%q) = %v", importPath, err)
+			continue
+		}
+		if key != "sub/b.yammm" {
+			t.Errorf("SyntheticImportKey(%q) = %q, want sub/b.yammm", importPath, key)
+		}
+	}
+}
+
+// TestImportPath_SpellingTheRootEscapes holds that a relative path spelling the
+// module root or an ancestor names the file beside that directory, above the root.
+func TestImportPath_SpellingTheRootEscapes(t *testing.T) {
+	t.Parallel()
+	yammmtest.RequireNoModuleRoot(t, schema.FindModuleRoot)
+
+	rows := []struct{ name, importPath string }{
+		{"the root", "../z"},
+		{"an ancestor of the root", "../../base"},
+	}
+	for _, row := range rows {
+		t.Run(row.name, func(t *testing.T) {
+			t.Parallel()
+			base := filepath.Join(t.TempDir(), "base")
+			root := filepath.Join(base, "z")
+			writeImportRows(t, base, "z.yammm", "../base.yammm", "z/..yammm", "z/...yammm")
+			entry := filepath.Join(root, "m.yammm")
+			writeHostPathFile(t, entry, "schema \"main\"\n\nimport \""+row.importPath+"\" as d\n\ntype T {\n\tid String primary\n}\n")
+
+			s, res := schema.Load(t.Context(), entry, schema.WithModuleRoot(root))
+			if !s.IsZero() {
+				t.Fatalf("import %q loaded", row.importPath)
+			}
+			wantCounts(t, res, map[diag.Code]int{diag.E_PATH_ESCAPE: 1})
+		})
+	}
+}
+
+// TestSyntheticImportPath_APathNamingNoFileIsRefused holds the same refusal where
+// a load looks imports up by key, and in the function that states the key rule.
+func TestSyntheticImportPath_APathNamingNoFileIsRefused(t *testing.T) {
+	t.Parallel()
+	for _, importPath := range []string{"", "./", "../", ".", "..", "./a/..", "/", "//"} {
+		t.Run(importPath, func(t *testing.T) {
+			t.Parallel()
+			if key, err := schema.SyntheticImportKey("sub/m.yammm", importPath); err == nil {
+				t.Errorf("SyntheticImportKey = %q, want a refusal", key)
+			}
+			sources := map[string][]byte{
+				"sub/m.yammm": []byte("schema \"main\"\n\nimport \"" + importPath + "\" as d\n\ntype T {\n\tid String primary\n}\n"),
+				"sub.yammm":   []byte("schema \"dep\"\n"),
+				"..yammm":     []byte("schema \"dot\"\n"),
+				".yammm":      []byte("schema \"empty\"\n"),
+			}
+			s, res := schema.LoadSourcesWithEntry(t.Context(), sources, "sub/m.yammm", "", schema.WithSyntheticRoot("test://r"))
+			if !s.IsZero() {
+				t.Fatalf("import %q loaded", importPath)
+			}
+			wantCounts(t, res, map[diag.Code]int{diag.E_IMPORT_RESOLVE: 1})
+		})
 	}
 }

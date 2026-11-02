@@ -6,7 +6,6 @@ import (
 	"testing"
 
 	"github.com/simon-lentz/yammm/lsp/internal/docstate"
-	"github.com/simon-lentz/yammm/lsp/internal/lsputil"
 	"github.com/simon-lentz/yammm/lsp/internal/protocol"
 	"github.com/simon-lentz/yammm/lsp/internal/testutil"
 
@@ -54,7 +53,7 @@ func TestHandleFormatting_WithDoc(t *testing.T) {
 func TestHandleFormatting_MarkdownURI(t *testing.T) {
 	t.Parallel()
 
-	resolver := &fakeResolver{encoding: lsputil.PositionEncodingUTF16}
+	resolver := &fakeResolver{}
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	h := handleFormatting(resolver, logger)
 

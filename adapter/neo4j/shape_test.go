@@ -19,21 +19,15 @@ func TestShapeForSchema_Basic(t *testing.T) {
 		t.Fatalf("ShapeForSchema failed: %v", err)
 	}
 
-	ns, ok := shape.Types[typeID(t, s, "Entity")]
+	ns, ok := shape.types[typeID(t, s, "Entity")]
 	if !ok {
 		t.Fatal("missing Entity in shape")
 	}
-	if ns.Label != "basic_test__Entity" {
-		t.Errorf("Label = %q; want %q", ns.Label, "basic_test__Entity")
+	if ns.label != "basic_test__Entity" {
+		t.Errorf("Label = %q; want %q", ns.label, "basic_test__Entity")
 	}
-	if !slices.Equal(ns.PrimaryKeys, []string{"id"}) {
-		t.Errorf("PrimaryKeys = %v; want [id]", ns.PrimaryKeys)
-	}
-	// RequiredFields: id, name, count, active, created_at.
-	for _, want := range []string{"id", "name", "count", "active", "created_at"} {
-		if !slices.Contains(ns.RequiredFields, want) {
-			t.Errorf("RequiredFields missing %q; got %v", want, ns.RequiredFields)
-		}
+	if !slices.Equal(ns.primaryKeys, []string{"id"}) {
+		t.Errorf("PrimaryKeys = %v; want [id]", ns.primaryKeys)
 	}
 }
 
@@ -47,14 +41,9 @@ func TestShapeForSchema_CompositePK(t *testing.T) {
 		t.Fatalf("ShapeForSchema failed: %v", err)
 	}
 
-	ns := shape.Types[typeID(t, s, "Record")]
-	if !slices.Equal(ns.PrimaryKeys, []string{"schema_id", "record_id"}) {
-		t.Errorf("PrimaryKeys = %v; want [schema_id record_id]", ns.PrimaryKeys)
-	}
-	for _, want := range []string{"schema_id", "record_id", "name"} {
-		if !slices.Contains(ns.RequiredFields, want) {
-			t.Errorf("RequiredFields missing %q; got %v", want, ns.RequiredFields)
-		}
+	ns := shape.types[typeID(t, s, "Record")]
+	if !slices.Equal(ns.primaryKeys, []string{"schema_id", "record_id"}) {
+		t.Errorf("PrimaryKeys = %v; want [schema_id record_id]", ns.primaryKeys)
 	}
 }
 
@@ -68,10 +57,10 @@ func TestShapeForSchema_SkipsAbstract(t *testing.T) {
 		t.Fatalf("ShapeForSchema failed: %v", err)
 	}
 
-	if _, ok := shape.Types[typeID(t, s, "Base")]; ok {
+	if _, ok := shape.types[typeID(t, s, "Base")]; ok {
 		t.Error("abstract type Base should not be in Types")
 	}
-	if _, ok := shape.Types[typeID(t, s, "Widget")]; !ok {
+	if _, ok := shape.types[typeID(t, s, "Widget")]; !ok {
 		t.Error("concrete type Widget should be in Types")
 	}
 }
@@ -112,12 +101,12 @@ part type Item {
 	if err := result.Err(); err != nil {
 		t.Fatalf("ShapeForSchema failed: %v", err)
 	}
-	ns, ok := shape.Types[item.ID()]
+	ns, ok := shape.types[item.ID()]
 	if !ok {
 		t.Fatal("imported part type base.Item has no shape")
 	}
-	if ns.Label != "base__Item" {
-		t.Errorf("imported part label = %q; want %q (the declaring schema's name)", ns.Label, "base__Item")
+	if ns.label != "base__Item" {
+		t.Errorf("imported part label = %q; want %q (the declaring schema's name)", ns.label, "base__Item")
 	}
 }
 
@@ -131,10 +120,10 @@ func TestShapeForSchema_PartTypes(t *testing.T) {
 		t.Fatalf("ShapeForSchema failed: %v", err)
 	}
 
-	if _, ok := shape.Types[typeID(t, s, "LineItem")]; !ok {
+	if _, ok := shape.types[typeID(t, s, "LineItem")]; !ok {
 		t.Error("part type LineItem should be in Types")
 	}
-	if _, ok := shape.Types[typeID(t, s, "Order")]; !ok {
+	if _, ok := shape.types[typeID(t, s, "Order")]; !ok {
 		t.Error("type Order should be in Types")
 	}
 }
@@ -150,19 +139,12 @@ func TestShapeForSchema_Inheritance(t *testing.T) {
 	}
 
 	// Tracked is abstract — should not appear.
-	if _, ok := shape.Types[typeID(t, s, "Tracked")]; ok {
+	if _, ok := shape.types[typeID(t, s, "Tracked")]; ok {
 		t.Error("abstract type Tracked should not be in Types")
 	}
 
-	ns, ok := shape.Types[typeID(t, s, "Entity")]
-	if !ok {
+	if _, ok := shape.types[typeID(t, s, "Entity")]; !ok {
 		t.Fatal("missing Entity in shape")
-	}
-	// Inherited required fields from Tracked.
-	for _, want := range []string{"run_id", "source_fetched_at", "id", "name"} {
-		if !slices.Contains(ns.RequiredFields, want) {
-			t.Errorf("RequiredFields missing inherited %q; got %v", want, ns.RequiredFields)
-		}
 	}
 }
 
@@ -176,20 +158,20 @@ func TestShapeForSchema_MultipleTypes(t *testing.T) {
 		t.Fatalf("ShapeForSchema failed: %v", err)
 	}
 
-	widget, ok := shape.Types[typeID(t, s, "Widget")]
+	widget, ok := shape.types[typeID(t, s, "Widget")]
 	if !ok {
 		t.Fatal("missing Widget")
 	}
-	if !slices.Equal(widget.PrimaryKeys, []string{"id"}) {
-		t.Errorf("Widget PrimaryKeys = %v; want [id]", widget.PrimaryKeys)
+	if !slices.Equal(widget.primaryKeys, []string{"id"}) {
+		t.Errorf("Widget PrimaryKeys = %v; want [id]", widget.primaryKeys)
 	}
 
-	gadget, ok := shape.Types[typeID(t, s, "Gadget")]
+	gadget, ok := shape.types[typeID(t, s, "Gadget")]
 	if !ok {
 		t.Fatal("missing Gadget")
 	}
-	if !slices.Equal(gadget.PrimaryKeys, []string{"uid", "sku"}) {
-		t.Errorf("Gadget PrimaryKeys = %v; want [uid sku]", gadget.PrimaryKeys)
+	if !slices.Equal(gadget.primaryKeys, []string{"uid", "sku"}) {
+		t.Errorf("Gadget PrimaryKeys = %v; want [uid sku]", gadget.primaryKeys)
 	}
 }
 
@@ -203,8 +185,8 @@ func TestShapeForSchema_CustomSeparator(t *testing.T) {
 		t.Fatalf("ShapeForSchema failed: %v", err)
 	}
 
-	ns := shape.Types[typeID(t, s, "Entity")]
-	if ns.Label != "basic_test_Entity" {
-		t.Errorf("Label = %q; want %q", ns.Label, "basic_test_Entity")
+	ns := shape.types[typeID(t, s, "Entity")]
+	if ns.label != "basic_test_Entity" {
+		t.Errorf("Label = %q; want %q", ns.label, "basic_test_Entity")
 	}
 }

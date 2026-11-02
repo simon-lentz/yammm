@@ -6,7 +6,6 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/simon-lentz/yammm/internal/source"
 	"github.com/simon-lentz/yammm/internal/yammmtest"
 	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
@@ -47,7 +46,7 @@ func TestSchema_SettersWorkBeforeSeal(t *testing.T) {
 }
 
 func TestNewSchema(t *testing.T) {
-	sourceID := location.MustNewSourceID("test://schema")
+	sourceID := location.NewSourceID("test://schema")
 	span := location.Span{
 		Source: sourceID,
 		Start:  location.Position{Line: 1, Column: 1, Byte: 0},
@@ -70,7 +69,7 @@ func TestSchema_Name(t *testing.T) {
 }
 
 func TestSchema_SourceID(t *testing.T) {
-	sourceID := location.MustNewSourceID("test://source")
+	sourceID := location.NewSourceID("test://source")
 
 	s := schema.TestNewSchema("test", sourceID, location.Span{}, "")
 
@@ -79,7 +78,7 @@ func TestSchema_SourceID(t *testing.T) {
 
 func TestSchema_Span(t *testing.T) {
 	span := location.Span{
-		Source: location.MustNewSourceID("test://span"),
+		Source: location.NewSourceID("test://span"),
 		Start:  location.Position{Line: 1, Column: 1, Byte: 0},
 		End:    location.Position{Line: 100, Column: 1, Byte: 1000},
 	}
@@ -320,7 +319,7 @@ func TestSchema_ImportByAlias_NotFound(t *testing.T) {
 
 func TestSchema_FindImportAlias_Found(t *testing.T) {
 	s := schema.TestNewSchema("test", location.SourceID{}, location.Span{}, "")
-	resolvedID := location.MustNewSourceID("test://types")
+	resolvedID := location.NewSourceID("test://types")
 	imp := schema.TestNewImport("./types.yammm", "types", resolvedID, location.Span{})
 	schema.TestSetSchemaImports(s, []schema.Import{imp})
 
@@ -332,13 +331,13 @@ func TestSchema_FindImportAlias_Found(t *testing.T) {
 func TestSchema_FindImportAlias_NotFound(t *testing.T) {
 	s := schema.TestNewSchema("test", location.SourceID{}, location.Span{}, "")
 
-	result := s.FindImportAlias(location.MustNewSourceID("test://unknown"))
+	result := s.FindImportAlias(location.NewSourceID("test://unknown"))
 
 	assert.Empty(t, result)
 }
 
 func TestSchema_FindImportAlias_OwnPath(t *testing.T) {
-	sourceID := location.MustNewSourceID("test://self")
+	sourceID := location.NewSourceID("test://self")
 	s := schema.TestNewSchema("test", sourceID, location.Span{}, "")
 
 	result := s.FindImportAlias(sourceID)
@@ -371,19 +370,4 @@ func TestSchema_IsSealed(t *testing.T) {
 	// After sealing, IsSealed should return true
 	schema.TestSealSchema(s)
 	assert.True(t, schema.TestIsSealedSchema(s), "sealed schema should report IsSealed() == true")
-}
-
-func TestSchema_HasSourceProvider_NilSources(t *testing.T) {
-	s := schema.TestNewSchema("test", location.SourceID{}, location.Span{}, "")
-
-	assert.False(t, s.HasSourceProvider())
-}
-
-func TestSchema_HasSourceProvider_WithSources(t *testing.T) {
-	s := schema.TestNewSchema("test", location.SourceID{}, location.Span{}, "")
-	reg := source.NewRegistry()
-	sources := schema.NewSources(reg)
-	schema.TestSetSchemaSources(s, sources)
-
-	assert.True(t, s.HasSourceProvider())
 }

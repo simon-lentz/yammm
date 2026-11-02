@@ -43,18 +43,9 @@ func isWideRune(r rune) bool {
 	}
 }
 
-// WrapLongLines processes lines sequentially, wrapping long lines and collapsing
-// multiline constructs that fit within the threshold. It handles Enum, extends,
-// datatype alias Enum, and invariant constructs.
-func WrapLongLines(text string) string {
-	if text == "" {
-		return ""
-	}
-	return joinLines(wrapLongLines(classifyLexed(text)))
-}
-
-// wrapLongLines is WrapLongLines over classified lines. Only a content line
-// starts a construct or is wrapped; a blank or comment line passes through
+// wrapLongLines processes lines sequentially, wrapping long lines and collapsing
+// multiline constructs that fit within the threshold, for Enum, extends, datatype
+// alias Enum and invariant constructs. A blank or comment line passes through
 // untouched, whatever its text looks like.
 func wrapLongLines(ls []line) []line {
 	result := make([]line, 0, len(ls))

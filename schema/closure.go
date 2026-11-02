@@ -11,7 +11,6 @@ import (
 // a breadth-first walk from the receiver over each schema's imports in
 // declaration order, deduplicated by SourceID, so a schema reachable through
 // multiple import paths appears exactly once, at its first-reached position.
-// During a load, an import with no resolved schema (deferred or failed) is skipped.
 //
 // The walk order is deterministic, making Closure suitable for driving
 // generated output.
@@ -52,9 +51,7 @@ func (s Schema) ensureClosure() {
 			seen[cur.SourceID()] = true
 			closure = append(closure, cur)
 			for _, imp := range cur.imports {
-				if dep := imp.Schema(); !dep.IsZero() {
-					queue = append(queue, dep)
-				}
+				queue = append(queue, imp.Schema())
 			}
 		}
 

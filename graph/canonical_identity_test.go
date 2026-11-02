@@ -10,6 +10,7 @@ import (
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/instance"
+	"github.com/simon-lentz/yammm/internal/snapparts"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -123,9 +124,8 @@ func TestIdentity_DistinctValuesStayDistinct(t *testing.T) {
 	}
 }
 
-// rebuildSchema declares a canonicalizing kind in every parts position
-// RebuildSnapshot fills: instance property, composed-child property and edge
-// property.
+// rebuildSchema declares a canonicalizing kind in every position a rebuild
+// fills: instance property, composed-child property and edge property.
 func rebuildSchema(t *testing.T) schema.Schema {
 	t.Helper()
 	const src = `schema "rebuild_canonical"
@@ -156,15 +156,14 @@ type Sensor {
 	return s
 }
 
-// TestRebuildSnapshot_CanonicalizesEveryPropertyPosition kills the rebuild
-// arm. RebuildSnapshot accepts pre-resolved parts and runs no validation, so
-// without it a caller-supplied time.Time reaches Properties() untouched and a
-// graph rebuilt from parts is not equal to one built through validation.
-func TestRebuildSnapshot_CanonicalizesEveryPropertyPosition(t *testing.T) {
+// TestRebuild_CanonicalizesEveryPropertyPosition pins that a rebuild stores what
+// a validator stores: a rebuild runs no validation, so a document's raw spelling
+// would otherwise reach Properties() untouched and the graph would not equal one
+// built through validation.
+func TestRebuild_CanonicalizesEveryPropertyPosition(t *testing.T) {
 	t.Parallel()
 	s := rebuildSchema(t)
-	when := time.Date(2026, 8, 19, 12, 0, 0, 0, time.UTC)
-	const wantText = "2026-08-19T12:00:00Z"
+	const spelled, wantText = "2026-08-19T12:00:00+00:00", "2026-08-19T12:00:00Z"
 	const id = "0a35ef0f-9d40-4b6b-a0a1-0d1a5a0e1f2b"
 
 	sensorID := mustTypeID(t, s, "Sensor")
@@ -174,9 +173,9 @@ func TestRebuildSnapshot_CanonicalizesEveryPropertyPosition(t *testing.T) {
 	sensorKey := immutable.WrapKey([]any{"s1"})
 	stationKey := immutable.WrapKey([]any{"st1"})
 
-	snap, result := graph.RebuildSnapshot(s, graph.SnapshotParts{
+	snap := rebuild(s, snapparts.Parts{
 		Types: []schema.TypeID{sensorID, stationID},
-		Instances: []graph.InstanceParts{
+		Instances: []snapparts.Instance{
 			{
 				TypeID:     stationID,
 				PrimaryKey: stationKey,
@@ -187,32 +186,28 @@ func TestRebuildSnapshot_CanonicalizesEveryPropertyPosition(t *testing.T) {
 				PrimaryKey: sensorKey,
 				Properties: immutable.WrapProperties(map[string]any{
 					"id":         "s1",
-					"created_at": when,
-					// A non-canonical spelling of the same instant.
-					"run_id": strings.ToUpper(id),
+					"created_at": spelled,
+					"run_id":     strings.ToUpper(id),
 				}),
-				Composed: map[string][]graph.InstanceParts{
+				Composed: map[string][]snapparts.Instance{
 					"READINGS": {{
 						TypeID:     readingID,
 						PrimaryKey: immutable.WrapKey([]any{"r1"}),
 						Properties: immutable.WrapProperties(map[string]any{
-							"name": "r1", "taken_at": when,
+							"name": "r1", "taken_at": spelled,
 						}),
 					}},
 				},
 			},
 		},
-		Edges: []graph.EdgeParts{{
+		Edges: []snapparts.Edge{{
 			Relation:   "FEED",
 			SourceType: sensorID,
 			SourceKey:  sensorKey,
 			TargetKey:  stationKey,
-			Properties: immutable.WrapProperties(map[string]any{"seen_at": when}),
+			Properties: immutable.WrapProperties(map[string]any{"seen_at": spelled}),
 		}},
 	})
-	if result.HasErrors() {
-		t.Fatalf("RebuildSnapshot: %s", result)
-	}
 
 	sensor := slices.Collect(snap.InstancesOf(sensorID))[0]
 	assertProp(t, sensor.Properties(), "created_at", wantText)
@@ -239,18 +234,18 @@ func assertProp(t *testing.T, props immutable.Properties, name, want string) {
 	}
 }
 
-// TestRebuildSnapshot_KeepsWhatItCannotRender is the other half of the arm's
-// contract. A value the constraint cannot render survives, because this entry
-// point reconstructs a document rather than validating one — and a document
-// written before the rule existed has to keep loading.
-func TestRebuildSnapshot_KeepsWhatItCannotRender(t *testing.T) {
+// TestRebuild_KeepsWhatItCannotRender is the other half of the contract. A value
+// the constraint cannot render survives, because a rebuild reconstructs a document
+// rather than validating one, and a document written before the rule existed has
+// to keep loading.
+func TestRebuild_KeepsWhatItCannotRender(t *testing.T) {
 	t.Parallel()
 	s := rebuildSchema(t)
 	sensorID := mustTypeID(t, s, "Sensor")
 
-	snap, result := graph.RebuildSnapshot(s, graph.SnapshotParts{
+	snap := rebuild(s, snapparts.Parts{
 		Types: []schema.TypeID{sensorID},
-		Instances: []graph.InstanceParts{
+		Instances: []snapparts.Instance{
 			{
 				TypeID:     sensorID,
 				PrimaryKey: immutable.WrapKey([]any{"s1"}),
@@ -262,9 +257,6 @@ func TestRebuildSnapshot_KeepsWhatItCannotRender(t *testing.T) {
 			},
 		},
 	})
-	if result.HasErrors() {
-		t.Fatalf("RebuildSnapshot refused a non-conforming value: %s", result)
-	}
 
 	props := slices.Collect(snap.InstancesOf(sensorID))[0].Properties()
 	assertProp(t, props, "created_at", "not-a-timestamp")

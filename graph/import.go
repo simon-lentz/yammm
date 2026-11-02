@@ -18,11 +18,11 @@ import (
 // and is not walked.
 //
 // Panics if s or snap is zero (programmer error).
-func NewFromSnapshot(s schema.Schema, snap Snapshot, opts ...Option) (*Graph, diag.Result) {
+func NewFromSnapshot(s schema.Schema, snap Snapshot) (*Graph, diag.Result) {
 	if snap.IsZero() {
 		panic("graph.NewFromSnapshot: zero Snapshot")
 	}
-	g := New(s, opts...)
+	g := New(s)
 	if res := validateImport(g.schema, g.canon, snap); res.HasErrors() {
 		return nil, res
 	}
@@ -30,17 +30,15 @@ func NewFromSnapshot(s schema.Schema, snap Snapshot, opts ...Option) (*Graph, di
 	return g, diag.OK()
 }
 
-// validateImport holds snap to s through [structureRules], the definition
-// [RebuildSnapshot] applies, so an import cannot install what the rebuild path
-// refuses. snap's types include every root's type, so its types entries carry
-// the root rule. A record's reason needs no schema and every constructor of
+// validateImport holds snap to s through [structureRules]. snap's types include
+// every root's type, so its types entries carry the root rule. A record's reason needs no schema and every constructor of
 // snap held it, so the walk judges none; importSnapshot derives the records again.
 func validateImport(s schema.Schema, canon *canonicalizer, snap Snapshot) diag.Result {
 	if snap.schema == s {
 		return diag.OK()
 	}
 	c := diag.NewCollector(0)
-	r := &structureRules{s: s, canon: canon, c: c, op: "NewFromSnapshot", callerFacing: true}
+	r := &structureRules{s: s, canon: canon, c: c}
 
 	for i, id := range snap.types {
 		r.typesEntry(i, id)
@@ -58,26 +56,11 @@ func validateImport(s schema.Schema, canon *canonicalizer, snap Snapshot) diag.R
 			r.countRecord(e.source.typeID, e.source.primaryKey, e.relation)
 		}
 	}
-	slots := newSlotIndex[Instance](canon)
-	for i, dup := range snap.duplicates {
+	// A duplicate's conflict is the root at its own type and key, which every
+	// constructor of snap held, and that root's type carries the root rule
+	// through the types entries.
+	for _, dup := range snap.duplicates {
 		checkTree(r, "duplicate instance", dup.instance)
-		// A root duplicate's conflict is the root at its own type and key, which
-		// every constructor of snap held, and that root's type carries the root
-		// rule through the types entries. A composed duplicate's conflict depends
-		// on its slot's multiplicity and keys, which s can change.
-		if dup.relation == "" {
-			continue
-		}
-		// An identity s cannot resolve is the identity rule's to report: a
-		// parent's through its type's entry, the instance's through checkTree.
-		if _, ok := s.TypeByID(dup.instance.typeID); !ok {
-			continue
-		}
-		if _, ok := s.TypeByID(dup.parent.typeID); !ok {
-			continue
-		}
-		at := oneSlot{source: dup.parent.typeID, key: canon.key(dup.parent.typeID, dup.parent.primaryKey).String()}
-		composedDuplicate(r, slots, i, dup.instance, at, dup.relation, dup.parent)
 	}
 	for _, u := range snap.unresolved {
 		// An absent record holds no data, so it names no field s can lack:
@@ -94,9 +77,7 @@ func validateImport(s schema.Schema, canon *canonicalizer, snap Snapshot) diag.R
 		// position, so the identity rule judges it here.
 		if u.reason == "target_missing" {
 			rec.target = u.targetType
-			if !rec.target.IsZero() {
-				r.identity(rec.target, positionAt("unresolved target", rec.targetKey.String()))
-			}
+			r.identity(rec.target, positionAt("unresolved target", rec.targetKey.String()))
 		}
 		if !r.association(rec) {
 			r.countRecord(rec.source, rec.sourceKey, rec.relation)
@@ -190,10 +171,8 @@ func (g *Graph) importSnapshot(snap Snapshot) {
 		g.rename(name, instClone)
 		g.canon.reinstance(instClone)
 
-		// The conflict and the parent are each a root or a composed child, which step 1
-		// cloned. A root duplicate's zero parent reads as the zero Instance.
-		// Diagnostic is zero-value for loaded snapshots.
-		g.duplicates = append(g.duplicates, newDuplicate(instClone, cloneMap[dup.conflict], cloneMap[dup.parent], dup.relation, dup.diagnostic))
+		// The conflict is a root, which step 1 cloned.
+		g.duplicates = append(g.duplicates, newDuplicate(instClone, cloneMap[dup.conflict]))
 	}
 
 	// Step 5: Diagnostics — no-op.
@@ -214,12 +193,10 @@ func (g *Graph) rename(name func(schema.TypeID) string, inst Instance) {
 }
 
 // unresolvedTargetKey recovers the key an unresolved record stores as its
-// rendering. "absent" and "empty" records store none, and a rendering that
-// does not parse reads as no key, which the arity rule then refuses.
+// rendering. A rendering that does not parse, as the empty one of an "absent" or
+// "empty" record, reads as no key, which the arity rule then refuses where a
+// record names a target.
 func unresolvedTargetKey(u UnresolvedEdge) immutable.Key {
-	if u.targetKey == "" {
-		return immutable.Key{}
-	}
 	components, err := ParseKey(u.targetKey)
 	if err != nil {
 		return immutable.Key{}

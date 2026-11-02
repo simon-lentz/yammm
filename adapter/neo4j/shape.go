@@ -7,116 +7,89 @@ import (
 	"strings"
 
 	"github.com/simon-lentz/yammm/diag"
-	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
 )
 
-// NodeShape describes the Neo4j representation of a single yammm type.
-//
-// Construct via [Adapter.ShapeForSchema]; do not create directly.
-type NodeShape struct {
-	Type           string   // Original yammm type name
-	Label          string   // Sanitized Neo4j label (namespace + separator + type)
-	PrimaryKeys    []string // Property names forming the uniqueness constraint
-	RequiredFields []string // All required properties (including primary keys)
+// nodeShape describes the Neo4j representation of a single yammm type.
+type nodeShape struct {
+	label       string   // Sanitized Neo4j label (namespace + separator + type)
+	primaryKeys []string // Property names forming the uniqueness constraint
 
-	// ImmutableKeys are the type's @writeOnce properties (own and inherited),
-	// sorted and deduplicated — see [ImmutableKeysFor].
-	//
-	// Non-nil when [Adapter.ShapeForSchema] computed the set, including when the
-	// set is empty; nil marks a shape that never computed one. The write path
-	// honors @writeOnce from this field, which costs no per-node derivation.
-	ImmutableKeys []string
+	// immutableKeys are the type's @writeOnce properties (own and inherited),
+	// sorted and deduplicated, recorded so the write path derives them once per type.
+	immutableKeys []string
 
-	// keyConstraints maps each name in PrimaryKeys to the schema constraint its
+	// keyConstraints maps each name in primaryKeys to the schema constraint its
 	// value must satisfy, so every write path coerces merge keys to the same
 	// driver-native types [propsToParamMap] produces for $props. A merge key
 	// bound raw where its property is coerced matches nothing: a Date primary
 	// key MERGEs on a string against DATE-valued nodes.
-	//
-	// Unexported, so it can only come from [Adapter.ShapeForSchema]. The write
-	// path refuses a shape without it — see [GraphShape.schemaID] — because keys
-	// that pass through uncoerced disagree in type with the properties they
-	// match against.
 	keyConstraints map[string]schema.Constraint
 }
 
-// GraphShape maps yammm type identities to their Neo4j node representations.
-//
-// Keyed by [schema.TypeID] rather than by rendered name: a name is a
-// rendering, and a transitively imported type renders to a bare name that a
-// same-named local type also renders to, so a name-keyed index binds one
-// type's instances to another type's label and keys. [NodeShape.Type] carries
-// the rendered name for display.
-//
-// Construct via [Adapter.ShapeForSchema]. The write path enforces that rather
-// than asking for it: a shape it did not build is refused.
+// GraphShape is the input [Adapter.BatchNodeQueries] and
+// [Adapter.BatchEdgeQueries] take for a schema: each non-abstract type's label,
+// primary keys and their constraints, and @writeOnce keys, with the schema object
+// they came from. [Adapter.ShapeForSchema] builds it. No field is exported,
+// so a caller passes it on and cannot change what it holds.
 type GraphShape struct {
-	Types map[schema.TypeID]NodeShape
+	// types is keyed by [schema.TypeID] rather than by rendered name: a name is a
+	// rendering, and a transitively imported type renders to a bare name that a
+	// same-named local type also renders to, so a name-keyed index binds one
+	// type's instances to another type's label and keys.
+	types map[schema.TypeID]nodeShape
 
-	// schemaID is the identity of the schema [Adapter.ShapeForSchema] built this
-	// shape from. Its zero value means the shape came from somewhere else, or from
-	// a schema with no SourceID, as a Builder gives without WithSourceID.
+	// schema is the object [Adapter.ShapeForSchema] built this shape from. Its
+	// zero value means the shape came from somewhere else.
 	//
-	// The write path requires it, and requires it to match the snapshot's own
-	// schema. A shape the adapter did not build carries no key constraints, so
-	// merge keys pass through [coerceValue] uncoerced while the SAME properties
-	// are coerced from the schema type — a Date primary key then reaches the
-	// driver as a string in the merge key and as a native date in the
-	// properties. The MERGE matches its key against the stored property, so it
-	// matches nothing and creates a duplicate node on every re-ingestion. A
-	// shape built from a DIFFERENT schema reaches the same place through a
-	// legitimate constructor, which is why the identity is compared and not
-	// merely present.
-	//
-	// Unexported, so nothing outside this package can set it: the guarantee is
-	// structural rather than a request in a doc comment.
-	schemaID location.SourceID
+	// The write path requires it to be the snapshot's own schema object, because
+	// another load, even of one source name, can declare a key another way. A
+	// merge key would then reach the driver as a string while the SAME property
+	// is coerced from the snapshot's schema to a native date. The MERGE matches its
+	// key against the stored property, so it matches nothing: each re-ingestion
+	// creates a duplicate node, or fails where a uniqueness constraint holds the
+	// key. So the object is compared, and not merely present.
+	schema schema.Schema
 }
 
-// requireShapeFor refuses a [GraphShape] this adapter did not build, and one
-// built from a schema other than the snapshot's.
+// requireShapeFor refuses a nil [GraphShape], one [Adapter.ShapeForSchema] did not
+// build, and one built from any object but the snapshot's schema. Another load of
+// one source is another object.
 func requireShapeFor(shapes *GraphShape, s schema.Schema) error {
 	switch {
 	case shapes == nil:
 		return errors.New("neo4j adapter: nil GraphShape; build one with Adapter.ShapeForSchema")
-	case shapes.schemaID.IsZero():
-		return errors.New("neo4j adapter: GraphShape was not built by Adapter.ShapeForSchema, so it carries no key constraints; " +
-			"merge keys would pass through uncoerced while their properties are coerced from the schema, and every re-ingestion would duplicate instead of match")
+	case shapes.schema.IsZero():
+		return errors.New("neo4j adapter: GraphShape was not built by Adapter.ShapeForSchema; build one with Adapter.ShapeForSchema")
 	case s.IsZero():
 		return errors.New("neo4j adapter: snapshot carries no schema to check the GraphShape against")
-	case shapes.schemaID != s.SourceID():
-		return fmt.Errorf("neo4j adapter: GraphShape was built from schema %s but the snapshot carries schema %s",
-			shapes.schemaID, s.SourceID())
+	case shapes.schema != s:
+		return fmt.Errorf("neo4j adapter: GraphShape was built from schema %s but the snapshot carries schema %s, and another load of one source is another schema",
+			shapes.schema.SourceID(), s.SourceID())
 	}
 	return nil
 }
 
 // ShapeForSchema converts a yammm schema into a [GraphShape] describing
 // the Neo4j node structure for each non-abstract type across the WHOLE
-// import closure — each member's types are labelled under that member's
-// own schema name, so an association or composition reaching an imported
+// import closure — [Adapter.Label] labels each member's types from that
+// member's own schema name, so an association or composition reaching an imported
 // type finds its shape without a hand-built merge.
 //
-// This is the metadata needed to ensure write-time label and key consistency.
-// Consumers use [NodeShape.Label] for MERGE patterns and [NodeShape.PrimaryKeys]
-// for MERGE key properties.
-//
 // If validation errors are found, returns (nil, result) where result contains
-// [E_NEO4J_INVALID_IDENTIFIER] or [E_NEO4J_LABEL_COLLISION] issues — two
-// closure members sharing a schema name render colliding labels, and a
-// TypeID-keyed map would silently hold two shapes under one label.
+// [E_NEO4J_INVALID_IDENTIFIER] or [E_NEO4J_LABEL_COLLISION] issues. Two types of the
+// closure that render one label draw the collision when the label is valid, and the
+// identifier issue when it is not.
 func (a *Adapter) ShapeForSchema(ctx context.Context, s schema.Schema) (*GraphShape, diag.Result) {
 	collector := diag.NewCollector(0)
 	shape := &GraphShape{
-		Types:    make(map[schema.TypeID]NodeShape),
-		schemaID: s.SourceID(),
+		types:  make(map[schema.TypeID]nodeShape),
+		schema: s,
 	}
 
-	// The source registry rejects a duplicated schema name
-	// (E_DUPLICATE_SCHEMA), but a schema name is a free string, and
+	// A load refuses a repeated schema name (E_DUPLICATE_SCHEMA), but
 	// [SanitizeIdentifier] maps "geo-regions" and "geo_regions" to one label
-	// prefix, so a loader-built closure reaches this refusal too.
+	// prefix, so two names in one closure reach this refusal.
 	seenLabels := make(map[string]schema.TypeID)
 	for t, label := range a.emittableTypes(ctx, s, collector) {
 		if first, dup := seenLabels[label]; dup {
@@ -134,63 +107,23 @@ func (a *Adapter) ShapeForSchema(ctx context.Context, s schema.Schema) (*GraphSh
 	return shape, result
 }
 
-// recordShape computes and stores one type's NodeShape.
+// recordShape computes and stores one type's [nodeShape].
 func (a *Adapter) recordShape(shape *GraphShape, t schema.Type, label string) {
-	{
-		// Trimmed to match the label, which is built from the same form. The
-		// map is keyed by identity, so this is the display name alone.
-		name := strings.TrimSpace(t.Name())
-
-		immutable := ImmutableKeysFor(t)
-		if immutable == nil {
-			immutable = []string{}
+	// Extract primary keys, keeping each one's constraint so the write path
+	// can coerce the value the MERGE matches on.
+	var primary []string
+	keyConstraints := make(map[string]schema.Constraint)
+	for pk := range t.PrimaryKeys() {
+		if pkName := strings.TrimSpace(pk.Name()); pkName != "" {
+			primary = append(primary, pkName)
+			keyConstraints[pkName] = pk.Constraint()
 		}
+	}
 
-		// Extract primary keys, keeping each one's constraint so the write path
-		// can coerce the value the MERGE matches on.
-		var primary []string
-		keyConstraints := make(map[string]schema.Constraint)
-		for pk := range t.PrimaryKeys() {
-			if pkName := strings.TrimSpace(pk.Name()); pkName != "" {
-				primary = append(primary, pkName)
-				keyConstraints[pkName] = pk.Constraint()
-			}
-		}
-
-		// Extract required fields (non-optional properties) with dedup.
-		var required []string
-		seen := make(map[string]struct{})
-		for prop := range t.AllProperties() {
-			propName := strings.TrimSpace(prop.Name())
-			if propName == "" {
-				continue
-			}
-			if _, exists := seen[propName]; exists {
-				continue
-			}
-			if prop.IsRequired() {
-				seen[propName] = struct{}{}
-				required = append(required, propName)
-			}
-		}
-
-		// Merge primary keys into required (avoiding duplicates).
-		for _, key := range primary {
-			if _, exists := seen[key]; !exists {
-				required = append(required, key)
-			}
-		}
-
-		shape.Types[t.ID()] = NodeShape{
-			Type:           name,
-			Label:          label,
-			PrimaryKeys:    primary,
-			RequiredFields: required,
-			// Non-nil even when empty, so the write path can tell a shape that
-			// computed no @writeOnce keys from one that never computed any (a
-			// hand-built or pre-upgrade shape) and only falls back for the latter.
-			ImmutableKeys:  immutable,
-			keyConstraints: keyConstraints,
-		}
+	shape.types[t.ID()] = nodeShape{
+		label:          label,
+		primaryKeys:    primary,
+		immutableKeys:  ImmutableKeysFor(t),
+		keyConstraints: keyConstraints,
 	}
 }

@@ -7,9 +7,8 @@ import (
 	"testing"
 
 	"github.com/simon-lentz/yammm/graph"
-	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/instance"
-	"github.com/simon-lentz/yammm/location"
+	"github.com/simon-lentz/yammm/internal/instancetest"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -17,18 +16,18 @@ import (
 func testConcurrentSchema(t *testing.T) schema.Schema {
 	t.Helper()
 
-	s, result := schema.NewBuilder().
-		WithName("concurrent").
-		WithSourceID(location.MustNewSourceID("test://concurrent.yammm")).
-		AddType("Person").
-		WithPrimaryKey("id", schema.StringConstraint{}).
-		WithProperty("name", schema.StringConstraint{}).
-		Done().
-		AddType("Company").
-		WithPrimaryKey("id", schema.StringConstraint{}).
-		WithProperty("name", schema.StringConstraint{}).
-		Done().
-		Build()
+	s, result := schema.LoadString(t.Context(), `schema "concurrent"
+
+type Person {
+	id String primary
+	name String required
+}
+
+type Company {
+	id String primary
+	name String required
+}
+`, "concurrent.yammm")
 
 	if result.HasErrors() {
 		t.Fatalf("Failed to build test schema: %s", result.String())
@@ -41,8 +40,6 @@ func TestGraph_Concurrent_Add(t *testing.T) {
 	g := graph.New(s)
 	ctx := t.Context()
 
-	personType, _ := s.Type("Person")
-
 	const numGoroutines = 100
 	const instancesPerGoroutine = 10
 
@@ -52,13 +49,7 @@ func TestGraph_Concurrent_Add(t *testing.T) {
 		wg.Go(func() {
 			for j := range instancesPerGoroutine {
 				pk := fmt.Sprintf("person-%d-%d", i, j)
-				inst := instance.NewValidInstance(
-					"Person",
-					personType.ID(),
-					immutable.WrapKey([]any{pk}),
-					immutable.WrapProperties(map[string]any{"id": pk, "name": pk}),
-					nil, nil, location.Provenance{},
-				)
+				inst := instancetest.Valid(t, s, "Person", map[string]any{"id": pk, "name": pk})
 
 				g.Add(ctx, inst)
 			}
@@ -82,8 +73,6 @@ func TestGraph_Concurrent_Add_WithDuplicates(t *testing.T) {
 	g := graph.New(s)
 	ctx := t.Context()
 
-	personType, _ := s.Type("Person")
-
 	const numGoroutines = 50
 	// All goroutines try to add the same instance
 	const sharedKey = "shared-alice"
@@ -95,13 +84,7 @@ func TestGraph_Concurrent_Add_WithDuplicates(t *testing.T) {
 
 	for i := range numGoroutines {
 		wg.Go(func() {
-			inst := instance.NewValidInstance(
-				"Person",
-				personType.ID(),
-				immutable.WrapKey([]any{sharedKey}),
-				immutable.WrapProperties(map[string]any{"id": sharedKey, "name": fmt.Sprintf("Alice %d", i)}),
-				nil, nil, location.Provenance{},
-			)
+			inst := instancetest.Valid(t, s, "Person", map[string]any{"id": sharedKey, "name": fmt.Sprintf("Alice %d", i)})
 
 			result := g.Add(ctx, inst)
 
@@ -139,9 +122,6 @@ func TestGraph_Concurrent_Add_MultipleTypes(t *testing.T) {
 	g := graph.New(s)
 	ctx := t.Context()
 
-	personType, _ := s.Type("Person")
-	companyType, _ := s.Type("Company")
-
 	const numGoroutines = 50
 	const instancesPerGoroutine = 10
 
@@ -152,13 +132,7 @@ func TestGraph_Concurrent_Add_MultipleTypes(t *testing.T) {
 		wg.Go(func() {
 			for j := range instancesPerGoroutine {
 				pk := fmt.Sprintf("person-%d-%d", i, j)
-				inst := instance.NewValidInstance(
-					"Person",
-					personType.ID(),
-					immutable.WrapKey([]any{pk}),
-					immutable.WrapProperties(map[string]any{"id": pk, "name": pk}),
-					nil, nil, location.Provenance{},
-				)
+				inst := instancetest.Valid(t, s, "Person", map[string]any{"id": pk, "name": pk})
 
 				g.Add(ctx, inst)
 			}
@@ -170,13 +144,7 @@ func TestGraph_Concurrent_Add_MultipleTypes(t *testing.T) {
 		wg.Go(func() {
 			for j := range instancesPerGoroutine {
 				pk := fmt.Sprintf("company-%d-%d", i, j)
-				inst := instance.NewValidInstance(
-					"Company",
-					companyType.ID(),
-					immutable.WrapKey([]any{pk}),
-					immutable.WrapProperties(map[string]any{"id": pk, "name": pk}),
-					nil, nil, location.Provenance{},
-				)
+				inst := instancetest.Valid(t, s, "Company", map[string]any{"id": pk, "name": pk})
 
 				g.Add(ctx, inst)
 			}
@@ -209,8 +177,6 @@ func TestGraph_Concurrent_Snapshot(t *testing.T) {
 	g := graph.New(s)
 	ctx := t.Context()
 
-	personType, _ := s.Type("Person")
-
 	const numWriters = 10
 	const numReaders = 20
 	const instancesPerWriter = 50
@@ -222,13 +188,7 @@ func TestGraph_Concurrent_Snapshot(t *testing.T) {
 		wg.Go(func() {
 			for j := range instancesPerWriter {
 				pk := fmt.Sprintf("person-%d-%d", i, j)
-				inst := instance.NewValidInstance(
-					"Person",
-					personType.ID(),
-					immutable.WrapKey([]any{pk}),
-					immutable.WrapProperties(map[string]any{"id": pk, "name": pk}),
-					nil, nil, location.Provenance{},
-				)
+				inst := instancetest.Valid(t, s, "Person", map[string]any{"id": pk, "name": pk})
 
 				g.Add(ctx, inst)
 			}
@@ -271,8 +231,6 @@ func TestGraph_Concurrent_Check(t *testing.T) {
 	g := graph.New(s)
 	ctx := t.Context()
 
-	personType, _ := s.Type("Person")
-
 	const numGoroutines = 20
 
 	var wg sync.WaitGroup
@@ -281,13 +239,7 @@ func TestGraph_Concurrent_Check(t *testing.T) {
 	for i := range numGoroutines {
 		wg.Go(func() {
 			pk := fmt.Sprintf("person-%d", i)
-			inst := instance.NewValidInstance(
-				"Person",
-				personType.ID(),
-				immutable.WrapKey([]any{pk}),
-				immutable.WrapProperties(map[string]any{"id": pk, "name": pk}),
-				nil, nil, location.Provenance{},
-			)
+			inst := instancetest.Valid(t, s, "Person", map[string]any{"id": pk, "name": pk})
 
 			g.Add(ctx, inst)
 		})
@@ -314,8 +266,6 @@ func TestGraph_Concurrent_DeterministicOrder(t *testing.T) {
 	s := testConcurrentSchema(t)
 	ctx := t.Context()
 
-	personType, _ := s.Type("Person")
-
 	// Run multiple times to test ordering consistency
 	const runs = 5
 	const numGoroutines = 20
@@ -332,13 +282,7 @@ func TestGraph_Concurrent_DeterministicOrder(t *testing.T) {
 			wg.Go(func() {
 				for j := range instancesPerGoroutine {
 					pk := fmt.Sprintf("person-%d-%d", i, j)
-					inst := instance.NewValidInstance(
-						"Person",
-						personType.ID(),
-						immutable.WrapKey([]any{pk}),
-						immutable.WrapProperties(map[string]any{"id": pk, "name": pk}),
-						nil, nil, location.Provenance{},
-					)
+					inst := instancetest.Valid(t, s, "Person", map[string]any{"id": pk, "name": pk})
 
 					g.Add(ctx, inst)
 				}
@@ -372,39 +316,33 @@ func TestGraph_Concurrent_DeterministicOrder(t *testing.T) {
 }
 
 func BenchmarkGraph_Add_Concurrent(b *testing.B) {
-	s, result := schema.NewBuilder().
-		WithName("bench").
-		WithSourceID(location.MustNewSourceID("test://bench.yammm")).
-		AddType("Person").
-		WithPrimaryKey("id", schema.StringConstraint{}).
-		WithProperty("name", schema.StringConstraint{}).
-		Done().
-		Build()
+	s, result := schema.LoadString(b.Context(), `schema "bench"
+
+type Person {
+	id String primary
+	name String required
+}
+`, "bench.yammm")
 
 	if result.HasErrors() {
 		b.Fatalf("Failed to build schema: %s", result.String())
 	}
 
-	personType, _ := s.Type("Person")
 	ctx := b.Context()
+
+	instances := make([]instance.ValidInstance, 100)
+	for j := range instances {
+		pk := fmt.Sprintf("person-%d", j)
+		instances[j] = instancetest.Valid(b, s, "Person", map[string]any{"id": pk, "name": pk})
+	}
 
 	b.ResetTimer()
 	b.RunParallel(func(pb *testing.PB) {
-		i := 0
 		for pb.Next() {
 			g := graph.New(s)
-			for j := range 100 {
-				pk := fmt.Sprintf("person-%d-%d", i, j)
-				inst := instance.NewValidInstance(
-					"Person",
-					personType.ID(),
-					immutable.WrapKey([]any{pk}),
-					immutable.WrapProperties(map[string]any{"id": pk, "name": pk}),
-					nil, nil, location.Provenance{},
-				)
+			for _, inst := range instances {
 				g.Add(ctx, inst)
 			}
-			i++
 		}
 	})
 }
@@ -415,42 +353,21 @@ func BenchmarkGraph_Add_Concurrent(b *testing.B) {
 
 func TestIntegration_ComplexMultiSchema(t *testing.T) {
 	// 3-schema hierarchy with cross-references
-	schemaA, schemaB, schemaC, _ := testTripleSchemaSetup(t)
+	schemaA, _, schemaC := testTripleSchemaSetup(t)
 	g := graph.New(schemaA)
 	ctx := t.Context()
 
 	// Add instances at each level
 	// Schema C: BaseType
-	baseType, _ := schemaC.Type("BaseType")
-	base := instance.NewValidInstance(
-		"c.BaseType",
-		baseType.ID(),
-		immutable.WrapKey([]any{"base1"}),
-		immutable.WrapProperties(map[string]any{"id": "base1", "value": "base value"}),
-		nil, nil, location.Provenance{},
-	)
+	base := instancetest.Valid(t, schemaC, "BaseType", map[string]any{"id": "base1", "value": "base value"})
 
 	// Note: Schema A imports B which imports C
 	// So A can access B types (b.MiddleType) but NOT C types directly
 	// This test verifies the graph handles the imported B correctly
 
-	middleType, _ := schemaB.Type("MiddleType")
-	middle := instance.NewValidInstance(
-		"b.MiddleType",
-		middleType.ID(),
-		immutable.WrapKey([]any{"mid1"}),
-		immutable.WrapProperties(map[string]any{"id": "mid1", "name": "middle value"}),
-		nil, nil, location.Provenance{},
-	)
+	middle := instancetest.Valid(t, schemaA, "b.MiddleType", map[string]any{"id": "mid1", "name": "middle value"})
 
-	topType, _ := schemaA.Type("TopType")
-	top := instance.NewValidInstance(
-		"TopType",
-		topType.ID(),
-		immutable.WrapKey([]any{"top1"}),
-		immutable.WrapProperties(map[string]any{"id": "top1", "label": "top value"}),
-		nil, nil, location.Provenance{},
-	)
+	top := instancetest.Valid(t, schemaA, "TopType", map[string]any{"id": "top1", "label": "top value"})
 
 	// Add in reverse order (forward refs)
 	g.Add(ctx, top)
@@ -519,27 +436,19 @@ func TestIntegration_ForwardRefChain(t *testing.T) {
 	}
 }
 
-func TestIntegration_MixedInlineStreamed(t *testing.T) {
-	// Test mixing inline compositions with AddComposed
+func TestIntegration_InlineChildrenKeepTheirOrder(t *testing.T) {
 	s := testSchemaWithComposition(t)
 	g := graph.New(s)
 	ctx := t.Context()
 
-	// Add parent without inline children
-	parent := mustValidInstance(t, s, "Parent",
-		[]any{"p1"}, map[string]any{"name": "Parent 1"})
-
-	g.Add(ctx, parent)
-
-	// Stream in children one by one
+	var kids []map[string]any
 	for i := range 5 {
-		child := mustValidPartInstance(t, s, "Child",
-			[]any{fmt.Sprintf("c%d", i)}, map[string]any{"name": fmt.Sprintf("Child %d", i)})
-
-		result := g.AddComposed(ctx, mustTypeID(t, s, "Parent"), graph.FormatKey("p1"), "CHILDREN", child)
-		if err := result.Err(); err != nil {
-			t.Errorf("AddComposed child %d should succeed: %v", i, err)
-		}
+		kids = append(kids, partData(t, s, "Child",
+			[]any{fmt.Sprintf("c%d", i)}, map[string]any{"name": fmt.Sprintf("Child %d", i)}))
+	}
+	parent := parentWith(t, s, "Parent", []any{"p1"}, map[string]any{"name": "Parent 1"}, "CHILDREN", kids...)
+	if err := g.Add(ctx, parent).Err(); err != nil {
+		t.Errorf("Add should succeed: %v", err)
 	}
 
 	// Verify all children are attached
@@ -567,9 +476,6 @@ func TestIntegration_ConcurrentAddCheck(t *testing.T) {
 	g := graph.New(s)
 	ctx := t.Context()
 
-	personType, _ := s.Type("Person")
-	companyType, _ := s.Type("Company")
-
 	const numWorkers = 10
 	const opsPerWorker = 20
 
@@ -581,22 +487,12 @@ func TestIntegration_ConcurrentAddCheck(t *testing.T) {
 			for i := range opsPerWorker {
 				// Add person
 				pk := fmt.Sprintf("person-%d-%d", w, i)
-				person := instance.NewValidInstance(
-					"Person", personType.ID(),
-					immutable.WrapKey([]any{pk}),
-					immutable.WrapProperties(map[string]any{"id": pk, "name": pk}),
-					nil, nil, location.Provenance{},
-				)
+				person := instancetest.Valid(t, s, "Person", map[string]any{"id": pk, "name": pk})
 				g.Add(ctx, person)
 
 				// Add company
 				ck := fmt.Sprintf("company-%d-%d", w, i)
-				company := instance.NewValidInstance(
-					"Company", companyType.ID(),
-					immutable.WrapKey([]any{ck}),
-					immutable.WrapProperties(map[string]any{"id": ck, "name": ck}),
-					nil, nil, location.Provenance{},
-				)
+				company := instancetest.Valid(t, s, "Company", map[string]any{"id": ck, "name": ck})
 				g.Add(ctx, company)
 			}
 		})
@@ -692,74 +588,5 @@ func TestGraph_Concurrent_ForwardReferences(t *testing.T) {
 	}
 	if len(sources) != numWorkers {
 		t.Errorf("Expected %d unique sources, got %d", numWorkers, len(sources))
-	}
-}
-
-// TestConcurrent_SnapshotAndAddComposed_Race tests for data races between
-// concurrent Snapshot() and AddComposed() calls.
-//
-// This test should be run with: go test -race ./graph -run TestConcurrent_SnapshotAndAddComposed_Race
-//
-// Before the deep-copy snapshot fix, this test would detect a race condition
-// because AddComposed() mutated graph.Instance.composed while Snapshot() readers
-// were accessing the same Instance pointers.
-func TestConcurrent_SnapshotAndAddComposed_Race(t *testing.T) {
-	s := testSchemaWithComposition(t)
-	g := graph.New(s)
-	ctx := t.Context()
-
-	// Add parent
-	parent := mustValidInstance(t, s, "Parent",
-		[]any{"p1"}, map[string]any{"name": "Parent 1"})
-	g.Add(ctx, parent)
-
-	const numWriters = 10
-	const numReaders = 20
-	const opsPerWorker = 50
-
-	var wg sync.WaitGroup
-
-	// Writers call AddComposed
-	for w := range numWriters {
-		wg.Go(func() {
-			for i := range opsPerWorker {
-				child := mustValidPartInstance(t, s, "Child",
-					[]any{fmt.Sprintf("c-%d-%d", w, i)},
-					map[string]any{"name": fmt.Sprintf("Child %d-%d", w, i)})
-				g.AddComposed(ctx, mustTypeID(t, s, "Parent"), graph.FormatKey("p1"), "CHILDREN", child)
-			}
-		})
-	}
-
-	// Readers take snapshots and read composed children
-	for range numReaders {
-		wg.Go(func() {
-			for range opsPerWorker {
-				snap := g.Snapshot()
-				parents := slices.Collect(snap.InstancesOf(mustTypeID(t, s, "Parent")))
-				if len(parents) > 0 {
-					// Access Composed() - this would race with addComposed() before the fix
-					_ = slices.Collect(parents[0].Composed("CHILDREN"))
-					_ = parents[0].ComposedCount("CHILDREN")
-					_ = parents[0].ComposedRelations()
-				}
-			}
-		})
-	}
-
-	wg.Wait()
-
-	// If we get here without race detector errors, the test passes
-	// Verify final state is consistent
-	snap := g.Snapshot()
-	parents := slices.Collect(snap.InstancesOf(mustTypeID(t, s, "Parent")))
-	if len(parents) != 1 {
-		t.Fatalf("Expected 1 parent, got %d", len(parents))
-	}
-
-	expectedChildren := numWriters * opsPerWorker
-	actualChildren := parents[0].ComposedCount("CHILDREN")
-	if actualChildren != expectedChildren {
-		t.Errorf("Expected %d children, got %d", expectedChildren, actualChildren)
 	}
 }

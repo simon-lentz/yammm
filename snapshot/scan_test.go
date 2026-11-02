@@ -53,6 +53,18 @@ func collectScanDir(ctx context.Context, dir string) (entries []snapshot.ScanEnt
 
 // ---------- ScanDir (iterator form) ----------
 
+// An empty dir names no directory, so it fails as a missing one does and never
+// reads the working directory.
+func TestScanDir_EmptyDirFailsAsAMissingDirectory(t *testing.T) {
+	entries, err := collectScanDir(context.Background(), "")
+	assert.Empty(t, entries)
+	require.ErrorIs(t, err, fs.ErrNotExist)
+
+	slice, res := snapshot.ScanDirSlice(context.Background(), "")
+	assert.Empty(t, slice)
+	assert.True(t, res.HasCode(diag.E_SNAPSHOT_IO), "%s", res)
+}
+
 func TestScanDir_HappyPath(t *testing.T) {
 	dir := t.TempDir()
 	seedValidYS(t, filepath.Join(dir, "a.ys"))

@@ -1,9 +1,11 @@
 package instancetest_test
 
 import (
+	"fmt"
+	"runtime"
+	"strings"
 	"testing"
 
-	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/instance"
 	"github.com/simon-lentz/yammm/internal/instancetest"
 	"github.com/simon-lentz/yammm/location"
@@ -11,90 +13,116 @@ import (
 	"github.com/simon-lentz/yammm/schema"
 )
 
-// TestVI_Defaults pins the builder's zero-option contract: primary key [1],
-// no properties, and nil edges, compositions, and provenance.
-func TestVI_Defaults(t *testing.T) {
-	vi := instancetest.VI("Person")
+func loadPerson(t *testing.T) schema.Schema {
+	t.Helper()
+	s, res := schema.LoadString(t.Context(), `schema "person"
 
-	if got := vi.TypeName(); got != "Person" {
-		t.Errorf("TypeName() = %q, want %q", got, "Person")
+type Person {
+	id String primary
+	name String required
+}
+`, "person.yammm")
+	if res.HasErrors() {
+		t.Fatalf("load: %s", res)
 	}
-	if got := vi.TypeID(); got != (schema.TypeID{}) {
-		t.Errorf("TypeID() = %v, want zero", got)
-	}
-	if got := vi.PrimaryKey().String(); got != "[1]" {
-		t.Errorf("PrimaryKey() = %s, want [1]", got)
+	return s
+}
+
+func TestValid_ReturnsTheValidatorsInstance(t *testing.T) {
+	vi := instancetest.Valid(t, loadPerson(t), "Person", map[string]any{"id": "p7", "name": "Alice"})
+	if got := vi.PrimaryKey().String(); got != `["p7"]` {
+		t.Errorf("PrimaryKey() = %s, want [\"p7\"]", got)
 	}
 	if !vi.Provenance().IsZero() {
 		t.Errorf("Provenance() = %v, want the zero Provenance", vi.Provenance())
 	}
-	for range vi.Edges() {
-		t.Error("default instance must have no edges")
-	}
-	for range vi.Compositions() {
-		t.Error("default instance must have no compositions")
-	}
 }
 
-// TestVI_Options pins that every option lands on its field.
-func TestVI_Options(t *testing.T) {
-	typeID := schema.NewTypeID(location.SourceID{}, "Person")
+func TestValidRaw_CarriesTheProvenance(t *testing.T) {
 	prov := location.NewProvenance("test.json", path.Root(), location.Span{})
-	edges := map[string]instance.ValidEdgeData{
-		"manager": instance.NewValidEdgeData([]instance.ValidEdgeTarget{
-			instance.NewValidEdgeTarget(immutable.WrapKey([]any{int64(9)}), immutable.WrapProperties(nil)),
-		}),
-	}
-	composed := map[string]immutable.Value{
-		"addresses": immutable.Wrap([]any{map[string]any{"id": int64(1)}}),
-	}
-
-	vi := instancetest.VI(
-		"Person",
-		instancetest.TypeID(typeID),
-		instancetest.PK("us", int64(7)),
-		instancetest.Props(map[string]any{"name": "Alice"}),
-		instancetest.Edges(edges),
-		instancetest.Composed(composed),
-		instancetest.Provenance(prov),
-	)
-
-	if got := vi.TypeID(); got != typeID {
-		t.Errorf("TypeID() = %v, want %v", got, typeID)
-	}
-	if got := vi.PrimaryKey().String(); got != `["us",7]` {
-		t.Errorf("PrimaryKey() = %s, want [\"us\",7]", got)
-	}
-	if name, ok := vi.Property("name"); !ok {
-		t.Error("Property(name) missing")
-	} else if s, _ := name.String(); s != "Alice" {
-		t.Errorf("Property(name) = %q, want %q", s, "Alice")
-	}
-	if _, ok := vi.Edge("manager"); !ok {
-		t.Error("Edge(manager) missing")
-	}
-	foundAddresses := false
-	for rel := range vi.Compositions() {
-		if rel == "addresses" {
-			foundAddresses = true
-		}
-	}
-	if !foundAddresses {
-		t.Error("Compositions() missing addresses relation")
-	}
-	if vi.Provenance().IsZero() {
-		t.Error("Provenance() = nil, want set")
+	vi := instancetest.ValidRaw(t, loadPerson(t), "Person", instance.RawInstance{
+		Properties: map[string]any{"id": "p7", "name": "Alice"},
+		Provenance: prov,
+	})
+	if vi.Provenance().SourceName() != "test.json" {
+		t.Errorf("Provenance() = %v, want test.json", vi.Provenance())
 	}
 }
 
-// TestVI_NoKey pins the option a keyless part needs: the built instance
-// carries an empty key rather than the [1] default.
-func TestVI_NoKey(t *testing.T) {
-	vi := instancetest.VI("Wheel", instancetest.NoKey())
-	if got := vi.PrimaryKey().Len(); got != 0 {
-		t.Errorf("PrimaryKey().Len() = %d, want 0", got)
+func TestValid_FailsTheTestOnARefusal(t *testing.T) {
+	s := loadPerson(t)
+	if !fatalOf(t, func(tb *recordingTB) {
+		instancetest.Valid(tb, s, "Person", map[string]any{"id": "p7"})
+	}).fatal {
+		t.Error("a refused fixture did not fail the test")
 	}
-	if got := vi.PrimaryKey().String(); got != "[]" {
-		t.Errorf("PrimaryKey() = %s, want []", got)
+}
+
+// A Refused member draws no issue of its own, and the validator returns no instance.
+func TestValid_FailsTheTestOnARefusalWithNoIssue(t *testing.T) {
+	s := loadPerson(t)
+	if !fatalOf(t, func(tb *recordingTB) {
+		instancetest.Valid(tb, s, "Person", map[string]any{"id": "p7", "name": instance.Refused{Value: "x"}})
+	}).fatal {
+		t.Error("a fixture holding a Refused member did not fail the test")
 	}
+}
+
+func TestTypeID_NamesTheTypeOfTheSourceItWasGiven(t *testing.T) {
+	first := instancetest.TypeID(t, "a.yammm", "T")
+	if first.IsZero() {
+		t.Fatal("TypeID returned the zero identity")
+	}
+	if first != instancetest.TypeID(t, "a.yammm", "T") {
+		t.Error("one source and one name gave two identities")
+	}
+	if first == instancetest.TypeID(t, "b.yammm", "T") {
+		t.Error("two sources gave one identity")
+	}
+}
+
+func TestTypeID_FailsTheTestOnANameTheLoadRefuses(t *testing.T) {
+	got := fatalOf(t, func(tb *recordingTB) { instancetest.TypeID(tb, "a.yammm", "lower") })
+	if !strings.Contains(got.message, "instancetest.TypeID: load lower") {
+		t.Errorf("Fatalf message = %q, want the load's refusal", got.message)
+	}
+}
+
+// The name closes the fixture's type and opens another, so the load accepts it
+// and declares no type of that name.
+func TestTypeID_FailsTheTestOnANameTheSchemaDoesNotDeclare(t *testing.T) {
+	const name = "T {\n\tid String primary\n}\n\ntype U"
+	got := fatalOf(t, func(tb *recordingTB) { instancetest.TypeID(tb, "a.yammm", name) })
+	if !strings.Contains(got.message, "the schema declares no type") {
+		t.Errorf("Fatalf message = %q, want the missing type's", got.message)
+	}
+}
+
+// fatalOf runs run on its own goroutine, since a Fatalf ends the goroutine.
+func fatalOf(t *testing.T, run func(*recordingTB)) *recordingTB {
+	t.Helper()
+	tb := &recordingTB{TB: t}
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		run(tb)
+	}()
+	<-done
+	return tb
+}
+
+// recordingTB records Fatalf and ends the goroutine, as testing.T does.
+type recordingTB struct {
+	testing.TB
+
+	fatal   bool
+	message string
+}
+
+func (r *recordingTB) Helper() {}
+
+func (r *recordingTB) Fatalf(format string, args ...any) {
+	r.fatal = true
+	r.message = fmt.Sprintf(format, args...)
+	runtime.Goexit()
 }

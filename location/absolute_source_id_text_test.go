@@ -45,15 +45,3 @@ func TestNormalizeSyntheticKey_TheAbsoluteRefusalGivesNoSchemeAdvice(t *testing.
 		}
 	}
 }
-
-// MustNewSourceID panics with the same text.
-func TestMustNewSourceID_ThePanicStatesTheStarts(t *testing.T) {
-	t.Parallel()
-	defer func() {
-		msg, _ := recover().(string)
-		if want := "location.MustNewSourceID: " + ErrAbsolutePathSourceID.Error() + `: "/abs"` + absoluteStart; msg != want {
-			t.Errorf("panic:\n got %s\nwant %s", msg, want)
-		}
-	}()
-	MustNewSourceID("/abs")
-}

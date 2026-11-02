@@ -6,10 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"reflect"
 	"slices"
-	"strconv"
-	"unicode/utf8"
 
 	"github.com/simon-lentz/yammm/adapter/internal/constraintof"
 	"github.com/simon-lentz/yammm/adapter/internal/refusal"
@@ -108,9 +105,9 @@ func (a *Adapter) WriteObject(ctx context.Context, w io.Writer, result graph.Sna
 
 // buildOutput constructs the JSON-serializable output map from a graph snapshot.
 // Cancellation is checked per type group, the unit of work the loop walks, as
-// [snapshot.Marshal] checks per group during emission. The CSV writers are
-// finer: writeSnapshotTypeTo checks per instance, so a single very large type
-// group stops sooner there than here.
+// [snapshot.Marshal] checks per group during emission. The CSV writer is finer:
+// it checks per instance, so a single very large type group stops sooner there
+// than here.
 func (a *Adapter) buildOutput(ctx context.Context, result graph.Snapshot) (map[string]any, error) {
 	output := make(map[string]any)
 	s := result.Schema()
@@ -250,13 +247,9 @@ func edgeTargetObject(s schema.Schema, rel schema.Relation, e graph.Edge) (map[s
 	out := make(map[string]any, len(pks))
 	for i, pk := range pks {
 		// "_target_" is the parser's reserved prefix; no declared property
-		// can begin with an underscore, so the namespaces cannot collide.
-		v, ok := canonicalOrRaw(key.Get(i).Unwrap(), pk.Constraint())
-		if !ok {
-			return nil, refusal.New(ErrUnrepresentable, "json adapter: edge %q to %s: target key component %d holds %s",
-				e.Relation(), diag.ValueText(e.Target().PrimaryKey().String()), i, unwritable)
-		}
-		out["_target_"+pk.Name()] = v
+		// can begin with an underscore, so the namespaces cannot collide. A
+		// stored key is in the form its constraint stores where it renders one.
+		out["_target_"+pk.Name()] = key.Get(i).Unwrap()
 	}
 	for name, val := range e.Properties().SortedRange() {
 		var c schema.Constraint
@@ -275,24 +268,19 @@ func edgeTargetObject(s schema.Schema, rel schema.Relation, e graph.Edge) (map[s
 
 // unwritable names what [unwrapValue] refuses, for the refusal that names the
 // property holding it.
-const unwritable = "a value JSON cannot write: a non-finite float, a number literal this adapter does not read back as a number, a string that is not valid UTF-8, a time or a UUID its constraint does not render as text that reads back, or a value that is no scalar, list or string-keyed map"
+const unwritable = "a number literal this adapter does not read back as a number"
 
 // unwrapValue recursively converts an immutable.Value to a JSON-compatible any,
 // rendering each scalar in the form its constraint stores. A collection
 // descends with its element constraint, so a List<Timestamp> canonicalizes at
 // its elements and not only at its outer level. It reports false when
-// [withFloatIndicator] refuses a value anywhere in v, or a map's key is not
-// valid UTF-8.
+// [canonicalOrRaw] refuses a value anywhere in v.
 func unwrapValue(v immutable.Value, c schema.Constraint) (any, bool) {
-	if v.IsNil() {
-		return nil, true
-	}
-
 	if m, ok := v.Map(); ok {
 		result := make(map[string]any, m.Len())
 		for k, val := range m.Range() {
 			u, ok := unwrapValue(val, nil)
-			if !ok || !utf8.ValidString(k) {
+			if !ok {
 				return nil, false
 			}
 			result[k] = u
@@ -315,82 +303,40 @@ func unwrapValue(v immutable.Value, c schema.Constraint) (any, bool) {
 	return canonicalOrRaw(v.Unwrap(), c)
 }
 
-// canonicalOrRaw renders raw in the form its constraint stores, then marks a
-// float through [withFloatIndicator], so a float returns as a json.RawMessage
-// rather than as the float64 it is stored as. It reads raw in the one form
-// every writer writes ([instance.ScalarOf]) and reports false for a value of no
-// such form. It returns that form, marked the same way, when the constraint
-// cannot render it: MarshalObject returns an error rather than a diag.Result,
-// so failing here would fail a whole export over one malformed value.
+// canonicalOrRaw renders raw in the form its constraint stores, or as it stands
+// when the constraint cannot: MarshalObject returns an error rather than a
+// diag.Result, so failing here would fail a whole export over one malformed
+// value. A float returns as a json.RawMessage with a float indicator (".", "e" or
+// "E"), the set [immutable.IsIntegerLiteral] reads as a float: without it a whole
+// float emits int-shaped and reads back as an integer wherever a reader classifies
+// a number by its spelling, a negative zero without its sign. The indicator
+// follows the Go type the value holds, not its constraint: a float held under an
+// Integer is written as the float it is, so the document states what the snapshot
+// holds and the validator refuses it on the way back. It reports false for a
+// json.Number [readsBack] refuses.
 func canonicalOrRaw(raw any, c schema.Constraint) (any, bool) {
-	held, ok := instance.ScalarOf(raw)
-	if !ok {
-		return nil, false
+	held := raw
+	if canonical, err := instance.CanonicalValue(raw, c); err == nil {
+		held = canonical
 	}
-	canonical, err := instance.CanonicalValue(held, c)
-	if err != nil {
-		return withFloatIndicator(held)
-	}
-	return withFloatIndicator(canonical)
-}
-
-// withFloatIndicator renders a float with a float indicator (".", "e" or "E"),
-// the set [immutable.IsIntegerLiteral] reads as a float. Without it a whole
-// float emits int-shaped and reads back as an integer wherever a reader
-// classifies a number by its spelling, a negative zero without its sign. The
-// indicator follows the Go type the value holds, not its constraint:
-// a float held under an Integer is written as the float it is, so the document
-// states what the snapshot holds and the validator refuses it on the way back.
-//
-// The digits come from encoding/json itself, so this cannot drift from the
-// encoder that writes every other number in the document. A float32 keeps its
-// 32-bit shortest form unless that form, read at 64 bits as the parser reads
-// it, rounds to another float32; it is then written in its 64-bit form. v is a value in the one form [instance.ScalarOf] reads;
-// every other one passes through. A non-finite float reports false, JSON having
-// no number for it, and so do a json.Number [readsBack] refuses, a string that
-// is not valid UTF-8, each invalid byte of which encoding/json writes as
-// U+FFFD, and a time.Time or uuid.UUID no constraint rendered.
-func withFloatIndicator(v any) (any, bool) {
-	rv := reflect.ValueOf(v)
-	var b []byte
-	var err error
-	switch rv.Kind() {
-	case reflect.Float32:
-		f := float32(rv.Float())
-		b, err = json.Marshal(f)
-		if back, perr := strconv.ParseFloat(string(b), 64); err == nil && perr == nil && float32(back) != f {
-			b, err = json.Marshal(rv.Float())
+	switch x := held.(type) {
+	case float64:
+		// The digits come from encoding/json, so this cannot drift from the encoder
+		// that writes every other number in the document.
+		b, _ := json.Marshal(x) //nolint:errchkjson // a held float is finite
+		if !bytes.ContainsAny(b, ".eE") {
+			b = append(b, '.', '0')
 		}
-	case reflect.Float64:
-		b, err = json.Marshal(rv.Float())
-	case reflect.String:
-		if n, isNumber := v.(json.Number); isNumber && !readsBack(n) {
-			return nil, false
-		}
-		if !utf8.ValidString(rv.String()) {
-			return nil, false
-		}
-		return v, true
-	case reflect.Struct, reflect.Array:
-		// In the one form only a time.Time or a uuid.UUID has these kinds, and
-		// one reaches here only where no constraint rendered it.
-		return nil, false
-	default:
-		return v, true
+		return json.RawMessage(b), true
+	case json.Number:
+		return x, readsBack(x)
 	}
-	// encoding/json refuses a float only when it is NaN or an infinity.
-	if err != nil {
-		return nil, false
-	}
-	if !bytes.ContainsAny(b, ".eE") {
-		b = append(b, '.', '0')
-	}
-	return json.RawMessage(b), true
+	return held, true
 }
 
 // readsBack reports whether the literal encoding/json writes for n, a JSON
-// number literal as every json.Number in the one form is, is read back as the
-// number n spells. encoding/json writes the literal as it stands.
+// number literal as every json.Number a validator or a document holds is, is read
+// back as the number n spells. encoding/json writes the literal as it stands.
 // [Adapter.ParseObject] hands the validator the literal's own text or the
 // number it spells, and a Float, which reads every number either numeric kind
 // reads, judges both alike: a literal no finite float64 holds is a number of

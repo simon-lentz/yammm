@@ -10,7 +10,7 @@ import (
 
 // A scalar Integer position widens every Go integer width to int64, exactly as
 // a List<Integer> element does.
-func TestCoerce_IntegerWidensToInt64(t *testing.T) {
+func TestCoerceScalar_IntegerWidensToInt64(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
 		name string
@@ -33,16 +33,16 @@ func TestCoerce_IntegerWidensToInt64(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			got, err := Coerce(schema.NewIntegerConstraint(), tt.raw)
+			got, err := coerceScalar(schema.NewIntegerConstraint(), tt.raw)
 			if err != nil {
-				t.Fatalf("Coerce(Integer, %#v) error: %v", tt.raw, err)
+				t.Fatalf("coerceScalar(Integer, %#v) error: %v", tt.raw, err)
 			}
 			n, ok := got.(int64)
 			if !ok {
-				t.Fatalf("Coerce(Integer, %#v) = %#v (%T), want int64", tt.raw, got, got)
+				t.Fatalf("coerceScalar(Integer, %#v) = %#v (%T), want int64", tt.raw, got, got)
 			}
 			if n != tt.want {
-				t.Errorf("Coerce(Integer, %#v) = %d, want %d", tt.raw, n, tt.want)
+				t.Errorf("coerceScalar(Integer, %#v) = %d, want %d", tt.raw, n, tt.want)
 			}
 		})
 	}
@@ -50,7 +50,7 @@ func TestCoerce_IntegerWidensToInt64(t *testing.T) {
 
 // A float is never an Integer, whole or not, as the validator's Integer rule
 // states, so it is an error rather than an integer the caller never wrote.
-func TestCoerce_IntegerRejectsWhatItCannotRepair(t *testing.T) {
+func TestCoerceScalar_IntegerRejectsWhatItCannotRepair(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
 		name string
@@ -74,9 +74,9 @@ func TestCoerce_IntegerRejectsWhatItCannotRepair(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			got, err := Coerce(schema.NewIntegerConstraint(), tt.raw)
+			got, err := coerceScalar(schema.NewIntegerConstraint(), tt.raw)
 			if err == nil {
-				t.Fatalf("Coerce(Integer, %#v) = %#v, want an error", tt.raw, got)
+				t.Fatalf("coerceScalar(Integer, %#v) = %#v, want an error", tt.raw, got)
 			}
 			if !strings.Contains(err.Error(), "int64") {
 				t.Errorf("error = %q, want it to name the target type", err)
@@ -86,11 +86,11 @@ func TestCoerce_IntegerRejectsWhatItCannotRepair(t *testing.T) {
 }
 
 // A nil value is an absent property, not a failure — unchanged by this rule.
-func TestCoerce_IntegerNilPassesThrough(t *testing.T) {
+func TestCoerceScalar_IntegerNilPassesThrough(t *testing.T) {
 	t.Parallel()
-	got, err := Coerce(schema.NewIntegerConstraint(), nil)
+	got, err := coerceScalar(schema.NewIntegerConstraint(), nil)
 	if err != nil || got != nil {
-		t.Errorf("Coerce(Integer, nil) = %#v, %v; want nil, nil", got, err)
+		t.Errorf("coerceScalar(Integer, nil) = %#v, %v; want nil, nil", got, err)
 	}
 }
 
@@ -135,7 +135,7 @@ func TestCoerceSlice_IntegerElementStillRejectsFractions(t *testing.T) {
 	}
 }
 
-// CoerceParams applies Coerce's rule, through the scalar path they share, at
+// CoerceParams applies coerceScalar's rule, through the scalar path they share, at
 // the boundary a direct-Cypher caller crosses: an integer widens, a float is
 // refused.
 func TestCoerceParams_IntegerRuleHoldsAtTheParamBoundary(t *testing.T) {
@@ -155,11 +155,11 @@ func TestCoerceParams_IntegerRuleHoldsAtTheParamBoundary(t *testing.T) {
 
 // An unsigned value past int64 is refused at every width that can hold one,
 // not only uint64.
-func TestCoerce_IntegerRefusesAnUnsignedValuePastInt64(t *testing.T) {
+func TestCoerceScalar_IntegerRefusesAnUnsignedValuePastInt64(t *testing.T) {
 	t.Parallel()
 	for _, raw := range []any{uint(math.MaxInt64) + 1, uint64(math.MaxInt64) + 1} {
-		if got, err := Coerce(schema.NewIntegerConstraint(), raw); err == nil {
-			t.Errorf("Coerce(Integer, %T %v) = %#v, want an error", raw, raw, got)
+		if got, err := coerceScalar(schema.NewIntegerConstraint(), raw); err == nil {
+			t.Errorf("coerceScalar(Integer, %T %v) = %#v, want an error", raw, raw, got)
 		}
 	}
 }

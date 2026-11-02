@@ -296,7 +296,7 @@ func (f fixedSource) Content(location.Span) ([]byte, bool) { return f.content, t
 func TestDiagnosticSink_SourceReachesTheRenderer(t *testing.T) {
 	t.Parallel()
 
-	source := location.MustNewSourceID("thing.yammm")
+	source := location.NewSourceID("thing.yammm")
 	c := diag.NewCollectorUnlimited()
 	c.Collect(diag.NewIssue(diag.Error, diag.E_SYNTAX, "unexpected token").
 		WithSpan(location.Span{

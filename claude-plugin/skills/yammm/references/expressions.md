@@ -151,7 +151,7 @@ address.city        // nested property access
 
 Property access on existing instances returns **nil** for properties not present on the object (enabling `Then`/`Lest` nil-guarded patterns). This allows safe navigation without raising evaluation errors.
 
-Every reference is checked statically at schema load: the checker types each sub-expression and follows the type through member access, indexing and pipeline stages. A property the type does not declare draws `E_UNKNOWN_PROPERTY`; a member read through an association key (`$c.name` over `--> CUSTOMERS`), a scalar or a list, an undefined named variable, an unknown function, a call shape the builtin refuses, or a receiver or argument of a kind the builtin refuses on every input (`age -> Upper`, `name -> Match("nor")`) draws `E_INVALID_INVARIANT`. A builtin's result is typed by its subkind — `Len` a number, `Upper` a string, `StartsWith` a boolean — so `name -> Len -> Upper` is refused too.
+Every reference is checked statically at schema load: the checker types each sub-expression and follows the type through member access, indexing and pipeline stages. A property the type does not declare draws `E_UNKNOWN_PROPERTY`, and a relation read in a casing other than its name or field name draws `E_INVALID_NAME`. Every other reference, index or call the checker refuses draws `E_INVALID_INVARIANT`, such as `$c.name` over `--> CUSTOMERS`, `age[0]`, an undefined named variable, an unknown function, `age -> Upper` and `name -> Match("nor")`. A builtin's result is typed by its subkind — `Len` a number, `Upper` a string, `StartsWith` a boolean — so `name -> Len -> Upper` is refused too.
 
 ---
 
@@ -191,7 +191,7 @@ tracked contract corpus at `instance/testdata/contract/`.
 - `$self` -- bound to the current instance during invariant evaluation
 - `$0`, `$1`, ... -- positional variables (evaluator-local, default nil)
 - `$item`, `$acc`, etc. -- named lambda parameters
-- Named variables are resolved through the evaluator's parent chain — lambda parameters, then the instance's own members (`$age` reads the property `age`); a name bound by neither is rejected at schema load (`E_INVALID_INVARIANT`)
+- A named variable reads a lambda parameter first, then the instance's own member of that exact spelling (`$age` reads the property `age`). A name bound by neither is rejected at schema load (`E_INVALID_INVARIANT`)
 
 ---
 

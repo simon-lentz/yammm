@@ -7,9 +7,7 @@ import (
 
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/graph"
-	"github.com/simon-lentz/yammm/immutable"
-	"github.com/simon-lentz/yammm/instance"
-	"github.com/simon-lentz/yammm/location"
+	"github.com/simon-lentz/yammm/internal/instancetest"
 	"github.com/simon-lentz/yammm/schema"
 	"github.com/simon-lentz/yammm/snapshot"
 )
@@ -21,8 +19,8 @@ const (
 
 // foreignSpellingSchema declares a Timestamp key at the root and at a keyed
 // composed child, plus an optional association, so one document can carry a
-// composed duplicate record and an unresolved-edge record whose addresses
-// are all canonicalizing.
+// duplicate record and an unresolved-edge record whose addresses are all
+// canonicalizing.
 func foreignSpellingSchema(t *testing.T) schema.Schema {
 	t.Helper()
 	const src = `schema "foreign_spelling"
@@ -49,43 +47,30 @@ part type Reading {
 }
 
 // TestLoad_RecordAddressesResolveFromAForeignSpelling pins the reader's
-// three record-addressing sites (#22): a duplicate record's conflict
-// address, a duplicate record's parent address and an unresolved record's
-// source address are each canonicalized before the instance index is read.
-// A foreign writer that spelled the shared instant the other way still
-// resolves against a document the graph indexed canonically; reverting any
-// one of the three turns its lookup into a dangling reference.
+// record-addressing sites (#22): a duplicate record's conflict address and an
+// unresolved record's source address are each canonicalized before the instance
+// index is read. A foreign writer that spelled the shared instant the other way
+// still resolves against a document the graph indexed canonically; reverting
+// either turns its lookup into a dangling reference.
 func TestLoad_RecordAddressesResolveFromAForeignSpelling(t *testing.T) {
 	t.Parallel()
 	s := foreignSpellingSchema(t)
-	sensorType, _ := s.Type("Sensor")
-	readingType, _ := s.Type("Reading")
-
-	reading := func() instance.ValidInstance {
-		return instance.NewValidInstance("Reading", readingType.ID(),
-			immutable.WrapKey([]any{canonicalStamp}),
-			immutable.WrapProperties(map[string]any{"taken_at": canonicalStamp}),
-			nil, nil, location.Provenance{})
-	}
 	// The association names a Station that is never added, so the snapshot
 	// carries an unresolved record whose SOURCE is the Timestamp-keyed root.
-	sensor := instance.NewValidInstance("Sensor", sensorType.ID(),
-		immutable.WrapKey([]any{canonicalStamp}),
-		immutable.WrapProperties(map[string]any{"observed_at": canonicalStamp}),
-		map[string]instance.ValidEdgeData{"AT": instance.NewValidEdgeData([]instance.ValidEdgeTarget{
-			instance.NewValidEdgeTarget(immutable.WrapKey([]any{"missing"}), immutable.WrapProperties(nil)),
-		})},
-		map[string]immutable.Value{"READINGS": immutable.Wrap([]any{reading()})}, location.Provenance{})
+	sensor := instancetest.Valid(t, s, "Sensor", map[string]any{
+		"observed_at": canonicalStamp,
+		"at":          map[string]any{"_target_id": "missing"},
+		"readings":    []any{map[string]any{"taken_at": canonicalStamp}},
+	})
 
 	g := graph.New(s)
 	if r := g.Add(t.Context(), sensor); !r.OK() {
 		t.Fatalf("add: %s", r)
 	}
-	// A second child at the same address makes a COMPOSED duplicate record,
-	// which carries both a parent address and a conflict address.
-	if r := g.AddComposed(t.Context(), sensorType.ID(), graph.FormatKey(canonicalStamp),
-		"READINGS", reading()); r.OK() {
-		t.Fatal("a duplicate sibling was accepted")
+	// A second root at the same address makes a duplicate record, which carries
+	// a conflict address.
+	if r := g.Add(t.Context(), instancetest.Valid(t, s, "Sensor", map[string]any{"observed_at": canonicalStamp})); r.OK() {
+		t.Fatal("a duplicate root was accepted")
 	}
 
 	snap := g.Snapshot()

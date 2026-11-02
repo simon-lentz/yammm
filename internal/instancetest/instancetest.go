@@ -1,75 +1,43 @@
 package instancetest
 
 import (
-	"github.com/simon-lentz/yammm/immutable"
+	"testing"
+
 	"github.com/simon-lentz/yammm/instance"
-	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
 )
 
-// viConfig collects the optional fields of a built ValidInstance.
-type viConfig struct {
-	typeID     schema.TypeID
-	pk         immutable.Key
-	props      immutable.Properties
-	edges      map[string]instance.ValidEdgeData
-	composed   map[string]immutable.Value
-	provenance location.Provenance
+// Valid validates props as one typeName instance over s and fails tb when the
+// validator refuses them. A fixture that states an edge or a composition writes
+// it as a validator's input: a relation's field name holding a target object, a
+// child object, or an array of them.
+func Valid(tb testing.TB, s schema.Schema, typeName string, props map[string]any) instance.ValidInstance {
+	tb.Helper()
+	return ValidRaw(tb, s, typeName, instance.RawInstance{Properties: props})
 }
 
-// VIOption customizes a [VI]-built instance.
-type VIOption func(*viConfig)
-
-// TypeID sets the schema type identity (defaults to the zero TypeID).
-func TypeID(id schema.TypeID) VIOption {
-	return func(c *viConfig) { c.typeID = id }
-}
-
-// PK sets the primary key from its component values
-// (defaults to the single-component key [1]).
-func PK(parts ...any) VIOption {
-	return func(c *viConfig) { c.pk = immutable.WrapKey(parts) }
-}
-
-// NoKey builds a keyless instance: the primary key is empty rather than the
-// default [1], which is what a part type declaring no key carries.
-func NoKey() VIOption {
-	return func(c *viConfig) { c.pk = immutable.WrapKey(nil) }
-}
-
-// Props sets the instance properties (defaults to none).
-func Props(m map[string]any) VIOption {
-	return func(c *viConfig) { c.props = immutable.WrapProperties(m) }
-}
-
-// Edges sets the association edge data (defaults to none).
-func Edges(edges map[string]instance.ValidEdgeData) VIOption {
-	return func(c *viConfig) { c.edges = edges }
-}
-
-// Composed sets the composition children (defaults to none).
-func Composed(composed map[string]immutable.Value) VIOption {
-	return func(c *viConfig) { c.composed = composed }
-}
-
-// Provenance sets the source provenance (defaults to none).
-func Provenance(p location.Provenance) VIOption {
-	return func(c *viConfig) { c.provenance = p }
-}
-
-// VI builds an instance.ValidInstance for tests, defaulting every field a
-// scenario does not name: zero TypeID, primary key [1], zero provenance, and
-// no properties, edges or compositions. It wraps the 7-argument
-// [instance.NewValidInstance] so call sites state only what they test.
-func VI(typeName string, opts ...VIOption) instance.ValidInstance {
-	c := viConfig{
-		pk:    immutable.WrapKey([]any{int64(1)}),
-		props: immutable.WrapProperties(nil),
+// ValidRaw is [Valid] over a whole raw instance, for a fixture that states a
+// provenance.
+func ValidRaw(tb testing.TB, s schema.Schema, typeName string, raw instance.RawInstance) instance.ValidInstance {
+	tb.Helper()
+	valid, res := instance.NewValidator(s).ValidateOne(tb.Context(), typeName, raw)
+	if res.HasErrors() || valid.IsZero() {
+		tb.Fatalf("instancetest: validate %s: %s", typeName, res)
 	}
-	for _, opt := range opts {
-		opt(&c)
+	return valid
+}
+
+// TypeID returns the identity of a type named typeName in a schema loaded under
+// sourceName, which gives a test an identity its own schema does not declare.
+func TypeID(tb testing.TB, sourceName, typeName string) schema.TypeID {
+	tb.Helper()
+	s, res := schema.LoadString(tb.Context(), "schema \"identity\"\n\ntype "+typeName+" {\n\tid String primary\n}\n", sourceName)
+	if res.HasErrors() {
+		tb.Fatalf("instancetest.TypeID: load %s: %s", typeName, res)
 	}
-	return instance.NewValidInstance(
-		typeName, c.typeID, c.pk, c.props, c.edges, c.composed, c.provenance,
-	)
+	typ, ok := s.Type(typeName)
+	if !ok {
+		tb.Fatalf("instancetest.TypeID: the schema declares no type %s", typeName)
+	}
+	return typ.ID()
 }

@@ -58,7 +58,7 @@ func TestAdapter_DataTypeRefSpanCoversTheQualifier_Qualified(t *testing.T) {
 		"\taddress types.Email\n" +
 		"}\n"
 
-	parser := schema.TestNewParser(location.MustNewSourceID("test://ref.yammm"), diag.NewCollector(0))
+	parser := schema.TestNewParser(location.NewSourceID("test://ref.yammm"), diag.NewCollector(0))
 	model := parser.Parse([]byte(src))
 	if model == nil || len(model.Types) != 1 || len(model.Types[0].Properties) != 2 {
 		t.Fatalf("fixture did not parse into one type with two properties: %+v", model)

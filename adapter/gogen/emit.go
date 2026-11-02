@@ -331,8 +331,8 @@ func (g *generator) emitAssociation(rel schema.Relation, fields map[string]strin
 
 // emitGraph writes the Graph aggregate: one slice field per concrete type the
 // entry schema can name, keyed by its [schema.AddressableTag], which no two such
-// types share. It needs no key check, since [schema.Load] and [schema.Builder]
-// refuse a concrete type with no primary key, so every field's type can hold a root.
+// types share. It needs no key check, since a load refuses a concrete type with
+// no primary key, so every field's type can hold a root.
 func (g *generator) emitGraph() error {
 	g.buf.WriteString("type Graph struct {\n")
 	for _, t := range g.closureTypes() {
@@ -390,9 +390,6 @@ func (g *generator) emitEdgeStructs() error {
 func (g *generator) emitSerializedModel() error {
 	srcs := g.schema.Sources()
 	ids := srcs.SourceIDs()
-	if len(ids) == 0 {
-		return errors.New("gogen: schema is not source-backed; Marshal requires a schema loaded via Load/LoadString/LoadSourcesWithEntry")
-	}
 	keys, err := g.embeddedKeys(ids)
 	if err != nil {
 		return err
@@ -405,10 +402,7 @@ func (g *generator) emitSerializedModel() error {
 	g.buf.WriteString("// it through SerializedSources below.\n")
 	g.buf.WriteString("var serializedSources = map[string]string{\n")
 	for _, id := range ids { // SourceIDs() is sorted/deterministic
-		content, ok := srcs.ContentBySource(id)
-		if !ok {
-			return fmt.Errorf("gogen: source %q content unavailable", id)
-		}
+		content, _ := srcs.ContentBySource(id)
 		key := keys[id]
 		g.embedded[key] = content
 		fmt.Fprintf(g.buf, "%s: %s,\n", strconv.Quote(key), strconv.Quote(string(content)))
@@ -486,7 +480,7 @@ func (g *generator) embeddedKeys(ids []location.SourceID) (map[location.SourceID
 			if err := assign(target, ik, how); err != nil {
 				return nil, err
 			}
-			// A schema a load or a Build returned has every import wired.
+			// A schema a load returned has every import wired.
 			queue = append(queue, imp.Schema())
 		}
 	}

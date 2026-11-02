@@ -68,10 +68,8 @@ type Person { id String primary
 	)
 	fold := []instance.Option{}
 	allow := []instance.Option{instance.WithAllowUnknownFields(true)}
-	strict := []instance.Option{instance.WithStrictPropertyNames(true)}
 	for _, c := range []struct {
 		row, schema, csv, json string
-		strict                 bool
 		csvErrors              []string
 	}{
 		{
@@ -114,12 +112,6 @@ type Person { id String primary
 			json: `{"id":"p1","hired_by":{"_target_code":"f1","note":"a|b"}}`,
 		},
 		{
-			row: "an exact key column is a key component under strict names", schema: composite, strict: true,
-			csv:       "id,works_at._target_cid,works_at._target_d,works_at.since\np1,,notadate,2020\n",
-			json:      `{"id":"p1","works_at":{"_target_cid":"","_target_d":"notadate","since":2020}}`,
-			csvErrors: []string{"E_CSV_COERCE"},
-		},
-		{
 			row: "a shadowed spelling does not decide the target count", schema: relation,
 			csv:  "id,works_at._target_company_id,works_at.since,works_at.SINCE\np1,c1,5,5|6\n",
 			json: `{"id":"p1","works_at":{"_target_company_id":"c1","since":5,"SINCE":"5|6"}}`,
@@ -128,16 +120,6 @@ type Person { id String primary
 			row: "a colliding pair does not decide the target count", schema: relation,
 			csv:  "id,works_at._target_company_id,works_at.Since,works_at.SINCE\np1,c1,5,5|6\n",
 			json: `{"id":"p1","works_at":{"_target_company_id":"c1","Since":"5","SINCE":"5|6"}}`,
-		},
-		{
-			row: "a mis-cased key column is text under strict names", schema: relation, strict: true,
-			csv:  "id,works_at._target_company_id,works_at._target_Company_id\np1,c1,a|b\n",
-			json: `{"id":"p1","works_at":{"_target_company_id":"c1","_target_Company_id":"a|b"}}`,
-		},
-		{
-			row: "a lone mis-cased key column is text under strict names", schema: relation, strict: true,
-			csv:  "id,works_at._target_Company_id\np1,a|b\n",
-			json: `{"id":"p1","works_at":{"_target_Company_id":"a|b"}}`,
 		},
 		{
 			row: "a column taken whole at one target keeps its escapes", schema: firm,
@@ -159,7 +141,7 @@ type Person { id String primary
 			byType, jres := jsonadapter.New().ParseObject(t.Context(), location.NewSourceID("p.json"),
 				[]byte(`{"Person":[`+c.json+`]}`))
 			fromJSON := byType["Person"][0]
-			raws, pres := New(WithSchema(s), WithStrictPropertyNames(c.strict)).ParseTyped(t.Context(),
+			raws, pres := New(WithSchema(s)).ParseTyped(t.Context(),
 				location.NewSourceID("p.csv"), "Person", strings.NewReader(c.csv), person)
 			if len(raws) != 1 {
 				t.Fatalf("csv parse: %d instances, %s", len(raws), pres)
@@ -171,11 +153,7 @@ type Person { id String primary
 			if got := errorCodes(pres); !slices.Equal(got, wantCodes) {
 				t.Errorf("parse Error codes = %q, want %q\ncsv:  %s\njson: %s", got, wantCodes, pres, jres)
 			}
-			modes := [][]instance.Option{fold, allow}
-			if c.strict {
-				modes = [][]instance.Option{strict, append(slices.Clone(strict), allow...)}
-			}
-			for i, opts := range modes {
+			for i, opts := range [][]instance.Option{fold, allow} {
 				if why := judgedAlike(t, s, raws[0], fromJSON, opts...); why != "" {
 					t.Errorf("mode %d: %s", i, why)
 				}

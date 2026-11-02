@@ -3,7 +3,6 @@ package instance
 import (
 	"context"
 	"errors"
-	"log/slog"
 	"testing"
 
 	"github.com/simon-lentz/yammm/diag"
@@ -13,15 +12,11 @@ import (
 	"github.com/simon-lentz/yammm/schema"
 )
 
-// panicHandler is a slog.Handler whose Handle panics: the evaluator logs
-// its trace op from inside EvaluateBool, so the panic lands inside the
-// window evaluateInvariants must recover.
-type panicHandler struct{}
+// panicContext panics on its first Err call, which evaluateInvariants makes
+// inside the window it must recover.
+type panicContext struct{ context.Context } //nolint:containedctx // a decorator holds the context it wraps
 
-func (panicHandler) Enabled(context.Context, slog.Level) bool  { return true }
-func (panicHandler) Handle(context.Context, slog.Record) error { panic("handler down") }
-func (h panicHandler) WithAttrs([]slog.Attr) slog.Handler      { return h }
-func (h panicHandler) WithGroup(string) slog.Handler           { return h }
+func (panicContext) Err() error { panic("context down") }
 
 func TestEvaluateInvariants_RecoversAPanicAsInternalError(t *testing.T) {
 	s, res := schema.LoadString(t.Context(), `schema "p"
@@ -36,11 +31,11 @@ type Doc {
 		t.Fatal(res)
 	}
 	typ, _ := s.Type("Doc")
-	v := NewValidator(s, WithLogger(slog.New(panicHandler{})))
+	v := NewValidator(s)
 	collector := diag.NewCollectorUnlimited()
 
-	inst := newValidatedInstance("Doc", typ.ID(), immutable.Key{}, immutable.WrapProperties(map[string]any{"id": "d"}), nil, nil, location.Provenance{})
-	err := v.evaluateInvariants(t.Context(), typ, "Doc", inst, collector, location.Provenance{}, path.Root())
+	inst := newValidInstance("Doc", typ, immutable.Key{}, immutable.WrapProperties(map[string]any{"id": "d"}), nil, nil, location.Provenance{})
+	err := v.evaluateInvariants(panicContext{t.Context()}, typ, "Doc", inst, collector, location.Provenance{}, path.Root())
 	var internalErr *InternalError
 	if !errors.As(err, &internalErr) {
 		t.Fatalf("err = %v, want *InternalError", err)

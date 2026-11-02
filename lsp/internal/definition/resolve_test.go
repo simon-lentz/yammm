@@ -52,7 +52,7 @@ func TestResolveSymbol_LocalType(t *testing.T) {
 		Sources: reg,
 	}
 
-	loc := definition.ResolveSymbol(snapshot, sym, lsputil.PositionEncodingUTF16, identityURI)
+	loc := definition.ResolveSymbol(snapshot, sym, identityURI)
 	require.NotNil(t, loc)
 	assert.NotEmpty(t, loc.URI)
 
@@ -64,7 +64,7 @@ func TestResolveSymbol_LocalType(t *testing.T) {
 func TestResolveReference_NotFound(t *testing.T) {
 	t.Parallel()
 
-	sourceID := location.MustNewSourceID("test://schema.yammm")
+	sourceID := location.NewSourceID("test://schema.yammm")
 
 	// Create empty snapshot - ResolveTypeReference will return nil
 	snapshot := &analysis.Snapshot{
@@ -76,10 +76,10 @@ func TestResolveReference_NotFound(t *testing.T) {
 	ref := &symbols.ReferenceSymbol{
 		TargetName: "NonExistent",
 		Qualifier:  "",
-		Span:       location.Range(sourceID, 5, 10, 5, 20),
+		Span:       location.RangeWithBytes(sourceID, 5, 10, -1, 5, 20, -1),
 	}
 
-	loc := definition.ResolveReference(snapshot, ref, sourceID, lsputil.PositionEncodingUTF16, identityURI)
+	loc := definition.ResolveReference(snapshot, ref, sourceID, identityURI)
 	assert.Nil(t, loc, "expected nil result for unresolved reference")
 }
 
@@ -108,7 +108,7 @@ func TestSymbolToLocation(t *testing.T) {
 		Selection: nameSpan,
 	}
 
-	loc := definition.SymbolToLocation(reg, sym, lsputil.PositionEncodingUTF16, identityURI)
+	loc := definition.SymbolToLocation(reg, sym, identityURI)
 	require.NotNil(t, loc)
 	assert.NotEmpty(t, loc.URI)
 
@@ -119,14 +119,14 @@ func TestSymbolToLocation(t *testing.T) {
 func TestSymbolToLocation_NilSymbol(t *testing.T) {
 	t.Parallel()
 
-	loc := definition.SymbolToLocation(nil, nil, lsputil.PositionEncodingUTF16, identityURI)
+	loc := definition.SymbolToLocation(nil, nil, identityURI)
 	assert.Nil(t, loc, "expected nil location for nil symbol")
 }
 
 func TestSymbolToLocation_ZeroRange(t *testing.T) {
 	t.Parallel()
 
-	sourceID := location.MustNewSourceID("test://types.yammm")
+	sourceID := location.NewSourceID("test://types.yammm")
 
 	sym := &symbols.Symbol{
 		Name:     "NoRange",
@@ -135,6 +135,6 @@ func TestSymbolToLocation_ZeroRange(t *testing.T) {
 		Range:    location.Span{}, // zero span
 	}
 
-	loc := definition.SymbolToLocation(nil, sym, lsputil.PositionEncodingUTF16, identityURI)
+	loc := definition.SymbolToLocation(nil, sym, identityURI)
 	assert.Nil(t, loc, "expected nil location for symbol with zero range")
 }

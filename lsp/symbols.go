@@ -27,7 +27,7 @@ func handleDocumentSymbol(ws Resolver, logger *slog.Logger) jrpc2.Handler {
 		var allSymbols []protocol.DocumentSymbol
 		for _, unit := range units {
 			syms := symbols.DocumentSymbolsFor(unit.Snapshot.ToSymbolView(), unit.Doc.URI, unit.Doc.SourceID, unit.Doc.Version,
-				ws.PositionEncoding(), logger)
+				logger)
 			if len(syms) > 0 && unit.Remap != nil {
 				syms = workspace.RemapDocumentSymbolRanges(syms, unit.Remap)
 			}

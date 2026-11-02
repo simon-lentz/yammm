@@ -11,7 +11,6 @@ import (
 	"github.com/simon-lentz/yammm/schema"
 
 	"github.com/simon-lentz/yammm/lsp/internal/analysis"
-	"github.com/simon-lentz/yammm/lsp/internal/lsputil"
 	"github.com/simon-lentz/yammm/lsp/internal/protocol"
 	"github.com/simon-lentz/yammm/lsp/internal/symbols"
 )
@@ -44,12 +43,9 @@ func TestTypeCompletions_EmptySchema(t *testing.T) {
 	t.Parallel()
 
 	// Create a snapshot with an empty schema
-	sourceID := location.MustNewSourceID("test://types.yammm")
-
-	sch, _ := schema.NewBuilder().
-		WithName("test").
-		WithSourceID(sourceID).
-		Build()
+	sch, _ := schema.LoadString(t.Context(), `schema "test"
+`, "types.yammm")
+	sourceID := sch.SourceID()
 
 	snapshot := &analysis.Snapshot{
 		Schema:          sch,
@@ -62,12 +58,9 @@ func TestTypeCompletions_EmptySchema(t *testing.T) {
 	assert.NotNil(t, items, "expected non-nil slice")
 }
 
-func TestComputeByteOffsetFromText_UTF8Mode(t *testing.T) {
-	// Tests that ComputeByteOffsetFromText respects UTF-8 position encoding.
-	// In UTF-8 mode, character offset IS byte offset (no conversion needed).
+func TestComputeByteOffsetFromText_ASCII(t *testing.T) {
 	t.Parallel()
 
-	// Test with ASCII content - should work the same for both encodings
 	text := "type Person {\n    name String\n}"
 
 	tests := []struct {
@@ -99,42 +92,20 @@ func TestComputeByteOffsetFromText_UTF8Mode(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			result := ComputeByteOffsetFromText(text, tt.lspLine, tt.lspChar, lsputil.PositionEncodingUTF8)
+			result := ComputeByteOffsetFromText(text, tt.lspLine, tt.lspChar)
 			assert.Equal(t, tt.expected, result, "ComputeByteOffsetFromText() = %d; want %d", result, tt.expected)
 		})
 	}
 }
 
-func TestComputeByteOffsetFromText_UTF8Mode_MultiByteChars(t *testing.T) {
-	// Tests UTF-8 mode with multi-byte characters.
-	// In UTF-8 mode, lspChar is already a byte offset, so no conversion needed.
-	// In UTF-16 mode, lspChar would be UTF-16 code units.
-	//
-	// This test verifies that UTF-8 mode passes through the byte offset directly,
-	// while UTF-16 mode performs conversion.
+func TestComputeByteOffsetFromText_CountsUTF16Units(t *testing.T) {
 	t.Parallel()
 
 	// Line with emoji: "type 😀Test {"
 	// Byte positions: t(0) y(1) p(2) e(3) _(4) 😀(5,6,7,8) T(9) e(10) s(11) t(12) _(13) {(14)
 	// UTF-16 positions: t(0) y(1) p(2) e(3) _(4) 😀(5,6) T(7) e(8) s(9) t(10) _(11) {(12)
-	text := "type 😀Test {"
-
-	t.Run("UTF-8 mode passes through byte offset", func(t *testing.T) {
-		t.Parallel()
-
-		// In UTF-8 mode, lspChar=9 means byte offset 9, which is 'T'
-		result := ComputeByteOffsetFromText(text, 0, 9, lsputil.PositionEncodingUTF8)
-		assert.Equal(t, 9, result, "UTF-8 mode: ComputeByteOffsetFromText(lspChar=9) = %d; want 9 (passthrough)", result)
-	})
-
-	t.Run("UTF-16 mode converts code units to bytes", func(t *testing.T) {
-		t.Parallel()
-
-		// In UTF-16 mode, lspChar=7 means UTF-16 position 7, which is 'T' (after emoji)
-		// 'T' is at byte offset 9 in the string
-		result := ComputeByteOffsetFromText(text, 0, 7, lsputil.PositionEncodingUTF16)
-		assert.Equal(t, 9, result, "UTF-16 mode: ComputeByteOffsetFromText(lspChar=7) = %d; want 9 (converted from UTF-16)", result)
-	})
+	result := ComputeByteOffsetFromText("type 😀Test {", 0, 7)
+	assert.Equal(t, 9, result, "ComputeByteOffsetFromText(lspChar=7) = %d; want 9", result)
 }
 
 func TestTypeBodySnippets_NoCommasBeforeModifiers(t *testing.T) {

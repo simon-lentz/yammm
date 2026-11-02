@@ -7,7 +7,6 @@ import (
 
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/instance"
-	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -20,19 +19,19 @@ func exampleTypeID(s schema.Schema, name string) schema.TypeID {
 
 func ExampleGraph_Add() {
 	// Build a schema with a relationship
-	s, _ := schema.NewBuilder().
-		WithName("example").
-		WithSourceID(location.MustNewSourceID("test://example.yammm")).
-		AddType("Department").
-		WithPrimaryKey("id", schema.StringConstraint{}).
-		WithProperty("name", schema.StringConstraint{}).
-		Done().
-		AddType("Employee").
-		WithPrimaryKey("id", schema.StringConstraint{}).
-		WithProperty("name", schema.StringConstraint{}).
-		WithRelation("DEPARTMENT", schema.LocalTypeRef("Department", location.Span{}), false, false).
-		Done().
-		Build()
+	s, _ := schema.LoadString(context.Background(), `schema "example"
+
+type Department {
+	id String primary
+	name String required
+}
+
+type Employee {
+	id String primary
+	name String required
+	--> DEPARTMENT (one) Department
+}
+`, "example.yammm")
 
 	// Create graph and validator
 	g := graph.New(s)
@@ -77,17 +76,17 @@ func ExampleGraph_Add() {
 
 func ExampleGraph_Check() {
 	// Build schema
-	s, _ := schema.NewBuilder().
-		WithName("example").
-		WithSourceID(location.MustNewSourceID("test://example.yammm")).
-		AddType("Parent").
-		WithPrimaryKey("id", schema.StringConstraint{}).
-		Done().
-		AddType("Child").
-		WithPrimaryKey("id", schema.StringConstraint{}).
-		WithRelation("PARENT", schema.LocalTypeRef("Parent", location.Span{}), false, false).
-		Done().
-		Build()
+	s, _ := schema.LoadString(context.Background(), `schema "example"
+
+type Parent {
+	id String primary
+}
+
+type Child {
+	id String primary
+	--> PARENT (one) Parent
+}
+`, "example.yammm")
 
 	g := graph.New(s)
 	validator := instance.NewValidator(s)

@@ -3,7 +3,7 @@ package diag
 // Severity represents the severity level of a diagnostic issue.
 //
 // Severity is an ordered enumeration where lower numeric values are more severe.
-// Use the comparison methods rather than raw numeric comparisons for clarity.
+// Use [Severity.IsMoreSevereThan] rather than a raw numeric comparison.
 type Severity uint8
 
 const (
@@ -64,11 +64,4 @@ func (s Severity) IsFailure() bool {
 // Use this method instead of raw numeric comparisons for clarity.
 func (s Severity) IsMoreSevereThan(other Severity) bool {
 	return s < other
-}
-
-// IsAtLeastAsSevereAs reports whether s is at least as severe as other.
-//
-// Returns true when s is equal to or more severe than other.
-func (s Severity) IsAtLeastAsSevereAs(other Severity) bool {
-	return s <= other
 }

@@ -39,7 +39,7 @@ func TestParseTyped_RecordsProvenancePerRow(t *testing.T) {
 	t.Parallel()
 	s := loadTestSchema(t, "basic.yammm")
 	st, _ := s.Type("Entity")
-	id := location.MustNewSourceID("test://data/entities.csv")
+	id := location.NewSourceID("test://data/entities.csv")
 
 	input := "id,name,count,score,active,created_at\ne1,Alice,5,3.14,true,2024-06-15\ne2,Bob,10,2.71,false,2024-01-01\n"
 	results, result := New().ParseTyped(t.Context(), id, "Entity", strings.NewReader(input), st)
@@ -78,7 +78,7 @@ func TestParseTyped_ProvenanceLineSurvivesAQuotedNewline(t *testing.T) {
 	t.Parallel()
 	s := loadTestSchema(t, "basic.yammm")
 	st, _ := s.Type("Entity")
-	id := location.MustNewSourceID("test://data/wrapped.csv")
+	id := location.NewSourceID("test://data/wrapped.csv")
 
 	input := "id,name,count,score,active,created_at\n" +
 		"e1,\"Ada\nLovelace\",5,3.14,true,2024-06-15\n" +
@@ -103,7 +103,7 @@ func TestParseTyped_CoercionDiagnosticsCarryTheRecordSpan(t *testing.T) {
 	t.Parallel()
 	s := loadTestSchema(t, "basic.yammm")
 	st, _ := s.Type("Entity")
-	id := location.MustNewSourceID("test://data/bad.csv")
+	id := location.NewSourceID("test://data/bad.csv")
 
 	input := "id,name,count,score,active,created_at\n" +
 		"e1,\"Ada\nLovelace\",5,3.14,true,2024-06-15\n" +
@@ -135,7 +135,7 @@ func TestParseTyped_MalformedRecordCarriesTheParseErrorSpan(t *testing.T) {
 	t.Parallel()
 	s := loadTestSchema(t, "basic.yammm")
 	st, _ := s.Type("Entity")
-	id := location.MustNewSourceID("test://data/malformed.csv")
+	id := location.NewSourceID("test://data/malformed.csv")
 
 	// A short record: the reader fixes the field count from the header.
 	input := "id,name,count,score,active,created_at\ne1,Alice\n"
@@ -163,7 +163,7 @@ func TestParseWithTypeColumn_RecordsProvenancePerRow(t *testing.T) {
 	t.Parallel()
 	s := loadTestSchema(t, "basic.yammm")
 	st, _ := s.Type("Entity")
-	id := location.MustNewSourceID("test://data/mixed.csv")
+	id := location.NewSourceID("test://data/mixed.csv")
 
 	input := "kind,id,name,count,score,active,created_at\n" +
 		"Entity,e1,\"Ada\nLovelace\",5,3.14,true,2024-06-15\n" +
@@ -209,7 +209,7 @@ func TestParseTyped_PathIndexesTheInstancesProduced(t *testing.T) {
 	t.Parallel()
 	s := loadTestSchema(t, "basic.yammm")
 	st, _ := s.Type("Entity")
-	id := location.MustNewSourceID("test://data/gap.csv")
+	id := location.NewSourceID("test://data/gap.csv")
 
 	// The middle record is short, which the reader refuses because the header
 	// fixed the field count.
@@ -246,7 +246,7 @@ func TestParseWithTypeColumn_IndexesEachTypeSeparately(t *testing.T) {
 	t.Parallel()
 	s := loadTestSchema(t, "basic.yammm")
 	st, _ := s.Type("Entity")
-	id := location.MustNewSourceID("test://data/interleaved.csv")
+	id := location.NewSourceID("test://data/interleaved.csv")
 
 	input := "kind,id,name,count,score,active,created_at\n" +
 		"Entity,e1,A,1,1.0,true,2024-01-01\n" +
@@ -310,7 +310,7 @@ func TestParseWithTypeColumn_IndexesEachTypeSeparately(t *testing.T) {
 // the second entry point, which only ParseTyped's was pinned before.
 func TestParseWithTypeColumn_MalformedRecordCarriesASpan(t *testing.T) {
 	t.Parallel()
-	id := location.MustNewSourceID("test://data/short.csv")
+	id := location.NewSourceID("test://data/short.csv")
 	a := New(WithTypeColumn("kind"))
 	_, result := a.ParseWithTypeColumn(t.Context(), id, strings.NewReader("kind,id\nEntity,e1\nEntity\n"),
 		func(string) schema.Type { return schema.Type{} })
@@ -331,7 +331,7 @@ func TestParseWithTypeColumn_MalformedRecordCarriesASpan(t *testing.T) {
 // before any record is read. Both are on line 1, and neither had a span.
 func TestParseTyped_HeaderDiagnosticsCarryASpan(t *testing.T) {
 	t.Parallel()
-	id := location.MustNewSourceID("test://data/header.csv")
+	id := location.NewSourceID("test://data/header.csv")
 
 	_, result := New().ParseTyped(t.Context(), id, "Entity", strings.NewReader(""), schema.Type{})
 	issue, ok := firstIssue(result)
@@ -362,7 +362,7 @@ func TestParseTyped_UnplacedDottedColumnsAreReportedAtTheRecord(t *testing.T) {
 	t.Parallel()
 	s := loadTestSchema(t, "with_relations.yammm")
 	st, _ := s.Type("Employee")
-	id := location.MustNewSourceID("test://data/dotted.csv")
+	id := location.NewSourceID("test://data/dotted.csv")
 
 	for _, c := range []struct {
 		name   string
@@ -401,7 +401,7 @@ func TestParseTyped_EdgeGroupDiagnosticsCarryTheRecordSpan(t *testing.T) {
 	t.Parallel()
 	s := loadTestSchema(t, "edge_properties.yammm")
 	st, _ := s.Type("Order")
-	id := location.MustNewSourceID("test://data/edges.csv")
+	id := location.NewSourceID("test://data/edges.csv")
 
 	for _, c := range []struct {
 		name  string
@@ -451,7 +451,7 @@ func TestParseTyped_CancellationReportsWhereItStopped(t *testing.T) {
 	t.Parallel()
 	s := loadTestSchema(t, "basic.yammm")
 	st, _ := s.Type("Entity")
-	id := location.MustNewSourceID("test://data/cancel.csv")
+	id := location.NewSourceID("test://data/cancel.csv")
 
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()

@@ -13,7 +13,7 @@ A person entity.
 ---
 
 - Properties: 1
-- Source: `test://types.yammm`
+- Source: `string://types.yammm`
 
 === abstract type ===
 **abstract type** `Entity`
@@ -21,7 +21,7 @@ A person entity.
 ---
 
 - Properties: 1
-- Source: `test://types.yammm`
+- Source: `string://types.yammm`
 
 === part type ===
 **part type** `Wheel`
@@ -29,7 +29,7 @@ A person entity.
 ---
 
 - Properties: 1
-- Source: `test://types.yammm`
+- Source: `string://types.yammm`
 
 === property ===
 **property** `Person.name`

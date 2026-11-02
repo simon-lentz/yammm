@@ -302,25 +302,26 @@ age Integer
 
 ---
 
-## 14. Lowercase Built-in Function Names
+## 14. Unknown or Misapplied Built-in Functions
 
-All built-in functions in invariants are capitalized. A lowercase name is not a
-built-in, so the schema still **loads clean** — the failure surfaces at
-validation time as `E_EVAL_ERROR` ("unknown method"), not at load. Nothing
-catches this for you at compile time.
+The schema load checks every call in an invariant. A name no built-in holds draws
+`E_INVALID_INVARIANT` ("unknown function"). A receiver of a kind the built-in
+refuses on every input draws the same code: `Contains` takes a list, so a `String`
+receiver is refused. A built-in name matches in any case, so `name -> len` is
+`name -> Len`. The tables in `expressions.md` spell each name capitalized.
 
-```yammm-snippet
-// WRONG -- loads clean; fails at validation time
-! "check_len" name -> len > 0
-! "all_valid" ITEMS -> all |$i| { $i.qty > 0 }
-! "has_name" name -> contains("test")
+```yammm-invalid
+// WRONG -- no built-in is named Length, and Contains takes a list: E_INVALID_INVARIANT
+name String required
+! "check_len" name -> Length > 0
+! "mentions_test" name -> Contains("test")
 ```
 
 ```yammm-snippet
-// RIGHT -- capitalized
+// RIGHT -- a built-in's name, on a receiver it takes
 ! "check_len" name -> Len > 0
-! "all_valid" ITEMS -> All |$i| { $i.qty > 0 }
-! "has_name" name -> Contains("test")
+! "mentions_test" name =~ /test/
+! "tagged_test" tags -> Contains("test")
 ```
 
 ---

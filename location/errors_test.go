@@ -18,7 +18,10 @@ func TestSentinels_ReturnedByTheirConstructors(t *testing.T) {
 		ErrInvalidUTF8Path,
 		ErrAbsoluteJoinElement,
 	}
-	base := MustCanonicalPath(t.TempDir())
+	base, err := NewCanonicalPath(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
 	const bad = "caf\xff.yammm"
 
 	rows := []struct {
@@ -26,11 +29,6 @@ func TestSentinels_ReturnedByTheirConstructors(t *testing.T) {
 		call func() error
 		want error
 	}{
-		{
-			name: "CanonicalizePathForSourceID refuses invalid UTF-8",
-			call: func() error { _, err := CanonicalizePathForSourceID(bad); return err },
-			want: ErrInvalidUTF8Path,
-		},
 		{
 			name: "ResolveSourcePath refuses invalid UTF-8",
 			call: func() error { _, _, err := ResolveSourcePath(bad); return err },

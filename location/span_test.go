@@ -35,8 +35,8 @@ func TestPointWithByte(t *testing.T) {
 	}
 }
 
-func TestRange(t *testing.T) {
-	s := Range(testSource, 10, 5, 10, 15)
+func TestRangeWithBytes_UnknownBytes(t *testing.T) {
+	s := RangeWithBytes(testSource, 10, 5, -1, 10, 15, -1)
 
 	if s.Start.Line != 10 || s.Start.Column != 5 {
 		t.Errorf("Start = %v; want {10, 5, -1}", s.Start)
@@ -45,18 +45,18 @@ func TestRange(t *testing.T) {
 		t.Errorf("End = %v; want {10, 15, -1}", s.End)
 	}
 	if s.IsPoint() {
-		t.Error("Range should not be a point")
+		t.Error("the span should not be a point")
 	}
 }
 
-func TestRange_Panics_EndBeforeStart(t *testing.T) {
+func TestRangeWithBytes_Panics_EndBeforeStart(t *testing.T) {
 	defer func() {
 		if r := recover(); r == nil {
-			t.Error("Range with end before start should panic")
+			t.Error("a span with its end before its start should panic")
 		}
 	}()
 
-	Range(testSource, 10, 15, 10, 5) // End column before start column
+	RangeWithBytes(testSource, 10, 15, -1, 10, 5, -1) // End column before start column
 }
 
 func TestRangeWithBytes(t *testing.T) {
@@ -124,7 +124,7 @@ func TestSpan_IsValid(t *testing.T) {
 		},
 		{
 			name: "valid range",
-			span: Range(testSource, 1, 1, 2, 10),
+			span: RangeWithBytes(testSource, 1, 1, -1, 2, 10, -1),
 			want: true,
 		},
 		{
@@ -153,67 +153,6 @@ func TestSpan_IsValid(t *testing.T) {
 	}
 }
 
-func TestSpan_IsGeometricallySafe(t *testing.T) {
-	tests := []struct {
-		name string
-		span Span
-		want bool
-	}{
-		{
-			name: "zero span",
-			span: Span{},
-			want: true,
-		},
-		{
-			name: "point span",
-			span: Point(testSource, 5, 10),
-			want: true,
-		},
-		{
-			name: "valid range",
-			span: Range(testSource, 1, 1, 2, 10),
-			want: true,
-		},
-		{
-			name: "inverted range via struct literal",
-			span: Span{
-				Source: testSource,
-				Start:  Position{Line: 2, Column: 10, Byte: -1},
-				End:    Position{Line: 1, Column: 1, Byte: -1},
-			},
-			want: false,
-		},
-		{
-			name: "inverted bytes via struct literal",
-			span: Span{
-				Source: testSource,
-				Start:  Position{Line: 1, Column: 1, Byte: 100},
-				End:    Position{Line: 1, Column: 10, Byte: 50},
-			},
-			want: false,
-		},
-		{
-			// Both orders are known and they disagree, so the span is unsafe
-			// whichever one a reader takes.
-			name: "ordered bytes, inverted line and column",
-			span: Span{
-				Source: testSource,
-				Start:  Position{Line: 10, Column: 15, Byte: 100},
-				End:    Position{Line: 10, Column: 5, Byte: 110},
-			},
-			want: false,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := tt.span.IsGeometricallySafe(); got != tt.want {
-				t.Errorf("IsGeometricallySafe() = %v; want %v", got, tt.want)
-			}
-		})
-	}
-}
-
 func TestSpan_String(t *testing.T) {
 	tests := []struct {
 		name string
@@ -232,7 +171,7 @@ func TestSpan_String(t *testing.T) {
 		},
 		{
 			name: "range span",
-			span: Range(testSource, 10, 5, 10, 15),
+			span: RangeWithBytes(testSource, 10, 5, -1, 10, 15, -1),
 			want: "test://unit:10:5-10:15",
 		},
 		{
@@ -258,7 +197,7 @@ func TestSpan_String(t *testing.T) {
 
 func TestSpan_Contains(t *testing.T) {
 	// Range from line 5, column 10 to line 5, column 20
-	s := Range(testSource, 5, 10, 5, 20)
+	s := RangeWithBytes(testSource, 5, 10, -1, 5, 20, -1)
 
 	tests := []struct {
 		name string
@@ -400,38 +339,38 @@ func TestCompare(t *testing.T) {
 	}{
 		{
 			name: "equal",
-			a:    Range(testSource, 5, 10, 5, 20),
-			b:    Range(testSource, 5, 10, 5, 20),
+			a:    RangeWithBytes(testSource, 5, 10, -1, 5, 20, -1),
+			b:    RangeWithBytes(testSource, 5, 10, -1, 5, 20, -1),
 			want: 0,
 		},
 		{
 			name: "a before b (line)",
-			a:    Range(testSource, 4, 10, 4, 20),
-			b:    Range(testSource, 5, 10, 5, 20),
+			a:    RangeWithBytes(testSource, 4, 10, -1, 4, 20, -1),
+			b:    RangeWithBytes(testSource, 5, 10, -1, 5, 20, -1),
 			want: -1,
 		},
 		{
 			name: "a after b (line)",
-			a:    Range(testSource, 6, 10, 6, 20),
-			b:    Range(testSource, 5, 10, 5, 20),
+			a:    RangeWithBytes(testSource, 6, 10, -1, 6, 20, -1),
+			b:    RangeWithBytes(testSource, 5, 10, -1, 5, 20, -1),
 			want: 1,
 		},
 		{
 			name: "a before b (column)",
-			a:    Range(testSource, 5, 5, 5, 15),
-			b:    Range(testSource, 5, 10, 5, 20),
+			a:    RangeWithBytes(testSource, 5, 5, -1, 5, 15, -1),
+			b:    RangeWithBytes(testSource, 5, 10, -1, 5, 20, -1),
 			want: -1,
 		},
 		{
 			name: "same start, different end",
-			a:    Range(testSource, 5, 10, 5, 15),
-			b:    Range(testSource, 5, 10, 5, 20),
+			a:    RangeWithBytes(testSource, 5, 10, -1, 5, 15, -1),
+			b:    RangeWithBytes(testSource, 5, 10, -1, 5, 20, -1),
 			want: -1,
 		},
 		{
 			name: "different source (alphabetic)",
-			a:    Range(NewSourceID("aaa://"), 5, 10, 5, 20),
-			b:    Range(NewSourceID("bbb://"), 5, 10, 5, 20),
+			a:    RangeWithBytes(NewSourceID("aaa://"), 5, 10, -1, 5, 20, -1),
+			b:    RangeWithBytes(NewSourceID("bbb://"), 5, 10, -1, 5, 20, -1),
 			want: -1,
 		},
 		{
@@ -448,7 +387,7 @@ func TestCompare(t *testing.T) {
 		},
 		{
 			name: "unknown start byte before a known one",
-			a:    Range(testSource, 1, 1, 1, 5),
+			a:    RangeWithBytes(testSource, 1, 1, -1, 1, 5, -1),
 			b:    Span{Source: testSource, Start: Position{Line: 1, Column: 1, Byte: 0}, End: Position{Line: 1, Column: 5, Byte: -1}},
 			want: -1,
 		},
@@ -498,9 +437,9 @@ func TestCompare(t *testing.T) {
 
 func TestSpan_Equality(t *testing.T) {
 	// Go struct equality should work
-	s1 := Range(testSource, 5, 10, 5, 20)
-	s2 := Range(testSource, 5, 10, 5, 20)
-	s3 := Range(testSource, 5, 10, 5, 21)
+	s1 := RangeWithBytes(testSource, 5, 10, -1, 5, 20, -1)
+	s2 := RangeWithBytes(testSource, 5, 10, -1, 5, 20, -1)
+	s3 := RangeWithBytes(testSource, 5, 10, -1, 5, 21, -1)
 
 	if s1 != s2 {
 		t.Error("equal spans should be equal")
@@ -511,8 +450,8 @@ func TestSpan_Equality(t *testing.T) {
 }
 
 func TestSpan_MapKey(t *testing.T) {
-	s1 := Range(testSource, 5, 10, 5, 20)
-	s2 := Range(testSource, 5, 10, 5, 20)
+	s1 := RangeWithBytes(testSource, 5, 10, -1, 5, 20, -1)
+	s2 := RangeWithBytes(testSource, 5, 10, -1, 5, 20, -1)
 
 	m := make(map[Span]int)
 	m[s1] = 42

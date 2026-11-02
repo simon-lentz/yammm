@@ -3,67 +3,32 @@ package ident
 import (
 	"strings"
 	"unicode"
-	"unicode/utf8"
 )
 
-// Capitalize converts an identifier to UpperCamelCase using rune-aware tokenization.
-// Acronym runs remain upper-case and separators are removed.
-//
-// Capitalize is semantically equivalent to [ToUpperCamel] and is provided for
-// code clarity when the intent is deriving Go export names.
-//
-// Examples:
-//
-//	Capitalize("http_server") = "HttpServer"
-//	Capitalize("user_id")     = "UserID"
-func Capitalize(s string) string {
-	return ToUpperCamel(s)
-}
-
-// ToUpperCamel tokenizes s on runes and returns an UpperCamelCase identifier.
-// Segments are split on separators, digit/letter transitions, and case breaks;
-// acronym runs stay grouped; adjacent numeric segments are separated by a
-// single underscore in the output.
-func ToUpperCamel(s string) string {
-	return joinCamelTokens(splitIdentifier(s), false)
-}
-
-// ToLowerCamel tokenizes s on runes and returns a lowerCamelCase identifier.
-// Segments are split on separators, digit/letter transitions, and case breaks;
-// acronym runs stay grouped; adjacent numeric segments are separated by a
-// single underscore in the output.
-func ToLowerCamel(s string) string {
-	return joinCamelTokens(splitIdentifier(s), true)
-}
-
-// ToUpperCamelInitialisms is [ToUpperCamel] with caller-supplied initialism
-// awareness: a name segment whose lower-case form is a key in initialisms is
-// upper-cased wholesale — e.g. with {"id": true, "url": true}, "user_id" ->
-// "UserID" and "base_url" -> "BaseURL". Acronym runs already upper-case in the
-// input are preserved as before.
+// ToUpperCamelInitialisms tokenizes s on runes and returns an UpperCamelCase
+// identifier: segments split on separators, digit/letter transitions and case
+// breaks, acronym runs stay grouped, and adjacent numeric segments are separated
+// by a single underscore. A name segment whose lower-case form is a key in
+// initialisms is upper-cased wholesale, so with {"id": true, "url": true},
+// "user_id" -> "UserID" and "base_url" -> "BaseURL".
 //
 // The caller owns the initialism set; this package holds no vocabulary of its
-// own, so domain-specific acronyms stay with the consumer. A nil or empty set
-// makes this equivalent to [ToUpperCamel].
-//
-// It reuses the same tokenizer as [ToUpperCamel]; a matching word token is
-// promoted to an acronym before joining, so no join logic is duplicated.
+// own, so domain-specific acronyms stay with the consumer.
 func ToUpperCamelInitialisms(s string, initialisms map[string]bool) string {
 	tokens := splitIdentifier(s)
 	for i := range tokens {
 		t := &tokens[i]
-		if !t.isNumber && !t.isAcronym && initialisms[strings.ToLower(t.text)] {
+		if !t.isAcronym && initialisms[strings.ToLower(t.text)] {
 			t.isAcronym = true
 		}
 	}
-	return joinCamelTokens(tokens, false)
+	return joinCamelTokens(tokens)
 }
 
 type token struct {
 	text      string
 	isNumber  bool
 	isAcronym bool
-	runeLen   int
 }
 
 type runeClass int
@@ -104,8 +69,7 @@ func splitIdentifier(s string) []token {
 		lastClass = class
 	}
 
-	tokens = appendToken(tokens, current)
-	return mergeAcronymRuns(tokens)
+	return appendToken(tokens, current)
 }
 
 func appendToken(tokens []token, current []rune) []token {
@@ -169,67 +133,21 @@ func buildToken(runes []rune) token {
 			allUpper = false
 		}
 	}
-	runeLen := len(runes)
-	isAcronym := !isNumber && allUpper
 	return token{
 		text:      string(runes),
 		isNumber:  isNumber,
-		isAcronym: isAcronym,
-		runeLen:   runeLen,
+		isAcronym: !isNumber && allUpper,
 	}
 }
 
-func mergeAcronymRuns(tokens []token) []token {
-	if len(tokens) == 0 {
-		return tokens
-	}
-	merged := make([]token, 0, len(tokens))
-	for i := 0; i < len(tokens); i++ {
-		tok := tokens[i]
-		if tok.isNumber || !tok.isAcronym || tok.runeLen > 1 {
-			merged = append(merged, tok)
-			continue
-		}
-
-		builder := strings.Builder{}
-		builder.WriteString(tok.text)
-		j := i
-		for j+1 < len(tokens) && tokens[j+1].isAcronym && !tokens[j+1].isNumber && tokens[j+1].runeLen == 1 {
-			builder.WriteString(tokens[j+1].text)
-			j++
-		}
-		if j == i {
-			merged = append(merged, tok)
-			continue
-		}
-		merged = append(merged, token{
-			text:      builder.String(),
-			isNumber:  false,
-			isAcronym: true,
-			runeLen:   utf8.RuneCountInString(builder.String()),
-		})
-		i = j
-	}
-	return merged
-}
-
-func joinCamelTokens(tokens []token, lowerFirst bool) string {
-	if len(tokens) == 0 {
-		return ""
-	}
-
+func joinCamelTokens(tokens []token) string {
 	var b strings.Builder
 	for i, tok := range tokens {
 		if i > 0 && tok.isNumber && tokens[i-1].isNumber {
 			b.WriteRune('_')
 		}
 
-		switch {
-		case lowerFirst && i == 0:
-			b.WriteString(lowerToken(tok))
-		default:
-			b.WriteString(upperToken(tok))
-		}
+		b.WriteString(upperToken(tok))
 	}
 	result := b.String()
 	// Prefix with underscore if result starts with a digit to ensure valid Go identifier
@@ -249,17 +167,7 @@ func upperToken(tok token) string {
 	return capitalizeFirst(tok.text)
 }
 
-func lowerToken(tok token) string {
-	if tok.isNumber {
-		return tok.text
-	}
-	return strings.ToLower(tok.text)
-}
-
 func capitalizeFirst(s string) string {
-	if s == "" {
-		return s
-	}
 	runes := []rune(s)
 	runes[0] = unicode.ToUpper(runes[0])
 	return string(runes)

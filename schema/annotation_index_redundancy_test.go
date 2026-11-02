@@ -4,7 +4,6 @@ import (
 	"testing"
 
 	"github.com/simon-lentz/yammm/diag"
-	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -106,22 +105,19 @@ type Unrelated {
 
 // The deferral must hold when the unresolved supertype is on a DESCENDANT
 // rather than on the annotated type: that descendant may inherit a co-key once
-// the reference resolves, so its key is not yet known to be sole. Without this
-// term the schema would be rejected outright in a registry-less context.
+// the reference resolves, so its key is not yet known to be sole. The one report
+// is the unresolved reference.
 func TestAnnotation_IndexOnPrimary_DescendantDeferredSupertype_Silent(t *testing.T) {
 	t.Parallel()
-	_, res := schema.NewBuilder().
-		WithName("main").
-		AddType("Keyed").
-		AsAbstract().
-		WithPrimaryKey("id", schema.NewStringConstraint()).
-		WithPropertyAnnotation("id", "index").
-		Done().
-		AddType("Doc").
-		Extends(schema.NewTypeRef("", "Keyed", location.Span{})).
-		Extends(schema.NewTypeRef("ext", "Unresolved", location.Span{})).
-		Done().
-		Build()
+	_, res := schema.LoadString(t.Context(), `schema "main"
+
+abstract type Keyed {
+	id String primary @index
+}
+
+type Doc extends Keyed, ext.Unresolved {
+}
+`, "main.yammm")
 	if res.HasCode(diag.E_INVALID_ANNOTATION_TARGET) {
 		t.Errorf("a descendant with an unresolved supertype may still gain a co-key; got: %v", res)
 	}
@@ -131,14 +127,12 @@ func TestAnnotation_IndexOnPrimary_DescendantDeferredSupertype_Silent(t *testing
 // itself.
 func TestAnnotation_IndexOnPrimary_DeferredSupertype_Silent(t *testing.T) {
 	t.Parallel()
-	_, res := schema.NewBuilder().
-		WithName("main").
-		AddType("Entity").
-		Extends(schema.NewTypeRef("ext", "Base", location.Span{})).
-		WithPrimaryKey("id", schema.NewStringConstraint()).
-		WithPropertyAnnotation("id", "index").
-		Done().
-		Build()
+	_, res := schema.LoadString(t.Context(), `schema "main"
+
+type Entity extends ext.Base {
+	id String primary @index
+}
+`, "main.yammm")
 	if res.HasCode(diag.E_INVALID_ANNOTATION_TARGET) {
 		t.Errorf("@index on a primary key under an unresolved supertype must not be flagged redundant, got: %v", res)
 	}

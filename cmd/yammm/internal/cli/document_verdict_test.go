@@ -123,14 +123,18 @@ func observed(result diag.Result) expectedVerdict {
 		case diag.E_DUPLICATE_PK:
 			got.duplicates++
 		case diag.E_UNRESOLVED_REQUIRED:
-			parts, err := graph.ParseKeyStrings(details[diag.DetailKeyPrimaryKey])
+			parts, err := graph.ParseKey(details[diag.DetailKeyPrimaryKey])
 			if err != nil || len(parts) != 1 {
 				panic(fmt.Sprintf("unreadable source key %q", details[diag.DetailKeyPrimaryKey]))
 			}
+			part, ok := parts[0].(string)
+			if !ok {
+				panic(fmt.Sprintf("source key %q is not a string", details[diag.DetailKeyPrimaryKey]))
+			}
 			if details[diag.DetailKeyReason] == "absent" {
-				got.absent = append(got.absent, parts[0])
+				got.absent = append(got.absent, part)
 			} else {
-				got.missing = append(got.missing, parts[0])
+				got.missing = append(got.missing, part)
 			}
 		}
 	}

@@ -81,7 +81,7 @@ func TestScanIODetail_PerFileCarriesTheOSError(t *testing.T) {
 // dir-level failure … or a per-file failure", so fixing only scanFile would
 // have left half the claim false.
 //
-// Mutation: removing the DetailKeyDetail call in ScanDirSliceWith turns this
+// Mutation: removing the DetailKeyDetail call in ScanDirSlice turns this
 // red.
 func TestScanIODetail_DirLevelCarriesTheOSError(t *testing.T) {
 	missing := filepath.Join(t.TempDir(), "no-such-dir")

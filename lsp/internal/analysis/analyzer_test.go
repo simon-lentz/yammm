@@ -34,7 +34,7 @@ func TestSnapshot_Fields(t *testing.T) {
 	// Test that Snapshot fields are properly initialized
 	snapshot := &Snapshot{
 		CreatedAt:       time.Now(),
-		EntrySourceID:   location.MustNewSourceID("test://file.yammm"),
+		EntrySourceID:   location.NewSourceID("test://file.yammm"),
 		EntryVersion:    5,
 		Root:            "/project",
 		SymbolsBySource: make(map[location.SourceID]*symbols.SymbolIndex),
@@ -86,7 +86,7 @@ func TestSymbolKind_String(t *testing.T) {
 func TestSymbol_Fields(t *testing.T) {
 	t.Parallel()
 
-	sourceID := location.MustNewSourceID("test://file.yammm")
+	sourceID := location.NewSourceID("test://file.yammm")
 	span := location.Point(sourceID, 10, 5)
 
 	symbol := symbols.Symbol{
@@ -131,7 +131,7 @@ func TestOverlayPrecedenceOverDisk(t *testing.T) {
 	analyzer := NewAnalyzer(logger)
 
 	ctx := t.Context()
-	snapshot, err := analyzer.Analyze(ctx, diskPath, overlays, tmpDir, lsputil.PositionEncodingUTF16)
+	snapshot, err := analyzer.Analyze(ctx, diskPath, overlays, tmpDir)
 	require.NoError(t, err, "Analyze() error")
 	require.NotNil(t, snapshot, "Analyze() returned nil snapshot")
 
@@ -197,7 +197,7 @@ func TestOverlayWithSymlinkPath_StillOverridesDisk(t *testing.T) {
 
 	ctx := t.Context()
 	// Use symlink path as entry too (matches how workspace would call this)
-	snapshot, err := analyzer.Analyze(ctx, symlinkPath, overlays, linkDir, lsputil.PositionEncodingUTF16)
+	snapshot, err := analyzer.Analyze(ctx, symlinkPath, overlays, linkDir)
 	require.NoError(t, err, "Analyze() error")
 	require.NotNil(t, snapshot, "Analyze() returned nil snapshot")
 
@@ -244,7 +244,7 @@ func TestSources_PopulatesSourceRegistry(t *testing.T) {
 	analyzer := NewAnalyzer(logger)
 
 	ctx := t.Context()
-	snapshot, err := analyzer.Analyze(ctx, mainPath, overlays, tmpDir, lsputil.PositionEncodingUTF16)
+	snapshot, err := analyzer.Analyze(ctx, mainPath, overlays, tmpDir)
 	require.NoError(t, err, "Analyze() error")
 	require.NotNil(t, snapshot, "Analyze() returned nil snapshot")
 	require.NotNil(t, snapshot.Sources, "snapshot.Sources is nil")
@@ -295,7 +295,7 @@ func TestSources_FailedLoadKeepsEverySourceItRead(t *testing.T) {
 
 	snapshot, err := analyzer.Analyze(t.Context(), mainPath, map[string][]byte{
 		mainPath: []byte(mainContent),
-	}, tmpDir, lsputil.PositionEncodingUTF16)
+	}, tmpDir)
 	require.NoError(t, err, "a semantic load failure is not an Analyze error")
 	require.NotNil(t, snapshot)
 	require.True(t, snapshot.Schema.IsZero(), "the load must fail for this contract to apply")
@@ -333,7 +333,7 @@ func TestAnalyze_LeavesTheCallersOptionSliceAlone(t *testing.T) {
 	analyzer := NewAnalyzer(slog.New(slog.DiscardHandler))
 	_, err := analyzer.Analyze(t.Context(), "/test/entry.yammm", map[string][]byte{
 		"/test/entry.yammm": []byte("schema \"entry\"\n"),
-	}, "", lsputil.PositionEncodingUTF16, opts...)
+	}, "", opts...)
 	require.NoError(t, err)
 
 	whole := opts[:cap(opts)]
@@ -371,7 +371,7 @@ func TestSources_DiskFallback(t *testing.T) {
 	analyzer := NewAnalyzer(logger)
 
 	ctx := t.Context()
-	snapshot, err := analyzer.Analyze(ctx, mainPath, overlays, tmpDir, lsputil.PositionEncodingUTF16)
+	snapshot, err := analyzer.Analyze(ctx, mainPath, overlays, tmpDir)
 	require.NoError(t, err, "Analyze() error")
 	require.NotNil(t, snapshot, "Analyze() returned nil snapshot")
 
@@ -497,7 +497,7 @@ type TypeB {
 	ctx := t.Context()
 
 	// Analyze requesting b_main.yammm as entry (even though a_types is lexicographically first)
-	snapshot, err := analyzer.Analyze(ctx, bPath, overlays, tmpDir, lsputil.PositionEncodingUTF16)
+	snapshot, err := analyzer.Analyze(ctx, bPath, overlays, tmpDir)
 	require.NoError(t, err, "Analyze() error")
 	require.NotNil(t, snapshot, "Analyze() returned nil snapshot")
 
@@ -523,7 +523,7 @@ func TestAnalyze_PartialSnapshotOnLoadError(t *testing.T) {
 		"/test/entry.yammm": []byte("schema \"test\"\nimport \"missing.yammm\"\ntype Foo {\n}\n"),
 	}
 
-	snapshot, err := analyzer.Analyze(t.Context(), "/test/entry.yammm", overlays, "", lsputil.PositionEncodingUTF16)
+	snapshot, err := analyzer.Analyze(t.Context(), "/test/entry.yammm", overlays, "")
 	// Should get both a snapshot (with diagnostics) and an error
 	assert.NotNil(t, snapshot, "partial snapshot should be returned on load error")
 	if snapshot != nil {
@@ -582,7 +582,7 @@ func TestConvertRelatedInfo_URIEncodingWithSpaces(t *testing.T) {
 				},
 			}
 
-			result := analyzer.ConvertRelatedInfo(related, nil, lsputil.PositionEncodingUTF16)
+			result := analyzer.ConvertRelatedInfo(related, nil)
 
 			require.Len(t, result, 1, "expected 1 related info")
 

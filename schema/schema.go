@@ -41,9 +41,8 @@ type schemaState struct {
 	typeByID    map[TypeID]Type
 }
 
-// newSchema creates a new Schema. This is primarily for internal use;
-// schemas are typically created via Load, LoadString, LoadSourcesWithEntry, or
-// the Builder.
+// newSchema creates a new Schema. This is for internal use; a caller's schema
+// comes from Load, LoadString or LoadSourcesWithEntry.
 func newSchema(
 	name string,
 	sourceID location.SourceID,
@@ -172,7 +171,7 @@ func (s Schema) ImportByAlias(alias string) (Import, bool) {
 
 // FindImportAlias returns the alias for an imported schema, if it exists.
 // Returns empty string if the path is not imported. A schema never imports its own
-// path, since a load and a Build each refuse the cycle.
+// path, because a load refuses the cycle.
 func (s Schema) FindImportAlias(path location.SourceID) string {
 	for _, imp := range s.imports {
 		if imp.resolvedSourceID == path {
@@ -182,17 +181,9 @@ func (s Schema) FindImportAlias(path location.SourceID) string {
 	return ""
 }
 
-// Sources returns the source content registry for diagnostic rendering.
-// It is zero if source content was not retained.
+// Sources returns the source content a load held, for diagnostic rendering.
 func (s Schema) Sources() Sources {
 	return s.sources
-}
-
-// HasSourceProvider reports whether source content is available for diagnostic
-// rendering. Returns false for schemas built programmatically via Builder without
-// source content.
-func (s Schema) HasSourceProvider() bool {
-	return !s.sources.IsZero()
 }
 
 // ModuleRoot returns the canonicalized module root the load resolved
@@ -204,14 +195,10 @@ func (s Schema) HasSourceProvider() bool {
 // A load under [WithSyntheticRoot] reports the synthetic root, which is the
 // root that load resolved module-style imports against.
 //
-// Returns "" when no module root was in play — LoadString sources, an
-// empty root passed to LoadSourcesWithEntry, or a Builder-built schema.
+// Returns "" when no module root was in play — LoadString sources, or an
+// empty root passed to LoadSourcesWithEntry.
 //
-// The entry schema and every import compiled by the same load record that
-// load's root. A schema reused from a shared Registry (see [WithRegistry]) —
-// an import, or an entry the registry already held with identical content —
-// instead retains the root of the load that first compiled it: sealed
-// schemas are immutable, and the registry hands one record to every load.
+// The entry schema and every import of one load record that load's root.
 func (s Schema) ModuleRoot() string {
 	return s.moduleRoot
 }

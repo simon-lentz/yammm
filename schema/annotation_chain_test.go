@@ -7,7 +7,6 @@ import (
 	"testing"
 
 	"github.com/simon-lentz/yammm/diag"
-	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -861,21 +860,25 @@ type T extends M1, M2, M3, M4 { id String primary }`)
 // The schema-level manifestation of constraint-equality reflexivity
 // ([TestAliasConstraint_Equal_ReflexiveWhenUndecidable]): a property whose
 // datatype cannot be resolved must merge with itself as the closure re-presents
-// it, not be reported as conflicting with its own declaration. The Builder
-// reaches this shape because it accepts an alias-of-alias datatype the DSL
-// grammar cannot express.
+// it, not be reported as conflicting with its own declaration.
 func TestAnnotation_Chain_UnresolvableDatatypeDoesNotSelfConflict(t *testing.T) {
 	t.Parallel()
-	b := schema.NewBuilder().WithName("main")
-	b.AddDataType("Money", schema.NewAliasConstraint("ext.Amount", nil))
-	b.AddType("A").WithProperty("amount", schema.NewAliasConstraint("Money", nil))
-	b.AddType("B").Extends(schema.NewTypeRef("", "A", location.Span{}))
-	b.AddType("C").Extends(schema.NewTypeRef("", "B", location.Span{}))
-	b.AddType("D").Extends(schema.NewTypeRef("", "A", location.Span{})).
-		Extends(schema.NewTypeRef("", "B", location.Span{})).
-		Extends(schema.NewTypeRef("", "C", location.Span{})).
-		WithPrimaryKey("id", schema.NewStringConstraint())
-	_, res := b.Build()
+	_, res := schema.LoadString(t.Context(), `schema "main"
+
+abstract type A {
+	amount ext.Amount
+}
+
+abstract type B extends A {
+}
+
+abstract type C extends B {
+}
+
+type D extends A, B, C {
+	id String primary
+}
+`, "main.yammm")
 
 	for i := range res.Issues() {
 		if i.Code() == diag.E_PROPERTY_CONFLICT {
@@ -1064,34 +1067,4 @@ abstract type Mark { x String @index }
 abstract type Mid extends Base { x Integer }
 type Leaf extends Mid, Mark { id String primary }`)
 	wantCounts(t, res, map[diag.Code]int{diag.E_PROPERTY_CONFLICT: 2})
-}
-
-// A related location with no span renders as a bare "note:" line pointing
-// nowhere and is dropped outright by the LSP, so the two surfaces disagree
-// about what the diagnostic contains. Builder-built schemas carry no spans,
-// which is where this arises.
-func TestAnnotation_Chain_SpanlessRelatedLocationsAreOmitted(t *testing.T) {
-	t.Parallel()
-	b := schema.NewBuilder().WithName("main")
-	b.AddType("A").WithProperty("x", schema.NewStringConstraint())
-	b.AddType("B").WithProperty("x", schema.NewIntegerConstraint())
-	b.AddType("C").
-		Extends(schema.NewTypeRef("", "A", location.Span{})).
-		Extends(schema.NewTypeRef("", "B", location.Span{})).
-		WithPrimaryKey("id", schema.NewStringConstraint())
-	_, res := b.Build()
-
-	saw := false
-	for i := range res.Issues() {
-		if i.Code() != diag.E_PROPERTY_CONFLICT {
-			continue
-		}
-		saw = true
-		if n := len(i.Related()); n != 0 {
-			t.Errorf("span-less related locations must be omitted, got %d", n)
-		}
-	}
-	if !saw {
-		t.Fatal("expected the conflict this case exists to describe")
-	}
 }

@@ -152,7 +152,7 @@ func TestDeclaringScope_String_Unknown(t *testing.T) {
 func TestNewProperty(t *testing.T) {
 	constraint := schema.NewStringConstraint()
 	span := location.Span{
-		Source: location.MustNewSourceID("test://property"),
+		Source: location.NewSourceID("test://property"),
 		Start:  location.Position{Line: 5, Column: 3, Byte: 50},
 		End:    location.Position{Line: 5, Column: 20, Byte: 67},
 	}
@@ -175,7 +175,7 @@ func TestNewProperty(t *testing.T) {
 func TestProperty_Accessors(t *testing.T) {
 	constraint := schema.NewIntegerConstraint()
 	span := location.Span{
-		Source: location.MustNewSourceID("test://accessors"),
+		Source: location.NewSourceID("test://accessors"),
 		Start:  location.Position{Line: 10, Column: 1, Byte: 100},
 		End:    location.Position{Line: 10, Column: 15, Byte: 115},
 	}

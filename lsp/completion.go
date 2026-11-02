@@ -21,7 +21,7 @@ func handleCompletion(ws Resolver, logger *slog.Logger) jrpc2.Handler {
 		}
 
 		items := completion.Complete(unit.Snapshot, unit.Doc, unit.LocalLine, unit.LocalChar,
-			ws.PositionEncoding(), logger)
+			logger)
 		return items, nil
 	})
 }

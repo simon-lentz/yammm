@@ -8,7 +8,7 @@ import (
 	"github.com/simon-lentz/yammm/internal/ident"
 )
 
-func TestCapitalize(t *testing.T) {
+func TestToUpperCamelInitialisms_NilSetCapitalizes(t *testing.T) {
 	tests := []struct {
 		name  string
 		input string
@@ -23,15 +23,15 @@ func TestCapitalize(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := ident.Capitalize(tt.input); got != tt.want {
-				t.Errorf("Capitalize(%q) = %q, want %q", tt.input, got, tt.want)
+			if got := ident.ToUpperCamelInitialisms(tt.input, nil); got != tt.want {
+				t.Errorf("ToUpperCamelInitialisms(%q) = %q, want %q", tt.input, got, tt.want)
 			}
 		})
 	}
 }
 
-// TestToUpperCamel tests the ToUpperCamel function.
-func TestToUpperCamel(t *testing.T) {
+// TestToUpperCamelInitialisms_NilSetSplitsSegments states the tokenizer over a nil set.
+func TestToUpperCamelInitialisms_NilSetSplitsSegments(t *testing.T) {
 	tests := []struct {
 		name  string
 		input string
@@ -44,8 +44,8 @@ func TestToUpperCamel(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := ident.ToUpperCamel(tt.input); got != tt.want {
-				t.Errorf("ToUpperCamel(%q) = %q, want %q", tt.input, got, tt.want)
+			if got := ident.ToUpperCamelInitialisms(tt.input, nil); got != tt.want {
+				t.Errorf("ToUpperCamelInitialisms(%q) = %q, want %q", tt.input, got, tt.want)
 			}
 		})
 	}
@@ -81,75 +81,31 @@ func TestToUpperCamelInitialisms(t *testing.T) {
 	}
 }
 
-// TestToLowerCamel tests the ToLowerCamel function.
-func TestToLowerCamel(t *testing.T) {
-	tests := []struct {
-		name  string
-		input string
-		want  string
-	}{
-		{name: "complex", input: "St(range)___pCamelCase32_33Foo", want: "stRangePCamelCase32_33Foo"},
-		{name: "snake", input: "foo_bar_baz", want: "fooBarBaz"},
-		{name: "HTTP acronym", input: "HTTPServer", want: "httpServer"},
-		{name: "HTTP with underscore", input: "HTTP_Server", want: "httpServer"},
-		{name: "ID acronym", input: "ID_number", want: "idNumber"},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := ident.ToLowerCamel(tt.input); got != tt.want {
-				t.Errorf("ToLowerCamel(%q) = %q, want %q", tt.input, got, tt.want)
-			}
-		})
-	}
-}
-
 // TestCamelTransforms_NumericSegmentsSeparated tests numeric segment handling.
 func TestCamelTransforms_NumericSegmentsSeparated(t *testing.T) {
 	// Adjacent numeric segments should always be separated by "_" including 0 and 9.
-	if got := ident.ToLowerCamel("foo 1 2 bar"); got != "foo1_2Bar" {
-		t.Errorf("ToLowerCamel(\"foo 1 2 bar\") = %q, want \"foo1_2Bar\"", got)
-	}
-	if got := ident.ToLowerCamel("foo 0 0 bar"); got != "foo0_0Bar" {
-		t.Errorf("ToLowerCamel(\"foo 0 0 bar\") = %q, want \"foo0_0Bar\"", got)
-	}
-	if got := ident.ToLowerCamel("foo 9 9 bar"); got != "foo9_9Bar" {
-		t.Errorf("ToLowerCamel(\"foo 9 9 bar\") = %q, want \"foo9_9Bar\"", got)
-	}
 
-	if got := ident.ToUpperCamel("foo 1 2 bar"); got != "Foo1_2Bar" {
-		t.Errorf("ToUpperCamel(\"foo 1 2 bar\") = %q, want \"Foo1_2Bar\"", got)
+	if got := ident.ToUpperCamelInitialisms("foo 1 2 bar", nil); got != "Foo1_2Bar" {
+		t.Errorf("ToUpperCamelInitialisms(\"foo 1 2 bar\") = %q, want \"Foo1_2Bar\"", got)
 	}
-	if got := ident.ToUpperCamel("foo 0 0 bar"); got != "Foo0_0Bar" {
-		t.Errorf("ToUpperCamel(\"foo 0 0 bar\") = %q, want \"Foo0_0Bar\"", got)
+	if got := ident.ToUpperCamelInitialisms("foo 0 0 bar", nil); got != "Foo0_0Bar" {
+		t.Errorf("ToUpperCamelInitialisms(\"foo 0 0 bar\") = %q, want \"Foo0_0Bar\"", got)
 	}
-	if got := ident.ToUpperCamel("foo 9 9 bar"); got != "Foo9_9Bar" {
-		t.Errorf("ToUpperCamel(\"foo 9 9 bar\") = %q, want \"Foo9_9Bar\"", got)
+	if got := ident.ToUpperCamelInitialisms("foo 9 9 bar", nil); got != "Foo9_9Bar" {
+		t.Errorf("ToUpperCamelInitialisms(\"foo 9 9 bar\") = %q, want \"Foo9_9Bar\"", got)
 	}
 }
 
 // TestCamelTransforms_PreservesAcronymRuns tests acronym preservation.
 func TestCamelTransforms_PreservesAcronymRuns(t *testing.T) {
-	if got := ident.ToLowerCamel("HTTPServer"); got != "httpServer" {
-		t.Errorf("ToLowerCamel(\"HTTPServer\") = %q, want \"httpServer\"", got)
-	}
-	if got := ident.ToLowerCamel("HTTP_Server"); got != "httpServer" {
-		t.Errorf("ToLowerCamel(\"HTTP_Server\") = %q, want \"httpServer\"", got)
-	}
-	if got := ident.ToUpperCamel("ID_number"); got != "IDNumber" {
-		t.Errorf("ToUpperCamel(\"ID_number\") = %q, want \"IDNumber\"", got)
+	if got := ident.ToUpperCamelInitialisms("ID_number", nil); got != "IDNumber" {
+		t.Errorf("ToUpperCamelInitialisms(\"ID_number\") = %q, want \"IDNumber\"", got)
 	}
 }
 
-func TestToUpperCamel_EmptyString(t *testing.T) {
-	if got := ident.ToUpperCamel(""); got != "" {
-		t.Errorf("ToUpperCamel(%q) = %q, want %q", "", got, "")
-	}
-}
-
-func TestToLowerCamel_EmptyString(t *testing.T) {
-	if got := ident.ToLowerCamel(""); got != "" {
-		t.Errorf("ToLowerCamel(%q) = %q, want %q", "", got, "")
+func TestToUpperCamelInitialisms_EmptyString(t *testing.T) {
+	if got := ident.ToUpperCamelInitialisms("", nil); got != "" {
+		t.Errorf("ToUpperCamelInitialisms(%q) = %q, want %q", "", got, "")
 	}
 }
 
@@ -160,24 +116,20 @@ func TestCamelTransforms_LeadingDigits(t *testing.T) {
 		name      string
 		input     string
 		wantUpper string
-		wantLower string
 	}{
-		{name: "digit prefix", input: "123name", wantUpper: "_123Name", wantLower: "_123Name"},
-		{name: "digit only", input: "123", wantUpper: "_123", wantLower: "_123"},
-		{name: "digit underscore word", input: "9_lives", wantUpper: "_9Lives", wantLower: "_9Lives"},
-		{name: "leading zero", input: "0value", wantUpper: "_0Value", wantLower: "_0Value"},
-		{name: "multiple leading digits", input: "42foo", wantUpper: "_42Foo", wantLower: "_42Foo"},
-		{name: "already prefixed", input: "_123foo", wantUpper: "_123Foo", wantLower: "_123Foo"},
-		{name: "letter start unaffected", input: "foo123", wantUpper: "Foo123", wantLower: "foo123"},
+		{name: "digit prefix", input: "123name", wantUpper: "_123Name"},
+		{name: "digit only", input: "123", wantUpper: "_123"},
+		{name: "digit underscore word", input: "9_lives", wantUpper: "_9Lives"},
+		{name: "leading zero", input: "0value", wantUpper: "_0Value"},
+		{name: "multiple leading digits", input: "42foo", wantUpper: "_42Foo"},
+		{name: "already prefixed", input: "_123foo", wantUpper: "_123Foo"},
+		{name: "letter start unaffected", input: "foo123", wantUpper: "Foo123"},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := ident.ToUpperCamel(tt.input); got != tt.wantUpper {
-				t.Errorf("ToUpperCamel(%q) = %q, want %q", tt.input, got, tt.wantUpper)
-			}
-			if got := ident.ToLowerCamel(tt.input); got != tt.wantLower {
-				t.Errorf("ToLowerCamel(%q) = %q, want %q", tt.input, got, tt.wantLower)
+			if got := ident.ToUpperCamelInitialisms(tt.input, nil); got != tt.wantUpper {
+				t.Errorf("ToUpperCamelInitialisms(%q) = %q, want %q", tt.input, got, tt.wantUpper)
 			}
 		})
 	}
@@ -200,14 +152,52 @@ func TestCamelTransforms_IdempotentOnOutput(t *testing.T) {
 	for range 64 {
 		src := next()
 
-		lower1 := ident.ToLowerCamel(src)
-		if got := ident.ToLowerCamel(lower1); got != lower1 {
-			t.Errorf("ToLowerCamel not idempotent on %q: %q then %q", src, lower1, got)
+		upper1 := ident.ToUpperCamelInitialisms(src, nil)
+		if got := ident.ToUpperCamelInitialisms(upper1, nil); got != upper1 {
+			t.Errorf("ToUpperCamelInitialisms not idempotent on %q: %q then %q", src, upper1, got)
 		}
+	}
+}
 
-		upper1 := ident.ToUpperCamel(src)
-		if got := ident.ToUpperCamel(upper1); got != upper1 {
-			t.Errorf("ToUpperCamel not idempotent on %q: %q then %q", src, upper1, got)
-		}
+// TestToUpperCamelInitialisms_SplitsAtCaseBreaks holds the two case boundaries
+// through what they decide: which segment an initialism matches.
+func TestToUpperCamelInitialisms_SplitsAtCaseBreaks(t *testing.T) {
+	inits := map[string]bool{"id": true, "server": true}
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{name: "lower to upper", input: "userId", want: "UserID"},
+		{name: "an acronym run then a word", input: "URLId", want: "URLID"},
+		{name: "a run keeps its last capital for the word", input: "someHTTPServer", want: "SomeHTTPSERVER"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := ident.ToUpperCamelInitialisms(tt.input, inits); got != tt.want {
+				t.Errorf("ToUpperCamelInitialisms(%q) = %q, want %q", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestToUpperCamelInitialisms_KeepsLettersWithNoCase holds that a letter with no
+// case, or in title case, stays in the identifier and is no separator.
+func TestToUpperCamelInitialisms_KeepsLettersWithNoCase(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{name: "no case", input: "日本", want: "日本"},
+		{name: "title case", input: "ǅa", want: "Ǆa"},
+		{name: "no case after a word", input: "x日本", want: "X日本"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := ident.ToUpperCamelInitialisms(tt.input, nil); got != tt.want {
+				t.Errorf("ToUpperCamelInitialisms(%q) = %q, want %q", tt.input, got, tt.want)
+			}
+		})
 	}
 }

@@ -2,21 +2,22 @@
 // and YAMMM code blocks embedded in Markdown documents.
 //
 // The LSP server provides IDE features including:
-//   - Real-time diagnostics (parse errors, semantic errors, import issues)
-//   - Go-to-definition for types, properties, and imports
-//   - Hover information with documentation, constraints, and annotations
-//   - Completion for keywords, types, and annotations
+//   - Real-time diagnostics
+//   - Go-to-definition
+//   - Hover information
+//   - Completion
 //   - Document symbols for outline and breadcrumbs
-//   - Formatting with canonical style (tabs, LF)
+//   - Formatting by [github.com/simon-lentz/yammm/format.TokenStream]
 //
 // # Annotation Support
 //
 // Annotation names and their arguments complete, and an annotation name hovers
-// with its description and argument hint. Both read the built-in registry
+// with its description and argument hint. Completion reads the built-in registry
 // through [github.com/simon-lentz/yammm/schema.AnnotationSpecs] and
-// [github.com/simon-lentz/yammm/schema.VectorSimilarityFunctions] rather than
-// hard-coding a list, so the editor cannot offer an annotation or a keyword the
-// loader rejects.
+// [github.com/simon-lentz/yammm/schema.VectorSimilarityFunctions], and hover reads
+// it through AnnotationSpecs. So the editor offers only a name the registry holds
+// at that placement and a similarity keyword the loader accepts. It does not judge
+// the annotated property, so the loader can still refuse an offered name there.
 //
 // Completion is placement-aware: a property context offers the property-level
 // names, a @@ context the type-level ones, and a name that takes arguments
@@ -42,9 +43,9 @@
 //
 // # Architecture
 //
-// The root lsp package is a thin coordination layer containing the Server,
-// protocol lifecycle, and feature providers. State management is enforced
-// at the compiler level via internal packages.
+// The root lsp package is a thin coordination layer. It holds the Server, the
+// protocol lifecycle and the request handlers, which call the feature providers.
+// State management is enforced at the compiler level via internal packages.
 //
 // The server consists of:
 //   - Server: Main LSP server handling protocol lifecycle
@@ -57,13 +58,13 @@
 //   - internal/hover: Hover information provider
 //   - internal/symbols: Symbol extraction and indexing
 //   - internal/markdown: Code block extraction from Markdown
-//   - internal/lsputil: URI/path conversion, position encoding, and the source texts of an analysis
+//   - internal/lsputil: URI/path conversion, UTF-16 position conversion, and the source texts of an analysis
 //   - internal/lsperr: Sentinel errors that classify a logged failure
 //   - internal/protocol: LSP protocol type definitions
 //
 // # Go API
 //
-// For programmatic embedding, use [NewServer] with a [Config] and options:
+// For programmatic embedding, use [NewServer] with a [Config]:
 //
 //	srv := lsp.NewServer(logger, lsp.Config{
 //	    ModuleRoot: "/path/to/project",
@@ -71,8 +72,7 @@
 //	})
 //	err := srv.RunStdio()
 //
-// [Server.Close] performs graceful shutdown. [Server.Mux] exposes the
-// underlying handler map for custom protocol extensions.
+// [Server.Close] performs graceful shutdown.
 //
 // # CLI Usage
 //
@@ -89,8 +89,9 @@
 // # Limitations
 //
 // The server implements LSP 3.16, which does not support position encoding
-// negotiation (added in LSP 3.17). UTF-16 encoding is assumed for all
-// character positions.
+// negotiation (added in LSP 3.17). The server reads a client's character position
+// in UTF-16 code units, and writes one in those units when it holds the source's
+// text and a byte offset. Without them, a character position it writes counts runes.
 //
 // Documents must be opened (via textDocument/didOpen) before most LSP features
 // work for that document. Specifically, hover, definition, completion,
@@ -114,7 +115,9 @@
 //
 // The [Server] handles concurrent LSP requests internally via the jrpc2
 // server, which runs requests on concurrent goroutines and notifications in
-// order. Callers should not invoke server methods concurrently.
+// order. [Server.Close] does not end [Server.RunStdio], which returns only after
+// its read of the input ends. On Unix, closing a blocking descriptor does not end
+// that read.
 //
 // # Dependencies
 //

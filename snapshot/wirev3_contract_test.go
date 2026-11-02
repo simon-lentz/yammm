@@ -12,6 +12,9 @@ import (
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/immutable"
+	"github.com/simon-lentz/yammm/internal/instancetest"
+	"github.com/simon-lentz/yammm/internal/snapparts"
+	"github.com/simon-lentz/yammm/internal/snappartstest"
 	"github.com/simon-lentz/yammm/schema"
 	"github.com/simon-lentz/yammm/snapshot"
 )
@@ -41,11 +44,36 @@ func wireTypeTable(t *testing.T, data []byte) []struct {
 	return doc.Types
 }
 
+// duplicateOfAComposingRoot builds a Parent holding Child c1, and a duplicate of
+// that Parent the graph refused.
+func duplicateOfAComposingRoot(t *testing.T) graph.Snapshot {
+	t.Helper()
+	ctx := context.Background()
+	s := testSchemaWithComposition(t)
+
+	g := graph.New(s)
+	if res := g.Add(ctx, instancetest.Valid(t, s, "Parent", map[string]any{
+		"id": "p1", "name": "Root",
+		"children": []any{map[string]any{"id": "c1", "value": "first"}},
+	})); res.HasErrors() {
+		t.Fatalf("Add parent: %v", res)
+	}
+	if res := g.Add(ctx, mustValidInstance(t, s, "Parent", []any{"p1"}, map[string]any{"name": "Again"})); !res.HasErrors() {
+		t.Fatal("a second Parent at p1 must report a duplicate")
+	}
+
+	snap := g.Snapshot()
+	if n := len(slices.Collect(snap.Duplicates())); n != 1 {
+		t.Fatalf("snapshot holds %d duplicates, want 1", n)
+	}
+	return snap
+}
+
 // v3Doc marshals a small composed snapshot and returns the v3 bytes.
 func v3Doc(t *testing.T) []byte {
 	t.Helper()
 	ctx := context.Background()
-	data, res := snapshot.Marshal(ctx, composedPKCollision(t))
+	data, res := snapshot.Marshal(ctx, duplicateOfAComposingRoot(t))
 	if res.HasErrors() {
 		t.Fatalf("marshal: %v", res)
 	}
@@ -506,9 +534,8 @@ func rootDuplicateDoc(t *testing.T) ([]byte, schema.Schema) {
 	return data, s
 }
 
-// TestWireV3_StrayParentCoordinateIsReported drives each half of the
-// root-duplicate guard on its own. The guard is a disjunction, so a test that
-// splices both fields at once leaves each disjunct individually unpinned.
+// TestWireV3_StrayParentCoordinateIsReported drives each disjunct of the guard
+// on its own: a test that splices the fields at once leaves each one unpinned.
 func TestWireV3_StrayParentCoordinateIsReported(t *testing.T) {
 	ctx := context.Background()
 	data, s := rootDuplicateDoc(t)
@@ -519,6 +546,7 @@ func TestWireV3_StrayParentCoordinateIsReported(t *testing.T) {
 	}{
 		{"parent_type alone", `"parent_type":0,`},
 		{"parent_key alone", `"parent_key":["p1"],`},
+		{"relation alone", `"relation":"EMPLOYER",`},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -530,8 +558,31 @@ func TestWireV3_StrayParentCoordinateIsReported(t *testing.T) {
 			cut := idx + len(anchor)
 			edited := append(append([]byte{}, data[:cut]...), append([]byte(tc.field), data[cut:]...)...)
 
-			if _, res := snapshot.Load(ctx, edited, s, snapshot.WithIntegrityCheck(false)); !hasMalformedReason(res, "states no relation but carries parent coordinates") {
-				t.Errorf("Load accepted a root duplicate carrying %s: %v", tc.field, res)
+			if _, res := snapshot.Load(ctx, edited, s, snapshot.WithIntegrityCheck(false)); !hasMalformedReason(res, "states a parent or a relation") {
+				t.Errorf("Load accepted a duplicate carrying %s: %v", tc.field, res)
+			}
+		})
+	}
+}
+
+// A parent coordinate that is null or empty states no parent: the record is a
+// root's, it loads, and the next Marshal drops the member.
+func TestWireV3_AnEmptyParentCoordinateStatesNone(t *testing.T) {
+	ctx := t.Context()
+	data, s := rootDuplicateDoc(t)
+	for _, field := range []string{`"parent_type":null,`, `"parent_key":null,`, `"parent_key":[],`, `"relation":"",`} {
+		t.Run(field, func(t *testing.T) {
+			edited := bytes.Replace(data, []byte(`"duplicates":[{`), []byte(`"duplicates":[{`+field), 1)
+			snap, res := snapshot.Load(ctx, edited, s, snapshot.WithIntegrityCheck(false))
+			if res.HasErrors() {
+				t.Fatalf("Load: %s", res)
+			}
+			again, res := snapshot.Marshal(ctx, snap)
+			if res.HasErrors() {
+				t.Fatalf("Marshal: %s", res)
+			}
+			if !bytes.Equal(again, data) {
+				t.Errorf("the next Marshal wrote\n%s\nwant\n%s", again, data)
 			}
 		})
 	}
@@ -628,9 +679,9 @@ func TestWireV3_InstancelessTypeEmitsAnEmptyGroup(t *testing.T) {
 	populated := mustTypeID(t, s, "Person")
 	empty := mustTypeID(t, s, "Company")
 
-	built, res := graph.RebuildSnapshot(s, graph.SnapshotParts{
+	built := snappartstest.Loaded(t, s, snapparts.Parts{
 		Types: []schema.TypeID{populated, empty},
-		Instances: []graph.InstanceParts{
+		Instances: []snapparts.Instance{
 			{
 				TypeID:     populated,
 				PrimaryKey: immutable.WrapKey([]any{"p1"}),
@@ -638,13 +689,10 @@ func TestWireV3_InstancelessTypeEmitsAnEmptyGroup(t *testing.T) {
 			},
 		},
 		// Graph.Add records a required association the data does not name.
-		Unresolved: []graph.UnresolvedParts{{
+		Unresolved: []snapparts.Unresolved{{
 			SourceType: populated, SourceKey: immutable.WrapKey([]any{"p1"}), Relation: "EMPLOYER", Reason: "absent",
 		}},
 	})
-	if res.HasErrors() {
-		t.Fatalf("assembling: %s", res)
-	}
 
 	emptyRow := -1
 	data, mres := snapshot.Marshal(ctx, built)

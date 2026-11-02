@@ -35,20 +35,6 @@ func PointWithByte(source SourceID, line, column, byteOffset int) Span {
 	return Span{Source: source, Start: pos, End: pos}
 }
 
-// Range creates a Span from start to end positions (byte offsets unknown).
-//
-// Panics if end < start (geometric soundness invariant). This catches
-// construction bugs early rather than allowing malformed spans to propagate
-// through the system. For point spans where start == end, use Point() instead.
-func Range(source SourceID, startLine, startCol, endLine, endCol int) Span {
-	start := Position{Line: startLine, Column: startCol, Byte: -1}
-	end := Position{Line: endLine, Column: endCol, Byte: -1}
-	if positionBefore(end, start) {
-		panic(fmt.Sprintf("location.Range: end %v before start %v", end, start))
-	}
-	return Span{Source: source, Start: start, End: end}
-}
-
 // RangeWithBytes creates a Span with known byte offsets.
 //
 // Panics if end is before start by either measure it has: the byte offsets, or
@@ -88,8 +74,7 @@ func (s Span) IsPoint() bool {
 //   - Known Start position (Line > 0 && Column > 0)
 //   - Known End position OR is a point span
 //
-// IMPORTANT: IsValid() checks "convertible to LSP," NOT "geometrically sound."
-// Use IsGeometricallySafe() to verify Start <= End.
+// IsValid checks "convertible to LSP", not Start <= End.
 func (s Span) IsValid() bool {
 	if s.Source.IsZero() {
 		return false
@@ -100,25 +85,6 @@ func (s Span) IsValid() bool {
 	// For non-point spans, End must also be known
 	if !s.IsPoint() && !s.End.IsKnown() {
 		return false
-	}
-	return true
-}
-
-// IsGeometricallySafe reports whether the span satisfies Start <= End by every
-// measure it has: the byte offsets when both are known, and the line and column
-// when both are known. A zero span and a point span are safe.
-//
-// Use this to validate spans constructed via struct literals or from untrusted
-// sources, where the constructors' panics never ran.
-func (s Span) IsGeometricallySafe() bool {
-	if s.IsZero() || s.IsPoint() {
-		return true
-	}
-	if positionBefore(s.End, s.Start) {
-		return false
-	}
-	if s.Start.HasByte() && s.End.HasByte() {
-		return s.Start.Byte <= s.End.Byte
 	}
 	return true
 }
@@ -152,7 +118,7 @@ func (s Span) String() string {
 // of the half-open interval. An LSP-style operation that must match the exact
 // position of a point span compares the positions itself.
 //
-// Precondition: span must be geometrically sound (IsGeometricallySafe).
+// Precondition: Start <= End.
 func (s Span) Contains(p Position) bool {
 	if s.IsZero() || p.IsZero() {
 		return false
@@ -188,9 +154,8 @@ func (s Span) Contains(p Position) bool {
 //
 // Source comparison uses string ordering of SourceID.String(). This means
 // synthetic IDs that resemble file paths (e.g., "/absolute/path") will be
-// interleaved with file-backed spans in the ordering. To ensure deterministic
-// and non-colliding ordering, use [MustNewSourceID] which validates that
-// synthetic identifiers don't resemble file paths.
+// interleaved with file-backed spans in the ordering. [ValidateSyntheticSourceID]
+// refuses such an identifier.
 //
 // Returns:
 //

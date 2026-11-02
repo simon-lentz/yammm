@@ -25,9 +25,8 @@
 // positioned diagnostic. A source parses when the grammar matches its tokens
 // and every escape in a string outside an invariant expression and an
 // annotation argument is one the language has, with well-formed digits and no
-// surrogate code point. So one a load refuses for another reason
-// still formats: inverted bounds, a character the source rules refuse inside a
-// comment or a literal, or an escape whose value is not UTF-8.
+// surrogate code point. So a source a load refuses for any other reason still
+// formats, such as one with inverted bounds or an unknown annotation.
 //
 // # Preservation
 //
@@ -67,13 +66,11 @@
 // inside a comment does not open a construct, and a comment line is never
 // wrapped, aligned, or read as a value or type name.
 //
-// [WrapLongLines] and [AlignColumns] lex the text they are given. A caller that
-// enters at one of these phases has no record to inherit.
-//
 // # Annotation Spacing
 //
-// An annotation is written tight: no space between the @ / @@ sigil and the
-// name that follows it, and none between the name and its argument list. The
+// The formatter removes a space between the @ or @@ sigil and its name. A newline
+// there stays. It also removes the whitespace between the name and a "(" that
+// directly follows it, and a comment between them keeps its line. The
 // second rule is decided from token-stream state rather than from the token
 // pair alone, because a name followed by "(" is also a relation multiplicity
 // (`worksAt (one)`), which keeps its space.
@@ -82,19 +79,19 @@
 // wrapping never folds it into the line above as a continuation, and a
 // type-level @@ member keeps its own indented line inside the type body.
 //
-// Annotations are not aligned into a column of their own: each trails the
-// property it decorates by a single space, whatever the width of the
-// surrounding declarations. A property that carries an annotation is never
-// wrapped, because the annotation has no legal place on a continuation line.
+// Annotations are not aligned into a column of their own: one written on its
+// property's line trails the property by a single space, whatever the width of
+// the surrounding declarations. Line wrapping leaves a single-line property that
+// carries an annotation on its line, because the annotation has no legal place on
+// a continuation line. A multi-line Enum with an annotation on its closing line
+// stays multi-line when it is too wide to fold, and a load refuses it with
+// E_INVALID_ANNOTATION.
 //
 // # Additional Functions
 //
-// Two pipeline phases and two helpers are exported. Nothing outside this
-// package calls them, apart from the gate that pins these signatures and the
-// package's own external tests:
+// Two helpers are exported. Outside this package, the one Go reference to them
+// is the test in docs that pins their signatures:
 //
-//   - [WrapLongLines]: phase 3, wrap lines exceeding [LineWidthThreshold]
-//   - [AlignColumns]: phase 4, pad the name column of each run of like members
 //   - [NormalizeIndentation]: a phase-1 helper over one line, convert spaces to tabs
 //   - [DisplayWidth]: the one width function, counting display cells
 //

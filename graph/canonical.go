@@ -4,6 +4,7 @@ import (
 	"iter"
 
 	"github.com/simon-lentz/yammm/immutable"
+	"github.com/simon-lentz/yammm/internal/snapparts"
 	"github.com/simon-lentz/yammm/internal/value"
 	"github.com/simon-lentz/yammm/schema"
 )
@@ -14,24 +15,17 @@ import (
 //
 // It records, once at construction and for every type and relation in the
 // schema's closure, the declared properties and key positions whose kind has a
-// canonical form at all. The maps are never written after that, so [Graph.Add]
-// reads them from any number of goroutines with no lock; a schema declaring no
+// canonical form at all. The maps are never written after that, so any number of
+// goroutines read them with no lock; a schema declaring no
 // Timestamp, Date or UUID anywhere is inactive and every method returns its
 // input untouched.
 //
 // Primary keys are canonicalized too, and every position that ADDRESSES an
 // instance is canonicalized with them — an instance's own key, an edge's
-// endpoint keys, a duplicate's key and its parent's, an unresolved
-// record's endpoints. That is the whole of the rule: a key moves only if every
-// reference to it moves in the same pass.
-//
-// It was not always so. This type once left keys untouched on the ground that
-// "the wire holds canonical text, so a loaded key is already canonical" — which
-// was false for a key that entered through [instance.NewValidInstance], the
-// bypass constructor that runs no validation. Canonicalizing at the WRITER
-// instead left the graph indexing, sorting and resolving edges by one spelling
-// while its document carried another; canonicalizing here makes one value have
-// one spelling in the graph, and the document inherits it.
+// endpoint keys, a duplicate's key, an unresolved record's endpoints. That is the whole of the rule: a key moves only if every
+// reference to it moves in the same pass. One value then has one spelling in
+// the graph, which indexes, sorts and resolves edges by it, and the document
+// inherits that spelling.
 type canonicalizer struct {
 	byType    map[schema.TypeID][]schema.Property
 	byEdge    map[edgeKey][]schema.Property
@@ -57,7 +51,7 @@ type edgeKey struct {
 
 // newCanonicalizer walks every type in s's closure once. An entry is written
 // for every type and relation, empty where nothing canonicalizes, so a later
-// read never misses and never writes. s is not zero: [New] and [RebuildSnapshot]
+// read never misses and never writes. s is not zero: [New] and snapshot.Load
 // refuse a zero schema first.
 func newCanonicalizer(s schema.Schema) *canonicalizer {
 	c := &canonicalizer{
@@ -130,8 +124,7 @@ func (c *canonicalizer) keyPositions(id schema.TypeID) []keyPosition {
 // key rewrites a primary key component-wise under the declared key
 // constraints of id. A component the constraint cannot render is left as it
 // arrived, for the same reason apply leaves a property: this reconstructs
-// rather than validates, and a graph assembled before the rule existed must
-// still build.
+// rather than validates.
 func (c *canonicalizer) key(id schema.TypeID, k immutable.Key) immutable.Key {
 	if c.inactive || k.Len() == 0 {
 		return k
@@ -187,8 +180,8 @@ func (c *canonicalizer) canonicalOrRaw(v immutable.Value, con schema.Constraint)
 }
 
 // properties rewrites an instance's properties under the declared constraints
-// of id. The Add path and the rebuild path both reach it, so the two cannot
-// store one value two ways.
+// of id. The import and the rebuild path both reach it, so each stores what a
+// validator stores.
 func (c *canonicalizer) properties(id schema.TypeID, props immutable.Properties) immutable.Properties {
 	if c.inactive {
 		return props
@@ -197,9 +190,9 @@ func (c *canonicalizer) properties(id schema.TypeID, props immutable.Properties)
 }
 
 // apply rewrites the properties named by ps. A value the constraint cannot
-// render is left as it arrived: RebuildSnapshot reconstructs a document rather
-// than validating one, and a document written before this rule existed must
-// still load.
+// render is left as it arrived: the reader reconstructs a document rather than
+// validating one, and a document written before this rule existed must still
+// load.
 func apply(props immutable.Properties, ps []schema.Property) immutable.Properties {
 	if len(ps) == 0 || props.Len() == 0 {
 		return props
@@ -230,7 +223,7 @@ func apply(props immutable.Properties, ps []schema.Property) immutable.Propertie
 
 // instance rewrites an instance's properties and those of its composed
 // children, which carry their own types.
-func (c *canonicalizer) instance(ip InstanceParts) InstanceParts {
+func (c *canonicalizer) instance(ip snapparts.Instance) snapparts.Instance {
 	if c.inactive {
 		return ip
 	}
@@ -238,9 +231,9 @@ func (c *canonicalizer) instance(ip InstanceParts) InstanceParts {
 	ip.PrimaryKey = c.key(ip.TypeID, ip.PrimaryKey)
 
 	if len(ip.Composed) > 0 {
-		composed := make(map[string][]InstanceParts, len(ip.Composed))
+		composed := make(map[string][]snapparts.Instance, len(ip.Composed))
 		for rel, children := range ip.Composed {
-			out := make([]InstanceParts, len(children))
+			out := make([]snapparts.Instance, len(children))
 			for i, child := range children {
 				out[i] = c.instance(child)
 			}
@@ -252,7 +245,7 @@ func (c *canonicalizer) instance(ip InstanceParts) InstanceParts {
 }
 
 // reinstance rewrites a freshly cloned Instance and its composed children in
-// place, as instance rewrites InstanceParts. The clone is not yet reachable
+// place, as instance rewrites its parts. The clone is not yet reachable
 // from the graph, so writing it is safe; key is idempotent, so an already
 // canonical instance is unchanged.
 func (c *canonicalizer) reinstance(inst Instance) {
@@ -269,8 +262,8 @@ func (c *canonicalizer) reinstance(inst Instance) {
 }
 
 // edgeProperties rewrites an edge's own properties under the constraints the
-// source type's relation declares. Every path that installs an edge reaches
-// it, so the Add path and the rebuild path cannot store one value two ways. An
+// source type's relation declares. The import and the rebuild path both reach
+// it, so each stores what a validator stores. An
 // edge with no property holds the zero Properties on every path, because a
 // document's {} cannot say which empty value the writer held.
 func (c *canonicalizer) edgeProperties(source schema.TypeID, relation string, props immutable.Properties) immutable.Properties {
@@ -285,7 +278,7 @@ func (c *canonicalizer) edgeProperties(source schema.TypeID, relation string, pr
 
 // edge rewrites an edge's own properties, whose constraints hang off the
 // source type's relation rather than off either endpoint type.
-func (c *canonicalizer) edge(ep EdgeParts) EdgeParts {
+func (c *canonicalizer) edge(ep snapparts.Edge) snapparts.Edge {
 	ep.Properties = c.edgeProperties(ep.SourceType, ep.Relation, ep.Properties)
 	if c.inactive {
 		return ep
@@ -297,24 +290,13 @@ func (c *canonicalizer) edge(ep EdgeParts) EdgeParts {
 	return ep
 }
 
-// duplicate rewrites a duplicate record's two addresses: its instance's key and
-// its parent's.
-func (c *canonicalizer) duplicate(dp DuplicateParts) DuplicateParts {
-	if c.inactive {
-		return dp
-	}
-	dp.Instance = c.instance(dp.Instance)
-	dp.ParentKey = c.key(dp.ParentType, dp.ParentKey)
-	return dp
-}
-
 // unresolved rewrites a forward reference's edge properties, which reach the
 // wire through the same relation a resolved edge's do, and both its addresses.
-// The target key renders under the target type's constraints as the Add path
-// renders a staged edge's target: the instance it names does not exist, but
+// The target key renders under the target type's constraints as a validator
+// renders an edge's target: the instance it names does not exist, but
 // the relation's declared target type does, and a record built through Add
 // and one rebuilt from parts must carry one address for one input.
-func (c *canonicalizer) unresolved(up UnresolvedParts) UnresolvedParts {
+func (c *canonicalizer) unresolved(up snapparts.Unresolved) snapparts.Unresolved {
 	up.Properties = c.edgeProperties(up.SourceType, up.Relation, up.Properties)
 	if c.inactive {
 		return up

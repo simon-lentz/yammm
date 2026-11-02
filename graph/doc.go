@@ -6,7 +6,7 @@
 //
 // Among what it handles:
 //   - Primary key uniqueness (duplicate detection, or a merge under
-//     [Graph.AddOrMerge])
+//     [BatchAssembler.AddValidOrMerge])
 //   - The key rule (which components a key may hold) and root type eligibility
 //   - Association edge resolution (forward references)
 //   - Composition child extraction and indexing
@@ -14,10 +14,9 @@
 //
 // # Thread Safety
 //
-// [Graph] is safe for concurrent use. Multiple goroutines may call [Graph.Add],
-// [Graph.AddOrMerge] and [Graph.AddComposed] concurrently. The graph handles
-// forward references, duplicate detection and merges atomically using internal
-// synchronization.
+// [Graph] is safe for concurrent use. Multiple goroutines may call [Graph.Add]
+// concurrently. The graph handles forward references, duplicate detection and
+// merges atomically using internal synchronization.
 //
 // [Snapshot] has no method that changes it, and it is safe for concurrent read
 // access from multiple goroutines. A record it returns is a handle, so no caller
@@ -30,7 +29,7 @@
 //	// Add validated instances (may be called concurrently)
 //	result := g.Add(ctx, validInstance)
 //	if !result.OK() {
-//	    // A refused instance (a duplicate PK, an unknown type, ...; see Error Handling)
+//	    // A refused instance (a duplicate PK, a type this schema cannot name, ...; see Error Handling)
 //	}
 //
 //	// Check completeness
@@ -50,11 +49,9 @@
 // # Batch Assembly
 //
 // [BatchAssembler] composes a [github.com/simon-lentz/yammm/instance.Validator],
-// a [Graph], and a [Snapshot] into a single call surface for the common
-// pipeline pattern (validate → add → check → snapshot). The assembler
-// encodes the ordering invariant: Finalize runs Check before it takes the
-// Snapshot, and only a caller reaching past it through [BatchAssembler.Graph]
-// can take one first, which that method's godoc calls unsupported. It is
+// and a [Graph] into a single call surface for the common pipeline pattern
+// (validate → add → check → snapshot). Add validates before it adds, and
+// [BatchAssembler.Graph] gives the batch's end its check and its snapshot. It is
 // concurrent-safe by default — multiple goroutines may
 // share one assembler:
 //
@@ -64,11 +61,10 @@
 //	        return fmt.Errorf("record %d: %w", i, err)
 //	    }
 //	}
-//	res, err := ba.Finalize(ctx)
-//	if err != nil {
-//	    return fmt.Errorf("batch: %w", err)
+//	if res := ba.Graph().Check(ctx); res.HasErrors() {
+//	    return fmt.Errorf("batch: %w", res.WithContext("check"))
 //	}
-//	// res.Snapshot is never zero; pass it to snapshot.Marshal.
+//	snap := ba.Graph().Snapshot() // pass it to snapshot.Marshal
 //
 // One validator serves every goroutine, serialized through an internal
 // mutex. See [BatchAssembler] for the full thread-safety contract.
@@ -86,31 +82,36 @@
 // state; new Add calls resolve against the imported instances.
 // [NewBatchAssemblerFromSnapshot] is its assembler-level counterpart.
 //
-// [RebuildSnapshot] constructs a [Snapshot] from asserted parts (types,
-// instances, edges, duplicates, unresolved records and an attestation). It does not validate
-// values, and rebuilt instances report Validated() == false, but it holds the
-// parts to the structural facts below. This is the deserialization entry point
-// used by the snapshot package.
+// [github.com/simon-lentz/yammm/snapshot.Load] constructs a [Snapshot] from a .ys
+// document. It holds the document to the structural facts below and refuses a
+// string of invalid UTF-8 anywhere in it, and it judges values against their
+// constraints only under a load option that asks for it. Its instances report
+// Validated() == false under every option.
 //
 // # Type Resolution
 //
-// Three lookups of an instance's type, and they answer different questions:
+// [Graph.Add] judges an instance by the schema object that validated it. The
+// instance holds its [schema.Type] ([instance.ValidInstance.Type]), and Add compares
+// that handle with the one [schema.Schema.TypeByID] returns for its identity. A
+// mismatch panics: the type is outside this graph's import closure, or another
+// load validated the instance. One text loaded twice is two loads, so an instance
+// crossed between them panics whether or not the texts differ.
 //
-//   - [Graph.Add] resolves a root's type from its identity, restricted as a
-//     matter of OWNERSHIP: a graph bound to a schema holds instances of the
-//     types that schema declares or directly imports, and the diagnostic's
-//     hint says so.
-//   - A composed child resolves across the WHOLE import closure. Its type comes
-//     from a relation the schema already resolved, and no ownership question
-//     arises because the child arrived inside a parent this graph does own.
-//   - [Graph.AddComposed] resolves the parent's type across the whole import
-//     closure too, and looks the parent up among the instances the graph
-//     holds: an identity outside the closure is E_GRAPH_TYPE_NOT_FOUND, and a
-//     parent the graph does not hold is E_GRAPH_PARENT_NOT_FOUND.
+// A load holds one handle per type however many import paths reach it, so a
+// diamond import gives one handle. A validator over any member of a closure serves
+// a graph over any schema of that load whose own closure holds the type.
+//
+// Past that check, two questions remain, and they have different answers:
+//
+//   - A root's type is restricted as a matter of OWNERSHIP: a graph bound to a
+//     schema holds instances of the types that schema declares or directly
+//     imports, and the diagnostic's hint says so.
+//   - A composed child reaches the WHOLE import closure. Its type comes from a
+//     relation the schema already resolved, and no ownership question arises
+//     because the child arrived inside a parent this graph does own.
 //
 // A schema where an imported type composes a part type from a further import
-// therefore loads, validates and builds. Resolving the child on the root's rule
-// instead dropped its subtree and disabled sibling duplicate detection with it.
+// therefore loads, validates and builds.
 //
 // Save [BatchAssembler.Add], whose typeName goes to the validator, no lookup in
 // this package takes a rendered type name. Where two identities
@@ -119,12 +120,13 @@
 //
 // # Root type eligibility
 //
-// A root instance's type must satisfy four members, and every entry point that
-// installs or asserts a root applies the same four: [Graph.Add],
-// [Graph.AddOrMerge], [RebuildSnapshot], [NewFromSnapshot] for a snapshot of
-// another schema, and the snapshot reader. [BatchAssembler]'s add methods
-// apply them in the code [Graph.Add] and [Graph.AddOrMerge] run, and
-// [NewBatchAssemblerFromSnapshot] through [NewFromSnapshot]; a snapshot of the
+// A root instance's type must satisfy four members. [NewFromSnapshot] for a
+// snapshot of another schema and the snapshot reader apply all four. [Graph.Add] takes an instance a validator of its own load built,
+// and that validator refuses an abstract or a part type at a root, so Add checks
+// the name, the key and the part rule, which a member's validator or a child read
+// out of [instance.ValidInstance.Compositions] can still break. [BatchAssembler]'s
+// add methods run the code [Graph.Add] runs, and
+// [NewBatchAssemblerFromSnapshot] goes through [NewFromSnapshot]; a snapshot of the
 // importing schema was held to them where it was built. A type is
 // ineligible when it
 //
@@ -142,15 +144,16 @@
 // render alike, so a name-keyed document can always separate the roots a
 // snapshot holds.
 //
-// A composed child is held to none of the four. It is addressed through its
-// parent, its type comes from a relation the schema already resolved, and it
-// is legal only as that relation's declared target, which can be a transitively
-// imported part type.
+// A composed child is held only to the abstract member, since a load refuses an
+// abstract composition target. It is addressed through its parent, its type comes
+// from a relation the schema already resolved, and it is legal only as that
+// relation's declared target, which can be a transitively imported part type.
 //
 // # Denoted type eligibility
 //
 // A snapshot DENOTES every type in [Snapshot.Types]. That set holds every
-// root's type, and [SnapshotParts.Types] may add a type with no instances.
+// root's type, and a document's instances section may add a type through a group
+// with no item. A types table row with no group denotes no type.
 // Every denoted type is held to all four members above, whether or not the
 // snapshot holds an instance of it.
 //
@@ -163,19 +166,18 @@
 //
 // # Structural facts
 //
-// [Graph.Add] never builds a snapshot that breaks the facts below, and every
-// other constructor of a snapshot refuses one that does: [RebuildSnapshot] over
-// parts, and the snapshot package's reader over a document. [NewFromSnapshot]
+// [Graph.Add] never builds a snapshot that breaks the facts below, and the
+// snapshot package's reader refuses a document that does. [NewFromSnapshot]
 // and [NewBatchAssemblerFromSnapshot], over a snapshot bound to another schema,
 // derive its records again and refuse one that breaks any other fact, save an
 // "absent" record under a relation that is no association of that schema, which
 // they drop.
 // The facts are the whole promise: a shape they do not name, such as a
-// property value its constraint refuses, can pass a constructor. A type that
+// property value its constraint refuses, can pass the reader. A type that
 // cannot hold a root is one break, however many positions name it, and a root of
 // it holds no address: it owes no required association, it is in no (one) count,
-// no duplicate's conflict resolves in its slots, and a second root at its key is
-// no duplicate. A break its records or its slots show by themselves stays its own.
+// and a second root at its key is no duplicate. A break its records or its slots
+// show by themselves stays its own.
 // The facts are:
 //
 //   - Identity. Every type identity resolves in the schema.
@@ -188,16 +190,10 @@
 //     at that rendering, so a reload keeps every address. A keyed
 //     instance's stored key has one component per declared primary key,
 //     and each agrees with its key property, which is present and not
-//     null. So a component of no form (a json.Number that is no JSON number
-//     literal is one; only the empty one reaches the graph, since
-//     [immutable.WrapKey] panics on every other), a string that is not valid
-//     UTF-8, a json.Number that spells a number no finite float64 holds,
-//     a number ParseKey reads back at another rendering (such as a uint64 or
-//     a json.Number past int64 that reads back as a float64 rendered otherwise,
-//     a json.Number spelled 1.0, or a float64 negative zero), one whose
-//     rendering differs from its form's, and a time.Time or
-//     uuid.UUID no key property's constraint renders, as in every keyless
-//     part's key, are refused. Two roots of one type never share a canonical
+//     null. So a list or a map, a number no finite float64 holds, and a number
+//     ParseKey reads back at another rendering (such as one past int64 that
+//     reads back as a float64 rendered otherwise, one spelled 1.0, or a float64
+//     negative zero) are refused. Two roots of one type never share a canonical
 //     address.
 //   - Names. Every stored property and edge property name is declared.
 //   - Associations. Every edge and unresolved record is under an association
@@ -210,24 +206,27 @@
 //     "absent" or "empty" record carries no target key and no edge
 //     properties. A (one) association holds one record at most, edges and
 //     unresolved records together.
-//   - References. An edge's source and target, a record's source and a
-//     composed duplicate's parent each name a root. A reference to the address
+//   - References. An edge's source and target and a record's source each name
+//     a root. A reference to the address
 //     a root's key properties state, where the key rule refuses its stored key,
 //     is that root's break, and draws no diagnostic of its own.
 //   - Records. The records are the ones [Graph.Add] derives from the data, and
-//     the ones [Graph.AddOrMerge] merges into a held root from a duplicate's
-//     data. Every root holds an edge or a record under each required
+//     the ones [BatchAssembler.AddValidOrMerge] merges into a held root from a
+//     duplicate's data. Every root holds an edge or a record under each required
 //     association of its type. An "absent" or "empty" record stands alone,
 //     once, and only under a required association. A "target_missing" record
 //     names a target no root holds.
-//   - Duplicates. A duplicate's instance holds no composed children, and a
-//     root duplicate's type can hold a root and it names no parent. Its
-//     conflict is derived from its position, never taken from a constructor's
-//     input: for a root duplicate, the root at its own type and key; for a
-//     composed duplicate, whose type is its composition's declared target,
-//     the sole child of a (one) slot or the child of a keyed (many) slot at
-//     its own key. A duplicate with no such conflict, as under a keyless
-//     (many) slot, breaks the fact.
+//   - Duplicates. A duplicate's instance holds no composed children, and its
+//     type can hold a root. Its conflict is the root at its own type and key. A
+//     duplicate with no such root breaks the fact.
+//
+// The values are another matter. A snapshot holds only what a validator stored or
+// the reader decoded: nil, a bool, a string of valid UTF-8, an int64, a finite
+// float64, a json.Number (a literal no finite float64 holds, or a number nested
+// more than 64 levels deep), and lists and string-keyed maps of those. Each has a
+// form on the .ys wire, so [github.com/simon-lentz/yammm/snapshot.Marshal] meets no
+// value it cannot write. A data writer can still refuse one: adapter/csv and
+// adapter/neo4j have no spelling for some, and their docs name them.
 //
 // Whether an association is required is read from the schema, never taken from
 // a constructor's input:
@@ -250,51 +249,40 @@
 //
 // # Build Then Commit
 //
-// [Graph.Add], [Graph.AddOrMerge] and [Graph.AddComposed] walk an instance
-// ONCE. That walk both checks the whole structure — property names, edge names,
-// edge property names and multiplicities, a root's target keys, and every slot
-// and child of the composition tree at any depth — and assembles the [Instance] tree to install, touching no graph state. Only
-// a walk that raised no error reaches the commit phase, which installs the
-// tree, the staged association records and the attestation together under the
-// graph's lock; [Graph.AddComposed] holds that lock across its walk too. A
-// merge's commit installs no tree: it installs the records the merge plans on
-// the held root, retires the held root's "absent" or "empty" records they
-// replace, and joins the attestation when it installs a record. The commit can
+// [Graph.Add] and [BatchAssembler.AddValidOrMerge] check the instance's load and
+// its root type, then assemble the [Instance] tree to install and stage its
+// association records, touching no graph state. They check no structure below
+// the root type: the validator of the same load already judged the property names,
+// a root's edge names, edge property names, multiplicities and target keys, and
+// every slot and child of the composition tree at any depth. The commit phase
+// installs the tree and the staged association records together under the
+// graph's lock. A merge's commit installs no tree: it installs the records the merge plans on
+// the held root and retires the held root's "absent" or "empty" records they
+// replace. The commit can
 // still refuse, before it installs anything of the record: a root at a key the
-// graph holds with E_DUPLICATE_PK, a child at an occupied slot with
-// E_DUPLICATE_COMPOSED_PK, and a merge with E_GRAPH_CARDINALITY.
+// graph holds with E_DUPLICATE_PK, and a merge with E_GRAPH_CARDINALITY.
 //
 // A non-OK result therefore installs nothing of the record — no instance, child
-// or edge — and does so structurally rather than by two functions agreeing. A
-// rejection is itself recorded: a root [Graph.Add] refuses at its key, a root
-// [Graph.AddOrMerge] refuses at its key for its composed children, and a child
-// [Graph.AddComposed] refuses at its slot, in [Snapshot.Duplicates], and every
-// refusal's issue in [Snapshot.Diagnostics]. The alternative,
-// installing first and rejecting during the walk, left a record in the graph
-// that the caller had been told had failed: [BatchAssembler.Count]
-// under-reported against a snapshot that held the instance, and a retry of that
-// record drew E_DUPLICATE_PK.
+// or edge. A rejection is itself recorded: a root [Graph.Add] refuses at its key, and a root
+// [BatchAssembler.AddValidOrMerge] refuses at its key for its composed children,
+// in [Snapshot.Duplicates], and every refusal's issue in [Snapshot.Diagnostics].
 //
-// The check runs for every instance, not only for one reporting
-// [instance.ValidInstance.Validated] == false. Two reasons: the graph cannot
-// verify that bit, since no exported constructor sets it and a validator
-// defect would set it on malformed data; and the validator has held a hole in
-// one of these very rules — a (one) composition accepted an array of any
-// length — which this guard was the only thing to catch. A trust boundary
-// that deletes the check which found the last defect is not a trust boundary.
+// A validator defect reaches the graph: Add does not judge the record again.
+// [github.com/simon-lentz/yammm/snapshot.WithRevalidation] runs a validator over a
+// document's roots when it loads.
 //
 // # Merge on a Duplicate Key
 //
-// [Graph.AddOrMerge], and [BatchAssembler.AddValidOrMerge] above it, add an
-// instance as [Graph.Add] does. When the graph already holds a root of the
-// instance's type at its primary key, they merge instead: the incoming
+// [BatchAssembler.AddValidOrMerge] adds an instance as [Graph.Add] does. When
+// the graph already holds a root of the instance's type at its primary key, it
+// merges instead: the incoming
 // instance's association records go to the held root, and its properties and
 // provenance are dropped, so the held root's stand. A merge records no
 // [Duplicate] and raises no error. It is for a source that lists one record
 // under several parents, each listing naming its own association targets.
 //
-// The merge walks the incoming instance as [Graph.Add] does, and a record Add
-// would refuse is refused the same way. Then, under the graph's lock:
+// The merge makes the checks [Graph.Add] makes before it reads the held key, and
+// it refuses what they refuse under the same codes. Then, under the graph's lock:
 //
 //   - A record naming a target the held root already names under that
 //     association, by an edge or an unresolved record, adds nothing, and
@@ -312,32 +300,25 @@
 //
 // An incoming instance carrying composed children is not merged: it is refused
 // as [Graph.Add] refuses a duplicate, with a [Duplicate] and E_DUPLICATE_PK.
-// A merge that installs a record joins the payload's validation to
-// [Attestation]'s Values claim; one that installs nothing leaves the claim as
-// it stood. A merge finds the held root's records through an index by source,
-// built by the first AddOrMerge to reach these rules, whether it commits or is
+// A merge finds the held root's records through an index by source,
+// built by the first call to reach these rules, whether it commits or is
 // refused, so a graph that never merges keeps none.
 //
 // # Composed Children
 //
-// A composed child is checked as a root is — its property names, its edge
-// names, edge property names and multiplicities, its own key, and its own
-// composition tree — but its association edges are never staged, so their target keys go unjudged, and
-// never installed. A load and [schema.Builder] refuse a part type that declares
-// or inherits an association, so every edge name a child files is reported as
-// E_GRAPH_UNKNOWN_RELATION rather than dropped in silence. A composed child
+// A validator judges a composed child as it judges a root — its property names,
+// its own key, and its own composition tree — and [Graph.Add] judges none of it
+// again. A load refuses a part type that declares or
+// inherits an association, so a child holds no edge. A composed child
 // therefore produces no [Edge], no [UnresolvedEdge], and no effect on
 // [Attestation]'s Associations dimension.
 //
 // # Key Types
 //
-// [BatchAssembler] composes Validator + Graph + Snapshot for the
+// [BatchAssembler] composes Validator + Graph for the
 // validate→add→check→snapshot pipeline pattern; constructed via
 // [NewBatchAssembler] (or [NewBatchAssemblerFromSnapshot], seeding from
-// a prior snapshot) and finalized via [BatchAssembler.Finalize], which
-// returns a [FinalizeResult] whose Snapshot field is never zero.
-// [ErrAssemblerFinalized] is the sentinel returned from Add / AddValid /
-// AddValidOrMerge after Finalize.
+// a prior snapshot), and read at the batch's end through [BatchAssembler.Graph].
 //
 // [Instance] provides read access to a graph node's data, through
 // accessors such as [Instance.TypeName], [Instance.PrimaryKey], [Instance.Properties],
@@ -355,17 +336,6 @@
 // wire format carries these in the "properties" field of each
 // unresolved-edge wire entry; see the snapshot package for
 // format-version semantics.
-//
-// # Graph Options
-//
-// [New] and [NewFromSnapshot] accept [Option] values. [WithLogger] attaches a
-// structured logger to the graph's operation boundaries — Add, AddOrMerge,
-// AddComposed and Check each open and close a traced operation, and edge
-// resolution, forward references, duplicate primary keys, duplicate composed
-// children [Graph.AddComposed] refuses, merges and unresolved required associations are logged as they
-// occur. With no logger, every trace
-// call returns immediately. Symmetric with
-// [github.com/simon-lentz/yammm/schema.WithLogger].
 //
 // # Type Identity and Type Names
 //
@@ -396,9 +366,6 @@
 //   - [Snapshot.InstancesOf]
 //   - [Snapshot.InstanceByKey]
 //   - [Instance.TypeID]
-//   - [Graph.AddComposed]'s parentType parameter
-//   - [SnapshotParts.Types], and [InstanceParts.TypeID], which files a root
-//   - the type fields on [EdgeParts], [DuplicateParts] and [UnresolvedParts]
 //   - [UnresolvedEdge.TargetType]
 //
 // [Instance.TypeName] still carries the rendered name beside the identity
@@ -422,8 +389,9 @@
 // or UUID component canonicalized under the type's key constraints, as the key
 // was at entry. One instant at two offsets is two addresses.
 //
-// A part type may declare a primary key, which a composed child carries and
-// the graph checks and uses to tell siblings apart. It is not an address: a
+// A part type can declare a primary key, and a composed child carries it. A
+// validator, the snapshot package's reader and [NewFromSnapshot] over a snapshot of
+// another schema compare it to tell siblings apart. It is not an address: a
 // part instance is found through its parent composition, so
 // [Snapshot.InstanceByKey] never returns one and this package mints none; a
 // store that must give each part node an identity derives it, and
@@ -433,96 +401,71 @@
 //
 // Graph operations return [diag.Result]:
 //
-//   - [diag.Result.HasFatal]: context cancellation (E_CONTEXT_CANCELLED), or
-//     a broken invariant (E_INTERNAL)
+//   - [diag.Result.HasFatal]: context cancellation (E_CONTEXT_CANCELLED), and in
+//     [Snapshot.Diagnostics] a validator's E_INTERNAL, which [BatchAssembler.Add]
+//     merges
 //   - [diag.Result.HasErrors]: any Fatal or Error issue, so a semantic failure
 //     (duplicate PK, type not found) too
 //   - [diag.Result.OK]: success (may have warnings)
 //
 // Programmer errors panic: a nil receiver at a method that adds or checks, a
-// zero instance at [Graph.Add], [Graph.AddOrMerge] or [Graph.AddComposed], a nil
-// context, a zero schema or snapshot at a constructor, an instance of another
-// schema, or a key value [FormatKey] cannot encode. [BatchAssembler.AddValid]
+// zero instance at [Graph.Add], a nil context, a zero schema or snapshot at a
+// constructor, an instance whose type this graph's schema does not hold under its
+// identity (see Type Resolution), or a key value [FormatKey] cannot encode.
+// [BatchAssembler.AddValid]
 // and [BatchAssembler.AddValidOrMerge] report a zero instance as Error
 // E_INTERNAL instead, since a validator returns a zero instance for a refused one.
 //
-// [Graph.Add] emits the following. The first four judge a root's type in the
+// [Graph.Add] emits the following. The first three judge a root's type in the
 // order listed, and a type breaking two draws the first:
 //
-//   - E_GRAPH_TYPE_NOT_FOUND: a root's type is not declared by this graph's
-//     schema or a direct import
-//   - E_GRAPH_MISSING_PK: the type declares no primary key
-//   - E_GRAPH_INVALID_COMPOSITION: a part type was added directly, or a
-//     composed child is not an instance of its relation's target type
-//   - E_GRAPH_ABSTRACT_TYPE: the type is abstract
-//   - E_GRAPH_INVALID_PK: a primary key — the instance's own, or a composed
-//     child's, a keyless part's included — holds a component the Keys fact
-//     refuses; a keyed type's key is empty, has the wrong arity, has a key
-//     property that is absent or null, or disagrees with its own key
-//     property; or a root's association target key has the wrong arity or a
-//     component the Keys fact refuses
-//   - E_GRAPH_CARDINALITY: a (one) association carries several targets
-//   - E_GRAPH_UNKNOWN_RELATION: edge data or composed children arrived under a
-//     name the type does not declare in that slot
-//   - E_UNKNOWN_FIELD, E_UNKNOWN_EDGE_FIELD: a property or edge property name
-//     the type or association does not declare
-//   - E_DUPLICATE_COMPOSED_PK: a (one) composition carries several children,
-//     or two children of one keyed (many) slot share a primary key
+//   - E_GRAPH_TYPE_NOT_FOUND: a root's type is in the import closure of this
+//     graph's schema, and that schema neither declares nor directly imports it
+//   - E_GRAPH_MISSING_PK: the type declares no primary key, so the root is a
+//     keyless part read out of [instance.ValidInstance.Compositions]
+//   - E_GRAPH_INVALID_COMPOSITION: the root is a keyed part read out of
+//     [instance.ValidInstance.Compositions]
 //   - E_DUPLICATE_PK: the primary key already exists for this type
 //   - E_CONTEXT_CANCELLED: the context was cancelled
 //
-// [Graph.AddComposed] emits:
-//
-//   - E_GRAPH_TYPE_NOT_FOUND: the PARENT's identity is not in the schema's
-//     import closure, or is the zero TypeID
-//   - E_GRAPH_PARENT_NOT_FOUND: no root carries that identity and key
-//   - E_GRAPH_INVALID_COMPOSITION: the named relation is not a composition, or
-//     the child is not an instance of its target type
-//   - E_GRAPH_INVALID_PK: the child's key, or a descendant's, holds a
-//     component the Keys fact refuses, a keyless part's included, or, for a
-//     keyed type's key, is empty, has the wrong arity, has a key property
-//     that is absent or null, or disagrees with its own key property
-//   - E_DUPLICATE_COMPOSED_PK: the parent's (one) slot already holds a child,
-//     or its keyed (many) slot holds a sibling at the child's key
-//   - E_GRAPH_CARDINALITY, E_GRAPH_UNKNOWN_RELATION, E_DUPLICATE_COMPOSED_PK,
-//     E_GRAPH_INVALID_COMPOSITION, E_UNKNOWN_FIELD, E_UNKNOWN_EDGE_FIELD: from
-//     the child's own structure and its descendants', judged by the walk a
-//     root's composition tree takes
-//   - E_CONTEXT_CANCELLED: the context was cancelled
-//
-// It does NOT emit E_GRAPH_MISSING_PK, E_GRAPH_ABSTRACT_TYPE or
-// E_DUPLICATE_PK; those three belong to a root.
-//
-// [Graph.AddOrMerge] emits what [Graph.Add] emits, with two differences at a
-// held key: E_DUPLICATE_PK only for an incoming instance carrying composed
-// children, and E_GRAPH_CARDINALITY for a merge that would give a (one)
-// association a second target.
-//
-// A composed child whose identity is not in the import closure is an
-// invariant guard on both paths, Fatal E_INTERNAL: the child must already
-// equal its relation's target, which the schema resolved at load, and a
-// child from outside the closure is refused first: by the check that compares
-// it with its relation's target (E_GRAPH_INVALID_COMPOSITION), or, in
-// [Graph.AddComposed], by a schema guard that panics before that check where
-// the child's schema path is outside the closure. No public constructor reaches
-// it.
+// [BatchAssembler.AddValidOrMerge] emits what [Graph.Add] emits, with two
+// differences at a held key: E_DUPLICATE_PK only for an incoming instance
+// carrying composed children, and E_GRAPH_CARDINALITY for a merge that would
+// give a (one) association a second target.
 //
 // [Graph.Check] emits E_UNRESOLVED_REQUIRED and E_CONTEXT_CANCELLED.
 //
-// [RebuildSnapshot] and the import report a broken structural fact with the
-// code [Graph.Add] reports it with, save in two cases. The import draws
-// E_GRAPH_TYPE_NOT_FOUND for a composed child whose identity the schema cannot
-// resolve, where [Graph.Add] draws E_GRAPH_INVALID_COMPOSITION. At
-// [RebuildSnapshot], parts that break the identity, root, denoted-type, name,
-// address, reason, records, duplicate or References rule come only from a
-// broken caller, so it reports them as Fatal E_INTERNAL. [RebuildSnapshot]
-// panics on a zero schema, as [New] does.
+// The import judges what no validator of its schema judged. It reports each
+// broken structural fact at Error under one of these codes:
+//
+//   - E_GRAPH_TYPE_NOT_FOUND: a type identity the snapshot states does not resolve
+//   - E_GRAPH_TYPE_NOT_FOUND, E_GRAPH_MISSING_PK, E_GRAPH_INVALID_COMPOSITION,
+//     E_GRAPH_ABSTRACT_TYPE: a denoted type breaks the root rule, judged in that
+//     order
+//   - E_GRAPH_INVALID_COMPOSITION: a composed child is not an instance of its
+//     relation's target type
+//   - E_GRAPH_INVALID_PK: a keyed instance's stored key is empty or has the wrong
+//     arity, a key property is absent or null, a component disagrees with its key
+//     property, or an association target key has the wrong arity
+//   - E_DUPLICATE_PK: two roots of a type that can hold one, whose stored keys the
+//     key rule accepts, stand at one canonical address
+//   - E_GRAPH_CARDINALITY: a (one) association holds several records
+//   - E_GRAPH_UNKNOWN_RELATION: an edge, a record or composed children stand under
+//     a name the type does not declare as that kind of relation, or an edge or a
+//     "target_missing" record targets another type than its association declares
+//   - E_UNKNOWN_FIELD, E_UNKNOWN_EDGE_FIELD: a property or edge property name
+//     the type or association does not declare
+//   - E_DUPLICATE_COMPOSED_PK: a (one) composition holds several children, or two
+//     children of one keyed (many) slot share a canonical key
+//
+// The snapshot package's reader reports a broken fact under its own codes, such as
+// E_SNAPSHOT_DANGLING_REFERENCE and E_SNAPSHOT_INVALID_ROOT, or under a code above,
+// such as E_GRAPH_CARDINALITY.
 //
 // # Diagnostics Lifecycle
 //
-// [Snapshot.Diagnostics] returns the cumulative issues from [Graph.Add],
-// [Graph.AddOrMerge] and [Graph.AddComposed] calls, and a [BatchAssembler]'s
-// validator results, its validation failures among them, and zero-instance
+// [Snapshot.Diagnostics] returns the cumulative issues from [Graph.Add] calls,
+// and a [BatchAssembler]'s adds and validator results, its validation failures among them, and zero-instance
 // refusals. [BatchAssembler.Add] adds none for a record whose one fault is an
 // [instance.Refused] value, since its producer's result holds its issue; the
 // zero instance a validator returns for one still draws AddValid's E_INTERNAL. These are construction-time
@@ -540,7 +483,8 @@
 // # Ordering Guarantees
 //
 // Every collection accessor of [Snapshot] produces deterministically sorted
-// output, independent of [Graph.Add] call order or concurrency:
+// output. [Graph.Add] call order and concurrency move only records that tie in
+// every arm of the tuple:
 //
 //   - [Snapshot.Types]: lexicographic by the TypeID's String
 //   - [Snapshot.InstancesOf]: lexicographic by primary key string
@@ -548,59 +492,24 @@
 //   - [Snapshot.Edges]: (sourceType, sourceKey, relation, targetType,
 //     targetKey, edge properties)
 //   - [Snapshot.EdgesFrom]: the order of [Snapshot.Edges], over one source
-//   - [Snapshot.Duplicates]: (type, primaryKey, relation, conflictType,
-//     conflictKey, parent slot, rejected instance's properties, rejected
-//     instance's provenance)
+//   - [Snapshot.Duplicates]: (type, primaryKey, rejected instance's properties,
+//     rejected instance's provenance)
 //   - [Snapshot.Unresolved]: (sourceType, sourceKey, relation, targetType,
 //     targetKey, reason, required, edge properties)
 //
-// Every arm of each tuple is compared. A properties arm compares a rendering that
-// writes each value as %T|%#v, and a provenance arm a rendering of its source name
-// and span start, so records those renderings make equal tie in that arm. Among
-// the ties are float64(1) and int64(1) inside a list or map, a zero and an empty
-// Properties, a [time.Time] at one wall clock under two unnamed zones, and two
-// non-zero provenance values that differ only elsewhere.
+// Each sort compares every arm its tuple names. A properties arm compares a rendering that
+// writes each value as %T|%#v, so records that rendering makes equal tie in that arm.
+// A provenance arm compares the source name, the path a document writes, and the
+// span. Among the ties are float64(1) and int64(1) inside a list or map, and a
+// zero and an empty Properties.
 //
 // Sorting is established when the Snapshot is constructed — by [Graph.Snapshot]
-// and by [RebuildSnapshot] alike, which reach it through one place — and is
-// amortized across accessor calls. Neither constructor asks its caller to
-// pre-sort, and neither can skip it.
-//
-// # Streaming Scenarios
-//
-// For streaming scenarios where compositions arrive after their parent,
-// [Graph.AddComposed] attaches children to existing parents. There are
-// important limitations to understand:
-//
-// Supported:
-//
-//   - Adding children to any top-level parent (added via [Graph.Add] or
-//     [Graph.AddOrMerge], or imported by [NewFromSnapshot])
-//   - Mixed inline and streamed children (inline added first, streamed later)
-//   - Nested inline compositions (grandchildren included in streamed child)
-//
-// Not Supported:
-//
-//   - Streaming grandchildren to composed children (nested streaming)
-//   - Addressing a composed parent by a key of its own
-//
-// For nested compositions, include the full composition tree inline in the
-// [instance.ValidInstance] passed to AddComposed. The graph will recursively
-// extract and attach all nested children.
-//
-// Example of supported pattern:
-//
-//	// Parent added to graph
-//	g.Add(ctx, parentInstance)
-//
-//	// Child streamed later, with nested GrandChild inline
-//	childInstance := ... // includes GrandChild in composed property
-//	g.AddComposed(ctx, parentTypeID, parentKey, "CHILDREN", childInstance)
-//	// Both Child and GrandChild are now attached
+// and by the snapshot package's reader alike, which reach it through one place —
+// and is amortized across accessor calls. Neither asks its caller to pre-sort, and
+// neither can skip it.
 //
 // # Dependencies
 //
 //	graph  ──imports──▶  schema, instance, diag, location, immutable
-//	graph  ──imports──▶  internal/trace, internal/value
-//	graph  ──imports──▶  github.com/google/uuid
+//	graph  ──imports──▶  internal/value, internal/snapparts
 package graph

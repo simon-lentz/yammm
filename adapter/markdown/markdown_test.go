@@ -10,9 +10,7 @@ import (
 	"testing"
 
 	"github.com/simon-lentz/yammm/internal/yammmtest"
-	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
-	"github.com/simon-lentz/yammm/schema/expr"
 )
 
 // loadTestdata loads a corpus schema from testdata, failing on any
@@ -150,45 +148,6 @@ func TestMarshal_ClassMembersOption(t *testing.T) {
 		if strings.Contains(got, absent) {
 			t.Errorf("WithClassMembers(false) output still carries the member line %q:\n%s", absent, got)
 		}
-	}
-}
-
-// TestMarshal_NonSourceBacked pins that Marshal accepts a Builder-built
-// schema with no source content: invariants degrade to message-only and no
-// source fence is emitted.
-func TestMarshal_NonSourceBacked(t *testing.T) {
-	t.Parallel()
-
-	s, res := schema.NewBuilder().WithName("built").
-		AddType("Other").
-		WithPrimaryKey("id", schema.NewStringConstraint()).
-		Done().
-		AddType("Thing").
-		WithPrimaryKey("id", schema.NewStringConstraint()).
-		WithRelation("POINTS_AT", schema.NewTypeRef("", "Other", location.Span{}), true, false).
-		WithInvariant("always true", expr.NewLiteral(true), "").
-		Done().
-		Build()
-	if err := res.Err(); err != nil {
-		t.Fatalf("Build: %v", err)
-	}
-
-	out, err := Marshal(s)
-	if err != nil {
-		t.Fatalf("Marshal: %v", err)
-	}
-	doc := string(out)
-	if !strings.Contains(doc, "# Schema built") || !strings.Contains(doc, "### Thing") {
-		t.Errorf("document lacks expected skeleton:\n%s", doc)
-	}
-	if !strings.Contains(doc, "-   \"always true\"") {
-		t.Errorf("invariant message missing:\n%s", doc)
-	}
-	if strings.Contains(doc, "```yammm") {
-		t.Errorf("source fence emitted for a non-source-backed schema:\n%s", doc)
-	}
-	if !strings.Contains(doc, "-   `--> POINTS_AT (_)` [Other](#") {
-		t.Errorf("relation target not rendered as a link:\n%s", doc)
 	}
 }
 

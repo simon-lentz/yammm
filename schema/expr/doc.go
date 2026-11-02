@@ -22,25 +22,28 @@
 //
 // # Builtin Catalogue
 //
-// [BuiltinSpec] describes each pipeline builtin the language defines — its
-// argument and parameter arity, whether it takes a body, and how it types its
-// result and lambda parameters. [LookupBuiltin] and [Builtins] expose the
-// catalogue. The evaluator enforces the arity fields and the schema layer's
-// static checker follows types through pipelines with the rest, so the two
-// read one table and cannot drift.
+// [BuiltinSpec] describes each pipeline builtin the language defines: its
+// receiver and argument kinds, its argument and parameter arity, whether it takes
+// a body, and how it types its result and lambda parameters. [LookupBuiltin]
+// exposes the catalogue. The evaluator enforces the arity and body fields from
+// this table and panics at start on a builtin the table lacks. The schema layer's
+// static checker follows types through pipelines with the other fields. Each
+// builtin's implementation checks its own kinds and computes its own result, so
+// nothing ties those fields to the evaluator.
 //
 // # Helper Functions
 //
 // The package provides helper functions for inspecting expression nodes:
 //
 //   - [StringLiteral]: extract a string value from a Literal expression
-//   - [IsRegexpLiteral]: check if an expression is a compiled regexp
 //   - [ArgsLiteral]: extract argument list from a Literal expression
 //   - [ParamsLiteral]: extract parameter names from a Literal expression
 //
 // # Thread Safety
 //
-// All expression types are immutable value types, safe for concurrent access.
+// An expression tree is safe for concurrent reads while no caller writes to it.
+// A [Literal]'s Val and an [SExpr]'s elements are writable, and [Literal.Literal]
+// returns Val uncopied, so a holder must not write through them.
 //
 // # Dependencies
 //

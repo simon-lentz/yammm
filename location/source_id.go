@@ -11,11 +11,12 @@ import (
 	"golang.org/x/text/unicode/norm"
 )
 
-// SourceID identifies a source uniquely within a build.
+// SourceID identifies a source within a build. File-backed identities compare
+// up to NFC, and synthetic ones as written.
 //
 // A SourceID can represent:
 //   - File-backed source: Created via SourceIDFromPath or ResolveSourcePath
-//   - Synthetic source: Created via NewSourceID or MustNewSourceID, such as
+//   - Synthetic source: Created via NewSourceID, such as
 //     "<stdin>", "inline:test", or "test://unit/person.yammm"
 //
 // For file-backed sources, SourceID stores the CanonicalPath directly (not as
@@ -34,15 +35,9 @@ type SourceID struct {
 
 // NewSourceID creates a SourceID for synthetic (non-file) sources.
 //
-// WARNING: Prefer [MustNewSourceID] for new code. NewSourceID bypasses validation,
-// which can lead to subtle bugs:
-//   - Empty string: Returns a zero-value SourceID (IsZero() returns true),
-//     which is invalid and may cause map key anomalies.
-//   - Absolute paths: Creates collisions with file-backed SourceIDs, breaking
-//     the String() injectivity invariant.
-//
-// NewSourceID is appropriate for internal use where the identifier is known-valid
-// at compile time (e.g., string literals in test code).
+// It does not validate the identifier: an empty one gives a zero SourceID, and
+// an absolute path collides with a file-backed SourceID. A caller that takes the
+// identifier from outside judges it first with [ValidateSyntheticSourceID].
 //
 // Recommended synthetic identifier patterns:
 //   - test://unit/person.yammm (unit tests)
@@ -53,26 +48,11 @@ func NewSourceID(identifier string) SourceID {
 	return SourceID{synthetic: identifier}
 }
 
-// MustNewSourceID creates a synthetic SourceID with validation.
-//
-// Panics when [ValidateSyntheticSourceID] refuses the identifier: an empty one,
-// one that is not UTF-8 or holds a character that does not print, and one that
-// resembles an absolute file path (Unix or Windows), which would violate the
-// String() injectivity invariant and collide with file-backed SourceIDs.
-//
-// Use in application code, tests, and high-level APIs.
-func MustNewSourceID(identifier string) SourceID {
-	if err := ValidateSyntheticSourceID(identifier); err != nil {
-		panic("location.MustNewSourceID: " + err.Error())
-	}
-	return SourceID{synthetic: identifier}
-}
-
 // ValidateSyntheticSourceID reports whether an identifier is safe as a
 // synthetic SourceID: not empty ([ErrEmptySourceID]), valid UTF-8
 // ([ErrInvalidUTF8Path]), holding only characters [strconv.IsPrint] reports
 // printable ([ErrUnprintableSourceID]), and not shaped like an absolute file
-// path ([ErrAbsolutePathSourceID]). MustNewSourceID calls it.
+// path ([ErrAbsolutePathSourceID]).
 func ValidateSyntheticSourceID(identifier string) error {
 	if identifier == "" {
 		return ErrEmptySourceID
@@ -126,24 +106,14 @@ func NormalizeSyntheticKey(key string) (string, error) {
 }
 
 // SourceIDFromPath returns the file-backed identity of path, derived as
-// [NewCanonicalPath] derives it. Every file-backed identity is minted through
-// it, [ResolveSourcePath] or [CanonicalizePathForSourceID], so two spellings of
-// one file give one identity. A path that does not exist yet is allowed.
+// [NewCanonicalPath] derives it. Two spellings that resolve to one host path give
+// one identity. A path that does not exist yet is allowed.
 func SourceIDFromPath(path string) (SourceID, error) {
 	cp, err := NewCanonicalPath(path)
 	if err != nil {
 		return SourceID{}, fmt.Errorf("create source ID from path %q: %w", path, err)
 	}
 	return SourceID{cp: cp}, nil
-}
-
-// MustSourceIDFromPath is like SourceIDFromPath but panics on error.
-func MustSourceIDFromPath(path string) SourceID {
-	sid, err := SourceIDFromPath(path)
-	if err != nil {
-		panic("location.MustSourceIDFromPath: " + err.Error())
-	}
-	return sid
 }
 
 // String returns the source identifier.
@@ -252,28 +222,4 @@ func (s SourceID) CanonicalPath() (CanonicalPath, bool) {
 		return CanonicalPath{}, false
 	}
 	return s.cp, true
-}
-
-// CanonicalizePathForSourceID returns the canonical form of an existing path,
-// for a Sources key whose TypeIDs must equal a Load of the same file. Unlike
-// NewCanonicalPath it requires the path itself to exist, so it fails for one
-// that does not; its result is what SourceIDFromPath produces.
-func CanonicalizePathForSourceID(path string) (string, error) {
-	host, err := resolveHostPath(path, true)
-	if err != nil {
-		return "", fmt.Errorf("canonicalize path for source ID: %w", err)
-	}
-	return identityOf(host).String(), nil
-}
-
-// MustCanonicalizePathForSourceID is like CanonicalizePathForSourceID but
-// panics on error.
-//
-// Use only in initialization code where paths are known-good.
-func MustCanonicalizePathForSourceID(path string) string {
-	s, err := CanonicalizePathForSourceID(path)
-	if err != nil {
-		panic("location.MustCanonicalizePathForSourceID: " + err.Error())
-	}
-	return s
 }

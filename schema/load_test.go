@@ -1,10 +1,8 @@
 package schema_test
 
 import (
-	"bytes"
 	"context"
 	"fmt"
-	"log/slog"
 	"os"
 	"path/filepath"
 	"slices"
@@ -17,9 +15,7 @@ import (
 	"golang.org/x/text/unicode/norm"
 
 	"github.com/simon-lentz/yammm/diag"
-	"github.com/simon-lentz/yammm/internal/source"
 	"github.com/simon-lentz/yammm/internal/yammmtest"
-	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -422,36 +418,6 @@ func TestLoad_DuplicateImport(t *testing.T) {
 
 	assert.True(t, s.IsZero())
 	assert.True(t, result.HasErrors())
-}
-
-func TestWithRegistry(t *testing.T) {
-	source := `schema "test" type Person { name String primary }`
-	ctx := t.Context()
-	registry := schema.NewRegistry()
-
-	s, result := schema.LoadString(ctx, source, "test.yammm", schema.WithRegistry(registry))
-
-	require.False(t, s.IsZero())
-	assert.False(t, result.HasErrors())
-
-	// The schema should be in the provided registry
-	found, ok := registry.LookupByName("test")
-	assert.True(t, ok)
-	if s != found {
-		t.Error("s and found do not name one record")
-	}
-}
-
-func TestWithIssueLimit(t *testing.T) {
-	// Test that issue limit option is respected
-	source := `schema "test" type Person { name String primary }`
-	ctx := t.Context()
-
-	// Test with issue limit (should still work for valid schema)
-	s, result := schema.LoadString(ctx, source, "test.yammm", schema.WithIssueLimit(1))
-
-	assert.False(t, s.IsZero())
-	assert.False(t, result.HasErrors())
 }
 
 func TestLoad_ReservedKeywordAlias(t *testing.T) {
@@ -1425,26 +1391,6 @@ func TestSources_ContextCancellation(t *testing.T) {
 	assert.True(t, s.IsZero())
 }
 
-func TestLoad_WithLogger(t *testing.T) {
-	// Test that WithLogger option works
-	moduleRoot := t.TempDir()
-
-	mainPath := filepath.Join(moduleRoot, "main.yammm")
-	mainContent := `schema "main" type Person { name String primary }`
-	require.NoError(t, os.WriteFile(mainPath, []byte(mainContent), 0o600))
-
-	var buf bytes.Buffer
-	logger := slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug}))
-
-	ctx := t.Context()
-	s, result := schema.Load(ctx, mainPath,
-		schema.WithModuleRoot(moduleRoot),
-		schema.WithLogger(logger))
-
-	require.False(t, s.IsZero())
-	assert.False(t, result.HasErrors())
-}
-
 func TestLoad_MultipleImports(t *testing.T) {
 	// Test loading schema with multiple imports
 	moduleRoot := t.TempDir()
@@ -1505,29 +1451,6 @@ func TestString_ContextCancellation(t *testing.T) {
 
 	assert.True(t, s.IsZero())
 	require.True(t, result.HasFatal(), "cancellation should produce fatal diagnostic")
-}
-
-func TestLoad_WithSchemaRegistry(t *testing.T) {
-	// Test loading with a pre-populated schema registry
-	tmpDir := t.TempDir()
-
-	schemaPath := filepath.Join(tmpDir, "test.yammm")
-	content := `schema "test" type Test { name String primary }`
-	require.NoError(t, os.WriteFile(schemaPath, []byte(content), 0o600))
-
-	// Create a registry
-	reg := schema.NewRegistry()
-
-	ctx := t.Context()
-	s, result := schema.Load(ctx, schemaPath, schema.WithRegistry(reg))
-
-	require.False(t, s.IsZero())
-	assert.False(t, result.HasErrors())
-
-	// Verify schema was registered
-	found, ok := reg.LookupBySourceID(s.SourceID())
-	assert.False(t, found.IsZero())
-	assert.True(t, ok)
 }
 
 func TestLoad_DiamondImport(t *testing.T) {
@@ -1678,14 +1601,12 @@ type Order {
 	assert.True(t, found, "expected E_UNKNOWN_PROPERTY for nonexistent on LineItem")
 }
 
-// --- Shared-Registry cross-Load tests ---
-
-// writeSharedRegistryFixtures sets up a tempdir with:
+// writeTwoRootsOverACommonImport sets up a tempdir with:
 //   - common.yammm — a leaf schema shared as a transitive import
 //   - root_a.yammm, root_b.yammm — two independent roots both importing common
 //
 // Returns the tempdir path. Fixtures live only for the test's duration via t.TempDir().
-func writeSharedRegistryFixtures(t *testing.T) string {
+func writeTwoRootsOverACommonImport(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
 
@@ -1713,11 +1634,7 @@ type HolderB { id String primary --> REF (one) c.BaseCommon }`),
 }
 
 // resolveImportSchema returns the resolved Schema for the import with the
-// given alias on s. Fails the test if no such import is present. Reusable
-// helper — kept general rather than hard-coding the "c" alias so future
-// shared-Registry tests with different alias conventions can use it.
-//
-//nolint:unparam // kept general for future callers
+// given alias on s. Fails the test if no such import is present.
 func resolveImportSchema(t *testing.T, s schema.Schema, alias string) schema.Schema {
 	t.Helper()
 	imp, ok := s.ImportByAlias(alias)
@@ -1727,114 +1644,9 @@ func resolveImportSchema(t *testing.T, s schema.Schema, alias string) schema.Sch
 	return resolved
 }
 
-func TestLoad_SharedRegistry_NonOverlapping(t *testing.T) {
-	// Two independent schemas with no shared imports, one shared Registry.
-	// Both Load calls must succeed; registry must end with exactly 2 schemas.
-	dir := t.TempDir()
-
-	require.NoError(t, os.WriteFile(
-		filepath.Join(dir, "alpha.yammm"),
-		[]byte(`schema "alpha" type Alpha { id String primary }`),
-		0o600,
-	))
-	require.NoError(t, os.WriteFile(
-		filepath.Join(dir, "beta.yammm"),
-		[]byte(`schema "beta" type Beta { id String primary }`),
-		0o600,
-	))
-
-	ctx := t.Context()
-	reg := schema.NewRegistry()
-
-	sA, resA := schema.Load(ctx, filepath.Join(dir, "alpha.yammm"),
-		schema.WithRegistry(reg), schema.WithModuleRoot(dir))
-	require.False(t, sA.IsZero())
-	require.False(t, resA.HasErrors(), "errors: %v", resA)
-
-	sB, resB := schema.Load(ctx, filepath.Join(dir, "beta.yammm"),
-		schema.WithRegistry(reg), schema.WithModuleRoot(dir))
-	require.False(t, sB.IsZero())
-	require.False(t, resB.HasErrors(), "errors: %v", resB)
-
-	assert.Equal(t, 2, reg.Len(), "non-overlapping loads: registry holds exactly both roots")
-}
-
-func TestLoad_SharedRegistry_OverlappingImports(t *testing.T) {
-	// The core cross-Load short-circuit test. Two roots both importing
-	// common.yammm against a shared Registry: each root registers once,
-	// common.yammm registers once, reg.Len() == 3.
-	dir := writeSharedRegistryFixtures(t)
-
-	ctx := t.Context()
-	reg := schema.NewRegistry()
-
-	sA, resA := schema.Load(ctx, filepath.Join(dir, "root_a.yammm"),
-		schema.WithRegistry(reg), schema.WithModuleRoot(dir))
-	require.False(t, sA.IsZero())
-	require.False(t, resA.HasErrors(), "errors: %v", resA)
-
-	sB, resB := schema.Load(ctx, filepath.Join(dir, "root_b.yammm"),
-		schema.WithRegistry(reg), schema.WithModuleRoot(dir))
-	require.False(t, sB.IsZero())
-	require.False(t, resB.HasErrors(), "errors: %v", resB)
-
-	assert.Equal(t, 3, reg.Len(), "expected registry: [common, root_a, root_b]")
-
-	// The common-schema pointer must be identical across both root schemas.
-	// This is the direct observation of the cross-Load short-circuit: both
-	// Loads resolved the import to the same Schema pointer.
-	commonFromA := resolveImportSchema(t, sA, "c")
-	commonFromB := resolveImportSchema(t, sB, "c")
-	if commonFromA != commonFromB {
-		t.Error("cross-Load short-circuit must resolve overlapping imports to the same Schema pointer")
-	}
-
-	// And the registry's stored pointer must match both.
-	regCommon, ok := reg.LookupBySourceID(commonFromA.SourceID())
-	require.True(t, ok, "common schema must be in the registry")
-	if commonFromA != regCommon {
-		t.Error("registry-stored pointer must match the pointer resolved through Import.Schema()")
-	}
-}
-
-func TestLoad_SharedRegistry_ObservesCrossLoadShortCircuit(t *testing.T) {
-	// Stronger observation: delete the common-schema source file after the
-	// first Load. The second Load must still succeed — which is only possible
-	// if the cross-Load short-circuit fired before the parse path (which
-	// would have tried to read the deleted file).
-	dir := writeSharedRegistryFixtures(t)
-
-	ctx := t.Context()
-	reg := schema.NewRegistry()
-
-	sA, resA := schema.Load(ctx, filepath.Join(dir, "root_a.yammm"),
-		schema.WithRegistry(reg), schema.WithModuleRoot(dir))
-	require.False(t, sA.IsZero())
-	require.False(t, resA.HasErrors(), "first load unexpectedly failed: %v", resA)
-
-	// Remove the shared import source. A naive second Load that re-parses
-	// the transitive import would fail with a file-not-found style error.
-	require.NoError(t, os.Remove(filepath.Join(dir, "common.yammm")))
-
-	sB, resB := schema.Load(ctx, filepath.Join(dir, "root_b.yammm"),
-		schema.WithRegistry(reg), schema.WithModuleRoot(dir))
-	require.False(t, sB.IsZero(),
-		"second Load must succeed via the cross-Load short-circuit; common.yammm was deleted")
-	require.False(t, resB.HasErrors(),
-		"no parse of common.yammm should occur on the second Load — errors: %v",
-		resB)
-
-	// Sanity: the second Load's resolved common pointer must equal the first's.
-	if resolveImportSchema(t, sA, "c") != resolveImportSchema(t, sB, "c") {
-		t.Error("cross-Load short-circuit must reuse the first Load's common Schema")
-	}
-}
-
-func TestLoad_DefaultFreshRegistryPerCall(t *testing.T) {
-	// Pin the default: when WithRegistry is absent, each Load constructs its
-	// own Registry, so two independent Loads do not share state. Guards against
-	// an accidental future change that would flip the default to shared.
-	dir := writeSharedRegistryFixtures(t)
+func TestLoad_EachCallCompilesItsOwnSchemas(t *testing.T) {
+	// Two independent Loads share no state.
+	dir := writeTwoRootsOverACommonImport(t)
 	ctx := t.Context()
 
 	sA, resA := schema.Load(ctx, filepath.Join(dir, "root_a.yammm"),
@@ -1847,48 +1659,9 @@ func TestLoad_DefaultFreshRegistryPerCall(t *testing.T) {
 	require.False(t, sB.IsZero())
 	require.False(t, resB.HasErrors())
 
-	// Each Load materialized its own common-schema instance (no Registry was
-	// shared). Different pointers prove the per-Load default is intact.
+	// Each Load materialized its own common-schema instance.
 	if resolveImportSchema(t, sA, "c") == resolveImportSchema(t, sB, "c") {
-		t.Error("fresh-Registry default: independent Loads must produce independent Schema records for shared imports")
-	}
-}
-
-func TestLoad_SharedRegistry_TopLevelReparse(t *testing.T) {
-	// One object per SourceID for everyone reading a registry: Load(A) twice
-	// against one Registry compiles A twice, Register keeps the first, and
-	// the second Load returns that same registered object rather than its
-	// own discarded compile — exactly as an import re-loaded by two loads
-	// does.
-	dir := t.TempDir()
-	aPath := filepath.Join(dir, "a.yammm")
-	require.NoError(t, os.WriteFile(aPath,
-		[]byte(`schema "root" type Root { id String primary }`), 0o600))
-
-	ctx := t.Context()
-	reg := schema.NewRegistry()
-
-	s1, res1 := schema.Load(ctx, aPath,
-		schema.WithRegistry(reg), schema.WithModuleRoot(dir))
-	require.False(t, s1.IsZero())
-	require.False(t, res1.HasErrors())
-
-	s2, res2 := schema.Load(ctx, aPath,
-		schema.WithRegistry(reg), schema.WithModuleRoot(dir))
-	require.False(t, s2.IsZero())
-	require.False(t, res2.HasErrors(),
-		"second Load must succeed — Register hits the idempotence path, not the error path: %v",
-		res2)
-
-	if s1 != s2 {
-		t.Error("a root re-loaded against a registry that holds it returns the registered object")
-	}
-
-	// The registry retained the first pointer (idempotent Register is a no-op).
-	regStored, ok := reg.LookupBySourceID(s1.SourceID())
-	require.True(t, ok)
-	if s1 != regStored {
-		t.Error("registry must retain the first Load's pointer; idempotent Register must not overwrite")
+		t.Error("independent Loads must produce independent Schema records for shared imports")
 	}
 }
 
@@ -1975,35 +1748,6 @@ func TestModuleRoot_Recorded(t *testing.T) {
 		cwd, err := os.Getwd()
 		require.NoError(t, err)
 		assert.Equal(t, canonicalPath(t, cwd), s.ModuleRoot())
-	})
-
-	t.Run("registry cache hit retains producing load's root", func(t *testing.T) {
-		t.Parallel()
-		reg := schema.NewRegistry()
-		root := t.TempDir()
-		sub := filepath.Join(root, "sub")
-		require.NoError(t, os.MkdirAll(sub, 0o750))
-		shared := []byte("schema \"shared\"\n\ntype Part {\n\tpart_id String primary\n}\n")
-		require.NoError(t, os.WriteFile(filepath.Join(sub, "shared.yammm"), shared, 0o600))
-		entryA := filepath.Join(root, "a.yammm")
-		require.NoError(t, os.WriteFile(entryA, []byte("schema \"a\"\n\nimport \"sub/shared\" as sh\n\ntype Thing {\n\tid String primary\n\t--> USES (one) sh.Part\n}\n"), 0o600))
-		entryB := filepath.Join(sub, "b.yammm")
-		require.NoError(t, os.WriteFile(entryB, []byte("schema \"b\"\n\nimport \"shared\" as sh\n\ntype Thing {\n\tid String primary\n\t--> USES (one) sh.Part\n}\n"), 0o600))
-
-		a, res := schema.Load(ctx, entryA, schema.WithModuleRoot(root), schema.WithRegistry(reg))
-		requireOK(t, res)
-		b, res := schema.Load(ctx, entryB, schema.WithModuleRoot(sub), schema.WithRegistry(reg))
-		requireOK(t, res)
-
-		require.Len(t, slices.Collect(b.Imports()), 1)
-		imp := slices.Collect(b.Imports())[0].Schema()
-		require.False(t, imp.IsZero())
-		if slices.Collect(a.Imports())[0].Schema() != imp {
-			t.Error("nested roots reaching the same canonical file share via the registry")
-		}
-		assert.Equal(t, canonicalPath(t, sub), b.ModuleRoot())
-		assert.Equal(t, canonicalPath(t, root), imp.ModuleRoot(),
-			"a cache-reused import keeps the root of the load that compiled it")
 	})
 }
 
@@ -2137,74 +1881,6 @@ func TestWithSourcesOnly_SymlinkedImportDir(t *testing.T) {
 			assert.Equal(t, "entry", s.Name())
 		})
 	}
-}
-
-// TestSharedRegistry_CacheHitSourcesComplete pins that a cross-Load
-// registry cache hit still yields a complete Sources() on the new load:
-// the cached import's content is copied into the load's source registry,
-// so closure-content consumers (diagnostics rendering, gogen's embedded
-// embedded source store) see every source even when the read+parse pipeline was
-// short-circuited.
-func TestSharedRegistry_CacheHitSourcesComplete(t *testing.T) {
-	t.Parallel()
-	ctx := context.Background()
-	root, entry := writeModuleTree(t)
-	registry := schema.NewRegistry()
-
-	first, res := schema.Load(ctx, entry, schema.WithModuleRoot(root), schema.WithRegistry(registry))
-	requireOK(t, res)
-	second, res := schema.Load(ctx, entry, schema.WithModuleRoot(root), schema.WithRegistry(registry))
-	requireOK(t, res)
-
-	require.Len(t, slices.Collect(second.Imports()), 1)
-	imp := slices.Collect(second.Imports())[0]
-	if slices.Collect(first.Imports())[0].Schema() != imp.Schema() {
-		t.Error("second load should cache-hit the import")
-	}
-
-	srcs := second.Sources()
-	require.False(t, srcs.IsZero())
-	if _, ok := srcs.ContentBySource(imp.ResolvedSourceID()); !ok {
-		t.Error("cache-hit import content missing from the new load's Sources()")
-	}
-}
-
-// TestSharedRegistry_CacheHitDivergentSourceConflict pins that a cross-Load
-// registry cache hit cannot silently mix a cached compiled import with
-// conflicting pre-registered source bytes: copying the cached closure's
-// content into a source registry that already holds different bytes for the
-// same SourceID must surface a diagnostic, not succeed with a Sources() view
-// that disagrees with the schema the import was compiled from.
-func TestSharedRegistry_CacheHitDivergentSourceConflict(t *testing.T) {
-	t.Parallel()
-	ctx := context.Background()
-	root := t.TempDir()
-	reg := schema.NewRegistry()
-
-	depSrc := []byte("schema \"dep\"\n\ntype Part {\n\tpart_id String primary\n}\n")
-	entrySrc := func(name string) []byte {
-		return []byte("schema \"" + name + "\"\n\nimport \"dep\" as dep\n\ntype Thing {\n\tid String primary\n\t--> USES (one) dep.Part\n}\n")
-	}
-
-	_, res := schema.LoadSourcesWithEntry(ctx, map[string][]byte{
-		"entry.yammm": entrySrc("entry"),
-		"dep.yammm":   depSrc,
-	}, "entry.yammm", root, schema.WithRegistry(reg))
-	requireOK(t, res)
-
-	// The second load shares the schema registry but its source registry
-	// already holds DIFFERENT bytes under dep's SourceID; the import of dep
-	// cache-hits the first load's schema, whose closure content collides.
-	depID, err := location.SourceIDFromPath(filepath.Join(canonicalPath(t, root), "dep.yammm"))
-	require.NoError(t, err)
-	srcReg := source.NewRegistry()
-	require.NoError(t, srcReg.Register(depID, []byte("schema \"dep\"\n\ntype Part {\n\tpart_id String primary\n\tname String required\n}\n")))
-
-	_, res = schema.LoadSourcesWithEntry(ctx, map[string][]byte{
-		"entry2.yammm": entrySrc("entry2"),
-	}, "entry2.yammm", root, schema.WithRegistry(reg), schema.TestWithSourceRegistry(srcReg))
-	require.True(t, res.HasErrors(), "conflicting cached-closure content must surface a diagnostic")
-	assert.Contains(t, res.Err().Error(), "dep.yammm")
 }
 
 // diamondSources returns a diamond-shaped import graph of the given depth.

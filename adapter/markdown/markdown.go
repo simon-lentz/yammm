@@ -43,9 +43,7 @@ func WithClassMembers(include bool) Option {
 // per-type reference sections and data-type tables, with one section per
 // imported schema. Output is deterministic — byte-identical across runs
 // for the same schema — and structurally verified before return; an error
-// reports a generator bug, never broken Markdown. The schema does not need
-// source backing: on a Builder-built schema, an invariant is its message line
-// and its doc comment.
+// reports a generator bug, never broken Markdown.
 func Marshal(s schema.Schema, opts ...Option) ([]byte, error) {
 	cfg := config{classDiagram: true, classMembers: true}
 	for _, o := range opts {

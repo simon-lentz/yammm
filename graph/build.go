@@ -1,31 +1,10 @@
 package graph
 
 import (
-	"fmt"
-
-	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/instance"
 	"github.com/simon-lentz/yammm/schema"
 )
-
-// instanceBuilder walks a [instance.ValidInstance] ONCE: it reports every
-// structural violation and assembles the [Instance] tree a clean walk installs.
-// Nothing it builds touches the graph, so a caller that finds errors discards
-// the tree and the graph is unchanged.
-//
-// The two-walk shape it replaced — check, then attach — kept the same four
-// predicates in two places, and the attaching walk skipped in silence exactly
-// what the checking walk rejected. One traversal makes the invariant structural
-// rather than a discipline two functions have to keep.
-type instanceBuilder struct {
-	g *Graph
-	c *diag.Collector
-
-	// attested folds [instance.ValidInstance.Validated] over the root and every
-	// descendant. The commit phase applies it under the graph's lock.
-	attested bool
-}
 
 // stagedEdge is one association record resolved against the schema but not yet
 // against the graph, which only the commit phase may read. reason is empty for
@@ -35,383 +14,65 @@ type stagedEdge struct {
 	relation   string
 	jsonField  string
 	targetType schema.TypeID
-	// targetTypeName is the rendered target, computed once per relation
-	// OUTSIDE the graph's lock — the commit phase only reads it.
-	targetTypeName string
-	targetKey      string
-	properties     immutable.Properties
-	isRequired     bool
-	reason         string
+	targetKey  string
+	properties immutable.Properties
+	isRequired bool
+	reason     string
 }
 
-func newInstanceBuilder(g *Graph, c *diag.Collector) *instanceBuilder {
-	return &instanceBuilder{g: g, c: c, attested: true}
-}
+// build returns the Instance tree of inst, a record [Graph.add] holds to be of
+// a type this graph's load declares. Its validator walked that same type, so
+// every member, multiplicity and key it holds is one the type states, and every
+// value is in the form the type stores. stage receives the root's association
+// records: a load refuses a part type that carries an association, so a child
+// stages none.
+func (g *Graph) build(typ schema.Type, inst instance.ValidInstance, stage *[]stagedEdge) Instance {
+	id := typ.ID()
+	graphInst := newInstance(g.instanceTagForm(id), id, inst.PrimaryKey(), inst.Properties(), inst.Provenance(), true)
 
-// build walks inst and returns the Instance to install. key is inst's
-// primary key in canonical form, computed once by the caller so every address
-// the caller derives — a root's index entry, a sibling scan, a duplicate
-// record — is the one the Instance carries. stage receives the instance's
-// association records, and is nil for a composed child: a child's edges are
-// checked like any other, but no path installs them — the package doc's
-// Composed Children section states that gap.
-//
-// Properties are canonicalized here beside the key, as the rebuild path's
-// canonicalizer.instance does, so a graph built through Add holds the same
-// bytes for a value as one rebuilt from parts.
-func (b *instanceBuilder) build(typ schema.Type, inst instance.ValidInstance, key immutable.Key, stage *[]stagedEdge) Instance {
-	b.attested = b.attested && inst.Validated()
-	graphInst := newInstance(b.g.instanceTagForm(inst.TypeID()), inst.TypeID(), key,
-		b.g.canon.properties(inst.TypeID(), inst.Properties()),
-		inst.Provenance(), inst.Validated())
-
-	// Diagnostics name the graph's canonical tag form, never the instance's
-	// self-declared TypeName: a consumer keying on type_name must get a name
-	// that round-trips through Snapshot.Types.
-	typeName := graphInst.TypeName()
-
-	// The validator stores a value under its declared name alone, so an
-	// undeclared one arrives only from a bypass-built instance.
-	for _, name := range undeclaredNames(inst.Properties(), func(n string) bool { _, ok := typ.Property(n); return ok }) {
-		b.c.Collect(diag.NewIssue(diag.Error, diag.E_UNKNOWN_FIELD,
-			fmt.Sprintf("type %q declares no property %s", typeName, diag.QuoteValue(name))).
-			WithDetail(diag.DetailKeyTypeName, typeName).
-			WithDetail(diag.DetailKeyPropertyName, name).Build())
+	for rel := range typ.AllAssociations() {
+		stageRelation(rel, inst, stage)
 	}
 
-	b.edges(typ, inst, typeName, stage)
-
 	for relationName, composedValue := range inst.Compositions() {
-		rel, ok := typ.Relation(relationName)
-		if !ok {
-			b.c.Collect(undeclaredRelation(typeName, relationName,
-				fmt.Sprintf("type %q declares no composition %s", typeName, diag.QuoteValue(relationName))))
-			continue
+		children, _ := composedValue.Slice()
+		for i := range children.Len() {
+			child := children.Get(i).Unwrap().(instance.ValidInstance) //nolint:errcheck // Compositions states the element type.
+			graphInst.addComposed(relationName, g.build(child.Type(), child, stage))
 		}
-		if rel.Kind() != schema.RelationComposition {
-			b.c.Collect(undeclaredRelation(typeName, relationName,
-				fmt.Sprintf("relation %q on type %q is declared as an association, not a composition",
-					relationName, typeName)))
-			continue
-		}
-		b.slot(graphInst, typeName, relationName, rel, composedValue)
 	}
 
 	return graphInst
 }
 
-// edges checks an instance's association data and, when stage is non-nil,
-// records what the commit phase will resolve against the graph.
-//
-// The map form is materialized only for a staging walk, which needs it for the
-// absent-required pass. A composed child's edges are checked but never
-// installed, so its walk reads the iterator and allocates nothing.
-func (b *instanceBuilder) edges(typ schema.Type, inst instance.ValidInstance, typeName string, stage *[]stagedEdge) {
-	if stage == nil {
-		for relationName, edgeData := range inst.Edges() {
-			if rel, ok := b.checkEdgeRelation(typ, typeName, relationName, edgeData); ok {
-				b.checkEdgeProperties(typeName, rel, edgeData)
-			}
-		}
-		return
-	}
-
-	declared := b.g.iterEdges(inst)
-	for relationName, edgeData := range declared {
-		rel, ok := b.checkEdgeRelation(typ, typeName, relationName, edgeData)
-		if !ok {
-			continue
-		}
-		b.checkEdgeProperties(typeName, rel, edgeData)
-		b.checkTargetKeys(typeName, rel, edgeData)
-		isRequired := !rel.IsOptional()
-		targetName := b.g.instanceTagForm(rel.TargetID())
-		for target := range edgeData.Targets() {
-			*stage = append(*stage, stagedEdge{
-				relation:       relationName,
-				jsonField:      rel.FieldName(),
-				targetType:     rel.TargetID(),
-				targetTypeName: targetName,
-				targetKey:      b.g.canon.key(rel.TargetID(), target.TargetKey()).String(),
-				properties:     b.g.canon.edgeProperties(inst.TypeID(), relationName, target.Properties()),
-				isRequired:     isRequired,
-			})
-		}
-		if isRequired && edgeData.IsEmpty() {
-			*stage = append(*stage, stagedEdge{
-				relation:       relationName,
-				jsonField:      rel.FieldName(),
-				targetType:     rel.TargetID(),
-				targetTypeName: targetName,
-				isRequired:     true,
-				reason:         "empty",
-			})
-		}
-	}
-
-	for rel := range typ.AllAssociations() {
-		if rel.IsOptional() {
-			continue
-		}
-		if _, present := declared[rel.Name()]; present {
-			continue
-		}
+// stageRelation records what the commit phase resolves for one association of a
+// root: each target it names, or the "empty" or "absent" record a required
+// association draws where it names none.
+func stageRelation(rel schema.Relation, inst instance.ValidInstance, stage *[]stagedEdge) {
+	isRequired := !rel.IsOptional()
+	edgeData, present := inst.Edge(rel.Name())
+	for target := range edgeData.Targets() {
 		*stage = append(*stage, stagedEdge{
-			relation:       rel.Name(),
-			jsonField:      rel.FieldName(),
-			targetType:     rel.TargetID(),
-			targetTypeName: b.g.instanceTagForm(rel.TargetID()),
-			isRequired:     true,
-			reason:         "absent",
+			relation:   rel.Name(),
+			jsonField:  rel.FieldName(),
+			targetType: rel.TargetID(),
+			targetKey:  target.TargetKey().String(),
+			properties: target.Properties(),
+			isRequired: isRequired,
 		})
 	}
-}
-
-// checkEdgeRelation validates one association slot: the name must be declared
-// as an association, and a (one) slot may carry at most one target. It reports
-// the relation when the slot is sound enough to install.
-func (b *instanceBuilder) checkEdgeRelation(
-	typ schema.Type,
-	typeName string,
-	relationName string,
-	edgeData instance.ValidEdgeData,
-) (schema.Relation, bool) {
-	rel, ok := typ.Relation(relationName)
-	if !ok {
-		b.c.Collect(undeclaredRelation(typeName, relationName,
-			fmt.Sprintf("type %q declares no association %s", typeName, diag.QuoteValue(relationName))))
-		return schema.Relation{}, false
-	}
-	if rel.Kind() != schema.RelationAssociation {
-		b.c.Collect(undeclaredRelation(typeName, relationName,
-			fmt.Sprintf("relation %q on type %q is declared as a composition, not an association",
-				relationName, typeName)))
-		return schema.Relation{}, false
-	}
-	if rel.IsMany() {
-		return rel, true
-	}
-	targets := 0
-	for range edgeData.Targets() {
-		targets++
-	}
-	if targets > 1 {
-		b.c.Collect(diag.NewIssue(diag.Error, diag.E_GRAPH_CARDINALITY,
-			fmt.Sprintf("association %q on type %q is (one) and carries %d targets",
-				relationName, typeName, targets)).
-			WithDetail(diag.DetailKeyTypeName, typeName).
-			WithDetail(diag.DetailKeyRelationName, relationName).Build())
-		return schema.Relation{}, false
-	}
-	return rel, true
-}
-
-// checkEdgeProperties reports each edge property name the association does not
-// declare, on every target of the slot.
-func (b *instanceBuilder) checkEdgeProperties(typeName string, rel schema.Relation, edgeData instance.ValidEdgeData) {
-	for target := range edgeData.Targets() {
-		for _, name := range undeclaredNames(target.Properties(), func(n string) bool { _, ok := rel.Property(n); return ok }) {
-			b.c.Collect(diag.NewIssue(diag.Error, diag.E_UNKNOWN_EDGE_FIELD,
-				fmt.Sprintf("association %q on type %q declares no edge property %s", rel.Name(), typeName, diag.QuoteValue(name))).
-				WithDetail(diag.DetailKeyTypeName, typeName).
-				WithDetail(diag.DetailKeyRelationName, rel.Name()).
-				WithDetail(diag.DetailKeyPropertyName, name).Build())
-		}
-	}
-}
-
-// checkTargetKeys reports each target key whose arity disagrees with the
-// target type's primary key, or whose component [unreadableComponent] refuses. No instance
-// can ever carry such a key, so the record would stay unresolved for the life
-// of the graph.
-func (b *instanceBuilder) checkTargetKeys(typeName string, rel schema.Relation, edgeData instance.ValidEdgeData) {
-	target, ok := b.g.schema.TypeByID(rel.TargetID())
-	if !ok {
+	if !isRequired || !edgeData.IsEmpty() {
 		return
 	}
-	declared := keyArity(target)
-	for t := range edgeData.Targets() {
-		var msg string
-		if n := t.TargetKey().Len(); n != declared {
-			msg = fmt.Sprintf("association %q on type %q carries a %d-part target key; the target declares %d",
-				rel.Name(), typeName, n, declared)
-		} else if i := unreadableComponent(target, t.TargetKey()); i >= 0 {
-			msg = fmt.Sprintf("association %q on type %q carries a target key whose component %d is not a scalar graph.ParseKey reads back",
-				rel.Name(), typeName, i)
-		}
-		if msg != "" {
-			b.c.Collect(diag.NewIssue(diag.Error, diag.E_GRAPH_INVALID_PK, msg).
-				WithDetail(diag.DetailKeyTypeName, typeName).
-				WithDetail(diag.DetailKeyRelationName, rel.Name()).Build())
-		}
+	reason := "absent"
+	if present {
+		reason = "empty"
 	}
-}
-
-// slot checks one composition slot — its cardinality and the shape of what
-// arrived in it — and builds every child it admits.
-func (b *instanceBuilder) slot(
-	graphParent Instance,
-	parentName string,
-	relationName string,
-	rel schema.Relation,
-	composedValue immutable.Value,
-) {
-	switch v := composedValue.Unwrap().(type) {
-	case immutable.Slice:
-		if !rel.IsMany() && v.Len() > 1 {
-			b.c.Collect(b.g.composedOverflowIssue(parentName, relationName, rel, v))
-		}
-		seen := make(map[string]int, v.Len())
-		for i := range v.Len() {
-			child, ok := v.Get(i).Unwrap().(instance.ValidInstance)
-			if !ok || child.IsZero() {
-				b.c.Collect(nonInstanceChild(parentName, relationName, rel, i))
-				continue
-			}
-			b.child(graphParent, parentName, relationName, rel, child, i, seen)
-		}
-	case instance.ValidInstance:
-		if v.IsZero() {
-			b.c.Collect(nonInstanceChild(parentName, relationName, rel, 0))
-			return
-		}
-		b.child(graphParent, parentName, relationName, rel, v, 0, nil)
-	case nil:
-		// An absent optional composition arrives as a nil value.
-	default:
-		b.c.Collect(nonInstanceChild(parentName, relationName, rel, 0))
-	}
-}
-
-// child checks one composed child against its relation target and, if it holds,
-// builds it and attaches it to the parent under construction. seen accumulates
-// the sibling keys already met, and is nil for a slot that cannot hold siblings.
-func (b *instanceBuilder) child(
-	graphParent Instance,
-	parentName string,
-	relationName string,
-	rel schema.Relation,
-	child instance.ValidInstance,
-	index int,
-	seen map[string]int,
-) {
-	if child.TypeID() != rel.TargetID() {
-		got, want, gotText, wantText := b.g.describeTypePair(child.TypeID(), rel.TargetID())
-		b.c.Collect(diag.NewIssue(diag.Error, diag.E_GRAPH_INVALID_COMPOSITION,
-			fmt.Sprintf("child type %s does not match relation target %s", gotText, wantText)).
-			WithDetail(diag.DetailKeyTypeName, parentName).
-			WithDetail(diag.DetailKeyRelationName, relationName).
-			WithDetail(diag.DetailKeyExpected, want).
-			WithDetail(diag.DetailKeyGot, got).Build())
-		return
-	}
-
-	// A composed child is addressed by identity, so it resolves across the
-	// whole import closure — where [Graph.ownsType] states the narrower policy
-	// [Graph.Add] applies to a root.
-	childTyp, ok := b.g.schema.TypeByID(child.TypeID())
-	if !ok {
-		b.c.Collect(unresolvableChildType(child))
-		return
-	}
-
-	// Canonicalized once, here: the sibling scan and the installed instance
-	// read one value, so two spellings of one key cannot pass as two children.
-	key := b.g.canon.key(child.TypeID(), child.PrimaryKey())
-	if err := checkInstanceKey(childTyp, child, b.g.canon); err != nil {
-		b.c.Collect(diag.NewIssue(diag.Error, diag.E_GRAPH_INVALID_PK,
-			fmt.Sprintf("composed child of type %s: %s", diag.QuoteValue(child.TypeName()), err)).
-			WithDetail(diag.DetailKeyTypeName, child.TypeName()).
-			WithDetail(diag.DetailKeyRelationName, relationName).
-			WithDetail(diag.DetailKeyPrimaryKey, child.PrimaryKey().String()).Build())
-		return
-	}
-	if childTyp.HasPrimaryKey() && seen != nil && rel.IsMany() {
-		keyStr := key.String()
-		if first, dup := seen[keyStr]; dup {
-			b.c.Collect(b.g.siblingDuplicateIssue(parentName, relationName, rel, keyStr, first, index))
-		} else {
-			seen[keyStr] = index
-		}
-	}
-
-	graphParent.addComposed(relationName, b.build(childTyp, child, key, nil))
-}
-
-// unresolvableChildType reports a composed child whose identity is not in the
-// schema's import closure, on the inline path and on [Graph.AddComposed]'s.
-//
-// Neither entry point reaches it: the child's identity must already equal the
-// relation's target, and a relation's target is resolved by the schema layer
-// at load, so it is always in the closure. A child from outside the closure is
-// refused first: by the target check on the inline path, and by
-// [Graph.AddComposed]'s schema guard on its own. Reaching this means the
-// closure and the relation disagree, which is why it is Fatal E_INTERNAL and
-// not a graph-category error — and why no test drives it. Dropping the subtree
-// in silence was the alternative, and that is the regression it exists to
-// prevent.
-func unresolvableChildType(child instance.ValidInstance) diag.Issue {
-	return diag.NewIssue(diag.Fatal, diag.E_INTERNAL,
-		fmt.Sprintf("composed child type %s is not in the schema's import closure", child.TypeID())).
-		WithDetail(diag.DetailKeyTypeName, child.TypeName()).
-		WithDetail(diag.DetailKeyTypeSchema, child.TypeID().SchemaPath().String()).Build()
-}
-
-// composedOverflowIssue reports a (one) composition slot carrying several
-// children.
-func (g *Graph) composedOverflowIssue(
-	parentName string,
-	relationName string,
-	rel schema.Relation,
-	children immutable.Slice,
-) diag.Issue {
-	builder := diag.NewIssue(diag.Error, diag.E_DUPLICATE_COMPOSED_PK,
-		fmt.Sprintf("composition %q: (one) cardinality violated, got %d children", relationName, children.Len())).
-		WithDetail(diag.DetailKeyTypeName, parentName).
-		WithDetail(diag.DetailKeyRelationName, relationName).
-		WithDetail(diag.DetailKeyJSONField, rel.FieldName())
-
-	// No primary_key detail: the whole record is refused, so not one of these
-	// children attaches and no composed key is assigned to any of them. A
-	// detail naming an address the writers never create is worse than none.
-	return builder.Build()
-}
-
-// siblingDuplicateIssue reports two children of one (many) slot sharing a
-// primary key. The streamed path in [Graph.AddComposed] enforces the same rule
-// against the children already attached.
-func (g *Graph) siblingDuplicateIssue(
-	parentName string,
-	relationName string,
-	rel schema.Relation,
-	keyStr string,
-	firstIndex, index int,
-) diag.Issue {
-	return diag.NewIssue(diag.Error, diag.E_DUPLICATE_COMPOSED_PK,
-		fmt.Sprintf("duplicate composed child primary key %s at indices %d and %d",
-			diag.ValueText(keyStr), firstIndex, index)).
-		WithDetail(diag.DetailKeyTypeName, parentName).
-		WithDetail(diag.DetailKeyRelationName, relationName).
-		WithDetail(diag.DetailKeyJSONField, rel.FieldName()).
-		WithDetail(diag.DetailKeyPrimaryKey, keyStr).
-		Build()
-}
-
-// undeclaredRelation builds the diagnostic for instance data filed under a
-// name the type does not declare in the slot it arrived in.
-func undeclaredRelation(typeName, relationName, msg string) diag.Issue {
-	return diag.NewIssue(diag.Error, diag.E_GRAPH_UNKNOWN_RELATION, msg).
-		WithDetail(diag.DetailKeyTypeName, typeName).
-		WithDetail(diag.DetailKeyRelationName, relationName).Build()
-}
-
-// nonInstanceChild builds the diagnostic for a composition slot holding
-// something that is not an instance — a zero entry among them.
-func nonInstanceChild(typeName, relationName string, rel schema.Relation, index int) diag.Issue {
-	return diag.NewIssue(diag.Error, diag.E_GRAPH_INVALID_COMPOSITION,
-		fmt.Sprintf("composition %q on type %q: child %d is not an instance",
-			relationName, typeName, index)).
-		WithDetail(diag.DetailKeyTypeName, typeName).
-		WithDetail(diag.DetailKeyRelationName, relationName).
-		WithDetail(diag.DetailKeyJSONField, rel.FieldName()).Build()
+	*stage = append(*stage, stagedEdge{
+		relation:   rel.Name(),
+		jsonField:  rel.FieldName(),
+		targetType: rel.TargetID(),
+		isRequired: true,
+		reason:     reason,
+	})
 }

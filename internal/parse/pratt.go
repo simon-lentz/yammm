@@ -3,7 +3,6 @@ package parse
 import (
 	"errors"
 	"fmt"
-	"maps"
 	"regexp"
 	"strconv"
 	"strings"
@@ -491,32 +490,21 @@ var reservedLC = map[string]bool{
 
 // propertyNameExclusions are the six spellings that cannot be a property or
 // annotation name: three are grammar keywords in that position and three are
-// literals the lexer's own rules outrank an identifier with.
+// literals. Each lexes as LC_WORD, so the grammar refuses all six by name.
 var propertyNameExclusions = map[string]bool{
 	"as": true, "part": true, "in": true,
 	"nil": true, "true": true, "false": true,
+}
+
+// IsReserved reports whether name is a spelling the language refuses in a
+// position that admits either case: an import alias, a relation name, a reverse
+// name. It is the union of the lowercase keywords and the built-in type names.
+func IsReserved(name string) bool {
+	return reservedLC[name] || datatypeKeywords[name]
 }
 
 // IsDatatypeKeyword reports whether name is one of the eleven built-in type
 // names, which no type, datatype or relation name may spell.
 func IsDatatypeKeyword(name string) bool {
 	return datatypeKeywords[name]
-}
-
-// IsExcludedPropertyName reports whether name is one of the six spellings no
-// property or annotation name may spell.
-func IsExcludedPropertyName(name string) bool {
-	return propertyNameExclusions[name]
-}
-
-// ReservedKeywords returns every spelling the language refuses in a position
-// that admits either case — an import alias, a relation name, a reverse name.
-// It is the union of the lowercase keywords and the built-in datatype names,
-// and it is exported so a caller enforcing its own alias rule can compare
-// against this vocabulary rather than keep a second copy that silently drifts.
-func ReservedKeywords() map[string]bool {
-	out := make(map[string]bool, len(reservedLC)+len(datatypeKeywords))
-	maps.Copy(out, reservedLC)
-	maps.Copy(out, datatypeKeywords)
-	return out
 }

@@ -10,6 +10,8 @@ import (
 	"reflect"
 	"slices"
 	"strings"
+	"unicode"
+	"unicode/utf16"
 	"unicode/utf8"
 
 	"github.com/simon-lentz/yammm/diag"
@@ -190,8 +192,9 @@ func skipValue(dec *json.Decoder, key string) error {
 // The accept range is the closed interval [MinReadableVersion, currentVersion].
 // A document of the expected shape outside the range draws an Error-severity
 // [diag.E_SNAPSHOT_UNSUPPORTED_VERSION]. Load, Verify, Info, HeaderOnly and
-// UpdateMetadata report one of another shape as E_SNAPSHOT_MALFORMED first. The package doc's Wire Format
-// Versions section and docs/API.md's Versioning Policy carry the full policy.
+// UpdateMetadata report one of another shape, or holding a string [checkDocument]
+// refuses, as E_SNAPSHOT_MALFORMED first. The package doc's Wire Format Versions
+// section and docs/API.md's Versioning Policy carry the full policy.
 //
 // It is DERIVED from currentVersion, not written as a second literal: this
 // package reads only the version it writes, and two independent literals let
@@ -263,8 +266,8 @@ type provenanceWire struct {
 //
 // Schema is the declaring schema's DECLARED NAME, not its source path. The
 // name travels between machines where a path does not, and it is unique
-// across an import closure because [github.com/simon-lentz/yammm/schema.Registry.Register]
-// refuses a second schema with an existing name. Keying by source path made
+// across an import closure because a load refuses a second schema with an
+// existing name. Keying by source path made
 // two documents of one schema text — loaded from two directories, or from
 // disk and from embedded sources — carry an identical schema_hash and
 // mutually unreadable type tables, because
@@ -304,18 +307,24 @@ type edgeWire struct {
 	Properties map[string]any `json:"properties"`
 }
 
-// conflictWire is the address of the instance a duplicate collided with.
-// Key is null for a keyless slot occupant, which the reader resolves
-// through the parent slot alone.
+// statesNothing reports whether the element is null or holds no field with a
+// value. It then states no target key to judge.
+func (e edgeWire) statesNothing() bool {
+	return e.TargetType == nil && len(e.TargetKey) == 0 && len(e.Properties) == 0
+}
+
+// conflictWire is the address of the root a duplicate collided with.
 type conflictWire struct {
 	Type *int  `json:"type"`
 	Key  []any `json:"key"`
 }
 
 // dupWire is the wire representation of a duplicate record. Type and Key
-// identify the rejected instance; Conflict addresses the instance it
-// collided with. The parent coordinates are present only for a
-// composed-child duplicate and must name a root instance.
+// identify the rejected root; Conflict addresses the root it collided with.
+// Marshal writes no parent coordinates. The reader decodes them to refuse a
+// record that states one, since it reads a member it does not declare as absent
+// and would take such a record for a root's. A coordinate that is null or empty
+// states none, so it loads and the next Marshal drops it.
 type dupWire struct {
 	Type       *int          `json:"type"`
 	Key        []any         `json:"key"`
@@ -363,15 +372,102 @@ type diagWire struct {
 	Unresolved []unresolvedWire `json:"unresolved"`
 }
 
-// checkDocument holds data to the document's outermost shape and to its
-// member names. Every surface that holds the whole document runs it before it
-// decodes the header, so a document one of them accepts is one Load decodes
-// as written, and a fault in the header is reported as itself.
+// checkDocument holds data to the document's outermost shape, to its member
+// names and to its text. Every surface that holds the whole document runs it
+// before it decodes the header, so a document one of them accepts is one Load
+// decodes as written. A fault it finds draws E_SNAPSHOT_MALFORMED whatever version
+// the header states; [HeaderOnlyRead] judges the version first.
 func checkDocument(data []byte) error {
 	if err := checkTopLevelKeys(data); err != nil {
 		return err
 	}
-	return checkMemberNames(data)
+	return checkStrings(data)
+}
+
+// readString returns the index of the quote that closes the string opening at
+// data[i], and whether the string holds an escape. It returns an error for a
+// string encoding/json would rewrite: it decodes each byte that is not UTF-8,
+// and each surrogate escape that is not half of a pair, as U+FFFD with no error.
+// data must be JSON that encoding/json has read whole.
+func readString(data []byte, i int) (int, bool, error) {
+	end, escaped := i+1, false
+	for data[end] != '"' {
+		if data[end] == '\\' {
+			end++
+			escaped = true
+		}
+		end++
+	}
+	body := data[i+1 : end]
+	if !utf8.Valid(body) {
+		return 0, false, fmt.Errorf("the string at byte %d is not valid UTF-8; encoding/json would read each invalid byte as U+FFFD", i)
+	}
+	if escaped {
+		if at := loneSurrogate(body); at >= 0 {
+			return 0, false, fmt.Errorf("the string at byte %d holds the surrogate escape %s, which is half of no pair; encoding/json would read it as U+FFFD", i, body[at:at+6])
+		}
+	}
+	return end, escaped, nil
+}
+
+// loneSurrogate returns the index in body of the first \uXXXX escape naming a
+// UTF-16 surrogate that is not half of a pair, or -1. body is the text of a JSON
+// string encoding/json has read, so each \u holds four hex digits.
+func loneSurrogate(body []byte) int {
+	for i := 0; i < len(body); i++ {
+		if body[i] != '\\' {
+			continue
+		}
+		i++
+		if body[i] != 'u' {
+			continue
+		}
+		r := escapedRune(body[i+1:])
+		start := i - 1
+		i += 4
+		if !utf16.IsSurrogate(r) {
+			continue
+		}
+		if i+6 < len(body) && body[i+1] == '\\' && body[i+2] == 'u' && utf16.DecodeRune(r, escapedRune(body[i+3:])) != unicode.ReplacementChar {
+			i += 6
+			continue
+		}
+		return start
+	}
+	return -1
+}
+
+// escapedRune reads the four hex digits a \u escape holds.
+func escapedRune(digits []byte) rune {
+	var r rune
+	for _, d := range digits[:4] {
+		switch {
+		case d <= '9':
+			r = r<<4 | rune(d-'0')
+		case d <= 'F':
+			r = r<<4 | rune(d-'A'+10)
+		default:
+			r = r<<4 | rune(d-'a'+10)
+		}
+	}
+	return r
+}
+
+// checkText returns an error for the first string of data that [readString]
+// refuses. It is the part of [checkStrings] a reader that holds only a prefix of
+// the document can run; the prefix ends between two values.
+func checkText(data []byte) error {
+	for i := 0; i < len(data); i++ {
+		if data[i] != '"' {
+			continue
+		}
+		end, _, err := readString(data, i)
+		if err != nil {
+			return err
+		}
+		i = end
+	}
+	return nil
 }
 
 // invalidMetadata refuses the first metadata key, in key order, that is not
@@ -470,19 +566,18 @@ func (s *wireShape) member(name string) (*wireShape, string) {
 	return nil, ""
 }
 
-// smallObject is how many member names [checkMemberNames] compares one by
+// smallObject is how many member names [checkStrings] compares one by
 // one as it reads them; a larger object's names are sorted and compared once,
 // when it closes.
 const smallObject = 16
 
-// checkMemberNames returns an error for the first object of data that repeats
-// a member name, or that decodes into a wire struct and holds a name differing
-// from a declared one only in case. Names compare as decoded text, so a name
-// spelled with an escape repeats the same name without one, and two names that
-// hold different bytes that are not UTF-8 repeat each other when they decode
-// to one text. data must be JSON that encoding/json has read whole;
+// checkStrings returns an error for the first string of data that [readString]
+// refuses, and for the first object that repeats a member name, or that decodes
+// into a wire struct and holds a name differing from a declared one only in
+// case. Names compare as decoded text, so a name spelled with an escape repeats
+// the same name without one. data must be JSON that encoding/json has read whole;
 // [checkTopLevelKeys] reads it so.
-func checkMemberNames(data []byte) error {
+func checkStrings(data []byte) error {
 	type frame struct {
 		start int        // index in names of an object's first name; -1 for an array
 		shape *wireShape // how the container decodes
@@ -532,18 +627,13 @@ func checkMemberNames(data []byte) error {
 		case ',':
 			atName = stack[len(stack)-1].start >= 0
 		case '"':
-			end, escaped := i+1, false
-			for data[end] != '"' {
-				if data[end] == '\\' {
-					end++
-					escaped = true
-				}
-				end++
+			end, escaped, err := readString(data, i)
+			if err != nil {
+				return err
 			}
 			if atName {
 				name := data[i+1 : end]
-				// encoding/json writes each byte that is not UTF-8 as U+FFFD.
-				if escaped || !utf8.Valid(name) {
+				if escaped {
 					var decoded string
 					if err := json.Unmarshal(data[i:end+1], &decoded); err != nil {
 						return fmt.Errorf("member name %s does not decode: %w", diag.ValueText(string(data[i:end+1])), err)

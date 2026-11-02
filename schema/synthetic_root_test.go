@@ -469,8 +469,7 @@ func TestWithSyntheticRoot_RejectedByLoadAndLoadString(t *testing.T) {
 
 // TestWithSourcesOnly_RefusedByLoadAndLoadString pins the refusal on the two
 // entry points that cannot serve the option: under it an import of a Load
-// failed as not pre-registered unless a shared registry already held it, and
-// on a LoadString it was a no-op.
+// would fail as not pre-registered, and on a LoadString it would be a no-op.
 func TestWithSourcesOnly_RefusedByLoadAndLoadString(t *testing.T) {
 	t.Parallel()
 
@@ -517,10 +516,6 @@ func TestWithSyntheticRoot_EmptyRootIsNotSilentlyIgnored(t *testing.T) {
 func TestSyntheticImportKey_IsTheLoadersLookup(t *testing.T) {
 	t.Parallel()
 
-	if got, err := schema.SyntheticImportKey("a/main.yammm", "./x.yammm/.."); err != nil || got != "a.yammm" {
-		t.Errorf(`SyntheticImportKey("a/main.yammm", "./x.yammm/..") = (%q, %v), want "a.yammm"`, got, err)
-	}
-
 	const root = "embedded://app"
 	dep := []byte("schema \"core\"\n\ntype Region {\n\tcode String primary\n}\n")
 	for _, tc := range []struct {
@@ -536,6 +531,7 @@ func TestSyntheticImportKey_IsTheLoadersLookup(t *testing.T) {
 		{"cleaned", "main.yammm", "lib/./x/../dep", "lib/dep.yammm"},
 		{"a decomposed name", "main.yammm", "café/dep", "café/dep.yammm"},
 		{"a backslash", "main.yammm", `lib\dep`, ""},
+		{"a path whose last segment is a dot dot", "a/main.yammm", "./x.yammm/..", ""},
 		{"an importer key the loader cleans", "sub/main.yammm/", "./dep", "sub/dep.yammm"},
 		{"an importer key with a dot segment", "sub/./main.yammm", "../dep", "dep.yammm"},
 		{"an importer key holding a backslash", `sub\main.yammm`, "./dep", ""},

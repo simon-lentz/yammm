@@ -37,7 +37,7 @@ func TestExitForResult_ARefusedCSVHeaderWhoseReaderFailedIsRuntime(t *testing.T)
 	t.Parallel()
 	failure := errors.New("input/output error")
 	for _, header := range []string{"id,id\n", "id,\n", "i\"d,name\n", "\"id\"x,name"} {
-		_, res := csv.New().ParseTyped(t.Context(), location.MustNewSourceID("test://x.csv"), "P",
+		_, res := csv.New().ParseTyped(t.Context(), location.NewSourceID("test://x.csv"), "P",
 			&headerThenFailure{header: header, err: failure}, schema.Type{})
 		if !res.HasCode(diag.E_ADAPTER_PARSE) {
 			t.Fatalf("%q is not refused, so the case asserts nothing: %s", header, res)

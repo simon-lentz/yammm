@@ -1,7 +1,9 @@
 package schema
 
 import (
+	"errors"
 	"fmt"
+	"math"
 	"reflect"
 	"regexp"
 	"slices"
@@ -356,7 +358,7 @@ func NewTimestampConstraint() TimestampConstraint {
 
 // NewTimestampConstraintFormatted creates a TimestampConstraint with a Go time
 // format. The format is judged once here: one that is not valid UTF-8 is
-// recorded, and [Builder.Build] and [CheckConstraint] refuse the constraint.
+// recorded, and [CheckConstraint] refuses the constraint.
 func NewTimestampConstraintFormatted(format string) TimestampConstraint {
 	return TimestampConstraint{format: format, badFormat: !utf8.ValidString(format)}
 }
@@ -433,7 +435,7 @@ type EnumConstraint struct {
 // NewEnumConstraint creates an EnumConstraint with the given allowed values.
 // The values are stored in a defensive copy, and judged once here: the first
 // value that is empty, is not valid UTF-8 or repeats an earlier one is
-// recorded, and [Builder.Build] and [CheckConstraint] refuse the constraint.
+// recorded, and [CheckConstraint] refuses the constraint.
 func NewEnumConstraint(values []string) EnumConstraint {
 	c := EnumConstraint{values: slices.Clone(values)}
 	c.invalid = enumValueFault(c.values)
@@ -522,7 +524,7 @@ func (EnumConstraint) IsResolved() bool { return true }
 
 // PatternConstraint constrains string values to match one or more regex patterns.
 // All patterns must match (conjunction semantics). The DSL states at most two,
-// and [Builder.Build] refuses more.
+// and [CheckConstraint] refuses more.
 type PatternConstraint struct {
 	patterns []string         // source pattern strings (public API)
 	compiled []*regexp.Regexp // compiled patterns (internal validation)
@@ -534,9 +536,9 @@ type PatternConstraint struct {
 // .yammm source compiles it, so each is compiled again from its source: a
 // regexp built with [regexp.CompilePOSIX] or [regexp.Regexp.Longest] matches
 // by the source's Perl reading. A source that reading refuses, which POSIX
-// syntax can accept (a**), is kept as given, and [Builder.Build] and
-// [CheckConstraint] refuse the constraint as the DSL refuses the pattern. They
-// refuse a pattern writing a surrogate code point with a \x{…} escape too.
+// syntax can accept (a**), is kept as given, and [CheckConstraint] refuses the
+// constraint as the DSL refuses the pattern. It refuses a pattern writing a
+// surrogate code point with a \x{…} escape too.
 func NewPatternConstraint(patterns []*regexp.Regexp) PatternConstraint {
 	c := PatternConstraint{
 		patterns: make([]string, len(patterns)),
@@ -663,8 +665,8 @@ type ListConstraint struct {
 }
 
 // NewListConstraint creates a ListConstraint with no length bounds. The
-// element must be non-nil: [Builder.Build] and [CheckConstraint] refuse a List
-// with no element, which is what the zero ListConstraint holds. A nil pointer
+// element must be non-nil: [CheckConstraint] refuses a List with no element,
+// which is what the zero ListConstraint holds. A nil pointer
 // is no element, whatever type it points to.
 func NewListConstraint(element Constraint) ListConstraint {
 	return ListConstraint{element: held(element)}
@@ -774,17 +776,15 @@ type AliasConstraint struct {
 
 // NewAliasConstraint creates an AliasConstraint referencing a DataType. A
 // raw-constraint caller with no schema, such as [instance.CheckValue],
-// [instance.CanonicalValue] or the Neo4j adapter's Coerce, reads the resolved
-// argument as the alias's meaning. [Builder.Build] does
-// not: it drops the argument at any List depth and resolves the name through
-// completion, which builds each resolved alias with this function, so a
-// DataType reference means its declaration and nothing else.
-// [CheckConstraint] refuses a reference whose resolved argument is nil, and a
+// [instance.CanonicalValue] or the Neo4j adapter's CoerceParams, reads the resolved
+// argument as the alias's meaning. Completion builds each resolved alias with
+// this function, so in a loaded schema a DataType reference means its
+// declaration and nothing else. [CheckConstraint] refuses a reference whose resolved argument is nil, and a
 // nil pointer is nil here, whatever type it points to.
 //
 // The name is judged once here. A .yammm source writes a reference as a
-// datatype name, or as an import alias, a dot and a datatype name, and Build
-// and [CheckConstraint] refuse a reference under any other name.
+// datatype name, or as an import alias, a dot and a datatype name, and
+// [CheckConstraint] refuses a reference under any other name.
 func NewAliasConstraint(dataTypeName string, resolved Constraint) AliasConstraint {
 	_, _, ok := referenceParts(dataTypeName)
 	return AliasConstraint{dataTypeName: dataTypeName, resolved: held(resolved), badName: !ok}
@@ -925,4 +925,139 @@ func ResolveAlias(c Constraint) Constraint {
 		seen[next.dataTypeName] = struct{}{}
 		c = next.resolved
 	}
+}
+
+// CheckConstraint returns why c cannot judge a value, or nil when it can. It
+// refuses a nil constraint, an argument no .yammm source can state, a DataType reference under a name no
+// source writes, a List with no element, more than two patterns or one
+// regexp.Compile refuses, and a constraint of a Go type this package does not
+// construct, such as a pointer to one. A raw constraint meets
+// no completion, so it also refuses a DataType reference resolved to another
+// reference alone, as a datatype declared as another alone is, and one that
+// resolves to no constraint, at any List depth. The Neo4j adapter's CoerceParams,
+// instance.CheckValue and instance.CanonicalValue call it before they read a
+// value.
+func CheckConstraint(c Constraint) error {
+	if c == nil {
+		return errors.New("schema: no constraint")
+	}
+	if fault, found := constraintFault(c); found {
+		return fmt.Errorf("schema: %s", fault)
+	}
+	// constraintFault judged every List level, so only the innermost element
+	// is left to resolve: judging each level again costs the depth squared.
+	for {
+		list, isList := c.(ListConstraint)
+		if !isList {
+			break
+		}
+		c = list.Element()
+	}
+	held, isAlias := c.(AliasConstraint)
+	if !isAlias {
+		return nil
+	}
+	if inner, isAlias := held.resolved.(AliasConstraint); isAlias {
+		return fmt.Errorf("schema: datatype %q resolves to datatype %q alone; a datatype declares a built-in type or a List", held.DataTypeName(), inner.DataTypeName())
+	}
+	terminal := ResolveAlias(c)
+	if open, isOpen := terminal.(AliasConstraint); isOpen {
+		return fmt.Errorf("schema: datatype %q resolves to no constraint", open.DataTypeName())
+	}
+	return CheckConstraint(terminal)
+}
+
+// constraintFault describes the first fault of c, or of a List element at any
+// depth, that no .yammm source can state: an argument the DSL refuses, as
+// E_INVALID_CONSTRAINT or E_SYNTAX, or a Go type this package does not construct. A
+// DataType reference is judged by the form of its name, which
+// [NewAliasConstraint] recorded; completion resolves what the name names.
+func constraintFault(c Constraint) (string, bool) {
+	switch c := c.(type) {
+	case BooleanConstraint, DateConstraint, UUIDConstraint:
+		// Nothing to judge: the DSL states every Boolean, Date and UUID.
+	case AliasConstraint:
+		// Completion resolves the name. The zero AliasConstraint meets no
+		// constructor, so its empty name is read here.
+		if c.badName || c.dataTypeName == "" {
+			return fmt.Sprintf("datatype reference %q is not one a .yammm source can write; a reference is a datatype name, or an import alias, a dot and a datatype name", c.dataTypeName), true
+		}
+	case TimestampConstraint:
+		// The zero TimestampConstraint holds no format, which is sound.
+		if c.badFormat {
+			return fmt.Sprintf("timestamp format %q is not valid UTF-8", c.format), true
+		}
+	case IntegerConstraint:
+		lo, hasLo := c.Min()
+		hi, hasHi := c.Max()
+		if hasLo && hasHi && lo > hi {
+			return fmt.Sprintf("integer bounds inverted: min %d > max %d", lo, hi), true
+		}
+	case FloatConstraint:
+		lo, hasLo := c.Min()
+		hi, hasHi := c.Max()
+		for _, b := range [...]struct {
+			v   float64
+			has bool
+		}{{lo, hasLo}, {hi, hasHi}} {
+			if b.has && (math.IsInf(b.v, 0) || math.IsNaN(b.v)) {
+				return fmt.Sprintf("non-finite float bound %v; a Float bound is a finite number", b.v), true
+			}
+		}
+		if hasLo && hasHi && lo > hi {
+			return fmt.Sprintf("float bounds inverted: min %v > max %v", lo, hi), true
+		}
+	case StringConstraint:
+		return lengthFault("string", c.MinLen, c.MaxLen)
+	case ListConstraint:
+		if fault, found := lengthFault("list", c.MinLen, c.MaxLen); found {
+			return fault, true
+		}
+		if c.Element() == nil {
+			return "list has no element constraint", true
+		}
+		return constraintFault(c.Element())
+	case EnumConstraint:
+		// The count is read here, not recorded: the zero EnumConstraint meets no
+		// constructor and holds no values.
+		switch n := len(c.values); {
+		case c.invalid != "":
+			return c.invalid, true
+		case n < 2:
+			return fmt.Sprintf("enum must have at least two values (got %d)", n), true
+		}
+	case PatternConstraint:
+		switch n := c.PatternCount(); {
+		case n == 0:
+			return "pattern constraint needs at least one pattern", true
+		case n > parse.MaxPatterns:
+			return fmt.Sprintf("pattern constraint exceeds maximum of %d patterns (got %d)", parse.MaxPatterns, n), true
+		case c.invalid != "":
+			return c.invalid, true
+		}
+	case VectorConstraint:
+		if d := c.Dimension(); d < parse.MinVectorDimensions || d > parse.MaxVectorDimensions {
+			return fmt.Sprintf("vector dimensions must be between %d and %d (got %d)",
+				parse.MinVectorDimensions, parse.MaxVectorDimensions, d), true
+		}
+	default:
+		return fmt.Sprintf("a constraint of Go type %T is none this package constructs", c), true
+	}
+	return "", false
+}
+
+// lengthFault reports a negative or inverted length pair; kind names the
+// constraint as the DSL's diagnostics do.
+func lengthFault(kind string, minLen, maxLen func() (int64, bool)) (string, bool) {
+	lo, hasLo := minLen()
+	hi, hasHi := maxLen()
+	switch {
+	case hasLo && lo < 0:
+		return fmt.Sprintf("%s minimum length cannot be negative: %d", kind, lo), true
+	case hasHi && hi < 0:
+		return fmt.Sprintf("%s maximum length cannot be negative: %d", kind, hi), true
+	case hasLo && hasHi && lo > hi:
+		return fmt.Sprintf("%s length bounds inverted: min %d > max %d", kind, lo, hi), true
+	}
+	return "", false
 }

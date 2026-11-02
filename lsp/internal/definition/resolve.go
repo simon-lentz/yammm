@@ -1,7 +1,6 @@
 // Package definition provides pure definition-resolution logic for the LSP server.
 // Functions here convert symbols and references to LSP Locations without
-// depending on server state; they receive a URI-mapping function and
-// position encoding as parameters.
+// depending on server state; they receive a URI-mapping function as a parameter.
 package definition
 
 import (
@@ -19,7 +18,6 @@ import (
 func SymbolToLocation(
 	sources *lsputil.Texts,
 	sym *symbols.Symbol,
-	enc lsputil.PositionEncoding,
 	mapURI func(string) string,
 ) *protocol.Location {
 	if sym == nil || sym.Range.IsZero() {
@@ -29,7 +27,7 @@ func SymbolToLocation(
 	uri := mapURI(sym.SourceID.String())
 
 	// Use proper UTF-16 conversion for the range
-	start, end, ok := lsputil.SpanToLSPRange(sources, sym.Selection, enc)
+	start, end, ok := lsputil.SpanToLSPRange(sources, sym.Selection)
 	if !ok {
 		// Fallback to naive conversion if span conversion fails
 		return &protocol.Location{
@@ -62,7 +60,6 @@ func ResolveReference(
 	snapshot *analysis.Snapshot,
 	ref *symbols.ReferenceSymbol,
 	fromSourceID location.SourceID,
-	enc lsputil.PositionEncoding,
 	mapURI func(string) string,
 ) *protocol.Location {
 	targetSym := snapshot.ResolveTypeReference(ref, fromSourceID)
@@ -70,7 +67,7 @@ func ResolveReference(
 		return nil
 	}
 
-	return SymbolToLocation(snapshot.Sources, targetSym, enc, mapURI)
+	return SymbolToLocation(snapshot.Sources, targetSym, mapURI)
 }
 
 // ResolveSymbol handles definition requests on symbol declarations.
@@ -80,14 +77,13 @@ func ResolveReference(
 func ResolveSymbol(
 	snapshot *analysis.Snapshot,
 	sym *symbols.Symbol,
-	enc lsputil.PositionEncoding,
 	mapURI func(string) string,
 ) *protocol.Location {
 	switch sym.Kind {
 	case symbols.SymbolImport:
-		return resolveImport(snapshot, sym, enc, mapURI)
+		return resolveImport(snapshot, sym, mapURI)
 	default:
-		return SymbolToLocation(snapshot.Sources, sym, enc, mapURI)
+		return SymbolToLocation(snapshot.Sources, sym, mapURI)
 	}
 }
 
@@ -95,7 +91,6 @@ func ResolveSymbol(
 func resolveImport(
 	snapshot *analysis.Snapshot,
 	sym *symbols.Symbol,
-	enc lsputil.PositionEncoding,
 	mapURI func(string) string,
 ) *protocol.Location {
 	imp, ok := sym.Data.(schema.Import)
@@ -108,7 +103,7 @@ func resolveImport(
 	schemaSpan := importedSchema.Span()
 
 	// Try proper conversion if sources are available
-	start, end, ok := lsputil.SpanToLSPRange(snapshot.Sources, schemaSpan, enc)
+	start, end, ok := lsputil.SpanToLSPRange(snapshot.Sources, schemaSpan)
 	if ok {
 		return &protocol.Location{
 			URI: uri,

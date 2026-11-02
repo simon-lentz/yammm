@@ -244,8 +244,7 @@ func (b *builder) lengthBound(t *lenTok, kind, side string) (*int64, bool) {
 // is empty, or repeats an earlier value. The two-value minimum counts the
 // values the source wrote: a value dropped for its own fault has a diagnostic
 // that says what is wrong with it, and one break is one diagnostic, so
-// "one good and one duplicate" is reported as the duplicate alone, as the
-// schema Builder reports it.
+// "one good and one duplicate" is reported as the duplicate alone.
 func (b *builder) enumConstraint(c *enuC, span location.Span) *Constraint {
 	out := &Constraint{Kind: ConstraintEnum, Span: span}
 	seen := make(map[string]bool, len(c.Values))
@@ -277,8 +276,8 @@ func (b *builder) enumConstraint(c *enuC, span location.Span) *Constraint {
 // count is of the patterns the source wrote, so a pattern refused for its own
 // fault counts and draws its own diagnostic too. Every written literal stays
 // in PatternLits, and at most MaxPatterns of them carry a Regex, so nothing
-// downstream enforces a pattern past the cap. The schema Builder refuses a
-// longer list by the same bound.
+// downstream enforces a pattern past the cap. [schema.CheckConstraint] refuses
+// a longer list by the same bound.
 const MaxPatterns = 2
 
 func (b *builder) patternConstraint(c *patC, span location.Span) *Constraint {
@@ -368,7 +367,7 @@ func SurrogateEscape(pattern string) (rune, bool) {
 }
 
 // SurrogateMessage is the diagnostic for a pattern [SurrogateEscape] refuses;
-// the schema Builder refuses one in the same words.
+// [schema.CheckConstraint] refuses one in the same words.
 func SurrogateMessage(pattern string, r rune) string {
 	return fmt.Sprintf("regex pattern %q names the surrogate code point U+%04X, which no string holds", pattern, r)
 }

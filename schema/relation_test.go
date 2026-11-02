@@ -169,9 +169,9 @@ func TestRelation_SetTargetID_WorksBeforeSeal(t *testing.T) {
 
 func TestNewRelation(t *testing.T) {
 	target := schema.NewTypeRef("users", "Person", location.Span{})
-	targetID := schema.NewTypeID(location.MustNewSourceID("test://users"), "Person")
+	targetID := schema.NewTypeID(location.NewSourceID("test://users"), "Person")
 	span := location.Span{
-		Source: location.MustNewSourceID("test://schema"),
+		Source: location.NewSourceID("test://schema"),
 		Start:  location.Position{Line: 10, Column: 5, Byte: 100},
 		End:    location.Position{Line: 10, Column: 50, Byte: 150},
 	}
@@ -319,7 +319,7 @@ func TestRelation_Target(t *testing.T) {
 
 func TestRelation_Span(t *testing.T) {
 	span := location.Span{
-		Source: location.MustNewSourceID("test://span"),
+		Source: location.NewSourceID("test://span"),
 		Start:  location.Position{Line: 15, Column: 3, Byte: 150},
 		End:    location.Position{Line: 15, Column: 40, Byte: 187},
 	}

@@ -139,9 +139,8 @@ func (ln line) maskedSub(start, end int) string {
 }
 
 // classifyLexed splits text into lines and records the lexer's view of each.
-// It lexes, because a caller entering at an exported phase has no token stream
-// to inherit; the pipeline builds the same record during phase 1's emission and
-// pays no lex at all.
+// It lexes, because text that phase 3 changed has no token stream to inherit,
+// where phase 1 builds the same record during its emission.
 func classifyLexed(text string) []line {
 	raw := strings.Split(text, "\n")
 	starts := make([]int, len(raw))

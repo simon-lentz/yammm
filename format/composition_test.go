@@ -10,10 +10,10 @@ import (
 	"github.com/simon-lentz/yammm/format"
 )
 
-// TestTokenStream_IsItsExportedPhasesComposed is the second implementation of
-// the records phases 3 and 4 read: the pipeline must produce what the exported
+// TestTokenStream_IsItsPhasesComposed is the second implementation of
+// the records phases 3 and 4 read: the pipeline must produce what the
 // phases produce from a lex of the same text, on every corpus input and variant.
-func TestTokenStream_IsItsExportedPhasesComposed(t *testing.T) {
+func TestTokenStream_IsItsPhasesComposed(t *testing.T) {
 	t.Parallel()
 
 	checked := 0

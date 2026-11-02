@@ -82,19 +82,9 @@ const (
 	// DetailKeyAlias is the import alias (for alias validation errors).
 	DetailKeyAlias = "alias"
 
-	// DetailKeyName is the invalid identifier name (for naming errors).
-	DetailKeyName = "name"
-
-	// DetailKeyContext is contextual information (e.g., "Builder", "Registry").
-	DetailKeyContext = "context"
-
-	// DetailKeyID is the identifier value (e.g., synthetic SourceID).
-	DetailKeyID = "id"
-
 	// DetailKeyTypeSchema is the identity of the schema a type is defined in,
 	// its SchemaPath, written as the identity and never relativized. Used with
-	// E_GRAPH_TYPE_NOT_FOUND, E_GRAPH_PARENT_NOT_FOUND, E_SNAPSHOT_UNNAMEABLE_TYPE
-	// and E_INTERNAL.
+	// E_GRAPH_TYPE_NOT_FOUND and E_SNAPSHOT_UNNAMEABLE_TYPE.
 	DetailKeyTypeSchema = "type_schema"
 
 	// DetailKeyFirstAlias is the first import alias in duplicate detection.
@@ -114,7 +104,7 @@ const (
 
 	// DetailKeyInstanceIndex is the zero-based index of an instance in a batch
 	// validation call. Used to correlate diagnostics with specific instances
-	// in [instance.Validator.Validate] and [instance.Validator.ValidateForComposition].
+	// in [instance.Validator.Validate].
 	DetailKeyInstanceIndex = "instance_index"
 
 	// DetailKeyStackTrace is a stack trace captured from a recovered panic.
@@ -157,7 +147,8 @@ const (
 	// imports against, written as an identity — NFC and "/"-separated, the form
 	// every span source beside it takes — or a synthetic root as given, and empty
 	// when the load had none. Carried by every issue in the import-resolution
-	// family (see [IsImportResolutionCode]) and by E_LOAD_MODULE_ROOT_MALFORMED.
+	// family (E_IMPORT_RESOLVE, E_IMPORT_CYCLE, E_PATH_ESCAPE) and by
+	// E_LOAD_MODULE_ROOT_MALFORMED.
 	DetailKeyModuleRoot = "module_root"
 
 	// DetailKeyModuleRootOrigin names where the module root came from, over
@@ -174,7 +165,7 @@ const (
 // The five are exhaustive: a load either was given a root, found one, stands
 // on a synthetic one, fell back to the entry schema's directory, or has no
 // root in play at all. The last is not the same as the fourth — a string
-// source and a Builder-built schema have no directory to default to.
+// source has no directory to default to.
 const (
 	// ModuleRootExplicit means the caller supplied the root.
 	ModuleRootExplicit = "explicit"
@@ -237,13 +228,12 @@ func TypeField(typeName, fieldName string) []Detail {
 // PathRelation creates detail entries for diagnostics involving relation path
 // segments.
 //
-// Provides both the schema relation name (for path) and the normalized JSON
+// Provides both the schema relation name and the normalized JSON
 // field name (for direct lookup in instance data). The jsonFieldName is
 // the relation name in lower case.
 //
-// Use with relation-path diagnostics (e.g., E_DUPLICATE_COMPOSED_PK,
-// E_UNRESOLVED_REQUIRED_COMPOSITION) to enable users to locate the field
-// in their JSON input.
+// Use with a relation-path diagnostic, as E_EDGE_SHAPE_MISMATCH does, so a
+// user can locate the field in the JSON input.
 func PathRelation(relationName, jsonFieldName string) []Detail {
 	return []Detail{
 		{Key: DetailKeyRelationName, Value: relationName},

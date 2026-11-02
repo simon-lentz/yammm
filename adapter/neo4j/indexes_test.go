@@ -9,7 +9,6 @@ import (
 
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/internal/yammmtest"
-	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -327,20 +326,19 @@ func TestIndexes_FulltextRangeNameCollisionDisambiguated(t *testing.T) {
 // TestIndexesStructured_DanglingSupertypeRejectedAtBuild pins that the state
 // the adapter's emission-time property re-check was written for — a sealed
 // schema whose supertype never resolved, hiding whether an @@index argument
-// names a real property — is rejected at construction: a registry-less Builder
-// draws E_UNKNOWN_TYPE and nils the schema. The re-check in IndexesStructured
+// names a real property — is rejected at load: the unresolved reference draws
+// E_UNKNOWN_TYPE and nils the schema. The re-check in IndexesStructured
 // stays as defense against internal callers, but no public entry point can
 // hand the adapter a model it cannot trust.
 func TestIndexesStructured_DanglingSupertypeRejectedAtBuild(t *testing.T) {
 	t.Parallel()
-	s, res := schema.NewBuilder().
-		WithName("probe").
-		AddType("Entity").
-		Extends(schema.NewTypeRef("common", "Base", location.Span{})).
-		WithPrimaryKey("id", schema.NewStringConstraint()).
-		WithTypeAnnotation("index", "missingProp").
-		Done().
-		Build()
+	s, res := schema.LoadString(t.Context(), `schema "probe"
+
+type Entity extends common.Base {
+	id String primary
+	@@index(missingProp)
+}
+`, "probe.yammm")
 	if !s.IsZero() {
 		t.Fatal("a dangling qualified supertype must nil the schema")
 	}
@@ -349,21 +347,18 @@ func TestIndexesStructured_DanglingSupertypeRejectedAtBuild(t *testing.T) {
 	}
 }
 
-// Both Builder entry points round-trip to emitted fulltext DDL: a schema built
-// with WithPropertyAnnotation("...", "fulltext") and WithTypeAnnotation
-// ("fulltext", ...) emits the same two indexes the DSL spellings would.
-func TestIndexesStructured_BuilderFulltextRoundTrip(t *testing.T) {
+// The property and type spellings of fulltext both round-trip to emitted DDL.
+func TestIndexesStructured_FulltextRoundTrip(t *testing.T) {
 	t.Parallel()
-	s, res := schema.NewBuilder().
-		WithName("probe").
-		AddType("Entity").
-		WithPrimaryKey("id", schema.NewStringConstraint()).
-		WithProperty("title", schema.NewStringConstraint()).
-		WithProperty("summary", schema.NewStringConstraint()).
-		WithPropertyAnnotation("title", "fulltext").
-		WithTypeAnnotation("fulltext", "title", "summary").
-		Done().
-		Build()
+	s, res := schema.LoadString(t.Context(), `schema "probe"
+
+type Entity {
+	id String primary
+	title String required @fulltext
+	summary String required
+	@@fulltext(title, summary)
+}
+`, "probe.yammm")
 	if res.HasErrors() {
 		t.Fatalf("builder schema should seal cleanly: %v", res)
 	}
@@ -400,14 +395,13 @@ func TestIndexesStructured_BuilderFulltextRoundTrip(t *testing.T) {
 // whose eligibility the adapter would have to re-derive.
 func TestIndexesStructured_DanglingAliasTargetRejectedAtBuild(t *testing.T) {
 	t.Parallel()
-	s, res := schema.NewBuilder().
-		WithName("probe").
-		AddType("Entity").
-		WithPrimaryKey("id", schema.NewStringConstraint()).
-		WithProperty("blob", schema.NewAliasConstraint("common.Text", nil)).
-		WithPropertyAnnotation("blob", "fulltext").
-		Done().
-		Build()
+	s, res := schema.LoadString(t.Context(), `schema "probe"
+
+type Entity {
+	id String primary
+	blob common.Text required @fulltext
+}
+`, "probe.yammm")
 	if !s.IsZero() {
 		t.Fatal("a dangling qualified property datatype must nil the schema")
 	}

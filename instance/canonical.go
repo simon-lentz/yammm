@@ -47,14 +47,12 @@ func CanonicalValue(val any, c schema.Constraint) (any, error) {
 	return out, nil
 }
 
-// ScalarOf returns v in the one form every writer of this module writes, read
-// through at most 64 pointers and interfaces: a string, a bool, an int64, a uint64, a
-// float32 or a float64 for a value of that kind, a named type as its base value,
-// a json.Number that is a JSON number literal, a time.Time or a uuid.UUID as
-// itself, and nil for a value that holds none, a nil slice or map included. It
-// reports false for every other value, a list and a map included, which a writer
-// walks itself, reading each element through ScalarOf. A writer writes a time.Time only at a Timestamp or a Date, and a uuid.UUID
-// only at a UUID, each of which renders it.
-func ScalarOf(v any) (any, bool) {
-	return value.Scalar(v)
+// IsAbsent reports whether v holds no value: nil, or a pointer, an interface, a
+// map, a slice, a channel, a function or an unsafe pointer that is nil, bare or
+// behind at most 64 pointers and interfaces, or a nil immutable container.
+// [Validator] reads such a value at a property as a missing key: adapter/gogen
+// emits a typed nil pointer for an absent optional scalar, and a nil slice for
+// an absent optional list. adapter/neo4j writes such a value as null.
+func IsAbsent(v any) bool {
+	return value.Absent(v)
 }
