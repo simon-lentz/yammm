@@ -242,7 +242,7 @@ linters:
       - path: "^schema/(alias|builder|complete|constraint|cross_cycle|datatype|hash|import|invariant|load|parse|parser_coverage|property|registry|relation|schema|sources|type|typeid|typeref|validate_invariants)_test\\.go$"
         linters:
           - depguard
-      - path: "^schema/expr/(expr)_test\\.go$"
+      - path: "^internal/expr/(expr)_test\\.go$"
         linters:
           - depguard
       - path: "^schema/internal/exprcomp/(exprcomp)_test\\.go$"

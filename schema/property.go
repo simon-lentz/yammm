@@ -229,17 +229,16 @@ func (p Property) Annotation(name string) (Annotation, bool) {
 
 // Origin returns the property as declared: p itself for a property a type
 // declares, and the declaring ancestor's property for one synthesized while
-// merging a property inherited from several ancestors (a merged view carries the
-// union of those ancestors' annotations, which no single declared property
-// holds). Never zero on a record.
+// merging an inherited property whose merged annotations differ from the declared
+// property's. Never zero on a record.
 //
 // Use it as the key of any identity-keyed map built from declared properties
 // ([Type.Properties], [Relation.Properties]) and read back while
 // iterating a merged view ([Type.AllProperties]): the two views do not
 // hold one record for a synthesized property, and Origin bridges them.
 // Everything Origin discards is annotation state; name, constraint, datatype
-// reference, optionality, primary-key status, span, and declaring scope are all
-// preserved on the synthesized copy.
+// reference, optionality, primary-key status, span, doc comment, and declaring scope
+// are all preserved on the synthesized copy.
 func (p Property) Origin() Property {
 	if !p.origin.IsZero() {
 		return p.origin

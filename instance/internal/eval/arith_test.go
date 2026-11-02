@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	"github.com/simon-lentz/yammm/instance/internal/eval"
-	"github.com/simon-lentz/yammm/schema/expr"
+	"github.com/simon-lentz/yammm/internal/expr"
 )
 
 // Integer arithmetic is exact within int64: a result outside it is an

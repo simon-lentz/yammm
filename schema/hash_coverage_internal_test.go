@@ -25,11 +25,12 @@ func TestStructuralHash_TypeFieldCoverage(t *testing.T) {
 		"superTypes":      "hashed via SuperTypes (extends rows)",
 
 		// Subsumed: the linearized all* slices cover the own members.
-		"properties":   "subsumed by allProperties",
-		"associations": "subsumed by allAssociations",
-		"compositions": "subsumed by allCompositions",
-		"invariants":   "subsumed by allInvariants",
-		"inherits":     "subsumed by superTypes (linearized ancestors)",
+		"properties":    "subsumed by allProperties",
+		"associations":  "subsumed by allAssociations",
+		"compositions":  "subsumed by allCompositions",
+		"invariants":    "subsumed by allInvariants",
+		"inherits":      "subsumed by superTypes (linearized ancestors)",
+		"extendsClause": "subsumed by superTypes (linearized ancestors)",
 
 		// Excluded: never rejects data.
 		"annotations":    "excluded: annotations configure DDL, never reject data",

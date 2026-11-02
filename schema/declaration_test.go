@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/simon-lentz/yammm/diag"
+	"github.com/simon-lentz/yammm/internal/expr"
 	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
 )
@@ -397,8 +398,8 @@ type Person {
 	if got := invariants[0].Documentation(); got != "Validates that age is greater than zero" {
 		t.Errorf("invariants[0].Documentation() = %v, want %v", got, "Validates that age is greater than zero")
 	}
-	if invariants[0].Expression() == nil {
-		t.Errorf("invariants[0].Expression() is nil")
+	if expr.InvariantExpression(invariants[0]) == nil {
+		t.Errorf("expr.InvariantExpression(invariants[0]) is nil")
 	}
 }
 

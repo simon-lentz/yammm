@@ -323,26 +323,29 @@ func TestSchema_FindImportAlias_Found(t *testing.T) {
 	imp := schema.TestNewImport("./types.yammm", "types", resolvedID, location.Span{})
 	schema.TestSetSchemaImports(s, []schema.Import{imp})
 
-	result := s.FindImportAlias(resolvedID)
+	alias, ok := s.FindImportAlias(resolvedID)
 
-	assert.Equal(t, "types", result)
+	assert.True(t, ok)
+	assert.Equal(t, "types", alias)
 }
 
 func TestSchema_FindImportAlias_NotFound(t *testing.T) {
 	s := schema.TestNewSchema("test", location.SourceID{}, location.Span{}, "")
 
-	result := s.FindImportAlias(location.NewSourceID("test://unknown"))
+	alias, ok := s.FindImportAlias(location.NewSourceID("test://unknown"))
 
-	assert.Empty(t, result)
+	assert.False(t, ok)
+	assert.Empty(t, alias)
 }
 
 func TestSchema_FindImportAlias_OwnPath(t *testing.T) {
 	sourceID := location.NewSourceID("test://self")
 	s := schema.TestNewSchema("test", sourceID, location.Span{}, "")
 
-	result := s.FindImportAlias(sourceID)
+	alias, ok := s.FindImportAlias(sourceID)
 
-	assert.Empty(t, result)
+	assert.False(t, ok)
+	assert.Empty(t, alias)
 }
 
 func TestSchema_Sources_Zero(t *testing.T) {

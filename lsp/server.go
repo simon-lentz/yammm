@@ -100,8 +100,13 @@ type Server struct {
 	logger    *slog.Logger
 	config    Config
 	mux       handler.Map
-	jrpcSrv   *jrpc2.Server
 	workspace *workspace.Workspace
+
+	// inputMu guards input and closed, since RunStdio and Close run on different
+	// goroutines.
+	inputMu sync.Mutex
+	input   *stoppableChannel
+	closed  bool
 
 	// traceValue stores the current trace level (replaces protocol.SetTraceValue global).
 	// Accessed atomically because jrpc2 may dispatch setTrace and shutdown on different goroutines.
@@ -168,17 +173,28 @@ func NewServer(logger *slog.Logger, cfg Config) *Server {
 // RunStdio runs the server using stdio transport with LSP framing.
 // It wires the workspace notifier to use the jrpc2 server for push
 // notifications (diagnostics). Uses context.Background() so notifications
-// are not tied to any individual request's lifecycle.
+// are not tied to any individual request's lifecycle. [Server.Close] ends it, and it
+// returns nil once its in-flight handlers and writes finish. A call after Close reads
+// nothing.
 func (s *Server) RunStdio() error {
-	ch := channel.LSP(os.Stdin, os.Stdout)
-	s.jrpcSrv = jrpc2.NewServer(s.mux, &jrpc2.ServerOptions{
+	srv := jrpc2.NewServer(s.mux, &jrpc2.ServerOptions{
 		AllowPush: true, // required for server-to-client notifications
 	})
 	s.workspace.SetNotifier(func(method string, params any) {
-		_ = s.jrpcSrv.Notify(context.Background(), method, params) //nolint:errcheck // best-effort notification
+		_ = srv.Notify(context.Background(), method, params) //nolint:errcheck // best-effort notification
 	})
-	s.jrpcSrv.Start(ch)
-	return s.jrpcSrv.Wait() //nolint:wrapcheck // top-level server entrypoint
+
+	s.inputMu.Lock()
+	if s.closed {
+		s.inputMu.Unlock()
+		return nil
+	}
+	s.input = newStoppableChannel(channel.LSP(os.Stdin, os.Stdout))
+	input := s.input
+	s.inputMu.Unlock()
+
+	srv.Start(input)
+	return srv.Wait() //nolint:wrapcheck // top-level server entrypoint
 }
 
 // Close performs an ordered shutdown:
@@ -187,17 +203,22 @@ func (s *Server) RunStdio() error {
 //     b. bgCancel() — cancel in-flight analysis contexts
 //     c. stop pending debounce timers
 //     d. wg.Wait() with 3s timeout — wait for tracked goroutines
-//  2. jrpcSrv.Stop() — close the connection's write side
+//  2. stop the input, which ends the jrpc2 server's read, so it cancels its
+//     handlers and closes the connection's write side
 //
-// Close is idempotent. jrpc2.Stop() returns immediately. RunStdio returns only
-// after its read of the input ends, which Close does not do.
-// Returns nil unconditionally — jrpc2.Stop() is void.
+// Close is idempotent and returns nil unconditionally. It takes no lock a write
+// holds, so a client that stopped reading holds it no longer than the wait above,
+// though that client holds [Server.RunStdio].
 func (s *Server) Close() error {
 	s.closeOnce.Do(func() {
 		s.logger.Info("initiating shutdown")
 		s.workspace.Shutdown()
-		if s.jrpcSrv != nil {
-			s.jrpcSrv.Stop()
+
+		s.inputMu.Lock()
+		defer s.inputMu.Unlock()
+		s.closed = true
+		if s.input != nil {
+			s.input.stop()
 		}
 	})
 	return nil

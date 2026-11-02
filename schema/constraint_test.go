@@ -6,6 +6,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
+	"github.com/simon-lentz/yammm/internal/expr"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -317,12 +318,12 @@ func TestPatternConstraint_Pattern_Empty(t *testing.T) {
 	assert.Empty(t, c.Pattern())
 }
 
-func TestPatternConstraint_CompiledPatterns(t *testing.T) {
+func TestPatternRegexps_ReadsTheCompiledPatterns(t *testing.T) {
 	p1 := regexp.MustCompile("^a")
 	p2 := regexp.MustCompile("b$")
 	c := schema.NewPatternConstraint([]*regexp.Regexp{p1, p2})
 
-	compiled := c.CompiledPatterns()
+	compiled := expr.PatternRegexps(c)
 	assert.Len(t, compiled, 2)
 	assert.True(t, compiled[0].MatchString("abc"))
 	assert.True(t, compiled[1].MatchString("ab"))

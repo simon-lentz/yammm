@@ -10,8 +10,7 @@ import (
 )
 
 // Schema represents a compiled schema. No exported method changes what a caller
-// reads, and after loading it is safe for concurrent access. [Invariant.Expression] returns the schema's
-// own tree, which a caller must not write.
+// reads, and after loading it is safe for concurrent access.
 type Schema struct{ *schemaState }
 
 // IsZero reports whether the handle names no record.
@@ -154,13 +153,7 @@ func (s Schema) ResolveDataType(ref DataTypeRef) (DataType, bool) {
 
 // Imports returns an iterator over import declarations.
 func (s Schema) Imports() iter.Seq[Import] {
-	return func(yield func(Import) bool) {
-		for _, i := range s.imports {
-			if !yield(i) {
-				return
-			}
-		}
-	}
+	return slices.Values(s.imports)
 }
 
 // ImportByAlias returns the import with the given alias.
@@ -169,16 +162,15 @@ func (s Schema) ImportByAlias(alias string) (Import, bool) {
 	return i, ok
 }
 
-// FindImportAlias returns the alias for an imported schema, if it exists.
-// Returns empty string if the path is not imported. A schema never imports its own
-// path, because a load refuses the cycle.
-func (s Schema) FindImportAlias(path location.SourceID) string {
+// FindImportAlias returns the alias of the import that resolves to path, and false if
+// none does. A schema never imports its own path, because a load refuses the cycle.
+func (s Schema) FindImportAlias(path location.SourceID) (string, bool) {
 	for _, imp := range s.imports {
 		if imp.resolvedSourceID == path {
-			return imp.alias
+			return imp.alias, true
 		}
 	}
-	return ""
+	return "", false
 }
 
 // Sources returns the source content a load held, for diagnostic rendering.

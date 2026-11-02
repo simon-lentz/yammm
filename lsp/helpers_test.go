@@ -168,6 +168,12 @@ func buildTestSnapshot(t *testing.T) (*analysis.Snapshot, *docstate.Snapshot) {
 // for the entry file, and the canonicalized temp dir.
 func buildCrossSchemaSnapshot(t *testing.T) (*analysis.Snapshot, *docstate.Snapshot, string) {
 	t.Helper()
+	return buildCrossSchemaSnapshotOf(t, "schema \"entry\"\n\nimport \"./foundation\" as region\n\ntype Listing extends region.Region {\n\textra String\n}\n")
+}
+
+// buildCrossSchemaSnapshotOf is [buildCrossSchemaSnapshot] over the given entry text.
+func buildCrossSchemaSnapshotOf(t *testing.T, entryContent string) (*analysis.Snapshot, *docstate.Snapshot, string) {
+	t.Helper()
 
 	tmpDir := t.TempDir()
 	// Canonicalize for macOS /var → /private/var symlink.
@@ -175,7 +181,6 @@ func buildCrossSchemaSnapshot(t *testing.T) (*analysis.Snapshot, *docstate.Snaps
 	require.NoError(t, err)
 
 	foundationContent := "schema \"foundation\"\n\ntype Region {\n\tarea_code String primary\n\tname String\n}\n"
-	entryContent := "schema \"entry\"\n\nimport \"./foundation\" as region\n\ntype Listing extends region.Region {\n\textra String\n}\n"
 
 	foundationPath := filepath.Join(tmpDir, "foundation.yammm")
 	entryPath := filepath.Join(tmpDir, "entry.yammm")

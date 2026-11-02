@@ -187,18 +187,17 @@ Internal                 : internal/* (no compatibility guarantees)
 | Package | Purpose |
 | ------- | ------- |
 | `schema` | Type system, constraints, and schema loading |
-| `schema/expr` | Expression AST types for invariants |
 | `instance` | Instance validation and constraint checking |
 | `graph` | Instance graph construction and integrity checking |
-| `snapshot` | Graph persistence: marshal, load, verify, and inspect `.ys` files |
+| `snapshot` | Graph persistence as `.ys` files; its package doc lists what it does |
 | `diag` | Structured diagnostics with stable error codes |
 | `location` | Source positions, spans, and canonical paths |
 | `immutable` | Immutable data structures for validated output |
 | `format` | Canonical `.yammm` file formatting |
 | `adapter/json` | JSON/JSONC parsing with location tracking |
 | `adapter/csv` | CSV data parsing and writing |
-| `adapter/neo4j` | Neo4j constraint + index generation and Cypher query building |
-| `adapter/gogen` | Go source generation from a schema (structs, enums, `EDGE_` structs, `Graph`) |
+| `adapter/neo4j` | The Neo4j mapping of a schema; its package doc lists what it holds |
+| `adapter/gogen` | Go source generation from a schema; its package doc lists what it emits |
 | `adapter/jschema` | JSON Schema (draft 2020-12) generation from a schema, for editor-assisted data authoring |
 | `adapter/markdown` | Markdown + Mermaid documentation generation from a schema |
 | `lsp` | Language Server Protocol server for `.yammm` files |

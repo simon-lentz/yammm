@@ -8,8 +8,8 @@ import (
 	"strings"
 
 	"github.com/simon-lentz/yammm/diag"
+	"github.com/simon-lentz/yammm/internal/expr"
 	"github.com/simon-lentz/yammm/location"
-	"github.com/simon-lentz/yammm/schema/expr"
 )
 
 // The projection is deliberately syntax-level: names, modifiers, raw bound

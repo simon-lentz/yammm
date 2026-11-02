@@ -8,8 +8,8 @@ import (
 	"strings"
 
 	"github.com/simon-lentz/yammm/diag"
+	"github.com/simon-lentz/yammm/internal/expr"
 	"github.com/simon-lentz/yammm/internal/parse"
-	"github.com/simon-lentz/yammm/schema/expr"
 )
 
 // staticKind is what the static checker knows an expression evaluates to.
@@ -145,7 +145,7 @@ func (t staticType) element() staticType {
 }
 
 // selfVariable is the name both layers bind to the instance, held once in
-// schema/expr so the completer, the checker and the evaluator cannot drift:
+// internal/expr so the completer, the checker and the evaluator cannot drift:
 // the evaluator's PropertyScopeOf seeds it and the checker's root scope binds
 // it. Neither the bare name nor $self reaches a member so named, so completion
 // refuses it.
@@ -434,7 +434,7 @@ func (c *completer) validateInvariantExpressions() {
 		scope := (&staticScope{}).child(selfVariable, instanceOf(t))
 		for inv := range t.Invariants() {
 			c.invariantSeen = nil
-			c.typeExpr(inv.Expression(), scope, t, inv)
+			c.typeExpr(inv.expr, scope, t, inv)
 		}
 	}
 }

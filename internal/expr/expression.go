@@ -1,9 +1,22 @@
 package expr
 
 import (
+	"regexp"
 	"slices"
 	"strings"
 )
+
+// InvariantExpression returns a schema.Invariant's tree. The schema package sets it
+// once, in its init, and nothing writes it after, so a read takes no lock. It takes
+// any because this package sits below schema and cannot name the type, and it
+// panics on any other argument.
+var InvariantExpression func(inv any) Expression
+
+// PatternRegexps returns a schema.PatternConstraint's compiled patterns, the
+// constraint's own slice, which a reader must not write. The schema package sets it
+// once, in its init, and nothing writes it after, so a read takes no lock. It takes
+// any because this package sits below schema, and it panics on any other argument.
+var PatternRegexps func(constraint any) []*regexp.Regexp
 
 // SelfVariable is the name bound to the instance under evaluation. The
 // completer refuses a member of this name, the static checker binds it in the

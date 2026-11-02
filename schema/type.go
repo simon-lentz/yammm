@@ -42,9 +42,10 @@ type typeState struct {
 	allAnnotations  []Annotation // own type-level annotations then inherited, deduped keep-first
 
 	// Inheritance
-	inherits   []TypeRef         // declared extends clause
-	superTypes []ResolvedTypeRef // linearized ancestors
-	subTypes   []ResolvedTypeRef // LOCAL subtypes only; completeTypes records a subtype only where its supertype is in the same schema (a cross-schema descendant is invisible here — the known limit concreteEmitters and the @index redundancy rule depend on)
+	extendsClause []TypeRef         // every reference the clause spells, in source order
+	inherits      []TypeRef         // the clause's first spelling of each supertype
+	superTypes    []ResolvedTypeRef // linearized ancestors
+	subTypes      []ResolvedTypeRef // LOCAL subtypes only; completeTypes records a subtype only where its supertype is in the same schema (a cross-schema descendant is invisible here — the known limit concreteEmitters and the @index redundancy rule depend on)
 
 	// O(1) lookup indices
 	propByName map[string]Property
@@ -157,36 +158,18 @@ func (t Type) Property(name string) (Property, bool) {
 // Properties returns an iterator over properties declared in this type body.
 // Does NOT include inherited properties; use AllProperties for that.
 func (t Type) Properties() iter.Seq[Property] {
-	return func(yield func(Property) bool) {
-		for _, p := range t.properties {
-			if !yield(p) {
-				return
-			}
-		}
-	}
+	return slices.Values(t.properties)
 }
 
 // AllProperties returns an iterator over all properties (own and inherited).
 // Properties are returned in linearized order: own first, then inherited.
 func (t Type) AllProperties() iter.Seq[Property] {
-	return func(yield func(Property) bool) {
-		for _, p := range t.allProperties {
-			if !yield(p) {
-				return
-			}
-		}
-	}
+	return slices.Values(t.allProperties)
 }
 
 // PrimaryKeys returns an iterator over primary key properties.
 func (t Type) PrimaryKeys() iter.Seq[Property] {
-	return func(yield func(Property) bool) {
-		for _, p := range t.primaryKeys {
-			if !yield(p) {
-				return
-			}
-		}
-	}
+	return slices.Values(t.primaryKeys)
 }
 
 // primaryKeyCount returns the number of EXTRACTED primary keys without copying
@@ -236,68 +219,32 @@ func (t Type) RelationByField(fieldName string) (Relation, bool) {
 
 // Associations returns an iterator over associations declared in this type body.
 func (t Type) Associations() iter.Seq[Relation] {
-	return func(yield func(Relation) bool) {
-		for _, r := range t.associations {
-			if !yield(r) {
-				return
-			}
-		}
-	}
+	return slices.Values(t.associations)
 }
 
 // AllAssociations returns an iterator over all associations (own and inherited).
 func (t Type) AllAssociations() iter.Seq[Relation] {
-	return func(yield func(Relation) bool) {
-		for _, r := range t.allAssociations {
-			if !yield(r) {
-				return
-			}
-		}
-	}
+	return slices.Values(t.allAssociations)
 }
 
 // Compositions returns an iterator over compositions declared in this type body.
 func (t Type) Compositions() iter.Seq[Relation] {
-	return func(yield func(Relation) bool) {
-		for _, r := range t.compositions {
-			if !yield(r) {
-				return
-			}
-		}
-	}
+	return slices.Values(t.compositions)
 }
 
 // AllCompositions returns an iterator over all compositions (own and inherited).
 func (t Type) AllCompositions() iter.Seq[Relation] {
-	return func(yield func(Relation) bool) {
-		for _, r := range t.allCompositions {
-			if !yield(r) {
-				return
-			}
-		}
-	}
+	return slices.Values(t.allCompositions)
 }
 
 // Invariants returns an iterator over invariants declared on this type.
 func (t Type) Invariants() iter.Seq[Invariant] {
-	return func(yield func(Invariant) bool) {
-		for _, i := range t.invariants {
-			if !yield(i) {
-				return
-			}
-		}
-	}
+	return slices.Values(t.invariants)
 }
 
 // AllInvariants returns an iterator over all invariants (own and inherited).
 func (t Type) AllInvariants() iter.Seq[Invariant] {
-	return func(yield func(Invariant) bool) {
-		for _, i := range t.allInvariants {
-			if !yield(i) {
-				return
-			}
-		}
-	}
+	return slices.Values(t.allInvariants)
 }
 
 // Annotations returns an iterator over the type-level annotations declared in
@@ -311,37 +258,26 @@ func (t Type) Annotations() iter.Seq[Annotation] {
 // inherited) in linearized order: own first, then inherited, with exact
 // duplicates deduplicated keep-first.
 func (t Type) AllAnnotations() iter.Seq[Annotation] {
-	return func(yield func(Annotation) bool) {
-		for _, a := range t.allAnnotations {
-			if !yield(a) {
-				return
-			}
-		}
-	}
+	return slices.Values(t.allAnnotations)
+}
+
+// ExtendsClause returns an iterator over the references the extends clause spells,
+// in source order, so a supertype named twice appears twice. A reader that wants the
+// edges reads [Type.Inherits].
+func (t Type) ExtendsClause() iter.Seq[TypeRef] {
+	return slices.Values(t.extendsClause)
 }
 
 // Inherits returns an iterator over the declared extends clause (syntactic refs),
-// one per supertype named.
+// one per supertype named, at its first spelling.
 func (t Type) Inherits() iter.Seq[TypeRef] {
-	return func(yield func(TypeRef) bool) {
-		for _, ref := range t.inherits {
-			if !yield(ref) {
-				return
-			}
-		}
-	}
+	return slices.Values(t.inherits)
 }
 
 // SuperTypes returns an iterator over linearized ancestors.
 // Order is DFS left-to-right with keep-first deduplication.
 func (t Type) SuperTypes() iter.Seq[ResolvedTypeRef] {
-	return func(yield func(ResolvedTypeRef) bool) {
-		for _, ref := range t.superTypes {
-			if !yield(ref) {
-				return
-			}
-		}
-	}
+	return slices.Values(t.superTypes)
 }
 
 // SubTypes returns an iterator over this type's known subtypes, which are
@@ -352,13 +288,7 @@ func (t Type) SuperTypes() iter.Seq[ResolvedTypeRef] {
 // the closure ([Schema.Closure]) rather than rely on this iterator, or they
 // will silently skip cross-schema descendants.
 func (t Type) SubTypes() iter.Seq[ResolvedTypeRef] {
-	return func(yield func(ResolvedTypeRef) bool) {
-		for _, ref := range t.subTypes {
-			if !yield(ref) {
-				return
-			}
-		}
-	}
+	return slices.Values(t.subTypes)
 }
 
 // IsSubTypeOf reports whether this type is a subtype of the given type.
@@ -489,12 +419,28 @@ func (t Type) setAllAnnotations(all []Annotation) {
 	t.allAnnotations = all
 }
 
+// firstSpellings returns the clause's first reference to each supertype. A supertype
+// named twice is one edge, so each reader of the edges reports and draws it once.
+func firstSpellings(clause []TypeRef) []TypeRef {
+	first := make([]TypeRef, 0, len(clause))
+	seen := make(map[[2]string]struct{}, len(clause))
+	for _, ref := range clause {
+		name := [2]string{ref.qualifier, ref.name}
+		if _, held := seen[name]; !held {
+			seen[name] = struct{}{}
+			first = append(first, ref)
+		}
+	}
+	return first
+}
+
 // setInherits sets the declared extends clause (called during completion).
-func (t Type) setInherits(inherits []TypeRef) {
+func (t Type) setInherits(clause []TypeRef) {
 	if t.sealed {
 		panic("schema: cannot mutate sealed type")
 	}
-	t.inherits = inherits
+	t.extendsClause = clause
+	t.inherits = firstSpellings(clause)
 }
 
 // setSuppressedAnnotations records the annotations this type's inheritance

@@ -92,9 +92,9 @@
 //
 // # Merged Views and Property Identity
 //
-// A property inherited from several direct supertypes carries the UNION of their
-// merged views' annotations, so an annotation a middle type dropped does not
-// return. When that union differs from the annotations of the declaration
+// A property inherited from several direct supertypes, none of which descends from
+// another, carries the UNION of their merged views' annotations, so an annotation a
+// middle type dropped does not return. When that union differs from the annotations of the declaration
 // the entry is taken from, the entry in
 // [Type.AllProperties] is a synthesized copy, not
 // the Property its declaring type holds in [Type.Properties].
@@ -113,11 +113,7 @@
 //
 // # Immutability
 //
-// A loaded schema is immutable, and so is every value it hands out
-// save two it shares with the caller: the expression [Invariant.Expression]
-// returns and each pattern in the slice [PatternConstraint.CompiledPatterns]
-// returns. A caller must not change either, nor call [regexp.Regexp.Longest] on
-// such a pattern. This provides:
+// A loaded schema is immutable, and so is every value it hands out. This provides:
 //   - Thread-safety for concurrent access
 //   - Predictable behavior (no hidden mutations)
 //   - Safe sharing across goroutines
@@ -150,12 +146,11 @@
 //
 // # Thread Safety
 //
-// A loaded schema is safe for concurrent reads while no caller changes one of the
-// two values the Immutability section names as shared.
+// A loaded schema is safe for concurrent reads.
 //
 // # Dependencies
 //
-//	schema  ──imports──▶  diag, location, schema/expr,
+//	schema  ──imports──▶  diag, internal/expr, location,
 //	                      internal/parse, internal/source,
 //	                      golang.org/x/text/unicode/norm
 package schema

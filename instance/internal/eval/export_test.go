@@ -4,7 +4,7 @@ import (
 	"maps"
 
 	"github.com/simon-lentz/yammm/immutable"
-	"github.com/simon-lentz/yammm/schema/expr"
+	"github.com/simon-lentz/yammm/internal/expr"
 )
 
 // EmptyScope returns an empty Scope with no bindings.

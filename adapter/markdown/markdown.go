@@ -500,7 +500,7 @@ func (g *generator) buildOutline() {
 	for _, sch := range g.closure[1:] {
 		name := printableName(sch.Name())
 		text, md := "Schema "+name, "Schema "+escapeInline(name)
-		if alias := g.entry.FindImportAlias(sch.SourceID()); alias != "" {
+		if alias, ok := g.entry.FindImportAlias(sch.SourceID()); ok {
 			text += " (imported as " + alias + ")"
 			md += " (imported as " + alias + ")"
 		}

@@ -1,9 +1,20 @@
 package schema
 
 import (
+	"regexp"
+
+	"github.com/simon-lentz/yammm/internal/expr"
 	"github.com/simon-lentz/yammm/location"
-	"github.com/simon-lentz/yammm/schema/expr"
 )
+
+func init() {
+	expr.InvariantExpression = func(inv any) expr.Expression {
+		return inv.(Invariant).expr //nolint:errcheck // each caller passes an Invariant
+	}
+	expr.PatternRegexps = func(constraint any) []*regexp.Regexp {
+		return constraint.(PatternConstraint).compiled //nolint:errcheck // each caller passes a PatternConstraint
+	}
+}
 
 // Invariant represents a constraint expression attached to a type.
 // Invariants are validated at runtime; the expression is compiled at schema
@@ -40,12 +51,6 @@ func newInvariant(name string, e expr.Expression, span location.Span, doc string
 // This is displayed when the invariant evaluates to false.
 func (i Invariant) Name() string {
 	return i.name
-}
-
-// Expression returns the compiled expression for this invariant. The tree is the
-// schema's own, so a caller must not write to it.
-func (i Invariant) Expression() expr.Expression {
-	return i.expr
 }
 
 // Span returns the source location of this invariant declaration.

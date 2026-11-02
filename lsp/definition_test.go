@@ -108,3 +108,37 @@ func TestHandleDefinition_CrossSchemaImport(t *testing.T) {
 	assert.Equal(t, foundationURI, result.URI,
 		"definition should point to the imported schema file")
 }
+
+// A supertype named twice is one edge, and each spelling still answers at its own
+// position.
+func TestHandleDefinition_SecondSpellingOfARepeatedSupertype(t *testing.T) {
+	t.Parallel()
+
+	snapshot, doc, tmpDir := buildCrossSchemaSnapshotOf(t, "schema \"entry\"\n\nimport \"./foundation\" as region\n\ntype Listing extends region.Region, region.Region {\n\textra String\n}\n")
+
+	foundationPath := filepath.Join(tmpDir, "foundation.yammm")
+	for _, char := range []int{28, 43} {
+		h := handleDefinition(&fakeResolver{
+			unit: &workspace.Unit{
+				Snapshot:  snapshot,
+				Doc:       doc,
+				LocalLine: 4,
+				LocalChar: char,
+			},
+		}, testutil.DiscardLogger())
+
+		var result *protocol.Location
+		err := callHandler(t, h, &protocol.DefinitionParams{
+			TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+				TextDocument: protocol.TextDocumentIdentifier{URI: doc.URI},
+				Position:     protocol.Position{Line: 4, Character: uint32(char)},
+			},
+		}, &result)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if result == nil || result.URI != lsputil.PathToURI(foundationPath) {
+			t.Errorf("definition at character %d = %+v, want %s", char, result, foundationPath)
+		}
+	}
+}

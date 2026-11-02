@@ -10,7 +10,7 @@ import (
 
 	"github.com/alecthomas/participle/v2/lexer"
 
-	"github.com/simon-lentz/yammm/schema/expr"
+	"github.com/simon-lentz/yammm/internal/expr"
 )
 
 // Binding powers for the invariant-expression grammar, tightest last. Three

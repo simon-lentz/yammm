@@ -4,8 +4,8 @@ import (
 	"regexp"
 
 	"github.com/simon-lentz/yammm/diag"
+	"github.com/simon-lentz/yammm/internal/expr"
 	"github.com/simon-lentz/yammm/location"
-	"github.com/simon-lentz/yammm/schema/expr"
 )
 
 // File is one parsed schema source. Parse always returns one, so a caller

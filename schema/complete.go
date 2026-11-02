@@ -3,13 +3,12 @@ package schema
 import (
 	"fmt"
 	"iter"
-	"slices"
 	"strings"
 
 	"github.com/simon-lentz/yammm/diag"
+	"github.com/simon-lentz/yammm/internal/expr"
 	"github.com/simon-lentz/yammm/internal/parse"
 	"github.com/simon-lentz/yammm/location"
-	"github.com/simon-lentz/yammm/schema/expr"
 )
 
 // importResolution is one import alias's resolution outcome, handed from the
@@ -316,17 +315,13 @@ func (c *completer) indexTypes() {
 			t.setNameSpan(td.NameSpan)
 		}
 
-		// Convert declared inherits. A supertype named twice is one edge, so each
-		// reader of the clause reports and draws it once.
-		inherits := make([]TypeRef, 0, len(td.Inherits))
+		clause := make([]TypeRef, 0, len(td.Inherits))
 		for _, ref := range td.Inherits {
-			if ref != nil && !slices.ContainsFunc(inherits, func(held TypeRef) bool {
-				return held.Qualifier() == ref.Qualifier && held.Name() == ref.Name
-			}) {
-				inherits = append(inherits, NewTypeRef(ref.Qualifier, ref.Name, ref.Span))
+			if ref != nil {
+				clause = append(clause, NewTypeRef(ref.Qualifier, ref.Name, ref.Span))
 			}
 		}
-		t.setInherits(inherits)
+		t.setInherits(clause)
 
 		// Convert and set declared properties
 		props := c.convertProperties(td.Properties, td.Name)

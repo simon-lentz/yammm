@@ -553,3 +553,25 @@ type Person {
 	// Should include constraint type (String with capital S) but not "required" since it's optional
 	assert.Equal(t, "name String", detail)
 }
+
+func TestExtractReferences_EachSpellingOfARepeatedSupertype(t *testing.T) {
+	t.Parallel()
+
+	s, result := schema.LoadString(t.Context(), "schema \"m\"\ntype B { id String primary }\ntype A extends B, B { }\n", "m.yammm")
+	if !result.OK() {
+		t.Fatal(result)
+	}
+
+	var spans []location.Span
+	for _, ref := range symbols.ExtractReferences(s) {
+		if ref.Kind == symbols.RefExtends {
+			if ref.TargetName != "B" {
+				t.Errorf("reference names %q, want B", ref.TargetName)
+			}
+			spans = append(spans, ref.Span)
+		}
+	}
+	if len(spans) != 2 || spans[0] == spans[1] {
+		t.Errorf("extends references hold spans %v, want one per spelling", spans)
+	}
+}

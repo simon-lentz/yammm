@@ -6,7 +6,7 @@ import (
 	"github.com/alecthomas/participle/v2"
 	"github.com/alecthomas/participle/v2/lexer"
 
-	"github.com/simon-lentz/yammm/schema/expr"
+	"github.com/simon-lentz/yammm/internal/expr"
 )
 
 // The declaration grammar as participle structs. The loop in parse.go owns

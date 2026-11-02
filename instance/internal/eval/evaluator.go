@@ -9,8 +9,8 @@ import (
 	"strings"
 
 	"github.com/simon-lentz/yammm/immutable"
+	"github.com/simon-lentz/yammm/internal/expr"
 	"github.com/simon-lentz/yammm/internal/value"
-	"github.com/simon-lentz/yammm/schema/expr"
 )
 
 // Evaluator evaluates compiled expressions.

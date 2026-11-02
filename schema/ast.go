@@ -5,9 +5,9 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/simon-lentz/yammm/internal/expr"
 	"github.com/simon-lentz/yammm/internal/parse"
 	"github.com/simon-lentz/yammm/location"
-	"github.com/simon-lentz/yammm/schema/expr"
 )
 
 // model is the syntax-level representation of a YAMMM schema file. It carries

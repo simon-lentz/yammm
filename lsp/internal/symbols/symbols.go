@@ -256,8 +256,8 @@ func ExtractReferences(s schema.Schema) []ReferenceSymbol {
 
 	// Extract references from types
 	for t := range s.Types() {
-		// Extends references
-		for ref := range t.Inherits() {
+		// Extends references, one per spelling so each answers at its own position.
+		for ref := range t.ExtendsClause() {
 			refs = append(refs, ReferenceSymbol{
 				Kind:       RefExtends,
 				Span:       ref.Span(),

@@ -1,6 +1,7 @@
 package lsp
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/simon-lentz/yammm/lsp/internal/protocol"
@@ -84,4 +85,37 @@ func TestHandleHover_CrossSchemaQualifiedRef(t *testing.T) {
 	require.NotNil(t, result, "hover should resolve cross-schema qualified type reference")
 	assert.Contains(t, result.Contents.Value, "Region",
 		"hover content should mention the imported type name")
+}
+
+// A supertype named twice is one edge, and each spelling still answers at its own
+// position.
+func TestHandleHover_SecondSpellingOfARepeatedSupertype(t *testing.T) {
+	t.Parallel()
+
+	snapshot, doc, _ := buildCrossSchemaSnapshotOf(t, "schema \"entry\"\n\nimport \"./foundation\" as region\n\ntype Listing extends region.Region, region.Region {\n\textra String\n}\n")
+
+	for _, char := range []int{28, 43} {
+		h := handleHover(&fakeResolver{
+			unit: &workspace.Unit{
+				Snapshot:  snapshot,
+				Doc:       doc,
+				LocalLine: 4,
+				LocalChar: char,
+			},
+		}, testutil.DiscardLogger())
+
+		var result *protocol.Hover
+		err := callHandler(t, h, &protocol.HoverParams{
+			TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+				TextDocument: protocol.TextDocumentIdentifier{URI: doc.URI},
+				Position:     protocol.Position{Line: 4, Character: uint32(char)},
+			},
+		}, &result)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if result == nil || !strings.Contains(result.Contents.Value, "`Region`") {
+			t.Errorf("hover at character %d = %+v, want the type Region", char, result)
+		}
+	}
 }

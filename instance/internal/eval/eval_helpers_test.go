@@ -5,8 +5,8 @@ import (
 	"testing"
 
 	"github.com/simon-lentz/yammm/instance/internal/eval"
+	"github.com/simon-lentz/yammm/internal/expr"
 	"github.com/simon-lentz/yammm/internal/yammmtest"
-	"github.com/simon-lentz/yammm/schema/expr"
 )
 
 // lit wraps a Go value as a literal expression.

@@ -5,9 +5,9 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
+	"github.com/simon-lentz/yammm/internal/expr"
 	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
-	"github.com/simon-lentz/yammm/schema/expr"
 )
 
 func TestNewInvariant(t *testing.T) {
@@ -23,7 +23,7 @@ func TestNewInvariant(t *testing.T) {
 
 	assert.False(t, inv.IsZero())
 	assert.Equal(t, "age must be positive", inv.Name())
-	assert.Equal(t, e, inv.Expression())
+	assert.Equal(t, e, expr.InvariantExpression(inv))
 	assert.Equal(t, span, inv.Span())
 	assert.Equal(t, doc, inv.Documentation())
 }
@@ -60,7 +60,7 @@ func TestInvariant_Expression(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			inv := schema.TestNewInvariant("test", tt.expr, location.Span{}, "")
-			assert.Equal(t, tt.expr, inv.Expression())
+			assert.Equal(t, tt.expr, expr.InvariantExpression(inv))
 		})
 	}
 }

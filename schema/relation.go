@@ -2,6 +2,7 @@ package schema
 
 import (
 	"iter"
+	"slices"
 	"strings"
 
 	"github.com/simon-lentz/yammm/location"
@@ -174,13 +175,7 @@ func (r Relation) Owner() string {
 // Properties returns an iterator over edge properties.
 // For compositions, this returns an empty iterator.
 func (r Relation) Properties() iter.Seq[Property] {
-	return func(yield func(Property) bool) {
-		for _, p := range r.properties {
-			if !yield(p) {
-				return
-			}
-		}
-	}
+	return slices.Values(r.properties)
 }
 
 // Property returns the edge property with the given name, if it exists.

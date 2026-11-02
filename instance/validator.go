@@ -12,6 +12,7 @@ import (
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/instance/internal/eval"
+	"github.com/simon-lentz/yammm/internal/expr"
 	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/location/path"
 	"github.com/simon-lentz/yammm/schema"
@@ -849,12 +850,12 @@ func (v *Validator) evaluateInvariants(
 			return err //nolint:wrapcheck // spec: return ctx.Err() directly for cancellation
 		}
 
-		expr := inv.Expression()
+		tree := expr.InvariantExpression(inv)
 		if scope == nil {
 			scope = eval.PropertyScopeOf(v.scopeOf(inst))
 		}
 
-		result, err := v.evaluator.EvaluateBool(ctx, expr, scope)
+		result, err := v.evaluator.EvaluateBool(ctx, tree, scope)
 		if err != nil {
 			issue := diag.NewIssue(
 				diag.Error,

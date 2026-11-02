@@ -4,11 +4,13 @@ import (
 	"encoding/json"
 	"math"
 	"regexp"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/simon-lentz/yammm/instance/internal/eval"
+	"github.com/simon-lentz/yammm/internal/raceskip"
 	"github.com/simon-lentz/yammm/schema"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -951,5 +953,43 @@ func TestCoerceValue_CanonicalFormsAreStable(t *testing.T) {
 			require.NoError(t, err)
 			assert.Equal(t, tc.val, got, "a canonical value must coerce to itself")
 		})
+	}
+}
+
+// Every pattern judges the value, and a miss names the pattern that missed.
+func TestCheckValue_EveryPatternJudges(t *testing.T) {
+	t.Parallel()
+	c := schema.NewPatternConstraint([]*regexp.Regexp{regexp.MustCompile("^a"), regexp.MustCompile("b$")})
+	if err := eval.CheckValue("ab", c); err != nil {
+		t.Errorf("ab: %v, want nil", err)
+	}
+	for value, missed := range map[string]string{"ac": "b$", "xb": "^a"} {
+		err := eval.CheckValue(value, c)
+		if err == nil || !strings.Contains(err.Error(), missed) {
+			t.Errorf("%s: %v, want a miss naming %s", value, err, missed)
+		}
+	}
+
+	// A value that misses both names the first, on each call: the check reads the
+	// constraint's own slice, which every value shares.
+	for range 2 {
+		if err := eval.CheckValue("xy", c); err == nil || !strings.Contains(err.Error(), "^a") {
+			t.Errorf("xy: %v, want a miss naming ^a", err)
+		}
+	}
+}
+
+// The validator judges a pattern once per value. The detector makes regexp's sync.Pool
+// drop what it holds, so a match allocates under -race alone.
+func TestCheckValue_APatternAllocatesNothing(t *testing.T) {
+	raceskip.Skip(t)
+	var c schema.Constraint = schema.NewPatternConstraint([]*regexp.Regexp{regexp.MustCompile("^a"), regexp.MustCompile("b$")})
+	var value any = "ab"
+	var err error
+	if allocs := testing.AllocsPerRun(100, func() { err = eval.CheckValue(value, c) }); allocs != 0 {
+		t.Errorf("a pattern check allocated %v times, want 0", allocs)
+	}
+	if err != nil {
+		t.Error(err)
 	}
 }

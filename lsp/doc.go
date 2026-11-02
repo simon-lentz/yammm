@@ -115,9 +115,10 @@
 //
 // The [Server] handles concurrent LSP requests internally via the jrpc2
 // server, which runs requests on concurrent goroutines and notifications in
-// order. [Server.Close] does not end [Server.RunStdio], which returns only after
-// its read of the input ends. On Unix, closing a blocking descriptor does not end
-// that read.
+// order. [Server.Close] ends [Server.RunStdio], which returns nil once its in-flight
+// handlers and writes finish, and a RunStdio called after Close reads nothing. One goroutine of a
+// RunStdio that Close ended can stay in a read of the input until the input delivers
+// or ends, and it drops what it reads.
 //
 // # Dependencies
 //

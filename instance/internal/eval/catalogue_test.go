@@ -5,13 +5,13 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/simon-lentz/yammm/schema/expr"
+	"github.com/simon-lentz/yammm/internal/expr"
 )
 
 // Every builtin the language defines has an implementation, and every
 // implementation is a builtin the language defines.
 func TestBuiltinRegistry_MatchesTheCatalogue(t *testing.T) {
-	data, err := os.ReadFile("../../../schema/expr/testdata/builtin_names.txt")
+	data, err := os.ReadFile("../../../internal/expr/testdata/builtin_names.txt")
 	if err != nil {
 		t.Fatal(err)
 	}

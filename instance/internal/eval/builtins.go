@@ -12,8 +12,8 @@ import (
 	"unicode/utf8"
 
 	"github.com/simon-lentz/yammm/immutable"
+	"github.com/simon-lentz/yammm/internal/expr"
 	"github.com/simon-lentz/yammm/internal/value"
-	"github.com/simon-lentz/yammm/schema/expr"
 )
 
 // builtinEvaluator is the interface that builtins use to evaluate sub-expressions.

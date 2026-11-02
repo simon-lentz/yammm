@@ -3,7 +3,7 @@ package expr_test
 import (
 	"testing"
 
-	"github.com/simon-lentz/yammm/schema/expr"
+	"github.com/simon-lentz/yammm/internal/expr"
 )
 
 // TestLookupBuiltin_ArgsDoNotAliasTheCatalogue pins that a caller cannot write

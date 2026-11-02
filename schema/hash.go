@@ -12,8 +12,8 @@ import (
 	"regexp"
 	"slices"
 
+	"github.com/simon-lentz/yammm/internal/expr"
 	"github.com/simon-lentz/yammm/location"
-	"github.com/simon-lentz/yammm/schema/expr"
 )
 
 // StructuralHashVersion identifies the version of the structural hashing
@@ -193,7 +193,7 @@ func hashType(h io.Writer, typ Type, owners map[location.SourceID]string) {
 	invs := slices.Collect(typ.AllInvariants())
 	blobs := make([][]byte, 0, len(invs))
 	for _, inv := range invs {
-		e := inv.Expression()
+		e := inv.expr
 		if e == nil {
 			continue
 		}
@@ -212,7 +212,7 @@ func hashType(h io.Writer, typ Type, owners map[location.SourceID]string) {
 
 // hashExpression serializes one expression node deterministically: a
 // node-kind tag, then the node's content, children in order. There is no
-// canonical rendering in schema/expr to reuse, and none to drift from.
+// canonical rendering in internal/expr to reuse, and none to drift from.
 func hashExpression(w io.Writer, e expr.Expression) {
 	if e == nil {
 		writeTag(w, "x:nil")

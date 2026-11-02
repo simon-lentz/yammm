@@ -5,8 +5,8 @@ import (
 	"slices"
 	"testing"
 
+	"github.com/simon-lentz/yammm/internal/expr"
 	"github.com/simon-lentz/yammm/location"
-	"github.com/simon-lentz/yammm/schema/expr"
 )
 
 // TestParse_AnInvariantNamesEachLiteralWithNoValue pins that an invariant

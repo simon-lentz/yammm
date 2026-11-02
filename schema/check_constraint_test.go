@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/simon-lentz/yammm/diag"
+	"github.com/simon-lentz/yammm/internal/expr"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -375,8 +376,8 @@ type Car {
 func TestNewPatternConstraint_KeepsASourcePerlSyntaxRefuses(t *testing.T) {
 	posix := regexp.MustCompilePOSIX("a**")
 	c := schema.NewPatternConstraint([]*regexp.Regexp{posix})
-	if got := c.CompiledPatterns(); len(got) != 1 || got[0] != posix {
-		t.Errorf("CompiledPatterns = %v; want the caller's regexp", got)
+	if got := expr.PatternRegexps(c); len(got) != 1 || got[0] != posix {
+		t.Errorf("PatternRegexps = %v; want the caller's regexp", got)
 	}
 	if got := c.Patterns(); len(got) != 1 || got[0] != "a**" {
 		t.Errorf("Patterns = %v; want [a**]", got)

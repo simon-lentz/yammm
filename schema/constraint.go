@@ -594,13 +594,6 @@ func (c PatternConstraint) Pattern() string {
 	return c.patterns[0]
 }
 
-// CompiledPatterns returns the compiled regex patterns for internal validation use.
-// This method is for internal use by the validation layer (checkers.go).
-// External consumers should use Patterns() which returns strings per the public API spec.
-func (c PatternConstraint) CompiledPatterns() []*regexp.Regexp {
-	return slices.Clone(c.compiled)
-}
-
 func (c PatternConstraint) String() string {
 	quoted := make([]string, len(c.patterns))
 	for i, p := range c.patterns {

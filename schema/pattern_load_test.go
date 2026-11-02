@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/simon-lentz/yammm/internal/expr"
 	"github.com/simon-lentz/yammm/internal/yammmtest"
 	"github.com/simon-lentz/yammm/schema"
 )
@@ -73,7 +74,7 @@ func TestLoad_HoldsThePatternsItsSourceStates(t *testing.T) {
 		fmt.Fprintf(&b, "%s: %s as %s\n", name, c, p)
 		fmt.Fprintf(&b, "\tequal to the constructor's: %t, %t\n", p.Equal(built), built.Equal(p))
 		fmt.Fprintf(&b, "\tCheckConstraint: %v\n", schema.CheckConstraint(c))
-		for i, re := range p.CompiledPatterns() {
+		for i, re := range expr.PatternRegexps(p) {
 			if re.String() != p.Patterns()[i] {
 				t.Errorf("%s: compiled pattern %d reads %q; its source is %q", name, i, re, p.Patterns()[i])
 			}

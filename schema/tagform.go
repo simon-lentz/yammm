@@ -13,7 +13,7 @@ func TagForm(s Schema, id TypeID) string {
 	if s.IsZero() || id.IsZero() || id.SchemaPath() == s.SourceID() {
 		return id.Name()
 	}
-	if alias := s.FindImportAlias(id.SchemaPath()); alias != "" {
+	if alias, ok := s.FindImportAlias(id.SchemaPath()); ok {
 		return alias + "." + id.Name()
 	}
 	return id.Name()

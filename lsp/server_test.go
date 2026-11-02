@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"testing/synctest"
@@ -1428,4 +1429,178 @@ func TestConfigValidate_RefusesARootThatCanNeverNameADirectory(t *testing.T) {
 	if !errors.Is(err, location.ErrInvalidUTF8Path) {
 		t.Errorf("Validate(%q) = %v, want %v", typed, err, location.ErrInvalidUTF8Path)
 	}
+}
+
+// stdioPipes points os.Stdin and os.Stdout at pipes for one test, since a running
+// server reads the one and closes the other. It returns the input's write end and the
+// output's read end, and a test that calls it cannot run in parallel.
+func stdioPipes(t *testing.T) (input, output *os.File) {
+	t.Helper()
+	inR, inW, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	outR, outW, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	stdin, stdout := os.Stdin, os.Stdout
+	os.Stdin, os.Stdout = inR, outW
+	t.Cleanup(func() {
+		os.Stdin, os.Stdout = stdin, stdout
+		for _, f := range []*os.File{inR, inW, outR, outW} {
+			_ = f.Close()
+		}
+	})
+	return inW, outR
+}
+
+// writeFrame writes one framed request for a method no server handles, which draws a
+// response.
+func writeFrame(t *testing.T, w io.Writer, id int) {
+	t.Helper()
+	writeMessage(t, w, fmt.Sprintf(`{"jsonrpc":"2.0","id":%d,"method":"no/such/method"}`, id))
+}
+
+// writeMessage writes one message under the LSP's framing.
+func writeMessage(t *testing.T, w io.Writer, body string) {
+	t.Helper()
+	if _, err := fmt.Fprintf(w, "Content-Length: %d\r\n\r\n%s", len(body), body); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// awaitRunStdio fails the test unless RunStdio has returned nil within the deadline.
+func awaitRunStdio(t *testing.T, done <-chan error) {
+	t.Helper()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Errorf("RunStdio = %v, want nil", err)
+		}
+	case <-time.After(30 * time.Second):
+		t.Fatal("RunStdio did not return after Close")
+	}
+}
+
+// Close runs on the signal's goroutine and RunStdio on its own, so the race detector
+// judges this test too. The input stays open, so Close alone must end RunStdio.
+func TestServer_CloseBesideRunStdio(t *testing.T) {
+	stdioPipes(t)
+	server := lsp.NewServer(slog.New(slog.DiscardHandler), lsp.Config{})
+
+	done := make(chan error, 1)
+	go func() { done <- server.RunStdio() }()
+	if err := server.Close(); err != nil {
+		t.Fatal(err)
+	}
+	awaitRunStdio(t, done)
+}
+
+// Close ends a session that its input alone would hold open, and the session runs until
+// then.
+func TestServer_RunStdioRunsUntilClose(t *testing.T) {
+	input, output := stdioPipes(t)
+	server := lsp.NewServer(slog.New(slog.DiscardHandler), lsp.Config{})
+
+	done := make(chan error, 1)
+	go func() { done <- server.RunStdio() }()
+
+	// A response proves the server's read is running.
+	writeFrame(t, input, 1)
+	if _, err := output.Read(make([]byte, 1)); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err := <-done:
+		t.Fatalf("RunStdio = %v with its input open and no Close", err)
+	case <-time.After(200 * time.Millisecond):
+	}
+
+	if err := server.Close(); err != nil {
+		t.Fatal(err)
+	}
+	awaitRunStdio(t, done)
+}
+
+// The byte stays in the pipe for a later reader, and each later call returns too.
+func TestServer_RunStdioAfterClose_ReadsNothing(t *testing.T) {
+	input, _ := stdioPipes(t)
+	server := lsp.NewServer(slog.New(slog.DiscardHandler), lsp.Config{})
+	if err := server.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := input.WriteString("X"); err != nil {
+		t.Fatal(err)
+	}
+
+	for range 2 {
+		done := make(chan error, 1)
+		go func() { done <- server.RunStdio() }()
+		awaitRunStdio(t, done)
+	}
+
+	// A read that started would take the byte inside this wait.
+	time.Sleep(200 * time.Millisecond)
+	if err := os.Stdin.SetReadDeadline(time.Now().Add(time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	if n, err := os.Stdin.Read(make([]byte, 1)); n != 1 {
+		t.Errorf("the input held no byte after RunStdio: %v", err)
+	}
+}
+
+// RunStdio installs the notifier that carries a diagnostic from the workspace to the
+// client, and the in-process harness of the other tests installs its own.
+func TestServer_RunStdioDeliversDiagnostics(t *testing.T) {
+	input, output := stdioPipes(t)
+	server := lsp.NewServer(slog.New(slog.DiscardHandler), lsp.Config{DebounceDelay: time.Millisecond})
+
+	done := make(chan error, 1)
+	go func() { done <- server.RunStdio() }()
+
+	writeMessage(t, input, `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"processId":null,"rootUri":null,"capabilities":{}}}`)
+	writeMessage(t, input, `{"jsonrpc":"2.0","method":"initialized","params":{}}`)
+	uri := "file://" + filepath.Join(t.TempDir(), "a.yammm")
+	writeMessage(t, input, fmt.Sprintf(`{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":%q,"languageId":"yammm","version":1,"text":"schema \"a\"\ntype A extends Missing { }\n"}}}`, uri))
+
+	if err := output.SetReadDeadline(time.Now().Add(30 * time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	var seen strings.Builder
+	buf := make([]byte, 4096)
+	for !strings.Contains(seen.String(), "textDocument/publishDiagnostics") {
+		n, err := output.Read(buf)
+		if err != nil {
+			t.Fatalf("no diagnostic through RunStdio: %v, after %q", err, seen.String())
+		}
+		seen.Write(buf[:n])
+	}
+
+	if err := server.Close(); err != nil {
+		t.Fatal(err)
+	}
+	awaitRunStdio(t, done)
+}
+
+// A message can already be on its way when Close runs. It must draw nothing: the
+// reader that takes it after a stopped server panics inside jrpc2.
+func TestServer_AMessageAfterCloseIsDropped(t *testing.T) {
+	input, output := stdioPipes(t)
+	server := lsp.NewServer(slog.New(slog.DiscardHandler), lsp.Config{})
+
+	done := make(chan error, 1)
+	go func() { done <- server.RunStdio() }()
+
+	// A response proves the server's read is running.
+	writeFrame(t, input, 1)
+	if _, err := output.Read(make([]byte, 1)); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := server.Close(); err != nil {
+		t.Fatal(err)
+	}
+	writeFrame(t, input, 2)
+	awaitRunStdio(t, done)
 }

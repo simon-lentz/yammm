@@ -7,6 +7,7 @@ import (
 
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/instance"
+	"github.com/simon-lentz/yammm/schema"
 )
 
 var rangeCount int
@@ -94,5 +95,21 @@ func TestRecordIterators_ARangeAllocatesNothing(t *testing.T) {
 		if allocs := testing.AllocsPerRun(10, ranged); allocs != 0 {
 			t.Errorf("a range over %s allocated %v times, want 0", name, allocs)
 		}
+	}
+}
+
+func TestSnapshot_TypesIsAFreshSlice(t *testing.T) {
+	t.Parallel()
+	s := testSchemaWithAssociation(t)
+	g := graph.New(s)
+	company := mustValidInstance(t, s, "Company", []any{"c1"}, map[string]any{"id": "c1", "name": "Acme"})
+	if res := g.Add(t.Context(), company); !res.OK() {
+		t.Fatal(res)
+	}
+	snap := g.Snapshot()
+	want := slices.Clone(snap.Types())
+	snap.Types()[0] = schema.TypeID{}
+	if got := snap.Types(); !slices.Equal(got, want) {
+		t.Errorf("Types = %v after a write to an earlier result, want %v", got, want)
 	}
 }

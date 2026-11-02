@@ -17,7 +17,6 @@
 // Primary API — the load, validate, assemble, persist pipeline:
 //
 //   - [github.com/simon-lentz/yammm/schema]: Type system, constraints, annotations, and schema loading
-//   - [github.com/simon-lentz/yammm/schema/expr]: Expression AST types for invariants
 //   - [github.com/simon-lentz/yammm/instance]: Instance validation and constraint checking
 //   - [github.com/simon-lentz/yammm/graph]: Instance graph construction and integrity checking
 //   - [github.com/simon-lentz/yammm/snapshot]: Graph snapshot persistence in the .ys format

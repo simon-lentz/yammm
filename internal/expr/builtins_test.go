@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/simon-lentz/yammm/schema/expr"
+	"github.com/simon-lentz/yammm/internal/expr"
 )
 
 func TestLookupBuiltin_IsCaseInsensitive(t *testing.T) {

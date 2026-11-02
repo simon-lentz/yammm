@@ -8,8 +8,8 @@ import (
 
 	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/instance/internal/eval"
+	"github.com/simon-lentz/yammm/internal/expr"
 	"github.com/simon-lentz/yammm/schema"
-	"github.com/simon-lentz/yammm/schema/expr"
 )
 
 // checkFloat accepts every unsigned value coerceFloat converts: a uint64
@@ -240,7 +240,7 @@ func TestMinMax_WithArgumentRefuseAListReceiver(t *testing.T) {
 
 // A datatype the language cannot check at runtime — a shape or a constraint
 // keyword the parser still emits as a DatatypeLiteral — is an error, by the
-// one set schema/expr defines for both layers.
+// one set internal/expr defines for both layers.
 func TestDatatypeCheck_UnknownNameErrors(t *testing.T) {
 	t.Parallel()
 	for _, name := range []string{"Vector", "List", "Enum", "Pattern", "int", "number"} {

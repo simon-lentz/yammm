@@ -157,7 +157,7 @@ func tagForm(s schema.Schema, id schema.TypeID) string {
 	if id.IsZero() || id.SchemaPath() == s.SourceID() {
 		return id.Name()
 	}
-	if alias := s.FindImportAlias(id.SchemaPath()); alias != "" {
+	if alias, ok := s.FindImportAlias(id.SchemaPath()); ok {
 		return alias + "." + id.Name()
 	}
 	return id.Name()

@@ -1,6 +1,6 @@
 // Package eval provides expression evaluation for instance validation.
 //
-// This package evaluates compiled expressions from [github.com/simon-lentz/yammm/schema/expr] against
+// This package evaluates compiled expressions from [github.com/simon-lentz/yammm/internal/expr] against
 // instance property values. It is used internally by the instance validation
 // layer to evaluate invariants and constraints.
 //
@@ -33,7 +33,7 @@
 // # Built-in Functions
 //
 // The evaluator implements every builtin the catalogue in
-// [github.com/simon-lentz/yammm/schema/expr] defines, under the names the
+// [github.com/simon-lentz/yammm/internal/expr] defines, under the names the
 // DSL resolves case-insensitively:
 //
 //   - Collection: Map, Filter, Count, All, Any, AllOrNone, Reduce, Compact, Unique, Len, Sum, First, Last, Sort, Reverse, Flatten, Contains

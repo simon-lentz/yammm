@@ -6,7 +6,7 @@
 // parse sits below the schema object model. Of this module's packages it
 // depends only on the foundation packages — [github.com/simon-lentz/yammm/diag],
 // [github.com/simon-lentz/yammm/location] and
-// [github.com/simon-lentz/yammm/schema/expr] — and knows nothing about type
+// [github.com/simon-lentz/yammm/internal/expr] — and knows nothing about type
 // resolution, inheritance, imports or any other semantic phase. Everything it
 // reports is a fact about the text.
 //

@@ -8,10 +8,10 @@ import (
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/instance/internal/eval"
+	"github.com/simon-lentz/yammm/internal/expr"
 	"github.com/simon-lentz/yammm/internal/parse"
 	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
-	"github.com/simon-lentz/yammm/schema/expr"
 )
 
 // The static invariant checker and the evaluator implement one scope contract,
@@ -744,7 +744,7 @@ func TestInvariantContract_EveryRetypedResultIsRefusedByItsConsumer(t *testing.T
 		expr.ResultBoolean: {`-> Abs > 0`, "takes a number"},
 	}
 
-	data, err := os.ReadFile("../schema/expr/testdata/builtin_names.txt")
+	data, err := os.ReadFile("../internal/expr/testdata/builtin_names.txt")
 	if err != nil {
 		t.Fatal(err)
 	}

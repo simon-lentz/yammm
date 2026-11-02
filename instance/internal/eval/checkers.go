@@ -13,6 +13,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/simon-lentz/yammm/diag"
+	"github.com/simon-lentz/yammm/internal/expr"
 	"github.com/simon-lentz/yammm/internal/value"
 	"github.com/simon-lentz/yammm/schema"
 )
@@ -569,16 +570,15 @@ func checkPattern(val any, c schema.Constraint) error {
 		return refused
 	}
 
-	pc, ok := c.(schema.PatternConstraint)
-	if !ok {
+	if _, ok := c.(schema.PatternConstraint); !ok {
 		return errors.New("invalid pattern constraint type")
 	}
 
-	compiled := pc.CompiledPatterns()
-	patterns := pc.Patterns()
-	for i, pattern := range compiled {
+	// A pattern's String is its source text, and the hook takes c as it stands, so a
+	// value this path judges allocates nothing.
+	for _, pattern := range expr.PatternRegexps(c) {
 		if !pattern.MatchString(s) {
-			return constraintFail("value %s does not match pattern %s", diag.QuoteValue(s), patterns[i])
+			return constraintFail("value %s does not match pattern %s", diag.QuoteValue(s), pattern.String())
 		}
 	}
 	return nil

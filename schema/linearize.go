@@ -8,9 +8,9 @@ import (
 	"strings"
 
 	"github.com/simon-lentz/yammm/diag"
+	"github.com/simon-lentz/yammm/internal/expr"
 	"github.com/simon-lentz/yammm/internal/parse"
 	"github.com/simon-lentz/yammm/location"
-	"github.com/simon-lentz/yammm/schema/expr"
 )
 
 // visitState tracks DFS progress for cycle detection.
@@ -607,8 +607,8 @@ func (c *completer) resolveInheritedAnnotations(t Type, result []Property) {
 // but its ancestor. Drop's merged view already reflects Base with Drop's
 // decisions applied, so keeping Base would make the annotation resolver treat a
 // resolved chain as two rivals — a spurious disagreement. The reduction is over
-// the declared supertypes only (a handful), via [Type.IsSubTypeOf] against the
-// transitively-closed [Type.SuperTypes], so it is cheap; it is NOT the
+// the declared supertypes only, against the union of their transitively-closed
+// [Type.SuperTypes], so a long clause stays linear in those sets; it is NOT the
 // closure-wide maximal scan that made an earlier design superlinear.
 func (c *completer) directSuperTypes(t Type) []Type {
 	var resolved []Type
@@ -631,16 +631,15 @@ func (c *completer) directSuperTypes(t Type) []Type {
 		return resolved
 	}
 
+	ancestors := make(map[TypeID]bool)
+	for _, s := range resolved {
+		for _, st := range s.superTypes {
+			ancestors[st.id] = true
+		}
+	}
 	var out []Type
 	for _, cand := range resolved {
-		subsumed := false
-		for _, other := range resolved {
-			if other.IsSubTypeOf(cand.ID()) {
-				subsumed = true
-				break
-			}
-		}
-		if !subsumed {
+		if !ancestors[cand.ID()] {
 			out = append(out, cand)
 		}
 	}
@@ -1158,9 +1157,9 @@ func sameExpression(a, b expr.Expression) bool {
 // and the result is a.
 func (c *completer) unifyInvariants(a, b Invariant) (Invariant, bool) {
 	if len(c.noValue) == 0 {
-		return a, sameExpression(a.Expression(), b.Expression())
+		return a, sameExpression(a.expr, b.expr)
 	}
-	e, ok := unifyNode(a.Expression(), b.Expression(), c.noValue)
+	e, ok := unifyNode(a.expr, b.expr, c.noValue)
 	if !ok {
 		return Invariant{}, false
 	}

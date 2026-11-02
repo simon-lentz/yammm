@@ -15,6 +15,7 @@ import (
 	"golang.org/x/text/unicode/norm"
 
 	"github.com/simon-lentz/yammm/diag"
+	"github.com/simon-lentz/yammm/internal/expr"
 	"github.com/simon-lentz/yammm/internal/yammmtest"
 	"github.com/simon-lentz/yammm/schema"
 )
@@ -531,10 +532,10 @@ type Item {
 	invs := slices.Collect(itemType.Invariants())
 	require.Len(t, invs, 1)
 
-	e := invs[0].Expression()
+	e := expr.InvariantExpression(invs[0])
 	require.NotNil(t, e, "invariant expression should survive load pipeline")
 
-	// Verify the expression operator (Expression() now returns expr.Expression directly)
+	// Verify the expression operator (the hook returns expr.Expression directly)
 	assert.Equal(t, ">=", e.Op(), "expression should be a >= comparison")
 }
 
@@ -1556,7 +1557,7 @@ type Person {
 
 	// Verify both invariant expressions survived the pipeline
 	for _, inv := range invs {
-		require.NotNil(t, inv.Expression(),
+		require.NotNil(t, expr.InvariantExpression(inv),
 			"invariant %q expression should survive load pipeline", inv.Name())
 	}
 }

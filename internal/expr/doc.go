@@ -1,8 +1,14 @@
-// Package expr provides expression types for YAMMM schema invariants.
+// Package expr holds the expression tree of a YAMMM invariant.
 //
-// This package contains the compile-time representation of expressions. It
-// defines typed Expression nodes that can be stored in the schema and evaluated
-// at runtime by the instance layer.
+// The parser builds the tree, the schema package stores and checks it, and the
+// instance layer's evaluator runs it. Nothing outside this module reads the tree.
+//
+// # Hooks
+//
+// A schema.Invariant keeps its tree, and a schema.PatternConstraint its compiled
+// patterns, in unexported fields. The instance layer reads both through
+// [InvariantExpression] and [PatternRegexps], which the schema package sets in its
+// init.
 //
 // # Expression Types
 //
@@ -47,7 +53,7 @@
 //
 // # Dependencies
 //
-//	schema/expr  ──imports──▶  (stdlib only)
+//	internal/expr  ──imports──▶  (stdlib only)
 //
 // # Known Limitations
 //
