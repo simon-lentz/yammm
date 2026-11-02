@@ -1542,11 +1542,16 @@ func TestServer_RunStdioAfterClose_ReadsNothing(t *testing.T) {
 
 	// A read that started would take the byte inside this wait.
 	time.Sleep(200 * time.Millisecond)
-	if err := os.Stdin.SetReadDeadline(time.Now().Add(time.Second)); err != nil {
+	// A Windows pipe takes no deadline, and a closed write end bounds the read on every host.
+	if err := input.Close(); err != nil {
 		t.Fatal(err)
 	}
-	if n, err := os.Stdin.Read(make([]byte, 1)); n != 1 {
-		t.Errorf("the input held no byte after RunStdio: %v", err)
+	held, err := io.ReadAll(os.Stdin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(held) != "X" {
+		t.Errorf("the input held %q after RunStdio, want the byte", held)
 	}
 }
 
@@ -1564,9 +1569,10 @@ func TestServer_RunStdioDeliversDiagnostics(t *testing.T) {
 	uri := "file://" + filepath.Join(t.TempDir(), "a.yammm")
 	writeMessage(t, input, fmt.Sprintf(`{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":%q,"languageId":"yammm","version":1,"text":"schema \"a\"\ntype A extends Missing { }\n"}}}`, uri))
 
-	if err := output.SetReadDeadline(time.Now().Add(30 * time.Second)); err != nil {
-		t.Fatal(err)
-	}
+	// A Windows pipe takes no deadline, and a closed write end bounds the read on every host.
+	serverOutput := os.Stdout
+	timer := time.AfterFunc(30*time.Second, func() { _ = serverOutput.Close() })
+	defer timer.Stop()
 	var seen strings.Builder
 	buf := make([]byte, 4096)
 	for !strings.Contains(seen.String(), "textDocument/publishDiagnostics") {

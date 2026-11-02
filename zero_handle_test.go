@@ -2,6 +2,7 @@ package yammm_test
 
 import (
 	"reflect"
+	"runtime"
 	"slices"
 	"testing"
 
@@ -46,6 +47,11 @@ func callZero(t *testing.T, zero any, skip ...string) []zeroCall {
 // included, so no zero handle hands out an iterator that fails at its range.
 func TestZeroHandle_ASchemaRecordsAccessorPanicsAtTheCall(t *testing.T) {
 	t.Parallel()
+	// Each call is a recovered nil dereference, and on windows/amd64 one can write below
+	// the goroutine's stack and corrupt the heap (golang/go#81238).
+	if runtime.GOOS == "windows" {
+		t.Skip("a recovered nil dereference can corrupt the heap here: golang/go#81238")
+	}
 	for _, zero := range []any{
 		schema.Schema{},
 		schema.Type{},
