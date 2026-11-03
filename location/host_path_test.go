@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"testing"
 
@@ -453,6 +454,7 @@ func TestResolveHostPath_AFileReplacedDuringAResolveKeepsItsSpelling(t *testing.
 	}
 	stop := make(chan struct{})
 	var replacer sync.WaitGroup
+	var replaced atomic.Int64
 	replacer.Go(func() {
 		next := filepath.Join(dir, "next")
 		for {
@@ -465,10 +467,17 @@ func TestResolveHostPath_AFileReplacedDuringAResolveKeepsItsSpelling(t *testing.
 				t.Error(err)
 				return
 			}
-			if err := os.Rename(next, target); err != nil {
+			err := os.Rename(next, target)
+			// Windows refuses to replace a file while a resolve holds a handle
+			// on it: that replace has not happened yet.
+			if runtime.GOOS == "windows" && errors.Is(err, fs.ErrPermission) {
+				continue
+			}
+			if err != nil {
 				t.Error(err)
 				return
 			}
+			replaced.Add(1)
 		}
 	})
 	for range 5000 {
@@ -480,6 +489,9 @@ func TestResolveHostPath_AFileReplacedDuringAResolveKeepsItsSpelling(t *testing.
 	}
 	close(stop)
 	replacer.Wait()
+	if replaced.Load() == 0 {
+		t.Error("no replace landed while the resolves ran, so none was judged")
+	}
 }
 
 // heldByADescriptor is what each file [checkReadsThrough] reads holds.
