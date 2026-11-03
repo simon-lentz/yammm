@@ -39,9 +39,9 @@ func (id TypeID) Name() string {
 // For a disk-loaded schema the rendering embeds an absolute filesystem path,
 // so it is machine-local: two hosts that hold one schema text at different
 // paths render different strings. Use it for diagnostics and for a sort order on one host, never as a
-// persisted identity or an identity compared across hosts —
-// [StructuralHash] and the .ys wire key on (schema name, type name) for that
-// reason.
+// persisted identity or an identity compared across hosts. For that reason
+// the .ys wire keys a type, and [StructuralHash] a relation target, on (schema
+// name, type name).
 func (id TypeID) String() string {
 	if id.schemaPath.IsZero() {
 		return id.name

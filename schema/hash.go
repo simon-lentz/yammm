@@ -28,31 +28,11 @@ import (
 // zeros, so two closure members declaring one type name no longer collide.
 const StructuralHashVersion = 4
 
-// StructuralHash computes a deterministic, content-based identity over the
-// rules that decide what instance data is valid, across the schema's whole
-// import closure: for every member of [Schema.Closure], its types,
-// properties, relations, compositions, data types, constraints, invariants,
-// and the abstract and part markers.
-//
-// Two schemas that hash the same agree on every hashed rule in their closures.
-// Import edges are not hashed, so one member set under two import graphs hashes
-// the same, though a name one graph resolves can miss under the other. The converse does not hold: a hash can move on a change to an
-// imported schema this schema never references, because closure membership
-// is part of the identity. Each member is framed under its schema name, the
-// entry schema first and the remaining members ordered by name, so the
-// order imports are declared in does not enter the digest.
-//
-// Annotations are deliberately excluded — they configure downstream store
-// DDL or, for @writeOnce, the write path's update, and never reject data. So are import aliases and source paths: a member
-// frame carries the schema's declared name, never its source, and a relation
-// target is the pair (owning schema name, type name) — never a path. A hashed
-// path would make embedded:// and disk loads of one schema text disagree, and
-// consumer dispatch relies on the hash carrying no source path. A supertype
-// hashes by name alone: inheritance merges the ancestor's members into the
-// subtype and those members are hashed here. An ancestor's abstract marker and an
-// ancestor member the subtype re-declares do not enter the subtype's frame.
-//
-// The returned string has the format "sha256:<hex>".
+// StructuralHash returns a deterministic "sha256:<hex>" digest of the rules
+// that decide what instance data is valid, over every member of
+// [Schema.Closure]. Two schemas with one digest agree on every hashed rule in
+// their closures. The package doc's Structural Hash section states what is
+// hashed and what is left out, the entry schema's name surface among it.
 //
 // Panics if s is zero.
 func StructuralHash(s Schema) string {
@@ -65,12 +45,10 @@ func StructuralHash(s Schema) string {
 	// Domain separator.
 	writeTag(h, "yammm-schema-v4")
 
-	// Closure() returns the entry schema first; the rest are re-ordered by
-	// name so a re-ordered import list hashes the same. The slice is a copy,
-	// so sorting it in place touches no cached state. Ties on name keep
-	// closure order, which is deterministic, so the digest stays so.
+	// The entry schema stays first and the rest sort by name, so import order is
+	// not hashed. The slice is a copy, so sorting it touches no cached state.
 	members := slices.Collect(s.Closure())
-	slices.SortStableFunc(members[1:], func(a, b Schema) int {
+	slices.SortFunc(members[1:], func(a, b Schema) int {
 		return compareName(a.Name(), b.Name())
 	})
 

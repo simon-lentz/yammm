@@ -711,8 +711,8 @@ func toSlice(val any) ([]any, bool) {
 type TypeChecker func(val any) (bool, string)
 
 // checkerOf adapts a kind's check function to a TypeChecker, so a datatype
-// check (`=~ Kind`) applies exactly the rule a property of that kind does.
-// A nil constraint carries no bounds, layout or member set.
+// check (`=~ Kind`) applies the rule a property of that kind applies when it
+// declares no constraint. A nil constraint carries no bounds, layout or member set.
 func checkerOf(check func(val any, c schema.Constraint) error) TypeChecker {
 	return func(val any) (bool, string) {
 		if err := check(val, nil); err != nil {
@@ -749,9 +749,9 @@ func IsUUID() TypeChecker {
 }
 
 // IsTimestamp returns a TypeChecker that validates timestamp values: a
-// time.Time whose RFC 3339 text reads back, or a string in RFC 3339. A bare datatype names no layout, so a
-// value stored under a Timestamp["layout"] property matches only when that
-// layout is RFC 3339.
+// time.Time whose RFC 3339 text reads back, or a string in RFC 3339. It reads
+// RFC 3339 whatever layout a property declares, so "2030-01-02", which a
+// Timestamp["2006-01-02"] property holds, does not match.
 func IsTimestamp() TypeChecker {
 	return checkerOf(checkTimestamp)
 }

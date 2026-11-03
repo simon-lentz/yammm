@@ -73,6 +73,27 @@ func TestStructuralHash_CoversTransitiveImports(t *testing.T) {
 	}
 }
 
+const (
+	baseDecl = "type Base {\n\tid String primary\n\tx String\n}\n"
+	codeDecl = "type Code = String[3, 3]\n"
+)
+
+// withEntry adds an entry schema importing a and b, with the given declarations.
+func withEntry(members map[string]string, decls string) map[string]string {
+	members["entry.yammm"] = "schema \"entry\"\n\nimport \"a.yammm\" as a\nimport \"b.yammm\" as b\n\n" + decls
+	return members
+}
+
+// twoBases is a closure whose members a and b each declare Base alike.
+func twoBases(decls string) map[string]string {
+	return withEntry(map[string]string{"a.yammm": "schema \"a\"\n\n" + baseDecl, "b.yammm": "schema \"b\"\n\n" + baseDecl}, decls)
+}
+
+// twoCodes is a closure whose members a and b each declare Code alike.
+func twoCodes(decls string) map[string]string {
+	return withEntry(map[string]string{"a.yammm": "schema \"a\"\n\n" + codeDecl, "b.yammm": "schema \"b\"\n\n" + codeDecl}, decls)
+}
+
 // TestStructuralHash_ClosureCoverage is the closure-level coverage statement:
 // which facts about a schema's import closure enter the digest and which are
 // deliberately excluded, each pinned by a pair of loads. A change to what the
@@ -130,6 +151,42 @@ func TestStructuralHash_ClosureCoverage(t *testing.T) {
 				"a.yammm":     "schema \"a\"\n\ntype Alpha {\n\tid String primary\n}\n",
 				"b.yammm":     "schema \"b\"\n\ntype Beta {\n\tid String primary\n}\n",
 			},
+			entry:    "entry.yammm",
+			wantSame: true,
+		},
+		{
+			name: "the entry's direct import set is excluded",
+			a: map[string]string{
+				"entry.yammm": "schema \"entry\"\n\nimport \"la.yammm\" as la\nimport \"lb.yammm\" as lb\n\ntype Root {\n\tid String primary\n}\n",
+				"la.yammm":    "schema \"la\"\n\ntype U {\n\tid String primary\n}\n",
+				"lb.yammm":    "schema \"lb\"\n\ntype T {\n\tid String primary\n}\n",
+			},
+			b: map[string]string{
+				"entry.yammm": "schema \"entry\"\n\nimport \"la.yammm\" as la\n\ntype Root {\n\tid String primary\n}\n",
+				"la.yammm":    "schema \"la\"\n\nimport \"lb.yammm\" as lb\n\ntype U {\n\tid String primary\n}\n",
+				"lb.yammm":    "schema \"lb\"\n\ntype T {\n\tid String primary\n}\n",
+			},
+			entry:    "entry.yammm",
+			wantSame: true,
+		},
+		{
+			name:     "the member that owns a supertype declared alike is excluded",
+			a:        twoBases("type K extends a.Base {\n\tlabel String\n}\n"),
+			b:        twoBases("type K extends b.Base {\n\tlabel String\n}\n"),
+			entry:    "entry.yammm",
+			wantSame: true,
+		},
+		{
+			name:     "the member that owns a data type declared alike is excluded",
+			a:        twoCodes("type K {\n\tid String primary\n\tc a.Code\n}\n"),
+			b:        twoCodes("type K {\n\tid String primary\n\tc b.Code\n}\n"),
+			entry:    "entry.yammm",
+			wantSame: true,
+		},
+		{
+			name:     "the data type a property names is excluded",
+			a:        twoCodes("type K {\n\tid String primary\n\tc a.Code\n}\n"),
+			b:        twoCodes("type K {\n\tid String primary\n\tc String[3, 3]\n}\n"),
 			entry:    "entry.yammm",
 			wantSame: true,
 		},

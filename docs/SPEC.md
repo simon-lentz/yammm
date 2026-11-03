@@ -1421,7 +1421,7 @@ Supported datatype keywords for type checking:
 - `Timestamp` - checks for valid timestamp values
 - `Date` - checks for valid date values
 
-Each check applies the rule a property of that kind applies: `=~ Float` is false for NaN and infinities, `=~ String` is false for a number, and `=~ Timestamp` accepts an RFC 3339 string or a `time.Time` whose RFC 3339 text reads back. `Vector`, `List`, `Enum` and `Pattern` are datatype keywords but not type checks — they name a shape or a constraint, not a kind a value can have — and `=~` against one is refused at schema load with `E_INVALID_INVARIANT`.
+Each check applies the rule a property of that kind applies when it declares no constraint: `=~ Float` is false for NaN and infinities, `=~ String` is false for a number, and `=~ Timestamp` accepts an RFC 3339 string or a `time.Time` whose RFC 3339 text reads back. `=~ Timestamp` reads RFC 3339 whatever layout a property declares: a value stored under `d Timestamp["2006-01-02"]`, such as `"2030-01-02"`, validates there and `d =~ Timestamp` is false. An invariant has no layout to apply, since `=~` judges a value at run time and sees no property's constraint. `Vector`, `List`, `Enum` and `Pattern` are datatype keywords but not type checks — they name a shape or a constraint, not a kind a value can have — and `=~` against one is refused at schema load with `E_INVALID_INVARIANT`.
 
 Numeric type checks follow the property rules: `5 =~ Float` holds, because an integer widens to a float, and `5.0 =~ Integer` does not — a float is never an integer, whole or not.
 
@@ -1864,14 +1864,21 @@ Codes are stable identifiers for programmatic matching. `diag/code.go` holds the
 Each compiled schema has a deterministic structural hash (SHA-256) computed over its whole import closure. For every member schema — the entry schema and each schema it imports, directly or transitively — the input covers:
 
 - The member's schema name
-- Type names, properties (with constraints and modifiers), the primary-key set, relations (with targets and cardinalities), compositions, association edge properties, and inheritance edges
+- Type names, properties (with constraints and modifiers), the primary-key set, relations (with targets and cardinalities), compositions, association edge properties, and each supertype by its type name
 - Each type's `abstract` and `part` markers
 - Invariant expressions (the invariant's *name* is excluded — it is the failure message)
 - Data type names and constraints
 
 Two schemas that hash the same agree on every one of those rules everywhere in their closures. The converse does not hold: a hash can also move on a change to an imported schema this schema never references, because closure membership is part of the identity. Members are framed under their schema names, the entry schema first and the rest ordered by name, so the order imports are declared in does not enter the digest.
 
-**Excluded, deliberately:** annotations — they drive downstream store DDL and write shape and never reject data, so a schema that gains its first annotation hashes identically and every persisted `.ys` snapshot header hash stays valid; import aliases and source paths — a member is framed by its declared name, never its source, a relation target is the pair (owning schema name, type name), and a supertype hashes by name alone, so `embedded://` and disk loads of one schema text agree; and documentation and source positions. Adding an invariant, an edge property, or flipping a type between concrete and `part` changes the hash in any member.
+**Excluded, deliberately:** annotations — they drive downstream store DDL and write shape and never reject data, so a schema that gains its first annotation hashes identically and every persisted `.ys` snapshot header hash stays valid; source paths — a member is framed by its declared name, never its source, and a relation target is the pair (owning schema name, type name), so `embedded://` and disk loads of one schema text agree; and documentation and source positions. Adding an invariant, an edge property, or flipping a type between concrete and `part` changes the hash in any member.
+
+Two more facts are outside the hash, and two schemas that hash the same can differ in them:
+
+- **The import graph and the entry schema's name surface**: no member's imports are hashed, so one member set under two import graphs or two aliases hashes the same. The entry schema's direct import set and its import aliases decide which type names the schema resolves, such as `lb.T`, so a type name a caller validates data under can resolve under one and miss under the other; they change no rule a type applies. A `.ys` snapshot names a type by its schema's name, and a snapshot read refuses an instances group, or a duplicate record that states no parent, that names a type the schema reaches only through an intermediate import, with `E_SNAPSHOT_UNNAMEABLE_TYPE`.
+- **Which member owns a supertype, and which data type a property names.** A supertype hashes by its type name, and the subtype hashes the members it inherits. A property hashes its resolved constraint and never a data type's name. So `K extends a.Base` and `K extends b.Base` hash the same when `a` and `b` declare `Base` alike, and a property typed `a.Code`, one typed `b.Code` and one typed `String[3, 3]` hash the same when each `Code` is `String[3, 3]`. Instance validity agrees in each case.
+
+So a test that compares generated code's `SchemaHash` constant with the hash cannot see stale generated code after any change the hash leaves out: the generated code embeds the schema sources and their documentation comments. After a change to the name surface, a supertype's owner or a property's data type, a field's Go type or a graph field can differ too.
 
 The hash is deterministic. Most inputs are sorted by name; invariant blobs are sorted by their serialized bytes, and the operands of one expression are hashed in declared order, because operand order is semantic.
 

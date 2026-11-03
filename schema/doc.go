@@ -79,16 +79,51 @@
 //
 // # Structural Hash
 //
-// [StructuralHash] computes a deterministic SHA-256 hash over the rules that
+// [StructuralHash] computes a deterministic SHA-256 digest over the rules that
 // decide what instance data is valid, across the schema's whole import
-// closure — among them types, data types, the abstract and part markers,
-// properties, primary keys, supertypes, relations, constraints and invariants,
-// in every member. Used by the snapshot package for compatibility verification.
+// closure. For every member of [Schema.Closure] it hashes the member's schema
+// name, its types with their properties, primary keys, relations,
+// compositions, supertypes, constraints, invariants and abstract and part
+// markers, and its data types. Each member is framed under its schema name, the entry schema
+// first and the rest ordered by name, so the order imports are declared in does
+// not enter the digest. A relation target is the pair (owning schema name, type
+// name). Closure membership is part of the identity, so the digest moves on a
+// change to an imported schema this schema never references. The snapshot
+// package uses the digest for compatibility verification.
 //
-// Annotations are deliberately EXCLUDED from the hash: they drive downstream
-// store DDL and write shape, not which instance data is valid, so a schema
-// that gains its first annotation still hashes identically and every persisted
-// snapshot header hash stays valid. See [StructuralHash] for the full rule.
+// Two schemas with one digest agree on every hashed rule in their closures.
+// The digest leaves out the following, and two such schemas can differ in each:
+//
+//   - Invariant names, documentation comments and source spans. An invariant's
+//     name is its failure message; its expression is hashed.
+//   - Annotations. They drive downstream store DDL and the write path's
+//     update, and never reject data, so a schema that gains its first
+//     annotation still hashes identically and every persisted snapshot header
+//     hash stays valid.
+//   - Source paths. A member is framed by its declared name, so embedded://
+//     and disk loads of one schema text agree.
+//   - The entry schema's name surface: its direct import set and its import
+//     aliases. One member set under two import graphs or two aliases hashes the
+//     same, though a type name one of them resolves, such as lb.T, can miss
+//     under the other. A snapshot names a type by its schema's name, and the
+//     snapshot package judges each document against the schema it reads with:
+//     it refuses an instances group, or a duplicate record that states no
+//     parent, that names a type the schema reaches only through an intermediate
+//     import, with E_SNAPSHOT_UNNAMEABLE_TYPE.
+//   - Which member owns a supertype, and which data type a property names. A
+//     supertype hashes by its type name, and the subtype hashes the members it
+//     inherits. A property hashes its resolved constraint and never a data
+//     type's name. The member that declares a supertype or a data type hashes
+//     it in its own frame. So "K extends a.Base" and "K extends b.Base" hash the
+//     same when a and b declare Base alike, and a property typed a.Code, one
+//     typed b.Code and one typed String[3, 3] hash the same when each Code is
+//     String[3, 3]. Instance validity agrees in each case.
+//
+// So a test that compares a generated package's SchemaHash constant with
+// StructuralHash cannot see stale generated code after any change the digest
+// leaves out: the code embeds the schema sources and their documentation
+// comments. After a change to the name surface, a supertype's owner or a
+// property's data type, a field's Go type or a graph field can differ too.
 //
 // # Merged Views and Property Identity
 //
