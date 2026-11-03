@@ -176,8 +176,8 @@ The module is organized into layers with strict dependency ordering:
 Primary API              : schema, instance, graph, snapshot
 Foundation               : location, diag, immutable
 Tooling                  : format
-Adapter                  : adapter/json, adapter/neo4j,
-                           adapter/gogen, adapter/jschema, adapter/markdown
+Adapter                  : adapter/json, adapter/neo4j
+Generator                : schema/gogen, schema/jschema, schema/markdown
 LSP                      : lsp (Language Server Protocol server)
 CLI                      : cmd/yammm, cmd/yammm-lsp
 Internal                 : internal/* (no compatibility guarantees)
@@ -197,9 +197,9 @@ Internal                 : internal/* (no compatibility guarantees)
 | `format` | Canonical `.yammm` file formatting |
 | `adapter/json` | JSON/JSONC parsing with location tracking |
 | `adapter/neo4j` | The Neo4j mapping of a schema; its package doc lists what it holds |
-| `adapter/gogen` | Go source generation from a schema; its package doc lists what it emits |
-| `adapter/jschema` | JSON Schema (draft 2020-12) generation from a schema, for editor-assisted data authoring |
-| `adapter/markdown` | Markdown + Mermaid documentation generation from a schema |
+| `schema/gogen` | Go source generation from a schema; its package doc lists what it emits |
+| `schema/jschema` | JSON Schema (draft 2020-12) generation from a schema, for editor-assisted data authoring |
+| `schema/markdown` | Markdown + Mermaid documentation generation from a schema |
 | `lsp` | Language Server Protocol server for `.yammm` files |
 
 ### Entry Point Pattern
@@ -210,7 +210,7 @@ Diagnostic-producing operations return `(T, diag.Result)`:
 - `result.HasErrors()`: An Error or a Fatal: a semantic failure (structured issues), or the condition above
 - `result.OK()`: Success (may have warnings). A validator's zero instance beside it held an `instance.Refused` value, which its producer reported
 
-Pure adapter transformations (JSON serialization, Cypher batch queries, Go source, JSON Schema, and Markdown generation) return their output beside a Go `error`, as `(T, error)`, but for `adapter/neo4j`'s `BuildBatchRelationshipMergeQuery`, a query template that cannot fail; the Neo4j adapter's schema-derived DDL and shape builders report through a `diag.Result`, and its drop-statement builders return `(string, error)`. Snapshot serialization (`snapshot.Marshal`) is diagnostic-producing and returns `(T, diag.Result)`.
+The pure transformations of the adapters and the generators (JSON serialization, Cypher batch queries, Go source, JSON Schema, and Markdown generation) return their output beside a Go `error`, as `(T, error)`, but for `adapter/neo4j`'s `BuildBatchRelationshipMergeQuery`, a query template that cannot fail; the Neo4j adapter's schema-derived DDL and shape builders report through a `diag.Result`, and its drop-statement builders return `(string, error)`. Snapshot serialization (`snapshot.Marshal`) is diagnostic-producing and returns `(T, diag.Result)`.
 
 ## Schema Language
 

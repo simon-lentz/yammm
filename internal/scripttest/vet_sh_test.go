@@ -218,8 +218,10 @@ func TestVetScript_FailsATrackedDirectoryNoBuildReads(t *testing.T) {
 	} {
 		f.write(dir+"/x.go", "//go:build "+constraint+"\n\npackage "+dir+"\n")
 	}
-	f.write("adapter/markdown/x.go", "//go:build mermaid\n\npackage markdown\n")
-	f.write("adapter/neo4j/integration/x.go", "//go:build neo4j_integration\n\npackage integration\n")
+	// Each constraint excludes the other tag, so the check job's build under both
+	// tags cannot read the directory and only its own linux/amd64 entry does.
+	f.write("schema/markdown/x.go", "//go:build mermaid && !neo4j_integration\n\npackage markdown\n")
+	f.write("adapter/neo4j/integration/x.go", "//go:build neo4j_integration && !mermaid\n\npackage integration\n")
 	f.write(".gitignore", "untracked/\n")
 	f.index()
 	f.write("untracked/u.go", "package untracked\n")

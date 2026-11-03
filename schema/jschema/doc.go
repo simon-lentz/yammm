@@ -7,7 +7,7 @@
 //
 // # Schema-In, Bytes-Out
 //
-// Like adapter/gogen — and unlike the data adapters (adapter/json,
+// Like schema/gogen — and unlike the data adapters (adapter/json,
 // adapter/neo4j) — jschema has no instance-data path: it never
 // parses, validates, or serializes instances, and it imports neither
 // instance nor graph. It maps a completed schema to one JSON document,
@@ -115,7 +115,7 @@
 // the right names one kind and one identity; a closure holds one schema per
 // name. A key therefore depends on the set of claims, never on declaration or
 // import order, and adding a declaration never gives a key to another entity.
-// adapter/gogen names Go declarations by the same rule over more claimants:
+// schema/gogen names Go declarations by the same rule over more claimants:
 // its reserved names, inline enums, element enums, value constants and
 // per-layout types claim too, and it compares Go spellings after the
 // identifier transform. So Url and URL, or a type Graph, keep their bare keys
@@ -282,11 +282,10 @@
 //
 // # Dependencies
 //
-//	adapter/jschema  ──imports──▶  schema
+//	schema/jschema  ──imports──▶  schema
 //
 // jschema imports only public yammm packages and the standard library —
-// no internal/* (the adapter-layer carve-out documented in adapter/doc.go
-// stays gogen-only), no instance/graph, no diag, and no third-party
+// no internal/*, no instance/graph, no diag, and no third-party
 // modules. The contract-alignment test suite also imports the yammm packages
 // that read instance data, and carries the package's one third-party
 // test-only dependency, a JSON Schema validator used to prove yammm and the

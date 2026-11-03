@@ -84,7 +84,7 @@
 //
 // The Markdown is read as GitHub reads it, CRLF and a lone CR as line endings:
 // CommonMark with GitHub's extensions, parsed by goldmark, the reader
-// adapter/markdown puts its structural questions to. An invocation is a line of
+// schema/markdown puts its structural questions to. An invocation is a line of
 // a fenced code block that, less its indentation, is the program's name alone
 // or the name followed by white space, or a code span that starts with the name
 // and white space; a span may cross the lines of its paragraph, and each line

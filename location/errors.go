@@ -32,7 +32,7 @@ var ErrEmptySourceID = errors.New("location: synthetic source ID cannot be empty
 //
 // Returned by: ValidateSyntheticSourceID. NormalizeSyntheticKey returns it wrapped, for a key that looks absolute as
 // given or once cleaned and in NFC. So do schema.SyntheticImportKey, for an
-// importer key or an import that does, and adapter/gogen.Marshal, for a source
+// importer key or an import that does, and schema/gogen.Marshal, for a source
 // whose embedded key does. A load under schema.WithSyntheticRoot reports such
 // a source key as a Fatal E_LOAD_IO_FAILURE carrying the error's text, so
 // errors.Is cannot match it there.
@@ -43,7 +43,7 @@ var ErrAbsolutePathSourceID = errors.New("location: synthetic source ID looks li
 // character, a bidi or other format character, a space past ASCII, a private-use
 // or unassigned code point. Such a character would let two identities read alike.
 //
-// Returned by: ValidateSyntheticSourceID. NormalizeSyntheticKey, schema.SyntheticImportKey and adapter/gogen.Marshal return it
+// Returned by: ValidateSyntheticSourceID. NormalizeSyntheticKey, schema.SyntheticImportKey and schema/gogen.Marshal return it
 // wrapped.
 var ErrUnprintableSourceID = errors.New("location: synthetic source ID holds a character that does not print")
 

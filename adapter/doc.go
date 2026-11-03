@@ -1,9 +1,9 @@
 // Package adapter provides format-specific adapters that parse data into
-// [instance.RawInstance] values and write a [graph.Snapshot], plus a family of
-// schema-to-artifact generators. Each adapter subpackage targets a
-// specific output — a data format (JSON, Neo4j Cypher) or a generated
-// artifact (Go source, JSON Schema, Markdown) — and may have its own external
-// dependencies.
+// [instance.RawInstance] values and write a [graph.Snapshot]. Each adapter
+// subpackage targets one data format (JSON, Neo4j Cypher) and may have its own
+// external dependencies. The generators that convert a schema to an artifact
+// (Go source, JSON Schema, Markdown) are packages under schema/: gogen,
+// jschema and markdown.
 //
 // # Architectural Boundary
 //
@@ -12,10 +12,9 @@
 //
 //   - Dependency hygiene via import granularity: Go packages are granular at the
 //     import level. Consumers who import only schema and instance depend on no
-//     adapter's third-party module: adapter/json pulls tidwall/jsonc,
-//     adapter/markdown goldmark and golang.org/x/net/html, and adapter/neo4j
-//     the Neo4j driver's dbtype package, each only when that adapter is
-//     imported.
+//     adapter's third-party module: adapter/json pulls tidwall/jsonc and
+//     adapter/neo4j the Neo4j driver's dbtype package, each only when that
+//     adapter is imported.
 //
 //   - Clear library/consumer boundary: Each adapter subpackage imports the
 //     library to use it, as a downstream consumer's own adapter does.
@@ -31,45 +30,25 @@
 // the Neo4j adapter's other functions take no snapshot. No adapter takes an
 // [instance.ValidInstance].
 //
-// The generator adapters (gogen, jschema, markdown) take neither: they
-// are schema-in, bytes-out. Each consumes a completed schema and emits an
-// artifact — Go source, a JSON Schema document, a Markdown reference — with no
-// instance-data path and no dependency on instance or graph.
-//
 // # Dependency Direction
 //
 // Adapters depend on library packages; library packages never depend on adapters:
 //
-//	adapter/gogen     ──imports──▶  schema, location, internal/ident
-//	adapter/jschema   ──imports──▶  schema
 //	adapter/json      ──imports──▶  instance, diag, location, location/path, graph,
 //	                                immutable, schema, adapter/internal/constraintof,
 //	                                adapter/internal/refusal, github.com/tidwall/jsonc
-//	adapter/markdown  ──imports──▶  location, schema, github.com/yuin/goldmark,
-//	                                github.com/yuin/goldmark/ast,
-//	                                github.com/yuin/goldmark/extension,
-//	                                github.com/yuin/goldmark/extension/ast,
-//	                                github.com/yuin/goldmark/renderer,
-//	                                github.com/yuin/goldmark/renderer/html,
-//	                                github.com/yuin/goldmark/text,
-//	                                github.com/yuin/goldmark/util,
-//	                                golang.org/x/net/html
 //	adapter/neo4j     ──imports──▶  schema, graph, instance, immutable, diag,
 //	                                adapter/internal/constraintof, adapter/internal/refusal,
 //	                                github.com/neo4j/neo4j-go-driver/v6/neo4j/dbtype
 //
 // # Layering Discipline
 //
-// The production code of every adapter but one imports no core internal/*
-// package, keeping a clean separation between core library internals and the
-// adapter layer: the data adapters (json, neo4j) and two of the three
-// generators (jschema, markdown) reach only for the public API and
-// adapter/internal. The gogen
-// adapter is the sole exception: it imports internal/ident, the module's
-// rune-aware identifier-casing transform, to derive Go identifiers, and no
-// other production package imports it. The rule binds production code
-// alone: an adapter test can import a core internal package, as test support or
-// as the internals the test checks against.
+// The production code of every adapter imports no core internal/* package,
+// keeping a clean separation between core library internals and the adapter
+// layer: json and neo4j reach only for the public API and adapter/internal.
+// The rule binds production code alone: an adapter test can import a core
+// internal package, as test support or as the internals the test checks
+// against.
 //
 // An internal package under adapter/ is not an exception to this rule: it is the
 // adapters', not the core's. adapter/internal holds the two the adapters share:
@@ -78,9 +57,6 @@
 //
 // # Subpackages
 //
-//   - [gogen]: Go source generator (structs, enums, EDGE_ associations, a Graph aggregate, and the embedded schema source) from a schema and its import closure
-//   - [jschema]: JSON Schema (draft 2020-12) generator describing the instance data the validator accepts, for editor-assisted authoring
 //   - [json]: JSON adapter that reads JSONC and records a location for every instance it parses
-//   - [markdown]: Markdown reference generator with a Mermaid class diagram over the import closure
 //   - [neo4j]: Neo4j constraint and index DDL, label mapping, write query generation, and drift diffs against a live database
 package adapter

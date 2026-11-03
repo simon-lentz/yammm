@@ -1832,8 +1832,12 @@ func TestTestWorkflow_EveryJobTimesOutAfterItsTests(t *testing.T) {
 	}
 }
 
-// mermaidPkgDir is the npm package the mermaid job installs.
-const mermaidPkgDir = "adapter/markdown/testdata/mermaid"
+// mermaidPkg is the Go package the mermaid job tests, and mermaidPkgDir the
+// npm package it installs, which that package's mermaid-tagged test reads.
+const (
+	mermaidPkg    = "schema/markdown"
+	mermaidPkgDir = mermaidPkg + "/testdata/mermaid"
+)
 
 // mermaidInstall is the mermaid job's install command. npm ci runs a package's
 // lifecycle scripts, which could write GITHUB_ENV, unless told not to; the
@@ -1854,7 +1858,7 @@ var mermaidActions = map[string]map[string]string{
 }
 
 // mermaidJobFindings reports each link of the mermaid job's chain that does
-// not hold: mermaidInstall installs the lock-filed package; adapter/markdown
+// not hold: mermaidInstall installs the lock-filed package; schema/markdown
 // holds a test the mermaid build tag admits on the job's runner, and none that
 // needs the tag and the runner does not build (tagged and unbuilt, from
 // taggedTestFiles); one step runs every test of the package under that tag; the
@@ -1904,7 +1908,7 @@ func mermaidJobFindings(wf workflow, tagged, unbuilt, lintTags []string, gitigno
 		findings = append(findings, "no step of jobs.mermaid runs "+mermaidInstall+" in "+mermaidPkgDir)
 	}
 	if len(tagged) == 0 {
-		findings = append(findings, "adapter/markdown declares no test behind the mermaid build tag that the job's runner builds")
+		findings = append(findings, mermaidPkg+" declares no test behind the mermaid build tag that the job's runner builds")
 	}
 	for _, name := range unbuilt {
 		findings = append(findings, name+" declares a test behind the mermaid build tag that the job's runner does not build")
@@ -2013,10 +2017,10 @@ var mermaidGoTestFlags = map[string]bool{"count": true, "tags": true, "timeout":
 var unplainChar = regexp.MustCompile(`[^A-Za-z0-9 \t._/=,-]`)
 
 // mermaidStepFindings holds the mermaid job's go test step to the one form that
-// runs every test of adapter/markdown under the mermaid tag: a run of one line
+// runs every test of schema/markdown under the mermaid tag: a run of one line
 // of plain text, so no comment, continuation or second line reaches bash; go
 // test first; only mermaidGoTestFlags, with -count present and positive, -tags
-// mermaid alone and -v true; the one package ./adapter/markdown/; and no step
+// mermaid alone and -v true; the one package ./schema/markdown/; and no step
 // key beyond name, run and timeout-minutes.
 func mermaidStepFindings(s step) []string {
 	findings := stepKeyFindings("the go test step", s, "name", "run", "timeout-minutes")
@@ -2074,8 +2078,8 @@ func mermaidStepFindings(s step) []string {
 	if tags != "mermaid" {
 		findings = append(findings, fmt.Sprintf("the go test step's -tags is %q, want mermaid alone, the tag the check builds with", tags))
 	}
-	if len(pkgs) != 1 || (pkgs[0] != "./adapter/markdown/" && pkgs[0] != "./adapter/markdown") {
-		findings = append(findings, fmt.Sprintf("the go test step runs %q, want the one package ./adapter/markdown/", pkgs))
+	if len(pkgs) != 1 || (pkgs[0] != "./"+mermaidPkg+"/" && pkgs[0] != "./"+mermaidPkg) {
+		findings = append(findings, fmt.Sprintf("the go test step runs %q, want the one package ./%s/", pkgs, mermaidPkg))
 	}
 	return findings
 }
@@ -2137,7 +2141,7 @@ func runnerBuild(t *testing.T) build.Context {
 	return ctx
 }
 
-// taggedTestFiles reads srcs, adapter/markdown's test files by name, in the
+// taggedTestFiles reads srcs, schema/markdown's test files by name, in the
 // runner's build context. tagged holds each file that declares a test and that
 // runner compiles with the mermaid tag and not without it. unbuilt holds each
 // file that declares a test, whose build constraint needs the tag, and that
@@ -2304,13 +2308,13 @@ func isGoTestFunc(fn *ast.FuncDecl) bool {
 	return false
 }
 
-// The mermaid job parses adapter/markdown's diagrams with real Mermaid only
+// The mermaid job parses schema/markdown's diagrams with real Mermaid only
 // when every link of its chain holds.
 func TestTestWorkflow_TheMermaidJobParsesTheDiagrams(t *testing.T) {
 	t.Parallel()
 	var wf workflow
 	decodeYAML(t, fromRoot(".github/workflows/yammm_test.yml"), &wf)
-	names, err := filepath.Glob(fromRoot("adapter/markdown/*_test.go"))
+	names, err := filepath.Glob(fromRoot(mermaidPkg + "/*_test.go"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2339,6 +2343,12 @@ func TestTestWorkflow_TheMermaidJobParsesTheDiagrams(t *testing.T) {
 	for _, f := range mermaidJobFindings(wf, tagged, unbuilt, lint.Run.BuildTags, string(ignore)) {
 		t.Error(f)
 	}
+	// The job's install step runs npm ci in mermaidPkgDir, which needs the
+	// lock-filed package there; the workflow check compares spellings alone.
+	lockFiled := func(rel string) bool { return rel == "package.json" || rel == "package-lock.json" }
+	if got := trackedFiles(t, fromRoot(mermaidPkgDir), lockFiled); len(got) != 2 {
+		t.Errorf("%s tracks %q, want package.json and package-lock.json, which the mermaid job's %s installs", mermaidPkgDir, got, mermaidInstall)
+	}
 }
 
 // The check itself: each form it refuses draws one finding naming the break,
@@ -2346,7 +2356,7 @@ func TestTestWorkflow_TheMermaidJobParsesTheDiagrams(t *testing.T) {
 func TestMermaidJobFindings_RefusesEachBrokenLink(t *testing.T) {
 	t.Parallel()
 	const (
-		run    = "go test -count=1 -tags mermaid -timeout 5m -v ./adapter/markdown/"
+		run    = "go test -count=1 -tags mermaid -timeout 5m -v ./schema/markdown/"
 		ignore = "x\n" + mermaidPkgDir + "/node_modules/\n"
 		// The job's steps by index.
 		checkout, setupGo, npm, goTest = 0, 1, 3, 4
@@ -2379,8 +2389,8 @@ func TestMermaidJobFindings_RefusesEachBrokenLink(t *testing.T) {
 		tagged []string
 	}{
 		"the known form":           {good, tagged},
-		"flags as -f=v and --f":    {withRun("go test --count=2 -tags=mermaid --timeout=5m -v=true ./adapter/markdown"), tagged},
-		"the last -tags applies":   {withRun("go test -count=1 -tags x -tags mermaid ./adapter/markdown/"), tagged},
+		"flags as -f=v and --f":    {withRun("go test --count=2 -tags=mermaid --timeout=5m -v=true ./schema/markdown"), tagged},
+		"the last -tags applies":   {withRun("go test -count=1 -tags x -tags mermaid ./schema/markdown/"), tagged},
 		"a block scalar's newline": {withRun(run + "\n"), tagged},
 		"a step timeout":           {wfOf(func(_ *workflow, _ *job, s *step) { s.TimeoutMinutes = 5 }), tagged},
 		"setup-go without inputs":  {wfOf(func(_ *workflow, j *job, _ *step) { j.Steps[setupGo].With = nil }), tagged},
@@ -2398,15 +2408,15 @@ func TestMermaidJobFindings_RefusesEachBrokenLink(t *testing.T) {
 	}{
 		{"no job", "is not set", workflow{Jobs: map[string]job{}}, tagged, []string{"mermaid"}, ignore},
 		{"no npm ci", "no step of jobs.mermaid runs npm ci", wfOf(func(_ *workflow, j *job, _ *step) { j.Steps = slices.Delete(j.Steps, npm, npm+1) }), tagged, []string{"mermaid"}, ignore},
-		{"npm ci elsewhere", "the install step runs in", wfOf(func(_ *workflow, j *job, _ *step) { j.Steps[npm].WorkDir = "adapter/markdown" }), tagged, []string{"mermaid"}, ignore},
+		{"npm ci elsewhere", "the install step runs in", wfOf(func(_ *workflow, j *job, _ *step) { j.Steps[npm].WorkDir = "schema/markdown" }), tagged, []string{"mermaid"}, ignore},
 		{"npm ci running scripts", `runs "npm ci", want`, wfOf(func(_ *workflow, j *job, _ *step) { j.Steps[npm].Run = "npm ci" }), tagged, []string{"mermaid"}, ignore},
 		{"an env on npm ci", "the install step sets env", wfOf(func(_ *workflow, j *job, _ *step) { j.Steps[npm].Env = map[string]string{"X": "1"} }), tagged, []string{"mermaid"}, ignore},
 		{"no go test step", "in 0 steps", wfOf(func(_ *workflow, j *job, _ *step) { j.Steps = j.Steps[:goTest] }), tagged, []string{"mermaid"}, ignore},
 		{"two go test steps", "in 2 steps", wfOf(func(_ *workflow, j *job, _ *step) { j.Steps = append(j.Steps, step{Run: run}) }), tagged, []string{"mermaid"}, ignore},
 		{"no tag", `-tags is ""`, withRun(strings.Replace(run, "-tags mermaid ", "", 1)), tagged, []string{"mermaid"}, ignore},
 		{"a tag beside mermaid", `-tags is "mermaid,x"`, withRun(strings.Replace(run, "-tags mermaid", "-tags mermaid,x", 1)), tagged, []string{"mermaid"}, ignore},
-		{"another package", "want the one package", withRun(strings.Replace(run, "./adapter/markdown/", "./...", 1)), tagged, []string{"mermaid"}, ignore},
-		{"a second package", "want the one package", withRun(run + " ./adapter/json/"), tagged, []string{"mermaid"}, ignore},
+		{"another package", "want the one package ./schema/markdown/", withRun(strings.Replace(run, "./schema/markdown/", "./...", 1)), tagged, []string{"mermaid"}, ignore},
+		{"a second package", "want the one package ./schema/markdown/", withRun(run + " ./adapter/json/"), tagged, []string{"mermaid"}, ignore},
 		{"a -run", "passes -run", withRun(strings.Replace(run, " ./", " -run TestA ./", 1)), tagged, []string{"mermaid"}, ignore},
 		{"a -skip", "passes -skip", withRun(strings.Replace(run, " ./", " -skip=TestA ./", 1)), tagged, []string{"mermaid"}, ignore},
 		{"a -test.run", "passes -test.run", withRun(strings.Replace(run, " ./", " -test.run=TestA ./", 1)), tagged, []string{"mermaid"}, ignore},
@@ -2415,12 +2425,12 @@ func TestMermaidJobFindings_RefusesEachBrokenLink(t *testing.T) {
 		{"-count=0", "runs no test", withRun(strings.Replace(run, "-count=1", "-count=0", 1)), tagged, []string{"mermaid"}, ignore},
 		{"-v=false", "passes -v=false", withRun(strings.Replace(run, "-v ", "-v=false ", 1)), tagged, []string{"mermaid"}, ignore},
 		{"an -exec", "passes -exec=true", withRun(strings.Replace(run, " ./", " -exec=true ./", 1)), tagged, []string{"mermaid"}, ignore},
-		{"a -coverpkg decoy", "passes -coverpkg", withRun("go test -count=1 -tags mermaid -coverpkg ./adapter/markdown/ ./adapter/json/"), tagged, []string{"mermaid"}, ignore},
+		{"a -coverpkg decoy", "passes -coverpkg", withRun("go test -count=1 -tags mermaid -coverpkg ./schema/markdown/ ./adapter/json/"), tagged, []string{"mermaid"}, ignore},
 		{"go test not first", "does not start with go test", withRun("echo " + run), tagged, []string{"mermaid"}, ignore},
 		{"another go", "does not start with go test", withRun("./" + run), tagged, []string{"mermaid"}, ignore},
 		{"a second command line", "more than one line", withRun(run + "\necho done"), tagged, []string{"mermaid"}, ignore},
 		{"a comment line", "more than one line", withRun("# every test\n" + run), tagged, []string{"mermaid"}, ignore},
-		{"a continued line", "more than one line", withRun("go test -count=1 \\\n  -tags mermaid -v ./adapter/markdown/"), tagged, []string{"mermaid"}, ignore},
+		{"a continued line", "more than one line", withRun("go test -count=1 \\\n  -tags mermaid -v ./schema/markdown/"), tagged, []string{"mermaid"}, ignore},
 		{"a comment", `holds '#'`, withRun(run + " # every test"), tagged, []string{"mermaid"}, ignore},
 		{"a trailing backslash", `holds '\\'`, withRun(run + " \\"), tagged, []string{"mermaid"}, ignore},
 		{"a form feed", `holds '\f'`, withRun("\f" + run), tagged, []string{"mermaid"}, ignore},
@@ -2433,7 +2443,7 @@ func TestMermaidJobFindings_RefusesEachBrokenLink(t *testing.T) {
 		{"a second command on the line", `holds ';'`, withRun(strings.Replace(run, "-timeout 5m", "-timeout=5m;true", 1)), tagged, []string{"mermaid"}, ignore},
 		{"a quoted word", `holds '\''`, withRun(strings.Replace(run, "-tags mermaid", "-tags 'mermaid'", 1)), tagged, []string{"mermaid"}, ignore},
 		{"a GitHub expression", `holds '$'`, withRun(strings.Replace(run, "-tags mermaid", "-tags ${{ env.TAGS }}", 1)), tagged, []string{"mermaid"}, ignore},
-		{"a glob", `holds '*'`, withRun(strings.Replace(run, "./adapter/markdown/", "./adapter/mark*/", 1)), tagged, []string{"mermaid"}, ignore},
+		{"a glob", `holds '*'`, withRun(strings.Replace(run, "./schema/markdown/", "./schema/mark*/", 1)), tagged, []string{"mermaid"}, ignore},
 		{"an env on the step", "the go test step sets env", wfOf(func(_ *workflow, _ *job, s *step) { s.Env = map[string]string{"GOENV": "/tmp/go.env"} }), tagged, []string{"mermaid"}, ignore},
 		{"an env on the job", "jobs.mermaid sets env", wfOf(func(_ *workflow, j *job, _ *step) { j.Env = map[string]string{"GOFLAGS": "-run=TestA"} }), tagged, []string{"mermaid"}, ignore},
 		{"an env on the workflow", "the workflow sets env", wfOf(func(wf *workflow, _ *job, _ *step) { wf.Env = map[string]string{"CGO_ENABLED": "0"} }), tagged, []string{"mermaid"}, ignore},
@@ -2444,8 +2454,8 @@ func TestMermaidJobFindings_RefusesEachBrokenLink(t *testing.T) {
 		{"a runner group", `in group "any"`, wfOf(func(_ *workflow, j *job, _ *step) { j.runnerGroup = "any" }), tagged, []string{"mermaid"}, ignore},
 		{"continue-on-error", "the go test step sets continue-on-error", wfOf(func(_ *workflow, _ *job, s *step) { s.ContinueOnError = true }), tagged, []string{"mermaid"}, ignore},
 		{"a shell", "sets shell", wfOf(func(_ *workflow, _ *job, s *step) { s.Shell = "python" }), tagged, []string{"mermaid"}, ignore},
-		{"a working directory", "the go test step sets working-directory", wfOf(func(_ *workflow, _ *job, s *step) { s.WorkDir = "adapter" }), tagged, []string{"mermaid"}, ignore},
-		{"workflow defaults", "the workflow sets defaults", wfOf(func(wf *workflow, _ *job, _ *step) { wf.Defaults.Run.WorkingDirectory = "adapter" }), tagged, []string{"mermaid"}, ignore},
+		{"a working directory", "the go test step sets working-directory", wfOf(func(_ *workflow, _ *job, s *step) { s.WorkDir = "schema" }), tagged, []string{"mermaid"}, ignore},
+		{"workflow defaults", "the workflow sets defaults", wfOf(func(wf *workflow, _ *job, _ *step) { wf.Defaults.Run.WorkingDirectory = "schema" }), tagged, []string{"mermaid"}, ignore},
 		{"job defaults", "jobs.mermaid sets defaults", wfOf(func(_ *workflow, j *job, _ *step) { j.Defaults.Run.Shell = "sh" }), tagged, []string{"mermaid"}, ignore},
 		{"a container", "jobs.mermaid sets container", wfOf(func(_ *workflow, j *job, _ *step) { j.keys = append(j.keys, "container") }), tagged, []string{"mermaid"}, ignore},
 		{"a matrix", "jobs.mermaid sets strategy", wfOf(func(_ *workflow, j *job, _ *step) { j.Strategy.Matrix.Axes = map[string][]string{"go": {"1.26"}} }), tagged, []string{"mermaid"}, ignore},
@@ -2457,7 +2467,7 @@ func TestMermaidJobFindings_RefusesEachBrokenLink(t *testing.T) {
 		{"checkout of another ref", "passes ref", wfOf(func(_ *workflow, j *job, _ *step) { j.Steps[checkout].With = map[string]any{"ref": "main"} }), tagged, []string{"mermaid"}, ignore},
 		{"another Go", "passes go-version-file", wfOf(func(_ *workflow, j *job, _ *step) { j.Steps[setupGo].With["go-version-file"] = "old/go.mod" }), tagged, []string{"mermaid"}, ignore},
 		{"an env on an action", `"Set up Go" sets env`, wfOf(func(_ *workflow, j *job, _ *step) { j.Steps[setupGo].Env = map[string]string{"X": "1"} }), tagged, []string{"mermaid"}, ignore},
-		{"no tagged test", "declares no test", good, nil, []string{"mermaid"}, ignore},
+		{"no tagged test", "schema/markdown declares no test", good, nil, []string{"mermaid"}, ignore},
 		{"a linter blind to the tag", "linter", good, tagged, []string{"neo4j_integration"}, ignore},
 		{"node_modules tracked", ".gitignore", good, tagged, []string{"mermaid"}, "x\n"},
 	} {

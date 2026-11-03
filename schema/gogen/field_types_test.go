@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/simon-lentz/yammm/adapter/gogen"
 	"github.com/simon-lentz/yammm/schema"
+	"github.com/simon-lentz/yammm/schema/gogen"
 )
 
 // marshalString loads src as one schema and generates it.

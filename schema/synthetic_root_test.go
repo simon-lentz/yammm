@@ -257,7 +257,7 @@ func TestWithSyntheticRoot_DotSlashKeyMatchesBareKey(t *testing.T) {
 }
 
 // TestWithSyntheticRoot_KeyEscapingRootResolves pins the decision to permit a
-// key outside the root: adapter/gogen writes one for an entry that sits
+// key outside the root: schema/gogen writes one for an entry that sits
 // outside the module root, a layout it documents as legal. The identity
 // keeps the "..", because the joined string is never cleaned.
 func TestWithSyntheticRoot_KeyEscapingRootResolves(t *testing.T) {

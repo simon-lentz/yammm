@@ -150,7 +150,7 @@
 // adapter writes decodes into the aggregate. A type the entry schema reaches only
 // through another import has no such name, so no document can hold it at top
 // level, and it takes no Graph field. Its struct is still emitted, as every type
-// in the closure is. The keys are the envelope keys adapter/jschema emits.
+// in the closure is. The keys are the envelope keys schema/jschema emits.
 //
 //	type Graph struct {
 //		Person []*Person `json:"Person,omitempty"`
@@ -376,11 +376,10 @@
 //
 // # Dependencies
 //
-//	adapter/gogen  ──imports──▶  schema, location, internal/ident
+//	schema/gogen  ──imports──▶  schema, location, internal/ident
 //
-// gogen is the one adapter that imports a core internal package — internal/ident, for
-// the identifier-casing transform that turns schema names into Go
-// identifiers — and, unlike the data adapters, it imports neither instance/graph
-// nor diag. The generated output depends only on the standard library, importing at
+// gogen imports one core internal package, internal/ident, for the
+// identifier-casing transform that turns schema names into Go identifiers.
+// Unlike the data adapters, it imports neither instance/graph nor diag. The generated output depends only on the standard library, importing at
 // most "time" and "encoding/json".
 package gogen

@@ -8,8 +8,8 @@ import (
 	"testing"
 	"unicode"
 
-	"github.com/simon-lentz/yammm/adapter/gogen"
 	"github.com/simon-lentz/yammm/schema"
+	"github.com/simon-lentz/yammm/schema/gogen"
 )
 
 // unprintableRoot returns a module root whose name holds a no-break space, a

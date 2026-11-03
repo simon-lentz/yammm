@@ -2,7 +2,7 @@
   "name": "yammm-markdown-mermaid-oracle",
   "private": true,
   "type": "module",
-  "description": "Parses adapter/markdown's class diagrams with real Mermaid for the mermaid-tagged test.",
+  "description": "Parses schema/markdown's class diagrams with real Mermaid for the mermaid-tagged test.",
   "engines": {
     "node": ">=22.13.0"
   },

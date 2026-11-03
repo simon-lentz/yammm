@@ -13,13 +13,13 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/simon-lentz/yammm/adapter/gogen"
-	"github.com/simon-lentz/yammm/adapter/jschema"
 	"github.com/simon-lentz/yammm/schema"
+	"github.com/simon-lentz/yammm/schema/gogen"
+	"github.com/simon-lentz/yammm/schema/jschema"
 )
 
 // TestMarshal_GraphKeysMatchTheJSONSchemaEnvelope holds gogen's Graph keys to
-// adapter/jschema's envelope keys over both packages' fixtures: the two
+// schema/jschema's envelope keys over both packages' fixtures: the two
 // generators describe one document, so they must name one set of top-level
 // keys, and every key must be a tag the entry schema resolves to a concrete
 // type.

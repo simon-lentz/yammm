@@ -83,7 +83,7 @@ Load schemas, validate raw data, build instance graphs, persist snapshots, and e
 | `references/type-system.md` | Constraint types, aliases, abstract/part, inheritance | Type system questions, narrowing rules, PK restrictions |
 | `references/patterns.md` | Common modeling patterns with examples | Looking for schema design patterns |
 | `references/api-pipeline.md` | Go API: load -> validate -> graph -> snapshot | Writing Go code that uses yammm packages |
-| `references/adapters.md` | JSON/Neo4j/gogen/jschema/markdown adapter usage | Exporting, importing, or generating Go / JSON Schema / Markdown from a schema |
+| `references/adapters.md` | JSON/Neo4j adapter and gogen/jschema/markdown generator usage | Exporting, importing, or generating Go / JSON Schema / Markdown from a schema |
 | `references/diagnostics.md` | Error codes, troubleshooting | Understanding or fixing errors |
 | `references/cli.md` | CLI commands and workflows | Using yammm from the terminal |
 

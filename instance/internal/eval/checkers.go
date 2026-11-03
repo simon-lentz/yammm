@@ -192,7 +192,7 @@ func CoerceValue(val any, c schema.Constraint) (any, error) {
 		return out, nil
 	case schema.KindString, schema.KindEnum, schema.KindPattern:
 		// A named type over string reaches here from a caller holding
-		// adapter/gogen's output. Store the base value: accepting the carrier
+		// schema/gogen's output. Store the base value: accepting the carrier
 		// and then persisting it would put a type the wire and the writers
 		// never see into the validated instance.
 		s, ok := value.GetString(val)

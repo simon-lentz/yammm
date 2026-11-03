@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/simon-lentz/yammm/adapter/gogen"
 	"github.com/simon-lentz/yammm/schema"
+	"github.com/simon-lentz/yammm/schema/gogen"
 )
 
 // TestMarshal_WithPackageNameRefusesAnInvalidName pins that a name no package

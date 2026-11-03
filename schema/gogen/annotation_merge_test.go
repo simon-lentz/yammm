@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/simon-lentz/yammm/adapter/gogen"
 	"github.com/simon-lentz/yammm/schema"
+	"github.com/simon-lentz/yammm/schema/gogen"
 )
 
 // mergedAnnotationSchema declares the same datatype-typed property on two

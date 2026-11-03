@@ -129,7 +129,7 @@ type C extends A, B {
 // A merged property is a synthesized copy, so it is NOT pointer-identical to the
 // declared property any type's own slice holds. Origin bridges the two views —
 // the contract every identity-keyed consumer of a merged property set depends on
-// (the generator adapters key their datatype tables by the declared pointer).
+// (the generators key their datatype tables by the declared pointer).
 func TestAnnotation_Union_OriginResolvesToDeclaredProperty(t *testing.T) {
 	t.Parallel()
 	s := loadOK(t, `schema "main"

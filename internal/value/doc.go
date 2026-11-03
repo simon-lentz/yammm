@@ -41,7 +41,7 @@
 // of its base. The fallback runs only when
 // the type switch misses, so canonical input pays nothing for it.
 //
-// The named-type rule is not a convenience. adapter/gogen emits
+// The named-type rule is not a convenience. schema/gogen emits
 // `type <Name> <base>` for every DataType and inline enum, so rejecting named
 // types meant this library's own generator produced values its own validator
 // and evaluator refused.

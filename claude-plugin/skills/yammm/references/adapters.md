@@ -1,8 +1,8 @@
-# Adapter Reference
+# Adapter and Generator Reference
 
-The JSON adapter parses raw data into `RawInstance` values for validation, and the data adapters serialize validated data for export. Five adapters are provided: the two data adapters (JSON, Neo4j) and the three gen-family generators (gogen, jschema, markdown).
+The JSON adapter parses raw data into `RawInstance` values for validation, and the data adapters serialize validated data for export. Two data adapters are provided (JSON, Neo4j), and this reference also covers the three generators (gogen, jschema, markdown).
 
-All adapters live in `adapter/{json,neo4j,gogen,jschema,markdown}` packages. The library never imports adapters -- adapters import the library. The data adapters serialize instance data, and the JSON adapter also parses it; the generators are schema-in/bytes-out and never touch instance data.
+The data adapters live in `adapter/{json,neo4j}` and the generators in `schema/{gogen,jschema,markdown}`. The library never imports either -- each imports the library. The data adapters serialize instance data, and the JSON adapter also parses it; the generators are schema-in/bytes-out and never touch instance data.
 
 ---
 
@@ -211,10 +211,10 @@ source := adapter.InferSchema(constraints, relationships, "inventory")
 
 ---
 
-## gogen Adapter (Go Code Generation)
+## gogen Generator (Go Code Generation)
 
 ```go
-import "github.com/simon-lentz/yammm/adapter/gogen"
+import "github.com/simon-lentz/yammm/schema/gogen"
 ```
 
 Schema-in, bytes-out: `gogen.Marshal` maps a loaded, resolved schema to formatted, type-checked Go source — one struct per type, named Enum/DataType types, a generated `Date` type and one type per custom `Timestamp` layout (each embedding `time.Time` with a JSON codec in the stored string form), `EDGE_` association structs, a Graph aggregate keyed as the JSON adapter keys its output, and the embedded schema source, reachable through `SerializedSources()` / `SerializedEntry`, which re-loads hermetically (under `schema.WithSyntheticRoot`, no filesystem participation). Generated output is stdlib-only (imports at most `time` and `encoding/json`) and byte-reproducible across checkouts. Unlike the data adapters it has no instance-data path and returns a plain `error` rather than a `diag.Result`.
@@ -225,13 +225,13 @@ Full API semantics: the gogen section of `docs/API.md`. CLI form: `yammm gen --t
 
 ---
 
-## jschema Adapter (JSON Schema Generation)
+## jschema Generator (JSON Schema Generation)
 
 ```go
-import "github.com/simon-lentz/yammm/adapter/jschema"
+import "github.com/simon-lentz/yammm/schema/jschema"
 ```
 
-Schema-in, bytes-out: `jschema.Marshal` maps a loaded, resolved schema to a JSON Schema **draft 2020-12** document describing the instance-data JSON object form `yammm check` reads (it does not reproduce yammm's validation; `adapter/jschema`'s Fidelity Caveats list where the two differ) — one top-level key per type a data file can hold (entry types bare, directly imported types alias-qualified as `common.Region`), each an array of instances; `EDGE_` defs carrying required `_target_<pk>` foreign-key fields; compositions always arrays (`minItems: 1` when required, `maxItems: 1` for to-one); named DataTypes as `$ref`ed `$defs` entries; schema doc-comments flowing through as `description` for editor hover. Association presence is deliberately NOT `required` per-file (yammm defers it to graph assembly). Output is deterministic and self-checked (valid JSON, every `$ref` resolves) before return. Options: `WithSchemaID` (the `"$id"`, omitted when unset). Plain `error`, no instance-data path, no source-backing requirement.
+Schema-in, bytes-out: `jschema.Marshal` maps a loaded, resolved schema to a JSON Schema **draft 2020-12** document describing the instance-data JSON object form `yammm check` reads (it does not reproduce yammm's validation; `schema/jschema`'s Fidelity Caveats list where the two differ) — one top-level key per type a data file can hold (entry types bare, directly imported types alias-qualified as `common.Region`), each an array of instances; `EDGE_` defs carrying required `_target_<pk>` foreign-key fields; compositions always arrays (`minItems: 1` when required, `maxItems: 1` for to-one); named DataTypes as `$ref`ed `$defs` entries; schema doc-comments flowing through as `description` for editor hover. Association presence is deliberately NOT `required` per-file (yammm defers it to graph assembly). Output is deterministic and self-checked (valid JSON, every `$ref` resolves) before return. Options: `WithSchemaID` (the `"$id"`, omitted when unset). Plain `error`, no instance-data path, no source-backing requirement.
 
 Wire the generated document into an editor for completion and validation while authoring data files. For a JSON data file, use a `json.schemas` mapping in the editor's settings. A JSON data file cannot carry a `"$schema"` member: the envelope admits no member but a type name, and `adapter/json` refuses the key as a type tag (`E_INVALID_TYPE_TAG`). A `# yaml-language-server: $schema=./fleet.schema.json` comment wires a YAML file, but yammm reads no YAML data file — its data commands read JSON and JSONC — so that file gets the editor's checks alone.
 
@@ -239,10 +239,10 @@ Full API semantics: the JSON Schema Generation section of `docs/API.md`. CLI for
 
 ---
 
-## markdown Adapter (Markdown + Mermaid Documentation Generation)
+## markdown Generator (Markdown + Mermaid Documentation Generation)
 
 ```go
-import "github.com/simon-lentz/yammm/adapter/markdown"
+import "github.com/simon-lentz/yammm/schema/markdown"
 ```
 
 Schema-in, bytes-out: `markdown.Marshal` maps a loaded, resolved schema to one self-contained Markdown reference document covering the whole import closure — a Mermaid class diagram (each type's own members as `name KindLabel` pairs, `<<Abstract>>`/`<<Part>>` stereotypes, DSL-labeled relation edges, `Parent <|-- Child` inheritance edges), per-type sections in declaration order (flattened property tables with `from <Owner>` inherited-row markers, DSL-form constraint rendering like `String[1, 100]`, relation bullets with linked targets and edge-property sub-tables, invariant source fences extracted from the schema source), and Name | Definition | Description data-type tables. Imported schemas get their own `## Schema <Name> (imported as <alias>)` sections, a transitive import, which has no alias, a plain `## Schema <Name>`. A type is named as the entry schema names it: bare when the entry declares it, `alias.TypeName` when the entry imports it directly, and `TypeName (schemaName)` when the entry reaches it only through another import. Headings take GitHub's anchors (`-1`, `-2` on a repeated slug), allocated over every heading element in the document, doc-comment headings and raw HTML `<h1>`–`<h6>` included, as GitHub anchors them, so no schema is refused for its names and every link lands on its heading. Schema text renders literally under GitHub-flavored Markdown: an empty HTML comment splits each colon, `@` and dot after `www` in text escaped for Markdown and in a `<code>` cell, since GitHub autolinks through escapes. Output is deterministic, is a versioned surface (`docs/API.md`'s Versioning Policy), and is self-checked before return by reading it with that parser (`github.com/yuin/goldmark`): every heading and table the generator wrote must read as written, outside doc comments the links read must be exactly the internal links it wrote, and every class-diagram line must be a form the emitter writes, a subset of Mermaid's class-diagram grammar (class ids are ASCII and never hold `direction`; a class label writes every character but an ASCII letter or digit, a dot, and an underscore between two ASCII letters or digits as an entity code, and an edge label writes each character Mermaid reads as syntax as one, so `one:many` labels an edge `one#58;many`); doc-comment text is the author's Markdown and is not checked, in a description cell too, and a code fence or HTML block it leaves open is closed at the end of its block. Options: `WithClassDiagram(false)` omits the diagram, and `WithClassMembers(false)` drops the member lines inside each class. Plain `error`, no instance-data path.

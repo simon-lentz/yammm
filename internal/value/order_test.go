@@ -77,7 +77,7 @@ type (
 	namedString  string
 )
 
-// A named type takes the strata of its underlying kind. adapter/gogen emits
+// A named type takes the strata of its underlying kind. schema/gogen emits
 // `type <Name> <base>` for every DataType and inline enum, so rejecting them
 // meant the generator produced values this package could not order.
 //

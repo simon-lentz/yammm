@@ -348,7 +348,7 @@ func TestMinMax_WithArgumentRefuseAStoredListReceiver(t *testing.T) {
 	}
 }
 
-// A named carrier over a number — adapter/gogen's shape for a DataType over
+// A named carrier over a number — schema/gogen's shape for a DataType over
 // int64, float64 or float32 — is checked and coerced at Integer, Float and
 // Vector as its base value is, and the stored form is the base.
 func TestCheckAndCoerce_NamedNumericCarriers(t *testing.T) {

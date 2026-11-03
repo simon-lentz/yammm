@@ -123,7 +123,7 @@ func WithSourcesOnly(only bool) LoadOption {
 // keeps its ".."; [SyntheticImportKey] states the rule. [Schema.ModuleRoot] reports the
 // synthetic root, because the root is the one this load resolved imports
 // against; a schema loaded this way is a supported input to
-// [github.com/simon-lentz/yammm/adapter/gogen.Marshal], whose embedded keys
+// [github.com/simon-lentz/yammm/schema/gogen.Marshal], whose embedded keys
 // are then relative to that root.
 func WithSyntheticRoot(root string) LoadOption {
 	return func(c *loadConfig) {

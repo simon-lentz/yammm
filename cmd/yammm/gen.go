@@ -5,11 +5,11 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/simon-lentz/yammm/adapter/gogen"
-	"github.com/simon-lentz/yammm/adapter/jschema"
-	"github.com/simon-lentz/yammm/adapter/markdown"
 	"github.com/simon-lentz/yammm/cmd/yammm/internal/cli"
 	"github.com/simon-lentz/yammm/schema"
+	"github.com/simon-lentz/yammm/schema/gogen"
+	"github.com/simon-lentz/yammm/schema/jschema"
+	"github.com/simon-lentz/yammm/schema/markdown"
 )
 
 func newGenCmd() *cobra.Command {

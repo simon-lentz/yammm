@@ -318,7 +318,7 @@ func TestCanonical_NilInputsPassThrough(t *testing.T) {
 }
 
 // canonicalUUID reads the same carriers checkUUID accepts: a named string
-// type (adapter/gogen's shape for a DataType over UUID) and a *string. A
+// type (schema/gogen's shape for a DataType over UUID) and a *string. A
 // value the check passes must not fail the coercion that follows it.
 func TestCanonical_UUIDReadsAStringCarrier(t *testing.T) {
 	t.Parallel()

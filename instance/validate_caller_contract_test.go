@@ -31,7 +31,7 @@ func codes(res diag.Result) []string {
 	return out
 }
 
-// A typed nil pointer — the shape adapter/gogen emits for an absent optional
+// A typed nil pointer — the shape schema/gogen emits for an absent optional
 // scalar — is the absent value at every null-rule site, exactly as an
 // interface nil is, and so is a nil slice or map.
 func TestTypedNilPointer_IsAbsent(t *testing.T) {

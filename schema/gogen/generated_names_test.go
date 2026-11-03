@@ -17,9 +17,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/simon-lentz/yammm/adapter/gogen"
-	"github.com/simon-lentz/yammm/adapter/jschema"
 	"github.com/simon-lentz/yammm/schema"
+	"github.com/simon-lentz/yammm/schema/gogen"
+	"github.com/simon-lentz/yammm/schema/jschema"
 )
 
 // generateSources loads sources with entry "main.yammm" and generates them.
@@ -490,7 +490,7 @@ func defRef(t *testing.T, raw json.RawMessage) string {
 }
 
 // TestMarshal_EveryReferenceBindsTheEntityJSchemaBinds checks gogen's names
-// against a second implementation of the same binding, adapter/jschema's
+// against a second implementation of the same binding, schema/jschema's
 // $defs keys: from each Graph field, every struct a field's type names holds
 // the wire keys of the def jschema's matching property references, at every
 // depth.

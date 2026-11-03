@@ -152,7 +152,7 @@ func requireMermaidPackage(t *testing.T) {
 	}
 	for _, pkg := range []string{"mermaid10", "mermaid11", "mermaid12", "jsdom"} {
 		if _, err := os.Stat(filepath.Join(mermaidDir, "node_modules", pkg, "package.json")); err != nil {
-			t.Fatalf("%s is not installed; run `npm ci` in adapter/markdown/%s: %v", pkg, filepath.ToSlash(mermaidDir), err)
+			t.Fatalf("%s is not installed; run `npm ci` in schema/markdown/%s: %v", pkg, filepath.ToSlash(mermaidDir), err)
 		}
 	}
 }

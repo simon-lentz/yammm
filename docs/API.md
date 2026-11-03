@@ -449,7 +449,7 @@ func CanonicalValue(val any, c schema.Constraint) (any, error)
 // IsAbsent reports whether v holds no value: nil, or a pointer, an interface, a
 // map, a slice, a channel, a function or an unsafe pointer that is nil, bare or
 // behind at most 64 pointers and interfaces, or a nil immutable container.
-// The validator reads such a value at a property as a missing key: adapter/gogen
+// The validator reads such a value at a property as a missing key: schema/gogen
 // emits a typed nil pointer for an absent optional scalar, and a nil slice for
 // an absent optional list. adapter/neo4j writes such a value as null.
 func IsAbsent(v any) bool
@@ -644,7 +644,7 @@ if target, ok := s.TypeByID(rel.TargetID()); ok {
 }
 ```
 
-`TypeByID` returns `ok == false` for a zero or unknown `TypeID`. Both accessors compute the closure lazily on first use and cache it; like all `Schema` accessors they are safe for concurrent use. The generators (`adapter/gogen`, `adapter/jschema`, `adapter/markdown`) drive their emission walks off `Closure()`, and the instance layer resolves relation targets through `TypeByID`.
+`TypeByID` returns `ok == false` for a zero or unknown `TypeID`. Both accessors compute the closure lazily on first use and cache it; like all `Schema` accessors they are safe for concurrent use. The generators (`schema/gogen`, `schema/jschema`, `schema/markdown`) drive their emission walks off `Closure()`, and the instance layer resolves relation targets through `TypeByID`.
 
 ## Schema Identity
 
@@ -1427,7 +1427,7 @@ index pass is what covers a property named only by an `@index`, `@@index`,
 
 ## Go Source Generation
 
-The `adapter/gogen` package generates Go source from a schema: one struct per type, named Enum/DataType types, generated temporal types, `EDGE_` association structs, a `Graph` aggregate, and the embedded schema source. Unlike the data adapters above, gogen has no instance-data path — it is schema-in, bytes-out. Generated output is stdlib-only (it imports at most `time` and `encoding/json`).
+The `schema/gogen` package generates Go source from a schema: one struct per type, named Enum/DataType types, generated temporal types, `EDGE_` association structs, a `Graph` aggregate, and the embedded schema source. Unlike the data adapters above, gogen has no instance-data path — it is schema-in, bytes-out. Generated output is stdlib-only (it imports at most `time` and `encoding/json`).
 
 ### Generation
 
@@ -1484,7 +1484,7 @@ A named DataType is rendered faithfully in every position — scalar field, list
 
 - **Struct per type** (including abstract and part types). A type's doc comment carries through as its struct's Go doc comment, and a property's, an edge property's included, as its field's; a data type's, a relation's and the schema's own are not written. The text is the loaded schema's, whose continuation lines lost the indentation they all share, byte for byte, when the parser read the comment (see [Comments](SPEC.md#comments)), so layout that indents every continuation line alike makes no code block; lines indented by different bytes, such as a tab on one and spaces on another, share none and keep theirs, which the Go doc-comment formatter reads as a code block.
 - **`EDGE_<Owner>_<edge>_<Target>` structs** for associations — that spelling is the struct's bare one, from its owner's and its target's names (see [Names](#names)) — carrying the target type's primary keys as `_target_<pk>` fields with the association's own properties beside them, the shape `adapter/json` exchanges. (An association whose target type has no primary key is rejected: the edge would have no `_target_` fields to identify a target node.)
-- **`Graph` aggregate** — one slice field per concrete type the entry schema can name, tagged `,omitempty` and keyed by its `schema.AddressableTag`, the name the JSON adapter keys its object by: the bare type name for the entry schema's own types, `alias.Name` for a directly imported one, so `adapter/json` output decodes into it. A type the entry schema reaches only through another import has no such name and takes no field; its struct is still emitted, as every type in the closure is. The keys are the envelope keys `adapter/jschema` emits.
+- **`Graph` aggregate** — one slice field per concrete type the entry schema can name, tagged `,omitempty` and keyed by its `schema.AddressableTag`, the name the JSON adapter keys its object by: the bare type name for the entry schema's own types, `alias.Name` for a directly imported one, so `adapter/json` output decodes into it. A type the entry schema reaches only through another import has no such name and takes no field; its struct is still emitted, as every type in the closure is. The keys are the envelope keys `schema/jschema` emits.
 - **`SerializedSources` / `SerializedEntry`** — the embedded-source surface, emitted identically by every generated package whatever its source count: `func SerializedSources() map[string][]byte` returns every source the schema's load held, by key, and `const SerializedEntry` names the entry key. They read an unexported package-level store, so the identifiers a consumer sees do not vary with how many files a schema spans. A `SchemaHash` const carries the structural hash. The embedded source is **guaranteed re-loadable through the recipe the file prints**: `Marshal` re-loads the store exactly as emitted, under a synthetic root, which reads no disk, and returns the bytes only when the `StructuralHash` matches, so a non-re-loadable model is a generation error, never a silent claim.
 
 ### Names
@@ -1534,7 +1534,7 @@ The `gen` command loads the schema (resolving imports), generates Go, and writes
 
 ## JSON Schema Generation
 
-The `adapter/jschema` package generates a JSON Schema **draft 2020-12** document from a schema, for editor-assisted authoring of instance-data JSON files, which `yammm check` then judges. Like gogen it is schema-in, bytes-out — no instance-data path, plain `error` — and the adapter imports only public yammm packages and the standard library.
+The `schema/jschema` package generates a JSON Schema **draft 2020-12** document from a schema, for editor-assisted authoring of instance-data JSON files, which `yammm check` then judges. Like gogen it is schema-in, bytes-out — no instance-data path, plain `error` — and it imports only public yammm packages and the standard library.
 
 ### Generation
 
@@ -1592,7 +1592,7 @@ Per-target flags are enforced: `--package`/`--initialisms` are rejected for the 
 
 ## Markdown Documentation Generation
 
-The `adapter/markdown` package generates a Markdown reference document — a Mermaid class diagram plus per-type sections — from a schema, giving every schema a canonical, regenerable documentation artifact. Like its gen-family siblings it is schema-in, bytes-out — no instance-data path, plain `error` — and its third-party modules are `github.com/yuin/goldmark`, the CommonMark parser it reads its own output with, and `golang.org/x/net`, whose HTML5 parser reads the HTML that output renders to.
+The `schema/markdown` package generates a Markdown reference document — a Mermaid class diagram plus per-type sections — from a schema, giving every schema a canonical, regenerable documentation artifact. Like its gen-family siblings it is schema-in, bytes-out — no instance-data path, plain `error` — and its third-party modules are `github.com/yuin/goldmark`, the CommonMark parser it reads its own output with, and `golang.org/x/net`, whose HTML5 parser reads the HTML that output renders to.
 
 ### Generation
 
@@ -1705,8 +1705,8 @@ yammm's versioning covers four surfaces that evolve on related but distinct cade
 
 1. **Go API surface** — exported types, functions, methods, constants, variables, struct fields, options, and their documented behavior under the `github.com/simon-lentz/yammm` module.
 2. **`.ys` wire format** — the on-disk shape of snapshots produced by `snapshot.Marshal` and the metadata updates (`snapshot.UpdateMetadata`, `snapshot.UpdateMetadataOrReMarshal`) and consumed by every read path of the `snapshot` package (`snapshot.Load`, `snapshot.Verify`, `snapshot.Info`, `snapshot.HeaderOnly`, `snapshot.HeaderOnlyRead`, the `ScanDir` family and the metadata updates). The wire format carries its own `version` field in the header (currently `4`, first tagged by v0.19.0; `3` from v0.12.0 through v0.18.0).
-3. **Generated Go output (`adapter/gogen`)** — the shape of the Go source `gogen.Marshal` emits for a given schema and options. A committed surface since v0.6.0: a downstream consumer byte-pins committed generated packages against it. Its tier rules are in "Generated-output surface" below.
-4. **Emitted Markdown (`adapter/markdown`)** — the shape of the reference document `markdown.Marshal` emits for a given schema and options. A versioned surface from the release after `v0.21.1`: a downstream consumer commits a generated document and drift-checks it in CI. Its tier rules are in "Emitted-Markdown surface" below.
+3. **Generated Go output (`schema/gogen`)** — the shape of the Go source `gogen.Marshal` emits for a given schema and options. A committed surface since v0.6.0: a downstream consumer byte-pins committed generated packages against it. Its tier rules are in "Generated-output surface" below.
+4. **Emitted Markdown (`schema/markdown`)** — the shape of the reference document `markdown.Marshal` emits for a given schema and options. A versioned surface from the release after `v0.21.1`: a downstream consumer commits a generated document and drift-checks it in CI. Its tier rules are in "Emitted-Markdown surface" below.
 
 The surfaces share a semver tag but have independent version-bump triggers, documented below.
 
@@ -1751,7 +1751,7 @@ Wire-format version bumps are permitted at minor-version bumps during pre-1.0 (t
 
 Patch releases never introduce breaking changes: no removed or renamed exported symbols, no signature changes, no tightenings of documented behavior, and no wire-format changes. Anything in those categories requires at least a minor release.
 
-### Generated-output surface (`adapter/gogen`)
+### Generated-output surface (`schema/gogen`)
 
 For an unchanged schema under an unchanged load name, unchanged `Marshal` options, an unchanged module root, an unchanged yammm version and an unchanged Go release, generated output is byte-identical (all walks and name assignments are deterministic).
 
@@ -1774,9 +1774,9 @@ The module root is an input because a file load's entry key in `SerializedEntry`
 - Doc-comment prose inside generated files.
 - Declaration order beyond "deterministic for a given yammm version".
 
-The golden corpus under `adapter/gogen/testdata/` is this contract's executable form: a golden may change only in a release whose notes account for the change under the tiers above.
+The golden corpus under `schema/gogen/testdata/` is this contract's executable form: a golden may change only in a release whose notes account for the change under the tiers above.
 
-### Emitted-Markdown surface (`adapter/markdown`)
+### Emitted-Markdown surface (`schema/markdown`)
 
 For an unchanged schema, unchanged `Marshal` options and an unchanged yammm version, the emitted document is byte-identical. No path, module root or source identity reaches the document. Three inputs of the build reach it besides the schema and the options: the Unicode tables of the Go release that builds the generator decide how a character a later Unicode version added is escaped and slugged, and the goldmark and `golang.org/x/net/html` releases the build selects — `go.mod` names each minimum, and a consumer's module graph can select later ones — read doc comments and headings for anchors and for the blocks a doc comment leaves open. Across versions, changes to the output classify as:
 
@@ -1798,7 +1798,7 @@ For an unchanged schema, unchanged `Marshal` options and an unchanged yammm vers
 - The sentences the generator writes (badge wording, the Mermaid renderer-floor sentence).
 - Mermaid class ids, and the order of the diagram's lines beyond "deterministic for a given yammm version".
 
-The golden corpus under `adapter/markdown/testdata/` is this contract's executable form: a golden may change only in a release whose notes account for the change under the tiers above.
+The golden corpus under `schema/markdown/testdata/` is this contract's executable form: a golden may change only in a release whose notes account for the change under the tiers above.
 
 ### Post-1.0 policy (future)
 

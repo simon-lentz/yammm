@@ -8,7 +8,7 @@
 //
 // # Schema-In, Bytes-Out
 //
-// Like adapter/gogen and adapter/jschema — and unlike the data adapters —
+// Like schema/gogen and schema/jschema — and unlike the data adapters —
 // markdown has no instance-data path: it never parses, validates, or
 // serializes instances, and it imports neither instance nor graph. It maps
 // a completed schema to one Markdown document, nothing more, and returns a
@@ -254,22 +254,21 @@
 //
 // # Dependencies
 //
-//	adapter/markdown  ──imports──▶  location, schema, github.com/yuin/goldmark,
-//	                                github.com/yuin/goldmark/ast,
-//	                                github.com/yuin/goldmark/extension,
-//	                                github.com/yuin/goldmark/extension/ast,
-//	                                github.com/yuin/goldmark/renderer,
-//	                                github.com/yuin/goldmark/renderer/html,
-//	                                github.com/yuin/goldmark/text,
-//	                                github.com/yuin/goldmark/util,
-//	                                golang.org/x/net/html
+//	schema/markdown  ──imports──▶  location, schema, github.com/yuin/goldmark,
+//	                               github.com/yuin/goldmark/ast,
+//	                               github.com/yuin/goldmark/extension,
+//	                               github.com/yuin/goldmark/extension/ast,
+//	                               github.com/yuin/goldmark/renderer,
+//	                               github.com/yuin/goldmark/renderer/html,
+//	                               github.com/yuin/goldmark/text,
+//	                               github.com/yuin/goldmark/util,
+//	                               golang.org/x/net/html
 //
 // markdown imports public yammm packages, the standard library, goldmark, a
 // CommonMark parser with GitHub's extensions and no dependencies of its own,
 // and golang.org/x/net/html, the Go team's HTML5 parser, to read the HTML a
 // document renders to as a browser does.
-// No internal/* (the adapter-layer carve-out documented in adapter/doc.go
-// stays gogen-only), no instance/graph, no diag, and no Mermaid tooling: the
+// No internal/*, no instance/graph, no diag, and no Mermaid tooling: the
 // golden corpus plus the parser-backed self-check carry output verification,
 // and a test behind the mermaid build tag parses every golden's diagram with
 // Mermaid itself.

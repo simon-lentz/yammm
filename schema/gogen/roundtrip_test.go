@@ -11,12 +11,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/simon-lentz/yammm/adapter/gogen"
-	"github.com/simon-lentz/yammm/adapter/gogen/internal/temporal"
 	adapterjson "github.com/simon-lentz/yammm/adapter/json"
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/instance"
 	"github.com/simon-lentz/yammm/internal/yammmtest"
+	"github.com/simon-lentz/yammm/schema/gogen"
+	"github.com/simon-lentz/yammm/schema/gogen/internal/temporal"
 )
 
 // generatedFixturePath is the compiled copy of the temporal fixture's output,

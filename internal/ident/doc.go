@@ -5,7 +5,7 @@
 //
 // This package is internal to the YAMMM module and is not importable by
 // external consumers per Go's internal/ package semantics. It is used by the
-// gogen adapter to derive Go identifiers.
+// schema/gogen generator to derive Go identifiers.
 //
 // # CamelCase Conversion
 //

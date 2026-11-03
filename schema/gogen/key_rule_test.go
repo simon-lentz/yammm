@@ -11,9 +11,9 @@ import (
 	"testing"
 	"unicode"
 
-	"github.com/simon-lentz/yammm/adapter/gogen"
 	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
+	"github.com/simon-lentz/yammm/schema/gogen"
 )
 
 // keyRuleMain imports its sibling dep.yammm by a relative path, so both the
