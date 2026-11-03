@@ -92,9 +92,9 @@ type IndexDrift struct {
 // order matters.
 //
 // Composite property order is significant, a deliberate divergence from
-// [Adapter.DiffConstraints], which sorts properties: SHOW INDEXES reports
-// properties in index-definition order, so the order-sensitive identity is
-// sound. A same-set/different-order remote index is therefore a distinct index:
+// [Adapter.DiffConstraints], which sorts properties to pair them: SHOW INDEXES
+// reports properties in index-definition order, so the order-sensitive identity
+// is sound. A same-set/different-order remote index is therefore a distinct index:
 // Create and, if [RemoteIndex.Declarable] accepts it, Drop when its name differs
 // too, and Drift when it holds the desired index's name.
 //

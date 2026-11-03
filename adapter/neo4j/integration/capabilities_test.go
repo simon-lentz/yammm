@@ -845,7 +845,6 @@ func TestNameHeldOnForeignLabel_BlocksCreate(t *testing.T) {
 func TestDefinitionServedByConstraintIndex_IsSatisfied(t *testing.T) {
 	ctx := context.Background()
 	driver(t)
-	dropAll(t, ctx)
 	t.Cleanup(func() { dropAll(t, ctx) })
 
 	s, res := schema.LoadString(ctx, `schema "pk"
@@ -856,40 +855,49 @@ type Doc { doc_id String primary
 		t.Fatalf("load: %v", res.Err())
 	}
 
-	a := newAdapter(t, ctx)
-	applySchemaDDL(t, ctx, a, s)
+	for _, tc := range []struct {
+		name    string
+		nodeKey bool
+	}{
+		{"UNIQUE", false},
+		{"NODE KEY", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if tc.nodeKey {
+				requireEnterprise(t, ctx)
+			}
+			dropAll(t, ctx)
+			a := newAdapter(t, ctx, n4j.WithNodeKeyConstraints(tc.nodeKey))
+			applySchemaDDL(t, ctx, a, s)
 
-	desired, _ := a.IndexesStructured(ctx, s)
-	if len(desired) != 1 {
-		t.Fatalf("expected the one @@index, got %d", len(desired))
-	}
-	// The server did not create it: the constraint's backing index serves it.
-	var exists bool
-	for _, rec := range query(t, ctx, "SHOW INDEXES YIELD name") {
-		if n, _ := rec["name"].(string); n == desired[0].Name {
-			exists = true
-		}
-	}
-	if exists {
-		t.Skip("this server did create a separate index over the constrained pair; the blocker does not apply")
-	}
+			desired, _ := a.IndexesStructured(ctx, s)
+			if len(desired) != 1 {
+				t.Fatalf("expected the one @@index, got %d", len(desired))
+			}
+			for _, rec := range query(t, ctx, "SHOW INDEXES YIELD name") {
+				if n, _ := rec["name"].(string); n == desired[0].Name {
+					t.Fatalf("the server created %s beside the constraint's backing index", n)
+				}
+			}
 
-	parsed, err := n4j.ParseRemoteIndexes(query(t, ctx, n4j.IntrospectIndexesQuery()))
-	if err != nil {
-		t.Fatalf("ParseRemoteIndexes: %v", err)
-	}
-	diff := a.DiffIndexes(desired, parsed, a.OwnedLabels(ctx, s))
-	if len(diff.Create) != 0 {
-		t.Errorf("reported a Create the server will never honour: %+v", diff.Create)
-	}
-	if len(diff.Drift) != 0 {
-		t.Errorf("reported unclearable drift on a valid, fully-applied schema: %+v", diff.Drift)
-	}
-	if len(diff.Match) != 1 {
-		t.Fatalf("match = %d, want the declaration satisfied by the backing index", len(diff.Match))
-	}
-	if diff.Match[0].Actual.OwningConstraint == "" {
-		t.Error("the matched index should be the constraint's backing index")
+			parsed, err := n4j.ParseRemoteIndexes(query(t, ctx, n4j.IntrospectIndexesQuery()))
+			if err != nil {
+				t.Fatalf("ParseRemoteIndexes: %v", err)
+			}
+			diff := a.DiffIndexes(desired, parsed, a.OwnedLabels(ctx, s))
+			if len(diff.Create) != 0 {
+				t.Errorf("reported a Create the server will never honour: %+v", diff.Create)
+			}
+			if len(diff.Drift) != 0 {
+				t.Errorf("reported unclearable drift on a valid, fully-applied schema: %+v", diff.Drift)
+			}
+			if len(diff.Match) != 1 {
+				t.Fatalf("match = %d, want the declaration satisfied by the backing index", len(diff.Match))
+			}
+			if diff.Match[0].Actual.OwningConstraint == "" {
+				t.Error("the matched index should be the constraint's backing index")
+			}
+		})
 	}
 }
 
@@ -1108,6 +1116,8 @@ func TestNameHeldAcrossKinds_ServerResponse(t *testing.T) {
 		indexOnB   = "CREATE INDEX held IF NOT EXISTS FOR (n:B) ON (n.y)"
 		uniqueOnB  = "CREATE CONSTRAINT held IF NOT EXISTS FOR (n:B) REQUIRE n.y IS UNIQUE"
 		notNullOnB = "CREATE CONSTRAINT held IF NOT EXISTS FOR (n:B) REQUIRE n.y IS NOT NULL"
+		nodeKeyOnA = "CREATE CONSTRAINT held FOR (n:A) REQUIRE n.x IS NODE KEY"
+		nodeKeyOnB = "CREATE CONSTRAINT held IF NOT EXISTS FOR (n:B) REQUIRE n.y IS NODE KEY"
 	)
 	tests := []struct {
 		name       string
@@ -1122,6 +1132,9 @@ func TestNameHeldAcrossKinds_ServerResponse(t *testing.T) {
 		{name: "constraint over a constraint's name", holder: notNullOnA, statement: uniqueOnB, enterprise: true},
 		{name: "unique constraint over an index's name", holder: indexOnA, statement: uniqueOnB, wantCode: "IndexWithNameAlreadyExists"},
 		{name: "not-null constraint over an index's name", holder: indexOnA, statement: notNullOnB, enterprise: true, wantCode: "IndexWithNameAlreadyExists"},
+		{name: "index over a node key's backing index's name", holder: nodeKeyOnA, statement: indexOnB, enterprise: true},
+		{name: "node key constraint over an index's name", holder: indexOnA, statement: nodeKeyOnB, enterprise: true, wantCode: "IndexWithNameAlreadyExists"},
+		{name: "node key constraint over a unique constraint's name", holder: uniqueOnA, statement: nodeKeyOnB, enterprise: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

@@ -110,6 +110,12 @@
 // so they receive index DDL too). The emitted CREATE VECTOR INDEX ... OPTIONS
 // statement form requires Neo4j 5.15+.
 //
+// Apply every constraint statement before every index statement. A range index
+// over a primary key's properties in their order is the index a UNIQUE or NODE
+// KEY constraint creates. Applied after the constraint, its statement creates
+// nothing and the constraint's backing index serves it; applied first, the index
+// makes the server refuse the constraint with IndexAlreadyExists.
+//
 // # Label Mapping
 //
 // [Adapter.Label] generates namespaced Neo4j labels from schema and type names.
@@ -262,10 +268,12 @@
 // A []any at a List or a Vector is element-coerced, which also requires a Go string
 // of a String, UUID, Enum or Pattern element and a bool of a Boolean element, where a
 // scalar of those kinds passes through. The write path refuses a value that holds
-// one at a List whose element is a collection by its type first, so a JSON number
-// literal reaches the rule as the int64 or float64 it spells, which an Integer refuses when it is a
-// float; a literal no finite float64 holds, or no int64 holds outside a Float
-// where the .ys reader left it a json.Number, is refused before the rule. A value of any other Go type at a collection constraint
+// one at a List whose element is a collection by its type first. It reads every
+// other JSON number literal as the driver's number before the rule: at a Float
+// its nearest float64, elsewhere an integer literal as the int64 it spells and a
+// float literal as its nearest float64, which an Integer refuses as a float. A
+// literal no finite float64 holds, or no int64 holds outside a Float where the
+// .ys reader left it a json.Number, is refused before the rule. A value of any other Go type at a collection constraint
 // is returned unchanged, save a map, refused above, and a value at a List whose
 // element is a List or a Vector: Neo4j has no nested collection property type, so a
 // value there that holds one, an empty list included, is an error wrapping
@@ -399,10 +407,12 @@
 // see.
 //
 // Both results carry an Excluded count — the remote objects the comparison
-// neither paired nor dropped: the schema owns no label they carry, or the
-// schema could not declare them as they stand under this configuration
-// ([RemoteIndex.Declarable] states the index side's rule). One can still stand as the Actual
-// of a Drift, where it holds the name of a declaration nothing realises.
+// set aside because the schema owns no label they carry, or could not declare
+// them as they stand under this configuration ([RemoteIndex.Declarable] states
+// the index side's rule). One can still stand as the Actual of a Drift, where
+// it holds the name of a declaration nothing realises, or it is a UNIQUE or
+// NODE KEY over the key a declaration of the other kind needs: a NODE KEY under
+// [WithEdition](Community), or one on a declared label the owned set leaves out.
 // It is deliberately not drift; in a database shared with other applications a
 // non-zero count is the normal state. It exists so that "0 to drop" cannot be
 // read as "the database is accounted for": ownership is derived from the schema
@@ -428,9 +438,17 @@
 // [Adapter.DiffConstraints] produces a [ConstraintDiffResult] classifying
 // desired vs. actual constraints into FIVE categories: matched, drifted (a
 // different definition under the same identity, a name the database already
-// holds, or a UNIQUE or NODE KEY declaration whose label and properties a RANGE
-// index already serves under another name), to-create, to-drop, and unverified (present, but the server did not
-// report what was needed to compare it). A caller deciding "is this in sync?"
+// holds, a UNIQUE or NODE KEY declaration whose label and properties, in its
+// order, a RANGE index already serves under another name, or one beside a constraint of the
+// other of those two kinds over the same label and properties in the same
+// order), to-create, to-drop, and unverified (present, but the server did not
+// report what was needed to compare it). The server refuses a UNIQUE and a NODE
+// KEY constraint over one key, so the other kind's constraint is that drift's
+// Actual and is not also a to-drop: drop it, then create the declaration. A
+// NODE KEY also requires every node to hold each key property, and the server
+// refuses it while a node lacks one. Applied after the drop, that refusal leaves
+// the key with no uniqueness constraint, so check the data before the drop.
+// A caller deciding "is this in sync?"
 // must consult Unverified as well: treating it as matched reports an unchecked
 // constraint as verified.
 //

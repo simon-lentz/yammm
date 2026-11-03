@@ -96,7 +96,7 @@ indexes, result := adapter.IndexesStructured(ctx, s)
 // VectorDimensions, VectorSimilarity, Statement
 ```
 
-Property-level `@index` emits a single-property range index; type-level `@@index(a, b)` a composite range index (declared order significant); property-level `@vector(cosine|euclidean)` a vector index (dimension from the `Vector[N]` constraint); property-level `@fulltext` and type-level `@@fulltext(a, b)` fulltext indexes (`CREATE FULLTEXT INDEX ... ON EACH [...]`). Index names are always emitted; two indexes whose readable names would collide are disambiguated with a short deterministic digest. A load refuses an index annotation with no eligible target (`E_UNKNOWN_ANNOTATION_TARGET`, `E_INVALID_ANNOTATION_TARGET`), so no schema it returns draws the adapter's own codes for the two cases, `E_NEO4J_UNKNOWN_PROPERTY` and `E_NEO4J_INVALID_INDEX_TARGET`. Indexes emit for every edition (unlike constraints); the `CREATE VECTOR INDEX ... OPTIONS` form requires Neo4j 5.15+.
+Property-level `@index` emits a single-property range index; type-level `@@index(a, b)` a composite range index (declared order significant); property-level `@vector(cosine|euclidean)` a vector index (dimension from the `Vector[N]` constraint); property-level `@fulltext` and type-level `@@fulltext(a, b)` fulltext indexes (`CREATE FULLTEXT INDEX ... ON EACH [...]`). Index names are always emitted; two indexes whose readable names would collide are disambiguated with a short deterministic digest. A load refuses an index annotation with no eligible target (`E_UNKNOWN_ANNOTATION_TARGET`, `E_INVALID_ANNOTATION_TARGET`), so no schema it returns draws the adapter's own codes for the two cases, `E_NEO4J_UNKNOWN_PROPERTY` and `E_NEO4J_INVALID_INDEX_TARGET`. Indexes emit for every edition (unlike constraints); the `CREATE VECTOR INDEX ... OPTIONS` form requires Neo4j 5.15+. Apply every constraint statement before every index statement: a range index over a primary key's properties in their order is the index a UNIQUE or NODE KEY constraint creates, so applied first it makes the server refuse the constraint with `IndexAlreadyExists`, and applied after it creates nothing.
 
 `DiffIndexes` returns an `*IndexDiffResult` with **five** sets: Match/Drift/Create/Drop plus **Unverified** — indexes present on both sides whose definition could not be compared (no readable vector configuration, or still `POPULATING`). `DiffConstraints` has the same five sets, its `Unverified` covering a TYPE constraint whose remote record carries no `propertyType`, so its enforced type was not compared. A drift gate must count `Unverified` as an incomplete check, not a pass; summing only Drift+Create+Drop reports an unchecked index as in sync. Composite property order is significant, and a schema-owned remote index with no declaration reports as a drop when the schema could have declared it, and is counted in `Excluded` otherwise. See [Diffing Against a Live Database](#diffing-against-a-live-database) for the call shape.
 
@@ -188,13 +188,16 @@ Ownership is set membership, not a prefix test on the remote object's label:
 two sanitized free-form names and is not invertible, so any rule that tries to
 read a schema back out of a label can be satisfied by a sibling schema's labels.
 
-`Excluded` counts the remote objects the comparison neither paired nor
-dropped — the schema owns no label they carry, or they are of a kind this
+`Excluded` counts the remote objects the comparison set aside because the
+schema owns no label they carry, or they are of a kind this
 configuration cannot declare: on the constraint side a relationship
 constraint, a node constraint kind the DSL cannot express, and under
 `WithEdition(Community)` every kind but UNIQUE; on the index side every row
 `RemoteIndex.Declarable` refuses. A counted object that holds the name of a
-declaration nothing realises is also the `Actual` of that declaration's drift. A
+declaration nothing realises is also the `Actual` of that declaration's drift, as
+is a UNIQUE or NODE KEY over the key a declaration of the other kind needs: a
+NODE KEY under `WithEdition(Community)`, or one on a declared label the owned
+set leaves out. A
 constraint's backing index that serves a declared index is that declaration's
 `Actual` and is not counted. The count is not drift; in a
 shared database a non-zero count is normal. It exists so "0 to drop" is not read
