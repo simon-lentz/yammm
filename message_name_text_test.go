@@ -6,7 +6,6 @@ import (
 	"strings"
 	"testing"
 
-	csvadapter "github.com/simon-lentz/yammm/adapter/csv"
 	jsonadapter "github.com/simon-lentz/yammm/adapter/json"
 	"github.com/simon-lentz/yammm/adapter/neo4j"
 	"github.com/simon-lentz/yammm/graph"
@@ -47,7 +46,6 @@ func TestMessages_RepeatANameCutToItsHead(t *testing.T) {
 	if res.HasErrors() {
 		t.Fatal(res)
 	}
-	typ, _ := s.Type("T")
 	c := &echoChecker{t: t, judged: map[string]int{}}
 
 	v := instance.NewValidator(s)
@@ -73,24 +71,6 @@ func TestMessages_RepeatANameCutToItsHead(t *testing.T) {
 		_, r := jsonadapter.New().ParseObject(ctx, source, []byte(doc))
 		c.result("json", r)
 	}
-
-	csvSource := location.NewSourceID("test://names.csv")
-	_, r = csvadapter.New().ParseTyped(ctx, csvSource, "T", strings.NewReader("id,"+longText+","+longText+"\na,1,2\n"), typ)
-	c.result("csv", r)
-	_, r = csvadapter.New(csvadapter.WithTypeColumn("type")).ParseWithTypeColumn(ctx, csvSource,
-		strings.NewReader("type,id\n"+longText+"!,a\n"), func(string) schema.Type { return schema.Type{} })
-	c.result("csv", r)
-	_, r = csvadapter.New(csvadapter.WithTypeColumn(longText)).ParseWithTypeColumn(ctx, csvSource,
-		strings.NewReader("type,id\nT,a\n"), func(string) schema.Type { return typ })
-	c.result("csv", r)
-	_, r = csvadapter.New(csvadapter.WithTypeColumn(longText)).ParseWithTypeColumn(ctx, csvSource,
-		strings.NewReader(longText+",id\n!,a\n"), func(string) schema.Type { return typ })
-	c.result("csv", r)
-	_, r = csvadapter.New(csvadapter.WithTypeColumn(longText+"\r\n")).ParseWithTypeColumn(ctx, csvSource,
-		strings.NewReader("type,id\nT,a\n"), func(string) schema.Type { return typ })
-	c.result("csv", r)
-	_, r = csvadapter.New().ParseTyped(ctx, csvSource, "T", strings.NewReader("id,"+longText+","+longText+".x\na,1,2\n"), typ)
-	c.result("csv", r)
 
 	held := graph.New(s)
 	held.Add(ctx, instancetest.Valid(t, s, "U", map[string]any{"id": "u"}))
@@ -139,19 +119,6 @@ func TestMessages_RepeatANameCutToItsHead(t *testing.T) {
 		}
 		c.result("validator", r)
 	}
-	ft, _ := fs.Type("F")
-	for _, doc := range []string{
-		"id," + upper + "\na,x\n",
-		"id," + upper + "_R._target_" + upper + "," + upper + "_R." + upper + "," + upper + "_R." + upper + "X\n" +
-			"a,g1|g2,1|2|3,\nb,g1|g2,1|2,1|2|3\nc,g1,x,\n",
-	} {
-		_, r := csvadapter.New(csvadapter.WithSchema(fs)).ParseTyped(ctx, csvSource, "F", strings.NewReader(doc), ft)
-		if r.OK() {
-			t.Errorf("csv: %.200s was accepted", doc)
-		}
-		c.result("csv", r)
-	}
-
 	_, err := instance.BuilderFor(s, longText)
 	c.err("instance.SchemaBuilder", err)
 	b, err := instance.BuilderFor(s, "T")
@@ -182,7 +149,7 @@ func TestMessages_RepeatANameCutToItsHead(t *testing.T) {
 	c.result("snapshot.Info", r)
 
 	for _, where := range []string{
-		"validator", "instance.SchemaBuilder", "json", "csv",
+		"validator", "instance.SchemaBuilder", "json",
 		"neo4j.CoerceParams", "snapshot.Marshal", "snapshot.Load", "snapshot.Info",
 	} {
 		if c.judged[where] == 0 {

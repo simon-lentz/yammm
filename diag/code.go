@@ -226,8 +226,9 @@ var (
 	// rather than at graph-construction time.
 	E_NO_PRIMARY_KEY = NewCode("E_NO_PRIMARY_KEY", CategorySchema)
 
-	// E_LOAD_IO_FAILURE indicates an I/O error during schema loading.
-	// Covers file read failures, path resolution errors, and other filesystem issues.
+	// E_LOAD_IO_FAILURE indicates an I/O error during schema loading, or a load
+	// whose arguments or options the loader refuses. It covers file read
+	// failures, path resolution errors and other filesystem issues.
 	E_LOAD_IO_FAILURE = NewCode("E_LOAD_IO_FAILURE", CategorySchema)
 
 	// E_LOAD_MODULE_ROOT_MALFORMED indicates a yammm.mod module-root marker
@@ -362,7 +363,7 @@ var (
 	E_COMPOSITION_DEPTH_EXCEEDED = NewCode("E_COMPOSITION_DEPTH_EXCEEDED", CategoryInstance)
 
 	// E_INVALID_TYPE_TAG indicates a type tag that is not a type name by the
-	// grammar's rule: a JSON document's top-level key or a CSV type-column value.
+	// grammar's rule: a JSON document's top-level key.
 	E_INVALID_TYPE_TAG = NewCode("E_INVALID_TYPE_TAG", CategoryInstance)
 
 	// E_CASE_FOLD_COLLISION indicates multiple input fields collide after case-folding.
@@ -377,14 +378,6 @@ var (
 var (
 	// E_ADAPTER_PARSE indicates a format-specific parsing error.
 	E_ADAPTER_PARSE = NewCode("E_ADAPTER_PARSE", CategoryAdapter)
-
-	// E_ADAPTER_IO indicates an adapter's input failed to arrive: the
-	// io.Reader a parse reads from returned an error that is neither the
-	// input's end nor a fault in its content. Raised at Fatal, since the run
-	// did not finish; what was read before the failure is kept. It is the
-	// per-category I/O code for CategoryAdapter, as E_LOAD_IO_FAILURE is for
-	// CategorySchema and E_SNAPSHOT_IO for CategorySnapshot.
-	E_ADAPTER_IO = NewCode("E_ADAPTER_IO", CategoryAdapter)
 )
 
 // Graph codes.
@@ -483,9 +476,9 @@ var (
 	// E_SNAPSHOT_UNNAMEABLE_TYPE indicates an instances group or a duplicate
 	// record that names a type the entry schema cannot name: the import
 	// closure declares it, but the schema reaches it only through an
-	// intermediate import. adapter/json and adapter/csv key their output by the
-	// name the entry schema gives each denoted type, so such a document
-	// describes a snapshot they cannot render. The hint names the remedy, which
+	// intermediate import. adapter/json keys its output by the name the entry
+	// schema gives each denoted type, so such a document describes a snapshot it
+	// cannot render. The hint names the remedy, which
 	// is to import the declaring schema directly.
 	E_SNAPSHOT_UNNAMEABLE_TYPE = NewCode("E_SNAPSHOT_UNNAMEABLE_TYPE", CategorySnapshot)
 

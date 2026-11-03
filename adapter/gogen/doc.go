@@ -7,7 +7,7 @@
 //
 // # Schema-In, Bytes-Out
 //
-// Unlike the data adapters (adapter/json, adapter/csv, adapter/neo4j), gogen has no
+// Unlike the data adapters (adapter/json, adapter/neo4j), gogen has no
 // instance-data path: it never parses, validates, or serializes instances, and it
 // imports neither instance nor graph. It maps a completed schema to Go source,
 // nothing more. It also returns a plain error rather than the

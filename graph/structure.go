@@ -131,8 +131,8 @@ func positionAt(position, key string) string {
 }
 
 // typesEntry refuses a types entry s cannot resolve, and a type that cannot hold
-// a root instance, whether or not the snapshot holds one: adapter/json and
-// adapter/csv key their output by a denoted type's name.
+// a root instance, whether or not the snapshot holds one: adapter/json keys
+// its output by a denoted type's name.
 func (r *structureRules) typesEntry(i int, id schema.TypeID) {
 	if !r.identity(id, fmt.Sprintf("types entry %d", i)) {
 		return

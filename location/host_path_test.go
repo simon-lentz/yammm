@@ -3,6 +3,7 @@ package location
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"io/fs"
 	"os"
 	"os/exec"
@@ -11,6 +12,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"testing"
 
@@ -347,6 +349,159 @@ func TestLexicalTarget_EvaluatesADotDotOnTheText(t *testing.T) {
 				t.Errorf("lexicalTarget(%q, %q) = %q; want %q", row.dir, row.target, got, row.want)
 			}
 		})
+	}
+}
+
+// A descriptor path reaches an open file that the host may give no name for, and
+// reading the path the resolver answers must read that file.
+func TestResolveHostPath_AnswersAPathThatReachesADescriptorsFile(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows has no descriptor paths")
+	}
+	const content = heldByADescriptor
+	descriptorPath := func(f *os.File) string { return fmt.Sprintf("/dev/fd/%d", f.Fd()) }
+
+	t.Run("a pipe", func(t *testing.T) {
+		t.Parallel()
+		r, w, err := os.Pipe()
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer r.Close()
+		if _, err := w.WriteString(content); err != nil {
+			t.Fatal(err)
+		}
+		if err := w.Close(); err != nil {
+			t.Fatal(err)
+		}
+		checkReadsThrough(t, descriptorPath(r))
+	})
+	t.Run("a regular file", func(t *testing.T) {
+		t.Parallel()
+		path := filepath.Join(t.TempDir(), "held.txt")
+		if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		f, err := os.Open(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer f.Close()
+		checkReadsThrough(t, descriptorPath(f))
+	})
+	// darwin's realpath(3) answers /dev/fd/<the file's name>, here another
+	// descriptor's path, which exists and reaches another file.
+	t.Run("a regular file named for another descriptor", func(t *testing.T) {
+		t.Parallel()
+		path := filepath.Join(t.TempDir(), "0")
+		if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		f, err := os.Open(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer f.Close()
+		checkReadsThrough(t, descriptorPath(f))
+	})
+	t.Run("a path under a descriptor's regular file", func(t *testing.T) {
+		t.Parallel()
+		path := filepath.Join(t.TempDir(), "held.txt")
+		if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		f, err := os.Open(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer f.Close()
+		if host, err := ResolveHostPath(descriptorPath(f) + "/x"); err == nil {
+			t.Errorf("ResolveHostPath answered %q for a path under a regular file", host)
+		}
+	})
+	t.Run("an unlinked file", func(t *testing.T) {
+		t.Parallel()
+		path := filepath.Join(t.TempDir(), "gone.txt")
+		if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		f, err := os.Open(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer f.Close()
+		if err := os.Remove(path); err != nil {
+			t.Fatal(err)
+		}
+		checkReadsThrough(t, descriptorPath(f))
+	})
+}
+
+// A file replaced during a resolve is spelled on disk at every instant, since the
+// kernel reaches it through its directory at every instant.
+func TestResolveHostPath_AFileReplacedDuringAResolveKeepsItsSpelling(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	mkdirAll(t, filepath.Join(dir, "real"))
+	symlink(t, "real", filepath.Join(dir, "lnk"))
+	target := filepath.Join(dir, "real", "a.json")
+	writeEmpty(t, target)
+	want, err := ResolveHostPath(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stop := make(chan struct{})
+	var replacer sync.WaitGroup
+	replacer.Go(func() {
+		next := filepath.Join(dir, "next")
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+			}
+			if err := os.WriteFile(next, nil, 0o600); err != nil {
+				t.Error(err)
+				return
+			}
+			if err := os.Rename(next, target); err != nil {
+				t.Error(err)
+				return
+			}
+		}
+	})
+	for range 5000 {
+		got, err := ResolveHostPath(filepath.Join(dir, "lnk", "a.json"))
+		if err != nil || got != want {
+			t.Errorf("ResolveHostPath = %q, %v; want %q", got, err, want)
+			break
+		}
+	}
+	close(stop)
+	replacer.Wait()
+}
+
+// heldByADescriptor is what each file [checkReadsThrough] reads holds.
+const heldByADescriptor = "held by a descriptor"
+
+// checkReadsThrough requires the descriptor path typed to answer itself, and
+// reading that answer to give [heldByADescriptor].
+func checkReadsThrough(t *testing.T, typed string) {
+	t.Helper()
+	host, err := ResolveHostPath(typed)
+	if err != nil {
+		t.Fatalf("ResolveHostPath(%q): %v", typed, err)
+	}
+	if host != typed {
+		t.Errorf("ResolveHostPath(%q) = %q, want itself", typed, host)
+	}
+	got, err := os.ReadFile(host)
+	if err != nil {
+		t.Fatalf("read %q, the answer for %q: %v", host, typed, err)
+	}
+	if string(got) != heldByADescriptor {
+		t.Errorf("read %q through %q, want %q", got, host, heldByADescriptor)
 	}
 }
 

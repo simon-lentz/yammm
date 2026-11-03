@@ -144,8 +144,7 @@ func sameFile(t *testing.T, a, b string) bool {
 }
 
 // What export writes through a ".." after a symlinked directory, check reads
-// back through the same spelling: for --output, and for --output-dir, where
-// the directory export makes and the one it writes into are one directory.
+// back through the same spelling.
 func TestExport_WhatItWritesThroughALinkedDotDotCheckReadsBack(t *testing.T) {
 	schemaPath, err := filepath.Abs(filepath.Join("testdata", "valid.yammm"))
 	if err != nil {
@@ -192,21 +191,6 @@ func TestExport_WhatItWritesThroughALinkedDotDotCheckReadsBack(t *testing.T) {
 			t.Errorf("the kernel's file changed to %q; the loader reads %s", got, filepath.Join(dir, "f.json"))
 		}
 		if code, _, errOut := runCLI(t, "check", schemaPath, out); code != 0 {
-			t.Errorf("check of what export wrote: exit %d: %s", code, errOut)
-		}
-	})
-
-	t.Run("--output-dir", func(t *testing.T) {
-		dir := t.TempDir()
-		linkedDirFixture(t, dir)
-		outDir := dir + sep + "link" + sep + ".." + sep + "out"
-		if code, _, errOut := runCLI(t, "export", "--to", "csv", "--output-dir", outDir, schemaPath, dataPath); code != 0 {
-			t.Fatalf("export: exit %d: %s", code, errOut)
-		}
-		if _, err := os.Lstat(filepath.Join(dir, "real", "deep", "out")); err == nil {
-			t.Errorf("export made the kernel's directory %s", filepath.Join(dir, "real", "deep", "out"))
-		}
-		if code, _, errOut := runCLI(t, "check", "--type", "Person", schemaPath, outDir+sep+"Person.csv"); code != 0 {
 			t.Errorf("check of what export wrote: exit %d: %s", code, errOut)
 		}
 	})

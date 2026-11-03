@@ -2,12 +2,11 @@
 //
 // The data adapters' writers report through an error, not a diag.Result, so a
 // caller separates a refusal — "this snapshot cannot be written in this
-// format", or "this adapter holds a setting it cannot use" — from an encoding
-// failure and from an I/O failure with errors.Is against a sentinel the
+// format" — from an encoding failure and from an I/O failure with errors.Is against a sentinel the
 // adapter exports. A refusal carries that sentinel as its class and the site's
 // own text as its message, and marking never changes the text. That text, or
 // the wraps the writer adds around it, names what was refused: an instance, a
-// property, a param, a primary key, a column, an edge or the setting. A call
+// property, a param, a primary key or an edge. A call
 // handed one bare value, with no name for it, names nothing. [New] builds a refusal from its
 // text; [Mark] marks an error another call returned, which keeps every class
 // that error already carries.

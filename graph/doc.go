@@ -134,8 +134,8 @@
 //   - is a part type, because a part instance is addressed through its parent
 //     composition;
 //   - declares no primary key, because it then has no address at all;
-//   - is one the entry schema cannot name, because adapter/json and
-//     adapter/csv key a root's output by that name and a type reached only
+//   - is one the entry schema cannot name, because adapter/json keys
+//     a root's output by that name and a type reached only
 //     through an intermediate import has no name form.
 //
 // [schema.Addressable] is the fourth member, and [schema.AddressableTag] is the
@@ -157,9 +157,9 @@
 // Every denoted type is held to all four members above, whether or not the
 // snapshot holds an instance of it.
 //
-// The reason is the writers. adapter/json and adapter/csv key their output by
-// the name of each type the snapshot denotes, so a denoted type needs a name,
-// and a key they emit must be one the instance validator and the generated
+// The reason is the writer. adapter/json keys its output by the name of each
+// type the snapshot denotes, so a denoted type needs a name, and a key it emits
+// must be one the instance validator and the generated
 // aggregate read back. The validator refuses an abstract or a part type's name even for
 // an empty batch, so a snapshot that denoted one would write a document its own
 // readers refuse.
@@ -225,8 +225,9 @@
 // float64, a json.Number (a literal no finite float64 holds, or a number nested
 // more than 64 levels deep), and lists and string-keyed maps of those. Each has a
 // form on the .ys wire, so [github.com/simon-lentz/yammm/snapshot.Marshal] meets no
-// value it cannot write. A data writer can still refuse one: adapter/csv and
-// adapter/neo4j have no spelling for some, and their docs name them.
+// value it cannot write. A data writer can still refuse one: adapter/neo4j has
+// no spelling for some, and adapter/json none for a json.Number no finite float64
+// holds, and each one's doc names them.
 //
 // Whether an association is required is read from the schema, never taken from
 // a constructor's input:
@@ -374,7 +375,7 @@
 // lossy as above: a root's name names only its type, and a composed child's
 // may match another type's. Where output needs a name that denotes one type,
 // render the identity with [github.com/simon-lentz/yammm/schema.AddressableTag],
-// as the JSON writer's object keys and the CSV writer's file names do.
+// as the JSON writer's object keys do.
 //
 // # Key Formatting
 //

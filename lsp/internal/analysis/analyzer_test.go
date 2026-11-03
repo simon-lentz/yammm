@@ -87,7 +87,7 @@ func TestSymbol_Fields(t *testing.T) {
 	t.Parallel()
 
 	sourceID := location.NewSourceID("test://file.yammm")
-	span := location.Point(sourceID, 10, 5)
+	span := location.PointWithByte(sourceID, 10, 5, -1)
 
 	symbol := symbols.Symbol{
 		Name:       "Person",
@@ -577,7 +577,7 @@ func TestConvertRelatedInfo_URIEncodingWithSpaces(t *testing.T) {
 
 			related := []location.RelatedInfo{
 				{
-					Span:    location.Point(sourceID, 6, 1),
+					Span:    location.PointWithByte(sourceID, 6, 1, -1),
 					Message: "related info message",
 				},
 			}

@@ -15,7 +15,6 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/simon-lentz/yammm/adapter/csv"
 	adapterjson "github.com/simon-lentz/yammm/adapter/json"
 	adaptern4j "github.com/simon-lentz/yammm/adapter/neo4j"
 	"github.com/simon-lentz/yammm/cmd/yammm/internal/cli"
@@ -297,13 +296,11 @@ func TestWriterFailure_ARefusalOfTheDataExitsValidation(t *testing.T) {
 		err  error
 		want int
 	}{
-		{"csv's refusal", csv.ErrUnrepresentable, cli.ExitValidation},
 		{"json's refusal, wrapped", fmt.Errorf("marshal: %w", adapterjson.ErrUnrepresentable), cli.ExitValidation},
 		{"neo4j's refusal, wrapped", fmt.Errorf("type %q: %w", "Grid", adaptern4j.ErrUnrepresentable), cli.ExitValidation},
 		{"neo4j's coercion refusal", coercionRefusal(), cli.ExitValidation},
 		{"neo4j's identifier refusal", adaptern4j.ErrInvalidIdentifier, cli.ExitRuntime},
 		{"any other writer failure", errors.New("disk full"), cli.ExitRuntime},
-		{"csv's setting refusal", csv.ErrConfig, cli.ExitRuntime},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()

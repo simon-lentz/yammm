@@ -12,7 +12,7 @@ The `yammm` CLI provides schema validation, formatting, data checking, snapshot 
 | `yammm fmt <schema>...` | Format schema files, or check them with `--check` |
 | `yammm check <schema> <data>` | Validate data against a schema |
 | `yammm load <schema> <data>` | Load data into graph and validate |
-| `yammm export <schema> <data>` | Export data to JSON, CSV, or Cypher |
+| `yammm export <schema> <data>` | Export data to JSON or Cypher |
 | `yammm gen --to go <schema>` | Generate Go source from a schema |
 | `yammm gen --to jsonschema <schema>` | Generate a JSON Schema (draft 2020-12) for instance-data authoring |
 | `yammm gen --to md <schema>` | Generate Markdown docs with a Mermaid class diagram |
@@ -34,9 +34,8 @@ The `yammm` CLI provides schema validation, formatting, data checking, snapshot 
 
 ### Writing files
 
-Every command that writes a file you name — `--output`, `--output-dir`, `-o`,
-`fmt -w`, `snapshot update-metadata` — writes it the same way, but for the one
-`--output-dir` exception stated below. A `..` in the
+Every command that writes a file you name — `--output`, `-o`, `snapshot save
+--into`, `fmt -w`, `snapshot update-metadata` — writes it the same way. A `..` in the
 path is evaluated on its text first, as for every path yammm reads, so
 `link/../f` is the `f` beside `link` and the file `yammm check` reads for that
 spelling, where on Unix the shell's `cat link/../f` reads the one beside the
@@ -45,21 +44,20 @@ as the kernel follows it, so a link survives and the file it names is written. A
 regular file, or one that does not exist yet, is replaced atomically: the
 content is staged beside it and renamed over it, so an interrupted write leaves
 the previous file. A new file is created at `0600` on Unix (Windows honours
-only a mode's write bit); an existing one keeps its mode. A FIFO, a device,
-`/dev/stdout`, `/dev/stderr` or `/dev/fd/N` is written through, continuing its
+only a mode's write bit); an existing one keeps its permission bits, and loses setuid, setgid and sticky. A FIFO, a device,
+`/dev/stdin`, `/dev/stdout`, `/dev/stderr` or `/dev/fd/N` is written through, continuing its
 stream, however the path reaches that directory: through a link to `/dev`, or
 on Linux through any descriptor table under `/proc`, such as `/proc/self/fd/N`.
 Behind `>> log` the bytes are
-appended and the log keeps its history. `--output-dir` refuses such a file at
-exit 3, since it puts its files in place together by renames. Any other path
+appended and the log keeps its history. Any other path
 under `/dev/`, such as a file under Linux's `/dev/shm`, is decided by the file
 it reaches. Anything else is refused at exit 3, naming the path: a
 read-only file, a directory, a looping link, or a file whose directory cannot
-hold the staging file, which `gofmt -w` refuses too. `export`, `gen` and
+hold the staging file, which `gofmt -w` refuses too. A path the process cannot
+stat, a refused rename and a write-through target that will not open exit 3 the
+same way. `export`, `gen` and
 `neo4j introspect` write to stdout when `--output` is omitted; `snapshot save`
-needs `-o` or `--into`. `--output-dir` renders every file before it touches the disk, so a
-graph the CSV writer refuses creates no directory; a directory it made before
-the filesystem refused a file stays, as `mkdir -p` leaves it.
+needs `-o` or `--into`.
 
 ---
 
@@ -122,18 +120,9 @@ yammm check schema.yammm data.json  # validate data
 
 ```bash
 yammm check schema.yammm data.json
-yammm check schema.yammm data.csv --type User
-yammm check schema.yammm data.csv --type-column '$type'
-yammm check --from csv schema.yammm data.tsv --type User
 ```
 
-Validates data against a schema as `load` does, and writes nothing: every instance, primary-key uniqueness, and every required association's target. Reports constraint violations, missing fields, invariant failures, duplicate primary keys and unresolved required associations. The verdict is about the data file: a target the file holds but the validator refuses is reported by that refusal and not as a missing target, and a key two instances state is a duplicate even where one of them is refused. Every command that reads data treats a `.tsv` file as CSV input whose fields split on tabs, with CSV quoting still in force; any other CSV file splits on commas.
-
-| Flag | Description |
-| ---- | ----------- |
-| `--from` | Input format override (`json` or `csv`; auto-detected if omitted) |
-| `--type` | Type name for single-type CSV |
-| `--type-column` | Column name containing type names (multi-type CSV) |
+Validates data against a schema as `load` does, and writes nothing: every instance, primary-key uniqueness, and every required association's target. Reports instance and graph diagnostics, the validator's at most 100 for one instance, among them constraint violations, missing and unknown fields, invariant failures, duplicate primary keys and unresolved required associations. The verdict is about the data file: a target the file holds but the validator refuses is reported by that refusal and not as a missing target, and a key two instances state is a duplicate even where one of them is refused. Every command that reads data reads each data file as JSON or JSONC, whatever its name, so `/dev/stdin` serves on Linux and macOS, on a pipe or a redirected file. A file that is not a JSON object draws `E_ADAPTER_PARSE`. A JSON object is read as that document, so a `.ys` snapshot draws `E_INVALID_TYPE_TAG` for each of its top-level keys here, at `load` and at `snapshot save`; `export` alone also reads a snapshot.
 
 ### load
 
@@ -141,7 +130,7 @@ Validates data against a schema as `load` does, and writes nothing: every instan
 yammm load schema.yammm data.json
 ```
 
-Loads data into an in-memory graph, validates it as `check` does, and in text output prints a summary line when the data loads without error. Same flags as `check`.
+Loads data into an in-memory graph, validates it as `check` does, and in text output prints a summary line when the data loads without error. Takes `--module-root`, as `check` does.
 
 ---
 
@@ -151,19 +140,16 @@ Loads data into an in-memory graph, validates it as `check` does, and in text ou
 
 ```bash
 yammm snapshot save -o output.ys schema.yammm data.json
-yammm snapshot save -o output.ys schema.yammm data1.json data2.csv --type User
+yammm snapshot save -o output.ys schema.yammm data1.json data2.json
 yammm snapshot save -o output.ys --into existing.ys schema.yammm new_data.json
 yammm snapshot save -o output.ys -m env=prod -m version=2 schema.yammm data.json
 ```
 
-Builds a graph snapshot from one or more data files and persists it as a `.ys` file. The data files are validated as one document, as `check` validates one file, and under `--into` the merged file's instances hold their keys too. Every data file's path is refused if it is empty or not UTF-8, and its format is decided, before the schema or any file is read. A `--type` the schema lacks, given for CSV data without `--type-column`, is refused before any data file is read. So a data usage error names nothing about the data, and a data file that cannot be read keeps the parse diagnostics the files before it drew.
+Builds a graph snapshot from one or more data files and persists it as a `.ys` file. The data files are validated as one document, as `check` validates one file, and under `--into` the merged file's instances hold their keys too. Every data file's path is refused if it is empty or not UTF-8 before the schema or any file is read. So a data usage error names nothing about the data, and a data file that cannot be read keeps the parse diagnostics the files before it drew.
 
 | Flag | Description |
 | ---- | ----------- |
 | `-o, --output` | Output path for the `.ys` file; required unless `--into` is given, which defaults it to the merged file |
-| `--from` | Input format override |
-| `--type` | Type name for single-type CSV |
-| `--type-column` | Column for multi-type CSV |
 | `-m, --metadata` | Key=value metadata pairs (repeatable) |
 | `--timestamp` | Stamp the current time as `created_at` (breaks determinism) |
 | `--indent` | Produce indented output |
@@ -223,21 +209,14 @@ yammm export --to cypher schema.yammm data.json
 
 ```bash
 yammm export --to json schema.yammm data.json
-yammm export --to csv --output-dir ./out schema.yammm data.json
 yammm export --to cypher schema.yammm data.json > import.cypher
-yammm export --to json --output result.json schema.yammm data.csv --type User
+yammm export --to json --output result.json schema.yammm data.json
 ```
-
-`--to csv --output` writes tab-delimited fields when the file name ends in `.tsv`, so `check` reads it back; any other name, `--output-dir`'s per-type `.csv` files and stdout take commas. `--to csv` refuses a graph in which an instance holds composed children, since a CSV row has no column for them, and writes nothing; `--to json` carries them.
 
 | Flag | Description |
 | ---- | ----------- |
-| `--to` | Output format: `json`, `csv`, or `cypher` (required) |
-| `--from` | Input format override |
-| `--output` | Output file path (default: stdout); with `--to csv`, a `.tsv` name writes tab-delimited fields |
-| `--output-dir` | Output directory (CSV multi-type: one file per type) |
-| `--type` | Type name for single-type CSV input |
-| `--type-column` | Column for multi-type CSV input |
+| `--to` | Output format: `json` or `cypher` (required) |
+| `--output` | Output file path (default: stdout) |
 
 ---
 
@@ -376,7 +355,7 @@ yammm neo4j diff --uri bolt://localhost:7687 schema.yammm
 yammm export --to cypher schema.yammm data.json --output load.cypher
 ```
 
-The `--to cypher` output is parameterized — `UNWIND`/`MERGE` over one `$rows`
+The `--to cypher` output is parameterized — `UNWIND` statements over one `$rows`
 placeholder, whose rows carry the keys and properties each statement reads (a
 node merge's as `row.key_<name>` and `row.props`, and `row.update_props` for a type
 with `@writeOnce` properties) — so it is written for inspection and for

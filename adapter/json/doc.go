@@ -61,9 +61,9 @@
 //
 // Every valid type name whose value is an array is an entry of the result, an
 // empty array included, unless a fault or a cancellation stops the parse
-// before it is read. A shape a decoder resolves silently is an Error diagnostic
-// instead, because what a decoder keeps of it is one reader's convention and not
-// the document's meaning. Each is reported where it stands:
+// before it is read. Each shape below, which a decoder resolves silently, is an
+// Error diagnostic instead, because what a decoder keeps of it is one reader's
+// convention and not the document's meaning. Each is reported where it stands:
 //
 //   - A type name repeated as a key of the root object. Decoding keeps the last
 //     array and drops the first batch whole; here the repeat is reported at its
@@ -119,8 +119,7 @@
 // [Adapter.MarshalObject] checks once per type
 // group and returns an error wrapping the context's; [Adapter.WriteObject]
 // checks again after the document is built and writes nothing if it is
-// cancelled by then. The CSV adapter's writer is finer, checking per
-// instance, so one very large type group stops sooner there than here.
+// cancelled by then.
 //
 // # Provenance
 //
@@ -130,8 +129,7 @@
 // offset lies in the data or at its end; the cancellation diagnostic carries none.
 //
 // The path indexes the document's own array, so $.Person[2] addresses the
-// document even where element 1 failed to decode. [adapter/csv] indexes by the
-// instances it produced instead, because CSV has no path language.
+// document even where element 1 failed to decode.
 //
 // Columns count runes from the line start of the bytes passed in, never of the
 // buffer jsonc returns: jsonc writes one byte per comment BYTE, and one more
@@ -154,10 +152,7 @@
 //
 // ParseObject skips one leading UTF-8 byte order mark and counts it in the
 // positions it reports: one column on line 1, and three bytes in every byte
-// offset. A second mark is a parse error, E_ADAPTER_PARSE. The CSV adapter's
-// parse methods skip one leading mark too and share neither rule: a second
-// mark stays in the first header column's name, and the column an
-// [encoding/csv] parse error's message names does not count the mark.
+// offset. A second mark is a parse error, E_ADAPTER_PARSE.
 //
 // # Thread Safety
 //
@@ -186,8 +181,7 @@
 //
 //	adapter/json  ──imports──▶  instance, diag, location, location/path, graph,
 //	                            immutable, schema, adapter/internal/constraintof,
-//	                            adapter/internal/refusal, adapter/internal/typetag,
-//	                            github.com/tidwall/jsonc
+//	                            adapter/internal/refusal, github.com/tidwall/jsonc
 //
 // [tidwall/jsonc]: https://github.com/tidwall/jsonc
 package json

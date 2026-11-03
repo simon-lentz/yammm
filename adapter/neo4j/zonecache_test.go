@@ -72,10 +72,10 @@ func TestDriverZone_AgreeingNameIsKept(t *testing.T) {
 	}
 }
 
-// A Date carries no time of day. dbtype.Date holds a whole time.Time and the
-// driver derives its day number by an integer division that truncates toward
-// zero, so a pre-1970 instant with a time of day landed a day late — measured
-// against a live server as 1969-07-20T18:00:00Z stored as 1969-07-21.
+// A Date carries no time of day. dbtype.Date holds a whole time.Time, and a
+// driver before v6.4.0 derived its day number by a division that truncated
+// toward zero, so a pre-1970 instant with a time of day landed a day late —
+// measured against a live server as 1969-07-20T18:00:00Z stored as 1969-07-21.
 //
 // It drives [coerceScalar], not calendarDate, and covers all THREE Date arms: the
 // rule holds only where it is wired in, and the dbtype.Date arm passed its

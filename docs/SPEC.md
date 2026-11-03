@@ -747,7 +747,7 @@ max    = [ "-" ] ( "_" | INTEGER | FLOAT ) .
 
 As for `Integer`, a minus sign before `_` is accepted with a Warning and no effect.
 
-Validation accepts floats and integers; an integer is widened to `float64`. In a JSON or CSV data document a `Float` value is any number literal, read as its nearest `float64`, so `-0` keeps its sign; a literal no finite `float64` holds, such as `1e400`, is refused. `NaN` and the infinities are refused. Loading a `.ys` snapshot stores a number by its spelling alone, with or without revalidation, so an integer literal under a `Float` there, such as `-0` or `5`, loads as an `int64`; the writer writes one only for an integer no `float64` holds exactly.
+Validation accepts floats and integers; an integer is widened to `float64`. In a JSON data document a `Float` value is any number literal, read as its nearest `float64`, so `-0` keeps its sign; a literal no finite `float64` holds, such as `1e400`, is refused. `NaN` and the infinities are refused. Loading a `.ys` snapshot stores a number by its spelling alone, with or without revalidation, so an integer literal under a `Float` there, such as `-0` or `5`, loads as an `int64`; the writer writes one only for an integer no `float64` holds exactly.
 
 Examples:
 
@@ -1727,7 +1727,7 @@ YAMMM uses structured diagnostics with stable error codes. The Go programmatic i
 
 ### Diagnostic Codes
 
-Codes are stable identifiers for programmatic matching. `diag/code.go` holds the built-in codes, and `adapter/neo4j` and `adapter/csv` register their own on import. Categories and their codes:
+Codes are stable identifiers for programmatic matching. `diag/code.go` holds the built-in codes, and `adapter/neo4j` registers its own on import. Categories and their codes:
 
 **Sentinel** — internal conditions:
 
@@ -1795,7 +1795,7 @@ Codes are stable identifiers for programmatic matching. `diag/code.go` holds the
 - `E_UNRESOLVED_REQUIRED_COMPOSITION` — required composition unresolved
 - `E_COMPOSITION_DEPTH_EXCEEDED` — composed nesting exceeds the depth limit (32), the bound the `.ys` reader holds a document to with `E_SNAPSHOT_DEPTH_EXCEEDED`, so a snapshot can carry every nesting a validator accepts
 - `E_DUPLICATE_COMPOSED_PK` — a composition slot cannot hold this child: two children of one `(many)` slot share a primary key, or a `(one)` slot is given several. Listed here as well as under Graph: the validator raises it over the children it validates together. The import raises it over the snapshot it is given, and `snapshot.Load` and `snapshot.Verify` raise it for two children of a keyed `(many)` slot at one canonical key and for a `(one)` slot a document holds several children in; `snapshot.Info` reads without a schema and makes no such claim
-- `E_INVALID_TYPE_TAG` — a type tag that is not a type name by the grammar: a JSON document's top-level key, or a CSV type-column value
+- `E_INVALID_TYPE_TAG` — a type tag that is not a type name by the grammar: a JSON document's top-level key
 - `E_CASE_FOLD_COLLISION` — multiple input fields map to the same schema property, relation field, edge property or `_target_` foreign-key field after case-folding. Property name matching is case-insensitive by default (see `WithStrictPropertyNames` in [API.md](API.md)). When two or more input fields fold to one schema property and none of them matches it exactly (schema `name`, input `Name` and `NAME`), the collision is reported and neither field is mapped. An input name that matches a schema property exactly is claimed first and never collides
 
 **Graph** — graph construction errors:
@@ -1822,7 +1822,7 @@ Codes are stable identifiers for programmatic matching. `diag/code.go` holds the
 - `E_SNAPSHOT_DANGLING_REFERENCE` — an edge target, a duplicate's conflict, or an unresolved record's source not found; a reference to an address a refused unit states draws none, the unit's refusal being its one issue
 - `E_SNAPSHOT_INVALID_COMPOSED` — composed child carries edges, or composed children stand under a name the parent's type does not declare as a composition
 - `E_SNAPSHOT_INVALID_ROOT` — an instances group, empty or not, or a duplicate record names a type that cannot hold a root instance: abstract, a part type, or declaring no primary key. Refused whatever the load options say — none of the three describes a graph any caller could have built. One type draws one issue, however many positions name it, and a root of it holds no address: it owes no required association, it is in no `(one)` count, and a second root at its key is no duplicate. A break its records or its slots show by themselves stays its own
-- `E_SNAPSHOT_UNNAMEABLE_TYPE` — an instances group, empty or not, or a duplicate record names a type the entry schema reaches only through an intermediate import, so the schema has no name form for it. `adapter/json` and `adapter/csv` key their output by the name of each type a snapshot denotes, so such a document describes a snapshot they cannot render. Refused whatever the load options say, and the hint names the remedy, which is to import the declaring schema directly. One type draws one issue, and a root of it holds no address, as under `E_SNAPSHOT_INVALID_ROOT`
+- `E_SNAPSHOT_UNNAMEABLE_TYPE` — an instances group, empty or not, or a duplicate record names a type the entry schema reaches only through an intermediate import, so the schema has no name form for it. `adapter/json` keys its output by the name of each type a snapshot denotes, so such a document describes a snapshot it cannot render. Refused whatever the load options say, and the hint names the remedy, which is to import the declaring schema directly. One type draws one issue, and a root of it holds no address, as under `E_SNAPSHOT_INVALID_ROOT`
 - `E_DUPLICATE_PK` — two root instances in one group, both of whose stored keys the key rule accepts, state one primary key. Under a schema, only roots of a type that can hold a root count. Listed here as well as under Graph: `snapshot.Load`, `snapshot.Verify` and `snapshot.Info` emit it, because the wire has a diagnostics section for a rejected duplicate and two live instances at one address is not a shape it can carry. `Info` resolves no schema, so it judges no type and compares keys as the reader's number rule renders them, where `Load` and `Verify` also fold a timestamp or UUID key written two ways
 - `E_SNAPSHOT_COMPOSED_ON_DUPLICATE`, `E_SNAPSHOT_EDGES_ON_DUPLICATE` — illegal data on duplicate records
 - `E_SNAPSHOT_DEPTH_EXCEEDED` — composed nesting exceeds depth limit (32)
@@ -1837,12 +1837,9 @@ Codes are stable identifiers for programmatic matching. `diag/code.go` holds the
 - `W_SNAPSHOT_UNRESOLVED_REQUIRED` — under `WithRevalidation`, a loaded document carries an unresolved record, one no structural check refused, for a required association
 - `W_SNAPSHOT_PATH_EXTENSION` (Warning) — a snapshot was written to a path that does not end in `.ys`. The write succeeded; a reader that discovers snapshots by extension will not find it
 
-**Adapter** — format-specific errors. `E_ADAPTER_PARSE` and `E_ADAPTER_IO` are declared in `diag`; every other code below is registered by its adapter package when that package is linked:
+**Adapter** — format-specific errors. `E_ADAPTER_PARSE` is declared in `diag`; every other code below is registered by its adapter package when that package is linked:
 
 - `E_ADAPTER_PARSE` — parsing error in adapter input
-- `E_ADAPTER_IO` (Fatal) — an adapter's input failed to arrive: the reader a parse reads from returned an error that is neither the input's end nor a fault in its content. What was read before the failure is kept
-- `E_CSV_COERCE` — a CSV cell's text does not coerce to the type its member declares
-- `E_CSV_CONFIG` — the CSV adapter holds a setting the parse cannot use: a delimiter `encoding/csv` refuses, or `ParseWithTypeColumn` with no type column set or with one whose name holds a CR LF, which no header can hold. No record is read
 - `E_NEO4J_LABEL_COLLISION` — two types render the same Neo4j label
 - `E_NEO4J_INVALID_IDENTIFIER` — an identifier is not usable unquoted in generated Cypher
 - `E_NEO4J_UNSUPPORTED_TYPE` — a property kind the adapter cannot express

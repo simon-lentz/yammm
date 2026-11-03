@@ -2,9 +2,9 @@
 //
 // This package defines the core types used by the YAMMM diagnostic system
 // to track source locations. Besides the standard library it depends only on
-// its location/path sub-package, golang.org/x/text/unicode/norm and, on
-// Windows, golang.org/x/sys/windows (see Dependencies), so every package but
-// location/path can import it without an import cycle.
+// its location/path sub-package, internal/hostpath, golang.org/x/text/unicode/norm
+// and, on Windows, golang.org/x/sys/windows (see Dependencies), so every package
+// but location/path and internal/hostpath can import it without an import cycle.
 //
 // # CanonicalPath
 //
@@ -15,8 +15,8 @@
 //   - Written with "/" as its separator, on every host
 //   - Resolved as far as the process can look: symlinks followed, and each
 //     component it can look up spelled as the filesystem spells it; a missing
-//     tail, and anything under a component it cannot traverse, is kept as
-//     typed (see the section on ".." below)
+//     tail, anything under a component it cannot traverse, and a descriptor
+//     path, is kept as typed (see the section on ".." below)
 //   - Valid UTF-8
 //
 // Canonicalization follows the host's own path rules. On Windows a backslash
@@ -26,7 +26,9 @@
 //
 // A CanonicalPath is an identity, not a path to open. NFC can change its bytes,
 // so on a filesystem that distinguishes normalization forms it may name no
-// file; read a file through the host path it was derived from.
+// file; read a file through the path as given or the host path it was derived
+// from, and through the path as given when a link may reach a descriptor (see
+// below).
 //
 // Create via NewCanonicalPath. The type uses an unexported
 // field to enforce construction through validated constructors only.
@@ -34,17 +36,23 @@
 // # Host paths and identities
 //
 // [ResolveHostPath] answers one question — what does the filesystem call this
-// file — and every file-backed identity is that answer, normalized. The
-// constructors [SourceIDFromPath], [ResolveSourcePath], [NewCanonicalPath] and
-// [CanonicalPath.Join] all resolve. Two
+// file — and a file-backed identity is that answer in NFC with forward slashes,
+// save as this section states. A descriptor
+// path names a descriptor, not a file, and answers as typed, case included (see
+// below). The constructors [SourceIDFromPath], [ResolveSourcePath],
+// [NewCanonicalPath] and [CanonicalPath.Join] all resolve; [CanonicalPath.Dir]
+// cuts an identity's text, so a descriptor path's directory keeps its typed
+// spelling too. Two
 // spellings that resolve to one host path therefore give one identity: the
-// spelling the filesystem holds, written in NFC, with a missing tail as typed. A file that two host paths reach — a
+// spelling the filesystem holds, written in NFC, with a missing tail, or a
+// descriptor path, as typed. A file that two host paths reach — a
 // hard link, a firmlink or a bind mount — keeps two identities.
 //
 // # A ".." is evaluated on the text
 //
 // Case, the on-disk normalization and every symbolic link are read from disk, as
-// far as the path exists and the process can look. A ".." is not. It is evaluated
+// far as the path exists, the process can look and the path is not a descriptor
+// path. A ".." is not. It is evaluated
 // on the path's text before anything is looked up, so "dir/link/../x" names
 // "dir/x" whatever "dir/link" resolves to. A "." and a repeated or trailing
 // separator are cleaned on the text in the same step.
@@ -60,7 +68,7 @@
 //
 // The reason is agreement. The schema loader resolves a "../" import through
 // filepath.Join, on the text; an editor resolves the file it is editing through
-// this package; a data file resolves through it too, and the command-line tool
+// this package; a data file takes its identity from it too, and the command-line tool
 // evaluates a ".." the same way in every path it reads or writes. One rule for
 // all of them lands them on one file, and a resolver that followed the kernel
 // here would send the editor to a file the loader does not compile.
@@ -73,7 +81,8 @@
 // the path, and a "." or a trailing separator after a regular file is dropped
 // where the kernel would refuse it too.
 //
-// On darwin the answer is realpath(3), called through libSystem. It reads each
+// For a path that is not a descriptor path, the answer on darwin is realpath(3),
+// called through libSystem. It reads each
 // component's name from the directory the lookup passed through, so it answers
 // in the volume's case and normalization; it opens nothing, so a FIFO, an
 // unreadable file and a full descriptor table resolve like any other path.
@@ -87,7 +96,7 @@
 // falls back to the name as opened, which is not normalized. filepath.EvalSymlinks is not used
 // there: it follows a link named inside a target before a ".." that follows
 // it, where Windows evaluates the ".." first. On Linux filepath.EvalSymlinks
-// is the answer: the host is case-sensitive, and a directory mounted with case
+// is the answer for such a path: the host is case-sensitive, and a directory mounted with case
 // folding (ext4 +F) keeps the typed case and is out of scope.
 //
 // A path that does not exist yet resolves as far as it exists: the deepest
@@ -108,6 +117,17 @@
 // does not exist or is not a directory, since the kernel reaches no file through it; so is a cycle of dangling links, and so is an existing path whose resolved form is
 // longer than the host allows a path to be (PATH_MAX, 1024 bytes on darwin).
 //
+// On every host but Windows, a descriptor path resolves to itself. It is a path
+// whose directory is /dev, by whatever route the path reaches it, and whose name
+// is stdin, stdout or stderr; one whose directory is /dev/fd and whose name is a
+// number; or, on Linux, an entry of a procfs descriptor table. Such a path
+// names an open descriptor, not a file: its file may be a pipe or an unlinked file
+// with no name, and on darwin the host gives no true name for a regular one. Two
+// spellings of one descriptor path, such as /dev/stdin and /DEV/stdin on a
+// case-insensitive volume, give two identities. A link to one resolves as far as
+// the host names it, and that name may reach no file or another file, so only
+// the path as given is sure to reach the descriptor.
+//
 // # SourceID
 //
 // SourceID identifies a source within a build, up to NFC: on a host that keeps
@@ -119,7 +139,8 @@
 //     like "<stdin>", "inline:test", or "test://unit/person.yammm".
 //
 // SourceID is comparable and safe for use as map keys. Case is not folded, it
-// is read from the filesystem: where /Users/Simon/a.yammm and
+// is read from the filesystem as far as the path resolves (see CanonicalPath
+// above): where /Users/Simon/a.yammm and
 // /users/simon/a.yammm name one file, both give the identity of the spelling
 // the volume holds. A synthetic identifier is compared as written.
 //
@@ -140,7 +161,7 @@
 //   - Start: Inclusive start position
 //   - End: Exclusive end position (equals Start for point spans)
 //
-// Create spans via Point, PointWithByte, or RangeWithBytes. RangeWithBytes panics
+// Create spans via PointWithByte or RangeWithBytes. RangeWithBytes panics
 // if end is before start by an order both positions know: the byte offsets, or
 // the line and column. A position with
 // a zero line or column knows no line and column order, and one with both zero
@@ -174,10 +195,10 @@
 //
 // # Dependencies
 //
-//	location  ──imports──▶  location/path, golang.org/x/text/unicode/norm,
+//	location  ──imports──▶  location/path, internal/hostpath, golang.org/x/text/unicode/norm,
 //	                        golang.org/x/sys/windows
 //
-// The sub-package carries provenance paths, the x/text import is NFC
-// normalization, and the x/sys import, made on Windows alone, is the
-// final-path call.
+// The sub-package carries provenance paths, internal/hostpath judges a
+// descriptor path by its name, the x/text import is NFC normalization, and the
+// x/sys import, made on Windows alone, is the final-path call.
 package location

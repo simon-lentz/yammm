@@ -5,9 +5,6 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
-	"path/filepath"
-	"runtime"
-	"strings"
 	"syscall"
 
 	"github.com/simon-lentz/yammm/internal/hostpath"
@@ -31,9 +28,6 @@ const stagingPattern = ".yammm-*" + snapshot.TmpSuffix
 // (MAXSYMLINKS) — so a loop is refused rather than followed.
 const maxLinkHops = 40
 
-// errNotReplaceable refuses a target a set of files cannot rename into place.
-var errNotReplaceable = errors.New("not a regular file, so a set of files cannot replace it")
-
 // writeTarget is where a write to an operator-named path lands, and how.
 type writeTarget struct {
 	path    string      // the file a replacement lands on: the named path, its symlinks followed
@@ -52,7 +46,7 @@ type writeTarget struct {
 func resolveWriteTarget(path string) (writeTarget, error) {
 	resolved := path
 	for hops := 0; ; hops++ {
-		if descriptorPath(resolved) {
+		if hostpath.Descriptor(resolved) {
 			return writeTarget{path: path, through: true}, nil
 		}
 		info, err := os.Lstat(resolved)
@@ -89,43 +83,13 @@ func resolveWriteTarget(path string) (writeTarget, error) {
 	}
 }
 
-// descriptorPath reports whether path names /dev/stdout, /dev/stderr or
-// /dev/fd/N, judged by the directory holding it as the kernel reaches it, each
-// link and ".." in it taken on disk: a link to /dev is seen, and on Linux every
-// descriptor table procfs holds counts as /dev/fd. Such a path names an open
-// descriptor's file, which a rename would take away from the descriptor.
-func descriptorPath(path string) bool {
-	// Windows reads "/dev" as a directory of the current drive.
-	if runtime.GOOS == "windows" {
-		return false
-	}
-	dir := hostpath.Parent(path)
-	switch base := filepath.Base(path); {
-	case base == "stdout" || base == "stderr":
-		return sameFile(dir, "/dev")
-	case strings.Trim(base, "0123456789") == "":
-		return sameFile(dir, "/dev/fd") || procDescriptorTable(dir)
-	}
-	return false
-}
-
-// sameFile reports whether a and b both stat and name one file.
-func sameFile(a, b string) bool {
-	ai, err := os.Stat(a)
-	if err != nil {
-		return false
-	}
-	bi, err := os.Stat(b)
-	return err == nil && os.SameFile(ai, bi)
-}
-
 // WriteFile writes data to path and never leaves a file it replaces half-written.
 //
 // It writes the file [HostPath] gives for path, the one `yammm check` reads.
 // It follows that path's symlinks, so a link survives and the file it names is
 // written. A regular file, or one that does not exist yet, is replaced: the
 // payload is staged beside it, synced, given its mode and renamed over it. A
-// FIFO, a device, /dev/stdout, /dev/stderr or /dev/fd/N is written through,
+// FIFO, a device, /dev/stdin, /dev/stdout, /dev/stderr or /dev/fd/N is written through,
 // since no rename can stand in for one. Anything else is refused, and every error names path.
 func WriteFile(path string, data []byte) error {
 	host, err := HostPath(path)
@@ -222,180 +186,4 @@ func writeSyncChmodClose(f *os.File, data []byte, mode fs.FileMode) (retErr erro
 		return fmt.Errorf("chmod: %w", bare(err))
 	}
 	return nil
-}
-
-// A NamedFile is one file of the set [WriteFileSet] writes: its name inside the
-// set's directory and its contents.
-type NamedFile struct {
-	Name string
-	Data []byte
-}
-
-// stagedFile is one [NamedFile] written to its staging file and waiting for its
-// rename.
-type stagedFile struct {
-	tmp    string
-	name   string // the name the caller gave, which every error reports
-	target string // where the rename lands: the name's symlinks followed
-}
-
-// WriteFileSet writes files into the directory [HostPath] gives for dir, all of
-// them or, but for a rename the filesystem refuses after others succeeded, none:
-// each is staged beside its target and renamed only once the last is staged, and
-// a failure removes the staging files, since a partial set reads as a complete
-// export with one type's file missing. The directory, with any
-// missing parent, is made once the names are judged and is never removed, so a
-// caller that must create nothing for a refused set judges its data first. A
-// staging directory renamed over the target would be simpler and would delete
-// the files the operator put there.
-func WriteFileSet(dir string, files []NamedFile) error {
-	set, err := stageFileSet(dir, files)
-	if err != nil {
-		return err
-	}
-	return set.commit()
-}
-
-// stagedSet is a set of files [stageFileSet] staged and [stagedSet.commit] has
-// not yet renamed into place.
-type stagedSet []stagedFile
-
-// stageFileSet judges the names, creates dir and stages every file. A failure
-// removes the staging files it made.
-func stageFileSet(dir string, files []NamedFile) (stagedSet, error) {
-	if err := judgeNames(files); err != nil {
-		return nil, err
-	}
-	host, err := HostPath(dir)
-	if err != nil {
-		return nil, fmt.Errorf("create output directory: %w", &fs.PathError{Op: "mkdir", Path: dir, Err: err})
-	}
-	if err := os.MkdirAll(host, 0o750); err != nil {
-		return nil, fmt.Errorf("create output directory: %w", err)
-	}
-	set := make(stagedSet, 0, len(files))
-	for _, nf := range files {
-		sf, err := stage(dir, nf)
-		if err == nil {
-			// Two names whose links reach one file would leave the set one file
-			// short, as two names differing in case would.
-			for _, earlier := range set {
-				if earlier.sameTarget(sf) {
-					os.Remove(sf.tmp) //nolint:gosec // best-effort cleanup
-					err = fmt.Errorf("%s and %s name one file, %s", earlier.name, sf.name, sf.target)
-					break
-				}
-			}
-		}
-		if err != nil {
-			set.discard()
-			return nil, err
-		}
-		set = append(set, sf)
-	}
-	return set, nil
-}
-
-// commit renames every staged file into place, first refusing a directory that
-// appeared where a file belongs since it was staged, because a rename that fails
-// after earlier ones succeeded cannot be undone. A failure removes the staging
-// files not yet renamed.
-func (s stagedSet) commit() error {
-	for _, sf := range s {
-		if info, err := os.Stat(sf.target); err == nil && info.IsDir() {
-			s.discard()
-			return fmt.Errorf("%s exists and is a directory", sf.name)
-		}
-	}
-	for i := range s {
-		if err := os.Rename(s[i].tmp, s[i].target); err != nil {
-			s.discard()
-			return fmt.Errorf("rename %s: %w", s[i].name, bare(err))
-		}
-		s[i].tmp = ""
-	}
-	return nil
-}
-
-// discard removes every staging file of s not yet renamed into place.
-func (s stagedSet) discard() {
-	for i := range s {
-		if s[i].tmp != "" {
-			os.Remove(s[i].tmp) //nolint:gosec // best-effort cleanup
-			s[i].tmp = ""
-		}
-	}
-}
-
-// sameTarget reports whether a's and s's renames land on one file: one file
-// that exists, or one name in one directory, compared as [judgeNames] compares
-// names, where the file does not exist yet.
-func (s stagedFile) sameTarget(a stagedFile) bool {
-	si, serr := os.Stat(s.target)
-	ai, aerr := os.Stat(a.target)
-	if serr == nil && aerr == nil {
-		return os.SameFile(si, ai)
-	}
-	sd, serr := os.Stat(hostpath.Parent(s.target))
-	ad, aerr := os.Stat(hostpath.Parent(a.target))
-	return serr == nil && aerr == nil && os.SameFile(sd, ad) &&
-		strings.EqualFold(filepath.Base(s.target), filepath.Base(a.target))
-}
-
-// judgeNames refuses a set whose names cannot share one directory, before
-// anything is created.
-func judgeNames(files []NamedFile) error {
-	for i, nf := range files {
-		if nf.Name == "." || nf.Name == ".." || filepath.Base(nf.Name) != nf.Name {
-			return fmt.Errorf("%q is not a file name inside the output directory", nf.Name)
-		}
-		// Two names that differ only in case are one file on a
-		// case-insensitive filesystem: the second rename replaces the first's
-		// contents while the directory keeps the first's spelling, so the set
-		// ends one file short and the survivor carries one member's name over
-		// another's data. Refused on every filesystem, because the directory is
-		// a portable artefact and the caller cannot know where it will be read.
-		for _, earlier := range files[:i] {
-			switch {
-			case earlier.Name == nf.Name:
-				return fmt.Errorf("%s is named twice in one set", nf.Name)
-			case strings.EqualFold(earlier.Name, nf.Name):
-				return fmt.Errorf("%s and %s differ only in case and cannot share one directory", earlier.Name, nf.Name)
-			}
-		}
-	}
-	return nil
-}
-
-// stage writes nf to a staging file beside the file its name reaches inside
-// dir. It refuses, before anything is written, a target [WriteFile] would
-// refuse and a target only a write in place could reach.
-func stage(dir string, nf NamedFile) (stagedFile, error) {
-	// The directory and the name are joined as text, the rule HostPath applies,
-	// so the file lands in the directory WriteFileSet made.
-	path := filepath.Join(dir, nf.Name)
-	host, err := HostPath(path)
-	var t writeTarget
-	if err == nil {
-		t, err = resolveWriteTarget(host)
-	}
-	if err == nil && t.through {
-		err = errNotReplaceable
-	}
-	var f *os.File
-	if err == nil {
-		f, err = os.CreateTemp(hostpath.Parent(t.path), stagingPattern)
-		if err != nil {
-			err = fmt.Errorf("stage replacement: %w", bare(err))
-		}
-	}
-	if err == nil {
-		if err = writeSyncChmodClose(f, nf.Data, t.mode); err != nil {
-			os.Remove(f.Name()) //nolint:gosec // best-effort cleanup on a failed write
-		}
-	}
-	if err != nil {
-		return stagedFile{}, &fs.PathError{Op: "write", Path: path, Err: err}
-	}
-	return stagedFile{tmp: f.Name(), name: nf.Name, target: t.path}, nil
 }

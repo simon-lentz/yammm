@@ -15,14 +15,10 @@ func newLoadCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "load <schema.yammm> <data-file>",
 		Short: "Load data into an in-memory graph and validate",
-		Long:  "Load JSON or CSV data into a schema-validated graph. Reports diagnostics and, in text output when the data loads without error, a summary line; 'yammm check' runs the same validation and prints no summary.",
+		Long:  "Load JSON data into a schema-validated graph. Reports diagnostics and, in text output when the data loads without error, a summary line; 'yammm check' runs the same validation and prints no summary.",
 		Args:  cobra.ExactArgs(2),
 		RunE:  withDiagnostics(runLoad),
 	}
-
-	cmd.Flags().String("from", "", "input format override: json or csv")
-	cmd.Flags().String("type", "", "type name for CSV data (required for single-type CSV)")
-	cmd.Flags().String("type-column", "", "column name containing type names (for multi-type CSV)")
 
 	registerModuleRootFlag(cmd)
 	return cmd
@@ -31,8 +27,7 @@ func newLoadCmd() *cobra.Command {
 func runLoad(cmd *cobra.Command, args []string, sink *cli.DiagnosticSink) error {
 	schemaPath := args[0]
 	dataPath := args[1]
-	in, err := dataInputOf(cmd, dataPath)
-	if err != nil {
+	if err := checkDataOperands(dataPath); err != nil {
 		return err
 	}
 	absSchemaPath, err := schemaOperand(schemaPath)
@@ -50,7 +45,7 @@ func runLoad(cmd *cobra.Command, args []string, sink *cli.DiagnosticSink) error 
 		return err
 	}
 
-	if _, err := loadGraph(cmd, sink, s, in); err != nil {
+	if _, err := loadGraph(cmd, sink, s, dataPath); err != nil {
 		return err
 	}
 
@@ -96,7 +91,7 @@ func reportSchemaLoad(sink *cli.DiagnosticSink, s schema.Schema, explicitRoot, a
 // against, which the renderer turns into an identity: a completed load's
 // ModuleRoot unless it is a synthetic scheme string, and for a failed load the
 // root the loader would have used — the explicit root, then the nearest
-// yammm.mod, then the directory of the schema file with its symlinks resolved.
+// yammm.mod, then the directory of the host path the schema file resolves to.
 func diagRootFor(s schema.Schema, explicitRoot, absSchemaPath string) string {
 	if !s.IsZero() {
 		if root := s.ModuleRoot(); root != "" && filepath.IsAbs(root) {

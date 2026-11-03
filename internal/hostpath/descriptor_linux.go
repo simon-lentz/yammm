@@ -1,4 +1,4 @@
-package cli
+package hostpath
 
 import (
 	"path/filepath"

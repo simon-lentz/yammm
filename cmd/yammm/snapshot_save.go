@@ -32,9 +32,6 @@ merged file's own created_at forward.`,
 	}
 
 	cmd.Flags().StringP("output", "o", "", "output path for the .ys file (required unless --into is given, which defaults it to the merged file)")
-	cmd.Flags().String("from", "", "input format override: json or csv (auto-detected if not set)")
-	cmd.Flags().String("type", "", "type name for CSV data (required for single-type CSV)")
-	cmd.Flags().String("type-column", "", "column name containing type names (for multi-type CSV)")
 	cmd.Flags().StringArrayP("metadata", "m", nil, "key=value metadata pair (repeatable)")
 	cmd.Flags().Bool("timestamp", false, "include created_at timestamp in header (breaks determinism)")
 	cmd.Flags().Bool("indent", false, "produce indented output for human inspection")
@@ -66,8 +63,8 @@ func runSnapshotSave(cmd *cobra.Command, args []string, sink *cli.DiagnosticSink
 	}
 
 	schemaPath := args[0]
-	in, err := dataInputOf(cmd, args[1:]...)
-	if err != nil {
+	dataPaths := args[1:]
+	if err := checkDataOperands(dataPaths...); err != nil {
 		return err
 	}
 
@@ -115,13 +112,11 @@ func runSnapshotSave(cmd *cobra.Command, args []string, sink *cli.DiagnosticSink
 		imported = header
 	}
 
-	a, err := assembleGraph(cmd, sink, s, in, g)
+	a, err := assembleGraph(cmd, sink, s, dataPaths, g)
 	if err != nil {
 		return err
 	}
 	g = a.graph
-	// The data file's own read failure rides this result for a streamed format,
-	// so the exit rule decides: an I/O failure outranks a validation one.
 	if sink.Result().HasErrors() {
 		return cli.Exit(cli.ExitForResult(sink.Result()))
 	}

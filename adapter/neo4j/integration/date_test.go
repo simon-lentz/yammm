@@ -16,9 +16,9 @@ import (
 // cases only a server settles.
 //
 // dbtype.Date carries a whole time.Time and the driver derives its day number
-// by an integer division that truncates toward zero, so a pre-1970 instant with
-// a time of day arrived a day late. No unit test could see it: the conversion
-// is the driver's, not the adapter's.
+// from it; before v6.4.0 that division truncated toward zero, so a pre-1970
+// instant with a time of day arrived a day late. No unit test can see it: the
+// conversion is the driver's, not the adapter's.
 func TestCoerceDate_ServerStoresTheWallClockDate(t *testing.T) {
 	ctx := context.Background()
 	d := driver(t)

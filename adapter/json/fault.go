@@ -2,8 +2,6 @@ package json
 
 import (
 	"bytes"
-
-	"github.com/simon-lentz/yammm/adapter/internal/typetag"
 )
 
 // nestingLimit is the depth both implementations of encoding/json refuse to
@@ -91,7 +89,7 @@ func faultOffset(src []byte) (int, bool) {
 				return end, out == faulted
 			}
 			if len(stack) == 1 {
-				top.refused = typetag.Validate(string(decodeName(src[i:end]))) != nil
+				top.refused = typeTagFault(string(decodeName(src[i:end]))) != ""
 			}
 			top.state = wantColon
 			i = end

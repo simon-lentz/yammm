@@ -1,4 +1,4 @@
-# export: graph data out to json, csv, or cypher — from raw data files or
+# export: graph data out to json or cypher — from raw data files or
 # from a .ys snapshot (auto-detected).
 
 exec yammm export --to json valid.yammm data.json
@@ -12,18 +12,14 @@ stdout 'MERGE'
 exec yammm export --to json --output out.json valid.yammm data.json
 grep '"Person"' out.json
 
-exec yammm export --to csv --output out.csv valid.yammm data.json
-grep 'alice' out.csv
-
 # --output /dev/stdout writes through the descriptor: here stdout is a pipe, and
 # no rename can stand in for one. Windows has no /dev/stdout.
 [!windows] exec yammm export --to json --output /dev/stdout valid.yammm data.json
 [!windows] stdout '"alice"'
 
-# --output-dir writes one CSV per type.
-mkdir csvdir
-exec yammm export --to csv --output-dir csvdir valid.yammm data.json
-grep 'alice' csvdir/Person.csv
+# csv is no target.
+! exec yammm export --to csv valid.yammm data.json
+stderr 'must be json or cypher'
 
 # --to is required.
 ! exec yammm export valid.yammm data.json

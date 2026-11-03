@@ -10,16 +10,13 @@ import (
 
 	"github.com/simon-lentz/yammm/internal/snapparts"
 
-	csvadapter "github.com/simon-lentz/yammm/adapter/csv"
 	jsonadapter "github.com/simon-lentz/yammm/adapter/json"
 	neo4jadapter "github.com/simon-lentz/yammm/adapter/neo4j"
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/instance"
-	"github.com/simon-lentz/yammm/internal/instancetest"
 	"github.com/simon-lentz/yammm/internal/snappartstest"
-	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
 	"github.com/simon-lentz/yammm/snapshot"
 )
@@ -184,14 +181,6 @@ func TestMessages_RepeatAValueCutToItsHead(t *testing.T) {
 	})
 	_, err = jsonadapter.New().MarshalObject(ctx, unwritable)
 	c.err("json writer", err)
-	_, err = csvadapter.New().MarshalSnapshot(ctx, unwritable)
-	c.err("csv writer", err)
-	composed := graph.New(s)
-	if r := composed.Add(ctx, instancetest.Valid(t, s, "T", map[string]any{"id": longText, "parts": []any{map[string]any{"pid": "c"}}})); r.HasErrors() {
-		t.Fatal(r)
-	}
-	_, err = csvadapter.New().MarshalSnapshot(ctx, composed.Snapshot())
-	c.err("csv writer", err)
 	ls, res := schema.LoadString(ctx, "schema \"links\"\n\ntype L {\n\tid String primary\n\t--> TO (many) M {\n\t\tw Float\n\t}\n}\n\ntype M {\n\tid String primary\n}\n", "links.yammm")
 	if res.HasErrors() {
 		t.Fatal(res)
@@ -212,20 +201,12 @@ func TestMessages_RepeatAValueCutToItsHead(t *testing.T) {
 	_, err = jsonadapter.New().MarshalObject(ctx, linked)
 	c.err("json writer", err)
 
-	csvSource := location.NewSourceID("test://echo.csv")
-	row := "x," + strings.Repeat(longText+",", 5) + longText + "\n" + "y," + longDigits + "," + longDigits + "e400,,,,\n"
-	_, r = csvadapter.New().ParseTyped(ctx, csvSource, "T", strings.NewReader("id,n,f,b,d,ts,tf\n"+row), typ)
-	if r.OK() {
-		t.Error("csv: the long cells were accepted")
-	}
-	c.result("csv", r)
-
 	for _, k := range []schema.Constraint{schema.NewTimestampConstraint(), schema.NewTimestampConstraintFormatted("2006-01-02"), schema.NewDateConstraint()} {
 		_, err := neo4jadapter.CoerceParams(map[string]any{"v": longText}, neo4jadapter.ParamTypes{"v": k})
 		c.err("neo4j.CoerceParams", err)
 	}
 
-	for _, where := range []string{"validator", "graph.Add", "graph.ParseKey", "snapshot.Load", "json writer", "csv writer", "csv", "neo4j.CoerceParams"} {
+	for _, where := range []string{"validator", "graph.Add", "graph.ParseKey", "snapshot.Load", "json writer", "neo4j.CoerceParams"} {
 		if c.judged[where] == 0 {
 			t.Errorf("%s wrote no message to judge", where)
 		}

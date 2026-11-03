@@ -8,7 +8,6 @@ import (
 	"strings"
 	"testing"
 
-	csvadapter "github.com/simon-lentz/yammm/adapter/csv"
 	jsonadapter "github.com/simon-lentz/yammm/adapter/json"
 	"github.com/simon-lentz/yammm/adapter/neo4j"
 	"github.com/simon-lentz/yammm/diag"
@@ -233,21 +232,14 @@ func TestDocumentedKeyFunctions(t *testing.T) {
 	}
 }
 
-// TestDocumentedAdapterParseSurface pins the parse and write shapes of the two
-// adapters whose documented surface had drifted: adapter/json documented three
-// removed methods, adapter/csv one.
+// TestDocumentedAdapterParseSurface holds that the parse and write methods the
+// document names on adapter/json exist. A bare `_ = (*T).M` compiles under any
+// signature, so it pins nothing else.
 func TestDocumentedAdapterParseSurface(t *testing.T) {
 	t.Parallel()
 	_ = (*jsonadapter.Adapter).ParseObject
 	_ = (*jsonadapter.Adapter).MarshalObject
 	_ = (*jsonadapter.Adapter).WriteObject
-	_ = (*csvadapter.Adapter).ParseTyped
-	_ = (*csvadapter.Adapter).ParseWithTypeColumn
-
-	// A typed value: a bare `_ = (*T).M` compiles under any signature, and the
-	// Serialization fence shows this call with nothing else compiling it.
-	pin := func(func(*csvadapter.Adapter, context.Context, graph.Snapshot) (map[string][]byte, error)) {}
-	pin((*csvadapter.Adapter).MarshalSnapshot)
 }
 
 // TestDocumentedFormatSurface pins the format package facts the Formatting

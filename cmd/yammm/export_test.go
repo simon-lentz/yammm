@@ -50,31 +50,6 @@ type Place {
 	return schemaPath, dataPath
 }
 
-// A CSV export of several types needs one file per type. --output does not
-// change that, and used to be exactly what admitted the broken case: the
-// command refused a multi-type export to stdout and accepted the same export
-// into one file, where the per-type header rows interleave in an order that
-// varies between runs.
-func TestExport_CSVMultiTypeRequiresOutputDir(t *testing.T) {
-	t.Parallel()
-
-	schemaPath, dataPath := multiTypeFixture(t)
-
-	t.Run("to stdout", func(t *testing.T) {
-		t.Parallel()
-		code := executeCmd(t, "export", "--to", "csv", schemaPath, dataPath)
-		assert.Equal(t, cli.ExitUsage, code)
-	})
-
-	t.Run("to one --output file", func(t *testing.T) {
-		t.Parallel()
-		out := filepath.Join(t.TempDir(), "all.csv")
-		code := executeCmd(t, "export", "--to", "csv", "--output", out, schemaPath, dataPath)
-		assert.Equal(t, cli.ExitUsage, code)
-		assert.NoFileExists(t, out, "a refused export writes nothing")
-	})
-}
-
 // TestExport_CypherCarriesTheLabelFlags pins that `--to cypher` composes its
 // labels from the same flags its sibling `neo4j` commands take. The plugin's
 // CLI reference documents the three as one workflow; emitting data on
@@ -101,9 +76,8 @@ func TestExport_CypherCarriesTheLabelFlags(t *testing.T) {
 		"the default label survived beside the configured one")
 }
 
-// TestExport_LabelFlagsApplyOnlyToCypher pins the per-target refusal beside the
-// one --output-dir already carries: json and csv compose no Neo4j label, so a
-// label flag on either is a flag that would do nothing.
+// TestExport_LabelFlagsApplyOnlyToCypher pins the per-target refusal: json
+// composes no Neo4j label, so a label flag on it is a flag that would do nothing.
 func TestExport_LabelFlagsApplyOnlyToCypher(t *testing.T) {
 	t.Parallel()
 

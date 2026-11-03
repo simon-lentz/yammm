@@ -1,0 +1,46 @@
+# A data operand is read once and through the path that reaches it, so a pipe and
+# a redirected file read as a named file does.
+[windows] skip
+
+stdin data.json
+exec yammm check valid.yammm /dev/stdin
+
+stdin data.json
+exec yammm load valid.yammm /dev/stdin
+
+stdin data.json
+exec yammm snapshot save valid.yammm /dev/stdin -o saved.ys
+
+stdin data.json
+exec yammm export --to json valid.yammm /dev/stdin
+stdout '"alice"'
+
+stdin saved.ys
+exec yammm export --to json valid.yammm /dev/stdin
+stdout '"alice"'
+
+exec sh -c 'yammm check valid.yammm /dev/stdin < data.json'
+exec sh -c 'yammm export --to json valid.yammm /dev/stdin < data.json'
+stdout '"alice"'
+exec sh -c 'yammm export --to json valid.yammm /dev/stdin < saved.ys'
+stdout '"alice"'
+
+# A link to a descriptor path reads the descriptor, whatever the host names it.
+symlink lk -> /dev/stdin
+stdin data.json
+exec yammm check valid.yammm lk
+exec sh -c 'yammm check valid.yammm lk < data.json'
+
+# A FIFO's second open would wait for a writer that has gone.
+exec sh -c 'mkfifo f; cat data.json > f & yammm export --to json valid.yammm f'
+stdout '"alice"'
+
+-- valid.yammm --
+schema "test"
+
+type Person {
+	id   String primary
+	name String required
+}
+-- data.json --
+{"Person":[{"id":"a","name":"alice"}]}

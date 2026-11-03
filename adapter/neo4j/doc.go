@@ -124,11 +124,11 @@
 // grammar refuses as a property name, four are Cypher keywords too ("as", "in",
 // "true" and "false"). A property named "match" or a type named "MATCH" is
 // valid yammm and exports cleanly through the JSON
-// and CSV adapters, but can fail Neo4j export. The names a schema writes into
+// adapter, but can fail Neo4j export. The names a schema writes into
 // generated DDL unquoted — property names, primary keys, and the assembled
 // labels — are checked with [ValidateIdentifier] during constraint and index
-// generation and rejected with [ErrReservedKeyword] (the check is
-// case-insensitive); a constraint or index name is built from those checked
+// generation and rejected as E_NEO4J_INVALID_IDENTIFIER, whose detail begins
+// with the [ErrReservedKeyword] error's text (the check is case-insensitive); a constraint or index name is built from those checked
 // parts. Namespaced labels usually absorb
 // reserved type names — the label "app__MATCH" is not a keyword — but a
 // reserved property name fails wherever a generated constraint or index
@@ -177,7 +177,7 @@
 // label, as two SCHEMA names that sanitize alike do, or schema "a" with type B__C
 // and schema "a__B" with type C; [Adapter.ShapeForSchema] refuses that closure.
 //
-// An error marked [ErrUnrepresentable], as the JSON and CSV adapters mark theirs,
+// An error marked [ErrUnrepresentable], as the JSON adapter marks its own,
 // refuses these values: one its constraint's coercion refuses, a nested collection's, a map at a
 // property the schema declares, a list or a map a document nests more than 256
 // levels deep, a [encoding/json.Number] no driver number holds, or a primary key
@@ -233,9 +233,8 @@
 //   - Date: a "2006-01-02" string, a time.Time, OR a dbtype.Date -> dbtype.Date
 //     (Neo4j DATE). A string that does not parse, or any other non-temporal
 //     value, is a coercion failure and returns an error. All three arms are
-//     normalised to midnight UTC: a date carries no time of day, and the driver
-//     derives its day number by a division that truncates toward zero, so a
-//     pre-1970 instant carrying a clock would land a day late.
+//     normalised to midnight UTC on the date the value itself shows, since a
+//     date carries no time of day.
 //   - Every other (non-transforming) kind passes a value through unchanged, save
 //     a []any, a map and a value at a List whose element is a collection. A []any
 //     is element-coerced at a List or a Vector and refused at any other kind,

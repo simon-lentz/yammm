@@ -323,11 +323,11 @@ func TestFormatIssueJSON_WithRelated(t *testing.T) {
 		WithRelated(
 			location.RelatedInfo{
 				Message: "first definition here",
-				Span:    location.Point(source, 5, 1),
+				Span:    location.PointWithByte(source, 5, 1, -1),
 			},
 			location.RelatedInfo{
 				Message: "second definition here",
-				Span:    location.Point(source, 10, 1),
+				Span:    location.PointWithByte(source, 10, 1, -1),
 			},
 		).
 		Build()
@@ -517,7 +517,7 @@ func TestFormatIssueJSON_CompleteIssue(t *testing.T) {
 		WithHint("try this").
 		WithRelated(location.RelatedInfo{
 			Message: "related note",
-			Span:    location.Point(source, 5, 1),
+			Span:    location.PointWithByte(source, 5, 1, -1),
 		}).
 		WithDetails(Detail{Key: "key", Value: "value"}).
 		Build()

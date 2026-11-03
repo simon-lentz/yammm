@@ -9,7 +9,6 @@ import (
 
 	// Blank imports register adapter-defined diagnostic codes so AllCodes()
 	// includes them. This is a test file, so the coupling is acceptable.
-	_ "github.com/simon-lentz/yammm/adapter/csv"
 	_ "github.com/simon-lentz/yammm/adapter/neo4j"
 )
 

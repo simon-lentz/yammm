@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"io"
 	"math"
+	"strings"
 	"testing"
 	"time"
 
@@ -634,10 +635,8 @@ type Event {
 	return mustBuild(t, s, result)
 }
 
-// unwrapValue hands the raw value to encoding/json, so a time.Time-valued
-// Timestamp marshals through time.Time.MarshalJSON as strict RFC 3339 while a
-// string-valued one marshals verbatim. The JSON writer therefore agrees with
-// itself across the two representations where adapter/csv does not.
+// The writer renders a Timestamp through its constraint's canonical form, so a
+// time.Time-valued one and its RFC 3339 string render one text.
 func TestMarshalObject_TimestampRendersPerRepresentation(t *testing.T) {
 	s := testSchemaWithTimestamp(t)
 	when := time.Date(2020, 1, 2, 3, 4, 5, 0, time.UTC)
@@ -653,7 +652,7 @@ func TestMarshalObject_TimestampRendersPerRepresentation(t *testing.T) {
 	require.NoError(t, err)
 
 	got := string(data)
-	assert.Contains(t, got, `"2020-01-02T03:04:05Z"`)
+	assert.Equal(t, 2, strings.Count(got, `"2020-01-02T03:04:05Z"`), got)
 	assert.NotContains(t, got, "+0000 UTC",
 		"the JSON writer must not render a time.Time through fmt.Sprint")
 }

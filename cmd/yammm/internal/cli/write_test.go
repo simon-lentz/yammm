@@ -159,169 +159,24 @@ func TestWriteFile_ADirectoryTargetIsRefusedAndNothingIsWritten(t *testing.T) {
 	assertNoDebris(t, dir, path)
 }
 
-func TestWriteFileSet_EveryFileArrivesOrNoneDoes(t *testing.T) {
+// A refused rename names neither the staging file nor the target's resolved path,
+// and removes the staging file. A directory at the target refuses the rename on
+// every host and leaves the directory holding the staging file writable.
+func TestReplace_ARefusedRenameLeavesNoStagingFile(t *testing.T) {
 	t.Parallel()
-	ab := []NamedFile{{Name: "a.csv", Data: []byte("a.csv")}, {Name: "b.csv", Data: []byte("b.csv")}}
-
-	t.Run("every file is put in place", func(t *testing.T) {
-		t.Parallel()
-		dir := filepath.Join(t.TempDir(), "out")
-		if err := WriteFileSet(dir, ab); err != nil {
-			t.Fatalf("write set: %v", err)
-		}
-		for _, nf := range ab {
-			path := filepath.Join(dir, nf.Name)
-			if got, err := os.ReadFile(path); err != nil || string(got) != string(nf.Data) {
-				t.Errorf("%s holds %q (%v), want %q", nf.Name, got, err, nf.Data)
-			}
-			if runtime.GOOS != "windows" {
-				assertPerm(t, path, NewFileMode)
-			}
-		}
-		assertNoDebris(t, dir, filepath.Join(dir, "a.csv"), filepath.Join(dir, "b.csv"))
-	})
-
-	t.Run("one blocked target leaves the directory as it was", func(t *testing.T) {
-		t.Parallel()
-		dir := filepath.Join(t.TempDir(), "out")
-		blocker := filepath.Join(dir, "b.csv")
-		if err := os.MkdirAll(blocker, 0o750); err != nil {
-			t.Fatalf("mkdir blocker: %v", err)
-		}
-		if err := WriteFileSet(dir, ab); err == nil {
-			t.Fatal("a blocked target reported success")
-		}
-		// a.csv must NOT have been renamed into place: a partial set reads as
-		// a complete export with one type quietly missing.
-		if _, err := os.Stat(filepath.Join(dir, "a.csv")); err == nil {
-			t.Error("a.csv was left behind; the set is partial and nothing says so")
-		}
-		assertNoDebris(t, dir, blocker)
-	})
-
-	t.Run("a directory that appears after staging is refused before any rename", func(t *testing.T) {
-		t.Parallel()
-		dir := filepath.Join(t.TempDir(), "out")
-		set, err := stageFileSet(dir, ab)
-		if err != nil {
-			t.Fatalf("stage: %v", err)
-		}
-		blocker := filepath.Join(dir, "b.csv")
-		if err := os.Mkdir(blocker, 0o750); err != nil {
-			t.Fatalf("mkdir blocker: %v", err)
-		}
-		err = set.commit()
-		if err == nil {
-			t.Fatal("a directory standing where b.csv belongs reported success")
-		}
-		if !strings.Contains(err.Error(), "b.csv") || strings.Contains(err.Error(), snapshot.TmpSuffix) {
-			t.Errorf("error %q must name b.csv and no staging file", err)
-		}
-		if _, err := os.Stat(filepath.Join(dir, "a.csv")); err == nil {
-			t.Error("a.csv was renamed into place; the set is partial and nothing says so")
-		}
-		assertNoDebris(t, dir, blocker)
-	})
-
-	t.Run("a refused rename names the file, not its staging name", func(t *testing.T) {
-		t.Parallel()
-		if runtime.GOOS == "windows" {
-			t.Skip(noDirPermissionsOnWindows)
-		}
-		if os.Geteuid() == 0 {
-			t.Skip("root ignores the write bit")
-		}
-		base := unsealedTempDir(t)
-		dir := filepath.Join(base, "out")
-		set, err := stageFileSet(dir, ab[:1])
-		if err != nil {
-			t.Fatalf("stage: %v", err)
-		}
-		// Sealed after staging, so the rename itself is what fails.
-		if err := sealDir(dir); err != nil {
-			t.Fatalf("seal: %v", err)
-		}
-		err = set.commit()
-		if err == nil {
-			t.Fatal("a rename into a sealed directory reported success")
-		}
-		if !strings.Contains(err.Error(), "a.csv") || strings.Contains(err.Error(), snapshot.TmpSuffix) {
-			t.Errorf("error %q must name a.csv and no staging file", err)
-		}
-		if _, err := os.Stat(filepath.Join(dir, "a.csv")); err == nil {
-			t.Error("a.csv was renamed into a directory the commit reported failing")
-		}
-	})
-
-	t.Run("a refused rename removes every staging file not yet renamed", func(t *testing.T) {
-		t.Parallel()
-		if runtime.GOOS == "windows" {
-			t.Skip(noDirPermissionsOnWindows)
-		}
-		if os.Geteuid() == 0 {
-			t.Skip("root ignores the write bit")
-		}
-		base := unsealedTempDir(t)
-		dir := filepath.Join(base, "out")
-		other := filepath.Join(base, "other")
-		for _, d := range []string{dir, other} {
-			if err := os.Mkdir(d, 0o750); err != nil {
-				t.Fatal(err)
-			}
-		}
-		if err := os.Symlink(filepath.Join(other, "a.csv"), filepath.Join(dir, "a.csv")); err != nil {
-			t.Skipf("symlinks unavailable: %v", err)
-		}
-		set, err := stageFileSet(dir, ab)
-		if err != nil {
-			t.Fatalf("stage: %v", err)
-		}
-		// Sealed after staging, so a.csv's rename fails and b.csv's never runs.
-		if err := sealDir(other); err != nil {
-			t.Fatal(err)
-		}
-		if err := set.commit(); err == nil {
-			t.Fatal("a rename into a sealed directory reported success")
-		}
-		assertNoDebris(t, dir, "a.csv")
-	})
-
-	t.Run("a link to a directory that appears after staging is refused before any rename", func(t *testing.T) {
-		t.Parallel()
-		dir := filepath.Join(t.TempDir(), "out")
-		set, err := stageFileSet(dir, ab)
-		if err != nil {
-			t.Fatalf("stage: %v", err)
-		}
-		if err := os.Mkdir(filepath.Join(dir, "elsewhere"), 0o750); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.Symlink("elsewhere", filepath.Join(dir, "b.csv")); err != nil {
-			t.Skipf("symlinks unavailable: %v", err)
-		}
-		if err := set.commit(); err == nil || !strings.Contains(err.Error(), "b.csv") {
-			t.Fatalf("error %v, want a refusal naming b.csv", err)
-		}
-		if info, err := os.Lstat(filepath.Join(dir, "b.csv")); err != nil || info.Mode()&fs.ModeSymlink == 0 {
-			t.Errorf("the link at b.csv was replaced (%v)", err)
-		}
-		if _, err := os.Stat(filepath.Join(dir, "a.csv")); err == nil {
-			t.Error("a.csv was renamed into place; the set is partial and nothing says so")
-		}
-		assertNoDebris(t, dir, "b.csv", "elsewhere")
-	})
-
-	t.Run("a discarded set leaves no staging file", func(t *testing.T) {
-		t.Parallel()
-		dir := filepath.Join(t.TempDir(), "out")
-		set, err := stageFileSet(dir, ab)
-		if err != nil {
-			t.Fatalf("stage: %v", err)
-		}
-		set.discard()
-		set.discard()
-		assertNoDebris(t, dir)
-	})
+	dir := t.TempDir()
+	target := filepath.Join(dir, "target")
+	if err := os.Mkdir(target, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	err := replace(writeTarget{path: target, mode: NewFileMode}, []byte(targetPayload))
+	if err == nil {
+		t.Fatal("a rename over a directory reported success")
+	}
+	if text := err.Error(); !strings.HasPrefix(text, "rename into place: ") || strings.Contains(text, dir) {
+		t.Errorf("error %q must state the rename and name no path", text)
+	}
+	assertNoDebris(t, dir, "target")
 }
 
 func assertPerm(t *testing.T, path string, want fs.FileMode) {

@@ -68,7 +68,7 @@ func TestRegistry_Content_Span(t *testing.T) {
 	}
 
 	// Content via Span (adapter method)
-	span := location.Point(sourceID, 1, 1)
+	span := location.PointWithByte(sourceID, 1, 1, -1)
 	got, ok := reg.Content(span)
 	if !ok {
 		t.Fatal("Content(span) returned false for registered source")

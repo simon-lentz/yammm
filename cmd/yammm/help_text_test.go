@@ -20,26 +20,6 @@ func helpText(t *testing.T, args ...string) string {
 	return out
 }
 
-// TestRootHelp_NamesEveryCommandTakingTheDataFlags pins that the root help
-// names every command that accepts --from, `snapshot save` included, and names
-// --type and --type-column, the two flags a CSV input requires.
-func TestRootHelp_NamesEveryCommandTakingTheDataFlags(t *testing.T) {
-	t.Parallel()
-
-	out := helpText(t)
-
-	// The commands that register --from, read from the tree rather than listed
-	// here: check, load, export and snapshot save.
-	if !strings.Contains(out, "snapshot save") {
-		t.Errorf("the data-flag list omits `snapshot save`, which registers --from:\n%s", out)
-	}
-	for _, flag := range []string{"--type", "--type-column"} {
-		if !strings.Contains(out, flag) {
-			t.Errorf("the root help never names %s, which a CSV input requires:\n%s", flag, out)
-		}
-	}
-}
-
 // TestSnapshotSaveHelp_OutputIsNotUnconditionallyRequired pins that --output
 // does not read "(required)". `--into` alone satisfies the destination check,
 // so that text would refuse an invocation the command accepts.

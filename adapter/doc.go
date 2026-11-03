@@ -1,7 +1,7 @@
 // Package adapter provides format-specific adapters that parse data into
 // [instance.RawInstance] values and write a [graph.Snapshot], plus a family of
 // schema-to-artifact generators. Each adapter subpackage targets a
-// specific output — a data format (JSON, CSV, Neo4j Cypher) or a generated
+// specific output — a data format (JSON, Neo4j Cypher) or a generated
 // artifact (Go source, JSON Schema, Markdown) — and may have its own external
 // dependencies.
 //
@@ -25,11 +25,10 @@
 //
 // # Data In, Snapshots Out
 //
-// The data adapters read and write one way. The JSON and CSV parsers return
-// [instance.RawInstance] values for the validator. The JSON and CSV serializers
-// and the Neo4j adapter's batch node and edge queries take a complete
-// [graph.Snapshot]; the Neo4j adapter's other functions take no snapshot. No
-// adapter takes an
+// The data adapters read and write one way. The JSON parser returns
+// [instance.RawInstance] values for the validator. The JSON serializer and the
+// Neo4j adapter's batch node and edge queries take a complete [graph.Snapshot];
+// the Neo4j adapter's other functions take no snapshot. No adapter takes an
 // [instance.ValidInstance].
 //
 // The generator adapters (gogen, jschema, markdown) take neither: they
@@ -41,15 +40,11 @@
 //
 // Adapters depend on library packages; library packages never depend on adapters:
 //
-//	adapter/csv       ──imports──▶  instance, diag, location, location/path, graph,
-//	                                immutable, schema, adapter/internal/constraintof,
-//	                                adapter/internal/refusal, adapter/internal/typetag
 //	adapter/gogen     ──imports──▶  schema, location, internal/ident
 //	adapter/jschema   ──imports──▶  schema
 //	adapter/json      ──imports──▶  instance, diag, location, location/path, graph,
 //	                                immutable, schema, adapter/internal/constraintof,
-//	                                adapter/internal/refusal, adapter/internal/typetag,
-//	                                github.com/tidwall/jsonc
+//	                                adapter/internal/refusal, github.com/tidwall/jsonc
 //	adapter/markdown  ──imports──▶  location, schema, github.com/yuin/goldmark,
 //	                                github.com/yuin/goldmark/ast,
 //	                                github.com/yuin/goldmark/extension,
@@ -67,8 +62,9 @@
 //
 // The production code of every adapter but one imports no core internal/*
 // package, keeping a clean separation between core library internals and the
-// adapter layer: the data adapters (csv, json, neo4j) and two of the three
-// generators (jschema, markdown) reach only for the public API. The gogen
+// adapter layer: the data adapters (json, neo4j) and two of the three
+// generators (jschema, markdown) reach only for the public API and
+// adapter/internal. The gogen
 // adapter is the sole exception: it imports internal/ident, the module's
 // rune-aware identifier-casing transform, to derive Go identifiers, and no
 // other production package imports it. The rule binds production code
@@ -76,14 +72,12 @@
 // as the internals the test checks against.
 //
 // An internal package under adapter/ is not an exception to this rule: it is the
-// adapters', not the core's. adapter/internal holds the three the adapters
-// share: typetag for a type tag's syntax, which the JSON and CSV adapters read,
-// and refusal for a refusal's class and constraintof for the constraint a value
-// renders through, which the CSV, JSON and Neo4j adapters read.
+// adapters', not the core's. adapter/internal holds the two the adapters share:
+// refusal for a refusal's class and constraintof for the constraint a value renders
+// through, which the JSON and Neo4j adapters read.
 //
 // # Subpackages
 //
-//   - [csv]: CSV/TSV adapter with schema-driven type coercion
 //   - [gogen]: Go source generator (structs, enums, EDGE_ associations, a Graph aggregate, and the embedded schema source) from a schema and its import closure
 //   - [jschema]: JSON Schema (draft 2020-12) generator describing the instance data the validator accepts, for editor-assisted authoring
 //   - [json]: JSON adapter that reads JSONC and records a location for every instance it parses

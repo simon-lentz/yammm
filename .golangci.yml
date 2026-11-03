@@ -115,19 +115,12 @@ linters:
       - path: "adapter/neo4j/errors\\.go"
         linters:
           - revive
-      - path: "adapter/csv/errors\\.go"
-        linters:
-          - revive
       # Package names matching domain concepts (not stdlib collisions).
       - path: "^internal/parse/.*"
         text: "avoid package names that conflict"
         linters:
           - revive
       - path: "adapter/json/.*"
-        text: "avoid package names that conflict"
-        linters:
-          - revive
-      - path: "adapter/csv/.*"
         text: "avoid package names that conflict"
         linters:
           - revive
@@ -164,13 +157,7 @@ linters:
       # drops its testify import, delete it from its directory's entry (and
       # delete the whole entry when its alternation empties). Never add a
       # file here.
-      - path: "^adapter/csv/(coerce|parse|write)_test\\.go$"
-        linters:
-          - depguard
       - path: "^adapter/json/(adapter|write)_test\\.go$"
-        linters:
-          - depguard
-      - path: "^adapter/internal/typetag/(validate)_test\\.go$"
         linters:
           - depguard
       - path: "^adapter/neo4j/(diff|infer|introspect)_test\\.go$"

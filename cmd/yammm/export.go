@@ -4,29 +4,27 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
-	"maps"
-	"slices"
 	"strings"
 
 	"github.com/spf13/cobra"
 
-	"github.com/simon-lentz/yammm/adapter/csv"
 	adapterjson "github.com/simon-lentz/yammm/adapter/json"
 	adaptern4j "github.com/simon-lentz/yammm/adapter/neo4j"
 	"github.com/simon-lentz/yammm/cmd/yammm/internal/cli"
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/schema"
+	"github.com/simon-lentz/yammm/snapshot"
 )
 
 func newExportCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "export <schema.yammm> <data-file>",
 		Short: "Load data and export to a target format",
-		Long: `Load JSON or CSV data into a schema-validated graph, then export to JSON, CSV, or Cypher.
+		Long: `Load JSON data into a schema-validated graph, then export to JSON or Cypher.
 
 The --to cypher format produces parameterized Cypher statements intended for
 inspection and integration into application code or migration tooling.
-The output contains UNWIND/MERGE patterns over one parameter placeholder, $rows,
+The output contains UNWIND statements over one parameter placeholder, $rows,
 whose rows carry the keys and properties each statement reads (a node merge's as
 row.key_<name> and row.props, and row.update_props for a type with @writeOnce
 properties), and is not directly executable in Neo4j Browser or cypher-shell.`,
@@ -34,12 +32,8 @@ properties), and is not directly executable in Neo4j Browser or cypher-shell.`,
 		RunE: withDiagnostics(runExport),
 	}
 
-	cmd.Flags().String("to", "", "output format: json, csv, or cypher (required)")
-	cmd.Flags().String("from", "", "input format override: json or csv")
-	cmd.Flags().String("type", "", "type name for CSV data (required for single-type CSV)")
-	cmd.Flags().String("type-column", "", "column name containing type names (for multi-type CSV)")
-	cmd.Flags().String("output", "", "output file path (default: stdout); with --to csv, a .tsv name writes tab-delimited fields")
-	cmd.Flags().String("output-dir", "", "output directory for CSV multi-type export (one file per type)")
+	cmd.Flags().String("to", "", "output format: json or cypher (required)")
+	cmd.Flags().String("output", "", "output file path (default: stdout)")
 	registerLabelFlags(cmd)
 
 	_ = cmd.MarkFlagRequired("to")
@@ -51,10 +45,9 @@ properties), and is not directly executable in Neo4j Browser or cypher-shell.`,
 func runExport(cmd *cobra.Command, args []string, sink *cli.DiagnosticSink) error {
 	toFormat, _ := cmd.Flags().GetString("to")
 	outputPath, _ := cmd.Flags().GetString("output")
-	outputDir, _ := cmd.Flags().GetString("output-dir")
 
 	target := strings.ToLower(toFormat)
-	if err := validateExportFlags(cmd, toFormat, target, outputPath, outputDir); err != nil {
+	if err := validateExportFlags(cmd, toFormat, target); err != nil {
 		return err
 	}
 
@@ -78,54 +71,43 @@ func runExport(cmd *cobra.Command, args []string, sink *cli.DiagnosticSink) erro
 		return err
 	}
 
-	// Check if the data file is a persisted snapshot.
-	isSnapshot, err := cli.IsSnapshotFile(dataPath)
+	// Read once, so a pipe gives the parse the bytes the snapshot probe looked at.
+	data, err := cli.ReadFile(dataPath)
 	if err != nil {
 		return cli.Runtimef("read data file: %v", err)
 	}
-
-	if isSnapshot {
-		return exportFromSnapshot(cmd, sink, s, dataPath, target, outputPath, outputDir)
+	if cli.IsSnapshot(data) {
+		return exportFromSnapshot(cmd, sink, s, data, target, outputPath)
 	}
 
-	in, err := dataInputOf(cmd, dataPath)
+	// A snapshot may hold any name, since no identity is derived from it.
+	if err := checkDataOperands(dataPath); err != nil {
+		return err
+	}
+	parsed, parseResult, err := cli.ParseJSON(cmd.Context(), dataPath, data)
 	if err != nil {
 		return err
 	}
-	g, err := loadGraph(cmd, sink, s, in)
-	if err != nil {
-		return err
-	}
+	sink.Add(parseResult)
+	a := assembleParsed(cmd, sink, s, parsed, nil)
+	reportLoaded(sink, a)
 
 	sink.Flush()
-	// The data file's own read failure rides this result for a streamed format,
-	// so the exit rule decides: an I/O failure outranks a validation one.
 	if sink.Result().HasErrors() {
 		return cli.Exit(cli.ExitForResult(sink.Result()))
 	}
 
-	return writeExport(cmd, sink, g.Snapshot(), s, target, outputPath, outputDir)
+	return writeExport(cmd, sink, a.graph.Snapshot(), s, target, outputPath)
 }
 
-// validateExportFlags refuses a contradictory or inapplicable flag set before
-// any work runs.
-//
-// Every one of these was previously discovered after the schema had loaded, the
-// data had parsed and validated, the graph had been built and diagnostics had
-// rendered — so an operator read a page of progress and then a usage error, or
-// read no error at all because the flag was silently ignored and the output
-// went somewhere else.
-func validateExportFlags(cmd *cobra.Command, raw, target, outputPath, outputDir string) error {
+// validateExportFlags refuses a target or a label flag it cannot apply before
+// any work runs, so an operator never reads a page of progress and then a usage
+// error.
+func validateExportFlags(cmd *cobra.Command, raw, target string) error {
 	switch target {
-	case "json", "csv", "cypher":
+	case "json", "cypher":
 	default:
-		return cli.Usagef("unsupported export format %q: must be json, csv, or cypher", raw)
-	}
-	if outputPath != "" && outputDir != "" {
-		return cli.Usagef("--output and --output-dir are mutually exclusive")
-	}
-	if outputDir != "" && target != "csv" {
-		return cli.Usagef("--output-dir applies only to --to csv")
+		return cli.Usagef("unsupported export format %q: must be json or cypher", raw)
 	}
 	// The label flags shape Neo4j labels, which only the cypher target emits.
 	for _, flag := range []string{"separator", "prefix"} {
@@ -143,15 +125,11 @@ func validateExportFlags(cmd *cobra.Command, raw, target, outputPath, outputDir 
 
 // writeExport routes a snapshot to the adapter for target, which
 // [validateExportFlags] has already admitted.
-func writeExport(cmd *cobra.Command, sink *cli.DiagnosticSink, snap graph.Snapshot, s schema.Schema, target, outputPath, outputDir string) error {
-	switch target {
-	case "json":
+func writeExport(cmd *cobra.Command, sink *cli.DiagnosticSink, snap graph.Snapshot, s schema.Schema, target, outputPath string) error {
+	if target == "json" {
 		return exportJSON(cmd, snap, outputPath)
-	case "csv":
-		return exportCSV(cmd, sink, snap, s, outputPath, outputDir)
-	default:
-		return exportCypher(cmd, sink, snap, s, outputPath)
 	}
+	return exportCypher(cmd, sink, snap, s, outputPath)
 }
 
 func exportJSON(cmd *cobra.Command, snapshot graph.Snapshot, outputPath string) error {
@@ -167,66 +145,11 @@ func exportJSON(cmd *cobra.Command, snapshot graph.Snapshot, outputPath string) 
 	return nil
 }
 
-func exportCSV(cmd *cobra.Command, sink *cli.DiagnosticSink, snapshot graph.Snapshot, _ schema.Schema, outputPath, outputDir string) error {
-	// --output names the one file's delimiter by its extension; --output-dir
-	// writes <type>.csv files, and stdout has no name, so both take ','.
-	adapter := csv.New(csv.WithDelimiter(cli.CSVDelimiter(outputPath)))
-
-	types := snapshot.Types()
-
-	// If --output-dir specified, always use directory output
-	if outputDir != "" {
-		return exportCSVToDir(cmd, sink, adapter, snapshot, outputDir)
-	}
-
-	// One destination holds one type. --output does not change that: the
-	// adapter emits a header row per type, so several types written to one file
-	// interleave into a document no CSV reader can read back, in an order that
-	// varies between runs.
-	if len(types) > 1 {
-		return cli.Usagef("CSV export with multiple types requires --output-dir")
-	}
-
-	data, err := adapter.MarshalSnapshot(cmd.Context(), snapshot)
-	if err != nil {
-		return writerFailure("marshal csv", err)
-	}
-
-	var out []byte
-	for _, typeData := range data {
-		out = append(out, typeData...)
-	}
-	if err := cli.WriteTo(out, outputPath, cmd.OutOrStdout()); err != nil {
-		return cli.Runtimef("write csv: %v", err)
-	}
-	return nil
-}
-
-func exportCSVToDir(cmd *cobra.Command, sink *cli.DiagnosticSink, adapter *csv.Adapter, snapshot graph.Snapshot, outputDir string) error {
-	// Every file is rendered before the disk is touched, so a snapshot the
-	// writer refuses creates no directory and no file.
-	data, err := adapter.MarshalSnapshot(cmd.Context(), snapshot)
-	if err != nil {
-		return writerFailure("marshal csv", err)
-	}
-	files := make([]cli.NamedFile, 0, len(data))
-	for _, typeName := range slices.Sorted(maps.Keys(data)) {
-		files = append(files, cli.NamedFile{Name: typeName + ".csv", Data: data[typeName]})
-	}
-	if err := cli.WriteFileSet(outputDir, files); err != nil {
-		return cli.Runtimef("write csv snapshot: %v", err)
-	}
-
-	sink.Statusf("wrote %d CSV files to %s\n", len(files), outputDir)
-	return nil
-}
-
 // writerFailure reports a writer's error as the exit it earns: a refusal of
 // the data, a value the format cannot represent, exits 1 as any other refusal
 // of the input does, and anything else is a failure outside the input, 3.
 func writerFailure(what string, err error) error {
-	if errors.Is(err, adapterjson.ErrUnrepresentable) || errors.Is(err, csv.ErrUnrepresentable) ||
-		errors.Is(err, adaptern4j.ErrUnrepresentable) {
+	if errors.Is(err, adapterjson.ErrUnrepresentable) || errors.Is(err, adaptern4j.ErrUnrepresentable) {
 		return cli.Validationf("%s: %v", what, err)
 	}
 	return cli.Runtimef("%s: %v", what, err)
@@ -300,11 +223,8 @@ func exportCypher(cmd *cobra.Command, sink *cli.DiagnosticSink, snapshot graph.S
 // that would not parse — means integrity was NOT fully verified, and the
 // operator must read it before the export lands, which is why the flush is
 // explicit rather than left to the wrapper.
-func exportFromSnapshot(cmd *cobra.Command, sink *cli.DiagnosticSink, s schema.Schema, dataPath, target, outputPath, outputDir string) error {
-	snap, _, snapResult, err := cli.LoadSnapshotFile(cmd.Context(), dataPath, s)
-	if err != nil {
-		return cli.Runtimef("%v", err)
-	}
+func exportFromSnapshot(cmd *cobra.Command, sink *cli.DiagnosticSink, s schema.Schema, data []byte, target, outputPath string) error {
+	snap, snapResult := snapshot.Load(cmd.Context(), data, s)
 
 	sink.Add(snapResult)
 	sink.Flush()
@@ -312,5 +232,5 @@ func exportFromSnapshot(cmd *cobra.Command, sink *cli.DiagnosticSink, s schema.S
 		return cli.Exit(cli.ExitForResult(sink.Result()))
 	}
 
-	return writeExport(cmd, sink, snap, s, target, outputPath, outputDir)
+	return writeExport(cmd, sink, snap, s, target, outputPath)
 }

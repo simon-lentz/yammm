@@ -62,7 +62,7 @@ func TestRenderer_WithSourceProvider_Nil(t *testing.T) {
 
 	source := location.NewSourceID("test://file.yammm")
 	issue := NewIssue(Error, E_SYNTAX, "error").
-		WithSpan(location.Point(source, 1, 1)).
+		WithSpan(location.PointWithByte(source, 1, 1, -1)).
 		Build()
 
 	// Should not panic, just skip excerpts
@@ -112,7 +112,7 @@ func TestRenderer_WithExcerpts_Disabled(t *testing.T) {
 	)
 
 	issue := NewIssue(Error, E_SYNTAX, "error").
-		WithSpan(location.Point(source, 1, 1)).
+		WithSpan(location.PointWithByte(source, 1, 1, -1)).
 		Build()
 
 	output := formatIssue(r, issue)
@@ -190,7 +190,7 @@ func TestRenderer_FormatIssue_Location(t *testing.T) {
 		{
 			name: "with span",
 			issue: NewIssue(Error, E_SYNTAX, "msg").
-				WithSpan(location.Point(location.NewSourceID("test://a.yammm"), 10, 5)).
+				WithSpan(location.PointWithByte(location.NewSourceID("test://a.yammm"), 10, 5, -1)).
 				Build(),
 			contains: "test://a.yammm:10:5",
 		},
@@ -232,7 +232,7 @@ func TestRenderer_FormatIssue_Related(t *testing.T) {
 	issue := NewIssue(Error, E_DUPLICATE_TYPE, "type collision").
 		WithRelated(location.RelatedInfo{
 			Message: "first definition here",
-			Span:    location.Point(source, 5, 1),
+			Span:    location.PointWithByte(source, 5, 1, -1),
 		}).
 		Build()
 
@@ -325,7 +325,7 @@ func TestRenderer_Excerpt_PointSpan(t *testing.T) {
 	)
 
 	issue := NewIssue(Error, E_SYNTAX, "error").
-		WithSpan(location.Point(source, 1, 3)).
+		WithSpan(location.PointWithByte(source, 1, 3, -1)).
 		Build()
 
 	output := formatIssue(r, issue)
@@ -397,7 +397,7 @@ func TestRenderer_Excerpt_SourceNotAvailable(t *testing.T) {
 
 	source := location.NewSourceID("test://missing.yammm")
 	issue := NewIssue(Error, E_SYNTAX, "error").
-		WithSpan(location.Point(source, 1, 1)).
+		WithSpan(location.PointWithByte(source, 1, 1, -1)).
 		Build()
 
 	output := formatIssue(r, issue)
@@ -435,7 +435,7 @@ func TestRenderer_CompleteOutput(t *testing.T) {
 		WithHint("consider renaming one of the types").
 		WithRelated(location.RelatedInfo{
 			Message: "first definition here",
-			Span:    location.Point(source, 1, 6),
+			Span:    location.PointWithByte(source, 1, 6, -1),
 		}).
 		Build()
 
@@ -490,7 +490,7 @@ func TestRenderer_WriteLocation_Precedence(t *testing.T) {
 				severity:   Error,
 				code:       E_SYNTAX,
 				message:    "test",
-				span:       location.Point(source, 10, 5),
+				span:       location.PointWithByte(source, 10, 5, -1),
 				sourceName: "data.json",
 				path:       "$.foo",
 			},
@@ -502,7 +502,7 @@ func TestRenderer_WriteLocation_Precedence(t *testing.T) {
 				severity:   Error,
 				code:       E_SYNTAX,
 				message:    "test",
-				span:       location.Point(source, 10, 5),
+				span:       location.PointWithByte(source, 10, 5, -1),
 				sourceName: "data.json",
 			},
 			expected: "test://schema.yammm:10:5:",

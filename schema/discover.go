@@ -204,7 +204,8 @@ func checkMarkerContent(path string, content []byte) error {
 // A [MalformedModuleRootError] becomes an Error-severity
 // E_LOAD_MODULE_ROOT_MALFORMED carrying the marker's directory and the origin
 // "discovered"; any other error becomes a Fatal E_LOAD_IO_FAILURE, the shape
-// every other I/O failure in the loader takes. The issue carries no span: the
+// of the loader's other fatal I/O failures (a failed import read is an
+// Error-severity issue instead). The issue carries no span: the
 // source registry holds .yammm sources only.
 //
 // Exported because the editor reports the same failure without going through

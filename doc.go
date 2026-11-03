@@ -24,7 +24,6 @@
 // Adapters — data in and out, and generation from a schema:
 //
 //   - [github.com/simon-lentz/yammm/adapter/json]: JSON/JSONC parsing and serialization
-//   - [github.com/simon-lentz/yammm/adapter/csv]: CSV parsing and writing
 //   - [github.com/simon-lentz/yammm/adapter/neo4j]: Neo4j constraint and index DDL, Cypher query building, and drift diffs
 //   - [github.com/simon-lentz/yammm/adapter/gogen]: Go source generation from a schema
 //   - [github.com/simon-lentz/yammm/adapter/jschema]: JSON Schema (draft 2020-12) generation from a schema
@@ -80,7 +79,7 @@
 //	        // Diagnostic issues (duplicate PK, etc.)
 //	    }
 //	}
-//	result := g.Check(ctx)
+//	result = g.Check(ctx)
 //	if !result.OK() {
 //	    // An unresolved required association, or a cancellation
 //	}

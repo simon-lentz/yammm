@@ -1,8 +1,8 @@
 # Adapter Reference
 
-Adapters parse raw data into `RawInstance` values for validation and serialize validated data for export. Six adapters are provided: the three data adapters (JSON, CSV, Neo4j) and the three gen-family generators (gogen, jschema, markdown).
+The JSON adapter parses raw data into `RawInstance` values for validation, and the data adapters serialize validated data for export. Five adapters are provided: the two data adapters (JSON, Neo4j) and the three gen-family generators (gogen, jschema, markdown).
 
-All adapters live in `adapter/{json,csv,neo4j,gogen,jschema,markdown}` packages. The library never imports adapters -- adapters import the library. The data adapters parse and serialize instance data; the generators are schema-in/bytes-out and never touch instance data.
+All adapters live in `adapter/{json,neo4j,gogen,jschema,markdown}` packages. The library never imports adapters -- adapters import the library. The data adapters serialize instance data, and the JSON adapter also parses it; the generators are schema-in/bytes-out and never touch instance data.
 
 ---
 
@@ -39,49 +39,6 @@ data, err := adapter.MarshalObject(ctx, snapshot,
 
 // Write snapshot to io.Writer
 n, err := adapter.WriteObject(ctx, writer, snapshot)
-```
-
----
-
-## CSV Adapter
-
-```go
-import csvAdapter "github.com/simon-lentz/yammm/adapter/csv"
-```
-
-### Constructor
-
-```go
-adapter := csvAdapter.New(
-    csvAdapter.WithTypeColumn("$type"), // column for type discrimination (multi-type CSV)
-)
-```
-
-The delimiter is `,` unless `csvAdapter.WithDelimiter` sets another (`'\t'` for TSV), the first row is always the header, and list elements, vector elements and edge-column segments join on `|`, which the parse side splits on too.
-
-### Parsing
-
-```go
-// Parse CSV where all rows are the same type
-raws, result := adapter.ParseTyped(ctx, sourceID, "User", reader, schemaType)
-
-// Parse CSV with a type column (multi-type)
-parsed, result := adapter.ParseWithTypeColumn(ctx, sourceID, reader, typeResolver)
-
-```
-
-Type coercion: CSV values are strings. The adapter coerces them to the schema's expected types (integers, floats, booleans, lists and vectors); a number cell must be a JSON number literal, and an Integer cell an integer one. Dates and timestamps are checked against their layout and kept as text, as the JSON adapter keeps them. A cell that does not coerce, or in a relation group each target's segment that does not, draws `E_CSV_COERCE` and is an `instance.Refused` holding that text. A validator reports nothing more for it at a key that a member claims: one bad value is one issue. A column that a member claims only by folding is no member's under strict names, so a strict validator also reports `E_UNKNOWN_FIELD` for it. A fault in the file's structure — a header the parser cannot use, a record the reader refuses, an edge group whose columns disagree, a plain column and a dotted group that write one key — produces `E_ADAPTER_PARSE`, the code the JSON adapter reports a malformed document under; a setting the adapter cannot use produces `E_CSV_CONFIG`, before any byte is read; and a failure the reader returns produces a Fatal `E_ADAPTER_IO`, on which the CLI exits 3. The failure is reported also when the parse ends for another reason at the read that returned it, as at a header the parser refuses.
-
-Column names resolve as the validator resolves JSON keys: exact first, then case-insensitively (ASCII), with each key kept as the header spells it. Under a strict validator (`instance.RecommendedOptions()` is one) a mis-cased column reaches the validator as an unknown field. A name the schema does not declare reaches the validator in each row whose cell is not empty, which reports it unless `instance.WithAllowUnknownFields` is set. A header that repeats a name or leaves a column unnamed is refused. A malformed record is reported and skipped; a failure the reader returns stops the parse with a Fatal diagnostic, and the instances read before it are returned.
-
-BOM stripping: UTF-8 BOM bytes at the start of input are automatically stripped.
-
-### Writing
-
-```go
-// Marshal entire snapshot (one CSV per type)
-files, err := adapter.MarshalSnapshot(ctx, snapshot)
-// files is map[string][]byte: type name -> CSV bytes
 ```
 
 ---
@@ -124,7 +81,7 @@ constraints, result := adapter.ConstraintsStructured(ctx, s)
 // Each Constraint has: Name, Kind, Label, Properties, TypeExpr, Statement
 ```
 
-Generation is **all-or-nothing**: any validation error returns `(nil, result)`, so one unemittable property withholds every constraint of the schema rather than emitting a partial script that looks complete. Beside a name Neo4j refuses as an identifier (Cypher reserved words, below) and two labels that sanitize alike, the one shape a *valid* schema can hit is a list whose element is itself a collection (`List<List<T>>`, `List<Vector[N]>`, or a list of a list-typed alias) — legal yammm, but Neo4j has no nested collection property type, so `ConstraintsForSchema` and `ConstraintsStructured` report `E_NEO4J_UNSUPPORTED_TYPE` under every option, `WithScalarTypeConstraints(false)` included. `IndexesForSchema` and `ShapeForSchema` do not make that check. The write path does: `BatchNodeQueries` and `CoerceParams` refuse a value of such a property with an error wrapping `ErrUnsupportedListElem`, an empty list included, and read a value that holds none as nil, which `BatchNodeQueries` writes as null. `CoerceParams` refuses a nested param map (a `map[string]any`) or a rows value under such a key as it does under any constraint: a constraint at a nested map's or a rows param's own key is the caller's error, which wraps no class. `yammm export --to cypher` exits 1 over data holding one. The property is judged on each concrete type and part type with a valid label that declares or inherits it, so one declared on an abstract type that no such type extends is not reported. Model the inner collection as a `part type` reached by a composition. A bare `Vector` is fine; it maps to `LIST<FLOAT NOT NULL>`.
+Generation is **all-or-nothing**: any validation error returns `(nil, result)`, so one unemittable property withholds every constraint of the schema rather than emitting a partial script that looks complete. Beside a name Neo4j refuses as an identifier (Cypher reserved words, below) and two labels that sanitize alike, the one shape a *valid* schema can hit is a list whose element is itself a collection (`List<List<T>>`, `List<Vector[N]>`, or a list of a list-typed alias) — legal yammm, but Neo4j has no nested collection property type, so `ConstraintsForSchema` and `ConstraintsStructured` report `E_NEO4J_UNSUPPORTED_TYPE` under every option, `WithScalarTypeConstraints(false)` included. `IndexesForSchema` and `ShapeForSchema` do not make that check. The write path does: `BatchNodeQueries` and `CoerceParams` refuse a value of such a property with an error wrapping `ErrUnsupportedListElem`, an empty list included, and read a value that holds none as nil, which `BatchNodeQueries` writes as null. `CoerceParams` refuses a nested param map (a `map[string]any`) or a rows value under such a key as it does under any constraint: a constraint at a nested map's or a rows param's own key is the caller's error, which wraps no class. `yammm export --to cypher` exits 1 over data holding one. The property is judged on each concrete type and part type with a valid label that declares or inherits it, so one declared on an abstract type that no such type extends is not reported. Model the inner collection as a `part type` reached by a composition. A `Vector[N]` property is fine; it maps to `LIST<FLOAT NOT NULL>`.
 
 ### Index Generation
 
@@ -192,16 +149,16 @@ result := adapter.DetectLabelCollisions(ctx, s)
 **Cypher reserved words:** the DSL reserves none as one; of the six spellings
 its grammar refuses as a property name, four are Cypher keywords too (`as`,
 `in`, `true` and `false`). A property named
-`match` is valid yammm (and fine for JSON/CSV export) but is rejected with
-`ErrReservedKeyword` wherever a generated constraint or index statement
-writes it, because property names appear unquoted in generated Cypher; the
+`match` is valid yammm (and fine for JSON export) but is rejected with
+`E_NEO4J_INVALID_IDENTIFIER`, whose detail begins with `ErrReservedKeyword`'s text,
+wherever a generated constraint or index statement writes it, because property names appear unquoted in generated Cypher; the
 check is case-insensitive. Under `WithEdition(Community)`,
 `WithScalarTypeConstraints(false)` or `WithRequiredOnlyTypeConstraints(true)`
 fewer statements write a name, so fewer are checked, and `ShapeForSchema`
 checks labels only. Namespaced labels usually absorb reserved type names
 (`inventory__MATCH` is fine). Check early with
-`ValidateIdentifier(name, context)` or by running `ConstraintsForSchema`
-before write time.
+`ValidateIdentifier(name, context)` or by running `ConstraintsForSchema` and
+`IndexesForSchema` before write time.
 
 ### Diffing Against a Live Database
 
@@ -276,7 +233,7 @@ import "github.com/simon-lentz/yammm/adapter/jschema"
 
 Schema-in, bytes-out: `jschema.Marshal` maps a loaded, resolved schema to a JSON Schema **draft 2020-12** document describing the instance-data JSON object form `yammm check` reads (it does not reproduce yammm's validation; `adapter/jschema`'s Fidelity Caveats list where the two differ) — one top-level key per type a data file can hold (entry types bare, directly imported types alias-qualified as `common.Region`), each an array of instances; `EDGE_` defs carrying required `_target_<pk>` foreign-key fields; compositions always arrays (`minItems: 1` when required, `maxItems: 1` for to-one); named DataTypes as `$ref`ed `$defs` entries; schema doc-comments flowing through as `description` for editor hover. Association presence is deliberately NOT `required` per-file (yammm defers it to graph assembly). Output is deterministic and self-checked (valid JSON, every `$ref` resolves) before return. Options: `WithSchemaID` (the `"$id"`, omitted when unset). Plain `error`, no instance-data path, no source-backing requirement.
 
-Wire the generated document into an editor for completion and validation while authoring data files. For a JSON data file, use a `json.schemas` mapping in the editor's settings. A JSON data file cannot carry a `"$schema"` member: the envelope admits no member but a type name, and `adapter/json` refuses the key as a type tag (`E_INVALID_TYPE_TAG`). A `# yaml-language-server: $schema=./fleet.schema.json` comment wires a YAML file, but yammm reads no YAML data file — its data commands read JSON, JSONC and CSV — so that file gets the editor's checks alone.
+Wire the generated document into an editor for completion and validation while authoring data files. For a JSON data file, use a `json.schemas` mapping in the editor's settings. A JSON data file cannot carry a `"$schema"` member: the envelope admits no member but a type name, and `adapter/json` refuses the key as a type tag (`E_INVALID_TYPE_TAG`). A `# yaml-language-server: $schema=./fleet.schema.json` comment wires a YAML file, but yammm reads no YAML data file — its data commands read JSON and JSONC — so that file gets the editor's checks alone.
 
 Full API semantics: the JSON Schema Generation section of `docs/API.md`. CLI form: `yammm gen --to jsonschema` (see `cli.md`).
 
@@ -300,9 +257,7 @@ A write reports through an `error`, not a `diag.Result`, so the adapters carry s
 
 | Sentinel | Adapter | Meaning |
 | -------- | ------- | ------- |
-| `csv.ErrUnrepresentable` | CSV | The snapshot holds a value CSV cannot write so that its own parser reads it back unchanged: a composed child, a lone all-empty association, a cell holding a CR LF, a list of one empty element, a null list element, a map, a list at an edge property, a number its parser does not read back as a number (a `json.Number` no finite `float64` holds) |
-| `csv.ErrConfig` | CSV | The adapter holds a delimiter `encoding/csv` refuses. `MarshalSnapshot` returns it before it builds any output. The parse-side twin is `E_CSV_CONFIG` |
-| `csv.ErrZeroSnapshot`, `json.ErrZeroSnapshot` | CSV, JSON | A write method received a zero snapshot |
+| `json.ErrZeroSnapshot` | JSON | A write method received a zero snapshot |
 | `neo4j.ErrUnrepresentable` | Neo4j | `BatchNodeQueries` and `BatchEdgeQueries` refuse a value Neo4j would not store as held: one its constraint's coercion refuses, a nested collection's (matching `ErrUnsupportedListElem` too), a map at a property the schema declares, a list or a map a document nests more than 256 levels deep, a `json.Number` that is an integer literal past `int64` at any position but a `Float`, or that no finite `float64` holds, or a primary key that is absent or holds no value; `CoerceParams` marks its refusals of a value so too. No other error carries the class: a caller's own, such as a constraint `schema.CheckConstraint` refuses, a constraint at a nested map's or a rows param's own key, a `GraphShape` the adapter did not build for the snapshot's schema or a relationship type that is no valid identifier, and a cancelled context |
 | `json.ErrUnrepresentable` | JSON | The snapshot holds a value JSON cannot write as itself: a `json.Number` no finite `float64` holds, which only a document read without revalidating at Error states |
 
@@ -312,10 +267,7 @@ An I/O failure and a cancellation match none of these classes.
 
 | Code | Adapter | Meaning |
 | ---- | ------- | ------- |
-| `E_ADAPTER_PARSE` | All | Format-specific parsing error |
-| `E_ADAPTER_IO` | CSV | The reader a streamed parse reads from failed; Fatal, and the CLI exits 3 as for any I/O failure. Module-wide by name, as `E_ADAPTER_PARSE` is, but the CSV adapter is the one parser that streams: the JSON adapter takes bytes |
-| `E_CSV_COERCE` | CSV | A cell's text does not coerce to the type its member declares |
-| `E_CSV_CONFIG` | CSV | The adapter holds a setting this parse cannot use; no record is read |
+| `E_ADAPTER_PARSE` | JSON | Format-specific parsing error |
 | `E_NEO4J_LABEL_COLLISION` | Neo4j | Two types produce the same Neo4j label |
 | `E_NEO4J_INVALID_IDENTIFIER` | Neo4j | Name not valid as Neo4j identifier |
 | `E_NEO4J_UNSUPPORTED_TYPE` | Neo4j | Constraint kind has no Neo4j type mapping |

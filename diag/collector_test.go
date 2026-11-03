@@ -280,9 +280,9 @@ func TestCollector_Result_Sorted(t *testing.T) {
 	c := NewCollector(0)
 
 	// Add issues in non-sorted order
-	c.Collect(NewIssue(Error, E_SYNTAX, "b:10").WithSpan(location.Point(source, 10, 1)).Build())
-	c.Collect(NewIssue(Error, E_SYNTAX, "a:5").WithSpan(location.Point(sourceA, 5, 1)).Build())
-	c.Collect(NewIssue(Error, E_SYNTAX, "b:1").WithSpan(location.Point(source, 1, 1)).Build())
+	c.Collect(NewIssue(Error, E_SYNTAX, "b:10").WithSpan(location.PointWithByte(source, 10, 1, -1)).Build())
+	c.Collect(NewIssue(Error, E_SYNTAX, "a:5").WithSpan(location.PointWithByte(sourceA, 5, 1, -1)).Build())
+	c.Collect(NewIssue(Error, E_SYNTAX, "b:1").WithSpan(location.PointWithByte(source, 1, 1, -1)).Build())
 
 	result := c.Result()
 
@@ -506,7 +506,7 @@ func TestCompareIssues_SpanBackedBeforePathOnly(t *testing.T) {
 	source := location.NewSourceID("test://a.yammm")
 
 	spanBacked := NewIssue(Error, E_SYNTAX, "span-backed").
-		WithSpan(location.Point(source, 1, 1)).
+		WithSpan(location.PointWithByte(source, 1, 1, -1)).
 		Build()
 
 	pathOnly := NewIssue(Error, E_SYNTAX, "path-only").
@@ -550,10 +550,10 @@ func TestCompareIssues_SeverityTieBreaker(t *testing.T) {
 
 	// Same span, same code, different severity
 	errorIssue := NewIssue(Error, E_SYNTAX, "same message").
-		WithSpan(location.Point(source, 1, 1)).
+		WithSpan(location.PointWithByte(source, 1, 1, -1)).
 		Build()
 	warningIssue := NewIssue(Warning, E_SYNTAX, "same message").
-		WithSpan(location.Point(source, 1, 1)).
+		WithSpan(location.PointWithByte(source, 1, 1, -1)).
 		Build()
 
 	// Error (severity 1) < Warning (severity 2) numerically
@@ -567,10 +567,10 @@ func TestCompareIssues_MessageTieBreaker(t *testing.T) {
 
 	// Same span, same code, same severity, different message
 	issueA := NewIssue(Error, E_SYNTAX, "aaa").
-		WithSpan(location.Point(source, 1, 1)).
+		WithSpan(location.PointWithByte(source, 1, 1, -1)).
 		Build()
 	issueB := NewIssue(Error, E_SYNTAX, "bbb").
-		WithSpan(location.Point(source, 1, 1)).
+		WithSpan(location.PointWithByte(source, 1, 1, -1)).
 		Build()
 
 	if cmp := compareIssues(issueA, issueB); cmp >= 0 {
@@ -583,11 +583,11 @@ func TestCompareIssues_HintTieBreaker(t *testing.T) {
 
 	// Same everything except hint
 	issueA := NewIssue(Error, E_SYNTAX, "msg").
-		WithSpan(location.Point(source, 1, 1)).
+		WithSpan(location.PointWithByte(source, 1, 1, -1)).
 		WithHint("hint A").
 		Build()
 	issueB := NewIssue(Error, E_SYNTAX, "msg").
-		WithSpan(location.Point(source, 1, 1)).
+		WithSpan(location.PointWithByte(source, 1, 1, -1)).
 		WithHint("hint B").
 		Build()
 
@@ -601,11 +601,11 @@ func TestCompareIssues_DetailsTieBreaker(t *testing.T) {
 
 	// Same everything except details
 	issueA := NewIssue(Error, E_SYNTAX, "msg").
-		WithSpan(location.Point(source, 1, 1)).
+		WithSpan(location.PointWithByte(source, 1, 1, -1)).
 		WithDetails(Detail{Key: "key", Value: "a"}).
 		Build()
 	issueB := NewIssue(Error, E_SYNTAX, "msg").
-		WithSpan(location.Point(source, 1, 1)).
+		WithSpan(location.PointWithByte(source, 1, 1, -1)).
 		WithDetails(Detail{Key: "key", Value: "b"}).
 		Build()
 
@@ -615,10 +615,10 @@ func TestCompareIssues_DetailsTieBreaker(t *testing.T) {
 
 	// Fewer details sorts before more details
 	issueNoDetails := NewIssue(Error, E_SYNTAX, "msg").
-		WithSpan(location.Point(source, 1, 1)).
+		WithSpan(location.PointWithByte(source, 1, 1, -1)).
 		Build()
 	issueWithDetails := NewIssue(Error, E_SYNTAX, "msg").
-		WithSpan(location.Point(source, 1, 1)).
+		WithSpan(location.PointWithByte(source, 1, 1, -1)).
 		WithDetails(Detail{Key: "key", Value: "val"}).
 		Build()
 
@@ -633,16 +633,16 @@ func TestCompareIssues_RelatedTieBreaker(t *testing.T) {
 
 	// Same everything except related info
 	issueA := NewIssue(Error, E_SYNTAX, "msg").
-		WithSpan(location.Point(source, 1, 1)).
+		WithSpan(location.PointWithByte(source, 1, 1, -1)).
 		WithRelated(location.RelatedInfo{
-			Span:    location.Point(relSource, 1, 1),
+			Span:    location.PointWithByte(relSource, 1, 1, -1),
 			Message: "related A",
 		}).
 		Build()
 	issueB := NewIssue(Error, E_SYNTAX, "msg").
-		WithSpan(location.Point(source, 1, 1)).
+		WithSpan(location.PointWithByte(source, 1, 1, -1)).
 		WithRelated(location.RelatedInfo{
-			Span:    location.Point(relSource, 1, 1),
+			Span:    location.PointWithByte(relSource, 1, 1, -1),
 			Message: "related B",
 		}).
 		Build()
@@ -656,7 +656,7 @@ func TestCompareIssues_TotalOrder_IdenticalIssuesEqual(t *testing.T) {
 	source := location.NewSourceID("test://a.yammm")
 
 	issue := NewIssue(Error, E_SYNTAX, "msg").
-		WithSpan(location.Point(source, 1, 1)).
+		WithSpan(location.PointWithByte(source, 1, 1, -1)).
 		WithHint("hint").
 		WithDetails(Detail{Key: "k", Value: "v"}).
 		Build()
@@ -674,12 +674,12 @@ func TestCompareIssues_HybridIssues_DifferentPaths(t *testing.T) {
 
 	// Two hybrid issues: same span, same everything, but different instance paths
 	issue1 := NewIssue(Error, E_TYPE_MISMATCH, "expected integer").
-		WithSpan(location.Point(source, 10, 5)).
+		WithSpan(location.PointWithByte(source, 10, 5, -1)).
 		WithPath("data.json", "$.users[0].age").
 		Build()
 
 	issue2 := NewIssue(Error, E_TYPE_MISMATCH, "expected integer").
-		WithSpan(location.Point(source, 10, 5)).
+		WithSpan(location.PointWithByte(source, 10, 5, -1)).
 		WithPath("data.json", "$.users[1].age").
 		Build()
 
@@ -702,12 +702,12 @@ func TestCompareIssues_HybridIssues_DifferentSourceNames(t *testing.T) {
 	source := location.NewSourceID("test://schema.yammm")
 
 	issue1 := NewIssue(Error, E_TYPE_MISMATCH, "expected integer").
-		WithSpan(location.Point(source, 10, 5)).
+		WithSpan(location.PointWithByte(source, 10, 5, -1)).
 		WithPath("a.json", "$.value").
 		Build()
 
 	issue2 := NewIssue(Error, E_TYPE_MISMATCH, "expected integer").
-		WithSpan(location.Point(source, 10, 5)).
+		WithSpan(location.PointWithByte(source, 10, 5, -1)).
 		WithPath("b.json", "$.value").
 		Build()
 
@@ -723,11 +723,11 @@ func TestCompareIssues_SchemaOnlyBeforeHybrid(t *testing.T) {
 	source := location.NewSourceID("test://schema.yammm")
 
 	schemaOnly := NewIssue(Error, E_SYNTAX, "msg").
-		WithSpan(location.Point(source, 1, 1)).
+		WithSpan(location.PointWithByte(source, 1, 1, -1)).
 		Build()
 
 	hybrid := NewIssue(Error, E_SYNTAX, "msg").
-		WithSpan(location.Point(source, 1, 1)).
+		WithSpan(location.PointWithByte(source, 1, 1, -1)).
 		WithPath("data.json", "$.x").
 		Build()
 
@@ -764,7 +764,7 @@ func TestCollector_DeterministicOrdering_Concurrent(t *testing.T) {
 					// any reordering instability is detectable.
 					msg := fmt.Sprintf("%c%02d", 'A'+g, i)
 					issue := NewIssue(Error, E_SYNTAX, msg).
-						WithSpan(location.Point(source, 1, 1)).
+						WithSpan(location.PointWithByte(source, 1, 1, -1)).
 						Build()
 					c.Collect(issue)
 				}
@@ -807,12 +807,12 @@ func TestCollector_DeterministicOrdering_MixedIssueTypes(t *testing.T) {
 
 	// Add in deliberately scrambled order
 	c.Collect(NewIssue(Error, E_SYNTAX, "path-only-2").WithPath("data.json", "$.b").Build())
-	c.Collect(NewIssue(Error, E_SYNTAX, "span-b-10").WithSpan(location.Point(sourceB, 10, 1)).Build())
+	c.Collect(NewIssue(Error, E_SYNTAX, "span-b-10").WithSpan(location.PointWithByte(sourceB, 10, 1, -1)).Build())
 	c.Collect(NewIssue(Error, E_SYNTAX, "path-only-1").WithPath("data.json", "$.a").Build())
-	c.Collect(NewIssue(Error, E_SYNTAX, "span-a-1").WithSpan(location.Point(sourceA, 1, 1)).Build())
-	c.Collect(NewIssue(Error, E_SYNTAX, "span-a-5").WithSpan(location.Point(sourceA, 5, 1)).Build())
-	c.Collect(NewIssue(Warning, E_SYNTAX, "span-a-1-warn").WithSpan(location.Point(sourceA, 1, 1)).Build())
-	c.Collect(NewIssue(Error, E_SYNTAX, "hybrid").WithSpan(location.Point(sourceA, 1, 1)).WithPath("data.json", "$.x").Build())
+	c.Collect(NewIssue(Error, E_SYNTAX, "span-a-1").WithSpan(location.PointWithByte(sourceA, 1, 1, -1)).Build())
+	c.Collect(NewIssue(Error, E_SYNTAX, "span-a-5").WithSpan(location.PointWithByte(sourceA, 5, 1, -1)).Build())
+	c.Collect(NewIssue(Warning, E_SYNTAX, "span-a-1-warn").WithSpan(location.PointWithByte(sourceA, 1, 1, -1)).Build())
+	c.Collect(NewIssue(Error, E_SYNTAX, "hybrid").WithSpan(location.PointWithByte(sourceA, 1, 1, -1)).WithPath("data.json", "$.x").Build())
 
 	result := c.Result()
 	var messages []string

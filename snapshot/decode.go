@@ -541,8 +541,8 @@ func (sd *streamDecoder) walkInstances(ctx context.Context, groups []instanceGro
 // checkRootTypeEligible refuses a type that cannot hold a root instance, by the
 // graph package doc's "Root type eligibility" section, at the first group, or
 // duplicate record stating no parent, that names it, and reports whether the type
-// can hold one. An empty group is held to it too: adapter/json and adapter/csv key
-// their output by a denoted type's name. No load option excuses a member, and a
+// can hold one. An empty group is held to it too: adapter/json keys its output by
+// a denoted type's name. No load option excuses a member, and a
 // schema-less read checks none.
 func (sd *streamDecoder) checkRootTypeEligible(row int, position string) bool {
 	if sd.schema.IsZero() || row >= len(sd.tableIDs) {

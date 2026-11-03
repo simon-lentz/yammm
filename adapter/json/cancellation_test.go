@@ -74,8 +74,8 @@ func TestParseObject_CancelledContextIsFatal(t *testing.T) {
 	}
 }
 
-// The writer stops on a cancelled context and returns the cause, as its CSV
-// sibling does; MarshalObject returns an error rather than a diag.Result.
+// The writer stops on a cancelled context and returns the cause; MarshalObject
+// returns an error rather than a diag.Result.
 func TestMarshalObject_CancelledContextReturnsTheCause(t *testing.T) {
 	t.Parallel()
 	ctx, cancel := context.WithCancel(context.Background())
@@ -148,8 +148,8 @@ func (c *cancelAfterPolls) Err() error {
 	return nil
 }
 
-// A parse cancelled PARTWAY keeps the keys it already read, as the CSV parser
-// keeps its records, so a caller can tell an abandoned run from an empty one.
+// A parse cancelled PARTWAY keeps the keys it already read, so a caller can tell
+// an abandoned run from an empty one.
 // Cancelling before the parse cannot show this: it keeps nothing, which is
 // what an empty document returns.
 func TestParseObject_CancelledParseKeepsWhatItRead(t *testing.T) {

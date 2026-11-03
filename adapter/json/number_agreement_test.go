@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"math"
 	"strings"
@@ -12,7 +11,6 @@ import (
 
 	"github.com/simon-lentz/yammm/internal/snapparts"
 
-	csvad "github.com/simon-lentz/yammm/adapter/csv"
 	jsonad "github.com/simon-lentz/yammm/adapter/json"
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/graph"
@@ -50,10 +48,9 @@ var agreementLiterals = []string{
 // The second implementation is encoding/json decoding into the Go type each
 // kind stores: an Integer accepts exactly what it decodes into an int64, with
 // the same value, and a Float exactly what it decodes into a float64, bit for
-// bit, the sign of a zero included. The JSON adapter and the validator, and
-// the CSV adapter and the validator, agree with it on every literal, on what
-// they accept and what they store; the .ys reader under revalidation agrees on
-// what it accepts.
+// bit, the sign of a zero included. The JSON adapter and the validator agree with
+// it on every literal, on what they accept and what they store; the .ys reader
+// under revalidation agrees on what it accepts.
 func TestNumberRule_EveryReaderAgreesWithEncodingJSON(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -61,7 +58,6 @@ func TestNumberRule_EveryReaderAgreesWithEncodingJSON(t *testing.T) {
 	if err := res.Err(); err != nil {
 		t.Fatalf("load: %v", err)
 	}
-	ty, _ := s.Type("T")
 	v := instance.NewValidator(s)
 	ys := ysTemplate(t, s, v)
 
@@ -77,9 +73,6 @@ func TestNumberRule_EveryReaderAgreesWithEncodingJSON(t *testing.T) {
 
 				got, ok := jsonReader(ctx, t, v, prop, lit)
 				check(t, "JSON", ok, wantOK, got, want)
-
-				got, ok = csvReader(ctx, t, v, ty, prop, lit)
-				check(t, "CSV", ok, wantOK, got, want)
 
 				if revalidated := ysReader(ctx, t, s, ys, prop, lit); revalidated != wantOK {
 					t.Errorf(".ys revalidation accepted=%v, encoding/json accepted=%v", revalidated, wantOK)
@@ -139,23 +132,6 @@ func jsonReader(ctx context.Context, t *testing.T, v *instance.Validator, prop, 
 		t.Fatalf("JSON parse %s: %v", doc, err)
 	}
 	return validated(ctx, v, parsed["T"][0], prop)
-}
-
-// csvReader reads a CSV file holding lit at prop and validates the row.
-func csvReader(ctx context.Context, t *testing.T, v *instance.Validator, ty schema.Type, prop, lit string) (any, bool) {
-	t.Helper()
-	text := "id,n,f\na," + lit + ",0.5\n"
-	if prop == "f" {
-		text = "id,n,f\na,0," + lit + "\n"
-	}
-	raws, cres := csvad.New().ParseTyped(ctx, location.NewSourceID("test://agree.csv"), "T", strings.NewReader(text), ty)
-	if !cres.OK() {
-		if !cres.HasCode(csvad.E_CSV_COERCE) {
-			t.Fatalf("CSV parse %q drew %s, want at most E_CSV_COERCE", text, cres)
-		}
-		return nil, false
-	}
-	return validated(ctx, v, raws[0], prop)
 }
 
 func validated(ctx context.Context, v *instance.Validator, raw instance.RawInstance, prop string) (any, bool) {
@@ -224,12 +200,11 @@ type T {
 `
 
 // The JSON and .ys writers mark a float in a property value by the Go type it
-// holds, and the CSV writer every one a cell can spell: a float under an Integer, a
-// String, a Timestamp, a Date, a UUID and a List<Timestamp> element, a float standing
-// where a Vector or a List belongs, a float nested in a list or a string-keyed map
-// that stands where a scalar belongs, and a list standing at a Float or nested as a
-// Vector element. A snapshot holds such a value only when nothing validated it. A CSV
-// cell has no spelling for a map, so the CSV writer refuses the map row as the class.
+// holds: a float under an Integer, a String, a Timestamp, a Date, a UUID and a
+// List<Timestamp> element, a float standing where a Vector or a List belongs, a float
+// nested in a list or a string-keyed map that stands where a scalar belongs, and a
+// list standing at a Float or nested as a Vector element. A snapshot holds such a
+// value only when nothing validated it.
 func TestWriters_MarkEveryHeldFloat(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -239,24 +214,24 @@ func TestWriters_MarkEveryHeldFloat(t *testing.T) {
 	}
 	ty, _ := s.Type("T")
 	for _, c := range []struct {
-		prop            string
-		held            any
-		jsonYS, csvCell string
+		prop   string
+		held   any
+		jsonYS string
 	}{
-		{"n", float64(0.1), `"n":0.1}`, ",0.1,"},
-		{"n", float64(6), `"n":6.0`, ",6.0,"},
-		{"s", float64(6), `"s":6.0`, ",6.0"},
-		{"ts", float64(6), `"ts":6.0`, ",6.0"},
-		{"d", float64(6), `"d":6.0`, "6.0,"},
-		{"u", float64(6), `"u":6.0`, ",6.0"},
-		{"tss", []any{float64(6)}, `"tss":[6.0]`, ",6.0"},
-		{"v", float64(7), `"v":7.0`, ",7.0"},
-		{"l", float64(8), `"l":8.0`, ",8.0"},
-		{"n", []any{float64(6)}, `"n":[6.0]`, ",6.0,"},
-		{"n", map[string]any{"k": float64(6)}, `"n":{"k":6.0}`, "refused"},
-		{"ts", []any{float64(6)}, `"ts":[6.0]`, ",6.0"},
-		{"f", []any{float64(6)}, `"f":[6.0]`, ",6.0,"},
-		{"v", []any{[]any{float64(6)}, float64(1)}, `"v":[[6.0],1.0]`, ",6.0|1.0"},
+		{"n", float64(0.1), `"n":0.1}`},
+		{"n", float64(6), `"n":6.0`},
+		{"s", float64(6), `"s":6.0`},
+		{"ts", float64(6), `"ts":6.0`},
+		{"d", float64(6), `"d":6.0`},
+		{"u", float64(6), `"u":6.0`},
+		{"tss", []any{float64(6)}, `"tss":[6.0]`},
+		{"v", float64(7), `"v":7.0`},
+		{"l", float64(8), `"l":8.0`},
+		{"n", []any{float64(6)}, `"n":[6.0]`},
+		{"n", map[string]any{"k": float64(6)}, `"n":{"k":6.0}`},
+		{"ts", []any{float64(6)}, `"ts":[6.0]`},
+		{"f", []any{float64(6)}, `"f":[6.0]`},
+		{"v", []any{[]any{float64(6)}, float64(1)}, `"v":[[6.0],1.0]`},
 	} {
 		snap := snappartstest.Loaded(t, s, snapparts.Parts{Instances: []snapparts.Instance{{
 			TypeID: ty.ID(), PrimaryKey: immutable.WrapKey([]any{"a"}),
@@ -269,16 +244,6 @@ func TestWriters_MarkEveryHeldFloat(t *testing.T) {
 		ys, mres := snapshot.Marshal(ctx, snap)
 		if mres.HasErrors() || !bytes.Contains(ys, []byte(c.jsonYS)) {
 			t.Errorf(".ys %s=%#v wrote %s (%s), want %s", c.prop, c.held, ys, mres, c.jsonYS)
-		}
-		files, err := csvad.New(csvad.WithSchema(s)).MarshalSnapshot(ctx, snap)
-		if c.csvCell == "refused" {
-			if !errors.Is(err, csvad.ErrUnrepresentable) {
-				t.Errorf("CSV %s=%#v = %v, want ErrUnrepresentable", c.prop, c.held, err)
-			}
-			continue
-		}
-		if err != nil || !strings.Contains(string(files["T"]), c.csvCell) {
-			t.Errorf("CSV %s=%#v wrote %q (%v), want %s", c.prop, c.held, files["T"], err, c.csvCell)
 		}
 	}
 }

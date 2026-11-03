@@ -2,10 +2,6 @@
 # Frozen so a fixture cannot leave the clean set unnoticed.
 
 ## clean (projection frozen under golden/valid/)
-adapter/csv/testdata/basic.yammm
-adapter/csv/testdata/edge_properties.yammm
-adapter/csv/testdata/inherited_relations.yammm
-adapter/csv/testdata/with_relations.yammm
 adapter/gogen/testdata/composite_pk.yammm
 adapter/gogen/testdata/edge_datatype.yammm
 adapter/gogen/testdata/edge_where_collision.yammm

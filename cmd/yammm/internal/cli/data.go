@@ -7,12 +7,8 @@ import (
 	"fmt"
 	"io"
 	"maps"
-	"os"
-	"path/filepath"
 	"slices"
-	"strings"
 
-	"github.com/simon-lentz/yammm/adapter/csv"
 	adapterjson "github.com/simon-lentz/yammm/adapter/json"
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/graph"
@@ -22,41 +18,11 @@ import (
 	"github.com/simon-lentz/yammm/snapshot"
 )
 
-// dataExtension is the one spelling of a data file's extension that
-// [DetectFormat] and [CSVDelimiter] both read, so a name that selects the CSV
-// format and a name that selects a tab are decided by one fold.
-func dataExtension(path string) string {
-	return strings.ToLower(filepath.Ext(path))
-}
-
-// DetectFormat returns "json" or "csv" based on the file extension.
-func DetectFormat(path string) (string, error) {
-	switch dataExtension(path) {
-	case ".json", ".jsonc":
-		return "json", nil
-	case ".csv", ".tsv":
-		return "csv", nil
-	default:
-		return "", Usagef("cannot detect data format for %q: use --from to specify json or csv", path)
-	}
-}
-
-// CSVDelimiter returns the field delimiter a CSV file's extension names: '\t'
-// for ".tsv" and ',' for every other name, the empty one included. The read
-// side and the write side both take it, so a file `export` writes under a
-// ".tsv" name is one `check` reads back.
-func CSVDelimiter(path string) rune {
-	if dataExtension(path) == ".tsv" {
-		return '\t'
-	}
-	return ','
-}
-
 // LoadAndParseJSON reads a JSON file and parses it into raw instances.
 //
-// The identity and the host path come out of one resolution, as the schema
-// loader takes them, so a data diagnostic and a schema diagnostic name one file
-// the same way.
+// The bytes come through the path the kernel reaches for path ([ReadFile]), and the
+// identity only names them ([ParseJSON]), so a descriptor path, or a link to one,
+// reads the file a shell reads.
 //
 // Returns (T, diag.Result, error) because the error return captures the
 // failures that stop a read — a path that names no file, one that cannot be
@@ -67,61 +33,24 @@ func CSVDelimiter(path string) rune {
 // bytes that are not UTF-8, included — and exits 3. This is an internal CLI
 // helper, not a public API.
 func LoadAndParseJSON(ctx context.Context, path string) (map[string][]instance.RawInstance, diag.Result, error) {
-	sourceID, hostPath, err := location.ResolveSourcePath(path)
-	if err != nil {
-		return nil, diag.Result{}, fmt.Errorf("resolve data file %q: %w", path, err)
-	}
-
-	data, err := os.ReadFile(hostPath)
+	data, err := ReadFile(path)
 	if err != nil {
 		return nil, diag.Result{}, fmt.Errorf("read data file: %w", err)
 	}
-
-	parsed, result := adapterjson.New().ParseObject(ctx, sourceID, data)
-	return parsed, result, nil
+	return ParseJSON(ctx, path, data)
 }
 
-// LoadAndParseCSV reads a CSV file and parses it into raw instances.
-// The typeName parameter specifies the schema type for the rows.
-// If typeColumn is non-empty, it is used instead of typeName for multi-type CSVs.
-//
-// The identity and the host path come out of one resolution, as
-// [LoadAndParseJSON] takes them; the handle is opened on the path it returns.
-// The delimiter is [CSVDelimiter]'s for path as the caller spelled it, the
-// spelling [DetectFormat] reads.
-//
-// Returns (T, diag.Result, error) because the error return captures I/O
-// failures (file open errors) which are distinct from semantic parse
-// issues reported through the diag.Result.
-func LoadAndParseCSV(ctx context.Context, path, typeName, typeColumn string, s schema.Schema) (map[string][]instance.RawInstance, diag.Result, error) {
-	sourceID, hostPath, err := location.ResolveSourcePath(path)
+// ParseJSON parses data, already read from path, into raw instances. Its identity
+// is the one the schema loader derives, so a data diagnostic and a schema diagnostic
+// name one file the same way. The caller reads first because it needs the document's
+// kind and a pipe cannot be read twice.
+func ParseJSON(ctx context.Context, path string, data []byte) (map[string][]instance.RawInstance, diag.Result, error) {
+	sourceID, err := location.SourceIDFromPath(path)
 	if err != nil {
 		return nil, diag.Result{}, fmt.Errorf("resolve data file %q: %w", path, err)
 	}
-
-	f, err := os.Open(hostPath)
-	if err != nil {
-		return nil, diag.Result{}, fmt.Errorf("open data file: %w", err)
-	}
-	defer f.Close()
-
-	if typeColumn != "" {
-		adapter := csv.New(csv.WithTypeColumn(typeColumn), csv.WithSchema(s), csv.WithDelimiter(CSVDelimiter(path)))
-		parsed, result := adapter.ParseWithTypeColumn(ctx, sourceID, f, func(name string) schema.Type {
-			t, _ := s.ResolveTypeName(name)
-			return t
-		})
-		return parsed, result, nil
-	}
-
-	// An unknown type is the caller's mistake, refused here rather than parsed
-	// uncoerced and refused row by row downstream.
-	schemaType, ok := s.ResolveTypeName(typeName)
-	if !ok {
-		return nil, diag.Result{}, Usagef("type %q not found in schema", typeName)
-	}
-	raws, result := csv.New(csv.WithSchema(s), csv.WithDelimiter(CSVDelimiter(path))).ParseTyped(ctx, sourceID, typeName, f, schemaType)
-	return map[string][]instance.RawInstance{typeName: raws}, result, nil
+	parsed, result := adapterjson.New().ParseObject(ctx, sourceID, data)
+	return parsed, result, nil
 }
 
 // Validated is a document's instances after validation, in the order they
@@ -223,41 +152,40 @@ func WriteTo(data []byte, path string, w io.Writer) error {
 	return err
 }
 
-// IsSnapshotFile reports whether the file at path is a yammm snapshot (.ys)
-// file using content-based detection. It reads the first bytes and checks
-// for the {"yammm_snapshot": prefix.
-//
-// Returns (false, nil) for non-snapshot files (including non-JSON files).
-// Returns (false, err) only for genuine I/O errors.
-func IsSnapshotFile(path string) (bool, error) {
-	f, err := Open(path)
-	if err != nil {
-		return false, fmt.Errorf("open file: %w", err)
+// IsSnapshot reports whether a document is a yammm snapshot (.ys): a JSON object
+// whose first key is "yammm_snapshot". Anything else is not one, malformed JSON
+// included, since the parse that follows reports it. A byte order mark or a comment
+// the snapshot reader refuses is read past, so that reader is what refuses it.
+// It reads only as far as the first key.
+func IsSnapshot(data []byte) bool {
+	rest := skipBlank(bytes.TrimPrefix(data, []byte("\xef\xbb\xbf")))
+	if len(rest) == 0 || rest[0] != '{' {
+		return false
 	}
-	defer f.Close()
+	key, err := json.NewDecoder(bytes.NewReader(skipBlank(rest[1:]))).Token()
+	return err == nil && key == "yammm_snapshot"
+}
 
-	dec := json.NewDecoder(io.LimitReader(f, 512))
-
-	// First token must be '{'.
-	tok, err := dec.Token()
-	if err != nil {
-		return false, nil // not valid JSON — not a snapshot
+// skipBlank returns b past white space and comments. An unterminated block comment
+// leaves nothing.
+func skipBlank(b []byte) []byte {
+	for {
+		b = bytes.TrimLeft(b, " \t\r\n")
+		var end []byte
+		switch {
+		case bytes.HasPrefix(b, []byte("//")):
+			end = []byte("\n")
+		case bytes.HasPrefix(b, []byte("/*")):
+			end = []byte("*/")
+		default:
+			return b
+		}
+		_, after, found := bytes.Cut(b[2:], end)
+		if !found {
+			return nil
+		}
+		b = after
 	}
-	delim, ok := tok.(json.Delim)
-	if !ok || delim != '{' {
-		return false, nil
-	}
-
-	// Second token must be the string "yammm_snapshot".
-	tok, err = dec.Token()
-	if err != nil {
-		return false, nil
-	}
-	key, ok := tok.(string)
-	if !ok {
-		return false, nil
-	}
-	return key == "yammm_snapshot", nil
 }
 
 // LoadSnapshotFile reads a .ys file and loads it into a [graph.Snapshot],

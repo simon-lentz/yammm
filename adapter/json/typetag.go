@@ -1,33 +1,23 @@
-package typetag
+package json
 
 import (
 	"strings"
 	"unicode/utf8"
 )
 
-// Error represents a type tag validation failure with structured detail.
-// The Detail field contains a canonical reason string for programmatic inspection.
-type Error struct {
-	Detail string // Canonical reason string
-}
-
-// Error implements the error interface.
-func (e *Error) Error() string {
-	return e.Detail
-}
-
-// Canonical detail strings for validation failures.
+// The reasons [typeTagFault] gives. Each reaches an operator in the message and in
+// the structured detail of an E_INVALID_TYPE_TAG issue.
 const (
-	DetailEmptyTag          = "empty type tag"
-	DetailMustStartUpper    = "type name must start with uppercase letter"
-	DetailInvalidChars      = "type name contains invalid characters"
-	DetailLeadingDot        = "leading dot in qualified name"
-	DetailTrailingDot       = "trailing dot in qualified name"
-	DetailMultipleDots      = "multiple dots in qualified name"
-	DetailReservedDatatype  = "reserved datatype keyword"
-	DetailAliasInvalidChars = "alias contains invalid characters"
-	DetailAliasStartLetter  = "alias must start with letter"
-	DetailAliasReserved     = "alias is a reserved keyword"
+	tagFaultEmptyTag          = "empty type tag"
+	tagFaultMustStartUpper    = "type name must start with uppercase letter"
+	tagFaultInvalidChars      = "type name contains invalid characters"
+	tagFaultLeadingDot        = "leading dot in qualified name"
+	tagFaultTrailingDot       = "trailing dot in qualified name"
+	tagFaultMultipleDots      = "multiple dots in qualified name"
+	tagFaultReservedDatatype  = "reserved datatype keyword"
+	tagFaultAliasInvalidChars = "alias contains invalid characters"
+	tagFaultAliasStartLetter  = "alias must start with letter"
+	tagFaultAliasReserved     = "alias is a reserved keyword"
 )
 
 // datatypeKeywords are the eleven built-in type names. The grammar refuses
@@ -58,96 +48,83 @@ var reservedLC = map[string]bool{
 	"in": true, "nil": true, "true": true, "false": true,
 }
 
-// Validate checks that typeName matches DSL grammar syntax for type names.
-//
-// Valid forms:
-//   - Unqualified: "Person" (starts with uppercase)
-//   - Qualified: "common.Entity" (alias.TypeName)
+// typeTagFault returns why typeName is no type name the DSL grammar admits, or ""
+// when it is one: a name starting with an uppercase ASCII letter ("Person"), or
+// an alias and such a name around one dot ("common.Entity").
 //
 // Neither half may spell a reserved word: the alias refuses every spelling the
 // grammar refuses where either case is admitted, and the type name refuses the
-// built-in datatype names.
-//
-// Returns nil if valid, or *Error with Detail describing the failure.
-func Validate(typeName string) error {
+// built-in datatype names. This judges syntax before the validator resolves the
+// name against a schema.
+func typeTagFault(typeName string) string {
 	if typeName == "" {
-		return &Error{Detail: DetailEmptyTag}
+		return tagFaultEmptyTag
 	}
 
-	// Check for qualified form (contains a dot)
 	if idx := strings.Index(typeName, "."); idx != -1 {
-		return validateQualified(typeName, idx)
+		return qualifiedFault(typeName, idx)
 	}
 
-	// Unqualified form
-	return validateTypeName(typeName)
+	return typeNameFault(typeName)
 }
 
-// validateTypeName validates a type name: the whole of an unqualified tag, or
-// the half after the dot of a qualified one. Both halves read this one copy, so
-// a test of either covers the rule for both.
-func validateTypeName(typeName string) error {
-	// First rune must be uppercase ASCII letter
+// typeNameFault judges a type name: the whole of an unqualified tag, or the half
+// after the dot of a qualified one. Both halves read this one copy, so a test of
+// either covers the rule for both.
+func typeNameFault(typeName string) string {
 	first, size := utf8.DecodeRuneInString(typeName)
 	if !isUpperASCII(first) {
-		return &Error{Detail: DetailMustStartUpper}
+		return tagFaultMustStartUpper
 	}
 
-	// Remaining characters must be ASCII alphanumeric or underscore
 	for _, r := range typeName[size:] {
 		if !isWordChar(r) {
-			return &Error{Detail: DetailInvalidChars}
+			return tagFaultInvalidChars
 		}
 	}
 
-	// Check for reserved datatype keywords
 	if isDatatypeKeyword(typeName) {
-		return &Error{Detail: DetailReservedDatatype}
+		return tagFaultReservedDatatype
 	}
 
-	return nil
+	return ""
 }
 
-// validateQualified validates a qualified type name (contains dot).
-func validateQualified(typeName string, dotIdx int) error {
-	// Leading dot check
+// qualifiedFault judges a tag whose first dot is at dotIdx.
+func qualifiedFault(typeName string, dotIdx int) string {
 	if dotIdx == 0 {
-		return &Error{Detail: DetailLeadingDot}
+		return tagFaultLeadingDot
 	}
 
-	// Trailing dot check
 	if dotIdx == len(typeName)-1 {
-		return &Error{Detail: DetailTrailingDot}
+		return tagFaultTrailingDot
 	}
 
-	// Multiple dots check
 	if strings.Contains(typeName[dotIdx+1:], ".") {
-		return &Error{Detail: DetailMultipleDots}
+		return tagFaultMultipleDots
 	}
 
 	alias := typeName[:dotIdx]
 	typeNamePart := typeName[dotIdx+1:]
 
-	// Validate alias: must start with ASCII letter
 	firstAlias, sizeAlias := utf8.DecodeRuneInString(alias)
 	if !isASCIILetter(firstAlias) {
-		return &Error{Detail: DetailAliasStartLetter}
+		return tagFaultAliasStartLetter
 	}
 
-	// Remaining alias characters must be ASCII alphanumeric or underscore
 	for _, r := range alias[sizeAlias:] {
 		if !isWordChar(r) {
-			return &Error{Detail: DetailAliasInvalidChars}
+			return tagFaultAliasInvalidChars
 		}
 	}
 
 	// An import alias admits either case, so the alias half refuses the whole
 	// reserved vocabulary where the type half refuses the datatype names alone.
 	if isReservedName(alias) {
-		return &Error{Detail: DetailAliasReserved}
+		return tagFaultAliasReserved
 	}
 
-	return validateTypeName(typeNamePart)
+	return typeNameFault(typeNamePart)
 }
 
 // isReservedName reports whether name is a spelling the grammar refuses in a

@@ -40,7 +40,7 @@ func TestExcerpt_MarksSitUnderTheText(t *testing.T) {
 	t.Parallel()
 
 	src := location.NewSourceID("test://excerpt.yammm")
-	point := func(line, col int) location.Span { return location.Point(src, line, col) }
+	point := func(line, col int) location.Span { return location.PointWithByte(src, line, col, -1) }
 	span := func(startLine, startCol, endLine, endCol int) location.Span {
 		return location.Span{
 			Source: src,
@@ -123,7 +123,7 @@ func TestExcerpt_LongLineShowsTheSpan(t *testing.T) {
 		t.Run(row.name, func(t *testing.T) {
 			t.Parallel()
 			line := strings.Repeat("a", row.col-1) + strings.Repeat("X", row.marked) + strings.Repeat("b", row.length-row.col-row.marked+1)
-			span := location.Point(src, 1, row.col)
+			span := location.PointWithByte(src, 1, row.col, -1)
 			if row.marked > 1 {
 				span = location.RangeWithBytes(src, 1, row.col, -1, 1, row.col+row.marked, -1)
 			}

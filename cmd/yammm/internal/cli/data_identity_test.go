@@ -54,31 +54,6 @@ func TestLoadAndParseJSON_MintsTheLoadersIdentity(t *testing.T) {
 	}
 }
 
-// TestLoadAndParseCSV_MintsTheLoadersIdentity pins the same rule on the CSV
-// entry point.
-func TestLoadAndParseCSV_MintsTheLoadersIdentity(t *testing.T) {
-	t.Parallel()
-	s := closureSchema(t)
-	p := writeDataFile(t, "data.csv", "id\na1\n")
-
-	parsed, res, err := LoadAndParseCSV(t.Context(), p, "Anchor", "", s)
-	if err != nil {
-		t.Fatalf("LoadAndParseCSV: %v", err)
-	}
-	if !res.OK() {
-		t.Fatalf("parse: %s", res)
-	}
-
-	want := wantSourceID(t, p)
-	span := parsed["Anchor"][0].Provenance.Span()
-	if span.Source != want {
-		t.Errorf("span source %q, want %q", span.Source, want)
-	}
-	if !span.Source.IsFilePath() {
-		t.Errorf("identity %q is not file-backed", span.Source)
-	}
-}
-
 // TestLoadAndParse_OneSpellingOfOneFileGivesOneIdentity pins what a synthetic
 // identity built by concatenation cannot give: two spellings of one path are
 // one identity, so a diagnostic and a snapshot agree on which file they name.
@@ -106,46 +81,39 @@ func TestLoadAndParse_OneSpellingOfOneFileGivesOneIdentity(t *testing.T) {
 	}
 }
 
-// TestLoadAndParse_RefusesAPathTheResolverRejects drives the resolve arm both
-// entry points gained.
-//
-// A MISSING file does not reach it: [location.ResolveSourcePath] resolves a path
-// whose leaf does not exist yet, and the read that follows is what fails. The
-// arm fires for a path that cannot name a file at all — an empty one, and one
-// that descends through a regular file.
-func TestLoadAndParse_RefusesAPathTheResolverRejects(t *testing.T) {
+// A path that cannot name a file is refused by the read of it, and bytes that can
+// never be named are refused by [ParseJSON]'s identity.
+func TestLoadAndParse_RefusesAPathThatNamesNoFile(t *testing.T) {
 	t.Parallel()
 	regular := writeDataFile(t, "data.json", `{"Anchor": [{"id": "a1"}]}`)
-
-	for _, c := range []struct {
-		name string
-		path string
-	}{
-		{"empty path", ""},
-		{"a path under a regular file", filepath.Join(regular, "inner.json")},
+	for name, path := range map[string]string{
+		"empty path":                  "",
+		"a path under a regular file": filepath.Join(regular, "inner.json"),
 	} {
-		t.Run(c.name, func(t *testing.T) {
+		t.Run(name, func(t *testing.T) {
 			t.Parallel()
-			_, _, err := LoadAndParseJSON(t.Context(), c.path)
-			if err == nil {
-				t.Errorf("LoadAndParseJSON accepted %q", c.path)
-			} else if !strings.Contains(err.Error(), "resolve data file") {
-				t.Errorf("LoadAndParseJSON: %v, want the resolve arm", err)
+			_, _, err := LoadAndParseJSON(t.Context(), path)
+			if err == nil || !strings.Contains(err.Error(), "read data file") {
+				t.Errorf("LoadAndParseJSON(%q): %v, want the read's refusal", path, err)
 			}
-
-			_, _, err = LoadAndParseCSV(t.Context(), c.path, "Anchor", "", closureSchema(t))
-			if err == nil {
-				t.Errorf("LoadAndParseCSV accepted %q", c.path)
-			} else if !strings.Contains(err.Error(), "resolve data file") {
-				t.Errorf("LoadAndParseCSV: %v, want the resolve arm", err)
+		})
+	}
+	for name, path := range map[string]string{
+		"empty path":          "",
+		"a path not in UTF-8": "bad\xff.json",
+	} {
+		t.Run("parse, "+name, func(t *testing.T) {
+			t.Parallel()
+			_, _, err := ParseJSON(t.Context(), path, []byte(`{}`))
+			if err == nil || !strings.Contains(err.Error(), "resolve data file") {
+				t.Errorf("ParseJSON(%q): %v, want the resolver's refusal", path, err)
 			}
 		})
 	}
 }
 
-// TestLoadAndParse_ReadsAMissingFileThroughTheReadArm pins the boundary the test
-// above depends on: the resolver accepts a path whose leaf is absent, so a
-// missing file is still reported by the read, not by the resolve.
+// TestLoadAndParse_ReadsAMissingFileThroughTheReadArm pins that a missing file is
+// reported by the read.
 func TestLoadAndParse_ReadsAMissingFileThroughTheReadArm(t *testing.T) {
 	t.Parallel()
 	missing := filepath.Join(t.TempDir(), "nope", "data.json")
@@ -156,13 +124,5 @@ func TestLoadAndParse_ReadsAMissingFileThroughTheReadArm(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "read data file") {
 		t.Errorf("LoadAndParseJSON: %v, want the read arm", err)
-	}
-
-	_, _, err = LoadAndParseCSV(t.Context(), missing, "Anchor", "", closureSchema(t))
-	if err == nil {
-		t.Fatalf("LoadAndParseCSV accepted a missing file")
-	}
-	if !strings.Contains(err.Error(), "open data file") {
-		t.Errorf("LoadAndParseCSV: %v, want the open arm", err)
 	}
 }

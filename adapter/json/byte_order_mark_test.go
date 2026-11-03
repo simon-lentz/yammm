@@ -8,8 +8,8 @@ import (
 )
 
 // TestParseObject_SkipsOneLeadingByteOrderMark pins that a data file starting
-// with U+FEFF parses as the same document without it, as the CSV adapter
-// already does, and that a second mark is still a parse error.
+// with U+FEFF parses as the same document without it, and that a second mark is
+// still a parse error.
 func TestParseObject_SkipsOneLeadingByteOrderMark(t *testing.T) {
 	t.Parallel()
 	a := New()

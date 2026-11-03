@@ -7,7 +7,6 @@ import (
 	"github.com/simon-lentz/yammm/internal/doclint"
 
 	// Each adapter registers its own codes with diag when it is imported.
-	_ "github.com/simon-lentz/yammm/adapter/csv"
 	_ "github.com/simon-lentz/yammm/adapter/neo4j"
 )
 
@@ -42,6 +41,6 @@ func TestModuleCitesRegisteredCodes(t *testing.T) {
 }
 
 const (
-	commentCitationFloor  = 655
-	markdownCitationFloor = 510
+	commentCitationFloor  = 640
+	markdownCitationFloor = 490
 )

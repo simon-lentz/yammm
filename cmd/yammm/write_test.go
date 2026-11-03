@@ -6,10 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
-	"strings"
 	"testing"
-
-	"github.com/simon-lentz/yammm/cmd/yammm/internal/cli"
 )
 
 // Every way the CLI writes a file the operator named.
@@ -17,8 +14,7 @@ import (
 // One flag, one answer: the durability and the mode policy must not depend on
 // which command produced the bytes or which target it was asked for. Before the
 // durable-write primitive these paths disagreed — one `--output` flag left 0600
-// through `gen`, 0600 through `--to json` and 0644 through `--to csv` and
-// `--to cypher` — and nothing in the tree asserted any of it.
+// through `gen`, 0600 through `--to json` and 0644 through `--to cypher` — and nothing in the tree asserted any of it.
 type writePath struct {
 	name string
 	// build prepares fixtures and returns the file the command writes plus the
@@ -80,17 +76,6 @@ func writePaths() []writePath {
 				out := filepath.Join(dir, "out.json")
 				return out, []string{
 					"export", "--to", "json", "--output", out,
-					"testdata/valid.yammm", "testdata/data.json",
-				}
-			},
-		},
-		{
-			name:    "export --to csv --output",
-			creates: true,
-			build: func(_ *testing.T, dir string) (string, []string) {
-				out := filepath.Join(dir, "out.csv")
-				return out, []string{
-					"export", "--to", "csv", "--output", out,
 					"testdata/valid.yammm", "testdata/data.json",
 				}
 			},
@@ -340,70 +325,6 @@ func dirEntryNames(t *testing.T, dir string) map[string]struct{} {
 		names[e.Name()] = struct{}{}
 	}
 	return names
-}
-
-// TestWrite_PartialDirectoryExportLeavesTheDirectoryAsItWas pins that a
-// directory export is all or nothing. When a later type's file is blocked, no
-// earlier type's file is left complete in the operator's directory.
-func TestWrite_PartialDirectoryExportLeavesTheDirectoryAsItWas(t *testing.T) {
-	dir := t.TempDir()
-	outDir := filepath.Join(dir, "csvs")
-	if err := os.MkdirAll(outDir, 0o750); err != nil {
-		t.Fatalf("mkdir: %v", err)
-	}
-	// A directory where one type's file belongs: the create fails, and it
-	// cannot be removed by the cleanup either.
-	blocker := filepath.Join(outDir, "Pet.csv")
-	if err := os.Mkdir(blocker, 0o750); err != nil {
-		t.Fatalf("mkdir blocker: %v", err)
-	}
-
-	schemaPath, dataPath := multiTypeFixture(t)
-
-	code, _, errOut := runCLI(t, "export", "--to", "csv", "--output-dir", outDir, schemaPath, dataPath)
-	if code != cli.ExitRuntime {
-		t.Fatalf("a blocked write: exit %d, want %d: %s", code, cli.ExitRuntime, errOut)
-	}
-
-	entries, err := os.ReadDir(outDir)
-	if err != nil {
-		t.Fatalf("read dir: %v", err)
-	}
-	for _, e := range entries {
-		if e.Name() == "Pet.csv" {
-			continue // the blocker the test put there
-		}
-		t.Errorf("a failed export left %q behind; the set is partial and nothing says so", e.Name())
-	}
-}
-
-// The files of a directory export are the operator's too.
-func TestWrite_DirectoryExportFilesAreOwnerOnly(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip(noModeBitsOnWindows)
-	}
-	dir := t.TempDir()
-	outDir := filepath.Join(dir, "csvs")
-	schemaPath, dataPath := multiTypeFixture(t)
-
-	code, _, errOut := runCLI(t, "export", "--to", "csv", "--output-dir", outDir, schemaPath, dataPath)
-	if code != 0 {
-		t.Fatalf("exit %d: %s", code, errOut)
-	}
-	if want := "wrote 3 CSV files to " + outDir; !strings.Contains(errOut, want) {
-		t.Errorf("stderr %q does not report %q", errOut, want)
-	}
-
-	entries, err := os.ReadDir(outDir)
-	if err != nil {
-		t.Fatalf("read dir: %v", err)
-	}
-	if len(entries) == 0 {
-		t.Fatal("the export wrote nothing")
-	}
-	for _, e := range entries {
-		assertMode(t, filepath.Join(outDir, e.Name()), 0o600)
-	}
 }
 
 // noModeBitsOnWindows is why a test of the CLI's mode policy cannot run there.

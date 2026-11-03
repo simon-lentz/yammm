@@ -469,14 +469,7 @@ func zoneNamed(name string) *time.Location {
 }
 
 // calendarDate strips the time of day, keeping the wall-clock date the value
-// itself shows.
-//
-// dbtype.Date carries a whole time.Time and the driver derives its day number
-// from it by an integer division that truncates toward zero rather than
-// flooring, so a pre-1970 instant with a nonzero time of day lands a day late.
-// Measured against a live server: 1969-07-20T18:00:00Z stored as 1969-07-21,
-// while the same time of day in 2001 and the same date at midnight both stored
-// correctly.
+// itself shows, so every Date arm hands the driver one form.
 func calendarDate(t time.Time) time.Time {
 	y, m, d := t.Date()
 	return time.Date(y, m, d, 0, 0, 0, 0, time.UTC)

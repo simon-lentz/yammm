@@ -11,7 +11,6 @@ import (
 
 	"github.com/tidwall/jsonc"
 
-	"github.com/simon-lentz/yammm/adapter/internal/typetag"
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/instance"
@@ -19,8 +18,8 @@ import (
 	"github.com/simon-lentz/yammm/location/path"
 )
 
-// byteOrderMark is the UTF-8 encoding of U+FEFF. One leading mark is skipped,
-// as the CSV adapter skips it; a second is a parse error.
+// byteOrderMark is the UTF-8 encoding of U+FEFF. One leading mark is skipped; a
+// second is a parse error.
 var byteOrderMark = []byte("\uFEFF")
 
 // ParseObject parses JSON data structured as one top-level key per type name,
@@ -91,8 +90,7 @@ func (a *Adapter) parseObject(ctx context.Context, source location.SourceID, dat
 	seen := make(map[string]struct{})
 	keys := 0
 	for dec.More() {
-		// Checked per top-level key, the unit of work this loop reads, as the
-		// CSV parser checks per record.
+		// Checked per top-level key, the unit of work this loop reads.
 		if err := ctx.Err(); err != nil {
 			collector.Collect(diag.NewIssue(diag.Fatal, diag.E_CONTEXT_CANCELLED,
 				fmt.Sprintf("json parse cancelled after %d top-level keys", keys)).Build())
@@ -116,8 +114,8 @@ func (a *Adapter) parseObject(ctx context.Context, source location.SourceID, dat
 			return result, collector.Result()
 		}
 
-		if err := typetag.Validate(typeName); err != nil {
-			collector.Collect(typeTagError(keySpan, typeName, err))
+		if fault := typeTagFault(typeName); fault != "" {
+			collector.Collect(typeTagError(keySpan, typeName, fault))
 			if !pc.skipMember(dec, collector) {
 				return result, collector.Result()
 			}
@@ -492,12 +490,12 @@ func (pc *parseContext) parseError(span location.Span, msg, detail string) diag.
 }
 
 // typeTagError creates an E_INVALID_TYPE_TAG issue for type name validation errors.
-func typeTagError(span location.Span, typeName string, err error) diag.Issue {
-	msg := fmt.Sprintf("invalid type name %s: %s", diag.QuoteValue(typeName), err.Error())
+func typeTagError(span location.Span, typeName, fault string) diag.Issue {
+	msg := fmt.Sprintf("invalid type name %s: %s", diag.QuoteValue(typeName), fault)
 	return diag.NewIssue(diag.Error, diag.E_INVALID_TYPE_TAG, msg).
 		WithSpan(span).
 		WithDetail(diag.DetailKeyGot, typeName).
-		WithDetail(diag.DetailKeyDetail, err.Error()).
+		WithDetail(diag.DetailKeyDetail, fault).
 		Build()
 }
 

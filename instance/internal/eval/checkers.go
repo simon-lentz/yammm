@@ -177,7 +177,7 @@ func CoerceValue(val any, c schema.Constraint) (any, error) {
 		return CoerceValue(val, resolved)
 	case schema.KindTimestamp, schema.KindDate, schema.KindUUID:
 		// These three accept two Go representations and store one string. The
-		// rule lives in [value.Canonical] so the wire, both writers and the
+		// rule lives in [value.Canonical] so the wire, the JSON writer and the
 		// snapshot rebuild render a value the same way this does.
 		// value.Canonical returns its input beside an error; every arm here
 		// returns nil beside one, so a caller never mistakes the input for a

@@ -12,7 +12,6 @@ import (
 
 	"github.com/tidwall/jsonc"
 
-	"github.com/simon-lentz/yammm/adapter/internal/typetag"
 	"github.com/simon-lentz/yammm/location"
 )
 
@@ -77,7 +76,7 @@ func readPrefix(b []byte) prefixVerdict {
 		if err != nil {
 			return verdict(err)
 		}
-		if name, _ := key.(string); typetag.Validate(name) != nil {
+		if name, _ := key.(string); typeTagFault(name) != "" {
 			var skip json.RawMessage
 			if err := dec.Decode(&skip); err != nil {
 				return verdict(err)

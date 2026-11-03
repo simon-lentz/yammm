@@ -8,7 +8,7 @@
 // # Schema-In, Bytes-Out
 //
 // Like adapter/gogen — and unlike the data adapters (adapter/json,
-// adapter/csv, adapter/neo4j) — jschema has no instance-data path: it never
+// adapter/neo4j) — jschema has no instance-data path: it never
 // parses, validates, or serializes instances, and it imports neither
 // instance nor graph. It maps a completed schema to one JSON document,
 // nothing more, and returns a plain error rather than the
@@ -147,8 +147,8 @@
 //     validation refuses two children of one (many) composition that share
 //     one (E_DUPLICATE_COMPOSED_PK).
 //   - Association resolution. Graph assembly refuses a required association
-//     that is absent, that is an empty array, or whose _target_<pk_name>
-//     fields name no instance (E_UNRESOLVED_REQUIRED).
+//     that is absent, that is an empty array at a (one:many) association, or
+//     whose _target_<pk_name> fields name no instance (E_UNRESOLVED_REQUIRED).
 //   - Invariants. A type's invariants are not emitted; instance validation
 //     refuses an instance that fails one (E_INVARIANT_FAIL).
 //   - Composition depth. Instance validation refuses composed children nested
@@ -215,8 +215,8 @@
 //
 //	# yaml-language-server: $schema=./fleet.schema.json
 //
-// yammm reads no YAML data file — its data commands read JSON, JSONC, CSV and
-// TSV — so a YAML file wired this way gets the editor's checks alone.
+// yammm reads no YAML data file — its data commands read JSON and JSONC — so a
+// YAML file wired this way gets the editor's checks alone.
 //
 // For JSON data files, a json.schemas mapping in VS Code settings that
 // associates the document with a file glob. Do not add a "$schema" member to

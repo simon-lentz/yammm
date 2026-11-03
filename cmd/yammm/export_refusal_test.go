@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"maps"
 	"os"
 	"path/filepath"
@@ -85,5 +86,16 @@ func TestExport_CypherRefusesAValueAtOneExitWhateverItsOrder(t *testing.T) {
 				t.Errorf("exit %d, stdout %q; want %d and no statement (stderr %q)", code, out, cli.ExitValidation, errOut)
 			}
 		})
+	}
+}
+
+// A value the JSON writer refuses is a refusal of the data, so `--to json` exits 1
+// over it, as `--to cypher` does.
+func TestExport_JSONRefusesAValueAtOneExit(t *testing.T) {
+	t.Parallel()
+	schemaPath, ysPath := refusedSnapshot(t, t.TempDir(), map[string]any{"a": json.Number("1e400")}, nil)
+	code, out, errOut := executeCmdOutput(t, "export", "--to", "json", schemaPath, ysPath)
+	if code != cli.ExitValidation || out != "" {
+		t.Errorf("exit %d, stdout %q; want %d and no document (stderr %q)", code, out, cli.ExitValidation, errOut)
 	}
 }

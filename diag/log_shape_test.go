@@ -53,7 +53,7 @@ func TestIssueLogValue_CarriesTheSourceName(t *testing.T) {
 	t.Run("omitted when unset", func(t *testing.T) {
 		t.Parallel()
 		bare := NewIssue(Error, E_SYNTAX, "no provenance").
-			WithSpan(location.Point(location.NewSourceID("test://x"), 1, 1)).
+			WithSpan(location.PointWithByte(location.NewSourceID("test://x"), 1, 1, -1)).
 			Build()
 		if _, ok := attrsOf(t, bare.LogValue())["source_name"]; ok {
 			t.Error("source_name is emitted for an issue that has none")

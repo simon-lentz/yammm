@@ -3,9 +3,9 @@
 //
 // A ".." the path itself holds is evaluated on the text first, as the schema
 // loader and location.ResolveHostPath evaluate it. [Text] applies that step to
-// the paths the command-line tool writes and the snapshot and formatter paths
-// it reads, and to the path snapshot.WriteFile writes; the tool's data and
-// schema paths take the same step through location and filepath.Abs. So each
+// every path the command-line tool reads or writes but a schema, and to the path
+// snapshot.WriteFile writes; the tool's schema paths, and the identity of each
+// path it reads, take the same step through location and filepath.Abs. So each
 // reaches the file the loader reads for the same spelling. A POSIX kernel would
 // instead take the parent of the directory the component before the ".."
 // reached, which differs when that component is a symbolic link; on Windows the
@@ -20,6 +20,9 @@
 // ".." against the component before it, and a caller that stages a file beside
 // a target and renames it over the target needs both paths to name one
 // directory.
+//
+// A descriptor path names an open descriptor, not a file. [Descriptor] judges one
+// by its name, because it stats as whatever its descriptor holds.
 package hostpath
 
 import (

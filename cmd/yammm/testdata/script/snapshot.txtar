@@ -35,10 +35,6 @@ exec yammm snapshot save valid.yammm data.json -o odd.json
 stderr 'warning'
 stderr '\.ys'
 
-# CSV input with --type.
-exec yammm snapshot save valid.yammm data.csv --type Person -o csv.ys
-grep '"yammm_snapshot"' csv.ys
-
 # --- save --into (merge) ---
 exec yammm snapshot save valid.yammm extra.json --into out.ys
 grep '"alice"' out.ys
@@ -160,10 +156,6 @@ type Widget {
 }
 -- extra.json --
 {"Person": [{"id": "eve", "name": "Eve", "age": 40}]}
--- data.csv --
-id,name,age
-carol,Carol,28
-dave,Dave,35
 -- hr.yammm --
 schema "hr"
 

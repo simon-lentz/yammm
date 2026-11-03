@@ -55,7 +55,7 @@ const (
 	// constraint reason, parse error).
 	DetailKeyDetail = "detail"
 
-	// DetailKeyFormat is the adapter format identifier (e.g., "json", "csv", "yaml").
+	// DetailKeyFormat is the adapter format identifier (e.g., "json").
 	DetailKeyFormat = "format"
 
 	// DetailKeyTargetType is the target type name (for cross-reference errors).

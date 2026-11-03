@@ -272,12 +272,9 @@ func TestRun_IntrospectValidatesFormatBeforeURI(t *testing.T) {
 	}
 }
 
-// TestRun_ExportRefusesBeforeWork pins that export validates --to, and refuses
-// flag pairs that contradict each other, before it loads, parses, validates,
-// builds or renders anything.
+// TestRun_ExportRefusesBeforeWork pins that export validates --to before it loads,
+// parses, validates, builds or renders anything.
 func TestRun_ExportRefusesBeforeWork(t *testing.T) {
-	dir := t.TempDir()
-
 	t.Run("bad --to refuses before rendering diagnostics", func(t *testing.T) {
 		code, _, errOut := runCLI(t, "export", "--to", "xml", "testdata/valid.yammm", "testdata/data.json")
 		if code != cli.ExitUsage {
@@ -288,23 +285,6 @@ func TestRun_ExportRefusesBeforeWork(t *testing.T) {
 		}
 		if strings.Contains(errOut, "loaded") {
 			t.Errorf("stderr mentions %q but no work runs before the flag set is refused:\n%s", "loaded", errOut)
-		}
-	})
-
-	t.Run("--output-dir with --to json is refused", func(t *testing.T) {
-		code, _, _ := runCLI(t, "export", "--to", "json", "--output-dir", dir,
-			"testdata/valid.yammm", "testdata/data.json")
-		if code != cli.ExitUsage {
-			t.Errorf("exit code = %d, want %d", code, cli.ExitUsage)
-		}
-	})
-
-	t.Run("--output with --output-dir is refused", func(t *testing.T) {
-		code, _, _ := runCLI(t, "export", "--to", "csv",
-			"--output", filepath.Join(dir, "o.csv"), "--output-dir", dir,
-			"testdata/valid.yammm", "testdata/data.json")
-		if code != cli.ExitUsage {
-			t.Errorf("exit code = %d, want %d", code, cli.ExitUsage)
 		}
 	})
 }

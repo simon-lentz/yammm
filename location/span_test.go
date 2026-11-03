@@ -7,8 +7,8 @@ import (
 
 var testSource = NewSourceID("test://unit")
 
-func TestPoint(t *testing.T) {
-	s := Point(testSource, 10, 5)
+func TestPointWithByte_UnknownByte(t *testing.T) {
+	s := PointWithByte(testSource, 10, 5, -1)
 
 	if s.Source != testSource {
 		t.Error("Source mismatch")
@@ -17,10 +17,10 @@ func TestPoint(t *testing.T) {
 		t.Errorf("Start = %v; want {10, 5, -1}", s.Start)
 	}
 	if s.Start.Byte != -1 {
-		t.Error("Point should have Byte = -1")
+		t.Error("PointWithByte should keep Byte = -1")
 	}
 	if !s.IsPoint() {
-		t.Error("Point should report IsPoint() == true")
+		t.Error("PointWithByte should report IsPoint() == true")
 	}
 }
 
@@ -100,7 +100,7 @@ func TestSpan_IsZero(t *testing.T) {
 		t.Error("zero value should report IsZero() == true")
 	}
 
-	s := Point(testSource, 1, 1)
+	s := PointWithByte(testSource, 1, 1, -1)
 	if s.IsZero() {
 		t.Error("valid span should not be zero")
 	}
@@ -119,7 +119,7 @@ func TestSpan_IsValid(t *testing.T) {
 		},
 		{
 			name: "valid point",
-			span: Point(testSource, 1, 1),
+			span: PointWithByte(testSource, 1, 1, -1),
 			want: true,
 		},
 		{
@@ -166,7 +166,7 @@ func TestSpan_String(t *testing.T) {
 		},
 		{
 			name: "point span",
-			span: Point(testSource, 10, 5),
+			span: PointWithByte(testSource, 10, 5, -1),
 			want: "test://unit:10:5",
 		},
 		{
@@ -298,11 +298,11 @@ func TestCompare_ZeroOnlyForEqualSpans(t *testing.T) {
 		name string
 		a, b Span
 	}{
-		{"a known and an unknown start byte", Point(testSource, 1, 1), PointWithByte(testSource, 1, 1, 0)},
+		{"a known and an unknown start byte", PointWithByte(testSource, 1, 1, -1), PointWithByte(testSource, 1, 1, 0)},
 		{"two known start bytes", PointWithByte(testSource, 1, 1, 0), PointWithByte(testSource, 1, 1, 4)},
 		{"two known end bytes", RangeWithBytes(testSource, 1, 1, 0, 1, 5, 4), RangeWithBytes(testSource, 1, 1, 0, 1, 5, 9)},
 		{"two known start bytes before one end byte", RangeWithBytes(testSource, 1, 1, 0, 1, 5, 9), RangeWithBytes(testSource, 1, 1, 2, 1, 5, 9)},
-		{"a synthetic and a file-backed source spelled alike", Point(NewSourceID(file.String()), 1, 1), Point(file, 1, 1)},
+		{"a synthetic and a file-backed source spelled alike", PointWithByte(NewSourceID(file.String()), 1, 1, -1), PointWithByte(file, 1, 1, -1)},
 	}
 	for _, p := range pairs {
 		t.Run(p.name, func(t *testing.T) {
@@ -411,8 +411,8 @@ func TestCompare(t *testing.T) {
 		},
 		{
 			name: "synthetic source before a file-backed one spelled alike",
-			a:    Point(synthetic, 1, 1),
-			b:    Point(file, 1, 1),
+			a:    PointWithByte(synthetic, 1, 1, -1),
+			b:    PointWithByte(file, 1, 1, -1),
 			want: -1,
 		},
 		{
@@ -464,7 +464,7 @@ func TestSpan_MapKey(t *testing.T) {
 // TestSpan_PointContains documents that point spans contain no positions by definition
 // of the half-open interval [Start, End) where Start == End.
 func TestSpan_PointContains(t *testing.T) {
-	point := Point(testSource, 5, 10)
+	point := PointWithByte(testSource, 5, 10, -1)
 	pos := Position{Line: 5, Column: 10, Byte: -1}
 
 	// Point spans use half-open interval [Start, End) where Start == End

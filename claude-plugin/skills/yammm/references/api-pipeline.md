@@ -1,6 +1,6 @@
 # Go API Pipeline Reference
 
-The yammm Go library follows a four-stage pipeline: **load schema -> validate instances -> build graph -> persist/export**. An operation that reports diagnostics returns a `diag.Result`, beside the value where the call produces one, with stable error codes and, where a diagnostic has a source position, its span. Some operations return an `error` instead, among them the JSON and CSV adapters' write methods, the Neo4j adapter's `BatchNodeQueries` and `BatchEdgeQueries`, `gogen.Marshal`, `jschema.Marshal` and `markdown.Marshal`, `graph.BatchAssembler`'s `Add`, `AddValid` and `AddValidOrMerge`, and `instance.BuilderFor`.
+The yammm Go library follows a four-stage pipeline: **load schema -> validate instances -> build graph -> persist/export**. An operation that reports diagnostics returns a `diag.Result`, beside the value where the call produces one, with stable error codes and, where a diagnostic has a source position, its span. Some operations return an `error` instead, among them the JSON adapter's write methods, the Neo4j adapter's `BatchNodeQueries` and `BatchEdgeQueries`, `gogen.Marshal`, `jschema.Marshal` and `markdown.Marshal`, `graph.BatchAssembler`'s `Add`, `AddValid` and `AddValidOrMerge`, and `instance.BuilderFor`.
 
 ---
 
@@ -122,7 +122,7 @@ v := instance.NewValidator(s,
 ### Validate Instances
 
 ```go
-// Validate a batch (common path for JSON/CSV adapter output)
+// Validate a batch (common path for JSON adapter output)
 raws := []instance.RawInstance{
     {Properties: map[string]any{"id": "abc-123", "name": "Widget"}},
 }
@@ -143,7 +143,7 @@ type RawInstance struct {
 }
 ```
 
-A parser that cannot read an input as its member's type reports that issue and writes `instance.Refused{Value: <the input>}` in the value's place, as the CSV adapter does for each cell that draws `E_CSV_COERCE`. At a property, a foreign-key field or an edge property, the validator reports nothing for a `Refused` and refuses the instance: `ValidateOne` returns a zero `ValidInstance` with no error for it, and `graph.BatchAssembler.Add`, for a record whose one fault it is, returns an error matching `instance.ErrRefusedValue`. Anywhere else a `Refused` is a value of no form and draws the issue any such value draws (`E_TYPE_MISMATCH` as a list element, for one). One break draws one issue.
+A parser that cannot read an input as its member's type reports that issue and writes `instance.Refused{Value: <the input>}` in the value's place. At a property, a foreign-key field or an edge property, the validator reports nothing for a `Refused` and refuses the instance: `ValidateOne` returns a zero `ValidInstance` with no error for it, and `graph.BatchAssembler.Add`, for a record whose one fault it is, returns an error matching `instance.ErrRefusedValue`. Anywhere else a `Refused` is a value of no form and draws the issue any such value draws (`E_TYPE_MISMATCH` as a list element, for one). One break draws one issue.
 
 ### Build RawInstances with SchemaBuilder
 

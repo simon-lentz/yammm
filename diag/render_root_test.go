@@ -173,7 +173,7 @@ func TestModuleRoot_TextLocations(t *testing.T) {
 			}
 			root, src, want := row.setup(t)
 			out := formatIssue(NewRenderer(WithModuleRoot(root)),
-				NewIssue(Error, E_SYNTAX, "msg").WithSpan(location.Point(src, 1, 1)).Build())
+				NewIssue(Error, E_SYNTAX, "msg").WithSpan(location.PointWithByte(src, 1, 1, -1)).Build())
 			got, _, _ := strings.Cut(out, ": error[")
 			if want += ":1:1"; got != want {
 				t.Errorf("location under root %q\n got %q\nwant %q", root, got, want)
@@ -216,8 +216,8 @@ func TestRenderContracts(t *testing.T) {
 				}
 				c := NewCollector(0)
 				c.Collect(NewIssue(Error, E_SYNTAX, "msg").
-					WithSpan(location.Point(id, 1, 1)).
-					WithRelated(location.RelatedInfo{Message: "here", Span: location.Point(id, 2, 1)}).
+					WithSpan(location.PointWithByte(id, 1, 1, -1)).
+					WithRelated(location.RelatedInfo{Message: "here", Span: location.PointWithByte(id, 2, 1, -1)}).
 					Build())
 				type span struct {
 					Source string `json:"source"`

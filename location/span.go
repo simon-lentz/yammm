@@ -21,15 +21,8 @@ type Span struct {
 	End Position
 }
 
-// Point creates a single-point Span where Start == End.
-// This is the canonical way to create spans from parser token positions.
-// The byte offset is set to -1 (unknown).
-func Point(source SourceID, line, column int) Span {
-	pos := Position{Line: line, Column: column, Byte: -1}
-	return Span{Source: source, Start: pos, End: pos}
-}
-
-// PointWithByte creates a single-point Span with a known byte offset.
+// PointWithByte creates a single-point Span where Start == End. A byte offset of
+// -1 names an unknown one.
 func PointWithByte(source SourceID, line, column, byteOffset int) Span {
 	pos := Position{Line: line, Column: column, Byte: byteOffset}
 	return Span{Source: source, Start: pos, End: pos}

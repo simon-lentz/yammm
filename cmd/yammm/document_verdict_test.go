@@ -271,22 +271,16 @@ func TestSnapshotSave_KeepsEarlierFilesFindingsWhenALaterFileCannotBeRead(t *tes
 }
 
 // TestSnapshotSave_RefusesAUsageErrorBeforeReadingAnyFile pins that every data
-// usage error — a format, a CSV type flag, a --type name, an operand — is
-// decided before the first data file is read, so it reports nothing an earlier
-// file would have drawn.
+// operand a read could not answer is refused before the first data file is read,
+// so it reports nothing an earlier file would have drawn.
 func TestSnapshotSave_RefusesAUsageErrorBeforeReadingAnyFile(t *testing.T) {
 	t.Parallel()
 
 	dir, schemaPath := verdictFixture(t, map[string]string{
 		"first.json": `{"Person": [{"id": "a", "id": "b", "name": "A", "manager": {"_target_id": "a"}}]}`,
-		"second.csv": "id,name\nc,C\n",
-		"third.xml":  "<Person/>",
 	})
 	for name, args := range map[string][]string{
-		"a CSV file with no type flag":  {filepath.Join(dir, "first.json"), filepath.Join(dir, "second.csv")},
-		"an undetectable format":        {filepath.Join(dir, "first.json"), filepath.Join(dir, "third.xml")},
-		"a --type the schema lacks":     {"--type", "Nope", filepath.Join(dir, "first.json"), filepath.Join(dir, "second.csv")},
-		"an empty data path":            {"--from", "json", filepath.Join(dir, "first.json"), ""},
+		"an empty data path":            {filepath.Join(dir, "first.json"), ""},
 		"a data path that is not UTF-8": {filepath.Join(dir, "first.json"), "bad\xff.json"},
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -304,9 +298,9 @@ func TestSnapshotSave_RefusesAUsageErrorBeforeReadingAnyFile(t *testing.T) {
 }
 
 // TestDataCommands_RefuseAUsageErrorBeforeAnyRead pins that check, load and
-// snapshot save decide every data file's format before they read the schema or
-// a merged file: a schema that does not load and a merged file that does not
-// exist draw nothing beside the usage error.
+// snapshot save judge every data operand before they read the schema or a merged
+// file: a schema that does not load and a merged file that does not exist draw
+// nothing beside the usage error.
 func TestDataCommands_RefuseAUsageErrorBeforeAnyRead(t *testing.T) {
 	t.Parallel()
 
@@ -315,10 +309,7 @@ func TestDataCommands_RefuseAUsageErrorBeforeAnyRead(t *testing.T) {
 	if err := os.WriteFile(broken, []byte("schema \"b\"\n\ntype {\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	data := filepath.Join(dir, "data.csv")
-	if err := os.WriteFile(data, []byte("id,name\na,A\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	const data = "bad\xff.json"
 	out := filepath.Join(dir, "out.ys")
 	for name, argv := range map[string][]string{
 		"check":                {"check", "--format", "json", broken, data},
@@ -336,28 +327,6 @@ func TestDataCommands_RefuseAUsageErrorBeforeAnyRead(t *testing.T) {
 				t.Errorf("codes = %v, want %v: nothing may be read before a usage error", got, want)
 			}
 		})
-	}
-}
-
-// TestCheck_ReadsATypeColumn pins that --type-column alone satisfies CSV data:
-// the rows are read and judged, so a row the schema refuses exits 1, not 2.
-func TestCheck_ReadsATypeColumn(t *testing.T) {
-	t.Parallel()
-
-	dir := t.TempDir()
-	good := filepath.Join(dir, "good.csv")
-	bad := filepath.Join(dir, "bad.csv")
-	if err := os.WriteFile(good, []byte("kind,id,name\nPerson,a,A\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(bad, []byte("kind,id\nPerson,a\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if code, _, errOut := executeCmdOutput(t, "check", "--type-column", "kind", "testdata/valid.yammm", good); code != cli.ExitOK {
-		t.Errorf("check --type-column over a valid row: exit %d\n%s", code, errOut)
-	}
-	if code, _, errOut := executeCmdOutput(t, "check", "--type-column", "kind", "testdata/valid.yammm", bad); code != cli.ExitValidation {
-		t.Errorf("check --type-column over a refused row: exit %d, want %d\n%s", code, cli.ExitValidation, errOut)
 	}
 }
 

@@ -1,6 +1,6 @@
 # Diagnostics Reference
 
-yammm reports problems as structured diagnostics in a `diag.Result`. A function that returns one returns it last, after its value when it has one: `schema.Load` returns `(Schema, diag.Result)`, and `Graph.Add` returns a `diag.Result` alone. Each issue has a stable error code, a severity and a message, and a source location where one applies. Some entry points return a Go `error` instead, among them the JSON and CSV adapters' writers and `gogen.Marshal`, `jschema.Marshal` and `markdown.Marshal`. `graph.BatchAssembler`'s `Add`, `AddValid` and `AddValidOrMerge` return an `error` too; when the cause is a failed result, the error carries that `diag.Result`, and `diag.AsContextualError` recovers it.
+yammm reports problems as structured diagnostics in a `diag.Result`. An exported function that returns one returns it last, after its value when it has one: `schema.Load` returns `(Schema, diag.Result)`, and `Graph.Add` returns a `diag.Result` alone. Each issue has a stable error code, a severity and a message, and a source location where one applies. Some entry points return a Go `error` instead, among them the JSON adapter's writers and `gogen.Marshal`, `jschema.Marshal` and `markdown.Marshal`. `graph.BatchAssembler`'s `Add`, `AddValid` and `AddValidOrMerge` return an `error` too; when the cause is a failed result, the error carries that `diag.Result`, and `diag.AsContextualError` recovers it.
 
 ---
 
@@ -73,7 +73,7 @@ The all-or-nothing contract is unchanged: any error still yields a zero schema.
 5. **Invariant error** -- `E_INVARIANT_FAIL` (expression returned false) or `E_EVAL_ERROR` (expression bug).
 6. **Graph error** -- a code of the Graph table below, such as `E_DUPLICATE_PK` (duplicate key) or `E_UNRESOLVED_REQUIRED` (missing required association).
 7. **Snapshot error** -- See the Snapshot section. Corrupt, incompatible, or dangling references.
-8. **Adapter error** -- `E_ADAPTER_PARSE` (the input is not well formed, in either data format), `E_ADAPTER_IO` (the input could not be read; exit 3), `E_CSV_COERCE` (a CSV cell), `E_CSV_CONFIG` (the CSV adapter's own settings), or Neo4j-specific codes in the Adapter section.
+8. **Adapter error** -- `E_ADAPTER_PARSE` (the input is not well formed), or Neo4j-specific codes in the Adapter section.
 
 ---
 
@@ -160,7 +160,7 @@ The all-or-nothing contract is unchanged: any error still yields a zero schema.
 | `E_EDGE_SHAPE_MISMATCH` | An edge's or a composition's value has a shape its relation does not take |
 | `E_UNRESOLVED_REQUIRED_COMPOSITION` | Required composition is unresolved |
 | `E_COMPOSITION_DEPTH_EXCEEDED` | Composed nesting deeper than the bound (32) |
-| `E_INVALID_TYPE_TAG` | A JSON top-level key or CSV type-column value is not a type name |
+| `E_INVALID_TYPE_TAG` | A JSON top-level key is not a type name |
 | `E_CASE_FOLD_COLLISION` | Input fields collide after case-folding |
 
 ### Graph
@@ -210,10 +210,7 @@ The all-or-nothing contract is unchanged: any error still yields a zero schema.
 
 | Code | Adapter | Meaning |
 | ---- | ------- | ------- |
-| `E_ADAPTER_PARSE` | JSON, CSV | The input is not well formed |
-| `E_ADAPTER_IO` | CSV | The reader a streamed parse reads from failed; Fatal, and the CLI exits 3 as for any I/O failure. Module-wide by name, as `E_ADAPTER_PARSE` is, but the CSV adapter is the one parser that streams: the JSON adapter takes bytes |
-| `E_CSV_COERCE` | CSV | A cell's text does not coerce to the type its member declares |
-| `E_CSV_CONFIG` | CSV | The adapter holds a setting this parse cannot use; no record is read |
+| `E_ADAPTER_PARSE` | JSON | The input is not well formed |
 | `E_NEO4J_LABEL_COLLISION` | Neo4j | Two types produce the same Neo4j label |
 | `E_NEO4J_INVALID_IDENTIFIER` | Neo4j | Name not valid as Neo4j identifier |
 | `E_NEO4J_UNSUPPORTED_TYPE` | Neo4j | Constraint kind has no Neo4j type mapping |

@@ -204,7 +204,7 @@ func TestValidate_AnAbstractOrPartNameFailsOnAnEmptyBatch(t *testing.T) {
 func TestValidate_AnAbstractRowRefusalCarriesItsSpan(t *testing.T) {
 	t.Parallel()
 	s := loadT(t, "schema \"a\"\n\nabstract type A {\n\tid String primary\n}\n")
-	span := location.Point(location.NewSourceID("rows.json"), 7, 3)
+	span := location.PointWithByte(location.NewSourceID("rows.json"), 7, 3, -1)
 	raw := instance.RawInstance{Properties: map[string]any{"id": "x"}, Provenance: location.NewProvenance("rows.json", path.Root(), span)}
 	_, res := instance.NewValidator(s).Validate(t.Context(), "A", []instance.RawInstance{raw})
 	if !res.HasCode(diag.E_ABSTRACT_TYPE) {

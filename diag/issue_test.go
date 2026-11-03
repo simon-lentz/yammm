@@ -9,9 +9,9 @@ import (
 
 func TestIssue_Accessors(t *testing.T) {
 	source := location.NewSourceID("test://schema.yammm")
-	span := location.Point(source, 10, 5)
+	span := location.PointWithByte(source, 10, 5, -1)
 	related := []location.RelatedInfo{
-		{Span: location.Point(source, 5, 1), Message: "previous definition here"},
+		{Span: location.PointWithByte(source, 5, 1, -1), Message: "previous definition here"},
 	}
 	details := []Detail{
 		{Key: DetailKeyTypeName, Value: "Person"},
@@ -68,7 +68,7 @@ func TestIssue_HasSpan(t *testing.T) {
 		{
 			name: "issue with span",
 			issue: Issue{
-				span:     location.Point(source, 1, 1),
+				span:     location.PointWithByte(source, 1, 1, -1),
 				severity: Error,
 				code:     E_SYNTAX,
 				message:  "test",
@@ -127,7 +127,7 @@ func TestIssue_IsZero(t *testing.T) {
 		{
 			name: "only span set",
 			issue: Issue{
-				span: location.Point(source, 1, 1),
+				span: location.PointWithByte(source, 1, 1, -1),
 			},
 			want: false,
 		},
@@ -148,7 +148,7 @@ func TestIssue_IsZero(t *testing.T) {
 		{
 			name: "full issue",
 			issue: Issue{
-				span:     location.Point(source, 1, 1),
+				span:     location.PointWithByte(source, 1, 1, -1),
 				severity: Error,
 				code:     E_SYNTAX,
 				message:  "test",
@@ -249,7 +249,7 @@ func TestIssue_IsValid(t *testing.T) {
 func TestIssue_Related_DefensiveCopy(t *testing.T) {
 	source := location.NewSourceID("test://schema.yammm")
 	original := []location.RelatedInfo{
-		{Span: location.Point(source, 5, 1), Message: "original"},
+		{Span: location.PointWithByte(source, 5, 1, -1), Message: "original"},
 	}
 
 	issue := Issue{
@@ -332,7 +332,7 @@ func TestIssue_Details_NilForEmpty(t *testing.T) {
 func TestIssue_Clone(t *testing.T) {
 	source := location.NewSourceID("test://schema.yammm")
 	original := Issue{
-		span:       location.Point(source, 10, 5),
+		span:       location.PointWithByte(source, 10, 5, -1),
 		sourceName: "data.json",
 		path:       "$.x",
 		severity:   Error,
@@ -340,7 +340,7 @@ func TestIssue_Clone(t *testing.T) {
 		message:    "original message",
 		hint:       "original hint",
 		related: []location.RelatedInfo{
-			{Span: location.Point(source, 5, 1), Message: "related"},
+			{Span: location.PointWithByte(source, 5, 1, -1), Message: "related"},
 		},
 		details: []Detail{
 			{Key: DetailKeyTypeName, Value: "Person"},
@@ -470,7 +470,7 @@ func TestIssue_LogValue_MinimalIssue(t *testing.T) {
 func TestIssue_LogValue_FullIssue(t *testing.T) {
 	source := location.NewSourceID("test://schema.yammm")
 	issue := NewIssue(Error, E_DUPLICATE_TYPE, "full issue").
-		WithSpan(location.Point(source, 7, 3)).
+		WithSpan(location.PointWithByte(source, 7, 3, -1)).
 		WithPath("data.json", "$.Widget[0].name").
 		WithHint("rename it").
 		WithDetails(
@@ -551,7 +551,7 @@ func TestIssue_LogValue_OmitsEmptyFields(t *testing.T) {
 func TestIssue_LogValue_SchemaOnly_OmitsPath(t *testing.T) {
 	source := location.NewSourceID("test://schema.yammm")
 	issue := NewIssue(Error, E_DUPLICATE_TYPE, "schema-only").
-		WithSpan(location.Point(source, 1, 1)).
+		WithSpan(location.PointWithByte(source, 1, 1, -1)).
 		Build()
 	val := issue.LogValue()
 	if _, ok := issueLogAttr(t, val, "location"); !ok {

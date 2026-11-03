@@ -9,6 +9,8 @@ import (
 	"slices"
 	"syscall"
 	"unicode/utf8"
+
+	"github.com/simon-lentz/yammm/internal/hostpath"
 )
 
 // maxLinkHops bounds how many dangling links one resolution follows. The kernel
@@ -23,7 +25,8 @@ var errTooManyLinks = errors.New("too many levels of symbolic links")
 // symlink-resolved, each existing component in its on-disk spelling. The
 // result is a host path, not an identity; [SourceIDFromPath] turns p into one.
 // The package documentation states what it answers for a path that does not
-// exist, one the process cannot traverse and one that can never exist.
+// exist, one the process cannot traverse, one that can never exist and a
+// descriptor path, which it returns as typed.
 func ResolveHostPath(p string) (string, error) {
 	host, err := walkHostPath(p)
 	if err == nil && !utf8.ValidString(host) {
@@ -37,7 +40,8 @@ func ResolveHostPath(p string) (string, error) {
 // ResolveSourcePath returns the identity of p and the host path it was derived
 // from, out of one resolution, so the two cannot disagree. It is
 // [SourceIDFromPath] for a caller that also reads the file, and it fails where
-// [ResolveHostPath] does.
+// [ResolveHostPath] does. A caller that may be given a link to a descriptor reads
+// through p instead, since the host path may reach no file or another file.
 func ResolveSourcePath(p string) (SourceID, string, error) {
 	host, err := ResolveHostPath(p)
 	if err != nil {
@@ -64,6 +68,9 @@ func walkHostPath(p string) (string, error) {
 	hops := 0
 	current := abs
 	for {
+		if len(missing) == 0 && hostpath.Descriptor(current) {
+			return current, nil
+		}
 		info, err := os.Stat(current)
 		if err == nil {
 			// Windows reports a path under a regular file absent rather than

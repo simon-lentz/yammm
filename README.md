@@ -173,9 +173,10 @@ raw, err := b.
 The module is organized into layers with strict dependency ordering:
 
 ```text
-Primary API (stable)     : schema, instance, graph, snapshot
-Foundation (stable)      : location, diag, immutable, format
-Adapter                  : adapter/json, adapter/csv, adapter/neo4j,
+Primary API              : schema, instance, graph, snapshot
+Foundation               : location, diag, immutable
+Tooling                  : format
+Adapter                  : adapter/json, adapter/neo4j,
                            adapter/gogen, adapter/jschema, adapter/markdown
 LSP                      : lsp (Language Server Protocol server)
 CLI                      : cmd/yammm, cmd/yammm-lsp
@@ -195,7 +196,6 @@ Internal                 : internal/* (no compatibility guarantees)
 | `immutable` | Immutable data structures for validated output |
 | `format` | Canonical `.yammm` file formatting |
 | `adapter/json` | JSON/JSONC parsing with location tracking |
-| `adapter/csv` | CSV data parsing and writing |
 | `adapter/neo4j` | The Neo4j mapping of a schema; its package doc lists what it holds |
 | `adapter/gogen` | Go source generation from a schema; its package doc lists what it emits |
 | `adapter/jschema` | JSON Schema (draft 2020-12) generation from a schema, for editor-assisted data authoring |
@@ -210,7 +210,7 @@ Diagnostic-producing operations return `(T, diag.Result)`:
 - `result.HasErrors()`: An Error or a Fatal: a semantic failure (structured issues), or the condition above
 - `result.OK()`: Success (may have warnings). A validator's zero instance beside it held an `instance.Refused` value, which its producer reported
 
-Pure adapter transformations (JSON/CSV serialization, Cypher batch queries, Go source, JSON Schema, and Markdown generation) return their output beside a Go `error`, as `(T, error)`, but for `adapter/neo4j`'s `BuildBatchRelationshipMergeQuery`, a query template that cannot fail; the Neo4j adapter's schema-derived DDL and shape builders report through a `diag.Result`, and its drop-statement builders return `(string, error)`. Snapshot serialization (`snapshot.Marshal`) is diagnostic-producing and returns `(T, diag.Result)`.
+Pure adapter transformations (JSON serialization, Cypher batch queries, Go source, JSON Schema, and Markdown generation) return their output beside a Go `error`, as `(T, error)`, but for `adapter/neo4j`'s `BuildBatchRelationshipMergeQuery`, a query template that cannot fail; the Neo4j adapter's schema-derived DDL and shape builders report through a `diag.Result`, and its drop-statement builders return `(string, error)`. Snapshot serialization (`snapshot.Marshal`) is diagnostic-producing and returns `(T, diag.Result)`.
 
 ## Schema Language
 
@@ -357,12 +357,12 @@ The `yammm` binary ([`cmd/yammm/`](cmd/yammm/)) provides commands for working wi
 ```bash
 yammm validate <schema>                                  # validate a schema, report diagnostics
 yammm fmt <schema>... [-w|--check]                       # canonical formatting (stdout; -w rewrites, --check lists unformatted)
-yammm check <schema> <data>                              # validate JSON/CSV data against a schema
+yammm check <schema> <data>                              # validate JSON data against a schema
 yammm load <schema> <data>                               # build an in-memory graph, report diagnostics
 yammm gen --to go <schema>                               # generate Go source from a schema
 yammm gen --to jsonschema <schema>                       # generate a JSON Schema for instance-data authoring
 yammm gen --to md <schema>                               # generate Markdown docs with a Mermaid class diagram
-yammm export <schema> <data> --to <json|csv|cypher>      # export a validated graph
+yammm export <schema> <data> --to <json|cypher>          # export a validated graph
 yammm snapshot save <schema> <data...> -o <file.ys>      # build graph, persist
 yammm snapshot save <schema> <data...> --into <file.ys>  # merge into an existing snapshot
 yammm snapshot info <file.ys>                            # metadata + stats

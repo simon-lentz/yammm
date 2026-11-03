@@ -26,7 +26,7 @@ func TestNewIssue(t *testing.T) {
 
 func TestIssueBuilder_WithSpan(t *testing.T) {
 	source := location.NewSourceID("test://schema.yammm")
-	span := location.Point(source, 10, 5)
+	span := location.PointWithByte(source, 10, 5, -1)
 
 	issue := NewIssue(Error, E_SYNTAX, "test").
 		WithSpan(span).
@@ -66,11 +66,11 @@ func TestIssueBuilder_WithHint(t *testing.T) {
 func TestIssueBuilder_WithRelated(t *testing.T) {
 	source := location.NewSourceID("test://schema.yammm")
 	related1 := location.RelatedInfo{
-		Span:    location.Point(source, 5, 1),
+		Span:    location.PointWithByte(source, 5, 1, -1),
 		Message: "previous definition here",
 	}
 	related2 := location.RelatedInfo{
-		Span:    location.Point(source, 10, 1),
+		Span:    location.PointWithByte(source, 10, 1, -1),
 		Message: "also defined here",
 	}
 
@@ -94,8 +94,8 @@ func TestIssueBuilder_WithRelated(t *testing.T) {
 func TestIssueBuilder_WithRelated_Variadic(t *testing.T) {
 	source := location.NewSourceID("test://schema.yammm")
 	related := []location.RelatedInfo{
-		{Span: location.Point(source, 5, 1), Message: "first"},
-		{Span: location.Point(source, 10, 1), Message: "second"},
+		{Span: location.PointWithByte(source, 5, 1, -1), Message: "first"},
+		{Span: location.PointWithByte(source, 10, 1, -1), Message: "second"},
 	}
 
 	issue := NewIssue(Error, E_DUPLICATE_TYPE, "test").
@@ -176,9 +176,9 @@ func TestIssueBuilder_WithExpectedGot(t *testing.T) {
 
 func TestIssueBuilder_FluentChaining(t *testing.T) {
 	source := location.NewSourceID("test://schema.yammm")
-	span := location.Point(source, 10, 5)
+	span := location.PointWithByte(source, 10, 5, -1)
 	related := location.RelatedInfo{
-		Span:    location.Point(source, 5, 1),
+		Span:    location.PointWithByte(source, 5, 1, -1),
 		Message: "previous definition",
 	}
 
@@ -212,7 +212,7 @@ func TestIssueBuilder_BuildImmutability(t *testing.T) {
 
 	builder := NewIssue(Error, E_DUPLICATE_TYPE, "test").
 		WithRelated(location.RelatedInfo{
-			Span:    location.Point(source, 5, 1),
+			Span:    location.PointWithByte(source, 5, 1, -1),
 			Message: "original",
 		}).
 		WithDetails(Detail{Key: DetailKeyTypeName, Value: "original"})
@@ -222,7 +222,7 @@ func TestIssueBuilder_BuildImmutability(t *testing.T) {
 
 	// Modify builder and build second issue
 	builder.WithRelated(location.RelatedInfo{
-		Span:    location.Point(source, 10, 1),
+		Span:    location.PointWithByte(source, 10, 1, -1),
 		Message: "added",
 	})
 	builder.WithDetails(Detail{Key: DetailKeyPropertyName, Value: "added"})
@@ -254,7 +254,7 @@ func TestIssueBuilder_BuildDeepCopy(t *testing.T) {
 	// Create builder with slices
 	builder := NewIssue(Error, E_DUPLICATE_TYPE, "test").
 		WithRelated(location.RelatedInfo{
-			Span:    location.Point(source, 5, 1),
+			Span:    location.PointWithByte(source, 5, 1, -1),
 			Message: "related",
 		}).
 		WithDetails(Detail{Key: DetailKeyTypeName, Value: "type"})

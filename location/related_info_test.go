@@ -13,7 +13,7 @@ func TestRelatedInfo_IsValid(t *testing.T) {
 		{
 			name: "valid span and message",
 			info: RelatedInfo{
-				Span:    Point(source, 10, 5),
+				Span:    PointWithByte(source, 10, 5, -1),
 				Message: "previous definition here",
 			},
 			want: true,
@@ -21,7 +21,7 @@ func TestRelatedInfo_IsValid(t *testing.T) {
 		{
 			name: "valid span, no message",
 			info: RelatedInfo{
-				Span: Point(source, 10, 5),
+				Span: PointWithByte(source, 10, 5, -1),
 			},
 			want: true,
 		},
@@ -66,7 +66,7 @@ func TestRelatedInfo_String(t *testing.T) {
 		{
 			name: "span and message",
 			info: RelatedInfo{
-				Span:    Point(source, 10, 5),
+				Span:    PointWithByte(source, 10, 5, -1),
 				Message: "previous definition here",
 			},
 			want: "test://unit:10:5: previous definition here",
@@ -74,7 +74,7 @@ func TestRelatedInfo_String(t *testing.T) {
 		{
 			name: "span only",
 			info: RelatedInfo{
-				Span: Point(source, 10, 5),
+				Span: PointWithByte(source, 10, 5, -1),
 			},
 			want: "test://unit:10:5",
 		},

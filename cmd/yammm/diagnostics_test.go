@@ -59,10 +59,8 @@ func TestDiagnosticsSurviveEveryEarlyReturn(t *testing.T) {
 
 	dir := t.TempDir()
 	missingData := filepath.Join(dir, "nonexistent.json")
-	for name, body := range map[string]string{"rows.csv": "id\na\n", "empty.json": "{}"} {
-		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o600); err != nil {
-			t.Fatal(err)
-		}
+	if err := os.WriteFile(filepath.Join(dir, "empty.json"), []byte("{}"), 0o600); err != nil {
+		t.Fatal(err)
 	}
 
 	tests := []struct {
@@ -70,7 +68,6 @@ func TestDiagnosticsSurviveEveryEarlyReturn(t *testing.T) {
 		args []string
 	}{
 		{"check, unreadable data file", []string{"check", shadowedSchema, missingData}},
-		{"check, a CSV type the schema lacks", []string{"check", "--type", "Nope", shadowedSchema, filepath.Join(dir, "rows.csv")}},
 		{"export, unreadable data file", []string{"export", "--to", "json", shadowedSchema, missingData}},
 		{"load, unreadable data file", []string{"load", shadowedSchema, missingData}},
 		{"snapshot save, an unreadable second data file", []string{
@@ -397,19 +394,16 @@ func TestStderrIsOneJSONDocument(t *testing.T) {
 		{"fmt, unreadable path", "fmt " + missing},
 		{"check, unreadable schema", "check " + missing + " testdata/data.json"},
 		{"check, unreadable data", "check " + shadowedSchema + " " + missing + ".json"},
-		{"check, undetectable data format", "check --from xml " + shadowedSchema + " testdata/data.json"},
-		{"check, csv without --type", "check " + shadowedSchema + " testdata/data.csv"},
 		{"check, validation errors", "check " + shadowedSchema + " testdata/annotation_shadowed_bad.json"},
 		{"load, unreadable schema", "load " + missing + " testdata/data.json"},
 		{"load, unreadable data", "load " + shadowedSchema + " " + missing + ".json"},
 		{"export, unreadable schema", "export --to json " + missing + " testdata/data.json"},
 		{"export, unreadable data", "export --to json " + shadowedSchema + " " + missing + ".json"},
 		{"export, unsupported target", "export --to xml " + shadowedSchema + " testdata/data.json"},
-		{"export, contradictory destinations", "export --to csv --output " + missing + " --output-dir " + dir + " " + shadowedSchema + " testdata/data.json"},
 		{"gen, unreadable schema", "gen --to go " + missing},
 		{"gen, unsupported target", "gen --to rust " + shadowedSchema},
 		{"snapshot save, unreadable schema", "snapshot save -o " + missing + ".ys " + missing + " testdata/data.json"},
-		{"snapshot save, undetectable data format", "snapshot save -o " + missing + ".ys " + shadowedSchema + " " + shadowedSchema},
+		{"snapshot save, a data file that is not JSON", "snapshot save -o " + missing + ".ys " + shadowedSchema + " " + shadowedSchema},
 		{"snapshot save, no destination", "snapshot save " + shadowedSchema + " testdata/data.json"},
 		{"snapshot info, unreadable file", "snapshot info " + missing + ".ys"},
 		{"snapshot info, corrupt file", "snapshot info " + corrupt},
@@ -469,10 +463,6 @@ func TestStderrIsOneJSONDocumentOnSuccess(t *testing.T) {
 		}},
 		{"snapshot save onto a path that is not .ys", []string{
 			"snapshot", "save", "--format", "json", "-o", notYS,
-			shadowedSchema, "testdata/annotation_shadowed_good.json",
-		}},
-		{"export --output-dir, which reports a file count", []string{
-			"export", "--format", "json", "--to", "csv", "--output-dir", dir,
 			shadowedSchema, "testdata/annotation_shadowed_good.json",
 		}},
 		{"snapshot update-metadata, whose summary is a status line", []string{

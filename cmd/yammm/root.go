@@ -23,14 +23,7 @@ Global flags:
               status summary; "snapshot info" writes its payload to stdout.
               A "help", "completion" or --version that succeeds writes
               no document.
-  --no-color  Disable ANSI color in diagnostic output.
-
-Data commands (check, load, export, snapshot save) also accept:
-  --from         Data input format override: "json" or "csv".
-                 Auto-detected from the file extension when not specified.
-                 A .tsv file is CSV whose fields split on tabs.
-  --type         Type name for single-type CSV data.
-  --type-column  Column naming each row's type, for multi-type CSV.`,
+  --no-color  Disable ANSI color in diagnostic output.`,
 		Version:       version,
 		SilenceErrors: true,
 		SilenceUsage:  true,

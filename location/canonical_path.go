@@ -8,17 +8,16 @@ import (
 	"golang.org/x/text/unicode/norm"
 )
 
-// CanonicalPath is a file-backed source identity: an absolute, clean,
-// NFC-normalized path written with forward slashes, spelled as the filesystem
-// spells it. It is an identity, not a path to open; the package documentation
-// states the rules it follows. The zero value is invalid; use IsZero to check.
+// CanonicalPath is a file-backed source identity: an absolute path in NFC,
+// written with forward slashes. It is an identity, not a path to open; the
+// package documentation states the rules it follows. The zero value is invalid;
+// use IsZero to check.
 type CanonicalPath struct {
 	path string
 }
 
 // NewCanonicalPath is the identity of the host path [ResolveHostPath] returns
-// for p: absolute, clean, symlink-resolved and spelled on disk, then NFC with
-// forward slashes. It fails where ResolveHostPath does.
+// for p, in NFC with forward slashes. It fails where ResolveHostPath does.
 func NewCanonicalPath(p string) (CanonicalPath, error) {
 	host, err := ResolveHostPath(p)
 	if err != nil {

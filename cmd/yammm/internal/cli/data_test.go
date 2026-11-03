@@ -1,92 +1,40 @@
 package cli
 
 import (
-	"os"
-	"path/filepath"
+	"strings"
 	"testing"
-
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 )
 
-func TestDetectFormat(t *testing.T) {
+func TestIsSnapshot(t *testing.T) {
 	t.Parallel()
-
-	tests := []struct {
-		path    string
-		want    string
-		wantErr bool
+	for name, c := range map[string]struct {
+		doc  string
+		want bool
 	}{
-		{"data.json", "json", false},
-		{"data.jsonc", "json", false},
-		{"data.JSON", "json", false},
-		{"data.csv", "csv", false},
-		{"data.tsv", "csv", false},
-		{"data.CSV", "csv", false},
-		{"data.xml", "", true},
-		{"data", "", true},
-		{"noext", "", true},
-		{".json", "json", false}, // dotfile with json extension
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.path, func(t *testing.T) {
+		"a snapshot":                         {`{"yammm_snapshot":{"version":1},"types":[]}`, true},
+		"a snapshot past leading whitespace": {" \n\t" + `{"yammm_snapshot":{}}`, true},
+		"a snapshot past 512 bytes of space": {strings.Repeat(" ", 600) + `{"yammm_snapshot":{}}`, true},
+		"a snapshot past a byte order mark":  {"\xef\xbb\xbf" + `{"yammm_snapshot":{}}`, true},
+		"a snapshot past a line comment":     {"// c\n" + `{"yammm_snapshot":{}}`, true},
+		"a snapshot past a block comment":    {`{/* c */"yammm_snapshot":{}}`, true},
+		"a snapshot past two comments": {"/* a */ // b\n" + `{ // c
+ "yammm_snapshot":{}}`, true},
+		"a key past a key":          {`{"types":[],"yammm_snapshot":{}}`, false},
+		"a data document":           {`{"Person":[{"id":"a"}]}`, false},
+		"an array":                  {`["yammm_snapshot"]`, false},
+		"a bare string":             {`"yammm_snapshot"`, false},
+		"text":                      {"id,name\na,b\n", false},
+		"an unterminated comment":   {`/*{"yammm_snapshot":{}}`, false},
+		"a line comment and no end": {`//{"yammm_snapshot":{}}`, false},
+		"a second byte order mark":  {"\xef\xbb\xbf\xef\xbb\xbf" + `{"yammm_snapshot":{}}`, false},
+		"an escaped key":            {`{"yammm\u005fsnapshot":{}}`, true},
+		"nothing":                   {"", false},
+	} {
+		t.Run(name, func(t *testing.T) {
 			t.Parallel()
-			got, err := DetectFormat(tt.path)
-			if tt.wantErr {
-				require.Error(t, err)
-				assert.Contains(t, err.Error(), "cannot detect data format")
-				assert.Equal(t, ExitUsage, ExitForError(err), "an undetectable format is the invocation's mistake")
-				return
+			if got := IsSnapshot([]byte(c.doc)); got != c.want {
+				t.Errorf("IsSnapshot(%q) = %v, want %v", c.doc, got, c.want)
 			}
-			require.NoError(t, err)
-			assert.Equal(t, tt.want, got)
 		})
 	}
-}
-
-func TestIsSnapshotFile_ValidSnapshot(t *testing.T) {
-	t.Parallel()
-	tmp := filepath.Join(t.TempDir(), "test.ys")
-	require.NoError(t, os.WriteFile(tmp, []byte(`{"yammm_snapshot":{"version":1},"types":[]}`), 0o600))
-
-	ok, err := IsSnapshotFile(tmp)
-	require.NoError(t, err)
-	assert.True(t, ok)
-}
-
-func TestIsSnapshotFile_JSONDataFile(t *testing.T) {
-	t.Parallel()
-	tmp := filepath.Join(t.TempDir(), "data.json")
-	require.NoError(t, os.WriteFile(tmp, []byte(`{"Person":[{"id":"a"}]}`), 0o600))
-
-	ok, err := IsSnapshotFile(tmp)
-	require.NoError(t, err)
-	assert.False(t, ok)
-}
-
-func TestIsSnapshotFile_CSVFile(t *testing.T) {
-	t.Parallel()
-	tmp := filepath.Join(t.TempDir(), "data.csv")
-	require.NoError(t, os.WriteFile(tmp, []byte("id,name\na,b\n"), 0o600))
-
-	ok, err := IsSnapshotFile(tmp)
-	require.NoError(t, err)
-	assert.False(t, ok)
-}
-
-func TestIsSnapshotFile_NonexistentFile(t *testing.T) {
-	t.Parallel()
-	_, err := IsSnapshotFile(filepath.Join(t.TempDir(), "nope.ys"))
-	require.Error(t, err)
-}
-
-func TestIsSnapshotFile_EmptyFile(t *testing.T) {
-	t.Parallel()
-	tmp := filepath.Join(t.TempDir(), "empty")
-	require.NoError(t, os.WriteFile(tmp, []byte{}, 0o600))
-
-	ok, err := IsSnapshotFile(tmp)
-	require.NoError(t, err)
-	assert.False(t, ok)
 }

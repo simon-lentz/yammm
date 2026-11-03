@@ -199,7 +199,6 @@ func TestExitForResult_RuntimeCodeOutranksValidation(t *testing.T) {
 	}{
 		{"a schema load I/O failure", diag.E_LOAD_IO_FAILURE, ExitRuntime},
 		{"a snapshot I/O failure", diag.E_SNAPSHOT_IO, ExitRuntime},
-		{"an adapter I/O failure", diag.E_ADAPTER_IO, ExitRuntime},
 		{"an internal fault", diag.E_INTERNAL, ExitRuntime},
 		{"a cancelled context", diag.E_CONTEXT_CANCELLED, ExitRuntime},
 		{"an ordinary error", diag.E_MISSING_REQUIRED, ExitValidation},

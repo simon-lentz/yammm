@@ -311,51 +311,6 @@ func TestWriteFile_TargetKinds(t *testing.T) {
 	}
 }
 
-// TestWriteFileSet_TargetKinds judges a one-file set by the same table. A set
-// is replaced by renames, so a target only written through — a FIFO, a device,
-// a descriptor path — is refused.
-func TestWriteFileSet_TargetKinds(t *testing.T) {
-	t.Parallel()
-	if os.Geteuid() == 0 {
-		t.Skip("root ignores the write bit")
-	}
-
-	for _, tc := range writeTargetCases() {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			if tc.windowsSkip != "" && runtime.GOOS == "windows" {
-				t.Skip(tc.windowsSkip)
-			}
-			dir := unsealedTempDir(t)
-			target, err := tc.setup(dir)
-			if err != nil {
-				t.Fatalf("setup: %v", err)
-			}
-			err = stageOne(target, targetPayload)
-			var failure string
-			switch tc.name {
-			case "a FIFO receives the bytes and stays a FIFO",
-				"the null device is written through",
-				"a link to a device is written through":
-				if !errors.Is(err, errNotReplaceable) {
-					failure = fmt.Sprintf("staging a target no rename can replace: error %v, want %v", err, errNotReplaceable)
-				}
-			case "an error under a parent that is a file names the operator's path":
-				// The set's directory is the operator's path, and creating it fails.
-				failure = expectErrorNames(filepath.Dir(target), err)
-			default:
-				failure = tc.check(dir, target, err)
-			}
-			checkRepairState(t, "WriteFileSet: "+tc.name, failure)
-		})
-	}
-}
-
-// stageOne writes one file as a set into its directory.
-func stageOne(target, content string) error {
-	return WriteFileSet(filepath.Dir(target), []NamedFile{{Name: filepath.Base(target), Data: []byte(content)}})
-}
-
 // expectWritten reports the target not holding the payload at mode after a
 // successful write.
 func expectWritten(target string, mode fs.FileMode, err error) string {
@@ -486,22 +441,6 @@ func TestWriteFile_DescriptorPathContinuesItsStream(t *testing.T) {
 	}
 }
 
-// TestWriteFileSet_DescriptorPathIsRefused pins the descriptor rule for a set:
-// /dev/fd/N stats as the regular file its descriptor holds, and a rename over
-// that file would leave the descriptor writing to a file no path reaches.
-func TestWriteFileSet_DescriptorPathIsRefused(t *testing.T) {
-	t.Parallel()
-	f, spellings := heldDescriptor(t)
-	for _, path := range spellings {
-		if err := stageOne(path, targetPayload); !errors.Is(err, errNotReplaceable) {
-			t.Errorf("staging %s: error %v, want %v", path, err, errNotReplaceable)
-		}
-	}
-	if got, _ := os.ReadFile(f.Name()); string(got) != earlierOutput {
-		t.Errorf("the descriptor's file holds %q after a refused set, want %q", got, earlierOutput)
-	}
-}
-
 // devDirectory returns a new directory under Linux's /dev/shm, a directory in
 // /dev that holds regular files, skipping where /dev/shm is missing or cannot be
 // written.
@@ -544,25 +483,6 @@ func TestWriteFile_ARegularFileUnderDevIsReplaced(t *testing.T) {
 			continue
 		}
 		if got := expectPayload(path); got != "" {
-			t.Error(got)
-		}
-	}
-}
-
-// TestWriteFileSet_WritesIntoADirectoryUnderDev pins the same rule for a set:
-// a directory under /dev that holds regular files takes a set of them.
-func TestWriteFileSet_WritesIntoADirectoryUnderDev(t *testing.T) {
-	t.Parallel()
-	dir := devDirectory(t)
-	if err := os.WriteFile(filepath.Join(dir, "a.csv"), []byte(earlierOutput), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	files := []NamedFile{{Name: "a.csv", Data: []byte(targetPayload)}, {Name: "b.csv", Data: []byte(targetPayload)}}
-	if err := WriteFileSet(dir, files); err != nil {
-		t.Fatalf("WriteFileSet(%s): %v", dir, err)
-	}
-	for _, nf := range files {
-		if got := expectPayload(filepath.Join(dir, nf.Name)); got != "" {
 			t.Error(got)
 		}
 	}

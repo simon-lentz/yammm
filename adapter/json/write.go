@@ -105,9 +105,7 @@ func (a *Adapter) WriteObject(ctx context.Context, w io.Writer, result graph.Sna
 
 // buildOutput constructs the JSON-serializable output map from a graph snapshot.
 // Cancellation is checked per type group, the unit of work the loop walks, as
-// [snapshot.Marshal] checks per group during emission. The CSV writer is finer:
-// it checks per instance, so a single very large type group stops sooner there
-// than here.
+// [snapshot.Marshal] checks per group during emission.
 func (a *Adapter) buildOutput(ctx context.Context, result graph.Snapshot) (map[string]any, error) {
 	output := make(map[string]any)
 	s := result.Schema()

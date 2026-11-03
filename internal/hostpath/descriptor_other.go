@@ -1,6 +1,6 @@
 //go:build !linux
 
-package cli
+package hostpath
 
 // procDescriptorTable reports false: off Linux no procfs descriptor table is
 // judged, as on illumos, Solaris or NetBSD, and no other host yammm ships a

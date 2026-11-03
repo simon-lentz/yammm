@@ -19,7 +19,6 @@ func TestCode_String(t *testing.T) {
 		{E_TYPE_MISMATCH, "E_TYPE_MISMATCH"},
 		{E_DUPLICATE_PK, "E_DUPLICATE_PK"},
 		{E_ADAPTER_PARSE, "E_ADAPTER_PARSE"},
-		{E_ADAPTER_IO, "E_ADAPTER_IO"},
 	}
 
 	for _, tt := range tests {
@@ -46,7 +45,6 @@ func TestCode_Category(t *testing.T) {
 		{E_DUPLICATE_PK, CategoryGraph},
 		{E_UNRESOLVED_REQUIRED, CategoryGraph},
 		{E_ADAPTER_PARSE, CategoryAdapter},
-		{E_ADAPTER_IO, CategoryAdapter},
 	}
 
 	for _, tt := range tests {
@@ -173,7 +171,7 @@ func TestCodes_EachCategoryHoldsItsRequiredCodes(t *testing.T) {
 		{
 			cat:         CategoryAdapter,
 			minExpected: 1,
-			mustContain: []Code{E_ADAPTER_PARSE, E_ADAPTER_IO},
+			mustContain: []Code{E_ADAPTER_PARSE},
 		},
 	}
 
@@ -268,7 +266,6 @@ func TestContractValidationCodesExist(t *testing.T) {
 		{E_UNRESOLVED_REQUIRED, CategoryGraph},
 		// Adapter
 		{E_ADAPTER_PARSE, CategoryAdapter},
-		{E_ADAPTER_IO, CategoryAdapter},
 	}
 
 	for _, tc := range requiredCodes {

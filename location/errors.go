@@ -69,8 +69,8 @@ var ErrEmptyPath = errors.New("location: path is empty")
 //
 // Returned by: ResolveHostPath, every file-backed constructor (NewCanonicalPath,
 // SourceIDFromPath, ResolveSourcePath and CanonicalPath.Join),
-// ValidateSyntheticSourceID and NormalizeSyntheticKey. Their callers return it
-// wrapped, as schema.SyntheticImportKey, schema.FindModuleRoot and the language
+// ValidateSyntheticSourceID and NormalizeSyntheticKey. A caller that returns it
+// wraps it, as schema.SyntheticImportKey, schema.FindModuleRoot and the language
 // server's configuration check do, and the CLI's source operand check wraps it
 // in its own refusal. A schema load reports it as a Fatal
 // E_LOAD_IO_FAILURE for the entry path, an explicit module root, a LoadString
