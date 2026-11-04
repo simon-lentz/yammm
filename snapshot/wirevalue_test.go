@@ -66,9 +66,10 @@ func sensorProps(id string, reading any, samples []any) map[string]any {
 	}
 }
 
-// buildWireTestSnapshot holds reading and samples as stated, and a float at every
-// other position. A number the writer heals is one no validator stores, and the
-// golden's header claims nothing about its values, so the fixture is a document.
+// buildWireTestSnapshot loads a document stating reading and samples as given,
+// and a float at every other position. An integer at a Float is one no validator
+// stores, and the golden's header claims nothing about its values, so the
+// fixture is a document.
 func buildWireTestSnapshot(t *testing.T, s schema.Schema, reading any, samples []any) graph.Snapshot {
 	t.Helper()
 	stationID := mustTypeID(t, s, "Station")
@@ -164,33 +165,32 @@ func TestMarshal_FloatEmissionEveryPosition(t *testing.T) {
 	yammmtest.Golden(t, "marshal_float_representative.ys", indented)
 }
 
-// TestMarshal_HealsNarrowedFloats pins the healing rule. Load never
-// re-validates, so a document's int-shaped floats reach memory as
-// int64 — built here directly, which is the identical in-memory state — and
-// the next Marshal emits them in decimal form. An int64 beyond 2^53 passes
-// through instead: float64 conversion could corrupt it, and no narrowed
-// float can have produced it.
-func TestMarshal_HealsNarrowedFloats(t *testing.T) {
+// An integer a document states at a Float reads back as its nearest float64, so
+// one past 2^53 rounds, and the next write states each as a float and is the
+// fixpoint: no writer rewrites an integer for the reader's sake.
+func TestRoundTrip_AnIntegerAtAFloatReadsAsItsNearestFloat64(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	s := loadWireTestSchema(t)
 	const beyondExact = int64(1)<<53 + 1
 	snap := buildWireTestSnapshot(t, s, int64(1860000), []any{int64(3), beyondExact})
 
+	sensorID := mustTypeID(t, s, "Sensor")
+	inst, ok := snap.InstanceByKey(sensorID, graph.FormatKey("s1"))
+	if !ok {
+		t.Fatal("the sensor did not load")
+	}
+	props := inst.Properties().Clone()
+	yammmtest.Diff(t, map[string]any{"reading": float64(1860000), "samples": []any{float64(3), float64(9007199254740992)}},
+		map[string]any{"reading": props["reading"], "samples": props["samples"]})
+
 	data, result := snapshot.Marshal(ctx, snap)
 	if err := result.Err(); err != nil {
 		t.Fatalf("Marshal: %v", err)
 	}
-	doc := string(data)
-
-	if !strings.Contains(doc, `"reading":1860000.0`) {
-		t.Error("narrowed int64 under a Float constraint did not heal to decimal form")
+	if doc := string(data); !strings.Contains(doc, `"reading":1860000.0`) || !strings.Contains(doc, `"samples":[3.0,9007199254740992.0]`) {
+		t.Fatalf("the loaded floats were not written as floats:\n%s", doc)
 	}
-	if !strings.Contains(doc, `"samples":[3.0,9007199254740993]`) {
-		t.Error("list healing wrong: want elementwise heal with beyond-2^53 passthrough")
-	}
-
-	// The healed document is already the fixpoint.
 	loaded, lres := snapshot.Load(ctx, data, s)
 	if err := lres.Err(); err != nil {
 		t.Fatalf("Load: %v", err)
@@ -199,51 +199,17 @@ func TestMarshal_HealsNarrowedFloats(t *testing.T) {
 	if err := r2.Err(); err != nil {
 		t.Fatalf("second Marshal: %v", err)
 	}
-	if string(data2) != doc {
-		t.Error("healed document is not a marshal fixpoint")
+	if string(data2) != string(data) {
+		t.Error("the document written from a load is not a marshal fixpoint")
 	}
-}
-
-// Healing changes a value's dynamic type on the first pass, so an int-shaped
-// snapshot is not its own round-trip fixpoint — but healing is idempotent, so
-// the loaded document is. This is the exception [snapshottest.AssertRoundTrip]
-// documents, pinned rather than left to prose.
-func TestRoundTrip_NarrowedFloatStabilisesAfterOnePass(t *testing.T) {
-	t.Parallel()
-	ctx := context.Background()
-	s := loadWireTestSchema(t)
-	narrowed := buildWireTestSnapshot(t, s, int64(1860000), []any{int64(3)})
-
-	data, result := snapshot.Marshal(ctx, narrowed)
-	if err := result.Err(); err != nil {
-		t.Fatalf("Marshal: %v", err)
-	}
-	healed, result := snapshot.Load(ctx, data, s)
-	if err := result.Err(); err != nil {
-		t.Fatalf("Load: %v", err)
-	}
-
-	sensor, ok := healed.InstanceByKey(tidOf(t, s, "Sensor"), graph.FormatKey("s1"))
-	if !ok {
-		t.Fatal("sensor s1 missing after the healing pass")
-	}
-	reading, ok := sensor.Property("reading")
-	if !ok {
-		t.Fatal("reading property missing")
-	}
-	if _, isFloat := reading.Unwrap().(float64); !isFloat {
-		t.Fatalf("reading = %T, want float64 — the narrowed whole float did not heal", reading.Unwrap())
-	}
-
-	snapshottest.AssertRoundTrip(t, healed, s)
 }
 
 func wrapKey(parts ...any) immutable.Key { return immutable.WrapKey(parts) }
 
 func wrapProps(m map[string]any) immutable.Properties { return immutable.WrapProperties(m) }
 
-// listIntSchema declares a List whose element constraint is not Float, which
-// is the arm the float healer must leave alone.
+// listIntSchema declares a List whose element constraint is not Float, so its
+// integer elements are written as held.
 const listIntSchema = `schema "listint"
 
 type Tally {
@@ -253,9 +219,8 @@ type Tally {
 `
 
 // TestMarshal_ListOfIntegerElementsStayIntShaped pins the KindList arm's
-// recursion into a non-Float element constraint. Routing list elements
-// through wireNumeric instead of wireValue heals Integer elements into
-// floats, which no List<Float> fixture can detect.
+// recursion into a non-Float element constraint: an Integer element is written
+// int-shaped, which no List<Float> fixture can detect.
 func TestMarshal_ListOfIntegerElementsStayIntShaped(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -285,8 +250,8 @@ func TestMarshal_ListOfIntegerElementsStayIntShaped(t *testing.T) {
 	}
 }
 
-// TestMarshal_Float64ArmEmitsAtFullWidth pins the width wireNumeric's float64
-// arm emits at. A value carrying more mantissa than float32 holds renders
+// TestMarshal_Float64ArmEmitsAtFullWidth pins the width wireFloat emits a
+// float64 at. A value carrying more mantissa than float32 holds renders
 // differently at bitSize 32, which would truncate a property the document
 // declared as a Float.
 func TestMarshal_Float64ArmEmitsAtFullWidth(t *testing.T) {

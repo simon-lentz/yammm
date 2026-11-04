@@ -176,7 +176,7 @@ The all-or-nothing contract is unchanged: any error still yields a zero schema.
 | `E_GRAPH_CARDINALITY` | A `(one)` association holds more than one record: a merge at `BatchAssembler.AddValidOrMerge` that would add a second target, several edges and unresolved records no check refused, in a snapshot or `.ys` document (v0.15+) |
 | `E_GRAPH_UNKNOWN_RELATION` | Instance data or an association record under a relation name the type does not declare in that slot, or an association record naming a target type the schema resolves, other than the declared one (v0.15+) |
 | `E_GRAPH_ABSTRACT_TYPE` | An imported snapshot's root or types entry naming a type the importing schema makes abstract (v0.15+) |
-| `E_GRAPH_INVALID_PK` | A keyed type's primary key empty, of the wrong arity, with a key property absent or null, or disagreeing with its own key properties; or an association target key of the wrong arity (v0.15+) |
+| `E_GRAPH_INVALID_PK` | A keyed type's primary key empty, of the wrong arity, with a key property absent or null, or disagreeing with its own key properties; an association target key of the wrong arity; or a key stored on a composed child whose type declares no primary key (v0.15+) |
 
 ### Snapshot
 

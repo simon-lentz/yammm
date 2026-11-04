@@ -238,7 +238,7 @@ func coerceInteger(val any) (any, error) {
 		// int64 holds is refused rather than rounded: its nearest float64 can
 		// be a different integer.
 		if n, ok := norm.(json.Number); ok {
-			return nil, fmt.Errorf("cannot coerce integer %s outside the int64 range to int64", diag.ValueText(string(n)))
+			return nil, fmt.Errorf("cannot coerce integer %s outside the int64 range to int64", diag.CutValue(string(n)))
 		}
 		if u, ok := value.GetUint64(norm); ok {
 			return nil, fmt.Errorf("cannot coerce integer %d outside the int64 range to int64", u)
@@ -247,7 +247,7 @@ func coerceInteger(val any) (any, error) {
 		return nil, fmt.Errorf("cannot coerce float %s to int64", floatText(val, norm))
 	}
 	if n, ok := noFloat64Holds(val); ok {
-		return nil, fmt.Errorf("cannot coerce %s to int64: no finite float64 holds it", diag.ValueText(string(n)))
+		return nil, fmt.Errorf("cannot coerce %s to int64: no finite float64 holds it", diag.CutValue(string(n)))
 	}
 	if n, ok := value.UnreadNumber(val); ok {
 		return nil, fmt.Errorf("cannot coerce json.Number %s to int64: no JSON number literal", diag.QuoteValue(string(n)))
@@ -264,7 +264,7 @@ func coerceFloat(val any) (any, error) {
 		// A JSON number literal fails to parse only when no finite float64 holds it.
 		f, err := n.Float64()
 		if err != nil {
-			return nil, fmt.Errorf("cannot coerce %s to float64: no finite float64 holds it", diag.ValueText(string(n)))
+			return nil, fmt.Errorf("cannot coerce %s to float64: no finite float64 holds it", diag.CutValue(string(n)))
 		}
 		return f, nil
 	}
@@ -377,7 +377,7 @@ func checkInteger(val any, c schema.Constraint) error {
 		i, ok = value.GetInt64(norm)
 		if !ok {
 			if n, isNumber := norm.(json.Number); isNumber {
-				return typeMismatch("expected integer, got an integer outside the int64 range: %s", diag.ValueText(string(n)))
+				return typeMismatch("expected integer, got an integer outside the int64 range: %s", diag.CutValue(string(n)))
 			}
 			if u, isUnsigned := value.GetUint64(norm); isUnsigned {
 				return typeMismatch("expected integer, got an integer outside the int64 range: %d", u)
@@ -388,7 +388,7 @@ func checkInteger(val any, c schema.Constraint) error {
 		return typeMismatch("expected integer, got float %s", floatText(val, norm))
 	default:
 		if n, ok := noFloat64Holds(val); ok {
-			return typeMismatch("expected integer, got a number no float64 holds: %s", diag.ValueText(string(n)))
+			return typeMismatch("expected integer, got a number no float64 holds: %s", diag.CutValue(string(n)))
 		}
 		if n, ok := value.UnreadNumber(val); ok {
 			return typeMismatch("expected integer, got a json.Number that is no JSON number literal: %s", diag.QuoteValue(string(n)))
@@ -421,7 +421,7 @@ func checkFloat(val any, c schema.Constraint) error {
 		// A JSON number literal fails to parse only when no finite float64 holds it.
 		fv, err := n.Float64()
 		if err != nil {
-			return typeMismatch("expected float, got a number no float64 holds: %s", diag.ValueText(string(n)))
+			return typeMismatch("expected float, got a number no float64 holds: %s", diag.CutValue(string(n)))
 		}
 		f = fv
 	} else {

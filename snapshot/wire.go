@@ -122,7 +122,7 @@ func checkTopLevelKeys(data []byte) error {
 		return fmt.Errorf("expected JSON object: %w", err)
 	}
 	if delim, ok := tok.(json.Delim); !ok || delim != '{' {
-		return fmt.Errorf("expected JSON object, got %s", diag.ValueText(fmt.Sprint(tok)))
+		return fmt.Errorf("expected JSON object, got %s", diag.CutValue(fmt.Sprint(tok)))
 	}
 
 	seen := 0
@@ -133,7 +133,7 @@ func checkTopLevelKeys(data []byte) error {
 		}
 		key, ok := tok.(string)
 		if !ok {
-			return fmt.Errorf("expected a top-level key, got %s", diag.ValueText(fmt.Sprint(tok)))
+			return fmt.Errorf("expected a top-level key, got %s", diag.CutValue(fmt.Sprint(tok)))
 		}
 		if seen == len(topLevelKeys) {
 			return fmt.Errorf("document carries a fifth top-level key %s; the format has exactly %d",
@@ -636,7 +636,7 @@ func checkStrings(data []byte) error {
 				if escaped {
 					var decoded string
 					if err := json.Unmarshal(data[i:end+1], &decoded); err != nil {
-						return fmt.Errorf("member name %s does not decode: %w", diag.ValueText(string(data[i:end+1])), err)
+						return fmt.Errorf("member name %s does not decode: %w", diag.CutValue(string(data[i:end+1])), err)
 					}
 					name = []byte(decoded)
 				}

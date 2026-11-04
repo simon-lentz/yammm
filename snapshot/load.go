@@ -33,9 +33,12 @@ import (
 // [WithIntegrityCheck](false) skips the integrity hash, and an empty stored hash
 // is skipped under any option.
 //
-// A dynamic numeric value materializes as an int64 or a float64. A literal no
-// finite float64 can hold returns as a json.Number, unconverted, and so does a
-// number nested more than 64 levels deep in a dynamic value.
+// A number materializes by the value rule at the kind its position declares. At
+// a Float, and at a Vector element, a number literal is its nearest float64, so
+// 5 loads as 5.0, -0 keeps its sign and an integer past int64 rounds. Elsewhere
+// an integer literal an int64 holds is an int64, a float literal a float64, and
+// an integer literal past int64 stays the json.Number its text spells. At any
+// position, a literal no finite float64 holds stays the json.Number.
 //
 // The returned Snapshot's Schema() method returns the schema provided to
 // Load, not the schema used at original construction time.

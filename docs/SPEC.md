@@ -733,7 +733,7 @@ index Integer[_, 99]         // no minimum, maximum 99
 temperature Integer[-40, 50] // negative lower bound
 ```
 
-Validation accepts signed and unsigned integers, including named/alias types and pointer values, and refuses every float, whole or not. In a data document an `Integer` value is an integer literal — no `.`, `e` or `E` — read exactly, so `5.0` and `1e2` are floats and are refused. Unsigned inputs larger than `int64` are rejected before bound checks, and so is an integer literal outside the `int64` range: validation never reads it as its nearest float, which for a literal just below the minimum is the minimum itself. A `.ys` snapshot loaded without revalidation stores such a literal as its nearest `float64`; revalidation judges the document's own text.
+Validation accepts signed and unsigned integers, including named/alias types and pointer values, and refuses every float, whole or not. In a data document an `Integer` value is an integer literal — no `.`, `e` or `E` — read exactly, so `5.0` and `1e2` are floats and are refused. Unsigned inputs larger than `int64` are rejected before bound checks, and so is an integer literal outside the `int64` range: validation never reads it as its nearest float, which for a literal just below the minimum is the minimum itself. A `.ys` snapshot stores such a literal as its text and writes it back unchanged, and revalidation refuses it.
 
 #### Float
 
@@ -747,7 +747,7 @@ max    = [ "-" ] ( "_" | INTEGER | FLOAT ) .
 
 As for `Integer`, a minus sign before `_` is accepted with a Warning and no effect.
 
-Validation accepts floats and integers; an integer is widened to `float64`. In a JSON data document a `Float` value is any number literal, read as its nearest `float64`, so `-0` keeps its sign; a literal no finite `float64` holds, such as `1e400`, is refused. `NaN` and the infinities are refused. Loading a `.ys` snapshot stores a number by its spelling alone, with or without revalidation, so an integer literal under a `Float` there, such as `-0` or `5`, loads as an `int64`; the writer writes one only for an integer no `float64` holds exactly.
+Validation accepts floats and integers; an integer is widened to `float64`. In a JSON data document a `Float` value is any number literal, read as its nearest `float64`, so `-0` keeps its sign; a literal no finite `float64` holds, such as `1e400`, is refused. `NaN` and the infinities are refused. A `.ys` snapshot reads a number literal under a `Float` as its nearest `float64`, with or without revalidation: `5` loads as `5.0`, `-0` keeps its sign, and `9007199254740993` loads as its nearest `float64`, `9007199254740992.0`, which the next write states. A literal no finite `float64` holds stays as written, and revalidation refuses it.
 
 Examples:
 
@@ -1806,7 +1806,7 @@ Codes are stable identifiers for programmatic matching. `diag/code.go` holds the
 - `E_GRAPH_TYPE_NOT_FOUND` — at `Graph.Add`, a root whose type is in the load's closure, where the graph's schema neither declares nor directly imports it. At a snapshot's import, a type identity the importing schema cannot resolve, or a `types` entry denoting a type it neither declares nor directly imports
 - `E_GRAPH_INVALID_COMPOSITION` — invalid composition
 - `E_GRAPH_MISSING_PK` — a root, or an imported snapshot's types entry, whose type declares no primary key
-- `E_GRAPH_INVALID_PK` — a keyed type's primary key empty, of the wrong arity, with a key property absent or null, or disagreeing with the instance's own key properties; or an association target key of the wrong arity
+- `E_GRAPH_INVALID_PK` — a keyed type's primary key empty, of the wrong arity, with a key property absent or null, or disagreeing with the instance's own key properties; an association target key of the wrong arity; or a key stored on a composed child whose type declares no primary key
 - `E_GRAPH_CARDINALITY` — a (one) association holds more than one record: a merge at `BatchAssembler.AddValidOrMerge` that would add a second target, several edges and unresolved records no check refused, in a snapshot or a `.ys` document
 - `E_GRAPH_UNKNOWN_RELATION` — instance data or an association record under a relation name the type does not declare in that slot, or an association record naming a target type the schema resolves, other than the declared one
 - `E_GRAPH_ABSTRACT_TYPE` — an imported snapshot's root or types entry names a type the importing schema makes abstract

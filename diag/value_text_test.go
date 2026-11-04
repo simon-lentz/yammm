@@ -26,10 +26,10 @@ func TestQuoteValue_CutsLongTextToWholeCharacters(t *testing.T) {
 		if got := QuoteValue(r.in); got != r.quoted {
 			t.Errorf("QuoteValue(%.40q) = %q, want %q", r.in, got, r.quoted)
 		}
-		if got := ValueText(r.in); got != r.plain {
-			t.Errorf("ValueText(%.40q) = %q, want %q", r.in, got, r.plain)
+		if got := CutValue(r.in); got != r.plain {
+			t.Errorf("CutValue(%.40q) = %q, want %q", r.in, got, r.plain)
 		}
-		for _, got := range []string{QuoteValue(r.in), ValueText(r.in)} {
+		for _, got := range []string{QuoteValue(r.in), CutValue(r.in)} {
 			if !utf8.ValidString(got) {
 				t.Errorf("%.40q renders as %q, which is not valid UTF-8", r.in, got)
 			}

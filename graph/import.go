@@ -1,8 +1,11 @@
 package graph
 
 import (
+	"encoding/json"
+
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/immutable"
+	"github.com/simon-lentz/yammm/internal/value"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -12,7 +15,8 @@ import (
 // snap need not have been built against s. The import derives its records again
 // under s, and refuses one that breaks another fact of the package doc's
 // "Structural facts" under s, save an "absent" record under a relation that is no
-// association of s, which it drops. A refusal returns a nil Graph and one
+// association of s, which it drops. It stores a number at a Float of s as the
+// validator does, as its nearest float64. A refusal returns a nil Graph and one
 // diagnostic for each break, naming a position, and nothing is installed. A break
 // that reads a unit another diagnostic refused can draw none. A snapshot bound to s already holds to the facts
 // and is not walked.
@@ -110,6 +114,10 @@ func (g *Graph) importSnapshot(snap Snapshot) {
 	// → graph instances for steps 2-4.
 	cloneMap := make(map[Instance]Instance)
 	name := tagForms(g.schema)
+	var floats *floatPositions
+	if snap.schema != g.schema {
+		floats = newFloatPositions(g.schema)
+	}
 
 	imported := 0
 	for _, typeID := range snap.Types() {
@@ -124,6 +132,7 @@ func (g *Graph) importSnapshot(snap Snapshot) {
 			// changed carries addresses the importing schema no longer spells
 			// that way, and every lookup here canonicalizes.
 			g.canon.reinstance(cloned)
+			floats.instance(cloned)
 			g.instances[typeID][cloned.PrimaryKey().String()] = cloned
 			imported++
 		}
@@ -146,8 +155,9 @@ func (g *Graph) importSnapshot(snap Snapshot) {
 	for edge := range snap.Edges() {
 		srcClone := cloneMap[edge.Source()]
 		tgtClone := cloneMap[edge.Target()]
+		props := floats.edge(edge.Source().TypeID(), edge.Relation(), edge.Properties())
 		g.installEdge(newEdge(edge.Relation(), srcClone, tgtClone,
-			g.canon.edgeProperties(edge.Source().TypeID(), edge.Relation(), edge.Properties())))
+			g.canon.edgeProperties(edge.Source().TypeID(), edge.Relation(), props)))
 	}
 
 	// Step 3: Install the unresolved records. A snapshot bound to this schema
@@ -158,7 +168,7 @@ func (g *Graph) importSnapshot(snap Snapshot) {
 			g.installPending(cloneMap[unres.source], unres.relation, unres.targetKey, unres.reason, unres.properties)
 		}
 	} else {
-		g.deriveRecords(snap, cloneMap)
+		g.deriveRecords(snap, cloneMap, floats)
 	}
 
 	// Step 4: Install duplicates.
@@ -170,6 +180,7 @@ func (g *Graph) importSnapshot(snap Snapshot) {
 		instClone := cloneInstance(dup.instance, cloneMap)
 		g.rename(name, instClone)
 		g.canon.reinstance(instClone)
+		floats.instance(instClone)
 
 		// The conflict is a root, which step 1 cloned.
 		g.duplicates = append(g.duplicates, newDuplicate(instClone, cloneMap[dup.conflict]))
@@ -235,7 +246,7 @@ func (g *Graph) installPending(source Instance, relation, targetKey, reason stri
 // declare, is dropped; and a root with no edge and no record under a
 // required association gains an absent record, what Add derives when the data
 // names no target, as the snapshot's data names none.
-func (g *Graph) deriveRecords(snap Snapshot, cloneMap map[Instance]Instance) {
+func (g *Graph) deriveRecords(snap Snapshot, cloneMap map[Instance]Instance, floats *floatPositions) {
 	type slot struct {
 		source   Instance
 		relation string
@@ -252,17 +263,18 @@ func (g *Graph) deriveRecords(snap Snapshot, cloneMap map[Instance]Instance) {
 		if !ok || !rel.IsAssociation() {
 			continue
 		}
+		props := floats.edge(source.typeID, unres.relation, unres.properties)
 		if unres.reason != "target_missing" {
 			if rel.IsOptional() {
 				continue
 			}
 		} else if target := g.findInstance(rel.TargetID(), g.canon.address(rel.TargetID(), unres.targetKey)); !target.IsZero() {
 			g.installEdge(newEdge(unres.relation, source, target,
-				g.canon.edgeProperties(source.typeID, unres.relation, unres.properties)))
+				g.canon.edgeProperties(source.typeID, unres.relation, props)))
 			held[slot{source, unres.relation}] = true
 			continue
 		}
-		g.installPending(source, unres.relation, unres.targetKey, unres.reason, unres.properties)
+		g.installPending(source, unres.relation, unres.targetKey, unres.reason, props)
 		held[slot{source, unres.relation}] = true
 	}
 	for _, id := range snap.types {
@@ -280,4 +292,119 @@ func (g *Graph) deriveRecords(snap Snapshot, cloneMap map[Instance]Instance) {
 			}
 		}
 	}
+}
+
+// floatPositions holds, for each type and relation of a schema, the declared
+// properties at which a number is a Float ([value.ReadsAsFloat]). An import
+// under another schema reads each through it, so it stores what the validator
+// stores: the snapshot's schema can declare an Integer where this one declares a
+// Float. A nil table reads nothing, as a snapshot bound to the importing schema
+// already holds a float64 at every Float.
+type floatPositions struct {
+	byType map[schema.TypeID][]schema.Property
+	byEdge map[edgeKey][]schema.Property
+}
+
+func newFloatPositions(s schema.Schema) *floatPositions {
+	f := &floatPositions{
+		byType: make(map[schema.TypeID][]schema.Property),
+		byEdge: make(map[edgeKey][]schema.Property),
+	}
+	floatProps := func(ps func(func(schema.Property) bool)) []schema.Property {
+		var out []schema.Property
+		for p := range ps {
+			if value.ReadsAsFloat(p.Constraint()) {
+				out = append(out, p)
+			}
+		}
+		return out
+	}
+	for sc := range s.Closure() {
+		for t := range sc.Types() {
+			f.byType[t.ID()] = floatProps(t.AllProperties())
+			for _, rels := range []iterRelations{t.AllAssociations(), t.AllCompositions()} {
+				for rel := range rels {
+					f.byEdge[edgeKey{source: t.ID(), relation: rel.Name()}] = floatProps(rel.Properties())
+				}
+			}
+		}
+	}
+	return f
+}
+
+// instance reads inst's properties, and each composed child's, in place. inst
+// is a fresh clone no graph reaches yet.
+func (f *floatPositions) instance(inst Instance) {
+	if f == nil {
+		return
+	}
+	inst.properties = readFloats(inst.properties, f.byType[inst.typeID])
+	for _, children := range inst.composed {
+		for _, child := range children {
+			f.instance(child)
+		}
+	}
+}
+
+// edge reads the properties of a record under the relation source declares.
+func (f *floatPositions) edge(source schema.TypeID, relation string, props immutable.Properties) immutable.Properties {
+	if f == nil {
+		return props
+	}
+	return readFloats(props, f.byEdge[edgeKey{source: source, relation: relation}])
+}
+
+// readFloats returns props with each property ps names read by [value.ReadAt]
+// at its constraint, in a copy; props is returned as it is when no property ps
+// names holds a number ReadAt can rewrite.
+func readFloats(props immutable.Properties, ps []schema.Property) immutable.Properties {
+	if len(ps) == 0 || props.Len() == 0 {
+		return props
+	}
+	var m map[string]any
+	for _, p := range ps {
+		v, ok := props.Get(p.Name())
+		if !ok || !mayReadFloat(v, p.Constraint()) {
+			continue
+		}
+		if m == nil {
+			m = props.Clone()
+		}
+		m[p.Name()] = value.ReadAt(m[p.Name()], p.Constraint())
+	}
+	if m == nil {
+		return props
+	}
+	return immutable.WrapProperties(m)
+}
+
+// floatElement is the constraint of a Vector's elements.
+var floatElement schema.Constraint = schema.NewFloatConstraint()
+
+// mayReadFloat reports whether v holds an int64 or a json.Number at a position
+// c reads as a Float, the only numbers [value.ReadAt] rewrites in a snapshot:
+// the reader and the validator have read every other number as ReadAt would.
+func mayReadFloat(v immutable.Value, c schema.Constraint) bool {
+	rc := schema.ResolveAlias(c)
+	switch x := v.Unwrap().(type) {
+	case int64, json.Number:
+		_, ok := rc.(schema.FloatConstraint)
+		return ok
+	case immutable.Slice:
+		var elem schema.Constraint
+		switch rc := rc.(type) {
+		case schema.VectorConstraint:
+			elem = floatElement
+		case schema.ListConstraint:
+			elem = rc.Element()
+		default:
+			return false
+		}
+		for e := range x.Iter() {
+			if mayReadFloat(e, elem) {
+				return true
+			}
+		}
+	}
+	return false
 }

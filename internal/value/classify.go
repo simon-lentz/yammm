@@ -76,16 +76,7 @@ func Classify(val any) (Kind, any) {
 	case nil:
 		return UnspecifiedKind, nil
 	case json.Number:
-		if immutable.IsIntegerLiteral(v) {
-			if n, err := v.Int64(); err == nil {
-				return IntKind, n
-			}
-			return IntKind, v
-		}
-		if n, err := v.Float64(); err == nil {
-			return FloatKind, n
-		}
-		return UnspecifiedKind, v
+		return classifyNumber(v)
 	case bool:
 		return BoolKind, held
 	case string:
@@ -96,4 +87,18 @@ func Classify(val any) (Kind, any) {
 		return FloatKind, held
 	}
 	return UnspecifiedKind, val
+}
+
+// classifyNumber is [Classify] over a JSON number literal.
+func classifyNumber(v json.Number) (Kind, any) {
+	if immutable.IsIntegerLiteral(v) {
+		if n, err := v.Int64(); err == nil {
+			return IntKind, n
+		}
+		return IntKind, v
+	}
+	if n, err := v.Float64(); err == nil {
+		return FloatKind, n
+	}
+	return UnspecifiedKind, v
 }

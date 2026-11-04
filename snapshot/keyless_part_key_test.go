@@ -165,8 +165,8 @@ func partKeyStoredKeys(snap graph.Snapshot) []immutable.Key {
 // the .ys reader, to the reader, over every key of a table on every part shape. A
 // snapshot either builds is one Marshal writes and Load reads, every stored key of
 // which graph.ParseKey reads back. The reader refuses exactly the keys holding a
-// component ParseKey cannot read, keyed or not. Graph.Add takes only the keys a
-// validator states.
+// component ParseKey cannot read, and every key a keyless part stores. Graph.Add
+// takes only the keys a validator states.
 func TestPartKey_EverySnapshotLoadsBack(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()
@@ -211,11 +211,12 @@ func TestPartKey_EverySnapshotLoadsBack(t *testing.T) {
 					continue
 				}
 				at := name + ", " + shape.name + ", " + kc.name
+				held := kc.readable && (shape.keyed || len(kc.components) == 0)
 				b := build(shape, kc.components)
 				if !b.res.OK() {
 					refused++
-					if kc.readable {
-						t.Errorf("%s: refused a key graph.ParseKey reads back: %s", at, b.res)
+					if held {
+						t.Errorf("%s: refused a key its part can hold: %s", at, b.res)
 					}
 					if !b.res.HasCode(diag.E_SNAPSHOT_MALFORMED) {
 						t.Errorf("%s: %s, want %s", at, b.res, diag.E_SNAPSHOT_MALFORMED)
@@ -223,8 +224,8 @@ func TestPartKey_EverySnapshotLoadsBack(t *testing.T) {
 					continue
 				}
 				accepted++
-				if !kc.readable {
-					t.Errorf("%s: accepted a key with a component graph.ParseKey cannot read back", at)
+				if !held {
+					t.Errorf("%s: accepted a key its part cannot hold", at)
 				}
 				snaps := map[string]graph.Snapshot{name: b.snap}
 				if g, r := graph.NewFromSnapshot(s, b.snap); r.OK() {

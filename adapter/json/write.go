@@ -150,7 +150,7 @@ func serializeInstance(inst graph.Instance, snap graph.Snapshot, s schema.Schema
 	schemaType, ok := s.TypeByID(inst.TypeID())
 	if !ok {
 		return nil, fmt.Errorf("json adapter: instance %s: type %s does not resolve, so its relations' field names are unknowable; no constructor builds such a snapshot, so an invariant is broken",
-			diag.ValueText(inst.PrimaryKey().String()), inst.TypeID())
+			diag.CutValue(inst.PrimaryKey().String()), inst.TypeID())
 	}
 
 	// 1. Add properties. encoding/json sorts an object's keys, so the order
@@ -159,7 +159,7 @@ func serializeInstance(inst graph.Instance, snap graph.Snapshot, s schema.Schema
 		v, ok := unwrapValue(val, constraintof.Property(schemaType, name))
 		if !ok {
 			return nil, refusal.New(ErrUnrepresentable, "json adapter: instance %s: property %q holds %s",
-				diag.ValueText(inst.PrimaryKey().String()), name, unwritable)
+				diag.CutValue(inst.PrimaryKey().String()), name, unwritable)
 		}
 		obj[name] = v
 	}
@@ -257,7 +257,7 @@ func edgeTargetObject(s schema.Schema, rel schema.Relation, e graph.Edge) (map[s
 		v, ok := unwrapValue(val, c)
 		if !ok {
 			return nil, refusal.New(ErrUnrepresentable, "json adapter: edge %q to %s: edge property %q holds %s",
-				e.Relation(), diag.ValueText(e.Target().PrimaryKey().String()), name, unwritable)
+				e.Relation(), diag.CutValue(e.Target().PrimaryKey().String()), name, unwritable)
 		}
 		out[name] = v
 	}

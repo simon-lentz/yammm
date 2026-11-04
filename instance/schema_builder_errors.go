@@ -73,7 +73,7 @@ func (e *buildError) Error() string {
 		b.WriteString("build error")
 		if e.target != "" {
 			b.WriteString(" (")
-			b.WriteString(diag.ValueText(e.target))
+			b.WriteString(diag.CutValue(e.target))
 			b.WriteString(")")
 		}
 		if e.detail != "" {

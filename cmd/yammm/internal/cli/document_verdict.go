@@ -113,7 +113,7 @@ func documentVerdict(s schema.Schema, g *graph.Graph, fromBase bool, doc Validat
 // of a key an earlier holder states where the graph reported no duplicate.
 func duplicateIssue(h holder) diag.Issue {
 	return diag.NewIssue(diag.Error, diag.E_DUPLICATE_PK,
-		fmt.Sprintf("duplicate primary key %s for type %q", diag.ValueText(h.at.key), h.typeName)).
+		fmt.Sprintf("duplicate primary key %s for type %q", diag.CutValue(h.at.key), h.typeName)).
 		WithDetail(diag.DetailKeyTypeName, h.typeName).
 		WithDetail(diag.DetailKeyPrimaryKey, h.at.key).
 		WithSpan(h.prov.Span()).

@@ -360,7 +360,7 @@ func marshalDiagnostics(view *writerView, s schema.Schema, tt *typeTable) (diagW
 			key, err := parseTargetKey(u.TargetKey())
 			if err != nil {
 				return diagWire{}, fmt.Errorf("unresolved record %s[%s].%s: %w",
-					tt.ref(sourceID), diag.ValueText(u.Source().PrimaryKey().String()), u.Relation(), err)
+					tt.ref(sourceID), diag.CutValue(u.Source().PrimaryKey().String()), u.Relation(), err)
 			}
 			uw.TargetKey = key
 			var rel schema.Relation
@@ -398,7 +398,7 @@ func marshalProvenance(inst graph.Instance) (*provenanceWire, error) {
 	}
 	if !utf8.ValidString(prov.SourceName()) || !utf8.ValidString(pathStr) {
 		return nil, fmt.Errorf("%w: source name %s, path %s of %s[%s]", errInvalidProvenance,
-			diag.QuoteValue(prov.SourceName()), diag.QuoteValue(pathStr), inst.TypeName(), diag.ValueText(inst.PrimaryKey().String()))
+			diag.QuoteValue(prov.SourceName()), diag.QuoteValue(pathStr), inst.TypeName(), diag.CutValue(inst.PrimaryKey().String()))
 	}
 	return &provenanceWire{SourceName: prov.SourceName(), Path: pathStr}, nil
 }
@@ -686,7 +686,7 @@ func parseTargetKey(keyStr string) ([]any, error) {
 	}
 	values, err := graph.ParseKey(keyStr)
 	if err != nil {
-		return nil, fmt.Errorf("target key %s: graph.ParseKey: %w", diag.ValueText(keyStr), err)
+		return nil, fmt.Errorf("target key %s: graph.ParseKey: %w", diag.CutValue(keyStr), err)
 	}
 	return values, nil
 }

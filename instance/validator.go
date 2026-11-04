@@ -566,7 +566,7 @@ func nameList(keys []string) string {
 	shown := keys[:min(len(keys), maxListedKeys)]
 	texts := make([]string, len(shown))
 	for i, k := range shown {
-		texts[i] = diag.ValueText(k)
+		texts[i] = diag.CutValue(k)
 	}
 	list := "[" + strings.Join(texts, " ") + "]"
 	if rest := len(keys) - len(shown); rest > 0 {

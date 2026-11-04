@@ -98,19 +98,34 @@ func TestParseKey_WholeFloatReturnsAsInt64(t *testing.T) {
 	}
 }
 
-// FormatKey writes a large whole float64 as an int-shaped literal past the
-// int64 range, so ParseKey reads one as float64: its inverse for keys holds
-// even where the Integer check refuses the same literal.
-func TestParseKey_IntegerBeyondInt64ReturnsFloat(t *testing.T) {
+// An integer literal no int64 holds is no key component: one past the int64
+// range is refused, never read as its nearest float64,
+// whether FormatKey wrote it for a uint64 or a large whole float64 or a caller
+// spelled it. The int64 bounds themselves read back, and -0 reads as the int64 0.
+func TestParseKey_RefusesAnIntegerPastInt64(t *testing.T) {
 	t.Parallel()
-	for _, f := range []float64{1e20, 1 << 63, -1e20} {
-		key := graph.FormatKey(f)
+	for _, key := range []string{
+		graph.FormatKey(1e20), graph.FormatKey(float64(1 << 63)), graph.FormatKey(-1e20),
+		graph.FormatKey(uint64(math.MaxUint64)), graph.FormatKey(uint64(math.MaxInt64) + 1),
+		`[9223372036854775808]`, `[-9223372036854775809]`, `["a",99999999999999999999]`,
+	} {
 		got, err := graph.ParseKey(key)
-		if err != nil {
-			t.Fatalf("graph.ParseKey(%s) error: %v", key, err)
+		if err == nil {
+			t.Errorf("graph.ParseKey(%s) = %#v, want an error", key, got)
+			continue
 		}
-		if g, ok := got[0].(float64); !ok || g != f {
-			t.Errorf("graph.ParseKey(%s) = %#v, want float64(%v)", key, got[0], f)
+		if !strings.Contains(err.Error(), "is an integer literal no int64 holds") {
+			t.Errorf("graph.ParseKey(%s) error = %q, want it to name the number", key, err)
+		}
+	}
+	for key, want := range map[string]any{
+		`[9223372036854775807]`:  int64(math.MaxInt64),
+		`[-9223372036854775808]`: int64(math.MinInt64),
+		`[-0]`:                   int64(0),
+	} {
+		got, err := graph.ParseKey(key)
+		if err != nil || len(got) != 1 || got[0] != want {
+			t.Errorf("graph.ParseKey(%s) = %#v, %v; want %#v", key, got, err, want)
 		}
 	}
 }
@@ -133,7 +148,8 @@ func TestParseKey_Errors(t *testing.T) {
 		{"nested array component", `[["a"]]`, "component 0 is not a scalar"},
 		{"nested object component", `[{"a":1}]`, "component 0 is not a scalar"},
 		{"nested at index 1", `["a",[1]]`, "component 1 is not a scalar"},
-		{"unrepresentable number", `[1e999]`, "component 0 is not a representable number"},
+		{"unrepresentable number", `[1e999]`, "component 0 is a number literal no finite float64 holds"},
+		{"integer past int64 at index 1", `["a",9223372036854775808]`, "component 1 is an integer literal no int64 holds"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

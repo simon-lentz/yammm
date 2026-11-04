@@ -72,6 +72,14 @@
 // A slice is never a scalar kind: a list or vector's shape is its constraint's
 // to judge, elementwise, in the instance layer.
 //
+// [Read] applies Classify to every json.Number in a decoded value, at any depth
+// of its lists and string-keyed maps, and [ReadAt] does so at the position a
+// constraint describes: at a Float, and at a Vector element, a number literal is
+// its nearest float64. The .ys reader, graph.ParseKey and graph.NewFromSnapshot
+// under another schema read a number by them. adapter/json reads a number by its
+// own rule, which keeps -0 a json.Number for the validator to read at the
+// property's kind, and imports no internal package but adapter/'s own.
+//
 // # json.Number Handling
 //
 // [Classify] determines what a value IS, not what it should be per schema. It

@@ -185,16 +185,16 @@
 //   - Composition slots. A slot is a composition its parent's type declares,
 //     holds instances of its declared target, holds one child at most under a
 //     (one) composition, and holds each canonical key of a keyed part once.
-//   - Keys. Every stored key, a keyless part's included, holds only scalars
-//     that render as every writer writes them and that [ParseKey] reads back
-//     at that rendering, so a reload keeps every address. A keyed
-//     instance's stored key has one component per declared primary key,
-//     and each agrees with its key property, which is present and not
-//     null. So a list or a map, a number no finite float64 holds, and a number
-//     ParseKey reads back at another rendering (such as one past int64 that
-//     reads back as a float64 rendered otherwise, one spelled 1.0, or a float64
-//     negative zero) are refused. Two roots of one type never share a canonical
-//     address.
+//   - Keys. Every stored key holds only scalars that render as every writer
+//     writes them and that [ParseKey] reads back at that rendering, so a reload
+//     keeps every address. A keyless part stores no key. A keyed instance's
+//     stored key has one component per declared primary key, and each agrees
+//     with its key property, which is present and not null: both of one kind,
+//     so the integer 1 and the float 1.0 disagree. So a list or a map, an
+//     integer literal no int64 holds, a literal no finite float64 holds, and a
+//     number ParseKey reads back at another rendering (one spelled
+//     1.0, or a negative zero) are refused. Two roots of one type never share a
+//     canonical address.
 //   - Names. Every stored property and edge property name is declared.
 //   - Associations. Every edge and unresolved record is under an association
 //     its source's type declares. An edge's target is an instance of that
@@ -222,8 +222,9 @@
 //
 // The values are another matter. A snapshot holds only what a validator stored or
 // the reader decoded: nil, a bool, a string of valid UTF-8, an int64, a finite
-// float64, a json.Number (a literal no finite float64 holds, or a number nested
-// more than 64 levels deep), and lists and string-keyed maps of those. Each has a
+// float64, a json.Number (an integer literal past int64 at a position that is
+// neither a Float nor a Vector element, or a literal no finite float64 holds),
+// and lists and string-keyed maps of those. Each has a
 // form on the .ys wire, so [github.com/simon-lentz/yammm/snapshot.Marshal] meets no
 // value it cannot write. A data writer can still refuse one: adapter/neo4j has
 // no spelling for some, and adapter/json none for a json.Number no finite float64
@@ -345,7 +346,8 @@
 // identity, in canonical instance tag form:
 //
 //   - Local types: unqualified name (e.g., "Person")
-//   - Imported types: alias-qualified name (e.g., "c.Entity")
+//   - Types of a schema the schema imports directly: alias-qualified name (e.g.,
+//     "c.Entity")
 //
 // The rendering is lossy, and only ever suitable for display. A type reachable
 // only through an intermediate import has no alias to qualify with and renders
@@ -447,7 +449,8 @@
 //     relation's target type
 //   - E_GRAPH_INVALID_PK: a keyed instance's stored key is empty or has the wrong
 //     arity, a key property is absent or null, a component disagrees with its key
-//     property, or an association target key has the wrong arity
+//     property, an association target key has the wrong arity, or a composed
+//     child whose type declares no primary key stores a key
 //   - E_DUPLICATE_PK: two roots of a type that can hold one, whose stored keys the
 //     key rule accepts, stand at one canonical address
 //   - E_GRAPH_CARDINALITY: a (one) association holds several records

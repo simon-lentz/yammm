@@ -39,12 +39,6 @@ func BuildSnapshot(tb testing.TB, s schema.Schema, instances ...instance.ValidIn
 // AssertRoundTrip marshals a snapshot, loads it back, and verifies
 // structural equivalence via [DiffSnapshots]. Fails the test with a
 // (-want +got) diff on mismatch.
-//
-// Not valid for a snapshot whose whole floats are stored as int64, because the
-// round trip heals them to float64 while [DiffSnapshots] compares dynamic types.
-// Round-trip such a snapshot once first; healing is idempotent, so every later
-// round trip holds. The composed-child identity repair this also warned about
-// is gone with the reader that needed it.
 func AssertRoundTrip(tb testing.TB, snap graph.Snapshot, s schema.Schema, opts ...snapshot.Option) {
 	tb.Helper()
 	ctx := context.Background()

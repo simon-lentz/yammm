@@ -9,6 +9,7 @@ import (
 
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/immutable"
+	"github.com/simon-lentz/yammm/internal/value"
 )
 
 // FormatKey renders primary key components as the JSON array string the
@@ -51,27 +52,21 @@ func FormatKey(values ...any) string {
 
 // ParseKey decodes a [FormatKey] string back into its component values.
 //
-// Components come back as the types a snapshot round trip produces: string,
-// int64, float64, bool, and nil. Numbers are classified by lexical form, the
-// same rule the .ys reader applies — a literal carrying '.', 'e', or 'E' is
-// float64, an int-shaped literal is int64. Two consequences follow:
+// Components come back as string, int64, float64, bool and nil. A number reads
+// as the .ys reader reads a key component: an integer literal is int64, and a
+// literal carrying '.', 'e' or 'E' is float64, whole or not. An integer literal
+// no int64 holds, and a literal no finite float64 holds, is an error naming the
+// component's index: an integer literal past the int64 range is one, which
+// FormatKey writes for an unsigned integer
+// above math.MaxInt64, a json.Number that spells one and a whole float64 or
+// float32 of magnitude 2^63 to below 1e21, and a literal such as 1e999.
 //
-//   - An int-shaped literal beyond the int64 range comes back as float64, with
-//     the precision loss that implies. FormatKey writes one for any value
-//     encoding/json renders as such a literal, as a whole float64 of magnitude
-//     2^63 to below 1e21 or a uint64 above math.MaxInt64 is rendered.
-//   - A literal that is valid JSON but has no finite Go value, such as 1e999,
-//     is an error naming the component's index. FormatKey writes one only for a
-//     value that encoding/json renders as such a literal, which no value of
-//     its documented component types is.
-//
-// The round-trip law holds over these normalized components: a valid UTF-8
-// string, int64, bool, nil and finite non-whole float64. ParseKey(FormatKey(vs...))
-// returns vs, and FormatKey(ParseKey(s)...) returns s for any s that FormatKey
-// produced from such values. Two carve-outs are documented rather than hidden:
-// FormatKey renders float64(5) as the literal 5, which ParseKey reads back as
-// int64(5) at the same rendering, and a float64 negative zero as -0, which
-// ParseKey reads back as int64(0), rendered 0.
+// The round-trip law holds over a valid UTF-8 string, int64, bool, nil and a
+// finite float64 that is not whole: ParseKey(FormatKey(vs...)) returns vs, and
+// FormatKey(ParseKey(s)...) returns s for any s that FormatKey produced from such
+// values. FormatKey renders a whole float64 below 2^63 in magnitude as an integer
+// literal, so float64(5) reads back as int64(5) at the same rendering, and a
+// float64 negative zero as -0, which reads back as int64(0), rendered 0.
 //
 // The string must hold exactly one JSON array and nothing else; surrounding
 // whitespace is tolerated, trailing content is not. A component that is itself
@@ -84,16 +79,17 @@ func ParseKey(s string) ([]any, error) {
 	}
 	out := make([]any, len(raw))
 	for i, v := range raw {
-		norm := immutable.NormalizeValue(v)
-		switch norm.(type) {
+		read := value.Read(v)
+		switch n := read.(type) {
 		case []any, map[string]any:
-			return nil, fmt.Errorf("graph.ParseKey: component %d is not a scalar: %T", i, norm)
+			return nil, fmt.Errorf("graph.ParseKey: component %d is not a scalar: %T", i, read)
 		case json.Number:
-			// NormalizeNumber hands back the raw number when no finite Go value
-			// represents it. Reporting it keeps the documented component set exact.
-			return nil, fmt.Errorf("graph.ParseKey: component %d is not a representable number: %v", i, diag.ValueText(fmt.Sprint(norm)))
+			if immutable.IsIntegerLiteral(n) {
+				return nil, fmt.Errorf("graph.ParseKey: component %d is an integer literal no int64 holds: %v", i, diag.CutValue(string(n)))
+			}
+			return nil, fmt.Errorf("graph.ParseKey: component %d is a number literal no finite float64 holds: %v", i, diag.CutValue(string(n)))
 		}
-		out[i] = norm
+		out[i] = read
 	}
 	return out, nil
 }

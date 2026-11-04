@@ -1,6 +1,7 @@
 package graph_test
 
 import (
+	"encoding/json"
 	"fmt"
 	"slices"
 	"strings"
@@ -12,6 +13,7 @@ import (
 	"github.com/simon-lentz/yammm/instance"
 	"github.com/simon-lentz/yammm/internal/instancetest"
 	"github.com/simon-lentz/yammm/internal/snapparts"
+	"github.com/simon-lentz/yammm/internal/snappartstest"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -296,8 +298,8 @@ func TestNewFromSnapshot_RefusesARootTheImportingSchemaGivesNoKey(t *testing.T) 
 	requireRefused(t, keyless, src.Snapshot(), diag.E_GRAPH_MISSING_PK, "declares no primary key")
 }
 
-// The importing schema can declare a key of another arity than the stored one, and
-// a key where the stored part has none.
+// The importing schema can declare a key of another arity than the stored one, a
+// key where the stored part has none, and no key where the stored part has one.
 func TestNewFromSnapshot_RefusesAStoredKeyOfAnotherArity(t *testing.T) {
 	t.Parallel()
 	const order = "schema \"entry\"\n\ntype Order {\n\tid String primary\n\t*-> LINES (many) Line\n}\n\npart type Line {\n\tsku String%s\n}\n"
@@ -322,6 +324,22 @@ func TestNewFromSnapshot_RefusesAStoredKeyOfAnotherArity(t *testing.T) {
 			typeName: "Order",
 			raw:      map[string]any{"id": "o1", "LINES": []any{map[string]any{"sku": "a"}}},
 			phrase:   "primary key is empty",
+		},
+		{
+			name:     "a keyed part the importing schema makes keyless",
+			built:    fmt.Sprintf(order, " primary"),
+			bound:    fmt.Sprintf(order, ""),
+			typeName: "Order",
+			raw:      map[string]any{"id": "o1", "LINES": []any{map[string]any{"sku": "a"}}},
+			phrase:   `composed child of type Line at ["a"]: its type declares no primary key, so it stores none`,
+		},
+		{
+			name:     "a keyed part under a parent type the importing schema lacks",
+			built:    fmt.Sprintf(order, " primary"),
+			bound:    "schema \"entry\"\n\npart type Line {\n\tsku String\n}\n",
+			typeName: "Order",
+			raw:      map[string]any{"id": "o1", "LINES": []any{map[string]any{"sku": "a"}}},
+			phrase:   `composed child of type Line at ["a"]: its type declares no primary key, so it stores none`,
 		},
 	} {
 		t.Run(c.name, func(t *testing.T) {
@@ -440,4 +458,35 @@ func TestNewFromSnapshot_RekeysAComposedChild(t *testing.T) {
 	if got, want := child.PrimaryKey().String(), graph.FormatKey(canonInstant); got != want {
 		t.Errorf("child key = %s, want %s", got, want)
 	}
+}
+
+// A key component and the property the importing schema makes its key are held
+// to one kind: the integer 1 and the float 1.0 render alike as the key [1], and
+// a float is never an integer.
+func TestNewFromSnapshot_AKeyComponentAgreesWithItsPropertyByKind(t *testing.T) {
+	t.Parallel()
+	built := loadEntry(t, "schema \"entry\"\n\ntype T {\n\tid String primary\n\tcode Float\n}\n")
+	bound := loadEntry(t, "schema \"entry\"\n\ntype T {\n\tid String\n\tcode String primary\n}\n")
+	id := typeIDOf(t, built, "T")
+	snapOf := func(code json.Number) graph.Snapshot {
+		return snappartstest.Loaded(t, built, snapparts.Parts{Instances: []snapparts.Instance{{
+			TypeID: id, PrimaryKey: immutable.WrapKey([]any{json.Number("1")}),
+			Properties: immutable.WrapProperties(map[string]any{"id": json.Number("1"), "code": code}),
+		}}})
+	}
+	requireRefused(t, bound, snapOf("1.0"), diag.E_GRAPH_INVALID_PK, `primary key component 0 disagrees with property "code" ([1] vs [1.0])`)
+	requireRefused(t, bound, snapOf("1"), diag.E_GRAPH_INVALID_PK, `primary key component 0 disagrees with property "code" ([1] vs [1.0])`)
+}
+
+// A disagreement's message marks each whole float in a list as a float, as it
+// marks a float at the top: [1.0, 2.5] is no list of integers.
+func TestNewFromSnapshot_ADisagreementMarksAFloatInAList(t *testing.T) {
+	t.Parallel()
+	built := loadEntry(t, "schema \"entry\"\n\ntype T {\n\tid String primary\n\tcode List<Float>\n}\n")
+	bound := loadEntry(t, "schema \"entry\"\n\ntype T {\n\tid String\n\tcode String primary\n}\n")
+	snap := snappartstest.Loaded(t, built, snapparts.Parts{Instances: []snapparts.Instance{{
+		TypeID: typeIDOf(t, built, "T"), PrimaryKey: immutable.WrapKey([]any{"x"}),
+		Properties: immutable.WrapProperties(map[string]any{"id": "x", "code": []any{json.Number("1"), json.Number("2.5")}}),
+	}}})
+	requireRefused(t, bound, snap, diag.E_GRAPH_INVALID_PK, `primary key component 0 disagrees with property "code" (["x"] vs [[1.0,2.5]])`)
 }

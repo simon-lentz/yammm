@@ -271,11 +271,11 @@ func (sd *streamDecoder) rowWritten(row int) bool {
 // part cut as a value is, since a document can name a schema and a type of any
 // length.
 func (sd *streamDecoder) entryText(e typeTableEntry) string {
-	schemaName := diag.ValueText(e.Schema)
+	schemaName := diag.CutValue(e.Schema)
 	if sd.closureHolds(e.Schema) {
 		schemaName = e.Schema
 	}
-	return schemaName + "#" + diag.ValueText(e.Name)
+	return schemaName + "#" + diag.CutValue(e.Name)
 }
 
 // closureHolds reports whether the import closure holds a schema named name.

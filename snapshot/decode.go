@@ -133,7 +133,7 @@ func (sd *streamDecoder) decodeHeader() error {
 		return fmt.Errorf("expected JSON object: %w", err)
 	}
 	if delim, ok := tok.(json.Delim); !ok || delim != '{' {
-		return fmt.Errorf("expected JSON object, got %s", diag.ValueText(fmt.Sprint(tok)))
+		return fmt.Errorf("expected JSON object, got %s", diag.CutValue(fmt.Sprint(tok)))
 	}
 
 	// First key must be "yammm_snapshot".
@@ -610,7 +610,7 @@ func (sd *streamDecoder) walkInstance(row int, inst instWire, depth int, eligibl
 	if depth == 0 && inst.Type != nil && *inst.Type != row {
 		sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_TYPE_MISMATCH,
 			fmt.Sprintf("root instance %s declares type row %d (%s) inside the section entry of row %d (%s)",
-				diag.ValueText(formatWireKey(inst.Key)), *inst.Type, sd.refText(*inst.Type), row, sd.refText(row))).Build())
+				diag.CutValue(formatWireKey(inst.Key)), *inst.Type, sd.refText(*inst.Type), row, sd.refText(row))).Build())
 	}
 
 	if depth > 0 && len(inst.Edges) > 0 {
@@ -623,6 +623,9 @@ func (sd *streamDecoder) walkInstance(row int, inst instWire, depth int, eligibl
 	sd.checkProvenancePath(inst, row)
 	sd.checkValueConformance(inst, row)
 	keyed := sd.checkStoredKey(row, inst)
+	if keyed && depth > 0 {
+		sd.checkKeylessPartKey(row, inst)
+	}
 	sd.checkDeclaredProperties(row, inst.Key, inst.Properties)
 
 	// Every address in the index is the CANONICAL key — the spelling the
@@ -672,7 +675,7 @@ func (sd *streamDecoder) walkInstance(row int, inst instWire, depth int, eligibl
 			// type's slice while its index keeps only the last, so InstancesOf
 			// reported two and every edge on that key bound to one.
 			sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_DUPLICATE_PK,
-				fmt.Sprintf("duplicate primary key %s for type %s", diag.ValueText(keyStr), sd.refQuoted(row))).
+				fmt.Sprintf("duplicate primary key %s for type %s", diag.CutValue(keyStr), sd.refQuoted(row))).
 				WithDetail(diag.DetailKeyTypeName, sd.refAt(row)).
 				WithDetail(diag.DetailKeyPrimaryKey, keyStr).
 				Build())
@@ -694,7 +697,7 @@ func (sd *streamDecoder) walkInstance(row int, inst instWire, depth int, eligibl
 			// The writer emits a row at every non-root position, so an absent
 			// one is malformed rather than a value to recover from context.
 			childRow, ok := sd.requireRow(child.Type, func() string {
-				return fmt.Sprintf("composed child under %s.%s", sd.refText(row), diag.ValueText(relName))
+				return fmt.Sprintf("composed child under %s.%s", sd.refText(row), diag.CutValue(relName))
 			})
 			if ok && judged {
 				sd.checkComposedChildType(row, relName, childRow, child.Key, target)
@@ -732,7 +735,7 @@ func (sd *streamDecoder) walkEdges(row int, inst instWire, keyStr string, own in
 			start := sd.mark()
 			sd.checkDeclaredEdgeProperties(row, inst.Key, relName, e.Properties)
 			targetRow, _ := sd.requireRow(e.TargetType, func() string {
-				return fmt.Sprintf("edge %d under %s.%s", ei, sd.refText(row), diag.ValueText(relName))
+				return fmt.Sprintf("edge %d under %s.%s", ei, sd.refText(row), diag.CutValue(relName))
 			})
 			rel := sd.checkAssociation(fmt.Sprintf("edge %d", ei), row, inst.Key, relName, e.TargetType, e.TargetKey, "", !e.statesNothing())
 			if sd.refusedSince(start) {
@@ -766,7 +769,7 @@ func (sd *streamDecoder) checkEdgeListName(row int, key []any, relation string) 
 	}
 	sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_GRAPH_UNKNOWN_RELATION,
 		fmt.Sprintf("the empty edge list of %s[%s] under %s, which the type does not declare as an association",
-			sd.refText(row), diag.ValueText(formatWireKey(key)), diag.QuoteValue(relation))).
+			sd.refText(row), diag.CutValue(formatWireKey(key)), diag.QuoteValue(relation))).
 		WithDetail(diag.DetailKeyTypeName, sd.refAt(row)).
 		WithDetail(diag.DetailKeyRelationName, relation).
 		Build())
@@ -833,7 +836,7 @@ func (sd *streamDecoder) checkSiblingKeys(row int, parentKey, relation string, t
 		if first, dup := seen[key]; dup {
 			sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_DUPLICATE_COMPOSED_PK,
 				fmt.Sprintf("composition %q under %s[%s] holds children %d and %d at key %s",
-					relation, sd.refText(row), diag.ValueText(parentKey), first, i, diag.ValueText(key))).
+					relation, sd.refText(row), diag.CutValue(parentKey), first, i, diag.CutValue(key))).
 				WithDetail(diag.DetailKeyTypeName, sd.refAt(row)).
 				WithDetail(diag.DetailKeyRelationName, relation).
 				WithDetail(diag.DetailKeyPrimaryKey, key).
@@ -859,7 +862,7 @@ func (sd *streamDecoder) checkComposedChildType(parentRow int, relation string, 
 	}
 	sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_TYPE_MISMATCH,
 		fmt.Sprintf("composed child %s under %s.%s is typed %s, which the composition declares as %s",
-			diag.ValueText(formatWireKey(key)), sd.refText(parentRow), relation, sd.refText(childRow), sd.identRef(want))).
+			diag.CutValue(formatWireKey(key)), sd.refText(parentRow), relation, sd.refText(childRow), sd.identRef(want))).
 		WithDetail(diag.DetailKeyTypeName, sd.refAt(parentRow)).
 		WithDetail(diag.DetailKeyRelationName, relation).
 		WithDetail(diag.DetailKeyExpected, sd.identRef(want)).
@@ -879,7 +882,7 @@ func (sd *streamDecoder) checkComposedChildType(parentRow int, relation string, 
 func (sd *streamDecoder) checkStoredKey(row int, inst instWire) bool {
 	if i := unreadableWireComponent(inst.Key); i >= 0 {
 		sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_MALFORMED,
-			fmt.Sprintf("instance of %s stores key %s, whose component %d is not a scalar graph.ParseKey reads back", sd.refText(row), diag.ValueText(literalWireKey(inst.Key)), i)).
+			fmt.Sprintf("instance of %s stores key %s, whose component %d is not a scalar graph.ParseKey reads back", sd.refText(row), diag.CutValue(literalWireKey(inst.Key)), i)).
 			WithDetail(diag.DetailKeyTypeName, sd.refAt(row)).
 			WithDetail(diag.DetailKeyPrimaryKey, literalWireKey(inst.Key)).
 			Build())
@@ -910,7 +913,7 @@ func (sd *streamDecoder) checkStoredKey(row int, inst instWire) bool {
 			}
 			if !wireComponentAgrees(inst.Key[i], prop, canonicalizingConstraint(positions, i)) {
 				reason = fmt.Sprintf("component %d disagrees with property %q, which holds %s",
-					i, pk.Name(), diag.ValueText(formatWireKey([]any{prop})))
+					i, pk.Name(), diag.CutValue(literalWireKey([]any{prop})))
 				break
 			}
 			i++
@@ -920,11 +923,29 @@ func (sd *streamDecoder) checkStoredKey(row int, inst instWire) bool {
 		return true
 	}
 	sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_MALFORMED,
-		fmt.Sprintf("instance of %s stores key %s, which %s", sd.refText(row), diag.ValueText(formatWireKey(inst.Key)), reason)).
+		fmt.Sprintf("instance of %s stores key %s, which %s", sd.refText(row), diag.CutValue(formatWireKey(inst.Key)), reason)).
 		WithDetail(diag.DetailKeyTypeName, sd.refAt(row)).
 		WithDetail(diag.DetailKeyPrimaryKey, formatWireKey(inst.Key)).
 		Build())
 	return false
+}
+
+// checkKeylessPartKey refuses a key stored on a composed child whose type
+// declares no primary key: [graph.Graph.Add] stores none there. A root of such a
+// type is the root rule's one break.
+func (sd *streamDecoder) checkKeylessPartKey(row int, inst instWire) {
+	if len(inst.Key) == 0 || sd.schema.IsZero() || row < 0 || row >= len(sd.tableIDs) {
+		return
+	}
+	t, ok := sd.schema.TypeByID(sd.tableIDs[row])
+	if !ok || t.HasPrimaryKey() {
+		return
+	}
+	sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_MALFORMED,
+		fmt.Sprintf("composed child of %s stores key %s, which its type, declaring no primary key, cannot hold", sd.refText(row), diag.CutValue(literalWireKey(inst.Key)))).
+		WithDetail(diag.DetailKeyTypeName, sd.refAt(row)).
+		WithDetail(diag.DetailKeyPrimaryKey, literalWireKey(inst.Key)).
+		Build())
 }
 
 // statedKey returns the canonical address inst's key properties name, or false
@@ -944,8 +965,8 @@ func (sd *streamDecoder) statedKey(row int, inst instWire) (string, bool) {
 			return "", false
 		}
 		// As materialization reads it: a property's spelling of a number is no
-		// address, and the wire's numeric contract is.
-		key = append(key, immutable.NormalizeValue(prop))
+		// address, and the value rule's reading is.
+		key = append(key, readScalar(prop))
 	}
 	if unreadableWireComponent(key) >= 0 {
 		return "", false
@@ -955,17 +976,19 @@ func (sd *streamDecoder) statedKey(row int, inst instWire) (string, bool) {
 
 // unreadableWireComponent returns the index of the first component of a
 // decoded key that graph.ParseKey cannot read back as written — a JSON array
-// or object, a number no finite float64 holds, or a number that renders back
-// otherwise — or -1.
+// or object, an integer literal no int64 holds, a literal no finite float64
+// holds, or a number that
+// renders back otherwise — or -1.
 func unreadableWireComponent(key []any) int {
 	for i, v := range key {
 		switch v := v.(type) {
 		case []any, map[string]any:
 			return i
 		case json.Number:
-			// A literal must read back as written: one that renders otherwise, as
-			// 1.0 or a uint64 past int64 does, puts the instance at another
-			// address than the one the document states.
+			// A literal must read back as written: one ParseKey refuses, as an
+			// integer past int64, addresses nothing, and one that renders
+			// otherwise, as 1.0 does, puts the instance at another address than
+			// the one the document states.
 			if !readsBack("[" + v.String() + "]") {
 				return i
 			}
@@ -988,6 +1011,22 @@ func literalWireKey(key []any) string {
 	}
 	literal, _ := json.Marshal(key) //nolint:errchkjson // a decoded key always marshals
 	return string(literal)
+}
+
+// checkReferenceKey refuses a key a record states to name a root when a
+// component does not read back as written, as the root's own stored key would
+// be refused: [1.0] names no root, though it renders as the key [1]. what names
+// the record and its key. It reports whether the key reads back.
+func (sd *streamDecoder) checkReferenceKey(what string, key []any) bool {
+	i := unreadableWireComponent(key)
+	if i < 0 {
+		return true
+	}
+	sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_MALFORMED,
+		fmt.Sprintf("%s %s, whose component %d is not a scalar graph.ParseKey reads back", what, diag.CutValue(literalWireKey(key)), i)).
+		WithDetail(diag.DetailKeyPrimaryKey, literalWireKey(key)).
+		Build())
+	return false
 }
 
 func readsBack(written string) bool {
@@ -1016,11 +1055,12 @@ func canonicalizingConstraint(positions []wireKeyPosition, i int) schema.Constra
 }
 
 // wireComponentAgrees reports whether a stored key component and its property
-// hold one value, as graph's keyComponentAgrees decides it: both sides in the
-// form c stores where c renders them, identical scalar kinds compared
-// directly, and anything else by its canonical key rendering.
+// hold one value, as graph's keyComponentAgrees decides it: both sides read by
+// the value rule and put in the form c stores where c renders them, then of one
+// kind and alike in their canonical key rendering. An integer and a float never
+// agree, though 1 and 1.0 render alike.
 func wireComponentAgrees(component, property any, c schema.Constraint) bool {
-	x, y := immutable.NormalizeValue(component), immutable.NormalizeValue(property)
+	x, y := readScalar(component), readScalar(property)
 	if xs, ok := x.(string); ok {
 		if ys, ok := y.(string); ok && xs == ys {
 			return true
@@ -1034,6 +1074,7 @@ func wireComponentAgrees(component, property any, c schema.Constraint) bool {
 			y = cy
 		}
 	}
+	// A string, int64 or bool pair is decided exactly, with no rendering.
 	switch xv := x.(type) {
 	case string:
 		if yv, ok := y.(string); ok {
@@ -1048,7 +1089,19 @@ func wireComponentAgrees(component, property any, c schema.Constraint) bool {
 			return xv == yv
 		}
 	}
-	return immutable.WrapKey([]any{x}).String() == immutable.WrapKey([]any{y}).String()
+	kx, _ := value.Classify(x)
+	ky, _ := value.Classify(y)
+	return kx == ky && immutable.WrapKey([]any{x}).String() == immutable.WrapKey([]any{y}).String()
+}
+
+// readScalar reads a number by the value rule and returns any other value as the
+// document holds it. It never rewrites a list or a map, which revalidation reads
+// afterwards as the document wrote it.
+func readScalar(v any) any {
+	if _, ok := v.(json.Number); ok {
+		return value.Read(v)
+	}
+	return v
 }
 
 // revalidate reports WithRevalidation's findings after every structural check,
@@ -1181,9 +1234,9 @@ func reportsTheRun(code diag.Code) bool {
 // (one) association holds at most one record.
 func (sd *streamDecoder) rebuildRawProperties(t schema.Type, inst instWire) map[string]any {
 	// The validator judges the document's own text: a number stays the
-	// decoder's json.Number, which the checkers read exactly, so a wide integer
-	// is refused as written rather than passed as the float64 that
-	// materialization (instanceParts) reads by the wire's numeric contract.
+	// decoder's json.Number, which the checkers read exactly, so a number is
+	// judged as written, never as the value materialization (instanceParts)
+	// reads at its position.
 	props := make(map[string]any, len(inst.Properties)+len(inst.Edges)+len(inst.Composed))
 	maps.Copy(props, inst.Properties)
 
@@ -1291,7 +1344,7 @@ func (sd *streamDecoder) identRef(id schema.TypeID) string {
 // hint, span, path and related locations all travel.
 func retagIssue(issue diag.Issue, sev diag.Severity, typeText, keyStr string) diag.Issue {
 	b := diag.NewIssue(sev, issue.Code(),
-		fmt.Sprintf("revalidation of %s[%s]: %s", typeText, diag.ValueText(keyStr), issue.Message())).
+		fmt.Sprintf("revalidation of %s[%s]: %s", typeText, diag.CutValue(keyStr), issue.Message())).
 		WithDetails(issue.Details()...).
 		WithRelated(issue.Related()...)
 	if issue.HasSpan() {
@@ -1342,7 +1395,7 @@ func (sd *streamDecoder) checkDeclaredProperties(row int, key []any, props map[s
 	for _, name := range undeclaredWireNames(props, func(n string) bool { _, ok := t.Property(n); return ok }) {
 		sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_MALFORMED,
 			fmt.Sprintf("instance %s[%s] holds property %s, which its type does not declare",
-				sd.refText(row), diag.ValueText(formatWireKey(key)), diag.QuoteValue(name))).
+				sd.refText(row), diag.CutValue(formatWireKey(key)), diag.QuoteValue(name))).
 			WithDetails(diag.TypeProp(sd.refAt(row), name)...).
 			Build())
 	}
@@ -1367,7 +1420,7 @@ func (sd *streamDecoder) checkDeclaredEdgeProperties(row int, key []any, relatio
 	for _, name := range undeclaredWireNames(props, func(n string) bool { _, ok := rel.Property(n); return ok }) {
 		sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_MALFORMED,
 			fmt.Sprintf("edge %q of %s[%s] holds edge property %s, which the association does not declare",
-				relation, sd.refText(row), diag.ValueText(formatWireKey(key)), diag.QuoteValue(name))).
+				relation, sd.refText(row), diag.CutValue(formatWireKey(key)), diag.QuoteValue(name))).
 			WithDetail(diag.DetailKeyTypeName, sd.refAt(row)).
 			WithDetail(diag.DetailKeyRelationName, relation).
 			WithDetail(diag.DetailKeyPropertyName, name).
@@ -1424,14 +1477,14 @@ func (sd *streamDecoder) checkValueConformance(inst instWire, row int) {
 		if !value.Canonicalizes(prop.Constraint()) {
 			continue
 		}
-		// raw is the decoder's own value, never normalized: NormalizeValue
+		// raw is the decoder's own value, never read: value.Read
 		// rewrites a list in place, and revalidation reads this same wire tree
 		// afterwards and must see the document's numbers as written. A number is
 		// refused by these kinds whatever form it takes.
 		if _, err := value.Canonical(raw, prop.Constraint()); err != nil {
 			sd.collector.Collect(diag.NewIssue(diag.Warning, diag.W_SNAPSHOT_VALUE_NONCONFORMING,
 				fmt.Sprintf("property %q of %s does not conform to its %s constraint: %s",
-					name, diag.ValueText(formatWireKey(inst.Key)), prop.Constraint().Kind(), err)).
+					name, diag.CutValue(formatWireKey(inst.Key)), prop.Constraint().Kind(), err)).
 				WithDetails(diag.TypeProp(sd.refAt(row), name)...).
 				Build())
 		}
@@ -1473,7 +1526,7 @@ func (sd *streamDecoder) validateDiagnostics(diags diagWire, idx *docIndex) {
 		if rowOK && dup.Instance.Type != nil && *dup.Instance.Type != row {
 			sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_TYPE_MISMATCH,
 				fmt.Sprintf("duplicate instance %s[%s] declares type row %d (%s) but its record states row %d (%s)",
-					sd.refText(row), diag.ValueText(keyStr), *dup.Instance.Type, sd.refText(*dup.Instance.Type), row, sd.refText(row))).Build())
+					sd.refText(row), diag.CutValue(keyStr), *dup.Instance.Type, sd.refText(*dup.Instance.Type), row, sd.refText(row))).Build())
 		}
 
 		// Marshal rewrites the record's key from the instance it carries, so a
@@ -1501,15 +1554,18 @@ func (sd *streamDecoder) validateDiagnostics(diags diagWire, idx *docIndex) {
 			}
 		}
 		// A refused stored key is that one break, so it is compared with nothing.
+		if keyed {
+			keyed = sd.checkReferenceKey(fmt.Sprintf("duplicate record %d states key", di), dup.Key)
+		}
 		if keyed && stated != carried {
 			sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_MALFORMED,
 				fmt.Sprintf("duplicate record %d states key %s but its instance carries %s",
-					di, diag.ValueText(literalWireKey(dup.Key)), diag.ValueText(literalWireKey(dup.Instance.Key)))).Build())
+					di, diag.CutValue(literalWireKey(dup.Key)), diag.CutValue(literalWireKey(dup.Instance.Key)))).Build())
 		}
 
 		if len(dup.Instance.Composed) > 0 {
 			b := diag.NewIssue(diag.Error, diag.E_SNAPSHOT_COMPOSED_ON_DUPLICATE,
-				fmt.Sprintf("duplicate instance %s[%s] must not have composed children", dupText, diag.ValueText(keyStr))).
+				fmt.Sprintf("duplicate instance %s[%s] must not have composed children", dupText, diag.CutValue(keyStr))).
 				WithDetail(diag.DetailKeyPrimaryKey, keyStr)
 			if rowOK {
 				b = b.WithDetail(diag.DetailKeyTypeName, dupRef)
@@ -1518,7 +1574,7 @@ func (sd *streamDecoder) validateDiagnostics(diags diagWire, idx *docIndex) {
 		}
 		if len(dup.Instance.Edges) > 0 {
 			b := diag.NewIssue(diag.Error, diag.E_SNAPSHOT_EDGES_ON_DUPLICATE,
-				fmt.Sprintf("duplicate instance %s[%s] must not have edges", dupText, diag.ValueText(keyStr))).
+				fmt.Sprintf("duplicate instance %s[%s] must not have edges", dupText, diag.CutValue(keyStr))).
 				WithDetail(diag.DetailKeyPrimaryKey, keyStr)
 			if rowOK {
 				b = b.WithDetail(diag.DetailKeyTypeName, dupRef)
@@ -1539,7 +1595,7 @@ func (sd *streamDecoder) validateDiagnostics(diags diagWire, idx *docIndex) {
 			}
 		} else {
 			sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_MALFORMED,
-				fmt.Sprintf("duplicate record %d (%s[%s]) carries no conflict block", di, dupText, diag.ValueText(keyStr))).Build())
+				fmt.Sprintf("duplicate record %d (%s[%s]) carries no conflict block", di, dupText, diag.CutValue(keyStr))).Build())
 		}
 
 		// No root is of a type that cannot hold one, and a refused key is no
@@ -1547,12 +1603,15 @@ func (sd *streamDecoder) validateDiagnostics(diags diagWire, idx *docIndex) {
 		if statesParent || !eligible || !keyed || !conflictOK {
 			continue
 		}
+		if !sd.checkReferenceKey(fmt.Sprintf("duplicate record %d states conflict key", di), dup.Conflict.Key) {
+			continue
+		}
 		// A conflict a refused unit states is judged no further for its
 		// existence alone: its type and key are still the record's own.
 		if !idx.rootExists(conflictRow, conflictKey) && !sd.refusedAddress(idx, conflictRow, conflictKey) {
 			sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_DANGLING_REFERENCE,
 				fmt.Sprintf("duplicate conflict %s[%s] references non-existent instance",
-					sd.refText(conflictRow), diag.ValueText(conflictKey))).
+					sd.refText(conflictRow), diag.CutValue(conflictKey))).
 				WithDetail(diag.DetailKeyTypeName, sd.refAt(conflictRow)).
 				WithDetail(diag.DetailKeyPrimaryKey, conflictKey).
 				Build())
@@ -1564,7 +1623,7 @@ func (sd *streamDecoder) validateDiagnostics(diags diagWire, idx *docIndex) {
 		if rowOK && (conflictRow != row || conflictKey != carried && conflictKey != stated) {
 			sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_MALFORMED,
 				fmt.Sprintf("duplicate record %d states conflict %s[%s]; a duplicate's conflict is the root at its own type and key, %s[%s]",
-					di, sd.refText(conflictRow), diag.ValueText(conflictKey), dupText, diag.ValueText(carried))).Build())
+					di, sd.refText(conflictRow), diag.CutValue(conflictKey), dupText, diag.CutValue(carried))).Build())
 		}
 	}
 
@@ -1598,6 +1657,7 @@ func (sd *streamDecoder) checkRecord(ui int, u unresolvedWire, idx *docIndex) (s
 		return fmt.Sprintf("unresolved record %d source", ui)
 	})
 	sd.requireRow(u.TargetType, func() string { return fmt.Sprintf("unresolved record %d target", ui) })
+	sd.checkReferenceKey(fmt.Sprintf("unresolved record %d states source key", ui), u.SourceKey)
 	var slot slotCoord
 	var rel schema.Relation
 	if ok {
@@ -1613,7 +1673,7 @@ func (sd *streamDecoder) checkRecord(ui int, u unresolvedWire, idx *docIndex) (s
 			!sd.refusedAddress(idx, sourceRow, sourceKey) {
 			sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_DANGLING_REFERENCE,
 				fmt.Sprintf("unresolved edge source %s[%s] references non-existent instance",
-					sd.refText(sourceRow), diag.ValueText(sourceKey))).
+					sd.refText(sourceRow), diag.CutValue(sourceKey))).
 				WithDetail(diag.DetailKeyTypeName, sd.refAt(sourceRow)).
 				WithDetail(diag.DetailKeyPrimaryKey, sourceKey).
 				Build())
@@ -1665,7 +1725,7 @@ func (sd *streamDecoder) checkRecordFacts(diags diagWire, idx *docIndex) {
 				idx.refuseRecord(ui)
 				sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_MALFORMED,
 					fmt.Sprintf("unresolved record %d states reason %q under %q of %s[%s], which is optional, where graph.Add records none",
-						ui, u.Reason, u.Relation, sd.refText(rec.slot.row), diag.ValueText(rec.slot.key))).Build())
+						ui, u.Reason, u.Relation, sd.refText(rec.slot.row), diag.CutValue(rec.slot.key))).Build())
 			}
 		case "target_missing":
 			// checkRecord accepted the record, so its target row is the association's
@@ -1676,7 +1736,7 @@ func (sd *streamDecoder) checkRecordFacts(diags diagWire, idx *docIndex) {
 				idx.refuseRecord(ui)
 				sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_MALFORMED,
 					fmt.Sprintf("unresolved record %d names target %s[%s], which a root holds, where graph.Add resolves an edge",
-						ui, sd.refText(targetRow), diag.ValueText(key))).Build())
+						ui, sd.refText(targetRow), diag.CutValue(key))).Build())
 			}
 		}
 	}
@@ -1722,7 +1782,7 @@ func (sd *streamDecoder) checkRecordFacts(diags diagWire, idx *docIndex) {
 			reported[rec.slot] = true
 			sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_MALFORMED,
 				fmt.Sprintf("%q of %s[%s] holds an %s record beside another record, where graph.Add records it alone",
-					u.Relation, sd.refText(rec.slot.row), diag.ValueText(rec.slot.key), u.Reason)).Build())
+					u.Relation, sd.refText(rec.slot.row), diag.CutValue(rec.slot.key), u.Reason)).Build())
 		}
 	}
 	// A record whose source row resolves to none could name any root at its
@@ -1764,7 +1824,7 @@ func (sd *streamDecoder) checkRecordFacts(diags diagWire, idx *docIndex) {
 					markSlot(&idx.refusedRoots, slotCoord{row: row, key: key})
 					sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_MALFORMED,
 						fmt.Sprintf("root %s[%s] holds no edge and no record under the required association %q, where graph.Add records an absent one",
-							sd.refText(row), diag.ValueText(key), relation)).Build())
+							sd.refText(row), diag.CutValue(key), relation)).Build())
 				}
 			}
 		}
@@ -1827,7 +1887,7 @@ func (sd *streamDecoder) checkUnresolvedReason(ui int, u unresolvedWire) bool {
 	if len(u.TargetKey) > 0 {
 		sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_MALFORMED,
 			fmt.Sprintf("unresolved record %d states reason %q but carries a target key %s",
-				ui, u.Reason, diag.ValueText(formatWireKey(u.TargetKey)))).Build())
+				ui, u.Reason, diag.CutValue(formatWireKey(u.TargetKey)))).Build())
 	}
 	if len(u.Properties) > 0 {
 		sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_MALFORMED,
@@ -1848,7 +1908,7 @@ func (sd *streamDecoder) warnUnresolvedRequired(sourceRow int, u unresolvedWire)
 	}
 	sd.collector.Collect(diag.NewIssue(sd.loadCfg.revalidateSeverity, diag.W_SNAPSHOT_UNRESOLVED_REQUIRED,
 		fmt.Sprintf("required association %q of %s[%s] is unresolved (%s)",
-			u.Relation, sd.refText(sourceRow), diag.ValueText(formatWireKey(u.SourceKey)), u.Reason)).
+			u.Relation, sd.refText(sourceRow), diag.CutValue(formatWireKey(u.SourceKey)), u.Reason)).
 		WithDetail(diag.DetailKeyRelationName, u.Relation).
 		Build())
 }
@@ -1889,7 +1949,7 @@ func (sd *streamDecoder) checkAssociation(what string, sourceRow int, sourceKey 
 		if i := unreadableWireComponent(targetKey); namesTarget && i >= 0 {
 			sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_MALFORMED,
 				fmt.Sprintf("%s of %s under %s carries target key %s, whose component %d is not a scalar graph.ParseKey reads back",
-					what, diag.ValueText(literalWireKey(sourceKey)), relationText, diag.ValueText(literalWireKey(targetKey)), i)).
+					what, diag.CutValue(literalWireKey(sourceKey)), relationText, diag.CutValue(literalWireKey(targetKey)), i)).
 				WithDetail(diag.DetailKeyRelationName, relation).
 				Build())
 		}
@@ -1904,7 +1964,7 @@ func (sd *streamDecoder) checkAssociation(what string, sourceRow int, sourceKey 
 		return schema.Relation{}
 	}
 	source := sd.refAt(sourceRow)
-	at := fmt.Sprintf("%s of %s[%s] under ", what, sd.refText(sourceRow), diag.ValueText(formatWireKey(sourceKey)))
+	at := fmt.Sprintf("%s of %s[%s] under ", what, sd.refText(sourceRow), diag.CutValue(formatWireKey(sourceKey)))
 	rel, ok := t.Relation(relation)
 	if !ok || !rel.IsAssociation() {
 		sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_GRAPH_UNKNOWN_RELATION,
@@ -1958,7 +2018,7 @@ func (sd *streamDecoder) checkOnes(idx *docIndex) {
 			markSlot(&idx.refusedRoots, slotCoord{row: slot.row, key: slot.key})
 			sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_GRAPH_CARDINALITY,
 				fmt.Sprintf("(one) association %q of %s[%s] holds %d records",
-					slot.relation, sd.refText(slot.row), diag.ValueText(slot.key), n)).
+					slot.relation, sd.refText(slot.row), diag.CutValue(slot.key), n)).
 				WithDetail(diag.DetailKeyTypeName, sd.refAt(slot.row)).
 				WithDetail(diag.DetailKeyRelationName, slot.relation).
 				Build())
@@ -1993,7 +2053,7 @@ func (sd *streamDecoder) validateEdgeRefs(idx *docIndex) {
 		targetRef := sd.refAt(ref.targetRow)
 		sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_DANGLING_REFERENCE,
 			fmt.Sprintf("edge in %s[%s] references %s[%s] which does not exist",
-				sd.refText(ref.slot.row), diag.ValueText(ref.slot.key), sd.refText(ref.targetRow), diag.ValueText(ref.targetKey))).
+				sd.refText(ref.slot.row), diag.CutValue(ref.slot.key), sd.refText(ref.targetRow), diag.CutValue(ref.targetKey))).
 			WithDetail(diag.DetailKeyTypeName, sourceRef).
 			WithDetail(diag.DetailKeyPrimaryKey, ref.slot.key).
 			WithDetail(diag.DetailKeyTargetType, targetRef).
@@ -2070,8 +2130,8 @@ func (sd *streamDecoder) loadDocument(groups []instanceGroupWire, diags diagWire
 						Relation:   relName,
 						SourceType: id,
 						SourceKey:  ip.PrimaryKey,
-						TargetKey:  immutable.WrapKey(normalizeSlice(e.TargetKey)),
-						Properties: immutable.WrapProperties(normalizeMap(e.Properties)),
+						TargetKey:  immutable.WrapKey(readWireKey(e.TargetKey)),
+						Properties: immutable.WrapProperties(readEdgeProperties(e.Properties, sd.relation(row, relName))),
 					})
 				}
 			}
@@ -2087,13 +2147,13 @@ func (sd *streamDecoder) loadDocument(groups []instanceGroupWire, diags diagWire
 	for _, uw := range diags.Unresolved {
 		up := snapparts.Unresolved{
 			SourceType: sd.tableIDs[*uw.SourceType],
-			SourceKey:  immutable.WrapKey(normalizeSlice(uw.SourceKey)),
+			SourceKey:  immutable.WrapKey(readWireKey(uw.SourceKey)),
 			Relation:   uw.Relation,
 			Reason:     uw.Reason,
-			Properties: immutable.WrapProperties(normalizeMap(uw.Properties)),
+			Properties: immutable.WrapProperties(readEdgeProperties(uw.Properties, sd.relation(*uw.SourceType, uw.Relation))),
 		}
 		if uw.TargetKey != nil {
-			up.TargetKey = immutable.WrapKey(normalizeSlice(uw.TargetKey))
+			up.TargetKey = immutable.WrapKey(readWireKey(uw.TargetKey))
 		}
 		unresParts = append(unresParts, up)
 	}
@@ -2123,10 +2183,11 @@ func (sd *streamDecoder) loadDocument(groups []instanceGroupWire, diags diagWire
 // from the identity.
 func (sd *streamDecoder) instanceParts(row int, inst instWire) snapparts.Instance {
 	id := sd.tableIDs[row]
+	t, _ := sd.schema.TypeByID(id)
 	ip := snapparts.Instance{
 		TypeID:     id,
-		PrimaryKey: immutable.WrapKey(normalizeSlice(inst.Key)),
-		Properties: immutable.WrapProperties(normalizeMap(inst.Properties)),
+		PrimaryKey: immutable.WrapKey(readWireKey(inst.Key)),
+		Properties: immutable.WrapProperties(readProperties(inst.Properties, t)),
 	}
 
 	if len(inst.Composed) > 0 {
@@ -2261,7 +2322,7 @@ func formatWireKey(key []any) string {
 	if key == nil {
 		return "[]"
 	}
-	k := immutable.WrapKey(normalizeSlice(key))
+	k := immutable.WrapKey(readWireKey(key))
 	return k.String()
 }
 
@@ -2276,7 +2337,7 @@ func (sd *streamDecoder) canonicalWireKey(row int, key []any) string {
 	if key == nil {
 		return "[]"
 	}
-	components := normalizeSlice(key)
+	components := readWireKey(key)
 	for _, pos := range sd.rowKeyPositions(row) {
 		if pos.index >= len(components) {
 			break
@@ -2322,16 +2383,16 @@ func (sd *streamDecoder) rowKeyPositions(row int) []wireKeyPosition {
 	return sd.keyPositions[row]
 }
 
-// normalizeSlice applies NormalizeValue to a copy of each element in a slice.
-// NormalizeValue rewrites a nested list or map in place, and a refusal reads the
-// document's numbers after an address has normalized them.
-func normalizeSlice(s []any) []any {
+// readWireKey reads a copy of each component of a wire key by the value rule. The
+// copy keeps the document's own numbers for a refusal that reads them after an
+// address has read the key.
+func readWireKey(s []any) []any {
 	if s == nil {
 		return nil
 	}
 	result := make([]any, len(s))
 	for i, v := range s {
-		result[i] = immutable.NormalizeValue(copyWireValue(v))
+		result[i] = value.Read(copyWireValue(v))
 	}
 	return result
 }
@@ -2355,14 +2416,38 @@ func copyWireValue(v any) any {
 	}
 }
 
-// normalizeMap applies NormalizeValue to each value in a map.
-func normalizeMap(m map[string]any) map[string]any {
+// readProperties reads each property of a materialized instance at the
+// constraint t declares for it, so a number at a Float is a float64 whatever its
+// spelling. The caller owns m: a list or a map in it is rewritten in place.
+func readProperties(m map[string]any, t schema.Type) map[string]any {
 	if m == nil {
 		return nil
 	}
 	result := make(map[string]any, len(m))
 	for k, v := range m {
-		result[k] = immutable.NormalizeValue(v)
+		p, _ := t.Property(k)
+		result[k] = value.ReadAt(v, p.Constraint())
 	}
 	return result
+}
+
+// readEdgeProperties is readProperties for an edge's or a record's properties,
+// whose constraints rel declares.
+func readEdgeProperties(m map[string]any, rel schema.Relation) map[string]any {
+	if m == nil {
+		return nil
+	}
+	result := make(map[string]any, len(m))
+	for k, v := range m {
+		p, _ := rel.Property(k)
+		result[k] = value.ReadAt(v, p.Constraint())
+	}
+	return result
+}
+
+// relation returns the relation a materialized row's type declares under name.
+func (sd *streamDecoder) relation(row int, name string) schema.Relation {
+	t, _ := sd.schema.TypeByID(sd.tableIDs[row])
+	rel, _ := t.Relation(name)
+	return rel
 }

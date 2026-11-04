@@ -376,10 +376,10 @@ func (a *Adapter) BatchEdgeQueries(
 
 // propsToParamMap converts instance properties to a Neo4j-driver-compatible
 // map, routing every scalar through [coerceScalar] and every []any slice through
-// [coerceSlice] against the property's schema constraint. This repairs the
-// JSON round-trip — a whole-number Float decoded as int64, and Date/Timestamp
-// values carried as strings — so the driver receives native types that satisfy
-// Neo4j TYPE constraints (IS :: FLOAT, IS :: DATE, IS :: ZONED DATETIME).
+// [coerceSlice] against the property's schema constraint. An integer at a Float becomes a
+// float64 and a Date or Timestamp string a driver temporal value, so the driver
+// receives native types that satisfy Neo4j TYPE constraints (IS :: FLOAT,
+// IS :: DATE, IS :: ZONED DATETIME).
 // Returns an error, naming the offending property, if a value cannot be coerced
 // to its declared kind (e.g. an unparseable Timestamp/Date string). Properties
 // are processed in sorted key order, so when several fail the error names the
@@ -422,11 +422,10 @@ func propsToParamMap(props immutable.Properties, schemaType schema.Type) (map[st
 var errNoForm = refusal.New(ErrUnrepresentable, "holds a list or a map nested past the depth this adapter writes")
 
 // errUnheldNumber refuses a json.Number no driver number holds: a literal no
-// finite float64 holds, or an integer literal no int64 holds outside a Float that
-// is nested past the 64 levels the .ys reader normalizes, since nearer the top
-// that reader reads it as a float64, which the driver stores. Only a snapshot
-// whose values no validator judged holds one.
-var errUnheldNumber = refusal.New(ErrUnrepresentable, "holds a json.Number no int64 or finite float64 holds, so the server would store another number")
+// finite float64 holds, or an integer literal no int64 holds outside a Float and
+// a Vector element, which the .ys reader keeps as its text. Only a snapshot whose values no
+// validator judged holds one.
+var errUnheldNumber = refusal.New(ErrUnrepresentable, "holds a json.Number no driver number holds, so the server would store another number")
 
 // firstRefusedProp returns the least name in props whose value [heldForm] refuses
 // at the constraint constraintOf returns for it, with its fault. A batch of sound
@@ -727,8 +726,9 @@ func widenInt64(v any) (int64, bool) {
 // coerceRelProps coerces a relationship property map against the relation's
 // declared property constraints, so typed edge properties (e.g. a Timestamp or
 // Float on an association) reach the driver as native types. A value that holds
-// none becomes nil, declared or not, and each other value of a property rel
-// declares routes through [coerceValue], the same chokepoint the node path uses.
+// none becomes nil, declared or not. Each other value is read by [heldForm] at
+// the constraint rel declares for it, or at none, and a value of a property rel
+// declares then routes through [coerceValue], as on the node path.
 //
 // Edge properties are scalar by language rule: List and Vector types on a
 // relationship are rejected at schema-load (diag.E_LIST_ON_EDGE /
@@ -736,8 +736,8 @@ func widenInt64(v any) (int64, bool) {
 // constraint is never a List. A []any value still reaches coerceValue's list
 // arm, which refuses it against the scalar constraint.
 //
-// Any other property not declared on rel passes through unchanged, for a zero
-// relation or one with no declared properties too. Properties are processed
+// A property rel does not declare passes through as [heldForm] reads it, for a
+// zero relation or one with no declared properties too. Properties are processed
 // in sorted key order, so a coercion error names the lexicographically-first
 // failing property on every run (matching [CoerceParams] and [propsToParamMap]).
 // Mutates and returns props.
@@ -749,14 +749,21 @@ func coerceRelProps(props map[string]any, rel schema.Relation) (map[string]any, 
 			props[k] = nil
 			continue
 		}
-		if !declares {
+		var c schema.Constraint
+		if declares {
+			if p, ok := rel.Property(k); ok {
+				c = p.Constraint()
+			}
+		}
+		read, err := heldForm(v, c)
+		if err != nil {
+			return nil, fmt.Errorf("relation %q: property %q: %w", rel.Name(), k, err)
+		}
+		if c == nil {
+			props[k] = read
 			continue
 		}
-		p, ok := rel.Property(k)
-		if !ok {
-			continue
-		}
-		cv, err := coerceValue(p.Constraint(), v)
+		cv, err := coerceValue(c, read)
 		if err != nil {
 			return nil, fmt.Errorf("relation %q: property %q: %w", rel.Name(), k, err)
 		}

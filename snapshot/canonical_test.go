@@ -242,10 +242,9 @@ func TestMarshal_CanonicalizesALoadedValue(t *testing.T) {
 	}
 }
 
-// TestMarshal_HealsOrPassesThroughNonConformingText pins the write contract on the
-// three new kinds, mirroring what TestMarshal_HealsNarrowedFloats pins for
-// Float: the write arm heals what it can, preserves what it cannot, and never
-// fails a write.
+// TestMarshal_HealsOrPassesThroughNonConformingText pins the write contract on
+// Timestamp, Date and UUID: the write arm heals what it can, preserves what it
+// cannot, and never fails a write.
 func TestMarshal_HealsOrPassesThroughNonConformingText(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()

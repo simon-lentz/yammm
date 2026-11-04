@@ -631,9 +631,8 @@ func TestCoerceScalar_TimestampCustomFormatDirect(t *testing.T) {
 
 func TestCoerceParams_VectorElementCoercion(t *testing.T) {
 	t.Parallel()
-	// A Vector value carried as []any{int64...} — the shape a .ys snapshot load
-	// produces (NormalizeValue narrows whole-number JSON to int64), or a
-	// hand-built direct-Cypher param — must element-coerce to []float64, the same
+	// A Vector value carried as []any{int64...} — a hand-built direct-Cypher
+	// param — must element-coerce to []float64, the same
 	// rule the List paths apply. A Vector is float-valued, so reaching the driver
 	// as []any (or a list of int64) would be rejected against its FLOAT-list type.
 	params := map[string]any{"embedding": []any{int64(1), int64(2), int64(3)}}

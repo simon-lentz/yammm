@@ -435,14 +435,16 @@ var (
 
 	// E_GRAPH_INVALID_PK indicates a keyed type's primary key that is empty,
 	// has the wrong arity, has a key property that is absent or null, or
-	// disagrees with the instance's own key properties; or an association
-	// target key of the wrong arity.
+	// disagrees with the instance's own key properties; an association target
+	// key of the wrong arity; or a key stored on a composed child whose type
+	// declares no primary key.
 	E_GRAPH_INVALID_PK = NewCode("E_GRAPH_INVALID_PK", CategoryGraph)
 )
 
 // Snapshot persistence codes.
 var (
-	// E_SNAPSHOT_MALFORMED indicates the .ys file is not valid JSON, has the
+	// E_SNAPSHOT_MALFORMED indicates the .ys file is not valid JSON, has a
+	// header past snapshot.MaxHeaderSize where only the header is read, has the
 	// wrong outer shape (the four top-level keys, in order, each once and none
 	// null, with nothing after them, and no object repeating a member name or
 	// spelling a declared one in another case), or states content a structural

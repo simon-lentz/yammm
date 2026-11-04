@@ -91,6 +91,7 @@ func checkTree(r *structureRules, position string, n Instance) {
 	if !r.identity(id, positionAt(position, n.primaryKey.String())) {
 		for _, relName := range names {
 			for _, child := range composed[relName] {
+				r.keylessPartKey(child)
 				checkTree(r, "composed child", child)
 			}
 		}
@@ -101,6 +102,7 @@ func checkTree(r *structureRules, position string, n Instance) {
 		children := composed[relName]
 		checkSlot(r, t, n, relName, children)
 		for _, child := range children {
+			r.keylessPartKey(child)
 			checkTree(r, "composed child", child)
 		}
 	}
@@ -127,7 +129,7 @@ func (r *structureRules) identity(id schema.TypeID, at string) bool {
 
 // positionAt names an instance position and the key standing there.
 func positionAt(position, key string) string {
-	return position + " position, key " + diag.ValueText(key)
+	return position + " position, key " + diag.CutValue(key)
 }
 
 // typesEntry refuses a types entry s cannot resolve, and a type that cannot hold
@@ -185,7 +187,7 @@ func checkSlot(r *structureRules, t schema.Type, parent Instance, relName string
 		parentName := schema.TagForm(r.s, parent.typeID)
 		r.c.Collect(diag.NewIssue(diag.Error, diag.E_GRAPH_UNKNOWN_RELATION,
 			fmt.Sprintf("%s: %s[%s] holds composed children under %s, which its type does not declare as a composition",
-				importOp, parentName, diag.ValueText(parent.primaryKey.String()), diag.QuoteValue(relName))).
+				importOp, parentName, diag.CutValue(parent.primaryKey.String()), diag.QuoteValue(relName))).
 			WithDetail(diag.DetailKeyTypeName, parentName).
 			WithDetail(diag.DetailKeyRelationName, relName).Build())
 		return
@@ -194,7 +196,7 @@ func checkSlot(r *structureRules, t schema.Type, parent Instance, relName string
 		parentName := schema.TagForm(r.s, parent.typeID)
 		r.c.Collect(diag.NewIssue(diag.Error, diag.E_DUPLICATE_COMPOSED_PK,
 			fmt.Sprintf("%s: %s[%s] composition %q: (one) cardinality violated, got %d children",
-				importOp, parentName, diag.ValueText(parent.primaryKey.String()), relName, len(children))).
+				importOp, parentName, diag.CutValue(parent.primaryKey.String()), relName, len(children))).
 			WithDetail(diag.DetailKeyTypeName, parentName).
 			WithDetail(diag.DetailKeyRelationName, relName).
 			WithDetail(diag.DetailKeyJSONField, rel.FieldName()).Build())
@@ -211,7 +213,7 @@ func checkSlot(r *structureRules, t schema.Type, parent Instance, relName string
 		parentName := schema.TagForm(r.s, parent.typeID)
 		r.c.Collect(diag.NewIssue(diag.Error, diag.E_GRAPH_INVALID_COMPOSITION,
 			fmt.Sprintf("%s: %s[%s] composition %q child %d is of type %s; the composition declares %s",
-				importOp, parentName, diag.ValueText(parent.primaryKey.String()), relName, i, got, want)).
+				importOp, parentName, diag.CutValue(parent.primaryKey.String()), relName, i, got, want)).
 			WithDetail(diag.DetailKeyTypeName, parentName).
 			WithDetail(diag.DetailKeyRelationName, relName).
 			WithDetail(diag.DetailKeyExpected, want.String()).
@@ -251,7 +253,7 @@ func siblingKeys(r *structureRules, parent Instance, rel schema.Relation, childr
 			parentName := schema.TagForm(r.s, parent.typeID)
 			r.c.Collect(diag.NewIssue(diag.Error, diag.E_DUPLICATE_COMPOSED_PK,
 				fmt.Sprintf("%s: %s[%s] composition %q holds children %d and %d at key %s",
-					importOp, parentName, diag.ValueText(parent.primaryKey.String()), rel.Name(), first, i, diag.ValueText(key))).
+					importOp, parentName, diag.CutValue(parent.primaryKey.String()), rel.Name(), first, i, diag.CutValue(key))).
 				WithDetail(diag.DetailKeyTypeName, parentName).
 				WithDetail(diag.DetailKeyRelationName, rel.Name()).
 				WithDetail(diag.DetailKeyPrimaryKey, key).Build())
@@ -287,7 +289,7 @@ func address(r *structureRules, t schema.Type, root Instance) {
 	case !held:
 		r.addresses[slot] = true
 	default:
-		r.refuse(diag.E_DUPLICATE_PK, fmt.Sprintf("two instances of type %s at address %s: their keys are one under this schema", id, diag.ValueText(slot.key)))
+		r.refuse(diag.E_DUPLICATE_PK, fmt.Sprintf("two instances of type %s at address %s: their keys are one under this schema", id, diag.CutValue(slot.key)))
 	}
 }
 
@@ -301,10 +303,26 @@ func (r *structureRules) key(position string, t schema.Type, id schema.TypeID, k
 	if err := checkKey(t, key, props.Get, r.canon); err != nil {
 		name := schema.TagForm(r.s, id)
 		r.c.Collect(diag.NewIssue(diag.Error, diag.E_GRAPH_INVALID_PK,
-			fmt.Sprintf("%s: %s of type %s at %s: %s", importOp, position, name, diag.ValueText(key.String()), err)).
+			fmt.Sprintf("%s: %s of type %s at %s: %s", importOp, position, name, diag.CutValue(key.String()), err)).
 			WithDetail(diag.DetailKeyTypeName, name).
 			WithDetail(diag.DetailKeyPrimaryKey, key.String()).Build())
 	}
+}
+
+// keylessPartKey refuses a key stored on a composed child whose type declares no
+// primary key, as the snapshot reader refuses it: [Graph.Add] stores none there,
+// and a reload would hold an address no rule reads. A root of such a type is the
+// root rule's one break.
+func (r *structureRules) keylessPartKey(child Instance) {
+	t, ok := r.s.TypeByID(child.typeID)
+	if !ok || t.HasPrimaryKey() || child.primaryKey.Len() == 0 {
+		return
+	}
+	name := schema.TagForm(r.s, child.typeID)
+	r.c.Collect(diag.NewIssue(diag.Error, diag.E_GRAPH_INVALID_PK,
+		fmt.Sprintf("%s: composed child of type %s at %s: its type declares no primary key, so it stores none", importOp, name, diag.CutValue(child.primaryKey.String()))).
+		WithDetail(diag.DetailKeyTypeName, name).
+		WithDetail(diag.DetailKeyPrimaryKey, child.primaryKey.String()).Build())
 }
 
 // names refuses a stored property name t does not declare, own or inherited.
@@ -312,7 +330,7 @@ func (r *structureRules) key(position string, t schema.Type, id schema.TypeID, k
 func (r *structureRules) names(position string, t schema.Type, id schema.TypeID, key immutable.Key, props immutable.Properties) {
 	for _, name := range undeclaredNames(props, func(n string) bool { _, ok := t.Property(n); return ok }) {
 		r.refuse(diag.E_UNKNOWN_FIELD, fmt.Sprintf("%s %s[%s] holds property %s, which it does not declare",
-			position, id, diag.ValueText(key.String()), diag.QuoteValue(name)))
+			position, id, diag.CutValue(key.String()), diag.QuoteValue(name)))
 	}
 }
 
@@ -346,7 +364,7 @@ func (r *structureRules) association(rec associationRecord) bool {
 	}
 	before := r.c.ErrorCount()
 	sourceName := schema.TagForm(r.s, rec.source)
-	at := fmt.Sprintf("%s %s[%s] under ", rec.position, sourceName, diag.ValueText(rec.sourceKey.String()))
+	at := fmt.Sprintf("%s %s[%s] under ", rec.position, sourceName, diag.CutValue(rec.sourceKey.String()))
 	rel, ok := t.Relation(rec.relation)
 	if !ok || !rel.IsAssociation() {
 		r.c.Collect(diag.NewIssue(diag.Error, diag.E_GRAPH_UNKNOWN_RELATION,
@@ -447,7 +465,7 @@ func (r *structureRules) oneOverflow() {
 			name := schema.TagForm(r.s, slot.source)
 			r.c.Collect(diag.NewIssue(diag.Error, diag.E_GRAPH_CARDINALITY,
 				fmt.Sprintf("%s: (one) association %q of %s[%s] holds %d records",
-					importOp, slot.relation, name, diag.ValueText(slot.key), n)).
+					importOp, slot.relation, name, diag.CutValue(slot.key), n)).
 				WithDetail(diag.DetailKeyTypeName, name).
 				WithDetail(diag.DetailKeyRelationName, slot.relation).Build())
 		}

@@ -171,7 +171,8 @@
 //
 // [Adapter.BatchNodeQueries] and [Adapter.BatchEdgeQueries] operate on a
 // complete [graph.Snapshot] for high-throughput batch writes. They are the
-// write surface, and the package has no single-item write.
+// snapshot's write surface, and the package has no single-item write. Hand-built
+// Cypher can use [BuildBatchRelationshipMergeQuery] and [CoerceParams].
 //
 // Both require a [GraphShape] that [Adapter.ShapeForSchema] built from the
 // snapshot's schema object, and refuse any other: another load can declare a key
@@ -187,8 +188,8 @@
 // refuses these values: one its constraint's coercion refuses, a nested collection's, a map at a
 // property the schema declares, a list or a map a document nests more than 256
 // levels deep, a [encoding/json.Number] no driver number holds, or a primary key
-// that is absent or holds no value. An integer
-// at a Float position passes them and rounds to its nearest float64. No snapshot these writers accept holds a property the schema does not
+// that is absent or holds no value. An integer a finite float64 holds passes
+// them at a Float position and rounds to its nearest float64. No snapshot these writers accept holds a property the schema does not
 // declare: the validator keeps one out of a graph, and
 // [github.com/simon-lentz/yammm/snapshot.Load] and [graph.NewFromSnapshot] refuse
 // one. Of the values the mark refuses, a validated snapshot holds only a nested
@@ -212,9 +213,8 @@
 //
 //   - Float: an int, int8 to int64, uint, uint8 to uint64 or float32 ->
 //     float64 (a uintptr or a named type is a coercion failure); a
-//     float64 passes through. Repairs the JSON round-trip where a whole-number
-//     Float decodes as int64 and Neo4j rejects it against an IS :: FLOAT
-//     constraint. A non-numeric value is a coercion failure and returns an error.
+//     float64 passes through, so a caller's integer at a Float meets an
+//     IS :: FLOAT constraint. A non-numeric value is a coercion failure and returns an error.
 //   - Integer: an int, int8 to int64, uint, uint8 to uint64 -> int64 (a uintptr
 //     or a named type is a coercion failure); an int64 passes
 //     through. A float is a coercion failure and returns an error, whole or
@@ -263,7 +263,9 @@
 // transforming kind only ever receives the types its strict set accepts (Float:
 // float64; Integer: int64; Timestamp and Date: the string the validator stores),
 // so strictness fires only on a value no validator refused at Error: a hand-built
-// direct-Cypher param, or one snapshot.Load read without revalidating at Error.
+// direct-Cypher param, one snapshot.Load read without revalidating at Error, or
+// one graph.NewFromSnapshot imported under another schema, which holds no value
+// to its constraint.
 //
 // A []any at a List or a Vector is element-coerced, which also requires a Go string
 // of a String, UUID, Enum or Pattern element and a bool of a Boolean element, where a
@@ -272,8 +274,9 @@
 // other JSON number literal as the driver's number before the rule: at a Float
 // its nearest float64, elsewhere an integer literal as the int64 it spells and a
 // float literal as its nearest float64, which an Integer refuses as a float. A
-// literal no finite float64 holds, or no int64 holds outside a Float where the
-// .ys reader left it a json.Number, is refused before the rule. A value of any other Go type at a collection constraint
+// literal no finite float64 holds, or no int64 holds outside a Float and a
+// Vector element, where the .ys reader left it a json.Number, is refused before
+// the rule. A value of any other Go type at a collection constraint
 // is returned unchanged, save a map, refused above, and a value at a List whose
 // element is a List or a Vector: Neo4j has no nested collection property type, so a
 // value there that holds one, an empty list included, is an error wrapping
@@ -410,8 +413,9 @@
 // set aside because the schema owns no label they carry, or could not declare
 // them as they stand under this configuration ([RemoteIndex.Declarable] states
 // the index side's rule). One can still stand as the Actual of a Drift, where
-// it holds the name of a declaration nothing realises, or it is a UNIQUE or
-// NODE KEY over the key a declaration of the other kind needs: a NODE KEY under
+// it holds the name of a declaration nothing realises, already serves the
+// definition of an index a declaration asks for, or is a UNIQUE or NODE KEY
+// over the key a declaration of the other kind needs: a NODE KEY under
 // [WithEdition](Community), or one on a declared label the owned set leaves out.
 // It is deliberately not drift; in a database shared with other applications a
 // non-zero count is the normal state. It exists so that "0 to drop" cannot be

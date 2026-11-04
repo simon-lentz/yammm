@@ -23,10 +23,10 @@ func QuoteValue(s string) string {
 	return strconv.Quote(head) + "… (" + strconv.Itoa(len(s)) + " bytes)"
 }
 
-// ValueText renders text a message shows unquoted, such as a number literal,
+// CutValue renders text a message shows unquoted, such as a number literal,
 // a key's JSON or a type identity: cut as [QuoteValue] cuts it. Text that is
 // not valid UTF-8 is rendered by QuoteValue, so the result is valid UTF-8.
-func ValueText(s string) string {
+func CutValue(s string) string {
 	if !utf8.ValidString(s) {
 		return QuoteValue(s)
 	}

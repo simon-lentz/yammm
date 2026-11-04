@@ -70,146 +70,10 @@ func TestWireFloat_MatchesEncodingJSON(t *testing.T) {
 	}
 }
 
-// Every number a snapshot can hold under a float-bearing constraint reaches the
-// wire-float wrapper. A value that falls through emits int-shaped and narrows on
-// the next load, which is the narrowing the emitter exists to remove. A
-// json.Number is what the reader holds past its nesting depth.
-func TestWireNumeric_EveryNumericKind(t *testing.T) {
-	t.Parallel()
-
-	cases := []struct {
-		name string
-		in   any
-	}{
-		{"float64", float64(2)},
-		{"int64", int64(2)},
-		{"json.Number int-shaped", json.Number("2")},
-		{"json.Number float-shaped", json.Number("2.0")},
-		{"json.Number exponent", json.Number("2e0")},
-	}
-
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			got := wireNumeric(tc.in)
-			m, ok := got.(json.Marshaler)
-			if !ok {
-				t.Fatalf("wireNumeric(%T) = %T, which is no wire float — this value still emits int-shaped", tc.in, got)
-			}
-			b, err := m.MarshalJSON()
-			if err != nil {
-				t.Fatalf("MarshalJSON: %v", err)
-			}
-			if string(b) != "2.0" {
-				t.Errorf("emitted %s, want 2.0", b)
-			}
-		})
-	}
-}
-
-// A json.Number is classified by the reader's own rule, so the writer and the
-// reader cannot disagree about what a literal means. A literal neither parser
-// accepts passes through, because inventing a value for it would write data
-// the document never carried.
-func TestWireNumeric_JSONNumberUsesTheReaderRule(t *testing.T) {
-	t.Parallel()
-	cases := []struct {
-		name string
-		in   json.Number
-		want string // "" means the value passes through unwrapped
-	}{
-		{"int-shaped heals", json.Number("1860000"), "1860000.0"},
-		{"float-shaped is kept", json.Number("0.1"), "0.1"},
-		{"exponent is kept", json.Number("1e2"), "100.0"},
-		{"negative int-shaped heals", json.Number("-3"), "-3.0"},
-		{"the integer literal -0 keeps its sign", json.Number("-0"), "-0.0"},
-		{"beyond int64 falls back to float", json.Number("99999999999999999999"), "100000000000000000000.0"},
-		{"int-shaped past exact conversion passes through", json.Number("9223372036854775807"), ""},
-		{"malformed passes through", json.Number("not a number"), ""},
-		{"empty passes through", json.Number(""), ""},
-	}
-
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			got := wireNumeric(tc.in)
-			m, wrapped := got.(json.Marshaler)
-			if tc.want == "" {
-				if wrapped {
-					t.Fatalf("wireNumeric(%q) wrapped a literal no parser accepts", tc.in)
-				}
-				if got != any(tc.in) {
-					t.Errorf("wireNumeric(%q) = %#v, want it untouched", tc.in, got)
-				}
-				return
-			}
-			if !wrapped {
-				t.Fatalf("wireNumeric(%q) = %T, which is no wire float — it still emits int-shaped", tc.in, got)
-			}
-			b, err := m.MarshalJSON()
-			if err != nil {
-				t.Fatalf("MarshalJSON: %v", err)
-			}
-			if string(b) != tc.want {
-				t.Errorf("wireNumeric(%q) emitted %s, want %s", tc.in, b, tc.want)
-			}
-		})
-	}
-}
-
-// A non-numeric value passes through untouched: Load re-validates only when the
-// caller asks, so a hand-crafted document can put anything in a float position.
-func TestWireNumeric_NonNumericPassesThrough(t *testing.T) {
-	t.Parallel()
-	for _, v := range []any{"two", true, nil, []any{1.0}, map[string]any{}} {
-		if got := wireNumeric(v); got != nil && v == nil {
-			t.Errorf("wireNumeric(nil) = %v, want nil", got)
-		} else if v != nil {
-			if _, wrapped := wireNumeric(v).(json.Marshaler); wrapped {
-				t.Errorf("wireNumeric(%T) wrapped a non-numeric value as a float", v)
-			}
-		}
-	}
-}
-
-// Healing turns on exact convertibility, not on magnitude. An integer beyond
-// 2^53 that converts exactly did come from a whole float and must heal; one
-// that does not convert exactly cannot have, and healing it would invent
-// precision.
-func TestExactWireInt_TurnsOnConvertibility(t *testing.T) {
-	t.Parallel()
-
-	exact := []int64{
-		0, 1, -1, 1 << 53, -(1 << 53),
-		1 << 62, -(1 << 62), // beyond 2^53 and exactly representable
-		1_000_000_000_000_000_000,
-		math.MinInt64, // -2^63 is exactly representable
-	}
-	for _, n := range exact {
-		f, ok := exactWireInt(n)
-		if !ok {
-			t.Errorf("exactWireInt(%d) = not exact, want exact — a narrowed whole float here never heals", n)
-			continue
-		}
-		if int64(f) != n {
-			t.Errorf("exactWireInt(%d) = %v, which converts back to %d", n, f, int64(f))
-		}
-	}
-
-	inexact := []int64{
-		(1 << 53) + 1, -((1 << 53) + 1),
-		(1 << 62) + 1,
-		math.MaxInt64, // float64 rounds it up to 2^63
-	}
-	for _, n := range inexact {
-		if _, ok := exactWireInt(n); ok {
-			t.Errorf("exactWireInt(%d) = exact, want inexact — healing it would change the value", n)
-		}
-	}
-}
-
-// Every element of a vector emits with a float indicator, whole or fractional.
-func TestWireValue_AVectorsElementsEmitAsFloats(t *testing.T) {
+// Every float element of a vector emits with a float indicator, whole or
+// fractional, and an integer element is written as held: the reader reads every
+// number literal at a Vector element as its nearest float64.
+func TestWireValue_AVectorsFloatsEmitAsFloats(t *testing.T) {
 	t.Parallel()
 	got := wireValue([]any{float64(1), 2.5, int64(3)}, schema.VectorConstraint{})
 	elems, ok := got.([]any)
@@ -219,42 +83,18 @@ func TestWireValue_AVectorsElementsEmitAsFloats(t *testing.T) {
 	if len(elems) != 3 {
 		t.Fatalf("got %d elements, want 3", len(elems))
 	}
-	for i, e := range elems {
+	for i, e := range elems[:2] {
 		if _, ok := e.(json.Marshaler); !ok {
 			t.Errorf("element %d is %T, which is no wire float — it would emit int-shaped", i, e)
 		}
+	}
+	if elems[2] != int64(3) {
+		t.Errorf("element 2 is %#v, want the int64 as held", elems[2])
 	}
 
 	// A document can state a string under a Vector; it passes through untouched,
 	// or the assertions above would hold for anything.
 	if got := wireValue("not a vector", schema.VectorConstraint{}); got != "not a vector" {
 		t.Errorf("wireValue over a string returned %#v, want it untouched", got)
-	}
-}
-
-// The exactness guard turns on convertibility, so a value it cannot represent
-// passes through. Driving every kind at 2 alone never reaches that arm.
-func TestWireNumeric_InexactValuesPassThrough(t *testing.T) {
-	t.Parallel()
-	cases := []struct {
-		name    string
-		in      any
-		wrapped bool
-	}{
-		{"int64 exactly convertible beyond 2^53", int64(1) << 62, true},
-		{"int64 not exactly convertible", int64(1)<<62 + 1, false},
-		{"MaxInt64", int64(math.MaxInt64), false},
-		{"negative exactly convertible", int64(math.MinInt64), true},
-	}
-
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			got := wireNumeric(tc.in)
-			_, wrapped := got.(json.Marshaler)
-			if wrapped != tc.wrapped {
-				t.Errorf("wireNumeric(%v) wrapped = %v, want %v", tc.in, wrapped, tc.wrapped)
-			}
-		})
 	}
 }

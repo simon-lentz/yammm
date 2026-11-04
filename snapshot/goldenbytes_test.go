@@ -13,6 +13,7 @@ import (
 
 	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/instance"
+	"github.com/simon-lentz/yammm/internal/value"
 	"github.com/simon-lentz/yammm/schema"
 	"github.com/simon-lentz/yammm/snapshot"
 )
@@ -39,10 +40,8 @@ func loadFixture(t *testing.T) fixtureFile {
 	data, err := os.ReadFile(path)
 	require.NoError(t, err, "read fixture")
 
-	// Use json.Decoder with UseNumber so integer-shaped float values in
-	// the fixture (e.g., 0.75) survive normalization exactly as they
-	// appear in the JSON bytes — matching the wire-format path's
-	// normalizeMap behavior downstream.
+	// Use json.Decoder with UseNumber so each number in the fixture reaches
+	// normalizeFixtureProps as its text, which it reads as the .ys reader does.
 	dec := json.NewDecoder(bytes.NewReader(data))
 	dec.UseNumber()
 	var ff fixtureFile
@@ -117,17 +116,16 @@ func buildPersonWithEdgeProps(t *testing.T, s schema.Schema, personID, targetKey
 		"EMPLOYER", []any{targetKey}, props)
 }
 
-// normalizeFixtureProps converts json.Number values in the decoded
-// fixture map into Go's native int64 / float64 forms, mirroring the
-// behavior of immutable.NormalizeValue on the wire-format read path.
-// Keeps the fixture's 0.75 value round-trip-stable.
+// normalizeFixtureProps reads the json.Number values in the decoded fixture map
+// by the value rule, as the wire-format read path reads them. Keeps the
+// fixture's 0.75 value round-trip-stable.
 func normalizeFixtureProps(m map[string]any) map[string]any {
 	if m == nil {
 		return nil
 	}
 	out := make(map[string]any, len(m))
 	for k, v := range m {
-		out[k] = immutable.NormalizeValue(v)
+		out[k] = value.Read(v)
 	}
 	return out
 }

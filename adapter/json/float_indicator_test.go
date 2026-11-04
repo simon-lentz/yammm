@@ -65,8 +65,8 @@ func indicatorDoc(t *testing.T, props map[string]any) string {
 
 // A whole-valued Float carries a float indicator, as snapshot.wireValue
 // already emits it, so the value survives this package's own reader: without
-// it the number is int-shaped and immutable.NormalizeNumber's lexical rule
-// reads it back as int64.
+// it the number is int-shaped and this package's reader reads it back as an
+// int64.
 func TestMarshalObject_WholeFloatCarriesTheIndicator(t *testing.T) {
 	t.Parallel()
 	doc := indicatorDoc(t, map[string]any{"id": "r1", "ratio": float64(1)})

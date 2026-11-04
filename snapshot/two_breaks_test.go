@@ -508,7 +508,8 @@ part type K {
 
 // A key property holds its number however the document spells it, so a reference to
 // that number is a reference to the address the refused root states. A negative zero
-// does not read back, so it states no address and a reference to it is its own break.
+// and an integer past int64 do not read back, so each states no address and a
+// reference spelled so is its own break.
 func TestRead_AKeyPropertyStatesItsNumberInAnySpelling(t *testing.T) {
 	t.Parallel()
 	s, res := schema.LoadString(t.Context(), numberKeySchema, "nk.yammm")
@@ -559,7 +560,7 @@ func TestRead_AKeyPropertyStatesItsNumberInAnySpelling(t *testing.T) {
 		{"1.0 and an edge to 1", [][2]string{stated(`1.0`), edgeTo(`1`)}, 1},
 		{"1e0 and an edge to 1", [][2]string{stated(`1e0`), edgeTo(`1`)}, 1},
 		{"1 and an edge to 1", [][2]string{stated(`1`), edgeTo(`1`)}, 1},
-		{"a number past int64 and an edge to its nearest float", [][2]string{stated(`18446744073709551615`), edgeTo(`18446744073709552000`)}, 1},
+		{"a number past int64 and an edge to its nearest float, which is no key", [][2]string{stated(`18446744073709551615`), edgeTo(`18446744073709552000`)}, 2},
 		{"1.0 and a record of 1", [][2]string{stated(`1.0`), recordOf(`1`)}, 1},
 		{"1.0 and a duplicate whose conflict is 1", [][2]string{stated(`1.0`), dupOf(`1`)}, 1},
 		{"-0.0 and a duplicate whose conflict is -0.0", [][2]string{stated(`-0.0`), dupOf(`-0.0`)}, 2},
@@ -698,7 +699,7 @@ func TestRead_ARefusedKeyIsNamedAsSpelled(t *testing.T) {
 		{
 			"a duplicate record's own key",
 			[][2]string{{sbDups, sbDups + `{"type":1,"key":[1.0],` + sbDupInstance + `,"conflict":{"type":1,"key":["c1"]}},`}},
-			`states key [1.0] but its instance carries ["c1"]`, "",
+			`duplicate record 0 states key [1.0], whose component 0 is not a scalar graph.ParseKey reads back`, `[1.0]`,
 		},
 		{
 			"a duplicate record with no key of its own",

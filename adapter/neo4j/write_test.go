@@ -2,6 +2,7 @@ package neo4j
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"reflect"
 	"slices"
@@ -455,9 +456,9 @@ func TestCoerceSlice_TemporalParseFailure(t *testing.T) {
 
 func TestCoerceSlice_VectorElements(t *testing.T) {
 	t.Parallel()
-	// A Vector property carried as []any (the shape a .ys snapshot load produces,
-	// with whole numbers narrowed to int64 by NormalizeValue) must reach the
-	// driver as []float64, not []any. A Vector is float-valued by definition, so
+	// A Vector property carried as []any of int64, which no validator or .ys load
+	// stores, must reach the driver as []float64, not []any. A Vector is
+	// float-valued by definition, so
 	// it coerces elementwise exactly like a List<Float>.
 	s := loadSchema(t, "basic.yammm")
 	st, ok := s.Type("Entity")
@@ -834,6 +835,16 @@ func TestCoerceRelProps(t *testing.T) {
 	// A bad temporal string on a typed edge property surfaces an error.
 	if _, err := coerceRelProps(map[string]any{"observed_at": "not-a-timestamp"}, rel); err == nil {
 		t.Error("want error on unparseable Timestamp edge property, got nil")
+	}
+
+	// A json.Number is coerced as the driver's number heldForm reads, as on the
+	// node path, declared or not.
+	read, err := coerceRelProps(map[string]any{"weight": json.Number("5"), "undeclared": json.Number("7")}, rel)
+	if err != nil {
+		t.Fatalf("unexpected error over json.Number values: %v", err)
+	}
+	if read["weight"] != float64(5) || read["undeclared"] != int64(7) {
+		t.Errorf("json.Number values coerced to %#v and %#v, want float64(5) and int64(7)", read["weight"], read["undeclared"])
 	}
 
 	// A nil relation passes through unchanged.

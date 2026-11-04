@@ -1,7 +1,9 @@
 package graph
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"sync"
@@ -197,7 +199,7 @@ func (g *Graph) add(ctx context.Context, inst instance.ValidInstance, merge bool
 			// children, so the record gets its own childless instance.
 			rejected := newInstance(typeName, typeID, graphInst.PrimaryKey(), graphInst.Properties(), inst.Provenance(), true)
 			diagBuilder := diag.NewIssue(diag.Error, diag.E_DUPLICATE_PK,
-				fmt.Sprintf("duplicate primary key %s for type %q", diag.ValueText(pkString), typeName)).
+				fmt.Sprintf("duplicate primary key %s for type %q", diag.CutValue(pkString), typeName)).
 				WithDetail(diag.DetailKeyTypeName, typeName).
 				WithDetail(diag.DetailKeyPrimaryKey, pkString).
 				WithSpan(inst.Provenance().Span())
@@ -429,7 +431,7 @@ func identityText(s schema.Schema, id schema.TypeID) string {
 	if _, ok := s.TypeByID(id); ok {
 		return id.String()
 	}
-	name := diag.ValueText(id.Name())
+	name := diag.CutValue(id.Name())
 	path := id.SchemaPath()
 	if path.IsZero() {
 		return name
@@ -439,7 +441,7 @@ func identityText(s schema.Schema, id schema.TypeID) string {
 			return path.String() + ":" + name
 		}
 	}
-	return diag.ValueText(path.String()) + ":" + name
+	return diag.CutValue(path.String()) + ":" + name
 }
 
 // instanceTagForm computes the canonical instance tag form for a TypeID.
@@ -477,7 +479,7 @@ func checkKey(typ schema.Type, key immutable.Key, property func(string) (immutab
 		}
 		if !keyComponentAgrees(key.Get(i), val, pk.Constraint(), canon) {
 			return fmt.Errorf("primary key component %d disagrees with property %q (%s vs %s)",
-				i, pk.Name(), diag.ValueText(renderKeyComponent(key.Get(i))), diag.ValueText(renderKeyComponent(val)))
+				i, pk.Name(), diag.CutValue(quoteKeyValue(key.Get(i).Unwrap())), diag.CutValue(quoteKeyValue(val.Unwrap())))
 		}
 		i++
 	}
@@ -485,10 +487,11 @@ func checkKey(typ schema.Type, key immutable.Key, property func(string) (immutab
 }
 
 // keyComponentAgrees reports whether a key component and its property hold the
-// same value. Identical scalar kinds settle it without allocating, which is
-// what keeps the check affordable once per composed child rather than once per
-// root; anything else falls back to the canonical rendering, the form that
-// decides key equality on the wire.
+// same value. Identical scalars settle it without allocating, which is what
+// keeps the check affordable once per composed child rather than once per root;
+// any other pair agrees when both are of one kind and render alike, the form
+// that decides key equality on the wire. The rendering keeps -0.0 and 0.0 apart,
+// and reads a typed nil as an untyped one.
 //
 // Both sides are first put in the form the constraint stores, so two spellings
 // of one Timestamp agree: the graph holds one spelling per value, and refusing
@@ -500,25 +503,16 @@ func keyComponentAgrees(component, property immutable.Value, c schema.Constraint
 		return true
 	}
 	x, y := canon.canonicalOrRaw(component, c), canon.canonicalOrRaw(property, c)
-	switch xv := x.(type) {
-	case string:
-		if yv, ok := y.(string); ok {
-			return xv == yv
-		}
-	case int64:
-		if yv, ok := y.(int64); ok {
-			return xv == yv
-		}
-	case bool:
-		if yv, ok := y.(bool); ok {
-			return xv == yv
-		}
-	}
-	// float64 and nil are deliberately absent. Go equality disagrees with the
-	// canonical rendering on both: -0.0 == 0.0 while WrapKey renders [-0] and
-	// [0], and a typed nil is not == to an untyped one while both render
-	// [null]. The rendering decides key identity, so it decides here.
-	return renderKeyValue(x) == renderKeyValue(y)
+	return sameKind(x, y) && renderKeyValue(x) == renderKeyValue(y)
+}
+
+// sameKind reports whether x and y are of one value kind. The rendering alone
+// does not decide agreement: an int64 1 and a float64 1.0 both render [1], and a
+// float is never an integer.
+func sameKind(x, y any) bool {
+	kx, _ := value.Classify(x)
+	ky, _ := value.Classify(y)
+	return kx == ky
 }
 
 // sameScalar reports whether x and y are one string, int64 or bool. It never
@@ -538,15 +532,37 @@ func sameScalar(x, y any) bool {
 	return false
 }
 
-// renderKeyComponent renders one value in the canonical key form. Diagnostics
-// name the spelling the caller wrote, so they render the value as it arrived.
-func renderKeyComponent(v immutable.Value) string {
-	return renderKeyValue(v.Unwrap())
-}
-
 // renderKeyValue renders one unwrapped value in the canonical key form.
 func renderKeyValue(v any) string {
 	return immutable.WrapKey([]any{v}).String()
+}
+
+// quoteKeyValue renders v as renderKeyValue does, save that every whole float in
+// it keeps a ".0", at any depth, so a message never shows a float as the integer
+// it equals: the two disagree as key values.
+func quoteKeyValue(v any) string {
+	return renderKeyValue(markWholeFloats(immutable.Wrap(v).Clone()))
+}
+
+// markWholeFloats returns v, a value [immutable.Value.Clone] returned, with each
+// float that encoding/json writes with no fraction or exponent replaced by the
+// json.Number of that text and ".0". It rewrites lists and maps in place.
+func markWholeFloats(v any) any {
+	switch t := v.(type) {
+	case float64, float32:
+		if text, err := json.Marshal(t); err == nil && !bytes.ContainsAny(text, ".eE") {
+			return json.Number(string(text) + ".0")
+		}
+	case []any:
+		for i, e := range t {
+			t[i] = markWholeFloats(e)
+		}
+	case map[string]any:
+		for k, e := range t {
+			t[k] = markWholeFloats(e)
+		}
+	}
+	return v
 }
 
 // reject records issue in the per-call collector and in the graph's cumulative
