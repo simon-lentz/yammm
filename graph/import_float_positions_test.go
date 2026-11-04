@@ -113,8 +113,10 @@ func TestNewFromSnapshot_ANumberAtAFloatImportsAsItsFloat64(t *testing.T) {
 
 // An import under another schema copies no properties it rewrites nothing in:
 // where every number at a Float is already a float64, each further instance
-// costs what an instance with no Float costs.
+// costs what an instance with no Float costs. A copy costs at least one
+// allocation an instance, and the race detector's runtime adds a few at random.
 func TestNewFromSnapshot_CopiesNoPropertiesItLeavesAsTheyAre(t *testing.T) {
+	const added = 100
 	growth := func(kind string, v any) float64 {
 		src := "schema \"entry\"\n\ntype T {\n\tid String primary\n\tn " + kind + "\n}\n"
 		built, bound := loadEntry(t, src), loadEntry(t, src)
@@ -130,9 +132,10 @@ func TestNewFromSnapshot_CopiesNoPropertiesItLeavesAsTheyAre(t *testing.T) {
 			snap := snappartstest.Loaded(t, built, snapparts.Parts{Instances: insts})
 			return testing.AllocsPerRun(5, func() { graph.NewFromSnapshot(bound, snap) })
 		}
-		return allocs(200) - allocs(100)
+		return allocs(2*added) - allocs(added)
 	}
-	if float, str := growth("Float", 2.5), growth("String", "s"); float > str {
-		t.Errorf("100 more instances cost %v allocations at a Float, %v at a String; want no more", float, str)
+	if float, str := growth("Float", 2.5), growth("String", "s"); float-str >= added {
+		t.Errorf("%d more instances cost %v allocations at a Float, %v at a String; want fewer than one more an instance",
+			added, float, str)
 	}
 }
