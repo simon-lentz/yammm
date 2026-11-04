@@ -378,6 +378,11 @@ func (r *structureRules) association(rec associationRecord) bool {
 	for _, name := range undeclaredNames(rec.properties, func(n string) bool { _, ok := rel.Property(n); return ok }) {
 		r.refuse(diag.E_UNKNOWN_EDGE_FIELD, fmt.Sprintf("%s holds edge property %s, which the association does not declare", at, diag.QuoteValue(name)))
 	}
+	// An "empty" record stands for an empty list, which the validator refuses at
+	// a (one) association, optional or not.
+	if rec.reason == "empty" && !rel.IsMany() {
+		r.refuse(diag.E_EDGE_SHAPE_MISMATCH, at+` states reason "empty", where Graph.Add records "empty" only under a (many) association`)
+	}
 	namesTarget := !rec.unresolved || rec.reason == "target_missing"
 	if !rec.target.IsZero() {
 		if _, ok := r.s.TypeByID(rec.target); !ok {

@@ -217,6 +217,73 @@ func TestNewFromSnapshot_DropsAnAbsentRecordUnderADroppedAssociation(t *testing.
 	snapshottest.DiffSnapshots(t, add(sPrime), imported.Snapshot())
 }
 
+// An "absent" record under a (one) association is what Graph.Add records for
+// data that names no target there, so an import under another load of the
+// schema keeps it.
+func TestNewFromSnapshot_KeepsAnAbsentRecordUnderAOneAssociation(t *testing.T) {
+	t.Parallel()
+	add := func(s schema.Schema) graph.Snapshot {
+		t.Helper()
+		vi, res := instance.NewValidator(s).ValidateOne(t.Context(), "Person", instance.RawInstance{Properties: map[string]any{"id": "p1"}})
+		if res.HasErrors() {
+			t.Fatalf("validate: %s", res)
+		}
+		g := graph.New(s)
+		mustOK(t, g.Add(t.Context(), vi))
+		return g.Snapshot()
+	}
+	built := add(people(t, "--> WORKS_AT (one) Company"))
+	if records := slices.Collect(built.Unresolved()); len(records) != 1 || records[0].Reason() != "absent" {
+		t.Fatalf("want the one absent record, got %v", records)
+	}
+	sPrime := people(t, "--> WORKS_AT (one) Company")
+	imported, res := graph.NewFromSnapshot(sPrime, built)
+	if res.HasErrors() {
+		t.Fatalf("NewFromSnapshot: %s", res)
+	}
+	snapshottest.DiffSnapshots(t, add(sPrime), imported.Snapshot())
+}
+
+// An "empty" record stands for an empty list, which the validator refuses at a
+// (one) association, so an import under a schema that makes the association
+// (one) refuses the record, required or not.
+func TestNewFromSnapshot_RefusesAnEmptyRecordUnderAOneAssociation(t *testing.T) {
+	t.Parallel()
+	props := map[string]any{"id": "p1", "works_at": []any{}}
+	s := people(t, "--> WORKS_AT (one:many) Company")
+	vi, res := instance.NewValidator(s).ValidateOne(t.Context(), "Person", instance.RawInstance{Properties: props})
+	if res.HasErrors() {
+		t.Fatalf("validate: %s", res)
+	}
+	g := graph.New(s)
+	mustOK(t, g.Add(t.Context(), vi))
+	built := g.Snapshot()
+	if records := slices.Collect(built.Unresolved()); len(records) != 1 || records[0].Reason() != "empty" {
+		t.Fatalf("want the one empty record, got %v", records)
+	}
+	for _, assoc := range []string{"--> WORKS_AT (one) Company", "--> WORKS_AT (_:one) Company"} {
+		t.Run(assoc, func(t *testing.T) {
+			t.Parallel()
+			sPrime := people(t, assoc)
+			if _, res := instance.NewValidator(sPrime).ValidateOne(t.Context(), "Person", instance.RawInstance{Properties: props}); !res.HasCode(diag.E_EDGE_SHAPE_MISMATCH) {
+				t.Fatalf("the validator under %q accepts the data: %s", assoc, res)
+			}
+			imported, res := graph.NewFromSnapshot(sPrime, built)
+			if imported != nil {
+				t.Error("an empty record under a (one) association was installed")
+			}
+			var got []string
+			for issue := range res.Issues() {
+				got = append(got, issue.Code().String()+": "+issue.Message())
+			}
+			want := `E_EDGE_SHAPE_MISMATCH: NewFromSnapshot: unresolved record of Person[["p1"]] under "WORKS_AT" states reason "empty", where Graph.Add records "empty" only under a (many) association`
+			if len(got) != 1 || !strings.HasPrefix(got[0], want) {
+				t.Errorf("issues = %q; want one starting %q", got, want)
+			}
+		})
+	}
+}
+
 // A target_missing record names a target as an edge does, so an association
 // the importing schema retargets refuses it as it refuses the edge.
 func TestNewFromSnapshot_RefusesATargetMissingRecordUnderARetargetedAssociation(t *testing.T) {

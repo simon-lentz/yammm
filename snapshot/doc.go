@@ -23,9 +23,9 @@
 // whose header claims what its instances never earned and hash it. The unforgeable
 // point is the instance layer, and the attestation is the writer's word, not a proof.
 //
-// Every reader of a document refuses text encoding/json would silently rewrite to
-// U+FFFD: a string holding invalid UTF-8 or a surrogate escape that is half of no
-// pair. [Load], [Verify], [Info], [HeaderOnly] and [UpdateMetadata] judge the text
+// Every reader of a document refuses, in the text it reads, what encoding/json
+// would silently rewrite to U+FFFD: a string holding invalid UTF-8 or a surrogate
+// escape that is half of no pair. [Load], [Verify], [Info], [HeaderOnly] and [UpdateMetadata] judge the text
 // of the whole document before its header, with [diag.E_SNAPSHOT_MALFORMED].
 // [HeaderOnlyRead] and [ScanDir] read up to the end of the types table and judge
 // that text last, with the same code. A fault they find first, such as an

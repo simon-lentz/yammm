@@ -149,7 +149,7 @@ if result := ba.Graph().Check(ctx); result.HasErrors() {
 data, result := snapshot.Marshal(ctx, ba.Graph().Snapshot())
 ```
 
-To resume a persisted batch on a later run, seed the assembler from a loaded snapshot with `graph.NewBatchAssemblerFromSnapshot(ctx, s, snap)`, which takes a snapshot bound to the schema as it stands and refuses one built against another schema that breaks any of the schema's structural facts, save that it derives the Records fact's records again and drops an absent record under a relation that is no association of the schema — new adds resolve against the seeded instances and `Graph().Check` covers the union. Snapshot metadata can be rewritten in place, without a full load/re-marshal round-trip, via `snapshot.UpdateMetadataOrReMarshal`.
+To resume a persisted batch on a later run, seed the assembler from a loaded snapshot with `graph.NewBatchAssemblerFromSnapshot(ctx, s, snap)`, which takes a snapshot bound to the schema as it stands and refuses one built against another schema that breaks any of the schema's structural facts, save that it derives the Records fact's records again, refusing an `empty` record under a (one) association, and drops an absent record under a relation that is no association of the schema — new adds resolve against the seeded instances and `Graph().Check` covers the union. Snapshot metadata can be rewritten in place, without a full load/re-marshal round-trip, via `snapshot.UpdateMetadataOrReMarshal`.
 
 ### Build Instances Programmatically
 

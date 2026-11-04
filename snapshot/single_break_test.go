@@ -345,7 +345,7 @@ func sbRows() []sbRow {
 		},
 		{
 			name: "edge to no root", edits: edit(sbMentor, `"MENTOR":[{"target_type":4,"target_key":["p7"],"properties":{}}]`),
-			want: one(diag.E_SNAPSHOT_DANGLING_REFERENCE, `references sb#Person[["p7"]] which does not exist`), schemaless: true,
+			want: one(diag.E_SNAPSHOT_DANGLING_REFERENCE, `edge target sb#Person[["p7"]] in sb#Person[["p1"]] names no root instance`), schemaless: true,
 		},
 		{
 			name: "two edges under a (one) association", edits: edit(sbMentor, `"MENTOR":[{"target_type":4,"target_key":["p2"],"properties":{}},{"target_type":4,"target_key":["p1"],"properties":{}}]`),
@@ -573,6 +573,10 @@ func sbRows() []sbRow {
 			want: malformed("which is optional"),
 		},
 		{
+			name: "empty record under a (one) association", edits: edit(sbAbsent, strings.Replace(sbAbsent, `"absent"`, `"empty"`, 1)),
+			want: malformed(`states reason "empty" under (one) association "EMPLOYER"`), required: 1,
+		},
+		{
 			name: "empty record twice under a (many) association", edits: edit(sbEmpty, sbEmpty+`,`+sbEmpty),
 			want: malformed("holds an empty record beside another record"), required: 1,
 		},
@@ -662,10 +666,10 @@ func sbRows() []sbRow {
 			},
 		},
 		{
-			name: "empty record beside an edge and a target_missing record under a (one) association", edits: edit(sbUnresolved,
+			name: "empty record under a (one) association beside an edge and a target_missing record", edits: edit(sbUnresolved,
 				sbUnresolved+sbLost("p1", "EMPLOYER", 1, `["c9"]`, `{"since":1999}`)+`,`+sbRecord("p1", "EMPLOYER", "empty")+`,`),
 			want: []sbWant{
-				sbError(diag.E_SNAPSHOT_MALFORMED, "holds an empty record beside another record"),
+				sbError(diag.E_SNAPSHOT_MALFORMED, `states reason "empty" under (one) association "EMPLOYER"`),
 				sbError(diag.E_GRAPH_CARDINALITY, `(one) association "EMPLOYER" of sb#Person[["p1"]] holds 2 records`),
 			}, required: 3,
 		},
@@ -810,14 +814,14 @@ func sbRows() []sbRow {
 		// Every reference check runs before the (one) count and the record facts.
 		{
 			name: "edge to no root beside an accepted one under a (one) association", edits: edit(sbMentor, `"MENTOR":[{"target_type":4,"target_key":["p2"],"properties":{}},{"target_type":4,"target_key":["p7"],"properties":{}}]`),
-			want: one(diag.E_SNAPSHOT_DANGLING_REFERENCE, `references sb#Person[["p7"]]`),
+			want: one(diag.E_SNAPSHOT_DANGLING_REFERENCE, `edge target sb#Person[["p7"]]`),
 		},
 		{
 			name: "edge to no root beside an absent record", edits: [][2]string{
 				{sbEmployer, `"EMPLOYER":[{"target_type":1,"target_key":["c7"],"properties":{"since":1999}}]`},
 				{sbUnresolved, sbUnresolved + sbRecord("p1", "EMPLOYER", "absent") + `,`},
 			},
-			want: one(diag.E_SNAPSHOT_DANGLING_REFERENCE, `references sb#Company[["c7"]]`), required: 3,
+			want: one(diag.E_SNAPSHOT_DANGLING_REFERENCE, `edge target sb#Company[["c7"]]`), required: 3,
 		},
 		{
 			name: "edge to a refused root's stated address beside an accepted one under a (one) association", edits: [][2]string{

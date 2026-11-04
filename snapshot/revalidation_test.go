@@ -406,8 +406,8 @@ type T {
 
 // TestLoad_RevalidationJudgesAnEdgePropertyNumberByItsText pins the same rule
 // on an edge: an Integer edge property holding a literal just below int64 is
-// refused as written, not passed as math.MinInt64, and a number at an edge
-// target key is named as the decoder's json.Number.
+// refused as written, not passed as math.MinInt64, and a number at a
+// target_missing record's target key is named as the decoder's json.Number.
 func TestLoad_RevalidationJudgesAnEdgePropertyNumberByItsText(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()
@@ -431,8 +431,11 @@ type T {
 		t.Fatalf("validate U: %s", ur.String())
 	}
 	ti, tr := v.ValidateOne(ctx, "T", instance.RawInstance{Properties: map[string]any{
-		"id":    "t1",
-		"links": []any{map[string]any{"_target_id": "u1", "n": int64(7)}},
+		"id": "t1",
+		"links": []any{
+			map[string]any{"_target_id": "u1", "n": int64(7)},
+			map[string]any{"_target_id": "u9", "n": int64(8)},
+		},
 	}})
 	if tr.HasErrors() {
 		t.Fatalf("validate T: %s", tr.String())
@@ -455,7 +458,7 @@ type T {
 		{name: "untouched"},
 		{name: "an edge property below int64", from: `"n":7`, to: `"n":-9223372036854775809`, code: diag.E_TYPE_MISMATCH, message: "an integer outside the int64 range: -9223372036854775809"},
 		{name: "an edge property above int64", from: `"n":7`, to: `"n":9223372036854775808`, code: diag.E_TYPE_MISMATCH, message: "an integer outside the int64 range: 9223372036854775808"},
-		{name: "a number at an edge target key", from: `"target_key":["u1"]`, to: `"target_key":[5]`, code: diag.E_TYPE_MISMATCH, message: `FK field "_target_id": expected string, got json.Number`},
+		{name: "a number at a record's target key", from: `"target_key":["u9"]`, to: `"target_key":[5]`, code: diag.E_TYPE_MISMATCH, message: `FK field "_target_id": expected string, got json.Number`},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
@@ -477,17 +480,6 @@ type T {
 					t.Fatalf("issues = %v; want none", got)
 				}
 				return
-			}
-			if c.from == `"target_key":["u1"]` {
-				// The walker reports the dangling target too; the FK check's
-				// wording is what this case pins.
-				for _, g := range got {
-					if strings.HasPrefix(g, c.code.String()+": ") && strings.Contains(g, c.message) {
-						t.Logf("issues = %v", got)
-						return
-					}
-				}
-				t.Fatalf("issues = %v; want one %s holding %q", got, c.code, c.message)
 			}
 			if len(got) != 1 || !strings.HasPrefix(got[0], c.code.String()+": ") || !strings.Contains(got[0], c.message) {
 				t.Fatalf("issues = %v; want one %s holding %q", got, c.code, c.message)

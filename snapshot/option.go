@@ -183,16 +183,22 @@ func WithValueConformance(report bool) LoadOption {
 // composed children, edges, target_missing records and invariants included,
 // back through the real validator
 // ([github.com/simon-lentz/yammm/instance.Validator]) and report each finding
-// at the given severity, after every structural issue; at Error a document
-// that fails refuses to load. A root is run only when the structural checks
+// about the data at the given severity, after every structural issue (a
+// cancellation or an E_INTERNAL keeps its own); at Error a document that fails
+// refuses to load. A root is run only when the structural checks
 // left it whole: no check refused its type, a unit of its tree, one of its
 // edges, one of its unresolved records, or one of its required or (one) associations, no record
 // whose types-table row the reader refused could be its, and no other root the
 // reader walks stands at its address. The reader walks no root of an instances
 // entry that repeats a types-table row or names none. An edge that names no root
 // does not stop it, since the validator does not judge whether a target exists, unless it stands beside
-// another record under a (one) association; no duplicate record's instance is
-// run. It judges values — bounds,
+// another record under a (one) association. The validator judges no target key
+// component its key property refuses on an edge whose target no sound root
+// holds, or on a target_missing record whose target a refused unit stands at or
+// states: the edge's reference issue, or the unit's refusal, stands for it. As for any value
+// it refuses, it then runs no later pass of that root: its composed children and
+// invariants go unjudged.
+// No duplicate record's instance is run. It judges values — bounds,
 // enums, patterns, invariants — which the structural checks every read runs
 // leave alone, and reports each unresolved record no check refused under a
 // required association as

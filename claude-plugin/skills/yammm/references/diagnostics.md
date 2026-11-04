@@ -157,7 +157,7 @@ The all-or-nothing contract is unchanged: any error still yields a zero schema.
 | `E_MISSING_FK_TARGET` | Foreign key target is missing |
 | `E_PARTIAL_COMPOSITE_FK` | Partial composite foreign key |
 | `E_UNKNOWN_EDGE_FIELD` | Unknown field in edge data |
-| `E_EDGE_SHAPE_MISMATCH` | An edge's or a composition's value has a shape its relation does not take |
+| `E_EDGE_SHAPE_MISMATCH` | An edge's or a composition's value has a shape its relation does not take; at `graph.NewFromSnapshot` under another schema, an `"empty"` unresolved record under a `(one)` association |
 | `E_UNRESOLVED_REQUIRED_COMPOSITION` | Required composition is unresolved |
 | `E_COMPOSITION_DEPTH_EXCEEDED` | Composed nesting deeper than the bound (32) |
 | `E_INVALID_TYPE_TAG` | A JSON top-level key is not a type name |

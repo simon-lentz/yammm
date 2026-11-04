@@ -13,9 +13,9 @@ import (
 // ready for [Graph.Add] calls that resolve against the imported instances.
 //
 // snap need not have been built against s. The import derives its records again
-// under s, and refuses one that breaks another fact of the package doc's
-// "Structural facts" under s, save an "absent" record under a relation that is no
-// association of s, which it drops. It stores a number at a Float of s as the
+// under s, refusing an "empty" record under a (one) association, and refuses one
+// that breaks another fact of the package doc's "Structural facts" under s, save
+// an "absent" record under a relation that is no association of s, which it drops. It stores a number at a Float of s as the
 // validator does, as its nearest float64. A refusal returns a nil Graph and one
 // diagnostic for each break, naming a position, and nothing is installed. A break
 // that reads a unit another diagnostic refused can draw none. A snapshot bound to s already holds to the facts
@@ -35,8 +35,10 @@ func NewFromSnapshot(s schema.Schema, snap Snapshot) (*Graph, diag.Result) {
 }
 
 // validateImport holds snap to s through [structureRules]. snap's types include
-// every root's type, so its types entries carry the root rule. A record's reason needs no schema and every constructor of
-// snap held it, so the walk judges none; importSnapshot derives the records again.
+// every root's type, so its types entries carry the root rule. A record's reason
+// needs no schema and every constructor of snap held it, so the walk judges one
+// only where s makes it a record [Graph.Add] never makes, an "empty" one under a
+// (one) association; importSnapshot derives the records again.
 func validateImport(s schema.Schema, canon *canonicalizer, snap Snapshot) diag.Result {
 	if snap.schema == s {
 		return diag.OK()
@@ -241,9 +243,9 @@ func (g *Graph) installPending(source Instance, relation, targetKey, reason stri
 
 // deriveRecords installs the records [Graph.Add] would derive from snap's data
 // under this schema. A target_missing record whose target this import
-// installed resolves into an edge; an absent or empty record under an optional
-// association, and an absent one under an association this schema does not
-// declare, is dropped; and a root with no edge and no record under a
+// installed resolves into an edge; an absent record under an optional
+// association or one this schema does not declare, and an empty one under an
+// optional (many) association, is dropped; and a root with no edge and no record under a
 // required association gains an absent record, what Add derives when the data
 // names no target, as the snapshot's data names none.
 func (g *Graph) deriveRecords(snap Snapshot, cloneMap map[Instance]Instance, floats *floatPositions) {

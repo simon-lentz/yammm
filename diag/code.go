@@ -350,7 +350,9 @@ var (
 	// E_UNKNOWN_EDGE_FIELD indicates an unknown field in edge data.
 	E_UNKNOWN_EDGE_FIELD = NewCode("E_UNKNOWN_EDGE_FIELD", CategoryInstance)
 
-	// E_EDGE_SHAPE_MISMATCH indicates an edge has the wrong shape.
+	// E_EDGE_SHAPE_MISMATCH indicates an edge's or a composition's value has a
+	// shape its relation does not take, or that a snapshot an import reads holds
+	// an "empty" record under a (one) association.
 	E_EDGE_SHAPE_MISMATCH = NewCode("E_EDGE_SHAPE_MISMATCH", CategoryInstance)
 
 	// E_UNRESOLVED_REQUIRED_COMPOSITION indicates a required composition is unresolved.
@@ -491,8 +493,7 @@ var (
 	E_SNAPSHOT_TYPE_MISMATCH = NewCode("E_SNAPSHOT_TYPE_MISMATCH", CategorySnapshot)
 
 	// E_SNAPSHOT_DANGLING_REFERENCE indicates an edge target, a duplicate's
-	// conflict, or an unresolved record's source names an instance the snapshot
-	// does not hold.
+	// conflict, or an unresolved record's source names no root instance.
 	E_SNAPSHOT_DANGLING_REFERENCE = NewCode("E_SNAPSHOT_DANGLING_REFERENCE", CategorySnapshot)
 
 	// E_SNAPSHOT_INVALID_COMPOSED indicates a composed child instance carries edges,

@@ -232,8 +232,8 @@ func TypeField(typeName, fieldName string) []Detail {
 // field name (for direct lookup in instance data). The jsonFieldName is
 // the relation name in lower case.
 //
-// Use with a relation-path diagnostic, as E_EDGE_SHAPE_MISMATCH does, so a
-// user can locate the field in the JSON input.
+// Use with a relation-path diagnostic, as the validator's E_EDGE_SHAPE_MISMATCH
+// does, so a user can locate the field in the JSON input.
 func PathRelation(relationName, jsonFieldName string) []Detail {
 	return []Detail{
 		{Key: DetailKeyRelationName, Value: relationName},

@@ -45,7 +45,7 @@ var sbUnderCounts = []sbUnderCount{
 			"absent record twice beside two edges under a (one) association",
 			"absent record under an optional (one) association beside two edges",
 			"edge to a refused root's stated address beside an accepted one under a (one) association",
-			"empty record beside an edge and a target_missing record under a (one) association",
+			"empty record under a (one) association beside an edge and a target_missing record",
 			"record outside its bounds beside an edge under a (one) association",
 			"record with no source row at one key, beside another root holding nothing under its association",
 			"refused absent record beside an absent record and two edges under a (one) association",
@@ -74,7 +74,7 @@ var sbUnderCounts = []sbUnderCount{
 		b: []string{
 			"absent record beside an edge under a (one) association",
 			"absent record twice beside an edge under a (one) association",
-			"empty record beside an edge and a target_missing record under a (one) association",
+			"empty record under a (one) association beside an edge and a target_missing record",
 			"record outside its bounds beside an edge under a (one) association",
 			"record with an undocumented reason beside an edge under a (one) association",
 			"target_missing record naming a root beside an edge under a required (one) association",
@@ -89,7 +89,6 @@ var sbUnderCounts = []sbUnderCount{
 			"absent record beside two edges under a (one) association",
 			"absent record twice beside an edge under a (one) association",
 			"absent record twice beside two edges under a (one) association",
-			"empty record beside an edge and a target_missing record under a (one) association",
 			"refused absent record beside an absent record and two edges under a (one) association",
 		},
 	},
@@ -102,7 +101,7 @@ var sbUnderCounts = []sbUnderCount{
 			"absent record beside two edges under a (one) association",
 			"absent record twice beside two edges under a (one) association",
 			"edge to a refused root's stated address beside an accepted one under a (one) association",
-			"empty record beside an edge and a target_missing record under a (one) association",
+			"empty record under a (one) association beside an edge and a target_missing record",
 			"refused absent record beside an absent record and two edges under a (one) association",
 		},
 	},
@@ -114,19 +113,17 @@ var sbUnderCounts = []sbUnderCount{
 		b: []string{
 			"absent record beside two edges under a (one) association",
 			"absent record twice beside two edges under a (one) association",
-			"empty record beside an edge and a target_missing record under a (one) association",
 			"refused absent record beside an absent record and two edges under a (one) association",
 		},
 	},
 	{
 		cause: "One association reports each record fact and its (one) count once, and the two rows edit its records.",
 		a: []string{
-			"empty record beside an edge and a target_missing record under a (one) association",
+			"empty record under a (one) association beside an edge and a target_missing record",
 		},
 		b: []string{
 			"absent record twice beside two edges under a (one) association",
 			"edge to a refused root's stated address beside an accepted one under a (one) association",
-			"edge to no root beside an absent record",
 			"refused absent record beside an absent record and two edges under a (one) association",
 		},
 	},
@@ -136,7 +133,7 @@ var sbUnderCounts = []sbUnderCount{
 			"absent record beside two edges under a (one) association",
 		},
 		b: []string{
-			"empty record beside an edge and a target_missing record under a (one) association",
+			"empty record under a (one) association beside an edge and a target_missing record",
 		},
 	},
 	{
@@ -155,7 +152,7 @@ var sbUnderCounts = []sbUnderCount{
 		},
 		b: []string{
 			"absent record beside an edge under a (one) association",
-			"empty record beside an edge and a target_missing record under a (one) association",
+			"empty record under a (one) association beside an edge and a target_missing record",
 			"record outside its bounds beside an edge under a (one) association",
 		},
 	},

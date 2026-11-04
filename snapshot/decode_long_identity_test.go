@@ -100,13 +100,13 @@ func TestInfo_AWrittenTypeIdentityIsCutByItsParts(t *testing.T) {
 			name:       "duplicate whose conflict is absent",
 			duplicates: `{"type":0,"key":["z"],"instance":{"key":["z"],"properties":{},"provenance":null},"conflict":{"type":0,"key":["z"]}}`,
 			code:       diag.E_SNAPSHOT_DANGLING_REFERENCE,
-			want:       `duplicate conflict ` + owner + `[["z"]] references non-existent instance`,
+			want:       `duplicate conflict ` + owner + `[["z"]] names no root instance`,
 		},
 		{
 			name:       "unresolved record whose source is absent",
 			unresolved: `{"source_type":0,"source_key":["nope"],"relation":"R","target_type":1,"target_key":["t"],"required":false,"reason":"target_missing"}`,
 			code:       diag.E_SNAPSHOT_DANGLING_REFERENCE,
-			want:       `unresolved edge source ` + owner + `[["nope"]] references non-existent instance`,
+			want:       `unresolved edge source ` + owner + `[["nope"]] names no root instance`,
 		},
 		{
 			name:      "edge target key component not a scalar",

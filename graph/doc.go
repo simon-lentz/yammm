@@ -169,8 +169,9 @@
 // [Graph.Add] never builds a snapshot that breaks the facts below, and the
 // snapshot package's reader refuses a document that does. [NewFromSnapshot]
 // and [NewBatchAssemblerFromSnapshot], over a snapshot bound to another schema,
-// derive its records again and refuse one that breaks any other fact, save an
-// "absent" record under a relation that is no association of that schema, which
+// derive its records again, refusing an "empty" record under a (one)
+// association, and refuse one that breaks any other fact, save an "absent"
+// record under a relation that is no association of that schema, which
 // they drop.
 // The facts are the whole promise: a shape they do not name, such as a
 // property value its constraint refuses, can pass the reader. A type that
@@ -214,7 +215,8 @@
 //     the ones [BatchAssembler.AddValidOrMerge] merges into a held root from a
 //     duplicate's data. Every root holds an edge or a record under each required
 //     association of its type. An "absent" or "empty" record stands alone,
-//     once, and only under a required association. A "target_missing" record
+//     once, and only under a required association, and an "empty" record only
+//     under a (many) association. A "target_missing" record
 //     names a target no root holds.
 //   - Duplicates. A duplicate's instance holds no composed children, and its
 //     type can hold a root. Its conflict is the root at its own type and key. A
@@ -240,12 +242,15 @@
 // the import walks only a snapshot built against another schema. That import
 // derives the records again, as [Graph.Add] derives them from the snapshot's
 // data under the importing schema. A "target_missing" record whose target the
-// snapshot holds becomes an edge. An "absent" or "empty" record under an
-// association the schema makes optional, or an "absent" record under one it
-// drops, is dropped. A root holding no edge and no record under an association
-// the schema makes required gains an "absent" record there. A snapshot records
-// nothing for an empty list under an optional association, so that gained
-// record reads "absent" where [Graph.Add], given the list, records "empty". A
+// snapshot holds becomes an edge. An "empty" record under a (one) association
+// is refused, as the validator refuses an empty list there. Any other "absent"
+// or "empty" record under an association the schema makes optional, and an
+// "absent" record under a relation that is no association of it, is dropped. A
+// root holding no edge and no record under an association the schema makes
+// required gains an "absent" record there. A snapshot records nothing for an
+// empty list under an optional association, so that gained record reads
+// "absent" where [Graph.Add], given the list, records "empty" under a (many)
+// association, and the validator refuses the list under a (one) one. A
 // "target_missing" record names a target as an edge does, so under an
 // association the schema retargets both are refused.
 //
@@ -454,6 +459,7 @@
 //   - E_DUPLICATE_PK: two roots of a type that can hold one, whose stored keys the
 //     key rule accepts, stand at one canonical address
 //   - E_GRAPH_CARDINALITY: a (one) association holds several records
+//   - E_EDGE_SHAPE_MISMATCH: a (one) association holds an "empty" record
 //   - E_GRAPH_UNKNOWN_RELATION: an edge, a record or composed children stand under
 //     a name the type does not declare as that kind of relation, or an edge or a
 //     "target_missing" record targets another type than its association declares

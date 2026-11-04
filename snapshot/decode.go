@@ -292,13 +292,15 @@ type slotCoord struct {
 	relation string
 }
 
-// edgeRef is an edge no check of its own refused, for the reference check. slot
-// and own place it among its source's records, and one reports that its
-// association is a (one) association of a known type.
+// edgeRef is an edge no check of its own refused, for the reference check. slot,
+// index and own place it among its source's records: index is its place in the
+// source's edge list under slot's relation. one reports that its association is
+// a (one) association of a known type.
 type edgeRef struct {
 	targetRow int
 	targetKey string
 	slot      slotCoord
+	index     int
 	own       int
 	one       bool
 }
@@ -346,6 +348,9 @@ type docIndex struct {
 	// danglingOnes counts the edges under a (one) association that name no root.
 	refusedRoots map[slotCoord]bool
 	danglingOnes map[oneCoord]int
+	// unheld holds, under each root's slot, the index of each edge there whose
+	// target no sound root holds; it stays nil while every edge resolves to one.
+	unheld map[slotCoord][]int
 	// shared holds each address two roots stand at, their keys sound or not,
 	// relation left empty. An unresolved record there names the address, not a
 	// root: it counts toward no (one) association and stands beside no other
@@ -745,6 +750,7 @@ func (sd *streamDecoder) walkEdges(row int, inst instWire, keyStr string, own in
 				targetRow: targetRow,
 				targetKey: sd.canonicalWireKey(targetRow, e.TargetKey),
 				slot:      slot,
+				index:     ei,
 				own:       own,
 				one:       !rel.IsZero() && !rel.IsMany(),
 			})
@@ -1156,10 +1162,61 @@ func (sd *streamDecoder) revalidate(ctx context.Context, unresolved []unresolved
 		key := sd.canonicalWireKey(r.row, r.item.Key)
 		if address := (slotCoord{row: r.row, key: key}); !refused[address] && !idx.unjudged(r.row, key) &&
 			!names.may(address) {
-			sd.revalidateRoot(ctx, r.row, *r.item, unresolved, lost[address])
+			sd.revalidateRoot(ctx, idx, r.row, key, *r.item, unresolved, lost[address])
 		}
 	}
 	return nil
+}
+
+// refuseUnheldKeys writes as an [instance.Refused] each target key component the
+// validator would refuse, on each edge of the root at row and key whose target no
+// sound root holds: the edge's reference issue, or the refusal of the unit at its
+// target, stands for it.
+func (sd *streamDecoder) refuseUnheldKeys(idx *docIndex, t schema.Type, row int, key string, inst instWire) {
+	for relName, list := range inst.Edges {
+		indexes := idx.unheld[slotCoord{row: row, key: key, relation: relName}]
+		if len(indexes) == 0 {
+			continue
+		}
+		rel, _ := t.Relation(relName)
+		target, _ := sd.schema.TypeByID(rel.TargetID())
+		for _, i := range indexes {
+			refuseKeyComponents(target, list[i].TargetKey)
+		}
+	}
+}
+
+// refuseKeyComponents writes as an [instance.Refused] each component of key that
+// target's key property refuses. It writes the document's own list, since a
+// document holding a reference it marks is refused and nothing reads the list
+// after revalidation.
+func refuseKeyComponents(target schema.Type, key []any) {
+	pks := slices.Collect(target.PrimaryKeys())
+	for c, comp := range key {
+		if foreignKeyRefuses(comp, pks[c].Constraint()) {
+			key[c] = instance.Refused{Value: comp}
+		}
+	}
+}
+
+// refusedUnitAt reports whether a refused unit stands at the root address or
+// states it, so its refusal stands for a reference there.
+func (sd *streamDecoder) refusedUnitAt(idx *docIndex, row int, key string) bool {
+	if holder, present := idx.exists[row][key]; present {
+		return !holder
+	}
+	return sd.refusedAddress(idx, row, key)
+}
+
+// foreignKeyRefuses reports whether validateEdgeTarget refuses v at a foreign-key
+// field of constraint c. An internal failure refuses nothing, so the validator
+// still reports its E_INTERNAL.
+func foreignKeyRefuses(v any, c schema.Constraint) bool {
+	if instance.IsAbsent(v) {
+		return true
+	}
+	err := instance.CheckValue(v, c)
+	return err != nil && !errors.Is(err, instance.ErrInternalFailure)
 }
 
 // revalidateRoot reconstructs one root's raw form — properties, edges as
@@ -1170,8 +1227,13 @@ func (sd *streamDecoder) revalidate(ctx context.Context, unresolved []unresolved
 // root the structural checks left whole, and lost, the indexes of the
 // target_missing records at its address. Those are edges to the validator,
 // which judged them before graph.Add found no target, so each one joins the
-// root's edges.
-func (sd *streamDecoder) revalidateRoot(ctx context.Context, row int, inst instWire, unresolved []unresolvedWire, lost []int) {
+// root's edges. key is the root's canonical address. A reference's key
+// component the validator would refuse is marked where another issue stands for
+// it: an edge's by [streamDecoder.refuseUnheldKeys], a record's where a refused
+// unit stands at its target.
+func (sd *streamDecoder) revalidateRoot(ctx context.Context, idx *docIndex, row int, key string, inst instWire,
+	unresolved []unresolvedWire, lost []int,
+) {
 	if sd.revalidator == nil {
 		return
 	}
@@ -1183,12 +1245,18 @@ func (sd *streamDecoder) revalidateRoot(ctx context.Context, row int, inst instW
 		return
 	}
 	keyStr := formatWireKey(inst.Key)
+	sd.refuseUnheldKeys(idx, t, row, key, inst)
 	if len(lost) > 0 {
 		// A copy: the document's own edges are materialized after this pass.
 		edges := make(map[string][]edgeWire, len(inst.Edges)+len(lost))
 		maps.Copy(edges, inst.Edges)
 		for _, ui := range lost {
 			u := unresolved[ui]
+			if targetRow, _ := sd.rowAt(u.TargetType); sd.refusedUnitAt(idx, targetRow, sd.canonicalWireKey(targetRow, u.TargetKey)) {
+				rel, _ := t.Relation(u.Relation)
+				target, _ := sd.schema.TypeByID(rel.TargetID())
+				refuseKeyComponents(target, u.TargetKey)
+			}
 			edges[u.Relation] = slices.Concat(edges[u.Relation],
 				[]edgeWire{{TargetType: u.TargetType, TargetKey: u.TargetKey, Properties: u.Properties}})
 		}
@@ -1610,7 +1678,7 @@ func (sd *streamDecoder) validateDiagnostics(diags diagWire, idx *docIndex) {
 		// existence alone: its type and key are still the record's own.
 		if !idx.rootExists(conflictRow, conflictKey) && !sd.refusedAddress(idx, conflictRow, conflictKey) {
 			sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_DANGLING_REFERENCE,
-				fmt.Sprintf("duplicate conflict %s[%s] references non-existent instance",
+				fmt.Sprintf("duplicate conflict %s[%s] names no root instance",
 					sd.refText(conflictRow), diag.CutValue(conflictKey))).
 				WithDetail(diag.DetailKeyTypeName, sd.refAt(conflictRow)).
 				WithDetail(diag.DetailKeyPrimaryKey, conflictKey).
@@ -1672,7 +1740,7 @@ func (sd *streamDecoder) checkRecord(ui int, u unresolvedWire, idx *docIndex) (s
 		if !sd.refusedSince(start) && !idx.rootExists(sourceRow, sourceKey) &&
 			!sd.refusedAddress(idx, sourceRow, sourceKey) {
 			sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_DANGLING_REFERENCE,
-				fmt.Sprintf("unresolved edge source %s[%s] references non-existent instance",
+				fmt.Sprintf("unresolved edge source %s[%s] names no root instance",
 					sd.refText(sourceRow), diag.CutValue(sourceKey))).
 				WithDetail(diag.DetailKeyTypeName, sd.refAt(sourceRow)).
 				WithDetail(diag.DetailKeyPrimaryKey, sourceKey).
@@ -1683,10 +1751,10 @@ func (sd *streamDecoder) checkRecord(ui int, u unresolvedWire, idx *docIndex) (s
 }
 
 // checkRecordFacts holds the unresolved records to the facts graph.Add derives
-// them by: every root holds an edge or a record
-// under each required association of its type; an absent or empty record stands
-// alone, once, and only under a required association; and a target_missing
-// record names a target no root holds. Every record counts as held where it
+// them by: every root holds an edge or a record under each required association
+// of its type; an absent or empty record stands alone, once, and only under a
+// required association; an empty record stands only under a (many) association;
+// and a target_missing record names a target no root holds. Every record counts as held where it
 // stands, a refused one too, and no refused record is judged again. Each fact
 // refuses the records it reports, so no (one) count holds them; the records
 // beside them stay in it. A schema-less read makes no claim.
@@ -1726,6 +1794,11 @@ func (sd *streamDecoder) checkRecordFacts(diags diagWire, idx *docIndex) {
 				sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_MALFORMED,
 					fmt.Sprintf("unresolved record %d states reason %q under %q of %s[%s], which is optional, where graph.Add records none",
 						ui, u.Reason, u.Relation, sd.refText(rec.slot.row), diag.CutValue(rec.slot.key))).Build())
+			} else if u.Reason == "empty" && !rec.rel.IsMany() {
+				idx.refuseRecord(ui)
+				sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_MALFORMED,
+					fmt.Sprintf("unresolved record %d states reason \"empty\" under (one) association %q of %s[%s], where graph.Add records \"empty\" only under a (many) one",
+						ui, u.Relation, sd.refText(rec.slot.row), diag.CutValue(rec.slot.key))).Build())
 			}
 		case "target_missing":
 			// checkRecord accepted the record, so its target row is the association's
@@ -2026,14 +2099,21 @@ func (sd *streamDecoder) checkOnes(idx *docIndex) {
 	}
 }
 
-// validateEdgeRefs holds each edge's target to a root, and feeds the record
-// facts and the (one) counts. A target a refused unit states is that unit's
-// break, so the edge stays in both. An edge that names no root is refused: it
-// stays held where it stands, and is no record beside another and no count. Of
-// a sound root, an edge feeds that root's (one) counts.
+// validateEdgeRefs holds each edge's target to a root. An edge whose target no
+// sound root holds enters the unheld index. An edge to a root, or to an address
+// a refused unit states, which is that unit's break, feeds the record facts and
+// its sound source's (one) counts. Any other edge is refused: it stays held
+// where it stands, and is no record beside another and no count.
 func (sd *streamDecoder) validateEdgeRefs(idx *docIndex) {
 	for _, ref := range idx.refs {
-		if idx.rootExists(ref.targetRow, ref.targetKey) || sd.refusedAddress(idx, ref.targetRow, ref.targetKey) {
+		exists := idx.rootExists(ref.targetRow, ref.targetKey)
+		if !idx.exists[ref.targetRow][ref.targetKey] {
+			if idx.unheld == nil {
+				idx.unheld = make(map[slotCoord][]int)
+			}
+			idx.unheld[ref.slot] = append(idx.unheld[ref.slot], ref.index)
+		}
+		if exists || sd.refusedAddress(idx, ref.targetRow, ref.targetKey) {
 			if idx.soundEdges == nil {
 				idx.soundEdges = make(map[slotCoord]int)
 			}
@@ -2052,8 +2132,8 @@ func (sd *streamDecoder) validateEdgeRefs(idx *docIndex) {
 		sourceRef := sd.refAt(ref.slot.row)
 		targetRef := sd.refAt(ref.targetRow)
 		sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_DANGLING_REFERENCE,
-			fmt.Sprintf("edge in %s[%s] references %s[%s] which does not exist",
-				sd.refText(ref.slot.row), diag.CutValue(ref.slot.key), sd.refText(ref.targetRow), diag.CutValue(ref.targetKey))).
+			fmt.Sprintf("edge target %s[%s] in %s[%s] names no root instance",
+				sd.refText(ref.targetRow), diag.CutValue(ref.targetKey), sd.refText(ref.slot.row), diag.CutValue(ref.slot.key))).
 			WithDetail(diag.DetailKeyTypeName, sourceRef).
 			WithDetail(diag.DetailKeyPrimaryKey, ref.slot.key).
 			WithDetail(diag.DetailKeyTargetType, targetRef).
