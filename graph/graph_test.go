@@ -295,20 +295,11 @@ func TestSnapshot_NilReceiver(t *testing.T) {
 	if slices.Collect(r.Edges()) != nil {
 		t.Error("nil.Edges() should return nil")
 	}
-	if !r.Diagnostics().OK() {
-		t.Error("nil.Diagnostics() should be OK")
-	}
 	if slices.Collect(r.Duplicates()) != nil {
 		t.Error("nil.Duplicates() should return nil")
 	}
 	if slices.Collect(r.Unresolved()) != nil {
 		t.Error("nil.Unresolved() should return nil")
-	}
-	if !r.Diagnostics().OK() {
-		t.Error("nil.OK() should return true")
-	}
-	if r.Diagnostics().HasErrors() {
-		t.Error("nil.HasErrors() should return false")
 	}
 }
 
@@ -993,42 +984,6 @@ func TestResult_Instances(t *testing.T) {
 	}
 }
 
-func TestResult_DiagnosticsAndFlags(t *testing.T) {
-	s := testSchema(t)
-	g := graph.New(s)
-	ctx := t.Context()
-
-	inst := instancetest.Valid(t, s, "Person", map[string]any{"id": "test-person", "name": "Test"})
-	result := g.Add(ctx, inst)
-
-	// Test OK and HasErrors on the add result
-	ok := result.OK()
-	hasErrors := result.HasErrors()
-	if !ok {
-		t.Error("Expected OK to be true for successful add")
-	}
-	if hasErrors {
-		t.Error("Expected HasErrors to be false for successful add")
-	}
-
-	// Test snapshot-level methods
-	snap := g.Snapshot()
-	snapOk := snap.Diagnostics().OK()
-	snapHasErrors := snap.Diagnostics().HasErrors()
-	if !snapOk {
-		t.Error("Expected snap OK to be true")
-	}
-	if snapHasErrors {
-		t.Error("Expected snap HasErrors to be false")
-	}
-
-	// Test Diagnostics returns a diag.Result
-	diags := snap.Diagnostics()
-	if !diags.OK() {
-		t.Error("Expected diagnostics OK to be true")
-	}
-}
-
 // Tests for extractCompositions - inline composition handling
 
 func TestGraph_Add_InlineCompositions(t *testing.T) {
@@ -1204,16 +1159,6 @@ func TestAdd_PerOperationDiagnostics(t *testing.T) {
 	if issueCount2 != 0 {
 		t.Errorf("Second Add should return 0 issues, got %d", issueCount2)
 	}
-
-	// graph.Snapshot.Diagnostics() should still contain the first error (cumulative)
-	snap := g.Snapshot()
-	if snap.Diagnostics().OK() {
-		t.Error("Snapshot.Diagnostics() should NOT be OK (cumulative)")
-	}
-	snapIssueCount := countIssues(snap.Diagnostics())
-	if snapIssueCount != 1 {
-		t.Errorf("Snapshot.Diagnostics() should have 1 issue, got %d", snapIssueCount)
-	}
 }
 
 // TestCheck_Idempotent_IssueCount verifies that Check() is idempotent:
@@ -1250,12 +1195,6 @@ func TestCheck_Idempotent_IssueCount(t *testing.T) {
 	// Should have exactly 1 unresolved issue
 	if count1 != 1 {
 		t.Errorf("Expected 1 unresolved issue, got %d", count1)
-	}
-
-	// graph.Snapshot.Diagnostics() should NOT include Check() issues
-	snap := g.Snapshot()
-	if !snap.Diagnostics().OK() {
-		t.Error("Snapshot.Diagnostics() should be OK (Check doesn't merge)")
 	}
 }
 
@@ -1382,6 +1321,11 @@ func TestNilContext_Panics(t *testing.T) {
 			name:    "Add",
 			fn:      func() { g.Add(nil, inst) }, //nolint:staticcheck // testing nil context panic
 			wantMsg: "graph.Add: nil context",
+		},
+		{
+			name:    "AddOrMerge",
+			fn:      func() { g.AddOrMerge(nil, inst) }, //nolint:staticcheck // testing nil context panic
+			wantMsg: "graph.AddOrMerge: nil context",
 		},
 		{
 			name:    "Check",

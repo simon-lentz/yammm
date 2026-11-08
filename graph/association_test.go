@@ -467,8 +467,7 @@ func TestGraph_Check_Idempotent(t *testing.T) {
 	result3 := g.Check(ctx)
 
 	// OK() alone is trivially stable because Check holds no state; what the
-	// contract promises is that the issues themselves repeat and that none
-	// of them reaches the snapshot.
+	// contract promises is that the issues themselves repeat.
 	// Compare the SET of issues, not Result.String(): Check walks g.pending,
 	// a map, so the rendered order is not stable even for one call's own
 	// output and a string comparison would be flaky rather than meaningful.
@@ -486,9 +485,6 @@ func TestGraph_Check_Idempotent(t *testing.T) {
 	}
 	if !result1.HasCode(diag.E_UNRESOLVED_REQUIRED) {
 		t.Fatalf("the fixture did not produce an unresolved required association: %s", render(result1))
-	}
-	if g.Snapshot().Diagnostics().HasCode(diag.E_UNRESOLVED_REQUIRED) {
-		t.Error("Check accumulated into the snapshot's construction diagnostics")
 	}
 }
 

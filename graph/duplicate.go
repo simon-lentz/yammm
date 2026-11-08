@@ -10,8 +10,8 @@ import (
 //
 // When [Graph.Add] meets such a key, a Duplicate is created to track both the
 // new instance (which is rejected) and the existing instance (which remains in
-// the graph). [BatchAssembler.AddValidOrMerge] creates one only for an incoming
-// instance carrying composed children; a merge creates none. Its fields are read
+// the graph). [Graph.AddOrMerge] creates one only for an incoming instance
+// carrying composed children; a merge creates none. Its fields are read
 // through methods, so no caller can set one.
 //
 // # Composed Children Not Included
@@ -20,8 +20,7 @@ import (
 // [Graph.Add] builds the whole tree before it meets the duplicate, and records
 // a childless copy of the rejected root: a duplicate installs nothing. If you need
 // to inspect composed children from duplicate data, access them from the original
-// [instance.ValidInstance] passed to [Graph.Add], [BatchAssembler.AddValid] or
-// [BatchAssembler.AddValidOrMerge].
+// [instance.ValidInstance] passed to [Graph.Add] or [Graph.AddOrMerge].
 //
 // Duplicates are accessed via [Snapshot.Duplicates].
 type Duplicate struct{ *duplicateState }

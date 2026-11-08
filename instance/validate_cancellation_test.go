@@ -109,8 +109,8 @@ func TestValidate_EachGateReadsItsOwnPassesErrors(t *testing.T) {
 // TestValidateOne_CancelledMidRowReturnsTheCancellationAlone pins that
 // ValidateOne applies the batch rule. Validate drops a cancelled row's partial
 // diagnostics and returns one E_CONTEXT_CANCELLED; ValidateOne returned the
-// partial set, so BatchAssembler.addSerial and the snapshot revalidator — its
-// two callers — reported a timeout's leftovers as findings about the data.
+// partial set, so a caller such as the snapshot revalidator reported a
+// timeout's leftovers as findings about the data.
 // Removing ValidateOne's post-row check turns this red.
 func TestValidateOne_CancelledMidRowReturnsTheCancellationAlone(t *testing.T) {
 	t.Parallel()

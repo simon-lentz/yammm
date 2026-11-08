@@ -59,8 +59,8 @@ func TestImport_ADocumentWithNoAttestationKeepsValuesUnattested(t *testing.T) {
 	}
 }
 
-// A seeded assembler holds a forward reference as a target, so a second target
-// under a (one) association is refused there as it is on the graph that wrote it.
+// A seeded graph holds a forward reference as a target, so a second target under
+// a (one) association is refused there as it is on the graph that wrote it.
 func TestImport_AHeldTargetCountsTowardAOneAssociation(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()
@@ -71,21 +71,15 @@ func TestImport_AHeldTargetCountsTowardAOneAssociation(t *testing.T) {
 		"o":  map[string]any{"_target_id": "x"},
 		"m":  []any{map[string]any{"_target_id": "x"}},
 	})))
-	ba, res := graph.NewBatchAssemblerFromSnapshot(ctx, s, g.Snapshot())
-	if res.HasErrors() {
-		t.Fatalf("seed: %s", res)
-	}
-	merged, err := ba.AddValidOrMerge(instancetest.Valid(t, s, "R", map[string]any{
+	seeded := mustImport(t, s, g.Snapshot())
+	merged, res := seeded.AddOrMerge(ctx, instancetest.Valid(t, s, "R", map[string]any{
 		"id": "r",
 		"o":  map[string]any{"_target_id": "y"},
 	}))
-	if merged || err == nil {
-		t.Errorf("merged %v, err %v; want a refusal", merged, err)
+	if merged || !res.HasCode(diag.E_GRAPH_CARDINALITY) {
+		t.Errorf("merged %v, %s; want an E_GRAPH_CARDINALITY refusal", merged, res)
 	}
-	snap := ba.Graph().Snapshot()
-	if !snap.Diagnostics().HasCode(diag.E_GRAPH_CARDINALITY) {
-		t.Errorf("diagnostics %s, want %s", snap.Diagnostics(), diag.E_GRAPH_CARDINALITY)
-	}
+	snap := seeded.Snapshot()
 	var targets []string
 	for u := range snap.Unresolved() {
 		if u.Relation() == "O" {

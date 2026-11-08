@@ -1,6 +1,6 @@
 # Go API Pipeline Reference
 
-The yammm Go library follows a four-stage pipeline: **load schema -> validate instances -> build graph -> persist or write**. An operation that reports diagnostics returns a `diag.Result`, beside the value where the call produces one, with stable error codes and, where a diagnostic has a source position, its span. Some operations return an `error` instead, among them the Neo4j adapter's `BatchNodeQueries` and `BatchEdgeQueries`, `gogen.Marshal` and `markdown.Marshal`, `graph.BatchAssembler`'s `Add`, `AddValid` and `AddValidOrMerge`, and `instance.BuilderFor`.
+The yammm Go library follows a four-stage pipeline: **load schema -> validate instances -> build graph -> persist or write**. An operation that reports diagnostics returns a `diag.Result`, beside the value where the call produces one, with stable error codes and, where a diagnostic has a source position, its span. Some operations return an `error` instead, among them the Neo4j adapter's `BatchNodeQueries` and `BatchEdgeQueries`, `gogen.Marshal` and `markdown.Marshal`, and `instance.BuilderFor`.
 
 ---
 
@@ -143,7 +143,7 @@ type RawInstance struct {
 }
 ```
 
-A parser that cannot read an input as its member's type reports that issue and writes `instance.Refused{Value: <the input>}` in the value's place. At a property, a foreign-key field or an edge property, the validator reports nothing for a `Refused` and refuses the instance: `ValidateOne` returns a zero `ValidInstance` with no error for it, and `graph.BatchAssembler.Add`, for a record whose one fault it is, returns an error matching `instance.ErrRefusedValue`. Anywhere else a `Refused` is a value of no form and draws the issue any such value draws (`E_TYPE_MISMATCH` as a list element, for one). One break draws one issue.
+A parser that cannot read an input as its member's type reports that issue and writes `instance.Refused{Value: <the input>}` in the value's place. At a property, a foreign-key field or an edge property, the validator reports nothing for a `Refused` and refuses the instance: `ValidateOne` returns a zero `ValidInstance` with no error for it, and `instance.ErrRefusedValue` names the case for a caller that must return an error. Anywhere else a `Refused` is a value of no form and draws the issue any such value draws (`E_TYPE_MISMATCH` as a list element, for one). One break draws one issue.
 
 ### Build RawInstances with SchemaBuilder
 
@@ -307,8 +307,8 @@ updated, result := snapshot.UpdateMetadataOrReMarshal(ctx, data, newMeta, s)
 - **Loaded schemas** (`schema.Schema`) are immutable and safe for concurrent use
 - **Validated instances** (`instance.ValidInstance`) are immutable
 - **Graph snapshots** (`graph.Snapshot`) have no method that changes them, and a record is a handle, so no caller holds its address
-- **The `Graph` type** (`*graph.Graph`) is concurrent-safe for `Add` calls — multiple goroutines may add instances in parallel; the graph handles forward references and duplicate detection atomically. `Snapshot()` acquires a read lock, briefly blocking concurrent Adds, and returns a snapshot later Adds do not change
-- **`graph.BatchAssembler`** composes a Validator and a Graph for the validate→add pipeline pattern, and is safe for concurrent use. `Add` validates a record before it adds it. The caller waits for its workers, then reads the graph through `Graph()` to check it and take its snapshot. Construct with `NewBatchAssembler` (empty graph) or `NewBatchAssemblerFromSnapshot` (graph seeded from a prior snapshot — the resume path: new adds resolve against, and may complete, the seeded state; it returns a `diag.Result` and takes a snapshot bound to the schema as it stands and refuses one built against another schema that breaks any of the schema's structural facts, save that it derives the Records fact's records again, refusing an `empty` record under a (one) association, and drops an absent record under a relation that is no association of the schema). See the Batch Assembly section of `docs/API.md`
+- **The `Graph` type** (`*graph.Graph`) is concurrent-safe for `Add` and `AddOrMerge` calls — multiple goroutines may add instances in parallel; the graph handles forward references, duplicate detection and merges atomically. `Snapshot()` acquires a read lock, briefly blocking concurrent adds, and returns a snapshot later Adds do not change
+- **The validate→add pipeline** shares one `Validator` and one `Graph` across its workers: each worker validates a record with `ValidateOne`, checks `IsZero`, and adds it with `Add`, or with `AddOrMerge` for a source that lists one record under several parents. The caller waits for its workers, then checks the graph and takes its snapshot. Each call returns its own result, and a snapshot holds no diagnostics. To resume, seed the graph with `graph.NewFromSnapshot` (new adds resolve against, and may complete, the seeded state; it returns a `diag.Result` and takes a snapshot bound to the schema as it stands and refuses one built against another schema that breaks any of the schema's structural facts, save that it derives the Records fact's records again, refusing an `empty` record under a (one) association, and drops an absent record under a relation that is no association of the schema). See the Batch Assembly section of `docs/API.md`
 - **Validators** (`*instance.Validator`) are safe for concurrent use (stateless after construction)
 
 ---

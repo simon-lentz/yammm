@@ -18,11 +18,11 @@ import (
 // Graph builds an in-memory data structure from validated instances.
 //
 // Graph is safe for concurrent use from multiple goroutines. Multiple
-// callers may invoke [Graph.Add] concurrently; the graph handles forward
-// references and duplicate detection atomically.
+// callers may invoke [Graph.Add] and [Graph.AddOrMerge] concurrently; the graph
+// handles forward references, duplicate detection and merges atomically.
 //
-// Add and Check accept a [context.Context] for cancellation. Cancellation does
-// not corrupt internal state; partial results may be inspected.
+// Add, AddOrMerge and Check accept a [context.Context] for cancellation.
+// Cancellation does not corrupt internal state; partial results may be inspected.
 type Graph struct {
 	schema schema.Schema
 	mu     sync.RWMutex
@@ -46,12 +46,9 @@ type Graph struct {
 	duplicates []Duplicate
 
 	// bySource indexes edges and pending records by source and association,
-	// for [BatchAssembler.AddValidOrMerge]. It is nil until the first call to
-	// reach the merge rules, at a held key with no composed children, builds it.
+	// for [Graph.AddOrMerge]. It is nil until the first call to reach the merge
+	// rules, at a held key with no composed children, builds it.
 	bySource map[recordSlot]*heldRecords
-
-	// collector accumulates diagnostics.
-	collector *diag.Collector
 
 	// attestValues is the Values attestation: true for a new graph, whose every
 	// record comes from a validator, and a seeded graph's loaded header's claim.
@@ -90,7 +87,6 @@ func New(s schema.Schema) *Graph {
 		canon:        newCanonicalizer(s),
 		instances:    make(map[schema.TypeID]map[string]Instance),
 		pending:      make(map[pendingKey][]*pendingEdge),
-		collector:    diag.NewCollector(0), // unlimited
 		attestValues: true,
 	}
 }
@@ -103,61 +99,65 @@ func New(s schema.Schema) *Graph {
 //
 // Return semantics: check [diag.Result.OK] for success. A non-OK result
 // contains diagnostic issues and no instance installs — every rejection is
-// decided before the install. The graph keeps the issues and a duplicate's record. The package doc's Error Handling
+// decided before the install. The graph keeps a duplicate's record. The package doc's Error Handling
 // section enumerates the codes Add can emit.
 //
 // Panics if g or ctx is nil, inst is zero, or this graph's schema does not hold
 // inst's type under its identity: a validator of another load built it, even one
 // over the same text, or the type is outside that schema's import closure.
 func (g *Graph) Add(ctx context.Context, inst instance.ValidInstance) diag.Result {
-	_, res := g.add(ctx, inst, false)
+	_, res := g.add(ctx, inst, "graph.Add", false)
 	return res
 }
 
-// add is [Graph.Add], and with merge set the merge
-// [BatchAssembler.AddValidOrMerge] states.
-func (g *Graph) add(ctx context.Context, inst instance.ValidInstance, merge bool) (merged bool, res diag.Result) {
+// add is [Graph.Add], and with merge set [Graph.AddOrMerge]. name is the
+// calling method's, which its panics and its cancellation message carry.
+func (g *Graph) add(ctx context.Context, inst instance.ValidInstance, name string, merge bool) (merged bool, res diag.Result) {
 	// Programmer errors: a caller cannot recover from any of these.
 	if g == nil {
-		panic("graph.Add: nil *Graph receiver")
+		panic(name + ": nil *Graph receiver")
 	}
 
 	if inst.IsZero() {
-		panic("graph.Add: zero ValidInstance")
+		panic(name + ": zero ValidInstance")
 	}
 
 	if ctx == nil {
-		panic("graph.Add: nil context")
-	}
-
-	opCollector := diag.NewCollector(0)
-
-	if err := ctx.Err(); err != nil {
-		return false, g.reject(opCollector, diag.NewIssue(diag.Fatal, diag.E_CONTEXT_CANCELLED,
-			"graph.Add cancelled: "+err.Error()).Build())
+		panic(name + ": nil context")
 	}
 
 	typ := inst.Type()
 	typeID := typ.ID()
 
 	// Which load validated the instance is no fact of the data, so another load's
-	// handle is a programmer error, as a zero instance is.
+	// handle is a programmer error, as a zero instance is. It panics before the
+	// cancellation check, so a cancelled context does not hide it.
 	if held, ok := g.schema.TypeByID(typeID); !ok || held != typ {
-		panic("graph.Add: instance was validated under another schema load, or its type is outside this schema's import closure")
+		panic(name + ": instance was validated under another schema load, or its type is outside this schema's import closure")
+	}
+
+	opCollector := diag.NewCollector(0)
+
+	if err := ctx.Err(); err != nil {
+		opCollector.Collect(diag.NewIssue(diag.Fatal, diag.E_CONTEXT_CANCELLED,
+			name+" cancelled: "+err.Error()).Build())
+		return false, opCollector.Result()
 	}
 
 	// A validator refuses a part type at a root, so only a child read out of
 	// [instance.ValidInstance.Compositions] arrives here.
 	if !typ.HasPrimaryKey() {
-		return false, g.reject(opCollector, diag.NewIssue(diag.Error, diag.E_GRAPH_MISSING_PK,
+		opCollector.Collect(diag.NewIssue(diag.Error, diag.E_GRAPH_MISSING_PK,
 			fmt.Sprintf("type %s has no primary key; cannot add to graph", diag.QuoteValue(g.tagForm(typeID)))).
 			WithDetail(diag.DetailKeyTypeName, g.tagForm(typeID)).Build())
+		return false, opCollector.Result()
 	}
 
 	if typ.IsPart() {
-		return false, g.reject(opCollector, diag.NewIssue(diag.Error, diag.E_GRAPH_INVALID_COMPOSITION,
+		opCollector.Collect(diag.NewIssue(diag.Error, diag.E_GRAPH_INVALID_COMPOSITION,
 			fmt.Sprintf("part type %s cannot be added directly; add it in its parent's composition", diag.QuoteValue(g.tagForm(typeID)))).
 			WithDetail(diag.DetailKeyTypeName, g.tagForm(typeID)).Build())
+		return false, opCollector.Result()
 	}
 
 	var staged []stagedEdge
@@ -176,9 +176,9 @@ func (g *Graph) add(ctx context.Context, inst instance.ValidInstance, merge bool
 				plan, refused := g.planMerge(typ, existing, staged)
 				if len(refused) > 0 {
 					for _, issue := range refused {
-						res = g.reject(opCollector, issue)
+						opCollector.Collect(issue)
 					}
-					return false, res
+					return false, opCollector.Result()
 				}
 				g.commitMerge(existing, plan)
 				return true, opCollector.Result()
@@ -192,7 +192,8 @@ func (g *Graph) add(ctx context.Context, inst instance.ValidInstance, merge bool
 				WithDetail(diag.DetailKeyPrimaryKey, pkString).
 				WithSpan(inst.Provenance().Span())
 			g.duplicates = append(g.duplicates, newDuplicate(rejected, existing))
-			return false, g.reject(opCollector, diagBuilder.Build())
+			opCollector.Collect(diagBuilder.Build())
+			return false, opCollector.Result()
 		}
 	} else {
 		g.instances[typeID] = make(map[string]Instance)
@@ -246,8 +247,6 @@ func (g *Graph) Check(ctx context.Context) diag.Result {
 		panic("graph.Check: nil context")
 	}
 
-	// Check does NOT merge into g.collector, which is what makes it
-	// idempotent: multiple calls return identical results.
 	opCollector := diag.NewCollector(0)
 
 	if err := ctx.Err(); err != nil {
@@ -409,7 +408,7 @@ func (g *Graph) Snapshot() Snapshot {
 		Associations: !requiredUnresolved,
 	}
 
-	return newSnapshot(g.schema, g.canon, types, instances, instanceIndex, edges, duplicates, unresolved, g.collector.Result(), att)
+	return newSnapshot(g.schema, g.canon, types, instances, instanceIndex, edges, duplicates, unresolved, att)
 }
 
 // identityText renders a type identity for a message: whole where s resolves
@@ -552,13 +551,4 @@ func markWholeFloats(v any) any {
 		}
 	}
 	return v
-}
-
-// reject records issue in the per-call collector and in the graph's cumulative
-// one, and returns the per-call result. [diag.Collector] synchronizes itself,
-// so the graph's own lock is not needed for the second write.
-func (g *Graph) reject(opCollector *diag.Collector, issue diag.Issue) diag.Result {
-	opCollector.Collect(issue)
-	g.collector.Collect(issue)
-	return opCollector.Result()
 }

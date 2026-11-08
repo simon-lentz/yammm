@@ -1,7 +1,6 @@
 package graph_test
 
 import (
-	"context"
 	"maps"
 	"slices"
 	"strings"
@@ -722,17 +721,6 @@ func mustImport(tb testing.TB, s schema.Schema, snap graph.Snapshot) *graph.Grap
 		tb.Fatalf("NewFromSnapshot: %s", res)
 	}
 	return g
-}
-
-// mustSeed seeds a new assembler bound to s from snap and fails the test when
-// the seed is refused.
-func mustSeed(tb testing.TB, ctx context.Context, s schema.Schema, snap graph.Snapshot) *graph.BatchAssembler {
-	tb.Helper()
-	ba, res := graph.NewBatchAssemblerFromSnapshot(ctx, s, snap)
-	if res.HasErrors() {
-		tb.Fatalf("NewBatchAssemblerFromSnapshot: %s", res)
-	}
-	return ba
 }
 
 // rebuild constructs a snapshot from parts, as the snapshot package does from a

@@ -124,9 +124,6 @@ func TestNewFromSnapshot_OneBreakDrawsOneIssue(t *testing.T) {
 			if !found {
 				t.Errorf("no %s naming %q: %s", c.code, c.phrase, res)
 			}
-			if _, bres := graph.NewBatchAssemblerFromSnapshot(t.Context(), bound, snap); failures(bres) != failures(res) {
-				t.Errorf("the seeded assembler reports %d issues, the import %d: %s", failures(bres), failures(res), bres)
-			}
 		})
 	}
 }
@@ -197,9 +194,6 @@ func TestNewFromSnapshot_ARefusedSlotDrawsItsOwnIssues(t *testing.T) {
 			want := max(c.issues, 1)
 			if failures(res) != want || !res.HasCode(c.code) {
 				t.Errorf("%d issues, want %d with a %s: %s", failures(res), want, c.code, res)
-			}
-			if _, bres := graph.NewBatchAssemblerFromSnapshot(t.Context(), bound, snap); failures(bres) != failures(res) {
-				t.Errorf("the seeded assembler reports %d issues, the import %d: %s", failures(bres), failures(res), bres)
 			}
 		})
 	}

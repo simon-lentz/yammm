@@ -6,7 +6,7 @@
 //
 // Among what it handles:
 //   - Primary key uniqueness (duplicate detection, or a merge under
-//     [BatchAssembler.AddValidOrMerge])
+//     [Graph.AddOrMerge])
 //   - The key rule (which components a key may hold) and root type eligibility
 //   - Association edge resolution (forward references)
 //   - Composition child extraction and indexing
@@ -15,7 +15,7 @@
 // # Thread Safety
 //
 // [Graph] is safe for concurrent use. Multiple goroutines may call [Graph.Add]
-// concurrently. The graph handles forward references, duplicate detection and
+// and [Graph.AddOrMerge] concurrently. The graph handles forward references, duplicate detection and
 // merges atomically using internal synchronization.
 //
 // [Snapshot] has no method that changes it, and it is safe for concurrent read
@@ -46,41 +46,44 @@
 //	    }
 //	}
 //
-// # Batch Assembly
+// # Validate, Then Add
 //
-// [BatchAssembler] composes a [github.com/simon-lentz/yammm/instance.Validator],
-// and a [Graph] into a single call surface for the common pipeline pattern
-// (validate → add → check → snapshot). Add validates before it adds, and
-// [BatchAssembler.Graph] gives the batch's end its check and its snapshot. It is
-// concurrent-safe by default — multiple goroutines may
-// share one assembler:
+// A pipeline validates each record with an [instance.Validator] and adds what
+// the validator returns. Both are safe for concurrent use, so one validator and
+// one graph serve every goroutine, each call taking its own context:
 //
-//	ba := graph.NewBatchAssembler(ctx, s)
+//	v := instance.NewValidator(s)
+//	g := graph.New(s)
 //	for i, rec := range records {
-//	    if err := ba.Add("TypeName", buildRawInstance(rec)); err != nil {
-//	        return fmt.Errorf("record %d: %w", i, err)
+//	    valid, res := v.ValidateOne(ctx, "TypeName", buildRawInstance(rec))
+//	    if res.HasErrors() {
+//	        return fmt.Errorf("record %d: %w", i, res.WithContext("validate"))
+//	    }
+//	    if valid.IsZero() {
+//	        // The record holds an instance.Refused value, which its parser reported.
+//	        return fmt.Errorf("record %d: %w", i, instance.ErrRefusedValue)
+//	    }
+//	    if res := g.Add(ctx, valid); res.HasErrors() {
+//	        return fmt.Errorf("record %d: %w", i, res.WithContext("add"))
 //	    }
 //	}
-//	if res := ba.Graph().Check(ctx); res.HasErrors() {
+//	if res := g.Check(ctx); res.HasErrors() {
 //	    return fmt.Errorf("batch: %w", res.WithContext("check"))
 //	}
-//	snap := ba.Graph().Snapshot() // pass it to snapshot.Marshal
+//	snap := g.Snapshot() // pass it to snapshot.Marshal
 //
-// One validator serves every goroutine, serialized through an internal
-// mutex. See [BatchAssembler] for the full thread-safety contract.
-//
-// To resume assembly on top of a previously-persisted snapshot,
-// construct the assembler with [NewBatchAssemblerFromSnapshot]: the
-// underlying graph starts pre-populated via [NewFromSnapshot] semantics,
-// and new Add calls resolve against — and may complete — the seeded
-// state.
+// [Graph.AddOrMerge] takes Add's place for a source that lists one record under
+// several parents. To resume a persisted batch, seed the graph with
+// [NewFromSnapshot] and add the records still outstanding: they resolve against,
+// and may complete, the seeded state. Each refusal is in the result of the call
+// that drew it, so a caller that needs a record of every refusal keeps those
+// results; a [Snapshot] holds no diagnostics.
 //
 // # Alternative Constructors
 //
 // [NewFromSnapshot] creates a [Graph] pre-populated from a [Snapshot],
 // for incremental building on top of persisted or previously-constructed
 // state; new Add calls resolve against the imported instances.
-// [NewBatchAssemblerFromSnapshot] is its assembler-level counterpart.
 //
 // [github.com/simon-lentz/yammm/snapshot.Load] constructs a [Snapshot] from a .ys
 // document. It holds the document to the structural facts below and refuses a
@@ -110,8 +113,7 @@
 // A schema where an imported type composes a part type from a further import
 // therefore loads, validates and builds.
 //
-// Save [BatchAssembler.Add], whose typeName goes to the validator, no lookup in
-// this package takes a rendered type name. A diagnostic that compares two
+// No lookup in this package takes a rendered type name. A diagnostic that compares two
 // identities prints each whole, so two that render alike never read "X does not
 // match X".
 //
@@ -122,10 +124,8 @@
 // takes an instance a validator of its own load built, and that validator
 // refuses an abstract or a part type at a root, so Add checks the key and the
 // part rule, which a child read out of [instance.ValidInstance.Compositions] can
-// still break. [BatchAssembler]'s
-// add methods run the code [Graph.Add] runs, and
-// [NewBatchAssemblerFromSnapshot] goes through [NewFromSnapshot]; a snapshot of the
-// importing schema was held to them where it was built. A type is
+// still break. [Graph.AddOrMerge] runs the code [Graph.Add] runs, and a snapshot of
+// the importing schema was held to them where it was built. A type is
 // ineligible when it
 //
 //   - is abstract, because an abstract type has no instances;
@@ -154,12 +154,11 @@
 // # Structural facts
 //
 // [Graph.Add] never builds a snapshot that breaks the facts below, and the
-// snapshot package's reader refuses a document that does. [NewFromSnapshot]
-// and [NewBatchAssemblerFromSnapshot], over a snapshot bound to another schema,
-// derive its records again, refusing an "empty" record under a (one)
-// association, and refuse one that breaks any other fact, save an "absent"
-// record under a relation that is no association of that schema, which
-// they drop.
+// snapshot package's reader refuses a document that does. [NewFromSnapshot],
+// over a snapshot bound to another schema, derives its records again, refusing
+// an "empty" record under a (one) association, and refuses one that breaks any
+// other fact, save an "absent" record under a relation that is no association of
+// that schema, which it drops.
 // The facts are the whole promise: a shape they do not name, such as a
 // property value its constraint refuses, can pass the reader. A type that
 // cannot hold a root is one break, however many positions name it, and a root of
@@ -199,8 +198,8 @@
 //     a root's key properties state, where the key rule refuses its stored key,
 //     is that root's break, and draws no diagnostic of its own.
 //   - Records. The records are the ones [Graph.Add] derives from the data, and
-//     the ones [BatchAssembler.AddValidOrMerge] merges into a held root from a
-//     duplicate's data. Every root holds an edge or a record under each required
+//     the ones [Graph.AddOrMerge] merges into a held root from a duplicate's
+//     data. Every root holds an edge or a record under each required
 //     association of its type. An "absent" or "empty" record stands alone,
 //     once, and only under a required association, and an "empty" record only
 //     under a (many) association. A "target_missing" record
@@ -242,8 +241,7 @@
 //
 // # Build Then Commit
 //
-// [Graph.Add] and [BatchAssembler.AddValidOrMerge] check the instance's load and
-// its root type, then assemble the [Instance] tree to install and stage its
+// [Graph.Add] and [Graph.AddOrMerge] check the instance's load and its root type, then assemble the [Instance] tree to install and stage its
 // association records, touching no graph state. They check no structure below
 // the root type: the validator of the same load already judged the property names,
 // a root's edge names, edge property names, multiplicities and target keys, and
@@ -256,9 +254,9 @@
 // graph holds with E_DUPLICATE_PK, and a merge with E_GRAPH_CARDINALITY.
 //
 // A non-OK result therefore installs nothing of the record — no instance, child
-// or edge. A rejection is itself recorded: a root [Graph.Add] refuses at its key, and a root
-// [BatchAssembler.AddValidOrMerge] refuses at its key for its composed children,
-// in [Snapshot.Duplicates], and every refusal's issue in [Snapshot.Diagnostics].
+// or edge. A root [Graph.Add] refuses at its key, and a root [Graph.AddOrMerge]
+// refuses at its key for its composed children, is itself recorded in
+// [Snapshot.Duplicates]. Every refusal's issue is in the call's result alone.
 //
 // A validator defect reaches the graph: Add does not judge the record again.
 // [github.com/simon-lentz/yammm/snapshot.WithRevalidation] runs a validator over a
@@ -266,7 +264,7 @@
 //
 // # Merge on a Duplicate Key
 //
-// [BatchAssembler.AddValidOrMerge] adds an instance as [Graph.Add] does. When
+// [Graph.AddOrMerge] adds an instance as [Graph.Add] does. When
 // the graph already holds a root of the instance's type at its primary key, it
 // merges instead: the incoming
 // instance's association records go to the held root, and its properties and
@@ -293,9 +291,10 @@
 //
 // An incoming instance carrying composed children is not merged: it is refused
 // as [Graph.Add] refuses a duplicate, with a [Duplicate] and E_DUPLICATE_PK.
-// A merge finds the held root's records through an index by source,
-// built by the first call to reach these rules, whether it commits or is
-// refused, so a graph that never merges keeps none.
+// A merge finds the held root's records through an index by source. The first
+// call to reach these rules builds it, whether that call commits or is
+// refused, so a graph keeps none until an AddOrMerge without composed children
+// meets a held key.
 //
 // # Composed Children
 //
@@ -307,11 +306,6 @@
 // [Attestation]'s Associations dimension.
 //
 // # Key Types
-//
-// [BatchAssembler] composes Validator + Graph for the
-// validate→add→check→snapshot pipeline pattern; constructed via
-// [NewBatchAssembler] (or [NewBatchAssemblerFromSnapshot], seeding from
-// a prior snapshot), and read at the batch's end through [BatchAssembler.Graph].
 //
 // [Instance] provides read access to a graph node's data, through
 // accessors such as [Instance.TypeName], [Instance.PrimaryKey], [Instance.Properties],
@@ -346,9 +340,7 @@
 // schemas of one name. [github.com/simon-lentz/yammm/schema.Schema.ResolveTypeName]
 // resolves the first two forms and not the third.
 //
-// So every place that must denote a type exactly takes or returns an identity, and
-// [BatchAssembler.Add], which takes an entry-schema name, has the validator
-// resolve it to one identity first:
+// So every place that must denote a type exactly takes or returns an identity:
 //
 //   - [Snapshot.Types]
 //   - [Snapshot.InstancesOf]
@@ -389,20 +381,18 @@
 //
 // Graph operations return [diag.Result]:
 //
-//   - [diag.Result.HasFatal]: context cancellation (E_CONTEXT_CANCELLED), and in
-//     [Snapshot.Diagnostics] a validator's E_INTERNAL, which [BatchAssembler.Add]
-//     merges
+//   - [diag.Result.HasFatal]: context cancellation (E_CONTEXT_CANCELLED)
 //   - [diag.Result.HasErrors]: any Fatal or Error issue, so a semantic failure
 //     (duplicate PK, type not found) too
 //   - [diag.Result.OK]: success (may have warnings)
 //
 // Programmer errors panic: a nil receiver at a method that adds or checks, a
-// zero instance at [Graph.Add], a nil context, a zero schema or snapshot at a
-// constructor, an instance whose type this graph's schema does not hold under its
-// identity (see Type Resolution), or a key value [FormatKey] cannot encode.
-// [BatchAssembler.AddValid]
-// and [BatchAssembler.AddValidOrMerge] report a zero instance as Error
-// E_INTERNAL instead, since a validator returns a zero instance for a refused one.
+// zero instance at [Graph.Add] or [Graph.AddOrMerge], a nil context, a zero
+// schema or snapshot at a constructor, an instance whose type this graph's
+// schema does not hold under its identity (see Type Resolution), or a key value
+// [FormatKey] cannot encode. A
+// validator returns a zero instance for a record it refuses, so a caller checks
+// [instance.ValidInstance.IsZero] before it adds.
 //
 // [Graph.Add] emits the following. The first two judge a root's type in the
 // order listed, and a type breaking both draws the first:
@@ -414,7 +404,7 @@
 //   - E_DUPLICATE_PK: the primary key already exists for this type
 //   - E_CONTEXT_CANCELLED: the context was cancelled
 //
-// [BatchAssembler.AddValidOrMerge] emits what [Graph.Add] emits, with two
+// [Graph.AddOrMerge] emits what [Graph.Add] emits, with two
 // differences at a held key: E_DUPLICATE_PK only for an incoming instance
 // carrying composed children, and E_GRAPH_CARDINALITY for a merge that would
 // give a (one) association a second target.
@@ -451,21 +441,11 @@
 //
 // # Diagnostics Lifecycle
 //
-// [Snapshot.Diagnostics] returns the cumulative issues from [Graph.Add] calls,
-// and a [BatchAssembler]'s adds and validator results, its validation failures among them, and zero-instance
-// refusals. [BatchAssembler.Add] adds none for a record whose one fault is an
-// [instance.Refused] value, since its producer's result holds its issue; the
-// zero instance a validator returns for one still draws AddValid's E_INTERNAL. These are construction-time
-// diagnostics that accumulate as instances are added to the graph.
-//
-// [Graph.Check] operates differently: it returns a fresh [diag.Result] per
-// call without affecting [Snapshot.Diagnostics]. This makes Check idempotent—
-// calling it multiple times returns identical results without accumulating
-// issues into the snapshot.
-//
-// Design rationale: This separation allows users to call Check() freely
-// (for logging, validation gates, or debugging) without polluting the
-// snapshot's construction diagnostics.
+// Each call returns the issues it drew, and the graph keeps none of them: a
+// [Snapshot] carries the structural records ([Snapshot.Duplicates],
+// [Snapshot.Unresolved]) and the [Attestation], never a diagnostic. [Graph.Check]
+// judges the graph as it stands at each call, so calling it again returns the
+// same result over the same graph.
 //
 // # Ordering Guarantees
 //

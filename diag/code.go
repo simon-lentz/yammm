@@ -121,8 +121,7 @@ func NewCode(value string, cat CodeCategory) Code {
 
 // Sentinel codes.
 var (
-	// E_INTERNAL indicates a broken invariant, which marks a library defect, or a
-	// zero instance given to graph.BatchAssembler.AddValid or AddValidOrMerge.
+	// E_INTERNAL indicates a broken invariant, which marks a library defect.
 	E_INTERNAL = NewCode("E_INTERNAL", CategorySentinel)
 
 	// E_COMMAND_FAILED carries a command-line failure that is not itself a
@@ -133,10 +132,9 @@ var (
 	E_COMMAND_FAILED = NewCode("E_COMMAND_FAILED", CategorySentinel)
 
 	// E_CONTEXT_CANCELLED indicates the operation was cancelled via context.
-	// An operation that checks its context and reports through a [Result], or
-	// through a [ContextualError] that holds one, raises it when ctx.Err()
-	// returns a non-nil error; one that returns another Go error returns
-	// ctx.Err() or wraps it instead.
+	// An operation that checks its context and reports through a [Result]
+	// raises it when ctx.Err() returns a non-nil error; one that returns another
+	// Go error returns ctx.Err() or wraps it instead.
 	E_CONTEXT_CANCELLED = NewCode("E_CONTEXT_CANCELLED", CategorySentinel)
 )
 
@@ -419,8 +417,8 @@ var (
 	E_GRAPH_MISSING_PK = NewCode("E_GRAPH_MISSING_PK", CategoryGraph)
 
 	// E_GRAPH_CARDINALITY indicates a (one) association holding more than one
-	// record: a merge at graph.BatchAssembler.AddValidOrMerge that would add a
-	// second target, or several edges and unresolved records no check refused, together in a
+	// record: a merge at graph.Graph.AddOrMerge that would add a second target,
+	// or several edges and unresolved records no check refused, together in a
 	// snapshot or a .ys document.
 	E_GRAPH_CARDINALITY = NewCode("E_GRAPH_CARDINALITY", CategoryGraph)
 
@@ -502,10 +500,9 @@ var (
 	// cannot carry a created_at the input header states in a form other than
 	// RFC 3339.
 	//
-	// Three drops are DELIBERATE and are NOT marked: an instance provenance's
-	// SPAN, which the reader rebuilds as zero, an instance's own validated
-	// flag, which the header's attestation states for the document whole, and
-	// a snapshot's construction diagnostics, which the wire does not carry. A
+	// Two drops are DELIBERATE and are NOT marked: an instance provenance's
+	// SPAN, which the reader rebuilds as zero, and an instance's own validated
+	// flag, which the header's attestation states for the document whole. A
 	// consumer cannot gate loss detection on this code alone and be right.
 	W_SNAPSHOT_VALUE_DROPPED = NewCode("W_SNAPSHOT_VALUE_DROPPED", CategorySnapshot)
 

@@ -134,7 +134,7 @@ type Issue {
 	}
 	merge := func(step, id string, edges map[string][]string) {
 		t.Helper()
-		if merged, r := g.add(t.Context(), indexedInstance(t, s, "Issue", id, edges), true); r.HasErrors() || !merged {
+		if merged, r := g.AddOrMerge(t.Context(), indexedInstance(t, s, "Issue", id, edges)); r.HasErrors() || !merged {
 			t.Fatalf("%s: merged %v, %s", step, merged, r)
 		}
 		assertIndexMatchesARebuild(t, g, step)

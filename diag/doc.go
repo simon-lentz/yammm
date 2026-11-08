@@ -33,15 +33,14 @@
 // diagnostics in their own shape. snapshot.ScanDir yields each file's Result on
 // its entry. schema.ModuleRootIssue returns a bare [Issue].
 // format.TokenStream's error for a source that does not parse is a
-// *format.SyntaxError that holds an [Issue]. Each Add method of graph.BatchAssembler
-// returns an error whose cause is a [*ContextualError], unless it wraps
-// instance.ErrRefusedValue, and the graph's snapshot's Diagnostics hold the rest.
+// *format.SyntaxError that holds an [Issue].
 // A Result reads:
 //
 //   - [Result.HasFatal]: any Fatal issue, such as an I/O failure, a cancellation,
-//     an internal fault, input a reader cannot go past (a schema header that does
-//     not parse), an argument or option a loader refuses, or a finding that
-//     snapshot.WithRevalidation raises at Fatal
+//     an internal fault the validator or the snapshot writer reports (the schema
+//     loader raises its E_INTERNAL at Error), input a reader cannot go past (a
+//     schema header that does not parse), an argument or option a loader refuses,
+//     or a finding that snapshot.WithRevalidation raises at Fatal
 //   - [Result.HasErrors]: any Error or Fatal issue
 //   - [Result.OK]: success (may still include warnings/info/hints)
 //

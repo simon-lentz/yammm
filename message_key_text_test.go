@@ -2,7 +2,6 @@ package yammm_test
 
 import (
 	"context"
-	"errors"
 	"strings"
 	"testing"
 
@@ -139,22 +138,21 @@ func TestMessages_RepeatAKeyCutToItsHead(t *testing.T) {
 		return instancetest.Valid(t, s, typeName, props)
 	}
 	needs := map[string]any{"_target_id": "u"}
-	assembler := graph.NewBatchAssembler(ctx, s)
+	g := graph.New(s)
 	for _, record := range []instance.ValidInstance{
 		valid("U", map[string]any{"id": "u"}),
 		valid("U", map[string]any{"id": "u2"}),
 		valid("T", map[string]any{"id": longText, "needs": needs, "maybe": map[string]any{"_target_id": "u"}}),
 	} {
-		if err := assembler.AddValid(record); err != nil {
-			t.Fatal(err)
+		if res := g.Add(ctx, record); res.HasErrors() {
+			t.Fatal(res)
 		}
 	}
-	_, mergeErr := assembler.AddValidOrMerge(valid("T", map[string]any{"id": longText, "needs": needs, "maybe": map[string]any{"_target_id": "u2"}}))
-	refused, isContextual := errors.AsType[*diag.ContextualError](mergeErr)
-	if !isContextual {
-		t.Fatalf("AddValidOrMerge a second (one) target: %v", mergeErr)
+	merged, mergeRes := g.AddOrMerge(ctx, valid("T", map[string]any{"id": longText, "needs": needs, "maybe": map[string]any{"_target_id": "u2"}}))
+	if merged || !mergeRes.HasCode(diag.E_GRAPH_CARDINALITY) {
+		t.Fatalf("AddOrMerge a second (one) target: merged %v, %s", merged, mergeRes)
 	}
-	result("AddValidOrMerge a second (one) target", refused.Result)
+	result("AddOrMerge a second (one) target", mergeRes)
 
 	for _, key := range []string{"[" + longDigits + "e99999]", "null " + longText, `[] "` + longText + `"`} {
 		_, err := graph.ParseKey(key)

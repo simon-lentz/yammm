@@ -79,17 +79,13 @@ func loadedRecordsSnapshot(t *testing.T) graph.Snapshot {
 	return g.Snapshot()
 }
 
-// A .ys file persists no span, no construction diagnostic and no validator claim:
+// A .ys file persists no span and no validator claim:
 // [graph.Instance.Validated] documents the loaded answer.
 func loadedRecordsOptions() recordtest.Options {
 	return recordtest.Options{
 		OmitTypes: []reflect.Type{reflect.TypeFor[location.Span]()},
 		SkipMethod: func(owner, method string) bool {
-			switch owner + "." + method {
-			case "Instance.Validated", "Snapshot.Diagnostics":
-				return true
-			}
-			return false
+			return owner == "Instance" && method == "Validated"
 		},
 	}
 }

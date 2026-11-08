@@ -3,7 +3,7 @@ package graph_test
 import (
 	"context"
 	"math"
-	"strings"
+	"slices"
 	"testing"
 
 	"github.com/simon-lentz/yammm/diag"
@@ -15,11 +15,9 @@ import (
 	"github.com/simon-lentz/yammm/schema"
 )
 
-// TestAdd_ContextCancelled_ReachesSnapshotDiagnostics pins that a cancelled
-// construction is visible on the snapshot. Every other Add rejection is
-// merged into the cumulative collector; a cancellation that was not left a
-// half-built graph reporting diag.OK() construction diagnostics.
-func TestAdd_ContextCancelled_ReachesSnapshotDiagnostics(t *testing.T) {
+// A cancelled Add returns its cancellation and installs nothing, so a graph a
+// cancellation interrupted holds only what earlier calls installed.
+func TestAdd_ACancelledContextInstallsNothing(t *testing.T) {
 	t.Parallel()
 	s := testSchemaWithComposition(t)
 	g := graph.New(s)
@@ -29,72 +27,11 @@ func TestAdd_ContextCancelled_ReachesSnapshotDiagnostics(t *testing.T) {
 
 	inst := instancetest.Valid(t, s, "Parent", map[string]any{"id": "p1", "name": "Parent 1"})
 	res := g.Add(ctx, inst)
-	if !res.HasFatal() {
+	if !res.HasFatal() || !res.HasCode(diag.E_CONTEXT_CANCELLED) {
 		t.Fatalf("a cancelled Add returned %s", res.String())
 	}
-
-	diags := g.Snapshot().Diagnostics()
-	if !diags.HasCode(diag.E_CONTEXT_CANCELLED) {
-		t.Fatalf("Snapshot.Diagnostics() hid the cancellation: %s", diags.String())
-	}
-}
-
-// TestBatchAssembler_AddValid_ZeroIsAPerRecordError pins the documented
-// consumer loop: instance.Validator.Validate returns a nil entry for each
-// refused row, and feeding one back must not crash the batch.
-func TestBatchAssembler_AddValid_ZeroIsAPerRecordError(t *testing.T) {
-	t.Parallel()
-	s := testSchemaWithComposition(t)
-	ba := graph.NewBatchAssembler(t.Context(), s)
-
-	err := ba.AddValid(instance.ValidInstance{})
-	if err == nil {
-		t.Fatal("AddValid(nil) returned no error")
-	}
-	if ba.Count() != 0 {
-		t.Fatalf("a failed AddValid counted as a success (Count=%d)", ba.Count())
-	}
-	ce, ok := diag.AsContextualError(err, "")
-	if !ok {
-		t.Fatalf("AddValid(nil) error is not a *diag.ContextualError: %v", err)
-	}
-	// A single token before the ordinal: an empty type name would render
-	// " (attempt #1)" and break a consumer splitting on the first space.
-	if strings.HasPrefix(ce.Tag, " ") || !strings.HasPrefix(ce.Tag, "zero-instance (attempt #") {
-		t.Errorf("tag = %q, want a single token before the ordinal", ce.Tag)
-	}
-	// The record is absent, not mis-keyed.
-	if !ce.Result.HasCode(diag.E_INTERNAL) {
-		t.Errorf("want E_INTERNAL, got %s", ce.Result.String())
-	}
-	// Every other Add rejection reaches the snapshot; this one must too, or a
-	// caller that discards per-record errors has no record of the loss.
-	if !ba.Graph().Snapshot().Diagnostics().HasCode(diag.E_INTERNAL) {
-		t.Error("the zero-instance rejection never reached Snapshot.Diagnostics()")
-	}
-}
-
-// TestBatchAssembler_ErrorTagNamesTheAttemptOrdinal pins what the tag claims.
-// The ordinal counts calls across every goroutine sharing the assembler, so
-// naming it a record index would promise a row number nothing can supply.
-func TestBatchAssembler_ErrorTagNamesTheAttemptOrdinal(t *testing.T) {
-	t.Parallel()
-	s := testSchemaWithComposition(t)
-	ba := graph.NewBatchAssembler(t.Context(), s)
-
-	if err := ba.Add("Parent", instance.RawInstance{Properties: map[string]any{"id": "p1", "name": "Parent 1"}}); err != nil {
-		t.Fatalf("first add: %v", err)
-	}
-	err := ba.Add("Parent", instance.RawInstance{Properties: map[string]any{"id": "p1", "name": "Parent 1"}})
-	if err == nil {
-		t.Fatal("a duplicate primary key was accepted")
-	}
-	ce, ok := diag.AsContextualError(err, "")
-	if !ok {
-		t.Fatalf("not a contextual error: %v", err)
-	}
-	if !strings.Contains(ce.Tag, "attempt #2") {
-		t.Errorf("tag = %q, want it to name attempt #2", ce.Tag)
+	if n := len(slices.Collect(g.Snapshot().AllInstances())); n != 0 {
+		t.Errorf("a cancelled Add installed %d instances", n)
 	}
 }
 

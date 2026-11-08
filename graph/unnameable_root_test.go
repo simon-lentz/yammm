@@ -235,8 +235,8 @@ func TestGraphAdd_NamesAnUnnameableRootApartFromItsNamesake(t *testing.T) {
 }
 
 // TestGraphAdd_NamesARefusedTypeAsTheGraphRendersIt pins that Add's refusals of
-// a composed child read out as a root, and the assembler's error tag, name the
-// type by the graph's rendering, not by the validating schema's own name.
+// a composed child read out as a root, and of a duplicate root, name the type by
+// the graph's rendering, not by the validating schema's own name.
 func TestGraphAdd_NamesARefusedTypeAsTheGraphRendersIt(t *testing.T) {
 	t.Parallel()
 	s, result := schema.LoadSourcesWithEntry(t.Context(), map[string][]byte{
@@ -291,26 +291,35 @@ part type Shard {
 		if !res.HasCode(want.code) {
 			t.Fatalf("%s: Add drew %s, want %s", rel, res, want.code)
 		}
-		for issue := range res.Issues() {
-			for _, d := range issue.Details() {
-				if d.Key == diag.DetailKeyTypeName && d.Value != want.name {
-					t.Errorf("%s: the refusal names %q, want %q", rel, d.Value, want.name)
-				}
-			}
+		if got := refusedTypeNames(res); !slices.Equal(got, []string{want.name}) {
+			t.Errorf("%s: the refusal names %q, want [%q]", rel, got, want.name)
 		}
 	}
 
-	ba := graph.NewBatchAssembler(context.Background(), s)
-	if err := ba.AddValid(basin); err != nil {
-		t.Fatalf("first AddValid: %v", err)
+	g := graph.New(s)
+	if res := g.Add(context.Background(), basin); res.HasErrors() {
+		t.Fatalf("first Add: %s", res)
 	}
-	ce, ok := diag.AsContextualError(ba.AddValid(basin), "")
-	if !ok {
-		t.Fatal("a duplicate AddValid returned no contextual error")
+	res := g.Add(context.Background(), basin)
+	if !res.HasCode(diag.E_DUPLICATE_PK) {
+		t.Fatalf("a duplicate Add drew %s, want %s", res, diag.E_DUPLICATE_PK)
 	}
-	if want := "base.Basin (attempt #2)"; ce.Tag != want {
-		t.Errorf("the duplicate's tag = %q, want %q", ce.Tag, want)
+	if got := refusedTypeNames(res); !slices.Equal(got, []string{"base.Basin"}) {
+		t.Errorf("the duplicate names %q, want [%q]", got, "base.Basin")
 	}
+}
+
+// refusedTypeNames returns the type_name detail of each issue in res.
+func refusedTypeNames(res diag.Result) []string {
+	var names []string
+	for issue := range res.Issues() {
+		for _, d := range issue.Details() {
+			if d.Key == diag.DetailKeyTypeName {
+				names = append(names, d.Value)
+			}
+		}
+	}
+	return names
 }
 
 // loadDeepBeacon loads the entry, base and deep closure with deep's Beacon

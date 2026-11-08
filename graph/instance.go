@@ -15,8 +15,9 @@ import (
 // Instance provides read access to instance data. It is safe for
 // concurrent read access from multiple goroutines.
 //
-// Instances are created internally, by [Graph.Add], the snapshot package's reader
-// and the snapshot copies [Graph.Snapshot] and the import take.
+// Instances are created internally, by [Graph.Add] and [Graph.AddOrMerge], the
+// snapshot package's reader, and the snapshot copies [Graph.Snapshot] and the
+// import take.
 // A root is accessed via [Snapshot.AllInstances], [Snapshot.InstancesOf], or
 // [Snapshot.InstanceByKey]; a composed child via [Instance.Composed]; and the
 // instances an edge, a duplicate or an unresolved record names via that
@@ -114,7 +115,8 @@ func (i Instance) Properties() immutable.Properties {
 // Provenance returns the source location metadata for this instance.
 //
 // Returns the zero Provenance when the instance's source carried none: the
-// validated instance [Graph.Add] took, or the document snapshot.Load read.
+// validated instance [Graph.Add] or [Graph.AddOrMerge] took, or the document
+// snapshot.Load read.
 // Provenance includes SourceName, Path, and Span for diagnostic reporting.
 func (i Instance) Provenance() location.Provenance {
 	if i.IsZero() {

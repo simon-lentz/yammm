@@ -17,7 +17,7 @@ YAMMM is a Go library for defining schemas in a small DSL (`.yammm` files) and v
 - **Schema annotations**: Declare validated `@index` / `@@index` / `@vector` / `@fulltext` / `@@fulltext` metadata that adapters turn into store DDL, and `@writeOnce` properties that the Neo4j write path sets once
 - **Graph construction**: Build in-memory graphs from validated instances with integrity checking
 - **Graph persistence**: Save, load, verify, inspect, and edit-metadata-in-place graph snapshots (`.ys` format)
-- **Batch assembly**: Concurrent-safe validate-and-add surface over one graph, resumable from a prior snapshot
+- **Batch assembly**: Validate and add from many workers through one validator and one graph, merging a record listed under several parents, and resume a batch from a prior snapshot
 - **Structured diagnostics**: Stable error codes with source location tracking
 - **Cross-schema imports**: Modular schemas with sandboxed path resolution
 - **Go code generation**: Generate Go structs from schemas with `yammm gen --to go`
@@ -131,24 +131,34 @@ func main() {
 
 ### Assemble Batches
 
-For pipeline workloads, `graph.BatchAssembler` composes the validator and graph into a single concurrent-safe surface that validates each record and adds it as one step. At the end of the batch, wait for the workers, then check the graph and take its snapshot through `BatchAssembler.Graph`:
+A pipeline validates each record and adds what the validator returns. `instance.Validator` and `graph.Graph` are both safe for concurrent use, so one validator and one graph serve every worker. Each call returns its own result, and a `Snapshot` holds no diagnostics, so a worker keeps the results it needs. At the end of the batch, wait for the workers, then check the graph and take its snapshot:
 
 ```go
-ba := graph.NewBatchAssembler(ctx, s)
+v := instance.NewValidator(s)
+g := graph.New(s)
 
 for i, rec := range records { // rec is an instance.RawInstance
-    if err := ba.Add("Person", rec); err != nil {
-        log.Fatalf("record %d: %v", i, err)
+    valid, result := v.ValidateOne(ctx, "Person", rec)
+    if result.HasErrors() {
+        log.Fatalf("record %d: %s", i, result)
+    }
+    if valid.IsZero() { // the record holds an instance.Refused value
+        log.Fatalf("record %d: %v", i, instance.ErrRefusedValue)
+    }
+    if result := g.Add(ctx, valid); result.HasErrors() {
+        log.Fatalf("record %d: %s", i, result)
     }
 }
 
-if result := ba.Graph().Check(ctx); result.HasErrors() {
+if result := g.Check(ctx); result.HasErrors() {
     log.Fatal("batch failed:", result.Err())
 }
-data, result := snapshot.Marshal(ctx, ba.Graph().Snapshot())
+data, result := snapshot.Marshal(ctx, g.Snapshot())
 ```
 
-To resume a persisted batch on a later run, seed the assembler from a loaded snapshot with `graph.NewBatchAssemblerFromSnapshot(ctx, s, snap)`, which takes a snapshot bound to the schema as it stands and refuses one built against another schema that breaks any of the schema's structural facts, save that it derives the Records fact's records again, refusing an `empty` record under a (one) association, and drops an absent record under a relation that is no association of the schema — new adds resolve against the seeded instances and `Graph().Check` covers the union. Snapshot metadata can be rewritten in place, without a full load/re-marshal round-trip, via `snapshot.UpdateMetadataOrReMarshal`.
+For a source that lists one record under several parents, `g.AddOrMerge(ctx, valid)` takes `Add`'s place: at a primary key the graph already holds, a record with no composed children merges: its association targets are installed on the held root and `merged` is true. A record with composed children is refused there as `Add` refuses a duplicate (`E_DUPLICATE_PK`), and a merge that would give a `(one)` association a second target is refused whole (`E_GRAPH_CARDINALITY`); `merged` is false whenever the result holds an error.
+
+To resume a persisted batch on a later run, seed the graph from a loaded snapshot with `graph.NewFromSnapshot(s, snap)`, which takes a snapshot bound to the schema as it stands and refuses one built against another schema that breaks any of the schema's structural facts, save that it derives the Records fact's records again, refusing an `empty` record under a (one) association, and drops an absent record under a relation that is no association of the schema — new adds resolve against the seeded instances and `Check` covers the union. `snapshot.UpdateMetadata` rewrites a snapshot's metadata in place, without a full load/re-marshal round-trip; `snapshot.UpdateMetadataOrReMarshal` falls back to that round-trip, with `W_UPDATE_METADATA_FALLBACK`, when the in-place rewrite refuses for any reason but a cancelled context or metadata that is not valid UTF-8.
 
 ### Build Instances Programmatically
 
@@ -203,8 +213,8 @@ Internal                 : internal/* (no compatibility guarantees)
 
 Diagnostic-producing operations return `(T, diag.Result)`:
 
-- `result.HasFatal()`: Any Fatal issue (such as an I/O failure, a cancellation, an internal fault, input a reader cannot go past, or an argument or option a loader refuses)
-- `result.HasErrors()`: An Error or a Fatal: a semantic failure (structured issues), or the condition above
+- `result.HasFatal()`: Any Fatal issue (such as an I/O failure, a cancellation, an internal fault the validator or the snapshot writer reports, input a reader cannot go past, or an argument or option a loader refuses; the schema loader reports its internal faults at Error)
+- `result.HasErrors()`: Any Error or Fatal issue
 - `result.OK()`: Success (may have warnings). A validator's zero instance beside it held an `instance.Refused` value, which its producer reported
 
 The pure transformations of the Neo4j adapter and the generators (Cypher batch queries, Go source, and Markdown generation) return their output beside a Go `error`, as `(T, error)`, but for `adapter/neo4j`'s `BuildBatchRelationshipMergeQuery`, a query template that cannot fail; the Neo4j adapter's schema-derived DDL and shape builders report through a `diag.Result`, and its drop-statement builders return `(string, error)`. Snapshot serialization (`snapshot.Marshal`) is diagnostic-producing and returns `(T, diag.Result)`.

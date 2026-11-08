@@ -5,7 +5,6 @@ import (
 	"iter"
 	"slices"
 
-	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -103,9 +102,6 @@ type snapshotState struct {
 
 	// unresolved contains unresolved edge records in sorted order.
 	unresolved []UnresolvedEdge
-
-	// diagnostics contains all issues from graph construction.
-	diagnostics diag.Result
 
 	// attestation is the validity claim this snapshot carries.
 	attestation *Attestation
@@ -233,32 +229,6 @@ func (r Snapshot) EdgesFrom(inst Instance) iter.Seq[Edge] {
 	return slices.Values(edges)
 }
 
-// Diagnostics returns validation issues from graph construction.
-//
-// This includes the issues of [Graph.Add] calls, and a [BatchAssembler]'s adds
-// and validator results, its
-// validation failures among them, and zero-instance refusals. A record
-// [BatchAssembler.Add] refuses for its one fault, an [instance.Refused] value,
-// adds none: its producer's result holds its issue. [BatchAssembler.AddValid] of
-// the zero entry such a value leaves adds E_INTERNAL.
-// [Graph.Check] results are returned separately per-call and are not accumulated
-// here, making Check idempotent: multiple calls have no effect on snapshot diagnostics.
-//
-// For snapshots loaded from persisted .ys files, Diagnostics returns diag.OK()
-// because construction diagnostics are transient and not persisted. Consumers
-// should check [Snapshot.Duplicates] and [Snapshot.Unresolved] for the
-// structural records that survive serialization, [Snapshot.Attestation] for
-// the writer's validity claim, and the snapshot package's WithRevalidation
-// option to re-check a loaded document's instance data.
-//
-// Use [diag.Result.OK] to check if the graph construction succeeded.
-func (r Snapshot) Diagnostics() diag.Result {
-	if r.IsZero() {
-		return diag.OK()
-	}
-	return r.diagnostics
-}
-
 // Attestation returns the validity claim this snapshot carries, or nil when
 // it carries none. See [Attestation] for what each dimension means, what it
 // does not prove, and why absence is distinct from a false claim.
@@ -325,7 +295,6 @@ func newSnapshot(
 	edges []Edge,
 	duplicates []Duplicate,
 	unresolved []UnresolvedEdge,
-	diagnostics diag.Result,
 	attestation *Attestation,
 ) Snapshot {
 	// A repeated identity would make every instance of that type appear twice
@@ -353,7 +322,6 @@ func newSnapshot(
 		edges:         edges,
 		duplicates:    duplicates,
 		unresolved:    unresolved,
-		diagnostics:   diagnostics,
 		attestation:   attestation,
 	}
 	if len(edges) > 0 {

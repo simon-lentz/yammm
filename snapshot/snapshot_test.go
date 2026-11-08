@@ -333,24 +333,6 @@ func TestMarshalLoad_EdgeReconstruction(t *testing.T) {
 	}
 }
 
-func TestMarshalLoad_LoadedDiagnostics(t *testing.T) {
-	s := testSchema(t)
-	snap := buildSnapshot(t, s,
-		mustValidInstance(t, s, "Company", []any{"c1"}, map[string]any{"id": "c1", "title": "Acme"}))
-
-	ctx := context.Background()
-	data, _ := snapshot.Marshal(ctx, snap)
-	loaded, _ := snapshot.Load(ctx, data, s)
-
-	// Loaded snapshots return diag.OK() for Diagnostics.
-	if !loaded.Diagnostics().OK() {
-		t.Error("loaded Diagnostics() should be OK")
-	}
-	if loaded.Diagnostics().HasErrors() {
-		t.Error("loaded HasErrors() should be false")
-	}
-}
-
 func TestVerify_SchemaMismatch(t *testing.T) {
 	s := testSchema(t)
 	snap := buildSnapshot(t, s,

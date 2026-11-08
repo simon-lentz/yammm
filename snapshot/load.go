@@ -43,9 +43,6 @@ import (
 // The returned Snapshot's Schema() method returns the schema provided to
 // Load, not the schema used at original construction time.
 //
-// The returned Snapshot's Diagnostics() method returns diag.OK() —
-// construction diagnostics are transient and not persisted.
-//
 // Panics if s is zero (programming error).
 func Load(ctx context.Context, data []byte, s schema.Schema, opts ...LoadOption) (graph.Snapshot, diag.Result) {
 	if s.IsZero() {

@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"slices"
 
-	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/internal/snapparts"
 	"github.com/simon-lentz/yammm/location"
@@ -107,7 +106,7 @@ func rebuildSnapshot(s schema.Schema, parts snapparts.Parts) Snapshot {
 	if a := parts.Attestation; a != nil {
 		claim = &Attestation{Values: a.Values, Associations: a.Associations}
 	}
-	return newSnapshot(s, canon, types, instances, instanceIndex, edges, duplicates, unresolvedEdges, diag.OK(), claim)
+	return newSnapshot(s, canon, types, instances, instanceIndex, edges, duplicates, unresolvedEdges, claim)
 }
 
 // rebuildInstance creates an Instance from its parts, recursing into composed

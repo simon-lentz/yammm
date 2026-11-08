@@ -23,6 +23,9 @@ import (
 //
 // Panics if s or snap is zero (programmer error).
 func NewFromSnapshot(s schema.Schema, snap Snapshot) (*Graph, diag.Result) {
+	if s.IsZero() {
+		panic("graph.NewFromSnapshot: zero schema")
+	}
 	if snap.IsZero() {
 		panic("graph.NewFromSnapshot: zero Snapshot")
 	}
@@ -187,10 +190,6 @@ func (g *Graph) importSnapshot(snap Snapshot) {
 		// The conflict is a root, which step 1 cloned.
 		g.duplicates = append(g.duplicates, newDuplicate(instClone, cloneMap[dup.conflict]))
 	}
-
-	// Step 5: Diagnostics — no-op.
-	// Loaded snapshots have diag.OK() diagnostics. Construction diagnostics
-	// are transient and not persisted.
 }
 
 // rename renders inst's name, and every composed child's, under this graph's

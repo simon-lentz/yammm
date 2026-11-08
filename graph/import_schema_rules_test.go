@@ -50,8 +50,7 @@ func rootInstance(t *testing.T, s schema.Schema, name, key string) instance.Vali
 }
 
 // requireRefused asserts the import is refused with a nil graph and an issue
-// of code whose message holds phrase, and that the seeded assembler refuses
-// the same snapshot.
+// of code whose message holds phrase.
 func requireRefused(t *testing.T, s schema.Schema, snap graph.Snapshot, code diag.Code, phrase string) {
 	t.Helper()
 	g, res := graph.NewFromSnapshot(s, snap)
@@ -66,10 +65,6 @@ func requireRefused(t *testing.T, s schema.Schema, snap graph.Snapshot, code dia
 	}
 	if !found {
 		t.Errorf("NewFromSnapshot result = %s, want %s naming %q", res, code, phrase)
-	}
-	ba, bres := graph.NewBatchAssemblerFromSnapshot(t.Context(), s, snap)
-	if ba != nil || !bres.HasErrors() {
-		t.Errorf("NewBatchAssemblerFromSnapshot accepted what NewFromSnapshot refuses: %s", bres)
 	}
 }
 
@@ -255,9 +250,6 @@ func TestNewFromSnapshot_KeepsARootTheImportingSchemaCannotName(t *testing.T) {
 	}
 	if n := len(slices.Collect(g.Snapshot().AllInstances())); n != 1 {
 		t.Errorf("the imported graph holds %d roots, want 1", n)
-	}
-	if ba, bres := graph.NewBatchAssemblerFromSnapshot(ctx, through, src.Snapshot()); ba == nil || !bres.OK() {
-		t.Errorf("NewBatchAssemblerFromSnapshot: %s", bres)
 	}
 }
 

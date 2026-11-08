@@ -366,23 +366,23 @@ func TestZeroRoots_EachPanicNamesTheCallAndWhatIsZero(t *testing.T) {
 		t.Fatal(res)
 	}
 	for want, call := range map[string]func(){
-		"graph.New: zero schema":                             func() { graph.New(schema.Schema{}) },
-		"graph.NewFromSnapshot: zero Snapshot":               func() { _, _ = graph.NewFromSnapshot(s, graph.Snapshot{}) },
-		"graph.NewBatchAssembler: zero schema":               func() { graph.NewBatchAssembler(ctx, schema.Schema{}) },
-		"graph.NewBatchAssemblerFromSnapshot: zero schema":   func() { _, _ = graph.NewBatchAssemblerFromSnapshot(ctx, schema.Schema{}, built) },
-		"graph.NewBatchAssemblerFromSnapshot: zero Snapshot": func() { _, _ = graph.NewBatchAssemblerFromSnapshot(ctx, s, graph.Snapshot{}) },
-		"graph.Add: zero ValidInstance":                      func() { g.Add(ctx, instance.ValidInstance{}) },
-		"snapshot.Marshal: zero Snapshot":                    func() { _, _ = snapshot.Marshal(ctx, graph.Snapshot{}) },
-		"snapshot.Load: zero Schema":                         func() { _, _ = snapshot.Load(ctx, data, schema.Schema{}) },
-		"snapshot.Verify: zero Schema":                       func() { snapshot.Verify(ctx, data, schema.Schema{}) },
-		"snapshot.UpdateMetadataOrReMarshal: zero Schema":    func() { _, _ = snapshot.UpdateMetadataOrReMarshal(ctx, data, nil, schema.Schema{}) },
+		"graph.New: zero schema":                          func() { graph.New(schema.Schema{}) },
+		"graph.NewFromSnapshot: zero Snapshot":            func() { _, _ = graph.NewFromSnapshot(s, graph.Snapshot{}) },
+		"graph.NewFromSnapshot: zero schema":              func() { _, _ = graph.NewFromSnapshot(schema.Schema{}, built) },
+		"graph.Add: zero ValidInstance":                   func() { g.Add(ctx, instance.ValidInstance{}) },
+		"graph.AddOrMerge: zero ValidInstance":            func() { _, _ = g.AddOrMerge(ctx, instance.ValidInstance{}) },
+		"snapshot.Marshal: zero Snapshot":                 func() { _, _ = snapshot.Marshal(ctx, graph.Snapshot{}) },
+		"snapshot.Load: zero Schema":                      func() { _, _ = snapshot.Load(ctx, data, schema.Schema{}) },
+		"snapshot.Verify: zero Schema":                    func() { snapshot.Verify(ctx, data, schema.Schema{}) },
+		"snapshot.UpdateMetadataOrReMarshal: zero Schema": func() { _, _ = snapshot.UpdateMetadataOrReMarshal(ctx, data, nil, schema.Schema{}) },
 	} {
 		if got := yammmtest.AssertPanics(t, call); got != want {
 			t.Errorf("panic = %v, want %q", got, want)
 		}
 	}
-	if got := yammmtest.AssertPanics(t, func() { _, _ = graph.NewFromSnapshot(schema.Schema{}, built) }); got != "graph.New: zero schema" {
-		t.Errorf("NewFromSnapshot with a zero schema: panic = %v", got)
+	// A zero schema is named before a zero snapshot, as the parameters stand.
+	if got := yammmtest.AssertPanics(t, func() { _, _ = graph.NewFromSnapshot(schema.Schema{}, graph.Snapshot{}) }); got != "graph.NewFromSnapshot: zero schema" {
+		t.Errorf("NewFromSnapshot with both arguments zero: panic = %v", got)
 	}
 }
 

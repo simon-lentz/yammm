@@ -6,7 +6,6 @@ import (
 	"testing"
 
 	"github.com/simon-lentz/yammm/graph"
-	"github.com/simon-lentz/yammm/instance"
 	"github.com/simon-lentz/yammm/internal/instancetest"
 	"github.com/simon-lentz/yammm/schema"
 	"github.com/simon-lentz/yammm/snapshot"
@@ -43,9 +42,7 @@ func TestAdd_InstanceOfAnotherLoadPanics(t *testing.T) {
 			inst := instancetest.Valid(t, other, "T", map[string]any{"id": "t1"})
 			g := graph.New(s)
 			assertAnotherLoadPanic(t, func() { g.Add(t.Context(), inst) })
-			ba := graph.NewBatchAssembler(t.Context(), s)
-			assertAnotherLoadPanic(t, func() { _ = ba.AddValid(inst) })
-			assertAnotherLoadPanic(t, func() { _, _ = ba.AddValidOrMerge(inst) })
+			assertAnotherLoadPanic(t, func() { _, _ = g.AddOrMerge(t.Context(), inst) })
 			if n := len(slices.Collect(g.Snapshot().AllInstances())); n != 0 {
 				t.Errorf("the graph holds %d instances after the panic, want 0", n)
 			}
@@ -162,9 +159,9 @@ func TestAdd_TypeOutsideTheGraphsClosurePanics(t *testing.T) {
 	assertAnotherLoadPanic(t, func() { g.Add(t.Context(), inst) })
 }
 
-// A snapshot crosses loads through the import, and an assembler validates over
-// its own schema. Only an instance another load validated panics.
-func TestNewBatchAssemblerFromSnapshot_SeedOfAnotherLoad(t *testing.T) {
+// A snapshot crosses loads through the import, and the seeded graph takes what
+// its own load validated. Only an instance another load validated panics.
+func TestNewFromSnapshot_SeedOfAnotherLoad(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()
 	s := loadSchemaAt(t, loadIdentitySource, "loads.yammm")
@@ -182,14 +179,11 @@ func TestNewBatchAssemblerFromSnapshot_SeedOfAnotherLoad(t *testing.T) {
 	}
 
 	again := loadSchemaAt(t, loadIdentitySource, "loads.yammm")
-	ba, res := graph.NewBatchAssemblerFromSnapshot(ctx, again, seed)
-	if res.HasErrors() {
-		t.Fatalf("NewBatchAssemblerFromSnapshot: %s", res)
-	}
-	if err := ba.Add("T", instance.RawInstance{Properties: map[string]any{"id": "t2"}}); err != nil {
-		t.Errorf("the assembler's own Add: %v", err)
+	g := mustImport(t, again, seed)
+	if r := g.Add(ctx, instancetest.Valid(t, again, "T", map[string]any{"id": "t2"})); !r.OK() {
+		t.Errorf("an add its own load validated: %s", r)
 	}
 	assertAnotherLoadPanic(t, func() {
-		_ = ba.AddValid(instancetest.Valid(t, s, "T", map[string]any{"id": "t3"}))
+		g.Add(ctx, instancetest.Valid(t, s, "T", map[string]any{"id": "t3"}))
 	})
 }

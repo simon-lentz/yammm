@@ -18,8 +18,7 @@ import (
 // with its key properties, declared names and association shape — are one
 // invariant held by the .ys decoder and by the import. The class below builds one
 // legal graph under revisionBase and offers it, under every revision of that
-// schema, to snapshot.Load, NewFromSnapshot and NewBatchAssemblerFromSnapshot,
-// which must agree.
+// schema, to snapshot.Load and NewFromSnapshot, which must agree.
 
 const revisionBase = `schema "rev"
 
@@ -322,18 +321,16 @@ func TestStructuralFacts_TheReaderAndTheImportAgreeAcrossEveryRevision(t *testin
 			t.Parallel()
 			s2 := loadRevisionSchema(t, r.source())
 			outcomes := map[string]diag.Result{"snapshot.Load": loadClaimingSchema(t, s2, snap)}
-			g, ires := importInto(s2, snap)
+			g, ires := graph.NewFromSnapshot(s2, snap)
 			outcomes["NewFromSnapshot"] = ires
-			ba, sres := seedInto(t.Context(), s2, snap)
-			outcomes["NewBatchAssemblerFromSnapshot"] = sres
 			for reader, res := range outcomes {
 				legal := r.legal()
 				if legal == res.HasErrors() {
 					t.Errorf("%s: legal=%v, refused=%v: %s", reader, legal, res.HasErrors(), res)
 				}
 			}
-			if !r.legal() && (g != nil || ba != nil) {
-				t.Errorf("a refused import returned a graph (%v) or an assembler (%v)", g != nil, ba != nil)
+			if !r.legal() && g != nil {
+				t.Error("a refused import returned a graph")
 			}
 			for reader, rules := range wantRules(r) {
 				for _, w := range rules {
@@ -465,13 +462,9 @@ type Employee {
 					t.Fatalf("add %s: %s", tn, r)
 				}
 			}
-			imported, res := importInto(s2, g.Snapshot())
+			imported, res := graph.NewFromSnapshot(s2, g.Snapshot())
 			if imported != nil || !res.HasCode(tc.code) {
 				t.Errorf("NewFromSnapshot = (graph %v, %s), want a nil graph and %s", imported != nil, res, tc.code)
-			}
-			ba, bres := seedInto(ctx, s2, g.Snapshot())
-			if ba != nil || !bres.HasCode(tc.code) {
-				t.Errorf("NewBatchAssemblerFromSnapshot = (assembler %v, %s), want nil and %s", ba != nil, bres, tc.code)
 			}
 			// The same schema loaded twice is another pointer, so the import
 			// walks the snapshot, and a snapshot that holds finds nothing.
@@ -479,7 +472,7 @@ type Employee {
 			if ra.HasErrors() {
 				t.Fatal(ra)
 			}
-			if imported, res := importInto(again, g.Snapshot()); imported == nil || res.HasErrors() {
+			if imported, res := graph.NewFromSnapshot(again, g.Snapshot()); imported == nil || res.HasErrors() {
 				t.Errorf("an equal schema loaded twice was refused: %s", res)
 			}
 		})

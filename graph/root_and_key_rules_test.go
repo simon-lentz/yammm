@@ -77,6 +77,9 @@ func TestAdd_ComposedChildAtARoot_Keyless(t *testing.T) {
 		t.Fatal("a root of a type with no primary key passed Add")
 	}
 	assertHasCode(t, result, diag.E_GRAPH_MISSING_PK)
+	if n := result.Len(); n != 1 {
+		t.Errorf("%d issues, want one: a keyless part draws E_GRAPH_MISSING_PK alone: %s", n, result)
+	}
 }
 
 // firstChild reads a validated child out of the one composition inst holds.

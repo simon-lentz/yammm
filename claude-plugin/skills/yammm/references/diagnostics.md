@@ -1,6 +1,6 @@
 # Diagnostics Reference
 
-yammm reports problems as structured diagnostics in a `diag.Result`. An exported function that returns one returns it last, after its value when it has one: `schema.Load` returns `(Schema, diag.Result)`, and `Graph.Add` returns a `diag.Result` alone. Each issue has a stable error code, a severity and a message, and a source location where one applies. Some entry points return a Go `error` instead, among them `gogen.Marshal` and `markdown.Marshal`. `graph.BatchAssembler`'s `Add`, `AddValid` and `AddValidOrMerge` return an `error` too; when the cause is a failed result, the error carries that `diag.Result`, and `diag.AsContextualError` recovers it.
+yammm reports problems as structured diagnostics in a `diag.Result`. An exported function that returns one returns it last, after its value when it has one: `schema.Load` returns `(Schema, diag.Result)`, and `Graph.Add` returns a `diag.Result` alone. Each issue has a stable error code, a severity and a message, and a source location where one applies. Some entry points return a Go `error` instead, among them `gogen.Marshal` and `markdown.Marshal`.
 
 ---
 
@@ -174,7 +174,7 @@ The all-or-nothing contract is unchanged: any error still yields a zero schema.
 | `E_GRAPH_TYPE_NOT_FOUND` | A type identity an imported snapshot states that the schema does not resolve |
 | `E_GRAPH_INVALID_COMPOSITION` | Invalid composition in graph operations |
 | `E_GRAPH_MISSING_PK` | A root, or an imported snapshot's types entry, whose type declares no primary key |
-| `E_GRAPH_CARDINALITY` | A `(one)` association holds more than one record: a merge at `BatchAssembler.AddValidOrMerge` that would add a second target, several edges and unresolved records no check refused, in a snapshot or `.ys` document (v0.15+) |
+| `E_GRAPH_CARDINALITY` | A `(one)` association holds more than one record: a merge at `Graph.AddOrMerge` that would add a second target, several edges and unresolved records no check refused, in a snapshot or `.ys` document (v0.15+) |
 | `E_GRAPH_UNKNOWN_RELATION` | Instance data or an association record under a relation name the type does not declare in that slot, or an association record naming a target type the schema resolves, other than the declared one (v0.15+) |
 | `E_GRAPH_ABSTRACT_TYPE` | An imported snapshot's root or types entry naming a type the importing schema makes abstract (v0.15+) |
 | `E_GRAPH_INVALID_PK` | A keyed type's primary key empty, of the wrong arity, with a key property absent or null, or disagreeing with its own key properties; an association target key of the wrong arity; or a key stored on a composed child whose type declares no primary key (v0.15+) |

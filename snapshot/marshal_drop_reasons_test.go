@@ -43,8 +43,8 @@ type Source {
 }
 
 // TestMarshal_ADuplicateDrawsNoDropWarning pins that the wire carries a
-// duplicate's record whole: its issue lives in the graph's Snapshot.Diagnostics,
-// which are transient, so marshalling loses nothing a warning would name.
+// duplicate's record whole: its issue is in the result of the Add that drew it,
+// so marshalling loses nothing a warning would name.
 func TestMarshal_ADuplicateDrawsNoDropWarning(t *testing.T) {
 	t.Parallel()
 	s := dropReasonSchema(t)

@@ -146,10 +146,10 @@ func (v *Validator) ValidateOne(ctx context.Context, typeName string, raw RawIns
 		return ValidInstance{}, createErrorResult(ErrTypeNotFound, err.Error(), raw.Provenance)
 	}
 	inst, res := v.validateComposedInstance(ctx, typeName, typ, raw, raw.Provenance.Path(), false, 0)
-	// The batch rule, at the entry BatchAssembler.Add and the snapshot
-	// revalidator use: a row the caller is told did not run reports the
-	// cancellation and no partial finding, so a timeout's leftovers are never
-	// read as findings about the data.
+	// The batch rule holds at this entry too, which the snapshot revalidator
+	// uses: a row the caller is told did not run reports the cancellation and no
+	// partial finding, so a timeout's leftovers are never read as findings about
+	// the data.
 	if err := ctx.Err(); err != nil {
 		out := diag.NewCollectorUnlimited()
 		out.Merge(keepInternalErrors(res))
