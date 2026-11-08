@@ -1,45 +1,8 @@
 # Adapter and Generator Reference
 
-The JSON adapter parses raw data into `RawInstance` values for validation, and the data adapters serialize validated data for export. Two data adapters are provided (JSON, Neo4j), and this reference also covers the three generators (gogen, jschema, markdown).
+One platform adapter is provided, Neo4j, and this reference also covers the two generators (gogen, markdown).
 
-The data adapters live in `adapter/{json,neo4j}` and the generators in `schema/{gogen,jschema,markdown}`. The library never imports either -- each imports the library. The data adapters serialize instance data, and the JSON adapter also parses it; the generators are schema-in/bytes-out and never touch instance data.
-
----
-
-## JSON Adapter
-
-```go
-import jsonAdapter "github.com/simon-lentz/yammm/adapter/json"
-```
-
-### Constructor
-
-```go
-adapter := jsonAdapter.New()
-```
-
-Input is preprocessed as JSONC: comments and trailing commas are tolerated.
-
-### Parsing
-
-```go
-// Parse a JSON object keyed by type name: {"User": [...], "Product": [...]}
-parsed, result := adapter.ParseObject(ctx, sourceID, data)
-```
-
-`ParseObject` is the whole parse surface; `ParseArray`, `ParseTypedArray` and `ParseOne` were removed in v0.12.0. It returns `RawInstance` values ready for `instance.Validator.Validate()`.
-
-### Writing
-
-```go
-// Marshal snapshot to JSON bytes
-data, err := adapter.MarshalObject(ctx, snapshot,
-    jsonAdapter.WithIndent("  "),
-)
-
-// Write snapshot to io.Writer
-n, err := adapter.WriteObject(ctx, writer, snapshot)
-```
+The adapter lives in `adapter/neo4j` and the generators in `schema/{gogen,markdown}`. The library never imports either -- each imports the library. The adapter writes a validated snapshot as Neo4j queries; the generators are schema-in/bytes-out and never touch instance data.
 
 ---
 
@@ -81,7 +44,7 @@ constraints, result := adapter.ConstraintsStructured(ctx, s)
 // Each Constraint has: Name, Kind, Label, Properties, TypeExpr, Statement
 ```
 
-Generation is **all-or-nothing**: any validation error returns `(nil, result)`, so one unemittable property withholds every constraint of the schema rather than emitting a partial script that looks complete. Beside a name Neo4j refuses as an identifier (Cypher reserved words, below) and two labels that sanitize alike, the one shape a *valid* schema can hit is a list whose element is itself a collection (`List<List<T>>`, `List<Vector[N]>`, or a list of a list-typed alias) — legal yammm, but Neo4j has no nested collection property type, so `ConstraintsForSchema` and `ConstraintsStructured` report `E_NEO4J_UNSUPPORTED_TYPE` under every option, `WithScalarTypeConstraints(false)` included. `IndexesForSchema` and `ShapeForSchema` do not make that check. The write path does: `BatchNodeQueries` and `CoerceParams` refuse a value of such a property with an error wrapping `ErrUnsupportedListElem`, an empty list included, and read a value that holds none as nil, which `BatchNodeQueries` writes as null. `CoerceParams` refuses a nested param map (a `map[string]any`) or a rows value under such a key as it does under any constraint: a constraint at a nested map's or a rows param's own key is the caller's error, which wraps no class. `yammm export --to cypher` exits 1 over data holding one. The property is judged on each concrete type and part type with a valid label that declares or inherits it, so one declared on an abstract type that no such type extends is not reported. Model the inner collection as a `part type` reached by a composition. A `Vector[N]` property is fine; it maps to `LIST<FLOAT NOT NULL>`.
+Generation is **all-or-nothing**: any validation error returns `(nil, result)`, so one unemittable property withholds every constraint of the schema rather than emitting a partial script that looks complete. Beside a name Neo4j refuses as an identifier (Cypher reserved words, below) and two labels that sanitize alike, the one shape a *valid* schema can hit is a list whose element is itself a collection (`List<List<T>>`, `List<Vector[N]>`, or a list of a list-typed alias) — legal yammm, but Neo4j has no nested collection property type, so `ConstraintsForSchema` and `ConstraintsStructured` report `E_NEO4J_UNSUPPORTED_TYPE` under every option, `WithScalarTypeConstraints(false)` included. `IndexesForSchema` and `ShapeForSchema` do not make that check. The write path does: `BatchNodeQueries` and `CoerceParams` refuse a value of such a property with an error wrapping `ErrUnsupportedListElem`, an empty list included, and read a value that holds none as nil, which `BatchNodeQueries` writes as null. `CoerceParams` refuses a nested param map (a `map[string]any`) or a rows value under such a key as it does under any constraint: a constraint at a nested map's or a rows param's own key is the caller's error, which wraps no class. The property is judged on each concrete type and part type with a valid label that declares or inherits it, so one declared on an abstract type that no such type extends is not reported. Model the inner collection as a `part type` reached by a composition. A `Vector[N]` property is fine; it maps to `LIST<FLOAT NOT NULL>`.
 
 ### Index Generation
 
@@ -149,7 +112,7 @@ result := adapter.DetectLabelCollisions(ctx, s)
 **Cypher reserved words:** the DSL reserves none as one; of the six spellings
 its grammar refuses as a property name, four are Cypher keywords too (`as`,
 `in`, `true` and `false`). A property named
-`match` is valid yammm (and fine for JSON export) but is rejected with
+`match` is valid yammm (and fine in a `.ys` snapshot) but is rejected with
 `E_NEO4J_INVALID_IDENTIFIER`, whose detail begins with `ErrReservedKeyword`'s text,
 wherever a generated constraint or index statement writes it, because property names appear unquoted in generated Cypher; the
 check is case-insensitive. Under `WithEdition(Community)`,
@@ -220,25 +183,11 @@ source := adapter.InferSchema(constraints, relationships, "inventory")
 import "github.com/simon-lentz/yammm/schema/gogen"
 ```
 
-Schema-in, bytes-out: `gogen.Marshal` maps a loaded, resolved schema to formatted, type-checked Go source — one struct per type, named Enum/DataType types, a generated `Date` type and one type per custom `Timestamp` layout (each embedding `time.Time` with a JSON codec in the stored string form), `EDGE_` association structs, a Graph aggregate keyed as the JSON adapter keys its output, and the embedded schema source, reachable through `SerializedSources()` / `SerializedEntry`, which re-loads hermetically (under `schema.WithSyntheticRoot`, no filesystem participation). Generated output is stdlib-only (imports at most `time` and `encoding/json`) and byte-reproducible across checkouts. Unlike the data adapters it has no instance-data path and returns a plain `error` rather than a `diag.Result`.
+Schema-in, bytes-out: `gogen.Marshal` maps a loaded, resolved schema to formatted, type-checked Go source — one struct per type, named Enum/DataType types, a generated `Date` type when a position emits `Date` and one type per custom `Timestamp` layout a position emits (each embedding `time.Time` with a JSON codec in the stored string form), `EDGE_` association structs, a Graph aggregate keyed as an instance document keys a type's array, and the embedded schema source, reachable through `SerializedSources()` / `SerializedEntry`, which re-loads hermetically (under `schema.WithSyntheticRoot`, no filesystem participation). Generated output is stdlib-only (imports at most `time` and `encoding/json`) and byte-reproducible across checkouts. Unlike `adapter/neo4j` it has no instance-data path, and it returns a plain `error` where the Neo4j adapter's schema-derived DDL and shape builders return a `diag.Result`.
 
 Schemas with imports are flattened into one self-contained package. A name unique in the closure stays bare; a name two entities claim, or a reserved name such as `Graph` claims, gives every claimant its exact spelling, which names its kind and its identity (for a type, its schema and name): two schemas' `Region` become `Type_geo__Region` / `Type_common__Region`, and a type and a datatype `Region` of one schema become `Type_geo__Region` / `DataType_geo__Region`. No name depends on declaration order, and adding a declaration never hands a name to another entity.
 
 Full API semantics: the gogen section of `docs/API.md`. CLI form: `yammm gen --to go` (see `cli.md`).
-
----
-
-## jschema Generator (JSON Schema Generation)
-
-```go
-import "github.com/simon-lentz/yammm/schema/jschema"
-```
-
-Schema-in, bytes-out: `jschema.Marshal` maps a loaded, resolved schema to a JSON Schema **draft 2020-12** document describing the instance-data JSON object form `yammm check` reads (it does not reproduce yammm's validation; `schema/jschema`'s Fidelity Caveats list where the two differ) — one top-level key per type a data file can hold (entry types bare, directly imported types alias-qualified as `common.Region`), each an array of instances; `EDGE_` defs carrying required `_target_<pk>` foreign-key fields; compositions always arrays (`minItems: 1` when required, `maxItems: 1` for to-one); named DataTypes as `$ref`ed `$defs` entries; schema doc-comments flowing through as `description` for editor hover. Association presence is deliberately NOT `required` per-file (yammm defers it to graph assembly). Output is deterministic and self-checked (valid JSON, every `$ref` resolves) before return. Options: `WithSchemaID` (the `"$id"`, omitted when unset). Plain `error`, no instance-data path, no source-backing requirement.
-
-Wire the generated document into an editor for completion and validation while authoring data files. For a JSON data file, use a `json.schemas` mapping in the editor's settings. A JSON data file cannot carry a `"$schema"` member: the envelope admits no member but a type name, and `adapter/json` refuses the key as a type tag (`E_INVALID_TYPE_TAG`). A `# yaml-language-server: $schema=./fleet.schema.json` comment wires a YAML file, but yammm reads no YAML data file — its data commands read JSON and JSONC — so that file gets the editor's checks alone.
-
-Full API semantics: the JSON Schema Generation section of `docs/API.md`. CLI form: `yammm gen --to jsonschema` (see `cli.md`).
 
 ---
 
@@ -256,21 +205,18 @@ Full API semantics: the Markdown Documentation Generation section of `docs/API.m
 
 ## Adapter Refusal Classes
 
-A write reports through an `error`, not a `diag.Result`, so the adapters carry sentinel classes a caller matches with `errors.Is` instead of matching message text.
+A write reports through an `error`, not a `diag.Result`, so the adapter carries sentinel classes a caller matches with `errors.Is` instead of matching message text.
 
 | Sentinel | Adapter | Meaning |
 | -------- | ------- | ------- |
-| `json.ErrZeroSnapshot` | JSON | A write method received a zero snapshot |
 | `neo4j.ErrUnrepresentable` | Neo4j | `BatchNodeQueries` and `BatchEdgeQueries` refuse a value Neo4j would not store as held: one its constraint's coercion refuses, a nested collection's (matching `ErrUnsupportedListElem` too), a map at a property the schema declares, a list or a map a document nests more than 256 levels deep, a `json.Number` that is an integer literal past `int64` at any position but a `Float` or a `Vector` element, or that no finite `float64` holds, or a primary key that is absent or holds no value; `CoerceParams` marks its refusals of a value so too. No other error carries the class: a caller's own, such as a constraint `schema.CheckConstraint` refuses, a constraint at a nested map's or a rows param's own key, a `GraphShape` the adapter did not build for the snapshot's schema or a relationship type that is no valid identifier, and a cancelled context |
-| `json.ErrUnrepresentable` | JSON | The snapshot holds a value JSON cannot write as itself: a `json.Number` no finite `float64` holds, which only a document read without revalidating at Error states |
 
-An I/O failure and a cancellation match none of these classes.
+An I/O failure and a cancellation do not match it.
 
 ## Adapter Error Codes
 
 | Code | Adapter | Meaning |
 | ---- | ------- | ------- |
-| `E_ADAPTER_PARSE` | JSON | Format-specific parsing error |
 | `E_NEO4J_LABEL_COLLISION` | Neo4j | Two types produce the same Neo4j label |
 | `E_NEO4J_INVALID_IDENTIFIER` | Neo4j | Name not valid as Neo4j identifier |
 | `E_NEO4J_UNSUPPORTED_TYPE` | Neo4j | Constraint kind has no Neo4j type mapping |

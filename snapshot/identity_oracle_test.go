@@ -65,7 +65,7 @@ type Site {
 
 // Beacon is declared here, in base and in deep. The entry schema names the
 // first two, and their tags differ; it cannot name deep's, which base alone
-// imports, so that one cannot hold a root here at all.
+// imports, so deep's holds a root by its identity alone.
 type Beacon {
 	id String primary
 	power Float
@@ -160,6 +160,11 @@ func tagForm(s schema.Schema, id schema.TypeID) string {
 	if alias, ok := s.FindImportAlias(id.SchemaPath()); ok {
 		return alias + "." + id.Name()
 	}
+	for member := range s.Closure() {
+		if member.SourceID() == id.SchemaPath() {
+			return member.Name() + "#" + id.Name()
+		}
+	}
 	return id.Name()
 }
 
@@ -189,30 +194,21 @@ func mustTypeIDIn(t *testing.T, s schema.Schema, alias, name string) schema.Type
 	return typ.ID()
 }
 
-// mustTransitiveTypeID resolves a type the entry schema reaches only through
-// an intermediate import, which is the position tagForm renders as a bare
-// name because the entry schema holds no alias for it.
-func mustTransitiveTypeID(t *testing.T, s schema.Schema, viaAlias, thenAlias, name string) schema.TypeID {
+// mustDeepTypeID resolves a type of the fixture's deep schema, which the entry
+// schema reaches only through base, so tagForm renders it "schema#Name".
+func mustDeepTypeID(t *testing.T, s schema.Schema, name string) schema.TypeID {
 	t.Helper()
-	via, ok := s.ImportByAlias(viaAlias)
+	base, ok := s.ImportByAlias("base")
+	if !ok || base.Schema().IsZero() {
+		t.Fatal("import alias base did not resolve in the entry schema")
+	}
+	deep, ok := base.Schema().ImportByAlias("deep")
+	if !ok || deep.Schema().IsZero() {
+		t.Fatal("import alias deep did not resolve in base")
+	}
+	typ, ok := deep.Schema().Type(name)
 	if !ok {
-		t.Fatalf("import alias %q not found in the entry schema", viaAlias)
-	}
-	mid := via.Schema()
-	if mid.IsZero() {
-		t.Fatalf("import alias %q resolved to no schema", viaAlias)
-	}
-	then, ok := mid.ImportByAlias(thenAlias)
-	if !ok {
-		t.Fatalf("import alias %q not found in the schema imported as %q", thenAlias, viaAlias)
-	}
-	deep := then.Schema()
-	if deep.IsZero() {
-		t.Fatalf("import alias %q resolved to no schema", thenAlias)
-	}
-	typ, ok := deep.Type(name)
-	if !ok {
-		t.Fatalf("type %q not found in the transitively imported schema", name)
+		t.Fatalf("type %q not found in the deep schema", name)
 	}
 	return typ.ID()
 }
@@ -501,7 +497,7 @@ func identityCases() []identityCase {
 				t.Helper()
 				siteID := mustTypeIDIn(t, s, "", "Site")
 				basePartID := mustTypeIDIn(t, s, "base", "Part")
-				childID := mustTransitiveTypeID(t, s, "base", "deep", "Part")
+				childID := mustDeepTypeID(t, s, "Part")
 				return snapparts.Parts{
 					Types: []schema.TypeID{siteID},
 					Instances: []snapparts.Instance{
@@ -555,6 +551,55 @@ func identityCases() []identityCase {
 							TypeID:     importedID,
 							PrimaryKey: immutable.WrapKey([]any{"ib1"}),
 							Properties: immutable.WrapProperties(map[string]any{"id": "ib1", "power": float64(2)}),
+						},
+					},
+				}
+			},
+		},
+		{
+			// Reachable only through base: the entry schema holds no name for
+			// it, and its root is held by identity.
+			name:     "root_transitively_imported",
+			origin:   "transitive",
+			position: "root",
+			build: func(t *testing.T, s schema.Schema) snapparts.Parts {
+				t.Helper()
+				id := mustDeepTypeID(t, s, "Probe")
+				return snapparts.Parts{
+					Types: []schema.TypeID{id},
+					Instances: []snapparts.Instance{
+						{
+							TypeID:     id,
+							PrimaryKey: immutable.WrapKey([]any{"pr1"}),
+							Properties: immutable.WrapProperties(map[string]any{"id": "pr1", "reading": float64(5)}),
+						},
+					},
+				}
+			},
+		},
+		{
+			// deep's Beacon renders the entry Beacon's bare name. Both hold a
+			// root at one key, so a position keyed by the rendered name merges
+			// them and one keyed by identity keeps them apart.
+			name:     "root_transitively_imported_beside_its_namesake",
+			origin:   "transitive",
+			position: "root",
+			build: func(t *testing.T, s schema.Schema) snapparts.Parts {
+				t.Helper()
+				localID := mustTypeIDIn(t, s, "", "Beacon")
+				deepID := mustDeepTypeID(t, s, "Beacon")
+				return snapparts.Parts{
+					Types: []schema.TypeID{localID, deepID},
+					Instances: []snapparts.Instance{
+						{
+							TypeID:     localID,
+							PrimaryKey: immutable.WrapKey([]any{"b1"}),
+							Properties: immutable.WrapProperties(map[string]any{"id": "b1", "power": float64(1)}),
+						},
+						{
+							TypeID:     deepID,
+							PrimaryKey: immutable.WrapKey([]any{"b1"}),
+							Properties: immutable.WrapProperties(map[string]any{"id": "b1", "power": float64(2)}),
 						},
 					},
 				}
@@ -683,7 +728,7 @@ func TestIdentityOracle_RoundTripPreservesIdentity(t *testing.T) {
 	}
 	// The floor is the ingredient matrix: a deleted case names its hole.
 	for _, want := range []string{
-		"root/local", "root/imported", "root/collided",
+		"root/local", "root/imported", "root/collided", "root/transitive",
 		"composed/local", "composed/imported", "composed/collided",
 		"composed/transitive",
 		"nested/local",
@@ -693,11 +738,6 @@ func TestIdentityOracle_RoundTripPreservesIdentity(t *testing.T) {
 		if !covered[want] {
 			t.Fatalf("the oracle generates no %s document; the ingredient matrix has a hole", want)
 		}
-	}
-	// Illegal rather than untested: a root is keyed by name and the entry
-	// schema cannot name a transitively imported type.
-	if covered["root/transitive"] {
-		t.Fatal("the oracle generates a root/transitive document, which the reader refuses")
 	}
 	// Illegal rather than untested: a composed child is an instance of its
 	// slot's declared target, and a slot is a composition its parent declares.

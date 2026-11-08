@@ -42,8 +42,9 @@
 // that names a test somebody deleted.
 //
 // A qualified link resolves its package part against the referencing file's own
-// imports first. This module has an adapter/json package, so a bare
-// package-name match for a json-qualified link would collide with encoding/json.
+// imports first. This module has a location/path package, so a bare
+// package-name match for a path-qualified link would collide with the standard
+// library's path.
 // When the file does not import the name, a unique in-module package with that
 // name is the fallback, which is how a comment can reference a package that
 // would be an import cycle to depend on. Links resolving outside the module are

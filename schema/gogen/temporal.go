@@ -17,7 +17,7 @@ import (
 // assigned and cannot depend on whether a Date position exists.
 const dateGoName = "Date"
 
-// dateLayout is the stored form of a Date, the one adapter/json writes.
+// dateLayout is the stored form of a Date, the one the validator reads.
 const dateLayout = time.DateOnly
 
 // temporalTypes holds the generated types that carry a stored temporal
@@ -183,7 +183,7 @@ func unmarshalTemporal(b []byte, layout string, dst *time.Time) error {
 
 // emitTemporalDecl writes a struct embedding time.Time, its unexported layout
 // const, and a JSON codec pair exchanging the value in that layout — the
-// string form adapter/json writes. Embedding keeps time.Time's methods
+// string form the validator reads. Embedding keeps time.Time's methods
 // promoted, so a .Format caller compiles unchanged.
 func (g *generator) emitTemporalDecl(name, layout string) {
 	g.needsTime = true

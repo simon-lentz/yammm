@@ -11,7 +11,7 @@ YAMMM is a Go library for defining schemas in a small DSL (`.yammm` files) and v
 ## Features
 
 - **Schema DSL**: Define types, properties, relationships, and constraints in `.yammm` files
-- **Runtime validation**: Validate Go maps and JSON against compiled schemas
+- **Runtime validation**: Validate Go maps against compiled schemas, and JSON data files with `yammm check`
 - **Relationship modeling**: Associations (references) and compositions (ownership) with multiplicity
 - **Invariants**: Boolean constraint expressions evaluated at validation time
 - **Schema annotations**: Declare validated `@index` / `@@index` / `@vector` / `@fulltext` / `@@fulltext` metadata that adapters turn into store DDL, and `@writeOnce` properties that the Neo4j write path sets once
@@ -21,9 +21,8 @@ YAMMM is a Go library for defining schemas in a small DSL (`.yammm` files) and v
 - **Structured diagnostics**: Stable error codes with source location tracking
 - **Cross-schema imports**: Modular schemas with sandboxed path resolution
 - **Go code generation**: Generate Go structs from schemas with `yammm gen --to go`
-- **JSON Schema generation**: Emit editor-ready JSON Schema (draft 2020-12) for instance-data authoring with `yammm gen --to jsonschema`
 - **Markdown documentation generation**: Render a schema as a Markdown reference document with a Mermaid class diagram via `yammm gen --to md`
-- **CLI tool**: `yammm` binary for snapshot management, data export, and validation
+- **CLI tool**: `yammm` binary for validation, formatting, data checking, snapshot management, generation, Neo4j DDL, and a diff against and an introspection of a live Neo4j database
 
 ## Installation
 
@@ -176,8 +175,8 @@ The module is organized into layers with strict dependency ordering:
 Primary API              : schema, instance, graph, snapshot
 Foundation               : location, diag, immutable
 Tooling                  : format
-Adapter                  : adapter/json, adapter/neo4j
-Generator                : schema/gogen, schema/jschema, schema/markdown
+Adapter                  : adapter/neo4j
+Generator                : schema/gogen, schema/markdown
 LSP                      : lsp (Language Server Protocol server)
 CLI                      : cmd/yammm, cmd/yammm-lsp
 Internal                 : internal/* (no compatibility guarantees)
@@ -195,10 +194,8 @@ Internal                 : internal/* (no compatibility guarantees)
 | `location` | Source positions, spans, and canonical paths |
 | `immutable` | Immutable data structures for validated output |
 | `format` | Canonical `.yammm` file formatting |
-| `adapter/json` | JSON/JSONC parsing with location tracking |
 | `adapter/neo4j` | The Neo4j mapping of a schema; its package doc lists what it holds |
 | `schema/gogen` | Go source generation from a schema; its package doc lists what it emits |
-| `schema/jschema` | JSON Schema (draft 2020-12) generation from a schema, for editor-assisted data authoring |
 | `schema/markdown` | Markdown + Mermaid documentation generation from a schema |
 | `lsp` | Language Server Protocol server for `.yammm` files |
 
@@ -210,7 +207,7 @@ Diagnostic-producing operations return `(T, diag.Result)`:
 - `result.HasErrors()`: An Error or a Fatal: a semantic failure (structured issues), or the condition above
 - `result.OK()`: Success (may have warnings). A validator's zero instance beside it held an `instance.Refused` value, which its producer reported
 
-The pure transformations of the adapters and the generators (JSON serialization, Cypher batch queries, Go source, JSON Schema, and Markdown generation) return their output beside a Go `error`, as `(T, error)`, but for `adapter/neo4j`'s `BuildBatchRelationshipMergeQuery`, a query template that cannot fail; the Neo4j adapter's schema-derived DDL and shape builders report through a `diag.Result`, and its drop-statement builders return `(string, error)`. Snapshot serialization (`snapshot.Marshal`) is diagnostic-producing and returns `(T, diag.Result)`.
+The pure transformations of the Neo4j adapter and the generators (Cypher batch queries, Go source, and Markdown generation) return their output beside a Go `error`, as `(T, error)`, but for `adapter/neo4j`'s `BuildBatchRelationshipMergeQuery`, a query template that cannot fail; the Neo4j adapter's schema-derived DDL and shape builders report through a `diag.Result`, and its drop-statement builders return `(string, error)`. Snapshot serialization (`snapshot.Marshal`) is diagnostic-producing and returns `(T, diag.Result)`.
 
 ## Schema Language
 
@@ -357,12 +354,9 @@ The `yammm` binary ([`cmd/yammm/`](cmd/yammm/)) provides commands for working wi
 ```bash
 yammm validate <schema>                                  # validate a schema, report diagnostics
 yammm fmt <schema>... [-w|--check]                       # canonical formatting (stdout; -w rewrites, --check lists unformatted)
-yammm check <schema> <data>                              # validate JSON data against a schema
-yammm load <schema> <data>                               # build an in-memory graph, report diagnostics
+yammm check <schema> <data...>                           # validate JSON data files, read as one document
 yammm gen --to go <schema>                               # generate Go source from a schema
-yammm gen --to jsonschema <schema>                       # generate a JSON Schema for instance-data authoring
 yammm gen --to md <schema>                               # generate Markdown docs with a Mermaid class diagram
-yammm export <schema> <data> --to <json|cypher>          # export a validated graph
 yammm snapshot save <schema> <data...> -o <file.ys>      # build graph, persist
 yammm snapshot save <schema> <data...> --into <file.ys>  # merge into an existing snapshot
 yammm snapshot info <file.ys>                            # metadata + stats

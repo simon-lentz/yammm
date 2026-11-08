@@ -30,7 +30,7 @@ If `$ARGUMENTS` specifies a tool name, provide instructions for that tool only.
 
 ## yammm CLI
 
-The `yammm` CLI provides schema validation, formatting, data checking, snapshot persistence, and export.
+The `yammm` CLI provides schema validation, formatting, data checking, snapshot persistence, generation, and Neo4j DDL.
 
 ### Option 1: Go install (if Go is available)
 
@@ -106,7 +106,7 @@ Required for the automatic schema validation hook (PostToolUse). Without it, the
 
 | Tool | Plugin features unlocked |
 | ---- | ------------------------ |
-| `yammm` | Schema compilation, formatting, export, PostToolUse auto-validation, `Bash(yammm *)` in skills |
+| `yammm` | Schema compilation, formatting, data checking, PostToolUse auto-validation, `Bash(yammm *)` in skills |
 | `yammm-lsp` | Editor diagnostics, completions, hover, go-to-definition |
 | `jq` | PostToolUse auto-validation hook (parses stdin JSON to extract file paths) |
 

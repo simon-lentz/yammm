@@ -228,8 +228,8 @@ func TestNewFromSnapshot_RefusesARootTheImportingSchemaMakesAPart(t *testing.T) 
 }
 
 // A type the snapshot's schema imports directly and the importing schema
-// reaches only through another import cannot hold a root there.
-func TestNewFromSnapshot_RefusesARootTheImportingSchemaCannotName(t *testing.T) {
+// reaches only through another import holds its root there by identity.
+func TestNewFromSnapshot_KeepsARootTheImportingSchemaCannotName(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()
 	base := "schema \"base\"\n\ntype Beacon {\n\tid String primary\n}\n"
@@ -249,7 +249,16 @@ func TestNewFromSnapshot_RefusesARootTheImportingSchemaCannotName(t *testing.T) 
 	if r := src.Add(ctx, instancetest.Valid(t, direct, "base.Beacon", map[string]any{"id": "b1"})); !r.OK() {
 		t.Fatalf("add: %s", r)
 	}
-	requireRefused(t, through, src.Snapshot(), diag.E_GRAPH_TYPE_NOT_FOUND, "reachable only through an intermediate import")
+	g, res := graph.NewFromSnapshot(through, src.Snapshot())
+	if g == nil || !res.OK() {
+		t.Fatalf("NewFromSnapshot: %s", res)
+	}
+	if n := len(slices.Collect(g.Snapshot().AllInstances())); n != 1 {
+		t.Errorf("the imported graph holds %d roots, want 1", n)
+	}
+	if ba, bres := graph.NewBatchAssemblerFromSnapshot(ctx, through, src.Snapshot()); ba == nil || !bres.OK() {
+		t.Errorf("NewBatchAssemblerFromSnapshot: %s", bres)
+	}
 }
 
 // A duplicate record's instance is held to the importing schema's names as a

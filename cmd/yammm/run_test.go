@@ -81,9 +81,7 @@ func TestRun_MissingPathExitsRuntimeEverywhere(t *testing.T) {
 		{"validate", []string{"validate", missingSchema}},
 		{"fmt", []string{"fmt", missingSchema}},
 		{"check", []string{"check", valid, missingData}},
-		{"load", []string{"load", valid, missingData}},
 		{"snapshot save", []string{"snapshot", "save", "-o", filepath.Join(dir, "o.ys"), valid, missingData}},
-		{"export", []string{"export", "--to", "json", valid, missingData}},
 		{"snapshot verify", []string{"snapshot", "verify", valid, missingSnap}},
 		{"snapshot info", []string{"snapshot", "info", missingSnap}},
 	}
@@ -115,8 +113,6 @@ func TestRun_MissingSchemaExitsRuntime(t *testing.T) {
 		args []string
 	}{
 		{"check", []string{"check", missing, data}},
-		{"load", []string{"load", missing, data}},
-		{"export", []string{"export", "--to", "json", missing, data}},
 		{"gen", []string{"gen", "--to", "go", missing}},
 		{"snapshot save", []string{"snapshot", "save", "-o", filepath.Join(t.TempDir(), "o.ys"), missing, data}},
 		{"snapshot verify", []string{"snapshot", "verify", missing, "testdata/data.json"}},
@@ -151,7 +147,7 @@ func TestRun_EveryFailurePrints(t *testing.T) {
 		{"too few args", []string{"validate"}, cli.ExitUsage},
 		{"too many args", []string{"validate", "a.yammm", "b.yammm"}, cli.ExitUsage},
 		{"bad --format", []string{"validate", "--format", "bogus", "testdata/valid.yammm"}, cli.ExitUsage},
-		{"missing required flag", []string{"export", "testdata/valid.yammm", "testdata/data.json"}, cli.ExitUsage},
+		{"missing required flag", []string{"gen", "testdata/valid.yammm"}, cli.ExitUsage},
 	}
 
 	for _, tt := range tests {
@@ -270,23 +266,6 @@ func TestRun_IntrospectValidatesFormatBeforeURI(t *testing.T) {
 	if !strings.Contains(errOut, "invalid output format") {
 		t.Errorf("stderr does not mention %q:\n%s", "invalid output format", errOut)
 	}
-}
-
-// TestRun_ExportRefusesBeforeWork pins that export validates --to before it loads,
-// parses, validates, builds or renders anything.
-func TestRun_ExportRefusesBeforeWork(t *testing.T) {
-	t.Run("bad --to refuses before rendering diagnostics", func(t *testing.T) {
-		code, _, errOut := runCLI(t, "export", "--to", "xml", "testdata/valid.yammm", "testdata/data.json")
-		if code != cli.ExitUsage {
-			t.Errorf("exit code = %d, want %d", code, cli.ExitUsage)
-		}
-		if !strings.Contains(errOut, "xml") {
-			t.Errorf("stderr does not mention %q:\n%s", "xml", errOut)
-		}
-		if strings.Contains(errOut, "loaded") {
-			t.Errorf("stderr mentions %q but no work runs before the flag set is refused:\n%s", "loaded", errOut)
-		}
-	})
 }
 
 // TestRun_UpdateMetadataRefusesContradictoryKeys pins that --set and --unset

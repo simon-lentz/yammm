@@ -37,8 +37,6 @@ Global flags:
 		newFmtCmd(),
 		newCheckCmd(),
 		newNeo4jCmd(),
-		newLoadCmd(),
-		newExportCmd(),
 		newGenCmd(),
 		newSnapshotCmd(),
 	)

@@ -133,14 +133,14 @@ func positionAt(position, key string) string {
 }
 
 // typesEntry refuses a types entry s cannot resolve, and a type that cannot hold
-// a root instance, whether or not the snapshot holds one: adapter/json keys
-// its output by a denoted type's name.
+// a root instance, whether or not the snapshot holds one: no constructor denotes
+// a type [Graph.Add] refuses.
 func (r *structureRules) typesEntry(i int, id schema.TypeID) {
 	if !r.identity(id, fmt.Sprintf("types entry %d", i)) {
 		return
 	}
 	if code, rule := rootIneligibility(r.s, id); rule != "" {
-		r.refuse(code, fmt.Sprintf("types entry %d denotes %s, which %s", i, id, rule))
+		r.refuse(code, fmt.Sprintf("types entry %d denotes %s, which %s", i, schema.TagForm(r.s, id), rule))
 		r.refuseType(id)
 	}
 }
@@ -160,12 +160,9 @@ func rootIneligibility(s schema.Schema, id schema.TypeID) (diag.Code, string) {
 	if !ok {
 		return diag.Code{}, ""
 	}
-	// [Graph.Add] checks the first three in this order, so a type breaking two
+	// [Graph.Add] checks the first two in this order, so a type breaking two
 	// draws one code at every constructor.
 	switch {
-	case !schema.Addressable(s, id):
-		return diag.E_GRAPH_TYPE_NOT_FOUND,
-			"is reachable only through an intermediate import, so the entry schema cannot name it; import its schema directly"
 	case !t.HasPrimaryKey():
 		return diag.E_GRAPH_MISSING_PK, "declares no primary key"
 	case t.IsPart():
@@ -289,7 +286,7 @@ func address(r *structureRules, t schema.Type, root Instance) {
 	case !held:
 		r.addresses[slot] = true
 	default:
-		r.refuse(diag.E_DUPLICATE_PK, fmt.Sprintf("two instances of type %s at address %s: their keys are one under this schema", id, diag.CutValue(slot.key)))
+		r.refuse(diag.E_DUPLICATE_PK, fmt.Sprintf("two instances of type %s at address %s: their keys are one under this schema", schema.TagForm(r.s, id), diag.CutValue(slot.key)))
 	}
 }
 
@@ -330,7 +327,7 @@ func (r *structureRules) keylessPartKey(child Instance) {
 func (r *structureRules) names(position string, t schema.Type, id schema.TypeID, key immutable.Key, props immutable.Properties) {
 	for _, name := range undeclaredNames(props, func(n string) bool { _, ok := t.Property(n); return ok }) {
 		r.refuse(diag.E_UNKNOWN_FIELD, fmt.Sprintf("%s %s[%s] holds property %s, which it does not declare",
-			position, id, diag.CutValue(key.String()), diag.QuoteValue(name)))
+			position, schema.TagForm(r.s, id), diag.CutValue(key.String()), diag.QuoteValue(name)))
 	}
 }
 

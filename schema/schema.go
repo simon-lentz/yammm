@@ -97,7 +97,8 @@ func (s Schema) Types() iter.Seq[Type] {
 // schema imports directly. It is the one by-name resolve every name-taking
 // entry point applies — the validator's, the instance builder's, the CLI's —
 // so a name means the same thing at each. A transitively imported type has no
-// name form; [Schema.TypeByID] addresses it.
+// name this resolves, though [TagForm] renders it as "schema#Name";
+// [Schema.TypeByID] addresses it.
 func (s Schema) ResolveTypeName(name string) (Type, bool) {
 	return s.ResolveType(typeRefFromName(name))
 }

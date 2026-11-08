@@ -16,9 +16,8 @@ import (
 // caller's rule, as it is the validator's. A non-nil constraint is judged first by
 // [schema.CheckConstraint], and one it refuses is an error whatever the value.
 //
-// This is the check half of the boundary contract [CanonicalValue] renders the
-// other half of, exported for a caller that admits schema-typed values at a
-// boundary this library does not own. A violation returns the checker's
+// It is exported for a caller that admits schema-typed values without a
+// [Validator], such as the snapshot reader. A violation returns the checker's
 // message; a panic inside the check returns an [InternalError] that matches
 // [ErrInternalFailure], as it does for the validator.
 func CheckValue(val any, c schema.Constraint) error {
@@ -45,7 +44,7 @@ func checkValueRecovering(val any, c schema.Constraint) (err error) {
 }
 
 // coerceValueRecovering runs eval.CoerceValue under the same recovery rule as
-// [checkValueRecovering], so the validator and CanonicalValue share it.
+// [checkValueRecovering].
 func coerceValueRecovering(val any, c schema.Constraint) (result any, err error) {
 	defer func() {
 		if r := recover(); r != nil {

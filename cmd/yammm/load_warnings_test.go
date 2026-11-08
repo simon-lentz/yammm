@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -68,8 +69,7 @@ func TestJSONDiagnosticsAreOneDocumentPerInvocation(t *testing.T) {
 		args []string
 	}{
 		{"check", []string{"check", "--format", "json", schemaPath, dataPath}},
-		{"load", []string{"load", "--format", "json", schemaPath, dataPath}},
-		{"export", []string{"export", "--format", "json", "--to", "json", schemaPath, dataPath}},
+		{"snapshot save", []string{"snapshot", "save", "--format", "json", "-o", filepath.Join(t.TempDir(), "out.ys"), schemaPath, dataPath}},
 	}
 
 	for _, tt := range tests {

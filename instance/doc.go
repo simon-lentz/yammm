@@ -83,13 +83,11 @@
 //
 // # Value Functions
 //
-// [CheckValue] and [CanonicalValue] are the validator's two per-value rules —
-// does this value conform, and what is its stored form — exported for code
-// outside the validator that reads a value under a constraint, as the adapter/json
-// writer does.
-// Both accept a nil constraint, and a value that holds none ([IsAbsent]) under
-// a constraint [schema.CheckConstraint] accepts; both refuse a constraint it
-// refuses, whatever the value.
+// [CheckValue] is the validator's per-value rule, exported for code outside the
+// validator that reads a value under a constraint, as the snapshot reader does.
+// It accepts a nil constraint, and a value that holds none ([IsAbsent]) under a
+// constraint [schema.CheckConstraint] accepts; it refuses a constraint that
+// function refuses, whatever the value.
 //
 // # Thread Safety
 //

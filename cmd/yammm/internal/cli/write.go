@@ -13,9 +13,8 @@ import (
 
 // NewFileMode is the mode [WriteFile] gives a file that does not exist yet.
 //
-// Owner-only, because a CLI write carries whatever the graph held: an export
-// can contain every value in the schema, and 0o644 publishes it to every
-// account on the host.
+// Owner-only, because a snapshot the CLI writes carries every value the graph
+// held, and 0o644 publishes it to every account on the host.
 const NewFileMode fs.FileMode = 0o600
 
 // stagingPattern is the [os.CreateTemp] pattern of every staging file. Its

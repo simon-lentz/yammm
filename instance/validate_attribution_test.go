@@ -11,7 +11,6 @@ import (
 	"github.com/simon-lentz/yammm/instance"
 	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/location/path"
-	"github.com/simon-lentz/yammm/schema"
 )
 
 func detail(is diag.Issue, key string) (string, bool) {
@@ -165,16 +164,6 @@ func TestValidInstance_EdgeAcceptsEitherSpelling(t *testing.T) {
 		if _, ok := inst.Edge(name); !ok {
 			t.Errorf("Edge(%q) not found", name)
 		}
-	}
-}
-
-// CanonicalValue returns the input beside an error, so a caller that heals
-// what it can and passes through what it cannot may use the value directly.
-func TestCanonicalValue_ReturnsTheInputBesideAnError(t *testing.T) {
-	t.Parallel()
-	got, err := instance.CanonicalValue("x", schema.NewIntegerConstraint())
-	if err == nil || got != "x" {
-		t.Errorf("CanonicalValue(\"x\", Integer) = %#v, %v; want the input beside an error", got, err)
 	}
 }
 

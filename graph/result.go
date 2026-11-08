@@ -47,7 +47,7 @@ type Attestation struct {
 // Every collection accessor produces deterministically sorted output
 // ([Snapshot.EdgesFrom] in [Snapshot.Edges]' order), Add() call order and
 // concurrency move only records that tie in every arm, and every ordering below
-// compares types by TypeID so two types rendering one name still sort apart:
+// compares types by TypeID:
 //   - [Snapshot.Types]: lexicographic by the TypeID's String
 //   - [Snapshot.InstancesOf]: lexicographic by primary key string
 //   - [Snapshot.Edges]: (sourceType, sourceKey, relation, targetType,
@@ -131,10 +131,9 @@ func (r Snapshot) Schema() schema.Schema {
 // Types returns every type the snapshot denotes, ordered by TypeID: each
 // root's type, and each type a document holds an instances group for with no
 // item. A types table row with no such group denotes no type.
-// Every one can hold a root under the package doc's "Root type eligibility",
-// so [schema.AddressableTag] accepts it; a composed child's type is a part
-// type and is never denoted, so walk [Instance.ComposedRelations] for a
-// subtree. The slice is a copy, and a [schema.TypeID] is a value.
+// Every one can hold a root under the package doc's "Root type eligibility";
+// a composed child's type is a part type and is never denoted, so walk
+// [Instance.ComposedRelations] for a subtree. The slice is a copy, and a [schema.TypeID] is a value.
 func (r Snapshot) Types() []schema.TypeID {
 	if r.IsZero() || len(r.types) == 0 {
 		return nil

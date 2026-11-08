@@ -6,10 +6,9 @@
 //
 // # Architectural Position
 //
-// The neo4j adapter lives alongside [github.com/simon-lentz/yammm/adapter/json]
-// in the adapter layer. It depends on library packages (schema, graph,
-// instance, immutable, diag); library packages never depend on
-// adapters.
+// The neo4j adapter is the adapter layer's one package. It depends on library
+// packages (schema, graph, instance, immutable, diag); library packages never
+// depend on adapters.
 //
 // # Neo4j Driver Dependency (Type-Only)
 //
@@ -18,11 +17,8 @@
 // connection, session, or transaction packages — no code in this package
 // opens a connection or executes queries against a database. Consumers
 // supply their own driver and choose how to apply the generated output
-// (directly, via neo4j-migrations, via a consumer's apply step, etc.).
-//
-// This mirrors the JSON adapter principle: adapter/json does not import
-// HTTP libraries — it produces bytes. adapter/neo4j does not import the
-// Neo4j session API — it produces Cypher and driver-compatible parameters.
+// (directly, via neo4j-migrations, via a consumer's apply step, etc.): the
+// package produces Cypher and driver-compatible parameters.
 //
 // # Constraint Generation
 //
@@ -129,8 +125,7 @@
 // The DSL reserves no Cypher keyword as one. Of the six spellings its own
 // grammar refuses as a property name, four are Cypher keywords too ("as", "in",
 // "true" and "false"). A property named "match" or a type named "MATCH" is
-// valid yammm and exports cleanly through the JSON
-// adapter, but can fail Neo4j export. The names a schema writes into
+// valid yammm, but can fail Neo4j export. The names a schema writes into
 // generated DDL unquoted — property names, primary keys, and the assembled
 // labels — are checked with [ValidateIdentifier] during constraint and index
 // generation and rejected as E_NEO4J_INVALID_IDENTIFIER, whose detail begins
@@ -184,8 +179,7 @@
 // label, as two SCHEMA names that sanitize alike do, or schema "a" with type B__C
 // and schema "a__B" with type C; [Adapter.ShapeForSchema] refuses that closure.
 //
-// An error marked [ErrUnrepresentable], as the JSON adapter marks its own,
-// refuses these values: one its constraint's coercion refuses, a nested collection's, a map at a
+// An error marked [ErrUnrepresentable] refuses these values: one its constraint's coercion refuses, a nested collection's, a map at a
 // property the schema declares, a list or a map a document nests more than 256
 // levels deep, a [encoding/json.Number] no driver number holds, or a primary key
 // that is absent or holds no value. An integer a finite float64 holds passes
@@ -237,8 +231,8 @@
 //     disagrees are all re-expressed in the value's own offset. A consumer that
 //     must keep IANA names on a host without a tz database imports time/tzdata.
 //   - Date: a "2006-01-02" string, a time.Time, OR a dbtype.Date -> dbtype.Date
-//     (Neo4j DATE). A string that does not parse, or any other non-temporal
-//     value, is a coercion failure and returns an error. All three arms are
+//     (Neo4j DATE). A string that does not parse, or a value of any other
+//     type, is a coercion failure and returns an error. All three arms are
 //     normalised to midnight UTC on the date the value itself shows, since a
 //     date carries no time of day.
 //   - Every other (non-transforming) kind passes a value through unchanged, save
@@ -561,6 +555,5 @@
 // # Dependencies
 //
 //	adapter/neo4j  ──imports──▶  schema, graph, instance, immutable, diag,
-//	                             adapter/internal/constraintof, adapter/internal/refusal,
 //	                             github.com/neo4j/neo4j-go-driver/v6/neo4j/dbtype
 package neo4j

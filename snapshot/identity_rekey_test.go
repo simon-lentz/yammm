@@ -48,15 +48,12 @@ func hasCode(result diag.Result, code diag.Code) bool {
 // graph-side import of a child whose type the entry schema cannot name. Such a
 // type has no alias to qualify with, so a name-resolved import dropped it; a
 // composed child is addressed through its parent and must survive.
-//
-// It is a COMPOSED child and not a root because the entry schema cannot name
-// the type, and every root is keyed by name.
 func TestImportSnapshot_KeepsATransitivelyImportedComposedChild(t *testing.T) {
 	t.Parallel()
 	s := loadIdentitySchema(t)
 
 	siteID := mustTypeIDIn(t, s, "", "Site")
-	deepPart := mustTransitiveTypeID(t, s, "base", "deep", "Part")
+	deepPart := mustDeepTypeID(t, s, "Part")
 	if _, addressable := schema.AddressableTag(s, deepPart); addressable {
 		t.Fatal("fixture is vacuous: the entry schema can name deep.Part")
 	}
@@ -110,8 +107,9 @@ func TestImportSnapshot_KeepsATransitivelyImportedComposedChild(t *testing.T) {
 // A local type and a DIRECTLY imported one of the same name render different
 // tags and share one bare name. Every position that must denote a type exactly
 // is keyed by [schema.TypeID], and one keyed by the bare name merges the pair.
-// A type the entry schema cannot name is not part of this: it cannot hold a
-// root at all, so no position keyed by name ever has to separate one.
+// A type the entry schema cannot name holds a root too, and renders the bare
+// name its entry namesake renders; the identity oracle's transitive root cases
+// hold that pair.
 
 // sameNameBeacons builds a snapshot holding the entry schema's Beacon beside
 // the one it imports as base. Both are addressable, their tags differ, and

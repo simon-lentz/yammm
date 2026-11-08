@@ -258,7 +258,7 @@ func (ba *BatchAssembler) addValid(valid instance.ValidInstance, merge bool) (bo
 
 	merged, addRes := ba.graph.add(ba.ctx, valid, merge)
 	if addRes.HasErrors() {
-		return false, ba.wrapAddError(valid.TypeName(), attemptN, addRes)
+		return false, ba.wrapAddError(ba.graph.tagForm(valid.Type().ID()), attemptN, addRes)
 	}
 	if !merged {
 		ba.successes.Add(1)

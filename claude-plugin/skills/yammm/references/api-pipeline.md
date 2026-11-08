@@ -1,6 +1,6 @@
 # Go API Pipeline Reference
 
-The yammm Go library follows a four-stage pipeline: **load schema -> validate instances -> build graph -> persist/export**. An operation that reports diagnostics returns a `diag.Result`, beside the value where the call produces one, with stable error codes and, where a diagnostic has a source position, its span. Some operations return an `error` instead, among them the JSON adapter's write methods, the Neo4j adapter's `BatchNodeQueries` and `BatchEdgeQueries`, `gogen.Marshal`, `jschema.Marshal` and `markdown.Marshal`, `graph.BatchAssembler`'s `Add`, `AddValid` and `AddValidOrMerge`, and `instance.BuilderFor`.
+The yammm Go library follows a four-stage pipeline: **load schema -> validate instances -> build graph -> persist or write**. An operation that reports diagnostics returns a `diag.Result`, beside the value where the call produces one, with stable error codes and, where a diagnostic has a source position, its span. Some operations return an `error` instead, among them the Neo4j adapter's `BatchNodeQueries` and `BatchEdgeQueries`, `gogen.Marshal` and `markdown.Marshal`, `graph.BatchAssembler`'s `Add`, `AddValid` and `AddValidOrMerge`, and `instance.BuilderFor`.
 
 ---
 
@@ -122,7 +122,7 @@ v := instance.NewValidator(s,
 ### Validate Instances
 
 ```go
-// Validate a batch (common path for JSON adapter output)
+// Validate a batch of one type
 raws := []instance.RawInstance{
     {Properties: map[string]any{"id": "abc-123", "name": "Widget"}},
 }
@@ -187,18 +187,18 @@ g := graph.New(s)
 
 // Add validated instances: Validate's result was checked, so a zero entry
 // held a refused value its producer reported
-for _, inst := range validInstances {
-    if inst.IsZero() {
+for _, valid := range validInstances {
+    if valid.IsZero() {
         continue
     }
-    result := g.Add(ctx, inst)
+    result := g.Add(ctx, valid)
     if result.HasErrors() {
-        // handle duplicate PK, type not found, etc.
+        // handle a duplicate primary key, a keyless or part type, etc.
     }
 }
 ```
 
-`Add` panics on an instance another schema load validated, so build the validator and the graph from one `schema.Schema`. One text loaded twice is two loads. A validator over a member of the import closure shares the entry schema's load, so `Add` adds an instance of a type the entry schema declares or directly imports. Any other type of the closure draws `E_GRAPH_TYPE_NOT_FOUND`.
+`Add` panics on an instance another schema load validated, so build the validator and the graph from one `schema.Schema`. One text loaded twice is two loads. A validator over a member of the import closure shares the entry schema's load, so `Add` adds an instance of any type of the closure that can hold a root: concrete, not a part, and keyed, one the entry schema reaches only through another import included.
 
 ### Check Graph Completeness
 
@@ -332,26 +332,34 @@ if result.HasErrors() {
     return result.Err()
 }
 
-// 2. Parse data with the JSON adapter; the SourceID names the document in diagnostics
-adapter := jsonAdapter.New()
-parsed, result := adapter.ParseObject(ctx, location.NewSourceID("data://inventory.json"), jsonData)
-if result.HasErrors() {
-    return result.Err()
+// 2. Decode the data: one array of objects per type name. UseNumber keeps an
+// integer apart from a float, as the validator's Integer rule needs.
+var doc map[string][]map[string]any
+dec := json.NewDecoder(bytes.NewReader(jsonData))
+dec.UseNumber()
+if err := dec.Decode(&doc); err != nil {
+    return err
 }
 
 // 3. Validate instances
 v := instance.NewValidator(s)
 g := graph.New(s)
-for typeName, raws := range parsed {
+for typeName, objects := range doc {
+    raws := make([]instance.RawInstance, len(objects))
+    for i, props := range objects {
+        raws[i] = instance.RawInstance{Properties: props}
+    }
     valids, result := v.Validate(ctx, typeName, raws)
     if result.HasErrors() {
         return result.Err()
     }
-    for _, inst := range valids {
-        if inst.IsZero() {
+    for _, valid := range valids {
+        if valid.IsZero() {
             continue // its producer refused a value and reported it
         }
-        g.Add(ctx, inst)
+        if res := g.Add(ctx, valid); res.HasErrors() {
+            return res.Err()
+        }
     }
 }
 

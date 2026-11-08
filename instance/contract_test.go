@@ -31,7 +31,7 @@ func contractFixture(t *testing.T, schemaFile, dataFile string) (schema.Schema, 
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Numbers stay json.Number, as yammm's JSON adapter reads a document: a
+	// Numbers stay json.Number, as the yammm command reads a data file: a
 	// float64 decode would turn every integer into a float, which no Integer
 	// accepts.
 	var data map[string][]map[string]any

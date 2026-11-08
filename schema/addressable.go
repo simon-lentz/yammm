@@ -7,7 +7,8 @@ package schema
 // contract — an accepted id's tag resolves back to that same identity, and no
 // entry-relative name denotes a refused one — held together over a closure by
 // [TestAddressableTag_IsResolveTypeNameInverse]. [TagForm] renders every
-// identity for display and is lossy on purpose; this refuses instead.
+// identity, a type s reaches only through an intermediate import as
+// "schema#Name".
 func AddressableTag(s Schema, id TypeID) (string, bool) {
 	if s.IsZero() || id.IsZero() {
 		return "", false
@@ -32,11 +33,4 @@ func AddressableTag(s Schema, id TypeID) (string, bool) {
 		return "", false
 	}
 	return alias + "." + id.Name(), true
-}
-
-// Addressable reports whether s can name id. It is [AddressableTag] without
-// the tag, for a caller deciding eligibility rather than rendering a name.
-func Addressable(s Schema, id TypeID) bool {
-	_, ok := AddressableTag(s, id)
-	return ok
 }

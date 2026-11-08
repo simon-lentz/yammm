@@ -2,7 +2,6 @@ package gogen_test
 
 import (
 	"context"
-	"encoding/json"
 	"go/ast"
 	"go/parser"
 	"go/token"
@@ -15,20 +14,16 @@ import (
 
 	"github.com/simon-lentz/yammm/schema"
 	"github.com/simon-lentz/yammm/schema/gogen"
-	"github.com/simon-lentz/yammm/schema/jschema"
 )
 
-// TestMarshal_GraphKeysMatchTheJSONSchemaEnvelope holds gogen's Graph keys to
-// schema/jschema's envelope keys over both packages' fixtures: the two
-// generators describe one document, so they must name one set of top-level
-// keys, and every key must be a tag the entry schema resolves to a concrete
-// type.
-func TestMarshal_GraphKeysMatchTheJSONSchemaEnvelope(t *testing.T) {
+// TestMarshal_GraphKeysAreTheTagsTheEntrySchemaAddresses holds gogen's Graph
+// keys to the type tags a JSON instance document is read by: one key per
+// concrete, non-part type the entry schema can name, spelled as
+// [schema.AddressableTag] spells it, and each key a tag the entry schema
+// resolves to a concrete type.
+func TestMarshal_GraphKeysAreTheTagsTheEntrySchemaAddresses(t *testing.T) {
 	var files []string
-	for _, pattern := range []string{
-		"testdata/*.yammm", "testdata/*/*.yammm",
-		"../jschema/testdata/*.yammm", "../jschema/testdata/*/*.yammm",
-	} {
+	for _, pattern := range []string{"testdata/*.yammm", "testdata/*/*.yammm"} {
 		m, err := filepath.Glob(pattern)
 		if err != nil {
 			t.Fatal(err)
@@ -36,7 +31,7 @@ func TestMarshal_GraphKeysMatchTheJSONSchemaEnvelope(t *testing.T) {
 		files = append(files, m...)
 	}
 	if len(files) < 40 {
-		t.Fatalf("found %d fixtures; the globs no longer reach both corpora", len(files))
+		t.Fatalf("found %d fixtures; the globs no longer reach the corpus", len(files))
 	}
 
 	unnameable := 0
@@ -49,27 +44,29 @@ func TestMarshal_GraphKeysMatchTheJSONSchemaEnvelope(t *testing.T) {
 		if res.HasErrors() {
 			t.Fatalf("load %s: %v", f, res.Err())
 		}
+		var want []string
 		for sc := range s.Closure() {
 			for typ := range sc.Types() {
-				if !typ.IsAbstract() && !typ.IsPart() && !schema.Addressable(s, typ.ID()) {
+				if typ.IsAbstract() || typ.IsPart() {
+					continue
+				}
+				if tag, ok := schema.AddressableTag(s, typ.ID()); ok {
+					want = append(want, tag)
+				} else {
 					unnameable++
 				}
 			}
 		}
+		slices.Sort(want)
 
 		t.Run(f, func(t *testing.T) {
 			src, err := gogen.Marshal(s)
 			if err != nil {
 				t.Fatal(err)
 			}
-			doc, err := jschema.Marshal(s)
-			if err != nil {
-				t.Fatal(err)
-			}
 			graph := graphKeys(t, src)
-			envelope := envelopeKeys(t, doc)
-			if !slices.Equal(graph, envelope) {
-				t.Errorf("Graph keys %q, envelope keys %q", graph, envelope)
+			if !slices.Equal(graph, want) {
+				t.Errorf("Graph keys %q, want the entry schema's tags %q", graph, want)
 			}
 			for _, k := range graph {
 				typ, ok := s.ResolveTypeName(k)
@@ -79,8 +76,8 @@ func TestMarshal_GraphKeysMatchTheJSONSchemaEnvelope(t *testing.T) {
 			}
 		})
 	}
-	// Without a concrete type the entry schema cannot name, the two
-	// generators could agree by both keying every type.
+	// Without a concrete type the entry schema cannot name, keying every type
+	// would pass.
 	if unnameable == 0 {
 		t.Fatal("no fixture holds a concrete type its entry schema cannot name")
 	}
@@ -120,24 +117,6 @@ func graphKeys(t *testing.T, src []byte) []string {
 	})
 	if !found {
 		t.Fatal("no Graph struct in the generated source")
-	}
-	slices.Sort(keys)
-	return keys
-}
-
-// envelopeKeys returns the sorted top-level property names of a JSON Schema
-// document.
-func envelopeKeys(t *testing.T, doc []byte) []string {
-	t.Helper()
-	var envelope struct {
-		Properties map[string]json.RawMessage `json:"properties"`
-	}
-	if err := json.Unmarshal(doc, &envelope); err != nil {
-		t.Fatal(err)
-	}
-	keys := make([]string, 0, len(envelope.Properties))
-	for k := range envelope.Properties {
-		keys = append(keys, k)
 	}
 	slices.Sort(keys)
 	return keys

@@ -7,7 +7,6 @@ import (
 
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/immutable"
-	"github.com/simon-lentz/yammm/instance"
 	"github.com/simon-lentz/yammm/internal/instancetest"
 	"github.com/simon-lentz/yammm/internal/snapparts"
 	"github.com/simon-lentz/yammm/internal/snappartstest"
@@ -24,14 +23,14 @@ func TestMarshal_ANegativeZeroKeepsItsSignAtAFloat(t *testing.T) {
 	if res.HasErrors() {
 		t.Fatalf("load schema: %s", res)
 	}
-	stored, err := instance.CanonicalValue(json.Number("-0"), schema.NewFloatConstraint())
-	if f, ok := stored.(float64); err != nil || !ok || !math.Signbit(f) {
-		t.Fatalf("the validator stores -0 at a Float as %#v, %v; want a negative zero", stored, err)
-	}
 	holderT, _ := s.Type("Holder")
 	props := map[string]any{"id": "h1", "f": json.Number("-0"), "v": []any{json.Number("-0"), json.Number("1")}}
+	valid := instancetest.Valid(t, s, "Holder", props)
+	if stored, _ := valid.Property("f"); !negativeZero(stored.Unwrap()) {
+		t.Fatalf("the validator stores -0 at a Float as %#v; want a negative zero", stored.Unwrap())
+	}
 	g := graph.New(s)
-	if r := g.Add(t.Context(), instancetest.Valid(t, s, "Holder", props)); r.HasErrors() {
+	if r := g.Add(t.Context(), valid); r.HasErrors() {
 		t.Fatalf("Add: %s", r)
 	}
 	for name, snap := range map[string]graph.Snapshot{

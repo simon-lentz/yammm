@@ -148,3 +148,61 @@ func TestLoad_ValueConformanceLeavesRevalidationsInputAsWritten(t *testing.T) {
 		t.Errorf("revalidation alone reported %q and after value conformance %q; want one report, the same", alone, after)
 	}
 }
+
+const everyHeldSchema = `schema "held"
+
+type T {
+	id String primary
+	n Integer
+	s String
+	ts Timestamp
+	d Date
+	u UUID
+	tss List<Timestamp>
+	v Vector[2]
+	l List<Integer>
+	f Float
+}
+`
+
+// A float is written with its float indicator in every position that holds one,
+// whatever kind the position declares, so the document never spells an integer
+// the snapshot did not hold.
+func TestMarshal_MarksEveryHeldFloat(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	s, res := schema.LoadString(ctx, everyHeldSchema, "held.yammm")
+	if res.HasErrors() {
+		t.Fatalf("load schema: %s", res)
+	}
+	ty, _ := s.Type("T")
+	for _, c := range []struct {
+		prop string
+		held any
+		want string
+	}{
+		{"n", float64(0.1), `"n":0.1}`},
+		{"n", float64(6), `"n":6.0`},
+		{"s", float64(6), `"s":6.0`},
+		{"ts", float64(6), `"ts":6.0`},
+		{"d", float64(6), `"d":6.0`},
+		{"u", float64(6), `"u":6.0`},
+		{"tss", []any{float64(6)}, `"tss":[6.0]`},
+		{"v", float64(7), `"v":7.0`},
+		{"l", float64(8), `"l":8.0`},
+		{"n", []any{float64(6)}, `"n":[6.0]`},
+		{"n", map[string]any{"k": float64(6)}, `"n":{"k":6.0}`},
+		{"ts", []any{float64(6)}, `"ts":[6.0]`},
+		{"f", []any{float64(6)}, `"f":[6.0]`},
+		{"v", []any{[]any{float64(6)}, float64(1)}, `"v":[[6.0],1.0]`},
+	} {
+		snap := snappartstest.Loaded(t, s, snapparts.Parts{Instances: []snapparts.Instance{{
+			TypeID: ty.ID(), PrimaryKey: immutable.WrapKey([]any{"a"}),
+			Properties: immutable.WrapProperties(map[string]any{"id": "a", c.prop: c.held}),
+		}}})
+		data, mres := snapshot.Marshal(ctx, snap)
+		if mres.HasErrors() || !bytes.Contains(data, []byte(c.want)) {
+			t.Errorf("%s=%#v wrote %s (%s), want %s", c.prop, c.held, data, mres, c.want)
+		}
+	}
+}

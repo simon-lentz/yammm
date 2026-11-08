@@ -22,13 +22,15 @@ const (
 	// CategoryImport is for import resolution errors.
 	CategoryImport
 
-	// CategoryInstance is for instance validation errors.
+	// CategoryInstance is for instance data errors: a data document that does
+	// not parse, and an instance that fails validation.
 	CategoryInstance
 
 	// CategoryGraph is for graph-layer errors.
 	CategoryGraph
 
-	// CategoryAdapter is for format adapter parsing errors.
+	// CategoryAdapter is for the codes an adapter package registers when it is
+	// linked, such as adapter/neo4j's.
 	CategoryAdapter
 
 	// CategorySnapshot is for snapshot persistence errors.
@@ -368,18 +370,18 @@ var (
 	// grammar's rule: a JSON document's top-level key.
 	E_INVALID_TYPE_TAG = NewCode("E_INVALID_TYPE_TAG", CategoryInstance)
 
+	// E_DATA_PARSE indicates an instance document that is not well formed, is
+	// not one object, holds a type name whose value is not an array of objects,
+	// states one member name twice in one object, or nests deeper than the
+	// decoder's 10,000-level limit.
+	E_DATA_PARSE = NewCode("E_DATA_PARSE", CategoryInstance)
+
 	// E_CASE_FOLD_COLLISION indicates multiple input fields collide after case-folding.
 	// This occurs when non-strict mode is enabled and two or more field names fold
 	// to one member that none of them matches exactly: a property (schema "name",
 	// input "Name" and "NAME"), a relation's field, an edge property or a
 	// foreign-key field. An exact match is claimed first and never collides.
 	E_CASE_FOLD_COLLISION = NewCode("E_CASE_FOLD_COLLISION", CategoryInstance)
-)
-
-// Adapter codes.
-var (
-	// E_ADAPTER_PARSE indicates a format-specific parsing error.
-	E_ADAPTER_PARSE = NewCode("E_ADAPTER_PARSE", CategoryAdapter)
 )
 
 // Graph codes.
@@ -403,9 +405,8 @@ var (
 	// E_UNRESOLVED_REQUIRED indicates a required association is unresolved.
 	E_UNRESOLVED_REQUIRED = NewCode("E_UNRESOLVED_REQUIRED", CategoryGraph)
 
-	// E_GRAPH_TYPE_NOT_FOUND indicates a root's or a denoted type that the graph's
-	// schema reaches only through an intermediate import, or a type identity in an
-	// imported snapshot that names no type of the schema.
+	// E_GRAPH_TYPE_NOT_FOUND indicates a type identity in an imported snapshot
+	// that names no type of the schema.
 	E_GRAPH_TYPE_NOT_FOUND = NewCode("E_GRAPH_TYPE_NOT_FOUND", CategoryGraph)
 
 	// E_GRAPH_INVALID_COMPOSITION indicates an invalid composition in graph operations.
@@ -477,15 +478,6 @@ var (
 	// in the provided schema.
 	E_SNAPSHOT_UNKNOWN_TYPE = NewCode("E_SNAPSHOT_UNKNOWN_TYPE", CategorySnapshot)
 
-	// E_SNAPSHOT_UNNAMEABLE_TYPE indicates an instances group or a duplicate
-	// record that names a type the entry schema cannot name: the import
-	// closure declares it, but the schema reaches it only through an
-	// intermediate import. adapter/json keys its output by the name the entry
-	// schema gives each denoted type, so such a document describes a snapshot it
-	// cannot render. The hint names the remedy, which
-	// is to import the declaring schema directly.
-	E_SNAPSHOT_UNNAMEABLE_TYPE = NewCode("E_SNAPSHOT_UNNAMEABLE_TYPE", CategorySnapshot)
-
 	// E_SNAPSHOT_TYPE_MISMATCH indicates a type row that contradicts its
 	// position: a root's row that is not its group's, a duplicate instance's
 	// that is not its record's, or a composed child's or an association record's
@@ -519,8 +511,8 @@ var (
 
 	// E_SNAPSHOT_INVALID_ROOT indicates an instances group, empty or not, or a
 	// duplicate record names a type that cannot hold a root instance: an
-	// abstract type, a part type, or one declaring no primary key. Nameability is a denoted type's rule and draws
-	// [E_SNAPSHOT_UNNAMEABLE_TYPE]. No instance of any of the three installs at
+	// abstract type, a part type, or one declaring no primary key. No instance of
+	// any of the three installs at
 	// [github.com/simon-lentz/yammm/graph.Graph.Add], so a document stating one
 	// describes a graph that cannot be built. The message names which rule the
 	// type fails. One type draws one issue, however many positions name it.

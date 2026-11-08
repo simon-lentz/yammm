@@ -342,7 +342,7 @@ type Sub extends Base {
 	}
 }
 
-// A json.Number — what adapter/json's UseNumber decode emits for every
+// A json.Number — what an encoding/json decode with UseNumber emits for every
 // number — is a number at a String property, not a string of digits.
 func TestValidateOne_JSONNumberIsNotAString(t *testing.T) {
 	t.Parallel()

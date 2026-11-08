@@ -7,10 +7,9 @@
 //
 // # Schema-In, Bytes-Out
 //
-// Unlike the data adapters (adapter/json, adapter/neo4j), gogen has no
-// instance-data path: it never parses, validates, or serializes instances, and it
-// imports neither instance nor graph. It maps a completed schema to Go source,
-// nothing more. It also returns a plain error rather than the
+// Unlike adapter/neo4j, gogen has no instance-data path: it never parses,
+// validates, or serializes instances, and it imports neither instance nor graph.
+// It maps a completed schema to Go source, nothing more. It also returns a plain error rather than the
 // [github.com/simon-lentz/yammm/diag.Result] the library's loading, validation
 // and graph code return, because its failures are refusals of its inputs and generator bugs (see
 // Error Conditions), not data diagnostics with source locations.
@@ -77,7 +76,7 @@
 //	List<T>                       →  []T
 //
 // The library stores a Date as "2006-01-02" and a custom-layout Timestamp
-// through its declared layout, and adapter/json writes those strings. A bare
+// through its declared layout, and the validator reads those strings. A bare
 // time.Time decodes RFC 3339 alone, so it refuses a Date and every layout whose
 // text is not RFC 3339. The generated Date and per-layout types are
 // structs embedding time.Time — so every time.Time method but MarshalJSON and
@@ -124,8 +123,8 @@
 // Each declared association is emitted as one struct, whose bare spelling is
 // EDGE_<Owner>_<edge>_<Target> (see Names), carrying the target type's primary-key
 // fields under the parser's reserved "_target_" keys, with the association's
-// own edge properties beside them — the shape adapter/json's parser and
-// writer exchange:
+// own edge properties beside them — the shape the instance document yammm check
+// reads gives an association:
 //
 //	type EDGE_Person_employer_Company struct {
 //		TargetID string    `json:"_target_id"` // the target Company's primary key
@@ -139,18 +138,20 @@
 // type (E_INVALID_ASSOCIATION_TARGET) that carries a primary key
 // (E_NO_PRIMARY_KEY), so the "_target_" fields always exist. Compositions, by
 // contrast, are inlined as ownership slices ([]*Child for every
-// multiplicity — the parser exchanges an array for (one) too) on the owning
+// multiplicity — the document holds an array for (one) too) on the owning
 // struct.
 //
 // The Graph aggregate is the top-level envelope: one slice field per concrete type
 // the entry schema can name (abstract and part types are excluded), each keyed by
-// its [github.com/simon-lentz/yammm/schema.AddressableTag], the name adapter/json
-// keys its object by — the bare type name for the entry schema's own types and
-// the alias-qualified name for a directly imported one — so a document that
-// adapter writes decodes into the aggregate. A type the entry schema reaches only
-// through another import has no such name, so no document can hold it at top
-// level, and it takes no Graph field. Its struct is still emitted, as every type
-// in the closure is. The keys are the envelope keys schema/jschema emits.
+// its [github.com/simon-lentz/yammm/schema.AddressableTag], the type tag the
+// instance document yammm check reads keys a type's array by — the bare type
+// name for the entry schema's own types and the alias-qualified name for a
+// directly imported one — so such a document decodes into the aggregate once it
+// holds no leading byte order mark and none of JSONC's comments and trailing
+// commas, which encoding/json refuses. A type
+// the entry schema reaches only through another import has no such name, so no
+// document can hold it at top level, and it takes no Graph field. Its struct is
+// still emitted, as every type in the closure is.
 //
 //	type Graph struct {
 //		Person []*Person `json:"Person,omitempty"`
@@ -380,6 +381,7 @@
 //
 // gogen imports one core internal package, internal/ident, for the
 // identifier-casing transform that turns schema names into Go identifiers.
-// Unlike the data adapters, it imports neither instance/graph nor diag. The generated output depends only on the standard library, importing at
-// most "time" and "encoding/json".
+// Unlike adapter/neo4j, it imports neither instance/graph nor diag. The
+// generated output depends only on the standard library, importing at most
+// "time" and "encoding/json".
 package gogen

@@ -1,6 +1,6 @@
 # Diagnostics Reference
 
-yammm reports problems as structured diagnostics in a `diag.Result`. An exported function that returns one returns it last, after its value when it has one: `schema.Load` returns `(Schema, diag.Result)`, and `Graph.Add` returns a `diag.Result` alone. Each issue has a stable error code, a severity and a message, and a source location where one applies. Some entry points return a Go `error` instead, among them the JSON adapter's writers and `gogen.Marshal`, `jschema.Marshal` and `markdown.Marshal`. `graph.BatchAssembler`'s `Add`, `AddValid` and `AddValidOrMerge` return an `error` too; when the cause is a failed result, the error carries that `diag.Result`, and `diag.AsContextualError` recovers it.
+yammm reports problems as structured diagnostics in a `diag.Result`. An exported function that returns one returns it last, after its value when it has one: `schema.Load` returns `(Schema, diag.Result)`, and `Graph.Add` returns a `diag.Result` alone. Each issue has a stable error code, a severity and a message, and a source location where one applies. Some entry points return a Go `error` instead, among them `gogen.Marshal` and `markdown.Marshal`. `graph.BatchAssembler`'s `Add`, `AddValid` and `AddValidOrMerge` return an `error` too; when the cause is a failed result, the error carries that `diag.Result`, and `diag.AsContextualError` recovers it.
 
 ---
 
@@ -66,14 +66,14 @@ The all-or-nothing contract is unchanged: any error still yields a zero schema.
 
 ## Decision Tree: "I Got an Error"
 
-1. **Parse/syntax error** -- See `E_SYNTAX` in the Syntax section below.
+1. **Parse/syntax error** -- A schema that does not parse draws `E_SYNTAX`: see the Syntax section below. A data file that does not parse draws `E_DATA_PARSE`: see the Instance Data and Validation section.
 2. **Import error** -- See the Import section below. Check paths, aliases, circular dependencies.
 3. **Schema compilation error** -- See the Schema Compilation section. Type conflicts, missing types, invalid constraints.
-4. **Validation error** -- See the Instance Validation section. `E_TYPE_MISMATCH`, `E_CONSTRAINT_FAIL`, `E_MISSING_REQUIRED`, etc.
+4. **Validation error** -- See the Instance Data and Validation section. `E_TYPE_MISMATCH`, `E_CONSTRAINT_FAIL`, `E_MISSING_REQUIRED`, etc.
 5. **Invariant error** -- `E_INVARIANT_FAIL` (expression returned false) or `E_EVAL_ERROR` (expression bug).
 6. **Graph error** -- a code of the Graph table below, such as `E_DUPLICATE_PK` (duplicate key) or `E_UNRESOLVED_REQUIRED` (missing required association).
 7. **Snapshot error** -- See the Snapshot section. Corrupt, incompatible, or dangling references.
-8. **Adapter error** -- `E_ADAPTER_PARSE` (the input is not well formed), or Neo4j-specific codes in the Adapter section.
+8. **Adapter error** -- Neo4j-specific codes in the Adapter section.
 
 ---
 
@@ -141,7 +141,7 @@ The all-or-nothing contract is unchanged: any error still yields a zero schema.
 | `W_ANNOTATION_SHADOWED` | A re-declaration silently drops an inherited property's annotations (warning) |
 | `W_TIMESTAMP_LOSSY_FORMAT` | `Timestamp["layout"]` declares a layout that cannot reproduce an instant, so a value stored through it can read back as another instant (Warning, v0.13+) |
 
-### Instance Validation
+### Instance Data and Validation
 
 | Code | Meaning |
 | ---- | ------- |
@@ -161,6 +161,7 @@ The all-or-nothing contract is unchanged: any error still yields a zero schema.
 | `E_UNRESOLVED_REQUIRED_COMPOSITION` | Required composition is unresolved |
 | `E_COMPOSITION_DEPTH_EXCEEDED` | Composed nesting deeper than the bound (32) |
 | `E_INVALID_TYPE_TAG` | A JSON top-level key is not a type name |
+| `E_DATA_PARSE` | A data file `yammm check` or `yammm snapshot save` reads is not well formed, is not one object, holds a type name whose value is not an array of objects, states one member name twice in one object, or nests deeper than the decoder's 10,000-level limit |
 | `E_CASE_FOLD_COLLISION` | Input fields collide after case-folding |
 
 ### Graph
@@ -170,7 +171,7 @@ The all-or-nothing contract is unchanged: any error still yields a zero schema.
 | `E_DUPLICATE_PK` | Duplicate primary key: two instances added to a graph, two roots whose stored keys the key rule both accepts, in a snapshot or a `.ys` document, or two roots of a data command's input, one of them refused. A read under a schema counts only roots of a type that can hold one |
 | `E_DUPLICATE_COMPOSED_PK` | Two children of one `(many)` composition share a primary key, or a `(one)` composition holds several |
 | `E_UNRESOLVED_REQUIRED` | Required association is unresolved |
-| `E_GRAPH_TYPE_NOT_FOUND` | A root's type at `Graph.Add`, or a root's or types entry's type in an imported snapshot, that the graph's schema neither declares nor directly imports, or a type identity an imported snapshot states that the schema does not resolve |
+| `E_GRAPH_TYPE_NOT_FOUND` | A type identity an imported snapshot states that the schema does not resolve |
 | `E_GRAPH_INVALID_COMPOSITION` | Invalid composition in graph operations |
 | `E_GRAPH_MISSING_PK` | A root, or an imported snapshot's types entry, whose type declares no primary key |
 | `E_GRAPH_CARDINALITY` | A `(one)` association holds more than one record: a merge at `BatchAssembler.AddValidOrMerge` that would add a second target, several edges and unresolved records no check refused, in a snapshot or `.ys` document (v0.15+) |
@@ -191,7 +192,6 @@ The all-or-nothing contract is unchanged: any error still yields a zero schema.
 | `E_SNAPSHOT_DANGLING_REFERENCE` | An edge target, a duplicate's conflict, or an unresolved record's source names no root instance; none for an address a refused unit states |
 | `E_SNAPSHOT_INVALID_COMPOSED` | Composed child carries edges, or composed children stand under a name the parent's type does not declare as a composition |
 | `E_SNAPSHOT_INVALID_ROOT` | An instances group, empty or not, or a duplicate record names a type that cannot be a root: abstract, part, or no primary key |
-| `E_SNAPSHOT_UNNAMEABLE_TYPE` | An instances group or a duplicate record names a type the entry schema reaches only through an intermediate import, so it has no name form |
 | `W_SNAPSHOT_VALUE_DROPPED` | A write path held a value it could not write at that position and left it out |
 | `E_SNAPSHOT_COMPOSED_ON_DUPLICATE` | Duplicate record has composed children |
 | `E_SNAPSHOT_EDGES_ON_DUPLICATE` | Duplicate record has edges |
@@ -202,7 +202,7 @@ The all-or-nothing contract is unchanged: any error still yields a zero schema.
 | `E_SNAPSHOT_IO` | A file that fails to open during `snapshot.ScanDir`, a directory `ScanDirSlice` fails to read (v0.3+), or a reader `snapshot.HeaderOnlyRead` reads failing with an error that is not a truncation, Fatal (unreleased; on the line after v0.21.0, not in v0.21.1) |
 | `E_UPDATE_METADATA_BODY_OFFSET` | `snapshot.UpdateMetadata` body-offset tracker could not resolve the reused-body byte range (v0.3+) |
 | `W_UPDATE_METADATA_FALLBACK` | `snapshot.UpdateMetadataOrReMarshal` fell back from the fast path to `Load + Marshal` (Warning, v0.3+) |
-| `W_SNAPSHOT_VALUE_NONCONFORMING` | A root's or a composed child's stored `Timestamp`, `Date` or `UUID` value, or a list of them, does not conform to its schema constraint. Reported only under `snapshot.WithValueConformance`, and not a full re-validation (Warning, v0.13+) |
+| `W_SNAPSHOT_VALUE_NONCONFORMING` | A root's or a composed child's stored `Timestamp`, `Date` or `UUID` value, or a list of them at any depth, does not conform to its schema constraint. Reported only under `snapshot.WithValueConformance`, and not a full re-validation (Warning, v0.13+) |
 | `W_SNAPSHOT_UNRESOLVED_REQUIRED` | A loaded document carries an unresolved record, one no structural check refused, for an association the schema declares required (read from the schema, never the record); reported only under `snapshot.WithRevalidation`, at that option's severity (v0.15+) |
 | `W_SNAPSHOT_PATH_EXTENSION` | A snapshot was written to a path that does not end in `.ys`; the write succeeded, and a reader that discovers snapshots by extension will not find it |
 
@@ -210,12 +210,11 @@ The all-or-nothing contract is unchanged: any error still yields a zero schema.
 
 | Code | Adapter | Meaning |
 | ---- | ------- | ------- |
-| `E_ADAPTER_PARSE` | JSON | The input is not well formed |
 | `E_NEO4J_LABEL_COLLISION` | Neo4j | Two types produce the same Neo4j label |
 | `E_NEO4J_INVALID_IDENTIFIER` | Neo4j | Name not valid as Neo4j identifier |
 | `E_NEO4J_UNSUPPORTED_TYPE` | Neo4j | Constraint kind has no Neo4j type mapping |
 | `E_NEO4J_UNKNOWN_PROPERTY` | Neo4j | An index annotation names a property the type does not have |
-| `E_NEO4J_INVALID_INDEX_TARGET` | Neo4j | An index annotation names a property whose type cannot carry it (`@index` on a non-scalar, `@vector` on a non-Vector or a non-positive dimension, `@fulltext` on a non-text property) |
+| `E_NEO4J_INVALID_INDEX_TARGET` | Neo4j | An index annotation names a property whose type cannot carry it (`@index` or `@@index` on a non-scalar, `@vector` on a non-Vector or a non-positive dimension, `@fulltext` or `@@fulltext` on a non-text property) |
 | `W_NEO4J_NODE_KEY_UNSUPPORTED` | Neo4j | `WithNodeKeyConstraints(true)` combined with `WithEdition(Community)`; NODE KEY is Enterprise-only, so UNIQUE is emitted for primary keys instead (Warning, v0.9.1+) |
 | `W_NEO4J_EDITION_CONSTRAINT_OMITTED` | Neo4j | `WithEdition(Community)` dropped NOT NULL and PROPERTY_TYPE constraints the schema declares; reported once per call with a count per omitted kind (Warning, v0.14+) |
 | `W_NEO4J_INDEXES_UNREADABLE` | Neo4j | A comparison could not read the database's indexes, so the half needing them did not run; the constraint half is complete, but a declaration whose name an index already holds reads as a create that will not take effect (Warning) |

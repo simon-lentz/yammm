@@ -12,7 +12,6 @@ import (
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/instance"
-	"github.com/simon-lentz/yammm/schema"
 )
 
 const nilContainerSchema = `schema "p"
@@ -98,19 +97,26 @@ func TestValidate_ANilContainerAgreesWithItsJSONForm(t *testing.T) {
 }
 
 // CheckValue accepts a nil slice under a List as a value that holds none, and
-// CanonicalValue renders it as nil, never as an empty list.
-func TestCanonicalValue_ANilSliceAtAListIsNoEmptyList(t *testing.T) {
+// the validator stores no value for it, never an empty list.
+func TestCheckValue_ANilSliceAtAListHoldsNoValue(t *testing.T) {
 	t.Parallel()
-	stamps := schema.NewListConstraint(schema.NewTimestampConstraint())
-	tags := schema.NewListConstraint(schema.NewStringConstraint())
-	for _, c := range []schema.Constraint{stamps, tags} {
+	s := loadT(t, nilContainerSchema)
+	typ, _ := s.Type("T")
+	v := instance.NewValidator(s)
+	for _, prop := range []string{"stamps", "optTags"} {
+		p, _ := typ.Property(prop)
 		for _, nilSlice := range []any{[]any(nil), []string(nil)} {
-			if err := instance.CheckValue(nilSlice, c); err != nil {
-				t.Errorf("CheckValue(%#v, %s) = %v, want nil", nilSlice, c, err)
+			if err := instance.CheckValue(nilSlice, p.Constraint()); err != nil {
+				t.Errorf("CheckValue(%#v, %s) = %v, want nil", nilSlice, p.Constraint(), err)
 			}
-			out, err := instance.CanonicalValue(nilSlice, c)
-			if err != nil || out != nil {
-				t.Errorf("CanonicalValue(%#v, %s) = %#v, %v; want nil", nilSlice, c, out, err)
+			inst, res := v.ValidateOne(t.Context(), "T", instance.RawInstance{Properties: map[string]any{
+				"id": "x", "reqTags": []any{"a"}, "reqVec": []float64{1, 2}, prop: nilSlice,
+			}})
+			if res.Err() != nil {
+				t.Fatalf("%s = %#v: %s", prop, nilSlice, res)
+			}
+			if stored, ok := inst.Property(prop); ok && !stored.IsNil() {
+				t.Errorf("%s = %#v stored %#v, want no value", prop, nilSlice, stored.Unwrap())
 			}
 		}
 	}

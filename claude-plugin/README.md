@@ -8,7 +8,7 @@ All tools are optional. The plugin provides full knowledge and review capabiliti
 
 | Tool | Enables | Install |
 | ---- | ------- | ------- |
-| `yammm` CLI | Schema compilation, formatting, export, auto-validation | `/yammm:setup` |
+| `yammm` CLI | Schema compilation, formatting, data checking, auto-validation | `/yammm:setup` |
 | `yammm-lsp` | Editor diagnostics, completions, hover, go-to-definition | `/yammm:setup` |
 | `jq` | PostToolUse auto-validation hook | `/yammm:setup` |
 
@@ -99,7 +99,7 @@ On session start, checks for `yammm`, `yammm-lsp`, and `jq`. Reports missing too
 | `type-system.md` | Constraint types, aliases, abstract/part, inheritance |
 | `patterns.md` | Common modeling patterns with examples |
 | `api-pipeline.md` | Go API: load, validate, graph, snapshot |
-| `adapters.md` | JSON/Neo4j adapter and gogen/jschema/markdown generator usage |
+| `adapters.md` | Neo4j adapter and gogen/markdown generator usage |
 | `diagnostics.md` | Error codes and troubleshooting |
 | `cli.md` | CLI commands and workflows |
 

@@ -304,9 +304,9 @@ func (g *generator) emitComposition(rel schema.Relation, fields map[string]strin
 		return fmt.Errorf("gogen: composition %q target %q has no Go name", rel.Name(), rel.TargetID().String())
 	}
 	field := fields[rel.FieldName()]
-	// Every composition is a slice, (one) included: the adapter/json parser
-	// and writer exchange an array for every multiplicity, and a slice also
-	// keeps a required-one composition cycle legal as a Go type.
+	// Every composition is a slice, (one) included: an instance document holds
+	// an array for every multiplicity, and a slice also keeps a required-one
+	// composition cycle legal as a Go type.
 	fmt.Fprintf(g.buf, "%s []*%s %s\n", field, childName, jsonTag(rel.FieldName(), relationOmit))
 	return nil
 }
@@ -355,7 +355,7 @@ func (g *generator) emitGraph() error {
 
 // emitEdgeStructs writes one struct per declared association: the target's
 // primary keys as flattened "_target_" fields, then the edge properties, the
-// shape adapter/json exchanges.
+// shape an instance document gives an edge.
 func (g *generator) emitEdgeStructs() error {
 	for _, e := range g.edges {
 		fmt.Fprintf(g.buf, "type %s struct {\n", g.names.edges[e.rel])

@@ -29,7 +29,7 @@
 //	// Add validated instances (may be called concurrently)
 //	result := g.Add(ctx, validInstance)
 //	if !result.OK() {
-//	    // A refused instance (a duplicate PK, a type this schema cannot name, ...; see Error Handling)
+//	    // A refused instance (a duplicate PK, a keyless part read out of a composition, ...; see Error Handling)
 //	}
 //
 //	// Check completeness
@@ -101,30 +101,28 @@
 // diamond import gives one handle. A validator over any member of a closure serves
 // a graph over any schema of that load whose own closure holds the type.
 //
-// Past that check, two questions remain, and they have different answers:
-//
-//   - A root's type is restricted as a matter of OWNERSHIP: a graph bound to a
-//     schema holds instances of the types that schema declares or directly
-//     imports, and the diagnostic's hint says so.
-//   - A composed child reaches the WHOLE import closure. Its type comes from a
-//     relation the schema already resolved, and no ownership question arises
-//     because the child arrived inside a parent this graph does own.
+// Past that check, a root's type is any type of the closure that can hold a root
+// (Root type eligibility, below), one the schema reaches only through an
+// intermediate import included. The graph holds it by identity, apart from an
+// entry type of its name. A composed child reaches the whole import closure too:
+// its type comes from a relation the schema already resolved.
 //
 // A schema where an imported type composes a part type from a further import
 // therefore loads, validates and builds.
 //
 // Save [BatchAssembler.Add], whose typeName goes to the validator, no lookup in
-// this package takes a rendered type name. Where two identities
-// render alike, a diagnostic naming them falls back to the full identity rather
-// than reading "X does not match X".
+// this package takes a rendered type name. A diagnostic that compares two
+// identities prints each whole, so two that render alike never read "X does not
+// match X".
 //
 // # Root type eligibility
 //
-// A root instance's type must satisfy four members. [NewFromSnapshot] for a
-// snapshot of another schema and the snapshot reader apply all four. [Graph.Add] takes an instance a validator of its own load built,
-// and that validator refuses an abstract or a part type at a root, so Add checks
-// the name, the key and the part rule, which a member's validator or a child read
-// out of [instance.ValidInstance.Compositions] can still break. [BatchAssembler]'s
+// A root instance's type must satisfy three members. [NewFromSnapshot] for a
+// snapshot of another schema and the snapshot reader apply all three. [Graph.Add]
+// takes an instance a validator of its own load built, and that validator
+// refuses an abstract or a part type at a root, so Add checks the key and the
+// part rule, which a child read out of [instance.ValidInstance.Compositions] can
+// still break. [BatchAssembler]'s
 // add methods run the code [Graph.Add] runs, and
 // [NewBatchAssemblerFromSnapshot] goes through [NewFromSnapshot]; a snapshot of the
 // importing schema was held to them where it was built. A type is
@@ -133,16 +131,11 @@
 //   - is abstract, because an abstract type has no instances;
 //   - is a part type, because a part instance is addressed through its parent
 //     composition;
-//   - declares no primary key, because it then has no address at all;
-//   - is one the entry schema cannot name, because adapter/json keys
-//     a root's output by that name and a type reached only
-//     through an intermediate import has no name form.
+//   - declares no primary key, because it then has no address at all.
 //
-// [schema.Addressable] is the fourth member, and [schema.AddressableTag] is the
-// name it grants. Sharing one rule is what lets a writer read a root's tag
-// without checking for a collision: two types the entry schema can name never
-// render alike, so a name-keyed document can always separate the roots a
-// snapshot holds.
+// Any type of the import closure that passes them can hold a root, one the entry
+// schema reaches only through an intermediate import included. A root is held
+// by its identity, so such a type stays apart from an entry type of its name.
 //
 // A composed child is held only to the abstract member, since a load refuses an
 // abstract composition target. It is addressed through its parent, its type comes
@@ -154,15 +147,9 @@
 // A snapshot DENOTES every type in [Snapshot.Types]. That set holds every
 // root's type, and a document's instances section may add a type through a group
 // with no item. A types table row with no group denotes no type.
-// Every denoted type is held to all four members above, whether or not the
-// snapshot holds an instance of it.
-//
-// The reason is the writer. adapter/json keys its output by the name of each
-// type the snapshot denotes, so a denoted type needs a name, and a key it emits
-// must be one the instance validator and the generated
-// aggregate read back. The validator refuses an abstract or a part type's name even for
-// an empty batch, so a snapshot that denoted one would write a document its own
-// readers refuse.
+// Every denoted type is held to the three members above, whether or not the
+// snapshot holds an instance of it, so no constructor denotes a type [Graph.Add]
+// refuses.
 //
 // # Structural facts
 //
@@ -229,8 +216,7 @@
 // and lists and string-keyed maps of those. Each has a
 // form on the .ys wire, so [github.com/simon-lentz/yammm/snapshot.Marshal] meets no
 // value it cannot write. A data writer can still refuse one: adapter/neo4j has
-// no spelling for some, and adapter/json none for a json.Number no finite float64
-// holds, and each one's doc names them.
+// no spelling for some, and its doc names them.
 //
 // Whether an association is required is read from the schema, never taken from
 // a constructor's input:
@@ -348,23 +334,17 @@
 //
 // A type is identified by [github.com/simon-lentz/yammm/schema.TypeID] — its
 // declaring schema path plus its name. A type NAME is a rendering of that
-// identity, in canonical instance tag form:
+// identity under one schema:
 //
 //   - Local types: unqualified name (e.g., "Person")
 //   - Types of a schema the schema imports directly: alias-qualified name (e.g.,
 //     "c.Entity")
+//   - Types the schema reaches only through an intermediate import: the declaring
+//     schema's name and the type's name (e.g., "deep#Beacon")
 //
-// The rendering is lossy, and only ever suitable for display. A type reachable
-// only through an intermediate import has no alias to qualify with and renders
-// bare, so it can collide with a local type of the same name, and two
-// same-named types in different schemas can render identically. Keying anything by a rendering
-// therefore merges types that are not the same type, silently and before any
-// diagnostic can see it.
-//
-// A snapshot's ROOTS are the exception, and by construction rather than by
-// coincidence: each is a type the bound schema can name, so no two of them
-// render alike and an output document may key them by name. See "Root type
-// eligibility" above, and [schema.AddressableTag] for the name itself.
+// Within one load each rendering denotes one type, since a load refuses two
+// schemas of one name. [github.com/simon-lentz/yammm/schema.Schema.ResolveTypeName]
+// resolves the first two forms and not the third.
 //
 // So every place that must denote a type exactly takes or returns an identity, and
 // [BatchAssembler.Add], which takes an entry-schema name, has the validator
@@ -378,11 +358,11 @@
 //
 // [Instance.TypeName] still carries the rendered name beside the identity
 // ([Instance.TypeID]). Every constructor renders it from the identity under the
-// bound schema with [github.com/simon-lentz/yammm/schema.TagForm], which is
-// lossy as above: a root's name names only its type, and a composed child's
-// may match another type's. Where output needs a name that denotes one type,
-// render the identity with [github.com/simon-lentz/yammm/schema.AddressableTag],
-// as the JSON writer's object keys do.
+// bound schema with [github.com/simon-lentz/yammm/schema.TagForm], and so does
+// the type-name detail of every graph diagnostic.
+// Where output needs a name the bound schema resolves, render the identity with
+// [github.com/simon-lentz/yammm/schema.AddressableTag], which refuses an
+// identity the bound schema cannot name.
 //
 // # Key Formatting
 //
@@ -424,11 +404,9 @@
 // and [BatchAssembler.AddValidOrMerge] report a zero instance as Error
 // E_INTERNAL instead, since a validator returns a zero instance for a refused one.
 //
-// [Graph.Add] emits the following. The first three judge a root's type in the
-// order listed, and a type breaking two draws the first:
+// [Graph.Add] emits the following. The first two judge a root's type in the
+// order listed, and a type breaking both draws the first:
 //
-//   - E_GRAPH_TYPE_NOT_FOUND: a root's type is in the import closure of this
-//     graph's schema, and that schema neither declares nor directly imports it
 //   - E_GRAPH_MISSING_PK: the type declares no primary key, so the root is a
 //     keyless part read out of [instance.ValidInstance.Compositions]
 //   - E_GRAPH_INVALID_COMPOSITION: the root is a keyed part read out of
@@ -447,9 +425,8 @@
 // broken structural fact at Error under one of these codes:
 //
 //   - E_GRAPH_TYPE_NOT_FOUND: a type identity the snapshot states does not resolve
-//   - E_GRAPH_TYPE_NOT_FOUND, E_GRAPH_MISSING_PK, E_GRAPH_INVALID_COMPOSITION,
-//     E_GRAPH_ABSTRACT_TYPE: a denoted type breaks the root rule, judged in that
-//     order
+//   - E_GRAPH_MISSING_PK, E_GRAPH_INVALID_COMPOSITION, E_GRAPH_ABSTRACT_TYPE: a
+//     denoted type breaks the root rule, judged in that order
 //   - E_GRAPH_INVALID_COMPOSITION: a composed child is not an instance of its
 //     relation's target type
 //   - E_GRAPH_INVALID_PK: a keyed instance's stored key is empty or has the wrong

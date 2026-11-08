@@ -6,12 +6,10 @@ import (
 	"strings"
 	"testing"
 
-	jsonadapter "github.com/simon-lentz/yammm/adapter/json"
 	"github.com/simon-lentz/yammm/adapter/neo4j"
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/instance"
 	"github.com/simon-lentz/yammm/internal/instancetest"
-	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
 	"github.com/simon-lentz/yammm/snapshot"
 )
@@ -61,16 +59,6 @@ func TestMessages_RepeatANameCutToItsHead(t *testing.T) {
 	}
 	_, r := v.ValidateOne(ctx, longText, instance.RawInstance{Properties: map[string]any{"id": "a"}})
 	c.result("validator", r)
-
-	source := location.NewSourceID("test://names.json")
-	for _, doc := range []string{
-		`{"T": [{"id": "a", "` + longText + `": 1, "` + longText + `": 2}]}`,
-		`{"T": [], "` + longText + `": [], "` + longText + `": []}`,
-		`{"` + longText + `!": []}`,
-	} {
-		_, r := jsonadapter.New().ParseObject(ctx, source, []byte(doc))
-		c.result("json", r)
-	}
 
 	held := graph.New(s)
 	held.Add(ctx, instancetest.Valid(t, s, "U", map[string]any{"id": "u"}))
@@ -149,7 +137,7 @@ func TestMessages_RepeatANameCutToItsHead(t *testing.T) {
 	c.result("snapshot.Info", r)
 
 	for _, where := range []string{
-		"validator", "instance.SchemaBuilder", "json",
+		"validator", "instance.SchemaBuilder",
 		"neo4j.CoerceParams", "snapshot.Marshal", "snapshot.Load", "snapshot.Info",
 	} {
 		if c.judged[where] == 0 {

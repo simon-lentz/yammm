@@ -63,8 +63,7 @@ func (p Provenance) Span() Span {
 
 // RawPath returns the raw path string preserved from snapshot loading.
 //
-// Returns an empty string for provenance created through normal construction
-// paths (adapter parsing, programmatic NewProvenance). snapshot.Load sets it
+// Returns an empty string for provenance [NewProvenance] creates. snapshot.Load sets it
 // when the persisted path fails to parse or parses to another spelling, so a
 // marshal writes the document's own path back byte for byte.
 func (p Provenance) RawPath() string {

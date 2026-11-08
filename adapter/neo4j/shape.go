@@ -34,9 +34,7 @@ type nodeShape struct {
 // so a caller passes it on and cannot change what it holds.
 type GraphShape struct {
 	// types is keyed by [schema.TypeID] rather than by rendered name: a name is a
-	// rendering, and a transitively imported type renders to a bare name that a
-	// same-named local type also renders to, so a name-keyed index binds one
-	// type's instances to another type's label and keys.
+	// rendering under one schema, and a snapshot's instances carry the identity.
 	types map[schema.TypeID]nodeShape
 
 	// schema is the object [Adapter.ShapeForSchema] built this shape from. Its

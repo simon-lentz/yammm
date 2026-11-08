@@ -51,6 +51,9 @@ type verdict struct {
 	// than a duplicate.
 	refused    map[heldKey]bool
 	duplicates diag.Result
+	// rendered maps each closure type's [schema.TagForm] under s, the name the
+	// graph's issues carry, to its identity.
+	rendered map[string]schema.TypeID
 }
 
 // documentVerdict reads the document's roots against g once every valid one was
@@ -128,6 +131,12 @@ func (v verdict) explain(check diag.Result) diag.Result {
 	if len(v.refused) == 0 || !check.HasCode(diag.E_UNRESOLVED_REQUIRED) || check.LimitReached() {
 		return check
 	}
+	v.rendered = make(map[string]schema.TypeID)
+	for sc := range v.s.Closure() {
+		for t := range sc.Types() {
+			v.rendered[schema.TagForm(v.s, t.ID())] = t.ID()
+		}
+	}
 	collector := diag.NewCollectorUnlimited()
 	for issue := range check.Issues() {
 		if issue.Code() == diag.E_UNRESOLVED_REQUIRED && v.refused[v.missingTarget(issue)] {
@@ -140,8 +149,7 @@ func (v verdict) explain(check diag.Result) diag.Result {
 
 // missingTarget returns the target an E_UNRESOLVED_REQUIRED names as missing,
 // typed by the relation it is reported under, or the zero key when it names
-// none. The source type resolves by the name the issue carries, the graph's
-// name for its instance's type.
+// none. The source type is the one whose rendering the issue carries.
 func (v verdict) missingTarget(issue diag.Issue) heldKey {
 	details := make(map[string]string, len(issue.Details()))
 	for _, d := range issue.Details() {
@@ -150,10 +158,11 @@ func (v verdict) missingTarget(issue diag.Issue) heldKey {
 	if details[diag.DetailKeyReason] != "target_missing" {
 		return heldKey{}
 	}
-	source, ok := v.s.ResolveTypeName(details[diag.DetailKeyTypeName])
+	id, ok := v.rendered[details[diag.DetailKeyTypeName]]
 	if !ok {
 		return heldKey{}
 	}
+	source, _ := v.s.TypeByID(id)
 	rel, ok := source.Relation(details[diag.DetailKeyRelationName])
 	if !ok {
 		return heldKey{}

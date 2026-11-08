@@ -1,6 +1,6 @@
 # CLI Reference
 
-The `yammm` CLI provides schema validation, formatting, data checking, snapshot persistence, export, and Go code generation from the terminal.
+The `yammm` CLI provides schema validation, formatting, data checking, snapshot persistence, Go and Markdown generation, Neo4j DDL, and a diff against and an introspection of a live Neo4j database from the terminal.
 
 ---
 
@@ -10,11 +10,8 @@ The `yammm` CLI provides schema validation, formatting, data checking, snapshot 
 | ------- | ----------- |
 | `yammm validate <schema>` | Validate a schema file |
 | `yammm fmt <schema>...` | Format schema files, or check them with `--check` |
-| `yammm check <schema> <data>` | Validate data against a schema |
-| `yammm load <schema> <data>` | Load data into graph and validate |
-| `yammm export <schema> <data>` | Export data to JSON or Cypher |
+| `yammm check <schema> <data>...` | Validate data files against a schema |
 | `yammm gen --to go <schema>` | Generate Go source from a schema |
-| `yammm gen --to jsonschema <schema>` | Generate a JSON Schema (draft 2020-12) for instance-data authoring |
 | `yammm gen --to md <schema>` | Generate Markdown docs with a Mermaid class diagram |
 | `yammm neo4j constraints <schema>` | Generate Neo4j constraint statements |
 | `yammm neo4j indexes <schema>` | Generate Neo4j index statements from annotations |
@@ -55,7 +52,7 @@ it reaches. Anything else is refused at exit 3, naming the path: a
 read-only file, a directory, a looping link, or a file whose directory cannot
 hold the staging file, which `gofmt -w` refuses too. A path the process cannot
 stat, a refused rename and a write-through target that will not open exit 3 the
-same way. `export`, `gen` and
+same way. `gen` and
 `neo4j introspect` write to stdout when `--output` is omitted; `snapshot save`
 needs `-o` or `--into`.
 
@@ -120,17 +117,10 @@ yammm check schema.yammm data.json  # validate data
 
 ```bash
 yammm check schema.yammm data.json
+yammm check schema.yammm people.json cars.json
 ```
 
-Validates data against a schema as `load` does, and writes nothing: every instance, primary-key uniqueness, and every required association's target. Reports instance and graph diagnostics, the validator's at most 100 for one instance, among them constraint violations, missing and unknown fields, invariant failures, duplicate primary keys and unresolved required associations. The verdict is about the data file: a target the file holds but the validator refuses is reported by that refusal and not as a missing target, and a key two instances state is a duplicate even where one of them is refused. Every command that reads data reads each data file as JSON or JSONC, whatever its name, so `/dev/stdin` serves on Linux and macOS, on a pipe or a redirected file. A file that is not a JSON object draws `E_ADAPTER_PARSE`. A JSON object is read as that document, so a `.ys` snapshot draws `E_INVALID_TYPE_TAG` for each of its top-level keys here, at `load` and at `snapshot save`; `export` alone also reads a snapshot.
-
-### load
-
-```bash
-yammm load schema.yammm data.json
-```
-
-Loads data into an in-memory graph, validates it as `check` does, and in text output prints a summary line when the data loads without error. Takes `--module-root`, as `check` does.
+Validates data against a schema and writes nothing. Several data files are one document, as `snapshot save` reads them. It checks every instance, primary-key uniqueness, and every required association's target. Reports instance and graph diagnostics, the validator's at most 100 for one instance, among them constraint violations, missing and unknown fields, invariant failures, duplicate primary keys and unresolved required associations. The verdict is about the document the data files form: a target the document holds but the validator refuses is reported by that refusal and not as a missing target, and a key two instances state is a duplicate even where one of them is refused. Every command that reads data reads each data file as JSON or JSONC, whatever its name, so `/dev/stdin` serves on Linux and macOS, on a pipe or a redirected file. A file that is not well formed, is not one object, holds a type name whose value is not an array of objects, states one member name twice in one object, or nests deeper than the decoder's 10,000-level limit draws `E_DATA_PARSE`. A JSON object is read as that document, so a `.ys` snapshot draws `E_INVALID_TYPE_TAG` for each of its top-level keys, here and at `snapshot save`.
 
 ---
 
@@ -145,7 +135,7 @@ yammm snapshot save -o output.ys --into existing.ys schema.yammm new_data.json
 yammm snapshot save -o output.ys -m env=prod -m version=2 schema.yammm data.json
 ```
 
-Builds a graph snapshot from one or more data files and persists it as a `.ys` file. The data files are validated as one document, as `check` validates one file, and under `--into` the merged file's instances hold their keys too. Every data file's path is refused if it is empty or not UTF-8 before the schema or any file is read. So a data usage error names nothing about the data, and a data file that cannot be read keeps the parse diagnostics the files before it drew.
+Builds a graph snapshot from one or more data files and persists it as a `.ys` file. The data files are validated as one document, as `check` reads them, and under `--into` the merged file's instances hold their keys too. Every data file's path is refused if it is empty or not UTF-8 before the schema or any file is read. So a data usage error names nothing about the data, and a data file that cannot be read keeps the parse diagnostics the files before it drew.
 
 | Flag | Description |
 | ---- | ----------- |
@@ -200,23 +190,7 @@ Rewrites metadata on an existing `.ys` file. It reuses the snapshot body verbati
 ```bash
 yammm snapshot save -o data.ys schema.yammm data.json
 yammm snapshot verify schema.yammm data.ys
-yammm export --to cypher schema.yammm data.json
 ```
-
----
-
-## Export
-
-```bash
-yammm export --to json schema.yammm data.json
-yammm export --to cypher schema.yammm data.json > import.cypher
-yammm export --to json --output result.json schema.yammm data.json
-```
-
-| Flag | Description |
-| ---- | ----------- |
-| `--to` | Output format: `json` or `cypher` (required) |
-| `--output` | Output file path (default: stdout) |
 
 ---
 
@@ -226,30 +200,25 @@ yammm export --to json --output result.json schema.yammm data.json
 yammm gen --to go schema.yammm
 yammm gen --to go --package models --output models_gen.go schema.yammm
 yammm gen --to go --initialisms GUID,JWT --module-root . schema.yammm
-yammm gen --to jsonschema schema.yammm
-yammm gen --to jsonschema --schema-id https://example.com/s.json --output s.schema.json schema.yammm
 yammm gen --to md schema.yammm
 yammm gen --to md --no-class-diagram --output SCHEMA.md schema.yammm
 ```
 
 `--to go` generates Go source via the `schema/gogen` package: one struct per type, named Enum/DataType types, generated `Date` and per-layout `Timestamp` types, `EDGE_` association structs, a Graph aggregate, and the embedded schema source reachable through `SerializedSources()` / `SerializedEntry`. Output is stdlib-only (imports at most `time` and `encoding/json`), formatted and type-checked before being written; schemas with imports are flattened into one self-contained package.
 
-`--to jsonschema` generates a JSON Schema draft 2020-12 document via the `schema/jschema` package, describing the instance-data JSON object form `yammm check` reads, without reproducing yammm's validation — wire it into an editor through a VS Code `json.schemas` mapping for completion, hover documentation, and validation while authoring JSON data files. A JSON data file cannot carry a `"$schema"` member, because `adapter/json` reads every top-level key as a type name. A `# yaml-language-server: $schema=…` header wires a YAML file, but yammm reads no YAML data file, so that file gets the editor's checks alone. Same closure flattening; output is deterministic and self-checked before being written.
-
 `--to md` (alias `markdown`) generates a Markdown reference document via the `schema/markdown` package: a Mermaid class diagram of the whole import closure plus per-type sections (flattened property tables with `from <Owner>` inherited-row markers, relation bullets with edge-property sub-tables, invariant source fences) and data-type tables. Same closure flattening; output is deterministic and structurally self-checked before being written.
 
 | Flag | Description |
 | ---- | ----------- |
-| `--to` | Target: `go`, `jsonschema`, or `md` (required) |
+| `--to` | Target: `go` or `md` (required) |
 | `--package` | go target: generated package name (default: derived from schema name). A value that is not a Go identifier, or is a keyword or `_`, an empty one included, is a usage error (exit 2), judged before the schema is loaded |
 | `--output` | Output file path (default: stdout) |
 | `--initialisms` | go target: extra acronyms to upper-case in generated names, e.g. `GUID,JWT` |
-| `--module-root` | Root directory for module-style imports (default: the nearest ancestor holding a `yammm.mod` marker, else the schema's directory). Shared by every command that loads a schema: `validate`, `check`, `load`, `export`, `gen`, `snapshot save`, `snapshot verify`, `neo4j constraints`, `neo4j diff`, `neo4j indexes`. A root that is not a directory the loader can open exits 3 before the schema is parsed, whether or not the schema imports anything |
-| `--schema-id` | jsonschema target: value for the emitted `"$id"` (omitted when unset) |
+| `--module-root` | Root directory for module-style imports (default: the nearest ancestor holding a `yammm.mod` marker, else the schema's directory). Shared by every command that loads a schema: `validate`, `check`, `gen`, `snapshot save`, `snapshot verify`, `neo4j constraints`, `neo4j diff`, `neo4j indexes`. A root that is not a directory the loader can open exits 3 before the schema is parsed, whether or not the schema imports anything |
 | `--no-class-diagram` | md target: omit the Mermaid class-diagram section |
 | `--no-class-members` | md target: keep the diagram and omit the member lines inside each class |
 
-Per-target flags are enforced with a usage error: `--package`/`--initialisms` apply only to `--to go`, `--schema-id` only to `--to jsonschema`, `--no-class-diagram` and `--no-class-members` only to `--to md`.
+Per-target flags are enforced with a usage error: `--package`/`--initialisms` apply only to `--to go`, `--no-class-diagram` and `--no-class-members` only to `--to md`.
 
 ---
 
@@ -342,8 +311,8 @@ separator splits schema from type, so a label another configuration wrote is not
 read as this schema's type. A `--schema` that matches none of the constraints
 read leaves a TODO line in the scaffold saying so.
 
-Every command that takes the label flags — the four `neo4j` commands and
-`export --to cypher` — refuses an empty `--separator`, and a `--prefix` or
+Every command that takes the label flags — the four `neo4j` commands —
+refuses an empty `--separator`, and a `--prefix` or
 `--separator` whose composed label is not a Neo4j identifier, at exit 2 before
 it loads a schema or opens a connection.
 
@@ -352,18 +321,7 @@ it loads a schema or opens a connection.
 ```bash
 yammm neo4j constraints schema.yammm > constraints.cypher
 yammm neo4j diff --uri bolt://localhost:7687 schema.yammm
-yammm export --to cypher schema.yammm data.json --output load.cypher
 ```
-
-The `--to cypher` output is parameterized — `UNWIND` statements over one `$rows`
-placeholder, whose rows carry the keys and properties each statement reads (a
-node merge's as `row.key_<name>` and `row.props`, and `row.update_props` for a type
-with `@writeOnce` properties) — so it is written for inspection and for
-integration into application or migration code. It is **not** directly
-executable in `cypher-shell` or Neo4j Browser; running it there fails on the
-unbound parameters. Data holding a value of a property Neo4j cannot store, a
-list whose element is itself a collection, is refused at exit 1 with no
-statement written, as `neo4j constraints` refuses the property.
 
 ---
 
@@ -372,9 +330,9 @@ statement written, as `neo4j constraints` refuses the property.
 | Code | Meaning |
 | ---- | ------- |
 | 0 | Success (no errors) |
-| 1 | Errors in input (validation failures, constraint violations, a value an export format cannot represent) |
-| 2 | Usage error (bad flags, missing arguments, an empty path operand, a schema, data or module-root path that is not valid UTF-8; `export` looks its data operand up first, since it may be a snapshot) |
-| 3 | Runtime error (connection failure, I/O error, a path the filesystem refuses, an internal fault, a failure the command did not classify) |
+| 1 | An error in the input (a validation failure, a constraint violation), drift `neo4j diff` finds, or a file `fmt --check` would reformat |
+| 2 | Usage error (bad flags, missing or extra arguments, an unknown command or help topic, an empty path operand, a schema, data or module-root path that is not valid UTF-8) |
+| 3 | Runtime error (connection failure, I/O error, a path the filesystem refuses, a `neo4j diff` comparison that could not be verified, a database object `neo4j diff` or `neo4j introspect` cannot classify, an internal fault, a failure the command did not classify) |
 
 ---
 
@@ -389,13 +347,14 @@ Two consequences worth knowing:
 - **Exit codes are unchanged.** A warning is not a failure: a command that
   prints warnings and nothing else still exits `0`. Scripting that gates on the
   exit code is unaffected; scripting that gates on "did it print anything" is
-  not. Each command's stdout contract (generated Cypher, Go source, exported
-  data) is untouched — diagnostics have always been separate from it.
+  not. Each command's stdout contract (generated Cypher, Go source,
+  Markdown, formatted schema text and `fmt --check`'s path list, a schema
+  scaffold, a report) is untouched — diagnostics have always been separate from it.
 - **An unchanged, still-passing schema may emit new stderr output.** Warnings
   that already existed but that no command printed are now visible. The
   `-_`-in-a-constraint-bound warning (`E_INVALID_CONSTRAINT`, "minus sign before
   '_' (unbounded) has no effect") is one; `yammm snapshot verify`,
-  `yammm snapshot info` without `--header-only`, `yammm export`, and
+  `yammm snapshot info` without `--header-only`, and
   `yammm snapshot save --into` additionally surface the
   snapshot decoder's `W_SNAPSHOT_PATH_FALLBACK` on otherwise unchanged `.ys`
   files. From v0.15.0, `E_SNAPSHOT_UNSUPPORTED_HASH_ALGORITHM` is an Error on

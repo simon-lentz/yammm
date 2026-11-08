@@ -21,15 +21,13 @@
 //   - [github.com/simon-lentz/yammm/graph]: Instance graph construction and integrity checking
 //   - [github.com/simon-lentz/yammm/snapshot]: Graph snapshot persistence in the .ys format
 //
-// Adapters — data in and out:
+// Adapters — a schema and its data in one platform's form:
 //
-//   - [github.com/simon-lentz/yammm/adapter/json]: JSON/JSONC parsing and serialization
 //   - [github.com/simon-lentz/yammm/adapter/neo4j]: Neo4j constraint and index DDL, Cypher query building, and drift diffs
 //
 // Generators — an artifact from a schema:
 //
 //   - [github.com/simon-lentz/yammm/schema/gogen]: Go source generation from a schema
-//   - [github.com/simon-lentz/yammm/schema/jschema]: JSON Schema (draft 2020-12) generation from a schema
 //   - [github.com/simon-lentz/yammm/schema/markdown]: Markdown + Mermaid documentation generation from a schema
 //
 // Tooling:

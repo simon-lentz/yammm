@@ -180,7 +180,7 @@
 // # Provenance
 //
 // [Provenance] tracks the origin of a parsed data element through the
-// adapter → validator → graph pipeline. It carries the source name,
+// reader → validator → graph pipeline. It carries the source name,
 // a [github.com/simon-lentz/yammm/location/path] builder for JSONPath-like
 // instance paths, an optional raw path, and an optional [Span] for its source
 // location, which need not hold a byte offset.

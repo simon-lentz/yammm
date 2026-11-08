@@ -28,7 +28,6 @@ func TestDataCommands_AReadFailureExitsRuntime(t *testing.T) {
 
 	for command, args := range map[string][]string{
 		"check":         {"check", schemaPath, data},
-		"export":        {"export", schemaPath, data, "--to", "json"},
 		"snapshot save": {"snapshot", "save", schemaPath, data, "-o", filepath.Join(dir, "out.ys")},
 	} {
 		t.Run(command, func(t *testing.T) {

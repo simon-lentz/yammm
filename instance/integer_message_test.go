@@ -36,9 +36,6 @@ func TestCheckValue_IntegerRefusesEveryFloat(t *testing.T) {
 		if err == nil || !strings.Contains(err.Error(), tc.want) {
 			t.Errorf("CheckValue(%v) = %v; want a refusal naming %q", tc.v, err, tc.want)
 		}
-		if _, cerr := instance.CanonicalValue(tc.v, cons); cerr == nil || !strings.Contains(cerr.Error(), tc.want) {
-			t.Errorf("CanonicalValue(%v) = %v; want a refusal naming %q", tc.v, cerr, tc.want)
-		}
 	}
 	if err := instance.CheckValue(int64(3), cons); err != nil {
 		t.Errorf("CheckValue(int64(3)) refused an integer: %v", err)

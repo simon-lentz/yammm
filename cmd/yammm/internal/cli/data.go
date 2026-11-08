@@ -3,13 +3,12 @@ package cli
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"maps"
 	"slices"
 
-	adapterjson "github.com/simon-lentz/yammm/adapter/json"
+	"github.com/simon-lentz/yammm/cmd/yammm/internal/jsondata"
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/instance"
@@ -20,36 +19,26 @@ import (
 
 // LoadAndParseJSON reads a JSON file and parses it into raw instances.
 //
-// The bytes come through the path the kernel reaches for path ([ReadFile]), and the
-// identity only names them ([ParseJSON]), so a descriptor path, or a link to one,
-// reads the file a shell reads.
+// The bytes come through the path the kernel reaches for path ([ReadFile]), and
+// the identity, the one the schema loader derives, only names them, so a data
+// diagnostic and a schema diagnostic name one file the same way, and a
+// descriptor path, or a link to one, reads the file a shell reads.
 //
-// Returns (T, diag.Result, error) because the error return captures the
-// failures that stop a read — a path that names no file, one that cannot be
-// read — which are distinct from semantic parse issues reported through the
-// diag.Result. The caller refuses an empty path or one that is not valid UTF-8
-// first ([CheckSourceOperand], exit 2), so every error this returns is a path the
-// filesystem answered — one under a regular file, or one that resolves into
-// bytes that are not UTF-8, included — and exits 3. This is an internal CLI
-// helper, not a public API.
+// The error return captures the failures that stop a read: a path that names no
+// file, one that cannot be read, or one the identity cannot be derived for. The
+// diag.Result carries the parse's diagnostics. The caller refuses an empty path
+// or one that is not valid UTF-8 first ([CheckSourceOperand], exit 2), so every
+// error this returns is a path the filesystem answered, and exits 3.
 func LoadAndParseJSON(ctx context.Context, path string) (map[string][]instance.RawInstance, diag.Result, error) {
 	data, err := ReadFile(path)
 	if err != nil {
 		return nil, diag.Result{}, fmt.Errorf("read data file: %w", err)
 	}
-	return ParseJSON(ctx, path, data)
-}
-
-// ParseJSON parses data, already read from path, into raw instances. Its identity
-// is the one the schema loader derives, so a data diagnostic and a schema diagnostic
-// name one file the same way. The caller reads first because it needs the document's
-// kind and a pipe cannot be read twice.
-func ParseJSON(ctx context.Context, path string, data []byte) (map[string][]instance.RawInstance, diag.Result, error) {
 	sourceID, err := location.SourceIDFromPath(path)
 	if err != nil {
 		return nil, diag.Result{}, fmt.Errorf("resolve data file %q: %w", path, err)
 	}
-	parsed, result := adapterjson.New().ParseObject(ctx, sourceID, data)
+	parsed, result := jsondata.Parse(ctx, sourceID, data)
 	return parsed, result, nil
 }
 
@@ -150,42 +139,6 @@ func WriteTo(data []byte, path string, w io.Writer) error {
 	}
 	_, err := w.Write(data)
 	return err
-}
-
-// IsSnapshot reports whether a document is a yammm snapshot (.ys): a JSON object
-// whose first key is "yammm_snapshot". Anything else is not one, malformed JSON
-// included, since the parse that follows reports it. A byte order mark or a comment
-// the snapshot reader refuses is read past, so that reader is what refuses it.
-// It reads only as far as the first key.
-func IsSnapshot(data []byte) bool {
-	rest := skipBlank(bytes.TrimPrefix(data, []byte("\xef\xbb\xbf")))
-	if len(rest) == 0 || rest[0] != '{' {
-		return false
-	}
-	key, err := json.NewDecoder(bytes.NewReader(skipBlank(rest[1:]))).Token()
-	return err == nil && key == "yammm_snapshot"
-}
-
-// skipBlank returns b past white space and comments. An unterminated block comment
-// leaves nothing.
-func skipBlank(b []byte) []byte {
-	for {
-		b = bytes.TrimLeft(b, " \t\r\n")
-		var end []byte
-		switch {
-		case bytes.HasPrefix(b, []byte("//")):
-			end = []byte("\n")
-		case bytes.HasPrefix(b, []byte("/*")):
-			end = []byte("*/")
-		default:
-			return b
-		}
-		_, after, found := bytes.Cut(b[2:], end)
-		if !found {
-			return nil
-		}
-		b = after
-	}
 }
 
 // LoadSnapshotFile reads a .ys file and loads it into a [graph.Snapshot],

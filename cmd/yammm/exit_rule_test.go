@@ -15,10 +15,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	adapterjson "github.com/simon-lentz/yammm/adapter/json"
-	adaptern4j "github.com/simon-lentz/yammm/adapter/neo4j"
 	"github.com/simon-lentz/yammm/cmd/yammm/internal/cli"
-	"github.com/simon-lentz/yammm/schema"
 )
 
 // commandFuncs parses the package's production files and calls visit with
@@ -284,37 +281,4 @@ func TestExitCodes_ACompletionScriptThatCannotBeWrittenExitsRuntime(t *testing.T
 			}
 		})
 	}
-}
-
-// TestWriterFailure_ARefusalOfTheDataExitsValidation pins export's writer rule:
-// a value the format cannot represent is a refusal of the input (1), wrapped
-// or not, and any other writer failure is outside the input (3).
-func TestWriterFailure_ARefusalOfTheDataExitsValidation(t *testing.T) {
-	t.Parallel()
-	for _, c := range []struct {
-		name string
-		err  error
-		want int
-	}{
-		{"json's refusal, wrapped", fmt.Errorf("marshal: %w", adapterjson.ErrUnrepresentable), cli.ExitValidation},
-		{"neo4j's refusal, wrapped", fmt.Errorf("type %q: %w", "Grid", adaptern4j.ErrUnrepresentable), cli.ExitValidation},
-		{"neo4j's coercion refusal", coercionRefusal(), cli.ExitValidation},
-		{"neo4j's identifier refusal", adaptern4j.ErrInvalidIdentifier, cli.ExitRuntime},
-		{"any other writer failure", errors.New("disk full"), cli.ExitRuntime},
-	} {
-		t.Run(c.name, func(t *testing.T) {
-			t.Parallel()
-			if got := cli.ExitForError(writerFailure("marshal", c.err)); got != c.want {
-				t.Errorf("writerFailure(%v) exits %d, want %d", c.err, got, c.want)
-			}
-		})
-	}
-}
-
-// coercionRefusal is the error adapter/neo4j returns for a Float at an Integer,
-// which an export of a snapshot no validator judged can meet before or after a
-// nested collection's refusal, whichever property sorts first.
-func coercionRefusal() error {
-	_, err := adaptern4j.CoerceParams(map[string]any{"v": 2.5}, adaptern4j.ParamTypes{"v": schema.NewIntegerConstraint()})
-	return err
 }

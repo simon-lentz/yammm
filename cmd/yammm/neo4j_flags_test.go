@@ -15,11 +15,10 @@ import (
 // before the refusal shows on stderr.
 func TestRun_LabelFlagsAreRefusedBeforeWork(t *testing.T) {
 	commands := map[string][]string{
-		"neo4j constraints":  {"neo4j", "constraints", shadowedSchema},
-		"neo4j indexes":      {"neo4j", "indexes", shadowedSchema},
-		"neo4j diff":         {"neo4j", "diff", "--uri", "bolt://127.0.0.1:1", shadowedSchema},
-		"neo4j introspect":   {"neo4j", "introspect", "--uri", "bolt://127.0.0.1:1"},
-		"export --to cypher": {"export", "--to", "cypher", shadowedSchema, "testdata/data.json"},
+		"neo4j constraints": {"neo4j", "constraints", shadowedSchema},
+		"neo4j indexes":     {"neo4j", "indexes", shadowedSchema},
+		"neo4j diff":        {"neo4j", "diff", "--uri", "bolt://127.0.0.1:1", shadowedSchema},
+		"neo4j introspect":  {"neo4j", "introspect", "--uri", "bolt://127.0.0.1:1"},
 	}
 	flags := map[string][]string{
 		"an empty separator":                      {"--separator", ""},

@@ -105,11 +105,9 @@
 //   - The entry schema's name surface: its direct import set and its import
 //     aliases. One member set under two import graphs or two aliases hashes the
 //     same, though a type name one of them resolves, such as lb.T, can miss
-//     under the other. A snapshot names a type by its schema's name, and the
-//     snapshot package judges each document against the schema it reads with:
-//     it refuses an instances group, or a duplicate record that states no
-//     parent, that names a type the schema reaches only through an intermediate
-//     import, with E_SNAPSHOT_UNNAMEABLE_TYPE.
+//     under the other. A snapshot names a type by its declaring schema's name
+//     and its own, so the snapshot reader resolves it through the member set
+//     alone.
 //   - Which member owns a supertype, and which data type a property names. A
 //     supertype hashes by its type name, and the subtype hashes the members it
 //     inherits. A property hashes its resolved constraint and never a data
@@ -140,7 +138,7 @@
 //
 //	name, ok := dtFieldNames[p.Origin()]
 //
-// — or the synthesized entry misses the table: gogen and jschema return an error there, and
+// — or the synthesized entry misses the table: gogen returns an error there, and
 // markdown degrades with none. Everything Origin discards is annotation state; name, constraint,
 // datatype reference, optionality, primary-key status, doc comment, span, and
 // declaring scope are all preserved on the copy, so a consumer that reads only those

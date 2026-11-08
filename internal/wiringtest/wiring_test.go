@@ -1196,7 +1196,7 @@ func TestExperimentSettings_ReadEachConstraint(t *testing.T) {
 func TestExperimentFindings_RefusesEachBrokenLink(t *testing.T) {
 	t.Parallel()
 	const after = "${{ !cancelled() }}"
-	files := []string{"adapter/json/nesting_jsonv2.go"}
+	files := []string{"cmd/yammm/internal/jsondata/nesting_jsonv2.go"}
 	needs := map[string][]string{"jsonv2": files}
 	// with returns a workflow of a host's test job and a jsonv2 job, edited.
 	with := func(edit func(j, test *job)) workflow {
@@ -1219,7 +1219,7 @@ func TestExperimentFindings_RefusesEachBrokenLink(t *testing.T) {
 	if f := experimentFindings(with(nil), needs); len(f) != 0 {
 		t.Fatalf("a whole job reports %q", f)
 	}
-	unbuilt := "no job sets GOEXPERIMENT=jsonv2, so no job builds what adapter/json/nesting_jsonv2.go select under it"
+	unbuilt := "no job sets GOEXPERIMENT=jsonv2, so no job builds what cmd/yammm/internal/jsondata/nesting_jsonv2.go select under it"
 	for _, tt := range []struct {
 		name  string
 		want  []string // a part of each finding, in order
@@ -2416,7 +2416,7 @@ func TestMermaidJobFindings_RefusesEachBrokenLink(t *testing.T) {
 		{"no tag", `-tags is ""`, withRun(strings.Replace(run, "-tags mermaid ", "", 1)), tagged, []string{"mermaid"}, ignore},
 		{"a tag beside mermaid", `-tags is "mermaid,x"`, withRun(strings.Replace(run, "-tags mermaid", "-tags mermaid,x", 1)), tagged, []string{"mermaid"}, ignore},
 		{"another package", "want the one package ./schema/markdown/", withRun(strings.Replace(run, "./schema/markdown/", "./...", 1)), tagged, []string{"mermaid"}, ignore},
-		{"a second package", "want the one package ./schema/markdown/", withRun(run + " ./adapter/json/"), tagged, []string{"mermaid"}, ignore},
+		{"a second package", "want the one package ./schema/markdown/", withRun(run + " ./cmd/yammm/internal/jsondata/"), tagged, []string{"mermaid"}, ignore},
 		{"a -run", "passes -run", withRun(strings.Replace(run, " ./", " -run TestA ./", 1)), tagged, []string{"mermaid"}, ignore},
 		{"a -skip", "passes -skip", withRun(strings.Replace(run, " ./", " -skip=TestA ./", 1)), tagged, []string{"mermaid"}, ignore},
 		{"a -test.run", "passes -test.run", withRun(strings.Replace(run, " ./", " -test.run=TestA ./", 1)), tagged, []string{"mermaid"}, ignore},
@@ -2425,7 +2425,7 @@ func TestMermaidJobFindings_RefusesEachBrokenLink(t *testing.T) {
 		{"-count=0", "runs no test", withRun(strings.Replace(run, "-count=1", "-count=0", 1)), tagged, []string{"mermaid"}, ignore},
 		{"-v=false", "passes -v=false", withRun(strings.Replace(run, "-v ", "-v=false ", 1)), tagged, []string{"mermaid"}, ignore},
 		{"an -exec", "passes -exec=true", withRun(strings.Replace(run, " ./", " -exec=true ./", 1)), tagged, []string{"mermaid"}, ignore},
-		{"a -coverpkg decoy", "passes -coverpkg", withRun("go test -count=1 -tags mermaid -coverpkg ./schema/markdown/ ./adapter/json/"), tagged, []string{"mermaid"}, ignore},
+		{"a -coverpkg decoy", "passes -coverpkg", withRun("go test -count=1 -tags mermaid -coverpkg ./schema/markdown/ ./cmd/yammm/internal/jsondata/"), tagged, []string{"mermaid"}, ignore},
 		{"go test not first", "does not start with go test", withRun("echo " + run), tagged, []string{"mermaid"}, ignore},
 		{"another go", "does not start with go test", withRun("./" + run), tagged, []string{"mermaid"}, ignore},
 		{"a second command line", "more than one line", withRun(run + "\necho done"), tagged, []string{"mermaid"}, ignore},

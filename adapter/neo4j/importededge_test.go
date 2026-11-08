@@ -126,17 +126,15 @@ type Hub {
 `
 
 // TestShapeForSchema_TransitivelyImportedTypeKeepsItsOwnLabel pins the reason
-// GraphShape is keyed by identity. The deep Hub renders the same bare name as
-// the entry schema's own Hub — a different label, different merge keys,
-// different required fields — and it gets its own closure-provided shape rather
-// than being merged into the entry Hub's.
+// GraphShape is keyed by identity. The deep Hub has the name of the entry
+// schema's own Hub — a different label, different merge keys, different
+// required fields — and it gets its own closure-provided shape rather than being
+// merged into the entry Hub's.
 //
-// It asserts the SHAPE and not a write, because the deep Hub can no longer hold
-// a root instance: the entry schema cannot name it. Nothing in a snapshot can
-// carry it to a write path, so the shape is where the identity keying is
-// observable.
+// [TestBatchNodeQueries_TransitivelyImportedRootWritesUnderItsOwnLabel] writes
+// the pair.
 //
-// Mutation: keying GraphShape.Types by schema.TagForm instead of by TypeID
+// Mutation: keying GraphShape.Types by the type's name instead of by TypeID
 // collapses the pair and turns this red.
 func TestShapeForSchema_TransitivelyImportedTypeKeepsItsOwnLabel(t *testing.T) {
 	t.Parallel()
@@ -166,10 +164,6 @@ func TestShapeForSchema_TransitivelyImportedTypeKeepsItsOwnLabel(t *testing.T) {
 	if deep.IsZero() {
 		t.Fatal("fixture is vacuous: the deep Hub did not resolve through the closure")
 	}
-	if schema.TagForm(s, deep.ID()) != local.Name() {
-		t.Fatalf("fixture is vacuous: the deep Hub renders as %q, not as the local name %q",
-			schema.TagForm(s, deep.ID()), local.Name())
-	}
 	if _, addressable := schema.AddressableTag(s, deep.ID()); addressable {
 		t.Fatal("fixture is vacuous: the entry schema can name the deep Hub")
 	}
@@ -193,5 +187,85 @@ func TestShapeForSchema_TransitivelyImportedTypeKeepsItsOwnLabel(t *testing.T) {
 	}
 	if !strings.Contains(deepShape.label, "deep") {
 		t.Errorf("the deep Hub's label is %q, not one derived from its declaring schema", deepShape.label)
+	}
+}
+
+// TestBatchNodeQueries_TransitivelyImportedRootWritesUnderItsOwnLabel writes a
+// root of the deep Hub beside one of the entry schema's Hub. Both are named Hub;
+// each merges under its own label on its own key.
+func TestBatchNodeQueries_TransitivelyImportedRootWritesUnderItsOwnLabel(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+
+	s, res := schema.LoadSourcesWithEntry(t.Context(), map[string][]byte{
+		"entry.yammm": []byte(collidingShapeEntry),
+		"mid.yammm":   []byte(collidingShapeMid),
+		"deep.yammm":  []byte(collidingShapeDeep),
+	}, "entry.yammm", ".", schema.WithSourcesOnly(true))
+	if res.HasErrors() {
+		t.Fatalf("load schema: %s", res)
+	}
+	local, ok := s.Type("Hub")
+	if !ok {
+		t.Fatal("the entry schema's own Hub did not resolve")
+	}
+	var deep schema.TypeID
+	for member := range s.Closure() {
+		if cand, ok := member.Type("Hub"); ok && cand.ID() != local.ID() {
+			deep = cand.ID()
+		}
+	}
+	if deep.IsZero() {
+		t.Fatal("fixture is vacuous: the deep Hub did not resolve through the closure")
+	}
+
+	built := snappartstest.Loaded(t, s, snapparts.Parts{
+		Types: []schema.TypeID{local.ID(), deep},
+		Instances: []snapparts.Instance{
+			{
+				TypeID:     local.ID(),
+				PrimaryKey: immutable.WrapKey([]any{"h1"}),
+				Properties: immutable.WrapProperties(map[string]any{"code": "h1", "name": "entry"}),
+			},
+			{
+				TypeID:     deep,
+				PrimaryKey: immutable.WrapKey([]any{"h1"}),
+				Properties: immutable.WrapProperties(map[string]any{"id": "h1"}),
+			},
+		},
+	})
+
+	a := New()
+	shapes, shapeRes := a.ShapeForSchema(ctx, s)
+	if shapeRes.HasErrors() {
+		t.Fatalf("shape: %s", shapeRes)
+	}
+	queries, err := a.BatchNodeQueries(ctx, built, shapes)
+	if err != nil {
+		t.Fatalf("BatchNodeQueries: %v", err)
+	}
+	byLabel := map[string]*BatchNodeQuery{}
+	for _, q := range queries {
+		if q.Kind != NodeMerge {
+			continue
+		}
+		for _, label := range []string{shapes.types[local.ID()].label, shapes.types[deep].label} {
+			if strings.Contains(q.Statement, "MERGE (n:"+label+" {") {
+				byLabel[label] = q
+			}
+		}
+	}
+	localQuery, deepQuery := byLabel[shapes.types[local.ID()].label], byLabel[shapes.types[deep].label]
+	if localQuery == nil || deepQuery == nil || localQuery == deepQuery {
+		t.Fatalf("want one merge per label, got %d node queries: %v", len(queries), queries)
+	}
+	for q, want := range map[*BatchNodeQuery]string{localQuery: "key_code", deepQuery: "key_id"} {
+		rows, _ := q.Params["rows"].([]map[string]any)
+		if len(rows) != 1 {
+			t.Fatalf("statement %q carries %d rows, want 1", q.Statement, len(rows))
+		}
+		if rows[0][want] != "h1" {
+			t.Errorf("statement %q row %v carries no %s of h1", q.Statement, rows[0], want)
+		}
 	}
 }

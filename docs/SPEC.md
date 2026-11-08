@@ -827,7 +827,7 @@ phone Pattern["^\\d{3}-\\d{3}-\\d{4}$"]
 
 When two patterns are provided, the value must match both. A list of more than two is `E_INVALID_CONSTRAINT`, counting every pattern written, so a pattern refused for its own fault counts too and draws its own diagnostic beside the count's.
 
-A pattern follows Go's `regexp` syntax, and one that does not compile is `E_INVALID_CONSTRAINT`. So is a pattern that writes a surrogate code point (U+D800 to U+DFFF) with a `\x{…}` escape, alone or in a class: Go compiles it, but no string holds a surrogate, so the surrogate matches nothing and has no reading a JSON Schema validator shares. A class that spans the surrogate block, such as `[\x{D000}-\x{E000}]`, writes none.
+A pattern follows Go's `regexp` syntax, and one that does not compile is `E_INVALID_CONSTRAINT`. So is a pattern that writes a surrogate code point (U+D800 to U+DFFF) with a `\x{…}` escape, alone or in a class: Go compiles it, but no string holds a surrogate, so the surrogate matches nothing. A class that spans the surrogate block, such as `[\x{D000}-\x{E000}]`, writes none.
 
 #### Timestamp
 
@@ -935,7 +935,7 @@ Validation accepts JSON arrays where each element passes the element type's cons
 - List types cannot be used as primary keys (see [Primary Key Types](#primary-key-types)).
 - List types cannot be used in relationship (edge) properties.
 
-**Export portability.** A list whose *element* is itself a collection — `List<List<T>>`, `List<Vector[N]>`, or a list of a list-typed alias — is valid yammm and validates normally, but has no equivalent in Neo4j, which has no nested collection property type. `yammm neo4j constraints` rejects such a property with `E_NEO4J_UNSUPPORTED_TYPE` under every flag, `--scalar-types=false` included, and because constraint generation is all-or-nothing it emits **nothing for the whole schema**, not just for that property. `yammm neo4j indexes` does not make the check, and prints the schema's index statements. The Neo4j adapter's write path refuses a value of such a property, an empty list included, and not an absent one, so `yammm export --to cypher` exits 1 over data holding one. `yammm neo4j constraints` judges a property on each concrete type and part type with a valid label that declares or inherits it. Two exceptions follow from that: it does not report a property of a type whose label is no valid identifier, which it reports with `E_NEO4J_INVALID_IDENTIFIER` instead, or a property declared on an abstract type that no such type extends. Model the inner collection as a `part type` reached by a composition if the model must export to Neo4j.
+**Neo4j portability.** A list whose *element* is itself a collection — `List<List<T>>`, `List<Vector[N]>`, or a list of a list-typed alias — is valid yammm and validates normally, but has no equivalent in Neo4j, which has no nested collection property type. `yammm neo4j constraints` rejects such a property with `E_NEO4J_UNSUPPORTED_TYPE` under every flag, `--scalar-types=false` included, and because constraint generation is all-or-nothing it emits **nothing for the whole schema**, not just for that property. `yammm neo4j indexes` does not make the check, and prints the schema's index statements. The Neo4j adapter's write path refuses a value of such a property, an empty list included, and not an absent one. `yammm neo4j constraints` judges a property on each concrete type and part type with a valid label that declares or inherits it. Two exceptions follow from that: it does not report a property of a type whose label is no valid identifier, which it reports with `E_NEO4J_INVALID_IDENTIFIER` instead, or a property declared on an abstract type that no such type extends. Model the inner collection as a `part type` reached by a composition if the model must be written to Neo4j.
 
 **Narrowing:**
 
@@ -1777,7 +1777,7 @@ Codes are stable identifiers for programmatic matching. `diag/code.go` holds the
 - `E_DUPLICATE_IMPORT` — the same schema imported multiple times, or two different schemas sharing one alias
 - `E_IMPORT_ALIAS_COLLISION` — import alias collides with local name
 
-**Instance** — validation errors:
+**Instance** — data parse and validation errors:
 
 - `E_INSTANCE_TYPE_NOT_FOUND` — type not found in schema
 - `E_ABSTRACT_TYPE` — attempt to instantiate abstract type, an empty batch under its name included
@@ -1788,7 +1788,7 @@ Codes are stable identifiers for programmatic matching. `diag/code.go` holds the
 - `E_CONSTRAINT_FAIL` — constraint check failed
 - `E_INVARIANT_FAIL` — invariant check failed
 - `E_EVAL_ERROR` — expression evaluation error. A call to an unknown built-in function is refused at load with `E_INVALID_INVARIANT`, so no loaded schema reaches the evaluator's own refusal of one
-- `E_MISSING_FK_TARGET` — foreign key target missing
+- `E_MISSING_FK_TARGET` — an edge object holds none of its target's `_target_` foreign-key fields
 - `E_PARTIAL_COMPOSITE_FK` — partial composite foreign key
 - `E_UNKNOWN_EDGE_FIELD` — unknown field in edge data
 - `E_EDGE_SHAPE_MISMATCH` — an edge or a composition value has a JSON shape its relation does not take, such as an object where an array belongs or the reverse, a null or a scalar, or a composed child or a `(many)` edge element that is not an object; and, at `graph.NewFromSnapshot` under another schema, an `"empty"` unresolved record under a `(one)` association, the record an empty list leaves
@@ -1796,6 +1796,7 @@ Codes are stable identifiers for programmatic matching. `diag/code.go` holds the
 - `E_COMPOSITION_DEPTH_EXCEEDED` — composed nesting exceeds the depth limit (32), the bound the `.ys` reader holds a document to with `E_SNAPSHOT_DEPTH_EXCEEDED`, so a snapshot can carry every nesting a validator accepts
 - `E_DUPLICATE_COMPOSED_PK` — a composition slot cannot hold this child: two children of one `(many)` slot share a primary key, or a `(one)` slot is given several. Listed here as well as under Graph: the validator raises it over the children it validates together. The import raises it over the snapshot it is given, and `snapshot.Load` and `snapshot.Verify` raise it for two children of a keyed `(many)` slot at one canonical key and for a `(one)` slot a document holds several children in; `snapshot.Info` reads without a schema and makes no such claim
 - `E_INVALID_TYPE_TAG` — a type tag that is not a type name by the grammar: a JSON document's top-level key
+- `E_DATA_PARSE` — an instance document `yammm check` or `yammm snapshot save` reads is not well formed, is not one object, holds a type name whose value is not an array of objects, states one member name twice in one object, or nests deeper than the decoder's 10,000-level limit
 - `E_CASE_FOLD_COLLISION` — multiple input fields map to the same schema property, relation field, edge property or `_target_` foreign-key field after case-folding. Property name matching is case-insensitive by default (see `WithStrictPropertyNames` in [API.md](API.md)). When two or more input fields fold to one schema property and none of them matches it exactly (schema `name`, input `Name` and `NAME`), the collision is reported and neither field is mapped. An input name that matches a schema property exactly is claimed first and never collides
 
 **Graph** — graph construction errors:
@@ -1803,7 +1804,7 @@ Codes are stable identifiers for programmatic matching. `diag/code.go` holds the
 - `E_DUPLICATE_PK` — duplicate primary key
 - `E_DUPLICATE_COMPOSED_PK` — a composition slot cannot hold this child (also raised by the validator and the snapshot reader; see Instance)
 - `E_UNRESOLVED_REQUIRED` — required association unresolved
-- `E_GRAPH_TYPE_NOT_FOUND` — at `Graph.Add`, a root whose type is in the load's closure, where the graph's schema neither declares nor directly imports it. At a snapshot's import, a type identity the importing schema cannot resolve, or a `types` entry denoting a type it neither declares nor directly imports
+- `E_GRAPH_TYPE_NOT_FOUND` — at a snapshot's import, a type identity the importing schema cannot resolve
 - `E_GRAPH_INVALID_COMPOSITION` — invalid composition
 - `E_GRAPH_MISSING_PK` — a root, or an imported snapshot's types entry, whose type declares no primary key
 - `E_GRAPH_INVALID_PK` — a keyed type's primary key empty, of the wrong arity, with a key property absent or null, or disagreeing with the instance's own key properties; an association target key of the wrong arity; or a key stored on a composed child whose type declares no primary key
@@ -1821,8 +1822,7 @@ Codes are stable identifiers for programmatic matching. `diag/code.go` holds the
 - `E_SNAPSHOT_TYPE_MISMATCH` — an instance or duplicate record states a type row other than the one it is filed under, or a composed child's or an association record's target row is not the relation's declared target
 - `E_SNAPSHOT_DANGLING_REFERENCE` — an edge target, a duplicate's conflict, or an unresolved record's source names no root instance; a reference to an address a refused unit states draws none, the unit's refusal being its one issue
 - `E_SNAPSHOT_INVALID_COMPOSED` — composed child carries edges, or composed children stand under a name the parent's type does not declare as a composition
-- `E_SNAPSHOT_INVALID_ROOT` — an instances group, empty or not, or a duplicate record names a type that cannot hold a root instance: abstract, a part type, or declaring no primary key. Refused whatever the load options say — none of the three describes a graph any caller could have built. One type draws one issue, however many positions name it, and a root of it holds no address: it owes no required association, it is in no `(one)` count, and a second root at its key is no duplicate. A break its records or its slots show by themselves stays its own
-- `E_SNAPSHOT_UNNAMEABLE_TYPE` — an instances group, empty or not, or a duplicate record names a type the entry schema reaches only through an intermediate import, so the schema has no name form for it. `adapter/json` keys its output by the name of each type a snapshot denotes, so such a document describes a snapshot it cannot render. Refused whatever the load options say, and the hint names the remedy, which is to import the declaring schema directly. One type draws one issue, and a root of it holds no address, as under `E_SNAPSHOT_INVALID_ROOT`
+- `E_SNAPSHOT_INVALID_ROOT` — an instances group, empty or not, or a duplicate record that states no parent names a type that cannot hold a root instance: abstract, a part type, or declaring no primary key. Refused whatever the load options say — none of the three describes a graph any caller could have built. One type draws one issue, however many positions name it, and a root of it holds no address: it owes no required association, it is in no `(one)` count, and a second root at its key is no duplicate. A break its records or its slots show by themselves stays its own
 - `E_DUPLICATE_PK` — two root instances in one group, both of whose stored keys the key rule accepts, state one primary key. Under a schema, only roots of a type that can hold a root count. Listed here as well as under Graph: `snapshot.Load`, `snapshot.Verify` and `snapshot.Info` emit it, because the wire has a diagnostics section for a rejected duplicate and two live instances at one address is not a shape it can carry. `Info` resolves no schema, so it judges no type and compares keys as the reader's number rule renders them, where `Load` and `Verify` also fold a timestamp or UUID key written two ways
 - `E_SNAPSHOT_COMPOSED_ON_DUPLICATE`, `E_SNAPSHOT_EDGES_ON_DUPLICATE` — illegal data on duplicate records
 - `E_SNAPSHOT_DEPTH_EXCEEDED` — composed nesting exceeds depth limit (32)
@@ -1837,9 +1837,8 @@ Codes are stable identifiers for programmatic matching. `diag/code.go` holds the
 - `W_SNAPSHOT_UNRESOLVED_REQUIRED` — under `WithRevalidation`, a loaded document carries an unresolved record, one no structural check refused, for a required association
 - `W_SNAPSHOT_PATH_EXTENSION` (Warning) — a snapshot was written to a path that does not end in `.ys`. The write succeeded; a reader that discovers snapshots by extension will not find it
 
-**Adapter** — format-specific errors. `E_ADAPTER_PARSE` is declared in `diag`; every other code below is registered by its adapter package when that package is linked:
+**Adapter** — platform errors. Each code below is registered by its adapter package when that package is linked:
 
-- `E_ADAPTER_PARSE` — parsing error in adapter input
 - `E_NEO4J_LABEL_COLLISION` — two types render the same Neo4j label
 - `E_NEO4J_INVALID_IDENTIFIER` — an identifier is not usable unquoted in generated Cypher
 - `E_NEO4J_UNSUPPORTED_TYPE` — a property kind the adapter cannot express
@@ -1875,7 +1874,7 @@ Two schemas that hash the same agree on every one of those rules everywhere in t
 
 Two more facts are outside the hash, and two schemas that hash the same can differ in them:
 
-- **The import graph and the entry schema's name surface**: no member's imports are hashed, so one member set under two import graphs or two aliases hashes the same. The entry schema's direct import set and its import aliases decide which type names the schema resolves, such as `lb.T`, so a type name a caller validates data under can resolve under one and miss under the other; they change no rule a type applies. A `.ys` snapshot names a type by its schema's name, and a snapshot read refuses an instances group, or a duplicate record that states no parent, that names a type the schema reaches only through an intermediate import, with `E_SNAPSHOT_UNNAMEABLE_TYPE`.
+- **The import graph and the entry schema's name surface**: no member's imports are hashed, so one member set under two import graphs or two aliases hashes the same. The entry schema's direct import set and its import aliases decide which type names the schema resolves, such as `lb.T`, so a type name a caller validates data under can resolve under one and miss under the other; they change no rule a type applies. A `.ys` snapshot names a type by its declaring schema's name and its own, so a snapshot read resolves it through the member set alone.
 - **Which member owns a supertype, and which data type a property names.** A supertype hashes by its type name, and the subtype hashes the members it inherits. A property hashes its resolved constraint and never a data type's name. So `K extends a.Base` and `K extends b.Base` hash the same when `a` and `b` declare `Base` alike, and a property typed `a.Code`, one typed `b.Code` and one typed `String[3, 3]` hash the same when each `Code` is `String[3, 3]`. Instance validity agrees in each case.
 
 So a test that compares generated code's `SchemaHash` constant with the hash cannot see stale generated code after any change the hash leaves out: the generated code embeds the schema sources and their documentation comments. After a change to the name surface, a supertype's owner or a property's data type, a field's Go type or a graph field can differ too.

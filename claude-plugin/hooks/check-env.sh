@@ -12,8 +12,8 @@ command -v yammm-lsp >/dev/null 2>&1 || warn="$warn yammm-lsp"
 command -v jq        >/dev/null 2>&1 || warn="$warn jq"
 
 if [ -n "$missing" ]; then
-  echo "yammm CLI not found. Schema compilation, formatting, and export"
-  echo "commands will not work. Knowledge, review, and schema authoring"
+  echo "yammm CLI not found. Schema compilation, formatting, data checking"
+  echo "and generation commands will not work. Knowledge, review, and schema authoring"
   echo "are still available."
 fi
 

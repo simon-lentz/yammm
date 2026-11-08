@@ -10,7 +10,7 @@ exec yammm check valid.yammm marked.json
 # Every data operand reads as JSON, whatever its name.
 exec yammm check valid.yammm renamed.txt
 ! exec yammm check valid.yammm table.csv
-stderr E_ADAPTER_PARSE
+stderr E_DATA_PARSE
 
 # Missing data file is rejected.
 ! exec yammm check valid.yammm nonexistent.json
@@ -21,8 +21,8 @@ stderr E_ADAPTER_PARSE
 stderr '"severity"'
 stderr '"error"'
 
-# check assembles the graph as load does, so a duplicate primary key and an
-# unresolved required association fail it too.
+# check assembles the graph, so a duplicate primary key and an unresolved
+# required association fail it too.
 ! exec yammm check linked.yammm dup.json
 stderr 'E_DUPLICATE_PK'
 ! exec yammm check linked.yammm unresolved.json
@@ -31,6 +31,13 @@ stderr 'E_UNRESOLVED_REQUIRED'
 stderr 'E_UNRESOLVED_REQUIRED'
 exec yammm check linked.yammm linked.json
 ! stderr .
+
+# Several data files are one document: a target one file holds resolves another
+# file's edge, and a key two files state is a duplicate.
+exec yammm check linked.yammm unresolved.json manager.json
+! stderr .
+! exec yammm check linked.yammm linked.json linked.json
+stderr 'E_DUPLICATE_PK'
 
 # --module-root reaches every schema-loading command, not only gen.
 ! exec yammm check sub/entry.yammm empty.json
@@ -102,3 +109,5 @@ type Person {
 {"Person": [{"id": "a", "name": "A", "manager": {"_target_id": "zz"}}]}
 -- absent.json --
 {"Person": [{"id": "a", "name": "A"}]}
+-- manager.json --
+{"Person": [{"id": "zz", "name": "Z", "manager": {"_target_id": "zz"}}]}

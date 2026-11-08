@@ -8,7 +8,7 @@
 //
 // # Schema-In, Bytes-Out
 //
-// Like schema/gogen and schema/jschema — and unlike the data adapters —
+// Like schema/gogen — and unlike adapter/neo4j —
 // markdown has no instance-data path: it never parses, validates, or
 // serializes instances, and it imports neither instance nor graph. It maps
 // a completed schema to one Markdown document, nothing more, and returns a
@@ -172,12 +172,12 @@
 // an HTML parser can place the generator's text after it inside it.
 //
 // Every other text the schema supplies renders literally under GitHub-flavored
-// Markdown. GitHub's emoji filter runs after it, and outside code it can still
-// read a :shortcode:, as it did in a heading when measured. A code cell — a property's name and Type, a DataType's name and
-// Definition — shows its text byte for byte: a code span with each pipe
-// escaped, or, for text holding a backtick, a backslash before a pipe or a
-// line break, a <code> element whose Markdown-significant characters are
-// entities. A description cell holds the doc comment's Markdown on one line.
+// Markdown. Outside a code span, the empty comment that splits each colon
+// (below) splits a :shortcode: too. A code cell — a property's name and Type, a
+// DataType's name and Definition — shows its text byte for byte: a code span
+// with each pipe escaped, or, for text holding a backtick, a backslash before a
+// pipe or a line break, a <code> element whose Markdown-significant characters
+// are entities. A description cell holds the doc comment's Markdown on one line.
 // A line break inside a code span folds to the space Markdown reads it as.
 // One inside raw HTML or an HTML block folds to a space, which an HTML parser
 // reads as white space, except in a pre or listing element's text, where it is

@@ -68,8 +68,6 @@ func TestDiagnosticsSurviveEveryEarlyReturn(t *testing.T) {
 		args []string
 	}{
 		{"check, unreadable data file", []string{"check", shadowedSchema, missingData}},
-		{"export, unreadable data file", []string{"export", "--to", "json", shadowedSchema, missingData}},
-		{"load, unreadable data file", []string{"load", shadowedSchema, missingData}},
 		{"snapshot save, an unreadable second data file", []string{
 			"snapshot", "save", "-o", filepath.Join(dir, "out.ys"), shadowedSchema, filepath.Join(dir, "empty.json"), missingData,
 		}},
@@ -190,25 +188,11 @@ func TestSnapshotInfoDirMarksWarnings(t *testing.T) {
 	})
 }
 
-// TestOwnPhaseDiagnosticsReachTheOperator pins the results a command produces
-// after the schema has loaded, on the two paths nothing else exercises: an
-// export whose source snapshot could not be fully verified, and an emitter that
-// refuses a property name Cypher reserves.
+// TestOwnPhaseDiagnosticsReachTheOperator pins the result a command produces
+// after the schema has loaded, on the path nothing else exercises: an emitter
+// that refuses a property name Cypher reserves.
 func TestOwnPhaseDiagnosticsReachTheOperator(t *testing.T) {
 	t.Parallel()
-
-	t.Run("export from a snapshot carrying a warning", func(t *testing.T) {
-		t.Parallel()
-		code, _, stderr := executeCmdOutput(t, "export", "--to", "json",
-			"--output", filepath.Join(t.TempDir(), "out.json"),
-			"testdata/valid.yammm", provenanceFixture)
-		if code != cli.ExitOK {
-			t.Errorf("exit code = %d, want %d: a warning is not a failure", code, cli.ExitOK)
-		}
-		if !strings.Contains(stderr, "W_SNAPSHOT_PATH_FALLBACK") {
-			t.Errorf("the snapshot's warning was discarded; stderr:\n%s", stderr)
-		}
-	})
 
 	t.Run("neo4j indexes refusing a reserved identifier", func(t *testing.T) {
 		t.Parallel()
@@ -305,18 +289,6 @@ func TestDiagnosticsPrecedeThePayload(t *testing.T) {
 			payload: "CREATE INDEX",
 		},
 		{
-			name:    "export to stdout",
-			args:    []string{"export", "--to", "json", shadowedSchema, "testdata/annotation_shadowed_good.json"},
-			first:   "W_ANNOTATION_SHADOWED",
-			payload: `"Doc"`,
-		},
-		{
-			name:    "export from a snapshot, to stdout",
-			args:    []string{"export", "--to", "json", "testdata/valid.yammm", provenanceFixture},
-			first:   "W_SNAPSHOT_PATH_FALLBACK",
-			payload: `"Person"`,
-		},
-		{
 			name: "snapshot save, whose payload is its status line",
 			args: []string{
 				"snapshot", "save", "-o", filepath.Join(t.TempDir(), "made.snap"),
@@ -395,11 +367,6 @@ func TestStderrIsOneJSONDocument(t *testing.T) {
 		{"check, unreadable schema", "check " + missing + " testdata/data.json"},
 		{"check, unreadable data", "check " + shadowedSchema + " " + missing + ".json"},
 		{"check, validation errors", "check " + shadowedSchema + " testdata/annotation_shadowed_bad.json"},
-		{"load, unreadable schema", "load " + missing + " testdata/data.json"},
-		{"load, unreadable data", "load " + shadowedSchema + " " + missing + ".json"},
-		{"export, unreadable schema", "export --to json " + missing + " testdata/data.json"},
-		{"export, unreadable data", "export --to json " + shadowedSchema + " " + missing + ".json"},
-		{"export, unsupported target", "export --to xml " + shadowedSchema + " testdata/data.json"},
 		{"gen, unreadable schema", "gen --to go " + missing},
 		{"gen, unsupported target", "gen --to rust " + shadowedSchema},
 		{"snapshot save, unreadable schema", "snapshot save -o " + missing + ".ys " + missing + " testdata/data.json"},
@@ -454,9 +421,6 @@ func TestStderrIsOneJSONDocumentOnSuccess(t *testing.T) {
 		{"validate, clean", []string{"validate", "--format", "json", "testdata/valid.yammm"}},
 		{"check, clean", []string{"check", "--format", "json", "testdata/valid.yammm", "testdata/data.json"}},
 		{"fmt --check, clean", []string{"fmt", "--format", "json", "--check", "testdata/valid.yammm"}},
-		{"load, whose pipeline reports a count", []string{
-			"load", "--format", "json", shadowedSchema, "testdata/annotation_shadowed_good.json",
-		}},
 		{"snapshot save, whose summary follows the document", []string{
 			"snapshot", "save", "--format", "json", "-o", snap,
 			shadowedSchema, "testdata/annotation_shadowed_good.json",

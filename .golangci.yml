@@ -120,10 +120,6 @@ linters:
         text: "avoid package names that conflict"
         linters:
           - revive
-      - path: "adapter/json/.*"
-        text: "avoid package names that conflict"
-        linters:
-          - revive
       # Package names matching domain concepts (not stdlib collisions).
       - path: "format/.*"
         linters:
@@ -157,13 +153,13 @@ linters:
       # drops its testify import, delete it from its directory's entry (and
       # delete the whole entry when its alternation empties). Never add a
       # file here.
-      - path: "^adapter/json/(adapter|write)_test\\.go$"
-        linters:
-          - depguard
       - path: "^adapter/neo4j/(diff|infer|introspect)_test\\.go$"
         linters:
           - depguard
-      - path: "^cmd/yammm/(check|export|neo4j_diff|snapshot_info|snapshot_save|snapshot_update_metadata|snapshot_verify|validate)_test\\.go$"
+      - path: "^cmd/yammm/(check|neo4j_diff|snapshot_info|snapshot_save|snapshot_update_metadata|snapshot_verify|validate)_test\\.go$"
+        linters:
+          - depguard
+      - path: "^cmd/yammm/internal/jsondata/(adapter)_test\\.go$"
         linters:
           - depguard
       - path: "^cmd/yammm-lsp/(main)_test\\.go$"
@@ -251,15 +247,6 @@ linters:
           deny:
             - pkg: github.com/stretchr/testify
               desc: "testify is frozen for new code — use the stdlib plus internal/yammmtest (cmp + goldens); grandfathered files are enumerated in linters.exclusions.rules and that list only shrinks"
-    wrapcheck:
-      # adapter/internal/refusal.New CONSTRUCTS an error, as errors.New and
-      # fmt.Errorf do, and refusal.Mark marks one the adapter's own code
-      # returned, keeping its text, so returning either result is not an
-      # unwrapped pass-through of a foreign error. The entries append to the
-      # linter's default list.
-      extra-ignore-sigs:
-        - refusal.New(
-        - refusal.Mark(
     testifylint:
       disable:
         # The DSL contract pins exact float results (parsed literals,

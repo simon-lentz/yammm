@@ -12,8 +12,6 @@ import (
 	"time"
 
 	"github.com/neo4j/neo4j-go-driver/v6/neo4j/dbtype"
-	"github.com/simon-lentz/yammm/adapter/internal/constraintof"
-	"github.com/simon-lentz/yammm/adapter/internal/refusal"
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/instance"
@@ -398,11 +396,11 @@ func propsToParamMap(props immutable.Properties, schemaType schema.Type) (map[st
 		if val == nil {
 			continue
 		}
-		c := constraintof.Property(schemaType, key)
+		c := propertyConstraint(schemaType, key)
 		// A property type Neo4j cannot store is refused before its value is read,
 		// as coerceScalar refuses it, so no element's own fault takes its place.
 		if err := nestedCollection(c); err != nil {
-			return nil, fmt.Errorf("property %q: %w", key, refusal.Mark(ErrUnrepresentable, err))
+			return nil, fmt.Errorf("property %q: %w", key, markUnrepresentable(err))
 		}
 		val, err := heldForm(val, c)
 		if err != nil {
@@ -419,13 +417,13 @@ func propsToParamMap(props immutable.Properties, schemaType schema.Type) (map[st
 
 // errNoForm refuses a list or a map nested past [maxFormDepth]. Only a snapshot
 // whose values no validator judged holds one.
-var errNoForm = refusal.New(ErrUnrepresentable, "holds a list or a map nested past the depth this adapter writes")
+var errNoForm = unrepresentable("holds a list or a map nested past the depth this adapter writes")
 
 // errUnheldNumber refuses a json.Number no driver number holds: a literal no
 // finite float64 holds, or an integer literal no int64 holds outside a Float and
 // a Vector element, which the .ys reader keeps as its text. Only a snapshot whose values no
 // validator judged holds one.
-var errUnheldNumber = refusal.New(ErrUnrepresentable, "holds a json.Number no driver number holds, so the server would store another number")
+var errUnheldNumber = unrepresentable("holds a json.Number no driver number holds, so the server would store another number")
 
 // firstRefusedProp returns the least name in props whose value [heldForm] refuses
 // at the constraint constraintOf returns for it, with its fault. A batch of sound
@@ -466,7 +464,7 @@ func heldFormAt(x any, c schema.Constraint, depth int) (any, bool, error) {
 		if t == nil {
 			return nil, true, nil
 		}
-		elem := constraintof.Element(c)
+		elem := elementConstraint(c)
 		out := t
 		for i, e := range t {
 			f, changed, err := heldFormAt(e, elem, depth+1)
@@ -545,7 +543,7 @@ func renders(c schema.Constraint, kinds ...schema.ConstraintKind) bool {
 // constraint. The write path refuses a value at such a constraint by it, so a
 // property the DDL refuses never reaches the driver.
 func nestedCollection(c schema.Constraint) error {
-	// A Vector's element is a Float, so only a List can nest; constraintof.Element
+	// A Vector's element is a Float, so only a List can nest; elementConstraint
 	// would allocate a FloatConstraint for every Vector value.
 	l, ok := schema.ResolveAlias(c).(schema.ListConstraint)
 	if !ok {
@@ -585,7 +583,7 @@ func nestedCollection(c schema.Constraint) error {
 func coerceSlice(raw []any, c schema.Constraint) (any, error) {
 	c = schema.ResolveAlias(c)
 	// A judged constraint's List holds an element, so no element means a scalar.
-	elem := schema.ResolveAlias(constraintof.Element(c))
+	elem := schema.ResolveAlias(elementConstraint(c))
 	if elem == nil {
 		return nil, fmt.Errorf("cannot coerce a list value against a scalar %s constraint", c.Kind())
 	}
@@ -850,13 +848,13 @@ func extractKeyProps(props immutable.Properties, shape *nodeShape) (map[string]a
 		return nil, errors.Join(append(keyListErrs(missing, nilKeys), coerceErrs...)...)
 	}
 	if len(missing) > 0 && len(nilKeys) > 0 {
-		return nil, refusal.New(ErrUnrepresentable, "missing required primary key(s): %v; nil primary key(s): %v", missing, nilKeys)
+		return nil, unrepresentable("missing required primary key(s): %v; nil primary key(s): %v", missing, nilKeys)
 	}
 	if len(missing) > 0 {
-		return nil, refusal.New(ErrUnrepresentable, "missing required primary key(s): %v", missing)
+		return nil, unrepresentable("missing required primary key(s): %v", missing)
 	}
 	if len(nilKeys) > 0 {
-		return nil, refusal.New(ErrUnrepresentable, "nil primary key(s): %v", nilKeys)
+		return nil, unrepresentable("nil primary key(s): %v", nilKeys)
 	}
 	return result, nil
 }

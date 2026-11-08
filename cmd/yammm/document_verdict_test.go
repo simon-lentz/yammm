@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"slices"
@@ -8,6 +9,10 @@ import (
 	"testing"
 
 	"github.com/simon-lentz/yammm/cmd/yammm/internal/cli"
+	"github.com/simon-lentz/yammm/graph"
+	"github.com/simon-lentz/yammm/instance"
+	"github.com/simon-lentz/yammm/schema"
+	"github.com/simon-lentz/yammm/snapshot"
 )
 
 const managerSchema = `schema "p12"
@@ -43,8 +48,6 @@ func dataCommands(t *testing.T, schemaPath, dataPath string) map[string][]string
 	out := filepath.Join(t.TempDir(), "out.ys")
 	return map[string][]string{
 		"check":         {"check", "--format", "json", schemaPath, dataPath},
-		"load":          {"load", "--format", "json", schemaPath, dataPath},
-		"export":        {"export", "--format", "json", "--to", "json", schemaPath, dataPath},
 		"snapshot save": {"snapshot", "save", "--format", "json", "-o", out, schemaPath, dataPath},
 	}
 }
@@ -265,7 +268,7 @@ func TestSnapshotSave_KeepsEarlierFilesFindingsWhenALaterFileCannotBeRead(t *tes
 		t.Fatalf("exit code = %d, want %d", code, cli.ExitRuntime)
 	}
 	doc := decodeDocument(t, errOut)
-	if got, want := codesOf(doc), []string{"E_ADAPTER_PARSE", "E_COMMAND_FAILED"}; !slices.Equal(got, want) {
+	if got, want := codesOf(doc), []string{"E_COMMAND_FAILED", "E_DATA_PARSE"}; !slices.Equal(got, want) {
 		t.Errorf("codes = %v, want %v: the first file's finding must survive the second file's failure", got, want)
 	}
 }
@@ -297,8 +300,8 @@ func TestSnapshotSave_RefusesAUsageErrorBeforeReadingAnyFile(t *testing.T) {
 	}
 }
 
-// TestDataCommands_RefuseAUsageErrorBeforeAnyRead pins that check, load and
-// snapshot save judge every data operand before they read the schema or a merged
+// TestDataCommands_RefuseAUsageErrorBeforeAnyRead pins that check and snapshot
+// save judge every data operand before they read the schema or a merged
 // file: a schema that does not load and a merged file that does not exist draw
 // nothing beside the usage error.
 func TestDataCommands_RefuseAUsageErrorBeforeAnyRead(t *testing.T) {
@@ -313,7 +316,6 @@ func TestDataCommands_RefuseAUsageErrorBeforeAnyRead(t *testing.T) {
 	out := filepath.Join(dir, "out.ys")
 	for name, argv := range map[string][]string{
 		"check":                {"check", "--format", "json", broken, data},
-		"load":                 {"load", "--format", "json", broken, data},
 		"snapshot save":        {"snapshot", "save", "--format", "json", "-o", out, broken, data},
 		"snapshot save --into": {"snapshot", "save", "--format", "json", "--into", filepath.Join(dir, "missing.ys"), broken, data},
 	} {
@@ -330,44 +332,99 @@ func TestDataCommands_RefuseAUsageErrorBeforeAnyRead(t *testing.T) {
 	}
 }
 
-// TestLoad_SummaryCountsTheDocumentAndIgnoresWarnings pins the summary line's
-// two counts over a document of several type names, and that a warning does
-// not withhold it.
-func TestLoad_SummaryCountsTheDocumentAndIgnoresWarnings(t *testing.T) {
+// TestSnapshotSaveInto_ReportsAMissingTargetOfARootTheEntryCannotName pins that
+// a base snapshot's root of a type the entry schema reaches only through another
+// import keeps its E_UNRESOLVED_REQUIRED when the document refuses an entry type
+// of the target's name and key: the refused root is another type.
+func TestSnapshotSaveInto_ReportsAMissingTargetOfARootTheEntryCannotName(t *testing.T) {
 	t.Parallel()
+	ctx := context.Background()
+	dir := t.TempDir()
+	for name, src := range map[string]string{
+		"entry.yammm": `schema "entry"
 
-	dir, schemaPath := verdictFixture(t, map[string]string{
-		"two.json": `{"Person": [
-{"id": "a", "name": "A", "manager": {"_target_id": "a"}},
-{"id": "b", "name": "B", "manager": {"_target_id": "a"}}
-]}`,
-	})
-	companySchema := filepath.Join(dir, "company.yammm")
-	if err := os.WriteFile(companySchema, []byte(managerSchema+`
-type Company {
-    cid String primary
+import "./base" as base
+
+type Beacon {
+	id String primary
+	--> LINK (one) Target
 }
-`), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	both := filepath.Join(dir, "both.json")
-	if err := os.WriteFile(both, []byte(`{"Company": [{"cid": "c"}], "Person": [
-{"id": "a", "name": "A", "manager": {"_target_id": "a"}},
-{"id": "b", "name": "B", "manager": {"_target_id": "a"}}
-]}`), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	for _, tc := range []struct {
-		args []string
-		want string
-	}{
-		{[]string{"load", schemaPath, filepath.Join(dir, "two.json")}, "loaded 2 instances of 1 types\n"},
-		{[]string{"load", companySchema, both}, "loaded 3 instances of 2 types\n"},
-		{[]string{"load", "testdata/annotation_shadowed.yammm", "testdata/annotation_shadowed_good.json"}, "loaded 1 instances of 1 types\n"},
+
+type Target {
+	id String primary
+	n Integer[0, 5]
+}
+`,
+		"base.yammm": `schema "base"
+
+import "./deep" as deep
+
+type Basin {
+	id String primary
+	--> LIGHT (_:one) deep.Beacon
+}
+`,
+		"deep.yammm": `schema "deep"
+
+type Beacon {
+	id String primary
+	--> LINK (one) Target
+}
+
+type Target {
+	id String primary
+}
+`,
+		"refused.json": `{"Target": [{"id": "t1", "n": 99}]}`,
 	} {
-		code, _, errOut := executeCmdOutput(t, tc.args...)
-		if code != cli.ExitOK || !strings.Contains(errOut, tc.want) {
-			t.Errorf("%v: exit %d, stderr %q; want exit 0 and %q", tc.args, code, errOut, tc.want)
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(src), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	entryPath := filepath.Join(dir, "entry.yammm")
+	s, res := schema.Load(ctx, entryPath)
+	if res.HasErrors() {
+		t.Fatalf("load schema: %s", res)
+	}
+	var deep schema.Schema
+	for member := range s.Closure() {
+		if member.Name() == "deep" {
+			deep = member
+		}
+	}
+	beacon, valid := instance.NewValidator(deep).ValidateOne(ctx, "Beacon",
+		instance.RawInstance{Properties: map[string]any{"id": "b1", "link": map[string]any{"_target_id": "t1"}}})
+	if valid.HasErrors() {
+		t.Fatalf("validate deep Beacon: %s", valid)
+	}
+	g := graph.New(s)
+	if added := g.Add(ctx, beacon); !added.OK() {
+		t.Fatalf("add deep Beacon: %s", added)
+	}
+	data, marshalled := snapshot.Marshal(ctx, g.Snapshot())
+	if marshalled.HasErrors() {
+		t.Fatalf("marshal: %s", marshalled)
+	}
+	base := filepath.Join(dir, "base.ys")
+	if err := os.WriteFile(base, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	code, _, errOut := executeCmdOutput(t, "snapshot", "save", "--format", "json", "--into", base,
+		"-o", filepath.Join(dir, "out.ys"), entryPath, filepath.Join(dir, "refused.json"))
+	if code != cli.ExitValidation {
+		t.Fatalf("exit code = %d, want %d\nstderr:\n%s", code, cli.ExitValidation, errOut)
+	}
+	doc := decodeDocument(t, errOut)
+	if got, want := codesOf(doc), []string{"E_CONSTRAINT_FAIL", "E_UNRESOLVED_REQUIRED"}; !slices.Equal(got, want) {
+		t.Errorf("codes = %v, want %v", got, want)
+	}
+	for _, iss := range doc.Issues {
+		if iss.Code != "E_UNRESOLVED_REQUIRED" {
+			continue
+		}
+		if name, _ := iss.detail("type"); name != "deep#Beacon" {
+			t.Errorf("the missing target's source is named %q, want %q", name, "deep#Beacon")
 		}
 	}
 }

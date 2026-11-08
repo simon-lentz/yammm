@@ -37,7 +37,6 @@ type streamDecoder struct {
 	header    headerWire       // decoded header
 	typeTable []typeTableEntry // decoded types table
 	tableIDs  []schema.TypeID  // identity per table row, zero where unresolved
-	tableTags []string         // rendered tag per table row; nil when the schema is zero
 	// rootlessRows holds each row [streamDecoder.checkRootTypeEligible] refused.
 	rootlessRows map[int]bool
 	collector    *diag.Collector // accumulates diagnostics
@@ -62,6 +61,10 @@ type streamDecoder struct {
 	// schema is present; [streamDecoder.revalidate] then runs each root the
 	// structural checks left whole back through it.
 	revalidator *instance.Validator
+
+	// revalidationTargets holds, per type revalidated so far, the validator
+	// and name [streamDecoder.revalidatorFor] chose for it.
+	revalidationTargets map[schema.TypeID]revalidationTarget
 
 	// cancelReported is set once a revalidated root has reported the context's
 	// cancellation, so revalidate's own poll does not report it a second time.
@@ -98,6 +101,41 @@ func newRevalidator(s schema.Schema, cfg loadConfig) *instance.Validator {
 		return nil
 	}
 	return instance.NewValidator(s, instance.WithIssueLimit(cfg.issueLimit))
+}
+
+// revalidationTarget is a validator and the name it resolves one type by.
+type revalidationTarget struct {
+	v    *instance.Validator
+	name string
+}
+
+// revalidatorFor returns the validator that revalidates a root of t and
+// the name that validator resolves t by. A type the entry schema can name is
+// revalidated under that name. Any other is revalidated under its declared
+// name by a validator over its declaring schema: the entry schema resolves no
+// name to it, and its declared name can denote another entry type or none.
+func (sd *streamDecoder) revalidatorFor(t schema.Type) (*instance.Validator, string) {
+	id := t.ID()
+	if target, ok := sd.revalidationTargets[id]; ok {
+		return target.v, target.name
+	}
+	target := revalidationTarget{v: sd.revalidator}
+	if tag, ok := schema.AddressableTag(sd.schema, id); ok {
+		target.name = tag
+	} else {
+		target.name = id.Name()
+		for s := range sd.schema.Closure() {
+			if s.SourceID() == id.SchemaPath() {
+				target.v = newRevalidator(s, sd.loadCfg)
+				break
+			}
+		}
+	}
+	if sd.revalidationTargets == nil {
+		sd.revalidationTargets = make(map[schema.TypeID]revalidationTarget)
+	}
+	sd.revalidationTargets[id] = target
+	return target.v, target.name
 }
 
 // newStreamDecoderFromReader creates a streamDecoder backed by an io.Reader,
@@ -546,9 +584,9 @@ func (sd *streamDecoder) walkInstances(ctx context.Context, groups []instanceGro
 // checkRootTypeEligible refuses a type that cannot hold a root instance, by the
 // graph package doc's "Root type eligibility" section, at the first group, or
 // duplicate record stating no parent, that names it, and reports whether the type
-// can hold one. An empty group is held to it too: adapter/json keys its output by
-// a denoted type's name. No load option excuses a member, and a
-// schema-less read checks none.
+// can hold one. An empty group is held to it too: no constructor denotes a type
+// graph.Graph.Add refuses. No load option excuses a member, and a schema-less
+// read checks none.
 func (sd *streamDecoder) checkRootTypeEligible(row int, position string) bool {
 	if sd.schema.IsZero() || row >= len(sd.tableIDs) {
 		return true
@@ -566,17 +604,6 @@ func (sd *streamDecoder) checkRootTypeEligible(row int, position string) bool {
 			sd.rootlessRows = make(map[int]bool)
 		}
 		sd.rootlessRows[row] = true
-	}
-	if !schema.Addressable(sd.schema, sd.tableIDs[row]) {
-		refuse()
-		sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_UNNAMEABLE_TYPE,
-			fmt.Sprintf("%s denotes %s, which this schema reaches only through an intermediate import and cannot name",
-				position, sd.refText(row))).
-			WithHint("import the schema that declares it directly, then read the document again").
-			WithDetail(diag.DetailKeyTypeName, sd.refAt(row)).
-			WithDetail(diag.DetailKeyTypeSchema, sd.tableIDs[row].SchemaPath().String()).
-			Build())
-		return false
 	}
 	// The graph package's order, so a type breaking two rules draws the rule it names.
 	var rule string
@@ -1263,7 +1290,8 @@ func (sd *streamDecoder) revalidateRoot(ctx context.Context, idx *docIndex, row 
 		inst.Edges = edges
 	}
 	props := sd.rebuildRawProperties(t, inst)
-	_, res := sd.revalidator.ValidateOne(ctx, sd.tableTags[row], instance.RawInstance{Properties: props})
+	v, name := sd.revalidatorFor(t)
+	_, res := v.ValidateOne(ctx, name, instance.RawInstance{Properties: props})
 	// MergeRetag keeps the validator's order, so a capped collector evicts by
 	// when a finding was raised, not by how its message sorts.
 	sev, typeText := sd.loadCfg.revalidateSeverity, sd.refText(row)
@@ -1387,8 +1415,8 @@ func (sd *streamDecoder) wireTypeText(row *int) string {
 //
 // The table is consulted first because a row already holds the rendering. An
 // identity the document does not denote is rendered from the closure instead —
-// NOT through schema.TagForm, which produces a bare or alias-qualified name and
-// would put the two halves of one diagnostic in two vocabularies. That case is
+// NOT through schema.TagForm, which produces an entry-relative name and would
+// put the two halves of one diagnostic in two vocabularies. That case is
 // not rare: it is what happens when the relation's declared target is the type
 // the document failed to name.
 func (sd *streamDecoder) identRef(id schema.TypeID) string {

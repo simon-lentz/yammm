@@ -31,7 +31,7 @@ func TestDocumentedInvocationsExist(t *testing.T) {
 	t.Logf("read %d invocations", n)
 }
 
-const invocationFloor = 125
+const invocationFloor = 110
 
 // executedCommandTable returns newRootCmd's table as execute builds the tree:
 // cobra's help and completion commands included.

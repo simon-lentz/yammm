@@ -159,8 +159,7 @@ func TestTemporalChecksReadAStringCarrier(t *testing.T) {
 }
 
 // Every CoerceValue arm returns (nil, error) on a wrong-typed value, the
-// temporal and UUID arm included: the pass-through is instance.CanonicalValue's
-// contract one layer up, not this one's.
+// temporal and UUID arm included.
 func TestCoerceValue_EveryArmReturnsNilOnError(t *testing.T) {
 	t.Parallel()
 	for name, c := range map[string]schema.Constraint{

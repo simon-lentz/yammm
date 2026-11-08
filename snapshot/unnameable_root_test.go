@@ -1,31 +1,35 @@
 package snapshot_test
 
 import (
-	"bytes"
-	"context"
-	"encoding/json"
 	"fmt"
+	"slices"
+	"strings"
 	"testing"
 
 	"github.com/simon-lentz/yammm/diag"
+	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/immutable"
+	"github.com/simon-lentz/yammm/instance"
+	"github.com/simon-lentz/yammm/internal/instancetest"
 	"github.com/simon-lentz/yammm/internal/snapparts"
 	"github.com/simon-lentz/yammm/internal/snappartstest"
 	"github.com/simon-lentz/yammm/schema"
 	"github.com/simon-lentz/yammm/snapshot"
 )
 
-// The reader half of the root type the entry schema cannot name.
-//
-// A root is keyed by name in every output document, so a type reached only
-// through an intermediate import cannot hold one. This library cannot write
-// such a document, but a foreign writer or a document written before the rule can
-// state one, and a reader that admitted it would hand the caller a snapshot no
-// adapter can key.
+// A type the entry schema cannot name: deep's Beacon, reached only through
+// base. The entry declares a Beacon of its own whose properties differ, so a
+// reader that resolved deep's Beacon by its bare name would judge it as the
+// entry's.
 
 const unreachableRootEntry = `schema "entry"
 
 import "base.yammm" as base
+
+type Beacon {
+	id String primary
+	label String required
+}
 `
 
 const unreachableRootBase = `schema "base"
@@ -34,6 +38,7 @@ import "deep.yammm" as deep
 
 type Basin {
 	id String primary
+	area Float
 }
 `
 
@@ -45,14 +50,10 @@ type Beacon {
 }
 `
 
-// unnameableDocument marshals a legal Basin-only snapshot, then ADDS a types
-// table row for the transitively imported Beacon and points the populated group
-// at it. No snapshot holds such a type, so the document can only be built by
-// editing the wire — which is exactly the shape a foreign writer, or a document
-// written before the rule, can carry.
-func unnameableDocument(t *testing.T, items string) ([]byte, schema.Schema) {
+// unnameableFixture loads the three-schema closure and returns the entry
+// schema, the deep schema and the identity of each Beacon.
+func unnameableFixture(t *testing.T) (s, deep schema.Schema, entryBeacon, deepBeacon schema.TypeID) {
 	t.Helper()
-	ctx := context.Background()
 	s, res := schema.LoadSourcesWithEntry(t.Context(), map[string][]byte{
 		"entry.yammm": []byte(unreachableRootEntry),
 		"base.yammm":  []byte(unreachableRootBase),
@@ -61,204 +62,163 @@ func unnameableDocument(t *testing.T, items string) ([]byte, schema.Schema) {
 	if res.HasErrors() {
 		t.Fatalf("load fixture: %s", res)
 	}
-
 	base, ok := s.ImportByAlias("base")
 	if !ok || base.Schema().IsZero() {
 		t.Fatal("import alias base did not resolve")
 	}
-	basinType, ok := base.Schema().Type("Basin")
-	if !ok {
-		t.Fatal("base.Basin not found")
-	}
-	deepImp, ok := base.Schema().ImportByAlias("deep")
-	if !ok || deepImp.Schema().IsZero() {
+	imp, ok := base.Schema().ImportByAlias("deep")
+	if !ok || imp.Schema().IsZero() {
 		t.Fatal("import alias deep did not resolve")
 	}
-	beaconType, ok := deepImp.Schema().Type("Beacon")
-	if !ok {
-		t.Fatal("deep.Beacon not found")
-	}
-	if _, addressable := schema.AddressableTag(s, beaconType.ID()); addressable {
+	deep = imp.Schema()
+	deepBeacon = factTypeID(t, deep, "Beacon")
+	if _, addressable := schema.AddressableTag(s, deepBeacon); addressable {
 		t.Fatal("fixture is vacuous: the entry schema can name deep.Beacon")
 	}
-	basin := basinType.ID()
-
-	built := snappartstest.Loaded(t, s, snapparts.Parts{
-		Types: []schema.TypeID{basin},
-		Instances: []snapparts.Instance{
-			{
-				TypeID:     basin,
-				PrimaryKey: immutable.WrapKey([]any{"b1"}),
-				Properties: immutable.WrapProperties(map[string]any{"id": "b1"}),
-			},
-		},
-	})
-	data, mres := snapshot.Marshal(ctx, built)
-	if mres.HasErrors() {
-		t.Fatalf("marshal: %s", mres)
-	}
-	return addUnnameableGroup(t, data, items), s
+	return s, deep, factTypeID(t, s, "Beacon"), deepBeacon
 }
 
-// addUnnameableGroup appends a types-table row for deep#Beacon and replaces the
-// instances section with a single group pointing at it. items is the group's
-// "items" array, so a caller chooses between a populated group and an empty one.
-func addUnnameableGroup(t *testing.T, data []byte, items string) []byte {
-	t.Helper()
-	var doc struct {
-		Types []json.RawMessage `json:"types"`
-	}
-	if err := json.Unmarshal(data, &doc); err != nil {
-		t.Fatalf("unmarshal document: %v", err)
-	}
-	rows := make([]json.RawMessage, len(doc.Types))
-	copy(rows, doc.Types)
-	rows = append(rows, json.RawMessage(`{"schema":"deep","name":"Beacon"}`))
-	added := len(rows) - 1
-
-	types, err := json.Marshal(rows)
-	if err != nil {
-		t.Fatalf("marshal the types table: %v", err)
-	}
-	out := spliceJSONValue(t, data, "types", types)
-	group := fmt.Sprintf(`[{"type":%d,"items":%s}]`, added, items)
-	return spliceJSONValue(t, out, "instances", []byte(group))
-}
-
-// spliceJSONValue replaces the value of a top-level key with replacement,
-// keeping every other byte of data as it stands. It matches brackets rather
-// than searching for a terminator so a nested array cannot end the scan early.
-func spliceJSONValue(t *testing.T, data []byte, key string, replacement []byte) []byte {
-	t.Helper()
-	marker := []byte(`"` + key + `":`)
-	at := bytes.Index(data, marker)
-	if at < 0 {
-		t.Fatalf("document has no %q key: %s", key, data)
-	}
-	valueStart := at + len(marker)
-	if valueStart >= len(data) || data[valueStart] != '[' {
-		t.Fatalf("the %q value is not an array: %s", key, data)
-	}
-
-	depth, inString, escaped, end := 0, false, false, -1
-	for i := valueStart; i < len(data); i++ {
-		c := data[i]
-		switch {
-		case escaped:
-			escaped = false
-		case c == '\\' && inString:
-			escaped = true
-		case c == '"':
-			inString = !inString
-		case inString:
-		case c == '[':
-			depth++
-		case c == ']':
-			depth--
-			if depth == 0 {
-				end = i + 1
-			}
-		}
-		if end >= 0 {
-			break
-		}
-	}
-	if end < 0 {
-		t.Fatalf("the %q array is unterminated: %s", key, data)
-	}
-
-	out := make([]byte, 0, len(data)-(end-valueStart)+len(replacement))
-	out = append(out, data[:valueStart]...)
-	out = append(out, replacement...)
-	out = append(out, data[end:]...)
-	return out
-}
-
-// TestLoad_UnnameableDenotedTypeRefused pins the reader's member of the denoted
-// type rule, over a group that HOLDS instances.
-//
-// Mutation: dropping the schema.Addressable arm from checkRootTypeEligible turns
-// this red.
-func TestLoad_UnnameableDenotedTypeRefused(t *testing.T) {
+// TestLoad_KeepsARootTheEntrySchemaCannotNameApartFromItsNamesake pins that a
+// document holding both Beacons at one key reads back as two roots, and that
+// revalidation judges each by its own type, so clean data reports nothing.
+func TestLoad_KeepsARootTheEntrySchemaCannotNameApartFromItsNamesake(t *testing.T) {
 	t.Parallel()
-	data, s := unnameableDocument(t, `[{"key":["d1"],"properties":{"id":"d1"},"provenance":null}]`)
-
-	_, res := snapshot.Load(context.Background(), data, s, snapshot.WithIntegrityCheck(false))
-	if !res.HasCode(diag.E_SNAPSHOT_UNNAMEABLE_TYPE) {
-		t.Fatalf("Load accepted a document denoting a type the entry schema cannot name: %s", res)
+	ctx := t.Context()
+	s, deep, entryBeacon, deepBeacon := unnameableFixture(t)
+	g := graph.New(s)
+	for _, valid := range []instance.ValidInstance{
+		instancetest.Valid(t, s, "Beacon", map[string]any{"id": "d1", "label": "lamp"}),
+		instancetest.Valid(t, deep, "Beacon", map[string]any{"id": "d1", "power": float64(2)}),
+	} {
+		if res := g.Add(ctx, valid); !res.OK() {
+			t.Fatalf("Add: %s", res)
+		}
 	}
-	var hinted, schemaNamed bool
-	for issue := range res.Issues() {
-		if issue.Code() != diag.E_SNAPSHOT_UNNAMEABLE_TYPE {
+	data, res := snapshot.Marshal(ctx, g.Snapshot())
+	if res.HasErrors() {
+		t.Fatalf("marshal: %s", res)
+	}
+	for name, opts := range map[string][]snapshot.LoadOption{
+		"plain":                   nil,
+		"revalidation at Warning": {snapshot.WithRevalidation(diag.Warning)},
+		"revalidation at Error":   {snapshot.WithRevalidation(diag.Error)},
+	} {
+		snap, res := snapshot.Load(ctx, data, s, opts...)
+		if res.Len() != 0 {
+			t.Errorf("%s: Load = %s, want no issue", name, res)
 			continue
 		}
-		if issue.Hint() != "" {
-			hinted = true
-		}
-		for _, d := range issue.Details() {
-			if d.Key == diag.DetailKeyTypeSchema && d.Value != "" {
-				schemaNamed = true
+		for _, id := range []schema.TypeID{entryBeacon, deepBeacon} {
+			if n := len(slices.Collect(snap.InstancesOf(id))); n != 1 {
+				t.Errorf("%s: %d instances of %s, want 1", name, n, id)
 			}
 		}
-		if issue.Severity() == diag.Fatal {
-			t.Errorf("a foreign document drew a Fatal issue, not an Error: %s", issue.Message())
+	}
+	if res := snapshot.Verify(ctx, data, s, snapshot.WithRevalidation(diag.Error)); res.Len() != 0 {
+		t.Errorf("Verify = %s, want no issue", res)
+	}
+}
+
+// TestLoad_KeepsAnEmptyGroupOfATypeTheEntrySchemaCannotName pins that a group
+// with no items denotes deep's Beacon as a populated one does.
+func TestLoad_KeepsAnEmptyGroupOfATypeTheEntrySchemaCannotName(t *testing.T) {
+	t.Parallel()
+	s, _, _, deepBeacon := unnameableFixture(t)
+	doc := snappartstest.Document(t, s, snapparts.Parts{Types: []schema.TypeID{deepBeacon}})
+	snap, res := snapshot.Load(t.Context(), doc, s)
+	if res.Len() != 0 {
+		t.Fatalf("Load = %s, want no issue", res)
+	}
+	if got := snap.Types(); !slices.Equal(got, []schema.TypeID{deepBeacon}) {
+		t.Errorf("Types() = %v, want [%s]", got, deepBeacon)
+	}
+}
+
+// TestLoad_RevalidatesARootTheEntrySchemaCannotNameAsItsOwnType pins that a bad
+// value under deep's Beacon draws deep's finding alone. The entry's Beacon would
+// add a missing label and an unknown power.
+func TestLoad_RevalidatesARootTheEntrySchemaCannotNameAsItsOwnType(t *testing.T) {
+	t.Parallel()
+	s, _, _, deepBeacon := unnameableFixture(t)
+	doc := snappartstest.Document(t, s, snapparts.Parts{Instances: []snapparts.Instance{{
+		TypeID:     deepBeacon,
+		PrimaryKey: immutable.WrapKey([]any{"d1"}),
+		Properties: immutable.WrapProperties(map[string]any{"id": "d1", "power": "high"}),
+	}}})
+	_, res := snapshot.Load(t.Context(), doc, s, snapshot.WithRevalidation(diag.Warning))
+	if res.Len() != 1 || !res.HasCode(diag.E_TYPE_MISMATCH) || res.HasErrors() {
+		t.Errorf("Load = %s, want one %s at Warning", res, diag.E_TYPE_MISMATCH)
+	}
+}
+
+// TestLoad_RevalidatesADirectlyImportedRootUnderItsTag pins that a root the
+// entry schema names "base.Basin" is judged by the entry's validator under that
+// tag: clean data reports nothing, and a bad value's finding names the tag.
+func TestLoad_RevalidatesADirectlyImportedRootUnderItsTag(t *testing.T) {
+	t.Parallel()
+	s, _, _, _ := unnameableFixture(t)
+	basin := mustTypeIDIn(t, s, "base", "Basin")
+	doc := func(area any) []byte {
+		return snappartstest.Document(t, s, snapparts.Parts{Instances: []snapparts.Instance{{
+			TypeID:     basin,
+			PrimaryKey: immutable.WrapKey([]any{"b1"}),
+			Properties: immutable.WrapProperties(map[string]any{"id": "b1", "area": area}),
+		}}})
+	}
+	if _, res := snapshot.Load(t.Context(), doc(float64(2)), s, snapshot.WithRevalidation(diag.Error)); res.Len() != 0 {
+		t.Errorf("clean Load = %s, want no issue", res)
+	}
+	_, res := snapshot.Load(t.Context(), doc("wide"), s, snapshot.WithRevalidation(diag.Warning))
+	if res.Len() != 1 || !res.HasCode(diag.E_TYPE_MISMATCH) {
+		t.Fatalf("Load = %s, want one %s", res, diag.E_TYPE_MISMATCH)
+	}
+	for issue := range res.Issues() {
+		for _, d := range issue.Details() {
+			if d.Key == diag.DetailKeyTypeName && d.Value != "base.Basin" {
+				t.Errorf("the finding names type %q, want %q", d.Value, "base.Basin")
+			}
 		}
 	}
-	if !hinted {
-		t.Error("the refusal carries no hint telling the caller to import the schema directly")
-	}
-	// The row renders as a bare name, so the declaring schema is the only thing
-	// that tells the caller WHICH type to import.
-	if !schemaNamed {
-		t.Errorf("the refusal carries no %s detail", diag.DetailKeyTypeSchema)
-	}
 }
 
-// TestLoad_UnnameableEmptyGroupRefused is the half the empty-group exemption used
-// to swallow. A group with no items still DENOTES its type, and every writer keys
-// its output by a denoted type's name, so nameability binds here where the three
-// root members do not.
-//
-// Mutation: restoring the `items == 0` early return above the nameability check
-// turns this red and leaves the test above green.
-func TestLoad_UnnameableEmptyGroupRefused(t *testing.T) {
+// TestLoad_RevalidationHoldsTheIssueLimitAtATypeTheEntrySchemaCannotName pins
+// that the validator of the schema declaring a type the entry schema cannot name
+// caps a row at the load's limit, as the entry's validator does.
+func TestLoad_RevalidationHoldsTheIssueLimitAtATypeTheEntrySchemaCannotName(t *testing.T) {
 	t.Parallel()
-	data, s := unnameableDocument(t, `[]`)
-
-	_, res := snapshot.Load(context.Background(), data, s, snapshot.WithIntegrityCheck(false))
-	if !res.HasCode(diag.E_SNAPSHOT_UNNAMEABLE_TYPE) {
-		t.Fatalf("Load accepted an empty group denoting an unnameable type: %s", res)
+	const width = 130
+	var props strings.Builder
+	values := map[string]any{"id": "w1"}
+	for i := range width {
+		fmt.Fprintf(&props, "\tp%d Float\n", i)
+		values[fmt.Sprintf("p%d", i)] = "bad"
 	}
-}
-
-// TestLoad_UnnameableDenotedTypeIsRefusedWhateverTheOptions pins that no load
-// option excuses the member. Revalidation checks an instance's PROPERTIES, which
-// says nothing about whether the schema can name its type.
-func TestLoad_UnnameableDenotedTypeIsRefusedWhateverTheOptions(t *testing.T) {
-	t.Parallel()
-	data, s := unnameableDocument(t, `[{"key":["d1"],"properties":{"id":"d1"},"provenance":null}]`)
-	ctx := context.Background()
-
-	for name, opts := range map[string][]snapshot.LoadOption{
-		"integrity off": {snapshot.WithIntegrityCheck(false)},
-		"revalidation":  {snapshot.WithIntegrityCheck(false), snapshot.WithRevalidation(diag.Error)},
-	} {
-		if _, res := snapshot.Load(ctx, data, s, opts...); !res.HasCode(diag.E_SNAPSHOT_UNNAMEABLE_TYPE) {
-			t.Errorf("%s: Load accepted the document: %s", name, res)
+	s, res := schema.LoadSourcesWithEntry(t.Context(), map[string][]byte{
+		"entry.yammm": []byte("schema \"entry\"\n\nimport \"base.yammm\" as base\n"),
+		"base.yammm":  []byte("schema \"base\"\n\nimport \"deep.yammm\" as deep\n"),
+		"deep.yammm":  []byte("schema \"deep\"\n\ntype Wide {\n\tid String primary\n" + props.String() + "}\n"),
+	}, "entry.yammm", ".", schema.WithSourcesOnly(true))
+	if res.HasErrors() {
+		t.Fatalf("load fixture: %s", res)
+	}
+	var wide schema.TypeID
+	for member := range s.Closure() {
+		if typ, ok := member.Type("Wide"); ok {
+			wide = typ.ID()
 		}
 	}
-}
-
-// A root of a type the entry schema cannot name draws its one refusal under
-// WithRevalidation too: the validator does not run it, and so reports no
-// finding of its own for the root's values.
-func TestLoad_AnUnnameableRootIsNotRevalidated(t *testing.T) {
-	t.Parallel()
-	data, s := unnameableDocument(t, `[{"key":["d1"],"properties":{"id":"d1","power":"high"},"provenance":null}]`)
-	for _, sev := range []diag.Severity{diag.Warning, diag.Error} {
-		_, res := snapshot.Load(context.Background(), data, s, snapshot.WithIntegrityCheck(false), snapshot.WithRevalidation(sev))
-		if res.Len() != 1 || !res.HasCode(diag.E_SNAPSHOT_UNNAMEABLE_TYPE) {
-			t.Errorf("revalidating at %s: %s, want one %s", sev, res, diag.E_SNAPSHOT_UNNAMEABLE_TYPE)
+	if _, addressable := schema.AddressableTag(s, wide); wide.IsZero() || addressable {
+		t.Fatal("fixture is vacuous: the entry schema can name Wide, or it did not resolve")
+	}
+	doc := snappartstest.Document(t, s, snapparts.Parts{Instances: []snapparts.Instance{{
+		TypeID:     wide,
+		PrimaryKey: immutable.WrapKey([]any{"w1"}),
+		Properties: immutable.WrapProperties(values),
+	}}})
+	for limit, want := range map[int][2]int{0: {width, 0}, 120: {120, width - 120}} {
+		_, res := snapshot.Load(t.Context(), doc, s, snapshot.WithRevalidation(diag.Warning), snapshot.WithIssueLimit(limit))
+		if res.Len() != want[0] || res.DroppedCount() != want[1] {
+			t.Errorf("limit %d: %d issues, %d dropped; want %d and %d", limit, res.Len(), res.DroppedCount(), want[0], want[1])
 		}
 	}
 }

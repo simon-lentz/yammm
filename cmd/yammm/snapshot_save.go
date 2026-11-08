@@ -112,11 +112,10 @@ func runSnapshotSave(cmd *cobra.Command, args []string, sink *cli.DiagnosticSink
 		imported = header
 	}
 
-	a, err := assembleGraph(cmd, sink, s, dataPaths, g)
+	g, err = assembleGraph(cmd, sink, s, dataPaths, g)
 	if err != nil {
 		return err
 	}
-	g = a.graph
 	if sink.Result().HasErrors() {
 		return cli.Exit(cli.ExitForResult(sink.Result()))
 	}

@@ -1,5 +1,0 @@
-{
-  "Sensor": [
-    { "id": "S1", "located_in": { "_target_country": "US" } }
-  ]
-}

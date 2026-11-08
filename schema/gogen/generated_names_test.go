@@ -3,14 +3,12 @@ package gogen_test
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"go/ast"
 	"go/parser"
 	"go/printer"
 	"go/token"
 	"maps"
-	"net/url"
 	"reflect"
 	"slices"
 	"strconv"
@@ -19,7 +17,6 @@ import (
 
 	"github.com/simon-lentz/yammm/schema"
 	"github.com/simon-lentz/yammm/schema/gogen"
-	"github.com/simon-lentz/yammm/schema/jschema"
 )
 
 // generateSources loads sources with entry "main.yammm" and generates them.
@@ -465,55 +462,73 @@ func goStructs(t *testing.T, src []byte) map[string]map[string]string {
 	return out
 }
 
-// defRef returns the $defs key a JSON Schema fragment references, directly or
-// as its array items.
-func defRef(t *testing.T, raw json.RawMessage) string {
-	t.Helper()
-	var frag struct {
-		Ref   string `json:"$ref"`
-		Items struct {
-			Ref string `json:"$ref"`
-		} `json:"items"`
-	}
-	if err := json.Unmarshal(raw, &frag); err != nil {
-		t.Fatal(err)
-	}
-	ref := frag.Ref
-	if ref == "" {
-		ref = frag.Items.Ref
-	}
-	pointer, err := url.PathUnescape(strings.TrimPrefix(ref, "#/$defs/"))
-	if err != nil || !strings.HasPrefix(ref, "#/$defs/") {
-		return ""
-	}
-	return strings.NewReplacer("~1", "/", "~0", "~").Replace(pointer)
+// wireEntity is what one JSON object of an instance document is: an instance
+// of typ, or, when edge is set, an edge of that association to typ.
+type wireEntity struct {
+	typ  schema.Type
+	edge *schema.Relation
 }
 
-// TestMarshal_EveryReferenceBindsTheEntityJSchemaBinds checks gogen's names
-// against a second implementation of the same binding, schema/jschema's
-// $defs keys: from each Graph field, every struct a field's type names holds
-// the wire keys of the def jschema's matching property references, at every
-// depth.
-func TestMarshal_EveryReferenceBindsTheEntityJSchemaBinds(t *testing.T) {
+// wireKeys returns the keys a JSON object of e holds, read from the schema by
+// the accessors the validator reads by, and the entity each object-valued key
+// holds.
+func wireKeys(t *testing.T, s schema.Schema, e wireEntity) ([]string, map[string]wireEntity) {
+	t.Helper()
+	var keys []string
+	children := map[string]wireEntity{}
+	if e.edge != nil {
+		for pk := range e.typ.PrimaryKeys() {
+			keys = append(keys, "_target_"+pk.Name())
+		}
+		for p := range e.edge.Properties() {
+			keys = append(keys, p.Name())
+		}
+		slices.Sort(keys)
+		return keys, children
+	}
+	for p := range e.typ.AllProperties() {
+		keys = append(keys, p.Name())
+	}
+	target := func(rel schema.Relation) schema.Type {
+		typ, ok := s.TypeByID(rel.TargetID())
+		if !ok {
+			t.Fatalf("%s: the target %s does not resolve", rel.Name(), rel.TargetID())
+		}
+		return typ
+	}
+	for rel := range e.typ.AllCompositions() {
+		keys = append(keys, rel.FieldName())
+		children[rel.FieldName()] = wireEntity{typ: target(rel)}
+	}
+	for rel := range e.typ.AllAssociations() {
+		keys = append(keys, rel.FieldName())
+		children[rel.FieldName()] = wireEntity{typ: target(rel), edge: &rel}
+	}
+	slices.Sort(keys)
+	return keys, children
+}
+
+// TestMarshal_EveryStructHoldsTheWireKeysOfTheEntityItBinds walks the generated
+// structs from Graph: every struct a field's type names holds the wire keys of
+// the entity that field holds, read from the schema, at every depth.
+func TestMarshal_EveryStructHoldsTheWireKeysOfTheEntityItBinds(t *testing.T) {
 	t.Parallel()
 
 	s, src := generateSources(t, collisionSources())
-	doc, err := jschema.Marshal(s)
-	if err != nil {
-		t.Fatalf("jschema.Marshal: %v", err)
-	}
-	var js struct {
-		Properties map[string]json.RawMessage `json:"properties"`
-		Defs       map[string]json.RawMessage `json:"$defs"`
-	}
-	if err := json.Unmarshal(doc, &js); err != nil {
-		t.Fatal(err)
-	}
 	structs := goStructs(t, src)
-	type binding struct{ goName, defKey, path string }
+	type binding struct {
+		goName string
+		entity wireEntity
+		path   string
+	}
 	var queue []binding
 	for key, goName := range structs["Graph"] {
-		queue = append(queue, binding{goName, defRef(t, js.Properties[key]), key})
+		typ, ok := s.ResolveTypeName(key)
+		if !ok {
+			t.Errorf("Graph key %q resolves to no type", key)
+			continue
+		}
+		queue = append(queue, binding{goName, wireEntity{typ: typ}, key})
 	}
 	seen := map[string]bool{}
 	for len(queue) > 0 {
@@ -523,21 +538,20 @@ func TestMarshal_EveryReferenceBindsTheEntityJSchemaBinds(t *testing.T) {
 			continue
 		}
 		seen[b.goName] = true
-		var def struct {
-			Properties map[string]json.RawMessage `json:"properties"`
-		}
-		if err := json.Unmarshal(js.Defs[b.defKey], &def); err != nil || def.Properties == nil {
-			t.Errorf("%s: jschema binds %q, which is no object def", b.path, b.defKey)
-			continue
-		}
+		want, children := wireKeys(t, s, b.entity)
 		fields := structs[b.goName]
-		if got, want := slices.Sorted(maps.Keys(fields)), slices.Sorted(maps.Keys(def.Properties)); !slices.Equal(got, want) {
-			t.Errorf("%s: gogen's %s holds %v, jschema's %s holds %v", b.path, b.goName, got, b.defKey, want)
+		if got := slices.Sorted(maps.Keys(fields)); !slices.Equal(got, want) {
+			t.Errorf("%s: gogen's %s holds %v, the schema's entity holds %v", b.path, b.goName, got, want)
 			continue
 		}
 		for key, target := range fields {
-			if target != "" {
-				queue = append(queue, binding{target, defRef(t, def.Properties[key]), b.path + "." + key})
+			child, isObject := children[key]
+			if (target != "") != isObject {
+				t.Errorf("%s.%s: gogen's field names struct %q, the schema's key holds an object: %v", b.path, key, target, isObject)
+				continue
+			}
+			if isObject {
+				queue = append(queue, binding{target, child, b.path + "." + key})
 			}
 		}
 	}

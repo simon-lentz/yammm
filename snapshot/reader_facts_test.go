@@ -99,8 +99,9 @@ type Item {
 	}
 }
 
-// A duplicate record's type is held to the root rule's naming member as a root's is.
-func TestRead_RefusesADuplicateOfATypeTheEntrySchemaCannotName(t *testing.T) {
+// A duplicate record of a type the entry schema cannot name reads back as a
+// root of it does.
+func TestRead_KeepsADuplicateOfATypeTheEntrySchemaCannotName(t *testing.T) {
 	t.Parallel()
 	s, res := schema.LoadSourcesWithEntry(t.Context(), map[string][]byte{
 		"entry.yammm": []byte(unreachableRootEntry),
@@ -119,10 +120,19 @@ func TestRead_RefusesADuplicateOfATypeTheEntrySchemaCannotName(t *testing.T) {
 		t.Fatal("import alias deep did not resolve")
 	}
 	beacon := factTypeID(t, deep.Schema(), "Beacon")
-	doc := snappartstest.Document(t, s, snapparts.Parts{Duplicates: []snapparts.Instance{{
+	record := snapparts.Instance{
 		TypeID:     beacon,
 		PrimaryKey: immutable.WrapKey([]any{"b"}),
 		Properties: immutable.WrapProperties(map[string]any{"id": "b"}),
-	}}})
-	requireReadersRefuse(t, doc, s, diag.E_SNAPSHOT_UNNAMEABLE_TYPE)
+	}
+	doc := snappartstest.Document(t, s, snapparts.Parts{
+		Instances:  []snapparts.Instance{record},
+		Duplicates: []snapparts.Instance{record},
+	})
+	if _, res := snapshot.Load(t.Context(), doc, s); res.HasErrors() {
+		t.Errorf("Load = %s, want no error", res)
+	}
+	if res := snapshot.Verify(t.Context(), doc, s); res.HasErrors() {
+		t.Errorf("Verify = %s, want no error", res)
+	}
 }

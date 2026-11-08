@@ -192,9 +192,7 @@ func TestRenderedLocations_FailedLoadShowsItsExcerpt(t *testing.T) {
 		run  func(*cobra.Command, []string, *cli.DiagnosticSink) error
 	}{
 		{"check", func(s, d, _ string) []string { return []string{"check", s, d} }, runCheck},
-		{"export", func(s, d, _ string) []string { return []string{"export", "--to", "json", s, d} }, runExport},
 		{"gen", func(s, _, _ string) []string { return []string{"gen", "--to", "go", s} }, runGen},
-		{"load", func(s, d, _ string) []string { return []string{"load", s, d} }, runLoad},
 		{"neo4j constraints", func(s, _, _ string) []string { return []string{"neo4j", "constraints", s} }, runNeo4jConstraints},
 		{"neo4j diff", func(s, _, _ string) []string { return []string{"neo4j", "diff", "--uri", "bolt://localhost:7687", s} }, runNeo4jDiff},
 		{"neo4j indexes", func(s, _, _ string) []string { return []string{"neo4j", "indexes", s} }, runNeo4jIndexes},

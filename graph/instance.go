@@ -28,9 +28,7 @@ func (i Instance) IsZero() bool { return i.instanceState == nil }
 
 // instanceState is the record a [Instance] names.
 type instanceState struct {
-	// typeName is the canonical instance tag form.
-	// Local types: unqualified (e.g., "Person")
-	// Imported types: alias-qualified (e.g., "c.Entity")
+	// typeName is the identity rendered by schema.TagForm under the bound schema.
 	typeName string
 
 	// typeID is the semantic type identity for internal indexing.
@@ -48,7 +46,7 @@ type instanceState struct {
 	composed map[string][]Instance
 
 	// provenance holds source location metadata for the instance.
-	// Zero if the adapter provided no provenance.
+	// Zero if the validated instance carried none.
 	provenance location.Provenance
 
 	// validated records whether this instance entered through a
@@ -57,18 +55,10 @@ type instanceState struct {
 	validated bool
 }
 
-// TypeName returns the canonical instance tag form for this instance's type.
-//
-// For local types, returns the unqualified name (e.g., "Person").
-// For imported types, returns the alias-qualified name (e.g., "c.Entity")
-// using the bound schema's import alias.
-//
-// The name is a rendering, not an identity: two types in different schemas can
-// render the same name. [Snapshot.Types] returns
-// [github.com/simon-lentz/yammm/schema.TypeID] values for that reason.
-// [github.com/simon-lentz/yammm/schema.TagForm] renders any identity as this
-// form, and [github.com/simon-lentz/yammm/schema.AddressableTag] renders only
-// the ones the bound schema can name.
+// TypeName returns this instance's type rendered under the bound schema by
+// [github.com/simon-lentz/yammm/schema.TagForm]: "Person" for a local type,
+// "c.Entity" for a directly imported one, and "deep#Beacon" for one the schema
+// reaches only through an intermediate import. Use [Instance.TypeID] to compare.
 func (i Instance) TypeName() string {
 	if i.IsZero() {
 		return ""
@@ -123,7 +113,8 @@ func (i Instance) Properties() immutable.Properties {
 
 // Provenance returns the source location metadata for this instance.
 //
-// Returns the zero Provenance if the adapter provided none.
+// Returns the zero Provenance when the instance's source carried none: the
+// validated instance [Graph.Add] took, or the document snapshot.Load read.
 // Provenance includes SourceName, Path, and Span for diagnostic reporting.
 func (i Instance) Provenance() location.Provenance {
 	if i.IsZero() {

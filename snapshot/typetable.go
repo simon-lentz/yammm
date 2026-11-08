@@ -174,17 +174,13 @@ func (sd *streamDecoder) resolveTypeTable() {
 	if sd.schema.IsZero() {
 		return
 	}
-	// The tag renders from the row alone, so it is derived once here rather
-	// than per instance and per composed child during materialization.
-	sd.tableTags = make([]string, len(sd.typeTable))
 	for i, e := range sd.typeTable {
 		if first := firstRow[i]; first != i {
-			sd.tableIDs[i], sd.tableTags[i] = sd.tableIDs[first], sd.tableTags[first]
+			sd.tableIDs[i] = sd.tableIDs[first]
 			continue
 		}
 		if t, ok := typeByWireID(sd.schema, e.Schema, e.Name); ok {
 			sd.tableIDs[i] = t.ID()
-			sd.tableTags[i] = schema.TagForm(sd.schema, t.ID())
 			continue
 		}
 		sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_UNKNOWN_TYPE,

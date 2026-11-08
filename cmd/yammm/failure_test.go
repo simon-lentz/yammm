@@ -71,7 +71,7 @@ func TestRun_JSONFailureIsInTheDocument(t *testing.T) {
 		code int
 		want string
 	}{
-		{"export, unsupported target", []string{"export", "--to", "xml", "testdata/valid.yammm", "testdata/data.json"}, cli.ExitUsage, "xml"},
+		{"gen, unsupported target", []string{"gen", "--to", "jsonschema", "testdata/valid.yammm"}, cli.ExitUsage, `"jsonschema": must be go or md`},
 		{"check, wrong arity", []string{"check", "testdata/valid.yammm"}, cli.ExitUsage, "arg"},
 		{"snapshot info, unreadable file", []string{"snapshot", "info", missing}, cli.ExitRuntime, "nonexistent.ys"},
 		{"fmt, contradictory flags", []string{"fmt", "--check", "--write", "testdata/valid.yammm"}, cli.ExitUsage, "mutually exclusive"},
@@ -186,8 +186,7 @@ var diagnosticCountLine = regexp.MustCompile(`\d+ error\(s\)|^error: {2,}`)
 // "error: " line says something: no line is the bare prefix, and none is a
 // line of a diagnostic result's String rendering printed as a message.
 func TestRun_FailureLinesCarryAMessage(t *testing.T) {
-	code, _, stderr := runCLI(t, "export", "--to", "cypher", "--prefix", "1bad ",
-		"testdata/valid.yammm", "testdata/data.json")
+	code, _, stderr := runCLI(t, "neo4j", "constraints", "--prefix", "1bad ", "testdata/valid.yammm")
 	// The label is the input's fault: a validation or a usage failure, never
 	// success and never an I/O failure, and the report names it.
 	if code != cli.ExitValidation && code != cli.ExitUsage {

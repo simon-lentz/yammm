@@ -1,9 +1,8 @@
-// Package adapter provides format-specific adapters that parse data into
-// [instance.RawInstance] values and write a [graph.Snapshot]. Each adapter
-// subpackage targets one data format (JSON, Neo4j Cypher) and may have its own
-// external dependencies. The generators that convert a schema to an artifact
-// (Go source, JSON Schema, Markdown) are packages under schema/: gogen,
-// jschema and markdown.
+// Package adapter holds the platform adapters: packages that turn a yammm
+// schema and a [graph.Snapshot] into what one database platform stores. Its one
+// subpackage, [neo4j], targets Neo4j 5. The generators that convert a schema to
+// an artifact (Go source, Markdown) are packages under schema/: gogen and
+// markdown.
 //
 // # Architectural Boundary
 //
@@ -12,51 +11,37 @@
 //
 //   - Dependency hygiene via import granularity: Go packages are granular at the
 //     import level. Consumers who import only schema and instance depend on no
-//     adapter's third-party module: adapter/json pulls tidwall/jsonc and
-//     adapter/neo4j the Neo4j driver's dbtype package, each only when that
-//     adapter is imported.
+//     adapter's third-party module: adapter/neo4j pulls the Neo4j driver's
+//     dbtype package only when it is imported.
 //
-//   - Clear library/consumer boundary: Each adapter subpackage imports the
+//   - Clear library/consumer boundary: An adapter subpackage imports the
 //     library to use it, as a downstream consumer's own adapter does.
 //
-//   - Extensibility signal: Users see adapter/json and understand they can
-//     create adapter/myformat using the same pattern.
+//   - Extensibility signal: Users see adapter/neo4j and understand they can
+//     create adapter/myplatform using the same pattern.
 //
-// # Data In, Snapshots Out
+// # Snapshots Out
 //
-// The data adapters read and write one way. The JSON parser returns
-// [instance.RawInstance] values for the validator. The JSON serializer and the
-// Neo4j adapter's batch node and edge queries take a complete [graph.Snapshot];
-// the Neo4j adapter's other functions take no snapshot. No adapter takes an
+// The Neo4j adapter's batch node and edge queries take a complete
+// [graph.Snapshot]; its other functions take no snapshot. No adapter takes an
 // [instance.ValidInstance].
 //
 // # Dependency Direction
 //
 // Adapters depend on library packages; library packages never depend on adapters:
 //
-//	adapter/json      ──imports──▶  instance, diag, location, location/path, graph,
-//	                                immutable, schema, adapter/internal/constraintof,
-//	                                adapter/internal/refusal, github.com/tidwall/jsonc
-//	adapter/neo4j     ──imports──▶  schema, graph, instance, immutable, diag,
-//	                                adapter/internal/constraintof, adapter/internal/refusal,
-//	                                github.com/neo4j/neo4j-go-driver/v6/neo4j/dbtype
+//	adapter/neo4j  ──imports──▶  schema, graph, instance, immutable, diag,
+//	                             github.com/neo4j/neo4j-go-driver/v6/neo4j/dbtype
 //
 // # Layering Discipline
 //
-// The production code of every adapter imports no core internal/* package,
-// keeping a clean separation between core library internals and the adapter
-// layer: json and neo4j reach only for the public API and adapter/internal.
-// The rule binds production code alone: an adapter test can import a core
-// internal package, as test support or as the internals the test checks
-// against.
-//
-// An internal package under adapter/ is not an exception to this rule: it is the
-// adapters', not the core's. adapter/internal holds the two the adapters share:
-// refusal for a refusal's class and constraintof for the constraint a value renders
-// through, which the JSON and Neo4j adapters read.
+// The production code of every adapter imports no internal/* package, keeping a
+// clean separation between core library internals and the adapter layer: neo4j
+// reaches only for the public API. The rule binds production code alone: an
+// adapter test can import a core internal package, as test support or as the
+// internals the test checks against.
 //
 // # Subpackages
 //
-//   - [json]: JSON adapter that reads JSONC and records a location for every instance it parses
 //   - [neo4j]: Neo4j constraint and index DDL, label mapping, write query generation, and drift diffs against a live database
 package adapter

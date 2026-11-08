@@ -28,7 +28,7 @@ type stagedEdge struct {
 // stages none.
 func (g *Graph) build(typ schema.Type, inst instance.ValidInstance, stage *[]stagedEdge) Instance {
 	id := typ.ID()
-	graphInst := newInstance(g.instanceTagForm(id), id, inst.PrimaryKey(), inst.Properties(), inst.Provenance(), true)
+	graphInst := newInstance(g.tagForm(id), id, inst.PrimaryKey(), inst.Properties(), inst.Provenance(), true)
 
 	for rel := range typ.AllAssociations() {
 		stageRelation(rel, inst, stage)

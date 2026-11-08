@@ -128,8 +128,8 @@ func isMajorVersion(elem string) bool {
 //
 // LookupPackage consults the file's own imports before falling back to a unique
 // in-module package of that name. Import-first is load-bearing: this module has
-// an adapter/json package, so a name-only match would resolve a json-qualified
-// link in a file importing encoding/json against the wrong package.
+// a location/path package, so a name-only match would resolve a path-qualified
+// link in a file importing the standard library's path against the wrong package.
 func (m *Module) parserFor(imports map[string]string) *comment.Parser {
 	return &comment.Parser{
 		LookupSym: func(_, name string) bool { return name != "" },

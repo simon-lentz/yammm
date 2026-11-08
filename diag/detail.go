@@ -55,7 +55,8 @@ const (
 	// constraint reason, parse error).
 	DetailKeyDetail = "detail"
 
-	// DetailKeyFormat is the adapter format identifier (e.g., "json").
+	// DetailKeyFormat names the format an issue is about: "json" for a data
+	// file the CLI reads, "neo4j" for the Cypher the Neo4j adapter writes.
 	DetailKeyFormat = "format"
 
 	// DetailKeyTargetType is the target type name (for cross-reference errors).
@@ -81,11 +82,6 @@ const (
 
 	// DetailKeyAlias is the import alias (for alias validation errors).
 	DetailKeyAlias = "alias"
-
-	// DetailKeyTypeSchema is the identity of the schema a type is defined in,
-	// its SchemaPath, written as the identity and never relativized. Used with
-	// E_GRAPH_TYPE_NOT_FOUND and E_SNAPSHOT_UNNAMEABLE_TYPE.
-	DetailKeyTypeSchema = "type_schema"
 
 	// DetailKeyFirstAlias is the first import alias in duplicate detection.
 	DetailKeyFirstAlias = "first_alias"

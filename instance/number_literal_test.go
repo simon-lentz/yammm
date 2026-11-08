@@ -33,9 +33,6 @@ func TestCheckValue_AJSONNumberThatIsNoLiteralIsRefused(t *testing.T) {
 				if err == nil || !strings.Contains(err.Error(), "a json.Number that is no JSON number literal") {
 					t.Errorf("%q %s at %s: %v, want a refusal naming no JSON number literal", text, carrier.name, c.Kind(), err)
 				}
-				if v, err := instance.CanonicalValue(carrier.v, c); err == nil {
-					t.Errorf("%q %s at %s: CanonicalValue = %#v, want a refusal", text, carrier.name, c.Kind(), v)
-				}
 			}
 		}
 	}

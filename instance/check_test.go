@@ -2,7 +2,6 @@ package instance_test
 
 import (
 	"errors"
-	"reflect"
 	"regexp"
 	"strings"
 	"testing"
@@ -54,7 +53,7 @@ func TestCheckValue_AppliesTheValidatorsRule(t *testing.T) {
 }
 
 // TestCheckValue_RefusesAConstraintCheckConstraintRefuses pins the judgement
-// CheckValue and CanonicalValue make before any value is read: a constraint
+// CheckValue makes before any value is read: a constraint
 // schema.CheckConstraint refuses is an error whatever the value, nil
 // included, and never an internal failure. A List with no element, a nil
 // pointer as its element, a reference resolved to another reference alone,
@@ -79,16 +78,6 @@ func TestCheckValue_RefusesAConstraintCheckConstraintRefuses(t *testing.T) {
 			}
 			if errors.Is(err, instance.ErrInternalFailure) {
 				t.Errorf("%s: CheckValue(%v) = %v, an internal failure", name, val, err)
-			}
-			got, err := instance.CanonicalValue(val, c)
-			if err == nil || err.Error() != "instance: "+want.Error() {
-				t.Errorf("%s: CanonicalValue(%v) = %v, want the refusal %q", name, val, err, want)
-			}
-			if errors.Is(err, instance.ErrInternalFailure) {
-				t.Errorf("%s: CanonicalValue(%v) = %v, an internal failure", name, val, err)
-			}
-			if !reflect.DeepEqual(got, val) {
-				t.Errorf("%s: CanonicalValue(%v) returned %v, want the value unchanged", name, val, got)
 			}
 		}
 	}

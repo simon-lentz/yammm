@@ -8,7 +8,6 @@ import (
 	"strings"
 	"testing"
 
-	jsonadapter "github.com/simon-lentz/yammm/adapter/json"
 	"github.com/simon-lentz/yammm/adapter/neo4j"
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/format"
@@ -230,16 +229,6 @@ func TestDocumentedKeyFunctions(t *testing.T) {
 	if len(parts) != 2 || parts[0] != "us" || parts[1] != "ca" {
 		t.Errorf("ParseKey returned %v; the documented round trip is [us ca]", parts)
 	}
-}
-
-// TestDocumentedAdapterParseSurface holds that the parse and write methods the
-// document names on adapter/json exist. A bare `_ = (*T).M` compiles under any
-// signature, so it pins nothing else.
-func TestDocumentedAdapterParseSurface(t *testing.T) {
-	t.Parallel()
-	_ = (*jsonadapter.Adapter).ParseObject
-	_ = (*jsonadapter.Adapter).MarshalObject
-	_ = (*jsonadapter.Adapter).WriteObject
 }
 
 // TestDocumentedFormatSurface pins the format package facts the Formatting

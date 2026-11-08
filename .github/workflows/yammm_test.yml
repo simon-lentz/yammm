@@ -295,10 +295,10 @@ jobs:
             ${{ steps.go-caches.outputs.build }}
             ${{ steps.go-caches.outputs.mod }}
           key: ${{ steps.go-restore.outputs.cache-primary-key }}
-  # adapter/json holds a file behind the goexperiment.jsonv2 build tag. Go
-  # builds it where encoding/json runs on its v2 implementation: with the
-  # module's toolchain only under GOEXPERIMENT=jsonv2, and from Go 1.27 with no
-  # setting. No other job sets the experiment, so this job lints, vets and
+  # cmd/yammm/internal/jsondata holds a file behind the goexperiment.jsonv2
+  # build tag. Go builds it where encoding/json runs on its v2 implementation:
+  # with the module's toolchain only under GOEXPERIMENT=jsonv2, and from Go 1.27
+  # with no setting. No other job sets the experiment, so this job lints, vets and
   # tests the module under it with the gate's scripts, and each of the three
   # runs after an earlier step fails. It runs the module's toolchain, so it
   # reads none of the Go 1.27 standard library.

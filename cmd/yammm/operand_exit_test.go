@@ -135,16 +135,14 @@ func TestExitCodes_EveryPathOperandByFailure(t *testing.T) {
 		{"fmt OP", ".yammm", false, false},
 		{"check OP DATA", ".yammm", false, true},
 		{"check SCHEMA OP", ".json", false, true},
-		{"load OP DATA", ".yammm", false, true},
-		{"load SCHEMA OP", ".json", false, true},
-		{"export --to json OP DATA", ".yammm", false, true},
-		{"export --to json SCHEMA OP", ".json", false, false},
+		{"check SCHEMA DATA OP", ".json", false, true},
 		{"gen --to go OP", ".yammm", false, true},
 		{"neo4j constraints OP", ".yammm", false, true},
 		{"neo4j indexes OP", ".yammm", false, true},
 		{"neo4j diff --uri bolt://127.0.0.1:1 OP", ".yammm", false, true},
 		{"snapshot save -o OUT OP DATA", ".yammm", false, true},
 		{"snapshot save -o OUT SCHEMA OP", ".json", false, true},
+		{"snapshot save -o OUT SCHEMA DATA OP", ".json", false, true},
 		{"snapshot save -o OUT --into OP SCHEMA DATA", ".ys", false, false},
 		{"snapshot info OP", ".ys", false, false},
 		{"snapshot info --header-only OP", ".ys", false, false},
@@ -155,8 +153,6 @@ func TestExitCodes_EveryPathOperandByFailure(t *testing.T) {
 		// The schema imports nothing, so only the root's own judgment can refuse it.
 		{"validate --module-root OP SCHEMA", "", true, true},
 		{"check --module-root OP SCHEMA DATA", "", true, true},
-		{"load --module-root OP SCHEMA DATA", "", true, true},
-		{"export --to json --module-root OP SCHEMA DATA", "", true, true},
 		{"gen --to go --module-root OP SCHEMA", "", true, true},
 		{"neo4j constraints --module-root OP SCHEMA", "", true, true},
 		{"neo4j indexes --module-root OP SCHEMA", "", true, true},
@@ -227,7 +223,6 @@ func TestRead_AFileNamedInBytesThatAreNotUTF8IsRead(t *testing.T) {
 		{"snapshot", "info", "--header-only", snap},
 		{"snapshot", "info", "--dir", sub},
 		{"snapshot", "verify", schemaPath, snap},
-		{"export", "--to", "json", schemaPath, snap},
 	} {
 		t.Run(strings.Join(args[:2], " "), func(t *testing.T) {
 			t.Parallel()

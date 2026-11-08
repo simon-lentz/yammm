@@ -143,9 +143,9 @@ func sameFile(t *testing.T, a, b string) bool {
 	return aerr == nil && berr == nil && os.SameFile(ai, bi)
 }
 
-// What export writes through a ".." after a symlinked directory, check reads
-// back through the same spelling.
-func TestExport_WhatItWritesThroughALinkedDotDotCheckReadsBack(t *testing.T) {
+// What snapshot save writes through a ".." after a symlinked directory,
+// snapshot verify reads back through the same spelling.
+func TestSnapshotSave_WhatItWritesThroughALinkedDotDotVerifyReadsBack(t *testing.T) {
 	schemaPath, err := filepath.Abs(filepath.Join("testdata", "valid.yammm"))
 	if err != nil {
 		t.Fatal(err)
@@ -159,39 +159,39 @@ func TestExport_WhatItWritesThroughALinkedDotDotCheckReadsBack(t *testing.T) {
 	t.Run("--output", func(t *testing.T) {
 		dir := t.TempDir()
 		linkedDirFixture(t, dir)
-		out := dir + sep + "link" + sep + ".." + sep + "o.json"
-		if code, _, errOut := runCLI(t, "export", "--to", "json", "--output", out, schemaPath, dataPath); code != 0 {
-			t.Fatalf("export: exit %d: %s", code, errOut)
+		out := dir + sep + "link" + sep + ".." + sep + "o.ys"
+		if code, _, errOut := runCLI(t, "snapshot", "save", "--output", out, schemaPath, dataPath); code != 0 {
+			t.Fatalf("snapshot save: exit %d: %s", code, errOut)
 		}
-		if code, _, errOut := runCLI(t, "check", schemaPath, out); code != 0 {
-			t.Errorf("check of what export wrote: exit %d: %s", code, errOut)
+		if code, _, errOut := runCLI(t, "snapshot", "verify", schemaPath, out); code != 0 {
+			t.Errorf("snapshot verify of what snapshot save wrote: exit %d: %s", code, errOut)
 		}
 	})
 
 	// The relative link at the kernel's spelling of the file would, followed
-	// from the text's directory, name ./g.json there.
+	// from the text's directory, name ./g.ys there.
 	t.Run("--output past a relative link at the kernel's spelling", func(t *testing.T) {
 		dir := t.TempDir()
 		linkedDirFixture(t, dir)
-		if err := os.Symlink("g.json", filepath.Join(dir, "real", "deep", "f.json")); err != nil {
+		if err := os.Symlink("g.ys", filepath.Join(dir, "real", "deep", "f.ys")); err != nil {
 			t.Fatal(err)
 		}
-		kernelTarget := filepath.Join(dir, "real", "deep", "g.json")
+		kernelTarget := filepath.Join(dir, "real", "deep", "g.ys")
 		if err := os.WriteFile(kernelTarget, []byte("old"), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		out := dir + sep + "link" + sep + ".." + sep + "f.json"
-		if code, _, errOut := runCLI(t, "export", "--to", "json", "--output", out, schemaPath, dataPath); code != 0 {
-			t.Fatalf("export: exit %d: %s", code, errOut)
+		out := dir + sep + "link" + sep + ".." + sep + "f.ys"
+		if code, _, errOut := runCLI(t, "snapshot", "save", "--output", out, schemaPath, dataPath); code != 0 {
+			t.Fatalf("snapshot save: exit %d: %s", code, errOut)
 		}
-		if got := readOrAbsent(t, filepath.Join(dir, "g.json")); got != nil {
-			t.Errorf("export wrote %s, a file no rule names", filepath.Join(dir, "g.json"))
+		if got := readOrAbsent(t, filepath.Join(dir, "g.ys")); got != nil {
+			t.Errorf("snapshot save wrote %s, a file no rule names", filepath.Join(dir, "g.ys"))
 		}
 		if got := readOrAbsent(t, kernelTarget); string(got) != "old" {
-			t.Errorf("the kernel's file changed to %q; the loader reads %s", got, filepath.Join(dir, "f.json"))
+			t.Errorf("the kernel's file changed to %q; the loader reads %s", got, filepath.Join(dir, "f.ys"))
 		}
-		if code, _, errOut := runCLI(t, "check", schemaPath, out); code != 0 {
-			t.Errorf("check of what export wrote: exit %d: %s", code, errOut)
+		if code, _, errOut := runCLI(t, "snapshot", "verify", schemaPath, out); code != 0 {
+			t.Errorf("snapshot verify of what snapshot save wrote: exit %d: %s", code, errOut)
 		}
 	})
 
@@ -201,15 +201,15 @@ func TestExport_WhatItWritesThroughALinkedDotDotCheckReadsBack(t *testing.T) {
 		dir := t.TempDir()
 		linkedDirFixture(t, dir)
 		t.Chdir(filepath.Join(dir, "link"))
-		out := ".." + sep + "o.json"
-		if code, _, errOut := runCLI(t, "export", "--to", "json", "--output", out, schemaPath, dataPath); code != 0 {
-			t.Fatalf("export: exit %d: %s", code, errOut)
+		out := ".." + sep + "o.ys"
+		if code, _, errOut := runCLI(t, "snapshot", "save", "--output", out, schemaPath, dataPath); code != 0 {
+			t.Fatalf("snapshot save: exit %d: %s", code, errOut)
 		}
-		if _, err := os.Stat(filepath.Join(dir, "o.json")); err != nil {
-			t.Errorf("export did not write %s, the file the loader reads: %v", filepath.Join(dir, "o.json"), err)
+		if _, err := os.Stat(filepath.Join(dir, "o.ys")); err != nil {
+			t.Errorf("snapshot save did not write %s, the file the loader reads: %v", filepath.Join(dir, "o.ys"), err)
 		}
-		if code, _, errOut := runCLI(t, "check", schemaPath, out); code != 0 {
-			t.Errorf("check of what export wrote: exit %d: %s", code, errOut)
+		if code, _, errOut := runCLI(t, "snapshot", "verify", schemaPath, out); code != 0 {
+			t.Errorf("snapshot verify of what snapshot save wrote: exit %d: %s", code, errOut)
 		}
 	})
 }
@@ -258,12 +258,6 @@ func TestRead_EveryPathReadsWhatTheLoaderReads(t *testing.T) {
 			snapshotFixture(t, dir, "s.ys")
 			writeBytes(t, filepath.Join(kernel, "s.ys"), junk)
 			return []string{"snapshot", "verify", "testdata/valid.yammm", spelledDir + sep + "s.ys"}, ""
-		}},
-		{"export from a snapshot", func(t *testing.T, dir, kernel, spelledDir string) ([]string, string) {
-			t.Helper()
-			snapshotFixture(t, dir, "s.ys")
-			writeBytes(t, filepath.Join(kernel, "s.ys"), junk)
-			return []string{"export", "--to", "json", "testdata/valid.yammm", spelledDir + sep + "s.ys"}, `"alice"`
 		}},
 	}
 	for _, tc := range cases {

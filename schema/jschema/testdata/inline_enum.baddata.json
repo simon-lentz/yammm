@@ -1,6 +1,0 @@
-{
-  "Car": [
-    { "vin": "V1", "color": "purple" },
-    { "vin": "V2", "sizes": ["xl"] }
-  ]
-}

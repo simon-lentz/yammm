@@ -2,7 +2,6 @@ package instance_test
 
 import (
 	"encoding/json"
-	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -15,11 +14,43 @@ import (
 	"github.com/simon-lentz/yammm/schema"
 )
 
+// oneFormSchema declares one optional property of each scalar kind.
+const oneFormSchema = `schema "p"
+
+type T {
+	id String primary
+	s String
+	i Integer
+	f Float
+	b Boolean
+	ts Timestamp
+	d Date
+	u UUID
+	e Enum["x", "12"]
+	p Pattern["^[0-9x]+$"]
+}
+`
+
 // The validator judges a value as its one form: for each carrier and each scalar
-// kind, CheckValue reads the value as it reads its form, and CanonicalValue stores
+// kind, CheckValue reads the value as it reads its form, and the validator stores
 // what it stores for the form.
 func TestCheckValue_JudgesAValueAsItsForm(t *testing.T) {
 	t.Parallel()
+	s := loadT(t, oneFormSchema)
+	typ, _ := s.Type("T")
+	v := instance.NewValidator(s)
+	stored := func(prop string, val any) (any, bool) {
+		inst, res := v.ValidateOne(t.Context(), "T", instance.RawInstance{Properties: map[string]any{"id": "x", prop: val}})
+		if res.Err() != nil {
+			t.Errorf("%s = %#v: %s", prop, val, res)
+			return nil, false
+		}
+		p, ok := inst.Property(prop)
+		if !ok || p.IsNil() {
+			return nil, false
+		}
+		return p.Unwrap(), true
+	}
 	type named string
 	text := "x"
 	number := json.Number("12")
@@ -72,12 +103,9 @@ func TestCheckValue_JudgesAValueAsItsForm(t *testing.T) {
 		{"a nil map keyed by no string", map[int]int(nil)},
 	} {
 		form, hasForm := value.Scalar(c.v)
-		for _, k := range []schema.Constraint{
-			schema.NewStringConstraint(), schema.NewIntegerConstraint(),
-			schema.NewFloatConstraint(), schema.NewBooleanConstraint(),
-			schema.NewTimestampConstraint(), schema.NewDateConstraint(), schema.NewUUIDConstraint(),
-			schema.NewEnumConstraint([]string{"x", "12"}), schema.NewPatternConstraint([]*regexp.Regexp{regexp.MustCompile("^[0-9x]+$")}),
-		} {
+		for _, prop := range []string{"s", "i", "f", "b", "ts", "d", "u", "e", "p"} {
+			p, _ := typ.Property(prop)
+			k := p.Constraint()
 			got := instance.CheckValue(c.v, k) == nil
 			want := hasForm && instance.CheckValue(form, k) == nil
 			if got != want {
@@ -86,17 +114,17 @@ func TestCheckValue_JudgesAValueAsItsForm(t *testing.T) {
 			if !got {
 				continue
 			}
-			stored, err := instance.CanonicalValue(c.v, k)
-			fromForm, ferr := instance.CanonicalValue(form, k)
-			if err != nil || ferr != nil || stored != fromForm {
-				t.Errorf("%s at %s: CanonicalValue = %#v, %v; of its form %#v, %v", c.name, k.Kind(), stored, err, fromForm, ferr)
+			got1, ok1 := stored(prop, c.v)
+			got2, ok2 := stored(prop, form)
+			if ok1 != ok2 || got1 != got2 {
+				t.Errorf("%s at %s: stored %#v (%v); of its form %#v (%v)", c.name, k.Kind(), got1, ok1, got2, ok2)
 			}
 		}
 	}
 }
 
-// A nil value a carrier holds is a null list or vector element to CheckValue
-// and to CanonicalValue, each on its own path, as a bare nil is.
+// A nil value a carrier holds is a null list or vector element to CheckValue,
+// as a bare nil is.
 func TestCheckValue_ANilCarrierInAListIsANullElement(t *testing.T) {
 	t.Parallel()
 	list := schema.NewListConstraint(schema.NewStringConstraint())
@@ -115,9 +143,6 @@ func TestCheckValue_ANilCarrierInAListIsANullElement(t *testing.T) {
 		for c, v := range map[schema.Constraint][]any{list: {"a", elem}, schema.NewVectorConstraint(2): {1.5, elem}} {
 			if err := instance.CheckValue(v, c); err == nil || !strings.Contains(err.Error(), "element [1]: expected ") || !strings.Contains(err.Error(), ", got null") {
 				t.Errorf("CheckValue with %s as a %s element = %v, want a null element", name, c.Kind(), err)
-			}
-			if _, err := instance.CanonicalValue(v, c); err == nil || !strings.Contains(err.Error(), "element [1]: expected ") || !strings.Contains(err.Error(), ", got null") {
-				t.Errorf("CanonicalValue with %s as a %s element = %v, want a null element", name, c.Kind(), err)
 			}
 		}
 	}

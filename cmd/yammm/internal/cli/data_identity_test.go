@@ -1,18 +1,21 @@
 package cli
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/location"
 )
 
-// writeDataFile writes content under a fresh directory and returns its path.
-func writeDataFile(t *testing.T, name, content string) string {
+// writeDataFile writes content to data.json under a fresh directory and returns
+// its path.
+func writeDataFile(t *testing.T, content string) string {
 	t.Helper()
-	p := filepath.Join(t.TempDir(), name)
+	p := filepath.Join(t.TempDir(), "data.json")
 	if err := os.WriteFile(p, []byte(content), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -34,7 +37,7 @@ func wantSourceID(t *testing.T, path string) location.SourceID {
 // one built by concatenation.
 func TestLoadAndParseJSON_MintsTheLoadersIdentity(t *testing.T) {
 	t.Parallel()
-	p := writeDataFile(t, "data.json", `{"Anchor": [{"id": "a1"}]}`)
+	p := writeDataFile(t, `{"Anchor": [{"id": "a1"}]}`)
 
 	parsed, res, err := LoadAndParseJSON(t.Context(), p)
 	if err != nil {
@@ -59,7 +62,7 @@ func TestLoadAndParseJSON_MintsTheLoadersIdentity(t *testing.T) {
 // one identity, so a diagnostic and a snapshot agree on which file they name.
 func TestLoadAndParse_OneSpellingOfOneFileGivesOneIdentity(t *testing.T) {
 	t.Parallel()
-	p := writeDataFile(t, "data.json", `{"Anchor": [{"id": "a1"}]}`)
+	p := writeDataFile(t, `{"Anchor": [{"id": "a1"}]}`)
 	// An uncleaned spelling of the same file: a synthetic identity built by
 	// concatenation keeps it verbatim and gives a second identity.
 	dir := filepath.Dir(p)
@@ -81,11 +84,10 @@ func TestLoadAndParse_OneSpellingOfOneFileGivesOneIdentity(t *testing.T) {
 	}
 }
 
-// A path that cannot name a file is refused by the read of it, and bytes that can
-// never be named are refused by [ParseJSON]'s identity.
+// A path that cannot name a file is refused by the read of it.
 func TestLoadAndParse_RefusesAPathThatNamesNoFile(t *testing.T) {
 	t.Parallel()
-	regular := writeDataFile(t, "data.json", `{"Anchor": [{"id": "a1"}]}`)
+	regular := writeDataFile(t, `{"Anchor": [{"id": "a1"}]}`)
 	for name, path := range map[string]string{
 		"empty path":                  "",
 		"a path under a regular file": filepath.Join(regular, "inner.json"),
@@ -95,18 +97,6 @@ func TestLoadAndParse_RefusesAPathThatNamesNoFile(t *testing.T) {
 			_, _, err := LoadAndParseJSON(t.Context(), path)
 			if err == nil || !strings.Contains(err.Error(), "read data file") {
 				t.Errorf("LoadAndParseJSON(%q): %v, want the read's refusal", path, err)
-			}
-		})
-	}
-	for name, path := range map[string]string{
-		"empty path":          "",
-		"a path not in UTF-8": "bad\xff.json",
-	} {
-		t.Run("parse, "+name, func(t *testing.T) {
-			t.Parallel()
-			_, _, err := ParseJSON(t.Context(), path, []byte(`{}`))
-			if err == nil || !strings.Contains(err.Error(), "resolve data file") {
-				t.Errorf("ParseJSON(%q): %v, want the resolver's refusal", path, err)
 			}
 		})
 	}
@@ -124,5 +114,26 @@ func TestLoadAndParse_ReadsAMissingFileThroughTheReadArm(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "read data file") {
 		t.Errorf("LoadAndParseJSON: %v, want the read arm", err)
+	}
+}
+
+// TestLoadAndParseJSON_StopsAtACancelledContext pins that the parse takes the
+// caller's context: a cancelled one draws a fatal E_CONTEXT_CANCELLED and no
+// instances.
+func TestLoadAndParseJSON_StopsAtACancelledContext(t *testing.T) {
+	t.Parallel()
+	p := writeDataFile(t, `{"Anchor": [{"id": "a1"}], "Other": []}`)
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+
+	parsed, res, err := LoadAndParseJSON(ctx, p)
+	if err != nil {
+		t.Fatalf("LoadAndParseJSON: %v", err)
+	}
+	if !res.HasFatal() || !res.HasCode(diag.E_CONTEXT_CANCELLED) {
+		t.Errorf("a cancelled context drew %s, want a fatal E_CONTEXT_CANCELLED", res)
+	}
+	if len(parsed) != 0 {
+		t.Errorf("a cancelled parse returned %d types, want none", len(parsed))
 	}
 }

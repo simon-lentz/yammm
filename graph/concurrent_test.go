@@ -361,32 +361,24 @@ func TestIntegration_ComplexMultiSchema(t *testing.T) {
 	// Schema C: BaseType
 	base := instancetest.Valid(t, schemaC, "BaseType", map[string]any{"id": "base1", "value": "base value"})
 
-	// Note: Schema A imports B which imports C
-	// So A can access B types (b.MiddleType) but NOT C types directly
-	// This test verifies the graph handles the imported B correctly
-
+	// A imports B, which imports C: A names b.MiddleType, and BaseType only by
+	// identity.
 	middle := instancetest.Valid(t, schemaA, "b.MiddleType", map[string]any{"id": "mid1", "name": "middle value"})
 
 	top := instancetest.Valid(t, schemaA, "TopType", map[string]any{"id": "top1", "label": "top value"})
 
 	// Add in reverse order (forward refs)
-	g.Add(ctx, top)
-	g.Add(ctx, middle)
-
-	// Adding base from C should fail since A doesn't directly import C
-	result := g.Add(ctx, base)
-	// This should fail with type not found
-	if result.OK() {
-		t.Error("Expected failure when adding transitive import type")
+	for _, inst := range []instance.ValidInstance{top, middle, base} {
+		if result := g.Add(ctx, inst); !result.OK() {
+			t.Fatalf("Add %s: %s", inst.TypeName(), result)
+		}
 	}
 
-	// Verify what was added successfully
 	snap := g.Snapshot()
-	if len(slices.Collect(snap.InstancesOf(tagID(t, schemaA, "TopType")))) != 1 {
-		t.Error("TopType should be in graph")
-	}
-	if len(slices.Collect(snap.InstancesOf(tagID(t, schemaA, "b.MiddleType")))) != 1 {
-		t.Error("b.MiddleType should be in graph")
+	for _, id := range []schema.TypeID{tagID(t, schemaA, "TopType"), tagID(t, schemaA, "b.MiddleType"), tagID(t, schemaC, "BaseType")} {
+		if n := len(slices.Collect(snap.InstancesOf(id))); n != 1 {
+			t.Errorf("%s holds %d instances, want 1", id, n)
+		}
 	}
 }
 

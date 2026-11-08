@@ -5,7 +5,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/instance"
 	"github.com/simon-lentz/yammm/internal/instancetest"
@@ -138,6 +137,7 @@ func TestAdd_TakesAValidatorOfAnyMemberOfOneLoad(t *testing.T) {
 		{"entry validator, directly imported root", "a", "b.Mid", "a", map[string]any{"id": "x"}},
 		{"member validator, graph over the entry", "b", "Mid", "a", map[string]any{"id": "x"}},
 		{"entry validator, graph over the member", "a", "b.Mid", "b", map[string]any{"id": "x"}},
+		{"member validator, root the entry reaches through another import", "d", "Root", "a", map[string]any{"id": "x"}},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
@@ -160,15 +160,6 @@ func TestAdd_TypeOutsideTheGraphsClosurePanics(t *testing.T) {
 	inst := instancetest.Valid(t, members["a"], "Top", map[string]any{"id": "x"})
 	g := graph.New(members["b"])
 	assertAnotherLoadPanic(t, func() { g.Add(t.Context(), inst) })
-}
-
-// A member's validator can state a root the entry reaches only through another
-// import. It is of the graph's load and the entry cannot name it.
-func TestAdd_RootTheEntryCannotNameIsRefused(t *testing.T) {
-	t.Parallel()
-	members := diamondClosure(t)
-	inst := instancetest.Valid(t, members["d"], "Root", map[string]any{"id": "x"})
-	assertHasCode(t, graph.New(members["a"]).Add(t.Context(), inst), diag.E_GRAPH_TYPE_NOT_FOUND)
 }
 
 // A snapshot crosses loads through the import, and an assembler validates over

@@ -1,20 +1,22 @@
 package schema
 
-// TagForm renders a type identity as the name a snapshot carries: the bare
-// name for a type s declares, alias-qualified for one s imports directly.
-//
-// The rendering is lossy, and deliberately so — it is a display and lookup
-// form, not an identity. A type s reaches only through an intermediate import
-// has no alias to qualify with and renders bare, as does a type from a schema
-// s does not import at all, so two same-named types in different schemas can
-// render identically. Use [TypeID] wherever the answer has to be exact, and
-// [AddressableTag] where a name has to denote one type.
+// TagForm renders a type identity by its schema path, as a graph and its
+// diagnostics name it: bare for a path of s's own source, "alias.Name" for one s
+// imports directly, "schema#Name" (that schema's name) for one of any other
+// schema of s's closure, and bare otherwise. Within one load each rendering
+// denotes one type, since a load refuses two schemas of one name and no type
+// name holds "." or "#".
 func TagForm(s Schema, id TypeID) string {
 	if s.IsZero() || id.IsZero() || id.SchemaPath() == s.SourceID() {
 		return id.Name()
 	}
 	if alias, ok := s.FindImportAlias(id.SchemaPath()); ok {
 		return alias + "." + id.Name()
+	}
+	for member := range s.Closure() {
+		if member.SourceID() == id.SchemaPath() {
+			return member.Name() + "#" + id.Name()
+		}
 	}
 	return id.Name()
 }

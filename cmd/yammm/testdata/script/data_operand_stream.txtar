@@ -6,24 +6,12 @@ stdin data.json
 exec yammm check valid.yammm /dev/stdin
 
 stdin data.json
-exec yammm load valid.yammm /dev/stdin
-
-stdin data.json
 exec yammm snapshot save valid.yammm /dev/stdin -o saved.ys
-
-stdin data.json
-exec yammm export --to json valid.yammm /dev/stdin
-stdout '"alice"'
-
-stdin saved.ys
-exec yammm export --to json valid.yammm /dev/stdin
-stdout '"alice"'
+grep '"alice"' saved.ys
 
 exec sh -c 'yammm check valid.yammm /dev/stdin < data.json'
-exec sh -c 'yammm export --to json valid.yammm /dev/stdin < data.json'
-stdout '"alice"'
-exec sh -c 'yammm export --to json valid.yammm /dev/stdin < saved.ys'
-stdout '"alice"'
+exec sh -c 'yammm snapshot save valid.yammm /dev/stdin -o redirected.ys < data.json'
+grep '"alice"' redirected.ys
 
 # A link to a descriptor path reads the descriptor, whatever the host names it.
 symlink lk -> /dev/stdin
@@ -32,8 +20,8 @@ exec yammm check valid.yammm lk
 exec sh -c 'yammm check valid.yammm lk < data.json'
 
 # A FIFO's second open would wait for a writer that has gone.
-exec sh -c 'mkfifo f; cat data.json > f & yammm export --to json valid.yammm f'
-stdout '"alice"'
+exec sh -c 'mkfifo f; cat data.json > f & yammm snapshot save valid.yammm f -o fifo.ys'
+grep '"alice"' fifo.ys
 
 -- valid.yammm --
 schema "test"

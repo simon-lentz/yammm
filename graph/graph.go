@@ -146,30 +146,18 @@ func (g *Graph) add(ctx context.Context, inst instance.ValidInstance, merge bool
 		panic("graph.Add: instance was validated under another schema load, or its type is outside this schema's import closure")
 	}
 
-	if !schema.Addressable(g.schema, typeID) {
-		builder := diag.NewIssue(diag.Error, diag.E_GRAPH_TYPE_NOT_FOUND,
-			fmt.Sprintf("type %s not found in schema", diag.QuoteValue(inst.TypeName()))).
-			WithDetail(diag.DetailKeyTypeName, inst.TypeName()).
-			WithDetail(diag.DetailKeyTypeSchema, typeID.SchemaPath().String()).
-			WithHint("if this type is from a transitively imported schema, add a direct import to access it")
-		if pk := inst.PrimaryKey(); pk.Len() > 0 {
-			builder = builder.WithDetail(diag.DetailKeyPrimaryKey, pk.String())
-		}
-		return false, g.reject(opCollector, builder.Build())
-	}
-
 	// A validator refuses a part type at a root, so only a child read out of
 	// [instance.ValidInstance.Compositions] arrives here.
 	if !typ.HasPrimaryKey() {
 		return false, g.reject(opCollector, diag.NewIssue(diag.Error, diag.E_GRAPH_MISSING_PK,
-			fmt.Sprintf("type %s has no primary key; cannot add to graph", diag.QuoteValue(inst.TypeName()))).
-			WithDetail(diag.DetailKeyTypeName, inst.TypeName()).Build())
+			fmt.Sprintf("type %s has no primary key; cannot add to graph", diag.QuoteValue(g.tagForm(typeID)))).
+			WithDetail(diag.DetailKeyTypeName, g.tagForm(typeID)).Build())
 	}
 
 	if typ.IsPart() {
 		return false, g.reject(opCollector, diag.NewIssue(diag.Error, diag.E_GRAPH_INVALID_COMPOSITION,
-			fmt.Sprintf("part type %s cannot be added directly; add it in its parent's composition", diag.QuoteValue(inst.TypeName()))).
-			WithDetail(diag.DetailKeyTypeName, inst.TypeName()).Build())
+			fmt.Sprintf("part type %s cannot be added directly; add it in its parent's composition", diag.QuoteValue(g.tagForm(typeID)))).
+			WithDetail(diag.DetailKeyTypeName, g.tagForm(typeID)).Build())
 	}
 
 	var staged []stagedEdge
@@ -444,8 +432,9 @@ func identityText(s schema.Schema, id schema.TypeID) string {
 	return diag.CutValue(path.String()) + ":" + name
 }
 
-// instanceTagForm computes the canonical instance tag form for a TypeID.
-func (g *Graph) instanceTagForm(id schema.TypeID) string {
+// tagForm renders id under the graph's schema, as every name the graph
+// returns and every graph diagnostic does.
+func (g *Graph) tagForm(id schema.TypeID) string {
 	return schema.TagForm(g.schema, id)
 }
 

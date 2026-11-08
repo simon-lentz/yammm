@@ -12,9 +12,7 @@ import (
 // Every way the CLI writes a file the operator named.
 //
 // One flag, one answer: the durability and the mode policy must not depend on
-// which command produced the bytes or which target it was asked for. Before the
-// durable-write primitive these paths disagreed — one `--output` flag left 0600
-// through `gen`, 0600 through `--to json` and 0644 through `--to cypher` — and nothing in the tree asserted any of it.
+// which command produced the bytes or which target it was asked for.
 type writePath struct {
 	name string
 	// build prepares fixtures and returns the file the command writes plus the
@@ -67,28 +65,6 @@ func writePaths() []writePath {
 			build: func(_ *testing.T, dir string) (string, []string) {
 				out := filepath.Join(dir, "gen.go")
 				return out, []string{"gen", "--to", "go", "--output", out, "testdata/valid.yammm"}
-			},
-		},
-		{
-			name:    "export --to json --output",
-			creates: true,
-			build: func(_ *testing.T, dir string) (string, []string) {
-				out := filepath.Join(dir, "out.json")
-				return out, []string{
-					"export", "--to", "json", "--output", out,
-					"testdata/valid.yammm", "testdata/data.json",
-				}
-			},
-		},
-		{
-			name:    "export --to cypher --output",
-			creates: true,
-			build: func(_ *testing.T, dir string) (string, []string) {
-				out := filepath.Join(dir, "out.cypher")
-				return out, []string{
-					"export", "--to", "cypher", "--output", out,
-					"testdata/valid.yammm", "testdata/data.json",
-				}
 			},
 		},
 		{

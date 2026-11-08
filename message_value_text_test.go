@@ -10,7 +10,6 @@ import (
 
 	"github.com/simon-lentz/yammm/internal/snapparts"
 
-	jsonadapter "github.com/simon-lentz/yammm/adapter/json"
 	neo4jadapter "github.com/simon-lentz/yammm/adapter/neo4j"
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/graph"
@@ -175,38 +174,12 @@ func TestMessages_RepeatAValueCutToItsHead(t *testing.T) {
 	_, r = snapshot.Load(ctx, data, s, snapshot.WithRevalidation(diag.Warning), snapshot.WithValueConformance(true))
 	c.result("snapshot.Load", r)
 
-	unwritable := snappartstest.Loaded(t, s, snapparts.Parts{
-		Types:     []schema.TypeID{typ.ID()},
-		Instances: []snapparts.Instance{root(longText, map[string]any{"id": longText, "f": json.Number(longDigits + "e400")})},
-	})
-	_, err = jsonadapter.New().MarshalObject(ctx, unwritable)
-	c.err("json writer", err)
-	ls, res := schema.LoadString(ctx, "schema \"links\"\n\ntype L {\n\tid String primary\n\t--> TO (many) M {\n\t\tw Float\n\t}\n}\n\ntype M {\n\tid String primary\n}\n", "links.yammm")
-	if res.HasErrors() {
-		t.Fatal(res)
-	}
-	lt, _ := ls.Type("L")
-	mt, _ := ls.Type("M")
-	linked := snappartstest.Loaded(t, ls, snapparts.Parts{
-		Types: []schema.TypeID{lt.ID(), mt.ID()},
-		Instances: []snapparts.Instance{
-			{TypeID: mt.ID(), PrimaryKey: immutable.WrapKey([]any{longText}), Properties: immutable.WrapProperties(map[string]any{"id": longText})},
-			{TypeID: lt.ID(), PrimaryKey: immutable.WrapKey([]any{"l"}), Properties: immutable.WrapProperties(map[string]any{"id": "l"})},
-		},
-		Edges: []snapparts.Edge{{
-			Relation: "TO", SourceType: lt.ID(), SourceKey: immutable.WrapKey([]any{"l"}), TargetKey: immutable.WrapKey([]any{longText}),
-			Properties: immutable.WrapProperties(map[string]any{"w": json.Number("1e400")}),
-		}},
-	})
-	_, err = jsonadapter.New().MarshalObject(ctx, linked)
-	c.err("json writer", err)
-
 	for _, k := range []schema.Constraint{schema.NewTimestampConstraint(), schema.NewTimestampConstraintFormatted("2006-01-02"), schema.NewDateConstraint()} {
 		_, err := neo4jadapter.CoerceParams(map[string]any{"v": longText}, neo4jadapter.ParamTypes{"v": k})
 		c.err("neo4j.CoerceParams", err)
 	}
 
-	for _, where := range []string{"validator", "graph.Add", "graph.ParseKey", "snapshot.Load", "json writer", "neo4j.CoerceParams"} {
+	for _, where := range []string{"validator", "graph.Add", "graph.ParseKey", "snapshot.Load", "neo4j.CoerceParams"} {
 		if c.judged[where] == 0 {
 			t.Errorf("%s wrote no message to judge", where)
 		}

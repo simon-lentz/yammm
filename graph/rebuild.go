@@ -151,7 +151,7 @@ func lookupInstance(index map[schema.TypeID]map[string]Instance, id schema.TypeI
 
 // compareEdges provides the sorting comparator for edges.
 // Sorts by (sourceType, sourceKey, relation, targetType, targetKey), comparing
-// types by identity so two types rendering one name do not interleave.
+// types by identity.
 func compareEdges(a, b Edge) int {
 	if c := cmp.Compare(a.source.typeID.String(), b.source.typeID.String()); c != 0 {
 		return c

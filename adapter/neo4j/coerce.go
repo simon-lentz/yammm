@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/neo4j/neo4j-go-driver/v6/neo4j/dbtype"
-	"github.com/simon-lentz/yammm/adapter/internal/refusal"
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/instance"
 	"github.com/simon-lentz/yammm/schema"
@@ -171,7 +170,7 @@ func coerceValue(constraint schema.Constraint, raw any) (any, error) {
 	} else {
 		cv, err = coerceScalar(constraint, raw)
 	}
-	return cv, refusal.Mark(ErrUnrepresentable, err)
+	return cv, markUnrepresentable(err)
 }
 
 // ParamTypes maps a Cypher parameter name to the schema constraint its value

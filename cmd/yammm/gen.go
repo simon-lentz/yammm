@@ -8,7 +8,6 @@ import (
 	"github.com/simon-lentz/yammm/cmd/yammm/internal/cli"
 	"github.com/simon-lentz/yammm/schema"
 	"github.com/simon-lentz/yammm/schema/gogen"
-	"github.com/simon-lentz/yammm/schema/jschema"
 	"github.com/simon-lentz/yammm/schema/markdown"
 )
 
@@ -21,22 +20,13 @@ func newGenCmd() *cobra.Command {
 Targets:
 
   --to go          A single file of typed Go structs for every schema type
-                   (including imported types), named Enum/DataType types, EDGE_
-                   association structs, a Graph aggregate, and the embedded
-                   schema source. Output is stdlib-only. Use --initialisms to
-                   upper-case extra acronyms (e.g. GUID,JWT) in generated
-                   identifiers; they merge with the default golint acronym set.
-
-  --to jsonschema  A JSON Schema draft 2020-12 document describing the JSON
-                   object form 'yammm check' reads: one key per type a data
-                   file can hold at its top level, each an array of
-                   instances. It does not reproduce yammm's validation;
-                   'yammm check' gives the verdict. Wire it into an editor
-                   through a json.schemas mapping in VS Code settings for
-                   completion and validation while authoring data files; a
-                   JSON data file cannot carry a "$schema" member.
-                   Use --schema-id to set the document's "$id" (omitted when
-                   unset).
+                   (including imported types), named Enum/DataType types, a
+                   Date type when a position emits Date, one type per custom
+                   Timestamp layout a position emits, EDGE_ association
+                   structs, a Graph aggregate, and the embedded schema source.
+                   Output is stdlib-only. Use --initialisms to upper-case
+                   extra acronyms (e.g. GUID,JWT) in generated identifiers;
+                   they merge with the default golint acronym set.
 
   --to md          A self-contained Markdown reference document: a Mermaid
                    class diagram of every type in the import closure, per-type
@@ -52,12 +42,11 @@ source keys are relative to that root.`,
 		Args: cobra.ExactArgs(1),
 		RunE: withDiagnostics(runGen),
 	}
-	cmd.Flags().String("to", "", "target: go, jsonschema, or md (required)")
+	cmd.Flags().String("to", "", "target: go or md (required)")
 	cmd.Flags().String("package", "", "go target: generated package name (default: derived from schema name)")
 	cmd.Flags().String("output", "", "output file path (default: stdout)")
 	cmd.Flags().StringSlice("initialisms", nil, "go target: extra acronyms to upper-case in generated names, e.g. GUID,JWT")
 	registerModuleRootFlag(cmd)
-	cmd.Flags().String("schema-id", "", `jsonschema target: value for the emitted "$id" (omitted when unset)`)
 	cmd.Flags().Bool("no-class-diagram", false, "md target: omit the Mermaid class-diagram section")
 	cmd.Flags().Bool("no-class-members", false, "md target: omit the member lines inside each diagram class")
 	_ = cmd.MarkFlagRequired("to")
@@ -73,7 +62,6 @@ func rejectInapplicableFlags(cmd *cobra.Command, target string) error {
 	perTarget := []struct{ flag, target string }{
 		{"package", "go"},
 		{"initialisms", "go"},
-		{"schema-id", "jsonschema"},
 		{"no-class-diagram", "md"},
 		{"no-class-members", "md"},
 	}
@@ -93,8 +81,8 @@ func runGen(cmd *cobra.Command, args []string, sink *cli.DiagnosticSink) error {
 	if target == "markdown" {
 		target = "md"
 	}
-	if target != "go" && target != "jsonschema" && target != "md" {
-		return cli.Usagef("unsupported gen target %q: must be go, jsonschema, or md", toFormat)
+	if target != "go" && target != "md" {
+		return cli.Usagef("unsupported gen target %q: must be go or md", toFormat)
 	}
 	if err := rejectInapplicableFlags(cmd, target); err != nil {
 		return err
@@ -137,13 +125,6 @@ func runGen(cmd *cobra.Command, args []string, sink *cli.DiagnosticSink) error {
 			opts = append(opts, gogen.WithInitialisms(initialisms...))
 		}
 		data, err = gogen.Marshal(s, opts...)
-	case "jsonschema":
-		schemaID, _ := cmd.Flags().GetString("schema-id")
-		var opts []jschema.Option
-		if schemaID != "" {
-			opts = append(opts, jschema.WithSchemaID(schemaID))
-		}
-		data, err = jschema.Marshal(s, opts...)
 	case "md":
 		noDiagram, _ := cmd.Flags().GetBool("no-class-diagram")
 		noMembers, _ := cmd.Flags().GetBool("no-class-members")

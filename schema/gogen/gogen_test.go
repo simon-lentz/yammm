@@ -267,8 +267,8 @@ func TestMarshal_TypeChecks(t *testing.T) {
 
 // TestMarshal_TemporalTypes pins the shape a Date or custom-layout Timestamp
 // takes in every position: a generated struct embedding time.Time with a
-// JSON codec that speaks the stored string form, so a value adapter/json
-// wrote decodes into the generated field.
+// JSON codec that speaks the stored string form, so a value an instance
+// document holds decodes into the generated field.
 func TestMarshal_TemporalTypes(t *testing.T) {
 	got, err := gogen.Marshal(loadSchema(t, "temporal"))
 	if err != nil {
@@ -589,7 +589,7 @@ func layoutNames(t *testing.T, decls string, layouts ...string) map[string]strin
 var layoutDecl = regexp.MustCompile(`// (\w+) is exchanged as a JSON string in the layout ("[^"]*")\.\ntype \w+ struct\{ time\.Time \}`)
 
 // TestMarshal_GraphKeysAreAddressableTags pins the Graph aggregate's json keys
-// as the names adapter/json writes: bare for the entry schema's types and
+// as the type tags an instance document is keyed by: bare for the entry schema's types and
 // alias-qualified for a direct import. A type the entry schema reaches only
 // through another import has no such name and no Graph field, though its
 // struct is still emitted; and an entry type that shares its name with one

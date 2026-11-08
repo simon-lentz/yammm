@@ -47,6 +47,8 @@ func TestErrUnrepresentable_MarksEveryRefusalOfAValue(t *testing.T) {
 			&nodeShape{label: "Holder", primaryKeys: []string{"id"}})),
 		"a missing primary key": second(extractKeyProps(immutable.WrapProperties(map[string]any{}),
 			&nodeShape{label: "Holder", primaryKeys: []string{"id"}})),
+		"a missing primary key beside a nil one": second(extractKeyProps(immutable.WrapProperties(map[string]any{"b": nil}),
+			&nodeShape{label: "Holder", primaryKeys: []string{"a", "b"}})),
 	} {
 		if !errors.Is(err, ErrUnrepresentable) {
 			t.Errorf("%s: error = %v; want ErrUnrepresentable", name, err)
