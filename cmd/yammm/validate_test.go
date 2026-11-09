@@ -94,7 +94,6 @@ func TestExitCodes(t *testing.T) {
 		{"update-metadata missing file arg", []string{"snapshot", "update-metadata", "-s", "k=v"}, cli.ExitUsage},
 		{"update-metadata nonexistent file", []string{"snapshot", "update-metadata", "-s", "k=v", "/nonexistent/path.ys"}, cli.ExitRuntime},
 		{"neo4j diff requires uri", []string{"neo4j", "diff", "testdata/valid.yammm"}, cli.ExitUsage},
-		{"neo4j introspect requires uri", []string{"neo4j", "introspect"}, cli.ExitUsage},
 	}
 
 	for _, tt := range tests {

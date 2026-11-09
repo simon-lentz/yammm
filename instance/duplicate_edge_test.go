@@ -2,6 +2,8 @@ package instance_test
 
 import (
 	"slices"
+	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/simon-lentz/yammm/diag"
@@ -99,6 +101,45 @@ func TestValidateOne_ARepeatedTargetKeyIsRefused(t *testing.T) {
 			}
 			if c.messages != nil && !slices.Equal(messages, c.messages) {
 				t.Errorf("messages %q, want %q", messages, c.messages)
+			}
+		})
+	}
+}
+
+// A listing another check refused is compared with no other listing, so its own
+// issue stands for the repeat, and the listings either side of it are still
+// compared with each other.
+func TestValidateOne_ARefusedListingIsComparedWithNoOther(t *testing.T) {
+	t.Parallel()
+	s := mustLoadString(t, duplicateEdgeSchema, "dupedge.yammm")
+	v := instance.NewValidator(s)
+	sound := map[string]any{"_target_id": companyLower}
+	refused := map[string]any{"_target_id": companyUpper, "since": 2020}
+	type issue struct{ code, path string }
+	mismatch := func(i int) issue {
+		return issue{diag.E_TYPE_MISMATCH.String(), "$.employers[" + strconv.Itoa(i) + "].since"}
+	}
+	for name, c := range map[string]struct {
+		raw  instance.RawInstance
+		want []issue
+	}{
+		"refused first":   {employers(refused, sound), []issue{mismatch(0)}},
+		"refused second":  {employers(sound, refused), []issue{mismatch(1)}},
+		"refused between": {employers(sound, refused, sound), []issue{mismatch(1), {diag.E_DUPLICATE_EDGE.String(), "$.employers[2]"}}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			valid, res := v.ValidateOne(t.Context(), "Person", c.raw)
+			if !valid.IsZero() {
+				t.Error("a refused listing yields an instance")
+			}
+			var got []issue
+			for i := range res.Issues() {
+				got = append(got, issue{i.Code().String(), i.Path()})
+			}
+			slices.SortFunc(got, func(a, b issue) int { return strings.Compare(a.path, b.path) })
+			if !slices.Equal(got, c.want) {
+				t.Errorf("issues %v, want %v", got, c.want)
 			}
 		})
 	}

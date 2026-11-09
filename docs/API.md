@@ -21,7 +21,7 @@ Use `result.Err()` to convert to a standard Go `error` when `!result.OK()`.
 
 The adapter constructor does not fail: `neo4j.New` returns `*Adapter` alone, and an `Option` of it cannot report a problem.
 
-Pure transformations split three ways rather than one. Some return `(T, diag.Result)`, such as `snapshot.Marshal` and `neo4j.Adapter.ShapeForSchema`. Some return `(T, error)`, such as `gogen.Marshal` and `neo4j.Adapter.BatchNodeQueries`. The introspection query builders return neither: `neo4j.IntrospectConstraintsQuery` and `IntrospectIndexesQuery` return a `string`, and `IntrospectRelationshipsQuery` and `Adapter.IntrospectRelationshipsQueryFor` return `(string, map[string]any)`.
+Pure transformations split three ways rather than one. Some return `(T, diag.Result)`, such as `snapshot.Marshal` and `neo4j.Adapter.ShapeForSchema`. Some return `(T, error)`, such as `gogen.Marshal` and `neo4j.Adapter.BatchNodeQueries`. The introspection query builders return neither: `neo4j.IntrospectConstraintsQuery` and `IntrospectIndexesQuery` return a `string`.
 
 ## Values
 
@@ -1104,7 +1104,7 @@ constraints, result := adapter.ConstraintsStructured(ctx, s)
 
 The `Constraint` struct contains the constraint `Name`, `Kind` (`ConstraintUnique`, `ConstraintNotNull`, `ConstraintType`, `ConstraintNodeKey`), `Label`, `Properties`, `TypeExpr`, and the complete `Statement`.
 
-Generation is **all-or-nothing**: any validation error returns `(nil, result)`, so one unemittable property withholds every constraint of the schema rather than emitting a partial script that looks complete. Beside a name Neo4j refuses as an identifier (Cypher reserved words, below) and two labels that sanitize alike (`E_NEO4J_LABEL_COLLISION`), the one shape a *valid* schema can hit is a list whose element is itself a collection — `List<List<T>>`, `List<Vector[N]>`, or a list of a list-typed alias. Those are legal yammm but Neo4j has no nested collection property type, so `ConstraintsForSchema` and `ConstraintsStructured` report `E_NEO4J_UNSUPPORTED_TYPE` for one, required or optional, under every option, `WithScalarTypeConstraints(false)` and `WithEdition(Community)` included: an option decides which constraints are emitted, and with them which property names are checked as identifiers, never whether a nested collection is refused. `IndexesForSchema` and `ShapeForSchema` do not make that check. The write path does: `BatchNodeQueries` and `CoerceParams` refuse a value of such a property with an error wrapping `ErrUnsupportedListElem`, an empty list included, and read an absent one as nil, which `BatchNodeQueries` writes as null. Model the inner collection as a `part type` reached by a composition if the model must be written to Neo4j. A property of an abstract type that no concrete type and no part type extends draws no report: no label carries it. A bare `Vector` is fine — it maps to `LIST<FLOAT NOT NULL>`.
+Generation is **all-or-nothing**: any validation error returns `(nil, result)`, so one unemittable property withholds every constraint of the schema rather than emitting a partial script that looks complete. Beside a name Neo4j refuses as an identifier (Cypher reserved words, below) and two types that compose one label (`E_NEO4J_LABEL_COLLISION`), the one shape a *valid* schema can hit is a list whose element resolves to a collection, a List or a Vector, the list and its element each written directly or through an alias. Those are legal yammm but Neo4j has no nested collection property type, so `ConstraintsForSchema` and `ConstraintsStructured` report `E_NEO4J_UNSUPPORTED_TYPE` for one, required or optional, whatever the constraint options set, `WithScalarTypeConstraints(false)` and `WithEdition(Community)` included: they shape what is emitted, never whether a nested collection is refused. A label option can decide it: a type whose composed label is not a valid identifier is refused with `E_NEO4J_INVALID_IDENTIFIER` and judged no further, so its nested collection is not reported. `IndexesForSchema` and `ShapeForSchema` do not make that check. The write path does: `BatchNodeQueries` and `CoerceParams` refuse a value of such a property with an error wrapping `ErrUnsupportedListElem`, an empty list included, and read an absent one as nil, which `BatchNodeQueries` writes as null. Model the inner collection as a `part type` reached by a composition if the model must be written to Neo4j. A property of an abstract type that no concrete type and no part type extends draws no report: no label carries it. A bare `Vector` is fine — it maps to `LIST<FLOAT NOT NULL>`.
 
 ### Indexes
 
@@ -1240,15 +1240,6 @@ The string form the library stores for a `Timestamp`, `Date` or `UUID` is the va
 
 **When to call:** at any direct-Cypher parameter boundary that writes schema-typed `Timestamp` / `Date` / `Float` properties — scalar or `List<…>` — e.g. an enrichment `MERGE` or relationship-maintenance query built outside the `Adapter` write path. Writes that go through `Adapter.BatchNodeQueries` / `BatchEdgeQueries`, or that already pass native Go types, need no extra coercion — those coerce their own merge keys and endpoint keys as well as their properties. Because `ParamTypes` carries the full constraint, `ParamTypesForType` is the easiest way to build one; it derives the element types lists need. When a hand-built merge key does not sit where the properties sit, coerce it explicitly — a `Date` primary key reaching the driver as a string matches no node whose property is a `DATE`, and every re-run inserts a duplicate, or fails where a uniqueness constraint holds the key.
 
-### Schema Inference
-
-```go
-// Generate a .yammm scaffold from introspected Neo4j constraints and relationships
-yammmSource := adapter.InferSchema(constraints, relationships, schemaFilter)
-```
-
-`InferSchema` takes `[]RemoteConstraint` and `[]RemoteRelationship` values (obtained from introspection queries) and produces a `.yammm` source string. Each label is parsed as `Adapter.Label` writes it under the adapter's prefix and separator, so a label another configuration wrote is not read as this schema's type; `schemaFilter` is compared as a label writes it, and a filter that matches none of the constraints read leaves a TODO line saying so. Helper functions `IntrospectConstraintsQuery`, `IntrospectRelationshipsQuery`, `ParseRemoteConstraints`, and `ParseRemoteRelationships` assist with gathering introspection data from a live database.
-
 ### Constraint Diffing
 
 ```go
@@ -1306,26 +1297,18 @@ Every schema-owned remote index the caller passes in is accounted for: it is the
 
 ### Introspection Queries
 
-```go
-// Get a Cypher query for introspecting relationship topology
-query, params := adapter.IntrospectRelationshipsQueryFor(schemaFilter)
-```
-
-This returns a parameterized Cypher query string and parameters — consumers execute it against their own driver. Package-level helpers assist with gathering introspection data:
+The package returns each query as Cypher text, which a consumer executes against its own driver, and parses the records the driver returns:
 
 | Function | Description |
 | -------- | ----------- |
 | `IntrospectConstraintsQuery()` | Static Cypher for `SHOW CONSTRAINTS YIELD *` |
 | `IntrospectIndexesQuery()` | Static Cypher projecting `name, type, entityType, labelsOrTypes, properties, options, state, owningConstraint`, filtered to `type <> 'LOOKUP'` |
-| `IntrospectRelationshipsQuery(labelPrefix)` | Parameterized Cypher for relationship topology discovery |
 | `ParseRemoteConstraints(records)` | Parse driver output into `[]RemoteConstraint` |
 | `ParseRemoteIndexes(records)` | Parse driver output into `[]RemoteIndex` (including the options map) |
-| `ParseRemoteRelationships(records)` | Parse driver output into `[]RemoteRelationship` |
 
 The introspection types are:
 
-- `RemoteConstraint` — constraint metadata (name, type, entity type, labels/types, properties, property type, and the `CreateStatement` Cypher that recreates it). `Type` is verbatim what the server reported, and the node-uniqueness spelling **depends on the server generation**: Neo4j 5.x reports `UNIQUENESS`, 2026.x reports `NODE_PROPERTY_UNIQUENESS`. The other kinds are stable. `DiffConstraints` and `InferSchema` fold both spellings internally; a consumer switching on the field itself must accept both, or it silently stops recognising every UNIQUE constraint when the database is upgraded.
-- `RemoteRelationship` — relationship topology (relation type, source/target labels)
+- `RemoteConstraint` — constraint metadata (name, type, entity type, labels/types, properties, property type, and the `CreateStatement` Cypher that recreates it). `Type` is verbatim what the server reported, and a uniqueness spelling **follows the Cypher language the query runs under**, not the edition: `CYPHER 5`, the one language of Neo4j 5.x, reports `UNIQUENESS` and `RELATIONSHIP_UNIQUENESS`, and `CYPHER 25`, the default of a new database on 2026.05, `NODE_PROPERTY_UNIQUENESS` and `RELATIONSHIP_PROPERTY_UNIQUENESS`. `IntrospectConstraintsQuery` names no language, so the database's default decides. `NODE_PROPERTY_EXISTENCE`, `NODE_PROPERTY_TYPE` and `NODE_KEY` are the same under both. `DiffConstraints` folds the two node spellings internally; a consumer switching on the field itself must accept both spellings of each uniqueness kind, or it silently stops recognising every UNIQUE constraint when the database's default language changes.
 - `RemoteIndex` — index metadata (name, type, entity type, labels/types, properties, options, state, owning constraint); `VectorDimensions()` and `VectorSimilarity()` read a vector index's configuration from the options map for drift detection, and `IsOnline()` reports whether the index is in a state that serves queries (an unreported state counts as online)
 
 `IntrospectIndexesQuery()` returns **constraint-backing indexes** as well as standalone ones — `RemoteIndex.OwningConstraint` identifies them. The diff needs them because a backing index holds its constraint's name against every `CREATE INDEX` and already serves the definition it covers, which are both conditions under which the server silently no-ops a declared index. A consumer filtering rows itself must test that field rather than assume the query excluded them.

@@ -154,10 +154,10 @@ The all-or-nothing contract is unchanged: any error still yields a zero schema.
 | `E_CONSTRAINT_FAIL` | A value fails its declared constraint |
 | `E_INVARIANT_FAIL` | Invariant expression evaluated to false |
 | `E_EVAL_ERROR` | Error during expression evaluation |
-| `E_MISSING_FK_TARGET` | Foreign key target is missing |
+| `E_MISSING_FK_TARGET` | An edge object holds none of its target's `_target_` foreign-key fields |
 | `E_PARTIAL_COMPOSITE_FK` | Partial composite foreign key |
 | `E_UNKNOWN_EDGE_FIELD` | Unknown field in edge data |
-| `E_DUPLICATE_EDGE` | A `(many)` association lists one target key twice for one source |
+| `E_DUPLICATE_EDGE` | A `(many)` association lists one target key twice for one source, where no other check refused either listing |
 | `E_EDGE_SHAPE_MISMATCH` | An edge's or a composition's value has a shape its relation does not take; at `graph.NewFromSnapshot` under another schema, an `"empty"` unresolved record under a `(one)` association |
 | `E_UNRESOLVED_REQUIRED_COMPOSITION` | Required composition is unresolved |
 | `E_COMPOSITION_DEPTH_EXCEEDED` | Composed nesting deeper than the bound (32) |

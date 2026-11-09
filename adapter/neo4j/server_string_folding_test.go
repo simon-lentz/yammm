@@ -10,11 +10,6 @@ import (
 // against a current server — which is the point: an unfolded comparison fails
 // silently and only under a server that changes, so the fold is pinned here
 // rather than left to be discovered the next time one does.
-//
-// The two commands that read these columns must fold them IDENTICALLY. A
-// stricter test in one of them is the dangerous shape: `neo4j diff` would keep
-// working while `neo4j introspect` quietly produced a different answer from the
-// same rows.
 
 // lowerCased is the mutation these tests apply: a server returning the same
 // value in another case. Applied to whole records rather than one field, so a
@@ -88,37 +83,5 @@ func TestDiffConstraints_TypeExprFoldDoesNotHideRealDrift(t *testing.T) {
 	}
 	if len(result.Match) != 0 {
 		t.Errorf("Match = %d; want 0", len(result.Match))
-	}
-}
-
-// InferSchema reads the same two columns and must reach the same conclusions.
-// Its failure mode is silent: an unrecognised entityType skips the constraint
-// entirely, and an unrecognised propertyType leaves the property on its String
-// fallback, so both produce a plausible-looking schema that is wrong.
-func TestInferSchema_FoldsServerColumnCase(t *testing.T) {
-	t.Parallel()
-	a := New()
-
-	constraints := []RemoteConstraint{
-		lowerCased(RemoteConstraint{
-			Name: "u", Type: "UNIQUENESS", EntityType: "NODE",
-			LabelsOrTypes: []string{"app__Person"}, Properties: []string{"id"},
-		}),
-		lowerCased(RemoteConstraint{
-			Name: "t", Type: "NODE_PROPERTY_TYPE", EntityType: "NODE",
-			LabelsOrTypes: []string{"app__Person"}, Properties: []string{"age"},
-			PropertyType: "INTEGER",
-		}),
-	}
-
-	src := a.InferSchema(constraints, nil, "app")
-
-	// A skipped entityType would drop the type and its key entirely.
-	if !strings.Contains(src, "primary") {
-		t.Errorf("lower-cased entityType lost the primary key:\n%s", src)
-	}
-	// A skipped propertyType would leave age on the String fallback.
-	if !strings.Contains(src, "age Integer") {
-		t.Errorf("lower-cased propertyType did not resolve to Integer:\n%s", src)
 	}
 }

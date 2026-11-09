@@ -15,8 +15,8 @@ import (
 // Markdown file: each `yammm …` example names a command
 // the CLI has and flags that command defines, so a flag legal only on another
 // command is reported. The table is read from newRootCmd's tree as execute
-// builds it, cobra's help and completion commands included, with the help and
-// version flags marked as cobra defines them, after the lookup.
+// builds it, cobra's help and completion commands and the help and version
+// flags included.
 func TestDocumentedInvocationsExist(t *testing.T) {
 	t.Parallel()
 	n := doclint.AssertInvocationsExist(t, "../..", doclint.CommandRules{
@@ -42,9 +42,8 @@ func executedCommandTable() []doclint.Command {
 }
 
 // commandTable returns every visible command under root with the flags it
-// accepts, inherited ones included. cobra adds the help and version flags only
-// to the command it has found, so each flag those initialisers add is marked
-// AfterLookup.
+// accepts, inherited ones included, as root holds them: a flag cobra would add
+// only once it has found a command is no flag of the table.
 func commandTable(root *cobra.Command) []doclint.Command {
 	var cmds []*cobra.Command
 	var walk func(c *cobra.Command)
@@ -57,23 +56,14 @@ func commandTable(root *cobra.Command) []doclint.Command {
 		}
 	}
 	walk(root)
-	atLookup := make(map[*cobra.Command]map[string]bool, len(cmds))
-	for _, c := range cmds {
-		names := make(map[string]bool)
-		visitFlags(c, func(f *pflag.Flag) { names[f.Name] = true })
-		atLookup[c] = names
-	}
 	table := make([]doclint.Command, 0, len(cmds))
 	for _, c := range cmds {
-		c.InitDefaultHelpFlag()
-		c.InitDefaultVersionFlag()
 		var flags []doclint.Flag
 		visitFlags(c, func(f *pflag.Flag) {
 			flags = append(flags, doclint.Flag{
-				Name:        f.Name,
-				Shorthand:   f.Shorthand,
-				NoValue:     f.NoOptDefVal != "",
-				AfterLookup: !atLookup[c][f.Name],
+				Name:      f.Name,
+				Shorthand: f.Shorthand,
+				NoValue:   f.NoOptDefVal != "",
 			})
 		})
 		table = append(table, doclint.Command{
@@ -92,9 +82,9 @@ func visitFlags(c *cobra.Command, fn func(*pflag.Flag)) {
 
 // TestCommandTable_HoldsWhatCobraAccepts pins the table the gate reads: the
 // commands execute adds, a help flag and the inherited flags on every command,
-// every flag one cobra defines there, NoValue exactly on the boolean flags,
-// AfterLookup exactly on the help and version flags cobra adds once it has
-// found the command, and no hidden command.
+// every flag one cobra defines there, NoValue exactly on the boolean flags, and
+// no hidden command. execute defines the help and version flags before cobra's
+// lookup, so the table holds them only when the lookup knows them.
 func TestCommandTable_HoldsWhatCobraAccepts(t *testing.T) {
 	t.Parallel()
 	byPath := make(map[string]map[string]doclint.Flag)
@@ -111,18 +101,18 @@ func TestCommandTable_HoldsWhatCobraAccepts(t *testing.T) {
 			t.Errorf("the table has no command %q", path)
 			continue
 		}
-		if f := flags["help"]; f.Shorthand != "h" || !f.NoValue || !f.AfterLookup {
-			t.Errorf("%q: help flag = %+v, want -h taking no value, defined after the lookup", path, f)
+		if f, ok := flags["help"]; !ok || f.Shorthand != "h" || !f.NoValue {
+			t.Errorf("%q: help flag = %+v, %v; want -h taking no value", path, f, ok)
 		}
-		if f, ok := flags["format"]; !ok || f.NoValue || f.AfterLookup {
-			t.Errorf("%q: format flag = %+v, %v; want it inherited, taking a value, known to the lookup", path, f, ok)
+		if f, ok := flags["format"]; !ok || f.NoValue {
+			t.Errorf("%q: format flag = %+v, %v; want it inherited, taking a value", path, f, ok)
 		}
-		if f := flags["no-color"]; !f.NoValue || f.AfterLookup {
-			t.Errorf("%q: no-color flag = %+v; want it inherited, taking no value, known to the lookup", path, f)
+		if f := flags["no-color"]; !f.NoValue {
+			t.Errorf("%q: no-color flag = %+v; want it inherited, taking no value", path, f)
 		}
 	}
-	if f := byPath[""]["version"]; f.Shorthand != "v" || !f.NoValue || !f.AfterLookup {
-		t.Errorf("the program's version flag = %+v, want -v taking no value, defined after the lookup", f)
+	if f, ok := byPath[""]["version"]; !ok || f.Shorthand != "v" || !f.NoValue {
+		t.Errorf("the program's version flag = %+v, %v; want -v taking no value", f, ok)
 	}
 	if _, ok := byPath["check"]["version"]; ok {
 		t.Error("check inherits --version, which cobra defines on the program alone")
@@ -149,9 +139,6 @@ func TestCommandTable_HoldsWhatCobraAccepts(t *testing.T) {
 			}
 			if isBool := pf.Value.Type() == "bool"; f.NoValue != isBool {
 				t.Errorf("%q: --%s NoValue = %v, but its value type is %s", c.Path, f.Name, f.NoValue, pf.Value.Type())
-			}
-			if cobraAdds := f.Name == "help" || f.Name == "version"; f.AfterLookup != cobraAdds {
-				t.Errorf("%q: --%s AfterLookup = %v", c.Path, f.Name, f.AfterLookup)
 			}
 		}
 		for _, want := range []string{"help", "format", "no-color"} {

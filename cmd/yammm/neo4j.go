@@ -15,27 +15,29 @@ func newNeo4jCmd() *cobra.Command {
 		RunE: requireSubcommand,
 		// A mistyped subcommand is reported as unknown, by name.
 		Args: cobra.NoArgs,
-		PersistentPreRunE: func(cmd *cobra.Command, _ []string) error {
-			return bindNeo4jFlags(cmd)
-		},
 	}
-
-	cmd.PersistentFlags().String("uri", "", "Neo4j bolt URI (e.g., neo4j://localhost:7687) [$YAMMM_NEO4J_URI]")
-	cmd.PersistentFlags().String("username", "neo4j", "Neo4j username [$YAMMM_NEO4J_USERNAME]")
-	cmd.PersistentFlags().String("password", "", "Neo4j password [$YAMMM_NEO4J_PASSWORD]")
-	cmd.PersistentFlags().String("database", "neo4j", "Neo4j database name [$YAMMM_NEO4J_DATABASE]")
 
 	cmd.AddCommand(
 		newNeo4jConstraintsCmd(),
 		newNeo4jIndexesCmd(),
 		newNeo4jDiffCmd(),
-		newNeo4jIntrospectCmd(),
 	)
 
 	return cmd
 }
 
-// bindNeo4jFlags binds Neo4j persistent flags to environment variables.
+// registerConnectionFlags adds the flags that name a database and its
+// credentials, each also read from its YAMMM_NEO4J_* variable. Only a command
+// that connects takes them, so none is accepted and then ignored.
+func registerConnectionFlags(cmd *cobra.Command) {
+	cmd.Flags().String("uri", "", "Neo4j bolt URI (e.g., neo4j://localhost:7687) [$YAMMM_NEO4J_URI]")
+	cmd.Flags().String("username", "neo4j", "Neo4j username [$YAMMM_NEO4J_USERNAME]")
+	cmd.Flags().String("password", "", "Neo4j password [$YAMMM_NEO4J_PASSWORD]")
+	cmd.Flags().String("database", "neo4j", "Neo4j database name [$YAMMM_NEO4J_DATABASE]")
+	cmd.PreRunE = func(cmd *cobra.Command, _ []string) error { return bindNeo4jFlags(cmd) }
+}
+
+// bindNeo4jFlags binds the connection flags to environment variables.
 // When a flag is not set on the command line but the corresponding env var
 // is present, the env value is written back into the cobra flag so that
 // subcommands can continue using cmd.Flags().GetString() unchanged.

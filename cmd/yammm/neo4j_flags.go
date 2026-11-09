@@ -36,16 +36,12 @@ func registerConstraintFlags(cmd *cobra.Command) {
 	cmd.Flags().Bool("required-only-types", false, "restrict type constraints to required properties")
 }
 
-// labelOptions reads the label flags back into adapter options, refusing an
-// empty separator and a prefix or separator whose composed label is not a
-// Neo4j identifier. It refuses rather than sanitizes: a quietly repaired label
+// labelOptions reads the label flags back into adapter options, refusing a
+// prefix or separator whose composed label is not a Neo4j identifier. It refuses rather than sanitizes: a quietly repaired label
 // is one the operator did not ask for, and every command calls it before work.
 func labelOptions(cmd *cobra.Command) ([]neo4j.Option, error) {
 	separator, _ := cmd.Flags().GetString("separator")
 	prefix, _ := cmd.Flags().GetString("prefix")
-	if separator == "" {
-		return nil, cli.Usagef("--separator must not be empty: a label composed without one cannot be split back into its schema and type")
-	}
 	opts := []neo4j.Option{
 		neo4j.WithLabelSeparator(separator),
 		neo4j.WithLabelPrefix(prefix),

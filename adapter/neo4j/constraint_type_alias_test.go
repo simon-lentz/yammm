@@ -5,8 +5,8 @@ import (
 	"testing"
 )
 
-// Neo4j spells the node uniqueness constraint type differently across server
-// generations — 5.x reports UNIQUENESS, 2026.x reports NODE_PROPERTY_UNIQUENESS
+// Neo4j spells the node uniqueness constraint type differently across Cypher
+// languages — CYPHER 5 reports UNIQUENESS, CYPHER 25 NODE_PROPERTY_UNIQUENESS
 // — and this adapter supports both. Every comparison against a server-reported
 // type therefore has to fold the two together. These tests pin that at each
 // site: matching a remote constraint could rot silently into "the schema's own
@@ -14,8 +14,9 @@ import (
 // because the plan looks actionable.
 
 // uniquenessSpellings is what real Neo4j servers report for a node uniqueness
-// constraint: 5.x reports the first, 2026.x the second. Both were read from
-// SHOW CONSTRAINTS on a running server of each generation.
+// constraint: CYPHER 5 (5.x's one language) reports the first, CYPHER 25 (a
+// new 2026.05 database's default) the second. Both were read from SHOW CONSTRAINTS
+// on running servers.
 //
 // Written as LITERALS on purpose. Deriving them from
 // remoteConstraintTypeAliases would make every test below agree with whatever
@@ -83,9 +84,9 @@ func TestDiffConstraints_UniquenessSpellingsAllMatch(t *testing.T) {
 
 			// The specific misbehaviour this guards: an unrecognised spelling
 			// makes the remote constraint undeclarable, so it is Excluded rather
-			// than paired, and the desired constraint then finds its name taken
-			// and reports as drift telling the operator to drop a constraint that
-			// is correct.
+			// than paired, and this unnamed desired constraint then plans a create
+			// of a constraint the database already holds (a named one would read
+			// as drift instead).
 			if len(result.Match) != 1 {
 				t.Errorf("Match = %d; want 1 — remote %q should realise the declaration", len(result.Match), spelling)
 			}
@@ -105,31 +106,6 @@ func TestDiffConstraints_UniquenessSpellingsAllMatch(t *testing.T) {
 			}
 			for _, d := range result.Drift {
 				t.Logf("  drift: %s", d.Reason)
-			}
-		})
-	}
-}
-
-func TestInferSchema_UniquenessSpellingsYieldPrimaryKey(t *testing.T) {
-	t.Parallel()
-
-	for _, spelling := range uniquenessSpellings {
-		t.Run(spelling, func(t *testing.T) {
-			t.Parallel()
-			a := New()
-
-			constraints := []RemoteConstraint{{
-				Name: "c1", Type: spelling, EntityType: "NODE",
-				LabelsOrTypes: []string{"app__Person"}, Properties: []string{"id"},
-			}}
-
-			src := a.InferSchema(constraints, nil, "app")
-
-			// An unrecognised spelling marks no primary key, and the scaffold
-			// then fails to load on E_NO_PRIMARY_KEY — a schema the tool itself
-			// produced and cannot read back.
-			if !strings.Contains(src, "primary") {
-				t.Errorf("remote %q produced a scaffold with no primary key:\n%s", spelling, src)
 			}
 		})
 	}

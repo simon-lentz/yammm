@@ -12,16 +12,20 @@ import (
 type RemoteConstraint struct {
 	Name string // Constraint name
 
-	// Type is verbatim what the server reported, and its spelling for a node
-	// uniqueness constraint DEPENDS ON THE SERVER GENERATION: Neo4j 5.x reports
-	// "UNIQUENESS", 2026.x reports "NODE_PROPERTY_UNIQUENESS". The other kinds
-	// ("NODE_PROPERTY_EXISTENCE", "NODE_PROPERTY_TYPE", "NODE_KEY") are stable.
+	// Type is verbatim what the server reported. Its spelling for a uniqueness
+	// constraint FOLLOWS THE CYPHER LANGUAGE the query runs under, not the
+	// edition: CYPHER 5, the one language of Neo4j 5.x, reports "UNIQUENESS"
+	// and "RELATIONSHIP_UNIQUENESS", and CYPHER 25, the default of a new database
+	// on 2026.05, "NODE_PROPERTY_UNIQUENESS" and "RELATIONSHIP_PROPERTY_UNIQUENESS".
+	// [IntrospectConstraintsQuery] names no language, so the database's default
+	// decides. "NODE_PROPERTY_EXISTENCE", "NODE_PROPERTY_TYPE" and "NODE_KEY"
+	// are the same under both.
 	//
-	// A consumer switching on this field must accept both uniqueness spellings,
-	// or it silently stops recognising every UNIQUE constraint the moment the
-	// database is upgraded. The diff and [Adapter.InferSchema] fold them
-	// internally; this field is deliberately not folded, so a diagnostic echoes
-	// the kind the operator's own database reports.
+	// A consumer switching on this field must accept both spellings of each
+	// uniqueness kind, or it silently stops recognising every UNIQUE constraint
+	// when the database's default language changes. The diff folds the node
+	// spellings internally; this field is deliberately not folded, so a
+	// diagnostic echoes the kind the operator's own database reports.
 	Type string
 
 	EntityType      string   // "NODE" or "RELATIONSHIP"
@@ -29,16 +33,6 @@ type RemoteConstraint struct {
 	Properties      []string // Constrained properties
 	PropertyType    string   // Enforced type (empty for non-type constraints or Neo4j < 5.9)
 	CreateStatement string   // Cypher to recreate the constraint
-}
-
-// RemoteRelationship represents a discovered relationship signature
-// from a graph-walking query.
-//
-// Parse from database output via [ParseRemoteRelationships].
-type RemoteRelationship struct {
-	RelationType string   // e.g., "WORKS_AT", "IN_REGION"
-	SourceLabels []string // Labels on source nodes
-	TargetLabels []string // Labels on target nodes
 }
 
 // RemoteIndex represents an index as reported by SHOW INDEXES, including the
@@ -185,58 +179,6 @@ func IntrospectIndexesQuery() string {
 		"WHERE type <> 'LOOKUP'"
 }
 
-// IntrospectRelationshipsQuery returns a Cypher query for discovering
-// relationship signatures, optionally narrowed by a label prefix.
-//
-// The prefix is a HEURISTIC FILTER, not an ownership test. A label starting
-// with it may belong to a sibling schema whose sanitized name shares the
-// prefix, and a label belonging to this schema is missed if a caller-configured
-// prefix or separator does not reproduce the one the writer used.
-// [Adapter.OwnedLabels] is the exact set, and it needs a compiled schema —
-// which the introspect path does not have, because it exists to produce one.
-//
-// The scan is unbounded by design: `MATCH (a)-[r]->(b)` visits every
-// relationship in the database, and no index serves a label-prefix predicate,
-// so the filter reduces what is RETURNED and not what is READ. Cost grows with
-// the graph, not with the schema.
-//
-// Returns the query string and a parameter map. When labelPrefix is empty,
-// all relationships are discovered (no filtering).
-func IntrospectRelationshipsQuery(labelPrefix string) (string, map[string]any) {
-	if labelPrefix == "" {
-		return "MATCH (a)-[r]->(b) " +
-			"WITH type(r) AS relType, labels(a) AS srcLabels, labels(b) AS tgtLabels " +
-			"RETURN DISTINCT relType, srcLabels, tgtLabels", nil
-	}
-
-	query := "MATCH (a)-[r]->(b) " +
-		"WHERE any(l IN labels(a) WHERE l STARTS WITH $prefix) " +
-		"WITH type(r) AS relType, labels(a) AS srcLabels, labels(b) AS tgtLabels " +
-		"RETURN DISTINCT relType, srcLabels, tgtLabels"
-	return query, map[string]any{"prefix": labelPrefix}
-}
-
-// IntrospectRelationshipsQueryFor returns a schema-scoped relationship discovery query.
-// It builds the label prefix from the adapter's configuration (labelPrefix + schemaFilter
-// + labelSeparator) and delegates to [IntrospectRelationshipsQuery], whose godoc
-// states what a prefix can and cannot establish.
-//
-// The filter is TRIMMED first, exactly as [Adapter.Label] trims a schema name
-// before composing a label. Testing the raw value instead meant an all-space
-// filter took the scoped path and built a prefix no written label carries,
-// discovering nothing and reporting it as an empty database.
-//
-// When schemaFilter is empty or all space, all relationships are discovered.
-func (a *Adapter) IntrospectRelationshipsQueryFor(schemaFilter string) (string, map[string]any) {
-	if strings.TrimSpace(schemaFilter) == "" {
-		return IntrospectRelationshipsQuery("")
-	}
-	prefix := a.config.labelPrefix +
-		SanitizeIdentifier(schemaFilter) +
-		a.config.labelSeparator
-	return IntrospectRelationshipsQuery(prefix)
-}
-
 // ParseRemoteConstraints parses SHOW CONSTRAINTS YIELD * output into structured values.
 //
 // Input is []map[string]any from the driver's Record.AsMap() output.
@@ -281,25 +223,6 @@ func ParseRemoteIndexes(records []map[string]any) ([]RemoteIndex, error) {
 			Options:          parseMapField(rec, "options"),
 			State:            parseStringField(rec, "state"),
 			OwningConstraint: parseStringField(rec, "owningConstraint"),
-		})
-	}
-	return result, nil
-}
-
-// ParseRemoteRelationships parses relationship signature query output.
-// Expected record keys: "relType", "srcLabels", "tgtLabels".
-func ParseRemoteRelationships(records []map[string]any) ([]RemoteRelationship, error) {
-	result := make([]RemoteRelationship, 0, len(records))
-	for i, rec := range records {
-		relType := parseStringField(rec, "relType")
-		if relType == "" {
-			return nil, fmt.Errorf("record %d: missing relType", i)
-		}
-
-		result = append(result, RemoteRelationship{
-			RelationType: relType,
-			SourceLabels: parseStringSliceField(rec, "srcLabels"),
-			TargetLabels: parseStringSliceField(rec, "tgtLabels"),
 		})
 	}
 	return result, nil

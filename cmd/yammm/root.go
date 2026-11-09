@@ -50,7 +50,11 @@ Global flags:
 // completion parent prints help and exits 0. A shell command that cannot
 // write its script is a runtime failure. [execute] calls it once the caller has set root's streams, since each shell command
 // binds its output when it is created.
-func initHelpAndCompletion(root *cobra.Command) {
+//
+// It also refuses an unknown subcommand on the help and flag-error paths, through
+// [unknownSubcommand], and returns the help path's refusal, which cobra's Execute
+// cannot return: it calls the help function and returns nil.
+func initHelpAndCompletion(root *cobra.Command) (helpRefusal func() error) {
 	root.InitDefaultHelpCmd()
 	root.InitDefaultCompletionCmd()
 	for _, c := range root.Commands() {
@@ -74,6 +78,48 @@ func initHelpAndCompletion(root *cobra.Command) {
 			}
 		}
 	}
+
+	initHelpFlags(root)
+	root.InitDefaultVersionFlag()
+
+	var refused error
+	help := root.HelpFunc()
+	root.SetHelpFunc(func(c *cobra.Command, args []string) {
+		if err := unknownSubcommand(c); err != nil {
+			refused = err
+			return
+		}
+		help(c, args)
+	})
+	flagError := root.FlagErrorFunc()
+	root.SetFlagErrorFunc(func(c *cobra.Command, err error) error {
+		if unknown := unknownSubcommand(c); unknown != nil {
+			return unknown
+		}
+		return flagError(c, err)
+	})
+	return func() error { return refused }
+}
+
+// initHelpFlags adds the help flag to c and every command under it. cobra adds
+// it only to the command it runs, after it has found that command, so without
+// it "yammm neo4j --help diff" reads "diff" as an unknown --help's value.
+func initHelpFlags(c *cobra.Command) {
+	c.InitDefaultHelpFlag()
+	for _, sub := range c.Commands() {
+		initHelpFlags(sub)
+	}
+}
+
+// unknownSubcommand refuses the first word c's flags left when c holds
+// subcommands, in cobra.NoArgs's words. cobra parses flags and answers --help
+// before it judges a command's words, so without it "yammm neo4j bogus --help"
+// prints neo4j's help at exit 0 and "yammm neo4j bogus --schema x" names the flag.
+func unknownSubcommand(c *cobra.Command) error {
+	if !c.HasSubCommands() {
+		return nil
+	}
+	return cobra.NoArgs(c, c.Flags().Args())
 }
 
 // withDiagnostics adapts a command that diagnoses to cobra's RunE. It admits

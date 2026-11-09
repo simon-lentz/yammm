@@ -2,7 +2,6 @@ package neo4j
 
 import (
 	"context"
-	"strings"
 	"testing"
 
 	"github.com/simon-lentz/yammm/diag"
@@ -89,34 +88,5 @@ func TestInvalidIdentifier_LabelSiteCarriesTheSameContract(t *testing.T) {
 	}
 	if got["type"] != "Person" {
 		t.Errorf("type detail = %q, want the type name %q", got["type"], "Person")
-	}
-}
-
-// The generated text says what it is. Introspection recovers labels and
-// properties; type identity, association-versus-composition and import
-// structure are not in a database, so the output names each guess rather than
-// looking like a schema that should load.
-//
-// Mutation: removing the header block turns this red.
-func TestInferSchema_SaysItIsAStartingPoint(t *testing.T) {
-	t.Parallel()
-
-	dsl := New().InferSchema([]RemoteConstraint{{
-		Name:          "c",
-		EntityType:    "NODE",
-		LabelsOrTypes: []string{"app__Thing"},
-		Properties:    []string{"id"},
-		Type:          "UNIQUENESS",
-	}}, nil, "app")
-
-	for _, want := range []string{
-		"STARTING POINT",
-		"not expected to load",
-		"association or a composition",
-		"no index metadata is read",
-	} {
-		if !strings.Contains(dsl, want) {
-			t.Errorf("generated text does not state %q:\n%s", want, dsl)
-		}
 	}
 }

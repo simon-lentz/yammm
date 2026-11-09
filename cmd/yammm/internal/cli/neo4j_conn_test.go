@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/neo4j/neo4j-go-driver/v6/neo4j"
 )
 
 // closedPort returns an address nothing is listening on, by binding one and
@@ -63,5 +65,14 @@ func TestConnectNeo4j_RejectsAMalformedURI(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "connect to neo4j") {
 		t.Errorf("error %q does not name the construction step", err)
+	}
+}
+
+// The diff reads the database it was asked for and can write nothing there.
+func TestReadSession_ReadsTheNamedDatabaseOnly(t *testing.T) {
+	t.Parallel()
+	got := readSession("analytics")
+	if got.DatabaseName != "analytics" || got.AccessMode != neo4j.AccessModeRead {
+		t.Errorf("session config = %+v, want database %q in read mode", got, "analytics")
 	}
 }

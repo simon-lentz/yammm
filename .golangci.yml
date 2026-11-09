@@ -153,7 +153,7 @@ linters:
       # drops its testify import, delete it from its directory's entry (and
       # delete the whole entry when its alternation empties). Never add a
       # file here.
-      - path: "^adapter/neo4j/(diff|infer|introspect)_test\\.go$"
+      - path: "^adapter/neo4j/(diff|introspect)_test\\.go$"
         linters:
           - depguard
       - path: "^cmd/yammm/(check|neo4j_diff|snapshot_info|snapshot_save|snapshot_update_metadata|snapshot_verify|validate)_test\\.go$"

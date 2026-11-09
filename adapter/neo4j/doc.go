@@ -1,12 +1,12 @@
 // Package neo4j generates Neo4j 5 constraint and index DDL, label mappings,
 // graph shape metadata, parameterized write queries and their coerced
-// parameters, introspection queries, schema inference, and constraint/index
-// drift diffs from yammm schemas and live Neo4j databases, and it sanitizes and
-// validates Neo4j identifiers.
+// parameters, introspection queries, and constraint/index drift diffs from
+// yammm schemas and live Neo4j databases, and it sanitizes and validates Neo4j
+// identifiers.
 //
 // # Architectural Position
 //
-// The neo4j adapter is the adapter layer's one package. It depends on library
+// Package neo4j is the adapter layer's one adapter. It depends on library
 // packages (schema, graph, instance, immutable, diag); library packages never
 // depend on adapters.
 //
@@ -41,7 +41,7 @@
 // or an invalid label the type and the label.
 //
 // Beside a name Neo4j refuses as an identifier (Cypher Reserved Words, below)
-// and two labels that sanitize alike ([Adapter.DetectLabelCollisions]), the one
+// and two types that compose one label ([Adapter.DetectLabelCollisions]), the one
 // shape a valid schema can hit here is a list whose ELEMENT resolves to a
 // collection: a List or a Vector, written directly or through an alias.
 // Those are legal yammm and validate normally, but Neo4j has no nested
@@ -159,8 +159,8 @@
 // # Graph Shape
 //
 // [Adapter.ShapeForSchema] converts a schema into a [GraphShape] describing
-// the Neo4j node structure (labels, primary keys and @writeOnce keys per type).
-// The shape is required input for write query generation, and exports no field.
+// the Neo4j node structure (labels, primary keys and their constraints, and
+// @writeOnce keys per type) and holding the schema it came from. The shape is required input for write query generation, and exports no field.
 //
 // # Write Surface
 //
@@ -371,17 +371,11 @@
 //     index backing a constraint — [RemoteIndex.OwningConstraint] identifies
 //     those, and the diff needs them because they block a CREATE INDEX by name
 //     and by definition
-//   - [IntrospectRelationshipsQuery] / [Adapter.IntrospectRelationshipsQueryFor]: discovers relationship signatures
 //
-// Parse the results with [ParseRemoteConstraints], [ParseRemoteIndexes],
-// and [ParseRemoteRelationships]. [ParseRemoteIndexes] reads the index options
-// map, so [RemoteIndex.VectorDimensions] and [RemoteIndex.VectorSimilarity]
-// expose a vector index's configuration for drift detection.
-//
-// # Schema Inference
-//
-// [Adapter.InferSchema] generates a .yammm DSL scaffold from remote
-// constraints and relationships discovered via introspection.
+// Parse the results with [ParseRemoteConstraints] and [ParseRemoteIndexes].
+// [ParseRemoteIndexes] reads the index options map, so
+// [RemoteIndex.VectorDimensions] and [RemoteIndex.VectorSimilarity] expose a
+// vector index's configuration for drift detection.
 //
 // # Diff Scope and Name Blocking
 //

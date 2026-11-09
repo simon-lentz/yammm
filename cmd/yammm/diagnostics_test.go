@@ -387,7 +387,6 @@ func TestStderrIsOneJSONDocument(t *testing.T) {
 		{"neo4j constraints, unrecognized edition", "neo4j constraints --edition bogus " + shadowedSchema},
 		{"neo4j indexes, unreadable schema", "neo4j indexes " + missing},
 		{"neo4j diff, no --uri", "neo4j diff " + shadowedSchema},
-		{"neo4j introspect, no --uri", "neo4j introspect"},
 	}
 
 	for _, tt := range tests {

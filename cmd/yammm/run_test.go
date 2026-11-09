@@ -255,16 +255,125 @@ func TestRun_FmtValidatesFormat(t *testing.T) {
 	}
 }
 
-// TestRun_IntrospectValidatesFormatBeforeURI pins that introspect refuses a bad
+// TestRun_DiffValidatesFormatBeforeURI pins that neo4j diff refuses a bad
 // --format before its --uri guard runs. Otherwise the command exits 2 for a
 // reason other than the flag under test, and the check reads as covered.
-func TestRun_IntrospectValidatesFormatBeforeURI(t *testing.T) {
-	code, _, errOut := runCLI(t, "neo4j", "introspect", "--format", "bogus")
+func TestRun_DiffValidatesFormatBeforeURI(t *testing.T) {
+	code, _, errOut := runCLI(t, "neo4j", "diff", "--format", "bogus", shadowedSchema)
 	if code != cli.ExitUsage {
 		t.Errorf("exit code = %d, want %d", code, cli.ExitUsage)
 	}
 	if !strings.Contains(errOut, "invalid output format") {
 		t.Errorf("stderr does not mention %q:\n%s", "invalid output format", errOut)
+	}
+}
+
+// TestRun_Neo4jHasNoIntrospectCommand pins that `neo4j introspect` is an
+// unknown command: a script that still calls it fails as a usage error naming
+// the word, before any connection is opened, whatever flags follow it.
+func TestRun_Neo4jHasNoIntrospectCommand(t *testing.T) {
+	for name, args := range map[string][]string{
+		"with --uri":         {"--uri", "bolt://127.0.0.1:1"},
+		"with --help":        {"--help"},
+		"with -h":            {"-h"},
+		"with a former flag": {"--schema", "inventory", "--output", "inferred.yammm"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			code, stdout, stderr := runCLI(t, append([]string{"neo4j", "introspect"}, args...)...)
+			if code != cli.ExitUsage {
+				t.Errorf("exit code = %d, want %d; stderr:\n%s", code, cli.ExitUsage, stderr)
+			}
+			if !strings.Contains(stderr, `unknown command "introspect" for "yammm neo4j"`) {
+				t.Errorf("stderr does not name the unknown command:\n%s", stderr)
+			}
+			if stdout != "" {
+				t.Errorf("stdout = %q, want nothing", stdout)
+			}
+		})
+	}
+}
+
+// TestRun_AGroupRefusesAnUnknownSubcommandBeforeHelp pins that every command
+// holding subcommands refuses a word that names none of them, though cobra
+// answers --help before it judges a command's words; the group's own help
+// still exits 0.
+func TestRun_AGroupRefusesAnUnknownSubcommandBeforeHelp(t *testing.T) {
+	for _, group := range []string{"neo4j", "snapshot", "completion"} {
+		t.Run(group, func(t *testing.T) {
+			code, stdout, stderr := runCLI(t, group, "bogus", "--help")
+			if code != cli.ExitUsage {
+				t.Errorf("exit code = %d, want %d; stderr:\n%s", code, cli.ExitUsage, stderr)
+			}
+			if want := `unknown command "bogus" for "yammm ` + group + `"`; !strings.Contains(stderr, want) {
+				t.Errorf("stderr does not say %s:\n%s", want, stderr)
+			}
+			if stdout != "" {
+				t.Errorf("stdout = %q, want nothing", stdout)
+			}
+			if code, stdout, stderr := runCLI(t, group, "--help"); code != cli.ExitOK || stdout == "" {
+				t.Errorf("%s --help: exit code = %d and %d bytes of help, want %d and the help; stderr:\n%s", group, code, len(stdout), cli.ExitOK, stderr)
+			}
+		})
+	}
+}
+
+// A help flag before a subcommand's name asks for that subcommand's help, and a
+// word after it that names no subcommand is still refused. --version before a
+// command's name is judged on that command, as after it.
+func TestRun_AHelpFlagBeforeASubcommandHelpsIt(t *testing.T) {
+	for _, tt := range []struct {
+		args  []string
+		usage string
+	}{
+		{[]string{"neo4j", "--help", "diff"}, "yammm neo4j diff <schema.yammm>"},
+		{[]string{"neo4j", "-h", "constraints"}, "yammm neo4j constraints <schema.yammm>"},
+		{[]string{"neo4j", "--help", "--format", "json", "diff"}, "yammm neo4j diff <schema.yammm>"},
+		{[]string{"--help", "neo4j"}, "yammm neo4j [flags]"},
+		{[]string{"--no-color", "-h", "validate"}, "yammm validate <schema.yammm>"},
+		{[]string{"snapshot", "-h", "info"}, "yammm snapshot info"},
+		{[]string{"completion", "--help", "bash"}, "yammm completion bash"},
+	} {
+		t.Run(strings.Join(tt.args, " "), func(t *testing.T) {
+			code, stdout, stderr := runCLI(t, tt.args...)
+			if code != cli.ExitOK || !strings.Contains(stdout, "Usage:\n  "+tt.usage) {
+				t.Errorf("exit code = %d, want %d and the usage %q; stdout:\n%s\nstderr:\n%s", code, cli.ExitOK, tt.usage, stdout, stderr)
+			}
+		})
+	}
+	for _, tt := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"neo4j", "--help", "bogus"}, `unknown command "bogus" for "yammm neo4j"`},
+		{[]string{"neo4j", "--help", "diff", "--nosuch"}, "unknown flag: --nosuch"},
+		{[]string{"--version", "check"}, "unknown flag: --version"},
+	} {
+		t.Run(strings.Join(tt.args, " "), func(t *testing.T) {
+			code, stdout, stderr := runCLI(t, tt.args...)
+			if code != cli.ExitUsage || !strings.Contains(stderr, tt.want) || stdout != "" {
+				t.Errorf("exit code = %d, want %d, stderr naming %q and no stdout; stdout:\n%s\nstderr:\n%s", code, cli.ExitUsage, tt.want, stdout, stderr)
+			}
+		})
+	}
+}
+
+// A --format json after a help flag still asks for one document, so a refused
+// word under --help is inside it.
+func TestRun_AHelpRefusalAfterAHelpFlagIsOneJSONDocument(t *testing.T) {
+	for _, args := range [][]string{
+		{"neo4j", "bogus", "--help", "--format", "json"},
+		{"neo4j", "bogus", "-h", "--format=json"},
+		{"bogus", "--help", "--format", "json"},
+	} {
+		t.Run(strings.Join(args, " "), func(t *testing.T) {
+			code, _, stderr := runCLI(t, args...)
+			if code != cli.ExitUsage {
+				t.Errorf("exit code = %d, want %d", code, cli.ExitUsage)
+			}
+			if problem := oneJSONDocumentOutcome(stderr); problem != "" || !strings.Contains(stderr, `"E_COMMAND_FAILED"`) {
+				t.Errorf("want one JSON document holding E_COMMAND_FAILED: %s\n%s", problem, stderr)
+			}
+		})
 	}
 }
 

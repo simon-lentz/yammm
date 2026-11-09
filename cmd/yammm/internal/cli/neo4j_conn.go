@@ -26,29 +26,31 @@ func ConnectNeo4j(ctx context.Context, uri, username, password string) (neo4j.Dr
 
 // QueryRunner executes one read query and returns its records.
 //
-// It is the seam the neo4j commands read through. Everything after the queries
-// is pure — the parsers, the inference and the diff — so a runner returning
-// recorded records exercises a whole command without a server, which nothing in
-// this module could do before. [DriverQueries] is the production implementation.
-type QueryRunner func(ctx context.Context, database, query string, params map[string]any) ([]map[string]any, error)
+// It is the seam `neo4j diff` reads the database through. Everything after the
+// queries is pure — the parsers and the diff — so a runner returning recorded
+// records exercises the command's whole read of the database without a server.
+// [DriverQueries] is the production implementation.
+type QueryRunner func(ctx context.Context, database, query string) ([]map[string]any, error)
 
 // DriverQueries returns the [QueryRunner] that reads from driver.
 func DriverQueries(driver neo4j.Driver) QueryRunner {
-	return func(ctx context.Context, database, query string, params map[string]any) ([]map[string]any, error) {
-		return runQuery(ctx, driver, database, query, params)
+	return func(ctx context.Context, database, query string) ([]map[string]any, error) {
+		return runQuery(ctx, driver, database, query)
 	}
 }
 
+// readSession configures a session that reads database and can write nothing.
+func readSession(database string) neo4j.SessionConfig {
+	return neo4j.SessionConfig{DatabaseName: database, AccessMode: neo4j.AccessModeRead}
+}
+
 // runQuery executes a read transaction and returns all records as maps.
-func runQuery(ctx context.Context, driver neo4j.Driver, database, query string, params map[string]any) ([]map[string]any, error) {
-	session := driver.NewSession(ctx, neo4j.SessionConfig{
-		DatabaseName: database,
-		AccessMode:   neo4j.AccessModeRead,
-	})
+func runQuery(ctx context.Context, driver neo4j.Driver, database, query string) ([]map[string]any, error) {
+	session := driver.NewSession(ctx, readSession(database))
 	defer session.Close(ctx)
 
 	records, err := neo4j.ExecuteRead(ctx, session, func(tx neo4j.ManagedTransaction) ([]map[string]any, error) {
-		result, err := tx.Run(ctx, query, params)
+		result, err := tx.Run(ctx, query, nil)
 		if err != nil {
 			return nil, fmt.Errorf("execute query: %w", err)
 		}

@@ -124,98 +124,53 @@ func TestParseRemoteIndexes_Basic(t *testing.T) {
 	assert.Equal(t, "RANGE", indexes[0].Type)
 }
 
-func TestParseRemoteRelationships_Basic(t *testing.T) {
+// Every column SHOW INDEXES reports reaches its field: the diff reads the
+// entity type and the owning constraint, which keeps a backing index out of Drop.
+func TestParseRemoteIndexes_ReadsEveryColumn(t *testing.T) {
 	t.Parallel()
-	records := []map[string]any{
-		{
-			"relType":   "ISSUED_BY",
-			"srcLabels": []any{"book_catalog__Book"},
-			"tgtLabels": []any{"book_catalog__Publisher"},
-		},
-		{
-			"relType":   "IN_REGION",
-			"srcLabels": []any{"book_catalog__Publisher"},
-			"tgtLabels": []any{"geo_regions__Region"},
-		},
-	}
-
-	rels, err := ParseRemoteRelationships(records)
+	indexes, err := ParseRemoteIndexes([]map[string]any{{
+		"name":             "rel_since",
+		"type":             "RANGE",
+		"entityType":       "RELATIONSHIP",
+		"labelsOrTypes":    []any{"EMPLOYS"},
+		"properties":       []any{"since"},
+		"options":          map[string]any{"indexProvider": "range-1.0"},
+		"state":            "ONLINE",
+		"owningConstraint": "c",
+	}})
 	require.NoError(t, err)
-	require.Len(t, rels, 2)
-	assert.Equal(t, "ISSUED_BY", rels[0].RelationType)
-	assert.Equal(t, []string{"book_catalog__Book"}, rels[0].SourceLabels)
-	assert.Equal(t, []string{"book_catalog__Publisher"}, rels[0].TargetLabels)
+	yammmtest.Diff(t, []RemoteIndex{{
+		Name:             "rel_since",
+		Type:             "RANGE",
+		EntityType:       "RELATIONSHIP",
+		LabelsOrTypes:    []string{"EMPLOYS"},
+		Properties:       []string{"since"},
+		Options:          map[string]any{"indexProvider": "range-1.0"},
+		State:            "ONLINE",
+		OwningConstraint: "c",
+	}}, indexes)
+}
+
+// A column of another shape than the server's reads as absent: a string column
+// that holds no string is empty, a list keeps its strings alone, and a list
+// column that is missing is nil.
+func TestParseRemoteConstraints_ReadsAnUnexpectedShapeAsAbsent(t *testing.T) {
+	t.Parallel()
+	constraints, err := ParseRemoteConstraints([]map[string]any{
+		{"name": "a", "type": 7, "labelsOrTypes": []any{"A", 3}},
+		{"name": "b", "type": "UNIQUENESS"},
+	})
+	require.NoError(t, err)
+	yammmtest.Diff(t, []RemoteConstraint{
+		{Name: "a", LabelsOrTypes: []string{"A"}},
+		{Name: "b", Type: "UNIQUENESS"},
+	}, constraints)
+	if constraints[1].LabelsOrTypes != nil || constraints[1].Properties != nil {
+		t.Errorf("missing list columns read as %#v and %#v, want nil", constraints[1].LabelsOrTypes, constraints[1].Properties)
+	}
 }
 
 func TestIntrospectConstraintsQuery(t *testing.T) {
 	t.Parallel()
 	assert.Equal(t, "SHOW CONSTRAINTS YIELD *", IntrospectConstraintsQuery())
-}
-
-func TestIntrospectRelationshipsQuery_WithPrefix(t *testing.T) {
-	t.Parallel()
-	query, params := IntrospectRelationshipsQuery("book_catalog__")
-	assert.Contains(t, query, "STARTS WITH $prefix")
-	assert.Equal(t, "book_catalog__", params["prefix"])
-}
-
-func TestIntrospectRelationshipsQuery_NoPrefix(t *testing.T) {
-	t.Parallel()
-	query, params := IntrospectRelationshipsQuery("")
-	assert.NotContains(t, query, "WHERE")
-	assert.Nil(t, params)
-}
-
-func TestIntrospectRelationshipsQueryFor_WithSchema(t *testing.T) {
-	t.Parallel()
-	a := New()
-	query, params := a.IntrospectRelationshipsQueryFor("book_catalog")
-	assert.Contains(t, query, "STARTS WITH $prefix")
-	assert.Equal(t, "book_catalog__", params["prefix"])
-}
-
-func TestIntrospectRelationshipsQueryFor_WithPrefix(t *testing.T) {
-	t.Parallel()
-	a := New(WithLabelPrefix("app_"))
-	query, params := a.IntrospectRelationshipsQueryFor("book_catalog")
-	assert.Contains(t, query, "STARTS WITH $prefix")
-	assert.Equal(t, "app_book_catalog__", params["prefix"])
-}
-
-func TestIntrospectRelationshipsQueryFor_EmptyFilter(t *testing.T) {
-	t.Parallel()
-	a := New()
-	query, params := a.IntrospectRelationshipsQueryFor("")
-	assert.NotContains(t, query, "WHERE")
-	assert.Nil(t, params)
-}
-
-// An all-space schema filter discovers everything, the same as an empty one.
-//
-// Adapter.Label trims a schema name before composing a label, so no written
-// label carries a prefix built from untrimmed space. Testing the raw value took
-// the scoped path and built a prefix nothing matched, which reports a populated
-// database as empty.
-//
-// Mutation: testing schemaFilter instead of its trimmed form turns this red.
-func TestIntrospectRelationshipsQueryFor_AllSpaceFilterIsUnscoped(t *testing.T) {
-	t.Parallel()
-	a := New()
-
-	unscoped, unscopedParams := a.IntrospectRelationshipsQueryFor("")
-	for _, filter := range []string{" ", "   ", "\t"} {
-		got, params := a.IntrospectRelationshipsQueryFor(filter)
-		if got != unscoped {
-			t.Errorf("filter %q built a scoped query:\n got: %s\nwant: %s", filter, got, unscoped)
-		}
-		if len(params) != len(unscopedParams) {
-			t.Errorf("filter %q produced params %v; want %v", filter, params, unscopedParams)
-		}
-	}
-
-	// A real filter still scopes.
-	scoped, params := a.IntrospectRelationshipsQueryFor("app")
-	if scoped == unscoped || params["prefix"] == nil {
-		t.Errorf("a non-empty filter did not scope: %s %v", scoped, params)
-	}
 }

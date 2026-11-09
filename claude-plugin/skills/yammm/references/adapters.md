@@ -44,7 +44,7 @@ constraints, result := adapter.ConstraintsStructured(ctx, s)
 // Each Constraint has: Name, Kind, Label, Properties, TypeExpr, Statement
 ```
 
-Generation is **all-or-nothing**: any validation error returns `(nil, result)`, so one unemittable property withholds every constraint of the schema rather than emitting a partial script that looks complete. Beside a name Neo4j refuses as an identifier (Cypher reserved words, below) and two labels that sanitize alike, the one shape a *valid* schema can hit is a list whose element is itself a collection (`List<List<T>>`, `List<Vector[N]>`, or a list of a list-typed alias) — legal yammm, but Neo4j has no nested collection property type, so `ConstraintsForSchema` and `ConstraintsStructured` report `E_NEO4J_UNSUPPORTED_TYPE` under every option, `WithScalarTypeConstraints(false)` included. `IndexesForSchema` and `ShapeForSchema` do not make that check. The write path does: `BatchNodeQueries` and `CoerceParams` refuse a value of such a property with an error wrapping `ErrUnsupportedListElem`, an empty list included, and read a value that holds none as nil, which `BatchNodeQueries` writes as null. `CoerceParams` refuses a nested param map (a `map[string]any`) or a rows value under such a key as it does under any constraint: a constraint at a nested map's or a rows param's own key is the caller's error, which wraps no class. The property is judged on each concrete type and part type with a valid label that declares or inherits it, so one declared on an abstract type that no such type extends is not reported. Model the inner collection as a `part type` reached by a composition. A `Vector[N]` property is fine; it maps to `LIST<FLOAT NOT NULL>`.
+Generation is **all-or-nothing**: any validation error returns `(nil, result)`, so one unemittable property withholds every constraint of the schema rather than emitting a partial script that looks complete. Beside a name Neo4j refuses as an identifier (Cypher reserved words, below) and two types that compose one label (`E_NEO4J_LABEL_COLLISION`), the one shape a *valid* schema can hit is a list whose element resolves to a collection, a List or a Vector, the list and its element each written directly or through an alias — legal yammm, but Neo4j has no nested collection property type, so `ConstraintsForSchema` and `ConstraintsStructured` report `E_NEO4J_UNSUPPORTED_TYPE` whatever the constraint options set, `WithScalarTypeConstraints(false)` included. `IndexesForSchema` and `ShapeForSchema` do not make that check. The write path does: `BatchNodeQueries` and `CoerceParams` refuse a value of such a property with an error wrapping `ErrUnsupportedListElem`, an empty list included, and read a value that holds none as nil, which `BatchNodeQueries` writes as null. `CoerceParams` refuses a nested param map (a `map[string]any`) or a rows value under such a key as it does under any constraint: a constraint at a nested map's or a rows param's own key is the caller's error, which wraps no class. The property is judged on each concrete type and part type with a valid label that declares or inherits it, so one declared on an abstract type that no such type extends is not reported. Model the inner collection as a `part type` reached by a composition. A `Vector[N]` property is fine; it maps to `LIST<FLOAT NOT NULL>`.
 
 ### Index Generation
 
@@ -167,13 +167,6 @@ shared database a non-zero count is normal. It exists so "0 to drop" is not read
 as "the database is accounted for": ownership is derived from the schema in hand,
 so objects left behind by a type since deleted or renamed sit on a label no
 current type declares.
-
-### Schema Inference (from Live Database)
-
-```go
-source := adapter.InferSchema(constraints, relationships, "inventory")
-// Returns .yammm source code inferred from Neo4j metadata; there is no error
-```
 
 ---
 

@@ -110,9 +110,9 @@ func TestNeo4jDiff_EnvVarSatisfiesURI(t *testing.T) {
 	t.Setenv("YAMMM_NEO4J_URI", "neo4j://127.0.0.1:1")
 
 	code := executeCmd(t, "neo4j", "diff", "testdata/valid.yammm")
-	// The command progresses past URI validation but fails at connection.
-	// Exit code 1 (validation) not 2 (usage) proves the env var was picked up.
-	assert.NotEqual(t, 2, code)
+	// The command passes the --uri guard and fails at the connection: exit 3
+	// (runtime), where a URI it never read is exit 2 (usage).
+	assert.Equal(t, cli.ExitRuntime, code)
 }
 
 // TestNeo4jDiff_AcceptsConfigFlags proves the --edition, --separator, and

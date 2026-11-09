@@ -154,9 +154,9 @@ func TestNodeKeyRequest_EnforcesPrimaryKeyOnEitherEdition(t *testing.T) {
 	}
 
 	// Liveness is asserted through the adapter's own diff rather than against a
-	// hand-written server type name. The server's spelling is generation- and
-	// edition-dependent (a uniqueness constraint reports NODE_PROPERTY_UNIQUENESS
-	// on some, UNIQUENESS on others) and the adapter already canonicalises it;
+	// hand-written server type name. The server's spelling follows the Cypher
+	// language (a uniqueness constraint reports UNIQUENESS under CYPHER 5 and
+	// NODE_PROPERTY_UNIQUENESS under CYPHER 25) and the adapter already canonicalises it;
 	// re-encoding that knowledge here would make the test assert the fixture
 	// rather than the behaviour. A clean diff is also the operator-visible claim:
 	// what was emitted is present, owned, and needs no further action.

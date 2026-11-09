@@ -102,9 +102,7 @@
 // each level every word left is read with that level's flags by the rule of
 // cobra's stripFlags. There a flag written without "=" takes the next word as
 // its value, unless the command at that level defines it as taking no value; a
-// flag the lookup does not know takes one, and so does a flag the program
-// defines only after the lookup (Flag.AfterLookup), as cobra does its help and
-// version flags. For a single dash, only a word of two bytes such as -o takes
+// flag the lookup does not know takes one. For a single dash, only a word of two bytes such as -o takes
 // one, and a synopsis word with alternatives, such as [-w|--check], takes
 // none. A synopsis word is read as the flag it names, where cobra would read
 // "[--output" as a word. A lone "-" is not part of the lookup. The first

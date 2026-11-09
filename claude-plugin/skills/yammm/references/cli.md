@@ -1,6 +1,6 @@
 # CLI Reference
 
-The `yammm` CLI provides schema validation, formatting, data checking, snapshot persistence, Go and Markdown generation, Neo4j DDL, and a diff against and an introspection of a live Neo4j database from the terminal.
+The `yammm` CLI provides schema validation, formatting, data checking, snapshot persistence, Go and Markdown generation, Neo4j DDL, and a diff against a live Neo4j database from the terminal.
 
 ---
 
@@ -16,7 +16,6 @@ The `yammm` CLI provides schema validation, formatting, data checking, snapshot 
 | `yammm neo4j constraints <schema>` | Generate Neo4j constraint statements |
 | `yammm neo4j indexes <schema>` | Generate Neo4j index statements from annotations |
 | `yammm neo4j diff <schema>` | Diff schema constraints and indexes vs live database |
-| `yammm neo4j introspect` | Infer schema from live Neo4j database |
 | `yammm snapshot save <schema> <data>` | Save graph snapshot to `.ys` file |
 | `yammm snapshot info <snapshot>` | Display snapshot metadata |
 | `yammm snapshot verify <schema> <snapshot>` | Verify snapshot against schema |
@@ -52,8 +51,7 @@ it reaches. Anything else is refused at exit 3, naming the path: a
 read-only file, a directory, a looping link, or a file whose directory cannot
 hold the staging file, which `gofmt -w` refuses too. A path the process cannot
 stat, a refused rename and a write-through target that will not open exit 3 the
-same way. `gen` and
-`neo4j introspect` write to stdout when `--output` is omitted; `snapshot save`
+same way. `gen` writes to stdout when `--output` is omitted; `snapshot save`
 needs `-o` or `--into`.
 
 ---
@@ -224,7 +222,7 @@ Per-target flags are enforced with a usage error: `--package`/`--initialisms` ap
 
 ## Neo4j Workflow
 
-All `neo4j` subcommands share connection flags (also available via environment variables):
+`neo4j diff`, the one `neo4j` command that connects, takes the connection flags (also available via environment variables); `constraints` and `indexes` take none:
 
 | Flag | Env Var | Default | Description |
 | ---- | ------- | ------- | ----------- |
@@ -290,31 +288,9 @@ Compares desired schema constraints **and indexes** against the live database (i
 
 Exit codes: `0` only when everything compared came back in sync. Drift, creates, or drops (constraints or indexes) exit `1`. A definition that could **not** be verified exits `3` — an index whose configuration the server did not report, a TYPE constraint whose enforced type it did not report, or an index introspection that failed outright and degraded the run to constraints-only. None is reported as success: a drift gate must not read "no drift" from a comparison that never ran. Drift outranks unverified, so a run with both exits `1`.
 
-### neo4j introspect
-
-```bash
-yammm neo4j introspect --uri bolt://localhost:7687
-yammm neo4j introspect --uri bolt://localhost:7687 --schema inventory --output inferred.yammm
-```
-
-Infers a `.yammm` schema from a live Neo4j database by reading constraints and relationships.
-
-| Flag | Description |
-| ---- | ----------- |
-| `--schema` | Infer only this schema's types; compared as a label writes it, so `book-catalog` matches `book_catalog`'s labels |
-| `--separator` | Label separator (schema__Type), as the graph was written |
-| `--prefix` | Global label prefix, if the graph was written with one |
-| `--output` | Output file (default: stdout) |
-
-Each label is read as the label flags compose it: the prefix is stripped and the
-separator splits schema from type, so a label another configuration wrote is not
-read as this schema's type. A `--schema` that matches none of the constraints
-read leaves a TODO line in the scaffold saying so.
-
-Every command that takes the label flags — the four `neo4j` commands —
-refuses an empty `--separator`, and a `--prefix` or
-`--separator` whose composed label is not a Neo4j identifier, at exit 2 before
-it loads a schema or opens a connection.
+Every command that takes the label flags — the three `neo4j` commands —
+refuses a `--prefix` or `--separator` whose composed label is not a Neo4j
+identifier, at exit 2 before it loads a schema or opens a connection.
 
 ### Typical Neo4j workflow
 
@@ -332,7 +308,7 @@ yammm neo4j diff --uri bolt://localhost:7687 schema.yammm
 | 0 | Success (no errors) |
 | 1 | An error in the input (a validation failure, a constraint violation), drift `neo4j diff` finds, or a file `fmt --check` would reformat |
 | 2 | Usage error (bad flags, missing or extra arguments, an unknown command or help topic, an empty path operand, a schema, data or module-root path that is not valid UTF-8) |
-| 3 | Runtime error (connection failure, I/O error, a path the filesystem refuses, a `neo4j diff` comparison that could not be verified, a database object `neo4j diff` or `neo4j introspect` cannot classify, an internal fault, a failure the command did not classify) |
+| 3 | Runtime error (connection failure, I/O error, a path the filesystem refuses, a `neo4j diff` comparison that could not be verified, a database object `neo4j diff` cannot classify, an internal fault, a failure the command did not classify) |
 
 ---
 
@@ -348,8 +324,9 @@ Two consequences worth knowing:
   prints warnings and nothing else still exits `0`. Scripting that gates on the
   exit code is unaffected; scripting that gates on "did it print anything" is
   not. Each command's stdout contract (generated Cypher, Go source,
-  Markdown, formatted schema text and `fmt --check`'s path list, a schema
-  scaffold, a report) is untouched — diagnostics have always been separate from it.
+  Markdown, formatted schema text and `fmt --check`'s path list, a report, a
+  shell completion script, help text, `--version`'s line) is untouched —
+  diagnostics have always been separate from it.
 - **An unchanged, still-passing schema may emit new stderr output.** Warnings
   that already existed but that no command printed are now visible. The
   `-_`-in-a-constraint-bound warning (`E_INVALID_CONSTRAINT`, "minus sign before

@@ -598,16 +598,17 @@ func remoteSemanticKey(o scoped[RemoteConstraint]) string {
 // canonicalRemoteConstraintType folds a server-reported constraint type onto the
 // spelling [constraintKindToRemoteType] produces, upper-casing on the way.
 //
-// Neo4j renamed the node uniqueness constraint type between server generations:
-// 5.x reports UNIQUENESS, 2026.x reports NODE_PROPERTY_UNIQUENESS — aligning it
-// with the NODE_PROPERTY_EXISTENCE and NODE_PROPERTY_TYPE spellings it has
-// always used. Both name the same constraint and this adapter targets both
-// generations, so every comparison against a remote type must accept either.
-// Comparing raw strings makes a 2026.x server's uniqueness constraints
-// undeclarable, and the whole diff then misreports: the actual side excludes
-// them, the desired side finds its name taken and reports the schema's OWN
-// constraint as drift to be dropped, and [Adapter.InferSchema] marks no primary
-// key at all, scaffolding a schema that cannot load.
+// Neo4j renamed the node uniqueness constraint type between Cypher languages:
+// CYPHER 5 reports UNIQUENESS, CYPHER 25 (a new 2026.05 database's default)
+// NODE_PROPERTY_UNIQUENESS — aligning it with the NODE_PROPERTY_EXISTENCE and
+// NODE_PROPERTY_TYPE spellings it has always used. Both name the same
+// constraint and [IntrospectConstraintsQuery] names no language, so every
+// comparison against a remote type must accept either. Comparing raw strings
+// makes the uniqueness constraints a CYPHER 25 query reports undeclarable, and
+// the whole diff then misreports: the actual side excludes
+// them, so a named desired constraint finds its name taken and reports the
+// schema's OWN constraint as drift, and an unnamed one plans a create of a
+// constraint the database already holds.
 //
 // The fold is for COMPARISON only. [RemoteConstraint.Type] keeps exactly what
 // the server reported, because drift messages echo it — naming a constraint kind
@@ -690,8 +691,8 @@ func (a *Adapter) declarableRemoteConstraint(rc RemoteConstraint) bool {
 	}
 	// The fold covers case (as [RemoteIndex.Declarable] does — the column is
 	// canonically upper-case, but a case difference must not hide a declarable
-	// constraint from matching and dropping) and the cross-generation spelling
-	// of the uniqueness type. Both must be absorbed here and in
+	// constraint from matching and dropping) and both Cypher languages'
+	// spellings of the uniqueness type. Both must be absorbed here and in
 	// [remoteSemanticKey] identically, or a constraint admitted by one is
 	// unpairable by the other.
 	canonical := canonicalRemoteConstraintType(rc.Type)

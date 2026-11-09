@@ -41,16 +41,22 @@ func run() int {
 // cobra's own — an unknown command or flag, a wrong operand count — and is a
 // usage error.
 func execute(cmd *cobra.Command) error {
-	initHelpAndCompletion(cmd)
-	return cli.Usage(cmd.Execute())
+	helpRefusal := initHelpAndCompletion(cmd)
+	if err := cmd.Execute(); err != nil {
+		return cli.Usage(err)
+	}
+	return cli.Usage(helpRefusal())
 }
 
-// jsonRequested reports whether args ask for --format json. It parses that
-// flag alone, because cobra parses no flag at all before it fails to find a
+// jsonRequested reports whether args ask for --format json. It reads the flag
+// itself, because cobra parses no flag at all before it fails to find a
 // command, and an unknown command is still owed a document.
 func jsonRequested(args []string) bool {
 	probe := &cobra.Command{FParseErrWhitelist: cobra.FParseErrWhitelist{UnknownFlags: true}}
 	format := probe.Flags().String("format", string(cli.FormatText), "")
+	// pflag stops at an undefined -h or --help, even with unknown flags
+	// allowed, so without it a --format after either is never read.
+	probe.Flags().BoolP("help", "h", false, "")
 	_ = probe.ParseFlags(args)
 	return *format == string(cli.FormatJSON)
 }

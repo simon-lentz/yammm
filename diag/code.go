@@ -341,7 +341,8 @@ var (
 	// E_EVAL_ERROR indicates an error during expression evaluation.
 	E_EVAL_ERROR = NewCode("E_EVAL_ERROR", CategoryInstance)
 
-	// E_MISSING_FK_TARGET indicates a foreign key target is missing.
+	// E_MISSING_FK_TARGET indicates an edge object that holds none of its
+	// target's `_target_` foreign-key fields.
 	E_MISSING_FK_TARGET = NewCode("E_MISSING_FK_TARGET", CategoryInstance)
 
 	// E_PARTIAL_COMPOSITE_FK indicates a partial composite foreign key.
@@ -402,10 +403,11 @@ var (
 
 	// E_DUPLICATE_EDGE indicates a (many) association that names one target
 	// twice for one source: a graph holds one edge per source, association and
-	// target. The validator raises it for a target key one listing repeats, and
-	// the import for an edge and a "target_missing" record, or two such records,
-	// that a snapshot built under another schema holds at one canonical target
-	// key. snapshot.Load and Verify refuse such a document with
+	// target. The validator raises it for a target key one listing repeats where
+	// no other check refused either listing, and the import for an edge and a
+	// "target_missing" record, or two such records, that a snapshot built under
+	// another schema holds at one canonical target key. snapshot.Load and Verify
+	// refuse such a document with
 	// E_SNAPSHOT_MALFORMED where no other check refused the repeating listing,
 	// one sound root (of a type that can hold a root, its stored key admitted by
 	// the key rule) holds the source's address alone, and an edge's target's,

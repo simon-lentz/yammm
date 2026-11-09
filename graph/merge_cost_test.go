@@ -5,14 +5,13 @@
 package graph_test
 
 import (
-	"math"
 	"strconv"
-	"syscall"
 	"testing"
 	"time"
 
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/instance"
+	"github.com/simon-lentz/yammm/internal/costratio"
 	"github.com/simon-lentz/yammm/internal/instancetest"
 	"github.com/simon-lentz/yammm/internal/raceskip"
 	"github.com/simon-lentz/yammm/schema"
@@ -21,29 +20,6 @@ import (
 // maxLinearRatio separates eight times the listings at linear cost, measured at 8
 // to 21 on a loaded host, from quadratic cost, measured at 41 to 93.
 const maxLinearRatio = 32
-
-// costRatio returns the cost of eight times small listings over the cost of small
-// listings. A run's cost is the CPU time the process spends in it, which other
-// processes' load leaves alone; no test of the package runs beside a test that is
-// not parallel. Each size's cost is its fastest of five tries, the sizes taking turns.
-func costRatio(small int, run func(n int) time.Duration) float64 {
-	bestSmall, bestLarge := time.Duration(math.MaxInt64), time.Duration(math.MaxInt64)
-	for range 5 {
-		bestSmall = min(bestSmall, run(small))
-		bestLarge = min(bestLarge, run(8*small))
-	}
-	return float64(bestLarge) / float64(bestSmall)
-}
-
-// cpuTime returns the CPU time the process has spent, user and system.
-func cpuTime(t *testing.T) time.Duration {
-	t.Helper()
-	var ru syscall.Rusage
-	if err := syscall.Getrusage(syscall.RUSAGE_SELF, &ru); err != nil {
-		t.Fatal(err)
-	}
-	return time.Duration(ru.Utime.Nano() + ru.Stime.Nano())
-}
 
 const listingSchema = "schema \"m\"\ntype T {\n id String primary\n}\ntype X {\n id String primary\n --> M (_:many) T\n}\n"
 
@@ -75,7 +51,7 @@ func TestAddOrMerge_ListingsOfOneKeyCostLinearTime(t *testing.T) {
 	ctx := t.Context()
 	s := loadEntry(t, listingSchema)
 	for name, targetsFirst := range map[string]bool{"to held targets": true, "to missing targets": false} {
-		ratio := costRatio(500, func(n int) time.Duration {
+		ratio := costratio.Ratio(t, 500, func(n int) time.Duration {
 			g := graph.New(s)
 			if targetsFirst {
 				for _, target := range targets(t, s, n) {
@@ -83,13 +59,13 @@ func TestAddOrMerge_ListingsOfOneKeyCostLinearTime(t *testing.T) {
 				}
 			}
 			merges := listings(t, s, n)
-			start := cpuTime(t)
+			start := costratio.CPUTime(t)
 			for _, listing := range merges {
 				if _, res := g.AddOrMerge(ctx, listing); res.HasErrors() {
 					t.Fatal(res)
 				}
 			}
-			return cpuTime(t) - start
+			return costratio.CPUTime(t) - start
 		})
 		if ratio >= maxLinearRatio {
 			t.Errorf("%s: eight times the merges cost %.0f times the time, want under %d", name, ratio, maxLinearRatio)
@@ -104,7 +80,7 @@ func TestAdd_ResolvingAMergedSourcesForwardReferencesCostsLinearTime(t *testing.
 	ctx := t.Context()
 	s := loadEntry(t, listingSchema)
 	// Below 2000 listings the resolution's own cost hides a quadratic index.
-	ratio := costRatio(2000, func(n int) time.Duration {
+	ratio := costratio.Ratio(t, 2000, func(n int) time.Duration {
 		g := graph.New(s)
 		for _, listing := range listings(t, s, n) {
 			if _, res := g.AddOrMerge(ctx, listing); res.HasErrors() {
@@ -112,11 +88,11 @@ func TestAdd_ResolvingAMergedSourcesForwardReferencesCostsLinearTime(t *testing.
 			}
 		}
 		adds := targets(t, s, n)
-		start := cpuTime(t)
+		start := costratio.CPUTime(t)
 		for _, target := range adds {
 			mustOK(t, g.Add(ctx, target))
 		}
-		return cpuTime(t) - start
+		return costratio.CPUTime(t) - start
 	})
 	if ratio >= maxLinearRatio {
 		t.Errorf("eight times the forward references cost %.0f times the time to resolve, want under %d", ratio, maxLinearRatio)

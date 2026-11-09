@@ -170,6 +170,30 @@ func TestLabel_WithPrefix(t *testing.T) {
 	}
 }
 
+// A prefix and a separator compose together, each as configured, and neither
+// reaches a label that has no schema. A name of spaces alone is no name.
+func TestLabel_ComposesPrefixAndSeparatorTogether(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	tests := []struct {
+		prefix, separator, schema, typ, want string
+	}{
+		{"app_", "_x_", "book_catalog", "Publisher", "app_book_catalog_x_Publisher"},
+		{"Tenant1_", "Z", " geo ", "District", "Tenant1_geoZDistrict"},
+		{"app_", "_x_", "", "Person", "Person"},
+		{"app_", "_x_", "   ", "Person", "Person"},
+		{"app_", "_x_", "book_catalog", "   ", ""},
+	}
+	for _, tt := range tests {
+		a := New(WithLabelPrefix(tt.prefix), WithLabelSeparator(tt.separator))
+		if got := a.Label(ctx, tt.schema, tt.typ); got != tt.want {
+			t.Errorf("prefix %q, separator %q: Label(%q, %q) = %q; want %q",
+				tt.prefix, tt.separator, tt.schema, tt.typ, got, tt.want)
+		}
+	}
+}
+
 func TestLabel_SanitizesComponents(t *testing.T) {
 	t.Parallel()
 

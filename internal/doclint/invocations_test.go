@@ -12,16 +12,15 @@ import (
 )
 
 // invocationRules is a small CLI: persistent --format and --no-color on the
-// program, --version on the program alone, and a help flag everywhere, the
-// last two defined only after the lookup, as cobra defines them.
+// program, --version on the program alone, and a help flag everywhere.
 func invocationRules() doclint.CommandRules {
-	help := doclint.Flag{Name: "help", Shorthand: "h", NoValue: true, AfterLookup: true}
+	help := doclint.Flag{Name: "help", Shorthand: "h", NoValue: true}
 	inherited := []doclint.Flag{{Name: "format"}, {Name: "no-color", NoValue: true}, help}
 	with := func(own ...doclint.Flag) []doclint.Flag { return append(own, inherited...) }
 	return doclint.CommandRules{
 		Program: "yammm",
 		Commands: []doclint.Command{
-			{Path: "", Flags: with(doclint.Flag{Name: "version", Shorthand: "v", NoValue: true, AfterLookup: true})},
+			{Path: "", Flags: with(doclint.Flag{Name: "version", Shorthand: "v", NoValue: true})},
 			{Path: "check", Flags: with(doclint.Flag{Name: "type"}, doclint.Flag{Name: "from"})},
 			{Path: "fmt", Flags: with(doclint.Flag{Name: "write", Shorthand: "w", NoValue: true}, doclint.Flag{Name: "check", NoValue: true})},
 			{Path: "gen", Flags: with(doclint.Flag{Name: "to"}, doclint.Flag{Name: "output"})},
@@ -425,9 +424,9 @@ const resolveDoc = "`yammm --no-color verify`\n" + // 1: a flag taking no value 
 	"`yammm -é verify`\n" + // 19: a single-dash word of three bytes takes no word
 	"`yammm check --output x`\n" +
 	"`yammm check -=x y`\n" + // 21: "=" first is a shorthand
-	"`yammm --help snapshot save`\n" + // 22: a flag defined after the lookup takes a word
-	"`yammm --version check`\n" +
-	"`yammm check -h`\n" + // 24: and is defined once the command is found
+	"`yammm --help snapshot save`\n" + // 22: a help flag takes no word
+	"`yammm --version check`\n" + // 23: and so does --version, judged on the command it precedes
+	"`yammm check -h`\n" + // 24: every command defines the help flag
 	"`yammm fmt -w= x`\n" + // 25: "=" with nothing after it is the next shorthand
 	"`yammm fmt -w=true x`\n" +
 	"`yammm check --type -weird x`\n" + // 27: a flag taking a value takes the next word, dash and all
@@ -455,7 +454,7 @@ func TestAssertInvocationsExist_ResolvesAsCobraDoes(t *testing.T) {
 		"resolve.md:19: `yammm -é verify` passes -é, which \"yammm\" does not define",
 		"resolve.md:20: `yammm check --output x` passes --output, which \"yammm check\" does not define (defined on yammm gen, yammm snapshot save)",
 		"resolve.md:21: `yammm check -=x y` passes -=, which \"yammm check\" does not define",
-		"resolve.md:22: `yammm --help snapshot save` names \"save\", which is no command of \"yammm\"",
+		"resolve.md:23: `yammm --version check` passes --version, which \"yammm check\" does not define (defined on yammm)",
 		"resolve.md:25: `yammm fmt -w= x` passes -=, which \"yammm fmt\" does not define",
 		"resolve.md:29: `yammm check -z --after-unknown-shorthand` passes -z, which \"yammm check\" does not define",
 		"resolve.md:29: `yammm check -z --after-unknown-shorthand` passes --after-unknown-shorthand, which \"yammm check\" does not define",

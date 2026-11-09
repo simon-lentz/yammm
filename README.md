@@ -22,7 +22,7 @@ YAMMM is a Go library for defining schemas in a small DSL (`.yammm` files) and v
 - **Cross-schema imports**: Modular schemas with sandboxed path resolution
 - **Go code generation**: Generate Go structs from schemas with `yammm gen --to go`
 - **Markdown documentation generation**: Render a schema as a Markdown reference document with a Mermaid class diagram via `yammm gen --to md`
-- **CLI tool**: `yammm` binary for validation, formatting, data checking, snapshot management, generation, Neo4j DDL, and a diff against and an introspection of a live Neo4j database
+- **CLI tool**: `yammm` binary for validation, formatting, data checking, snapshot management, generation, Neo4j DDL, and a diff against a live Neo4j database
 
 ## Installation
 
@@ -375,7 +375,6 @@ yammm snapshot update-metadata --set k=v <file.ys>       # rewrite metadata keys
 yammm neo4j constraints <schema>                         # generate Neo4j constraint statements
 yammm neo4j indexes <schema>                             # generate Neo4j index statements from annotations
 yammm neo4j diff <schema>                                # compare schema constraints and indexes against a live database
-yammm neo4j introspect                                   # inspect a live database's schema
 ```
 
 Every command writes its diagnostics to **stderr**, at every severity, and its

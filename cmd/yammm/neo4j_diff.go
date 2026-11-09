@@ -31,6 +31,7 @@ func newNeo4jDiffCmd() *cobra.Command {
 	// `yammm neo4j indexes` emit, so this command takes their whole flag set —
 	// see registerConstraintFlags. A flag one command has and another lacks is a
 	// plan reporting drift the operator never introduced.
+	registerConnectionFlags(cmd)
 	registerLabelFlags(cmd)
 	registerConstraintFlags(cmd)
 	cmd.Flags().Bool("indexes", true, "include index drift in the diff and exit code; --indexes=false is constraints-only")
@@ -168,7 +169,7 @@ type remoteState struct {
 // projection check and the degraded path are reachable without a server — the
 // absence that left this whole command unasserted past its --uri guard.
 func fetchRemoteState(ctx context.Context, run cli.QueryRunner, database string, sink *cli.DiagnosticSink) (remoteState, error) {
-	records, err := run(ctx, database, adaptern4j.IntrospectConstraintsQuery(), nil)
+	records, err := run(ctx, database, adaptern4j.IntrospectConstraintsQuery())
 	if err != nil {
 		return remoteState{}, cli.Runtimef("fetch constraints: %v", err)
 	}
@@ -191,7 +192,7 @@ func fetchRemoteState(ctx context.Context, run cli.QueryRunner, database string,
 	// actionable drift under the other. On a server that cannot report indexes
 	// the diff degrades rather than discarding the constraint diff, but it says
 	// so, and does not exit 0 when indexes were asked for.
-	indexRecords, indexErr := run(ctx, database, adaptern4j.IntrospectIndexesQuery(), nil)
+	indexRecords, indexErr := run(ctx, database, adaptern4j.IntrospectIndexesQuery())
 	switch {
 	case indexErr != nil:
 		sink.Add(indexesUnreadable(indexErr))

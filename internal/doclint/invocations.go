@@ -45,10 +45,6 @@ type Flag struct {
 	// NoValue reports that the flag takes no separate value, as a boolean
 	// flag does: the word after it is never its value.
 	NoValue bool
-	// AfterLookup reports that the program defines the flag only once it has
-	// found the command, as cobra does its help and version flags. Written
-	// before the command's name, such a flag takes the next word.
-	AfterLookup bool
 }
 
 // AssertInvocationsExist reports every invocation of rules.Program in the
@@ -344,7 +340,7 @@ func (tree commandTree) takesNextWord(path, tok string) bool {
 		return false
 	}
 	f, ok := tree.flags[path][flag]
-	return !ok || f.AfterLookup || !f.NoValue
+	return !ok || !f.NoValue
 }
 
 // readFlag returns the flags one flag word names on path, each spelled

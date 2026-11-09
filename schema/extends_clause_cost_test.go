@@ -1,3 +1,7 @@
+// The Windows clock behind process times ticks too coarsely for these runs.
+
+//go:build unix
+
 package schema_test
 
 import (
@@ -6,42 +10,29 @@ import (
 	"testing"
 	"time"
 
+	"github.com/simon-lentz/yammm/internal/costratio"
 	"github.com/simon-lentz/yammm/internal/raceskip"
 	"github.com/simon-lentz/yammm/schema"
 )
 
-// maxLinearRatio separates eight times the names at linear cost, which reads under 11
-// on a loaded host, from quadratic cost, which reads over 30.
-const maxLinearRatio = 24
+// maxLinearRatio separates eight times the names at linear cost, measured at 6 to 9
+// in CPU time on a loaded host, from quadratic cost, measured at 24 to 46.
+const maxLinearRatio = 16
 
-// costRatio returns the cost of eight times small names over the cost of small names.
-// A busy host only raises a load's time, so each size's cost is its fastest of three
-// tries, and one low reading cannot pass a quadratic load.
-func costRatio(small int, load func(n int) time.Duration) float64 {
-	fastest := func(n int) time.Duration {
-		best := load(n)
-		for range 2 {
-			best = min(best, load(n))
-		}
-		return best
-	}
-	return float64(fastest(8*small)) / float64(fastest(small))
-}
-
-// The time of a load carries the shape in both tests here: a repeated comparison
+// The CPU time of a load carries the shape in both tests here: a repeated comparison
 // allocates nothing, so no count shows it. Unknown names are refused, after the clause's
 // spellings are deduped and before the supertypes are reduced.
 func TestExtendsClause_ALongClauseOfUnknownNamesLoadsInLinearTime(t *testing.T) {
 	raceskip.Skip(t)
-	ratio := costRatio(8000, func(n int) time.Duration {
+	ratio := costratio.Ratio(t, 8000, func(n int) time.Duration {
 		names := make([]string, n)
 		for i := range names {
 			names[i] = "T" + strconv.Itoa(i)
 		}
 		src := "schema \"m\"\ntype A extends " + strings.Join(names, ", ") + " { id String primary }\n"
-		start := time.Now()
+		start := costratio.CPUTime(t)
 		_, _ = schema.LoadString(t.Context(), src, "m.yammm")
-		return time.Since(start)
+		return costratio.CPUTime(t) - start
 	})
 	if ratio >= maxLinearRatio {
 		t.Errorf("eight times the names cost %.0f times the load, want under %d", ratio, maxLinearRatio)
@@ -52,7 +43,7 @@ func TestExtendsClause_ALongClauseOfUnknownNamesLoadsInLinearTime(t *testing.T) 
 // clause of unknown names does not.
 func TestExtendsClause_ALongClauseOfDeclaredTypesLoadsInLinearTime(t *testing.T) {
 	raceskip.Skip(t)
-	ratio := costRatio(2000, func(n int) time.Duration {
+	ratio := costratio.Ratio(t, 2000, func(n int) time.Duration {
 		var src strings.Builder
 		src.WriteString("schema \"m\"\n")
 		names := make([]string, n)
@@ -61,12 +52,12 @@ func TestExtendsClause_ALongClauseOfDeclaredTypesLoadsInLinearTime(t *testing.T)
 			src.WriteString("abstract type " + names[i] + " { }\n")
 		}
 		src.WriteString("type A extends " + strings.Join(names, ", ") + " { id String primary }\n")
-		start := time.Now()
+		start := costratio.CPUTime(t)
 		_, res := schema.LoadString(t.Context(), src.String(), "m.yammm")
 		if !res.OK() {
 			t.Fatal(res)
 		}
-		return time.Since(start)
+		return costratio.CPUTime(t) - start
 	})
 	if ratio >= maxLinearRatio {
 		t.Errorf("eight times the names cost %.0f times the load, want under %d", ratio, maxLinearRatio)
