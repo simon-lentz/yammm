@@ -1,0 +1,136 @@
+// Package lsp implements a Language Server Protocol (LSP) server for YAMMM schema files
+// and YAMMM code blocks embedded in Markdown documents.
+//
+// The LSP server provides IDE features including:
+//   - Real-time diagnostics
+//   - Go-to-definition
+//   - Hover information
+//   - Completion
+//   - Document symbols for outline and breadcrumbs
+//   - Formatting by [github.com/simon-lentz/yammm/internal/format.Source]
+//
+// # Annotation Support
+//
+// Annotation names and their arguments complete, and an annotation name hovers
+// with its description and argument hint. Completion reads the built-in registry
+// through [github.com/simon-lentz/yammm/schema.AnnotationSpecs] and
+// [github.com/simon-lentz/yammm/schema.VectorSimilarityFunctions], and hover reads
+// it through AnnotationSpecs. So the editor offers only a name the registry holds
+// at that placement and a similarity keyword the loader accepts. It does not judge
+// the annotated property, so the loader can still refuse an offered name there.
+//
+// Completion is placement-aware: a property context offers the property-level
+// names, a @@ context the type-level ones, and a name that takes arguments
+// inserts its parentheses with the cursor inside, where argument completion
+// takes over. Argument completion covers the @vector similarity keywords;
+// @@index property references are not completed.
+//
+// Annotation hover is parse-independent — it scans the line rather than the
+// analysis snapshot — so it still answers while the document does not compile,
+// which is when a reader is most likely to be asking what an annotation means.
+//
+// The server communicates via JSON-RPC 2.0 over stdio (using creachadair/jrpc2)
+// and implements LSP 3.16. It leverages the schema package's Load functions
+// for analysis to ensure consistency between CLI and editor behavior.
+//
+// # Markdown Embedded Blocks
+//
+// YAMMM code blocks in Markdown files (.md, .markdown) receive diagnostics,
+// hover, completion, go-to-definition, and document symbols support. Each
+// code block is analyzed in isolation as an independent schema. Imports are
+// not supported in markdown blocks and produce an E_IMPORT_NOT_ALLOWED
+// diagnostic. Formatting is intentionally disabled for markdown files.
+//
+// # Architecture
+//
+// The root lsp package is a thin coordination layer. It holds the Server, the
+// protocol lifecycle and the request handlers, which call the feature providers.
+// State management is enforced at the compiler level via internal packages.
+//
+// The server consists of:
+//   - Server: Main LSP server handling protocol lifecycle
+//   - Feature providers: definition, hover, completion, symbols, formatting
+//   - internal/workspace: Manages open documents, workspace roots and module roots, markdown lifecycle, analysis scheduling, per-entry snapshots, diagnostic publishing, dependency tracking, and URI mapping
+//   - internal/docstate: Pure document types (.yammm overlays, text normalization, brace scanning) — true leaf, no internal imports
+//   - internal/analysis: Wraps schema loading for import-aware analysis
+//   - internal/completion: Completion provider (keywords, types, snippets, annotation names and their arguments)
+//   - internal/definition: Go-to-definition provider
+//   - internal/hover: Hover information provider
+//   - internal/symbols: Symbol extraction and indexing
+//   - internal/markdown: Code block extraction from Markdown
+//   - internal/lsputil: URI/path conversion, UTF-16 position conversion, and the source texts of an analysis
+//   - internal/lsperr: Sentinel errors that classify a logged failure
+//   - internal/protocol: LSP protocol type definitions
+//
+// # Callers
+//
+// The package is internal to the module, and the yammm-lsp command is its one
+// caller. That command validates a [Config], builds the [Server] with
+// [NewServer], runs [Server.RunStdio], and calls [Server.Close] on SIGINT or
+// SIGTERM.
+//
+// # CLI Usage
+//
+// The server is typically started via the yammm-lsp command:
+//
+//	yammm-lsp [options]
+//
+// The server communicates over stdio (implicit, no flag required).
+//
+// For debugging:
+//
+//	yammm-lsp --log-level debug --log-file /tmp/yammm-lsp.log
+//
+// # Limitations
+//
+// The server implements LSP 3.16, which does not support position encoding
+// negotiation (added in LSP 3.17). The server reads a client's character position
+// in UTF-16 code units, and writes one in those units when it holds the source's
+// text and a byte offset. Without them, a character position it writes counts runes.
+//
+// Documents must be opened (via textDocument/didOpen) before most LSP features
+// work for that document. Specifically, hover, definition, completion,
+// document symbols and formatting require the document to be open. This is because the server
+// relies on overlay content for the most current text and analysis snapshots
+// for semantic information. Imported files referenced by an open document
+// are loaded from disk automatically during analysis.
+//
+// A position counts characters in the text the client holds. For an open
+// document that is the text the client sent, a leading byte order mark
+// included. For an imported file read from disk it is the file's text without
+// one leading byte order mark, which an editor decodes away when it opens the
+// file.
+//
+// Only file:// URIs are supported. Documents with other URI schemes (such as
+// untitled:, vscode-notebook-cell://, or custom editor schemes) are silently
+// ignored in textDocument/didOpen. Editors opening unsaved buffers should
+// save to a temporary file first or use a file:// URI pointing to a temp file.
+//
+// # Thread Safety
+//
+// The [Server] handles concurrent LSP requests internally via the jrpc2
+// server, which runs requests on concurrent goroutines and notifications in
+// order. [Server.Close] ends [Server.RunStdio], which returns nil once its in-flight
+// handlers and writes finish, and a RunStdio called after Close reads nothing. One goroutine of a
+// RunStdio that Close ended can stay in a read of the input until the input delivers
+// or ends, and it drops what it reads.
+//
+// # Dependencies
+//
+//	internal/lsp  ──imports──▶  internal/format, location,
+//	                            internal/lsp/internal/completion,
+//	                            internal/lsp/internal/definition,
+//	                            internal/lsp/internal/docstate,
+//	                            internal/lsp/internal/hover,
+//	                            internal/lsp/internal/lsputil,
+//	                            internal/lsp/internal/protocol,
+//	                            internal/lsp/internal/symbols,
+//	                            internal/lsp/internal/workspace,
+//	                            github.com/creachadair/jrpc2,
+//	                            github.com/creachadair/jrpc2/channel,
+//	                            github.com/creachadair/jrpc2/handler
+//
+// The server package itself holds the transport and the handler wiring; it
+// imports location to resolve a configured module root, and reaches schema and
+// diag through the internal sub-packages.
+package lsp

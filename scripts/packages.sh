@@ -7,7 +7,7 @@
 # -race or -tags=x. A caller that judges several targets asks once for each.
 #
 # `./...` alone also reaches gitignored trees a developer's checkout holds and
-# CI's does not — an npm dependency under lsp/editors/vscode/node_modules ships
+# CI's does not — an npm dependency under editors/vscode/node_modules ships
 # a Go package — so a local run and CI's would cover different sets. The gate
 # scripts that test, vet or lint the module take their package set from here.
 # `git ls-files -z` writes each path as it is, so a file name git would quote

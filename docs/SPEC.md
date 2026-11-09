@@ -1858,7 +1858,7 @@ Codes are stable identifiers for programmatic matching. `diag/code.go` holds the
 - One schema per file
 - Import paths are case-sensitive on case-sensitive filesystems
 - `/` separates an import path's segments on every host, and only a `./` or `../` prefix makes an import relative. An import path holding a backslash is refused: Windows reads a backslash as a separator and every other host as part of a file name, so the path would name a different file on each
-- Canonical formatting is defined by `format.TokenStream` (see [API.md](API.md#formatting))
+- Canonical formatting is what `yammm fmt` writes (see [API.md](API.md#formatting))
 
 ## Schema Identity
 

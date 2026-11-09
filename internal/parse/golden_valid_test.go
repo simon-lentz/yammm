@@ -157,7 +157,13 @@ func repoRoot(tb testing.TB) string {
 	}
 	for dir := filepath.Dir(self); ; {
 		if isModuleRoot(dir) {
-			return dir
+			// WalkDir does not descend a root that is a link, and a checkout can
+			// lie below one, as /var does on macOS.
+			resolved, err := filepath.EvalSymlinks(dir)
+			if err != nil {
+				tb.Fatal(err)
+			}
+			return resolved
 		}
 		parent := filepath.Dir(dir)
 		if parent == dir {

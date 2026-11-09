@@ -1,0 +1,548 @@
+package format
+
+import (
+	"cmp"
+	"fmt"
+	"slices"
+	"strings"
+
+	"github.com/simon-lentz/yammm/diag"
+	"github.com/simon-lentz/yammm/internal/parse"
+	"github.com/simon-lentz/yammm/location"
+)
+
+// tokenRange is a half-open byte range of the source.
+type tokenRange struct {
+	start int
+	end   int
+}
+
+// The token kinds the pair rules below name. They are the rule names the
+// parser's lexer table spells, matched by value because that table is
+// keywordless: a keyword arrives as an ordinary word and is told apart by its
+// text.
+const (
+	kindWS         = "WS"
+	kindSLComment  = "SL_COMMENT"
+	kindDocComment = "DOC_COMMENT"
+	kindSTRING     = "STRING"
+	kindREGEXP     = "REGEXP"
+	kindLBRACE     = "LBRACE"
+	kindRBRACE     = "RBRACE"
+	kindLBRACK     = "LBRACK"
+	kindRBRACK     = "RBRACK"
+	kindLPAR       = "LPAR"
+	kindRPAR       = "RPAR"
+	kindAT         = "AT"
+	kindATAT       = "ATAT"
+	kindSLASH      = "SLASH"
+	kindEQUALS     = "EQUALS"
+	kindPERIOD     = "PERIOD"
+	kindCOMMA      = "COMMA"
+	kindMINUS      = "MINUS"
+	kindCOLON      = "COLON"
+	kindLT         = "LT"
+	kindGT         = "GT"
+)
+
+type spacingAction int
+
+const (
+	spacingNone spacingAction = iota
+	spacingSpace
+	spacingNewline
+)
+
+// lineEndingReplacer normalizes CRLF and CR to LF. Package-level for reuse
+// across calls — strings.Replacer is safe for concurrent use.
+var lineEndingReplacer = strings.NewReplacer("\r\n", "\n", "\r", "\n")
+
+// Source formats src, the text of a .yammm file, canonically. It returns an
+// error, and no output, when the grammar does not match src or when the output
+// would not carry src's tokens and comments. The second error wraps
+// [ErrNotPreserved] and is a defect in the formatter.
+func Source(src []byte) ([]byte, error) {
+	out, err := tokenStream(string(src), rewrite)
+	if err != nil {
+		return nil, err
+	}
+	return []byte(out), nil
+}
+
+// SyntaxError is [Source]'s error for a source that does not parse. Issue is
+// the parser's first diagnostic for text the grammar does not match or an
+// escape the language does not have, and it names no source, so a caller that
+// knows the file can name it. Its line and column are positions in the text
+// Source was given. Its byte offset counts each CRLF and each lone CR of that
+// text as one byte.
+type SyntaxError struct {
+	Issue diag.Issue
+}
+
+func (e *SyntaxError) Error() string { return "parse failed: " + e.Issue.Message() }
+
+// rewrite runs phases 2 to 5 over phase 1's lines.
+func rewrite(ls []line) string {
+	ls = collapseBlankLines(ls)
+	ls = recordsAfterWrap(ls, wrapLongLines(ls))
+	ls = alignColumns(ls)
+	return finalizeFormattedText(joinLines(ls))
+}
+
+// recordsAfterWrap returns the lines phase 4 reads. Phase 3 builds lines from
+// pieces of others and has no record for them, so when it changed the text the
+// record is the lexer's; when it did not, the lines it was given keep theirs.
+func recordsAfterWrap(before, after []line) []line {
+	text := joinLines(after)
+	if text == joinLines(before) {
+		return before
+	}
+	return classifyLexed(text)
+}
+
+// tokenStream is [Source] over text, with phases 2 to 5 as a parameter, so the
+// postcondition can be tested against a rewrite that breaks it.
+func tokenStream(text string, phases func([]line) string) (string, error) {
+	normalized := lineEndingReplacer.Replace(text)
+	ls, tokens, err := lexicalLines(normalized)
+	if err != nil {
+		return "", err
+	}
+	out := phases(ls)
+	// Unchanged text preserves itself, so a formatted file pays no second lex.
+	if out != normalized {
+		if err := preservesTokens(tokens, out); err != nil {
+			return "", fmt.Errorf("%w: %w", ErrNotPreserved, err)
+		}
+	}
+	return out, nil
+}
+
+// lexicalLines runs phase 1 and returns its output as classified lines, each
+// carrying the lexer's own view of it, and the source's tokens. The un-elided
+// tokens and the node tree both come from one LexAndParse.
+func lexicalLines(text string) ([]line, []parse.Token, error) {
+	normalized := lineEndingReplacer.Replace(text)
+
+	// Fail on the grammar alone: a source that parses still formats, whether
+	// it is semantically invalid, such as inverted bounds, or holds text the
+	// source rules refuse inside a comment or a literal.
+	file, allTokens, _ := parse.LexAndParse(normalized, location.SourceID{})
+	if len(file.Unparsed) > 0 {
+		return nil, nil, &SyntaxError{Issue: file.Unparsed[0]}
+	}
+
+	ranges := invariantExpressionRanges(file)
+	starts := lineStarts(file)
+
+	e := newEmitter()
+	var pendingWS strings.Builder
+	indentLevel := 0
+	var prev *parse.Token
+	prevInExpr := false
+	// Annotation-head tracking. prevAtSigil marks that the previous non-hidden
+	// token was @ / @@ (so the current token is the annotation name), and
+	// prevAnnotationName marks that the previous token was that name (so a
+	// following "(" opens an argument list and takes no space).
+	prevAtSigil := false
+	prevAnnotationName := false
+
+	for i := range allTokens {
+		tok := &allTokens[i]
+		inExpr := offsetInRanges(tok.Start, ranges)
+
+		if tok.Kind == kindWS {
+			if inExpr {
+				if pendingWS.Len() > 0 {
+					e.writeExprWhitespace(pendingWS.String())
+					pendingWS.Reset()
+				}
+				e.writeExprWhitespace(tok.Value)
+			} else {
+				pendingWS.WriteString(tok.Value)
+			}
+			continue
+		}
+
+		pendingStr := pendingWS.String()
+
+		if inExpr {
+			if pendingWS.Len() > 0 {
+				if prev != nil && !prevInExpr {
+					// Bridge from declaration context to expression context.
+					// When there's a newline, this is a multiline invariant
+					// whose continuation indentation was set by wrapInvariantAtOps.
+					// Preserve the original whitespace so that the indent level
+					// (which only tracks brace depth) doesn't flatten it.
+					if strings.Contains(pendingStr, "\n") {
+						e.writeExprWhitespace(pendingStr)
+					} else {
+						sep := declarationSeparator(prev, tok, pendingStr, indentLevel, true)
+						e.write(sep, chunkPlain)
+					}
+				} else {
+					e.writeExprWhitespace(pendingStr)
+				}
+				pendingWS.Reset()
+			} else if prev != nil && !prevInExpr {
+				sep := declarationSeparator(prev, tok, "", indentLevel, true)
+				e.write(sep, chunkPlain)
+			}
+
+			e.writeToken(tok)
+			prev = tok
+			prevInExpr = true
+			continue
+		}
+
+		sep := declarationSeparator(prev, tok, pendingStr, indentLevel, false)
+		// Every declaration and every member begins a line. Phase 2 inserts a
+		// blank after the schema header's line and the last import's, and phase 4
+		// aligns one member a line, so two on one line move on a second pass or
+		// misalign. A file-scope declaration's doc comment begins its line too,
+		// else phase 2's blank would land inside a multi-line comment. A member's
+		// doc comment keeps its place: the token after it already begins a line.
+		if prev != nil && starts[tok.Start] && (indentLevel == 0 || !isCommentToken(tok.Kind)) && !strings.Contains(sep, "\n") {
+			sep = newlineSeparator(1, indentLevel)
+		}
+		// An annotation name followed by "(" opens its argument list: collapse the
+		// space the (name, LPAR) default would otherwise emit. Decided here from
+		// loop state because that same pair is a relation multiplicity elsewhere,
+		// which must keep its space.
+		if prevAnnotationName && tok.Kind == kindLPAR {
+			sep = ""
+		}
+		pendingWS.Reset()
+		e.write(sep, chunkPlain)
+		e.writeToken(tok)
+
+		if tok.Kind == kindLBRACE {
+			indentLevel++
+		} else if tok.Kind == kindRBRACE && indentLevel > 0 {
+			indentLevel--
+		}
+
+		// The non-hidden token immediately after @ / @@ is always the annotation
+		// name (grammar), so prevAtSigil alone identifies it.
+		prevAnnotationName = prevAtSigil
+		prevAtSigil = tok.Kind == kindAT || tok.Kind == kindATAT
+		prev = tok
+		prevInExpr = false
+	}
+
+	if pendingWS.Len() > 0 {
+		e.write(pendingWS.String(), chunkPlain)
+	}
+
+	return e.lines(), allTokens, nil
+}
+
+// lineStarts returns the byte offset at which each file-scope declaration and
+// each type-body member begins: its doc comment when it has one. A property's own
+// annotations are part of the property, so none of them starts a line.
+func lineStarts(file *parse.File) map[int]bool {
+	starts := map[int]bool{}
+	for _, d := range file.Imports {
+		starts[d.Span.Start.Byte] = true
+	}
+	for _, d := range file.DataTypes {
+		starts[d.Span.Start.Byte] = true
+	}
+	for _, t := range file.Types {
+		starts[t.Span.Start.Byte] = true
+		for _, p := range t.Properties {
+			starts[p.Span.Start.Byte] = true
+		}
+		for _, r := range t.Relations {
+			starts[r.Span.Start.Byte] = true
+			for _, p := range r.Properties {
+				starts[p.Span.Start.Byte] = true
+			}
+		}
+		for _, inv := range t.Invariants {
+			starts[inv.Span.Start.Byte] = true
+		}
+		for _, a := range t.Annotations {
+			starts[a.Span.Start.Byte] = true
+		}
+	}
+	return starts
+}
+
+// invariantExpressionRanges returns the byte extent of every invariant
+// expression, sorted and merged. Inside one, the author's own spacing is kept
+// and the declaration pair rules do not apply.
+func invariantExpressionRanges(file *parse.File) []tokenRange {
+	var ranges []tokenRange
+	for _, span := range file.Expressions {
+		if span.End.Byte <= span.Start.Byte {
+			continue
+		}
+		ranges = append(ranges, tokenRange{start: span.Start.Byte, end: span.End.Byte})
+	}
+	if len(ranges) == 0 {
+		return nil
+	}
+
+	slices.SortFunc(ranges, func(a, b tokenRange) int {
+		return cmp.Or(
+			cmp.Compare(a.start, b.start),
+			cmp.Compare(a.end, b.end),
+		)
+	})
+
+	merged := make([]tokenRange, 0, len(ranges))
+	current := ranges[0]
+	for _, r := range ranges[1:] {
+		if r.start <= current.end {
+			if r.end > current.end {
+				current.end = r.end
+			}
+			continue
+		}
+		merged = append(merged, current)
+		current = r
+	}
+	return append(merged, current)
+}
+
+// offsetInRanges reports whether a byte offset falls inside a merged range. The
+// ranges are half-open, which is what makes the end offset the first byte after
+// the expression rather than its last.
+func offsetInRanges(off int, ranges []tokenRange) bool {
+	if off < 0 || len(ranges) == 0 {
+		return false
+	}
+	i, _ := slices.BinarySearchFunc(ranges, off, func(r tokenRange, target int) int {
+		return cmp.Compare(r.end-1, target)
+	})
+	if i >= len(ranges) {
+		return false
+	}
+	return ranges[i].start <= off
+}
+
+func declarationSeparator(
+	prev *parse.Token,
+	curr *parse.Token,
+	pendingWS string,
+	indentLevel int,
+	currInExpr bool,
+) string {
+	newlineCount := strings.Count(pendingWS, "\n")
+	currIndent := indentLevel
+	if !currInExpr && curr.Kind == kindRBRACE && currIndent > 0 {
+		currIndent--
+	}
+
+	if prev == nil {
+		if newlineCount > 0 {
+			return newlineSeparator(newlineCount, currIndent)
+		}
+		return ""
+	}
+
+	if isCommentToken(curr.Kind) {
+		if newlineCount > 0 {
+			return newlineSeparator(newlineCount, currIndent)
+		}
+		return " "
+	}
+
+	action := declarationSpacingAction(prev, curr)
+	if action == spacingNewline {
+		return newlineSeparator(max(1, newlineCount), currIndent)
+	}
+	if newlineCount > 0 {
+		return newlineSeparator(newlineCount, currIndent)
+	}
+	if action == spacingNone {
+		return ""
+	}
+	return " "
+}
+
+func declarationSpacingAction(prev *parse.Token, curr *parse.Token) spacingAction {
+	if prev == nil {
+		return spacingNone
+	}
+
+	prevType := prev.Kind
+	currType := curr.Kind
+
+	if currType == kindRBRACE {
+		return spacingNewline
+	}
+	if prevType == kindLBRACE {
+		return spacingNewline
+	}
+	if prevType == kindRBRACE {
+		return spacingNewline
+	}
+	if prevType == kindDocComment {
+		return spacingNewline
+	}
+
+	// Closing delimiters win over broad left-side rules.
+	if currType == kindRBRACK || currType == kindRPAR {
+		return spacingNone
+	}
+
+	// Annotation sigil: no space between @ / @@ and the annotation name that
+	// always follows it. The name-to-"(" spacing is decided in tokenStream from
+	// loop state, not here, because that pair is shared with a relation
+	// multiplicity (`worksAt (one)`), which must keep its space.
+	if prevType == kindAT || prevType == kindATAT {
+		return spacingNone
+	}
+
+	if currType == kindLBRACE {
+		return spacingSpace
+	}
+	if prevType == kindSLASH || currType == kindSLASH {
+		return spacingSpace
+	}
+	if prevType == kindEQUALS || currType == kindEQUALS {
+		return spacingSpace
+	}
+	if prevType == kindPERIOD || currType == kindPERIOD {
+		return spacingNone
+	}
+	if prevType == kindCOMMA {
+		return spacingSpace
+	}
+	if currType == kindCOMMA {
+		return spacingNone
+	}
+	if prevType == kindMINUS {
+		return spacingNone
+	}
+	if prevType == kindLPAR || currType == kindRPAR {
+		return spacingNone
+	}
+	if prevType == kindCOLON || currType == kindCOLON {
+		return spacingNone
+	}
+	if prevType == kindLBRACK {
+		return spacingNone
+	}
+	if currType == kindLBRACK && isConstraintBracketLeft(prev.Value) {
+		return spacingNone
+	}
+	// List type angle brackets: collapse spacing around < and > only in
+	// type contexts (e.g. List<String>), not in expression comparisons.
+	if currType == kindLT && isListAngleBracketLeft(prev.Value) {
+		return spacingNone
+	}
+	if prevType == kindLT {
+		return spacingNone
+	}
+	if currType == kindGT {
+		return spacingNone
+	}
+	if prevType == kindGT {
+		if currType == kindLBRACK {
+			return spacingNone
+		}
+		return spacingSpace
+	}
+	return spacingSpace
+}
+
+func isConstraintBracketLeft(text string) bool {
+	switch text {
+	case "Integer", "Float", "String", "Enum", "Pattern", "Timestamp", "Vector", "List":
+		return true
+	default:
+		return false
+	}
+}
+
+// isListAngleBracketLeft returns true if the token text can precede a `<`
+// in List type syntax. Currently only "List" itself uses angle brackets.
+func isListAngleBracketLeft(text string) bool {
+	return text == "List"
+}
+
+func isCommentToken(kind string) bool {
+	return kind == kindSLComment || kind == kindDocComment
+}
+
+func normalizeDocComment(text string) string {
+	lines := strings.Split(text, "\n")
+	for i, line := range lines {
+		trimmed := strings.TrimRight(line, " \t")
+		lines[i] = normalizeIndentation(trimmed)
+	}
+	return strings.Join(lines, "\n")
+}
+
+// writeExprWhitespace preserves an expression's own spacing, normalizing only
+// the indentation that starts a line.
+func (e *emitter) writeExprWhitespace(ws string) {
+	if ws == "" {
+		return
+	}
+
+	i := 0
+	for i < len(ws) {
+		if ws[i] == '\n' {
+			e.write("\n", chunkPlain)
+			i++
+			continue
+		}
+
+		j := i
+		for j < len(ws) && ws[j] != '\n' {
+			j++
+		}
+		seg := ws[i:j]
+		if e.lineStart {
+			seg = normalizeIndentation(seg)
+		}
+		e.write(seg, chunkPlain)
+		i = j
+	}
+}
+
+// writeToken emits one token, telling the emitter what kind it is so the line's
+// lexical record is built rather than guessed.
+func (e *emitter) writeToken(tok *parse.Token) {
+	text := tok.Value
+	kind := chunkPlain
+	switch tok.Kind {
+	case kindDocComment:
+		text = normalizeDocComment(text)
+		kind = chunkComment
+	case kindSLComment:
+		kind = chunkComment
+	case kindSTRING, kindREGEXP:
+		kind = chunkLiteral
+	}
+	e.write(text, kind)
+}
+
+func updateLineStart(lineStart bool, text string) bool {
+	state := lineStart
+	for i := range len(text) {
+		switch text[i] {
+		case '\n':
+			state = true
+		case ' ', '\t', '\r':
+			// keep current state
+		default:
+			state = false
+		}
+	}
+	return state
+}
+
+func newlineSeparator(count int, indentLevel int) string {
+	if count <= 0 {
+		count = 1
+	}
+	if indentLevel < 0 {
+		indentLevel = 0
+	}
+	return strings.Repeat("\n", count) + strings.Repeat("\t", indentLevel)
+}

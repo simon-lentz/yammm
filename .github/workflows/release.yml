@@ -27,7 +27,7 @@ jobs:
       - uses: actions/checkout@v7
       - name: Check the version is the tag's
         run: |
-          VERSION="v$(jq -r .version lsp/editors/vscode/package.json)"
+          VERSION="v$(jq -r .version editors/vscode/package.json)"
           if [ "${GITHUB_REF_TYPE}" != tag ] || [ "${GITHUB_REF_NAME}" != "${VERSION}" ]; then
             echo "::error::package.json's version is ${VERSION}, and this run is ${GITHUB_REF_TYPE} ${GITHUB_REF_NAME}: a release ships only from the tag package.json carries"
             exit 1

@@ -10,7 +10,6 @@ import (
 
 	"github.com/simon-lentz/yammm/adapter/neo4j"
 	"github.com/simon-lentz/yammm/diag"
-	"github.com/simon-lentz/yammm/format"
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/schema"
 )
@@ -229,31 +228,6 @@ func TestDocumentedKeyFunctions(t *testing.T) {
 	if len(parts) != 2 || parts[0] != "us" || parts[1] != "ca" {
 		t.Errorf("ParseKey returned %v; the documented round trip is [us ca]", parts)
 	}
-}
-
-// TestDocumentedFormatSurface pins the format package facts the Formatting
-// section states: the entry point's arity and the wrap threshold's value.
-func TestDocumentedFormatSurface(t *testing.T) {
-	t.Parallel()
-	if format.LineWidthThreshold != 100 {
-		t.Errorf("LineWidthThreshold is %d; the documented value is 100", format.LineWidthThreshold)
-	}
-	formatted, err := format.TokenStream("schema \"S\"\n")
-	if err != nil || formatted == "" {
-		t.Fatalf("the documented TokenStream shape: %v", err)
-	}
-	// The documented signatures, held as typed values so a shape change fails
-	// here rather than only in the prose.
-	var (
-		indent       func(string) string
-		width        func(string) int
-		notPreserved error
-		syntaxIssue  func(*format.SyntaxError) diag.Issue
-	)
-	indent, width = format.NormalizeIndentation, format.DisplayWidth
-	notPreserved = format.ErrNotPreserved
-	syntaxIssue = func(e *format.SyntaxError) diag.Issue { return e.Issue }
-	_, _, _, _ = indent, width, notPreserved, syntaxIssue
 }
 
 // TestDocumentedModuleRootDiscovery pins the module-root discovery surface the

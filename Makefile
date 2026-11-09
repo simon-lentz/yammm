@@ -74,7 +74,7 @@ LSP_LDFLAGS = -trimpath -ldflags="-s -w -X main.version=$(VERSION)"
 BIN_DIR = bin
 
 # VS Code extension directory
-VSCODE_EXT = lsp/editors/vscode
+VSCODE_EXT = editors/vscode
 
 # Detect current platform
 GOOS   ?= $(shell go env GOOS)

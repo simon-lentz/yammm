@@ -9,9 +9,9 @@ repos:
       # contract under test, so the text-rewriting hooks must never touch
       # them.
       - id: trailing-whitespace
-        exclude: '(\.(golden|ys|txtar)$|^format/testdata/)'
+        exclude: '(\.(golden|ys|txtar)$|^internal/format/testdata/)'
       - id: end-of-file-fixer
-        exclude: '(\.(golden|ys|txtar)$|^format/testdata/)'
+        exclude: '(\.(golden|ys|txtar)$|^internal/format/testdata/)'
       - id: check-added-large-files
       - id: check-yaml
       - id: check-json

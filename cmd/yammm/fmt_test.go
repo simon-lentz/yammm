@@ -9,9 +9,10 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/simon-lentz/yammm/cmd/yammm/internal/cli"
-	"github.com/simon-lentz/yammm/format"
+	"github.com/simon-lentz/yammm/internal/format"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -176,15 +177,65 @@ func TestFmtWrite_MultiplePaths(t *testing.T) {
 	}
 }
 
+// TestFmt_ASameLengthRewriteIsUnformatted pins that --check and --write compare
+// bytes: the source and its canonical form have the same length.
+func TestFmt_ASameLengthRewriteIsUnformatted(t *testing.T) {
+	t.Parallel()
+
+	const src = "schema \"s\"\n\ntype A{\n\tid String \n}\n"
+	const canonical = "schema \"s\"\n\ntype A {\n\tid String\n}\n"
+	if len(src) != len(canonical) {
+		t.Fatalf("the fixture's lengths differ: %d and %d", len(src), len(canonical))
+	}
+
+	path := writeFmtFixture(t, "same_length.yammm", src)
+	if code, out, _ := executeCmdOutput(t, "fmt", "--check", path); code != cli.ExitValidation || strings.TrimSpace(out) != path {
+		t.Errorf("--check: exit %d with %q, want %d with the path", code, out, cli.ExitValidation)
+	}
+	if code := executeCmd(t, "fmt", "--write", path); code != cli.ExitOK {
+		t.Fatalf("--write: exit %d, want %d", code, cli.ExitOK)
+	}
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read back: %v", err)
+	}
+	if string(got) != canonical {
+		t.Errorf("--write left %q, want %q", got, canonical)
+	}
+}
+
+// TestFmtWrite_LeavesAFormattedFileUntouched pins that --write writes nothing
+// when the file is already canonical: its modification time stays where the
+// test set it.
+func TestFmtWrite_LeavesAFormattedFileUntouched(t *testing.T) {
+	t.Parallel()
+
+	path := writeFmtFixture(t, "canonical.yammm", fmtCanonical)
+	old := time.Date(2001, 2, 3, 4, 5, 6, 0, time.UTC)
+	if err := os.Chtimes(path, old, old); err != nil {
+		t.Fatalf("set the times: %v", err)
+	}
+	if code := executeCmd(t, "fmt", "--write", path); code != cli.ExitOK {
+		t.Fatalf("exit %d, want %d", code, cli.ExitOK)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat: %v", err)
+	}
+	if !info.ModTime().Equal(old) {
+		t.Errorf("modification time = %v, want %v: --write rewrote a canonical file", info.ModTime(), old)
+	}
+}
+
 // tightOperators removes the spaces around a logical operator.
 var tightOperators = regexp.MustCompile(`[ \t]*(&&|\|\|)[ \t]*`)
 
-// fmtHazards returns schemas the formatter has been measured to rewrite into
-// something else: one loses an enum value and still loads, one no longer loads.
+// fmtHazards returns schemas whose canonical form is easy to get wrong: an enum
+// value on the opening line, and a logical operator with no spaces around it.
 func fmtHazards(t *testing.T) map[string]string {
 	t.Helper()
 	read := func(name string) string {
-		b, err := os.ReadFile(filepath.Join("..", "..", "format", "testdata", "roundtrip", name))
+		b, err := os.ReadFile(filepath.Join("..", "..", "internal", "format", "testdata", "roundtrip", name))
 		if err != nil {
 			t.Fatalf("read hazard: %v", err)
 		}
@@ -279,7 +330,7 @@ func TestFmtFailure_RefusalIsTheFormattersFault(t *testing.T) {
 		t.Errorf("refusal message = %q, want the path and that the file is left unchanged", msg)
 	}
 
-	_, parseErr := format.TokenStream("schema \"s\"\ntype T {\n")
+	_, parseErr := format.Source([]byte("schema \"s\"\ntype T {\n"))
 	if parseErr == nil {
 		t.Fatal("the unparseable input parsed")
 	}
@@ -289,7 +340,7 @@ func TestFmtFailure_RefusalIsTheFormattersFault(t *testing.T) {
 }
 
 // TestFmtCheck_LineEndingDifferenceIsUnformatted pins the behaviour the flag's
-// help text warns about: TokenStream normalizes CRLF before formatting and never
+// help text warns about: the formatter normalizes CRLF before formatting and never
 // converts back, so a CRLF file is unformatted even when nothing else differs.
 func TestFmtCheck_LineEndingDifferenceIsUnformatted(t *testing.T) {
 	t.Parallel()

@@ -1,0 +1,140 @@
+package definition_test
+
+import (
+	"context"
+	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	"github.com/simon-lentz/yammm/location"
+	"github.com/simon-lentz/yammm/schema"
+
+	"github.com/simon-lentz/yammm/internal/lsp/internal/analysis"
+	"github.com/simon-lentz/yammm/internal/lsp/internal/definition"
+	"github.com/simon-lentz/yammm/internal/lsp/internal/lsputil"
+	"github.com/simon-lentz/yammm/internal/lsp/internal/symbols"
+)
+
+// identityURI is a trivial mapper that returns the input as a file:// URI.
+func identityURI(path string) string {
+	return lsputil.PathToURI(path)
+}
+
+func TestResolveSymbol_LocalType(t *testing.T) {
+	t.Parallel()
+
+	src := "schema \"test\"\n\ntype Person {\n    id String primary\n    name String\n}"
+	s, result := schema.LoadString(t.Context(), src, "test.yammm")
+	require.True(t, result.OK(), "schema should parse without errors: %v", result)
+
+	reg := lsputil.NewTexts()
+	require.NoError(t, reg.Register(s.SourceID(), []byte(src)))
+
+	typ, ok := s.Type("Person")
+	require.True(t, ok, "schema should contain type Person")
+
+	nameSpan := typ.NameSpan()
+	fullSpan := typ.Span()
+	sourceID := s.SourceID()
+
+	sym := &symbols.Symbol{
+		Name:      "Person",
+		Kind:      symbols.SymbolType,
+		SourceID:  sourceID,
+		Range:     fullSpan,
+		Selection: nameSpan,
+		Data:      typ,
+	}
+
+	snapshot := &analysis.Snapshot{
+		Root:    "/test",
+		Sources: reg,
+	}
+
+	loc := definition.ResolveSymbol(snapshot, sym, identityURI)
+	require.NotNil(t, loc)
+	assert.NotEmpty(t, loc.URI)
+
+	// The selection span comes from the parser. Verify that LSP range is
+	// 0-indexed and matches the name span position.
+	assert.Equal(t, lsputil.ToUInteger(nameSpan.Start.Line-1), loc.Range.Start.Line)
+}
+
+func TestResolveReference_NotFound(t *testing.T) {
+	t.Parallel()
+
+	sourceID := location.NewSourceID("test://schema.yammm")
+
+	// Create empty snapshot - ResolveTypeReference will return nil
+	snapshot := &analysis.Snapshot{
+		Root:            "/test",
+		SymbolsBySource: map[location.SourceID]*symbols.SymbolIndex{},
+	}
+
+	// Reference to a non-existent type
+	ref := &symbols.ReferenceSymbol{
+		TargetName: "NonExistent",
+		Qualifier:  "",
+		Span:       location.RangeWithBytes(sourceID, 5, 10, -1, 5, 20, -1),
+	}
+
+	loc := definition.ResolveReference(snapshot, ref, sourceID, identityURI)
+	assert.Nil(t, loc, "expected nil result for unresolved reference")
+}
+
+func TestSymbolToLocation(t *testing.T) {
+	t.Parallel()
+
+	src := "schema \"test\"\n\ntype Customer {\n    id String primary\n}"
+	s, result := schema.LoadString(context.Background(), src, "types.yammm")
+	require.True(t, result.OK(), "schema should parse without errors: %v", result)
+
+	reg := lsputil.NewTexts()
+	require.NoError(t, reg.Register(s.SourceID(), []byte(src)))
+
+	typ, ok := s.Type("Customer")
+	require.True(t, ok, "schema should contain type Customer")
+
+	nameSpan := typ.NameSpan()
+	fullSpan := typ.Span()
+	sourceID := s.SourceID()
+
+	sym := &symbols.Symbol{
+		Name:      "Customer",
+		Kind:      symbols.SymbolType,
+		SourceID:  sourceID,
+		Range:     fullSpan,
+		Selection: nameSpan,
+	}
+
+	loc := definition.SymbolToLocation(reg, sym, identityURI)
+	require.NotNil(t, loc)
+	assert.NotEmpty(t, loc.URI)
+
+	// Should use selection span converted to 0-indexed LSP coordinates.
+	assert.Equal(t, lsputil.ToUInteger(nameSpan.Start.Line-1), loc.Range.Start.Line)
+}
+
+func TestSymbolToLocation_NilSymbol(t *testing.T) {
+	t.Parallel()
+
+	loc := definition.SymbolToLocation(nil, nil, identityURI)
+	assert.Nil(t, loc, "expected nil location for nil symbol")
+}
+
+func TestSymbolToLocation_ZeroRange(t *testing.T) {
+	t.Parallel()
+
+	sourceID := location.NewSourceID("test://types.yammm")
+
+	sym := &symbols.Symbol{
+		Name:     "NoRange",
+		Kind:     symbols.SymbolType,
+		SourceID: sourceID,
+		Range:    location.Span{}, // zero span
+	}
+
+	loc := definition.SymbolToLocation(nil, sym, identityURI)
+	assert.Nil(t, loc, "expected nil location for symbol with zero range")
+}

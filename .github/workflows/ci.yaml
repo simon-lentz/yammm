@@ -44,18 +44,18 @@ jobs:
           go-version-file: go.mod
       - uses: actions/setup-node@v7
         with:
-          node-version-file: lsp/editors/vscode/.nvmrc
+          node-version-file: editors/vscode/.nvmrc
       - name: Install dependencies
-        working-directory: lsp/editors/vscode
+        working-directory: editors/vscode
         run: npm ci
       - name: Typecheck
-        working-directory: lsp/editors/vscode
+        working-directory: editors/vscode
         run: npm run check
       - name: Lint
-        working-directory: lsp/editors/vscode
+        working-directory: editors/vscode
         run: npm run lint
       - name: Grammar tests
-        working-directory: lsp/editors/vscode
+        working-directory: editors/vscode
         run: npm run test:grammar
       # The same endpoint @vscode/test-electron resolves 'stable' from, so the
       # cache key tracks exactly what the integration harness will download.
@@ -71,7 +71,7 @@ jobs:
           path: ~/.cache/yammm-vscode-test
           key: vscode-test-${{ runner.os }}-${{ steps.vscode-version.outputs.version }}
       - name: Integration tests
-        working-directory: lsp/editors/vscode
+        working-directory: editors/vscode
         run: xvfb-run -a npm run test:integration
   build-extension:
     name: Build Extension ${{ matrix.target }}
@@ -120,22 +120,21 @@ jobs:
           BIN_EXT: ${{ matrix.ext }}
           BUILD_VERSION: ${{ github.ref_name }}
         run: |
-          mkdir -p "lsp/editors/vscode/bin/${BIN_DIR}"
           go build -trimpath -ldflags="-s -w -X main.version=${BUILD_VERSION}" \
-            -o "lsp/editors/vscode/bin/${BIN_DIR}/yammm-lsp${BIN_EXT}" \
+            -o "editors/vscode/bin/${BIN_DIR}/yammm-lsp${BIN_EXT}" \
             ./cmd/yammm-lsp
       - uses: actions/setup-node@v7
         with:
           node-version: 22
       - name: Install dependencies
-        working-directory: lsp/editors/vscode
+        working-directory: editors/vscode
         run: npm ci
       - name: Package VSIX
-        working-directory: lsp/editors/vscode
+        working-directory: editors/vscode
         run: npx vsce package --target ${{ matrix.target }} --no-dependencies
       - name: Upload VSIX
         uses: actions/upload-artifact@v7
         with:
           name: vsix-${{ matrix.target }}
-          path: lsp/editors/vscode/*.vsix
+          path: editors/vscode/*.vsix
           retention-days: 7

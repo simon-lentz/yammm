@@ -15,7 +15,7 @@ import (
 	"time"
 
 	"github.com/simon-lentz/yammm/internal/buildversion"
-	lsp "github.com/simon-lentz/yammm/lsp"
+	lsp "github.com/simon-lentz/yammm/internal/lsp"
 )
 
 // version is the ldflags-injected release version; [buildversion.Resolve]

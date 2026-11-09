@@ -30,10 +30,8 @@
 //   - [github.com/simon-lentz/yammm/schema/gogen]: Go source generation from a schema
 //   - [github.com/simon-lentz/yammm/schema/markdown]: Markdown + Mermaid documentation generation from a schema
 //
-// Tooling:
-//
-//   - [github.com/simon-lentz/yammm/format]: Canonical .yammm formatting
-//   - [github.com/simon-lentz/yammm/lsp]: Language Server Protocol server
+// The formatter and the language server are internal packages. Their surfaces
+// are the binaries: the yammm CLI's fmt command and yammm-lsp.
 //
 // Test helpers: [github.com/simon-lentz/yammm/snapshot/snapshottest] builds
 // snapshot fixtures. In-module suites also use packages under internal/, among

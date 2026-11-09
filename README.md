@@ -184,12 +184,10 @@ The module is organized into layers with strict dependency ordering:
 ```text
 Primary API              : schema, instance, graph, snapshot
 Foundation               : location, diag, immutable
-Tooling                  : format
 Adapter                  : adapter/neo4j
 Generator                : schema/gogen, schema/markdown
-LSP                      : lsp (Language Server Protocol server)
 CLI                      : cmd/yammm, cmd/yammm-lsp
-Internal                 : internal/* (no compatibility guarantees)
+Internal                 : internal/* (no compatibility guarantees), the formatter and the language server among them
 ```
 
 ### Key Packages
@@ -203,11 +201,9 @@ Internal                 : internal/* (no compatibility guarantees)
 | `diag` | Structured diagnostics with stable error codes |
 | `location` | Source positions, spans, and canonical paths |
 | `immutable` | Immutable data structures for validated output |
-| `format` | Canonical `.yammm` file formatting |
 | `adapter/neo4j` | The Neo4j mapping of a schema; its package doc lists what it holds |
 | `schema/gogen` | Go source generation from a schema; its package doc lists what it emits |
 | `schema/markdown` | Markdown + Mermaid documentation generation from a schema |
-| `lsp` | Language Server Protocol server for `.yammm` files |
 
 ### Entry Point Pattern
 
@@ -386,7 +382,7 @@ receives is unchanged.)
 
 ## IDE Support
 
-The [`lsp/`](lsp/) package provides a Language Server Protocol server for YAMMM schema files, with the binary entry point at [`cmd/yammm-lsp/`](cmd/yammm-lsp/):
+The `yammm-lsp` binary ([`cmd/yammm-lsp/`](cmd/yammm-lsp/)) is a Language Server Protocol server for YAMMM schema files, built from the internal package [`internal/lsp/`](internal/lsp/):
 
 - Real-time diagnostics (parse errors, semantic errors, import issues)
 - Go-to-definition for types, properties, and imports

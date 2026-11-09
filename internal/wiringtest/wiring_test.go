@@ -3648,7 +3648,7 @@ const versionJob = "version"
 // versionCheckRun is the whole text of versionJob's check. A part of it proves
 // nothing: exit 0 in place of exit 1, or && in place of ||, leaves every other
 // word in place and refuses no tag.
-const versionCheckRun = `VERSION="v$(jq -r .version lsp/editors/vscode/package.json)"
+const versionCheckRun = `VERSION="v$(jq -r .version editors/vscode/package.json)"
 if [ "${GITHUB_REF_TYPE}" != tag ] || [ "${GITHUB_REF_NAME}" != "${VERSION}" ]; then
   echo "::error::package.json's version is ${VERSION}, and this run is ${GITHUB_REF_TYPE} ${GITHUB_REF_NAME}: a release ships only from the tag package.json carries"
   exit 1
@@ -3821,7 +3821,7 @@ func TestReleaseFindings_RefusesEachWayToShipBeforeTheTests(t *testing.T) {
 		{"a conditional version check", editCheck(func(s *step) { s.If = "false" }), []string{"job version is not a checkout"}},
 		{"a version step that may fail", editCheck(func(s *step) { s.ContinueOnError = true }), []string{"job version is not a checkout"}},
 		{"a version step under another shell", editCheck(func(s *step) { s.Shell = "true {0}" }), []string{"job version is not a checkout"}},
-		{"a version step in another directory", editCheck(func(s *step) { s.WorkDir = "lsp/editors/vscode" }), []string{"job version is not a checkout"}},
+		{"a version step in another directory", editCheck(func(s *step) { s.WorkDir = "editors/vscode" }), []string{"job version is not a checkout"}},
 		{"a version step with its own env", editCheck(func(s *step) { s.Env = map[string]string{"VERSION": "v0"} }), []string{"job version is not a checkout"}},
 		{"a version job with no checkout", edit(versionJob, func(j *job) { j.Steps = slices.Clone(j.Steps)[1:] }), []string{"job version is not a checkout"}},
 		{"a version job that checks out nothing", edit(versionJob, func(j *job) {
@@ -4386,7 +4386,7 @@ func TestCIWorkflow_CachesWhereTheExtensionTestsDownload(t *testing.T) {
 		t.Fatalf("ci.yaml caches the VS Code test install in %d steps, want 1: %q", len(cached), cached)
 	}
 
-	script, err := os.ReadFile(fromRoot("lsp/editors/vscode/tests/integration/runTest.mjs"))
+	script, err := os.ReadFile(fromRoot("editors/vscode/tests/integration/runTest.mjs"))
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -1499,39 +1499,12 @@ yammm gen --to md <schema.yammm> [--no-class-diagram] [--no-class-members] [--ou
 
 ## Formatting
 
-The `format` package provides canonical formatting for `.yammm` schema files:
+Canonical formatting is what `yammm fmt` writes and what the language server returns for `textDocument/formatting`. Both run the module's internal formatter, so the rules below are the command's and the editor's; no package another module can import formats a schema.
 
-```go
-func TokenStream(text string) (string, error)
+The formatter returns no output in two cases.
 
-// Wrapped by TokenStream's error when its output would not preserve the source.
-var ErrNotPreserved error
-
-// TokenStream's error when the source does not parse. Issue is the parser's
-// first diagnostic for text the grammar does not match or an escape the
-// language does not have, naming no source. Its
-// line and column are positions in the text TokenStream was given; its byte
-// offset counts each CRLF and each lone CR of that text as one byte.
-type SyntaxError struct {
-    Issue diag.Issue
-}
-
-// Two helpers. Nothing outside this package calls them, apart from the gate that
-// pins these signatures.
-func NormalizeIndentation(line string) string
-func DisplayWidth(line string) int
-
-const LineWidthThreshold = 100 // display cells: a tab counts as 4, an East Asian wide rune as 2
-```
-
-```go
-formatted, err := format.TokenStream(input)
-```
-
-`TokenStream` returns an error, and no output, in two cases.
-
-- **The source fails to parse** — the grammar does not match its tokens, or a string holds an escape the language does not have (malformed digits, or a surrogate code point), save in an invariant expression or an annotation argument, which format as written. The error is a `*format.SyntaxError` carrying the first such issue, and its `Error()` reads `parse failed: ` and the message. A source that parses but that a load refuses formats successfully: inverted bounds, a character the source rules refuse inside a comment or a literal, or an escape whose value is not UTF-8.
-- **The output would not preserve the source.** Whitespace, a trailing comma before `]` or `{`, and a leading byte order mark are the only things the formatter may change. After phase 5, when the output differs from the input with its line ends made LF, the two token sequences are compared with those set aside, and every comment's text line by line. On a mismatch the error wraps `format.ErrNotPreserved`: the defect is the formatter's, never the input's. An input already formatted is returned unchanged and costs no comparison.
+- **The source fails to parse** — the grammar does not match its tokens, or a string holds an escape the language does not have (malformed digits, or a surrogate code point), save in an invariant expression or an annotation argument, which format as written. A source that parses but that a load refuses formats successfully: inverted bounds, a character the source rules refuse inside a comment or a literal, or an escape whose value is not UTF-8.
+- **The output would not preserve the source.** Whitespace, a trailing comma before `]` or `{`, and a leading byte order mark are the only things the formatter may change. After phase 5, when the output differs from the input with its line ends made LF, the two token sequences are compared with those set aside, and every comment's text line by line. On a mismatch the formatter refuses: the defect is the formatter's, never the input's. An input already formatted is returned unchanged and costs no comparison.
 
 The CLI reports a parse failure as the positioned `E_SYNTAX` diagnostic and exits with `ExitValidation`. It maps a refusal to `ExitRuntime`, leaving the file unchanged. The LSP returns no edits for either, and logs a refusal as a warning.
 
@@ -1539,10 +1512,10 @@ Before phase 1, line endings normalize to LF: CRLF and a lone CR both become LF,
 
 The formatter then applies a five-phase pipeline:
 
-1. **Token-stream rewriting:** canonical spacing between tokens and indentation normalization — **except inside invariant expressions**, whose regions keep the author's own spacing between tokens (a continuation line's leading indentation is still normalized)
+1. **Token-stream rewriting:** canonical spacing between tokens and indentation normalization, and each file-scope declaration (an import, a datatype alias, a type), its doc comment first, and each member of a type body (a property, a relationship, an edge property, an invariant, a `@@` annotation) begins a line; a member's doc comment written at the end of the line before it stays there — **except inside invariant expressions**, whose regions keep the author's own spacing between tokens (a continuation line's leading indentation is still normalized)
 2. **Blank line collapsing:** removes excess blank lines while preserving section breaks, and *inserts* one after the schema header and after the last import when the following line is not already blank
-3. **Line wrapping:** wraps long lines (enums, extends clauses, invariants) at `LineWidthThreshold`, and collapses an existing multiline enum, extends clause or datatype-alias enum back onto one line when the joined form fits. A construct is not collapsed when any of its lines carries a comment, because the comment would then stand in front of everything after it. A property whose suffix carries an annotation is not wrapped at all: the annotation would land on the closing `]` line, where it attaches to nothing and the schema no longer loads. A modifier on that line is legal. A multiline invariant is never collapsed
-4. **Column alignment:** pads the member-name column, measured in display cells, so the column after it lines up — the type for a property, the multiplicity for a relationship, the `=` for a datatype alias — and aligns trailing inline comments. It runs over contiguous runs of one member kind — properties, relationships, and file-scope datatype aliases — broken by a kind change or by any line that is not alignable — a blank line, a comment-only line, a type head or closing brace, an `extends` clause, the first line of a multiline construct. A type-block boundary breaks a run because its brace lines are not alignable, not because blocks are tracked
+3. **Line wrapping:** wraps long lines (enums, extends clauses, invariants) at 100 display cells, where a tab counts as 4 and an East Asian wide or fullwidth rune as 2, and collapses an existing multiline enum, extends clause or datatype-alias enum back onto one line when the joined form fits, and otherwise writes it one value or parent a line, unless the construct holds a blank line or a comment on any of its lines but the last: then it keeps its lines as written, re-indented, because a joined comment would stand in front of everything after it and a blank line is a section break. A trailing comment on its closing line ends the joined line. A property whose suffix carries an annotation is not wrapped at all: the annotation would start on the closing `]` line, a line after its property's, and the loader refuses an annotation written there (`E_INVALID_ANNOTATION`). A modifier on that line is legal. A multiline invariant is never collapsed
+4. **Column alignment:** pads the member-name column, measured in display cells, so the column after it lines up — the type for a property, the multiplicity for a relationship (its target when it has none), the `=` for a datatype alias — and aligns trailing inline comments. It runs over contiguous runs of one member kind — properties, relationships, and file-scope datatype aliases. A line joins a run when it is a relationship, a datatype alias on one line, or a property whose type is an upper-case name, alone or after an import's alias and a dot; a kind change, a multiline construct and every other line (a blank or comment-only line, a type head or closing brace, an invariant, a `@@` annotation) break the run. A type-block boundary breaks a run because its brace lines are not alignable, not because blocks are tracked
 5. **Text finalization:** trims trailing whitespace from each line, removes trailing blank lines, and ensures the file ends with a newline
 
 Phase 1 records the lexer's view of each line as it emits that line. The record holds three facts:
@@ -1555,7 +1528,7 @@ A blank line inside a block comment is comment text, not a section break. Phases
 
 Three consequences follow. A comma inside a string literal is not a value separator. A bracket inside a comment does not open or close a construct. A comment line is never wrapped, aligned, or read as an enum value or a type name, whatever its text looks like. A comment inside a multiline enum or `extends` list keeps its place, and the formatter re-indents the construct instead of collapsing it.
 
-Output is deterministic and idempotent. The formatter is used by the LSP server for `textDocument/formatting` and by the CLI for the `yammm fmt` command.
+Output is deterministic and idempotent.
 
 ## Versioning Policy
 
@@ -1565,21 +1538,12 @@ This section states yammm's versioning commitments, so consumers and contributor
 
 yammm's versioning covers four surfaces that evolve on related but distinct cadences:
 
-1. **Go API surface** — exported types, functions, methods, constants, variables, struct fields, options, and their documented behavior under the `github.com/simon-lentz/yammm` module.
+1. **Go API surface** — exported types, functions, methods, constants, variables, struct fields, options, and their documented behavior in every package of the `github.com/simon-lentz/yammm` module outside `internal/`, which Go keeps other modules from importing.
 2. **`.ys` wire format** — the on-disk shape of snapshots produced by `snapshot.Marshal` and the metadata updates (`snapshot.UpdateMetadata`, `snapshot.UpdateMetadataOrReMarshal`) and consumed by every read path of the `snapshot` package (`snapshot.Load`, `snapshot.Verify`, `snapshot.Info`, `snapshot.HeaderOnly`, `snapshot.HeaderOnlyRead`, the `ScanDir` family and the metadata updates). The wire format carries its own `version` field in the header (currently `4`, first tagged by v0.19.0; `3` from v0.12.0 through v0.18.0).
 3. **Generated Go output (`schema/gogen`)** — the shape of the Go source `gogen.Marshal` emits for a given schema and options. A committed surface since v0.6.0: a downstream consumer byte-pins committed generated packages against it. Its tier rules are in "Generated-output surface" below.
 4. **Emitted Markdown (`schema/markdown`)** — the shape of the reference document `markdown.Marshal` emits for a given schema and options. A versioned surface from the release after `v0.21.1`: a downstream consumer commits a generated document and drift-checks it in CI. Its tier rules are in "Emitted-Markdown surface" below.
 
 The surfaces share a semver tag but have independent version-bump triggers, documented below.
-
-#### Excluded from the v1.0 Go-API compatibility promise
-
-Two packages are **outside** surface 1 for the purpose of the v1.0 promise, and stay changeable at a minor version after the 1.0 tag:
-
-- **`lsp/`** — the language-server implementation and its `Config`. It is consumed through the `yammm-lsp` binary and the VS Code extension, both of which ship in lockstep with the library tag, so its Go API has no independent consumer to stabilize for.
-- **`format/`** — the formatter entry points, consumed through the `yammm` CLI and the LSP on the same footing. Both ship in lockstep with the library tag, which is the whole ground for the exclusion: it does not depend on whether some other Go consumer exists.
-
-A formatter output change is still a behavior change, and an LSP protocol change is still governed by LSP's own versioning. The exclusion drops surface 1's promise for these packages' Go symbols and their documented behavior, and this policy sets no tier for either change.
 
 ### Pre-1.0 policy (current)
 

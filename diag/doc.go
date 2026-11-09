@@ -32,8 +32,6 @@
 // and one that produces diagnostics alone returns a [Result]. Other surfaces carry
 // diagnostics in their own shape. snapshot.ScanDir yields each file's Result on
 // its entry. schema.ModuleRootIssue returns a bare [Issue].
-// format.TokenStream's error for a source that does not parse is a
-// *format.SyntaxError that holds an [Issue].
 // A Result reads:
 //
 //   - [Result.HasFatal]: any Fatal issue, such as an I/O failure, a cancellation,

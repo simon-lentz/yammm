@@ -73,9 +73,9 @@ linters:
     rules:
       # depguard matches its own `files` globs against the absolute path, so a
       # tree negation there turns the rule off for a checkout under any
-      # directory named adapter, cmd or lsp. The exclusion path is
-      # module-relative.
-      - path: "^(adapter|cmd|lsp)/"
+      # directory named adapter or cmd. An exclusion path is relative to this
+      # file's directory, the module root.
+      - path: "^(adapter|cmd)/"
         linters:
           - depguard
         text: "library-imports-no-adapter"
@@ -100,12 +100,8 @@ linters:
           - wrapcheck
           - gochecknoinits
           - gochecknoglobals
-      # LSP protocol types mirror the LSP spec; exported comments add no value.
-      - path: "lsp/internal/protocol/.*"
-        linters:
-          - revive
       # LSP workspace scheduler: background context stored for lifecycle, not request-scoped.
-      - path: "lsp/internal/workspace/.*"
+      - path: "^internal/lsp/internal/workspace/.*"
         linters:
           - revive
       # Diagnostic codes use E_* naming convention by design (stable identifiers).
@@ -115,16 +111,16 @@ linters:
       - path: "adapter/neo4j/errors\\.go"
         linters:
           - revive
-      # Package names matching domain concepts (not stdlib collisions).
+      # The package name parse is the standard library's text/template/parse.
+      # The package is internal, so no caller imports both.
       - path: "^internal/parse/.*"
         text: "avoid package names that conflict"
         linters:
           - revive
-      # Package names matching domain concepts (not stdlib collisions).
-      - path: "format/.*"
-        linters:
-          - revive
-      - path: "schema/build/.*"
+      # The package name format is the standard library's go/format. The
+      # package is internal, so no caller imports both.
+      - path: "^internal/format/.*"
+        text: "avoid package names that conflict"
         linters:
           - revive
       - path: "location/path/.*"
@@ -171,7 +167,7 @@ linters:
       - path: "^diag/(code_emission)_test\\.go$"
         linters:
           - depguard
-      - path: "^format/(format)_test\\.go$"
+      - path: "^internal/format/(format)_test\\.go$"
         linters:
           - depguard
       - path: "^graph/(import|result)_test\\.go$"
@@ -189,37 +185,37 @@ linters:
       - path: "^location/path/(builder|parse)_test\\.go$"
         linters:
           - depguard
-      - path: "^lsp/(completion|definition|format|helpers|hover|server|symbols|sync_handlers)_test\\.go$"
+      - path: "^internal/lsp/(completion|definition|format|helpers|hover|server|symbols|sync_handlers)_test\\.go$"
         linters:
           - depguard
-      - path: "^lsp/internal/analysis/(analyzer)_test\\.go$"
+      - path: "^internal/lsp/internal/analysis/(analyzer)_test\\.go$"
         linters:
           - depguard
-      - path: "^lsp/internal/completion/(complete|context)_test\\.go$"
+      - path: "^internal/lsp/internal/completion/(complete|context)_test\\.go$"
         linters:
           - depguard
-      - path: "^lsp/internal/definition/(resolve)_test\\.go$"
+      - path: "^internal/lsp/internal/definition/(resolve)_test\\.go$"
         linters:
           - depguard
-      - path: "^lsp/internal/docstate/(brace|normalize)_test\\.go$"
+      - path: "^internal/lsp/internal/docstate/(brace|normalize)_test\\.go$"
         linters:
           - depguard
-      - path: "^lsp/internal/hover/(hover|render)_test\\.go$"
+      - path: "^internal/lsp/internal/hover/(hover|render)_test\\.go$"
         linters:
           - depguard
-      - path: "^lsp/internal/lsputil/(posconv|uri)_test\\.go$"
+      - path: "^internal/lsp/internal/lsputil/(posconv|uri)_test\\.go$"
         linters:
           - depguard
-      - path: "^lsp/internal/markdown/(markdown)_test\\.go$"
+      - path: "^internal/lsp/internal/markdown/(markdown)_test\\.go$"
         linters:
           - depguard
-      - path: "^lsp/internal/protocol/(protocol)_test\\.go$"
+      - path: "^internal/lsp/internal/protocol/(protocol)_test\\.go$"
         linters:
           - depguard
-      - path: "^lsp/internal/symbols/(document|symbols)_test\\.go$"
+      - path: "^internal/lsp/internal/symbols/(document|symbols)_test\\.go$"
         linters:
           - depguard
-      - path: "^lsp/internal/workspace/(deps|mapper|workspace)_test\\.go$"
+      - path: "^internal/lsp/internal/workspace/(deps|mapper|workspace)_test\\.go$"
         linters:
           - depguard
       - path: "^schema/(alias|builder|complete|constraint|cross_cycle|datatype|hash|import|invariant|load|parse|parser_coverage|property|registry|relation|schema|sources|type|typeid|typeref|validate_invariants)_test\\.go$"

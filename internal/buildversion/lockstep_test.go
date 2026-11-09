@@ -19,13 +19,13 @@ var versionSites = []struct {
 		keys: [][]string{{"version"}},
 	},
 	{
-		path: filepath.Join("lsp", "editors", "vscode", "package.json"),
+		path: filepath.Join("editors", "vscode", "package.json"),
 		keys: [][]string{{"version"}},
 	},
 	{
 		// npm writes the version twice; a bump that misses the nested copy
 		// leaves the published VSIX describing the wrong release.
-		path: filepath.Join("lsp", "editors", "vscode", "package-lock.json"),
+		path: filepath.Join("editors", "vscode", "package-lock.json"),
 		keys: [][]string{{"version"}, {"packages", "", "version"}},
 	},
 }
@@ -41,7 +41,12 @@ func TestVersionLockstep_EveryInTreeSiteAgrees(t *testing.T) {
 	root := repoRoot(t)
 
 	seen := map[string][]string{} // version -> the sites reporting it
+	read := map[string]bool{}
 	for _, site := range versionSites {
+		if read[site.path] {
+			t.Errorf("%s is listed twice, so another site goes unread", site.path)
+		}
+		read[site.path] = true
 		full := filepath.Join(root, site.path)
 		raw, err := os.ReadFile(full)
 		if err != nil {

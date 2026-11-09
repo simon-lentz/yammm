@@ -32,11 +32,11 @@ AGENTS.md
 go.work.sum
 
 # VS Code extension build artifacts
-lsp/editors/vscode/out/
-lsp/editors/vscode/out-test/
-lsp/editors/vscode/.vscode-test/
-lsp/editors/vscode/node_modules/
-lsp/editors/vscode/*.vsix
+editors/vscode/out/
+editors/vscode/out-test/
+editors/vscode/.vscode-test/
+editors/vscode/node_modules/
+editors/vscode/*.vsix
 
 # schema/markdown's Mermaid oracle, installed by npm ci from its lock file
 schema/markdown/testdata/mermaid/node_modules/

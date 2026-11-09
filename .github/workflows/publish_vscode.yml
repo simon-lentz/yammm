@@ -54,24 +54,23 @@ jobs:
           GOARCH: ${{ matrix.goarch }}
           CGO_ENABLED: "0"
         run: |
-          mkdir -p lsp/editors/vscode/bin/${{ matrix.bin_dir }}
           go build -trimpath -ldflags="-s -w -X main.version=${GITHUB_REF_NAME}" \
-            -o lsp/editors/vscode/bin/${{ matrix.bin_dir }}/yammm-lsp${{ matrix.ext }} \
+            -o editors/vscode/bin/${{ matrix.bin_dir }}/yammm-lsp${{ matrix.ext }} \
             ./cmd/yammm-lsp
       - uses: actions/setup-node@v7
         with:
           node-version: 22
       - name: Install dependencies
-        working-directory: lsp/editors/vscode
+        working-directory: editors/vscode
         run: npm ci
       - name: Package VSIX
-        working-directory: lsp/editors/vscode
+        working-directory: editors/vscode
         run: npx vsce package --target ${{ matrix.target }} --no-dependencies
       - name: Upload VSIX
         uses: actions/upload-artifact@v7
         with:
           name: vsix-${{ matrix.target }}
-          path: lsp/editors/vscode/*.vsix
+          path: editors/vscode/*.vsix
   publish:
     name: Publish to Marketplace
     runs-on: ubuntu-24.04

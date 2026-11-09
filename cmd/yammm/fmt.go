@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"os"
@@ -9,7 +10,7 @@ import (
 
 	"github.com/simon-lentz/yammm/cmd/yammm/internal/cli"
 	"github.com/simon-lentz/yammm/diag"
-	"github.com/simon-lentz/yammm/format"
+	"github.com/simon-lentz/yammm/internal/format"
 	"github.com/simon-lentz/yammm/location"
 )
 
@@ -76,7 +77,7 @@ func fmtPath(cmd *cobra.Command, sink *cli.DiagnosticSink, path string, write, c
 		return err
 	}
 
-	formatted, err := format.TokenStream(string(content))
+	formatted, err := format.Source(content)
 	if syntaxErr, ok := errors.AsType[*format.SyntaxError](err); ok {
 		if result, ok := syntaxResult(path, content, syntaxErr.Issue); ok {
 			sink.Add(result)
@@ -89,7 +90,7 @@ func fmtPath(cmd *cobra.Command, sink *cli.DiagnosticSink, path string, write, c
 
 	switch {
 	case check:
-		if formatted == string(content) {
+		if bytes.Equal(formatted, content) {
 			return nil
 		}
 		// gofmt -l: the path alone, nothing else — so the failure carries the
@@ -98,17 +99,17 @@ func fmtPath(cmd *cobra.Command, sink *cli.DiagnosticSink, path string, write, c
 		return cli.Exit(cli.ExitValidation)
 
 	case write:
-		if formatted == string(content) {
+		if bytes.Equal(formatted, content) {
 			return nil // already formatted
 		}
 
-		if err := cli.WriteFile(path, []byte(formatted)); err != nil {
+		if err := cli.WriteFile(path, formatted); err != nil {
 			return err
 		}
 		return nil
 
 	default:
-		fmt.Fprint(cmd.OutOrStdout(), formatted)
+		fmt.Fprintf(cmd.OutOrStdout(), "%s", formatted)
 		return nil
 	}
 }
