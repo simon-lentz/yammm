@@ -26,7 +26,7 @@ import (
 // Every snapshot came from a validator or a document, so the wire has a form for
 // every value it holds, and no tree in it is nested deeper than the reader
 // accepts. Fatal E_INTERNAL marks only a broken invariant of the snapshot
-// itself. Panics if snap is zero.
+// itself. Panics if snap is zero or ctx is nil.
 //
 // Three further refusals, each Error [diag.E_SNAPSHOT_MALFORMED]: an indent that is
 // not JSON whitespace, which would produce bytes that are not JSON, and a metadata
@@ -35,6 +35,9 @@ import (
 func Marshal(ctx context.Context, snap graph.Snapshot, opts ...Option) ([]byte, diag.Result) {
 	if snap.IsZero() {
 		panic("snapshot.Marshal: zero Snapshot")
+	}
+	if ctx == nil {
+		panic("snapshot.Marshal: nil context")
 	}
 	if err := ctx.Err(); err != nil {
 		c := diag.NewCollector(0)

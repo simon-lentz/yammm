@@ -51,7 +51,7 @@
 //
 //	s, result := schema.Load(ctx, "path/to/schema.yammm")
 //	if result.HasFatal() {
-//	    // Such as an I/O failure, a cancellation, a refused option, or a header that does not parse
+//	    // Such as an I/O failure, a cancellation, a refused option, a header that does not parse, or an internal fault
 //	}
 //	if result.HasErrors() {
 //	    // Schema compilation errors

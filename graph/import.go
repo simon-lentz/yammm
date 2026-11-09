@@ -24,7 +24,7 @@ import (
 // Panics if s or snap is zero (programmer error).
 func NewFromSnapshot(s schema.Schema, snap Snapshot) (*Graph, diag.Result) {
 	if s.IsZero() {
-		panic("graph.NewFromSnapshot: zero schema")
+		panic("graph.NewFromSnapshot: zero Schema")
 	}
 	if snap.IsZero() {
 		panic("graph.NewFromSnapshot: zero Snapshot")
@@ -58,11 +58,12 @@ func validateImport(s schema.Schema, canon *canonicalizer, snap Snapshot) diag.R
 		}
 	}
 	for _, e := range snap.edges {
-		if !r.association(associationRecord{
+		rec := associationRecord{
 			position: "edge from", source: e.source.typeID, sourceKey: e.source.primaryKey, relation: e.relation,
 			target: e.target.typeID, targetKey: e.target.primaryKey, properties: e.properties,
-		}) {
-			r.countRecord(e.source.typeID, e.source.primaryKey, e.relation)
+		}
+		if !r.association(rec) {
+			r.countRecord(rec)
 		}
 	}
 	// A duplicate's conflict is the root at its own type and key, which every
@@ -89,7 +90,7 @@ func validateImport(s schema.Schema, canon *canonicalizer, snap Snapshot) diag.R
 			r.identity(rec.target, positionAt("unresolved target", rec.targetKey.String()))
 		}
 		if !r.association(rec) {
-			r.countRecord(rec.source, rec.sourceKey, rec.relation)
+			r.countRecord(rec)
 		}
 	}
 	r.oneOverflow()

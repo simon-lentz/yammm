@@ -213,7 +213,7 @@ Internal                 : internal/* (no compatibility guarantees)
 
 Diagnostic-producing operations return `(T, diag.Result)`:
 
-- `result.HasFatal()`: Any Fatal issue (such as an I/O failure, a cancellation, an internal fault the validator or the snapshot writer reports, input a reader cannot go past, or an argument or option a loader refuses; the schema loader reports its internal faults at Error)
+- `result.HasFatal()`: Any Fatal issue (such as an I/O failure, a cancellation, an internal fault, input a reader cannot go past, or an argument or option a loader refuses)
 - `result.HasErrors()`: Any Error or Fatal issue
 - `result.OK()`: Success (may have warnings). A validator's zero instance beside it held an `instance.Refused` value, which its producer reported
 

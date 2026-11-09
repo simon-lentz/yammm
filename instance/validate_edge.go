@@ -95,15 +95,33 @@ func (v *Validator) validateEdgeData(
 		// a required association's empty array is graph.Check's E_UNRESOLVED_REQUIRED.
 		targets := make([]ValidEdgeTarget, 0, len(arr))
 		refused := false
+		// Two listings of one target can carry different edge properties, so a
+		// repeat is refused rather than one kept: a graph holds one edge per target.
+		var listedAt map[string]int
 		for i, elem := range arr {
 			if err := ctx.Err(); err != nil {
 				return ValidEdgeData{}, refused
 			}
 			target, targetRefused := v.validateEdgeTarget(rel, elem, collector, prov, relPath.Index(i))
 			refused = refused || targetRefused
-			if target != nil {
-				targets = append(targets, *target)
+			if target == nil {
+				continue
 			}
+			key := target.targetKey.String()
+			if first, repeated := listedAt[key]; repeated {
+				issue := diag.NewIssue(diag.Error, diag.E_DUPLICATE_EDGE,
+					fmt.Sprintf("edge %s: target key %s listed at indices %d and %d", rel.Name(), diag.CutValue(key), first, i)).
+					WithDetails(diag.PathRelation(rel.Name(), rel.FieldName())...).
+					WithDetail(diag.DetailKeyTargetPK, key)
+				withProvenance(issue, prov, relPath.Index(i).String())
+				collector.Collect(issue.Build())
+				continue
+			}
+			if listedAt == nil {
+				listedAt = make(map[string]int, len(arr))
+			}
+			listedAt[key] = i
+			targets = append(targets, *target)
 		}
 		if refused {
 			return ValidEdgeData{}, true

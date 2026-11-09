@@ -37,10 +37,8 @@ type Graph struct {
 	// edges holds all resolved association edges.
 	edges []Edge
 
-	// pending holds unresolved forward references.
-	// Key: pendingKey{targetTypeID, targetKey}
-	// Multiple sources can reference the same target, so we store a slice.
-	pending map[pendingKey][]*pendingEdge
+	// pending holds the unresolved records, filed by target type and key.
+	pending map[pendingKey]map[*pendingEdge]struct{}
 
 	// duplicates holds duplicate PK records.
 	duplicates []Duplicate
@@ -79,14 +77,14 @@ type pendingEdge struct {
 // as there is no way to validate instances without a schema.
 func New(s schema.Schema) *Graph {
 	if s.IsZero() {
-		panic("graph.New: zero schema")
+		panic("graph.New: zero Schema")
 	}
 
 	return &Graph{
 		schema:       s,
 		canon:        newCanonicalizer(s),
 		instances:    make(map[schema.TypeID]map[string]Instance),
-		pending:      make(map[pendingKey][]*pendingEdge),
+		pending:      make(map[pendingKey]map[*pendingEdge]struct{}),
 		attestValues: true,
 	}
 }
@@ -258,8 +256,8 @@ func (g *Graph) Check(ctx context.Context) diag.Result {
 	g.mu.RLock()
 	defer g.mu.RUnlock()
 
-	for _, pendingList := range g.pending {
-		for _, pend := range pendingList {
+	for _, set := range g.pending {
+		for pend := range set {
 			if !pend.isRequired {
 				continue
 			}
@@ -361,12 +359,12 @@ func (g *Graph) Snapshot() Snapshot {
 	}
 
 	totalPending := 0
-	for _, pendingList := range g.pending {
-		totalPending += len(pendingList)
+	for _, set := range g.pending {
+		totalPending += len(set)
 	}
 	unresolved := make([]UnresolvedEdge, 0, totalPending)
-	for _, pendingList := range g.pending {
-		for _, pend := range pendingList {
+	for _, set := range g.pending {
+		for pend := range set {
 			// Determine reason token
 			reason := pend.reasonDetail
 			if reason == "" {
@@ -390,8 +388,8 @@ func (g *Graph) Snapshot() Snapshot {
 		}
 	}
 	requiredUnresolved := false
-	for _, pendingList := range g.pending {
-		for _, pend := range pendingList {
+	for _, set := range g.pending {
+		for pend := range set {
 			if pend.isRequired {
 				requiredUnresolved = true
 				break

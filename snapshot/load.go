@@ -43,10 +43,13 @@ import (
 // The returned Snapshot's Schema() method returns the schema provided to
 // Load, not the schema used at original construction time.
 //
-// Panics if s is zero (programming error).
+// Panics if s is zero or ctx is nil (programming error).
 func Load(ctx context.Context, data []byte, s schema.Schema, opts ...LoadOption) (graph.Snapshot, diag.Result) {
 	if s.IsZero() {
 		panic("snapshot.Load: zero Schema")
+	}
+	if ctx == nil {
+		panic("snapshot.Load: nil context")
 	}
 	if err := ctx.Err(); err != nil {
 		c := diag.NewCollector(0)

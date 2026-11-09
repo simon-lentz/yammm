@@ -104,6 +104,8 @@ import (
 //     and a W_UPDATE_METADATA_FALLBACK warning when the fallback succeeds.
 //   - [diag.E_CONTEXT_CANCELLED] — ctx was cancelled at entry.
 //
+// Panics if ctx is nil (programming error).
+//
 // Thread safety: UpdateMetadata is a pure function over its inputs.
 // It is safe for concurrent use; it does not mutate data or newMeta.
 //
@@ -117,6 +119,9 @@ func UpdateMetadata(
 	data []byte,
 	newMeta map[string]string,
 ) ([]byte, diag.Result) {
+	if ctx == nil {
+		panic("snapshot.UpdateMetadata: nil context")
+	}
 	if err := ctx.Err(); err != nil {
 		c := diag.NewCollector(0)
 		c.Collect(diag.NewIssue(diag.Fatal, diag.E_CONTEXT_CANCELLED, err.Error()).Build())
@@ -206,8 +211,7 @@ func UpdateMetadata(
 	features := sd.header.Features
 
 	// Normalize newMeta: empty maps round-trip as omitempty (no key emitted),
-	// matching WithMetadata's shallow-copy-or-nil normalization at
-	// option.go:57-59.
+	// matching [WithMetadata]'s shallow-copy-or-nil normalization.
 	var meta map[string]string
 	if len(newMeta) > 0 {
 		meta = maps.Clone(newMeta)
@@ -253,7 +257,7 @@ func UpdateMetadata(
 // path keeps it, so the result differs from a direct Marshal only where the input
 // document did.
 //
-// Panics if s is zero (programming error), on every call. Only the fallback reads
+// Panics if s is zero or ctx is nil (programming error), on every call. Only the fallback reads
 // s, and a panic on that path alone hides the bug until a document is malformed.
 //
 // When the fallback path succeeds, the returned [diag.Result] carries a
@@ -283,8 +287,9 @@ func UpdateMetadata(
 //
 // E_CONTEXT_CANCELLED is not a fallback trigger — it propagates as
 // cancellation without re-attempting via the slow path. Nor is a newMeta key
-// or value that is not valid UTF-8, which no path can write: the result names
-// it once, with E_SNAPSHOT_MALFORMED, beside any refusal of the document.
+// or value that is not valid UTF-8, which no path can write: a context cancelled
+// first aside, one E_SNAPSHOT_MALFORMED in the result names it, beside any
+// refusal of the document.
 //
 // Thread safety: UpdateMetadataOrReMarshal is a pure function over
 // its inputs. It is safe for concurrent use; it does not mutate
@@ -301,6 +306,9 @@ func UpdateMetadataOrReMarshal(
 	// the first document the fast path refused.
 	if s.IsZero() {
 		panic("snapshot.UpdateMetadataOrReMarshal: zero Schema")
+	}
+	if ctx == nil {
+		panic("snapshot.UpdateMetadataOrReMarshal: nil context")
 	}
 	out, res := UpdateMetadata(ctx, data, newMeta)
 	if !res.HasErrors() {

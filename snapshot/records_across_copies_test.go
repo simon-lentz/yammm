@@ -366,9 +366,10 @@ func TestZeroRoots_EachPanicNamesTheCallAndWhatIsZero(t *testing.T) {
 		t.Fatal(res)
 	}
 	for want, call := range map[string]func(){
-		"graph.New: zero schema":                          func() { graph.New(schema.Schema{}) },
+		"graph.New: zero Schema":                          func() { graph.New(schema.Schema{}) },
+		"instance.NewValidator: zero Schema":              func() { instance.NewValidator(schema.Schema{}) },
 		"graph.NewFromSnapshot: zero Snapshot":            func() { _, _ = graph.NewFromSnapshot(s, graph.Snapshot{}) },
-		"graph.NewFromSnapshot: zero schema":              func() { _, _ = graph.NewFromSnapshot(schema.Schema{}, built) },
+		"graph.NewFromSnapshot: zero Schema":              func() { _, _ = graph.NewFromSnapshot(schema.Schema{}, built) },
 		"graph.Add: zero ValidInstance":                   func() { g.Add(ctx, instance.ValidInstance{}) },
 		"graph.AddOrMerge: zero ValidInstance":            func() { _, _ = g.AddOrMerge(ctx, instance.ValidInstance{}) },
 		"snapshot.Marshal: zero Snapshot":                 func() { _, _ = snapshot.Marshal(ctx, graph.Snapshot{}) },
@@ -381,7 +382,7 @@ func TestZeroRoots_EachPanicNamesTheCallAndWhatIsZero(t *testing.T) {
 		}
 	}
 	// A zero schema is named before a zero snapshot, as the parameters stand.
-	if got := yammmtest.AssertPanics(t, func() { _, _ = graph.NewFromSnapshot(schema.Schema{}, graph.Snapshot{}) }); got != "graph.NewFromSnapshot: zero schema" {
+	if got := yammmtest.AssertPanics(t, func() { _, _ = graph.NewFromSnapshot(schema.Schema{}, graph.Snapshot{}) }); got != "graph.NewFromSnapshot: zero Schema" {
 		t.Errorf("NewFromSnapshot with both arguments zero: panic = %v", got)
 	}
 }

@@ -46,6 +46,23 @@ func assertIndexMatchesARebuild(t *testing.T, g *Graph, step string) {
 	}
 	fresh := &Graph{edges: g.edges, pending: g.pending}
 	fresh.sourceIndex()
+	// The rebuild files records through the index's own helpers, so each entry's
+	// key is checked against the record it files.
+	for slot, h := range g.bySource {
+		for k, e := range h.edges {
+			if want := e.Target().PrimaryKey().String(); k != want {
+				t.Errorf("%s: %s: an edge to %s is filed under %s", step, slot.relation, want, k)
+			}
+		}
+		for k, p := range h.pending {
+			if k != p.targetKey || p.reasonDetail != "" {
+				t.Errorf("%s: %s: a record naming %s (reason %q) is filed under %s", step, slot.relation, p.targetKey, p.reasonDetail, k)
+			}
+		}
+		if h.reason != nil && h.reason.reasonDetail == "" {
+			t.Errorf("%s: %s: a record naming %s is filed as the slot's reason record", step, slot.relation, h.reason.targetKey)
+		}
+	}
 	for slot := range mapsKeys(g.bySource, fresh.bySource) {
 		have, want := g.bySource[slot], fresh.bySource[slot]
 		if !sameElements(have.edgeList(), want.edgeList()) || !sameElements(have.pendingList(), want.pendingList()) {
@@ -60,14 +77,18 @@ func (h *heldRecords) edgeList() []Edge {
 	if h == nil {
 		return nil
 	}
-	return h.edges
+	return slices.Collect(maps.Values(h.edges))
 }
 
 func (h *heldRecords) pendingList() []*pendingEdge {
 	if h == nil {
 		return nil
 	}
-	return h.pending
+	list := slices.Collect(maps.Values(h.pending))
+	if h.reason != nil {
+		list = append(list, h.reason)
+	}
+	return list
 }
 
 func mapsKeys[K comparable, V any](a, b map[K]V) map[K]bool {

@@ -36,7 +36,7 @@ type Validator struct {
 // Panics if schema is zero.
 func NewValidator(s schema.Schema, opts ...Option) *Validator {
 	if s.IsZero() {
-		panic("instance.NewValidator: zero schema")
+		panic("instance.NewValidator: zero Schema")
 	}
 	cfg := applyOptions(opts)
 	return &Validator{

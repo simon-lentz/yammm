@@ -37,10 +37,10 @@
 // A Result reads:
 //
 //   - [Result.HasFatal]: any Fatal issue, such as an I/O failure, a cancellation,
-//     an internal fault the validator or the snapshot writer reports (the schema
-//     loader raises its E_INTERNAL at Error), input a reader cannot go past (a
-//     schema header that does not parse), an argument or option a loader refuses,
-//     or a finding that snapshot.WithRevalidation raises at Fatal
+//     an internal fault (E_INTERNAL, which every producer raises at Fatal), input
+//     a reader cannot go past (a schema header that does not parse), an argument
+//     or option a loader refuses, or a finding that snapshot.WithRevalidation
+//     raises at Fatal
 //   - [Result.HasErrors]: any Error or Fatal issue
 //   - [Result.OK]: success (may still include warnings/info/hints)
 //
@@ -154,11 +154,11 @@
 // # v0.3.0 Diagnostic Code Additions
 //
 // v0.3.0 adds three stable diagnostic codes under [CategorySnapshot],
-// raised by the snapshot package's scan and metadata primitives. The W_
-// prefix names a code whose severity is fixed at Warning; a code raised at
-// more than one severity, such as E_SNAPSHOT_UNSUPPORTED_HASH_ALGORITHM, keeps
-// E_. Severity lives on the Issue, so the prefix is a convention and not a
-// guarantee: W_SNAPSHOT_UNRESOLVED_REQUIRED is raised at whatever severity
+// raised by the snapshot package's scan and metadata primitives. Severity
+// lives on the Issue, so a code's prefix is a convention and not a guarantee:
+// W_ marks a code raised at Warning, and E_ every other code, one raised at
+// more than one severity such as E_SNAPSHOT_UNSUPPORTED_HASH_ALGORITHM among
+// them, save W_SNAPSHOT_UNRESOLVED_REQUIRED, raised at whatever severity
 // snapshot.WithRevalidation was given.
 //
 //	Code                              Severity  Emitted by

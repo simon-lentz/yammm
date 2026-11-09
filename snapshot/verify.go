@@ -16,10 +16,13 @@ import (
 // first, holding every instance's properties, so peak memory scales with
 // document size rather than with key count.
 //
-// Panics if s is zero (programming error).
+// Panics if s is zero or ctx is nil (programming error).
 func Verify(ctx context.Context, data []byte, s schema.Schema, opts ...LoadOption) diag.Result {
 	if s.IsZero() {
 		panic("snapshot.Verify: zero Schema")
+	}
+	if ctx == nil {
+		panic("snapshot.Verify: nil context")
 	}
 	if err := ctx.Err(); err != nil {
 		c := diag.NewCollector(0)

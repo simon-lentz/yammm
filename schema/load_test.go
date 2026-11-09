@@ -75,14 +75,6 @@ func TestString_SyntaxError(t *testing.T) {
 	loadErr(t, source)
 }
 
-func TestString_NilContextPanics(t *testing.T) {
-	source := `schema "test"`
-
-	assert.Panics(t, func() {
-		_, _ = schema.LoadString(nil, source, "test.yammm") //nolint:staticcheck // intentional nil
-	})
-}
-
 func TestString_DisallowsImports(t *testing.T) {
 	source := `schema "test" import "./other"`
 	loadErr(t, source)
@@ -229,16 +221,6 @@ func TestSources_EmptySources(t *testing.T) {
 	assert.Contains(t, result.String(), "no sources provided")
 }
 
-func TestSources_NilContextPanics(t *testing.T) {
-	sources := map[string][]byte{
-		"main.yammm": []byte(`schema "main"`),
-	}
-
-	assert.Panics(t, func() {
-		_, _ = schema.LoadSourcesWithEntry(nil, sources, "main.yammm", "/project") //nolint:staticcheck // intentional nil
-	})
-}
-
 func TestSourcesWithEntry_ExplicitEntry(t *testing.T) {
 	// Create two schemas where "beta.yammm" would be selected lexicographically
 	// but we explicitly select "gamma.yammm" as entry
@@ -288,16 +270,6 @@ func TestSourcesWithEntry_EntryNotInSources(t *testing.T) {
 	assert.Contains(t, result.String(), "not found in sources")
 }
 
-func TestSourcesWithEntry_NilContextPanics(t *testing.T) {
-	sources := map[string][]byte{
-		"main.yammm": []byte(`schema "main"`),
-	}
-
-	assert.Panics(t, func() {
-		_, _ = schema.LoadSourcesWithEntry(nil, sources, "main.yammm", "/project") //nolint:staticcheck // intentional nil
-	})
-}
-
 func TestSourcesWithEntry_EmptySources(t *testing.T) {
 	sources := map[string][]byte{}
 	ctx := t.Context()
@@ -316,10 +288,21 @@ func TestLoad_FileNotFound(t *testing.T) {
 	require.True(t, result.HasFatal())
 }
 
-func TestLoad_NilContextPanics(t *testing.T) {
-	assert.Panics(t, func() {
-		_, _ = schema.Load(nil, "/some/path.yammm") //nolint:staticcheck // intentional nil
-	})
+func TestLoad_NilContextPanicNamesTheCall(t *testing.T) {
+	sources := map[string][]byte{"main.yammm": []byte(`schema "main"`)}
+	for want, call := range map[string]func(){
+		"schema.Load: nil context": func() {
+			_, _ = schema.Load(nil, "/some/path.yammm") //nolint:staticcheck // intentional nil
+		},
+		"schema.LoadString: nil context": func() {
+			_, _ = schema.LoadString(nil, `schema "test"`, "test.yammm") //nolint:staticcheck // intentional nil
+		},
+		"schema.LoadSourcesWithEntry: nil context": func() {
+			_, _ = schema.LoadSourcesWithEntry(nil, sources, "main.yammm", "/project") //nolint:staticcheck // intentional nil
+		},
+	} {
+		assert.PanicsWithValue(t, want, call)
+	}
 }
 
 func TestLoad_RealFile(t *testing.T) {

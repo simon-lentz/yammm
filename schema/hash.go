@@ -37,7 +37,7 @@ const StructuralHashVersion = 4
 // Panics if s is zero.
 func StructuralHash(s Schema) string {
 	if s.IsZero() {
-		panic("schema: StructuralHash called on a zero Schema")
+		panic("schema.StructuralHash: zero Schema")
 	}
 
 	h := sha256.New()

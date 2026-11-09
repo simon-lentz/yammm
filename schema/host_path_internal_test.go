@@ -27,7 +27,7 @@ func TestResolveImportToRelative_UnrecordedImporterIsAnError(t *testing.T) {
 }
 
 // TestLoadImport_UnrecordedImporterIsInternal holds a relative import from an
-// importer with no recorded host path to one E_INTERNAL at the declaration,
+// importer with no recorded host path to one Fatal E_INTERNAL at the declaration,
 // never the author's E_IMPORT_RESOLVE, and binds its alias as failed.
 func TestLoadImport_UnrecordedImporterIsInternal(t *testing.T) {
 	t.Parallel()
@@ -57,8 +57,8 @@ func TestLoadImport_UnrecordedImporterIsInternal(t *testing.T) {
 	if len(issues) != 1 {
 		t.Fatalf("got %d issues %v; want one E_INTERNAL", len(issues), issues)
 	}
-	if got := issues[0]; got.Code() != diag.E_INTERNAL || got.Span() != imp.Span || !strings.Contains(got.Message(), errNoHostPath.Error()) {
-		t.Errorf("got %s at %v: %q; want E_INTERNAL at %v naming %q", got.Code(), got.Span(), got.Message(), imp.Span, errNoHostPath)
+	if got := issues[0]; got.Code() != diag.E_INTERNAL || got.Severity() != diag.Fatal || got.Span() != imp.Span || !strings.Contains(got.Message(), errNoHostPath.Error()) {
+		t.Errorf("got %s %s at %v: %q; want a Fatal E_INTERNAL at %v naming %q", got.Severity(), got.Code(), got.Span(), got.Message(), imp.Span, errNoHostPath)
 	}
 	if b, ok := l.imports[imp.Alias]; !ok || !b.failed || !b.sourceID.IsZero() || b.decl != imp {
 		t.Errorf("binding for %q = %+v, bound %v; want a failed binding of the declaration with no SourceID", imp.Alias, b, ok)

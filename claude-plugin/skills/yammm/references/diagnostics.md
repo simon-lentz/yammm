@@ -157,6 +157,7 @@ The all-or-nothing contract is unchanged: any error still yields a zero schema.
 | `E_MISSING_FK_TARGET` | Foreign key target is missing |
 | `E_PARTIAL_COMPOSITE_FK` | Partial composite foreign key |
 | `E_UNKNOWN_EDGE_FIELD` | Unknown field in edge data |
+| `E_DUPLICATE_EDGE` | A `(many)` association lists one target key twice for one source |
 | `E_EDGE_SHAPE_MISMATCH` | An edge's or a composition's value has a shape its relation does not take; at `graph.NewFromSnapshot` under another schema, an `"empty"` unresolved record under a `(one)` association |
 | `E_UNRESOLVED_REQUIRED_COMPOSITION` | Required composition is unresolved |
 | `E_COMPOSITION_DEPTH_EXCEEDED` | Composed nesting deeper than the bound (32) |
@@ -170,6 +171,7 @@ The all-or-nothing contract is unchanged: any error still yields a zero schema.
 | ---- | ------- |
 | `E_DUPLICATE_PK` | Duplicate primary key: two instances added to a graph, two roots whose stored keys the key rule both accepts, in a snapshot or a `.ys` document, or two roots of a data command's input, one of them refused. A read under a schema counts only roots of a type that can hold one |
 | `E_DUPLICATE_COMPOSED_PK` | Two children of one `(many)` composition share a primary key, or a `(one)` composition holds several |
+| `E_DUPLICATE_EDGE` | An edge and a `target_missing` record, or two such records, of one source under a `(many)` association name one target, in a snapshot imported under another schema; the `.ys` reader refuses such records, and two such edges, as `E_SNAPSHOT_MALFORMED` where no other check refused the repeating listing, one sound root (of a type that can hold a root, its stored key admitted by the key rule) holds the source's address alone, and an edge's target's, and no root stands at a record's target and no refused unit states it; elsewhere the issue at the listing, the source or the target stands for the repeat |
 | `E_UNRESOLVED_REQUIRED` | Required association is unresolved |
 | `E_GRAPH_TYPE_NOT_FOUND` | A type identity an imported snapshot states that the schema does not resolve |
 | `E_GRAPH_INVALID_COMPOSITION` | Invalid composition in graph operations |
@@ -183,7 +185,7 @@ The all-or-nothing contract is unchanged: any error still yields a zero schema.
 
 | Code | Meaning |
 | ---- | ------- |
-| `E_SNAPSHOT_MALFORMED` | `.ys` file not valid JSON, a wrong outer shape (the four top-level keys in order, each once and none null, nothing after them, and no object repeating a member name or spelling a declared one in another case), or content a structural rule refuses, such as an undeclared name, a stored key its key properties contradict, a key or target key component `graph.ParseKey` cannot read back, a target key of the wrong arity, an undocumented reason, a record contradicting itself, records `graph.Add` would not derive, a duplicate with no conflict or another one, a duplicate stating a parent or a relation, a string holding invalid UTF-8 or half a surrogate pair, or a header past `MaxHeaderSize`; from `snapshot.Marshal`, an indent that is not JSON whitespace, a metadata key or value that is not valid UTF-8, or a provenance source name or raw path that is not valid UTF-8; from `snapshot.UpdateMetadata`, such metadata too, or a document whose first byte is not `{` |
+| `E_SNAPSHOT_MALFORMED` | `.ys` file not valid JSON, a wrong outer shape (the four top-level keys in order, each once and none null, nothing after them, and no object repeating a member name or spelling a declared one in another case), or content a structural rule refuses, such as an undeclared name, a stored key its key properties contradict, a key or target key component `graph.ParseKey` cannot read back, a target key of the wrong arity, an undocumented reason, a record contradicting itself, records `graph.Add` would not derive (two edges or `target_missing` records of one source naming one target under a `(many)` association among them), a duplicate with no conflict or another one, a duplicate stating a parent or a relation, a string holding invalid UTF-8 or half a surrogate pair, or a header past `MaxHeaderSize`; from `snapshot.Marshal`, an indent that is not JSON whitespace, a metadata key or value that is not valid UTF-8, or a provenance source name or raw path that is not valid UTF-8; from `snapshot.UpdateMetadata`, such metadata too, or a document whose first byte is not `{` |
 | `E_SNAPSHOT_UNSUPPORTED_VERSION` | Format version not recognized |
 | `E_SNAPSHOT_UNSUPPORTED_FEATURE` | Unrecognized feature flag in header |
 | `E_SNAPSHOT_INCOMPATIBLE_SCHEMA` | Schema structural hash mismatch |
@@ -197,7 +199,7 @@ The all-or-nothing contract is unchanged: any error still yields a zero schema.
 | `E_SNAPSHOT_EDGES_ON_DUPLICATE` | Duplicate record has edges |
 | `E_SNAPSHOT_DEPTH_EXCEEDED` | Composed nesting exceeds depth limit (32) |
 | `E_SNAPSHOT_INTEGRITY_MISMATCH` | Integrity hash doesn't match content |
-| `E_SNAPSHOT_UNSUPPORTED_HASH_ALGORITHM` | Schema hash algorithm not recognized — Error on body-reading surfaces, Warning on header-only reads (v0.15+) |
+| `E_SNAPSHOT_UNSUPPORTED_HASH_ALGORITHM` | Schema hash algorithm not recognized — Warning from `HeaderOnly` and `HeaderOnlyRead` (so `ScanDir` and `ScanDirSlice`), Error from every other surface (v0.15+) |
 | `W_SNAPSHOT_PATH_FALLBACK` | Provenance path could not be parsed (Warning) |
 | `E_SNAPSHOT_IO` | A file that fails to open during `snapshot.ScanDir`, a directory `ScanDirSlice` fails to read (v0.3+), or a reader `snapshot.HeaderOnlyRead` reads failing with an error that is not a truncation, Fatal (unreleased; on the line after v0.21.0, not in v0.21.1) |
 | `E_UPDATE_METADATA_BODY_OFFSET` | `snapshot.UpdateMetadata` body-offset tracker could not resolve the reused-body byte range (v0.3+) |

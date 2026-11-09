@@ -111,6 +111,9 @@ type ScanEntry struct {
 //	    use(entry.Header)
 //	}
 func ScanDir(ctx context.Context, dir string) iter.Seq2[ScanEntry, error] {
+	if ctx == nil {
+		panic("snapshot.ScanDir: nil context")
+	}
 	return func(yield func(ScanEntry, error) bool) {
 		// Check cancellation at entry so an already-cancelled ctx doesn't
 		// pay the os.ReadDir cost.
@@ -237,6 +240,9 @@ func scanFile(ctx context.Context, name, path string) ScanEntry {
 // slice; callers that want partial results read the slice directly
 // and treat the outer Result as advisory.
 func ScanDirSlice(ctx context.Context, dir string) ([]ScanEntry, diag.Result) {
+	if ctx == nil {
+		panic("snapshot.ScanDirSlice: nil context")
+	}
 	var out []ScanEntry
 	var collector *diag.Collector
 	for entry, err := range ScanDir(ctx, dir) {

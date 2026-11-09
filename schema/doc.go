@@ -46,8 +46,8 @@
 //	s, result := schema.LoadSourcesWithEntry(ctx, sources, entryPath, moduleRoot)
 //
 // A non-OK result with a zero Schema indicates failure. result.HasFatal() reports
-// a load that could not start or finish for one of these reasons: an I/O failure, a cancellation, or
-// input a load cannot begin from, such as no sources, a source key the loader
+// a load that could not start or finish for one of these reasons: an I/O failure, a cancellation, an
+// internal fault (E_INTERNAL), or input a load cannot begin from, such as no sources, a source key the loader
 // refuses, two keys that name one source, or a source name that is not valid
 // UTF-8 or holds a character that does not print, or a source whose header cannot be parsed, which the parser reports
 // as a Fatal E_SYNTAX. A schema name with no value is an Error, E_SYNTAX, an

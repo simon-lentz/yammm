@@ -223,11 +223,9 @@ func refusedBy(t *testing.T, run func() diag.Result) bool {
 	return run().HasErrors()
 }
 
-// tiedUnresolvedSchema declares a (many) association carrying edge properties,
-// so one instance can name one missing target twice and differ only in the
-// properties. Those two unresolved records agree on every field an ordering
-// built from identity, key and relation can see.
-const tiedUnresolvedSchema = `schema "tied"
+// unresolvedSchema declares a (many) association carrying an edge property,
+// so each source can name several missing targets.
+const unresolvedSchema = `schema "tied"
 
 type Person {
 	id String primary
@@ -239,15 +237,12 @@ type Company {
 }
 `
 
-// TestMarshal_IsDeterministicWhenUnresolvedRecordsTie pins Marshal's documented
-// determinism against the one input that breaks a non-total ordering.
 // Graph.pending is a map, so each Snapshot call collects the unresolved records
-// in a fresh iteration order; if any two of them compare equal, the sort leaves
-// their positions to that order and the same graph writes different bytes.
-// Snapshot is called once per round precisely to redraw that order.
-func TestMarshal_IsDeterministicWhenUnresolvedRecordsTie(t *testing.T) {
+// in a fresh iteration order. Marshal writes one document whatever that order,
+// and Snapshot is called once per round to redraw it.
+func TestMarshal_IsDeterministicOverUnresolvedRecords(t *testing.T) {
 	ctx := context.Background()
-	s, res := schema.LoadString(t.Context(), tiedUnresolvedSchema, "tied.yammm")
+	s, res := schema.LoadString(t.Context(), unresolvedSchema, "tied.yammm")
 	if res.HasErrors() {
 		t.Fatalf("load schema: %s", res)
 	}
@@ -259,7 +254,7 @@ func TestMarshal_IsDeterministicWhenUnresolvedRecordsTie(t *testing.T) {
 			"id": fmt.Sprintf("p%02d", i),
 			"EMPLOYERS": []any{
 				map[string]any{"_target_id": fmt.Sprintf("c%02d", i), "since": "2020-01-01T00:00:00Z"},
-				map[string]any{"_target_id": fmt.Sprintf("c%02d", i), "since": "2021-01-01T00:00:00Z"},
+				map[string]any{"_target_id": fmt.Sprintf("c%02d", i+1), "since": "2021-01-01T00:00:00Z"},
 			},
 		}}
 		valid, vres := v.ValidateOne(ctx, "Person", raw)
@@ -272,7 +267,7 @@ func TestMarshal_IsDeterministicWhenUnresolvedRecordsTie(t *testing.T) {
 	}
 
 	if n := len(slices.Collect(g.Snapshot().Unresolved())); n != 80 {
-		t.Fatalf("fixture is vacuous: %d unresolved records, want 80 tied pairs", n)
+		t.Fatalf("fixture is vacuous: %d unresolved records, want 80", n)
 	}
 
 	var first []byte
@@ -286,7 +281,7 @@ func TestMarshal_IsDeterministicWhenUnresolvedRecordsTie(t *testing.T) {
 			continue
 		}
 		if !bytes.Equal(data, first) {
-			t.Fatalf("round %d wrote different bytes from round 0: the unresolved ordering is not total, so map-iteration order reaches the document", round)
+			t.Fatalf("round %d wrote different bytes from round 0: map-iteration order reaches the document", round)
 		}
 	}
 }

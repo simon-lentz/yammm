@@ -93,7 +93,7 @@ func TestBuilderFor_NilSchema(t *testing.T) {
 	b, err := instance.BuilderFor(schema.Schema{}, "Person")
 	require.Error(t, err)
 	assert.Nil(t, b)
-	assert.Contains(t, err.Error(), "zero schema")
+	assert.EqualError(t, err, "instance.BuilderFor: zero Schema")
 }
 
 func TestBuilderFor_UnknownType(t *testing.T) {

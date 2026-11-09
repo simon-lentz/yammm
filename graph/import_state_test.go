@@ -234,3 +234,30 @@ func TestImport_StructureRulesJudgeTheImportingSchemasFacts(t *testing.T) {
 		})
 	}
 }
+
+// The import's cardinality refusal names the source's key, as the merge's does.
+func TestImport_ACardinalityRefusalNamesTheSourceKey(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	from := loadEntry(t, "schema \"m\"\ntype T {\n id String primary\n}\ntype X {\n id String primary\n --> M (_:many) T\n}\n")
+	to := loadEntry(t, "schema \"m\"\ntype T {\n id String primary\n}\ntype X {\n id String primary\n --> M (_:one) T\n}\n")
+	g := graph.New(from)
+	mustOK(t, g.Add(ctx, instancetest.Valid(t, from, "X", map[string]any{
+		"id": "x", "m": []any{map[string]any{"_target_id": "p"}, map[string]any{"_target_id": "q"}},
+	})))
+	_, res := graph.NewFromSnapshot(to, g.Snapshot())
+	var keys []string
+	for issue := range res.Issues() {
+		if issue.Code() != diag.E_GRAPH_CARDINALITY {
+			continue
+		}
+		for _, d := range issue.Details() {
+			if d.Key == diag.DetailKeyPrimaryKey {
+				keys = append(keys, d.Value)
+			}
+		}
+	}
+	if !slices.Equal(keys, []string{`["x"]`}) {
+		t.Errorf("E_GRAPH_CARDINALITY primary keys %q, want [[\"x\"]]: %s", keys, res)
+	}
+}

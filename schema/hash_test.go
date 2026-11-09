@@ -110,7 +110,7 @@ func TestStructuralHashVersion(t *testing.T) {
 func TestStructuralHash_NilPanics(t *testing.T) {
 	assert.PanicsWithValue(
 		t,
-		"schema: StructuralHash called on a zero Schema",
+		"schema.StructuralHash: zero Schema",
 		func() { schema.StructuralHash(schema.Schema{}) },
 	)
 }

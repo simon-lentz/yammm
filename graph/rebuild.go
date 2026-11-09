@@ -148,9 +148,9 @@ func lookupInstance(index map[schema.TypeID]map[string]Instance, id schema.TypeI
 	return typeIdx[keyStr]
 }
 
-// compareEdges provides the sorting comparator for edges.
-// Sorts by (sourceType, sourceKey, relation, targetType, targetKey), comparing
-// types by identity.
+// compareEdges orders edges by (sourceType, sourceKey, relation, targetType,
+// targetKey), comparing types by identity. A snapshot holds one edge per source,
+// association and target, so no two of its edges tie.
 func compareEdges(a, b Edge) int {
 	if c := cmp.Compare(a.source.typeID.String(), b.source.typeID.String()); c != 0 {
 		return c
@@ -164,30 +164,27 @@ func compareEdges(a, b Edge) int {
 	if c := cmp.Compare(a.target.typeID.String(), b.target.typeID.String()); c != 0 {
 		return c
 	}
-	if c := cmp.Compare(a.target.primaryKey.String(), b.target.primaryKey.String()); c != 0 {
-		return c
-	}
-	return compareProps(a.properties, b.properties)
+	return cmp.Compare(a.target.primaryKey.String(), b.target.primaryKey.String())
 }
 
 // compareProps orders two property sets by walking both in sorted key order.
 //
 // It compares field by field rather than rendering each set to one string:
 // a "name=value;" rendering collides whenever a value holds the separators, so
-// an ordinary String edge property containing ';' or '=' made two distinct sets
+// an ordinary String property containing ';' or '=' made two distinct sets
 // compare equal and put map-iteration order back into the document. Values are
 // discriminated by type before value, so an int64 1 and the string "1" do not
 // tie.
 //
 // What this does not promise: two values of one type whose %v forms are equal
-// still tie. For the scalar types an edge property can hold, %#v is injective.
+// still tie. For the scalar types a property can hold, %#v is injective.
 // A composite renders by its content (see renderValue), so allocation never
 // decides, and quoting keeps one string apart from two.
 func compareProps(a, b immutable.Properties) int {
 	// The key order is precomputed at construction, so collecting it costs one
 	// allocation and no sort. An earlier rewrite walked two iter.Pull2
 	// coroutines to save that allocation and paid a coroutine pair per call
-	// instead — inside three comparators a sort runs O(n log n) times.
+	// instead, inside a comparator a sort runs O(n log n) times.
 	an := slices.Collect(a.SortedKeys())
 	bn := slices.Collect(b.SortedKeys())
 	for i := range min(len(an), len(bn)) {
@@ -212,12 +209,11 @@ func renderValue(v immutable.Value) string {
 	return fmt.Sprintf("%T|%#v", v.Unwrap(), v.Clone())
 }
 
-// compareUnresolved orders unresolved records. Graph.pending is a map,
-// so the slice these are collected into arrives in map-iteration order; an
-// ordering that leaves any two distinct records equal hands their positions to
-// that order, and Marshal's documented determinism fails across process runs.
-// Reproduced before this comparator was completed: sixty tied pairs spread
-// across sixty pending buckets produced ten distinct documents in ten runs.
+// compareUnresolved orders unresolved records by (sourceType, sourceKey,
+// relation, targetType, targetKey). Graph.pending is a map, so the records
+// arrive in map-iteration order, and only a total order keeps Marshal
+// deterministic. It is total: a source holds one record per association and
+// target, and its one "absent" or "empty" record there carries the empty key.
 func compareUnresolved(a, b UnresolvedEdge) int {
 	if c := cmp.Compare(a.source.TypeID().String(), b.source.TypeID().String()); c != 0 {
 		return c
@@ -231,19 +227,7 @@ func compareUnresolved(a, b UnresolvedEdge) int {
 	if c := cmp.Compare(a.targetType.String(), b.targetType.String()); c != 0 {
 		return c
 	}
-	if c := cmp.Compare(a.targetKey, b.targetKey); c != 0 {
-		return c
-	}
-	if c := cmp.Compare(a.reason, b.reason); c != 0 {
-		return c
-	}
-	if a.required != b.required {
-		if a.required {
-			return 1
-		}
-		return -1
-	}
-	return compareProps(a.properties, b.properties)
+	return cmp.Compare(a.targetKey, b.targetKey)
 }
 
 // compareDuplicates orders duplicate records. Two rejections of one key differ

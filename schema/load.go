@@ -245,12 +245,12 @@ func (e *pathEscapeError) Error() string {
 //
 // ctx must not be nil. Passing nil will panic.
 // A non-OK result with a zero Schema indicates failure. result.HasFatal() reports
-// a load that could not start or finish — an I/O failure, a cancellation, input a
-// load cannot begin from, or a source whose header cannot be parsed;
-// the package documentation enumerates them.
+// a load that could not start or finish — an I/O failure, a cancellation, an
+// internal fault, input a load cannot begin from, or a source whose header cannot
+// be parsed; the package documentation enumerates them.
 func Load(ctx context.Context, path string, opts ...LoadOption) (Schema, diag.Result) {
 	if ctx == nil {
-		panic("load.Load: context must not be nil")
+		panic("schema.Load: nil context")
 	}
 
 	cfg := defaultLoadConfig()
@@ -340,12 +340,12 @@ func Load(ctx context.Context, path string, opts ...LoadOption) (Schema, diag.Re
 //
 // ctx must not be nil. Passing nil will panic.
 // A non-OK result with a zero Schema indicates failure. result.HasFatal() reports
-// a load that could not start or finish — an I/O failure, a cancellation, input a
-// load cannot begin from, or a source whose header cannot be parsed;
-// the package documentation enumerates them.
+// a load that could not start or finish — an I/O failure, a cancellation, an
+// internal fault, input a load cannot begin from, or a source whose header cannot
+// be parsed; the package documentation enumerates them.
 func LoadString(ctx context.Context, sourceCode, sourceName string, opts ...LoadOption) (Schema, diag.Result) {
 	if ctx == nil {
-		panic("load.String: context must not be nil")
+		panic("schema.LoadString: nil context")
 	}
 
 	cfg := defaultLoadConfig()
@@ -394,12 +394,12 @@ func LoadString(ctx context.Context, sourceCode, sourceName string, opts ...Load
 //
 // ctx must not be nil. Passing nil will panic.
 // A non-OK result with a zero Schema indicates failure. result.HasFatal() reports
-// a load that could not start or finish — an I/O failure, a cancellation, input a
-// load cannot begin from, or a source whose header cannot be parsed;
-// the package documentation enumerates them.
+// a load that could not start or finish — an I/O failure, a cancellation, an
+// internal fault, input a load cannot begin from, or a source whose header cannot
+// be parsed; the package documentation enumerates them.
 func LoadSourcesWithEntry(ctx context.Context, sources map[string][]byte, entryPath string, moduleRoot string, opts ...LoadOption) (Schema, diag.Result) {
 	if ctx == nil {
-		panic("load.SourcesWithEntry: context must not be nil")
+		panic("schema.LoadSourcesWithEntry: nil context")
 	}
 
 	cfg := defaultLoadConfig()
@@ -597,7 +597,7 @@ func (l *loader) Close() error {
 func (l *loader) loadFile(ctx context.Context, sourceID location.SourceID, absPath string, content []byte) (Schema, diag.Result, error) {
 	// Register the source content
 	if err := l.sourceRegistry.Register(sourceID, content); err != nil {
-		l.collector.Collect(diag.NewIssue(diag.Error, diag.E_INTERNAL,
+		l.collector.Collect(diag.NewIssue(diag.Fatal, diag.E_INTERNAL,
 			fmt.Sprintf("register source %q: %v", absPath, err)).Build())
 		return Schema{}, l.collector.Result(), nil
 	}
@@ -649,7 +649,7 @@ func (l *loader) loadSource(ctx context.Context, sourceID location.SourceID, con
 	// Register source content if not already registered
 	if _, ok := l.sourceContent[sourceID]; !ok {
 		if err := l.sourceRegistry.Register(sourceID, content); err != nil {
-			l.collector.Collect(diag.NewIssue(diag.Error, diag.E_INTERNAL,
+			l.collector.Collect(diag.NewIssue(diag.Fatal, diag.E_INTERNAL,
 				fmt.Sprintf("register source %s: %v", sourceID, err)).Build())
 			return Schema{}, l.collector.Result(), nil
 		}
@@ -974,7 +974,7 @@ func (l *loader) loadImport(ctx context.Context, sourceID location.SourceID, imp
 	relativePath, err := l.resolveImportToRelative(sourceID, imp.Path)
 	if err != nil {
 		if errors.Is(err, errNoHostPath) {
-			l.collector.Collect(diag.NewIssue(diag.Error, diag.E_INTERNAL,
+			l.collector.Collect(diag.NewIssue(diag.Fatal, diag.E_INTERNAL,
 				fmt.Sprintf("resolve import %q: %v", imp.Path, err)).WithSpan(imp.Span).Build())
 			l.markImportFailed(imp)
 			return nil
@@ -1008,7 +1008,7 @@ func (l *loader) loadImport(ctx context.Context, sourceID location.SourceID, imp
 	// Register the source if not already registered
 	if _, exists := l.sourceContent[importSourceID]; !exists {
 		if err := l.sourceRegistry.Register(importSourceID, content); err != nil {
-			l.collector.Collect(diag.NewIssue(diag.Error, diag.E_INTERNAL,
+			l.collector.Collect(diag.NewIssue(diag.Fatal, diag.E_INTERNAL,
 				fmt.Sprintf("register import source: %v", err)).Build())
 			l.markImportFailed(imp)
 			return nil

@@ -64,7 +64,7 @@ type streamDecoder struct {
 
 	// revalidationTargets holds, per type revalidated so far, the validator
 	// and name [streamDecoder.revalidatorFor] chose for it.
-	revalidationTargets map[schema.TypeID]revalidationTarget
+	revalidationTargets map[schema.TypeID]*revalidationTarget
 
 	// cancelReported is set once a revalidated root has reported the context's
 	// cancellation, so revalidate's own poll does not report it a second time.
@@ -107,6 +107,18 @@ func newRevalidator(s schema.Schema, cfg loadConfig) *instance.Validator {
 type revalidationTarget struct {
 	v    *instance.Validator
 	name string
+	s    schema.Schema
+	// whole is v without its issue limit, built at the first root whose
+	// capped run dropped a repeat it raised.
+	whole *instance.Validator
+}
+
+// unlimited returns the target's validator with no issue limit.
+func (t *revalidationTarget) unlimited() *instance.Validator {
+	if t.whole == nil {
+		t.whole = instance.NewValidator(t.s, instance.WithIssueLimit(0))
+	}
+	return t.whole
 }
 
 // revalidatorFor returns the validator that revalidates a root of t and
@@ -114,28 +126,28 @@ type revalidationTarget struct {
 // revalidated under that name. Any other is revalidated under its declared
 // name by a validator over its declaring schema: the entry schema resolves no
 // name to it, and its declared name can denote another entry type or none.
-func (sd *streamDecoder) revalidatorFor(t schema.Type) (*instance.Validator, string) {
+func (sd *streamDecoder) revalidatorFor(t schema.Type) *revalidationTarget {
 	id := t.ID()
 	if target, ok := sd.revalidationTargets[id]; ok {
-		return target.v, target.name
+		return target
 	}
-	target := revalidationTarget{v: sd.revalidator}
+	target := &revalidationTarget{v: sd.revalidator, s: sd.schema}
 	if tag, ok := schema.AddressableTag(sd.schema, id); ok {
 		target.name = tag
 	} else {
 		target.name = id.Name()
 		for s := range sd.schema.Closure() {
 			if s.SourceID() == id.SchemaPath() {
-				target.v = newRevalidator(s, sd.loadCfg)
+				target.v, target.s = newRevalidator(s, sd.loadCfg), s
 				break
 			}
 		}
 	}
 	if sd.revalidationTargets == nil {
-		sd.revalidationTargets = make(map[schema.TypeID]revalidationTarget)
+		sd.revalidationTargets = make(map[schema.TypeID]*revalidationTarget)
 	}
 	sd.revalidationTargets[id] = target
-	return target.v, target.name
+	return target
 }
 
 // newStreamDecoderFromReader creates a streamDecoder backed by an io.Reader,
@@ -332,8 +344,9 @@ type slotCoord struct {
 
 // edgeRef is an edge no check of its own refused, for the reference check. slot,
 // index and own place it among its source's records: index is its place in the
-// source's edge list under slot's relation. one reports that its association is
-// a (one) association of a known type.
+// source's edge list under slot's relation. one and many report that its
+// association is a (one) or a (many) association of a known type; a schema-less
+// read knows neither.
 type edgeRef struct {
 	targetRow int
 	targetKey string
@@ -341,6 +354,7 @@ type edgeRef struct {
 	index     int
 	own       int
 	one       bool
+	many      bool
 }
 
 // docIndex carries the structural facts one walk of the instances section
@@ -382,7 +396,8 @@ type docIndex struct {
 	refusedRecords map[int]bool
 	// refusedRoots holds each address, relation left empty, whose holder a
 	// check refused an association of: a required one it holds nothing under,
-	// or a (one) one that holds more than one record.
+	// a (one) one that holds more than one record, or a (many) one under which
+	// two of its edges name one target.
 	// danglingOnes counts the edges under a (one) association that name no root.
 	refusedRoots map[slotCoord]bool
 	danglingOnes map[oneCoord]int
@@ -407,6 +422,25 @@ type docIndex struct {
 	// row; unrowedAt holds each row's canonical keys, built on first use.
 	unrowed   []instWire
 	unrowedAt map[int]map[string]bool
+	// named holds, under each slot of a (many) association, the canonical target
+	// key of each edge and target_missing record there that no check refused.
+	named map[slotCoord]map[string]bool
+}
+
+// names records target under slot and reports whether a record before it
+// named it.
+func (idx *docIndex) names(slot slotCoord, target string) bool {
+	if idx.named[slot][target] {
+		return true
+	}
+	if idx.named == nil {
+		idx.named = make(map[slotCoord]map[string]bool)
+	}
+	if idx.named[slot] == nil {
+		idx.named[slot] = make(map[string]bool)
+	}
+	idx.named[slot][target] = true
+	return false
 }
 
 // rootExists reports whether a root stands at the address, its key sound or
@@ -780,6 +814,7 @@ func (sd *streamDecoder) walkEdges(row int, inst instWire, keyStr string, own in
 				index:     ei,
 				own:       own,
 				one:       !rel.IsZero() && !rel.IsMany(),
+				many:      !rel.IsZero() && rel.IsMany(),
 			})
 		}
 	}
@@ -1257,7 +1292,11 @@ func foreignKeyRefuses(v any, c schema.Constraint) bool {
 // root's edges. key is the root's canonical address. A reference's key
 // component the validator would refuse is marked where another issue stands for
 // it: an edge's by [streamDecoder.refuseUnheldKeys], a record's where a refused
-// unit stands at its target.
+// unit stands at its target. A root that reaches here repeats a target only
+// where that target's own issue stands for the repeat, and the validator stops
+// at a repeat before the root's later checks, so the root is judged again
+// without the listings the validator refused as repeats. Each of those
+// validated clean, so nothing it would report is lost.
 func (sd *streamDecoder) revalidateRoot(ctx context.Context, idx *docIndex, row int, key string, inst instWire,
 	unresolved []unresolvedWire, lost []int,
 ) {
@@ -1289,9 +1328,19 @@ func (sd *streamDecoder) revalidateRoot(ctx context.Context, idx *docIndex, row 
 		}
 		inst.Edges = edges
 	}
-	props := sd.rebuildRawProperties(t, inst)
-	v, name := sd.revalidatorFor(t)
-	_, res := v.ValidateOne(ctx, name, instance.RawInstance{Properties: props})
+	target := sd.revalidatorFor(t)
+	_, res := target.v.ValidateOne(ctx, target.name, instance.RawInstance{Properties: sd.rebuildRawProperties(t, inst)})
+	if raised := res.CodeCounts(diag.Error)[diag.E_DUPLICATE_EDGE]; raised > 0 {
+		repeats := repeatedListings(res)
+		if len(repeats) < raised {
+			// The row's issue limit dropped a repeat, so only a run that keeps every
+			// issue names each one.
+			_, whole := target.unlimited().ValidateOne(ctx, target.name, instance.RawInstance{Properties: sd.rebuildRawProperties(t, inst)})
+			repeats = repeatedListings(whole)
+		}
+		inst.Edges = withoutListings(t, inst.Edges, repeats)
+		_, res = target.v.ValidateOne(ctx, target.name, instance.RawInstance{Properties: sd.rebuildRawProperties(t, inst)})
+	}
 	// MergeRetag keeps the validator's order, so a capped collector evicts by
 	// when a finding was raised, not by how its message sorts.
 	sev, typeText := sd.loadCfg.revalidateSeverity, sd.refText(row)
@@ -1311,6 +1360,40 @@ func (sd *streamDecoder) revalidateRoot(ctx context.Context, idx *docIndex, row 
 			}
 			return retagIssue(issue, sev, typeText, keyStr)
 		})
+}
+
+// repeatedListings returns the path of each listing res refuses as a repeat of
+// a target an earlier listing names.
+func repeatedListings(res diag.Result) map[string]bool {
+	var out map[string]bool
+	for issue := range res.Issues() {
+		if issue.Code() == diag.E_DUPLICATE_EDGE {
+			if out == nil {
+				out = make(map[string]bool)
+			}
+			out[issue.Path()] = true
+		}
+	}
+	return out
+}
+
+// withoutListings returns a copy of edges without the listings at the paths in
+// drop, each path as the validator writes it for the listing rebuildRawProperties
+// builds from the edge at that place.
+func withoutListings(t schema.Type, edges map[string][]edgeWire, drop map[string]bool) map[string][]edgeWire {
+	out := make(map[string][]edgeWire, len(edges))
+	for relation, list := range edges {
+		rel, _ := t.Relation(relation)
+		field := path.Root().Key(rel.FieldName())
+		kept := make([]edgeWire, 0, len(list))
+		for i, e := range list {
+			if !drop[field.Index(i).String()] {
+				kept = append(kept, e)
+			}
+		}
+		out[relation] = kept
+	}
+	return out
 }
 
 // reportsTheRun reports whether code states something about the revalidation run
@@ -1782,10 +1865,13 @@ func (sd *streamDecoder) checkRecord(ui int, u unresolvedWire, idx *docIndex) (s
 // them by: every root holds an edge or a record under each required association
 // of its type; an absent or empty record stands alone, once, and only under a
 // required association; an empty record stands only under a (many) association;
-// and a target_missing record names a target no root holds. Every record counts as held where it
-// stands, a refused one too, and no refused record is judged again. Each fact
-// refuses the records it reports, so no (one) count holds them; the records
-// beside them stay in it. A schema-less read makes no claim.
+// and a target_missing record names a target no root holds, and under a (many)
+// association no target a record before it there names, save a target a refused
+// unit stands at or states, whose refusal is the break. Every record counts as
+// held where it stands, a refused one too, and no refused record is judged
+// again. Each fact refuses the records it reports, so no (one) count holds them;
+// the records beside them stay in it. A schema-less read makes no claim: which
+// root a record's target is, and whether its key is sound, are the schema's.
 func (sd *streamDecoder) checkRecordFacts(diags diagWire, idx *docIndex) {
 	if sd.schema.IsZero() {
 		return
@@ -1833,11 +1919,24 @@ func (sd *streamDecoder) checkRecordFacts(diags diagWire, idx *docIndex) {
 			// declared target. A root whose key a check refused is one graph.Add holds
 			// not, so a record naming it is no second break.
 			targetRow, _ := sd.rowAt(u.TargetType)
-			if key := sd.canonicalWireKey(targetRow, u.TargetKey); idx.exists[targetRow][key] {
+			key := sd.canonicalWireKey(targetRow, u.TargetKey)
+			switch {
+			case idx.exists[targetRow][key]:
 				idx.refuseRecord(ui)
 				sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_MALFORMED,
 					fmt.Sprintf("unresolved record %d names target %s[%s], which a root holds, where graph.Add resolves an edge",
 						ui, sd.refText(targetRow), diag.CutValue(key))).Build())
+			case rec.rel.IsMany() && !idx.rootExists(targetRow, key) && !sd.refusedAddress(idx, targetRow, key) &&
+				idx.held(rec.slot.row, rec.slot.key) && idx.names(rec.slot, key):
+				idx.refuseRecord(ui)
+				sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_MALFORMED,
+					fmt.Sprintf("unresolved record %d names target %s[%s] under %q of %s[%s], which a record before it names, where graph.Add records one per target",
+						ui, sd.refText(targetRow), diag.CutValue(key), u.Relation, sd.refText(rec.slot.row), diag.CutValue(rec.slot.key))).
+					WithDetail(diag.DetailKeyTypeName, sd.refAt(rec.slot.row)).
+					WithDetail(diag.DetailKeyPrimaryKey, rec.slot.key).
+					WithDetail(diag.DetailKeyRelationName, u.Relation).
+					WithDetail(diag.DetailKeyTargetPK, key).
+					Build())
 			}
 		}
 	}
@@ -2121,6 +2220,7 @@ func (sd *streamDecoder) checkOnes(idx *docIndex) {
 				fmt.Sprintf("(one) association %q of %s[%s] holds %d records",
 					slot.relation, sd.refText(slot.row), diag.CutValue(slot.key), n)).
 				WithDetail(diag.DetailKeyTypeName, sd.refAt(slot.row)).
+				WithDetail(diag.DetailKeyPrimaryKey, slot.key).
 				WithDetail(diag.DetailKeyRelationName, slot.relation).
 				Build())
 		}
@@ -2130,8 +2230,11 @@ func (sd *streamDecoder) checkOnes(idx *docIndex) {
 // validateEdgeRefs holds each edge's target to a root. An edge whose target no
 // sound root holds enters the unheld index. An edge to a root, or to an address
 // a refused unit states, which is that unit's break, feeds the record facts and
-// its sound source's (one) counts. Any other edge is refused: it stays held
-// where it stands, and is no record beside another and no count.
+// its sound source's (one) counts, save one naming a target an edge before it
+// names under a (many) association, where a sound root holds each end's address
+// alone: graph.Add records one edge per source, association and target. Any other
+// edge is refused: it stays held where it stands, and is no record beside
+// another and no count.
 func (sd *streamDecoder) validateEdgeRefs(idx *docIndex) {
 	for _, ref := range idx.refs {
 		exists := idx.rootExists(ref.targetRow, ref.targetKey)
@@ -2142,6 +2245,20 @@ func (sd *streamDecoder) validateEdgeRefs(idx *docIndex) {
 			idx.unheld[ref.slot] = append(idx.unheld[ref.slot], ref.index)
 		}
 		if exists || sd.refusedAddress(idx, ref.targetRow, ref.targetKey) {
+			if ref.many && idx.held(ref.targetRow, ref.targetKey) && idx.held(ref.slot.row, ref.slot.key) &&
+				idx.names(ref.slot, ref.targetKey) {
+				markSlot(&idx.refusedRoots, slotCoord{row: ref.slot.row, key: ref.slot.key})
+				sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_MALFORMED,
+					fmt.Sprintf("edge %d under %q of %s[%s] names target %s[%s], which an edge before it names, where graph.Add records one edge per target",
+						ref.index, ref.slot.relation, sd.refText(ref.slot.row), diag.CutValue(ref.slot.key),
+						sd.refText(ref.targetRow), diag.CutValue(ref.targetKey))).
+					WithDetail(diag.DetailKeyTypeName, sd.refAt(ref.slot.row)).
+					WithDetail(diag.DetailKeyPrimaryKey, ref.slot.key).
+					WithDetail(diag.DetailKeyRelationName, ref.slot.relation).
+					WithDetail(diag.DetailKeyTargetPK, ref.targetKey).
+					Build())
+				continue
+			}
 			if idx.soundEdges == nil {
 				idx.soundEdges = make(map[slotCoord]int)
 			}
@@ -2229,11 +2346,8 @@ func (sd *streamDecoder) loadDocument(groups []instanceGroupWire, diags diagWire
 		for _, item := range g.Items {
 			ip := sd.instanceParts(row, item)
 			instParts = append(instParts, ip)
-			// Sorted, not map order: the rebuild sorts with an unstable sort, so
-			// a deterministic input order is what keeps two Loads of one
-			// document identical.
-			for _, relName := range slices.Sorted(maps.Keys(item.Edges)) {
-				for _, e := range item.Edges[relName] {
+			for relName, list := range item.Edges {
+				for _, e := range list {
 					edgeParts = append(edgeParts, snapparts.Edge{
 						Relation:   relName,
 						SourceType: id,

@@ -192,7 +192,8 @@
 //     it names a target, and states a reason [UnresolvedEdge] documents; an
 //     "absent" or "empty" record carries no target key and no edge
 //     properties. A (one) association holds one record at most, edges and
-//     unresolved records together.
+//     unresolved records together, and no two of a source's edges and
+//     "target_missing" records under one association name one target.
 //   - References. An edge's source and target and a record's source each name
 //     a root. A reference to the address
 //     a root's key properties state, where the key rule refuses its stored key,
@@ -276,8 +277,9 @@
 // it refuses what they refuse under the same codes. Then, under the graph's lock:
 //
 //   - A record naming a target the held root already names under that
-//     association, by an edge or an unresolved record, adds nothing, and
-//     neither does the second of two alike in the incoming data.
+//     association, by an edge or an unresolved record, adds nothing. The
+//     validator refuses a listing that names one target twice, so the incoming
+//     data names each target once.
 //   - A record under a (one) association that would leave the held root two
 //     targets there refuses the whole merge, before anything installs, with an
 //     E_GRAPH_CARDINALITY for each such association.
@@ -426,6 +428,9 @@
 //   - E_DUPLICATE_PK: two roots of a type that can hold one, whose stored keys the
 //     key rule accepts, stand at one canonical address
 //   - E_GRAPH_CARDINALITY: a (one) association holds several records
+//   - E_DUPLICATE_EDGE: an edge and a "target_missing" record, or two such
+//     records, of one source under a (many) association name one canonical
+//     target key; two edges there would need two roots at one address
 //   - E_EDGE_SHAPE_MISMATCH: a (one) association holds an "empty" record
 //   - E_GRAPH_UNKNOWN_RELATION: an edge, a record or composed children stand under
 //     a name the type does not declare as that kind of relation, or an edge or a
@@ -457,15 +462,17 @@
 //   - [Snapshot.InstancesOf]: lexicographic by primary key string
 //   - [Snapshot.AllInstances]: types by identity, then each type's primary keys
 //   - [Snapshot.Edges]: (sourceType, sourceKey, relation, targetType,
-//     targetKey, edge properties)
+//     targetKey)
 //   - [Snapshot.EdgesFrom]: the order of [Snapshot.Edges], over one source
 //   - [Snapshot.Duplicates]: (type, primaryKey, rejected instance's properties,
 //     rejected instance's provenance)
 //   - [Snapshot.Unresolved]: (sourceType, sourceKey, relation, targetType,
-//     targetKey, reason, required, edge properties)
+//     targetKey)
 //
-// Each sort compares every arm its tuple names. A properties arm compares a rendering that
-// writes each value as %T|%#v, so records that rendering makes equal tie in that arm.
+// A graph holds one edge or record per source, association and target, so no two
+// edges and no two unresolved records tie. Each sort compares every arm its tuple
+// names. A properties arm compares a rendering that writes each value as %T|%#v,
+// so records that rendering makes equal tie in that arm.
 // A provenance arm compares the source name, the path a document writes, and the
 // span. Among the ties are float64(1) and int64(1) inside a list or map, and a
 // zero and an empty Properties.

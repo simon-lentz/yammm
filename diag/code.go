@@ -400,6 +400,20 @@ var (
 	// relation's cardinality and its target's key, so it makes no such claim.
 	E_DUPLICATE_COMPOSED_PK = NewCode("E_DUPLICATE_COMPOSED_PK", CategoryGraph)
 
+	// E_DUPLICATE_EDGE indicates a (many) association that names one target
+	// twice for one source: a graph holds one edge per source, association and
+	// target. The validator raises it for a target key one listing repeats, and
+	// the import for an edge and a "target_missing" record, or two such records,
+	// that a snapshot built under another schema holds at one canonical target
+	// key. snapshot.Load and Verify refuse such a document with
+	// E_SNAPSHOT_MALFORMED where no other check refused the repeating listing,
+	// one sound root (of a type that can hold a root, its stored key admitted by
+	// the key rule) holds the source's address alone, and an edge's target's,
+	// and no root stands at a record's target and no refused unit states it.
+	// Elsewhere the issue at the listing, the source or the target stands for
+	// the repeat.
+	E_DUPLICATE_EDGE = NewCode("E_DUPLICATE_EDGE", CategoryGraph)
+
 	// E_UNRESOLVED_REQUIRED indicates a required association is unresolved.
 	E_UNRESOLVED_REQUIRED = NewCode("E_UNRESOLVED_REQUIRED", CategoryGraph)
 

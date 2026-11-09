@@ -30,7 +30,9 @@ import (
 // support, an empty target key, a target type that does not exist or has no
 // primary key, and a key whose arity is not the target's.
 // It does NOT catch value-level errors (wrong type, out-of-range, invalid PK, an
-// absent required property, an invariant); those remain in [Validator.ValidateOne]'s domain. A SchemaBuilder that
+// absent required property, an invariant, a target key a (many) relation names
+// twice, which two spellings of one key can do); those remain in
+// [Validator.ValidateOne]'s domain. A SchemaBuilder that
 // returns a clean (RawInstance, nil) from Build is guaranteed to pass the
 // shape portion of ValidateOne — property and relation names, and no
 // excess target on a (one) relation. Compositions are not covered: the builder cannot
@@ -83,7 +85,7 @@ type edgeState struct {
 // ("cross.Person"), matching the name-resolution rules [Validator] applies.
 func BuilderFor(s schema.Schema, typeName string) (*SchemaBuilder, error) {
 	if s.IsZero() {
-		return nil, errors.New("instance.BuilderFor: zero schema")
+		return nil, errors.New("instance.BuilderFor: zero Schema")
 	}
 	typ, found := s.ResolveTypeName(typeName)
 	if !found {
@@ -288,9 +290,9 @@ func (b *SchemaBuilder) edgeStateFor(rel schema.Relation) *edgeState {
 // schema-valid and no (one) relation holds an excess target. Compositions are not
 // covered — the builder cannot produce one — so a type with a required
 // composition builds clean and fails ValidateOne with
-// E_UNRESOLVED_REQUIRED_COMPOSITION. Value-level validation (constraint
-// checks, PK type coercion, foreign-key shape and key-component checks, an
-// absent required property, invariants) still happens at ValidateOne time. No
+// E_UNRESOLVED_REQUIRED_COMPOSITION. Every check outside that shape portion
+// still runs at ValidateOne time, value-level validation and a target key a
+// (many) relation names twice among them. No
 // validator asks whether an association's target exists: [graph.Graph.Check]
 // answers for a required association, and [graph.Snapshot.Unresolved] holds an
 // optional one.

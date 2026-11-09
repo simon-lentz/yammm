@@ -836,12 +836,9 @@ func TestValidator_NilReceiver(t *testing.T) {
 }
 
 func TestNewValidator_ZeroSchemaPanics(t *testing.T) {
-	defer func() {
-		r := recover()
-		require.NotNil(t, r, "expected panic for a zero schema")
-		assert.Contains(t, r, "zero schema", "panic message should mention a zero schema")
-	}()
-	instance.NewValidator(schema.Schema{})
+	require.PanicsWithValue(t, "instance.NewValidator: zero Schema", func() {
+		instance.NewValidator(schema.Schema{})
+	})
 }
 
 // Ownership Isolation Tests

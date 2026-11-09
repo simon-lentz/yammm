@@ -50,14 +50,16 @@ type Attestation struct {
 //   - [Snapshot.Types]: lexicographic by the TypeID's String
 //   - [Snapshot.InstancesOf]: lexicographic by primary key string
 //   - [Snapshot.Edges]: (sourceType, sourceKey, relation, targetType,
-//     targetKey, edge properties)
+//     targetKey)
 //   - [Snapshot.Duplicates]: (type, primaryKey, instance properties,
 //     instance provenance)
 //   - [Snapshot.Unresolved]: (sourceType, sourceKey, relation, targetType,
-//     targetKey, reason, required, edge properties)
+//     targetKey)
 //
-// Each sort compares every arm its tuple names. A properties arm compares a rendering that
-// writes each value as %T|%#v, so records that rendering makes equal tie in that arm.
+// No two edges and no two unresolved records tie: a graph holds one of each per
+// source, association and target. Each sort compares every arm its tuple names.
+// A properties arm compares a rendering that writes each value as %T|%#v, so
+// records that rendering makes equal tie in that arm.
 // A provenance arm compares the source name, the path a document writes, and the
 // span. Among the ties are float64(1) and int64(1) inside a list or map, and a
 // zero and an empty Properties.
@@ -199,7 +201,7 @@ func (r Snapshot) InstanceByKey(id schema.TypeID, key string) (Instance, bool) {
 // Edges returns all resolved relationship edges in sorted order.
 //
 // Edges are sorted by the tuple (sourceType, sourceKey, relation, targetType,
-// targetKey, edge properties), comparing types by identity.
+// targetKey), comparing types by identity.
 func (r Snapshot) Edges() iter.Seq[Edge] {
 	// One return lets the compiler resolve the closure at the call, so a range over it keeps its variables off the heap.
 	var edges []Edge
@@ -263,7 +265,7 @@ func (r Snapshot) Duplicates() iter.Seq[Duplicate] {
 //
 // Unresolved edges are associations the graph could not resolve: a target it
 // holds no root for, or a required one the data left absent or empty. They are sorted by the tuple (sourceType, sourceKey, relation,
-// targetType, targetKey, reason, required, edge properties).
+// targetType, targetKey).
 //
 // It yields nothing if all edges are resolved.
 func (r Snapshot) Unresolved() iter.Seq[UnresolvedEdge] {

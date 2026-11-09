@@ -329,8 +329,8 @@ func TestUpdateMetadata_PreservesAnIntShapedBodyThatReMarshalHeals(t *testing.T)
 	}
 }
 
-// parallelEdgeSchema declares many associations between one pair of instances,
-// so a document can hold edges that tie under graph's edge comparator.
+// parallelEdgeSchema declares many associations from one instance to the same
+// targets, so a document holds many edges that agree on all but one arm.
 var parallelEdgeSchema = func() string {
 	var src strings.Builder
 	src.WriteString("schema \"parallel\"\n\ntype Node {\n\tid String primary\n")
@@ -345,13 +345,13 @@ var parallelEdgeSchema = func() string {
 const parallelRelations = "ABCDEFGHIJKLMNOP"
 
 // TestLoad_ParallelEdgeOrderIsDeterministic pins the round trip against map
-// iteration order. Edges differing only in properties tie under the edge
-// comparator, and the sort is not stable, so reading them in map order let a
-// reload permute them and move the output bytes.
+// iteration order: the reader reads each root's edge lists in map order, and
+// the sort that follows is not stable, so only a total edge order keeps the
+// bytes.
 //
 // The fixture is deliberately large: Go's sort runs insertion sort below a
 // dozen elements and is stable there by accident, so a small fixture passes
-// whether or not the defect is present.
+// whether or not the order is total.
 func TestLoad_ParallelEdgeOrderIsDeterministic(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -375,12 +375,12 @@ func TestLoad_ParallelEdgeOrderIsDeterministic(t *testing.T) {
 	var edges []snapparts.Edge
 	weight := 0.0
 	for _, r := range parallelRelations {
-		for range 3 {
+		for _, target := range []string{"n2", "n3", "n4"} {
 			weight++
 			edges = append(edges, snapparts.Edge{
 				Relation:   "R" + string(r),
 				SourceType: id, SourceKey: immutable.WrapKey([]any{"n1"}),
-				TargetKey:  immutable.WrapKey([]any{"n2"}),
+				TargetKey:  immutable.WrapKey([]any{target}),
 				Properties: immutable.WrapProperties(map[string]any{"w": weight}),
 			})
 		}
@@ -390,6 +390,8 @@ func TestLoad_ParallelEdgeOrderIsDeterministic(t *testing.T) {
 		Instances: []snapparts.Instance{
 			node("n1"),
 			node("n2"),
+			node("n3"),
+			node("n4"),
 		},
 		Edges: edges,
 	})

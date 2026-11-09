@@ -27,6 +27,9 @@ type structureRules struct {
 	// allocated at the first (one) record met.
 	ones  map[oneSlot]int
 	order []oneSlot
+	// named holds the canonical target key of each edge and target_missing
+	// record counted under a (many) association of a source.
+	named map[oneSlot]map[string]bool
 	// addresses holds each root's canonical address, relation left empty, and
 	// whether a sound root holds it: one of a type that can hold a root, whose key
 	// the key rule accepts.
@@ -442,20 +445,57 @@ func (r *structureRules) countOne(slot oneSlot) {
 	r.ones[slot]++
 }
 
-// countRecord counts a record no rule refused toward its (one) association: a
-// (one) association of a sound root holds its source's address.
-func (r *structureRules) countRecord(source schema.TypeID, sourceKey immutable.Key, relation string) {
-	t, ok := r.s.TypeByID(source)
+// countRecord counts rec, which no rule refused, at its source's address where
+// a sound root holds it: toward its (one) association's count, or under a (many)
+// association by the target it names. A second record naming one target there
+// is refused: a graph holds one edge per source, association and target. A slot
+// or a target address [structureRules.unjudged] names is not judged.
+func (r *structureRules) countRecord(rec associationRecord) {
+	t, ok := r.s.TypeByID(rec.source)
 	if !ok {
 		return
 	}
-	if rel, ok := t.Relation(relation); !ok || !rel.IsAssociation() || rel.IsMany() {
+	rel, ok := t.Relation(rec.relation)
+	if !ok || !rel.IsAssociation() {
 		return
 	}
-	key := r.canon.key(source, sourceKey).String()
-	if r.addresses[oneSlot{source: source, key: key}] {
-		r.countOne(oneSlot{source: source, key: key, relation: relation})
+	key := r.canon.key(rec.source, rec.sourceKey).String()
+	if !r.addresses[oneSlot{source: rec.source, key: key}] {
+		return
 	}
+	slot := oneSlot{source: rec.source, key: key, relation: rec.relation}
+	if !rel.IsMany() {
+		r.countOne(slot)
+		return
+	}
+	if (rec.unresolved && rec.reason != "target_missing") || r.unjudged(slot) {
+		return
+	}
+	target := r.canon.key(rel.TargetID(), rec.targetKey).String()
+	// A record naming a refused root, or an address two roots stand at, is that
+	// address's break.
+	address := oneSlot{source: rel.TargetID(), key: target}
+	if sound, present := r.addresses[address]; (present && !sound) || r.unjudged(address) {
+		return
+	}
+	if r.named[slot][target] {
+		name := schema.TagForm(r.s, rec.source)
+		r.c.Collect(diag.NewIssue(diag.Error, diag.E_DUPLICATE_EDGE,
+			fmt.Sprintf("%s: %s %s[%s] under %q names target %s, which another record there names",
+				importOp, rec.position, name, diag.CutValue(slot.key), rec.relation, diag.CutValue(target))).
+			WithDetail(diag.DetailKeyTypeName, name).
+			WithDetail(diag.DetailKeyPrimaryKey, slot.key).
+			WithDetail(diag.DetailKeyRelationName, rec.relation).
+			WithDetail(diag.DetailKeyTargetPK, target).Build())
+		return
+	}
+	if r.named == nil {
+		r.named = make(map[oneSlot]map[string]bool)
+	}
+	if r.named[slot] == nil {
+		r.named[slot] = make(map[string]bool)
+	}
+	r.named[slot][target] = true
 }
 
 // oneOverflow refuses each (one) association holding more than one record,
@@ -469,6 +509,7 @@ func (r *structureRules) oneOverflow() {
 				fmt.Sprintf("%s: (one) association %q of %s[%s] holds %d records",
 					importOp, slot.relation, name, diag.CutValue(slot.key), n)).
 				WithDetail(diag.DetailKeyTypeName, name).
+				WithDetail(diag.DetailKeyPrimaryKey, slot.key).
 				WithDetail(diag.DetailKeyRelationName, slot.relation).Build())
 		}
 	}

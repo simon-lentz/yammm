@@ -1299,7 +1299,20 @@ func TestComplete_Import_MissingResolution(t *testing.T) {
 	s := schema.TestCompleteModel(model, srcID, collector, nil, resolvedImports)
 
 	assert.True(t, s.IsZero())
-	assert.True(t, collector.HasErrors())
+	res := collector.Result()
+	assert.True(t, res.HasFatal(), "a loader defect is Fatal: %s", res)
+	assert.True(t, res.HasCode(diag.E_INTERNAL), "%s", res)
+}
+
+// Completion with no model is a loader defect, reported as Fatal E_INTERNAL.
+func TestComplete_NoModelIsAnInternalFault(t *testing.T) {
+	collector := diag.NewCollector(0)
+	s := schema.TestCompleteModel(nil, sourceID(t, "no_model.yammm"), collector, nil, schema.TestResolvedImportMap{})
+
+	assert.True(t, s.IsZero())
+	res := collector.Result()
+	assert.True(t, res.HasFatal(), "a loader defect is Fatal: %s", res)
+	assert.True(t, res.HasCode(diag.E_INTERNAL), "%s", res)
 }
 
 func TestComplete_Association_WithEdgeProperties(t *testing.T) {

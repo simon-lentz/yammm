@@ -66,7 +66,7 @@ func completeModel(
 	resolvedImports resolvedImportMap,
 ) Schema {
 	if m == nil {
-		collector.Collect(diag.NewIssue(diag.Error, diag.E_INTERNAL, "no model to complete").Build())
+		collector.Collect(diag.NewIssue(diag.Fatal, diag.E_INTERNAL, "no model to complete").Build())
 		return Schema{}
 	}
 
@@ -433,7 +433,7 @@ func (c *completer) indexImports() {
 		// loader binds or fails every alias before completion. Reported and skipped.
 		resolved, present := c.resolvedImports[id.Alias]
 		if !present {
-			c.collector.Collect(diag.NewIssue(diag.Error, diag.E_INTERNAL,
+			c.collector.Collect(diag.NewIssue(diag.Fatal, diag.E_INTERNAL,
 				fmt.Sprintf("import alias %q has no resolved SourceID; ensure loader provides all import resolutions", id.Alias)).
 				WithSpan(id.Span).
 				WithDetail(diag.DetailKeyAlias, id.Alias).

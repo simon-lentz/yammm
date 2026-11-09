@@ -55,6 +55,10 @@
 // [schema.StructuralHash] is the schema identity the header pins: an
 // identity over the rules that decide what instance data is valid.
 //
+// Programmer errors panic, naming the function: a nil context at every function
+// that takes one, and a zero schema or snapshot where one is required. [ScanDir]
+// panics when it is called, never when its sequence runs.
+//
 // # Usage
 //
 //	// Serialize
@@ -270,8 +274,9 @@
 // the range is a deliberate act rather than an edit that forgets to.
 // A document of the expected shape outside the range draws an Error-severity
 // [diag.E_SNAPSHOT_UNSUPPORTED_VERSION], whose message names the observed
-// version and the supported range. [Load], [Verify], [Info], [HeaderOnly] and
-// [UpdateMetadata] report one that also breaks the shape or the text rule as
+// version and the supported range. Every function that reads a document, save
+// [HeaderOnlyRead] and the scans built on it ([ScanDir], [ScanDirSlice]),
+// reports one that also breaks the shape or the text rule as
 // [diag.E_SNAPSHOT_MALFORMED] instead. A v3 document is refused,
 // not migrated; an older reader rejects a v4 document the same way, so
 // an operator running an older binary sees a structured diagnostic

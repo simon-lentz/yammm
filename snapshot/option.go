@@ -182,7 +182,7 @@ func WithValueConformance(report bool) LoadOption {
 // WithRevalidation makes [Load] and [Verify] run root instances, their
 // composed children, edges, target_missing records and invariants included,
 // back through the real validator
-// ([github.com/simon-lentz/yammm/instance.Validator]) and report each finding
+// ([github.com/simon-lentz/yammm/instance.Validator]) and report its findings
 // about the data at the given severity, after every structural issue (a
 // cancellation or an E_INTERNAL keeps its own); at Error a document that fails
 // refuses to load. A root is run only when the structural checks
@@ -197,7 +197,9 @@ func WithValueConformance(report bool) LoadOption {
 // holds, or on a target_missing record whose target a refused unit stands at or
 // states: the edge's reference issue, or the unit's refusal, stands for it. As for any value
 // it refuses, it then runs no later pass of that root: its composed children and
-// invariants go unjudged.
+// invariants go unjudged. A listing that repeats a target no sound root holds
+// alone is left out of the root's run, so the target's own issue stands for the
+// repeat and the root's later passes still run.
 // No duplicate record's instance is run. It judges values — bounds,
 // enums, patterns, invariants — which the structural checks every read runs
 // leave alone, and reports each unresolved record no check refused under a

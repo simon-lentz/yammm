@@ -126,6 +126,9 @@ type SnapshotInfo struct { //nolint:revive // intentional stutter — mirrors .y
 //
 // Info follows the library's standard (T, diag.Result) return pattern.
 func Info(ctx context.Context, data []byte) (*SnapshotInfo, diag.Result) {
+	if ctx == nil {
+		panic("snapshot.Info: nil context")
+	}
 	if err := ctx.Err(); err != nil {
 		c := diag.NewCollector(0)
 		c.Collect(diag.NewIssue(diag.Fatal, diag.E_CONTEXT_CANCELLED, err.Error()).Build())
@@ -259,6 +262,9 @@ type HeaderInfo struct {
 // Returns (nil, result) with Error-severity diagnostics for malformed
 // input. Follows the library's standard (T, diag.Result) return pattern.
 func HeaderOnly(ctx context.Context, data []byte) (*HeaderInfo, diag.Result) {
+	if ctx == nil {
+		panic("snapshot.HeaderOnly: nil context")
+	}
 	if err := ctx.Err(); err != nil {
 		c := diag.NewCollector(0)
 		c.Collect(diag.NewIssue(diag.Fatal, diag.E_CONTEXT_CANCELLED, err.Error()).Build())
@@ -372,8 +378,8 @@ const MaxHeaderSize = 16 * 1024 * 1024
 // other than the header and a missing types section are refused. Use [HeaderOnly],
 // [Verify] or [Load] when that matters.
 //
-// Text: HeaderOnlyRead judges the version, the features and the types table first,
-// and stops at a fault they hold, where [HeaderOnly] judges the text first. With no
+// Text: HeaderOnlyRead judges the text only once it has read the header and the
+// types table without a fault, where [HeaderOnly] judges the text first. With no
 // such fault, E_SNAPSHOT_MALFORMED refuses a string up to the end of the table that
 // is not valid UTF-8 or that holds a surrogate escape that is half of no pair. A
 // string past the table goes unjudged.
@@ -384,6 +390,9 @@ const MaxHeaderSize = 16 * 1024 * 1024
 // See also [ScanDir] for directory-wide iteration that uses this
 // primitive per file.
 func HeaderOnlyRead(ctx context.Context, r io.Reader) (*HeaderInfo, diag.Result) {
+	if ctx == nil {
+		panic("snapshot.HeaderOnlyRead: nil context")
+	}
 	if err := ctx.Err(); err != nil {
 		c := diag.NewCollector(0)
 		c.Collect(diag.NewIssue(diag.Fatal, diag.E_CONTEXT_CANCELLED, err.Error()).Build())

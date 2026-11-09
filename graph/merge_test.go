@@ -212,8 +212,7 @@ func TestMerge_InstallsTheDuplicatesEdgesOnTheHeldInstance(t *testing.T) {
 }
 
 // A target the held instance already names, by an edge or an unresolved
-// record, adds nothing, and neither does a repeat inside the incoming data;
-// the held edge's properties stand.
+// record, adds nothing; the held edge's properties stand.
 func TestMerge_ATargetAlreadyNamedAddsNothing(t *testing.T) {
 	t.Parallel()
 	s := mergeSchema(t)
@@ -222,7 +221,7 @@ func TestMerge_ATargetAlreadyNamedAddsNothing(t *testing.T) {
 	mustAdd(t, g, issue(t, s, "i1", "t", with(required(), "ISSUED_BY",
 		target{"a", map[string]any{"role": "lead"}}, target{"zz", nil})))
 	mustMerge(t, g, issue(t, s, "i1", "t", with(required(), "ISSUED_BY",
-		target{"a", map[string]any{"role": "other"}}, target{"zz", nil}, target{"b", nil}, target{"b", nil})))
+		target{"a", map[string]any{"role": "other"}}, target{"zz", nil}, target{"b", nil})))
 
 	snap := g.Snapshot()
 	want := []string{`HOME->["p1"]{}`, `ISSUED_BY->["a"]{role: "lead"}`, `ISSUED_BY->["b"]{}`, `LISTED_ON->["p1"]{}`}
