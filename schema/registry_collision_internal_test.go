@@ -3,6 +3,7 @@ package schema
 import (
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -37,7 +38,8 @@ func TestLoad_ARegistryCollisionIsAnInternalFault(t *testing.T) {
 		want string
 		load func(l *loader) error
 	}{
-		"a file": {held: mainID, want: "register source \"" + mainPath + "\"", load: func(l *loader) error {
+		// The message quotes the path as %q does, so a Windows path's separators read escaped.
+		"a file": {held: mainID, want: "register source " + strconv.Quote(mainPath), load: func(l *loader) error {
 			_, _, err := l.loadFile(t.Context(), mainID, mainPath, mainContent)
 			return err
 		}},
