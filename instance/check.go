@@ -3,7 +3,7 @@ package instance
 import (
 	"fmt"
 
-	"github.com/simon-lentz/yammm/instance/internal/eval"
+	"github.com/simon-lentz/yammm/internal/value"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -30,7 +30,7 @@ func CheckValue(val any, c schema.Constraint) error {
 	return checkValueRecovering(val, c)
 }
 
-// checkValueRecovering runs eval.CheckValue and converts a panic into an
+// checkValueRecovering runs value.Check and converts a panic into an
 // InternalError of KindConstraintPanic, so the validator and CheckValue share
 // one recovery rule.
 func checkValueRecovering(val any, c schema.Constraint) (err error) {
@@ -40,10 +40,10 @@ func checkValueRecovering(val any, c schema.Constraint) (err error) {
 		}
 	}()
 	//nolint:wrapcheck // the checker's error is the contract; callers classify CheckError vs InternalError
-	return eval.CheckValue(val, c)
+	return value.Check(val, c)
 }
 
-// coerceValueRecovering runs eval.CoerceValue under the same recovery rule as
+// coerceValueRecovering runs value.Coerce under the same recovery rule as
 // [checkValueRecovering].
 func coerceValueRecovering(val any, c schema.Constraint) (result any, err error) {
 	defer func() {
@@ -52,5 +52,5 @@ func coerceValueRecovering(val any, c schema.Constraint) (result any, err error)
 		}
 	}()
 	//nolint:wrapcheck // the checker's error is the contract; callers classify CheckError vs InternalError
-	return eval.CoerceValue(val, c)
+	return value.Coerce(val, c)
 }

@@ -62,7 +62,7 @@ func Canonical(val any, c schema.Constraint) (any, error) {
 // timestamp is stored in text that satisfies its own format.
 func canonicalTimestamp(val any, c schema.Constraint) (any, error) {
 	layout := timestampLayout(c)
-	if t, ok := GetTime(val); ok {
+	if t, ok := val.(time.Time); ok {
 		s, readsBack := TimestampText(t, c)
 		if !readsBack {
 			return val, fmt.Errorf("value: a time.Time renders as %s, which is no timestamp the layout reads back", diag.QuoteValue(s))
@@ -140,7 +140,7 @@ func parseTimestamp(s string, c schema.Constraint) (time.Time, error) {
 // [uuid.Parse] accepts onto one key. The string form is whatever [GetString]
 // reads, so a carrier the check side accepts is one this side renders.
 func canonicalUUID(val any) (any, error) {
-	if u, ok := GetUUID(val); ok {
+	if u, ok := val.(uuid.UUID); ok {
 		return u.String(), nil
 	}
 	s, ok := GetString(val)
@@ -163,7 +163,7 @@ func canonicalUUID(val any) (any, error) {
 // an identity today — the layout admits exactly one spelling. It exists so the
 // three kinds read alike, not because a second spelling is waiting for it.
 func canonicalDate(val any) (any, error) {
-	if t, ok := GetTime(val); ok {
+	if t, ok := val.(time.Time); ok {
 		s, readsBack := DateText(t)
 		if !readsBack {
 			return val, fmt.Errorf("value: a time.Time renders as %s, which is no YYYY-MM-DD date", diag.QuoteValue(s))

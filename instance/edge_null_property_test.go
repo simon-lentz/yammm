@@ -40,7 +40,7 @@ func validateEmployer(t *testing.T, s schema.Schema, employer map[string]any) (i
 }
 
 // An explicit null does not satisfy a required edge property. The required
-// check tested key presence while CheckValue and CoerceValue both accept nil,
+// check tested key presence while value.Check and value.Coerce both accept nil,
 // so writing the key with a nil value was enough to pass it — the one slot of
 // the four where null was ACCEPTED rather than rejected or dropped.
 //

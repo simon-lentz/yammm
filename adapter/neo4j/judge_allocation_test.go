@@ -3,8 +3,8 @@ package neo4j
 import (
 	"testing"
 
-	"github.com/simon-lentz/yammm/instance"
 	"github.com/simon-lentz/yammm/internal/raceskip"
+	"github.com/simon-lentz/yammm/internal/value"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -66,26 +66,51 @@ func TestCoerceParams_JudgingALoadedSchemasTypesAllocatesNothing(t *testing.T) {
 	}
 }
 
-// The value rule passes a typed collection a Vector or a scalar List holds at no cost
-// beyond reading its form: only a List can nest, so a Vector is never judged for
-// it, and judging a List's element allocates nothing.
-func TestCoerceValue_ATypedCollectionCostsOnlyItsForm(t *testing.T) {
+// The value rule passes a Vector's []float64, the form CoerceParams reads one
+// in, at no cost beyond reading its form: only a List can nest, so a Vector is
+// never judged for it.
+func TestCoerceValue_ATypedVectorCostsOnlyItsForm(t *testing.T) {
 	raceskip.Skip(t)
-	for name, tc := range map[string]struct {
-		c   schema.Constraint
-		raw any
-	}{
-		"Vector[3]":    {schema.NewVectorConstraint(3), []float64{1, 2, 3}},
-		"List<Float>":  {schema.NewListConstraint(schema.NewFloatConstraint()), []float64{1, 2, 3}},
-		"List<String>": {schema.NewListConstraint(schema.NewStringConstraint()), []string{"a"}},
-	} {
-		form := testing.AllocsPerRun(100, func() { _ = instance.IsAbsent(tc.raw) })
-		if allocs := testing.AllocsPerRun(100, func() {
-			if _, err := coerceValue(tc.c, tc.raw); err != nil {
+	c, raw := schema.NewVectorConstraint(3), any([]float64{1, 2, 3})
+	form := testing.AllocsPerRun(100, func() { _ = value.Absent(raw) })
+	if allocs := testing.AllocsPerRun(100, func() {
+		if _, err := coerceValue(c, raw); err != nil {
+			t.Fatal(err)
+		}
+	}); allocs != form {
+		t.Errorf("coerceValue allocates %v per call at a Vector; want %v, the cost of reading its form", allocs, form)
+	}
+}
+
+// The value rule sends a UUID's canonical text as it is held, so a stored UUID
+// costs no more than reading its form.
+func TestCoerceValue_AStoredUUIDCostsNoCopy(t *testing.T) {
+	raceskip.Skip(t)
+	c, raw := schema.NewUUIDConstraint(), any("12345678-1234-1234-1234-123456789abc")
+	form := testing.AllocsPerRun(100, func() { _ = value.Absent(raw) })
+	if allocs := testing.AllocsPerRun(100, func() {
+		if _, err := coerceValue(c, raw); err != nil {
+			t.Fatal(err)
+		}
+	}); allocs != form {
+		t.Errorf("coerceValue allocates %v per call at a canonical UUID; want %v, the cost of reading its form", allocs, form)
+	}
+}
+
+// CoerceParams reads a Vector's []float64 at a cost its length does not move:
+// no element is allocated for.
+func TestCoerceParams_AFloat64VectorCostsNothingPerElement(t *testing.T) {
+	raceskip.Skip(t)
+	cost := func(n int) float64 {
+		types := ParamTypes{"v": schema.NewVectorConstraint(n)}
+		params := map[string]any{"v": make([]float64, n)}
+		return testing.AllocsPerRun(100, func() {
+			if _, err := CoerceParams(params, types); err != nil {
 				t.Fatal(err)
 			}
-		}); allocs != form {
-			t.Errorf("coerceValue allocates %v per call at %s; want %v, the cost of reading its form", allocs, name, form)
-		}
+		})
+	}
+	if short, long := cost(8), cost(1536); long != short {
+		t.Errorf("CoerceParams allocates %v per call at a []float64 of 1536 and %v at one of 8; want the same", long, short)
 	}
 }

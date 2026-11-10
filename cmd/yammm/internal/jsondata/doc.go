@@ -121,6 +121,13 @@
 // float64 holds it. The literal -0 stays a json.Number too, so a Float reads
 // it as the float64 -0. A float64 holds integers exactly only up to 2^53.
 //
+// # Text
+//
+// A string value is read as encoding/json reads it: each byte of an invalid
+// UTF-8 sequence reads as U+FFFD, as it does in a member name. So no string
+// Parse returns is invalid UTF-8, and the validator's refusal of such a string
+// (E_TYPE_MISMATCH) answers no document Parse read.
+//
 // # Dependencies
 //
 //	cmd/yammm/internal/jsondata  ──imports──▶  instance, diag, location, location/path,

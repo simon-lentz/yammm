@@ -6,9 +6,9 @@
 // # Hooks
 //
 // A schema.Invariant keeps its tree, and a schema.PatternConstraint its compiled
-// patterns, in unexported fields. The instance layer reads both through
-// [InvariantExpression] and [PatternRegexps], which the schema package sets in its
-// init.
+// patterns, in unexported fields. The validator reads the tree through
+// [InvariantExpression], and internal/value's pattern check reads the patterns
+// through [PatternRegexps]. The schema package sets both in its init.
 //
 // # Expression Types
 //

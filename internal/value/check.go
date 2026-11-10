@@ -1,4 +1,4 @@
-package eval
+package value
 
 import (
 	"bytes"
@@ -14,7 +14,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/internal/expr"
-	"github.com/simon-lentz/yammm/internal/value"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -44,14 +43,14 @@ func constraintFail(format string, args ...any) *CheckError {
 	return &CheckError{Kind: KindConstraintFail, Msg: fmt.Sprintf(format, args...)}
 }
 
-// textOf reads val as the text of a kind held as a string, through the
-// carriers [value.GetString] reads; want names what the kind accepts. A string
+// textOf reads val as the text of a kind held as a string, as [GetString]
+// reads it; want names what the kind accepts. A string
 // value is valid UTF-8, so a string that is not is refused as a value that is
 // no string is: a type mismatch, before any rule of the kind reads its bytes.
 // The message quotes the string by [diag.QuoteValue], so the diagnostic is
 // valid UTF-8 itself and its length does not follow the string's.
 func textOf(val any, want string) (string, *CheckError) {
-	s, ok := value.GetString(val)
+	s, ok := GetString(val)
 	if !ok {
 		return "", typeMismatch("expected %s, got %T", want, val)
 	}
@@ -65,18 +64,18 @@ func textOf(val any, want string) (string, *CheckError) {
 // so a whole float reads as the float it is: 5.0, never 5. The digits are
 // encoding/json's, as the writers emit them: a float32 held in val, a named one
 // included, at its 32-bit width, and any other float (a json.Number's, read
-// into norm by [value.Classify]) at 64 bits. A value encoding/json cannot
+// into norm by [Classify]) at 64 bits. A value encoding/json cannot
 // encode (NaN, ±Inf) is spelled as strconv spells it.
 func floatText(val, norm any) string {
-	f, _ := value.Scalar(val)
+	f, _ := Scalar(val)
 	switch f.(type) {
 	case float32, float64:
 	default:
-		f, _ = value.GetFloat64(norm)
+		f, _ = GetFloat64(norm)
 	}
 	b, err := json.Marshal(f)
 	if err != nil {
-		g, _ := value.GetFloat64(f)
+		g, _ := GetFloat64(f)
 		return strconv.FormatFloat(g, 'g', -1, 64)
 	}
 	if !bytes.ContainsAny(b, ".eE") {
@@ -85,11 +84,11 @@ func floatText(val, norm any) string {
 	return string(b)
 }
 
-// CheckValue validates that val conforms to the given constraint, by the one
-// value rule [github.com/simon-lentz/yammm/internal/value] defines.
-// Returns nil if valid, or an error describing the violation.
-func CheckValue(val any, c schema.Constraint) error {
-	if value.Absent(val) {
+// Check reports whether val conforms to c: nil if it does, or an error that
+// describes the violation. The validator, the snapshot reader and the Neo4j
+// adapter's parameter coercion all judge a value by it.
+func Check(val any, c schema.Constraint) error {
+	if Absent(val) {
 		// No value is valid for an optional property; the required check is
 		// done elsewhere.
 		return nil
@@ -128,15 +127,14 @@ func CheckValue(val any, c schema.Constraint) error {
 		if resolved == nil {
 			return fmt.Errorf("unresolved alias constraint: %s", alias.DataTypeName())
 		}
-		return CheckValue(val, resolved)
+		return Check(val, resolved)
 	default:
 		return fmt.Errorf("unknown constraint kind: %s", c.Kind())
 	}
 }
 
-// CoerceValue coerces a validated value to its canonical Go type.
-// This should be called after CheckValue succeeds to ensure the stored
-// value uses the canonical representation (e.g., int64 for Integer, float64 for Float).
+// Coerce returns val in the form the validator stores at c. Call it after
+// [Check] passes.
 //
 // Canonical types:
 //   - Integer → int64
@@ -150,8 +148,8 @@ func CheckValue(val any, c schema.Constraint) error {
 // when the value is not of the kind: every arm refuses a wrong-typed value,
 // so a caller that coerces without checking gets an error, never the input
 // reported as its own stored form.
-func CoerceValue(val any, c schema.Constraint) (any, error) {
-	if value.Absent(val) {
+func Coerce(val any, c schema.Constraint) (any, error) {
+	if Absent(val) {
 		return nil, nil //nolint:nilnil // This is the expected behavior
 	}
 
@@ -174,20 +172,20 @@ func CoerceValue(val any, c schema.Constraint) (any, error) {
 		if resolved == nil {
 			return nil, fmt.Errorf("unresolved alias constraint: %s", alias.DataTypeName())
 		}
-		return CoerceValue(val, resolved)
+		return Coerce(val, resolved)
 	case schema.KindTimestamp, schema.KindDate, schema.KindUUID:
 		// These three accept two Go representations and store one string. The
-		// rule lives in [value.Canonical] so the wire and the snapshot rebuild
+		// rule lives in [Canonical] so the wire and the snapshot rebuild
 		// render a value the same way this does.
-		// value.Canonical returns its input beside an error; every arm here
+		// Canonical returns its input beside an error; every arm here
 		// returns nil beside one, so a caller never mistakes the input for a
 		// stored form.
 		if err := invalidText(val); err != nil {
 			return nil, err
 		}
-		out, err := value.Canonical(val, c)
+		out, err := Canonical(val, c)
 		if err != nil {
-			return nil, err //nolint:wrapcheck // the canonicalizer's errors name the value and the layout; a wrapper here adds nothing
+			return nil, err
 		}
 		return out, nil
 	case schema.KindString, schema.KindEnum, schema.KindPattern:
@@ -195,7 +193,7 @@ func CoerceValue(val any, c schema.Constraint) (any, error) {
 		// schema/gogen's output. Store the base value: accepting the carrier
 		// and then persisting it would put a type the wire and the writers
 		// never see into the validated instance.
-		s, ok := value.GetString(val)
+		s, ok := GetString(val)
 		if !ok {
 			return nil, fmt.Errorf("cannot coerce %T to string", val)
 		}
@@ -204,7 +202,7 @@ func CoerceValue(val any, c schema.Constraint) (any, error) {
 		}
 		return s, nil
 	case schema.KindBoolean:
-		if b, ok := value.GetBool(val); ok {
+		if b, ok := GetBool(val); ok {
 			return b, nil
 		}
 		return nil, fmt.Errorf("cannot coerce %T to bool", val)
@@ -219,7 +217,7 @@ func CoerceValue(val any, c schema.Constraint) (any, error) {
 // string. The coercion judges no length, membership or pattern. Any other
 // value passes.
 func invalidText(val any) error {
-	if s, ok := value.GetString(val); ok && !utf8.ValidString(s) {
+	if s, ok := GetString(val); ok && !utf8.ValidString(s) {
 		return fmt.Errorf("cannot coerce a string that is not valid UTF-8: %s", diag.QuoteValue(s))
 	}
 	return nil
@@ -228,28 +226,28 @@ func invalidText(val any) error {
 // coerceInteger converts an integer value to int64. A float is refused whole or
 // not, as [checkInteger] refuses it: the lexical rule makes 5.0 a float.
 func coerceInteger(val any) (any, error) {
-	if i, ok := value.GetInt64(val); ok {
+	if i, ok := GetInt64(val); ok {
 		return i, nil
 	}
-	kind, norm := value.Classify(val)
+	kind, norm := Classify(val)
 	switch kind {
-	case value.IntKind:
+	case IntKind:
 		// GetInt64 reads every integer an int64 holds. An integer literal no
 		// int64 holds is refused rather than rounded: its nearest float64 can
 		// be a different integer.
 		if n, ok := norm.(json.Number); ok {
 			return nil, fmt.Errorf("cannot coerce integer %s outside the int64 range to int64", diag.CutValue(string(n)))
 		}
-		if u, ok := value.GetUint64(norm); ok {
+		if u, ok := GetUint64(norm); ok {
 			return nil, fmt.Errorf("cannot coerce integer %d outside the int64 range to int64", u)
 		}
-	case value.FloatKind:
+	case FloatKind:
 		return nil, fmt.Errorf("cannot coerce float %s to int64", floatText(val, norm))
 	}
 	if n, ok := noFloat64Holds(val); ok {
 		return nil, fmt.Errorf("cannot coerce %s to int64: no finite float64 holds it", diag.CutValue(string(n)))
 	}
-	if n, ok := value.UnreadNumber(val); ok {
+	if n, ok := UnreadNumber(val); ok {
 		return nil, fmt.Errorf("cannot coerce json.Number %s to int64: no JSON number literal", diag.QuoteValue(string(n)))
 	}
 	return nil, fmt.Errorf("cannot coerce %T to int64", val)
@@ -260,7 +258,9 @@ func coerceInteger(val any) (any, error) {
 // float64 holds, a json.Number that is no number literal, and a NaN or infinity
 // a caller spells, are refused, as [checkFloat] refuses them.
 func coerceFloat(val any) (any, error) {
-	if n, ok := asNumber(val); ok {
+	// A number literal is read as its own text: [Classify] reads the integer
+	// literal -0 as the int64 0, which has no sign.
+	if n, ok := NumberLiteral(val); ok {
 		// A JSON number literal fails to parse only when no finite float64 holds it.
 		f, err := n.Float64()
 		if err != nil {
@@ -268,42 +268,35 @@ func coerceFloat(val any) (any, error) {
 		}
 		return f, nil
 	}
-	if n, ok := value.UnreadNumber(val); ok {
+	if n, ok := UnreadNumber(val); ok {
 		return nil, fmt.Errorf("cannot coerce json.Number %s to float64: no JSON number literal", diag.QuoteValue(string(n)))
 	}
-	kind, norm := value.Classify(val)
-	if kind != value.FloatKind && kind != value.IntKind {
+	kind, norm := Classify(val)
+	if kind != FloatKind && kind != IntKind {
 		return nil, fmt.Errorf("cannot coerce %T to float64", val)
 	}
-	if f, ok := value.GetFloat64(norm); ok {
+	if f, ok := GetFloat64(norm); ok {
 		// Defense in depth: reject NaN/Inf even if check was bypassed
-		if !value.IsFinite(f) {
+		if !IsFinite(f) {
 			return nil, errors.New("cannot coerce non-finite float (NaN or Inf)")
 		}
 		return f, nil
 	}
-	if i, ok := value.GetInt64(norm); ok {
+	if i, ok := GetInt64(norm); ok {
 		return float64(i), nil
 	}
-	if u, ok := value.GetUint64(norm); ok {
+	if u, ok := GetUint64(norm); ok {
 		return float64(u), nil
 	}
 	return nil, fmt.Errorf("cannot coerce %T to float64", val)
 }
 
-// asNumber returns val as a JSON number literal, read as [value.Scalar] reads
-// it. A number literal is read as its own text at a Float: [value.Classify]
-// reads the integer literal -0 as the int64 0, which has no sign.
-func asNumber(val any) (json.Number, bool) {
-	return value.NumberLiteral(val)
-}
-
 // noFloat64Holds returns val as a number literal when it is one that spells a
-// number no finite float64 holds, read as [asNumber] reads it: the literal
-// [checkFloat] and [coerceFloat] refuse in those words. An Integer refuses it
+// number no finite float64 holds: the literal [checkFloat] and [coerceFloat]
+// refuse in those words. An Integer refuses it
 // in the same words, where it would otherwise name the literal's Go type.
 func noFloat64Holds(val any) (json.Number, bool) {
-	n, ok := asNumber(val)
+	n, ok := NumberLiteral(val)
 	if !ok {
 		return "", false
 	}
@@ -312,8 +305,18 @@ func noFloat64Holds(val any) (json.Number, bool) {
 }
 
 // coerceVector converts any numeric slice to []float64, each element through
-// coerceFloat.
+// coerceFloat. A []float64, the stored form, is copied without boxing its
+// elements.
 func coerceVector(val any) (any, error) {
+	if stored, ok := val.([]float64); ok {
+		for i, f := range stored {
+			if !IsFinite(f) {
+				_, err := coerceFloat(f)
+				return nil, fmt.Errorf("vector element [%d]: %w", i, err)
+			}
+		}
+		return slices.Clone(stored), nil
+	}
 	slice, ok := toSlice(val)
 	if !ok {
 		return nil, fmt.Errorf("cannot coerce %T to []float64", val)
@@ -321,7 +324,7 @@ func coerceVector(val any) (any, error) {
 
 	result := make([]float64, len(slice))
 	for i, elem := range slice {
-		if value.Absent(elem) {
+		if Absent(elem) {
 			return nil, fmt.Errorf("vector element [%d]: expected float, got null", i)
 		}
 		coerced, err := coerceFloat(elem)
@@ -366,31 +369,31 @@ func checkString(val any, c schema.Constraint) error {
 
 // checkInteger validates that val is an integer with optional bounds. A float
 // is refused whatever it holds, a whole 5.0 or 1e2 included: an Integer value
-// is an integer literal or a Go integer, by the rule [value.Classify] applies.
+// is an integer literal or a Go integer, by the rule [Classify] applies.
 func checkInteger(val any, c schema.Constraint) error {
-	kind, norm := value.Classify(val)
+	kind, norm := Classify(val)
 
 	var i int64
 	switch kind {
-	case value.IntKind:
+	case IntKind:
 		var ok bool
-		i, ok = value.GetInt64(norm)
+		i, ok = GetInt64(norm)
 		if !ok {
 			if n, isNumber := norm.(json.Number); isNumber {
 				return typeMismatch("expected integer, got an integer outside the int64 range: %s", diag.CutValue(string(n)))
 			}
-			if u, isUnsigned := value.GetUint64(norm); isUnsigned {
+			if u, isUnsigned := GetUint64(norm); isUnsigned {
 				return typeMismatch("expected integer, got an integer outside the int64 range: %d", u)
 			}
 			return typeMismatch("cannot convert %T to int64", val)
 		}
-	case value.FloatKind:
+	case FloatKind:
 		return typeMismatch("expected integer, got float %s", floatText(val, norm))
 	default:
 		if n, ok := noFloat64Holds(val); ok {
 			return typeMismatch("expected integer, got a number no float64 holds: %s", diag.CutValue(string(n)))
 		}
-		if n, ok := value.UnreadNumber(val); ok {
+		if n, ok := UnreadNumber(val); ok {
 			return typeMismatch("expected integer, got a json.Number that is no JSON number literal: %s", diag.QuoteValue(string(n)))
 		}
 		return typeMismatch("expected integer, got %T", val)
@@ -417,7 +420,7 @@ func checkInteger(val any, c schema.Constraint) error {
 // converts them. A literal no finite float64 holds is refused.
 func checkFloat(val any, c schema.Constraint) error {
 	var f float64
-	if n, isNumber := asNumber(val); isNumber {
+	if n, isNumber := NumberLiteral(val); isNumber {
 		// A JSON number literal fails to parse only when no finite float64 holds it.
 		fv, err := n.Float64()
 		if err != nil {
@@ -425,18 +428,18 @@ func checkFloat(val any, c schema.Constraint) error {
 		}
 		f = fv
 	} else {
-		kind, norm := value.Classify(val)
-		if kind != value.FloatKind && kind != value.IntKind {
-			if n, ok := value.UnreadNumber(val); ok {
+		kind, norm := Classify(val)
+		if kind != FloatKind && kind != IntKind {
+			if n, ok := UnreadNumber(val); ok {
 				return typeMismatch("expected float, got a json.Number that is no JSON number literal: %s", diag.QuoteValue(string(n)))
 			}
 			return typeMismatch("expected float, got %T", val)
 		}
-		if fv, ok := value.GetFloat64(norm); ok {
+		if fv, ok := GetFloat64(norm); ok {
 			f = fv
-		} else if iv, ok := value.GetInt64(norm); ok {
+		} else if iv, ok := GetInt64(norm); ok {
 			f = float64(iv)
-		} else if uv, ok := value.GetUint64(norm); ok {
+		} else if uv, ok := GetUint64(norm); ok {
 			f = float64(uv)
 		} else {
 			return typeMismatch("cannot convert %T to float64", val)
@@ -444,7 +447,7 @@ func checkFloat(val any, c schema.Constraint) error {
 	}
 
 	// Reject NaN and Inf values per spec
-	if !value.IsFinite(f) {
+	if !IsFinite(f) {
 		return constraintFail("float value is not finite (NaN or Inf)")
 	}
 
@@ -465,7 +468,7 @@ func checkFloat(val any, c schema.Constraint) error {
 
 // checkBoolean validates that val is a boolean.
 func checkBoolean(val any) error {
-	if _, ok := value.GetBool(val); ok {
+	if _, ok := GetBool(val); ok {
 		return nil
 	}
 	return typeMismatch("expected boolean, got %T", val)
@@ -477,8 +480,8 @@ func checkBoolean(val any) error {
 func checkTimestamp(val any, c schema.Constraint) error {
 	// A time.Time is judged as the text it is stored as, so the Go path and the
 	// text path refuse the same values.
-	if t, ok := value.GetTime(val); ok {
-		s, readsBack := value.TimestampText(t, c)
+	if t, ok := val.(time.Time); ok {
+		s, readsBack := TimestampText(t, c)
 		if readsBack {
 			return nil
 		}
@@ -490,7 +493,7 @@ func checkTimestamp(val any, c schema.Constraint) error {
 		return refused
 	}
 
-	if _, ok := value.ParseTimestamp(s, c); ok {
+	if _, ok := ParseTimestamp(s, c); ok {
 		return nil
 	}
 	if tc, ok := c.(schema.TimestampConstraint); ok && tc.Format() != "" {
@@ -503,13 +506,13 @@ func checkTimestamp(val any, c schema.Constraint) error {
 // Accepts a time.Time whose stored text reads back, or a string parsed as
 // YYYY-MM-DD.
 //
-// The time.Time arm has to be here rather than only in the coercer: CheckValue
+// The time.Time arm has to be here rather than only in the coercer: [Check]
 // runs first, so rejecting the type here would make the coercer's Date arm
 // unreachable and the generated time.Time field unusable.
 func checkDate(val any) error {
 	// A time.Time is judged as the text it is stored as, as checkTimestamp does.
-	if t, ok := value.GetTime(val); ok {
-		s, readsBack := value.DateText(t)
+	if t, ok := val.(time.Time); ok {
+		s, readsBack := DateText(t)
 		if readsBack {
 			return nil
 		}
@@ -530,7 +533,7 @@ func checkDate(val any) error {
 // Accepts uuid.UUID (always valid) or string (parsed as UUID).
 func checkUUID(val any) error {
 	// A uuid.UUID is always valid.
-	if _, ok := value.GetUUID(val); ok {
+	if _, ok := val.(uuid.UUID); ok {
 		return nil
 	}
 
@@ -584,12 +587,16 @@ func checkPattern(val any, c schema.Constraint) error {
 	return nil
 }
 
-// checkVector validates that val is a float slice with correct dimension.
+// checkVector validates that val is a float slice with correct dimension. A
+// []float64, the stored form, is judged in place: [ListElems] boxes each element.
 func checkVector(val any, c schema.Constraint) error {
-	// Get the slice as []any
-	slice, ok := toSlice(val)
-	if !ok {
-		return typeMismatch("expected array for vector, got %T", val)
+	stored, isStored := val.([]float64)
+	var slice []any
+	if !isStored {
+		var ok bool
+		if slice, ok = toSlice(val); !ok {
+			return typeMismatch("expected array for vector, got %T", val)
+		}
 	}
 
 	vc, ok := c.(schema.VectorConstraint)
@@ -599,24 +606,35 @@ func checkVector(val any, c schema.Constraint) error {
 
 	// Check dimension
 	expected := vc.Dimension()
-	if len(slice) != expected {
-		return constraintFail("vector has %d elements, expected %d", len(slice), expected)
+	if n := len(stored) + len(slice); n != expected {
+		return constraintFail("vector has %d elements, expected %d", n, expected)
 	}
 
+	for i, f := range stored {
+		if !IsFinite(f) {
+			return vectorElement(i, checkFloat(f, nil))
+		}
+	}
 	// Each element is judged by the Float rule, and coerceVector converts each
 	// through coerceFloat, which refuses what checkFloat refuses.
 	for i, elem := range slice {
-		if value.Absent(elem) {
+		if Absent(elem) {
 			return typeMismatch("vector element [%d]: expected float, got null", i)
 		}
 		if err := checkFloat(elem, nil); err != nil {
-			if ce, ok := errors.AsType[*CheckError](err); ok {
-				return &CheckError{Kind: ce.Kind, Msg: fmt.Sprintf("vector element [%d]: %s", i, ce.Msg)}
-			}
-			return fmt.Errorf("vector element [%d]: %w", i, err)
+			return vectorElement(i, err)
 		}
 	}
 	return nil
+}
+
+// vectorElement returns err, the Float rule's refusal of a Vector's element i,
+// naming the element.
+func vectorElement(i int, err error) error {
+	if ce, ok := errors.AsType[*CheckError](err); ok {
+		return &CheckError{Kind: ce.Kind, Msg: fmt.Sprintf("vector element [%d]: %s", i, ce.Msg)}
+	}
+	return fmt.Errorf("vector element [%d]: %w", i, err)
 }
 
 // elementKindName renders an element constraint's kind for a diagnostic,
@@ -650,13 +668,13 @@ func checkList(val any, c schema.Constraint) error {
 	// Check each element
 	elemConstraint := lc.Element()
 	for i, elem := range slice {
-		// CheckValue short-circuits a value that is absent for the
+		// Check short-circuits a value that is absent for the
 		// optional-property slot. No element position is optional, so a null
-		// element, a nil pointer among them, is rejected here.
-		if value.Absent(elem) {
+		// element is rejected here.
+		if Absent(elem) {
 			return typeMismatch("element [%d]: expected %s, got null", i, elementKindName(elemConstraint))
 		}
-		if err := CheckValue(elem, elemConstraint); err != nil {
+		if err := Check(elem, elemConstraint); err != nil {
 			if ce, ok := errors.AsType[*CheckError](err); ok {
 				return &CheckError{
 					Kind: ce.Kind,
@@ -688,10 +706,10 @@ func coerceList(val any, c schema.Constraint) (any, error) {
 		// The check side rejects a null element, so reaching one here means a
 		// caller coerced without checking. Refusing keeps the invariant that a
 		// coerced list holds no nil.
-		if value.Absent(elem) {
+		if Absent(elem) {
 			return nil, fmt.Errorf("element [%d]: expected %s, got null", i, elementKindName(elemConstraint))
 		}
-		coerced, err := CoerceValue(elem, elemConstraint)
+		coerced, err := Coerce(elem, elemConstraint)
 		if err != nil {
 			return nil, fmt.Errorf("element [%d]: %w", i, err)
 		}
@@ -703,60 +721,28 @@ func coerceList(val any, c schema.Constraint) (any, error) {
 
 // toSlice converts val to []any if it's a slice.
 func toSlice(val any) ([]any, bool) {
-	return value.ListElems(val)
+	return ListElems(val)
 }
 
-// TypeChecker is a function that checks if a value matches a type.
-// Returns (true, "") if valid, or (false, message) with an error description.
-type TypeChecker func(val any) (bool, string)
-
-// checkerOf adapts a kind's check function to a TypeChecker, so a datatype
-// check (`=~ Kind`) applies the rule a property of that kind applies when it
-// declares no constraint. A nil constraint carries no bounds, layout or member set.
-func checkerOf(check func(val any, c schema.Constraint) error) TypeChecker {
-	return func(val any) (bool, string) {
-		if err := check(val, nil); err != nil {
-			return false, err.Error()
-		}
-		return true, ""
+// CheckKind reports whether val is a value of kind k under no constraint: no
+// bounds, layout or member set. A value that holds none is of no kind, where
+// [Check] passes one.
+func CheckKind(val any, k schema.ConstraintKind) error {
+	switch k {
+	case schema.KindString:
+		return checkString(val, nil)
+	case schema.KindInteger:
+		return checkInteger(val, nil)
+	case schema.KindFloat:
+		return checkFloat(val, nil)
+	case schema.KindBoolean:
+		return checkBoolean(val)
+	case schema.KindUUID:
+		return checkUUID(val)
+	case schema.KindTimestamp:
+		return checkTimestamp(val, nil)
+	case schema.KindDate:
+		return checkDate(val)
 	}
-}
-
-// IsString returns a TypeChecker that validates string values.
-func IsString() TypeChecker {
-	return checkerOf(checkString)
-}
-
-// IsInteger returns a TypeChecker that validates integer values. A float is
-// refused, whole or not.
-func IsInteger() TypeChecker {
-	return checkerOf(checkInteger)
-}
-
-// IsFloat returns a TypeChecker that validates finite float and integer values.
-func IsFloat() TypeChecker {
-	return checkerOf(checkFloat)
-}
-
-// IsBoolean returns a TypeChecker that validates boolean values.
-func IsBoolean() TypeChecker {
-	return checkerOf(func(val any, _ schema.Constraint) error { return checkBoolean(val) })
-}
-
-// IsUUID returns a TypeChecker that validates UUID values.
-func IsUUID() TypeChecker {
-	return checkerOf(func(val any, _ schema.Constraint) error { return checkUUID(val) })
-}
-
-// IsTimestamp returns a TypeChecker that validates timestamp values: a
-// time.Time whose RFC 3339 text reads back, or a string in RFC 3339. It reads
-// RFC 3339 whatever layout a property declares, so "2030-01-02", which a
-// Timestamp["2006-01-02"] property holds, does not match.
-func IsTimestamp() TypeChecker {
-	return checkerOf(checkTimestamp)
-}
-
-// IsDate returns a TypeChecker that validates date values.
-func IsDate() TypeChecker {
-	return checkerOf(func(val any, _ schema.Constraint) error { return checkDate(val) })
+	return fmt.Errorf("value: no bare check for kind %s", k)
 }

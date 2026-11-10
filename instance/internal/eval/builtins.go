@@ -981,7 +981,7 @@ func builtinTypeOf(_ context.Context, _ builtinEvaluator, lhs any, _ []any, _ []
 // [value.TypeStrata]'s, which groups every numeric together and patterns with
 // strings.
 //
-// A Timestamp, Date or UUID reports as "string": [CoerceValue] renders all
+// A Timestamp, Date or UUID reports as "string": [value.Coerce] renders all
 // three to text, and invariants evaluate on coerced values, so no time.Time or
 // uuid.UUID reaches here.
 func dslTypeName(v any) string {
@@ -1019,17 +1019,7 @@ func dslTypeName(v any) string {
 }
 
 func builtinIsNil(_ context.Context, _ builtinEvaluator, lhs any, _ []any, _ []string, _ expr.Expression, _ Scope) (any, error) {
-	if lhs == nil {
-		return true, nil
-	}
-	// A typed nil: reflect.ValueOf never yields Kind Interface, so that
-	// kind is not listed.
-	rv := reflect.ValueOf(lhs)
-	if rv.Kind() == reflect.Pointer || rv.Kind() == reflect.Map ||
-		rv.Kind() == reflect.Slice || rv.Kind() == reflect.Chan || rv.Kind() == reflect.Func {
-		return rv.IsNil(), nil
-	}
-	return false, nil
+	return value.Absent(lhs), nil
 }
 
 func builtinDefault(_ context.Context, _ builtinEvaluator, lhs any, args []any, _ []string, _ expr.Expression, _ Scope) (any, error) {

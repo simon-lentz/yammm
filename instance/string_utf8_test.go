@@ -34,8 +34,8 @@ type Holder {
 }
 `
 
-// namedText and its pointer are the carriers [instance.Validator] reads a
-// string through beside the plain Go string.
+// namedText is the named type [instance.Validator] reads a string through
+// beside the plain Go string.
 type namedText string
 
 // invalidText is a string whose middle byte is no UTF-8 sequence. Go's regexp
@@ -64,7 +64,6 @@ func TestValidateOne_RefusesAStringThatIsNotValidUTF8(t *testing.T) {
 		t.Fatalf("load schema: %s", res)
 	}
 	v := instance.NewValidator(s)
-	ptr := invalidText
 
 	for _, c := range []struct {
 		name string
@@ -72,7 +71,6 @@ func TestValidateOne_RefusesAStringThatIsNotValidUTF8(t *testing.T) {
 	}{
 		{"a String property", utf8Raw(map[string]any{"text": invalidText})},
 		{"a String property held in a named type", utf8Raw(map[string]any{"text": namedText(invalidText)})},
-		{"a String property held behind a pointer", utf8Raw(map[string]any{"text": &ptr})},
 		{"a Pattern property its pattern matches", utf8Raw(map[string]any{"code": invalidText})},
 		{"an Enum property", utf8Raw(map[string]any{"kind": "a\xff"})},
 		{"a UUID property", utf8Raw(map[string]any{"uid": "6ba7b810-9dad-11d1-80b4-00c04fd430c\xff"})},

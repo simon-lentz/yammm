@@ -109,30 +109,6 @@ func TestTypeStrata_NamedTypesTakeTheirUnderlyingKind(t *testing.T) {
 	}
 }
 
-// A pointer takes the strata of what it points at, and a nil pointer is nil.
-func TestTypeStrata_PointersFollowTheirTarget(t *testing.T) {
-	i, f, s, b := int64(1), 1.5, "x", true
-	var nilPtr *int64
-
-	for _, tt := range []struct {
-		name  string
-		input any
-		want  int
-	}{
-		{"*int64", &i, value.NumericStrata},
-		{"*float64", &f, value.NumericStrata},
-		{"*string", &s, value.StringStrata},
-		{"*bool", &b, value.BoolStrata},
-		{"nil *int64", nilPtr, value.NilStrata},
-	} {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := value.TypeStrata(tt.input); got != tt.want {
-				t.Errorf("TypeStrata(%T) = %d, want %d", tt.input, got, tt.want)
-			}
-		})
-	}
-}
-
 // An immutable.Slice is what Value.Unwrap returns for a List- or Vector-typed
 // property, and it is a struct, so no reflect kind names it. Without the
 // explicit case every invariant comparing a list was an evaluation error.
@@ -1112,31 +1088,25 @@ func TestCompareUint64Float64(t *testing.T) {
 // TestOrder_StringComparableEdgeCases tests edge cases in toStringComparable
 // through the Order function (toStringComparable is unexported).
 func TestOrder_StringComparableEdgeCases(t *testing.T) {
-	// A nil regexp holds no value, as any nil pointer: it orders as nil, before
-	// a string, and equals every other value that holds none.
+	// A nil regexp is a pointer like any other: it orders against nothing and
+	// equals nothing, itself and nil included.
 	var nilRegexp *regexp.Regexp
-	for name, tc := range map[string]struct {
-		left, right any
-		want        int
-	}{
-		"nil regexp vs string":     {nilRegexp, "test", -1},
-		"string vs nil regexp":     {"test", nilRegexp, 1},
-		"nil regexp vs nil regexp": {nilRegexp, nilRegexp, 0},
-		"nil regexp vs nil":        {nilRegexp, nil, 0},
-	} {
-		t.Run(name, func(t *testing.T) {
-			if got, err := value.Order(tc.left, tc.right); err != nil || got != tc.want {
-				t.Errorf("Order = %d, %v; want %d", got, err, tc.want)
+	for name, other := range map[string]any{"a string": "test", "itself": nilRegexp, "nil": nil, "a nil slice": []any(nil)} {
+		t.Run("nil regexp and "+name, func(t *testing.T) {
+			if got, err := value.Order(nilRegexp, other); err == nil {
+				t.Errorf("Order(nil regexp, %s) = %d, want a refusal", name, got)
+			}
+			if got, err := value.Order(other, nilRegexp); err == nil {
+				t.Errorf("Order(%s, nil regexp) = %d, want a refusal", name, got)
+			}
+			if value.Equal(nilRegexp, other) || value.Equal(other, nilRegexp) {
+				t.Errorf("Equal(nil regexp, %s) = true", name)
 			}
 		})
 	}
-	t.Run("a nil regexp equals every value that holds none", func(t *testing.T) {
-		for _, other := range []any{nil, nilRegexp, (*int)(nil), []any(nil)} {
-			if !value.Equal(nilRegexp, other) || !value.Equal(other, nilRegexp) {
-				t.Errorf("Equal(nil regexp, %#v) = false; want true both ways", other)
-			}
-		}
-	})
+	if s := value.TypeStrata(nilRegexp); s != value.InvalidStrata {
+		t.Errorf("TypeStrata(nil regexp) = %d, want InvalidStrata", s)
+	}
 
 	// Test valid regexp comparisons
 	t.Run("regexp vs regexp equal", func(t *testing.T) {

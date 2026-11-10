@@ -9,80 +9,7 @@ import (
 	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/instance/internal/eval"
 	"github.com/simon-lentz/yammm/internal/expr"
-	"github.com/simon-lentz/yammm/schema"
 )
-
-// checkFloat accepts every unsigned value coerceFloat converts: a uint64
-// above math.MaxInt64 is a finite float, not a type mismatch, and the largest
-// uintptr is accepted whatever its width.
-func TestCheckFloat_AcceptsUnsignedAboveInt64(t *testing.T) {
-	t.Parallel()
-	c := schema.NewFloatConstraint()
-	for name, tc := range map[string]struct {
-		val  any
-		want float64
-	}{
-		"uint64":  {uint64(1<<63 + 5), float64(1<<63 + 5)},
-		"uintptr": {^uintptr(0), float64(^uintptr(0))},
-	} {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-			if err := eval.CheckValue(tc.val, c); err != nil {
-				t.Fatalf("CheckValue(%T) = %v, want nil", tc.val, err)
-			}
-			got, err := eval.CoerceValue(tc.val, c)
-			if err != nil || got != tc.want {
-				t.Errorf("CoerceValue(%T) = %v, %v; want %v", tc.val, got, err, tc.want)
-			}
-		})
-	}
-}
-
-// The String, Enum, Pattern and Boolean arms of CoerceValue refuse a value of
-// the wrong kind, as every other arm does: a wrong-typed value is an error,
-// never reported as its own stored form. A nil pointer, and an interface
-// holding one, holds no value, and coerces to nil at every kind.
-func TestCoerceValue_RefusesTheWrongKind(t *testing.T) {
-	t.Parallel()
-	type carrier string
-	var nilStr *string
-	var heldNil any = nilStr
-	refuse := []struct {
-		name string
-		val  any
-		c    schema.Constraint
-	}{
-		{"int at String", 42, schema.NewStringConstraint()},
-		{"string at Boolean", "true", schema.NewBooleanConstraint()},
-		{"int at Enum", 7, schema.NewEnumConstraint([]string{"a"})},
-		{"int at Pattern", 7, schema.NewPatternConstraint(nil)},
-		{"json.Number at String", json.Number("42"), schema.NewStringConstraint()},
-	}
-	for _, tc := range refuse {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			if got, err := eval.CoerceValue(tc.val, tc.c); err == nil {
-				t.Errorf("CoerceValue(%#v) = %#v, nil; want an error", tc.val, got)
-			}
-		})
-	}
-	if got, err := eval.CoerceValue(carrier("x"), schema.NewStringConstraint()); err != nil || got != "x" {
-		t.Errorf("a named string carrier must coerce to its base: got %#v, %v", got, err)
-	}
-	if got, err := eval.CoerceValue(true, schema.NewBooleanConstraint()); err != nil || got != true {
-		t.Errorf("a bool must coerce to itself: got %#v, %v", got, err)
-	}
-	for _, c := range []schema.Constraint{schema.NewStringConstraint(), schema.NewIntegerConstraint(), schema.NewTimestampConstraint()} {
-		for _, v := range []any{nilStr, &heldNil} {
-			if got, err := eval.CoerceValue(v, c); err != nil || got != nil {
-				t.Errorf("CoerceValue(%T holding nil) at %s = %#v, %v; want nil, nil", v, c.Kind(), got, err)
-			}
-			if err := eval.CheckValue(v, c); err != nil {
-				t.Errorf("CheckValue(%T holding nil) at %s = %v; want nil", v, c.Kind(), err)
-			}
-		}
-	}
-}
 
 // A datatype check (`=~ Kind`) is the property checker's rule for that kind:
 // what a property of the kind refuses, the check refuses.
@@ -112,6 +39,10 @@ func TestDatatypeCheck_IsTheCheckerRule(t *testing.T) {
 		{"an int is not a Timestamp", 12345, "Timestamp", false},
 		{"a date in a declared layout is not a Timestamp", "2030-01-02", "Timestamp", false},
 		{"nil is no kind", nil, "String", false},
+		{"a pointer to a string is not a String", new("x"), "String", false},
+		{"a nil pointer is not a String", (*string)(nil), "String", false},
+		{"a pointer to an int64 is not an Integer", new(int64(3)), "Integer", false},
+		{"a pointer to a time is not a Timestamp", new(time.Date(2024, 1, 15, 0, 0, 0, 0, time.UTC)), "Timestamp", false},
 	}
 	for _, r := range rows {
 		t.Run(r.name, func(t *testing.T) {

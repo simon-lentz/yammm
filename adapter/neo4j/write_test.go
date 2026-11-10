@@ -329,38 +329,6 @@ func TestBatchNodeQueries_PropertyCoercion(t *testing.T) {
 	}
 }
 
-func TestCoerceSlice_TimeTimeElements(t *testing.T) {
-	t.Parallel()
-	s := loadSchema(t, "list_properties.yammm")
-	st, ok := s.Type("Entity")
-	if !ok {
-		t.Fatal("Entity not found")
-	}
-	prop, ok := st.Property("times")
-	if !ok {
-		t.Fatal("times property not found")
-	}
-
-	t1 := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
-	t2 := time.Date(2024, 6, 15, 12, 30, 0, 0, time.UTC)
-	raw := []any{t1, t2}
-
-	result, err := coerceSlice(raw, prop.Constraint())
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	out, ok := result.([]time.Time)
-	if !ok {
-		t.Fatalf("expected []time.Time, got %T", result)
-	}
-	if len(out) != 2 {
-		t.Fatalf("length = %d; want 2", len(out))
-	}
-	if !out[0].Equal(t1) || !out[1].Equal(t2) {
-		t.Errorf("values mismatch: got %v", out)
-	}
-}
-
 func TestCoerceSlice_DateStringElements(t *testing.T) {
 	t.Parallel()
 	s := loadSchema(t, "list_properties.yammm")
@@ -452,35 +420,6 @@ func TestCoerceSlice_TemporalParseFailure(t *testing.T) {
 			t.Error("expected an error on unparseable Timestamp elements, got nil")
 		}
 	})
-}
-
-func TestCoerceSlice_VectorElements(t *testing.T) {
-	t.Parallel()
-	// A Vector property carried as []any of int64, which no validator or .ys load
-	// stores, must reach the driver as []float64, not []any. A Vector is
-	// float-valued by definition, so
-	// it coerces elementwise exactly like a List<Float>.
-	s := loadSchema(t, "basic.yammm")
-	st, ok := s.Type("Entity")
-	if !ok {
-		t.Fatal("Entity not found")
-	}
-	prop, ok := st.Property("embedding") // Vector[3]
-	if !ok {
-		t.Fatal("embedding property not found")
-	}
-	raw := []any{int64(1), int64(2), 3.5}
-	result, err := coerceSlice(raw, prop.Constraint())
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	out, ok := result.([]float64)
-	if !ok {
-		t.Fatalf("expected []float64 for a Vector, got %T", result)
-	}
-	if len(out) != 3 || out[0] != 1 || out[1] != 2 || out[2] != 3.5 {
-		t.Fatalf("vector elements not coerced to float64: %#v", out)
-	}
 }
 
 func TestCoerceSlice_ListValueUnderScalarConstraintErrors(t *testing.T) {
@@ -816,7 +755,7 @@ func TestCoerceRelProps(t *testing.T) {
 
 	out, err := coerceRelProps(map[string]any{
 		"observed_at": "2024-01-01T00:00:00Z",
-		"weight":      int64(5),
+		"weight":      5.0,
 		"undeclared":  "passthrough",
 	}, rel)
 	if err != nil {
@@ -845,6 +784,13 @@ func TestCoerceRelProps(t *testing.T) {
 	}
 	if read["weight"] != float64(5) || read["undeclared"] != int64(7) {
 		t.Errorf("json.Number values coerced to %#v and %#v, want float64(5) and int64(7)", read["weight"], read["undeclared"])
+	}
+
+	// A slice that holds none becomes nil, whatever its element type: the driver
+	// packs a nil slice as an empty list.
+	none, err := coerceRelProps(map[string]any{"weight": []float64(nil), "undeclared": []string(nil)}, rel)
+	if err != nil || none["weight"] != nil || none["undeclared"] != nil {
+		t.Errorf("nil slices coerced to %#v, %v; want nil at each key", none, err)
 	}
 
 	// A nil relation passes through unchanged.
@@ -916,45 +862,6 @@ func TestCoerceSlice_TypeMismatchErrors(t *testing.T) {
 				t.Errorf("List<%s> with a wrong-type element: want error, got nil", tc.name)
 			}
 		})
-	}
-}
-
-func TestCoerceSlice_IntegerWidthRepair(t *testing.T) {
-	t.Parallel()
-	// A List<Integer> hand-built with narrower or unsigned int widths must widen to
-	// []int64 — the same width repair coerceSlice applies for Float — rather than
-	// erroring on a non-int64 element (the prior strict int64-only behavior).
-	raw := []any{
-		int(1), int8(2), int16(3), int32(4), int64(5),
-		uint(6), uint8(7), uint16(8), uint32(9), uint64(10),
-	}
-	got, err := coerceSlice(raw, schema.NewListConstraint(schema.NewIntegerConstraint()))
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	out, ok := got.([]int64)
-	if !ok {
-		t.Fatalf("got %T, want []int64", got)
-	}
-	want := []int64{1, 2, 3, 4, 5, 6, 7, 8, 9, 10}
-	if len(out) != len(want) {
-		t.Fatalf("len = %d, want %d", len(out), len(want))
-	}
-	for i := range want {
-		if out[i] != want[i] {
-			t.Errorf("out[%d] = %d, want %d", i, out[i], want[i])
-		}
-	}
-}
-
-func TestCoerceSlice_IntegerOverflowErrors(t *testing.T) {
-	t.Parallel()
-	// A uint64 beyond the int64 range cannot be represented; coerceSlice errors
-	// rather than wrapping to a negative int64 (matching the validator's guard).
-	// 9223372036854775808 == math.MaxInt64 + 1.
-	raw := []any{uint64(9223372036854775808)}
-	if _, err := coerceSlice(raw, schema.NewListConstraint(schema.NewIntegerConstraint())); err == nil {
-		t.Fatal("want error for a uint64 exceeding int64 max, got nil")
 	}
 }
 

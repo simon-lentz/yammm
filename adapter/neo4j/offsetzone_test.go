@@ -46,26 +46,16 @@ func TestCoerce_OffsetOnlyInstantsCarryTheDriverZoneName(t *testing.T) {
 	}
 }
 
-// TestCoerce_UTCAndNamedZonesAreUntouched is the control. A named location is
-// a zone identifier the server resolves and carries more than an offset does,
-// so the repair must leave both alone.
-func TestCoerce_UTCAndNamedZonesAreUntouched(t *testing.T) {
+// TestCoerce_UTCTextStaysUTC is the control: UTC is a zone identifier every
+// server resolves, so the repair leaves it alone.
+func TestCoerce_UTCTextStaysUTC(t *testing.T) {
 	t.Parallel()
 	c := schema.NewTimestampConstraint()
-
-	utc := coerceTime(t, c, "2026-08-19T12:00:00Z")
-	if zone, _ := utc.Zone(); zone != "UTC" {
-		t.Errorf("a Z timestamp landed in zone %q, want UTC", zone)
-	}
-
-	berlin, err := time.LoadLocation("Europe/Berlin")
-	if err != nil {
-		t.Skipf("no tzdata: %v", err)
-	}
-	in := time.Date(2026, 8, 19, 12, 0, 0, 0, berlin)
-	got := coerceTime(t, c, in)
-	if got.Location().String() != "Europe/Berlin" {
-		t.Errorf("a named location became %q, want Europe/Berlin", got.Location())
+	for _, in := range []any{"2026-08-19T12:00:00Z", time.Date(2026, 8, 19, 12, 0, 0, 0, time.UTC)} {
+		got := coerceTime(t, c, in)
+		if got.Location() != time.UTC {
+			t.Errorf("%#v landed in %q, want UTC", in, got.Location())
+		}
 	}
 }
 
@@ -200,11 +190,12 @@ func TestCoerce_IsHostIndependent(t *testing.T) {
 	}
 }
 
-// TestCoerce_ResolvableCallerLocationIsKept holds the boundary: a caller's
-// location is kept when the host's tz database resolves its name — an IANA
-// name carries more than an offset does — and only then.
-// TestCoerce_UnresolvableZoneNameIsSentAsOffset is the other side.
-func TestCoerce_ResolvableCallerLocationIsKept(t *testing.T) {
+// TestCoerce_ACallersLocationIsSentAsItsOffset holds the stored-form rule for an
+// instant: a time.Time is read as the text the validator stores for it, which
+// carries an offset and no zone name, so a caller's location reaches the driver
+// as its offset, as the write path sends the same instant. An IANA name and a
+// legacy name the host's tz database resolves are no exception.
+func TestCoerce_ACallersLocationIsSentAsItsOffset(t *testing.T) {
 	t.Parallel()
 	c := schema.NewTimestampConstraint()
 
@@ -212,22 +203,26 @@ func TestCoerce_ResolvableCallerLocationIsKept(t *testing.T) {
 	if err != nil {
 		t.Skipf("no tzdata: %v", err)
 	}
-	got := coerceTime(t, c, time.Date(2026, 8, 19, 12, 0, 0, 0, berlin))
-	if got.Location().String() != "Europe/Berlin" {
-		t.Errorf("a caller-supplied IANA location became %q", got.Location())
-	}
-
-	// A legacy name the database still holds is a zone identifier too.
-	est := coerceTime(t, c, time.Date(2026, 8, 19, 12, 0, 0, 0, time.FixedZone("EST", -5*60*60)))
-	if est.Location().String() != "EST" {
-		t.Errorf("a resolvable legacy name became %q", est.Location())
-	}
-
-	// The driver's own offset sentinel is already the shape it sends.
-	in := time.Date(2026, 8, 19, 12, 0, 0, 0, time.FixedZone(driverOffsetZoneName, 2*60*60))
-	got = coerceTime(t, c, in)
-	if zone, offset := got.Zone(); zone != driverOffsetZoneName || offset != 2*60*60 {
-		t.Errorf("the offset sentinel moved to %q/%d", zone, offset)
+	for name, tc := range map[string]struct {
+		loc    *time.Location
+		offset int
+	}{
+		"an IANA location":         {berlin, 2 * 60 * 60},
+		"a resolvable legacy name": {time.FixedZone("EST", -5*60*60), -5 * 60 * 60},
+		"the offset sentinel":      {time.FixedZone(driverOffsetZoneName, 2*60*60), 2 * 60 * 60},
+	} {
+		in := time.Date(2026, 8, 19, 12, 0, 0, 0, tc.loc)
+		got := coerceTime(t, c, in)
+		if zone, offset := got.Zone(); zone != driverOffsetZoneName || offset != tc.offset || got.Location().String() != driverOffsetZoneName {
+			t.Errorf("%s: zone = %q/%d in %q, want %q/%d", name, zone, offset, got.Location(), driverOffsetZoneName, tc.offset)
+		}
+		if !got.Equal(in) {
+			t.Errorf("%s: coerced %s, want the same instant as %s", name, got, in)
+		}
+		// The text the validator stores for the instant sends the same value.
+		if text := coerceTime(t, c, in.Format(time.RFC3339Nano)); !text.Equal(got) || text.Location().String() != got.Location().String() {
+			t.Errorf("%s: its stored text sends %s in %q, the time.Time %s in %q", name, text, text.Location(), got, got.Location())
+		}
 	}
 }
 
@@ -241,10 +236,9 @@ func withLocal(t *testing.T, loc *time.Location) {
 	time.Local = loc
 }
 
-// TestCoerce_HostLocalTimeValueIsSentAsOffset covers the time.Time arm, which
-// the text-arm tests above never reach: a value built in time.Local — what
-// time.Now produces — must never carry the host's location to the driver,
-// whatever name that location resolves to on this host.
+// TestCoerce_HostLocalTimeValueIsSentAsOffset covers a time.Time built in
+// time.Local, what time.Now produces: it must never carry the host's location
+// to the driver, whatever name that location resolves to on this host.
 //
 // Not parallel: it writes a package-level variable of the standard library.
 func TestCoerce_HostLocalTimeValueIsSentAsOffset(t *testing.T) {
@@ -278,11 +272,10 @@ func TestCoerce_HostLocalTimeValueIsSentAsOffset(t *testing.T) {
 	}
 }
 
-// TestCoerce_UnresolvableZoneNameIsSentAsOffset pins the rule for a caller
-// location whose name the host cannot resolve: the driver would send the
-// name as a time-zone identifier and the server would refuse it, so the
-// instant is re-expressed in its offset. "Local" is included because
-// time.LoadLocation resolves that name to time.Local, which would keep it.
+// A caller's location goes as its offset whatever its name, one the host cannot
+// resolve and "Local" included: the instant goes through its stored text, which
+// holds no name. [TestDriverZone_AnUnnamedOrUnresolvableZoneGoesAsItsOffset]
+// pins the rule for a name that does reach driverZone.
 func TestCoerce_UnresolvableZoneNameIsSentAsOffset(t *testing.T) {
 	t.Parallel()
 	for name, loc := range map[string]*time.Location{

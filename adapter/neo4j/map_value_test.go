@@ -1,6 +1,7 @@
 package neo4j
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/simon-lentz/yammm/schema"
@@ -16,7 +17,7 @@ func TestBatchQueries_RefuseAMapValue(t *testing.T) {
 		want string
 	}{
 		"a String":         {holderValues{props: map[string]any{"text": map[string]any{"a": "b"}}}, `type "Holder": property "text": coerce String: ` + refusal},
-		"a list element":   {holderValues{props: map[string]any{"tags": []any{map[string]any{"a": "b"}}}}, `type "Holder": property "tags": list element 0: cannot use map[string]interface {} as a String element (want string)`},
+		"a list element":   {holderValues{props: map[string]any{"tags": []any{map[string]any{"a": "b"}}}}, `type "Holder": property "tags": list element 0: coerce String: ` + refusal},
 		"a part's String":  {holderValues{note: map[string]any{"body": map[string]any{"a": "b"}}}, `part holder__Note: property "body": coerce String: ` + refusal},
 		"an edge's String": {holderValues{label: map[string]any{"a": "b"}}, `relation "LINK": property "label": coerce String: ` + refusal},
 	} {
@@ -35,7 +36,8 @@ func TestBatchQueries_RefuseAMapValue(t *testing.T) {
 
 type namedMap map[string]any
 
-// coerceScalar and CoerceParams refuse a map whatever its key and element types.
+// coerceScalar refuses a map whatever its key and element types, and
+// CoerceParams refuses one as the validator does.
 func TestCoerceScalar_RefusesAMapValue(t *testing.T) {
 	t.Parallel()
 	for name, tc := range map[string]struct {
@@ -56,8 +58,12 @@ func TestCoerceScalar_RefusesAMapValue(t *testing.T) {
 		}
 	}
 	_, err := CoerceParams(map[string]any{"p": map[string]any{"q": map[string]any{}}}, ParamTypes{"p.q": schema.NewStringConstraint()})
-	if want := `param "p.q": coerce String: cannot store map[string]interface {}, a map, as a property value`; err == nil || err.Error() != want {
+	if want := `param "p.q": expected string, got map[string]interface {}`; !errors.Is(err, ErrUnrepresentable) || err.Error() != want {
 		t.Errorf("CoerceParams, a map in a nested map: error = %v; want %s", err, want)
+	}
+	_, err = CoerceParams(map[string]any{"p": map[string]string{"a": "b"}}, ParamTypes{"p": schema.NewStringConstraint()})
+	if want := `param "p": expected string, got map[string]string`; !errors.Is(err, ErrUnrepresentable) || err.Error() != want {
+		t.Errorf("CoerceParams, a map[string]string at a String: error = %v; want %s", err, want)
 	}
 }
 

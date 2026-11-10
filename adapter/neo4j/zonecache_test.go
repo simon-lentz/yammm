@@ -56,19 +56,31 @@ func TestDriverZone_ResolvableNameWithContradictingOffsetGoesAsOffset(t *testing
 }
 
 // A location whose name AND offset both agree with the host's tz database is
-// kept, so a genuinely zoned value still reaches the server as a zone
-// identifier rather than being flattened to an offset.
+// kept and reaches the server as a zone identifier. time.Parse mints one from a
+// layout with a zone-abbreviation token and the text GMT.
 func TestDriverZone_AgreeingNameIsKept(t *testing.T) {
 	t.Parallel()
-	loc, err := time.LoadLocation("America/Denver")
-	if err != nil {
-		t.Skipf("host has no tz database entry for America/Denver: %v", err)
+	if zoneNamed("GMT") == nil {
+		t.Skip("host has no tz database entry for GMT")
 	}
-	in := time.Date(2024, 6, 1, 12, 0, 0, 0, loc)
-
+	in := time.Date(2024, 6, 1, 12, 0, 0, 0, time.FixedZone("GMT", 0))
 	got := driverZone(in)
-	if got.Location() != loc {
-		t.Errorf("driverZone re-expressed an agreeing zone as %v, want it kept as %v", got.Location(), loc)
+	if got.Location() != in.Location() {
+		t.Errorf("driverZone re-expressed an agreeing zone as %v, want it kept as %v", got.Location(), in.Location())
+	}
+}
+
+// A location with no name, or with a name the host's tz database does not hold,
+// goes as its offset: the server reads neither as a time-zone identifier.
+func TestDriverZone_AnUnnamedOrUnresolvableZoneGoesAsItsOffset(t *testing.T) {
+	t.Parallel()
+	for _, loc := range []*time.Location{time.FixedZone("", 0), time.FixedZone("", 3600), time.FixedZone("QQQ", 0), time.FixedZone("QQQ", 3600)} {
+		in := time.Date(2024, 6, 1, 12, 0, 0, 0, loc)
+		_, want := in.Zone()
+		got := driverZone(in)
+		if zone, offset := got.Zone(); zone != driverOffsetZoneName || offset != want || !got.Equal(in) {
+			t.Errorf("driverZone(%q at %d) = %s in zone %q at %d; want the same instant in %q at %d", loc, want, got, zone, offset, driverOffsetZoneName, want)
+		}
 	}
 }
 
@@ -77,9 +89,8 @@ func TestDriverZone_AgreeingNameIsKept(t *testing.T) {
 // toward zero, so a pre-1970 instant with a time of day landed a day late —
 // measured against a live server as 1969-07-20T18:00:00Z stored as 1969-07-21.
 //
-// It drives [coerceScalar], not calendarDate, and covers all THREE Date arms: the
-// rule holds only where it is wired in, and the dbtype.Date arm passed its
-// input through for a release after the time.Time arm was fixed.
+// It drives [CoerceParams], not calendarDate, and covers all three forms a
+// caller hands a Date in: the rule holds only where it is wired in.
 func TestCoerceDate_KeepsTheWallClockDate(t *testing.T) {
 	t.Parallel()
 	instants := []struct {
@@ -95,45 +106,37 @@ func TestCoerceDate_KeepsTheWallClockDate(t *testing.T) {
 			time.Date(2001, 7, 20, 23, 0, 0, 0, time.FixedZone("X", -5*3600)), "2001-07-20",
 		},
 	}
-	arms := []struct {
-		arm  string
+	forms := []struct {
+		form string
 		wrap func(time.Time) any
 	}{
 		{"time.Time", func(t time.Time) any { return t }},
 		{"dbtype.Date", func(t time.Time) any { return dbtype.Date(t) }},
+		{"string", func(t time.Time) any { return t.Format(time.DateOnly) }},
 	}
 
-	for _, arm := range arms {
+	types := ParamTypes{"d": schema.NewDateConstraint()}
+	for _, form := range forms {
 		for _, tc := range instants {
-			out, err := coerceScalar(schema.DateConstraint{}, arm.wrap(tc.in))
+			out, err := CoerceParams(map[string]any{"d": form.wrap(tc.in)}, types)
 			if err != nil {
-				t.Errorf("%s/%s: coerceScalar: %v", arm.arm, tc.name, err)
+				t.Errorf("%s/%s: CoerceParams: %v", form.form, tc.name, err)
 				continue
 			}
-			d, ok := out.(dbtype.Date)
+			d, ok := out["d"].(dbtype.Date)
 			if !ok {
-				t.Errorf("%s/%s: coerceScalar returned %T, want dbtype.Date", arm.arm, tc.name, out)
+				t.Errorf("%s/%s: CoerceParams returned %T, want dbtype.Date", form.form, tc.name, out["d"])
 				continue
 			}
 			got := time.Time(d)
 			if got.Format(time.DateOnly) != tc.want {
-				t.Errorf("%s/%s: coerceScalar(%s) = %s, want %s",
-					arm.arm, tc.name, tc.in.Format(time.RFC3339), got.Format(time.DateOnly), tc.want)
+				t.Errorf("%s/%s: CoerceParams(%s) = %s, want %s",
+					form.form, tc.name, tc.in.Format(time.RFC3339), got.Format(time.DateOnly), tc.want)
 			}
-			if h, m, sec := got.Clock(); h|m|sec != 0 {
-				t.Errorf("%s/%s: a date reached the driver carrying %02d:%02d:%02d",
-					arm.arm, tc.name, h, m, sec)
+			if h, m, sec := got.Clock(); h|m|sec != 0 || got.Location() != time.UTC {
+				t.Errorf("%s/%s: a date reached the driver carrying %02d:%02d:%02d in %q",
+					form.form, tc.name, h, m, sec, got.Location())
 			}
 		}
-	}
-
-	// The string arm parses with time.DateOnly, which is midnight by
-	// construction; it is here so all three arms are named in one place.
-	out, err := coerceScalar(schema.DateConstraint{}, "1969-07-20")
-	if err != nil {
-		t.Fatalf("string arm: coerceScalar: %v", err)
-	}
-	if got := time.Time(out.(dbtype.Date)); got.Format(time.DateOnly) != "1969-07-20" {
-		t.Errorf("string arm: coerceScalar = %s, want 1969-07-20", got.Format(time.DateOnly))
 	}
 }

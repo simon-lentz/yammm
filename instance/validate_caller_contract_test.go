@@ -31,12 +31,7 @@ func codes(res diag.Result) []string {
 	return out
 }
 
-// A typed nil pointer — the shape schema/gogen emits for an absent optional
-// scalar — is the absent value at every null-rule site, exactly as an
-// interface nil is, and so is a nil slice or map.
-func TestTypedNilPointer_IsAbsent(t *testing.T) {
-	t.Parallel()
-	s := loadT(t, `schema "p"
+const nullRuleSchema = `schema "p"
 
 part type Line {
 	id String primary
@@ -55,26 +50,13 @@ type T {
 	--> AT (one) Co
 	*-> LINES (many) Line
 }
-`)
-	v := instance.NewValidator(s)
-	var nilStr *string
-	t.Run("optional pointer is dropped", func(t *testing.T) {
-		t.Parallel()
-		vi, res := v.ValidateOne(t.Context(), "T", instance.RawInstance{Properties: map[string]any{"id": "x", "must": "m", "nick": nilStr}})
-		if res.Err() != nil {
-			t.Fatalf("refused: %v", res.Err())
-		}
-		if _, ok := vi.Property("nick"); ok {
-			t.Error("an absent optional was stored")
-		}
-	})
-	t.Run("required pointer is missing, not a type mismatch", func(t *testing.T) {
-		t.Parallel()
-		_, res := v.ValidateOne(t.Context(), "T", instance.RawInstance{Properties: map[string]any{"id": "x", "must": nilStr}})
-		if !res.HasCode(diag.E_MISSING_REQUIRED) || res.HasCode(diag.E_TYPE_MISMATCH) {
-			t.Errorf("want E_MISSING_REQUIRED alone, got %v", codes(res))
-		}
-	})
+`
+
+// A nil slice or a nil map is the absent value at every null-rule site, as an
+// interface nil is.
+func TestValidateOne_ANilSliceOrMapIsAbsentAtEveryNullRuleSite(t *testing.T) {
+	t.Parallel()
+	v := instance.NewValidator(loadT(t, nullRuleSchema))
 	t.Run("optional nil slice is dropped", func(t *testing.T) {
 		t.Parallel()
 		for _, nilTags := range []any{[]any(nil), []string(nil)} {
@@ -99,28 +81,111 @@ type T {
 			}
 		}
 	})
-	t.Run("edge value pointer is the null an explicit null is", func(t *testing.T) {
+	t.Run("FK component nil slice is a null component", func(t *testing.T) {
+		t.Parallel()
+		_, res := v.ValidateOne(t.Context(), "T", instance.RawInstance{Properties: map[string]any{"id": "x", "must": "m", "at": map[string]any{"_target_id": []string(nil)}}})
+		if !strings.Contains(res.String(), `FK field "_target_id": expected string, got null`) {
+			t.Errorf("a nil slice at an FK component was not reported as null: %s", res)
+		}
+	})
+}
+
+// A nil pointer is a value of no form at every null-rule site, where an
+// interface nil is the absent value: each site refuses it by its Go type and
+// none reads it as null or as missing. The edge-property and composition sites
+// are [TestValidateOne_APointerIsNoValueAtAnEdgePropertyOrAComposition]'s.
+func TestValidateOne_ANilPointerIsNoAbsentValueAtAnyNullRuleSite(t *testing.T) {
+	t.Parallel()
+	v := instance.NewValidator(loadT(t, nullRuleSchema))
+	var nilStr *string
+	t.Run("optional property", func(t *testing.T) {
+		t.Parallel()
+		vi, res := v.ValidateOne(t.Context(), "T", instance.RawInstance{Properties: map[string]any{"id": "x", "must": "m", "nick": nilStr}})
+		if !slices.Equal(codes(res), []string{diag.E_TYPE_MISMATCH.String()}) || !vi.IsZero() {
+			t.Errorf("want E_TYPE_MISMATCH alone and no instance, got %v", codes(res))
+		}
+		if !strings.Contains(res.String(), "expected string, got *string") {
+			t.Errorf("the refusal does not name the pointer: %s", res)
+		}
+	})
+	t.Run("required property", func(t *testing.T) {
+		t.Parallel()
+		_, res := v.ValidateOne(t.Context(), "T", instance.RawInstance{Properties: map[string]any{"id": "x", "must": nilStr}})
+		if !slices.Equal(codes(res), []string{diag.E_TYPE_MISMATCH.String()}) {
+			t.Errorf("want E_TYPE_MISMATCH alone, got %v", codes(res))
+		}
+	})
+	t.Run("edge value", func(t *testing.T) {
 		t.Parallel()
 		var nilEdge *map[string]any
-		_, control := v.ValidateOne(t.Context(), "T", instance.RawInstance{Properties: map[string]any{"id": "x", "must": "m", "at": nil}})
 		_, res := v.ValidateOne(t.Context(), "T", instance.RawInstance{Properties: map[string]any{"id": "x", "must": "m", "at": nilEdge}})
-		if !control.HasCode(diag.E_EDGE_SHAPE_MISMATCH) || !res.HasCode(diag.E_EDGE_SHAPE_MISMATCH) {
-			t.Errorf("explicit null drew %v, typed nil pointer drew %v; want E_EDGE_SHAPE_MISMATCH from both", codes(control), codes(res))
+		if !res.HasCode(diag.E_EDGE_SHAPE_MISMATCH) || !strings.Contains(res.String(), "got *map[string]interface {}") || strings.Contains(res.String(), "got null") {
+			t.Errorf("want E_EDGE_SHAPE_MISMATCH naming the pointer, got %s", res)
 		}
 	})
-	t.Run("FK component pointer is a null component", func(t *testing.T) {
+	t.Run("FK component", func(t *testing.T) {
 		t.Parallel()
 		_, res := v.ValidateOne(t.Context(), "T", instance.RawInstance{Properties: map[string]any{"id": "x", "must": "m", "at": map[string]any{"_target_id": nilStr}}})
-		found := false
-		for is := range res.Issues() {
-			if strings.Contains(is.Message(), "got null") {
-				found = true
-			}
-		}
-		if !found {
-			t.Errorf("a typed nil FK component was not reported as null: %v", res.Err())
+		if res.Err() == nil || strings.Contains(res.String(), "got null") || !strings.Contains(res.String(), "*string") {
+			t.Errorf("want a refusal naming the pointer, got %s", res)
 		}
 	})
+}
+
+// A pointer is a value of no form at an edge property, a composition's value
+// and a composed child too, nil or not: each site refuses it by its Go type, and
+// none reads a nil one as null or as missing.
+func TestValidateOne_APointerIsNoValueAtAnEdgePropertyOrAComposition(t *testing.T) {
+	t.Parallel()
+	v := instance.NewValidator(loadT(t, `schema "p"
+
+part type Line {
+	id String primary
+}
+
+type Co {
+	id String primary
+}
+
+type T {
+	id String primary
+	--> AT (one) Co {
+		note String
+	}
+	*-> LINES (many) Line
+}
+`))
+	text := "x"
+	var (
+		nilText  *string
+		nilLines *[]any
+		nilLine  *map[string]any
+	)
+	lines := []any{map[string]any{"id": "l"}}
+	line := map[string]any{"id": "l"}
+	for name, c := range map[string]struct {
+		props map[string]any
+		code  diag.Code
+		want  string
+	}{
+		"a nil pointer at an edge property":   {map[string]any{"at": map[string]any{"_target_id": "c", "note": nilText}}, diag.E_TYPE_MISMATCH, `edge property "note": expected string, got *string`},
+		"a pointer at an edge property":       {map[string]any{"at": map[string]any{"_target_id": "c", "note": &text}}, diag.E_TYPE_MISMATCH, `edge property "note": expected string, got *string`},
+		"a nil pointer at a composition":      {map[string]any{"lines": nilLines}, diag.E_EDGE_SHAPE_MISMATCH, `expected array, got *[]interface {}`},
+		"a pointer at a composition":          {map[string]any{"lines": &lines}, diag.E_EDGE_SHAPE_MISMATCH, `expected array, got *[]interface {}`},
+		"a nil pointer at a composed child":   {map[string]any{"lines": []any{nilLine}}, diag.E_EDGE_SHAPE_MISMATCH, `composition child must be an object, got *map[string]interface {}`},
+		"a pointer at a composed child":       {map[string]any{"lines": []any{&line}}, diag.E_EDGE_SHAPE_MISMATCH, `composition child must be an object, got *map[string]interface {}`},
+		"a pointer at a one-edge's value":     {map[string]any{"at": &line}, diag.E_EDGE_SHAPE_MISMATCH, `expected object, got *map[string]interface {}`},
+		"a nil pointer at a one-edge's value": {map[string]any{"at": nilLine}, diag.E_EDGE_SHAPE_MISMATCH, `expected object, got *map[string]interface {}`},
+	} {
+		c.props["id"] = "x"
+		vi, res := v.ValidateOne(t.Context(), "T", instance.RawInstance{Properties: c.props})
+		if !slices.Equal(codes(res), []string{c.code.String()}) || !vi.IsZero() {
+			t.Errorf("%s: want %s alone and no instance, got %v", name, c.code, codes(res))
+		}
+		if !strings.Contains(res.String(), c.want) || strings.Contains(res.String(), "null") {
+			t.Errorf("%s: %s; want %q and no null", name, res, c.want)
+		}
+	}
 }
 
 // A cancelled batch returns no partial slice: the documented "one entry per

@@ -10,7 +10,7 @@
 //
 // Like schema/gogen — and unlike adapter/neo4j —
 // markdown has no instance-data path: it never parses, validates, or
-// serializes instances, and it imports neither instance nor graph. It maps
+// serializes instances. It imports neither instance nor graph. It maps
 // a completed schema to one Markdown document, nothing more, and returns a
 // plain error rather than a [github.com/simon-lentz/yammm/diag.Result],
 // because its only failures are

@@ -1,6 +1,7 @@
 package neo4j
 
 import (
+	"errors"
 	"maps"
 	"reflect"
 	"slices"
@@ -17,7 +18,6 @@ import (
 func TestWrite_AValueThatHoldsNoneReachesTheDriverAsNil(t *testing.T) {
 	t.Parallel()
 	typ := nilValueType(t)
-	var nilString *string
 	nones := map[string]any{
 		"tags":   []any(nil),
 		"vec":    []float64(nil),
@@ -42,7 +42,6 @@ func TestWrite_AValueThatHoldsNoneReachesTheDriverAsNil(t *testing.T) {
 		raw any
 	}{
 		"a nil slice at a Float":          {schema.NewFloatConstraint(), []float64(nil)},
-		"a nil pointer at a Float":        {schema.NewFloatConstraint(), nilString},
 		"a nil slice at a String":         {schema.NewStringConstraint(), []string(nil)},
 		"a nil map at a String":           {schema.NewStringConstraint(), map[string]any(nil)},
 		"a nil slice at a List<String>":   {schema.NewListConstraint(schema.NewStringConstraint()), []any(nil)},
@@ -66,8 +65,8 @@ func TestWrite_AValueThatHoldsNoneReachesTheDriverAsNil(t *testing.T) {
 	}
 }
 
-// A nil slice or map holds no value (instance.IsAbsent), so it is nil at a declared
-// position or not, and so is a nested param map's field.
+// A nil slice or map holds no value, so it is nil at a declared position or
+// not, and so is a nested param map's field.
 func TestHeldForm_ANilSliceOrMapHasTheFormNil(t *testing.T) {
 	t.Parallel()
 	list := schema.NewListConstraint(schema.NewStringConstraint())
@@ -98,6 +97,32 @@ func TestHeldForm_ANilSliceOrMapHasTheFormNil(t *testing.T) {
 
 // nilValueType loads a type with a property of each shape a nil slice or map
 // can stand at, and an association that declares an edge property.
+// A value that holds none at a List whose element is a collection is nil too:
+// the nested-collection refusal is of a value the property holds.
+func TestWrite_AValueThatHoldsNoneAtANestedCollectionIsNil(t *testing.T) {
+	t.Parallel()
+	_, s, _, _ := setupWrite(t, "nested_collection.yammm")
+	typ, ok := s.Type("Grid")
+	if !ok {
+		t.Fatal("no type Grid")
+	}
+	for name, none := range map[string]any{
+		"nil":         nil,
+		"a nil slice": []any(nil),
+		"a nil map":   map[string]any(nil),
+	} {
+		raw := map[string]any{"id": "g1", "matrix": none}
+		params, err := propsToParamMap(immutable.WrapProperties(raw, immutable.WithClone(true)), typ)
+		if err != nil {
+			t.Errorf("%s: propsToParamMap: %v", name, err)
+			continue
+		}
+		if v, ok := params["matrix"]; !ok || v != nil {
+			t.Errorf("%s: param matrix = %#v, %v; want nil", name, v, ok)
+		}
+	}
+}
+
 func nilValueType(t *testing.T) schema.Type {
 	t.Helper()
 	s, res := schema.LoadString(t.Context(), `schema "p"
@@ -151,15 +176,24 @@ func TestCoerceScalar_ARowOrAnUndeclaredValueThatHoldsNoneIsNil(t *testing.T) {
 	}
 }
 
-// A key that holds none behind a carrier is a nil key, as a nil one is.
+// A key that is a nil slice or a nil map holds none: it is a nil key, as a nil
+// one is. A pointer at a key is a value of no form, a nil one too, and the
+// key's constraint refuses it.
 func TestExtractKeyProps_AKeyThatHoldsNoneIsANilKey(t *testing.T) {
 	t.Parallel()
-	shape := &nodeShape{label: "T", primaryKeys: []string{"id"}}
-	var nilString *string
-	for name, none := range map[string]any{"a pointer to a nil pointer": &nilString, "a nil slice": []any(nil)} {
+	shape := &nodeShape{label: "T", primaryKeys: []string{"id"}, keyConstraints: map[string]schema.Constraint{"id": schema.NewStringConstraint()}}
+	for name, none := range map[string]any{"nil": nil, "a nil slice": []any(nil), "a nil map": map[string]any(nil)} {
 		_, err := extractKeyProps(immutable.WrapProperties(map[string]any{"id": none}), shape)
 		if err == nil || !strings.Contains(err.Error(), "nil primary key(s): [id]") {
 			t.Errorf("%s: extractKeyProps error = %v; want a nil key", name, err)
+		}
+	}
+	var nilString *string
+	text := "x"
+	for name, p := range map[string]any{"a nil pointer": nilString, "a pointer to a nil pointer": &nilString, "a pointer to a string": &text} {
+		got, err := extractKeyProps(immutable.WrapProperties(map[string]any{"id": p}), shape)
+		if !errors.Is(err, ErrUnrepresentable) || !strings.Contains(err.Error(), `primary key "id": coerce String: cannot use `) {
+			t.Errorf("%s: extractKeyProps = %#v, %v; want the key's constraint to refuse it", name, got, err)
 		}
 	}
 }
@@ -195,7 +229,7 @@ func TestCoerceParams_ReadsTheRowsItReturnsAsRows(t *testing.T) {
 		}
 	}
 	list := ParamTypes{"xs": schema.NewListConstraint(schema.NewStringConstraint())}
-	if out, err := CoerceParams(map[string]any{"xs": []any{nil}}, list); err == nil || !strings.Contains(err.Error(), `param "xs": list element 0:`) {
+	if out, err := CoerceParams(map[string]any{"xs": []any{nil}}, list); err == nil || err.Error() != `param "xs": element [0]: expected string, got null` {
 		t.Errorf("a []any of nils under a List<String> = %#v, %v; want the nil element refused", out["xs"], err)
 	}
 	out, err := CoerceParams(map[string]any{"xs": []any{}}, list)

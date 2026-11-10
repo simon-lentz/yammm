@@ -192,109 +192,28 @@ func TestClassify_FloatPrecision(t *testing.T) {
 	})
 }
 
-// Helper functions for pointer tests
-
-func ptrptr[T any](v T) **T {
-	p := &v
-	return &p
-}
-
-func TestClassify_PointerDereferencing(t *testing.T) {
-	// Classify dereferences pointers
-	t.Run("*int returns IntKind", func(t *testing.T) {
-		input := new(42)
-		kind, norm := value.Classify(input)
-		if kind != value.IntKind {
-			t.Errorf("expected IntKind for *int, got %v", kind)
-		}
-		if norm != int64(42) {
-			t.Errorf("expected int64 42, got %#v", norm)
-		}
-	})
-
-	t.Run("*string returns StringKind", func(t *testing.T) {
-		input := new("hello")
-		kind, norm := value.Classify(input)
-		if kind != value.StringKind {
-			t.Errorf("expected StringKind for *string, got %v", kind)
-		}
-		if norm != "hello" {
-			t.Errorf("expected hello, got %v", norm)
-		}
-	})
-
-	t.Run("*float64 returns FloatKind", func(t *testing.T) {
-		input := new(3.14)
-		kind, norm := value.Classify(input)
-		if kind != value.FloatKind {
-			t.Errorf("expected FloatKind for *float64, got %v", kind)
-		}
-		if norm != 3.14 {
-			t.Errorf("expected 3.14, got %v", norm)
-		}
-	})
-
-	t.Run("*bool returns BoolKind", func(t *testing.T) {
-		input := new(true)
-		kind, norm := value.Classify(input)
-		if kind != value.BoolKind {
-			t.Errorf("expected BoolKind for *bool, got %v", kind)
-		}
-		if norm != true {
-			t.Errorf("expected true, got %v", norm)
-		}
-	})
-
-	t.Run("**int returns IntKind", func(t *testing.T) {
-		input := ptrptr(42)
-		kind, norm := value.Classify(input)
-		if kind != value.IntKind {
-			t.Errorf("expected IntKind for **int, got %v", kind)
-		}
-		if norm != int64(42) {
-			t.Errorf("expected int64 42, got %#v", norm)
-		}
-	})
-
-	t.Run("nil *int returns UnspecifiedKind", func(t *testing.T) {
-		var input *int
+// A pointer has no kind, nil or not, and Classify returns it as given.
+func TestClassify_APointerHasNoKind(t *testing.T) {
+	t.Parallel()
+	var nilInt *int
+	inner := new(42)
+	slice := []float64{1.0, 2.0, 3.0}
+	for name, input := range map[string]any{
+		"*int":       new(42),
+		"*string":    new("hello"),
+		"*float64":   new(3.14),
+		"*bool":      new(true),
+		"**int":      &inner,
+		"nil *int":   nilInt,
+		"*nil *int":  &nilInt,
+		"*[]float64": &slice,
+	} {
 		kind, norm := value.Classify(input)
 		if kind != value.UnspecifiedKind {
-			t.Errorf("expected UnspecifiedKind for nil *int, got %v", kind)
+			t.Errorf("Classify(%s) = %v, want UnspecifiedKind", name, kind)
 		}
-		if norm != nil {
-			t.Errorf("expected nil, got %v", norm)
+		if norm != input {
+			t.Errorf("Classify(%s) returned %#v, want the pointer as given", name, norm)
 		}
-	})
-
-	t.Run("nil **int returns UnspecifiedKind", func(t *testing.T) {
-		var input **int
-		kind, norm := value.Classify(input)
-		if kind != value.UnspecifiedKind {
-			t.Errorf("expected UnspecifiedKind for nil **int, got %v", kind)
-		}
-		if norm != nil {
-			t.Errorf("expected nil, got %v", norm)
-		}
-	})
-
-	t.Run("*int where value is nil pointer", func(t *testing.T) {
-		var inner *int
-		input := &inner // **int where inner is nil
-		kind, norm := value.Classify(input)
-		if kind != value.UnspecifiedKind {
-			t.Errorf("expected UnspecifiedKind for **int with nil inner, got %v", kind)
-		}
-		if norm != nil {
-			t.Errorf("expected nil, got %v", norm)
-		}
-	})
-
-	t.Run("*[]float64 follows its target to the slice rule", func(t *testing.T) {
-		slice := []float64{1.0, 2.0, 3.0}
-		kind, _ := value.Classify(&slice)
-		if kind != value.UnspecifiedKind {
-			t.Errorf("expected UnspecifiedKind for *[]float64, got %v", kind)
-		}
-	})
+	}
 }

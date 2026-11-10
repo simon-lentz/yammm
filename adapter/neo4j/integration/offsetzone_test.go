@@ -140,10 +140,9 @@ func withLocal(t *testing.T, loc *time.Location) {
 	time.Local = loc
 }
 
-// TestCoerce_HostLocalTimeValueIsAcceptedWhateverTheHostZone is the
-// server-side half of the time.Time-arm rule: a value built in time.Local —
-// what time.Now produces — reaches the server whatever name the host's
-// location carries. The unrepaired shape is the control, on its own pool.
+// A value built in time.Local, as time.Now builds one, reaches the server
+// whatever name the host's location carries: CoerceParams sends the offset its
+// stored text carries. The uncoerced value is the control, on its own pool.
 func TestCoerce_HostLocalTimeValueIsAcceptedWhateverTheHostZone(t *testing.T) {
 	ctx := context.Background()
 	driver(t)
@@ -171,9 +170,8 @@ func TestCoerce_HostLocalTimeValueIsAcceptedWhateverTheHostZone(t *testing.T) {
 	}
 }
 
-// TestCoerce_UnresolvableZoneNameIsAcceptedAsOffset covers a caller-built
-// location whose name no tz database holds: sent by name the server refuses
-// it, so CoerceParams sends the offset.
+// A location whose name no tz database holds reaches the server as its offset.
+// Sent by name the server refuses it, which the uncoerced control shows.
 func TestCoerce_UnresolvableZoneNameIsAcceptedAsOffset(t *testing.T) {
 	ctx := context.Background()
 	driver(t)
@@ -200,10 +198,9 @@ func TestCoerce_UnresolvableZoneNameIsAcceptedAsOffset(t *testing.T) {
 	}
 }
 
-// TestCoerce_ResolvableZoneNameRoundTripsByName is the kept-name control: an
-// IANA location is a zone identifier the server resolves, and it comes back
-// by name rather than as an offset.
-func TestCoerce_ResolvableZoneNameRoundTripsByName(t *testing.T) {
+// A time.Time in an IANA location reaches the server as its offset, never by the
+// location's name: CoerceParams sends what the stored text holds.
+func TestCoerce_ACallersZoneNameReachesTheServerAsItsOffset(t *testing.T) {
 	ctx := context.Background()
 	driver(t)
 	berlin, err := time.LoadLocation("Europe/Berlin")
@@ -212,8 +209,7 @@ func TestCoerce_ResolvableZoneNameRoundTripsByName(t *testing.T) {
 	}
 
 	want := time.Date(2026, 8, 19, 12, 0, 0, 0, berlin)
-	coerced := coerceTimestamp(t, want)
-	echoed := echoParam(t, ctx, coerced)
+	echoed := echoParam(t, ctx, coerceTimestamp(t, want))
 	got, ok := echoed.(time.Time)
 	if !ok {
 		t.Fatalf("server returned %T, want time.Time", echoed)
@@ -221,8 +217,50 @@ func TestCoerce_ResolvableZoneNameRoundTripsByName(t *testing.T) {
 	if !got.Equal(want) {
 		t.Errorf("round trip returned %s, want the same instant as %s", got, want)
 	}
-	if got.Location().String() != "Europe/Berlin" {
-		t.Errorf("round trip returned location %q, want Europe/Berlin", got.Location())
+	if name, offset := got.Zone(); name != "Offset" || offset != 2*60*60 {
+		t.Errorf("round trip returned zone %q at %d seconds, want Offset at %d", name, offset, 2*60*60)
+	}
+}
+
+// The server reads one instant under a zone name and under that zone's offset
+// as two values: they are not equal, and a MERGE on each makes two nodes. So a
+// time.Time and the text the validator stores for it must reach the server in
+// one form, or a hand-built MERGE misses the node the write path made.
+func TestZoneNameAgainstOffset_ServerResponse(t *testing.T) {
+	ctx := context.Background()
+	driver(t)
+	berlin, err := time.LoadLocation("Europe/Berlin")
+	if err != nil {
+		t.Skipf("no tzdata: %v", err)
+	}
+	const label = "ZoneNameAgainstOffset"
+	clear := func() { run(t, ctx, "MATCH (n:"+label+") DETACH DELETE n") }
+	clear()
+	t.Cleanup(clear)
+
+	named := time.Date(2026, 8, 19, 12, 0, 0, 0, berlin)
+	byOffset := named.In(time.FixedZone("Offset", 2*60*60))
+	res, err := neo4jdriver.ExecuteQuery(ctx, driver(t), "RETURN $a = $b AS equal",
+		map[string]any{"a": named, "b": byOffset}, neo4jdriver.EagerResultTransformer)
+	if err != nil {
+		t.Fatalf("comparing the two forms: %v", err)
+	}
+	if equal := res.Records[0].AsMap()["equal"]; equal != false {
+		t.Errorf("the server compares a named-zone instant and its offset form as %v, want false", equal)
+	}
+	for _, v := range []any{named, byOffset} {
+		execWithParams(t, ctx, "MERGE (n:"+label+" {at: $v})", map[string]any{"v": v})
+	}
+	if n := countNodes(t, ctx, label); n != 2 {
+		t.Errorf("a MERGE by name and a MERGE by offset left %d nodes, want 2", n)
+	}
+
+	clear()
+	for _, raw := range []any{named, "2026-08-19T12:00:00+02:00"} {
+		execWithParams(t, ctx, "MERGE (n:"+label+" {at: $v})", map[string]any{"v": coerceTimestamp(t, raw)})
+	}
+	if n := countNodes(t, ctx, label); n != 1 {
+		t.Errorf("the coerced time.Time and the coerced stored text left %d nodes, want 1", n)
 	}
 }
 

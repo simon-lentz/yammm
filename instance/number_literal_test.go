@@ -17,22 +17,15 @@ var notLiterals = []string{
 }
 
 // A json.Number whose text is no JSON number literal is no number at an
-// Integer or a Float, bare, behind a pointer or inside an interface, and the
-// refusal names it as such, whatever strconv would read it as.
+// Integer or a Float, and the refusal names it as such, whatever strconv would
+// read it as.
 func TestCheckValue_AJSONNumberThatIsNoLiteralIsRefused(t *testing.T) {
 	t.Parallel()
 	for _, text := range notLiterals {
-		n := json.Number(text)
-		var held any = n
-		for _, carrier := range []struct {
-			name string
-			v    any
-		}{{"bare", n}, {"a pointer", &n}, {"an interface behind a pointer", &held}} {
-			for _, c := range []schema.Constraint{schema.NewIntegerConstraint(), schema.NewFloatConstraint()} {
-				err := instance.CheckValue(carrier.v, c)
-				if err == nil || !strings.Contains(err.Error(), "a json.Number that is no JSON number literal") {
-					t.Errorf("%q %s at %s: %v, want a refusal naming no JSON number literal", text, carrier.name, c.Kind(), err)
-				}
+		for _, c := range []schema.Constraint{schema.NewIntegerConstraint(), schema.NewFloatConstraint()} {
+			err := instance.CheckValue(json.Number(text), c)
+			if err == nil || !strings.Contains(err.Error(), "a json.Number that is no JSON number literal") {
+				t.Errorf("%q at %s: %v, want a refusal naming no JSON number literal", text, c.Kind(), err)
 			}
 		}
 	}

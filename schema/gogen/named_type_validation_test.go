@@ -83,7 +83,7 @@ func TestNamedTypes_GeneratedCarriersValidate(t *testing.T) {
 // persist a Go type the wire, both writers and the snapshot rebuild never see,
 // and key identity is a function of the stored representation.
 //
-// Mutation: reverting CoerceValue's string arm to `return val, nil` turns this
+// Mutation: reverting value.Coerce's string arm to `return val, nil` turns this
 // red while TestNamedTypes_GeneratedCarriersValidate stays green — which is
 // exactly the half-fixed state worth guarding against.
 func TestNamedTypes_AreStoredAsTheirBaseType(t *testing.T) {

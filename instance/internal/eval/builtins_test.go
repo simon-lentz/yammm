@@ -1094,6 +1094,29 @@ func TestBuiltin_IsNil(t *testing.T) {
 		e := makeBuiltinCall(expr.NewLiteral("hello"), "IsNil", nil, nil, nil)
 		evalEq(t, e, false)
 	})
+
+	// IsNil is the value layer's absence rule: a nil slice, map or immutable
+	// container holds none, and a pointer, a channel or a function is a value
+	// of no form, a nil one too.
+	for name, tc := range map[string]struct {
+		val  any
+		want bool
+	}{
+		"a nil slice":               {[]any(nil), true},
+		"a nil slice of strings":    {[]string(nil), true},
+		"a nil map":                 {map[string]any(nil), true},
+		"a nil immutable container": {immutable.Wrap([]any(nil)).Unwrap(), true},
+		"an empty list":             {[]any{}, false},
+		"an empty string":           {"", false},
+		"a nil pointer":             {(*string)(nil), false},
+		"a pointer to a string":     {new("x"), false},
+		"a nil channel":             {(chan int)(nil), false},
+		"a nil function":            {(func())(nil), false},
+	} {
+		t.Run(name, func(t *testing.T) {
+			evalEq(t, makeBuiltinCall(expr.NewLiteral(tc.val), "IsNil", nil, nil, nil), tc.want)
+		})
+	}
 }
 
 func TestBuiltin_Default(t *testing.T) {

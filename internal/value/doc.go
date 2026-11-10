@@ -5,9 +5,9 @@
 // # Internal Package
 //
 // This package is internal to the YAMMM module and is not importable by external
-// consumers per Go's internal/ package semantics. It is used by the instance
-// validation layer (instance/internal/eval) for type coercion and constraint
-// evaluation.
+// consumers per Go's internal/ package semantics. The validator, the expression
+// evaluator, the graph, the snapshot reader and the Neo4j adapter read a value
+// by it.
 //
 // # Value Comparison
 //
@@ -32,14 +32,13 @@
 //
 // This package is the single authority on what a value IS. A predeclared type
 // is answered by a type switch; anything else is read in the one form [Scalar]
-// defines. A pointer or an interface
-// is read through, at most 64 deep, to the strata and value of the scalar or
-// the nil it holds, and a longer chain, as one that points to itself is, has
-// neither; a slice is a list only when it is bare, as [ListElems] reads one,
-// and a non-nil slice behind a carrier is [InvalidStrata], where a nil one
-// holds none and is [NilStrata]; a named scalar (type MyInt int) takes those
-// of its base. The fallback runs only when
-// the type switch misses, so canonical input pays nothing for it.
+// defines. A pointer is a value of no form, a nil one too: it has no strata,
+// it is not absent, and every check refuses it. The one exception is a non-nil
+// *regexp.Regexp, the evaluator's pattern literal, which orders as its text. A
+// non-nil slice is a list, as
+// [ListElems] reads one, and a nil one holds none and is [NilStrata]; a named
+// scalar (type MyInt int) takes the strata and value of its base. The fallback
+// runs only when the type switch misses, so canonical input pays nothing for it.
 //
 // The named-type rule is not a convenience. schema/gogen emits
 // `type <Name> <base>` for every DataType and inline enum, so rejecting named
@@ -70,7 +69,7 @@
 //   - [UnspecifiedKind]: Slices, unsupported or nil values
 //
 // A slice is never a scalar kind: a list or vector's shape is its constraint's
-// to judge, elementwise, in the instance layer.
+// to judge, elementwise, by [Check].
 //
 // [Read] applies Classify to every json.Number in a decoded value, at any depth
 // of its lists and string-keyed maps, and [ReadAt] does so at the position a
@@ -147,19 +146,20 @@
 // constraint defines. Timestamp, UUID and Date each accept more than one Go
 // representation and store one, a List over one of them is rebuilt at its
 // elements, and every other kind passes through. It is the
-// temporal and UUID half of the stored-form rule: the instance layer's
-// CoerceValue — the rule itself — calls it for those kinds, and the graph
+// temporal and UUID half of the stored-form rule: [Coerce], the rule itself,
+// calls it for those kinds, and the graph
 // writer and the snapshot wire call it directly for a value that reached them
 // without validation.
 //
 // # Dependencies
 //
-//	internal/value  ──imports──▶  diag, immutable, schema, github.com/google/uuid
+//	internal/value  ──imports──▶  diag, immutable, internal/expr, schema, github.com/google/uuid
 //
-// Comparison and kind detection depend on stdlib and immutable; [Canonical] is what
-// reaches schema, because a canonical form is defined by a constraint, and it
-// and [Scalar] reach github.com/google/uuid, whose UUID each reads as itself.
-// [Canonical] reaches diag for [diag.QuoteValue], the rule a message that
-// repeats a value follows. The edge is one-directional: schema does not import
+// Comparison and kind detection depend on stdlib and immutable. [Check],
+// [Coerce] and [Canonical] reach schema, because a constraint defines what each
+// judges or renders, and diag for [diag.QuoteValue], the rule a message that
+// repeats a value follows. They and [Scalar] reach github.com/google/uuid,
+// whose UUID each reads as itself. [Check] reaches internal/expr for the
+// compiled patterns of a Pattern constraint. The edge is one-directional: schema does not import
 // this package, and adding that edge would create a cycle.
 package value

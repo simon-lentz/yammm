@@ -8,7 +8,7 @@
 // # Schema-In, Bytes-Out
 //
 // Unlike adapter/neo4j, gogen has no instance-data path: it never parses,
-// validates, or serializes instances, and it imports neither instance nor graph.
+// validates, or serializes instances. It imports neither instance nor graph.
 // It maps a completed schema to Go source, nothing more. It also returns a plain error rather than the
 // [github.com/simon-lentz/yammm/diag.Result] the library's loading, validation
 // and graph code return, because its failures are refusals of its inputs and generator bugs (see
@@ -16,7 +16,8 @@
 //
 // # Generated Declarations
 //
-// [Marshal] emits, in deterministic order:
+// [Marshal] emits the declarations below. The order of its output is
+// deterministic, and is not the order of this list:
 //
 //   - A named Go type for every DataType (type <Name> <base>), plus value constants
 //     when the DataType resolves to an Enum.
@@ -122,7 +123,7 @@
 //
 // Each declared association is emitted as one struct, whose bare spelling is
 // EDGE_<Owner>_<edge>_<Target> (see Names), carrying the target type's primary-key
-// fields under the parser's reserved "_target_" keys, with the association's
+// fields under the reserved "_target_" keys, with the association's
 // own edge properties beside them — the shape the instance document yammm check
 // reads gives an association:
 //
@@ -229,10 +230,11 @@
 //
 // The fields of one struct share a namespace of their own. A field's bare
 // spelling is its property's name, or its relation's field name (the
-// relation's name in lower case), as an exported identifier, and
-// an EDGE_ struct's key field is "Target" and the key property's name. Two
-// fields whose bare spellings meet each take "Field_" and their wire key, which
-// their json tag also holds: Field_foo_1 and Field_foo1 for foo_1 and foo1.
+// relation's name in lower case), as an exported identifier. An EDGE_ struct's
+// key field is "Target" and then the key property's name as an exported
+// identifier. Two fields whose bare spellings meet each take "Field_" and their
+// wire key, which their json tag also holds: Field_foo_1 and Field_foo1 for
+// foo_1 and foo1.
 //
 // # Embedded Source
 //
@@ -381,7 +383,8 @@
 //
 // gogen imports one core internal package, internal/ident, for the
 // identifier-casing transform that turns schema names into Go identifiers.
-// Unlike adapter/neo4j, it imports neither instance/graph nor diag. The
+// It does not import instance and, unlike adapter/neo4j, imports neither graph
+// nor diag. The
 // generated output depends only on the standard library, importing at most
 // "time" and "encoding/json".
 package gogen

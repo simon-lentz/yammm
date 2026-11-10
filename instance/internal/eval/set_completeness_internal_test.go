@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/simon-lentz/yammm/immutable"
+	"github.com/simon-lentz/yammm/internal/value"
 )
 
 // The three readers of a list position read every list shape alike, through
@@ -28,9 +29,9 @@ func TestListReaders_AgreeOnEveryShape(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			got, ok := toSlice(tc.in)
+			got, ok := value.ListElems(tc.in)
 			if ok != tc.ok || (ok && !reflect.DeepEqual(got, tc.want)) {
-				t.Errorf("toSlice(%T) = %#v, %v; want %#v, %v", tc.in, got, ok, tc.want, tc.ok)
+				t.Errorf("value.ListElems(%T) = %#v, %v; want %#v, %v", tc.in, got, ok, tc.want, tc.ok)
 			}
 			got2, err := asSlice("T", tc.in)
 			if (err == nil) != tc.ok || (tc.ok && !reflect.DeepEqual(got2, tc.want)) {
@@ -42,8 +43,8 @@ func TestListReaders_AgreeOnEveryShape(t *testing.T) {
 		if got, err := asSlice("T", none); err != nil || got == nil || len(got) != 0 {
 			t.Errorf("asSlice(%#v) = %#v, %v; want an empty list", none, got, err)
 		}
-		if _, ok := toSlice(none); ok {
-			t.Errorf("toSlice(%#v) = ok, want not a list", none)
+		if _, ok := value.ListElems(none); ok {
+			t.Errorf("value.ListElems(%#v) = ok, want not a list", none)
 		}
 	}
 }

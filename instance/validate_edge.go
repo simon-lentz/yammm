@@ -14,7 +14,6 @@ import (
 
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/immutable"
-	"github.com/simon-lentz/yammm/instance/internal/eval"
 	"github.com/simon-lentz/yammm/internal/value"
 	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/location/path"
@@ -164,7 +163,7 @@ func checkIssue(err error, message string) *diag.IssueBuilder {
 			WithDetail(diag.DetailKeyStackTrace, internalErr.Stack)
 	}
 	code := ErrTypeMismatch
-	if checkErr, ok := errors.AsType[*eval.CheckError](err); ok && checkErr.Kind == eval.KindConstraintFail {
+	if checkErr, ok := errors.AsType[*value.CheckError](err); ok && checkErr.Kind == value.KindConstraintFail {
 		code = ErrConstraintFail
 	}
 	return diag.NewIssue(diag.Error, code, message+": "+err.Error())

@@ -45,16 +45,15 @@ func (k Kind) String() string {
 // expectations.
 //
 // A predeclared type is answered by its type, and every other value by the
-// form [Scalar] reads it in: through pointers and interfaces, a named type as
-// its base value. A json.Number is classified by its spelling: an integer
+// form [Scalar] reads it in: a named type as its base value. A json.Number is classified by its spelling: an integer
 // literal is IntKind, any other JSON number literal a finite float64 holds is
 // FloatKind, whole-valued or not, and the rest is UnspecifiedKind, text that is
 // no JSON number literal included. An integer literal outside the int64 range
 // is IntKind and stays the json.Number: it is an integer no int64 holds, and
 // its nearest float64 can be a different integer. A slice of any element type
 // is UnspecifiedKind: a list's shape is the constraint's to judge, elementwise.
-// So is a value of no form, a time.Time and a uuid.UUID; a nil, a nil pointer
-// among them, is UnspecifiedKind with a nil value.
+// So is a value of no form, a pointer among them, a time.Time and a uuid.UUID;
+// a value that holds none is UnspecifiedKind with a nil value.
 func Classify(val any) (Kind, any) {
 	switch v := val.(type) {
 	case nil:

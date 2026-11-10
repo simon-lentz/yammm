@@ -176,8 +176,8 @@ func sentProp(nodes []*BatchNodeQuery, name string) any {
 }
 
 // Each value is sent in its form, at a node and an edge alike: a Timestamp's
-// text spelled at another offset as the instant, and a UUID's text in the spelling
-// the document holds.
+// text spelled at another offset as the instant, and a UUID as its canonical
+// text.
 func TestBatchQueries_EachValueIsSentInItsForm(t *testing.T) {
 	t.Parallel()
 	const spelled = "2024-01-02T04:04:05+01:00"

@@ -10,16 +10,13 @@ import (
 	"github.com/simon-lentz/yammm/immutable"
 )
 
-// Scalar returns v in the one form the validator reads a scalar in ([Classify]),
-// through pointers and interfaces: a string, bool, int64, uint64,
-// float32 or float64 for a value of that kind, a named type as its base value;
-// a json.Number that is a JSON number literal ([immutable.IsNumberLiteral]), a
-// time.Time or a uuid.UUID as itself; nil for a value that holds none
-// ([Absent]), a nil slice or map included. It reports false for every other
-// value: a json.Number holding other text, a struct, an array, a map, a slice,
-// a channel, a function, a complex number, and a chain of more than
-// [maxPointerDepth] pointers and interfaces. A list behind a pointer is no list,
-// as [ListElems] reads one.
+// Scalar returns v in the one form the validator reads a scalar in ([Classify]):
+// a string, bool, int64, uint64, float32 or float64 for a value of that kind, a
+// named type as its base value; a json.Number that is a JSON number literal
+// ([immutable.IsNumberLiteral]), a time.Time or a uuid.UUID as itself; nil for a
+// value that holds none ([Absent]). It reports false for every other value: a
+// json.Number holding other text, a pointer, nil or not, a struct, an array, a
+// map, a slice, a channel, a function and a complex number.
 func Scalar(v any) (any, bool) {
 	held, ok := form(v)
 	if n, isNumber := held.(json.Number); isNumber && !immutable.IsNumberLiteral(n) {
@@ -28,41 +25,14 @@ func Scalar(v any) (any, bool) {
 	return held, ok
 }
 
-// UnreadNumber returns the json.Number v holds, read as [Scalar] reads it, when
-// its text is no JSON number literal: the value Scalar refuses for its text
-// alone, which a refusal names.
+// UnreadNumber returns v when it is a json.Number whose text is no JSON number
+// literal: the value Scalar refuses for its text alone, which a refusal names.
 func UnreadNumber(v any) (json.Number, bool) {
-	rv, ok := walk(v)
-	if !ok || !rv.IsValid() || rv.Type() != numberType {
-		return "", false
-	}
-	n := json.Number(rv.String())
-	return n, !immutable.IsNumberLiteral(n)
+	n, ok := v.(json.Number)
+	return n, ok && !immutable.IsNumberLiteral(n)
 }
 
-var (
-	numberType = reflect.TypeFor[json.Number]()
-	timeType   = reflect.TypeFor[time.Time]()
-	uuidType   = reflect.TypeFor[uuid.UUID]()
-)
-
-// walk follows v through at most [maxPointerDepth] pointers and interfaces to
-// the value they hold, or the zero Value for a nil at any depth. It reports
-// false for a longer chain. It boxes nothing, so a getter that reads the
-// returned Value allocates nothing; [Scalar] boxes only the form it returns.
-func walk(v any) (reflect.Value, bool) {
-	rv := reflect.ValueOf(v)
-	for depth := 0; rv.Kind() == reflect.Pointer || rv.Kind() == reflect.Interface; depth++ {
-		if rv.IsNil() {
-			return reflect.Value{}, true
-		}
-		if depth == maxPointerDepth {
-			return reflect.Value{}, false
-		}
-		rv = rv.Elem()
-	}
-	return rv, true
-}
+var numberType = reflect.TypeFor[json.Number]()
 
 // literal returns rv as a json.Number when it is one whose text is a JSON number
 // literal.
@@ -74,65 +44,31 @@ func literal(rv reflect.Value) (json.Number, bool) {
 	return n, immutable.IsNumberLiteral(n)
 }
 
-// NumberLiteral returns the json.Number v holds, read as [Scalar] reads it, when
-// its text is a JSON number literal.
+// NumberLiteral returns v when it is a json.Number whose text is a JSON number
+// literal.
 func NumberLiteral(v any) (json.Number, bool) {
-	if n, ok := v.(json.Number); ok {
-		return n, immutable.IsNumberLiteral(n)
-	}
-	rv, ok := walk(v)
-	if !ok {
-		return "", false
-	}
-	return literal(rv)
+	n, ok := v.(json.Number)
+	return n, ok && immutable.IsNumberLiteral(n)
 }
 
-// Absent reports whether v holds no value, as [Scalar] reads it: nil, or a
-// pointer, an interface, a map, a slice, a channel,
-// a function or an unsafe pointer that is nil, bare or at some depth. A nil
-// slice or map is no empty list or map: encoding/json writes it as null, and a
-// nil [immutable] container ([immutable.IsNilContainer]) holds no value either.
+// Absent reports whether v holds no value: nil, a nil map, a nil slice or a nil
+// [immutable] container ([immutable.IsNilContainer]). A nil slice or map is no
+// empty list or map: encoding/json writes it as null. A pointer is a value of
+// no form, a nil one too, so it is not absent.
 func Absent(v any) bool {
 	if v == nil || immutable.IsNilContainer(v) {
 		return true
 	}
-	rv, ok := walk(v)
-	return ok && isNil(rv)
+	return isNil(reflect.ValueOf(v))
 }
 
-// isNil reports whether rv, a value [walk] reached, holds no value.
+// isNil reports whether rv is a nil map or a nil slice.
 func isNil(rv reflect.Value) bool {
-	if !rv.IsValid() {
-		return true
-	}
 	switch rv.Kind() {
-	case reflect.Map, reflect.Slice, reflect.Chan, reflect.Func, reflect.UnsafePointer:
+	case reflect.Map, reflect.Slice:
 		return rv.IsNil()
 	}
 	return false
-}
-
-// GetTime returns the time.Time v holds, read as [Scalar] reads it.
-func GetTime(v any) (time.Time, bool) {
-	return held[time.Time](v)
-}
-
-// GetUUID returns the uuid.UUID v holds, read as [Scalar] reads it.
-func GetUUID(v any) (uuid.UUID, bool) {
-	return held[uuid.UUID](v)
-}
-
-// held returns the T that v holds through its carriers, boxing nothing.
-func held[T any](v any) (T, bool) {
-	if x, ok := v.(T); ok {
-		return x, true
-	}
-	rv, ok := walk(v)
-	if !ok || !rv.IsValid() {
-		var zero T
-		return zero, false
-	}
-	return reflect.TypeAssert[T](rv)
 }
 
 // form is [Scalar] without the number literal rule.
@@ -146,22 +82,9 @@ func form(v any) (any, bool) {
 	if immutable.IsNilContainer(v) {
 		return nil, true
 	}
-	rv, ok := walk(v)
-	if !ok {
-		return nil, false
-	}
+	rv := reflect.ValueOf(v)
 	if isNil(rv) {
 		return nil, true
-	}
-	switch rv.Kind() {
-	case reflect.Map, reflect.Slice, reflect.Chan, reflect.Func, reflect.UnsafePointer:
-		return nil, false
-	}
-	switch rv.Type() {
-	case numberType:
-		return json.Number(rv.String()), true
-	case timeType, uuidType:
-		return rv.Interface(), true
 	}
 	switch rv.Kind() {
 	case reflect.String:

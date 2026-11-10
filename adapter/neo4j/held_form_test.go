@@ -71,20 +71,21 @@ func TestHeldForm_ANumberLiteralIsTheDriversNumber(t *testing.T) {
 	negZero := math.Copysign(0, -1)
 	integer, float, text := schema.NewIntegerConstraint(), schema.NewFloatConstraint(), schema.NewStringConstraint()
 	for _, c := range []struct {
-		name string
-		in   any
-		c    schema.Constraint
-		want any
+		name    string
+		in      any
+		c       schema.Constraint
+		want    any
+		refused bool
 	}{
-		{"an integer literal at an Integer", json.Number("5"), integer, int64(5)},
-		{"an integer literal at a Float", json.Number("5"), float, 5.0},
-		{"-0 at a Float", json.Number("-0"), float, negZero},
-		{"a float literal at a Float", json.Number("0.5"), float, 0.5},
-		{"a wide integer literal at a Float", json.Number("99999999999999999999"), float, 1e20},
-		{"an integer literal at a String", json.Number("5"), text, int64(5)},
-		{"an integer literal undeclared", json.Number("5"), nil, int64(5)},
-		{"-0 in a Vector", []any{json.Number("-0"), json.Number("1")}, schema.NewVectorConstraint(2), []any{negZero, 1.0}},
-		{"an integer literal in a List<Integer>", []any{json.Number("3")}, schema.NewListConstraint(integer), []any{int64(3)}},
+		{"an integer literal at an Integer", json.Number("5"), integer, int64(5), false},
+		{"an integer literal at a Float", json.Number("5"), float, 5.0, false},
+		{"-0 at a Float", json.Number("-0"), float, negZero, false},
+		{"a float literal at a Float", json.Number("0.5"), float, 0.5, false},
+		{"a wide integer literal at a Float", json.Number("99999999999999999999"), float, 1e20, false},
+		{"an integer literal at a String", json.Number("5"), text, int64(5), true},
+		{"an integer literal undeclared", json.Number("5"), nil, int64(5), false},
+		{"-0 in a Vector", []any{json.Number("-0"), json.Number("1")}, schema.NewVectorConstraint(2), []any{negZero, 1.0}, false},
+		{"an integer literal in a List<Integer>", []any{json.Number("3")}, schema.NewListConstraint(integer), []any{int64(3)}, false},
 	} {
 		got, err := heldForm(c.in, c.c)
 		if err != nil || !reflect.DeepEqual(got, c.want) || (c.want == negZero && !math.Signbit(got.(float64))) {
@@ -94,8 +95,9 @@ func TestHeldForm_ANumberLiteralIsTheDriversNumber(t *testing.T) {
 		if c.c == nil {
 			continue
 		}
-		if _, err := coerceValue(c.c, got); err != nil {
-			t.Errorf("%s: the coercion refuses the handed form %#v: %v", c.name, got, err)
+		// The coercion takes the number at a numeric kind and refuses it at any other.
+		if _, err := coerceValue(c.c, got); (err != nil) != c.refused || (c.refused && !errors.Is(err, ErrUnrepresentable)) {
+			t.Errorf("%s: the coercion of the handed form %#v = %v; want refused = %v", c.name, got, err, c.refused)
 		}
 	}
 	for _, c := range []struct {

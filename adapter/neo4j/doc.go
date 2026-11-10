@@ -6,9 +6,10 @@
 //
 // # Architectural Position
 //
-// Package neo4j is the adapter layer's one adapter. It depends on library
-// packages (schema, graph, instance, immutable, diag); library packages never
-// depend on adapters.
+// Package neo4j is the module's one adapter. It depends on library packages
+// (schema, graph, immutable, diag) and on internal/value, the rule the
+// validator, the graph and the snapshot reader read a value by; library packages
+// never depend on adapters.
 //
 // # Neo4j Driver Dependency (Type-Only)
 //
@@ -129,7 +130,7 @@
 // generated DDL unquoted — property names, primary keys, and the assembled
 // labels — are checked with [ValidateIdentifier] during constraint and index
 // generation and rejected as E_NEO4J_INVALID_IDENTIFIER, whose detail begins
-// with the [ErrReservedKeyword] error's text (the check is case-insensitive); a constraint or index name is built from those checked
+// with the refusing error's text, [ErrReservedKeyword]'s for a reserved word (the check is case-insensitive); a constraint or index name is built from those checked
 // parts. Namespaced labels usually absorb
 // reserved type names — the label "app__MATCH" is not a keyword — but a
 // reserved property name fails wherever a generated constraint or index
@@ -182,8 +183,8 @@
 // An error marked [ErrUnrepresentable] refuses these values: one its constraint's coercion refuses, a nested collection's, a map at a
 // property the schema declares, a list or a map a document nests more than 256
 // levels deep, a [encoding/json.Number] no driver number holds, or a primary key
-// that is absent or holds no value. An integer a finite float64 holds passes
-// them at a Float position and rounds to its nearest float64. No snapshot these writers accept holds a property the schema does not
+// that is absent or holds no value. An integer literal a finite float64 holds
+// passes them at a Float position and rounds to its nearest float64. No snapshot these writers accept holds a property the schema does not
 // declare: the validator keeps one out of a graph, and
 // [github.com/simon-lentz/yammm/snapshot.Load] and [graph.NewFromSnapshot] refuse
 // one. Of the values the mark refuses, a validated snapshot holds only a nested
@@ -198,88 +199,80 @@
 //
 // # Parameter Coercion
 //
-// One rule converts a value to the driver-native type its [schema.Constraint]
-// requires, so the value satisfies Neo4j TYPE constraints. The write path applies
-// it once it has read each json.Number as the driver's number. [CoerceParams]
-// applies it to the parameters of hand-built Cypher and reads no form. The rule takes the full
-// constraint, not just its kind, so a Timestamp's custom layout is honored; a
-// DataType reference is resolved internally.
+// One rule converts a value in the form the validator stores to the
+// driver-native type its [schema.Constraint] requires, so the value satisfies
+// Neo4j TYPE constraints. The write path applies it once it has read each
+// json.Number as the driver's number. [CoerceParams] applies it to the
+// parameters of hand-built Cypher: it first reads each value at its constraint
+// as [github.com/simon-lentz/yammm/instance.Validator] reads a property value,
+// so a parameter reaches the driver as the write path sends that value from a
+// validated instance, and a value the validator refuses (a wrong kind, a bound,
+// a member, a pattern) is an error. The rule takes the full constraint, not
+// just its kind, so a Timestamp's custom layout is honored; a DataType
+// reference is resolved internally.
 //
-//   - Float: an int, int8 to int64, uint, uint8 to uint64 or float32 ->
-//     float64 (a uintptr or a named type is a coercion failure); a
-//     float64 passes through, so a caller's integer at a Float meets an
-//     IS :: FLOAT constraint. A non-numeric value is a coercion failure and returns an error.
-//   - Integer: an int, int8 to int64, uint, uint8 to uint64 -> int64 (a uintptr
-//     or a named type is a coercion failure); an int64 passes
-//     through. A float is a coercion failure and returns an error, whole or
-//     not, as the validator's Integer rule refuses it: converting it would
-//     send an integer the caller's data never wrote. A json.Number is a
-//     coercion failure too, at an Integer and at a Float, though the validator
-//     reads one: a caller that decodes JSON with UseNumber converts each
-//     number to an int64 or a float64 before it calls CoerceParams. A uint past the
-//     int64 range is a failure too, as it is for a list element.
+//   - Float: a float64. Integer: an int64. Boolean: a bool. String, Enum and
+//     Pattern: a string. Each passes through, and a value of any other Go type
+//     is a coercion failure and returns an error.
+//   - UUID: a string -> its canonical text, lower case with hyphens. A string
+//     that is no UUID is a coercion failure.
 //   - Timestamp: a string -> time.Time (Neo4j ZONED DATETIME), parsed against the
 //     constraint's custom Go layout when it declares one (Timestamp["…"]) and
-//     against RFC3339 otherwise; a time.Time passes through. A string that does
-//     not parse, or any non-string non-time.Time value, is a coercion failure
-//     and returns an error. The instant is always expressed in a location the
-//     driver can send, under one rule: a location named "Offset", the driver's
-//     own offset form, is sent as it is; any other named location is kept only
-//     when the host's tz database resolves it AND the resolved offset agrees
-//     with the one the value carries; time.Local, a location named "Local", an
-//     unnamed location, any other unresolvable name and a name whose offset
+//     against RFC3339 otherwise. A string that does not parse, or any other
+//     value, is a coercion failure. The instant is always expressed in a
+//     location the driver can send, under one rule: a zone name the text
+//     carries is kept only when the host's tz database resolves it AND the
+//     resolved offset agrees with the one the value carries; the host's own
+//     zone, a numeric offset, an unresolvable name and a name whose offset
 //     disagrees are all re-expressed in the value's own offset. A consumer that
-//     must keep IANA names on a host without a tz database imports time/tzdata.
-//   - Date: a "2006-01-02" string, a time.Time, OR a dbtype.Date -> dbtype.Date
-//     (Neo4j DATE). A string that does not parse, or a value of any other
-//     type, is a coercion failure and returns an error. All three arms are
-//     normalised to midnight UTC on the date the value itself shows, since a
-//     date carries no time of day.
-//   - Every other (non-transforming) kind passes a value through unchanged, save
-//     a []any, a map and a value at a List whose element is a collection. A []any
-//     is element-coerced at a List or a Vector and refused at any other kind,
-//     since a scalar cannot hold a list. The other two are refused below.
-//     The rule does not ask whether the driver takes such a value: the driver
-//     refuses a uuid.UUID and a uint64 past int64, among others.
+//     must keep zone names on a host without a tz database imports time/tzdata.
+//   - Date: a "2006-01-02" string -> dbtype.Date (Neo4j DATE). A string that
+//     does not parse, or any other value, is a coercion failure. The date is
+//     midnight UTC on the day the text shows, since a date carries no time of
+//     day. [CoerceParams] also passes a dbtype.Date at a Date, read the same
+//     way; in a list it is refused, as the validator refuses it.
+//   - Vector: a []float64 passes through. At a List and at a Vector a []any is
+//     element-coerced by the rules above into a typed slice. A []any at any
+//     other kind is refused, since a scalar cannot hold a list.
 //
 // A map is refused under every constraint, whatever its key and element types:
 // Neo4j stores no map as a property value. A nil map holds no value and returns
 // nil.
 //
-// The four transforming kinds above are strict: they error on a value they can
-// neither pass through as already-native nor repair, rather than handing a
-// wrong-typed value to the driver. A list element is judged the same way, since a
-// list must build a homogeneous typed slice. The non-transforming kinds stay
-// lenient as a scalar, save a map, refused above, and a List whose element is a
-// collection, a type Neo4j cannot store, where a value that holds one is refused:
-// a correct value of any other needs no repair here, and instance validation is
-// its type authority. On the validated node path a
-// transforming kind only ever receives the types its strict set accepts (Float:
-// float64; Integer: int64; Timestamp and Date: the string the validator stores),
-// so strictness fires only on a value no validator refused at Error: a hand-built
-// direct-Cypher param, one snapshot.Load read without revalidating at Error, or
-// one graph.NewFromSnapshot imported under another schema, which holds no value
-// to its constraint.
+// [CoerceParams] reads a value as the validator does, so a value in a form the
+// validator reads is read the same way. A Go integer of any width, a named type
+// and a time.Time at a Timestamp are three such forms. It refuses two values
+// the validator takes: a value at a List whose element is a collection, and an
+// empty []map[string]any that is a param's own value at a List, which it reads
+// as rows. A time.Time goes through the text the validator stores it as. At a
+// Timestamp that text is in the constraint's layout, so the instant reaches the
+// server at the precision and in the zone that text keeps. The text holds an
+// offset, a zone abbreviation or both, as its layout does, or no zone under a
+// layout that holds none, where it is read as UTC. So a location's name such as
+// Europe/Berlin does not reach the server. A pointer is refused, a nil one too.
 //
-// A []any at a List or a Vector is element-coerced, which also requires a Go string
-// of a String, UUID, Enum or Pattern element and a bool of a Boolean element, where a
-// scalar of those kinds passes through. The write path refuses a value that holds
-// one at a List whose element is a collection by its type first. It reads every
-// other JSON number literal as the driver's number before the rule: at a Float
-// its nearest float64, elsewhere an integer literal as the int64 it spells and a
-// float literal as its nearest float64, which an Integer refuses as a float. A
+// On the write path the rule refuses only a value no validator refused at
+// Error: one snapshot.Load read without revalidating at Error, or one
+// graph.NewFromSnapshot imported under another schema, which holds no value to
+// its constraint. There it judges a value's form and never its bounds, members
+// or pattern, nor a Vector's dimension. A Timestamp, a Date and a UUID are
+// forms, so their text is parsed.
+//
+// The write path refuses a value at a List whose element is a List or a Vector
+// by its type first: Neo4j has no nested collection property type, so a value
+// there, an empty list included, is an error wrapping [ErrUnsupportedListElem],
+// and [CoerceParams] refuses one so too. The write path reads every JSON number
+// literal as the driver's number before the rule: at a Float its nearest
+// float64, elsewhere an integer literal as the int64 it spells and a float
+// literal as its nearest float64, which an Integer refuses as a float. A
 // literal no finite float64 holds, or no int64 holds outside a Float and a
 // Vector element, where the .ys reader left it a json.Number, is refused before
-// the rule. A value of any other Go type at a collection constraint
-// is returned unchanged, save a map, refused above, and a value at a List whose
-// element is a List or a Vector: Neo4j has no nested collection property type, so a
-// value there that holds one, an empty list included, is an error wrapping
-// [ErrUnsupportedListElem].
+// the rule.
 //
 // A value that holds none ([github.com/simon-lentz/yammm/instance.IsAbsent]),
-// such as a nil pointer, slice or map, is returned as nil, which the driver writes as null, and a
-// nil constraint ("no type to coerce against") passes any other value through
-// unchanged. A kind added to [schema.ConstraintKind] after the rule's switch was
+// nil, a nil slice, a nil map or a nil immutable container, is returned as nil,
+// which the driver writes as null, and a nil constraint ("no type to coerce against") passes any other
+// value through unchanged. A kind added to [schema.ConstraintKind] after the rule's switch was
 // written surfaces as a lint failure via its //exhaustive:enforce directive, rather
 // than as a silent driver-side PROPERTY_TYPE rejection in production.
 //
@@ -543,11 +536,13 @@
 // Configuration is immutable after [New] returns. Every method reads the
 // frozen config and writes only to values it allocates, save one package-level
 // value: a concurrency-safe memo of which zone names the host's tz database
-// resolves, which coercion of a Timestamp in a named zone fills; it caches a host fact fixed for the process
-// lifetime and holds no adapter state.
+// resolves, which coercion of a Timestamp whose text holds a zone abbreviation
+// fills. It caches a host fact fixed for the process lifetime and holds no
+// adapter state.
 //
 // # Dependencies
 //
-//	adapter/neo4j  ──imports──▶  schema, graph, instance, immutable, diag,
+//	adapter/neo4j  ──imports──▶  schema, graph, immutable, diag, internal/value,
+//	                             github.com/google/uuid,
 //	                             github.com/neo4j/neo4j-go-driver/v6/neo4j/dbtype
 package neo4j

@@ -643,9 +643,8 @@ func neo4jScalarType(c schema.Constraint) (string, bool) {
 		// A Vector maps to a list of floats, NOT to Neo4j's native vector
 		// property type, because a list of floats is what this adapter actually
 		// writes: the write path types a []any Vector as []float64 ([coerceSlice])
-		// and passes any other Vector value through the KindVector arm of
-		// [coerceScalar], and valueType() on the stored property
-		// returns exactly LIST<FLOAT NOT NULL>.
+		// and sends a []float64 as it is ([scalarForm]), and valueType() on the
+		// stored property returns exactly LIST<FLOAT NOT NULL>.
 		//
 		// Neo4j 5.x has no vector property type at all. Neo4j 2026.x does — spelled
 		// VECTOR(<dimension>, <coordinate type>) — but a plain list of floats does

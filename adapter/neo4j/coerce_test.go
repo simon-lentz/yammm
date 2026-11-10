@@ -9,16 +9,6 @@ import (
 	"github.com/simon-lentz/yammm/schema"
 )
 
-func TestCoerceScalar_FloatIntRepair(t *testing.T) {
-	got, err := coerceScalar(schema.NewFloatConstraint(), int64(1860000))
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if f, ok := got.(float64); !ok || f != 1860000.0 {
-		t.Fatalf("got %#v (%T), want float64(1860000)", got, got)
-	}
-}
-
 func TestCoerceScalar_TimestampParse(t *testing.T) {
 	got, err := coerceScalar(schema.NewTimestampConstraint(), "2024-01-01T00:00:00Z")
 	if err != nil {
@@ -36,16 +26,6 @@ func TestCoerceScalar_DateParse(t *testing.T) {
 	}
 	if _, ok := got.(dbtype.Date); !ok {
 		t.Fatalf("got %T, want dbtype.Date", got)
-	}
-}
-
-func TestCoerceScalar_DateFromTime(t *testing.T) {
-	got, err := coerceScalar(schema.NewDateConstraint(), time.Date(2024, 6, 15, 0, 0, 0, 0, time.UTC))
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if _, ok := got.(dbtype.Date); !ok {
-		t.Fatalf("got %T, want dbtype.Date from a time.Time (a Date value must not reach Neo4j as ZONED DATETIME)", got)
 	}
 }
 
@@ -137,8 +117,8 @@ func TestCoerceParams_TemporalGood(t *testing.T) {
 	if _, ok := out["ts_nano"].(time.Time); !ok {
 		t.Fatalf("ts_nano: want time.Time, got %T", out["ts_nano"])
 	}
-	if _, ok := out["native"].(time.Time); !ok {
-		t.Fatalf("native time.Time: want time.Time passthrough, got %T", out["native"])
+	if got, ok := out["native"].(time.Time); !ok || !got.Equal(native) {
+		t.Fatalf("native time.Time: want the instant %v, got %#v", native, out["native"])
 	}
 	if _, ok := out["date"].(dbtype.Date); !ok {
 		t.Fatalf("date: want dbtype.Date, got %T", out["date"])
@@ -380,66 +360,6 @@ func TestCoerceParams_ListElementError(t *testing.T) {
 	}
 }
 
-func TestCoerceParams_IntegerListWidthRepair(t *testing.T) {
-	t.Parallel()
-	// The direct-Cypher boundary: a List<Integer> param built with mixed or narrow
-	// int widths element-coerces to []int64 rather than erroring — symmetric with
-	// the List<Float> width repair, closing the Integer-vs-Float list asymmetry.
-	params := map[string]any{"counts": []any{int(1), int32(2), uint16(3)}}
-	types := ParamTypes{"counts": schema.NewListConstraint(schema.NewIntegerConstraint())}
-	out, err := CoerceParams(params, types)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	got, ok := out["counts"].([]int64)
-	if !ok {
-		t.Fatalf("counts: got %T, want []int64", out["counts"])
-	}
-	if len(got) != 3 || got[0] != 1 || got[1] != 2 || got[2] != 3 {
-		t.Fatalf("counts elements wrong: %#v", got)
-	}
-}
-
-func TestCoerceScalar_FloatFromAllNumericTypes(t *testing.T) {
-	t.Parallel()
-	// Every Go integer width and float32 must repair to float64, so a Float
-	// property never reaches the driver as a non-float numeric (Neo4j rejects an
-	// integer value against an IS :: FLOAT constraint).
-	cases := []struct {
-		name string
-		in   any
-	}{
-		{"int", int(5)},
-		{"int8", int8(5)},
-		{"int16", int16(5)},
-		{"int32", int32(5)},
-		{"int64", int64(5)},
-		{"uint", uint(5)},
-		{"uint8", uint8(5)},
-		{"uint16", uint16(5)},
-		{"uint32", uint32(5)},
-		{"uint64", uint64(5)},
-		{"float32", float32(5)},
-		{"float64", float64(5)},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			got, err := coerceScalar(schema.NewFloatConstraint(), tc.in)
-			if err != nil {
-				t.Fatalf("unexpected error: %v", err)
-			}
-			f, ok := got.(float64)
-			if !ok {
-				t.Fatalf("%s: got %T, want float64", tc.name, got)
-			}
-			if f != 5.0 {
-				t.Errorf("%s: got %v, want 5.0", tc.name, f)
-			}
-		})
-	}
-}
-
 func TestCoerceParams_ListElementTypeMismatchErrors(t *testing.T) {
 	t.Parallel()
 	// A direct-Cypher List<Float> param carrying a non-numeric element cannot be
@@ -514,9 +434,8 @@ func TestCoerceParams_DeterministicError(t *testing.T) {
 
 func TestCoerceScalar_StrictRejectsUnrepairableInput(t *testing.T) {
 	t.Parallel()
-	// The transforming kinds (Float/Date/Timestamp) error on an input they can
-	// neither pass through as already-driver-native nor repair, rather than
-	// silently handing a wrong-typed value to the driver — matching the list path.
+	// A Float, a Timestamp and a Date each refuse a value in another kind's
+	// form, as a list element of that kind does.
 	cases := []struct {
 		name       string
 		constraint schema.Constraint
@@ -539,33 +458,9 @@ func TestCoerceScalar_StrictRejectsUnrepairableInput(t *testing.T) {
 	}
 }
 
-func TestCoerceScalar_IdempotentOnCanonicalTypes(t *testing.T) {
-	t.Parallel()
-	// An already-driver-native value for a transforming kind passes through
-	// unchanged: coercion is idempotent and never rejects a correct value.
-	ts := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
-	d := dbtype.Date(time.Date(2024, 6, 15, 0, 0, 0, 0, time.UTC))
-
-	if got, err := coerceScalar(schema.NewFloatConstraint(), float64(3.14)); err != nil || got != float64(3.14) {
-		t.Errorf("Float float64: got %#v err %v, want 3.14", got, err)
-	}
-	if got, err := coerceScalar(schema.NewTimestampConstraint(), ts); err != nil {
-		t.Errorf("Timestamp time.Time: unexpected err %v", err)
-	} else if gt, ok := got.(time.Time); !ok || !gt.Equal(ts) {
-		t.Errorf("Timestamp time.Time: got %#v, want passthrough of %v", got, ts)
-	}
-	if got, err := coerceScalar(schema.NewDateConstraint(), d); err != nil {
-		t.Errorf("Date dbtype.Date: unexpected err %v", err)
-	} else if gd, ok := got.(dbtype.Date); !ok || !time.Time(gd).Equal(time.Time(d)) {
-		t.Errorf("Date dbtype.Date: got %#v, want passthrough of %v", got, d)
-	}
-}
-
 func TestCoerceParams_StrictRejectsWrongScalarType(t *testing.T) {
 	t.Parallel()
-	// The direct-Cypher boundary: a scalar param whose Go type the kind can
-	// neither pass through nor repair now errors rather than reaching the driver
-	// wrong-typed.
+	// CoerceParams refuses a string at a Float, as the validator does.
 	if _, err := CoerceParams(
 		map[string]any{"principal": "not-a-number"},
 		ParamTypes{"principal": schema.NewFloatConstraint()},

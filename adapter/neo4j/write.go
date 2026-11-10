@@ -7,14 +7,13 @@ import (
 	"errors"
 	"fmt"
 	"maps"
-	"math"
 	"slices"
 	"time"
 
 	"github.com/neo4j/neo4j-go-driver/v6/neo4j/dbtype"
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/immutable"
-	"github.com/simon-lentz/yammm/instance"
+	"github.com/simon-lentz/yammm/internal/value"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -374,7 +373,7 @@ func (a *Adapter) BatchEdgeQueries(
 
 // propsToParamMap converts instance properties to a Neo4j-driver-compatible
 // map, routing every scalar through [coerceScalar] and every []any slice through
-// [coerceSlice] against the property's schema constraint. An integer at a Float becomes a
+// [coerceSlice] against the property's schema constraint. A json.Number at a Float becomes a
 // float64 and a Date or Timestamp string a driver temporal value, so the driver
 // receives native types that satisfy Neo4j TYPE constraints (IS :: FLOAT,
 // IS :: DATE, IS :: ZONED DATETIME).
@@ -393,7 +392,8 @@ func propsToParamMap(props immutable.Properties, schemaType schema.Type) (map[st
 	raw := props.Clone()
 	for _, key := range slices.Sorted(maps.Keys(raw)) {
 		val := raw[key]
-		if val == nil {
+		if value.Absent(val) {
+			raw[key] = nil
 			continue
 		}
 		c := propertyConstraint(schemaType, key)
@@ -553,33 +553,17 @@ func nestedCollection(c schema.Constraint) error {
 	return err
 }
 
-// coerceSlice converts a []any to a concrete typed slice using the constraint's
-// element kind, so a List<T> or Vector property reaches the driver as the
-// homogeneous Go slice Neo4j requires ([]string, []float64, []dbtype.Date, ...).
-// A Vector is float-valued by definition (matching the eval package's checkVector
-// / coerceVector), so it coerces elementwise exactly as a List<Float> would; this
-// repairs a vector whose whole floats arrive as int64, as a hand-built param map
-// can carry them. Per-element conversion delegates
-// to [coerceScalar] (the Float width-repair and Date/Timestamp parse rules) or, for
-// Integer elements, to [widenInt64] (every Go int/uint width -> int64, a float
-// refused, mirroring the Float repair), so the repair rules live in
-// one place; coerceSlice owns only the slice typing. Scalar Integer positions
-// route through the same [widenInt64], so an element and a scalar of that kind
-// cannot disagree.
+// coerceSlice converts raw, a list in the form the validator stores, to the
+// typed slice Neo4j requires at c ([]string, []int64, []float64, []dbtype.Date,
+// ...). A Vector's element is a Float. [scalarForm] reads each element, as it
+// reads a scalar, and one it refuses is an error naming its index: only a
+// snapshot whose values no validator judged holds one.
 //
-// An element that is neither the element type nor coercible to it — a non-numeric
-// in a List<Float>, an unparseable or wrong-typed value in a List<Date> — is an
-// error naming the element index: a heterogeneous []any cannot satisfy a List<T>
-// column, so failing here beats shipping a slice the driver rejects. On the
-// validated node path this never fires (instance validation already enforced each
-// element's type); it guards the direct-Cypher path, where the param map is
-// hand-built. A []any value under a scalar (non-List, non-Vector) constraint is a
-// shape mismatch — a scalar property cannot hold a list — and is an error too. A
-// nested-collection element kind (a List or Vector element, e.g. List<Vector>) is
-// refused with [ErrUnsupportedListElem], an empty list included: Neo4j has no
-// nested collection property type, and the DDL refuses the property so. The
-// element switch is exhaustiveness-guarded, so a newly-added ConstraintKind fails
-// the lint here rather than silently passing a []any to the driver.
+// A []any under a scalar constraint is an error. A List whose element is a
+// collection is refused with [ErrUnsupportedListElem], an empty list included:
+// Neo4j has no nested collection property type, and the DDL refuses the
+// property so. The element switch is exhaustiveness-guarded, so a new
+// ConstraintKind fails the lint here.
 func coerceSlice(raw []any, c schema.Constraint) (any, error) {
 	c = schema.ResolveAlias(c)
 	// A judged constraint's List holds an element, so no element means a scalar.
@@ -590,77 +574,17 @@ func coerceSlice(raw []any, c schema.Constraint) (any, error) {
 	//exhaustive:enforce
 	switch elem.Kind() {
 	case schema.KindString, schema.KindUUID, schema.KindEnum, schema.KindPattern:
-		out := make([]string, len(raw))
-		for i, v := range raw {
-			s, ok := v.(string)
-			if !ok {
-				return nil, fmt.Errorf("list element %d: cannot use %T as a %s element (want string)", i, v, elem.Kind())
-			}
-			out[i] = s
-		}
-		return out, nil
+		return elements[string](raw, elem)
 	case schema.KindInteger:
-		out := make([]int64, len(raw))
-		for i, v := range raw {
-			n, ok := widenInt64(v)
-			if !ok {
-				return nil, fmt.Errorf("list element %d: cannot use %T as an Integer element (want an integer type)", i, v)
-			}
-			out[i] = n
-		}
-		return out, nil
+		return elements[int64](raw, elem)
 	case schema.KindFloat:
-		out := make([]float64, len(raw))
-		for i, v := range raw {
-			cv, err := coerceScalar(elem, v)
-			if err != nil {
-				return nil, fmt.Errorf("list element %d: %w", i, err)
-			}
-			f, ok := cv.(float64)
-			if !ok {
-				return nil, fmt.Errorf("list element %d: cannot use %T as a Float element (want a numeric type)", i, v)
-			}
-			out[i] = f
-		}
-		return out, nil
+		return elements[float64](raw, elem)
 	case schema.KindBoolean:
-		out := make([]bool, len(raw))
-		for i, v := range raw {
-			b, ok := v.(bool)
-			if !ok {
-				return nil, fmt.Errorf("list element %d: cannot use %T as a Boolean element (want bool)", i, v)
-			}
-			out[i] = b
-		}
-		return out, nil
+		return elements[bool](raw, elem)
 	case schema.KindDate:
-		out := make([]dbtype.Date, len(raw))
-		for i, v := range raw {
-			cv, err := coerceScalar(elem, v)
-			if err != nil {
-				return nil, fmt.Errorf("list element %d: %w", i, err)
-			}
-			d, ok := cv.(dbtype.Date)
-			if !ok {
-				return nil, fmt.Errorf("list element %d: cannot use %T as a Date element (want a YYYY-MM-DD string or time.Time)", i, v)
-			}
-			out[i] = d
-		}
-		return out, nil
+		return elements[dbtype.Date](raw, elem)
 	case schema.KindTimestamp:
-		out := make([]time.Time, len(raw))
-		for i, v := range raw {
-			cv, err := coerceScalar(elem, v)
-			if err != nil {
-				return nil, fmt.Errorf("list element %d: %w", i, err)
-			}
-			tt, ok := cv.(time.Time)
-			if !ok {
-				return nil, fmt.Errorf("list element %d: cannot use %T as a Timestamp element (want an RFC3339 string or time.Time)", i, v)
-			}
-			out[i] = tt
-		}
-		return out, nil
+		return elements[time.Time](raw, elem)
 	case schema.KindVector, schema.KindList, schema.KindAlias:
 		// Neo4j has no nested collection property type (List<Vector>,
 		// List<List<…>>), so the list is refused, an empty one included.
@@ -677,48 +601,23 @@ func coerceSlice(raw []any, c schema.Constraint) (any, error) {
 	}
 }
 
-// widenInt64 widens a Go integer of any width to int64 for an
-// Integer-constrained position, so a value hand-built with a narrower or
-// unsigned type reaches the driver as a Cypher INTEGER — the same width repair
-// [coerceScalar] applies for Float, in the other direction.
-//
-// A float is never an Integer, whole or not, so it is not widened: the driver
-// would otherwise receive an integer the caller never wrote, and the
-// validator's Integer rule refuses the same value. It reports false for a
-// float, for any other type, and for a uint or uint64 past the int64 range,
-// matching the validator's coerceInteger overflow guard.
-func widenInt64(v any) (int64, bool) {
-	switch n := v.(type) {
-	case int:
-		return int64(n), true
-	case int8:
-		return int64(n), true
-	case int16:
-		return int64(n), true
-	case int32:
-		return int64(n), true
-	case int64:
-		return n, true
-	case uint:
-		u := uint64(n)
-		if u > math.MaxInt64 {
-			return 0, false
+// elements returns raw as the []T the driver sends, each element read at elem by
+// [scalarForm]. T is the Go type scalarForm returns at elem's kind.
+func elements[T any](raw []any, elem schema.Constraint) (any, error) {
+	out := make([]T, len(raw))
+	for i, v := range raw {
+		cv, err := scalarForm(elem, v)
+		if err != nil {
+			return nil, fmt.Errorf("list element %d: %w", i, err)
 		}
-		return int64(u), true
-	case uint8:
-		return int64(n), true
-	case uint16:
-		return int64(n), true
-	case uint32:
-		return int64(n), true
-	case uint64:
-		if n > math.MaxInt64 {
-			return 0, false
+		e, ok := cv.(T)
+		if !ok {
+			// Unreachable while T is the type scalarForm returns at elem's kind.
+			return nil, fmt.Errorf("list element %d: coerce %s: the rule returned %T", i, elem.Kind(), cv)
 		}
-		return int64(n), true
-	default:
-		return 0, false
+		out[i] = e
 	}
+	return out, nil
 }
 
 // coerceRelProps coerces a relationship property map against the relation's
@@ -743,7 +642,7 @@ func coerceRelProps(props map[string]any, rel schema.Relation) (map[string]any, 
 	declares := !rel.IsZero() && rel.HasProperties()
 	for _, k := range slices.Sorted(maps.Keys(props)) {
 		v := props[k]
-		if instance.IsAbsent(v) {
+		if value.Absent(v) {
 			props[k] = nil
 			continue
 		}
@@ -790,10 +689,10 @@ func relConstraint(rel schema.Relation) func(string) schema.Constraint {
 // property path uses.
 //
 // A MERGE binds the key and SETs the property from two different maps, so a key
-// left raw where its property is coerced makes the two carry different Go types
-// for every transforming kind (Date, Timestamp, Float): the pattern matches no
-// stored node, and each write inserts another duplicate. The key is read by
-// [heldForm] first.
+// left raw where its property is coerced makes the two differ wherever the rule
+// changes a value: a Date's and a Timestamp's text become driver values, and a
+// UUID's text its canonical spelling. The pattern then matches no stored node,
+// and each write inserts another duplicate. The key is read by [heldForm] first.
 func coerceKey(shape *nodeShape, name string, raw any) (any, error) {
 	c := shape.keyConstraints[name]
 	held, err := heldForm(raw, c)
@@ -809,7 +708,7 @@ func coerceKey(shape *nodeShape, name string, raw any) (any, error) {
 
 // extractKeyProps extracts the shape's primary key properties from immutable
 // properties, coercing each against its declared constraint. All keys must be
-// present and hold a value: a nil pointer to a string is a nil key.
+// present and hold a value.
 func extractKeyProps(props immutable.Properties, shape *nodeShape) (map[string]any, error) {
 	keyNames := shape.primaryKeys
 	if len(keyNames) == 0 {
@@ -828,7 +727,7 @@ func extractKeyProps(props immutable.Properties, shape *nodeShape) (map[string]a
 			continue
 		}
 		unwrapped := val.Unwrap()
-		if instance.IsAbsent(unwrapped) {
+		if value.Absent(unwrapped) {
 			nilKeys = append(nilKeys, name)
 			continue
 		}

@@ -337,7 +337,7 @@ func TestReportError(t *testing.T) {
 		{
 			"a marked refusal is the one failure it marks",
 			Validationf("generate node queries: %w", markedRefusal()),
-			"error: generate node queries: param \"v\": coerce Integer: cannot convert float64 to int64\n",
+			"error: generate node queries: param \"v\": expected integer, got float 2.5\n",
 		},
 	}
 	for _, tt := range tests {

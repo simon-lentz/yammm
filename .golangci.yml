@@ -176,7 +176,7 @@ linters:
       - path: "^instance/(errors|options|raw|schema_builder|valid|validate_composition|validate_edge|validator)_test\\.go$"
         linters:
           - depguard
-      - path: "^instance/internal/eval/(builtins|checkers|evaluator|scope)_test\\.go$"
+      - path: "^instance/internal/eval/(builtins|evaluator|scope)_test\\.go$"
         linters:
           - depguard
       - path: "^location/(provenance)_test\\.go$"

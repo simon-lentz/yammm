@@ -733,7 +733,7 @@ index Integer[_, 99]         // no minimum, maximum 99
 temperature Integer[-40, 50] // negative lower bound
 ```
 
-Validation accepts signed and unsigned integers, including named/alias types and pointer values, and refuses every float, whole or not. In a data document an `Integer` value is an integer literal — no `.`, `e` or `E` — read exactly, so `5.0` and `1e2` are floats and are refused. Unsigned inputs larger than `int64` are rejected before bound checks, and so is an integer literal outside the `int64` range: validation never reads it as its nearest float, which for a literal just below the minimum is the minimum itself. A `.ys` snapshot stores such a literal as its text and writes it back unchanged, and revalidation refuses it.
+Validation accepts signed and unsigned integers, a named type over one included, and refuses every float, whole or not. A pointer to an integer is no integer. In a data document an `Integer` value is an integer literal — no `.`, `e` or `E` — read exactly, so `5.0` and `1e2` are floats and are refused. Unsigned inputs larger than `int64` are rejected before bound checks, and so is an integer literal outside the `int64` range: validation never reads it as its nearest float, which for a literal just below the minimum is the minimum itself. A `.ys` snapshot stores such a literal as its text and writes it back unchanged, and revalidation refuses it.
 
 #### Float
 
@@ -902,7 +902,7 @@ embedding Vector[768]       // 768-dimensional vector
 coordinates Vector[3]       // 3D coordinates
 ```
 
-Validation accepts float **slices** (`[]float32`, `[]float64`, and named types over them) and integer elements, which coerce to `float64`. A Go array or a pointer to a non-nil slice is refused; a nil slice, bare or behind a pointer, holds no value. `NaN`, `Inf`, and non-numeric elements are rejected.
+Validation accepts any Go slice whose elements are numbers, floats or integers, such as `[]float64`, `[]float32`, `[]int`, `[]json.Number` or `[]any`, a named slice type and a slice of a named number type included, or an `immutable.Slice` of numbers. Each element is stored as a `float64`. A Go array and a pointer to a slice are refused; a nil slice holds no value. `NaN`, `Inf`, and non-numeric elements are rejected.
 
 #### List
 
@@ -1421,7 +1421,7 @@ Supported datatype keywords for type checking:
 - `Timestamp` - checks for valid timestamp values
 - `Date` - checks for valid date values
 
-Each check applies the rule a property of that kind applies when it declares no constraint: `=~ Float` is false for NaN and infinities, `=~ String` is false for a number, and `=~ Timestamp` accepts an RFC 3339 string or a `time.Time` whose RFC 3339 text reads back. `=~ Timestamp` reads RFC 3339 whatever layout a property declares: a value stored under `d Timestamp["2006-01-02"]`, such as `"2030-01-02"`, validates there and `d =~ Timestamp` is false. An invariant has no layout to apply, since `=~` judges a value at run time and sees no property's constraint. `Vector`, `List`, `Enum` and `Pattern` are datatype keywords but not type checks — they name a shape or a constraint, not a kind a value can have — and `=~` against one is refused at schema load with `E_INVALID_INVARIANT`.
+Each check applies the rule a property of that kind applies when it declares no constraint: `=~ Float` is false for NaN and infinities, `=~ String` is false for a number, and `=~ Timestamp` accepts an RFC 3339 string or a `time.Time` whose RFC 3339 text reads back. A nil is the exception: a property accepts an absent value, and a nil is of no kind, so `x =~ String` is false and `x !~ String` is true while `x` is nil. `=~ Timestamp` reads RFC 3339 whatever layout a property declares: a value stored under `d Timestamp["2006-01-02"]`, such as `"2030-01-02"`, validates there and `d =~ Timestamp` is false. An invariant has no layout to apply, since `=~` judges a value at run time and sees no property's constraint. `Vector`, `List`, `Enum` and `Pattern` are datatype keywords but not type checks — they name a shape or a constraint, not a kind a value can have — and `=~` against one is refused at schema load with `E_INVALID_INVARIANT`.
 
 Numeric type checks follow the property rules: `5 =~ Float` holds, because an integer widens to a float, and `5.0 =~ Integer` does not — a float is never an integer, whole or not.
 

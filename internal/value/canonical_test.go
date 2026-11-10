@@ -317,22 +317,41 @@ func TestCanonical_NilInputsPassThrough(t *testing.T) {
 	}
 }
 
-// canonicalUUID reads the same carriers checkUUID accepts: a named string
-// type (schema/gogen's shape for a DataType over UUID) and a *string. A
-// value the check passes must not fail the coercion that follows it.
-func TestCanonical_UUIDReadsAStringCarrier(t *testing.T) {
+// canonicalUUID reads a named string as checkUUID accepts it (schema/gogen's
+// shape for a DataType over UUID): a value the check passes must not fail the
+// coercion that follows it.
+func TestCanonical_UUIDReadsANamedString(t *testing.T) {
 	t.Parallel()
 	type userID string
 	const spelled = "{123E4567-E89B-12D3-A456-426614174000}"
 	const want = "123e4567-e89b-12d3-a456-426614174000"
-	str := spelled
-	for name, in := range map[string]any{"named string": userID(spelled), "pointer": &str} {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-			if got := canon(t, in, schema.NewUUIDConstraint()); got != want {
-				t.Errorf("Canonical(%T) = %#v, want %q", in, got, want)
+	if got := canon(t, userID(spelled), schema.NewUUIDConstraint()); got != want {
+		t.Errorf("Canonical(a named string) = %#v, want %q", got, want)
+	}
+}
+
+// A pointer has no canonical form at any kind that has one, nil or not:
+// Canonical refuses it and returns it as given.
+func TestCanonical_RefusesAPointer(t *testing.T) {
+	t.Parallel()
+	text := "2026-08-19"
+	at := time.Date(2026, 8, 19, 12, 0, 0, 0, time.UTC)
+	id := uuid.MustParse("123e4567-e89b-12d3-a456-426614174000")
+	list := []any{text}
+	var nilText *string
+	for _, c := range []schema.Constraint{
+		schema.NewTimestampConstraint(), schema.NewDateConstraint(), schema.NewUUIDConstraint(),
+		schema.NewListConstraint(schema.NewDateConstraint()),
+	} {
+		for _, p := range []any{&text, &at, &id, &list, nilText} {
+			got, err := value.Canonical(p, c)
+			if err == nil {
+				t.Errorf("Canonical(%T, %s) = %#v, want a refusal", p, c, got)
 			}
-		})
+			if got != p {
+				t.Errorf("Canonical(%T, %s) returned %#v beside its error, want the pointer as given", p, c, got)
+			}
+		}
 	}
 }
 
@@ -420,13 +439,12 @@ func TestCanonical_ARefusedLongStringIsCut(t *testing.T) {
 // empty list, which a writer would write as [] where the nil writes null.
 func TestCanonical_AValueThatHoldsNonePassesThrough(t *testing.T) {
 	t.Parallel()
-	var nilText *string
 	for _, c := range []schema.Constraint{
 		schema.NewListConstraint(schema.NewTimestampConstraint()),
 		schema.NewListConstraint(schema.NewUUIDConstraint()),
 		schema.NewTimestampConstraint(),
 	} {
-		for _, v := range []any{[]any(nil), []string(nil), map[string]any(nil), nilText} {
+		for _, v := range []any{nil, []any(nil), []string(nil), map[string]any(nil)} {
 			out, err := value.Canonical(v, c)
 			if err != nil || !reflect.DeepEqual(out, v) || reflect.TypeOf(out) != reflect.TypeOf(v) {
 				t.Errorf("Canonical(%#v, %s) = %#v, %v; want it unchanged", v, c, out, err)

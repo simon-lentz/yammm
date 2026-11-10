@@ -19,20 +19,20 @@ type (
 
 func (selfMarshal) MarshalJSON() ([]byte, error) { return []byte(`"spelled"`), nil }
 
-// Scalar reads a value as its one form: a scalar through
-// any pointers and interfaces, a named type as its base value, three library
-// types as themselves, and nothing else.
+// Scalar reads a value as its one form: a scalar of a predeclared or named
+// type as its base value, three library types as themselves, a value that holds
+// none as nil, and nothing else. A pointer is no form, a nil one too.
 func TestScalar_ReadsTheOneForm(t *testing.T) {
 	t.Parallel()
+	type selfPointer *selfPointer
 	text := "a"
 	ptrText := &text
 	var held any = json.Number("5")
-	var heldText any = json.Number("+5")
 	number := json.Number("0x1p4")
-	var heldPtr any = ptrText
 	now := time.Date(2024, 1, 2, 3, 4, 5, 0, time.UTC)
 	id := uuid.MustParse("12345678-1234-1234-1234-123456789abc")
 	var nilMap map[int]string
+	var nilSlice []string
 	var nilPtr *string
 	var self selfPointer
 	self = &self
@@ -46,17 +46,15 @@ func TestScalar_ReadsTheOneForm(t *testing.T) {
 		{"a string", "a", "a", true},
 		{"a named string", namedText("a"), "a", true},
 		{"a self-spelling named string is its base value", selfMarshal("a"), "a", true},
-		{"a pointer to a string", ptrText, "a", true},
-		{"a pointer to a pointer to a string", &ptrText, "a", true},
-		{"a nil pointer", nilPtr, nil, true},
-		{"a pointer to an interface holding a json.Number", &held, json.Number("5"), true},
+		{"a pointer to a string", ptrText, nil, false},
+		{"a pointer to a pointer to a string", &ptrText, nil, false},
+		{"a nil pointer", nilPtr, nil, false},
+		{"a pointer to an interface holding a json.Number", &held, nil, false},
 		{"an empty json.Number is no number literal", json.Number(""), nil, false},
 		{"a json.Number spelled with a sign '+' is no number literal", json.Number("+5"), nil, false},
 		{"a json.Number with leading zeros is no number literal", json.Number("007"), nil, false},
-		{"a pointer to a hexadecimal json.Number is no number literal", &number, nil, false},
-		{"an interface holding a json.Number that is no number literal", &heldText, nil, false},
-		{"a pointer to an interface holding a pointer to a string", &heldPtr, "a", true},
-		{"a nil unsafe.Pointer", unsafe.Pointer(nil), nil, true},
+		{"a pointer to a json.Number", &number, nil, false},
+		{"a nil unsafe.Pointer", unsafe.Pointer(nil), nil, false},
 		{"a named int", namedInt(-3), int64(-3), true},
 		{"a uint8", uint8(7), uint64(7), true},
 		{"a uintptr", uintptr(9), uint64(9), true},
@@ -64,16 +62,21 @@ func TestScalar_ReadsTheOneForm(t *testing.T) {
 		{"a bool", true, true, true},
 		{"a json.Number", json.Number("1e400"), json.Number("1e400"), true},
 		{"a time", now, now, true},
-		{"a pointer to a time", &now, now, true},
+		{"a pointer to a time", &now, nil, false},
 		{"a uuid", id, id, true},
+		{"a pointer to a uuid", &id, nil, false},
 		{"a nil map keyed by an integer", nilMap, nil, true},
+		{"a nil slice", nilSlice, nil, true},
 		{"a struct", struct{ S string }{"a"}, nil, false},
 		{"an array", [1]string{"a"}, nil, false},
 		{"a map keyed by an integer", map[int]string{1: "a"}, nil, false},
 		{"a raw slice", []string{"a"}, nil, false},
 		{"a pointer to a slice", &[]string{"a"}, nil, false},
+		{"a pointer to a nil slice", &nilSlice, nil, false},
 		{"a complex number", complex(1, 2), nil, false},
 		{"a channel", make(chan int), nil, false},
+		{"a nil channel", (chan int)(nil), nil, false},
+		{"a nil function", (func())(nil), nil, false},
 		{"a pointer that points to itself", self, nil, false},
 	} {
 		got, ok := Scalar(c.in)

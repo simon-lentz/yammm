@@ -39,9 +39,6 @@ func toStringComparable(v any) (string, error) {
 	case string:
 		return s, nil
 	case *regexp.Regexp:
-		if s == nil {
-			return "", errors.New("value: nil regexp")
-		}
 		return s.String(), nil
 	}
 	if s, ok := GetString(v); ok {
@@ -339,10 +336,7 @@ func GetInt64(val any) (int64, bool) {
 	}
 	// Floats stay rejected here: the caller distinguishes an integer from a
 	// float by which getter answers.
-	rv, ok := walk(val)
-	if !ok || !rv.IsValid() {
-		return 0, false
-	}
+	rv := reflect.ValueOf(val)
 	switch rv.Kind() {
 	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
 		return rv.Int(), true
@@ -359,10 +353,6 @@ func GetInt64(val any) (int64, bool) {
 	return 0, false
 }
 
-// maxPointerDepth bounds how many pointers and interfaces [walk] follows, so no
-// reader of the value layer follows a pointer that points to itself forever.
-const maxPointerDepth = 64
-
 // GetFloat64 extracts a float64 from any float type.
 // Returns (value, true) if the input is float32 or float64.
 // Returns (0, false) for non-float types.
@@ -373,10 +363,7 @@ func GetFloat64(val any) (float64, bool) {
 	case float64:
 		return x, true
 	}
-	rv, ok := walk(val)
-	if !ok || !rv.IsValid() {
-		return 0, false
-	}
+	rv := reflect.ValueOf(val)
 	if k := rv.Kind(); k == reflect.Float32 || k == reflect.Float64 {
 		return rv.Float(), true
 	}
@@ -387,30 +374,29 @@ func GetFloat64(val any) (float64, bool) {
 	return 0, false
 }
 
-// GetBool extracts a bool, accepting a pointer, an interface or a named type
-// over bool so it agrees with the BoolStrata category TypeStrata assigns them.
+// GetBool extracts a bool, accepting a named type over bool so it agrees with
+// the BoolStrata category TypeStrata assigns one.
 func GetBool(val any) (bool, bool) {
 	if b, ok := val.(bool); ok {
 		return b, true
 	}
-	rv, ok := walk(val)
-	if !ok || !rv.IsValid() || rv.Kind() != reflect.Bool {
+	rv := reflect.ValueOf(val)
+	if rv.Kind() != reflect.Bool {
 		return false, false
 	}
 	return rv.Bool(), true
 }
 
-// GetString extracts a string, accepting a pointer, an interface or a named
-// type over string. It rejects *regexp.Regexp, which toStringComparable accepts
-// for ordering but which is not a value any string-kinded constraint holds, and
-// a json.Number behind any carrier, which is a named type over string but a
-// number to every other getter here.
+// GetString extracts a string, accepting a named type over string. It rejects
+// *regexp.Regexp, which toStringComparable accepts for ordering but which is not
+// a value any string-kinded constraint holds, and a json.Number, which is a
+// named type over string but a number to every other getter here.
 func GetString(val any) (string, bool) {
 	if s, ok := val.(string); ok {
 		return s, true
 	}
-	rv, ok := walk(val)
-	if !ok || !rv.IsValid() || rv.Kind() != reflect.String || rv.Type() == numberType {
+	rv := reflect.ValueOf(val)
+	if rv.Kind() != reflect.String || rv.Type() == numberType {
 		return "", false
 	}
 	return rv.String(), true
@@ -418,7 +404,7 @@ func GetString(val any) (string, bool) {
 
 // GetUint64 extracts a uint64 from any unsigned integer type, or from a
 // json.Number whose text is a JSON number literal spelling a non-negative
-// integer within uint64, each read through its carriers as [Scalar] reads it.
+// integer within uint64, a named type read as its base value.
 // Returns (0, false) for every other value.
 //
 // Unlike GetInt64, this function does not reject any valid unsigned values.
@@ -438,10 +424,7 @@ func GetUint64(val any) (uint64, bool) {
 	case uintptr:
 		return uint64(x), true
 	}
-	rv, ok := walk(val)
-	if !ok || !rv.IsValid() {
-		return 0, false
-	}
+	rv := reflect.ValueOf(val)
 	switch rv.Kind() {
 	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
 		return rv.Uint(), true

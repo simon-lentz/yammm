@@ -970,8 +970,8 @@ func (v *Validator) checkValueWithRecovery(val any, c schema.Constraint) error {
 	return checkValueRecovering(val, c)
 }
 
-// coerceValueWithRecovery runs eval.CoerceValue with panic recovery, as
-// checkValueWithRecovery runs eval.CheckValue.
+// coerceValueWithRecovery runs value.Coerce with panic recovery, as
+// checkValueWithRecovery runs value.Check.
 func (v *Validator) coerceValueWithRecovery(val any, c schema.Constraint) (any, error) {
 	return coerceValueRecovering(val, c)
 }

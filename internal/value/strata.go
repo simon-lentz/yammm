@@ -22,14 +22,14 @@ const (
 
 // TypeStrata returns the strata for a value's type — its ordering category.
 //
-// Returns InvalidStrata for types with no category: maps, channels, functions
-// and unsafe pointers that hold a value, structs other than an [immutable.Slice]
-// and a nil [immutable] container, a non-nil slice behind a pointer or an
-// interface, and a json.Number that is no JSON number literal. A value that
-// holds none ([Absent]), bare or through pointers and interfaces, a nil
-// container included, is NilStrata, and a scalar takes the strata of the form
-// [Scalar] reads it in, so the categories agree with [Order] and with the
-// extraction functions.
+// Returns InvalidStrata for types with no category: a pointer, nil or not, a
+// non-nil map, a channel, a function, a struct other than an [immutable.Slice]
+// and a nil [immutable] container, and a json.Number that is no JSON number
+// literal. The one pointer with a category is a non-nil *regexp.Regexp, the
+// evaluator's pattern literal, which is StringStrata. A value that holds none
+// ([Absent]) is NilStrata, and a scalar takes
+// the strata of the form [Scalar] reads it in, so the categories agree with
+// [Order] and with the extraction functions.
 func TypeStrata(a any) int {
 	if a == nil {
 		return NilStrata
@@ -51,8 +51,9 @@ func TypeStrata(a any) int {
 	case string:
 		return StringStrata
 	case *regexp.Regexp:
+		// The evaluator's pattern literal. A nil one is a pointer like any other.
 		if x == nil {
-			return NilStrata
+			return InvalidStrata
 		}
 		return StringStrata
 	case json.Number:
@@ -75,28 +76,15 @@ func TypeStrata(a any) int {
 }
 
 // strataOfKind reports the strata of a value the predeclared type switch
-// cannot answer by what [walk] reaches: nil for a value [Absent] reads as none,
-// a scalar by the form [Scalar] reads it in, a bare non-nil slice as a list, and
-// any other value as none.
+// cannot answer: nil for a value [Absent] reads as none, a named scalar by its
+// kind, a non-nil slice as a list, and any other value as none.
 func strataOfKind(a any) int {
 	if immutable.IsNilContainer(a) {
 		return NilStrata
 	}
-	rv, ok := walk(a)
-	if !ok {
-		return InvalidStrata
-	}
+	rv := reflect.ValueOf(a)
 	if isNil(rv) {
 		return NilStrata
-	}
-	switch rv.Type() {
-	case numberType:
-		if _, isLiteral := literal(rv); isLiteral {
-			return NumericStrata
-		}
-		return InvalidStrata
-	case timeType, uuidType:
-		return InvalidStrata
 	}
 	switch rv.Kind() {
 	case reflect.Bool:
@@ -109,11 +97,8 @@ func strataOfKind(a any) int {
 		return StringStrata
 	case reflect.Slice:
 		// Elements are not inspected here; an unsupported element fails at
-		// the comparison that reaches it. A slice behind a carrier is no
-		// list, as [ListElems] reads one.
-		if reflect.ValueOf(a).Kind() == reflect.Slice {
-			return SliceStrata
-		}
+		// the comparison that reaches it.
+		return SliceStrata
 	}
 	return InvalidStrata
 }

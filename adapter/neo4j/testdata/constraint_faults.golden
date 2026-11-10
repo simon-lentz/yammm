@@ -3,7 +3,7 @@ nil
 	CoerceParams: map[v:x], ok
 enum accepted
 	CheckConstraint: ok
-	CoerceParams: map[v:x], ok
+	CoerceParams: map[], param "v": value "x" not in enum [a b]
 enum zero value
 	CheckConstraint: schema: enum must have at least two values (got 0)
 	CoerceParams: map[], param type "v": schema: enum must have at least two values (got 0)
@@ -60,7 +60,7 @@ enum empty before not UTF-8
 	CoerceParams: map[], param type "v": schema: enum value cannot be empty
 enum values changed after construction
 	CheckConstraint: ok
-	CoerceParams: map[v:x], ok
+	CoerceParams: map[], param "v": value "x" not in enum [a b]
 enum pointer
 	CheckConstraint: schema: a constraint of Go type *schema.EnumConstraint is none this package constructs
 	CoerceParams: map[], param type "v": schema: a constraint of Go type *schema.EnumConstraint is none this package constructs
@@ -78,31 +78,31 @@ enum fault behind a reference
 	CoerceParams: map[], param type "v": schema: enum must have at least two values (got 1)
 enum accepted behind a reference
 	CheckConstraint: ok
-	CoerceParams: map[v:x], ok
+	CoerceParams: map[], param "v": value "x" not in enum [a b]
 boolean accepted
 	CheckConstraint: ok
-	CoerceParams: map[v:x], ok
+	CoerceParams: map[], param "v": expected boolean, got string
 date accepted
 	CheckConstraint: ok
-	CoerceParams: map[], param "v": coerce Date: cannot parse "x" as a YYYY-MM-DD date
+	CoerceParams: map[], param "v": invalid date format: "x" (expected YYYY-MM-DD)
 uuid accepted
 	CheckConstraint: ok
-	CoerceParams: map[v:x], ok
+	CoerceParams: map[], param "v": invalid UUID: "x"
 timestamp accepted
 	CheckConstraint: ok
-	CoerceParams: map[], param "v": coerce Timestamp: cannot parse "x" against format "2006-01-02"
+	CoerceParams: map[], param "v": invalid timestamp format: "x" (expected 2006-01-02)
 timestamp format not UTF-8
 	CheckConstraint: schema: timestamp format "\xff" is not valid UTF-8
 	CoerceParams: map[], param type "v": schema: timestamp format "\xff" is not valid UTF-8
 integer accepted
 	CheckConstraint: ok
-	CoerceParams: map[], param "v": coerce Integer: cannot convert string to int64
+	CoerceParams: map[], param "v": expected integer, got string
 integer inverted
 	CheckConstraint: schema: integer bounds inverted: min 5 > max 1
 	CoerceParams: map[], param type "v": schema: integer bounds inverted: min 5 > max 1
 float accepted
 	CheckConstraint: ok
-	CoerceParams: map[], param "v": coerce Float: cannot convert string to float64
+	CoerceParams: map[], param "v": expected float, got string
 float infinite max
 	CheckConstraint: schema: non-finite float bound +Inf; a Float bound is a finite number
 	CoerceParams: map[], param type "v": schema: non-finite float bound +Inf; a Float bound is a finite number
@@ -138,7 +138,7 @@ string negative min before negative max
 	CoerceParams: map[], param type "v": schema: string minimum length cannot be negative: -1
 list accepted
 	CheckConstraint: ok
-	CoerceParams: map[v:x], ok
+	CoerceParams: map[], param "v": expected array for list, got string
 list zero value
 	CheckConstraint: schema: list has no element constraint
 	CoerceParams: map[], param type "v": schema: list has no element constraint
@@ -171,7 +171,7 @@ list pointer
 	CoerceParams: map[], param type "v": schema: a constraint of Go type *schema.ListConstraint is none this package constructs
 pattern accepted
 	CheckConstraint: ok
-	CoerceParams: map[v:x], ok
+	CoerceParams: map[], param "v": value "x" does not match pattern ^a
 pattern zero value
 	CheckConstraint: schema: pattern constraint needs at least one pattern
 	CoerceParams: map[], param type "v": schema: pattern constraint needs at least one pattern
@@ -201,7 +201,7 @@ pattern refused before surrogate
 	CoerceParams: map[], param type "v": schema: invalid regex pattern "a**": error parsing regexp: invalid nested repetition operator: `**`
 vector accepted
 	CheckConstraint: ok
-	CoerceParams: map[v:x], ok
+	CoerceParams: map[], param "v": expected array for vector, got string
 vector zero
 	CheckConstraint: schema: vector dimensions must be between 1 and 65536 (got 0)
 	CoerceParams: map[], param type "v": schema: vector dimensions must be between 1 and 65536 (got 0)
@@ -216,7 +216,7 @@ pointer to a string
 	CoerceParams: map[], param type "v": schema: a constraint of Go type *schema.StringConstraint is none this package constructs
 reference accepted
 	CheckConstraint: ok
-	CoerceParams: map[], param "v": coerce Integer: cannot convert string to int64
+	CoerceParams: map[], param "v": expected integer, got string
 reference unresolved
 	CheckConstraint: schema: datatype "Code" resolves to no constraint
 	CoerceParams: map[], param type "v": schema: datatype "Code" resolves to no constraint

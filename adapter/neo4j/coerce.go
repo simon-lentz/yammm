@@ -5,20 +5,24 @@ import (
 	"maps"
 	"reflect"
 	"slices"
+	"strings"
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/neo4j/neo4j-go-driver/v6/neo4j/dbtype"
 	"github.com/simon-lentz/yammm/diag"
-	"github.com/simon-lentz/yammm/instance"
+	"github.com/simon-lentz/yammm/internal/value"
 	"github.com/simon-lentz/yammm/schema"
 )
 
-// coerceScalar applies the package doc's rule to one value. Every path reaches
-// it with a constraint a loaded or judged schema holds.
+// coerceScalar returns raw, a value in the form the validator stores, as the
+// driver's value at constraint. It judges the form alone: a value of another
+// kind's form is refused, and bounds, members and patterns are the validator's.
+// Every path reaches it with a constraint a loaded or judged schema holds.
 func coerceScalar(constraint schema.Constraint, raw any) (any, error) {
 	// The driver packs a nil slice as an empty list, so it must reach the driver as nil.
-	if instance.IsAbsent(raw) {
+	if value.Absent(raw) {
 		//nolint:nilnil // a value that holds none coerces to nil with no error: it is an absent property, not a failure
 		return nil, nil
 	}
@@ -28,11 +32,18 @@ func coerceScalar(constraint schema.Constraint, raw any) (any, error) {
 		return raw, nil
 	}
 	resolved := schema.ResolveAlias(constraint)
-	kind := resolved.Kind()
 	// A property type Neo4j cannot store is refused first, whatever the value.
 	if err := nestedCollection(resolved); err != nil {
 		return raw, err
 	}
+	return scalarForm(resolved, raw)
+}
+
+// scalarForm is [coerceScalar] at an alias-resolved constraint that is no nested
+// collection. A nil has no form there, so [coerceSlice] refuses a list element
+// that holds none by it.
+func scalarForm(resolved schema.Constraint, raw any) (any, error) {
+	kind := resolved.Kind()
 	if reflect.ValueOf(raw).Kind() == reflect.Map {
 		// Neo4j stores no map as a property value, so no constraint admits one.
 		return raw, fmt.Errorf("coerce %s: cannot store %T, a map, as a property value", kind, raw)
@@ -40,122 +51,112 @@ func coerceScalar(constraint schema.Constraint, raw any) (any, error) {
 	//exhaustive:enforce
 	switch kind {
 	case schema.KindFloat:
-		switch v := raw.(type) {
-		case int:
-			return float64(v), nil
-		case int8:
-			return float64(v), nil
-		case int16:
-			return float64(v), nil
-		case int32:
-			return float64(v), nil
-		case int64:
-			return float64(v), nil
-		case uint:
-			return float64(v), nil
-		case uint8:
-			return float64(v), nil
-		case uint16:
-			return float64(v), nil
-		case uint32:
-			return float64(v), nil
-		case uint64:
-			return float64(v), nil
-		case float32:
-			return float64(v), nil
-		case float64:
-			return v, nil
-		default:
-			return raw, fmt.Errorf("coerce %s: cannot convert %T to float64", kind, raw)
+		if _, ok := raw.(float64); !ok {
+			return raw, fmt.Errorf("coerce %s: cannot use %T (want float64)", kind, raw)
 		}
+		return raw, nil
 	case schema.KindTimestamp:
 		format := ""
 		if tc, ok := resolved.(schema.TimestampConstraint); ok {
 			format = tc.Format()
 		}
-		switch v := raw.(type) {
-		case time.Time:
-			return driverZone(v), nil // already Neo4j ZONED DATETIME native
-		case string:
-			if format != "" {
-				// A Timestamp["layout"] constraint: the declared Go layout is
-				// exclusive, matching schema validation (checkTimestamp).
-				if t, err := time.Parse(format, v); err == nil {
-					return driverZone(t), nil
-				}
-				return raw, fmt.Errorf("coerce %s: cannot parse %s against format %q", kind, diag.QuoteValue(v), format)
-			}
-			// One layout, not two: time.Parse against RFC3339 already accepts
-			// fractional seconds, so no input can fail it and then succeed
-			// against RFC3339Nano. The second attempt was unreachable.
-			if t, err := time.Parse(time.RFC3339, v); err == nil {
+		v, ok := raw.(string)
+		if !ok {
+			return raw, fmt.Errorf("coerce %s: cannot use %T (want string)", kind, raw)
+		}
+		if format != "" {
+			if t, err := time.Parse(format, v); err == nil {
 				return driverZone(t), nil
 			}
-			return raw, fmt.Errorf("coerce %s: cannot parse %s as an RFC3339 timestamp", kind, diag.QuoteValue(v))
-		default:
-			return raw, fmt.Errorf("coerce %s: cannot convert %T to a timestamp (want a string or time.Time)", kind, raw)
+			return raw, fmt.Errorf("coerce %s: cannot parse %s against format %q", kind, diag.QuoteValue(v), format)
 		}
+		if t, err := time.Parse(time.RFC3339, v); err == nil {
+			return driverZone(t), nil
+		}
+		return raw, fmt.Errorf("coerce %s: cannot parse %s as an RFC3339 timestamp", kind, diag.QuoteValue(v))
 	case schema.KindDate:
 		switch v := raw.(type) {
 		case dbtype.Date:
-			// Native already, but not necessarily normalised: dbtype.Date is a
-			// plain time.Time conversion with no constructor that zeroes the
-			// clock, so a caller can build one carrying a time of day.
+			// The driver's own date, which [CoerceParams] passes at a Date.
 			return dbtype.Date(calendarDate(time.Time(v))), nil
-		case time.Time:
-			return dbtype.Date(calendarDate(v)), nil
 		case string:
 			if t, err := time.Parse(time.DateOnly, v); err == nil {
 				return dbtype.Date(t), nil
 			}
 			return raw, fmt.Errorf("coerce %s: cannot parse %s as a YYYY-MM-DD date", kind, diag.QuoteValue(v))
 		default:
-			return raw, fmt.Errorf("coerce %s: cannot convert %T to a date (want a YYYY-MM-DD string, time.Time, or dbtype.Date)", kind, raw)
+			return raw, fmt.Errorf("coerce %s: cannot use %T (want a YYYY-MM-DD string or dbtype.Date)", kind, raw)
 		}
 	case schema.KindInteger:
-		n, ok := widenInt64(raw)
-		if !ok {
-			return raw, fmt.Errorf("coerce %s: cannot convert %T to int64", kind, raw)
+		if _, ok := raw.(int64); !ok {
+			return raw, fmt.Errorf("coerce %s: cannot use %T (want int64)", kind, raw)
 		}
-		return n, nil
-	case schema.KindString, schema.KindBoolean,
-		schema.KindUUID, schema.KindEnum, schema.KindPattern,
-		schema.KindVector, schema.KindAlias:
-		// Driver-native scalars; a Vector is coerced elementwise by the property
-		// paths ([coerceSlice]), not at this scalar boundary.
+		return raw, nil
+	case schema.KindString, schema.KindEnum, schema.KindPattern:
+		if _, ok := raw.(string); !ok {
+			return raw, fmt.Errorf("coerce %s: cannot use %T (want string)", kind, raw)
+		}
+		return raw, nil
+	case schema.KindUUID:
+		s, ok := raw.(string)
+		if !ok {
+			return raw, fmt.Errorf("coerce %s: cannot use %T (want string)", kind, raw)
+		}
+		id, err := uuid.Parse(s)
+		if err != nil {
+			return raw, fmt.Errorf("coerce %s: cannot parse %s as a UUID", kind, diag.QuoteValue(s))
+		}
+		// The canonical text goes as it is held, so a stored UUID costs no copy.
+		if len(s) == 36 && strings.ToLower(s) == s {
+			return raw, nil
+		}
+		return id.String(), nil
+	case schema.KindBoolean:
+		if _, ok := raw.(bool); !ok {
+			return raw, fmt.Errorf("coerce %s: cannot use %T (want bool)", kind, raw)
+		}
+		return raw, nil
+	case schema.KindVector:
+		if _, ok := raw.([]float64); !ok {
+			return raw, fmt.Errorf("coerce %s: cannot use %T (want a list of floats)", kind, raw)
+		}
 		return raw, nil
 	case schema.KindList:
-		// Coerced elementwise by the property paths too; a nested collection is
-		// refused above, in [coerceSlice]'s words, whatever Go type carries it.
+		return raw, fmt.Errorf("coerce %s: cannot use %T (want a list)", kind, raw)
+	case schema.KindAlias:
 		return raw, nil
 	default:
 		return raw, fmt.Errorf("coerce: unhandled schema.ConstraintKind %v", kind)
 	}
 }
 
-// coerceValue coerces a single value against a schema constraint — the
-// per-value rule CoerceParams and the write path's property and key coercion
-// share. A []any is element-coerced via
-// [coerceSlice] against the constraint's List/Vector element type (and is an
-// error under a scalar constraint — a scalar cannot hold a list). Every other
-// value routes through the scalar rule, [coerceScalar]. A nil constraint passes
-// the value through unchanged. The constraint is one the caller has judged: a
-// loaded schema's, or one [CoerceParams] checked.
-//
-// Shape note: a non-[]any value under a List or Vector constraint passes through
-// the scalar rule unchanged (it treats collection kinds as scalar-passthrough),
-// save a map, which the scalar rule refuses under every constraint, and a value
-// under a List whose element is a collection, which it refuses whatever carries
-// the value. This
-// is deliberate — an already-typed collection value, such as an in-memory Vector
-// carried as []float64, must survive untouched rather than be rejected — and it
-// means the inverse shape mismatch (a genuine scalar mistakenly declared under a
-// collection constraint) is not caught here. Scalar-vs-collection shape is the
-// schema validator's authority; on the direct-Cypher path it is the caller's.
-//
-// Routing both the adapter write path ([propsToParamMap], [coerceRelProps]) and
-// the direct-Cypher param path ([CoerceParams]) through this function keeps
-// list-element coercion from being silently skipped on any one path.
+// directForm returns the value the validator stores for raw at c, the form the
+// write path reads, or the validator's refusal. c is one [CoerceParams] judged.
+// A dbtype.Date at a Date is the driver's own date and passes. It recovers no
+// panic.
+func directForm(raw any, c schema.Constraint) (any, error) {
+	if c == nil {
+		return raw, nil
+	}
+	// A property type Neo4j cannot store is refused before its value is read.
+	if err := nestedCollection(c); err != nil {
+		return nil, err
+	}
+	if _, ok := raw.(dbtype.Date); ok && schema.ResolveAlias(c).Kind() == schema.KindDate {
+		return raw, nil
+	}
+	if err := value.Check(raw, c); err != nil {
+		return nil, err //nolint:wrapcheck // the validator's message is the refusal, and the caller names the param
+	}
+	//nolint:wrapcheck // as above
+	return value.Coerce(raw, c)
+}
+
+// coerceValue returns raw, a value in the form the validator stores, as the
+// driver's value at constraint: the one rule the write path ([propsToParamMap],
+// [coerceRelProps], [coerceKey]) and [CoerceParams] share. A []any goes to
+// [coerceSlice], and is an error under a scalar constraint; every other value
+// goes to [coerceScalar]. A nil constraint passes the value through unchanged.
 //
 // A nil []any reaches it as nil, because [heldForm] and [coerceParam] each answer
 // one first. The scalar rule returns any other value that holds none as nil.
@@ -185,12 +186,15 @@ func coerceValue(constraint schema.Constraint, raw any) (any, error) {
 // [ParamTypesForType], or hand-list constraints via the schema constructors.
 type ParamTypes map[string]schema.Constraint
 
-// CoerceParams returns a new map with each value coerced against the constraint
-// declared for its key in types. A value that holds none, a param, a field of a
-// nested param map or a row, is returned as nil, since
-// the driver packs a nil slice as an empty list. Any other value under a key
-// absent from types passes through as given, save a nested map or rows, which
-// are walked. params is never mutated, and for a non-empty params the returned top-level map is a
+// CoerceParams returns a new map with each value read at the constraint
+// declared for its key in types, as [github.com/simon-lentz/yammm/instance.Validator]
+// reads a property value, and returned as the write path sends the value the
+// validator stores. A value the validator refuses is an error, and a
+// dbtype.Date at a Date passes as the driver's own date. A value that holds
+// none, a param, a field of a nested param map or a row, is returned as nil,
+// since the driver packs a nil slice as an empty list. Any other value under a
+// key absent from types passes through as given, save a nested map or rows,
+// which are walked. params is never mutated, and for a non-empty params the returned top-level map is a
 // new one, so mutating its top-level keys cannot affect the input
 // (values that pass through uncoerced may still share backing storage). When no constraint in types is refused, an empty params
 // map is returned as-is — there is nothing to copy. Walks one level of nested
@@ -211,14 +215,11 @@ type ParamTypes map[string]schema.Constraint
 // key. Of several refused keys the error names the first in sorted order. The
 // map returned with that error is nil, for an empty or a nil params too.
 //
-// Scalar values take the rule the package doc states under Parameter Coercion, a
-// nested collection's refusal included;
-// []any list values are element-coerced against the List element type, and
-// refused under a List whose element is a collection (a List<Float> of int64s
-// reaches the driver as []float64, a List<Date> of strings as []dbtype.Date) —
-// the rule the adapter
-// write path applies once [heldForm] has read each number, so a
-// direct-Cypher boundary cannot silently skip list coercion.
+// The package doc states the rule under Parameter Coercion. A value that holds
+// one at a List whose element is a collection is refused, an empty list
+// included, and a list reaches the driver as a typed slice (a List<Float> of
+// int64s as []float64, a List<Date> of strings as []dbtype.Date). Every refusal
+// of a value matches [ErrUnrepresentable].
 //
 // Call this at any direct-Cypher parameter boundary that writes schema-typed
 // properties but does not pass through the adapter write path's coercion
@@ -265,12 +266,12 @@ func firstRefusedType(types ParamTypes) (string, error) {
 // "outer.inner" convention, or refused under a non-nil constraint at their own
 // key; any other value is coerced against its declared constraint via
 // [coerceValue], or returned as given under an undeclared key.
-func coerceParam(key string, value any, types ParamTypes) (any, error) {
-	if instance.IsAbsent(value) {
-		//nolint:nilnil // a value that holds none coerces to nil with no error: it is a valid absent value, not a failure
+func coerceParam(key string, val any, types ParamTypes) (any, error) {
+	if value.Absent(val) {
+		//nolint:nilnil // a val that holds none coerces to nil with no error: it is a valid absent val, not a failure
 		return nil, nil
 	}
-	switch v := value.(type) {
+	switch v := val.(type) {
 	case map[string]any:
 		// A nested map's fields are typed at "key.field", so a constraint at key
 		// would judge nothing: it is refused, as at a rows param's key.
@@ -288,13 +289,17 @@ func coerceParam(key string, value any, types ParamTypes) (any, error) {
 		}
 	}
 	if constraint, ok := types[key]; ok {
-		cv, err := coerceValue(constraint, value)
+		held, err := directForm(val, constraint)
+		if err != nil {
+			return nil, fmt.Errorf("param %s: %w", diag.QuoteValue(key), markUnrepresentable(err))
+		}
+		cv, err := coerceValue(constraint, held)
 		if err != nil {
 			return nil, fmt.Errorf("param %s: %w", diag.QuoteValue(key), err)
 		}
 		return cv, nil
 	}
-	return value, nil
+	return val, nil
 }
 
 // coerceRows walks each row of a rows param. The driver packs a nil map in a
@@ -346,12 +351,16 @@ func coerceNested(outer string, m map[string]any, types ParamTypes) (map[string]
 	for _, k := range slices.Sorted(maps.Keys(m)) {
 		v := m[k]
 		dotKey := outer + "." + k
-		if instance.IsAbsent(v) {
+		if value.Absent(v) {
 			out[k] = nil
 			continue
 		}
 		if constraint, ok := types[dotKey]; ok {
-			cv, err := coerceValue(constraint, v)
+			held, err := directForm(v, constraint)
+			if err != nil {
+				return nil, fmt.Errorf("param %s: %w", diag.QuoteValue(dotKey), markUnrepresentable(err))
+			}
+			cv, err := coerceValue(constraint, held)
 			if err != nil {
 				return nil, fmt.Errorf("param %s: %w", diag.QuoteValue(dotKey), err)
 			}
@@ -416,11 +425,6 @@ func ParamTypesForType(t schema.Type, prefix string) ParamTypes {
 // ZONED DATETIME into a location built with exactly this name.
 const driverOffsetZoneName = "Offset"
 
-// localZoneName is the name Go gives time.Local. time.LoadLocation resolves it
-// to time.Local on every host, so a location carrying the name must be refused
-// before the resolvability check, which would otherwise keep it.
-const localZoneName = "Local"
-
 // THE TEMPORAL RULE, stated here in full; the package doc and driverZone's godoc
 // restate its arms.
 //
@@ -428,9 +432,10 @@ const localZoneName = "Local"
 // back as the instant, zone and date yammm holds. One rule, two arms, and
 // everything below implements it:
 //
-//   - A zoned instant keeps its location only when the host's tz database holds
-//     the name AND agrees with the offset the value carries. Otherwise the
-//     offset is what yammm holds, and the value goes as a fixed offset.
+//   - An instant is read from its stored text. It keeps the zone name the text
+//     carries only when the host's tz database holds the name AND agrees with
+//     the offset the value carries. Otherwise the offset is what yammm holds,
+//     and the value goes as a fixed offset.
 //   - A date carries no time of day, because the driver derives its day number
 //     by an integer division that a time of day can push across a boundary.
 //
@@ -445,12 +450,10 @@ var resolvedZones sync.Map // name -> *time.Location (nil when unresolvable)
 
 // zoneNamed returns the host tz database's location for name, or nil.
 //
-// Two sources reach this and only one is bounded: a caller-built location's own
-// name, and — when a Timestamp layout carries a zone-abbreviation token — an
-// abbreviation read out of instance DATA. The memo is therefore bounded by the
-// distinct abbreviations the data holds, not by the caller's own zones. Each
-// entry is a short string and a pointer, so the growth is small; it is stated
-// because the rule it replaces claimed a bound the code does not have.
+// One source reaches this: an abbreviation that a Timestamp layout with a
+// zone-abbreviation token read out of stored text. The memo is therefore bounded
+// by the distinct abbreviations the data and the parameters hold. Each entry is
+// a short string and a pointer, so the growth is small.
 func zoneNamed(name string) *time.Location {
 	if v, ok := resolvedZones.Load(name); ok {
 		loc, isLocation := v.(*time.Location)
@@ -474,18 +477,19 @@ func calendarDate(t time.Time) time.Time {
 	return time.Date(y, m, d, 0, 0, 0, 0, time.UTC)
 }
 
-// driverZone re-renders an instant into a location the driver can send.
+// driverZone re-renders t, an instant time.Parse read from stored text, into a
+// location the driver can send.
 //
-// The driver selects its wire encoding by the zone ABBREVIATION: it sends an
-// offset only when Zone() reports driverOffsetZoneName, and otherwise sends
-// Location().String() as a time-zone identifier the server must resolve. Two
-// rules, in order: time.Local is always re-expressed in its offset — tested by
-// identity, never by name, because time.LoadLocation("Local") resolves and
-// the name is "UTC" on a host whose TZ is UTC; any other location is kept only
-// when the host's tz database resolves its name, and is otherwise re-expressed
-// in its offset. An unnamed location (what time.Parse produces for a numeric
-// offset) and the literal name "Local" resolve under LoadLocation too, so both
-// are refused before the check.
+// The driver sends Location().String() as a time-zone identifier the server
+// must resolve when the host's tz database holds that name at the offset t
+// carries, and sends the offset otherwise. driverZone applies that rule first,
+// so a text with a numeric offset and no abbreviation coerces to one value on
+// every host. Two rules, in order: time.Local, which time.Parse gives a text
+// whose offset or abbreviation the host's zone uses, is always re-expressed in
+// its offset; any other location is kept only when the host's tz database
+// resolves its name, and is otherwise re-expressed in its offset. An unnamed
+// location (what time.Parse produces for a numeric offset) resolves under
+// LoadLocation too, so it is refused before the check.
 //
 // The instant is unchanged — only the location it is expressed in moves — and
 // the offset form is the same shape the driver produces when reading such a
@@ -498,29 +502,25 @@ func driverZone(t time.Time) time.Time {
 	if loc == time.UTC {
 		return t
 	}
-	switch name := loc.String(); name {
-	case driverOffsetZoneName:
-		return t
-	case "", localZoneName:
+	name := loc.String()
+	if name == "" {
 		return offsetForm(t)
-	default:
-		// A resolvable NAME is not enough. The driver sends a resolvable name
-		// as a zone identifier and the server re-derives the offset from it, so
-		// a value carrying "MST" at +00:00 — which time.Parse mints from any
-		// layout with a zone-abbreviation token — would come back shifted by
-		// seven hours. Where the name and the carried offset disagree, the
-		// offset is what yammm holds.
-		loc := zoneNamed(name)
-		if loc == nil {
-			return offsetForm(t)
-		}
-		_, carried := t.Zone()
-		_, resolved := t.In(loc).Zone()
-		if carried != resolved {
-			return offsetForm(t)
-		}
-		return t
 	}
+	// A resolvable NAME is not enough. The driver sends a resolvable name as a
+	// zone identifier and the server re-derives the offset from it, so a value
+	// carrying "MST" at +00:00 — which time.Parse mints from any layout with a
+	// zone-abbreviation token — would come back shifted by seven hours. Where
+	// the name and the carried offset disagree, the offset is what yammm holds.
+	named := zoneNamed(name)
+	if named == nil {
+		return offsetForm(t)
+	}
+	_, carried := t.Zone()
+	_, resolved := t.In(named).Zone()
+	if carried != resolved {
+		return offsetForm(t)
+	}
+	return t
 }
 
 // offsetForm expresses t in the driver's offset sentinel location.

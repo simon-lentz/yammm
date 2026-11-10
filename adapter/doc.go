@@ -6,19 +6,14 @@
 //
 // # Architectural Boundary
 //
-// Adapters are the outermost layer of the library; only the command-line
-// programs under cmd/ sit above them. This design provides:
+// No library package imports an adapter outside its tests. Of the command-line
+// programs under cmd/, yammm does. A consumer that imports schema and instance
+// alone does not depend on the Neo4j driver: adapter/neo4j pulls the driver's
+// dbtype package only when it is imported.
 //
-//   - Dependency hygiene via import granularity: Go packages are granular at the
-//     import level. Consumers who import only schema and instance depend on no
-//     adapter's third-party module: adapter/neo4j pulls the Neo4j driver's
-//     dbtype package only when it is imported.
-//
-//   - Clear library/consumer boundary: An adapter subpackage imports the
-//     library to use it, as a downstream consumer's own adapter does.
-//
-//   - Extensibility signal: Users see adapter/neo4j and understand they can
-//     create adapter/myplatform using the same pattern.
+// An adapter is a package of this module. It reads a value by the module's own
+// rule, internal/value, so its write path and the validator agree on what a
+// value is.
 //
 // # Snapshots Out
 //
@@ -30,16 +25,9 @@
 //
 // Adapters depend on library packages; library packages never depend on adapters:
 //
-//	adapter/neo4j  ──imports──▶  schema, graph, instance, immutable, diag,
+//	adapter/neo4j  ──imports──▶  schema, graph, immutable, diag, internal/value,
+//	                             github.com/google/uuid,
 //	                             github.com/neo4j/neo4j-go-driver/v6/neo4j/dbtype
-//
-// # Layering Discipline
-//
-// The production code of every adapter imports no internal/* package, keeping a
-// clean separation between core library internals and the adapter layer: neo4j
-// reaches only for the public API. The rule binds production code alone: an
-// adapter test can import a core internal package, as test support or as the
-// internals the test checks against.
 //
 // # Subpackages
 //

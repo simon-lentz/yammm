@@ -27,8 +27,9 @@
 //
 // # Type Checking
 //
-// The package provides type checkers for all constraint kinds defined in
-// [schema]. These are used internally to validate property values.
+// A datatype check (`=~ Kind`) reads its [TypeChecker] here. Each applies the
+// rule internal/value's Check applies to a property of that kind that declares
+// no constraint, save that a value that holds none is of no kind.
 //
 // # Built-in Functions
 //
