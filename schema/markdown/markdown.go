@@ -39,51 +39,66 @@ func WithClassMembers(include bool) Option {
 }
 
 // Marshal renders a schema and its transitive import closure as one
-// self-contained Markdown document: a Mermaid class diagram followed by
-// per-type reference sections and data-type tables, with one section per
-// imported schema. Output is deterministic — byte-identical across runs
-// for the same schema — and structurally verified before return; an error
-// reports a generator bug, never broken Markdown.
+// self-contained Markdown document, laid out as the package documentation's
+// Document Structure states. Output is deterministic — byte-identical across runs for
+// the same schema, options and build of the generator — and the text the
+// generator wrote is structurally verified before return; an error reports a
+// generator bug, and no doc comment's text draws one.
 func Marshal(s schema.Schema, opts ...Option) ([]byte, error) {
 	cfg := config{classDiagram: true, classMembers: true}
 	for _, o := range opts {
 		o(&cfg)
 	}
-	g := newGenerator(s, cfg)
+	return newGenerator(s, cfg).marshal()
+}
+
+// marshal emits the document, emits it again when the read of its heading
+// elements moved an anchor of the outline, and returns it checked.
+func (g *generator) marshal() ([]byte, error) {
 	g.emitDocument()
-	moved, err := g.reanchor()
-	if err != nil {
-		return nil, err
-	}
-	if moved {
+	if g.authorHeadings && g.reanchor() {
 		g.reset()
 		g.emitDocument()
 	}
 	return g.finish()
 }
 
-// reanchor allocates every anchor over the headings the parser reads in the
+// reanchor allocates every anchor over the heading elements read in the
 // emitted document, doc-comment headings included, as GitHub allocates them,
-// and reports whether an outline anchor moved. A heading in a doc comment is
-// invisible to the outline, so it can take an anchor the outline gave a later
-// heading; the links written to that heading are then wrong and the document
-// is emitted again. Heading text does not depend on anchors, so a second pass
-// allocates the same anchors.
-func (g *generator) reanchor() (bool, error) {
-	read := g.read()
-	parsed, err := g.headings.headings(read.root, read.src, g.inAuthorText)
+// and reports whether an outline anchor moved. An outline heading the read
+// loses, which GitHub anchors not at all, takes an anchor after every heading
+// the read finds, so it moves none of theirs and its links lead nowhere
+// rather than to another heading. A document that cannot be read keeps the
+// outline's anchors. Heading text does not depend on anchors, so a second
+// emission allocates the same anchors.
+func (g *generator) reanchor() bool {
+	src := g.buf.Bytes()
+	read, err := g.headings.headings(parse(g.md, src), src)
 	if err != nil {
-		return false, fmt.Errorf("markdown: reading the emitted document: %w", err)
+		return false
 	}
 	at := make(map[int]int, len(g.outline))
 	for i, h := range g.outline {
 		at[h.offset] = i
 	}
 	var alloc anchorAllocator
+	anchors := make([]string, len(g.outline))
+	found := make([]bool, len(g.outline))
+	for _, p := range read {
+		if i, own := at[p.offset]; own {
+			anchors[i], found[i] = alloc.allocate(g.outline[i].text), true
+		} else {
+			alloc.allocate(p.text)
+		}
+	}
+	for i, h := range g.outline {
+		if !found[i] {
+			anchors[i] = alloc.allocate(h.text)
+		}
+	}
 	moved := false
-	for _, p := range parsed {
-		anchor := alloc.allocate(p.text)
-		if i, ok := at[p.offset]; ok && p.offset >= 0 && g.outline[i].anchor != anchor {
+	for i, anchor := range anchors {
+		if g.outline[i].anchor != anchor {
 			g.outline[i].anchor = anchor
 			moved = true
 		}
@@ -93,22 +108,11 @@ func (g *generator) reanchor() (bool, error) {
 			g.types[h.typ.ID()].anchor = h.anchor
 		}
 	}
-	return moved, nil
-}
-
-// read returns the emitted document as the parser reads it, parsed once per
-// emission and shared by reanchor and the self-check.
-func (g *generator) read() probe {
-	if g.parsed == nil {
-		p := probeText(g.md, g.buf.Bytes())
-		g.parsed = &p
-	}
-	return *g.parsed
+	return moved
 }
 
 // reset discards the emitted document and the state emitting it recorded.
 func (g *generator) reset() {
-	g.parsed = nil
 	g.authored = nil
 	g.buf.Reset()
 	g.links = nil
@@ -203,69 +207,75 @@ func (g *generator) writeDataTypeTable(dts []schema.DataType) {
 	}
 }
 
-// selfCheck reads the emitted document with a CommonMark parser and verifies
-// the structure the generator wrote. Nothing is left open at the end. Every
-// outline heading is a top-level heading of its level whose text is the text
-// the generator meant, holding the anchor GitHub allocates it. Outside doc
-// comments, the links read are the internal links the generator wrote, each
-// to an outline heading. Every table it wrote is read with its columns and
-// rows. The class diagram is read as a fenced code block whose every line is
-// a form the emitter writes. A failure is a generator bug.
+// selfCheck verifies the structure the generator wrote. It reads ownText, the
+// emitted document with each doc comment replaced, with a CommonMark parser,
+// so the verdict is about the generator's text alone and no doc comment
+// decides it. Nothing is left open at the end. The headings read are the
+// outline's and no other: each a top-level heading of its level whose text is
+// the text the generator meant, holding an anchor of its own that its slug
+// gives. The links read are the internal links the generator wrote, each to an
+// outline heading, and the raw HTML read is the tags the generator writes.
+// Every table it wrote is read with its columns and rows. The class diagram is
+// read as a fenced code block whose every line is a form the emitter writes. A
+// failure is a generator bug.
 func (g *generator) selfCheck() error {
-	doc := g.read()
+	own, at := g.ownText()
+	doc := probeText(g.md, own)
 	if _, open := doc.open(); open {
 		return errors.New("markdown: self-check: the document ends inside an open block")
 	}
 	root, out := doc.root, doc.src
-	type allocated struct {
-		heading parsedHeading
-		anchor  string
-	}
-	at := map[int]allocated{}
-	var alloc anchorAllocator
-	parsed, err := g.headings.headings(root, out, g.inAuthorText)
+	read, err := markdownHeadings(root, out)
 	if err != nil {
 		return fmt.Errorf("markdown: self-check: %w", err)
-	}
-	for _, p := range parsed {
-		anchor := alloc.allocate(p.text)
-		if p.offset >= 0 {
-			at[p.offset] = allocated{p, anchor}
-		}
 	}
 	anchors := make(map[string]bool, len(g.outline))
 	for _, h := range g.outline {
-		got, ok := at[h.offset]
-		switch {
-		case !ok || !got.heading.topLevel:
+		got, ok := read[at(h.offset)]
+		if !ok || got.Parent() != root {
 			return fmt.Errorf("markdown: self-check: heading %q is not read as a top-level heading", h.text)
-		case got.heading.level != h.level || got.heading.text != h.text:
-			return fmt.Errorf("markdown: self-check: heading %q is read as level %d %q", h.text, got.heading.level, got.heading.text)
-		case got.anchor != h.anchor:
-			return fmt.Errorf("markdown: self-check: heading %q takes anchor #%s where the generator gave it #%s", h.text, got.anchor, h.anchor)
+		}
+		text, err := textContent(g.md, got, out)
+		switch {
+		case err != nil:
+			return fmt.Errorf("markdown: self-check: %w", err)
+		case got.Level != h.level || text != h.text:
+			return fmt.Errorf("markdown: self-check: heading %q is read as level %d %q", h.text, got.Level, text)
+		case !isAnchorOf(h.anchor, slug(h.text)):
+			return fmt.Errorf("markdown: self-check: heading %q takes anchor #%s, which is neither its slug #%s nor a numbered form of it", h.text, h.anchor, slug(h.text))
+		case anchors[h.anchor]:
+			return fmt.Errorf("markdown: self-check: two headings take anchor #%s", h.anchor)
 		}
 		anchors[h.anchor] = true
+		delete(read, at(h.offset))
 	}
-	written := map[string]int{}
+	if len(read) > 0 {
+		text, err := textContent(g.md, read[slices.Min(slices.Collect(maps.Keys(read)))], out)
+		if err != nil {
+			return fmt.Errorf("markdown: self-check: %w", err)
+		}
+		return fmt.Errorf("markdown: self-check: text outside doc comments is read as the heading %q", text)
+	}
+	links := map[string]int{}
 	for _, a := range g.links {
-		written[a]++
+		links[a]++
 	}
-	read, err := linkTargets(root, out, g.inAuthorText)
+	linked, err := ownInlines(root, out)
 	if err != nil {
 		return fmt.Errorf("markdown: self-check: %w", err)
 	}
-	for _, a := range slices.Sorted(maps.Keys(read)) {
-		if written[a] == 0 {
-			return fmt.Errorf("markdown: self-check: internal link #%s is read %d times outside doc comments and written by no emitter", a, read[a])
+	for _, a := range slices.Sorted(maps.Keys(linked)) {
+		if links[a] == 0 {
+			return fmt.Errorf("markdown: self-check: internal link #%s is read %d times outside doc comments and written by no emitter", a, linked[a])
 		}
 	}
-	for _, a := range slices.Sorted(maps.Keys(written)) {
-		n := written[a]
+	for _, a := range slices.Sorted(maps.Keys(links)) {
+		n := links[a]
 		if !anchors[a] {
 			return fmt.Errorf("markdown: self-check: internal link #%s resolves to no emitted heading", a)
 		}
-		if read[a] != n {
-			return fmt.Errorf("markdown: self-check: internal link #%s is written %d times and read %d", a, n, read[a])
+		if linked[a] != n {
+			return fmt.Errorf("markdown: self-check: internal link #%s is written %d times and read %d", a, n, linked[a])
 		}
 	}
 	shapes, err := tables(root, out)
@@ -276,7 +286,7 @@ func (g *generator) selfCheck() error {
 		if tw.bad != "" {
 			return fmt.Errorf("markdown: self-check: %s", tw.bad)
 		}
-		got, ok := shapes[tw.offset]
+		got, ok := shapes[at(tw.offset)]
 		if !ok {
 			return errors.New("markdown: self-check: a table the generator wrote is not read as a table")
 		}
@@ -285,7 +295,7 @@ func (g *generator) selfCheck() error {
 		}
 	}
 	if g.diagramAt >= 0 {
-		body, ok := fencedCodeAt(root, out, g.diagramAt)
+		body, ok := fencedCodeAt(root, out, at(g.diagramAt))
 		if !ok {
 			return errors.New("markdown: self-check: the class diagram is not read as a fenced code block")
 		}
@@ -296,27 +306,126 @@ func (g *generator) selfCheck() error {
 	return nil
 }
 
-// writeAuthorText writes a doc comment, indented under its bullet when
-// underBullet is set, with its line endings made LF and the Markdown block
-// and the HTML construct it leaves open closed.
+// isAnchorOf reports whether anchor is one anchorAllocator gives a heading
+// that slugs to base: base, or base suffixed "-" and a number.
+func isAnchorOf(anchor, base string) bool {
+	suffix, ok := strings.CutPrefix(anchor, base)
+	if !ok || suffix == "" {
+		return ok
+	}
+	n, err := strconv.Atoi(strings.TrimPrefix(suffix, "-"))
+	return err == nil && n > 0 && suffix == "-"+strconv.Itoa(n)
+}
+
+// docStandIn is the paragraph the self-check reads where a doc comment's block
+// is written.
+const docStandIn = "doc"
+
+// ownText returns the emitted document with each doc comment replaced, a
+// block by docStandIn at the block's column and a description cell by an empty
+// cell, and the function that maps an offset of the generator's own text in
+// the document to its offset there.
+func (g *generator) ownText() ([]byte, func(int) int) {
+	doc := g.buf.Bytes()
+	if len(g.authored) == 0 {
+		return doc, func(offset int) int { return offset }
+	}
+	own := make([]byte, 0, len(doc))
+	// shorter[i] is how much shorter the text before g.authored[i] is there.
+	shorter := make([]int, len(g.authored)+1)
+	from := 0
+	for i, a := range g.authored {
+		own = append(append(own, doc[from:a.start]...), a.standIn...)
+		from = a.end
+		shorter[i+1] = shorter[i] + (a.end - a.start) - len(a.standIn)
+	}
+	own = append(own, doc[from:]...)
+	return own, func(offset int) int {
+		i, _ := slices.BinarySearchFunc(g.authored, offset, func(a authorText, offset int) int { return a.end - 1 - offset })
+		return offset - shorter[i]
+	}
+}
+
+// leavesNothingOpen reports whether doc holds none of what an open block or an
+// open HTML construct needs: a run of three backticks or tildes, which starts
+// a fenced code block, and a "<", which starts every HTML construct.
+func leavesNothingOpen(doc string) bool {
+	return !strings.Contains(doc, "<") && !strings.Contains(doc, "```") && !strings.Contains(doc, "~~~")
+}
+
+// closed returns doc with the Markdown block and the HTML construct it leaves
+// open closed, read once per distinct text, and whether an HTML5 parser then
+// reads what follows it. When it does not, the doc comment's HTML takes the
+// generator's headings after it, and GitHub anchors none of them.
+func (g *generator) closed(doc string) (text string, readsPast bool) {
+	if leavesNothingOpen(doc) {
+		return doc, true
+	}
+	if c, ok := g.closedDocs[doc]; ok {
+		return c.text, c.readsPast
+	}
+	text, readsPast = closeAuthorText(g.md, doc), true
+	if strings.Contains(doc, "<") {
+		text, readsPast = g.headings.closeAuthorHTML(g.md, text)
+	}
+	g.closedDocs[doc] = closedDoc{text: text, readsPast: readsPast}
+	return text, readsPast
+}
+
+// closedDoc is a doc comment closed, as closed returns it.
+type closedDoc struct {
+	text      string
+	readsPast bool
+}
+
+// writeAuthorText writes a doc comment as a block, indented under its bullet
+// when underBullet is set, with its line endings made LF and the Markdown
+// block and the HTML construct it leaves open closed.
 func (g *generator) writeAuthorText(doc string, underBullet bool) {
-	text := g.headings.closeAuthorHTML(g.md, closeAuthorText(g.md, lineEndings.Replace(doc)), "\n")
+	doc = lfLineEndings(doc)
+	text, readsPast := g.closed(doc)
+	standIn := docStandIn
 	if underBullet {
-		text = indentUnderBullet(text)
+		text, standIn = indentUnderBullet(text), indentUnderBullet(standIn)
 	}
 	start := g.buf.Len()
 	g.buf.WriteString(text)
-	g.authored = append(g.authored, span{start: start, end: g.buf.Len()})
+	g.authored = append(g.authored, authorText{start: start, end: g.buf.Len(), standIn: standIn})
+	g.authorHeadings = g.authorHeadings || !readsPast || holdsHeadingTag(doc) || mayHoldMarkdownHeading(doc)
 }
 
-// span is a byte range of the emitted document.
-type span struct{ start, end int }
+// authorText is a doc comment's byte range in the emitted document, and the
+// text the self-check reads in its place.
+type authorText struct {
+	start, end int
+	standIn    string
+}
 
-// inAuthorText reports whether pos falls inside a doc comment the generator
-// wrote.
-func (g *generator) inAuthorText(pos int) bool {
-	for _, s := range g.authored {
-		if pos >= s.start && pos < s.end {
+// holdsHeadingTag reports whether s holds the start of an h1 to h6 tag, which
+// a heading element written as raw HTML needs.
+func holdsHeadingTag(s string) bool {
+	for {
+		i := strings.IndexByte(s, '<')
+		if i < 0 || i+2 >= len(s) {
+			return false
+		}
+		if (s[i+1] == 'h' || s[i+1] == 'H') && '1' <= s[i+2] && s[i+2] <= '6' {
+			return true
+		}
+		s = s[i+1:]
+	}
+}
+
+// mayHoldMarkdownHeading reports whether a doc comment written as a block
+// holds what a Markdown heading needs: a "#", or a line of "=" or of "-" alone
+// under its block quote markers and indentation.
+func mayHoldMarkdownHeading(doc string) bool {
+	if strings.Contains(doc, "#") {
+		return true
+	}
+	for line := range strings.SplitSeq(doc, "\n") {
+		line = strings.Trim(line, " \t>")
+		if line != "" && (strings.Trim(line, "=") == "" || strings.Trim(line, "-") == "") {
 			return true
 		}
 	}
@@ -337,7 +446,7 @@ type tableWriter struct {
 }
 
 // tableCell is one cell's Markdown, and whether it holds a doc comment, which
-// the self-check leaves to its author.
+// the self-check reads as an empty cell.
 type tableCell struct {
 	md     string
 	author bool
@@ -345,10 +454,12 @@ type tableCell struct {
 
 func codeCellOf(s string) tableCell { return tableCell{md: codeCell(s)} }
 
-// descriptionCellOf writes a doc comment as a table cell, with the HTML
-// construct it leaves open closed on its line.
+// descriptionCellOf writes a doc comment as a table cell. The cell is inline
+// Markdown, where nothing a doc comment leaves open as a block is open, so it
+// takes no closer and is never read alone.
 func (g *generator) descriptionCellOf(doc string) tableCell {
-	return tableCell{md: g.headings.closeAuthorHTML(g.md, descriptionCell(g.md, doc), " "), author: true}
+	g.authorHeadings = g.authorHeadings || holdsHeadingTag(doc)
+	return tableCell{md: descriptionCell(doc), author: true}
 }
 
 // newTable writes a table's header and separator rows, indented by indent,
@@ -379,7 +490,7 @@ func (tw *tableWriter) row(cells ...tableCell) {
 }
 
 // write writes one row of cells, which are Markdown already, and records each
-// doc comment's place in the document.
+// doc comment's place in the document. An empty one has no place to record.
 func (tw *tableWriter) write(cells []tableCell) {
 	b := &tw.g.buf
 	b.WriteString(tw.indent + "|")
@@ -387,8 +498,8 @@ func (tw *tableWriter) write(cells []tableCell) {
 		b.WriteByte(' ')
 		start := b.Len()
 		b.WriteString(c.md)
-		if c.author {
-			tw.g.authored = append(tw.g.authored, span{start: start, end: b.Len()})
+		if c.author && c.md != "" {
+			tw.g.authored = append(tw.g.authored, authorText{start: start, end: b.Len()})
 		}
 		b.WriteString(" |")
 	}
@@ -419,12 +530,17 @@ type generator struct {
 	contents   map[location.SourceID][]byte // each source's content, read once
 	cfg        config
 
-	md       goldmark.Markdown // the parser the self-check and the closing of doc comments read with
-	headings headingReader     // reads the heading elements of what md parses
-	parsed   *probe            // the emitted document as md reads it; nil until read
-	links    []string          // the anchor of every internal link emitted
-	authored []span            // every doc comment written, in document order
-	tables   []*tableWriter    // every table emitted
+	md         goldmark.Markdown    // the parser the self-check and the closing of doc comments read with
+	headings   headingReader        // reads the heading elements of what md parses
+	links      []string             // the anchor of every internal link emitted
+	authored   []authorText         // every doc comment written, in document order
+	tables     []*tableWriter       // every table emitted
+	closedDocs map[string]closedDoc // each doc comment closed reads, by its text
+
+	// authorHeadings records that a doc comment written may hold a heading
+	// element, which takes an anchor the outline did not allocate, or leaves
+	// open HTML that takes the outline's headings after it.
+	authorHeadings bool
 
 	// labelled records that writeClass emitted a labelled class, which is
 	// what the floor sentence is about.
@@ -450,6 +566,7 @@ func newGenerator(s schema.Schema, cfg config) *generator {
 		cfg:        cfg,
 		md:         newParser(),
 		headings:   newHeadingReader(),
+		closedDocs: map[string]closedDoc{},
 		diagramAt:  -1,
 	}
 	mermaidIDs := map[string]bool{}

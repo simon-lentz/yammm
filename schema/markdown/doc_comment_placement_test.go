@@ -137,6 +137,8 @@ func TestMarshal_RawHTMLHeadingTakesItsAnchor(t *testing.T) {
 		{"a heading left open closes at the next heading", "<h2>Zeta\n\n# Other", "[Zeta](#zeta-1)"},
 		{"a heading in code is text", "`<h2>Zeta</h2>`", "[Zeta](#zeta)"},
 		{"a filtered tag is text", "<h2>Ze<textarea>ta</h2>", "[Zeta](#zeta)"},
+		{"a heading after a filtered tag", "a <title> b <h3>Zeta</h3>", "[Zeta](#zeta-1)"},
+		{"a heading after a filtered tag's block", "<textarea>\n<h2>Zeta</h2>", "[Zeta](#zeta-1)"},
 		{"a processing instruction is a comment", "<h2>Ze<?x?>ta</h2>", "[Zeta](#zeta-1)"},
 		{"an empty comment", "<h2>Ze<!-->ta</h2>", "[Zeta](#zeta-1)"},
 		{"an empty comment with a dash", "<h2>Ze<!--->ta</h2>", "[Zeta](#zeta-1)"},
@@ -148,12 +150,65 @@ func TestMarshal_RawHTMLHeadingTakesItsAnchor(t *testing.T) {
 		{"a quote in an attribute name", "<h2 a\"b>Zeta</h2>", "[Zeta](#zeta-1)"},
 		{"an apostrophe in an unquoted value", "<h2 title=it's>Zeta</h2>", "[Zeta](#zeta-1)"},
 		{"a heading nested in a heading is part of its text", "<h2>Z<em>eta<h3>X</h3></em></h2>", "[Zeta](#zeta)"},
+		{"a heading nested in a heading takes no anchor", "<h2><div><h3>Zeta</h3>tail</div></h2>", "[Zeta](#zeta)"},
+		{"a heading nested deeper in a heading takes no anchor", "<h1><b><h4><i><h5>Zeta</h5></i></h4>tail</b></h1>", "[Zeta](#zeta)"},
+		{"a heading after a nested heading takes its anchor", "<h2><h3>X</h3></h2><h2>Zeta</h2>", "[Zeta](#zeta-1)"},
+		{"a heading under a select takes no anchor", "<select><h3>Zeta</h3></select>", "[Zeta](#zeta)"},
+		{"a less-than sign before a heading tag", "<<h2>Zeta</h2>", "[Zeta](#zeta-1)"},
+		{"a heading in an option takes no anchor", "<select><option><h3>Zeta</h3></option></select>", "[Zeta](#zeta)"},
+		{"a heading under a select left open takes no anchor", "<select>\n<h3>Zeta</h3>", "[Zeta](#zeta)"},
+		{"a heading after a closed select takes its anchor", "<select></select><h3>Zeta</h3>", "[Zeta](#zeta-1)"},
+		{"a keygen element closes a select", "<select><keygen><h3>Zeta</h3>", "[Zeta](#zeta-1)"},
+		{"a keygen element in an option closes a select", "<select><option><keygen><h3>Zeta</h3>", "[Zeta](#zeta-1)"},
+		{"a heading before a keygen element takes no anchor", "<select><h3>Zeta</h3><keygen>", "[Zeta](#zeta)"},
+		{"a heading holding a keygen element takes no anchor", "<select><h3>Ze<keygen>ta</h3>", "[Zeta](#zeta)"},
+		{"a keygen element in SVG closes a select", "<select><svg><keygen></svg><h3>Zeta</h3>", "[Zeta](#zeta-1)"},
+		{"a keygen element in a template closes no select", "<select><template><keygen></template><h3>Zeta</h3>", "[Zeta](#zeta)"},
+		{"a keygen element in a template in SVG closes no select", "<select><svg><template><keygen></template></svg><h3>Zeta</h3>", "[Zeta](#zeta)"},
+		{"a heading in a template under a select takes its anchor", "<select><template><h3>Zeta</h3></template></select>", "[Zeta](#zeta-1)"},
+		{"a heading in a template left open under a select takes its anchor", "<select>\n<template>\n<h3>Zeta</h3>", "[Zeta](#zeta-1)"},
+		{"a select in SVG is no select", "<svg><select><foreignObject><h3>Zeta</h3></foreignObject></select></svg>", "[Zeta](#zeta-1)"},
+		{"a select in MathML is no select", "<math><select><mi><h3>Zeta</h3></mi></select></math>", "[Zeta](#zeta-1)"},
 		{"h7 is no heading", "<h7>Zeta</h7>", "[Zeta](#zeta)"},
+		{"h1 is a heading", "<h1>Zeta</h1>", "[Zeta](#zeta-1)"},
+		{"h6 is a heading", "<h6>Zeta</h6>", "[Zeta](#zeta-1)"},
+		{"a heading tag after another tag", "<b>x</b> <i>y</i> <h2>Zeta</h2>", "[Zeta](#zeta-1)"},
+		{"a heading tag that ends the comment", "Zeta <h2", "[Zeta](#zeta)"},
+		{"a setext heading under a line of equals signs", "Zeta\n===", "[Zeta](#zeta-1)"},
+		{"a setext heading under a line of hyphens", "Zeta\n---", "[Zeta](#zeta-1)"},
+		{"a setext heading under an indented underline", "Zeta\n   ---  ", "[Zeta](#zeta-1)"},
+		{"a setext heading in a quote", "> Zeta\n> ===", "[Zeta](#zeta-1)"},
+		{"a heading after a list marker", "- # Zeta", "[Zeta](#zeta-1)"},
 		{"a mark with another nonce is a raw heading", "<h2 data-yammm-heading=AAAA-0>Zeta</h2>", "[Zeta](#zeta-1)"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			doc := marshalString(t, "schema \"s\"\n/* "+tt.doc+" */\ntype A {\n  id String primary\n  --> TO (one) Zeta\n}\ntype Zeta {\n  id String primary\n}\n")
+			if !strings.Contains(doc, tt.link) {
+				t.Errorf("document does not link %s:\n%s", tt.link, doc)
+			}
+		})
+	}
+}
+
+// TestMarshal_ARawHeadingInADescriptionCellTakesItsAnchor pins that a heading
+// element a doc comment writes in a table cell takes its anchor in document
+// order, as one written in a block does, and that a cell's Markdown heading
+// line, which is text there, takes none.
+func TestMarshal_ARawHeadingInADescriptionCellTakesItsAnchor(t *testing.T) {
+	t.Parallel()
+
+	for _, tt := range []struct{ name, doc, link string }{
+		{"a heading element", "<h2>Zeta</h2>", "[Zeta](#zeta-1)"},
+		{"an upper-case heading element after a line", "See\n<H3>Zeta</H3>", "[Zeta](#zeta-1)"},
+		{"a Markdown heading line", "# Zeta", "[Zeta](#zeta)"},
+		{"an underlined line", "Zeta\n===", "[Zeta](#zeta)"},
+		{"a heading element under a select", "<select><h3>Zeta</h3></select>", "[Zeta](#zeta)"},
+		{"a heading element after a keygen element in a select", "<select><keygen><h3>Zeta</h3>", "[Zeta](#zeta-1)"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			doc := marshalString(t, "schema \"s\"\ntype A {\n  /* "+tt.doc+" */\n  id String primary\n  --> TO (one) Zeta\n}\ntype Zeta {\n  id String primary\n}\n")
 			if !strings.Contains(doc, tt.link) {
 				t.Errorf("document does not link %s:\n%s", tt.link, doc)
 			}
@@ -228,9 +283,25 @@ func TestMarshal_AnHTMLConstructADocCommentLeavesOpenIsClosed(t *testing.T) {
 		{"<!-- a --> <!-- b", "\n<!-- -->\n"},
 		{"<pre>\n<!-- x", "\n</pre>\n<!-- -->\n"},
 		{"<div title=x", "\n<!-- -->\n"},
-		{"<noscript>\nx", "\n</noscript>\n"},
+		{"<p", "\n<!-- -->\n"},
+		{"<P class=x", "\n<!-- -->\n"},
+		{"text\n<p", "\n<!-- -->\n"},
+		{"<div><p", "\n<!-- -->\n"},
+		{"<p title=\"x", "\n<wbr x='\"'>\n"},
+		{"<div><yammm-end-of-text", "\n<!-- -->\n"},
+		{"<div>yammm-end-of-text</div><div title=\"x", "\n<wbr x='\"'>\n"},
+		{"<div>\n<yammm-end-of-text>\n<!-- open", "\n<!-- -->\n"},
+		{"<div>\n<yammm-end-of-text></yammm-end-of-text>\n<!-- open", "\n<!-- -->\n"},
+		{"<frameset", "\n<!-- -->\n"},
+		{"<frameset>\n<!--", "\n<!-- -->\n"},
+		{"<frameset>\n<a href=\"", "\n<wbr x='\"'>\n"},
+		{"<frameset>", "\n\n"},
+		{"<noscript>\nx", "\n\n"},
 		{"<svg>\n<![CDATA[ x", "\n<![CDATA[ ]]>\n"},
 		{"<div title=\"x\">y</div>", "\n\n"},
+		{"<template><col>", "\n\n"},
+		{"<select>\n<template>\n<keygen>\n</template>", "\n</select>\n"},
+		{strings.Repeat("<div>", 600), "\n\n"},
 	} {
 		out := marshalString(t, "schema \"s\"\n/* "+tt.doc+" */\ntype A {\n  id String primary\n  --> TO (one) B\n}\ntype B {\n  id String primary\n}\n")
 		if !strings.Contains(out, tt.doc+tt.closer) {
@@ -242,36 +313,32 @@ func TestMarshal_AnHTMLConstructADocCommentLeavesOpenIsClosed(t *testing.T) {
 	}
 }
 
-// TestMarshal_ADescriptionCellsOpenHTMLIsClosed pins that a doc comment in a
-// table cell that leaves a noscript element's text open, which reads every
-// later tag as text, takes its closer on the cell's line.
-func TestMarshal_ADescriptionCellsOpenHTMLIsClosed(t *testing.T) {
+// TestMarshal_ADescriptionCellTakesNoCloser pins that a doc comment in a table
+// cell is written as its inline Markdown and nothing after it: what opens a
+// block when the comment is read alone opens nothing in a cell, where a closer
+// would end a comment the author never opened and hide the words before it.
+func TestMarshal_ADescriptionCellTakesNoCloser(t *testing.T) {
 	t.Parallel()
 
-	for _, doc := range []string{"<noscript>", "a <noscript> b"} {
+	for _, doc := range []string{"<noscript>", "a <noscript> b", "<!-- two words", "<!X y z", "<? x <!-- y", "<div title=\"x", "<![CDATA[ x"} {
 		out := marshalString(t, "schema \"s\"\ntype A {\n  /* "+doc+" */\n  id String primary\n  --> TO (one) B\n}\ntype B {\n  id String primary\n}\n")
-		if !strings.Contains(out, "| "+doc+" </noscript> |") || !strings.Contains(out, "[B](#b)") {
-			t.Errorf("doc %q is not closed in its cell:\n%s", doc, out)
+		if !strings.Contains(out, "| "+doc+" |\n") || !strings.Contains(out, "[B](#b)") {
+			t.Errorf("doc %q is not its cell's whole text:\n%s", doc, out)
 		}
 	}
 }
 
 // TestHeadingReader_AMarkdownHeadingOpenHTMLTakes pins the reader's rule for a
-// Markdown heading that no heading element holds: inside author text it is no
-// heading, as on GitHub, and anywhere else the read fails, since the
-// generator's own heading has gone.
+// Markdown heading that no heading element holds: it is no heading, as on
+// GitHub, and the read returns the others.
 func TestHeadingReader_AMarkdownHeadingOpenHTMLTakes(t *testing.T) {
 	t.Parallel()
 
 	r := newHeadingReader()
 	src := []byte("# Kept\n\n<div title=\"x\n\n# Taken\n")
-	root := parse(newParser(), src)
-	got, err := r.headings(root, src, func(int) bool { return true })
-	if err != nil || len(got) != 1 || got[0].text != "Kept" {
-		t.Errorf("headings in author text = %+v, %v; want Kept alone", got, err)
-	}
-	if _, err := r.headings(root, src, func(int) bool { return false }); err == nil || !strings.Contains(err.Error(), "not read as a heading element") {
-		t.Errorf("headings outside author text = %v, want the lost heading refused", err)
+	got, err := r.headings(parse(newParser(), src), src)
+	if err != nil || len(got) != 1 || got[0].text != "Kept" || got[0].offset != 0 {
+		t.Errorf("headings = %+v, %v; want Kept alone", got, err)
 	}
 }
 

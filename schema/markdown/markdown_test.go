@@ -508,10 +508,11 @@ func TestMarshal_OpenHTMLCommentIsClosed(t *testing.T) {
 	}
 }
 
-// TestMarshal_AuthorFenceUnderABulletIsReadInItsItem pins that the self-check
-// reads a relation's doc comment relative to the bullet that holds it: a
-// closer indented three spaces inside the item closes the fence, as it does
-// for a Markdown parser, although the line sits five spaces in.
+// TestMarshal_AuthorFenceUnderABulletIsReadInItsItem pins that a relation's
+// doc comment is judged relative to the bullet that holds it: a closer
+// indented three spaces inside the item closes the fence, as it does for a
+// Markdown parser, although the line sits five spaces in, so the comment is
+// written under its bullet with no closer added.
 func TestMarshal_AuthorFenceUnderABulletIsReadInItsItem(t *testing.T) {
 	t.Parallel()
 

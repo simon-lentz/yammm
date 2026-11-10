@@ -49,20 +49,39 @@
 // [github.com/simon-lentz/yammm/schema.AddressableTag] returns, which is how a
 // data file names the type.
 //
-// Every heading takes the anchor GitHub gives it: the heading's slug — its
+// Every heading GitHub anchors takes the anchor GitHub gives it, within the
+// two limits this paragraph ends with: the heading's slug — its
 // text lowercased, every character but letters and other alphabetic
-// characters, marks, decimal digits, connector punctuation and hyphens
-// removed, spaces made hyphens — suffixed -1, -2, …
-// when an earlier heading took it. The generator reads the emitted document
-// with a CommonMark parser, renders it to HTML, applies GitHub's tag filter
-// and builds the tree an HTML5 parser builds. It allocates over every heading
-// element of that tree, as GitHub anchors every h1 to h6 element it renders:
-// the Markdown headings, those inside doc comments included, and each heading
-// a doc comment writes as raw HTML, whose anchor is the slug of its text
-// content, a heading nested in it included. So each link
-// lands on the heading it names: two headings that slug alike each keep a
-// working link, and a type whose heading slugs like a section heading — a
-// type named Types — links to its own heading.
+// characters, marks, decimal digits, connector punctuation, hyphens and the
+// two join controls U+200C and U+200D removed, spaces made hyphens — suffixed
+// -1, -2, … when an earlier heading took it. GitHub anchors every h1 to h6
+// element it renders that is not inside another, so a heading inside a doc
+// comment takes an anchor too: a Markdown heading, and each heading a doc
+// comment writes as raw HTML, whose anchor is the slug of its text content,
+// the text of a heading nested in it included. A heading nested in another
+// takes no anchor and no slug. When a doc comment holds what such a heading
+// needs (an h1 to h6 tag or, where it is written as a block, a "#" or a line
+// of "=" or "-" alone), the generator reads the emitted document with a
+// CommonMark parser, renders it to HTML, applies GitHub's tag filter, builds
+// the tree an HTML5 parser builds, and allocates over every heading element
+// of that tree that is not inside another or below a select element that no
+// keygen element in it closed first, which GitHub's parser loses. GitHub's
+// parser reads a template's content apart: a heading in it is not lost, and a
+// keygen in it closes no select outside it. It reads the document too when a
+// doc comment written as a block leaves open HTML that no closer (below)
+// closes. The generator's own headings take their anchors in their own order:
+// one the tree holds at its place among the tree's headings, and one the tree
+// loses after every heading the tree holds, so a link to it leads nowhere
+// rather than to another heading. So each link lands on the heading it names,
+// save one to a heading the tree loses, which leads nowhere: two headings that
+// slug alike each keep a working link, and a type whose heading slugs like a
+// section heading — a type named Types — links to its own heading. The two
+// limits: the document is read with goldmark and golang.org/x/net/html, not
+// with GitHub's cmark-gfm and HTML parser, so where they read a doc comment's
+// text in two ways, a link can land on another heading; and x/net/html
+// rejects HTML nested deeper than 512 elements, so a document a doc comment
+// nests that deep keeps the anchors of the generator's headings alone, and a
+// link can land on a doc comment's heading that slugs alike.
 //
 // # Tables Own Detail; the Diagram Owns Shape
 //
@@ -73,9 +92,11 @@
 // List<FipsCode>) and the Modifiers column carries primary / required plus
 // a "from <Owner>" marker on inherited rows — the property table is
 // flattened over the full inheritance chain so a type's complete shape
-// reads in one place, with provenance preserved. When the diagram is still
-// too large, [WithClassMembers] with false drops the member lines and keeps
-// every class, stereotype and edge.
+// reads in one place, with provenance preserved. The generator writes a
+// diagram of any length and splits none. Mermaid's default maxTextSize is
+// 50,000 characters, and Mermaid shows its size message in place of a longer
+// diagram. When the diagram is still too large, [WithClassMembers] with false
+// drops the member lines and keeps every class, stereotype and edge.
 //
 // The diagram draws each type's OWN members and relation edges only;
 // inheritance edges (Parent <|-- Child) convey the rest. An abstract type
@@ -127,20 +148,27 @@
 //
 // # Output Guarantees
 //
-// Output is deterministic — byte-identical across runs and checkouts for one
-// build of the generator (no absolute paths, all walks ordered) — so generated
+// Output is deterministic: the same schema, the same options, the same yammm
+// version and the same build — the Go release that builds the generator and
+// the module versions the build selects — give the same bytes, across runs
+// and checkouts (no absolute paths, all walks ordered), so generated
 // documents can be committed and drift-checked in CI by regenerating and
 // diffing. The document is a versioned surface; docs/API.md's Versioning
 // Policy states its tiers.
 //
-// Before returning, [Marshal] reads the document with a CommonMark parser, with
-// GitHub's extensions, and verifies the structure it wrote. No block is left
-// open at the end. Every heading it wrote is a top-level heading of its level
-// whose text reads as the text it meant, holding the anchor the document's
-// heading elements allocate it. Outside doc comments, the links the parser
-// reads are exactly the internal links the generator wrote, each to such a
-// heading: no other link, autolink or image. Every table it wrote reads with
-// its columns and rows. The class diagram reads as a fenced code block each of
+// Before returning, [Marshal] verifies the structure it wrote. It reads the
+// document with each doc comment replaced, a block by a one-word paragraph at
+// the block's column and a description cell by an empty cell, with a
+// CommonMark parser with GitHub's extensions, so the verdict is about the
+// generator's own text and no doc comment decides it. No block is left open at
+// the end. The headings read are the ones it wrote and no other, each a
+// top-level heading of its level whose text reads as the text it meant and
+// whose anchor is its slug or a numbered form of it, held by no other heading.
+// The links read are exactly the internal links the generator wrote, each to
+// such a heading: no other link, autolink or image, and no raw HTML but the
+// tags the generator writes (<code>, </code>, <br>, the empty comment, and
+// <span> and </span> round a dollar). Every table it wrote reads with its
+// columns and rows. The class diagram reads as a fenced code block each of
 // whose lines is one of the forms the emitter writes, a subset of Mermaid's
 // class-diagram grammar and stricter than it, read with each entity code
 // replaced as Mermaid's render replaces it. Its own fences are sized past any
@@ -148,8 +176,9 @@
 // an error, never emitted output.
 //
 // Doc-comment text is written as the Markdown its author wrote, so a link, a
-// table or a heading inside it is the author's own and is not checked; that
-// holds in a description cell too. The text is the schema's documentation,
+// table or a heading inside it is the author's own and is not checked. A
+// description cell holds it as inline Markdown (below) and is checked only
+// for a line break, which the fold never writes. The text is the schema's documentation,
 // whose continuation lines lost the indentation they all share, byte for byte,
 // when the parser read the comment, so layout
 // that indents every continuation line alike makes no indented code block;
@@ -160,14 +189,23 @@
 // not end — is closed at the end of that comment's block with the line the
 // parser reads as its end, and a raw-text element such as <textarea> with
 // </pre>, which ends its HTML block and which GitHub's tag filter leaves
-// alone, so it cannot swallow the rest of the document. Raw HTML a doc
-// comment leaves open for an HTML parser — a comment, a CDATA section, a tag,
-// a quoted attribute value, a noscript element's text — is closed after it by
-// one line that reads as nothing from a closed state (<!-- -->, <![CDATA[ ]]>,
-// <wbr x='"'> or </noscript>), kept only when an HTML5
-// parser then reads an element written after the comment; a description cell
-// takes its closer on the cell's line, after a space. A Markdown heading
-// inside the comment that its own open HTML takes is no heading, as on GitHub.
+// alone, so it cannot swallow the rest of the document. An HTML block that
+// opens with <!-- or <![CDATA[ is closed this way, by --> or ]]>. In a
+// paragraph a comment, a tag or an attribute value left open is text. Raw HTML
+// a doc comment leaves open for an HTML parser inside an HTML block — a
+// comment, a CDATA section, a tag, a quoted attribute value or a select
+// element, as in <div><!-- x — is closed after it by one line that reads as
+// nothing from a closed state (<!-- -->, <![CDATA[ ]]>, <wbr x='"'> or
+// </select>), kept only when an HTML5 parser, reading the rendered HTML with
+// GitHub's tag filter applied and scripting off, as GitHub parses it, and
+// counting an element under a select element that no keygen element closed
+// first as lost, as GitHub's parser loses it (a template's content read
+// apart), then reads an element written after the comment. The closer is a
+// courtesy and never a condition: a comment that none of the four lines closes
+// is written as it is, and [Marshal] refuses nothing for it. The parser is
+// golang.org/x/net/html. A description cell takes no closer: in a cell's
+// inline Markdown a comment, a tag or an attribute value left open is text. A
+// Markdown heading inside the comment that its own open HTML takes is no heading, as on GitHub.
 // An element the comment leaves open, such as a <div>, is the author's, and
 // an HTML parser can place the generator's text after it inside it.
 //
@@ -177,22 +215,50 @@
 // DataType's name and Definition — shows its text byte for byte: a code span
 // with each pipe escaped, or, for text holding a backtick, a backslash before a
 // pipe or a line break, a <code> element whose Markdown-significant characters
-// are entities. A description cell holds the doc comment's Markdown on one line.
-// A line break inside a code span folds to the space Markdown reads it as.
-// One inside raw HTML or an HTML block folds to a space, which an HTML parser
-// reads as white space, except in a pre or listing element's text, where it is
-// a <br>, and the one right after that element's start tag, which an HTML
-// parser drops, folds to nothing.
-// Any other folds to <br> in place of the backslash that makes it a hard
-// break. A pipe after an even run of backslashes gains one, so the row keeps
-// its cells and the pipe renders as the doc comment's does. A
-// schema name, an invariant message, a type's import tag and a type reference
-// are escaped for Markdown, and a control
+// are entities, each pipe written \| and each line break <br>. A description cell holds the doc comment's text on one line,
+// and GitHub reads a cell as inline Markdown. No block of the comment is a
+// block there: a heading, a list, a quote or a table shows as its characters,
+// a fence of backticks reads as a code span, and Markdown between the tags of
+// an HTML block is live. Text of more than one line folds to one line of
+// inline text, read as cmark-gfm, GitHub's parser, reads it; text of one line
+// is written as it is, save the pipe rule below. A line break inside a code span or inside a tag
+// (a comment, a declaration, a processing instruction and a CDATA section are
+// tags here) folds to a space, and the white space that starts the next line
+// goes. So does one in an inline link's "(destination title)" tail, save one
+// inside the destination or the title, whose value holds it: that one is
+// written as the character reference &#10;. In a pre or listing element's
+// text it is a <br> and the line is kept whole, save the one right after that
+// element's start tag, which an HTML parser drops and which folds to nothing.
+// The fold tracks pre and listing elements alone: the end tag of an element
+// that holds one, such as </div>, leaves it open, and an end tag that an
+// element such as <object> hides from GitHub's parser closes it all the same.
+// Any other line break folds to <br>, the white space around it dropped. A
+// <br> is punctuation where the line break was white space, so a space stays
+// beside it after a "*", "_" or "~" no backslash escapes and, outside pre and
+// listing text, before a line that starts with one or with "www.". A www link
+// or a URL that GitHub's autolink extension reads where no link's text is open
+// is written as it is, its brackets and a backslash that ends it included. In
+// the fold, the "(" after a link's text whose tail does not form is written
+// "\(", so the cell reads no tail there either. An unescaped backslash that
+// ends a line before a line of text is the hard break it writes and gives way
+// to the <br>; one that ends a line before a blank line, one that white space
+// follows at the line's end, and one inside a pre or listing element's text
+// are doubled before the <br>, so each shows as one backslash. In the fold,
+// the "<" of a declaration that nothing ends (<!DOCTYPE html with no ">" after
+// it) is written "\<", so the ">" of a <br> does not end it. A pipe after an even run of backslashes
+// gains one, so the row keeps its cells; the table then drops one backslash
+// before a pipe, inside a code span too, so a code span that holds a
+// backslash before a pipe shows the pipe alone. A
+// schema name, an invariant message, the name or import tag the entry gives a
+// type, and a type reference are escaped for Markdown, and a control
 // character in a schema name is written as its Go escape (\n). GitHub reads a
 // www host, a URL and an email address as a link even through an escape, so an
 // empty HTML comment, which a browser does not show, splits each colon, each
-// at sign and each dot after "www" in text escaped this way and in a <code>
-// cell.
+// at sign and each dot that directly follows "www", in any case, in text
+// escaped this way and in a <code> cell. GitHub reads a pair of dollars
+// outside code as math, and a backslash does not stop it, so each dollar in
+// text escaped this way is written inside a <span>. A <code> cell keeps its
+// dollars: GitHub reads no math inside a <code> element.
 //
 // A Mermaid class label writes every character but an ASCII letter or digit,
 // a dot, and an underscore between two ASCII letters or digits as an entity
@@ -223,11 +289,12 @@
 //
 // # Error Conditions
 //
-// [Marshal] returns an error, and no output, only when it cannot read back the
-// document it emitted, or when that document fails the structural self-check
-// Output Guarantees describes. Each is a generator bug: the escapes above keep every
-// schema-supplied text in a form the check accepts, and doc-comment text is
-// not checked, so no schema is refused for its names or its doc-comment text.
+// [Marshal] returns an error, and no output, only when the text it wrote fails
+// the structural self-check Output Guarantees describes. That is a generator
+// bug: the escapes above keep every schema-supplied text in a form the check
+// accepts, and the check reads no doc comment's Markdown: of a description
+// cell it reads only that the cell holds no line break, which the fold never
+// writes. So no schema is refused for its names or its doc-comment text.
 //
 // # Thread Safety
 //
@@ -237,8 +304,10 @@
 // # Annotations
 //
 // Schema annotations do not appear in the emitted document — not in the
-// property tables, not in the class diagram. A schema that gains its first
-// annotation renders byte-identical Markdown. The generated reference describes
+// property tables, not in the class diagram — so adding one changes no output,
+// save where its text stands before an invariant on the invariant's source
+// line: the invariant's fence dedents its continuation lines by the column the
+// invariant starts at. The generated reference describes
 // the data model; where a schema's annotations land as store DDL is
 // [github.com/simon-lentz/yammm/adapter/neo4j]'s output, and `yammm neo4j
 // indexes` renders it.
@@ -267,7 +336,9 @@
 // markdown imports public yammm packages, the standard library, goldmark, a
 // CommonMark parser with GitHub's extensions and no dependencies of its own,
 // and golang.org/x/net/html, the Go team's HTML5 parser, to read the HTML a
-// document renders to as a browser does.
+// doc comment renders to, for its closer, and the HTML the document renders
+// to, for the anchors of its headings, and to decode the entities in the text
+// of a heading the self-check reads.
 // No internal/*, no instance/graph, no diag, and no Mermaid tooling: the
 // golden corpus plus the parser-backed self-check carry output verification,
 // and a test behind the mermaid build tag parses every golden's diagram with

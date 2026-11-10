@@ -48,7 +48,8 @@ func TestSlug(t *testing.T) {
 		{"\u16ee rune", "\u16ee-rune"},
 		{"a\u203fb", "a\u203fb"},
 		{"x\u00b2 squared", "x-squared"},
-		{"a\u200cb\u200dc", "abc"},
+		{"a\u200cb\u200dc", "a\u200cb\u200dc"},
+		{"a\u200bb\u2060c", "abc"},
 		{"a (b) c.d!?", "a-b-cd"},
 		{"a-b c", "a-b-c"},
 		{"B-", "b-"},
@@ -58,56 +59,6 @@ func TestSlug(t *testing.T) {
 			t.Parallel()
 			if got := slug(tt.heading); got != tt.want {
 				t.Errorf("slug(%q) = %q, want %q", tt.heading, got, tt.want)
-			}
-		})
-	}
-}
-
-// TestDescriptionCell pins that a doc comment in a table cell changes only
-// where the table layer reads it: a line break folds to <br>, or to a space
-// inside a code span or raw HTML, a hard-break backslash gives way to the
-// <br>, and a pipe after an even backslash run gains one backslash, so it
-// renders as the doc comment's.
-func TestDescriptionCell(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		name string
-		in   string
-		want string
-	}{
-		{"plain", "no special characters", "no special characters"},
-		{"empty", "", ""},
-		{"pipe", "a|b", `a\|b`},
-		{"newline", "line1\nline2", "line1<br>line2"},
-		{"crlf", "line1\r\nline2", "line1<br>line2"},
-		{"bare cr", "line1\rline2", "line1<br>line2"},
-		{"pipe and newline", "a|b\nc", `a\|b<br>c`},
-		{"indentation around fold dropped", "line1: \n\tline2 indented", "line1:<br>line2 indented"},
-		{"an author escape stays", `a\*b\*`, `a\*b\*`},
-		{"a lone backslash stays", `a\b`, `a\b`},
-		{"an escaped pipe stays escaped", `a\|b`, `a\|b`},
-		{"a pipe after an escaped backslash is escaped", `a\\|b`, `a\\\|b`},
-		{"a pipe after three backslashes stays", `a\\\|b`, `a\\\|b`},
-		{"leading pipe", "|x", `\|x`},
-		{"a pipe after an escape the run restarts at", `\*x|y`, `\*x\|y`},
-		{"a line-end backslash is the break", "C:\\\nnext", "C:<br>next"},
-		{"an escaped backslash at a line end stays", "C:\\\\\nnext", "C:\\\\<br>next"},
-		{"a code span across a line folds to a space", "a `x\ny` b", "a `x y` b"},
-		{"a code span's line-end backslash stays", "`x\\\ny`", "`x\\ y`"},
-		{"raw HTML across a line folds to a space", "<a\nhref=\"#x\">y</a>", "<a href=\"#x\">y</a>"},
-		{"an HTML block folds to spaces", "<div>\nx\n</div>", "<div> x </div>"},
-		{"a pre element keeps its breaks", "<pre>\na\n  b\n</pre>", "<pre>a<br>  b<br></pre>"},
-		{"a listing element keeps its breaks", "<listing>\na\nb\n</listing>", "<listing>a<br>b<br></listing>"},
-		{"a break after a tag inside pre is kept", "<pre>a<b>\nc</b>\nd</pre>", "<pre>a<b><br>c</b><br>d</pre>"},
-		{"a break after a pre element is white space", "<div><pre>a</pre>\nb\n</div>", "<div><pre>a</pre> b </div>"},
-	}
-	md := newParser()
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			if got := descriptionCell(md, tt.in); got != tt.want {
-				t.Errorf("descriptionCell(%q) = %q, want %q", tt.in, got, tt.want)
 			}
 		})
 	}

@@ -10,9 +10,6 @@ import (
 
 	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
-	"github.com/yuin/goldmark"
-	"github.com/yuin/goldmark/ast"
-	"golang.org/x/net/html"
 )
 
 // multiplicity renders the DSL multiplicity vocabulary for a relation's
@@ -36,10 +33,10 @@ func multiplicity(optional, many bool) string {
 // slug derives a heading's anchor as GitHub does: the text lowercased, every
 // character outside \p{Word}, the hyphen and the space removed, and each space
 // made a hyphen. \p{Word} here is letters and every other alphabetic
-// character, marks, decimal digits and connector punctuation, read from the Go
-// release's Unicode tables; the join controls are removed, as GitHub removes
-// them. Lowercasing maps U+0130 to "i" and a combining dot, as GitHub's full
-// case mapping does.
+// character, marks, decimal digits, connector punctuation and the two join
+// controls U+200C and U+200D, read from the Go release's Unicode tables;
+// GitHub keeps both join controls. Lowercasing maps U+0130 to "i" and a
+// combining dot, as GitHub's full case mapping does.
 func slug(heading string) string {
 	var b strings.Builder
 	b.Grow(len(heading))
@@ -56,18 +53,24 @@ func slug(heading string) string {
 
 // isWordRune reports whether r is a character GitHub keeps in an anchor.
 func isWordRune(r rune) bool {
-	return unicode.In(r, unicode.L, unicode.M, unicode.Nd, unicode.Nl, unicode.Pc, unicode.Other_Alphabetic)
+	return r == '\u200c' || r == '\u200d' || unicode.In(r, unicode.L, unicode.M, unicode.Nd, unicode.Nl, unicode.Pc, unicode.Other_Alphabetic)
 }
 
-// descriptionCell writes a doc comment into a table cell, changing only what
-// the table layer reads: its lines fold into one (foldLines), and a pipe after
-// an even backslash run gains one backslash, so the row keeps its cells and
-// the pipe renders as in the doc comment.
-func descriptionCell(md goldmark.Markdown, s string) string {
-	if s = lineEndings.Replace(s); strings.Contains(s, "\n") {
-		s = foldLines(md, s)
+// descriptionCell writes a doc comment as a table cell, which GitHub reads as
+// inline Markdown on one line: the comment's lines fold into one (foldLines),
+// and a pipe after an even backslash run gains one backslash, so the row keeps
+// its cells. The table then drops one backslash before a pipe, in a code span
+// too.
+func descriptionCell(s string) string {
+	if s = lfLineEndings(s); strings.Contains(s, "\n") {
+		s = foldLines(s)
+	}
+	pipes := strings.Count(s, "|")
+	if pipes == 0 {
+		return s
 	}
 	var b strings.Builder
+	b.Grow(len(s) + pipes)
 	run := 0
 	for i := range len(s) {
 		c := s[i]
@@ -84,123 +87,252 @@ func descriptionCell(md goldmark.Markdown, s string) string {
 	return b.String()
 }
 
-// foldLines joins a doc comment's lines into one cell line. A line break
-// inside a code span, raw HTML or an HTML block folds to a space, which a code
-// span and an HTML parser read it as. In a pre or listing element's text it is
-// a <br>, the line kept whole, save the one an HTML parser drops after the
-// element's start tag, which folds to nothing. Any other folds to <br>, the
-// white space around it dropped, and so does the backslash that made it a
-// hard break.
-func foldLines(md goldmark.Markdown, s string) string {
-	spans, kept, dropped := inlineSpans(md, s)
-	inside := func(pos int) bool {
-		return slices.ContainsFunc(spans, func(sp span) bool { return sp.start <= pos && pos < sp.end })
-	}
-	var out string
-	at := 0
-	for i, line := range strings.Split(s, "\n") {
-		switch {
-		case i == 0:
-			out = line
-		case slices.Contains(kept, at-1):
-			out += "<br>" + line
-		case slices.Contains(dropped, at-1):
-			out += line
-		case inside(at - 1):
-			out += " " + strings.TrimLeft(line, " \t")
+// foldLines joins a doc comment's lines into one cell line, reading the text
+// as the cell is read: as inline Markdown, never as a document of blocks. A
+// line break inside a code span, an HTML tag or an inline link's tail
+// (writeLinkTail) folds to a space, with the white space that starts the next
+// line dropped. In a pre or listing element's text it is a <br> and the line
+// is kept whole, a backslash that ends it included, save the one right after
+// the element's start tag, which an HTML parser drops and which folds to
+// nothing. Any other folds to <br> with the white space around it dropped,
+// save a space lineBreak keeps. A www link or URL is written as it is
+// (extendedAutolinkLength). The "(" after a link text whose tail does not
+// form is escaped (closeBracket).
+// An unescaped backslash that ends a line before a line of text is the hard
+// break it writes and goes; one that ends a line before a blank line, or
+// inside a pre element's text, is doubled before the <br>, so it stays a
+// backslash. The "<" of a declaration with no end is
+// escaped, so no <br> ends it.
+func foldLines(s string) string {
+	// A line break adds at most five bytes, and a declaration's "<" and a
+	// failed tail's "(" one each.
+	grow := 5*strings.Count(s, "\n") + strings.Count(s, "<!") + strings.Count(s, "](")
+	f := lineFolder{inlineScanner: inlineScanner{src: s}, out: make([]byte, 0, len(s)+grow)}
+	f.fold()
+	return string(bytes.TrimSpace(f.out))
+}
+
+// lineFolder is foldLines' state over one doc comment.
+type lineFolder struct {
+	inlineScanner
+	out []byte
+	// pre holds the pre and listing elements open at this point, innermost
+	// last, true for a listing element, and preStarted is set when the last
+	// thing read is such an element's start tag.
+	pre        []bool
+	preStarted bool
+	// brackets holds the link and image openers, "[" and "![", open at this
+	// point, innermost last, true for an image. linkFormed is set when a link
+	// formed after the last "[" was opened: cmark-gfm then reads no "[" before
+	// it as a link's start.
+	brackets   []bool
+	linkFormed bool
+	// autolinkEnd is the length of out after the last extended autolink: a
+	// backslash that ends one is the link's, never an escape or a hard break.
+	autolinkEnd int
+	parens      parenRun
+	// The title and end of the tail read after the destination that ends at
+	// lastDestTo.
+	lastDestTo, lastTitleFrom, lastTitleTo, lastEnd int
+}
+
+func (f *lineFolder) fold() {
+	s := f.src
+	for i := 0; i < len(s); {
+		afterPreStart := f.preStarted
+		f.preStarted = false
+		switch c := s[i]; {
+		case c == '\\' && i+1 < len(s) && isASCIIPunct(s[i+1]):
+			f.out = append(f.out, c, s[i+1])
+			i += 2
+		case c == '`':
+			n := runLength(s, i, '`')
+			end := f.codeSpanEnd(i+n, n)
+			if end < 0 {
+				end = i + n
+			}
+			f.writeSpan(s[i:end])
+			i = end
+		case c == '<':
+			end, tag := f.htmlEnd(i)
+			if end < 0 {
+				if declarationNameLength(s[i+1:]) > 0 {
+					// The ">" of a <br> written after it would end the declaration.
+					f.out = append(f.out, '\\')
+				}
+				f.out = append(f.out, c)
+				i++
+				break
+			}
+			f.writeSpan(s[i:end])
+			f.countPre(tag)
+			i = end
+		case c == '\n':
+			i = f.lineBreak(i, afterPreStart)
+		case c == '[':
+			f.openBracket(i, false)
+			f.linkFormed = false
+			f.out = append(f.out, c)
+			i++
+		case c == '!' && strings.HasPrefix(s[i+1:], "[") && !strings.HasPrefix(s[i+1:], "[^"):
+			f.openBracket(i+1, true)
+			f.out = append(f.out, "!["...)
+			i += 2
+		case c == ']' && len(f.brackets) > 0:
+			i = f.closeBracket(i)
+		case (c == 'w' || c == ':') && len(f.brackets) == 0:
+			if n := extendedAutolinkLength(s, i); n > 0 {
+				f.out = append(f.out, s[i:i+n]...)
+				f.autolinkEnd = len(f.out)
+				i += n
+				break
+			}
+			f.out = append(f.out, c)
+			i++
 		default:
-			out = withoutHardBreak(strings.TrimRight(out, " \t")) + "<br>" + strings.TrimLeft(line, " \t")
+			f.out = append(f.out, c)
+			i++
 		}
-		at += len(line) + 1
 	}
-	return strings.TrimSpace(out)
 }
 
-// inlineSpans returns the byte ranges of s that Markdown reads as a code span,
-// raw HTML or an HTML block, and, from preformattedBreaks, the line breaks an
-// HTML block holds in pre or listing text and the ones a parser drops there.
-func inlineSpans(md goldmark.Markdown, s string) (spans []span, kept, dropped []int) {
-	if err := ast.Walk(parse(md, []byte(s)), func(n ast.Node, entering bool) (ast.WalkStatus, error) {
-		if !entering {
-			return ast.WalkContinue, nil
-		}
-		switch n := n.(type) {
-		case *ast.CodeSpan:
-			if first, ok := n.FirstChild().(*ast.Text); ok {
-				if last, ok := n.LastChild().(*ast.Text); ok {
-					spans = append(spans, span{start: first.Segment.Start, end: last.Segment.Stop})
-				}
-			}
-		case *ast.RawHTML:
-			if l := n.Segments.Len(); l > 0 {
-				spans = append(spans, span{start: n.Segments.At(0).Start, end: n.Segments.At(l - 1).Stop})
-			}
-		case *ast.HTMLBlock:
-			if l := n.Lines().Len(); l > 0 {
-				sp := span{start: n.Lines().At(0).Start, end: n.Lines().At(l - 1).Stop}
-				spans = append(spans, sp)
-				k, d := preformattedBreaks(s[sp.start:sp.end], sp.start)
-				kept, dropped = append(kept, k...), append(dropped, d...)
-			}
-		}
-		return ast.WalkContinue, nil
-	}); err != nil {
-		return nil, nil, nil
+// openBracket opens the link or image opener whose "[" is src[i]. The stack
+// is made once, to hold every "[" from the first.
+func (f *lineFolder) openBracket(i int, image bool) {
+	if f.brackets == nil {
+		f.brackets = make([]bool, 0, strings.Count(f.src[i:], "["))
 	}
-	return spans, kept, dropped
+	f.brackets = append(f.brackets, image)
 }
 
-// preformattedBreaks returns where block, which starts at base, holds a line
-// break in a pre or listing element's text, and where it holds the one line
-// break right after such an element's start tag, which an HTML parser drops.
-func preformattedBreaks(block string, base int) (kept, dropped []int) {
-	z := html.NewTokenizer(strings.NewReader(block))
-	depth, off, afterStart := 0, 0, false
+// closeBracket reads the "]" at src[i] that closes the innermost opener, and
+// returns where the text after it starts. A link or an image ends with the
+// inline tail after the "]" when cmark-gfm reads one there; when it reads
+// none, the "(" is written escaped.
+func (f *lineFolder) closeBracket(i int) int {
+	image := f.brackets[len(f.brackets)-1]
+	f.brackets = f.brackets[:len(f.brackets)-1]
+	f.out = append(f.out, ']')
+	i++
+	if i == len(f.src) || f.src[i] != '(' || !image && f.linkFormed {
+		return i
+	}
+	t, ok := f.linkTailAt(i)
+	if !ok {
+		// The fold can join what cmark-gfm reads apart, so the cell would
+		// read a tail here that the doc comment does not hold.
+		f.out = append(f.out, '\\', '(')
+		return i + 1
+	}
+	f.writeLinkTail(i, t)
+	if !image {
+		f.linkFormed = true
+	}
+	return t.end
+}
+
+// writeSpan writes a code span or a tag on one line.
+func (f *lineFolder) writeSpan(span string) {
 	for {
-		tt := z.Next()
-		if tt == html.ErrorToken {
-			return kept, dropped
+		line, rest, more := strings.Cut(span, "\n")
+		f.out = append(f.out, line...)
+		if !more {
+			return
 		}
-		raw := string(z.Raw())
-		opens := false
-		switch tt {
-		case html.TextToken:
-			for i := range len(raw) {
-				switch {
-				case raw[i] != '\n' || depth == 0:
-				case afterStart && i == 0:
-					dropped = append(dropped, base+off+i)
-				default:
-					kept = append(kept, base+off+i)
-				}
-			}
-		case html.StartTagToken, html.EndTagToken:
-			if name, _ := z.TagName(); string(name) == "pre" || string(name) == "listing" {
-				if tt == html.StartTagToken {
-					depth++
-					opens = true
-				} else {
-					depth = max(depth-1, 0)
-				}
-			}
-		}
-		afterStart = opens
-		off += len(raw)
+		f.out = append(f.out, ' ')
+		span = strings.TrimLeft(rest, " \t")
 	}
 }
 
-// withoutHardBreak drops the backslash that ends s when it ends an odd run:
-// Markdown reads that backslash before a line break as the break itself.
-func withoutHardBreak(s string) string {
-	trimmed := strings.TrimRight(s, "\\")
-	if (len(s)-len(trimmed))%2 == 1 {
-		return s[:len(s)-1]
+// countPre reads a pre or listing element's start or end tag as an HTML
+// parser reads it in a body: a start tag opens the element, self-closing too,
+// and an end tag closes the innermost open one of its name and all inside it,
+// or is ignored when none is open. No other element is tracked, so an end tag
+// a scope boundary hides closes its element here all the same, and the end
+// tag of an element that holds one, such as </div>, leaves it open here.
+func (f *lineFolder) countPre(tag htmlTag) {
+	listing := strings.EqualFold(tag.name, "listing")
+	if !listing && !strings.EqualFold(tag.name, "pre") {
+		return
 	}
-	return s
+	if !tag.end {
+		f.pre = append(f.pre, listing)
+		f.preStarted = true
+		return
+	}
+	for i, l := range slices.Backward(f.pre) {
+		if l == listing {
+			f.pre = f.pre[:i]
+			return
+		}
+	}
 }
 
-// lineEndings makes every CR LF and every lone CR an LF. CommonMark ends a
-// line at each, and the parser the self-check reads with ends one at LF alone.
+// lineBreak folds the line break at src[i] that no code span and no tag holds,
+// and returns where the next line's text starts. A <br> is punctuation where
+// the line break was white space, so a space beside it keeps an emphasis
+// delimiter's flanking and a www link's start as the doc comment reads them.
+func (f *lineFolder) lineBreak(i int, afterPreStart bool) int {
+	if len(f.pre) > 0 {
+		if afterPreStart {
+			return i + 1
+		}
+		if endsInOddBackslashRun(f.out) && len(f.out) != f.autolinkEnd {
+			f.out = append(f.out, '\\')
+		}
+		f.spaceAfterDelimiter()
+		f.out = append(f.out, "<br>"...)
+		return i + 1
+	}
+	next := i + 1
+	for next < len(f.src) && (f.src[next] == ' ' || f.src[next] == '\t') {
+		next++
+	}
+	untrimmed := len(f.out)
+	f.out = bytes.TrimRight(f.out, " \t")
+	switch {
+	case !endsInOddBackslashRun(f.out) || len(f.out) == f.autolinkEnd:
+		f.spaceAfterDelimiter()
+	case len(f.out) == untrimmed && next < len(f.src) && f.src[next] != '\n':
+		// Markdown reads this backslash as the hard break itself.
+		f.out = f.out[:len(f.out)-1]
+	default:
+		// A lone backslash would escape the "<" of the <br>.
+		f.out = append(f.out, '\\')
+	}
+	f.out = append(f.out, "<br>"...)
+	if next < len(f.src) && (isEmphasisDelimiter(f.src[next]) || strings.HasPrefix(f.src[next:], "www.")) {
+		f.out = append(f.out, ' ')
+	}
+	return next
+}
+
+// spaceAfterDelimiter writes a space when the text written so far ends in an
+// emphasis delimiter no backslash escapes.
+func (f *lineFolder) spaceAfterDelimiter() {
+	if n := len(f.out); n > 0 && isEmphasisDelimiter(f.out[n-1]) && !endsInOddBackslashRun(f.out[:n-1]) {
+		f.out = append(f.out, ' ')
+	}
+}
+
+func isEmphasisDelimiter(c byte) bool { return c == '*' || c == '_' || c == '~' }
+
+// endsInOddBackslashRun reports whether b ends in a backslash that no
+// backslash before it escapes.
+func endsInOddBackslashRun(b []byte) bool {
+	return (len(b)-len(bytes.TrimRight(b, `\`)))%2 == 1
+}
+
+// lfLineEndings makes every CR LF and every lone CR of s an LF. CommonMark
+// ends a line at each, and the parser the self-check reads with ends one at
+// LF alone. Text with no CR is returned as it is, with no allocation.
+func lfLineEndings(s string) string {
+	if !strings.Contains(s, "\r") {
+		return s
+	}
+	return lineEndings.Replace(s)
+}
+
 var lineEndings = strings.NewReplacer("\r\n", "\n", "\r", "\n")
 
 // codeCell renders s as code inside a Markdown table cell, byte for byte.
@@ -226,7 +358,7 @@ func codeCell(s string) string {
 // cell: HTML metacharacters and inline syntax become entities, a pipe the
 // table layer's \|, a line break <br>, and a linkBreak stops each autolink.
 func codeTagText(s string) string {
-	rs := []rune(lineEndings.Replace(s))
+	rs := []rune(lfLineEndings(s))
 	var b strings.Builder
 	for i, r := range rs {
 		if breaksLinkAt(rs, i) {
@@ -274,17 +406,27 @@ func breaksLinkAt(rs []rune, i int) bool {
 	return false
 }
 
+// dollarSpan writes a dollar outside code. GitHub reads a pair of dollars as
+// math there, and a backslash does not stop it; its documentation gives a span
+// round the dollar as the escape.
+const dollarSpan = "<span>$</span>"
+
 // escapeInline backslash-escapes the ASCII punctuation Markdown reads as
-// inline syntax, a table cell's pipe included, and writes a linkBreak where
-// GitHub would read an autolink, so text such as a schema name renders
-// literally in a heading, a link or a table cell. An underscore between two
-// letters or digits opens no emphasis in GFM and is left as is.
+// inline syntax, a table cell's pipe included, writes a linkBreak where GitHub
+// would read an autolink and a dollarSpan for each dollar, so text such as a
+// schema name renders literally in a heading, a link or a table cell. An
+// underscore between two letters or digits opens no emphasis in GFM and is
+// left as is.
 func escapeInline(s string) string {
 	rs := []rune(s)
 	var b strings.Builder
 	for i, r := range rs {
 		if breaksLinkAt(rs, i) {
 			b.WriteString(linkBreak)
+		}
+		if r == '$' {
+			b.WriteString(dollarSpan)
+			continue
 		}
 		escape := strings.ContainsRune("\\`*[]<>&~|!#", r)
 		if r == '_' {
@@ -649,7 +791,7 @@ func (g *generator) invariantSource(inv schema.Invariant) string {
 	end := span.End.Byte
 	text := withoutLeadingComments(string(content[span.Start.Byte:end]))
 	at := end - len(text)
-	return dedent(lineEndings.Replace(text), lineIndent(content, at))
+	return dedent(lfLineEndings(text), lineIndent(content, at))
 }
 
 // withoutLeadingComments returns text from its first character that is neither

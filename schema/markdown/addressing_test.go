@@ -447,3 +447,53 @@ abstract type P {
 
 	assertLines(t, doc, "| `tag` | `String` | from P (a\\|b) |  |")
 }
+
+// TestMarshal_AnchorsAreGitHubs pins two anchors against the HTML GitHub's
+// renderer gives Marshal's document: a heading nested in a doc comment's raw
+// heading takes no anchor, so <h2><div><h3>Nested</h3>tail</div></h2> before
+// "### Nested" gives the ids nestedtail and nested, and a slug keeps U+200C
+// and U+200D, so "### T (a\u200db)" gives the id t-a\u200db.
+func TestMarshal_AnchorsAreGitHubs(t *testing.T) {
+	t.Parallel()
+
+	nested := marshalString(t, "schema \"s\"\n/* <h2><div><h3>Nested</h3>tail</div></h2> */\ntype A {\n  id String primary\n  --> TO (one) Nested\n}\ntype Nested {\n  id String primary\n}\n")
+	assertLines(t, nested, "-   `--> TO (one)` [Nested](#nested)")
+	assertAbsent(t, nested, "#nested-1")
+
+	joined := marshalSources(t, map[string]string{
+		"entry.yammm": "schema \"app\"\n\nimport \"mid.yammm\" as m\n\ntype Order {\n\tid String primary\n\t--> TO (one) m.U\n}\n",
+		"mid.yammm":   "schema \"mid\"\n\nimport \"far.yammm\" as f\n\ntype U extends f.T {\n\tid String primary\n}\n",
+		"far.yammm":   "schema \"a\u200db\"\n\nabstract type T {\n\tname String\n}\n",
+	})
+	assertLines(t, joined, "### T (a\u200db)")
+	if !strings.Contains(joined, "](#t-a\u200db)") {
+		t.Errorf("document does not link T (a\u200db) as #t-a\u200db:\n%s", joined)
+	}
+	assertAbsent(t, joined, "#t-ab)")
+}
+
+// TestMarshal_ATypesOwnDocHeadingTakesTheAnchorAfterIt pins that an outline
+// heading the read finds takes its anchor at its place: a type whose doc
+// comment holds a heading of the type's own name keeps the anchor its slug
+// gives, and the doc comment's heading takes the next.
+func TestMarshal_ATypesOwnDocHeadingTakesTheAnchorAfterIt(t *testing.T) {
+	t.Parallel()
+
+	doc := marshalString(t, "schema \"s\"\ntype A {\n  id String primary\n  --> TO (one) B\n}\n/* # B */\ntype B {\n  id String primary\n}\n")
+	assertLines(t, doc, "-   `--> TO (one)` [B](#b)")
+	assertAbsent(t, doc, "(#b-1)")
+}
+
+// TestMarshal_AHeadingTheTreeLosesTakesNoAnchorATreeHeadingTakes pins that a
+// heading of the generator's that GitHub's tree loses moves no anchor of a
+// heading the tree holds: the lost Ob gives up "ob", so o.B, which GitHub
+// anchors #ob, is linked there.
+func TestMarshal_AHeadingTheTreeLosesTakesNoAnchorATreeHeadingTakes(t *testing.T) {
+	t.Parallel()
+
+	doc := marshalSources(t, map[string]string{
+		"entry.yammm": "schema \"s\"\n\nimport \"o.yammm\" as o\n\n/* <div>\n<select><option x=\" */\ntype A {\n\tid String primary\n}\n\ntype Ob {\n\tid String primary\n}\n",
+		"o.yammm":     "/* <div>\n<i x=\"1\"><input> */\nschema \"o\"\n\ntype B {\n\tid String primary\n\t--> LOOP (one) B\n}\n",
+	})
+	assertLines(t, doc, "-   `--> LOOP (one)` [o.B](#ob)")
+}
