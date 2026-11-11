@@ -18,7 +18,6 @@ func TestParseTimestamp_TheHostsZoneDecidesNothing(t *testing.T) {
 	t.Cleanup(func() { time.Local = restore })
 
 	plain := schema.NewTimestampConstraint()
-	both := schema.NewTimestampConstraintFormatted("2006-01-02 15:04:05 -0700 MST")
 	offset := schema.NewTimestampConstraintFormatted("2006-01-02 15:04:05 -0700")
 	wall := schema.NewTimestampConstraintFormatted("2006-01-02 15:04:05")
 	hosts := []*time.Location{
@@ -33,10 +32,6 @@ func TestParseTimestamp_TheHostsZoneDecidesNothing(t *testing.T) {
 		{"2026-08-19T12:00:00Z", plain},
 		{"2026-08-19T12:00:00-04:00", plain},
 		{"2026-08-19T12:00:00+02:00", plain},
-		{"2026-08-19 12:00:00 -0400 EDT", both},
-		{"2026-08-19 12:00:00 +0200 CEST", both},
-		{"2026-08-19 12:00:00 +0000 UTC", both},
-		{"2026-08-19 12:00:00 +0000 GMT", both},
 		{"2026-08-19 12:00:00 -0400", offset},
 		{"2026-08-19 12:00:00 +0200", offset},
 		{"2026-08-19 12:00:00", wall},

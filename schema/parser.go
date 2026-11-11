@@ -2,7 +2,6 @@ package schema
 
 import (
 	"fmt"
-	"time"
 
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/internal/parse"
@@ -239,15 +238,7 @@ func (p *schemaParser) constraint(c *parse.Constraint) (Constraint, DataTypeRef)
 		return parsedPatternConstraint(c.PatternRegexps()), DataTypeRef{}
 	case parse.ConstraintTimestamp:
 		if format, ok := c.Format(); ok {
-			built := NewTimestampConstraintFormatted(format)
-			if fault, refused := constraintFault(built); refused {
-				p.collector.Collect(diag.NewIssue(diag.Error, diag.E_INVALID_CONSTRAINT, fault).
-					WithSpan(c.FormatLit.Span).
-					Build())
-			} else {
-				p.warnLossyTimestampFormat(format, c.FormatLit.Span)
-			}
-			return built, DataTypeRef{}
+			return p.timestampConstraint(format, c.FormatLit.Span), DataTypeRef{}
 		}
 		// The zero literal, not NewTimestampConstraint's result: the compiler
 		// boxes it with no allocation.
@@ -269,41 +260,24 @@ func (p *schemaParser) constraint(c *parse.Constraint) (Constraint, DataTypeRef)
 	return nil, DataTypeRef{} // unreachable: ConstraintKind has exactly the twelve forms above
 }
 
-// warnLossyTimestampFormat reports a declared layout that cannot reproduce an
-// instant. Values of the kind are stored as text rendered through the layout,
-// so whatever the layout omits is dropped from every value written under it,
-// and the round trip back through the same layout names a different moment.
-//
-// A wall-clock layout is a legitimate domain choice — an upstream feed emits
-// what it emits — so the declaration is accepted and the author is told once,
-// here, where the layout is written.
-func (p *schemaParser) warnLossyTimestampFormat(format string, span location.Span) {
-	if !lossyTimestampFormat(format) {
-		return
+// timestampConstraint builds the constraint of a declared layout from one
+// judgement of it. A layout no Timestamp holds is refused. One that drops a
+// field is a legitimate domain choice, since an upstream feed emits what it
+// emits, so it is accepted and the author is told once, here, what the two
+// probe instants lose under it.
+func (p *schemaParser) timestampConstraint(format string, span location.Span) TimestampConstraint {
+	fault, loss := judgeTimestampLayout(format)
+	if refusal, refused := timestampFaultText(format, fault); refused {
+		p.collector.Collect(diag.NewIssue(diag.Error, diag.E_INVALID_CONSTRAINT, refusal).
+			WithSpan(span).
+			Build())
+	} else if warning, lossy := loss.warning(format); lossy {
+		p.collector.Collect(diag.NewIssue(diag.Warning, diag.W_TIMESTAMP_LOSSY_FORMAT, warning).
+			WithSpan(span).
+			WithHint("declare Timestamp without a format to store RFC 3339 with nanoseconds, which loses none of these").
+			Build())
 	}
-	p.collector.Collect(diag.NewIssue(diag.Warning, diag.W_TIMESTAMP_LOSSY_FORMAT,
-		fmt.Sprintf("timestamp format %q cannot represent an instant: a value stored through it loses its UTC offset, its fractional second, or both", format)).
-		WithSpan(span).
-		WithHint("declare Timestamp without a format to store RFC 3339 with nanoseconds, which round-trips exactly").
-		Build())
-}
-
-// lossyTimestampFormat reports whether rendering an instant through format and
-// parsing it back changes the instant. The test is the round trip itself
-// rather than a scan for zone and fraction directives, so a layout is judged
-// by what it does rather than by how it is spelled.
-func lossyTimestampFormat(format string) bool {
-	// The probe zone carries a name: a layout with the MST directive renders
-	// an unnamed zone as a numeric offset, which time.Parse then refuses, and
-	// the error arm would call that layout "not lossy".
-	probe := time.Date(2026, 8, 19, 12, 34, 56, 789000000, time.FixedZone("XYZ", 2*60*60))
-	back, err := time.Parse(format, probe.Format(format))
-	if err != nil {
-		// A layout Go cannot parse its own output under is not something this
-		// warning can speak to.
-		return false
-	}
-	return !back.Equal(probe)
+	return TimestampConstraint{format: format, fault: fault}
 }
 
 // aliasConstraint is the one form yielding two outputs from one node: the

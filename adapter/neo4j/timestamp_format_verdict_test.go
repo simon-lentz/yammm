@@ -10,10 +10,11 @@ import (
 	"github.com/simon-lentz/yammm/schema"
 )
 
-// The two faults of a Timestamp format, in the judge's words after the format.
+// The faults of a Timestamp format, in the judge's words after the format.
 const (
-	notUTF8   = "is not valid UTF-8"
-	nameAlone = "holds a zone abbreviation and no numeric offset"
+	notUTF8      = "is not valid UTF-8"
+	abbreviation = "holds a zone abbreviation, which names no one offset; state the zone as a numeric offset such as Z07:00"
+	unreadable   = "does not read back the text it writes: it writes "
 )
 
 // timestampFormats holds one format of every class of text, with the verdict
@@ -57,25 +58,29 @@ var timestampFormats = []struct {
 	{"a bad byte last", "2006-01-02\xff", notUTF8},
 	{"a lead byte before ASCII", "\xc3(", notUTF8},
 
-	{"a zone abbreviation alone", "2006-01-02 15:04 MST", nameAlone},
-	{"the abbreviation and nothing else", "MST", nameAlone},
-	{"RFC 1123", time.RFC1123, nameAlone},
-	{"RFC 850", time.RFC850, nameAlone},
-	{"RFC 822", time.RFC822, nameAlone},
-	{"the Unix date", time.UnixDate, nameAlone},
-	{"an abbreviation beside a numeric offset", "2006-01-02 15:04 -0700 MST", ""},
-	{"an abbreviation beside Z07:00", "MST Z07:00", ""},
+	{"a zone abbreviation alone", "2006-01-02 15:04 MST", abbreviation},
+	{"the abbreviation and nothing else", "MST", abbreviation},
+	{"RFC 1123", time.RFC1123, abbreviation},
+	{"RFC 850", time.RFC850, abbreviation},
+	{"RFC 822", time.RFC822, abbreviation},
+	{"the Unix date", time.UnixDate, abbreviation},
+	{"an abbreviation beside a numeric offset", "2006-01-02 15:04 -0700 MST", abbreviation},
+	{"an abbreviation beside Z07:00", "MST Z07:00", abbreviation},
 	{"RFC 1123 with a numeric offset", time.RFC1123Z, ""},
 	{"a numeric offset alone", "-07", ""},
-	{"the abbreviation's letters inside a word, which time still reads", "MSTX 2006", nameAlone},
+	{"the abbreviation's letters inside a word, which time still reads", "MSTX 2006", abbreviation},
 	{"other capitals", "UTC 2006", ""},
 	{"bytes that are not UTF-8 beside an abbreviation", "15:04 MST\xff", notUTF8},
+
+	{"a month that reads the day's first digit", "2006-12-02 15:04:05", unreadable + `2026-08-19T13:34:56.789123456+05:30 as "2026-819-19 13:34:56"`},
+	{"a second that reads the day's first digit, in the second probe alone", "52", unreadable + `1950-11-23T00:07:08.1-09:30 as "823"`},
+	{"an abbreviation in a layout that does not read back", "12 MST", abbreviation},
 }
 
 // Every door gives one verdict on a Timestamp format, the one the constructor
-// recorded: a format that is not UTF-8, or that holds a zone abbreviation and
-// no numeric offset, is refused in the judge's words, alone, behind a
-// reference and as a List element, and any other is taken.
+// recorded: a format that is not UTF-8, that holds a zone abbreviation, or that
+// does not read back the text it writes is refused in the judge's words, alone,
+// behind a reference and as a List element, and any other is taken.
 func TestTimestampFormat_EveryDoorGivesTheConstructorsVerdict(t *testing.T) {
 	for _, row := range timestampFormats {
 		direct := schema.NewTimestampConstraintFormatted(row.format)

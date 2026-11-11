@@ -63,17 +63,16 @@ func TestCoerce_AUTCInstantGoesAsOffsetZero(t *testing.T) {
 
 // Every instant at offset zero goes in one shared location, whatever location
 // its text was read into, so the common instant costs no location of its own.
-// Text that names GMT at offset zero is read into a location of that name. An
-// instant at another offset is the control.
+// An instant at another offset is the control.
 func TestCoerce_UTCInstantsShareOneLocation(t *testing.T) {
 	t.Parallel()
 	c := schema.NewTimestampConstraint()
-	named := schema.NewTimestampConstraintFormatted("2006-01-02 15:04:05 -0700 MST")
+	declared := schema.NewTimestampConstraintFormatted("2006-01-02 15:04:05 -0700")
 	first := coerceTime(t, c, "2026-08-19T12:00:00Z").Location()
 	for text, at := range map[string]schema.Constraint{
-		"2026-08-19T12:00:00Z":          c,
-		"2001-01-01T00:00:00.5+00:00":   c,
-		"2026-08-19 12:00:00 +0000 GMT": named,
+		"2026-08-19T12:00:00Z":        c,
+		"2001-01-01T00:00:00.5+00:00": c,
+		"2026-08-19 12:00:00 +0000":   declared,
 	} {
 		if got := coerceTime(t, at, text).Location(); got != first {
 			t.Errorf("%s went in a location of its own, %p beside %p", text, got, first)
@@ -81,26 +80,6 @@ func TestCoerce_UTCInstantsShareOneLocation(t *testing.T) {
 	}
 	if got := coerceTime(t, c, "2026-08-19T12:00:00+02:00").Location(); got == first {
 		t.Error("control: an instant at +02:00 went in the UTC instants' location")
-	}
-}
-
-// A layout that holds a zone abbreviation beside a numeric offset sends the
-// offset and never the abbreviation, one the host's tz database resolves at
-// that offset included.
-func TestCoerce_AZoneAbbreviationInTheTextNeverReachesTheDriver(t *testing.T) {
-	t.Parallel()
-	c := schema.NewTimestampConstraintFormatted("2006-01-02 15:04:05 -0700 MST")
-	for text, offset := range map[string]int{
-		"2026-08-19 12:00:00 +0000 GMT": 0,
-		"2026-08-19 12:00:00 +0000 UTC": 0,
-		"2026-01-19 12:00:00 -0500 EST": -5 * 60 * 60,
-		"2026-01-19 12:00:00 +0100 CET": 60 * 60,
-		"2026-01-19 12:00:00 +0300 QQQ": 3 * 60 * 60,
-	} {
-		got := coerceTime(t, c, text)
-		if zone, at := got.Zone(); zone != driverOffsetZoneName || at != offset || got.Location().String() != driverOffsetZoneName {
-			t.Errorf("%q went as zone %q at %d in %q, want %q at %d", text, zone, at, got.Location(), driverOffsetZoneName, offset)
-		}
 	}
 }
 

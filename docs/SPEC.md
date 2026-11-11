@@ -840,18 +840,22 @@ format     = STRING .
 
 The format string follows Go's time formatting conventions. When omitted, RFC 3339 with fractional seconds (`"2006-01-02T15:04:05.999999999Z07:00"`) is used.
 
-**Accepted input and stored form.** A `Timestamp` property accepts a Go `time.Time` or a string, and **stores the string** rendered through the declared format when one is given and through RFC 3339 with nanoseconds otherwise. A string is parsed and re-rendered, so one instant at one offset reaches one spelling however it was written: `"…+00:00"` stores as `"…Z"`, and `".500Z"` stores as `".5Z"`. The UTC offset survives — an offset records where an observation happened and is data, not formatting. A `time.Time` is judged as the text it stores, so one whose text the same rule refuses is refused, such as a time outside years 0 to 9999.
+**Accepted input and stored form.** A `Timestamp` property accepts a Go `time.Time` or a string, and **stores the string** rendered through the declared format when one is given and through RFC 3339 with nanoseconds otherwise. A string is parsed and re-rendered, so one instant at one offset reaches one spelling however it was written: `"…+00:00"` stores as `"…Z"`, and `".500Z"` stores as `".5Z"`. The UTC offset survives — an offset records where an observation happened and is data, not formatting. A `time.Time` is rendered through the layout, and that text is judged and stored as a string is, so a time and the text it renders as reach one spelling: RFC 3339 writes an offset under a minute as `+00:00`, which is stored as `Z`. A time whose text the rule refuses is refused, such as a time outside years 0 to 9999. Stored text is text the layout reads and stores as itself: a string that its layout reads and stores as text the layout does not read back as written is refused. Under `"2006-01-02 15:04:05 -07:00:00"` an offset two seconds west of UTC is one, since Go writes it as `+00:00:-02`, which it does not read. Under a layout that writes an offset's minutes, and writes the offset once, the offset `+24:60` is one, since Go reads it as 25 hours and writes `+25:00`, which it does not read. Go reads the offset `-00:00:01` as no offset, so text at it is stored at UTC.
 
-**A declared format that cannot represent an instant loses what it omits.** A layout carrying no zone, no fractional second, or neither drops that part of every value stored under it, and a reader parsing the text back gets a different instant. At schema load a declared layout that is not refused renders one instant, and draws `W_TIMESTAMP_LOSSY_FORMAT` when that text reads back as another instant. It still loads, since a wall-clock layout is a legitimate domain choice. The next paragraph's layout is refused and draws no warning.
+**A declared format that cannot represent an instant loses what it omits.** A value is stored as the text its layout writes, so a value stored under a layout keeps none of the fields the layout drops, and a reader parsing the text back gets a different instant when the value held more than its text keeps. At schema load a declared layout that is not refused writes two instants and reads each text back: 13:34:56.789123456 at UTC+05:30 on 2026-08-19, and 00:07:08.1 at UTC-09:30 on 1950-11-23. It draws `W_TIMESTAMP_LOSSY_FORMAT` when a field of either instant reads back changed, and the message names each field lost: the year or its century, the month, the day, the hour or its half of the day, the minute, the second, the fractional second or its digits past a count, and the UTC offset or its minutes. So `"2006-01-02T15:04:05.000Z07:00"` loses the fractional second past 3 digits. The layout still loads, since a wall-clock layout is a legitimate domain choice. Go reads a fractional second after a seconds field whose layout declares none, so under such a layout a string that holds a fraction is accepted and stored without it. Neither instant's offset holds seconds, since RFC 3339 writes none, so a layout that drops an offset's seconds draws no warning for them. The two instants judge a layout and do not prove it: a layout whose number fields touch with no separator, such as `"2006-01-215:04:05"`, reads both back, and still refuses or misreads a value whose day has one digit.
 
-**A format that holds a zone abbreviation holds a numeric offset beside it.** An abbreviation names no one offset, so text under a layout that holds the abbreviation alone, such as `"2006-01-02 15:04 MST"`, names no one instant. Declaring such a layout is `E_INVALID_CONSTRAINT`; Go's `time.RFC1123`, `time.RFC850`, `time.RFC822` and `time.UnixDate` are four of them. A layout that holds both, such as `"2006-01-02 15:04 -0700 MST"`, loads, and the offset gives the instant. There is one exception: text whose abbreviation is `UTC` is read as UTC whatever offset stands beside it.
+**A format that no `Timestamp` can hold is refused.** Each of these is `E_INVALID_CONSTRAINT` on the format literal, and draws no warning:
+
+- An empty format, `Timestamp[""]`. `Timestamp` with no format is RFC 3339.
+- A format that holds a zone abbreviation, alone as in `"2006-01-02 15:04 MST"` or beside a numeric offset as in `"2006-01-02 15:04 -0700 MST"`. An abbreviation names no one offset, and Go reads the text `UTC` at an abbreviation as UTC whatever numeric offset stands beside it. A numeric offset, such as `Z07:00`, states the zone. Go's `time.RFC1123`, `time.RFC850`, `time.RFC822` and `time.UnixDate` each hold an abbreviation.
+- A format that does not read back the text it writes for one of the two instants above. `"2006-12-02 15:04:05"` is one: Go reads its `12` as a month and a day, so it writes 19 August 2026 as `2026-819-19`, which it cannot read. The message shows the instant and the text.
 
 Examples:
 
 ```yammm-snippet
-createdAt Timestamp                                    // the default, RFC3339Nano
-eventTime Timestamp["2006-01-02T15:04:05.000Z07:00"]   // explicit, fixed 3-digit fraction
-logTime Timestamp["2006-01-02 15:04:05"]               // custom, and lossy: no zone, no fraction
+createdAt Timestamp                                          // the default, RFC3339Nano
+eventTime Timestamp["2006-01-02T15:04:05.000000000Z07:00"]   // explicit, fixed 9-digit fraction
+logTime Timestamp["2006-01-02 15:04:05"]                     // custom, and lossy: no zone, no fraction
 ```
 
 #### Date
@@ -1762,7 +1766,7 @@ Codes are stable identifiers for programmatic matching. `diag/code.go` holds the
 - `E_UNKNOWN_ANNOTATION`, `E_INVALID_ANNOTATION` — annotation name, placement, arity, argument kind or value, duplicate, or inherited-disagreement errors
 - `E_UNKNOWN_ANNOTATION_TARGET`, `E_INVALID_ANNOTATION_TARGET` — annotation target-property errors (unknown reference / ineligible property)
 - `W_ANNOTATION_SHADOWED` — a re-declaration silently drops an inherited property's annotations (warning)
-- `W_TIMESTAMP_LOSSY_FORMAT` (Warning) — a `Timestamp["layout"]` declares a layout that cannot reproduce an instant; one that holds a zone abbreviation and no numeric offset draws `E_INVALID_CONSTRAINT` in its place
+- `W_TIMESTAMP_LOSSY_FORMAT` (Warning) — a `Timestamp["layout"]` declares a layout that cannot reproduce an instant, and the message names each field that one of the two probe instants loses; one that holds a zone abbreviation, or that does not read back the text it writes, draws `E_INVALID_CONSTRAINT` in its place
 - `E_REVERSE_CLAUSE_REMOVED` — the schema carries the reverse clause removed in v0.15.0
 
 **Syntax** — parse errors:

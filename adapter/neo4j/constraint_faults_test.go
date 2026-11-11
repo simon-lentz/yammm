@@ -73,10 +73,13 @@ func faultRows() []faultRow {
 
 		{"timestamp accepted", schema.NewTimestampConstraintFormatted("2006-01-02")},
 		{"timestamp format not UTF-8", schema.NewTimestampConstraintFormatted("\xff")},
-		{"timestamp format with a zone abbreviation alone", schema.NewTimestampConstraintFormatted("2006-01-02 15:04 MST")},
-		{"timestamp format with a zone abbreviation alone in a List", schema.NewListConstraint(schema.NewTimestampConstraintFormatted("15:04 MST"))},
+		{"timestamp format with a zone abbreviation", schema.NewTimestampConstraintFormatted("2006-01-02 15:04 MST")},
+		{"timestamp format with a zone abbreviation in a List", schema.NewListConstraint(schema.NewTimestampConstraintFormatted("15:04 MST"))},
 		{"timestamp format with a zone abbreviation beside an offset", schema.NewTimestampConstraintFormatted("2006-01-02 15:04 -0700 MST")},
-		{"timestamp format not UTF-8 before a zone abbreviation alone", schema.NewTimestampConstraintFormatted("15:04 MST\xff")},
+		{"timestamp format not UTF-8 before a zone abbreviation", schema.NewTimestampConstraintFormatted("15:04 MST\xff")},
+		{"timestamp format that does not read back its own text", schema.NewTimestampConstraintFormatted("2006-12-02 15:04:05")},
+		{"timestamp format that does not read back its own text in a List", schema.NewListConstraint(schema.NewTimestampConstraintFormatted("52"))},
+		{"timestamp format that drops every field", schema.NewTimestampConstraintFormatted("plain text")},
 
 		{"integer accepted", schema.IntegerBetween(1, 5)},
 		{"integer inverted", schema.IntegerBetween(5, 1)},

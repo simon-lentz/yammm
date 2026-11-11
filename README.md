@@ -373,12 +373,15 @@ yammm neo4j indexes <schema>                             # generate Neo4j index 
 yammm neo4j diff <schema>                                # compare schema constraints and indexes against a live database
 ```
 
-Every command writes its diagnostics to **stderr**, at every severity, and its
-results to stdout. A warning is not a failure — a run that prints warnings and
-nothing else still exits `0` — so do not read a zero exit code as "no
-diagnostics." (Before v0.9.0 a warnings-only result printed nothing at all, so
-an unchanged schema may emit new stderr output; the `Result` a library caller
-receives is unchanged.)
+A command writes the diagnostics it prints to **stderr**, at every severity,
+and stdout holds a command's own output. One report differs:
+`yammm snapshot info --dir` states each file's result in its stdout report —
+in text the file's first error or first warning, under `--format json` its
+diagnostics — and prints on stderr the diagnostics of the directory read
+alone. Stderr is not diagnostics alone: in text output `yammm snapshot save`
+and `yammm snapshot update-metadata` end a successful run with a one-line
+status there. `yammm validate` exits `0` for a schema that draws warnings and
+no error, so do not read a zero exit code as "no diagnostics."
 
 ## IDE Support
 

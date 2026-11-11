@@ -42,7 +42,7 @@ func TestSchemaParser_BuildsATimestampWithNoFormatWithoutAllocating(t *testing.T
 func TestConstraintFault_ReadsATimestampsRecordedVerdictAlone(t *testing.T) {
 	t.Parallel()
 	unjudged := TimestampConstraint{format: "2006\xff"}
-	recorded := TimestampConstraint{format: "2006-01-02", badFormat: true}
+	recorded := TimestampConstraint{format: "2006-01-02", fault: timestampFormatNotUTF8}
 	for name, wrap := range map[string]func(Constraint) Constraint{
 		"alone":             func(c Constraint) Constraint { return c },
 		"as a List element": func(c Constraint) Constraint { return NewListConstraint(c) },

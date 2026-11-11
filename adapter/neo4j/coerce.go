@@ -15,8 +15,8 @@ import (
 )
 
 // coerceScalar returns raw, a value in the form the validator stores, as the
-// driver's value at constraint. It judges the form alone: a value of another
-// kind's form is refused, and bounds, members and patterns are the validator's.
+// driver's value at constraint. It judges the form, and an instant's offset by
+// the server's bound: bounds, members and patterns are the validator's.
 // Every path reaches it with a constraint a loaded or judged schema holds.
 func coerceScalar(constraint schema.Constraint, raw any) (any, error) {
 	// The driver packs a nil slice as an empty list, so it must reach the driver as nil.
@@ -59,7 +59,11 @@ func scalarForm(resolved schema.Constraint, raw any) (any, error) {
 			return raw, fmt.Errorf("coerce %s: cannot use %T (want string)", kind, raw)
 		}
 		if t, ok := value.ParseTimestamp(v, resolved); ok {
-			return offsetForm(t), nil
+			_, offset := t.Zone()
+			if offset < -maxOffsetSeconds || offset > maxOffsetSeconds {
+				return raw, fmt.Errorf("coerce %s: cannot store %s: its UTC offset %s is past the 18 hours the server holds", kind, diag.QuoteValue(v), t.Format("-07:00:00"))
+			}
+			return offsetForm(t, offset), nil
 		}
 		if tc, ok := resolved.(schema.TimestampConstraint); ok && tc.Format() != "" {
 			return raw, fmt.Errorf("coerce %s: cannot parse %s against format %q", kind, diag.QuoteValue(v), tc.Format())
@@ -309,13 +313,17 @@ func calendarDate(t time.Time) time.Time {
 	return time.Date(y, m, d, 0, 0, 0, 0, time.UTC)
 }
 
-// offsetForm expresses t, an instant read from its stored text, in the driver's
-// offset sentinel location, so every instant reaches the server as its offset
-// and never under a zone name. The server holds one instant under a zone name
-// and under that zone's offset as two unequal values, and Cypher's own
-// datetime() gives the offset form.
-func offsetForm(t time.Time) time.Time {
-	_, offset := t.Zone()
+// maxOffsetSeconds is the widest UTC offset the server holds in a ZONED
+// DATETIME, 18 hours either way. The server refuses a wider one with an error
+// that names no property.
+const maxOffsetSeconds = 18 * 60 * 60
+
+// offsetForm expresses t, an instant read from its stored text at offset, in
+// the driver's offset sentinel location, so every instant reaches the server as
+// its offset and never under a zone name. The server holds one instant under a
+// zone name and under that zone's offset as two unequal values, and Cypher's
+// own datetime() gives the offset form.
+func offsetForm(t time.Time, offset int) time.Time {
 	if offset == 0 {
 		return t.In(offsetZero)
 	}

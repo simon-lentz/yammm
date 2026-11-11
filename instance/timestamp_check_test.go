@@ -51,3 +51,31 @@ func TestDatatypeCheck_TimestampReadsRFC3339WhateverAPropertyDeclares(t *testing
 		})
 	}
 }
+
+// A time.Time and the text it renders as are one value: the validator stores
+// both as one text, at a key too, so a graph holds one instance for the two.
+// RFC 3339 writes an offset under a minute as +00:00, which is stored as Z.
+func TestValidateOne_ATimeAndItsTextReachOneKey(t *testing.T) {
+	t.Parallel()
+	s, res := schema.LoadString(t.Context(), "schema \"t\"\n\ntype T {\n\tat Timestamp primary\n\tseen Timestamp\n}\n", "t.yammm")
+	if res.HasErrors() {
+		t.Fatal(res)
+	}
+	validator := instance.NewValidator(s)
+	aSecondEast := time.Date(2024, 1, 2, 3, 4, 5, 0, time.FixedZone("", 1))
+	const stored = "2024-01-02T03:04:05Z"
+	for _, given := range []any{aSecondEast, "2024-01-02T03:04:05+00:00", stored} {
+		valid, res := validator.ValidateOne(t.Context(), "T", instance.RawInstance{Properties: map[string]any{"at": given, "seen": given}})
+		if res.HasErrors() {
+			t.Fatalf("%#v: ValidateOne = %v", given, res)
+		}
+		if key := valid.PrimaryKey().String(); key != `["`+stored+`"]` {
+			t.Errorf("%#v: the key is %s; want [%q]", given, key, stored)
+		}
+		for _, name := range []string{"at", "seen"} {
+			if held, _ := valid.Property(name); held.Unwrap() != stored {
+				t.Errorf("%#v: %s holds %#v; want %q", given, name, held.Unwrap(), stored)
+			}
+		}
+	}
+}

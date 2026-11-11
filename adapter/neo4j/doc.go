@@ -184,9 +184,10 @@
 // passes them at a Float position and rounds to its nearest float64. No snapshot these writers accept holds a property the schema does not
 // declare: the validator keeps one out of a graph, and
 // [github.com/simon-lentz/yammm/snapshot.Load] and [graph.NewFromSnapshot] refuse
-// one. Of the values the mark refuses, a validated snapshot holds only a nested
-// collection's, which the validator accepts; any other is held only by a
-// snapshot whose values no validator refused at Error. [CoerceParams] marks its
+// one. Of the values the mark refuses, a validated snapshot holds two, which
+// the validator accepts: a nested collection's, and an instant at a UTC offset
+// past 18 hours. Any other is held only by a snapshot whose values no
+// validator refused at Error. [CoerceParams] marks its
 // refusals of a value so too. No other error
 // carries the class: a caller's own, such as a constraint
 // [schema.CheckConstraint] refuses, a [GraphShape] the adapter did not build
@@ -221,6 +222,8 @@
 //     a zone name: a UTC instant goes as offset zero. The server holds one
 //     instant under a zone name and under that zone's offset as two unequal
 //     values, and Cypher's datetime() of RFC 3339 text gives the offset form.
+//     An instant at an offset past 18 hours is a coercion failure: the server
+//     holds an offset of 18 hours at most.
 //   - Date: a "2006-01-02" string -> dbtype.Date (Neo4j DATE). A string that
 //     does not parse, or any other value, is a coercion failure. The date is
 //     midnight UTC on the day the text shows, since a date carries no time of
@@ -236,23 +239,22 @@
 //
 // [CoerceParams] reads a value as the validator does, so a value in a form the
 // validator reads is read the same way. A Go integer of any width, a named type
-// and a time.Time at a Timestamp are three such forms. It refuses one value
-// the validator takes: a value at a List whose element is a collection. A
-// time.Time goes through the text the validator stores it as. At a Timestamp
-// that text is in the constraint's layout, so the instant reaches the server at
-// the precision that text keeps and, with one exception, at its offset. Text
-// under a layout that holds no offset is read as UTC. The exception: under a
-// layout that holds a zone abbreviation beside an offset, text whose
-// abbreviation is UTC is read as UTC whatever offset it keeps. From a key that
-// holds a constraint no zone name reaches the server, a location's such as
-// Europe/Berlin included, and there a pointer is refused, a nil one too.
+// and a time.Time at a Timestamp are three such forms. It refuses two values
+// the validator takes: a value at a List whose element is a collection, and an
+// instant at a UTC offset past 18 hours. A time.Time goes through the text the
+// validator stores it as. At a Timestamp that text is in the constraint's
+// layout, so the instant reaches the server at the precision that text keeps
+// and at its offset. Text under a layout that holds no offset is read as UTC.
+// From a key that holds a constraint no zone name reaches the server, a
+// location's such as Europe/Berlin included, and there a pointer is refused, a
+// nil one too.
 //
-// On the write path the rule refuses only a value no validator refused at
-// Error: one snapshot.Load read without revalidating at Error, or one
-// graph.NewFromSnapshot imported under another schema, which holds no value to
-// its constraint. There it judges a value's form and never its bounds, members
-// or pattern, nor a Vector's dimension. A Timestamp, a Date and a UUID are
-// forms, so their text is parsed.
+// On the write path the rule refuses those two values, and beside them only a
+// value no validator refused at Error: one snapshot.Load read without
+// revalidating at Error, or one graph.NewFromSnapshot imported under another
+// schema, which holds no value to its constraint. There it judges a value's
+// form and never its bounds, members or pattern, nor a Vector's dimension. A
+// Timestamp, a Date and a UUID are forms, so their text is parsed.
 //
 // The write path refuses a value at a List whose element is a List or a Vector
 // by its type first: Neo4j has no nested collection property type, so a value

@@ -29,8 +29,10 @@ import (
 //
 // Rendering a Timestamp through a declared layout drops whatever that layout
 // cannot express. A schema declaring such a layout draws
-// [github.com/simon-lentz/yammm/diag.W_TIMESTAMP_LOSSY_FORMAT] at load, or is
-// refused where the layout holds a zone abbreviation and no numeric offset.
+// [github.com/simon-lentz/yammm/diag.W_TIMESTAMP_LOSSY_FORMAT] at load, save
+// for an offset's seconds. A value is refused when the layout does not read
+// back the text it stores as that same text, and a time.Time is stored as its
+// rendered text is.
 func Canonical(val any, c schema.Constraint) (any, error) {
 	if c == nil || Absent(val) {
 		return val, nil
@@ -62,34 +64,78 @@ func Canonical(val any, c schema.Constraint) (any, error) {
 // is the declared one when the constraint carries it, so a custom-format
 // timestamp is stored in text that satisfies its own format.
 func canonicalTimestamp(val any, c schema.Constraint) (any, error) {
-	layout := timestampLayout(c)
-	if t, ok := val.(time.Time); ok {
-		s, readsBack := TimestampText(t, c)
-		if !readsBack {
-			return val, fmt.Errorf("value: a time.Time renders as %s, which is no timestamp the layout reads back", diag.QuoteValue(s))
-		}
-		return s, nil
-	}
+	// A time.Time is stored as its rendered text is, so both forms of one
+	// instant reach one spelling.
+	t, isTime := val.(time.Time)
 	// The string form is whatever GetString reads, as the check side accepts
 	// it: a carrier the check passes is one this side renders.
-	s, ok := GetString(val)
-	if !ok {
+	s, isText := GetString(val)
+	switch {
+	case isTime:
+		s = t.Format(timestampLayout(c))
+	case !isText:
 		return val, fmt.Errorf("value: cannot canonicalize %T as a Timestamp (want a string or time.Time)", val)
 	}
-	t, err := parseTimestamp(s, c)
-	if err != nil {
-		return val, err
+	var buf [timestampTextSize]byte
+	stored, verdict := storedTimestamp(buf[:0], s, c)
+	switch {
+	case verdict == textSettled:
+		// Text in its stored form is returned as given, which saves the copy.
+		if s == string(stored) {
+			return s, nil
+		}
+		return string(stored), nil
+	case verdict == textUnsettled:
+		// The copy keeps buf on the stack.
+		return val, fmt.Errorf("value: %s is stored as %q, which does not read back as written", diag.QuoteValue(s), string(stored))
+	case isTime:
+		return val, fmt.Errorf("value: a time.Time renders as %s, which is no timestamp the layout reads back", diag.QuoteValue(s))
 	}
-	return t.Format(layout), nil
+	if tc, ok := c.(schema.TimestampConstraint); ok && tc.Format() != "" {
+		return val, fmt.Errorf("value: %s does not satisfy the declared timestamp format %q", diag.QuoteValue(s), tc.Format())
+	}
+	return val, fmt.Errorf("value: %s is not an RFC 3339 timestamp", diag.QuoteValue(s))
 }
 
-// TimestampText returns t in the text a Timestamp c stores, and reports
-// whether [ParseTimestamp] reads that text back. A year outside 0 to 9999, for
-// one, renders as text no layout reads back.
-func TimestampText(t time.Time, c schema.Constraint) (string, bool) {
-	s := t.Format(timestampLayout(c))
-	_, ok := ParseTimestamp(s, c)
-	return s, ok
+// timestampTextSize holds the stored text of RFC 3339 and of most declared
+// layouts on the stack. A longer text costs one allocation.
+const timestampTextSize = 64
+
+// textVerdict is how a Timestamp's layout answers one text.
+type textVerdict uint8
+
+const (
+	// textUnread: the layout does not read the text.
+	textUnread textVerdict = iota
+	// textUnsettled: the layout stores the text as text it does not read, or
+	// that it stores as other text again, so a later read would move the value.
+	textUnsettled
+	// textSettled: the layout stores the text as text it stores as itself.
+	textSettled
+)
+
+// storedTimestamp appends to buf the text a Timestamp c stores for s, and
+// judges it. For text c does not read it appends nothing.
+func storedTimestamp(buf []byte, s string, c schema.Constraint) ([]byte, textVerdict) {
+	t, ok := ParseTimestamp(s, c)
+	if !ok {
+		return buf, textUnread
+	}
+	layout := timestampLayout(c)
+	stored := t.AppendFormat(buf, layout)
+	// Text already in its stored form was read just now.
+	if string(stored) == s {
+		return stored, textSettled
+	}
+	back, ok := ParseTimestamp(string(stored), c)
+	if !ok {
+		return stored, textUnsettled
+	}
+	var again [timestampTextSize]byte
+	if string(back.AppendFormat(again[:0], layout)) != string(stored) {
+		return stored, textUnsettled
+	}
+	return stored, textSettled
 }
 
 // DateText returns t in the text a Date stores, and reports whether that text
@@ -126,17 +172,6 @@ func ParseTimestamp(s string, c schema.Constraint) (time.Time, bool) {
 	}
 	t, err := time.ParseInLocation(layout, s, time.UTC)
 	return t, err == nil
-}
-
-// parseTimestamp is [ParseTimestamp] with the refusal worded.
-func parseTimestamp(s string, c schema.Constraint) (time.Time, error) {
-	if t, ok := ParseTimestamp(s, c); ok {
-		return t, nil
-	}
-	if tc, ok := c.(schema.TimestampConstraint); ok && tc.Format() != "" {
-		return time.Time{}, fmt.Errorf("value: %s does not satisfy the declared timestamp format %q", diag.QuoteValue(s), tc.Format())
-	}
-	return time.Time{}, fmt.Errorf("value: %s is not an RFC 3339 timestamp", diag.QuoteValue(s))
 }
 
 // ParseUUID reads s as a UUID's text: the hyphenated form, that form between

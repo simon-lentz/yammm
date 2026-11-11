@@ -245,7 +245,7 @@ Generates `CREATE CONSTRAINT IF NOT EXISTS` Cypher statements from a schema.
 | ---- | ------- | ----------- |
 | `--edition` | `enterprise` | `enterprise` or `community` |
 | `--named` | `true` | Generate named constraints |
-| `--node-keys` | `false` | Emit NODE KEY instead of separate UNIQUE + NOT NULL for primary keys (Enterprise; degrades to UNIQUE with `W_NEO4J_NODE_KEY_UNSUPPORTED` under `--edition community`) |
+| `--node-keys` | `false` | Emit NODE KEY instead of separate UNIQUE + NOT NULL for primary keys (Enterprise; under `--edition community` it degrades to UNIQUE with `W_NEO4J_NODE_KEY_UNSUPPORTED`) |
 | `--scalar-types` | `true` | Emit `IS :: <TYPE>` constraints for scalar, List and Vector properties |
 | `--required-only-types` | `false` | Restrict type constraints to required properties |
 | `--separator` | `__` | Label separator (schema__Type) |
@@ -280,7 +280,7 @@ Compares desired schema constraints **and indexes** against the live database (i
 | `--indexes` | `true` | Include index drift in the diff and the exit code; `--indexes=false` is constraints-only |
 | `--edition` | `enterprise` | `enterprise` or `community` (governs which constraints are diffed, on **both** sides) |
 | `--named` | `true` | Named constraints; with `false` every pairing falls through to semantic identity |
-| `--node-keys` | `false` | Emit NODE KEY instead of separate UNIQUE + NOT NULL for primary keys (Enterprise; degrades to UNIQUE with `W_NEO4J_NODE_KEY_UNSUPPORTED` under `--edition community`) |
+| `--node-keys` | `false` | Compare against NODE KEY instead of separate UNIQUE + NOT NULL for primary keys (Enterprise; under `--edition community` the desired side degrades to UNIQUE, and `diff` prints `W_NEO4J_NODE_KEY_UNSUPPORTED` only beside a generation error) |
 | `--scalar-types` | `true` | Emit `IS :: <TYPE>` constraints for scalar, List and Vector properties |
 | `--required-only-types` | `false` | Restrict type constraints to required properties |
 | `--separator` | `__` | Label separator (schema__Type) |
@@ -314,33 +314,51 @@ yammm neo4j diff --uri bolt://localhost:7687 schema.yammm
 
 ## Diagnostics Go to stderr, at Every Severity
 
-Since v0.9.0 every command prints whatever its run produced — errors, warnings,
-info, hints — to **stderr**. Before v0.9.0 a warnings-only result printed
-nothing at all, in any command, `yammm validate` included.
+A diagnostic a command prints goes to **stderr**, whatever its severity. One
+report, named below, also states diagnostics on stdout. The list says what a
+command prints, and names what some commands find and do not print.
 
-Two consequences worth knowing:
-
-- **Exit codes are unchanged.** A warning is not a failure: a run that meets
-  none of the Exit Codes table's conditions for `1`, `2` or `3` exits `0`,
-  whatever warnings it prints. Scripting that gates on the
-  exit code is unaffected; scripting that gates on "did it print anything" is
-  not. Each command's stdout contract (generated Cypher, Go source,
+- **A warning is not a failure.** A run that meets none of the Exit Codes
+  table's conditions for `1`, `2` or `3` exits `0`, whatever warnings it
+  prints. Scripting that gates on the exit code sees no warning; scripting
+  that gates on "did it print anything" does.
+- **stdout holds each command's own output**: generated Cypher, Go source,
   Markdown, formatted schema text and `fmt --check`'s path list, a report, a
-  shell completion script, help text, `--version`'s line) is untouched.
-- **An unchanged, still-passing schema may emit new stderr output.** Warnings
-  that already existed but that no command printed are now visible. The
-  `-_`-in-a-constraint-bound warning (`E_INVALID_CONSTRAINT`, "minus sign before
-  '_' (unbounded) has no effect") is one; `yammm snapshot verify`,
+  shell completion script, help text, `--version`'s line.
+- **One report carries diagnostics on stdout.** `yammm snapshot info --dir`
+  sends the diagnostics of the directory read to stderr, and puts each file's
+  result in its stdout report: in text a row's status with its first error or
+  first warning and no other issue of that file, and under `--format json`
+  each entry's `diagnostics`. The exit code is read from every file's result.
+- **`yammm neo4j diff` prints a generation warning only beside an error.** It
+  generates the constraints it compares, and the indexes unless
+  `--indexes=false`. It prints what a generation reports only when that
+  generation's own report holds an error. So for a schema whose constraints
+  generate with no error, `neo4j diff --edition community` prints no
+  `W_NEO4J_EDITION_CONSTRAINT_OMITTED` where
+  `yammm neo4j constraints --edition community` prints one. The diagnostics
+  of the schema load are printed at every severity.
+- **`yammm fmt` judges the grammar alone.** For a file the grammar does not
+  match, it reports the first place that does not match. A file the grammar
+  matches is formatted, and `fmt` prints none of the diagnostics
+  `yammm validate` reports for it, such as inverted bounds.
+- **`yammm check` and `yammm snapshot save` leave out one consequence.** When
+  the document holds a root the pipeline refused, the `E_UNRESOLVED_REQUIRED`
+  that names that root as a missing target is not printed. The refusal of the
+  root is.
+- **A schema that passes can still print.** The `-_`-in-a-constraint-bound
+  warning (`E_INVALID_CONSTRAINT`, "minus sign before
+  '_' (unbounded) has no effect") is one. `yammm snapshot verify`,
   `yammm snapshot info` without `--header-only` or `--dir`, and
-  `yammm snapshot save --into` additionally surface the
-  snapshot decoder's `W_SNAPSHOT_PATH_FALLBACK` on otherwise unchanged `.ys`
-  files. From v0.15.0, `E_SNAPSHOT_UNSUPPORTED_HASH_ALGORITHM` is an Error on
-  these body-reading commands — the document is refused, not warned about.
+  `yammm snapshot save --into` print the
+  snapshot decoder's `W_SNAPSHOT_PATH_FALLBACK`.
+  `E_SNAPSHOT_UNSUPPORTED_HASH_ALGORITHM` is an Error on
+  these body-reading commands: the document is refused, not warned about.
   `yammm snapshot info --header-only` and `--dir` read the header and the types
   table alone and report it as a Warning. `yammm snapshot update-metadata` reports that Warning
   from its header read, then refuses the document with the Error.
 
-This is what makes `W_ANNOTATION_SHADOWED` reachable — the only signal that a
+`W_ANNOTATION_SHADOWED` is a warning, and it is the only signal that a
 subtype's property re-declaration dropped an inherited property annotation.
 **Do not read a zero exit code as "no diagnostics."** Read the
 output.

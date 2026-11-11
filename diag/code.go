@@ -267,14 +267,14 @@ var (
 
 	// W_TIMESTAMP_LOSSY_FORMAT indicates that a Timestamp["layout"] declares a
 	// Go layout that cannot reproduce an instant. Values of the kind are
-	// stored as text rendered through the declared layout, so a layout
-	// carrying no zone, no fractional second, or neither drops that part of
-	// every value written under it — and a reader parsing the text back gets a
-	// different instant. Warning severity: a wall-clock layout is a legitimate
-	// domain choice, so the declaration is accepted and the author is told
-	// once, at the point of declaration, rather than silently. The warning
-	// anchors on the format literal. A layout that holds a zone abbreviation
-	// and no numeric offset draws [E_INVALID_CONSTRAINT] in its place.
+	// stored as text rendered through the declared layout, and the message
+	// names each field that one of two probe instants loses there: a calendar
+	// or clock field, the fractional second or its trailing digits, the UTC
+	// offset or its minutes. Warning severity: a wall-clock layout is a
+	// legitimate domain choice, so the declaration is accepted and the author
+	// is told once, on the format literal. A layout that holds a zone
+	// abbreviation, or that does not read back the text it writes for one of
+	// the two instants, draws [E_INVALID_CONSTRAINT] in its place.
 	W_TIMESTAMP_LOSSY_FORMAT = NewCode("W_TIMESTAMP_LOSSY_FORMAT", CategorySchema)
 )
 

@@ -380,9 +380,12 @@ func (b *builder) timestampConstraint(c *timC, span location.Span) *Constraint {
 	f := c.Format
 	lit := Literal{Raw: f.Raw, Span: b.spanOf(f.Pos, f.EndPos)}
 	text, err := unquote(f.Raw)
-	if err != nil {
+	switch {
+	case err != nil:
 		b.reportUnquote(lit.Span, "invalid timestamp format", err)
-	} else {
+	case text == "":
+		b.report(diag.Error, diag.E_INVALID_CONSTRAINT, lit.Span, "timestamp format cannot be empty; declare Timestamp with no format to store RFC 3339 text")
+	default:
 		lit.Text, lit.Kept = text, true
 	}
 	out.FormatLit = &lit

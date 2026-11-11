@@ -42,10 +42,11 @@
 // constraint whose written arguments Parse refuses, among them inverted
 // bounds, an unparseable bound, an empty or duplicate enum value,
 // an enum of fewer than two values, more than two patterns, a regex that does
-// not compile or that writes a surrogate code point, and a vector dimension
-// out of range. Of a Timestamp format Parse judges the escapes alone: the
-// schema loader reports a format that holds a zone abbreviation and no numeric
-// offset, under the same code. E_INVALID_INVARIANT covers a literal inside
+// not compile or that writes a surrogate code point, an empty Timestamp format,
+// and a vector dimension out of range. Of a Timestamp format Parse judges the
+// escapes and the empty text alone: the schema loader reports a format that
+// holds a zone abbreviation, or that does not read back the text it writes for
+// a probe instant, under the same code. E_INVALID_INVARIANT covers a literal inside
 // an invariant expression that will not convert, such as a number out of range
 // or an unquotable string. E_INVALID_NAME covers an empty schema name and a
 // relation name that is not UPPER_SNAKE, and E_REVERSE_CLAUSE_REMOVED a

@@ -27,7 +27,7 @@ type T {
 	b Boolean
 	ts Timestamp
 	tl Timestamp["2006-01-02 15:04"]
-	tz Timestamp["2006-01-02 15:04 -0700 MST"]
+	tz Timestamp["2006-01-02 15:04 -0700"]
 	d Date
 	u UUID
 	e Enum["a", "b"]
@@ -114,7 +114,7 @@ func TestCoerceParams_SendsWhatTheWritePathSendsForTheValidatedValue(t *testing.
 		"b":  {true, false, namedFlag(true), "true", 1},
 		"ts": {"2024-01-02T03:04:05Z", "2024-01-02T03:04:05.123456789+02:00", utc, zoned, fixed, utc.In(time.Local), far, "nope", "2024-01-02", &utc, 5},
 		"tl": {"2024-01-02 03:04", utc, zoned, "2024-01-02T03:04:05Z"},
-		"tz": {"2024-01-02 03:04 -0700 MST", "2024-01-02 03:04 +0000 UTC", "2024-01-02 03:04 +0000 GMT", "2024-01-02 03:04 -0400 EDT", "2024-01-02 03:04 +0300 QQQ", "2024-01-02 03:04 MST", utc, zoned, fixed},
+		"tz": {"2024-01-02 03:04 -0700", "2024-01-02 03:04 +0000", "2024-01-02 03:04 -0400", "2024-01-02 03:04 +0300", "2024-01-02 03:04 +1800", "2024-01-02 03:04 -1800", "2024-01-02 03:04", utc, zoned, fixed},
 		"d":  {"2024-01-02", utc, zoned, far, "01/02/2024", "2024-01-02T03:04:05Z", 5},
 		"u":  {id.String(), upperID, "{" + upperID + "}", id, "zz", &id, 5},
 		"e":  {"a", namedText("b"), "c", 5},

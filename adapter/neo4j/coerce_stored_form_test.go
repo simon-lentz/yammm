@@ -262,9 +262,7 @@ func TestCoerceParams_JudgesBoundsMembersAndPatterns(t *testing.T) {
 
 // CoerceParams reads what it returned as it read what it was given, so a
 // second pass sends the same values: an instant, a date, a typed slice, and a
-// map or rows it passed as given. An instant in the driver's Offset zone is no
-// input under a layout that holds a zone abbreviation, which cannot write that
-// zone.
+// map or rows it passed as given.
 func TestCoerceParams_ReadsItsOwnOutput(t *testing.T) {
 	t.Parallel()
 	types := ParamTypes{
@@ -293,14 +291,5 @@ func TestCoerceParams_ReadsItsOwnOutput(t *testing.T) {
 		if !sameSent(second[k], want) {
 			t.Errorf("%s: the second pass sends %#v, the first %#v", k, second[k], want)
 		}
-	}
-
-	named := ParamTypes{"ts": schema.NewTimestampConstraintFormatted("2006-01-02 15:04 -0700 MST")}
-	first, err = CoerceParams(map[string]any{"ts": "2024-01-02 03:04 +0300 QQQ"}, named)
-	if err != nil {
-		t.Fatalf("CoerceParams under a layout that holds a zone abbreviation: %v", err)
-	}
-	if out, err := CoerceParams(first, named); !errors.Is(err, ErrUnrepresentable) || !strings.Contains(err.Error(), `"2024-01-02 03:04 +0300 Offset"`) {
-		t.Errorf("the second pass over %#v = %#v, %v; want the validator's refusal of the text the layout writes", first["ts"], out, err)
 	}
 }

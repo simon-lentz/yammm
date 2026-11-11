@@ -487,9 +487,8 @@ func TestStructuralHash_ConstraintFieldCoverage(t *testing.T) {
 		},
 		"BooleanConstraint": {}, // no fields
 		"TimestampConstraint": {
-			"format":    true, // TestStructuralHash_ConstraintSensitivity ("timestamp default vs formatted")
-			"badFormat": true, // derived from format; CheckConstraint refuses a constraint that sets it
-			"nameAlone": true, // derived from format; CheckConstraint refuses a constraint that sets it
+			"format": true, // TestStructuralHash_ConstraintSensitivity ("timestamp default vs formatted")
+			"fault":  true, // derived from format; CheckConstraint refuses a constraint that sets it
 		},
 		"DateConstraint": {}, // no fields
 		"UUIDConstraint": {}, // no fields

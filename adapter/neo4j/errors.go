@@ -75,7 +75,8 @@ var (
 	// ErrUnrepresentable marks a value [Adapter.BatchNodeQueries],
 	// [Adapter.BatchEdgeQueries] or [CoerceParams] refuses: one that is not in
 	// the stored form of its kind, a nested collection's (beside
-	// [ErrUnsupportedListElem]), a map at a property the schema declares, a list
+	// [ErrUnsupportedListElem]), an instant at a UTC offset past 18 hours, a map
+	// at a property the schema declares, a list
 	// or a map nested more than 256 levels deep, a number no driver number holds,
 	// a primary key that is absent or holds no value, and, at [CoerceParams], a
 	// value the validator refuses at its constraint.

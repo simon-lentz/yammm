@@ -4,6 +4,7 @@ package integration
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -310,6 +311,47 @@ func TestCoerce_AnInstantIsTheValueCypherReadsFromItsText(t *testing.T) {
 	}
 	if equal, zone := equalsText(utc, utcText); equal != false || zone != "UTC" {
 		t.Errorf("control: the instant under the zone name UTC is equal to datetime(%q) = %v in zone %v, want false in zone UTC", utcText, equal, zone)
+	}
+}
+
+// The server holds an instant at a UTC offset of 18 hours at most. One at the
+// bound is stored at its offset. One a second or a minute past it is refused
+// by the server's own error in the form the adapter would send it, and
+// CoerceParams refuses it first.
+func TestCoerce_TheServerHoldsAnOffsetOfEighteenHoursAtMost(t *testing.T) {
+	ctx := context.Background()
+	driver(t)
+
+	const bound = 18 * 60 * 60
+	for text, offset := range map[string]int{"2026-08-19T12:00:00+18:00": bound, "2026-08-19T12:00:00-18:00": -bound} {
+		want, err := time.Parse(time.RFC3339, text)
+		if err != nil {
+			t.Fatalf("parse %q: %v", text, err)
+		}
+		got, ok := echoParam(t, ctx, coerceTimestamp(t, text)).(time.Time)
+		if !ok || !got.Equal(want) {
+			t.Errorf("%s: the round trip returned %v, want the same instant", text, got)
+		}
+		if _, held := got.Zone(); held != offset {
+			t.Errorf("%s: the round trip returned offset %d, want %d", text, held, offset)
+		}
+	}
+
+	const toTheSecond = "2006-01-02T15:04:05-07:00:00"
+	for _, text := range []string{"2026-08-19T12:00:00+18:01:00", "2026-08-19T12:00:00-18:01:00", "2026-08-19T12:00:00+18:00:01", "2026-08-19T12:00:00-18:00:01"} {
+		at, err := time.Parse(toTheSecond, text)
+		if err != nil {
+			t.Fatalf("parse %q: %v", text, err)
+		}
+		_, offset := at.Zone()
+		_, err = neo4jdriver.ExecuteQuery(ctx, isolatedDriver(t), "RETURN $v AS v",
+			map[string]any{"v": at.In(time.FixedZone("Offset", offset))}, neo4jdriver.EagerResultTransformer)
+		if !neo4jdriver.IsNeo4jError(err) {
+			t.Errorf("%s: the server answered %v; want its own refusal, or the adapter's bound of 18 hours is no longer the server's", text, err)
+		}
+		if _, err := n4j.CoerceParams(map[string]any{"v": text}, n4j.ParamTypes{"v": schema.NewTimestampConstraintFormatted(toTheSecond)}); !errors.Is(err, n4j.ErrUnrepresentable) {
+			t.Errorf("%s: CoerceParams = %v, want a refusal that matches ErrUnrepresentable", text, err)
+		}
 	}
 }
 

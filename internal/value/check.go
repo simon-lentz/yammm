@@ -475,31 +475,37 @@ func checkBoolean(val any) error {
 }
 
 // checkTimestamp validates that val is a valid timestamp.
-// Accepts a time.Time whose stored text reads back, or a string parsed
-// against the format.
+// Accepts a time.Time, or a string parsed against the format, whose stored
+// text reads back as written.
 func checkTimestamp(val any, c schema.Constraint) error {
-	// A time.Time is judged as the text it is stored as, so the Go path and the
+	// A time.Time is judged as the text it renders as, so the Go path and the
 	// text path refuse the same values.
+	var s string
 	if t, ok := val.(time.Time); ok {
-		s, readsBack := TimestampText(t, c)
-		if readsBack {
-			return nil
+		s = t.Format(timestampLayout(c))
+	} else {
+		var refused *CheckError
+		if s, refused = textOf(val, "timestamp string or time.Time"); refused != nil {
+			return refused
 		}
-		val = s
 	}
 
-	s, refused := textOf(val, "timestamp string or time.Time")
-	if refused != nil {
-		return refused
-	}
-
-	if _, ok := ParseTimestamp(s, c); ok {
+	// Text is judged as the text it is stored as, so a value this check passes
+	// is one [Canonical] stores.
+	var buf [timestampTextSize]byte
+	stored, verdict := storedTimestamp(buf[:0], s, c)
+	if verdict == textSettled {
 		return nil
 	}
-	if tc, ok := c.(schema.TimestampConstraint); ok && tc.Format() != "" {
-		return constraintFail("invalid timestamp format: %s (expected %s)", diag.QuoteValue(s), tc.Format())
+	given := diag.QuoteValue(s)
+	if verdict == textUnsettled {
+		// The stored text is as long as its layout makes it, so it is shown whole.
+		given += " is stored as " + strconv.Quote(string(stored)) + ", which does not read back as written"
 	}
-	return constraintFail("invalid timestamp format: %s", diag.QuoteValue(s))
+	if tc, ok := c.(schema.TimestampConstraint); ok && tc.Format() != "" {
+		return constraintFail("invalid timestamp format: %s (expected %s)", given, tc.Format())
+	}
+	return constraintFail("invalid timestamp format: %s", given)
 }
 
 // checkDate validates that val is a valid date.

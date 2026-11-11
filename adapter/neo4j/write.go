@@ -556,8 +556,7 @@ func nestedCollection(c schema.Constraint) error {
 // coerceSlice converts raw, a list in the form the validator stores, to the
 // typed slice Neo4j requires at c ([]string, []int64, []float64, []dbtype.Date,
 // ...). A Vector's element is a Float. [scalarForm] reads each element, as it
-// reads a scalar, and one it refuses is an error naming its index: only a
-// snapshot whose values no validator judged holds one.
+// reads a scalar, and one it refuses is an error naming its index.
 //
 // A []any under a scalar constraint is an error. A List whose element is a
 // collection is refused with [ErrUnsupportedListElem], an empty list included:

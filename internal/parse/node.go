@@ -326,8 +326,8 @@ func (c *Constraint) PatternRegexps() []*regexp.Regexp {
 	return out
 }
 
-// Format returns the timestamp format and whether the source wrote one that
-// unquoted cleanly.
+// Format returns the timestamp format and whether the parser kept the one the
+// source wrote. It keeps no format that is empty or did not unquote cleanly.
 func (c *Constraint) Format() (string, bool) {
 	if c.FormatLit == nil || !c.FormatLit.Kept {
 		return "", false

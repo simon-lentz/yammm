@@ -287,6 +287,7 @@ func TestCanonical_ReturnsTheInputOnFailure(t *testing.T) {
 	}{
 		{"timestamp, wrong type", 42, schema.NewTimestampConstraint()},
 		{"timestamp, unparseable text", "not-a-timestamp", schema.NewTimestampConstraint()},
+		{"timestamp, text its declared layout does not read", "x", schema.NewTimestampConstraintFormatted(time.DateOnly)},
 		{"uuid, wrong type", 42, schema.NewUUIDConstraint()},
 		{"date, wrong type", 42, schema.NewDateConstraint()},
 		{"list element fails", []any{"not-a-timestamp"}, schema.NewListConstraint(schema.NewTimestampConstraint())},

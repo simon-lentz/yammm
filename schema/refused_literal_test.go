@@ -234,6 +234,8 @@ func TestLoad_ASourceWithNoRefusedTextAnswersAsV0210(t *testing.T) {
 		lastOne   = `E_INVALID_CONSTRAINT regex pattern "\\x{DFFF}" names the surrogate code point U+DFFF, which no string holds`
 		overThree = "E_INVALID_CONSTRAINT pattern constraint exceeds maximum of 2 patterns (got 3)"
 		overFour  = "E_INVALID_CONSTRAINT pattern constraint exceeds maximum of 2 patterns (got 4)"
+		dateOnlyV = `W_TIMESTAMP_LOSSY_FORMAT timestamp format "2006-01-02" cannot represent an instant: a value stored through it loses its UTC offset, its fractional second, or both`
+		dateOnly  = `W_TIMESTAMP_LOSSY_FORMAT timestamp format "2006-01-02" cannot represent an instant: a value stored through it loses the hour, the minute, the second, the fractional second and the UTC offset`
 	)
 	type move struct{ gone, added []string }
 	moved := map[string]move{
@@ -258,6 +260,8 @@ func TestLoad_ASourceWithNoRefusedTextAnswersAsV0210(t *testing.T) {
 		"plain: pattern of three, one not compiling":      {added: []string{overThree}},
 		"plain: pattern of three, one a malformed escape": {added: []string{overThree}},
 		"plain: pattern of four, one not compiling":       {gone: []string{overThree}, added: []string{overFour}},
+		// The lossy-layout warning names the fields the layout loses.
+		"plain: timestamp with a lossy layout": {gone: []string{dateOnlyV}, added: []string{dateOnly}},
 	}
 	data, err := os.ReadFile("testdata/source_text_v0210.tsv")
 	if err != nil {

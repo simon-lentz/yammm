@@ -9,7 +9,6 @@ import (
 	"slices"
 	"strconv"
 	"strings"
-	"time"
 	"unicode/utf8"
 
 	"github.com/simon-lentz/yammm/internal/parse"
@@ -348,9 +347,8 @@ func (BooleanConstraint) IsResolved() bool { return true }
 
 // TimestampConstraint constrains timestamp values with an optional format.
 type TimestampConstraint struct {
-	format    string
-	badFormat bool // format is not valid UTF-8
-	nameAlone bool // format holds a zone abbreviation and no numeric offset
+	format string
+	fault  timestampFault // why CheckConstraint refuses format
 }
 
 // NewTimestampConstraint creates a TimestampConstraint with no format.
@@ -359,23 +357,13 @@ func NewTimestampConstraint() TimestampConstraint {
 }
 
 // NewTimestampConstraintFormatted creates a TimestampConstraint with a Go time
-// format. The format is judged once here: one that is not valid UTF-8, or that
-// holds a zone abbreviation and no numeric offset, is recorded, and
-// [CheckConstraint] refuses the constraint.
+// format; an empty format is no format. The format is judged once here, and
+// [CheckConstraint] refuses the constraint of one that is not valid UTF-8, that
+// holds a zone abbreviation, or that does not read back the text it writes for
+// one of two probe instants.
 func NewTimestampConstraintFormatted(format string) TimestampConstraint {
-	return TimestampConstraint{format: format, badFormat: !utf8.ValidString(format), nameAlone: zoneNameAlone(format)}
-}
-
-// zoneNameAlone reports whether format renders a zone's abbreviation and no
-// numeric offset. An abbreviation names no one offset, so text in such a format
-// names no one instant. The format is judged by what it renders, as package
-// time reads it, not by a scan for its zone elements.
-func zoneNameAlone(format string) bool {
-	render := func(name string, offset int) string {
-		return time.Date(2006, time.January, 2, 15, 4, 5, 0, time.FixedZone(name, offset)).Format(format)
-	}
-	base := render("AAA", 60*60)
-	return render("BBB", 60*60) != base && render("AAA", 2*60*60) == base
+	fault, _ := judgeTimestampLayout(format)
+	return TimestampConstraint{format: format, fault: fault}
 }
 
 func (TimestampConstraint) Kind() ConstraintKind { return KindTimestamp }
@@ -936,7 +924,8 @@ func ResolveAlias(c Constraint) Constraint {
 }
 
 // CheckConstraint returns why c cannot judge a value, or nil when it can. It
-// refuses a nil constraint, an argument no .yammm source can state, a DataType reference under a name no
+// refuses a nil constraint. It refuses an argument no .yammm source can state,
+// where an empty Timestamp format is no format, a DataType reference under a name no
 // source writes, a List with no element, more than two patterns or one
 // regexp.Compile refuses, and a constraint of a Go type this package does not
 // construct, such as a pointer to one. A raw constraint meets
@@ -991,12 +980,7 @@ func constraintFault(c Constraint) (string, bool) {
 		}
 	case TimestampConstraint:
 		// The zero TimestampConstraint holds no format, which is sound.
-		if c.badFormat {
-			return fmt.Sprintf("timestamp format %q is not valid UTF-8", c.format), true
-		}
-		if c.nameAlone {
-			return fmt.Sprintf("timestamp format %q holds a zone abbreviation and no numeric offset, so its text names no one instant; add a numeric offset such as Z07:00", c.format), true
-		}
+		return timestampFaultText(c.format, c.fault)
 	case IntegerConstraint:
 		lo, hasLo := c.Min()
 		hi, hasHi := c.Max()

@@ -97,8 +97,8 @@ Date-time value with optional format specification.
 - Default format is RFC 3339: a string is read as `"2006-01-02T15:04:05Z07:00"`, fractional seconds included, and stored as `"2006-01-02T15:04:05.999999999Z07:00"`
 - Format string follows Go time formatting conventions
 - Accepts a string or a `time.Time`; **stores the string**, rendered through the declared format when there is one and through RFC 3339 with nanoseconds otherwise; a `time.Time` whose stored text that rule refuses is refused, such as one outside years 0 to 9999
-- A declared format with no zone or no fractional second loses what it omits. At schema load a declared layout that the next rule does not refuse renders one instant, and draws `W_TIMESTAMP_LOSSY_FORMAT` when that text reads back as another instant
-- A declared format that holds a zone abbreviation and no numeric offset, such as `"2006-01-02 15:04 MST"` or Go's `time.RFC1123`, is refused with `E_INVALID_CONSTRAINT`: its text names no one instant. Add a numeric offset (`-0700`, `Z07:00`) beside the abbreviation or in its place
+- A value stored under a declared format keeps none of the fields the format drops. At schema load a declared layout that the next rule does not refuse writes two instants and reads them back, and draws `W_TIMESTAMP_LOSSY_FORMAT` naming each field lost: the year or its century, the month, the day, the hour or its half of the day, the minute, the second, the fractional second or its digits past a count, the UTC offset or its minutes
+- A declared format is refused with `E_INVALID_CONSTRAINT` when it is empty (`Timestamp[""]`), when it holds a zone abbreviation, such as `"2006-01-02 15:04 MST"`, `"2006-01-02 15:04 -0700 MST"` or Go's `time.RFC1123`, or when it does not read back the text it writes for one of those two instants, such as `"2006-12-02 15:04:05"`. State a zone as a numeric offset (`-0700`, `Z07:00`), never as an abbreviation
 
 ```yammm-snippet
 created_at Timestamp
