@@ -39,11 +39,13 @@
 // the source rule's (in an invariant, unless its message holds an escape that
 // will not unquote, as above), and one holding a byte that is not UTF-8 is not
 // compiled and draws the byte's diagnostic alone. E_INVALID_CONSTRAINT covers a
-// constraint whose written arguments the DSL refuses, among them inverted
+// constraint whose written arguments Parse refuses, among them inverted
 // bounds, an unparseable bound, an empty or duplicate enum value,
 // an enum of fewer than two values, more than two patterns, a regex that does
 // not compile or that writes a surrogate code point, and a vector dimension
-// out of range. E_INVALID_INVARIANT covers a literal inside
+// out of range. Of a Timestamp format Parse judges the escapes alone: the
+// schema loader reports a format that holds a zone abbreviation and no numeric
+// offset, under the same code. E_INVALID_INVARIANT covers a literal inside
 // an invariant expression that will not convert, such as a number out of range
 // or an unquotable string. E_INVALID_NAME covers an empty schema name and a
 // relation name that is not UPPER_SNAKE, and E_REVERSE_CLAUSE_REMOVED a

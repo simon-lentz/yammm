@@ -38,17 +38,17 @@ func (v Date) MarshalJSON() ([]byte, error) { return marshalTemporal(v.Time, dat
 
 func (v *Date) UnmarshalJSON(b []byte) error { return unmarshalTemporal(b, dateLayout, &v.Time) }
 
-// Timestamp1504MST is exchanged as a JSON string in the layout "15:04 MST".
-type Timestamp1504MST struct{ time.Time }
+// Timestamp1504Z0700 is exchanged as a JSON string in the layout "15:04 Z07:00".
+type Timestamp1504Z0700 struct{ time.Time }
 
-const timestamp1504MSTLayout = "15:04 MST"
+const timestamp1504Z0700Layout = "15:04 Z07:00"
 
-func (v Timestamp1504MST) MarshalJSON() ([]byte, error) {
-	return marshalTemporal(v.Time, timestamp1504MSTLayout)
+func (v Timestamp1504Z0700) MarshalJSON() ([]byte, error) {
+	return marshalTemporal(v.Time, timestamp1504Z0700Layout)
 }
 
-func (v *Timestamp1504MST) UnmarshalJSON(b []byte) error {
-	return unmarshalTemporal(b, timestamp1504MSTLayout, &v.Time)
+func (v *Timestamp1504Z0700) UnmarshalJSON(b []byte) error {
+	return unmarshalTemporal(b, timestamp1504Z0700Layout, &v.Time)
 }
 
 type Days []Date
@@ -58,8 +58,8 @@ type Log struct {
 }
 
 type Event struct {
-	ID string               `json:"id"`
-	On [][]Timestamp1504MST `json:"on,omitzero"`
+	ID string                 `json:"id"`
+	On [][]Timestamp1504Z0700 `json:"on,omitzero"`
 }
 
 type Graph struct {
@@ -71,7 +71,7 @@ type Graph struct {
 // the name the re-load registers it under, as verbatim .yammm text. Read
 // it through SerializedSources below.
 var serializedSources = map[string]string{
-	"temporal_dep.yammm":  "schema \"temporaldep\"\n\ntype Days = List<Date>\n\ntype Event {\n\tid String primary\n\ton List<List<Timestamp[\"15:04 MST\"]>>\n}\n",
+	"temporal_dep.yammm":  "schema \"temporaldep\"\n\ntype Days = List<Date>\n\ntype Event {\n\tid String primary\n\ton List<List<Timestamp[\"15:04 Z07:00\"]>>\n}\n",
 	"temporal_main.yammm": "schema \"temporalmain\"\n\nimport \"temporal_dep.yammm\" as dep\n\ntype Log {\n\tid String primary\n}\n",
 }
 
@@ -95,4 +95,4 @@ func SerializedSources() map[string][]byte {
 	return m
 }
 
-const SchemaHash = "sha256:b37a1682dca0ac228d55a99b3e9b9991372c5ce4e7e241984166944befaf50e8"
+const SchemaHash = "sha256:be4ce843812ba521c933f01b2af12f1f2436875b62916dded46e431c7fed273d"

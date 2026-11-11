@@ -29,7 +29,8 @@ import (
 //
 // Rendering a Timestamp through a declared layout drops whatever that layout
 // cannot express. A schema declaring such a layout draws
-// [github.com/simon-lentz/yammm/diag.W_TIMESTAMP_LOSSY_FORMAT] at load.
+// [github.com/simon-lentz/yammm/diag.W_TIMESTAMP_LOSSY_FORMAT] at load, or is
+// refused where the layout holds a zone abbreviation and no numeric offset.
 func Canonical(val any, c schema.Constraint) (any, error) {
 	if c == nil || Absent(val) {
 		return val, nil
@@ -112,15 +113,18 @@ func timestampLayout(c schema.Constraint) string {
 
 // ParseTimestamp reads s as a Timestamp c reads text: by the declared layout
 // alone when c carries one, and as RFC 3339 with or without fractional seconds
-// otherwise. The checker and the canonical form both read by it.
+// otherwise. It reads in UTC, where [time.Parse] reads an offset or an
+// abbreviation the host's zone holds into the host's location, so one text
+// gives one instant in one location on every host. The checker, the canonical
+// form and the Neo4j adapter all read by it.
 func ParseTimestamp(s string, c schema.Constraint) (time.Time, bool) {
-	if tc, ok := c.(schema.TimestampConstraint); ok && tc.Format() != "" {
-		t, err := time.Parse(tc.Format(), s)
-		return t, err == nil
-	}
 	// RFC3339 parses fractional seconds too, so no RFC3339Nano fallback is
 	// needed: nothing that layout accepts, this one refuses.
-	t, err := time.Parse(time.RFC3339, s)
+	layout := time.RFC3339
+	if tc, ok := c.(schema.TimestampConstraint); ok && tc.Format() != "" {
+		layout = tc.Format()
+	}
+	t, err := time.ParseInLocation(layout, s, time.UTC)
 	return t, err == nil
 }
 
@@ -135,9 +139,21 @@ func parseTimestamp(s string, c schema.Constraint) (time.Time, error) {
 	return time.Time{}, fmt.Errorf("value: %s is not an RFC 3339 timestamp", diag.QuoteValue(s))
 }
 
+// ParseUUID reads s as a UUID's text: the hyphenated form, that form between
+// braces or after "urn:uuid:", or 32 hex digits, in either case. [uuid.Parse]
+// alone reads any 38 bytes that hold a UUID between two bytes it does not
+// check. The checker, the canonical form and the Neo4j adapter all read by it.
+func ParseUUID(s string) (uuid.UUID, bool) {
+	if uuid.Validate(s) != nil {
+		return uuid.Nil, false
+	}
+	u, err := uuid.Parse(s)
+	return u, err == nil
+}
+
 // canonicalUUID renders val through [uuid.UUID.String]. Parsing the string form
 // first is what collapses the brace, urn, uppercase and bare-hex spellings
-// [uuid.Parse] accepts onto one key. The string form is whatever [GetString]
+// [ParseUUID] accepts onto one key. The string form is whatever [GetString]
 // reads, so a carrier the check side accepts is one this side renders.
 func canonicalUUID(val any) (any, error) {
 	if u, ok := val.(uuid.UUID); ok {
@@ -147,8 +163,8 @@ func canonicalUUID(val any) (any, error) {
 	if !ok {
 		return val, fmt.Errorf("value: cannot canonicalize %T as a UUID (want a string or uuid.UUID)", val)
 	}
-	u, err := uuid.Parse(s)
-	if err != nil {
+	u, ok := ParseUUID(s)
+	if !ok {
 		return val, fmt.Errorf("value: %s is not a UUID", diag.QuoteValue(s))
 	}
 	return u.String(), nil

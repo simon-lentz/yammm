@@ -541,7 +541,7 @@ func checkUUID(val any) error {
 	if refused != nil {
 		return refused
 	}
-	if _, err := uuid.Parse(s); err != nil {
+	if _, ok := ParseUUID(s); !ok {
 		return constraintFail("invalid UUID: %s", diag.QuoteValue(s))
 	}
 	return nil

@@ -41,8 +41,10 @@ func TestErrUnrepresentable_MarksEveryRefusalOfAValue(t *testing.T) {
 		"a value, a map":                      second(coerceValue(schema.NewStringConstraint(), map[string]string{"a": "b"})),
 		"CoerceParams, a Date that does not parse": second(CoerceParams(
 			map[string]any{"d": "x"}, ParamTypes{"d": schema.NewDateConstraint()})),
-		"CoerceParams, a row's field": second(CoerceParams(
-			map[string]any{"rows": []map[string]any{{"n": "x"}}}, ParamTypes{"rows.n": schema.NewIntegerConstraint()})),
+		"CoerceParams, a map at a declared key": second(CoerceParams(
+			map[string]any{"p": map[string]any{"x": 1}}, ParamTypes{"p": schema.NewStringConstraint()})),
+		"CoerceParams, rows at a declared key": second(CoerceParams(
+			map[string]any{"rows": []map[string]any{{"x": 1}}}, ParamTypes{"rows": schema.NewStringConstraint()})),
 		"a nil primary key": second(extractKeyProps(immutable.WrapProperties(map[string]any{"id": nil}),
 			&nodeShape{label: "Holder", primaryKeys: []string{"id"}})),
 		"a missing primary key": second(extractKeyProps(immutable.WrapProperties(map[string]any{}),
@@ -60,19 +62,14 @@ func TestErrUnrepresentable_MarksEveryRefusalOfAValue(t *testing.T) {
 }
 
 // A caller's own error is not a refusal of the data: a constraint
-// CheckConstraint refuses, a constraint at a container param's key, and a shape
-// the adapter did not build carry no class.
+// CheckConstraint refuses and a shape the adapter did not build carry no class.
 func TestErrUnrepresentable_MarksNoCallersError(t *testing.T) {
 	t.Parallel()
 	a, _, snap := holderSnapshot(t, holderValues{})
 	for name, err := range map[string]error{
 		"a refused constraint at CoerceParams": second(CoerceParams(nil, ParamTypes{"p": schema.ListConstraint{}})),
-		"a constraint at a nested map's key": second(CoerceParams(
-			map[string]any{"p": map[string]any{"x": 1}}, ParamTypes{"p": schema.NewStringConstraint()})),
-		"a constraint at a rows param's key": second(CoerceParams(
-			map[string]any{"rows": []map[string]any{{"x": 1}}}, ParamTypes{"rows": schema.NewStringConstraint()})),
-		"a shape the adapter did not build": second(a.BatchNodeQueries(t.Context(), snap, &GraphShape{})),
-		"a shape with no primary key":       second(extractKeyProps(immutable.WrapProperties(map[string]any{}), &nodeShape{label: "Holder"})),
+		"a shape the adapter did not build":    second(a.BatchNodeQueries(t.Context(), snap, &GraphShape{})),
+		"a shape with no primary key":          second(extractKeyProps(immutable.WrapProperties(map[string]any{}), &nodeShape{label: "Holder"})),
 	} {
 		if err == nil || errors.Is(err, ErrUnrepresentable) {
 			t.Errorf("%s: error = %v; want an error without ErrUnrepresentable", name, err)

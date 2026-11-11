@@ -264,6 +264,55 @@ func TestZoneNameAgainstOffset_ServerResponse(t *testing.T) {
 	}
 }
 
+// An instant reaches the server as the value Cypher's datetime() reads from its
+// RFC 3339 text, a UTC instant included: the two are equal, the zone the server
+// holds is the offset, and a MERGE on each finds one node. The same instant
+// under the zone name UTC is the control, which the server holds unequal.
+func TestCoerce_AnInstantIsTheValueCypherReadsFromItsText(t *testing.T) {
+	ctx := context.Background()
+	driver(t)
+	const label = "InstantAgainstCypherText"
+	clear := func() { run(t, ctx, "MATCH (n:"+label+") DETACH DELETE n") }
+	clear()
+	t.Cleanup(clear)
+
+	utc := time.Date(2026, 8, 19, 12, 0, 0, 0, time.UTC)
+	const utcText = "2026-08-19T12:00:00Z"
+	equalsText := func(v any, text string) (equal, zone any) {
+		res, err := neo4jdriver.ExecuteQuery(ctx, driver(t), "RETURN $v = datetime($text) AS equal, $v.timezone AS zone",
+			map[string]any{"v": v, "text": text}, neo4jdriver.EagerResultTransformer)
+		if err != nil {
+			t.Fatalf("comparing %v with datetime(%q): %v", v, text, err)
+		}
+		row := res.Records[0].AsMap()
+		return row["equal"], row["zone"]
+	}
+	for _, row := range []struct {
+		raw        any
+		text, zone string
+	}{
+		{utcText, utcText, "Z"},
+		{"2026-08-19T12:00:00+00:00", utcText, "Z"},
+		{utc, utcText, "Z"},
+		{"2026-08-19T12:00:00+02:00", "2026-08-19T12:00:00+02:00", "+02:00"},
+		{"2026-08-19T12:00:00.123456789-05:30", "2026-08-19T12:00:00.123456789-05:30", "-05:30"},
+	} {
+		coerced := coerceTimestamp(t, row.raw)
+		if equal, zone := equalsText(coerced, row.text); equal != true || zone != row.zone {
+			t.Errorf("%v: equal to datetime(%q) = %v in zone %v, want true in zone %q", row.raw, row.text, equal, zone, row.zone)
+		}
+		clear()
+		execWithParams(t, ctx, "MERGE (n:"+label+" {at: $v})", map[string]any{"v": coerced})
+		execWithParams(t, ctx, "MERGE (n:"+label+" {at: datetime($text)})", map[string]any{"text": row.text})
+		if n := countNodes(t, ctx, label); n != 1 {
+			t.Errorf("%v: a MERGE by the coerced value and one by datetime(%q) left %d nodes, want 1", row.raw, row.text, n)
+		}
+	}
+	if equal, zone := equalsText(utc, utcText); equal != false || zone != "UTC" {
+		t.Errorf("control: the instant under the zone name UTC is equal to datetime(%q) = %v in zone %v, want false in zone UTC", utcText, equal, zone)
+	}
+}
+
 // coerceTimestamp is the value a hand-built parameter map sends for raw at a
 // Timestamp.
 func coerceTimestamp(t *testing.T, raw any) any {

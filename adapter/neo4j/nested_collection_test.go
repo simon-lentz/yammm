@@ -158,18 +158,11 @@ func TestCoerceScalar_RefusesANestedCollectionValue(t *testing.T) {
 			if !reflect.DeepEqual(got, raw) {
 				t.Errorf("coerceScalar(%s) returned %#v with its error; want the value unchanged", at, got)
 			}
-			for key, params := range map[string]map[string]any{
-				"m":      {"m": raw},
-				"p.m":    {"p": map[string]any{"m": raw}},
-				"rows.m": {"rows": []map[string]any{{"m": raw}}},
-			} {
-				_, err := CoerceParams(params, ParamTypes{key: tc.c})
-				want := `param "` + key + `": ` + refusal
-				if !errors.Is(err, ErrUnsupportedListElem) {
-					t.Errorf("CoerceParams(%s at %s) error = %v; want ErrUnsupportedListElem", at, key, err)
-				} else if err.Error() != want {
-					t.Errorf("CoerceParams(%s at %s) error = %q; want %q", at, key, err, want)
-				}
+			_, err = CoerceParams(map[string]any{"m": raw}, ParamTypes{"m": tc.c})
+			if want := `param "m": ` + refusal; !errors.Is(err, ErrUnsupportedListElem) {
+				t.Errorf("CoerceParams(%s) error = %v; want ErrUnsupportedListElem", at, err)
+			} else if err.Error() != want {
+				t.Errorf("CoerceParams(%s) error = %q; want %q", at, err, want)
 			}
 		}
 		if got, err := coerceScalar(tc.c, nil); err != nil || got != nil {

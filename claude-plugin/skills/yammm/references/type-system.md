@@ -97,7 +97,8 @@ Date-time value with optional format specification.
 - Default format is RFC 3339: a string is read as `"2006-01-02T15:04:05Z07:00"`, fractional seconds included, and stored as `"2006-01-02T15:04:05.999999999Z07:00"`
 - Format string follows Go time formatting conventions
 - Accepts a string or a `time.Time`; **stores the string**, rendered through the declared format when there is one and through RFC 3339 with nanoseconds otherwise; a `time.Time` whose stored text that rule refuses is refused, such as one outside years 0 to 9999
-- A declared format that cannot represent an instant (no zone, no fraction, or neither) loses what it omits and draws `W_TIMESTAMP_LOSSY_FORMAT` at schema load
+- A declared format with no zone or no fractional second loses what it omits. At schema load a declared layout that the next rule does not refuse renders one instant, and draws `W_TIMESTAMP_LOSSY_FORMAT` when that text reads back as another instant
+- A declared format that holds a zone abbreviation and no numeric offset, such as `"2006-01-02 15:04 MST"` or Go's `time.RFC1123`, is refused with `E_INVALID_CONSTRAINT`: its text names no one instant. Add a numeric offset (`-0700`, `Z07:00`) beside the abbreviation or in its place
 
 ```yammm-snippet
 created_at Timestamp

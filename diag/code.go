@@ -273,7 +273,8 @@ var (
 	// different instant. Warning severity: a wall-clock layout is a legitimate
 	// domain choice, so the declaration is accepted and the author is told
 	// once, at the point of declaration, rather than silently. The warning
-	// anchors on the format literal.
+	// anchors on the format literal. A layout that holds a zone abbreviation
+	// and no numeric offset draws [E_INVALID_CONSTRAINT] in its place.
 	W_TIMESTAMP_LOSSY_FORMAT = NewCode("W_TIMESTAMP_LOSSY_FORMAT", CategorySchema)
 )
 

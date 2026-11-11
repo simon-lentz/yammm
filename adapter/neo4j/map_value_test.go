@@ -57,9 +57,9 @@ func TestCoerceScalar_RefusesAMapValue(t *testing.T) {
 			t.Errorf("coerceScalar, %s: error = %v; want %s", name, err, want)
 		}
 	}
-	_, err := CoerceParams(map[string]any{"p": map[string]any{"q": map[string]any{}}}, ParamTypes{"p.q": schema.NewStringConstraint()})
-	if want := `param "p.q": expected string, got map[string]interface {}`; !errors.Is(err, ErrUnrepresentable) || err.Error() != want {
-		t.Errorf("CoerceParams, a map in a nested map: error = %v; want %s", err, want)
+	_, err := CoerceParams(map[string]any{"p": map[string]any{}}, ParamTypes{"p": schema.NewStringConstraint()})
+	if want := `param "p": expected string, got map[string]interface {}`; !errors.Is(err, ErrUnrepresentable) || err.Error() != want {
+		t.Errorf("CoerceParams, an empty map at a String: error = %v; want %s", err, want)
 	}
 	_, err = CoerceParams(map[string]any{"p": map[string]string{"a": "b"}}, ParamTypes{"p": schema.NewStringConstraint()})
 	if want := `param "p": expected string, got map[string]string`; !errors.Is(err, ErrUnrepresentable) || err.Error() != want {

@@ -121,8 +121,6 @@ func TestMessages_RepeatANameCutToItsHead(t *testing.T) {
 
 	_, err = neo4j.CoerceParams(map[string]any{longText: "x"}, neo4j.ParamTypes{longText: schema.NewFloatConstraint()})
 	c.err("neo4j.CoerceParams", err)
-	_, err = neo4j.CoerceParams(map[string]any{"row": map[string]any{longText: "x"}}, neo4j.ParamTypes{"row." + longText: schema.NewFloatConstraint()})
-	c.err("neo4j.CoerceParams", err)
 	_, err = neo4j.CoerceParams(nil, neo4j.ParamTypes{longText: schema.NewListConstraint(nil)})
 	c.err("neo4j.CoerceParams", err)
 

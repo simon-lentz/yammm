@@ -488,18 +488,19 @@ func TestStructuralHash_ConstraintFieldCoverage(t *testing.T) {
 		"BooleanConstraint": {}, // no fields
 		"TimestampConstraint": {
 			"format":    true, // TestStructuralHash_ConstraintSensitivity ("timestamp default vs formatted")
-			"badFormat": true, // derived from format; Build refuses a constraint that sets it
+			"badFormat": true, // derived from format; CheckConstraint refuses a constraint that sets it
+			"nameAlone": true, // derived from format; CheckConstraint refuses a constraint that sets it
 		},
 		"DateConstraint": {}, // no fields
 		"UUIDConstraint": {}, // no fields
 		"EnumConstraint": {
 			"values":  true, // TestStructuralHash_ConstraintSensitivity ("enum different values")
-			"invalid": true, // derived from values; Build refuses a constraint that sets it
+			"invalid": true, // derived from values; CheckConstraint refuses a constraint that sets it
 		},
 		"PatternConstraint": {
 			"patterns": true, // TestStructuralHash_ConstraintSensitivity ("pattern different patterns")
 			"compiled": true, // derived from patterns, not hashed independently
-			"invalid":  true, // derived from patterns; Build refuses a constraint that sets it
+			"invalid":  true, // derived from patterns; CheckConstraint refuses a constraint that sets it
 		},
 		"VectorConstraint": {
 			"dimension": true, // TestStructuralHash_ConstraintSensitivity ("vector dimension")

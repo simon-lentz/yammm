@@ -3,7 +3,6 @@ package neo4j
 import (
 	"errors"
 	"maps"
-	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -66,7 +65,7 @@ func TestWrite_AValueThatHoldsNoneReachesTheDriverAsNil(t *testing.T) {
 }
 
 // A nil slice or map holds no value, so it is nil at a declared position or
-// not, and so is a nested param map's field.
+// not, and CoerceParams returns nil at a declared key and at an undeclared one.
 func TestHeldForm_ANilSliceOrMapHasTheFormNil(t *testing.T) {
 	t.Parallel()
 	list := schema.NewListConstraint(schema.NewStringConstraint())
@@ -78,27 +77,22 @@ func TestHeldForm_ANilSliceOrMapHasTheFormNil(t *testing.T) {
 		}
 	}
 	out, err := CoerceParams(
-		map[string]any{"row": map[string]any{"tags": []any(nil), "other": []any(nil)}},
-		ParamTypes{"row.tags": list},
+		map[string]any{"tags": []any(nil), "other": []any(nil), "rows": []map[string]any(nil), "props": map[string]any(nil)},
+		ParamTypes{"tags": list},
 	)
 	if err != nil {
 		t.Fatalf("CoerceParams: %v", err)
 	}
-	row, ok := out["row"].(map[string]any)
-	if !ok {
-		t.Fatalf("row = %#v, want a map", out["row"])
-	}
-	for _, field := range []string{"tags", "other"} {
-		if v, ok := row[field]; !ok || v != nil {
-			t.Errorf("row.%s = %#v, %v; want nil", field, v, ok)
+	for _, key := range []string{"tags", "other", "rows", "props"} {
+		if v, ok := out[key]; !ok || v != nil {
+			t.Errorf("%s = %#v, %v; want nil", key, v, ok)
 		}
 	}
 }
 
-// nilValueType loads a type with a property of each shape a nil slice or map
-// can stand at, and an association that declares an edge property.
-// A value that holds none at a List whose element is a collection is nil too:
-// the nested-collection refusal is of a value the property holds.
+// A value that holds none at a List whose element is a collection is nil too,
+// on the write path and through CoerceParams: the nested-collection refusal is
+// of a value the property holds.
 func TestWrite_AValueThatHoldsNoneAtANestedCollectionIsNil(t *testing.T) {
 	t.Parallel()
 	_, s, _, _ := setupWrite(t, "nested_collection.yammm")
@@ -120,9 +114,19 @@ func TestWrite_AValueThatHoldsNoneAtANestedCollectionIsNil(t *testing.T) {
 		if v, ok := params["matrix"]; !ok || v != nil {
 			t.Errorf("%s: param matrix = %#v, %v; want nil", name, v, ok)
 		}
+		coerced, err := CoerceParams(map[string]any{"matrix": none}, ParamTypesForType(typ))
+		if err != nil {
+			t.Errorf("%s: CoerceParams: %v", name, err)
+			continue
+		}
+		if v, ok := coerced["matrix"]; !ok || v != nil {
+			t.Errorf("%s: CoerceParams gives matrix = %#v, %v; want nil", name, v, ok)
+		}
 	}
 }
 
+// nilValueType loads a type with a property of each shape a nil slice or map
+// can stand at, and an association that declares an edge property.
 func nilValueType(t *testing.T) schema.Type {
 	t.Helper()
 	s, res := schema.LoadString(t.Context(), `schema "p"
@@ -152,22 +156,10 @@ type T {
 	return typ
 }
 
-// A row that holds none reaches the driver as null, so CoerceParams returns the
-// rows as a list that can hold one. coerceRelProps returns a value that holds
-// none as nil where the relation declares no property, and under no relation.
-func TestCoerceScalar_ARowOrAnUndeclaredValueThatHoldsNoneIsNil(t *testing.T) {
+// coerceRelProps returns a value that holds none as nil where the relation
+// declares no property, and under no relation.
+func TestCoerceRelProps_AnUndeclaredValueThatHoldsNoneIsNil(t *testing.T) {
 	t.Parallel()
-	out, err := CoerceParams(map[string]any{"rows": []map[string]any{nil, {"id": "a"}}}, nil)
-	if err != nil {
-		t.Fatalf("CoerceParams: %v", err)
-	}
-	rows, ok := out["rows"].([]any)
-	if !ok || len(rows) != 2 || rows[0] != nil {
-		t.Fatalf("rows = %#v; want a nil row, then the row", out["rows"])
-	}
-	if row, ok := rows[1].(map[string]any); !ok || row["id"] != "a" {
-		t.Errorf("rows[1] = %#v; want the row", rows[1])
-	}
 	for name, rel := range map[string]schema.Relation{"no relation": {}, "a relation": slices.Collect(nilValueType(t).Associations())[0]} {
 		got, err := coerceRelProps(map[string]any{"undeclared": []any(nil), "kept": "x"}, rel)
 		if err != nil || got["undeclared"] != nil || got["kept"] != "x" {
@@ -198,36 +190,11 @@ func TestExtractKeyProps_AKeyThatHoldsNoneIsANilKey(t *testing.T) {
 	}
 }
 
-// The rows CoerceParams returns are rows to it too: a second pass coerces their
-// declared fields as the first did, and so does a []any of rows built by hand.
-func TestCoerceParams_ReadsTheRowsItReturnsAsRows(t *testing.T) {
+// A []any is a list whatever it holds: under a List its nil element is refused
+// and an empty one is an empty typed slice, and under no key of types it is
+// kept as given.
+func TestCoerceParams_ReadsAListAsAList(t *testing.T) {
 	t.Parallel()
-	types := ParamTypes{"rows.p": schema.NewFloatConstraint()}
-	once, err := CoerceParams(map[string]any{"rows": []map[string]any{{"p": 1}}}, nil)
-	if err != nil {
-		t.Fatalf("CoerceParams: %v", err)
-	}
-	for name, params := range map[string]map[string]any{
-		"the rows it returned": once,
-		"a []any of rows":      {"rows": []any{map[string]any{"p": 1}, map[string]any(nil), nil}},
-	} {
-		out, err := CoerceParams(params, types)
-		if err != nil {
-			t.Fatalf("%s: %v", name, err)
-		}
-		rows, ok := out["rows"].([]any)
-		if !ok || len(rows) == 0 {
-			t.Fatalf("%s: rows = %#v; want a []any", name, out["rows"])
-		}
-		if row, ok := rows[0].(map[string]any); !ok || row["p"] != float64(1) {
-			t.Errorf("%s: rows[0] = %#v; want p coerced to float64(1)", name, rows[0])
-		}
-		for i, row := range rows[1:] {
-			if row != nil {
-				t.Errorf("%s: rows[%d] = %#v; want nil", name, i+1, row)
-			}
-		}
-	}
 	list := ParamTypes{"xs": schema.NewListConstraint(schema.NewStringConstraint())}
 	if out, err := CoerceParams(map[string]any{"xs": []any{nil}}, list); err == nil || err.Error() != `param "xs": element [0]: expected string, got null` {
 		t.Errorf("a []any of nils under a List<String> = %#v, %v; want the nil element refused", out["xs"], err)
@@ -243,70 +210,5 @@ func TestCoerceParams_ReadsTheRowsItReturnsAsRows(t *testing.T) {
 	mixed, err := CoerceParams(map[string]any{"xs": []any{map[string]any{"p": 1}, "x"}}, nil)
 	if elems, ok := mixed["xs"].([]any); err != nil || !ok || len(elems) != 2 || elems[1] != "x" {
 		t.Errorf("an untyped []any of a map and a string = %#v, %v; want the list kept as given", mixed["xs"], err)
-	}
-}
-
-// A nested map's fields are typed at "<key>.<field>", so a constraint at the
-// map's own key would judge nothing and is refused, as at a rows param's key. An
-// empty map is refused too; a nil map holds no value and is nil.
-func TestCoerceParams_ANestedMapTakesNoConstraintAtItsOwnKey(t *testing.T) {
-	t.Parallel()
-	for name, c := range map[string]schema.Constraint{
-		"String":     schema.NewStringConstraint(),
-		"List<List>": schema.NewListConstraint(schema.NewListConstraint(schema.NewIntegerConstraint())),
-	} {
-		types := ParamTypes{"p": c, "p.x": schema.NewFloatConstraint()}
-		for shape, m := range map[string]map[string]any{"a map": {"x": 1}, "an empty map": {}} {
-			out, err := CoerceParams(map[string]any{"p": m}, types)
-			if err == nil || err.Error() != `param "p": a nested map takes no constraint at its own key; declare each field as "<key>.<field>"` {
-				t.Errorf("%s under %s = %#v, %v; want the constraint at the map's key refused", shape, name, out, err)
-			}
-		}
-		out, err := CoerceParams(map[string]any{"p": map[string]any(nil)}, types)
-		if err != nil || out["p"] != nil {
-			t.Errorf("a nil map under %s = %#v, %v; want nil", name, out["p"], err)
-		}
-	}
-	for name, types := range map[string]ParamTypes{"absent": {"p.x": schema.NewFloatConstraint()}, "nil": {"p": nil, "p.x": schema.NewFloatConstraint()}} {
-		out, err := CoerceParams(map[string]any{"p": map[string]any{"x": 1}}, types)
-		if m, ok := out["p"].(map[string]any); err != nil || !ok || m["x"] != 1.0 {
-			t.Errorf("a nested map, constraint %s = %#v, %v; want its field coerced", name, out["p"], err)
-		}
-	}
-}
-
-// A row's fields are typed at "rows.<field>", so a constraint at the rows key
-// itself is refused, as a second pass would refuse rows that hold no map.
-func TestCoerceParams_ARowsParamTakesNoConstraintAtItsOwnKey(t *testing.T) {
-	t.Parallel()
-	for name, c := range map[string]schema.Constraint{
-		"String":       schema.NewStringConstraint(),
-		"List<String>": schema.NewListConstraint(schema.NewStringConstraint()),
-		"List<List>":   schema.NewListConstraint(schema.NewListConstraint(schema.NewStringConstraint())),
-	} {
-		types := ParamTypes{"rows": c, "rows.p": schema.NewFloatConstraint()}
-		for shape, rows := range map[string]any{
-			"rows":            []map[string]any{{"p": 1}},
-			"empty rows":      []map[string]any{},
-			"all-nil rows":    []map[string]any{nil},
-			"a []any of rows": []any{map[string]any{"p": 1}, nil},
-		} {
-			out, err := CoerceParams(map[string]any{"rows": rows}, types)
-			if err == nil || !strings.Contains(err.Error(), `param "rows": rows take no constraint at their own key`) {
-				t.Errorf("%s under %s = %#v, %v; want the constraint at the rows key refused", shape, name, out, err)
-			}
-		}
-	}
-	for name, types := range map[string]ParamTypes{"absent": {}, "nil": {"rows": nil}} {
-		for shape, rows := range map[string][]map[string]any{"empty": {}, "all nil": {nil, nil}, "one map": {{"p": 1}, nil}} {
-			first, err := CoerceParams(map[string]any{"rows": rows}, types)
-			if err != nil {
-				t.Fatalf("%s rows, constraint %s: %v", shape, name, err)
-			}
-			second, err := CoerceParams(first, types)
-			if err != nil || !reflect.DeepEqual(second, first) {
-				t.Errorf("%s rows, constraint %s: second pass = %#v, %v; want the first pass's %#v", shape, name, second, err, first)
-			}
-		}
 	}
 }

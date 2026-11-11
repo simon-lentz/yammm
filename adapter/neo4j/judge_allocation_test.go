@@ -42,7 +42,7 @@ func TestCoerceParams_JudgingALoadedSchemasTypesAllocatesNothing(t *testing.T) {
 		t.Fatalf("load: %v", res.Err())
 	}
 	car, _ := s.Type("Car")
-	types := ParamTypesForType(car, "")
+	types := ParamTypesForType(car)
 	if len(types) != 15 {
 		t.Fatalf("ParamTypesForType holds %d entries; want 15", len(types))
 	}

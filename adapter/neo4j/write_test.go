@@ -882,8 +882,8 @@ type Doc extends Base { title String required }
 		t.Fatal("type Doc not found")
 	}
 
-	if _, ok := ParamTypesForType(dt, "rows")["rows.created_on"]; !ok {
-		t.Error("no rows.created_on entry; an inherited property belongs in a flat row too")
+	if _, ok := ParamTypesForType(dt)["created_on"]; !ok {
+		t.Error("no created_on entry; an inherited property belongs in a flat row too")
 	}
 }
 
@@ -1010,7 +1010,7 @@ func isDateValue(v any) bool {
 // Mutation: removing the nil guard turns this red with a nil dereference.
 func TestParamTypesForType_NilTypeIsEmptyNotPanic(t *testing.T) {
 	t.Parallel()
-	if got := ParamTypesForType(schema.Type{}, "rows"); len(got) != 0 {
+	if got := ParamTypesForType(schema.Type{}); len(got) != 0 {
 		t.Errorf("ParamTypesForType(nil) = %v; want an empty map", got)
 	}
 }

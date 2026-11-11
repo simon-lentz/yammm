@@ -842,7 +842,9 @@ The format string follows Go's time formatting conventions. When omitted, RFC 33
 
 **Accepted input and stored form.** A `Timestamp` property accepts a Go `time.Time` or a string, and **stores the string** rendered through the declared format when one is given and through RFC 3339 with nanoseconds otherwise. A string is parsed and re-rendered, so one instant at one offset reaches one spelling however it was written: `"…+00:00"` stores as `"…Z"`, and `".500Z"` stores as `".5Z"`. The UTC offset survives — an offset records where an observation happened and is data, not formatting. A `time.Time` is judged as the text it stores, so one whose text the same rule refuses is refused, such as a time outside years 0 to 9999.
 
-**A declared format that cannot represent an instant loses what it omits.** A layout carrying no zone, no fractional second, or neither drops that part of every value stored under it, and a reader parsing the text back gets a different instant. Declaring such a layout draws `W_TIMESTAMP_LOSSY_FORMAT` at schema load; the declaration is accepted, because a wall-clock layout is a legitimate domain choice.
+**A declared format that cannot represent an instant loses what it omits.** A layout carrying no zone, no fractional second, or neither drops that part of every value stored under it, and a reader parsing the text back gets a different instant. At schema load a declared layout that is not refused renders one instant, and draws `W_TIMESTAMP_LOSSY_FORMAT` when that text reads back as another instant. It still loads, since a wall-clock layout is a legitimate domain choice. The next paragraph's layout is refused and draws no warning.
+
+**A format that holds a zone abbreviation holds a numeric offset beside it.** An abbreviation names no one offset, so text under a layout that holds the abbreviation alone, such as `"2006-01-02 15:04 MST"`, names no one instant. Declaring such a layout is `E_INVALID_CONSTRAINT`; Go's `time.RFC1123`, `time.RFC850`, `time.RFC822` and `time.UnixDate` are four of them. A layout that holds both, such as `"2006-01-02 15:04 -0700 MST"`, loads, and the offset gives the instant. There is one exception: text whose abbreviation is `UTC` is read as UTC whatever offset stands beside it.
 
 Examples:
 
@@ -1741,11 +1743,11 @@ Codes are stable identifiers for programmatic matching. `diag/code.go` holds the
 - `E_DUPLICATE_SCHEMA` — two schemas in one load declare one name. A schema whose load reported an error takes no name and draws no such report
 - `E_INHERIT_CYCLE` — circular inheritance chain
 - `E_UNKNOWN_TYPE` — unresolvable type reference
-- `E_DUPLICATE_PROPERTY`, `E_UNKNOWN_PROPERTY` — a property declared twice on one type or an edge property twice on one association, or an invariant reading a member the type it reads does not declare
+- `E_DUPLICATE_PROPERTY`, `E_UNKNOWN_PROPERTY` — a property declared twice on one type or an edge property twice on one association, or an invariant reading a member the type it reads neither declares nor inherits
 - `E_DUPLICATE_RELATION`, `E_RELATION_COLLISION` — relation conflicts
 - `E_DUPLICATE_INVARIANT`, `E_INVARIANT_CONFLICT` — an invariant message declared twice on one type, or inherited with two different expressions (a literal with no value matches any literal of its kind)
 - `E_CASE_COLLISION` — two property names of a type, or two edge property names of an association, differ only by case
-- `E_PROPERTY_RELATION_COLLISION` — property and relation share a name
+- `E_PROPERTY_RELATION_COLLISION` — a property's lower-cased name equals a relation's field name, the relation name in lower case
 - `E_INVALID_ASSOCIATION_TARGET`, `E_INVALID_COMPOSITION_TARGET` — relation definition errors
 - `E_INVALID_CONSTRAINT` — constraint definition error
 - `E_INVALID_INVARIANT` — an invariant's expression or message is invalid
@@ -1760,7 +1762,7 @@ Codes are stable identifiers for programmatic matching. `diag/code.go` holds the
 - `E_UNKNOWN_ANNOTATION`, `E_INVALID_ANNOTATION` — annotation name, placement, arity, argument kind or value, duplicate, or inherited-disagreement errors
 - `E_UNKNOWN_ANNOTATION_TARGET`, `E_INVALID_ANNOTATION_TARGET` — annotation target-property errors (unknown reference / ineligible property)
 - `W_ANNOTATION_SHADOWED` — a re-declaration silently drops an inherited property's annotations (warning)
-- `W_TIMESTAMP_LOSSY_FORMAT` (Warning) — a `Timestamp["layout"]` declares a layout that cannot reproduce an instant
+- `W_TIMESTAMP_LOSSY_FORMAT` (Warning) — a `Timestamp["layout"]` declares a layout that cannot reproduce an instant; one that holds a zone abbreviation and no numeric offset draws `E_INVALID_CONSTRAINT` in its place
 - `E_REVERSE_CLAUSE_REMOVED` — the schema carries the reverse clause removed in v0.15.0
 
 **Syntax** — parse errors:

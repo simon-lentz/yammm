@@ -464,8 +464,8 @@ func TestMarshal_TemporalOnlyInAnImport(t *testing.T) {
 	for _, want := range []string{
 		"type Date struct{ time.Time }",
 		"type Days []Date",
-		"type Timestamp1504MST struct{ time.Time }",
-		"On [][]Timestamp1504MST ",
+		"type Timestamp1504Z0700 struct{ time.Time }",
+		"On [][]Timestamp1504Z0700 ",
 	} {
 		if !bytes.Contains(got, []byte(want)) {
 			t.Errorf("output missing %q:\n%s", want, got)

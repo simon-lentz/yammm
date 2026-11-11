@@ -239,8 +239,15 @@ func (p *schemaParser) constraint(c *parse.Constraint) (Constraint, DataTypeRef)
 		return parsedPatternConstraint(c.PatternRegexps()), DataTypeRef{}
 	case parse.ConstraintTimestamp:
 		if format, ok := c.Format(); ok {
-			p.warnLossyTimestampFormat(format, c.FormatLit.Span)
-			return NewTimestampConstraintFormatted(format), DataTypeRef{}
+			built := NewTimestampConstraintFormatted(format)
+			if fault, refused := constraintFault(built); refused {
+				p.collector.Collect(diag.NewIssue(diag.Error, diag.E_INVALID_CONSTRAINT, fault).
+					WithSpan(c.FormatLit.Span).
+					Build())
+			} else {
+				p.warnLossyTimestampFormat(format, c.FormatLit.Span)
+			}
+			return built, DataTypeRef{}
 		}
 		// The zero literal, not NewTimestampConstraint's result: the compiler
 		// boxes it with no allocation.
@@ -288,7 +295,7 @@ func (p *schemaParser) warnLossyTimestampFormat(format string, span location.Spa
 func lossyTimestampFormat(format string) bool {
 	// The probe zone carries a name: a layout with the MST directive renders
 	// an unnamed zone as a numeric offset, which time.Parse then refuses, and
-	// the error arm would call exactly the lossiest layouts "not lossy".
+	// the error arm would call that layout "not lossy".
 	probe := time.Date(2026, 8, 19, 12, 34, 56, 789000000, time.FixedZone("XYZ", 2*60*60))
 	back, err := time.Parse(format, probe.Format(format))
 	if err != nil {

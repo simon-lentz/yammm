@@ -320,18 +320,18 @@ nothing at all, in any command, `yammm validate` included.
 
 Two consequences worth knowing:
 
-- **Exit codes are unchanged.** A warning is not a failure: a command that
-  prints warnings and nothing else still exits `0`. Scripting that gates on the
+- **Exit codes are unchanged.** A warning is not a failure: a run that meets
+  none of the Exit Codes table's conditions for `1`, `2` or `3` exits `0`,
+  whatever warnings it prints. Scripting that gates on the
   exit code is unaffected; scripting that gates on "did it print anything" is
   not. Each command's stdout contract (generated Cypher, Go source,
   Markdown, formatted schema text and `fmt --check`'s path list, a report, a
-  shell completion script, help text, `--version`'s line) is untouched —
-  diagnostics have always been separate from it.
+  shell completion script, help text, `--version`'s line) is untouched.
 - **An unchanged, still-passing schema may emit new stderr output.** Warnings
   that already existed but that no command printed are now visible. The
   `-_`-in-a-constraint-bound warning (`E_INVALID_CONSTRAINT`, "minus sign before
   '_' (unbounded) has no effect") is one; `yammm snapshot verify`,
-  `yammm snapshot info` without `--header-only`, and
+  `yammm snapshot info` without `--header-only` or `--dir`, and
   `yammm snapshot save --into` additionally surface the
   snapshot decoder's `W_SNAPSHOT_PATH_FALLBACK` on otherwise unchanged `.ys`
   files. From v0.15.0, `E_SNAPSHOT_UNSUPPORTED_HASH_ALGORITHM` is an Error on

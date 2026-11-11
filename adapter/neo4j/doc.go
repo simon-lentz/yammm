@@ -63,10 +63,7 @@
 // [ErrUnsupportedListElem]: [Adapter.BatchNodeQueries]
 // and [CoerceParams] return an error for a value that holds one, an
 // empty list included, and read a value that holds none as nil, which
-// BatchNodeQueries writes as null. CoerceParams refuses a nested param map (a
-// map[string]any) or a rows value under such a key as it does under any
-// constraint: a constraint at a nested map's or a rows param's own key is the
-// caller's error, which carries no class.
+// BatchNodeQueries writes as null.
 //
 // # Index Generation
 //
@@ -192,10 +189,9 @@
 // snapshot whose values no validator refused at Error. [CoerceParams] marks its
 // refusals of a value so too. No other error
 // carries the class: a caller's own, such as a constraint
-// [schema.CheckConstraint] refuses, a constraint at a nested map's or a rows
-// param's own key, a [GraphShape] the adapter did not build for the snapshot's
-// schema or a relationship type that is no valid identifier, and a cancelled
-// context.
+// [schema.CheckConstraint] refuses, a [GraphShape] the adapter did not build
+// for the snapshot's schema or a relationship type that is no valid identifier,
+// and a cancelled context.
 //
 // # Parameter Coercion
 //
@@ -207,9 +203,10 @@
 // as [github.com/simon-lentz/yammm/instance.Validator] reads a property value,
 // so a parameter reaches the driver as the write path sends that value from a
 // validated instance, and a value the validator refuses (a wrong kind, a bound,
-// a member, a pattern) is an error. The rule takes the full constraint, not
-// just its kind, so a Timestamp's custom layout is honored; a DataType
-// reference is resolved internally.
+// a member, a pattern) is an error. CoerceParams reads one flat map and walks
+// no value: to coerce the fields of a nested map or of a row, call it on that
+// map. The rule takes the full constraint, not just its kind, so a Timestamp's
+// custom layout is honored; a DataType reference is resolved internally.
 //
 //   - Float: a float64. Integer: an int64. Boolean: a bool. String, Enum and
 //     Pattern: a string. Each passes through, and a value of any other Go type
@@ -219,13 +216,11 @@
 //   - Timestamp: a string -> time.Time (Neo4j ZONED DATETIME), parsed against the
 //     constraint's custom Go layout when it declares one (Timestamp["…"]) and
 //     against RFC3339 otherwise. A string that does not parse, or any other
-//     value, is a coercion failure. The instant is always expressed in a
-//     location the driver can send, under one rule: a zone name the text
-//     carries is kept only when the host's tz database resolves it AND the
-//     resolved offset agrees with the one the value carries; the host's own
-//     zone, a numeric offset, an unresolvable name and a name whose offset
-//     disagrees are all re-expressed in the value's own offset. A consumer that
-//     must keep zone names on a host without a tz database imports time/tzdata.
+//     value, is a coercion failure. The text is read in UTC, so the host's
+//     zone decides nothing, and the instant goes as its offset and never under
+//     a zone name: a UTC instant goes as offset zero. The server holds one
+//     instant under a zone name and under that zone's offset as two unequal
+//     values, and Cypher's datetime() of RFC 3339 text gives the offset form.
 //   - Date: a "2006-01-02" string -> dbtype.Date (Neo4j DATE). A string that
 //     does not parse, or any other value, is a coercion failure. The date is
 //     midnight UTC on the day the text shows, since a date carries no time of
@@ -241,15 +236,16 @@
 //
 // [CoerceParams] reads a value as the validator does, so a value in a form the
 // validator reads is read the same way. A Go integer of any width, a named type
-// and a time.Time at a Timestamp are three such forms. It refuses two values
-// the validator takes: a value at a List whose element is a collection, and an
-// empty []map[string]any that is a param's own value at a List, which it reads
-// as rows. A time.Time goes through the text the validator stores it as. At a
-// Timestamp that text is in the constraint's layout, so the instant reaches the
-// server at the precision and in the zone that text keeps. The text holds an
-// offset, a zone abbreviation or both, as its layout does, or no zone under a
-// layout that holds none, where it is read as UTC. So a location's name such as
-// Europe/Berlin does not reach the server. A pointer is refused, a nil one too.
+// and a time.Time at a Timestamp are three such forms. It refuses one value
+// the validator takes: a value at a List whose element is a collection. A
+// time.Time goes through the text the validator stores it as. At a Timestamp
+// that text is in the constraint's layout, so the instant reaches the server at
+// the precision that text keeps and, with one exception, at its offset. Text
+// under a layout that holds no offset is read as UTC. The exception: under a
+// layout that holds a zone abbreviation beside an offset, text whose
+// abbreviation is UTC is read as UTC whatever offset it keeps. From a key that
+// holds a constraint no zone name reaches the server, a location's such as
+// Europe/Berlin included, and there a pointer is refused, a nil one too.
 //
 // On the write path the rule refuses only a value no validator refused at
 // Error: one snapshot.Load read without revalidating at Error, or one
@@ -534,15 +530,10 @@
 //
 // An [Adapter] is safe for concurrent use after construction.
 // Configuration is immutable after [New] returns. Every method reads the
-// frozen config and writes only to values it allocates, save one package-level
-// value: a concurrency-safe memo of which zone names the host's tz database
-// resolves, which coercion of a Timestamp whose text holds a zone abbreviation
-// fills. It caches a host fact fixed for the process lifetime and holds no
-// adapter state.
+// frozen config and writes only to values it allocates.
 //
 // # Dependencies
 //
 //	adapter/neo4j  ──imports──▶  schema, graph, immutable, diag, internal/value,
-//	                             github.com/google/uuid,
 //	                             github.com/neo4j/neo4j-go-driver/v6/neo4j/dbtype
 package neo4j

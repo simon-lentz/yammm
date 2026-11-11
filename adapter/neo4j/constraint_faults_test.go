@@ -73,6 +73,10 @@ func faultRows() []faultRow {
 
 		{"timestamp accepted", schema.NewTimestampConstraintFormatted("2006-01-02")},
 		{"timestamp format not UTF-8", schema.NewTimestampConstraintFormatted("\xff")},
+		{"timestamp format with a zone abbreviation alone", schema.NewTimestampConstraintFormatted("2006-01-02 15:04 MST")},
+		{"timestamp format with a zone abbreviation alone in a List", schema.NewListConstraint(schema.NewTimestampConstraintFormatted("15:04 MST"))},
+		{"timestamp format with a zone abbreviation beside an offset", schema.NewTimestampConstraintFormatted("2006-01-02 15:04 -0700 MST")},
+		{"timestamp format not UTF-8 before a zone abbreviation alone", schema.NewTimestampConstraintFormatted("15:04 MST\xff")},
 
 		{"integer accepted", schema.IntegerBetween(1, 5)},
 		{"integer inverted", schema.IntegerBetween(5, 1)},

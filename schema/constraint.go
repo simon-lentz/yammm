@@ -9,6 +9,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/simon-lentz/yammm/internal/parse"
@@ -349,6 +350,7 @@ func (BooleanConstraint) IsResolved() bool { return true }
 type TimestampConstraint struct {
 	format    string
 	badFormat bool // format is not valid UTF-8
+	nameAlone bool // format holds a zone abbreviation and no numeric offset
 }
 
 // NewTimestampConstraint creates a TimestampConstraint with no format.
@@ -357,10 +359,23 @@ func NewTimestampConstraint() TimestampConstraint {
 }
 
 // NewTimestampConstraintFormatted creates a TimestampConstraint with a Go time
-// format. The format is judged once here: one that is not valid UTF-8 is
-// recorded, and [CheckConstraint] refuses the constraint.
+// format. The format is judged once here: one that is not valid UTF-8, or that
+// holds a zone abbreviation and no numeric offset, is recorded, and
+// [CheckConstraint] refuses the constraint.
 func NewTimestampConstraintFormatted(format string) TimestampConstraint {
-	return TimestampConstraint{format: format, badFormat: !utf8.ValidString(format)}
+	return TimestampConstraint{format: format, badFormat: !utf8.ValidString(format), nameAlone: zoneNameAlone(format)}
+}
+
+// zoneNameAlone reports whether format renders a zone's abbreviation and no
+// numeric offset. An abbreviation names no one offset, so text in such a format
+// names no one instant. The format is judged by what it renders, as package
+// time reads it, not by a scan for its zone elements.
+func zoneNameAlone(format string) bool {
+	render := func(name string, offset int) string {
+		return time.Date(2006, time.January, 2, 15, 4, 5, 0, time.FixedZone(name, offset)).Format(format)
+	}
+	base := render("AAA", 60*60)
+	return render("BBB", 60*60) != base && render("AAA", 2*60*60) == base
 }
 
 func (TimestampConstraint) Kind() ConstraintKind { return KindTimestamp }
@@ -978,6 +993,9 @@ func constraintFault(c Constraint) (string, bool) {
 		// The zero TimestampConstraint holds no format, which is sound.
 		if c.badFormat {
 			return fmt.Sprintf("timestamp format %q is not valid UTF-8", c.format), true
+		}
+		if c.nameAlone {
+			return fmt.Sprintf("timestamp format %q holds a zone abbreviation and no numeric offset, so its text names no one instant; add a numeric offset such as Z07:00", c.format), true
 		}
 	case IntegerConstraint:
 		lo, hasLo := c.Min()

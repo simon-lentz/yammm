@@ -117,7 +117,7 @@ The all-or-nothing contract is unchanged: any error still yields a zero schema.
 | `E_PROPERTY_RELATION_COLLISION` | A property's lower-cased name equals a relation's field name |
 | `E_INVALID_ASSOCIATION_TARGET` | Association targets an invalid type, or a part type declares or inherits an association |
 | `E_INVALID_COMPOSITION_TARGET` | Composition targets an invalid type |
-| `E_INVALID_CONSTRAINT` | Constraint definition is invalid |
+| `E_INVALID_CONSTRAINT` | A constraint definition is invalid; at Warning, a `-_` bound whose minus sign has no effect |
 | `E_INVALID_INVARIANT` | An invariant's expression or message is invalid |
 | `E_DUPLICATE_INVARIANT` | One invariant message declared twice on a type |
 | `E_INVARIANT_CONFLICT` | Two inherited definitions of one invariant message differ (a literal with no value matches any literal of its kind) |
@@ -126,7 +126,7 @@ The all-or-nothing contract is unchanged: any error still yields a zero schema.
 | `E_UPSTREAM_FAIL` | Imported schema failed to compile |
 | `E_PROPERTY_CONFLICT` | Conflicting property definitions from inheritance |
 | `E_UNKNOWN_TYPE` | Referenced type or datatype not found (`extends`, relation target, a property datatype, or a datatype declaration's reference such as a `List` element) |
-| `E_DUPLICATE_TYPE` | Type name defined multiple times |
+| `E_DUPLICATE_TYPE` | A type declared more than once, or a datatype declared more than once |
 | `E_DUPLICATE_SCHEMA` | Two schemas in one load declare one name, and both compile with no error. A schema with an error takes no name |
 | `E_RELATION_COLLISION` | A type carries two relation definitions under one field name that do not merge: an inherited one that differs from another it carries, or an association and a composition (two relations one type declares under one exact name are `E_DUPLICATE_RELATION`) |
 | `E_LIST_ON_EDGE` | List type used in relationship property |
@@ -139,7 +139,7 @@ The all-or-nothing contract is unchanged: any error still yields a zero schema.
 | `E_INVALID_ANNOTATION` | Annotation placement, arity, argument-kind, keyword, or duplicate violation, or conflicting annotations a type inherits for one property |
 | `E_INVALID_ANNOTATION_TARGET` | Annotation attached to an ineligible property |
 | `W_ANNOTATION_SHADOWED` | A re-declaration silently drops an inherited property's annotations (warning) |
-| `W_TIMESTAMP_LOSSY_FORMAT` | `Timestamp["layout"]` declares a layout that cannot reproduce an instant, so a value stored through it can read back as another instant (Warning, v0.13+) |
+| `W_TIMESTAMP_LOSSY_FORMAT` | `Timestamp["layout"]` declares a layout that cannot reproduce an instant, so a value stored through it can read back as another instant; a layout that holds a zone abbreviation and no numeric offset draws `E_INVALID_CONSTRAINT` in its place (Warning, v0.13+) |
 
 ### Instance Data and Validation
 

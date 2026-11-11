@@ -8,15 +8,14 @@ import (
 	"github.com/simon-lentz/yammm/schema"
 )
 
-// The driver picks its wire encoding by the zone abbreviation: an offset is
-// sent only when Zone() reports exactly this name, and every other value is
-// sent as a time-zone identifier taken from Location().String().
+// The driver picks its wire encoding by the location's name: a name that loads
+// as a zone whose offset agrees is sent as a time-zone identifier, and every
+// other value is sent as an offset. No zone has this name, and the driver's
+// read path builds each offset instant in a location so named.
 const driverOffsetZoneName = "Offset"
 
-// TestCoerce_OffsetOnlyInstantsCarryTheDriverZoneName pins the repair. A
-// numeric RFC 3339 offset parses into an unnamed location, whose empty
-// identifier the server rejects with "Illegal epoch adjustment" — so a
-// validated timestamp outside UTC could not be written at all.
+// An instant at a numeric RFC 3339 offset goes in a location of the driver's
+// offset name at that offset, whether text or a time.Time carries it.
 func TestCoerce_OffsetOnlyInstantsCarryTheDriverZoneName(t *testing.T) {
 	t.Parallel()
 	c := schema.NewTimestampConstraint()
@@ -32,8 +31,7 @@ func TestCoerce_OffsetOnlyInstantsCarryTheDriverZoneName(t *testing.T) {
 			got := coerceTime(t, c, in)
 			zone, offset := got.Zone()
 			if zone != driverOffsetZoneName {
-				t.Errorf("zone name = %q, want %q — the driver would send an empty time-zone identifier",
-					zone, driverOffsetZoneName)
+				t.Errorf("zone name = %q, want %q", zone, driverOffsetZoneName)
 			}
 			if want := 2 * 60 * 60; name == "string with a negative offset" {
 				if offset != -5*60*60 {
@@ -46,15 +44,62 @@ func TestCoerce_OffsetOnlyInstantsCarryTheDriverZoneName(t *testing.T) {
 	}
 }
 
-// TestCoerce_UTCTextStaysUTC is the control: UTC is a zone identifier every
-// server resolves, so the repair leaves it alone.
-func TestCoerce_UTCTextStaysUTC(t *testing.T) {
+// A UTC instant goes as offset zero, never under the name UTC: the server holds
+// the named form unequal to its own reading of the same RFC 3339 text.
+func TestCoerce_AUTCInstantGoesAsOffsetZero(t *testing.T) {
 	t.Parallel()
 	c := schema.NewTimestampConstraint()
-	for _, in := range []any{"2026-08-19T12:00:00Z", time.Date(2026, 8, 19, 12, 0, 0, 0, time.UTC)} {
+	want := time.Date(2026, 8, 19, 12, 0, 0, 0, time.UTC)
+	for _, in := range []any{"2026-08-19T12:00:00Z", "2026-08-19T12:00:00+00:00", want} {
 		got := coerceTime(t, c, in)
-		if got.Location() != time.UTC {
-			t.Errorf("%#v landed in %q, want UTC", in, got.Location())
+		if zone, offset := got.Zone(); zone != driverOffsetZoneName || offset != 0 || got.Location().String() != driverOffsetZoneName {
+			t.Errorf("%#v went as zone %q at %d in %q, want %q at 0", in, zone, offset, got.Location(), driverOffsetZoneName)
+		}
+		if !got.Equal(want) {
+			t.Errorf("%#v went as %s, want the same instant as %s", in, got, want)
+		}
+	}
+}
+
+// Every instant at offset zero goes in one shared location, whatever location
+// its text was read into, so the common instant costs no location of its own.
+// Text that names GMT at offset zero is read into a location of that name. An
+// instant at another offset is the control.
+func TestCoerce_UTCInstantsShareOneLocation(t *testing.T) {
+	t.Parallel()
+	c := schema.NewTimestampConstraint()
+	named := schema.NewTimestampConstraintFormatted("2006-01-02 15:04:05 -0700 MST")
+	first := coerceTime(t, c, "2026-08-19T12:00:00Z").Location()
+	for text, at := range map[string]schema.Constraint{
+		"2026-08-19T12:00:00Z":          c,
+		"2001-01-01T00:00:00.5+00:00":   c,
+		"2026-08-19 12:00:00 +0000 GMT": named,
+	} {
+		if got := coerceTime(t, at, text).Location(); got != first {
+			t.Errorf("%s went in a location of its own, %p beside %p", text, got, first)
+		}
+	}
+	if got := coerceTime(t, c, "2026-08-19T12:00:00+02:00").Location(); got == first {
+		t.Error("control: an instant at +02:00 went in the UTC instants' location")
+	}
+}
+
+// A layout that holds a zone abbreviation beside a numeric offset sends the
+// offset and never the abbreviation, one the host's tz database resolves at
+// that offset included.
+func TestCoerce_AZoneAbbreviationInTheTextNeverReachesTheDriver(t *testing.T) {
+	t.Parallel()
+	c := schema.NewTimestampConstraintFormatted("2006-01-02 15:04:05 -0700 MST")
+	for text, offset := range map[string]int{
+		"2026-08-19 12:00:00 +0000 GMT": 0,
+		"2026-08-19 12:00:00 +0000 UTC": 0,
+		"2026-01-19 12:00:00 -0500 EST": -5 * 60 * 60,
+		"2026-01-19 12:00:00 +0100 CET": 60 * 60,
+		"2026-01-19 12:00:00 +0300 QQQ": 3 * 60 * 60,
+	} {
+		got := coerceTime(t, c, text)
+		if zone, at := got.Zone(); zone != driverOffsetZoneName || at != offset || got.Location().String() != driverOffsetZoneName {
+			t.Errorf("%q went as zone %q at %d in %q, want %q at %d", text, zone, at, got.Location(), driverOffsetZoneName, offset)
 		}
 	}
 }
@@ -104,21 +149,13 @@ func mustParse(t *testing.T, s string) time.Time {
 	return tt
 }
 
-// TestCoerce_TextDerivedInstantNeverCarriesTheHostZone is the regression pin for
-// the host-dependence v0.13.0 made reachable.
+// Text at the host zone's own offset goes in the driver's offset location and
+// never in the host's. time.Parse reads such text into time.Local, and the
+// driver judges that location's name on each host.
 //
-// time.Parse returns time.Local, not an unnamed zone, when the parsed offset
-// equals the local zone's offset at that instant. Zone() then reports a
-// non-empty abbreviation, so the unnamed-zone rescue does not fire, and the
-// driver sends Location().String() as a time-zone identifier — "Local" on a host
-// with no TZ set, which the server rejects with "Illegal zone identifier".
-//
-// It sets time.Local rather than reading it. A test that derives its fixture
-// from the host's own zone cannot reproduce the case on a UTC host, because
-// UTC-offset text parses to time.UTC and never to time.Local — so it would pass
-// vacuously on every CI runner, which is where a regression would land. The
-// substitute zone carries a name no tz database holds, which is what the driver
-// would send and the server would refuse.
+// It sets time.Local rather than reading it: text at a UTC host's offset parses
+// to time.UTC and never to time.Local, so a fixture drawn from the host's own
+// zone passes vacuously on a UTC runner.
 //
 // Not parallel: it writes a package-level variable of the standard library.
 func TestCoerce_TextDerivedInstantNeverCarriesTheHostZone(t *testing.T) {
@@ -138,17 +175,13 @@ func TestCoerce_TextDerivedInstantNeverCarriesTheHostZone(t *testing.T) {
 	if parsed.Location() != time.Local {
 		t.Fatalf("time.Parse(%q) did not resolve to time.Local; the fixture no longer reproduces the case", text)
 	}
-	if name, _ := parsed.Zone(); name == "" {
-		t.Fatalf("time.Parse(%q) produced an unnamed zone; the unnamed rescue would cover it and this test proves nothing", text)
-	}
 
 	got := coerceTime(t, schema.NewTimestampConstraint(), text)
 	if got.Location() == time.Local {
 		t.Errorf("coerced value still carries the host's location %q", got.Location())
 	}
 	if zone, _ := got.Zone(); zone != driverOffsetZoneName {
-		t.Errorf("zone name = %q, want %q — the driver would send it as a time-zone identifier",
-			zone, driverOffsetZoneName)
+		t.Errorf("zone name = %q, want %q", zone, driverOffsetZoneName)
 	}
 	if !got.Equal(local) {
 		t.Errorf("coerced %s, want the same instant as %s", got, local)
@@ -170,13 +203,10 @@ func TestCoerce_IsHostIndependent(t *testing.T) {
 		got := coerceTime(t, c, text)
 		zone, offset := got.Zone()
 
-		// Either UTC, or the driver's offset sentinel. Never a host-supplied
-		// zone identifier, and never an empty one.
-		switch zone {
-		case "UTC", driverOffsetZoneName:
-		default:
-			t.Errorf("%q coerced to zone %q; only UTC and %q are host-independent",
-				text, zone, driverOffsetZoneName)
+		// The driver's offset sentinel alone. Never a zone identifier, the
+		// host's or the text's, and never an empty one.
+		if zone != driverOffsetZoneName {
+			t.Errorf("%q coerced to zone %q; want %q", text, zone, driverOffsetZoneName)
 		}
 
 		// Whatever the zone, the offset must be the one the text stated.
@@ -274,8 +304,7 @@ func TestCoerce_HostLocalTimeValueIsSentAsOffset(t *testing.T) {
 
 // A caller's location goes as its offset whatever its name, one the host cannot
 // resolve and "Local" included: the instant goes through its stored text, which
-// holds no name. [TestDriverZone_AnUnnamedOrUnresolvableZoneGoesAsItsOffset]
-// pins the rule for a name that does reach driverZone.
+// holds no name.
 func TestCoerce_UnresolvableZoneNameIsSentAsOffset(t *testing.T) {
 	t.Parallel()
 	for name, loc := range map[string]*time.Location{

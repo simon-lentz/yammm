@@ -27,7 +27,7 @@ type T {
 	b Boolean
 	ts Timestamp
 	tl Timestamp["2006-01-02 15:04"]
-	tz Timestamp["2006-01-02 15:04 MST"]
+	tz Timestamp["2006-01-02 15:04 -0700 MST"]
 	d Date
 	u UUID
 	e Enum["a", "b"]
@@ -75,8 +75,7 @@ func sameSent(a, b any) bool {
 
 // CoerceParams sends for a value what the write path sends for the instance the
 // validator builds from it, and refuses the value when the validator refuses
-// it, at every kind and in every Go form but a map[string]any and rows, which
-// CoerceParams walks.
+// it, at every kind and in every Go form, a map and rows included.
 func TestCoerceParams_SendsWhatTheWritePathSendsForTheValidatedValue(t *testing.T) {
 	t.Parallel()
 	s := loadInline(t, agreementSchema)
@@ -87,7 +86,7 @@ func TestCoerceParams_SendsWhatTheWritePathSendsForTheValidatedValue(t *testing.
 	if res.Err() != nil {
 		t.Fatalf("ShapeForSchema: %v", res.Err())
 	}
-	types := ParamTypesForType(typ, "")
+	types := ParamTypesForType(typ)
 
 	type (
 		namedText  string
@@ -109,19 +108,19 @@ func TestCoerceParams_SendsWhatTheWritePathSendsForTheValidatedValue(t *testing.
 	var nilText *string
 
 	rows := map[string][]any{
-		"s":  {"abc", namedText("abc"), "", "toolong", 5, json.Number("5"), &text, nilText, []any{"a"}, map[string]string{"a": "b"}},
+		"s":  {"abc", namedText("abc"), "", "toolong", 5, json.Number("5"), &text, nilText, []any{"a"}, map[string]string{"a": "b"}, map[string]any{"a": "b"}, map[string]any{}, []map[string]any{{"a": "b"}}},
 		"i":  {int64(5), 5, int32(5), uint8(5), uint64(5), namedInt(5), json.Number("5"), 11, -1, 5.0, json.Number("5.0"), uint64(1 << 63), "5", &n},
 		"f":  {1.5, float32(1.5), namedFloat(1.5), int64(3), 3, uint64(1 << 63), json.Number("-0"), json.Number("0.1"), json.Number("99999999999999999999"), json.Number("1e400"), math.NaN(), math.Inf(1), "1.5"},
 		"b":  {true, false, namedFlag(true), "true", 1},
 		"ts": {"2024-01-02T03:04:05Z", "2024-01-02T03:04:05.123456789+02:00", utc, zoned, fixed, utc.In(time.Local), far, "nope", "2024-01-02", &utc, 5},
 		"tl": {"2024-01-02 03:04", utc, zoned, "2024-01-02T03:04:05Z"},
-		"tz": {"2024-01-02 03:04 MST", "2024-01-02 03:04 UTC", "2024-01-02 03:04 EDT", utc, zoned, fixed},
+		"tz": {"2024-01-02 03:04 -0700 MST", "2024-01-02 03:04 +0000 UTC", "2024-01-02 03:04 +0000 GMT", "2024-01-02 03:04 -0400 EDT", "2024-01-02 03:04 +0300 QQQ", "2024-01-02 03:04 MST", utc, zoned, fixed},
 		"d":  {"2024-01-02", utc, zoned, far, "01/02/2024", "2024-01-02T03:04:05Z", 5},
 		"u":  {id.String(), upperID, "{" + upperID + "}", id, "zz", &id, 5},
 		"e":  {"a", namedText("b"), "c", 5},
 		"p":  {"axb", "zzz", 5},
 		"v":  {[]any{1.0, 2.0}, []any{int64(1), 2.5}, []float64{1, 2}, []float32{1, 2}, []any{json.Number("-0"), 1}, []any{1.0}, []any{1.0, nil}, []any{1.0, "x"}, []any{1.0, math.NaN()}, 1.0},
-		"ls": {[]any{"a"}, []string{"a", "b"}, []any{}, []namedText{"a"}, []any{"a", 5}, []any{"a", nil}, []any{"a", &text}, "a"},
+		"ls": {[]any{"a"}, []string{"a", "b"}, []any{}, []namedText{"a"}, []any{"a", 5}, []any{"a", nil}, []any{"a", &text}, "a", map[string]any{"a": "b"}, []map[string]any{{"a": "b"}}, []map[string]any{}, []any{map[string]any{"a": "b"}, nil}},
 		"li": {[]any{int64(1), int32(2), json.Number("3")}, []int{1, 2}, []any{1.5}, []any{json.Number("1.0")}},
 		"lf": {[]any{int64(1), 2.5, json.Number("-0")}, []float64{1}, []any{"1"}},
 		"lt": {[]any{"2024-01-02T03:04:05Z", utc, zoned}, []time.Time{utc, fixed}, []any{"nope"}},
@@ -167,7 +166,7 @@ func TestCoerceParams_ADriverDatePassesAtADateAlone(t *testing.T) {
 	t.Parallel()
 	s := loadInline(t, agreementSchema)
 	typ, _ := s.Type("T")
-	types := ParamTypesForType(typ, "")
+	types := ParamTypesForType(typ)
 	day := dbtype.Date(time.Date(2024, 1, 2, 0, 0, 0, 0, time.UTC))
 	got, err := CoerceParams(map[string]any{"d": dbtype.Date(time.Date(2024, 1, 2, 23, 30, 0, 0, time.FixedZone("X", -3600)))}, types)
 	if err != nil || !sameSent(got["d"], day) {

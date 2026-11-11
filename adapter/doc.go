@@ -26,7 +26,6 @@
 // Adapters depend on library packages; library packages never depend on adapters:
 //
 //	adapter/neo4j  ──imports──▶  schema, graph, immutable, diag, internal/value,
-//	                             github.com/google/uuid,
 //	                             github.com/neo4j/neo4j-go-driver/v6/neo4j/dbtype
 //
 // # Subpackages

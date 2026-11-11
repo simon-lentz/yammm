@@ -14,6 +14,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/neo4j/neo4j-go-driver/v6/neo4j/dbtype"
 
+	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -95,7 +96,7 @@ func TestCoerceValue_AValueThatHoldsNoneIsNil(t *testing.T) {
 func TestCoerceSlice_TakesTheStoredFormAtEachElement(t *testing.T) {
 	t.Parallel()
 	type namedText string
-	at := time.Date(2024, 1, 2, 3, 4, 5, 0, time.UTC)
+	at := time.Date(2024, 1, 2, 3, 4, 5, 0, time.FixedZone(driverOffsetZoneName, 0))
 	for _, c := range []struct {
 		name    string
 		c       schema.Constraint
@@ -129,7 +130,8 @@ func TestCoerceSlice_TakesTheStoredFormAtEachElement(t *testing.T) {
 }
 
 // A UUID is sent as its canonical text, as a scalar and as a list element, and
-// a string that is no UUID is refused at both.
+// a string that is no UUID is refused at both: 38 bytes that hold a UUID
+// between two bytes that are not braces included.
 func TestCoerceValue_AUUIDIsSentAsItsCanonicalText(t *testing.T) {
 	t.Parallel()
 	const canonical = "12345678-1234-1234-1234-123456789abc"
@@ -148,8 +150,10 @@ func TestCoerceValue_AUUIDIsSentAsItsCanonicalText(t *testing.T) {
 			t.Errorf("coerceValue(List<UUID>, [%q]) = %#v, %v; want [%q]", s, got, err, canonical)
 		}
 	}
-	if got, err := coerceValue(scalar, "zz"); !errors.Is(err, ErrUnrepresentable) || !strings.Contains(err.Error(), `"zz"`) {
-		t.Errorf(`coerceValue(UUID, "zz") = %#v, %v; want a refusal that quotes the text`, got, err)
+	for _, s := range []string{"zz", "x" + canonical + "y", "{" + canonical + ")"} {
+		if got, err := coerceValue(scalar, s); !errors.Is(err, ErrUnrepresentable) || !strings.Contains(err.Error(), "cannot parse "+diag.QuoteValue(s)+" as a UUID") {
+			t.Errorf("coerceValue(UUID, %q) = %#v, %v; want a refusal that quotes the text", s, got, err)
+		}
 	}
 	if got, err := coerceValue(list, []any{canonical, "zz"}); !errors.Is(err, ErrUnrepresentable) || !strings.Contains(err.Error(), `list element 1`) || !strings.Contains(err.Error(), `"zz"`) {
 		t.Errorf(`coerceValue(List<UUID>, [.., "zz"]) = %#v, %v; want a refusal that names list element 1 and quotes the text`, got, err)
@@ -257,9 +261,10 @@ func TestCoerceParams_JudgesBoundsMembersAndPatterns(t *testing.T) {
 }
 
 // CoerceParams reads what it returned as it read what it was given, so a
-// second pass sends the same values: an instant, a date, a typed slice. An
-// instant in the driver's Offset zone is no input under a layout that holds a
-// zone abbreviation, which cannot write that zone.
+// second pass sends the same values: an instant, a date, a typed slice, and a
+// map or rows it passed as given. An instant in the driver's Offset zone is no
+// input under a layout that holds a zone abbreviation, which cannot write that
+// zone.
 func TestCoerceParams_ReadsItsOwnOutput(t *testing.T) {
 	t.Parallel()
 	types := ParamTypes{
@@ -267,13 +272,12 @@ func TestCoerceParams_ReadsItsOwnOutput(t *testing.T) {
 		"ts": schema.NewTimestampConstraint(), "d": schema.NewDateConstraint(), "u": schema.NewUUIDConstraint(),
 		"v": schema.NewVectorConstraint(2), "ls": schema.NewListConstraint(schema.NewStringConstraint()),
 		"lf": schema.NewListConstraint(schema.NewFloatConstraint()), "lt": schema.NewListConstraint(schema.NewTimestampConstraint()),
-		"rows.ts": schema.NewTimestampConstraint(),
 	}
 	first, err := CoerceParams(map[string]any{
 		"f": 3, "i": int32(4), "s": "x", "ts": "2024-01-02T03:04:05.5+02:00", "d": "2024-01-02",
 		"u": "12345678-1234-1234-1234-123456789ABC", "v": []any{1, 2.5}, "ls": []any{"a"}, "lf": []any{1, 2.5},
 		"lt":   []any{"2024-01-02T03:04:05Z", "2024-01-02T03:04:05-07:00"},
-		"rows": []map[string]any{{"ts": "2024-01-02T03:04:05Z"}, nil},
+		"rows": []map[string]any{{"ts": "2024-01-02T03:04:05Z"}, nil}, "props": map[string]any{"ts": "2024-01-02T03:04:05Z"},
 	}, types)
 	if err != nil {
 		t.Fatalf("CoerceParams: %v", err)
@@ -282,28 +286,21 @@ func TestCoerceParams_ReadsItsOwnOutput(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CoerceParams over its own output: %v", err)
 	}
+	if len(second) != len(first) {
+		t.Errorf("the second pass sends %d params, the first %d", len(second), len(first))
+	}
 	for k, want := range first {
-		if k == "rows" {
-			continue
-		}
 		if !sameSent(second[k], want) {
 			t.Errorf("%s: the second pass sends %#v, the first %#v", k, second[k], want)
 		}
 	}
-	rows, ok := second["rows"].([]any)
-	if !ok || len(rows) != 2 || rows[1] != nil {
-		t.Fatalf("rows: the second pass sends %#v, want two rows, the second nil", second["rows"])
-	}
-	if row, ok := rows[0].(map[string]any); !ok || !sameSent(row["ts"], first["rows"].([]any)[0].(map[string]any)["ts"]) {
-		t.Errorf("rows[0]: the second pass sends %#v", rows[0])
-	}
 
-	named := ParamTypes{"ts": schema.NewTimestampConstraintFormatted("2006-01-02 15:04 MST")}
-	first, err = CoerceParams(map[string]any{"ts": "2024-01-02 03:04 QQQ"}, named)
+	named := ParamTypes{"ts": schema.NewTimestampConstraintFormatted("2006-01-02 15:04 -0700 MST")}
+	first, err = CoerceParams(map[string]any{"ts": "2024-01-02 03:04 +0300 QQQ"}, named)
 	if err != nil {
 		t.Fatalf("CoerceParams under a layout that holds a zone abbreviation: %v", err)
 	}
-	if out, err := CoerceParams(first, named); !errors.Is(err, ErrUnrepresentable) || !strings.Contains(err.Error(), `"2024-01-02 03:04 Offset"`) {
+	if out, err := CoerceParams(first, named); !errors.Is(err, ErrUnrepresentable) || !strings.Contains(err.Error(), `"2024-01-02 03:04 +0300 Offset"`) {
 		t.Errorf("the second pass over %#v = %#v, %v; want the validator's refusal of the text the layout writes", first["ts"], out, err)
 	}
 }

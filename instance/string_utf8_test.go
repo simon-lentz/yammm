@@ -24,7 +24,7 @@ type Holder {
 	uid UUID
 	day Date
 	at Timestamp
-	stamp Timestamp["2006-01-02 MST"]
+	stamp Timestamp["2006-01-02 Z07:00"]
 	tags List<String>
 	codes List<Pattern["^a.b$"]>
 	--> LINK (_:many) Target {
@@ -120,7 +120,7 @@ func TestValidateOne_RefusesAStringThatIsNotValidUTF8(t *testing.T) {
 		raw := utf8Raw(map[string]any{
 			"text": namedText(valid), "code": valid, "kind": "ab",
 			"uid": "6ba7b810-9dad-11d1-80b4-00c04fd430c8", "day": "2026-01-02",
-			"at": "2026-01-02T03:04:05Z", "stamp": "2026-01-02 UTC",
+			"at": "2026-01-02T03:04:05Z", "stamp": "2026-01-02 Z",
 			"tags": []string{"é", valid}, "codes": []any{valid},
 			"link": []any{map[string]any{"_target_key": valid, "label": valid, "mark": valid}},
 		})
