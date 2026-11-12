@@ -133,10 +133,11 @@ func WithSyntheticRoot(root string) LoadOption {
 }
 
 // WithImportsAllowed selects whether import declarations are processed. With
-// false, any import statement in the source produces a single
-// E_IMPORT_NOT_ALLOWED diagnostic at the first declaration. The rejection
-// does not suppress the source's other diagnostics: analysis continues
-// with the rejected aliases deferred, and the rejected imports are never
+// false, the import declarations the parser keeps draw a single
+// E_IMPORT_NOT_ALLOWED diagnostic at the first of them; the parser drops one
+// whose path derives a reserved alias, with E_INVALID_ALIAS. The rejection
+// does not end the analysis: it continues with the rejected aliases
+// deferred as a failed import's is, and the rejected imports are never
 // probed or resolved. The LSP markdown analysis path passes false for
 // isolated blocks. [LoadString] always rejects imports, whatever the caller
 // passes. With true — the default — imports resolve normally.

@@ -97,16 +97,16 @@ func typeNames(t *testing.T, s schema.Schema, nt *nameTable) map[string]string {
 
 // TestBuildNameTable_OneSchemaSharingACandidateTakesExactSpellings pins that
 // two entities of one schema mapping to one Go name both take their exact
-// spellings: a type and a data type both named Region, which the kind
-// separates, and two types Url and URL, which the initialisms map to one name.
+// spellings: a data type Uri and a type URI, and two types Url and URL, each
+// pair mapped to one name by the initialisms.
 func TestBuildNameTable_OneSchemaSharingACandidateTakesExactSpellings(t *testing.T) {
 	for name, tc := range map[string]struct {
 		src  string
 		want map[string]string
 	}{
-		"a type and a data type": {
-			src:  "schema \"geo\"\n\ntype Region = String\n\ntype Region {\n\tid String primary\n\tr Region\n}\n",
-			want: map[string]string{"type Region": "Type_geo__Region", "datatype Region": "DataType_geo__Region"},
+		"a data type and a type": {
+			src:  "schema \"geo\"\n\ntype Uri = String\n\ntype URI {\n\tid String primary\n\tr Uri\n}\n",
+			want: map[string]string{"type URI": "Type_geo__URI", "datatype Uri": "DataType_geo__Uri"},
 		},
 		"two types under an initialism": {
 			src:  "schema \"geo\"\n\ntype Url {\n\tid String primary\n}\n\ntype URL {\n\tid String primary\n}\n",

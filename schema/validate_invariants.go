@@ -423,8 +423,7 @@ func (c *completer) validateInvariantExpressions() {
 		}
 		// A type whose supertype chain has an unresolved link has an
 		// incomplete merged member set, so a reference to an inherited member
-		// would false-positive; the unresolved reference already carries its
-		// own diagnostic.
+		// would false-positive; the link's root cause is already reported.
 		if c.hasUnresolvedSupertype(t) {
 			continue
 		}
@@ -686,8 +685,8 @@ func (c *completer) typeMember(children []expr.Expression, sc *staticScope, owne
 // member is the join of what each declares, and an alternative that lacks it
 // is the unknown-property error, since the evaluator reads nil there on the
 // input that selects it. A type whose supertype chain has an unresolved link
-// has an incomplete member set, so nothing is claimed; the unresolved
-// reference already carries its diagnostic.
+// has an incomplete member set, so nothing is claimed; the link's root
+// cause is already reported.
 func (c *completer) typeInstanceMember(recv staticType, name string, owner Type, inv Invariant) staticType {
 	if slices.ContainsFunc(recv.typs, c.hasUnresolvedSupertype) {
 		return unknownType

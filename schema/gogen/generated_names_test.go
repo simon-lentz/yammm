@@ -165,13 +165,17 @@ func collisionSources() map[string]string {
 
 import "other.yammm" as other
 
-type Region = String
+type Uri = String
 type Tags = List<Enum["a-b", "a_b", "c"]>
 
 type Region {
 	region_id String primary
 	kind Enum["big", "small"]
-	r Region
+	r Uri
+}
+
+type URI {
+	whole_uri_id String primary
 }
 
 type Url {
@@ -229,7 +233,7 @@ func TestMarshal_AContestedNameTakesEveryClaimantsExactSpelling(t *testing.T) {
 	_, got := generateSources(t, collisionSources())
 	decls := topLevelDecls(t, got)
 	for _, want := range []string{
-		"Type_geo__Region", "DataType_geo__Region", "Type_other__Region",
+		"Type_geo__Region", "Type_other__Region", "DataType_geo__Uri", "Type_geo__URI",
 		"Type_geo__Url", "Type_geo__URL",
 		"Association_geo__Url__LINK", "Association_geo__URL__LINK",
 		"AssociationEnum_geo__Url__LINK__kind", "AssociationEnum_geo__URL__LINK__kind",
@@ -248,7 +252,7 @@ func TestMarshal_AContestedNameTakesEveryClaimantsExactSpelling(t *testing.T) {
 		}
 	}
 	for _, absent := range []string{
-		"Region", "GeoRegion", "GeoRegion2", "URL", "GeoURL", "GeoURL2", "GeoGraph",
+		"Region", "GeoRegion", "GeoRegion2", "URL", "GeoURL", "GeoURL2", "URI", "GeoGraph",
 		"RegionKind", "RegionKind2", "TagsElement", "TagsElement2", "TagsElementAB", "TagsElementAB2",
 		"EDGE_URL_link_Region", "EDGE_URL_link_Region2",
 	} {
@@ -275,8 +279,8 @@ func TestMarshal_NamesDependOnTheClaimsNotTheirOrder(t *testing.T) {
 	}
 	// The two data types swap as well.
 	reordered["main.yammm"] = strings.Replace(reordered["main.yammm"],
-		"type Region = String\ntype Tags = List<Enum[\"a-b\", \"a_b\", \"c\"]>",
-		"type Tags = List<Enum[\"a-b\", \"a_b\", \"c\"]>\ntype Region = String", 1)
+		"type Uri = String\ntype Tags = List<Enum[\"a-b\", \"a_b\", \"c\"]>",
+		"type Tags = List<Enum[\"a-b\", \"a_b\", \"c\"]>\ntype Uri = String", 1)
 	s2, second := generateSources(t, reordered)
 	if h1, h2 := schema.StructuralHash(s1), schema.StructuralHash(s2); h1 != h2 {
 		t.Fatalf("the reorder moved the hash: %s, %s", h1, h2)

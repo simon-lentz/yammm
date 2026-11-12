@@ -469,6 +469,8 @@ type Person {
 }
 ```
 
+A schema's types and data types share one namespace: a schema declares a name once, as a type or as a [data type alias](#data-type-aliases). A second declaration of a name, of either kind, is `E_DUPLICATE_TYPE` at that declaration. A name an import brings is another schema's: a reference reaches it through the import's alias, so it never meets a local name.
+
 ### Type Identity
 
 A type's identity is the pair (schema source, type name). Types with the same name from different schemas are distinct — an imported `Person` and a local `Person` are not the same type. This enables:
@@ -538,7 +540,7 @@ Inheritance rules:
 - Properties, associations, and compositions are inherited from parent types
 - Child types may override inherited properties with compatible narrower constraints
 - A part type carries no association, declared or inherited (`E_INVALID_ASSOCIATION_TARGET`)
-- Relationship definitions must be unique after inheritance. Two relations of one kind reaching a type under one field name are an error when their definitions **differ** — a different declared spelling, target, multiplicity, or edge-property set; structurally identical ones are deduplicated keep-first with no diagnostic. An association and a composition that reach one type under one name are caught separately, after both merges, as `E_RELATION_COLLISION` naming both declarations. `E_RELATION_COLLISION` is reported once per collision per affected type: ancestors that merely carry a relation forward do not repeat it, and two ancestors declaring structurally identical rivals are one collision, since a single edit to the surviving declaration resolves both. The diagnostic's related locations name the surviving declaration and every rival
+- Relationship definitions must be unique after inheritance. Two relations of one kind reaching a type under one field name are an error when their definitions **differ** — a different declared spelling, target, multiplicity, or edge-property set; structurally identical ones, at least one of them inherited, are deduplicated keep-first with no diagnostic. Two relations a type declares itself under one name are `E_DUPLICATE_RELATION`, whatever their kinds. An association and a composition that reach one type under one name, at least one of them inherited, are caught separately, after both merges, as `E_RELATION_COLLISION` naming both declarations. Between two definitions of one kind, `E_RELATION_COLLISION` is reported once per collision on each type the two definitions reach, its own or inherited: ancestors that merely carry a relation forward do not repeat it, and two ancestors declaring structurally identical rivals are one collision, since a single edit to the surviving declaration resolves both. Between an association and a composition it is reported on a type that carries both, unless a direct supertype of that type already carries both. Within one kind the diagnostic's related locations name the surviving declaration and one group of identical rivals; across the two kinds they name the association and the composition. A relation that reaches a type with a definition whose target did not resolve, or that holds an edge property of unknown type, is not judged on that type: the cause is already reported, and the definitions of that relation kind draw no `E_RELATION_COLLISION` from one another there, in any order of the `extends` clause.
 
 **One edge per supertype:** An `extends` clause that names one supertype twice declares one edge.
 
@@ -554,10 +556,12 @@ Inheritance rules:
 | --------- | ------ |
 | Child re-declares with narrower constraint | Child's version is used |
 | Inherited property narrows an earlier ancestor's | Narrower version replaces wider |
-| Child re-declares with a constraint that is not a valid narrowing | `E_PROPERTY_CONFLICT` is emitted |
-| Two inherited properties are incompatible | `E_PROPERTY_CONFLICT` is emitted |
+| Child re-declares with a constraint that is not a valid narrowing | `E_PROPERTY_CONFLICT`, unless the property has a definition of unknown type (below) |
+| Two inherited properties are incompatible, and the type does not re-declare the property | `E_PROPERTY_CONFLICT`, unless the property has a definition of unknown type (below) |
 
-`E_PROPERTY_CONFLICT` is reported once per conflict per affected type, so ancestors that merely carry a conflicting property forward do not repeat the diagnostic. The message names the declaration that survived the merge and the first one that clashed with it; the diagnostic's related locations name **every** declaration involved — both the full set that merged into the surviving definition (including declarations absorbed as equal-or-wider, and any that later took over as a narrower survivor) and every declaration on the conflicting side. Resolving the conflict may require editing any of them, so none is omitted. Each subtype that inherits a conflicting combination re-detects and reports it independently.
+`E_PROPERTY_CONFLICT` is reported once per conflict per affected type, so ancestors that merely carry a conflicting property forward do not repeat the diagnostic. The message names the declaration that survived the merge and the first one that clashed with it; the diagnostic's related locations name **every** declaration involved — both the full set that merged into the surviving definition (including declarations absorbed as equal-or-wider, and any that later took over as a narrower survivor) and every declaration on the conflicting side. Resolving the conflict may require editing any of them, so none is omitted. A subtype that inherits a conflicting combination and does not re-declare the property re-detects the conflict and reports it independently, unless the exception below withholds the report.
+
+A property that reaches a type with a definition of unknown type draws no `E_PROPERTY_CONFLICT` on that type. A type is unknown when the parser could not build it (`Vector[0]`) or when it reads a name that did not resolve to a constraint, itself or as a `List` element. Whatever the cause, it is already reported, once. The conflict is withheld in any order of the `extends` clause, because a known type there could make the definitions agree. Only the report is withheld: the merge keeps the definition it would keep, and the property's annotations are judged as for any property. A type the parser reports and still builds, such as `String[5, 1]`, is known and is judged.
 
 **Invariant merging:** Own invariants come first, then those inherited from each direct supertype in declaration order, each supertype contributing the set it has already merged. An invariant's message is its identity, and must not be empty (`E_INVALID_INVARIANT`). A subtype's declaration overrides an inherited one of the same name at any depth — a grandparent's rule cannot reappear past a parent that replaced it. One type may not declare a message twice (`E_DUPLICATE_INVARIANT`), and two inherited definitions of one message must carry the same expression; a disagreement is `E_INVARIANT_CONFLICT`, reported once on the type that inherits them, naming every rival. Expressions are compared structurally, as the structural hash compares them: `n > 1` and `n > 1.0` are different expressions, because an integer and a float literal are different literals. A literal with no value, whose own diagnostic already refuses the source, matches any literal of the kind the source wrote there (a string, an integer, a float or a regular expression), so the definitions of one message conflict only when no value for each such literal makes them all one, whatever order the supertypes are named in. One definition reached through two ancestors merges silently.
 
@@ -975,7 +979,7 @@ type Money = Float[0, _]
 
 Aliases are:
 
-- Declared with an upper-case identifier
+- Declared with an upper-case identifier, in the one namespace a schema's types and data types share: `type Color = String` beside `type Color { ... }` is `E_DUPLICATE_TYPE`
 - Case-preserved: the declared name is canonical (not lowercased internally)
 - Referenced by name in property declarations
 - Not chainable: an alias target must be a built-in, so `type Money = PositiveInt` is a syntax error
@@ -1216,7 +1220,7 @@ Annotations are validated at load, after inheritance linearization. Violations p
 
 Property-level annotations travel with the property they decorate: a subtype that inherits a property unchanged inherits its annotations. Type-level annotations linearize like properties and relations, not like invariants — the subtype's own annotations first, then inherited ones in ancestors-first order, with exact duplicates (same name and argument list) deduplicated keep-first and no override by name. Two `@@index` members differing only in argument list are distinct indexes and both survive.
 
-Annotations **do not survive a property re-declaration.** When a subtype re-declares an inherited property — identically or by narrowing — without re-stating the inherited annotations, those annotations drop from the subtype. The load warns of the drop with `W_ANNOTATION_SHADOWED`, which does not fail it, for an annotation no direct supertype dropped, unless that annotation drew its own diagnostic or the re-declaration drew `E_PROPERTY_CONFLICT`. Re-state the annotations on the re-declaration to keep them.
+Annotations **do not survive a property re-declaration.** When a subtype re-declares an inherited property — identically or by narrowing — without re-stating the inherited annotations, those annotations drop from the subtype. The load warns of the drop with `W_ANNOTATION_SHADOWED`, which does not fail it, for an annotation no direct supertype dropped, unless that annotation drew its own diagnostic or the merge refused the re-declaration: it drew `E_PROPERTY_CONFLICT`, or a definition of unknown type withheld that report. Re-state the annotations on the re-declaration to keep them.
 
 When a subtype does not re-declare an inherited property, its annotations are the **union across its direct supertypes' own resolved views**, independent of `extends` order. Because each supertype's view already reflects that supertype's decisions, this is transitive in the ordinary sense:
 
@@ -1732,7 +1736,7 @@ Codes are stable identifiers for programmatic matching. `diag/code.go` holds the
 
 **Schema** — schema compilation errors:
 
-- `E_DUPLICATE_TYPE` — type name conflicts
+- `E_DUPLICATE_TYPE` — a schema declares one name more than once: two types, two data types, or a type and a data type, which share one namespace. The issue stands at each later declaration and names the first
 - `E_DUPLICATE_SCHEMA` — two schemas in one load declare one name. A schema whose load reported an error takes no name and draws no such report
 - `E_INHERIT_CYCLE` — circular inheritance chain
 - `E_UNKNOWN_TYPE` — unresolvable type reference
@@ -1769,7 +1773,7 @@ Codes are stable identifiers for programmatic matching. `diag/code.go` holds the
 - `E_PATH_ESCAPE` — import path escapes allowed directory
 - `E_IMPORT_NOT_ALLOWED` — imports refused via `WithImportsAllowed(false)`, and by `LoadString`, which takes none
 - `E_DUPLICATE_IMPORT` — the same schema imported multiple times, or two different schemas sharing one alias
-- `E_IMPORT_ALIAS_COLLISION` — import alias collides with local name
+- `E_IMPORT_ALIAS_COLLISION` — an import alias is the name of a type or a data type the schema declares
 
 **Instance** — data parse and validation errors:
 

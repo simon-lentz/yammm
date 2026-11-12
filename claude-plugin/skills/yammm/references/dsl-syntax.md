@@ -245,7 +245,7 @@ type Document {
 
 - A property-level annotation follows the datatype and any `primary`/`required` modifier: `foo String @index` is valid, `foo String @index primary` is a syntax error.
 - Parentheses, when present, hold at least one argument — `@index`, never `@index()`.
-- Annotations do not survive a property re-declaration (identical or narrowing) unless re-stated on the surviving declaration; the load then warns with `W_ANNOTATION_SHADOWED`.
+- Annotations do not survive a property re-declaration (identical or narrowing) unless re-stated on the surviving declaration; the load warns of the drop with `W_ANNOTATION_SHADOWED` when the annotation drew no diagnostic of its own, the merge accepted the re-declaration, and no direct supertype already dropped the annotation.
 
 ---
 

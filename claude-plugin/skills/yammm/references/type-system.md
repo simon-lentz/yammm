@@ -342,7 +342,7 @@ Making a required field optional is widening and not allowed.
 
 ### Relationship Uniqueness
 
-After inheritance, one relation name carries one definition. Two own relations under one name draw `E_DUPLICATE_RELATION`; inherited definitions that differ, or an association and a composition sharing a name, draw `E_RELATION_COLLISION`, reported once on the type that combines them and naming every rival. Identical definitions reached through two ancestors merge silently.
+After inheritance, one relation name carries one definition. Two own relations under one name draw `E_DUPLICATE_RELATION`; inherited definitions of one kind that differ draw `E_RELATION_COLLISION`, as do an association and a composition sharing a name. A collision within one kind is reported on each type the differing definitions reach, its own or inherited; one across the two kinds is reported on a type that carries both, unless a direct supertype of it already carries both. A report within one kind names the surviving definition and one group of identical rivals; one across the two kinds names the association and the composition. Identical definitions reached through two ancestors merge silently. Inherited definitions of one kind draw no collision when one of them has an unresolved target or an edge property of unknown type: that cause is already reported.
 
 ### Extending Imported Types
 

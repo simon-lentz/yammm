@@ -136,6 +136,14 @@ type completer struct {
 	dataIndex       map[string]DataType
 	gate            errorGate // judges this completion by the errors it contributes
 
+	// declared holds the first declaration of each name. A schema's types and
+	// datatypes share one namespace.
+	declared map[string]declaration
+	// displaced holds each name with a declaration refused because the name's
+	// first declaration is of the other kind. A reference that reads the
+	// refused kind is silent: the duplicate is its root cause.
+	displaced map[string]bool
+
 	// unresolvedSupertypeMemo caches [completer.hasUnresolvedSupertype] per type:
 	// the inheritance graph and resolution state are fixed across the phases that
 	// query it (validatePrimaryKeys, validateInvariantExpressions,
@@ -161,9 +169,9 @@ type completer struct {
 	// annotation this same load rejects.
 	diagnosedAnnotations map[Annotation]bool
 
-	// conflictedProperties marks own declarations that drew E_PROPERTY_CONFLICT,
-	// so the shadow warning does not advise editing a declaration the load has
-	// already rejected outright.
+	// conflictedProperties marks own declarations the merge refused, whether
+	// E_PROPERTY_CONFLICT reports the refusal or an unknown type withholds the
+	// report. The shadow warning does not advise editing such a declaration.
 	conflictedProperties map[Property]bool
 
 	// dtStates and dtStack drive [completer.resolveDataType]: each datatype's
@@ -190,6 +198,7 @@ func (c *completer) complete() Schema {
 	// genuine data dependency.
 
 	// Phase 1: Index types and datatypes
+	c.indexDeclarations()
 	c.indexTypes()
 	c.indexDataTypes()
 
@@ -282,22 +291,71 @@ func (c *completer) sealOwnDeclarations() {
 	}
 }
 
-// indexTypes creates Type objects and indexes them by name. A duplicate
-// declaration is reported and skipped — the first declaration is the one
-// kept and indexed — so every duplicate is diagnosed in one pass and
-// downstream phases see one coherent Type per name.
+// declaration is a name's first declaration in a schema.
+type declaration struct {
+	kind  string // "type" or "datatype", as a message writes it
+	index int    // its place in the model's Types or DataTypes
+	span  location.Span
+}
+
+// indexDeclarations records the first declaration of each type and datatype
+// name: the earliest in the source, whatever its kind. Of two declarations at
+// one span, which only a model built by hand holds, the first is the one
+// visited first: a type before a datatype, then the model's order.
+func (c *completer) indexDeclarations() {
+	c.declared = make(map[string]declaration, len(c.model.Types)+len(c.model.DataTypes))
+	c.displaced = make(map[string]bool)
+	declare := func(kind, name string, index int, span location.Span) {
+		if first, ok := c.declared[name]; ok && location.Compare(first.span, span) <= 0 {
+			return
+		}
+		c.declared[name] = declaration{kind: kind, index: index, span: span}
+	}
+	for i, td := range c.model.Types {
+		if td != nil {
+			declare("type", td.Name, i, td.Span)
+		}
+	}
+	for i, dd := range c.model.DataTypes {
+		if dd != nil {
+			declare("datatype", dd.Name, i, dd.Span)
+		}
+	}
+}
+
+// redeclared reports whether the declaration of name at index of its kind's
+// list is not the name's first one. It reports a later one as a duplicate, and
+// records the name as displaced when the first is of the other kind.
+func (c *completer) redeclared(kind, name string, index int, span location.Span) bool {
+	first := c.declared[name]
+	if first.kind == kind && first.index == index {
+		return false
+	}
+	related := []location.RelatedInfo{{Span: first.span, Message: "first defined here"}}
+	if first.kind == kind {
+		c.errorfRelated(span, diag.E_DUPLICATE_TYPE, related,
+			"%s %q is defined multiple times", kind, name)
+		return true
+	}
+	c.errorfRelated(span, diag.E_DUPLICATE_TYPE, related,
+		"%s %q is defined multiple times; the name is first defined as a %s", kind, name, first.kind)
+	c.displaced[name] = true
+	return true
+}
+
+// indexTypes creates Type objects and indexes them by name. A declaration
+// that is not its name's first is reported and skipped, so every duplicate
+// is diagnosed in one pass and downstream phases see one declaration per
+// name.
 func (c *completer) indexTypes() {
 	types := make([]Type, 0, len(c.model.Types))
 
-	for _, td := range c.model.Types {
+	for i, td := range c.model.Types {
 		if td == nil {
 			continue
 		}
 
-		if existing, dup := c.typeIndex[td.Name]; dup {
-			c.errorf(td.Span, diag.E_DUPLICATE_TYPE,
-				"type %q is defined multiple times; first defined at %s",
-				td.Name, existing.Span().Start)
+		if c.redeclared("type", td.Name, i, td.Span) {
 			continue
 		}
 
@@ -346,21 +404,17 @@ func (c *completer) indexTypes() {
 	c.schema.setTypes(types)
 }
 
-// indexDataTypes creates DataType objects and indexes them by name. A
-// duplicate declaration is reported and skipped, keep-first, like
-// indexTypes.
+// indexDataTypes creates DataType objects and indexes them by name. It skips
+// a later declaration as indexTypes does.
 func (c *completer) indexDataTypes() {
 	dataTypes := make([]DataType, 0, len(c.model.DataTypes))
 
-	for _, dd := range c.model.DataTypes {
+	for i, dd := range c.model.DataTypes {
 		if dd == nil {
 			continue
 		}
 
-		if existing, dup := c.dataIndex[dd.Name]; dup {
-			c.errorf(dd.Span, diag.E_DUPLICATE_TYPE,
-				"datatype %q is defined multiple times; first defined at %s",
-				dd.Name, existing.Span().Start)
+		if c.redeclared("datatype", dd.Name, i, dd.Span) {
 			continue
 		}
 
@@ -409,20 +463,13 @@ func (c *completer) indexImports() {
 		}
 		aliasIndex[id.Alias] = id
 
-		// Check for alias collision with local type or datatype names.
-		// Both indexes are consulted: a qualified reference's qualifier is
-		// ambiguous against either kind of local declaration. The deferred entry
+		// An alias may not be a local type's or datatype's name: a qualified
+		// reference's qualifier would be ambiguous against it. The deferred entry
 		// overwrites any resolution the loader made, so a reference through the
 		// alias cannot silently resolve against the rejected import.
-		if _, collides := c.typeIndex[id.Alias]; collides {
+		if local, collides := c.declared[id.Alias]; collides {
 			c.errorf(id.Span, diag.E_IMPORT_ALIAS_COLLISION,
-				"import alias %q collides with local type name", id.Alias)
-			c.resolvedImports[id.Alias] = importResolution{deferred: true}
-			continue
-		}
-		if _, collides := c.dataIndex[id.Alias]; collides {
-			c.errorf(id.Span, diag.E_IMPORT_ALIAS_COLLISION,
-				"import alias %q collides with local datatype name", id.Alias)
+				"import alias %q collides with local %s name", id.Alias, local.kind)
 			c.resolvedImports[id.Alias] = importResolution{deferred: true}
 			continue
 		}
@@ -762,15 +809,18 @@ func (c *completer) resolveConstraint(con Constraint, span location.Span) (Const
 
 // resolveReference resolves one datatype name to an alias carrying the
 // datatype's resolved constraint. An unknown name is E_UNKNOWN_TYPE at the
-// reference, and a declared-but-failed import defers. A local datatype that
-// failed was reported by its own resolution; the reference carries the
-// constraint it declares, so a later phase still judges its shape (a List
-// datatype is refused on an edge whether or not its element resolved).
+// reference, and a declared-but-failed import and a displaced name defer. A
+// local datatype that failed was reported by its own resolution; the reference
+// carries the constraint it declares, so a later phase still judges its shape
+// (a List datatype is refused on an edge whether or not its element resolved).
 func (c *completer) resolveReference(dataTypeName string, span location.Span) (Constraint, bool) {
 	qualifier, name, _ := referenceParts(dataTypeName)
 	if qualifier == "" {
 		dt, found := c.dataIndex[name]
 		if !found {
+			if c.displaced[name] {
+				return nil, false
+			}
 			c.errorf(span, diag.E_UNKNOWN_TYPE,
 				"unknown type %q in datatype reference; a property type must be a built-in or a declared datatype",
 				dataTypeName)
@@ -832,14 +882,16 @@ func (c *completer) classifyQualifier(qualifier string) (aliasResolution, locati
 	}
 }
 
-// referenceDeferred reports whether a qualified reference's failure to resolve
-// stays silent: only a declared-but-failed import defers, its root cause being
-// already reported. An undeclared qualifier is unknown.
-func (c *completer) referenceDeferred(qualifier string) bool {
-	if qualifier == "" {
-		return false
+// referenceDeferred reports whether a type reference's failure to resolve stays
+// silent, its root cause being already reported: a local name that is
+// displaced, or a qualifier that names a declared-but-failed import. An
+// undeclared qualifier is unknown. A caller asks only once the reference has
+// failed to resolve, so a displaced name's refused declaration is the type.
+func (c *completer) referenceDeferred(ref TypeRef) bool {
+	if ref.Qualifier() == "" {
+		return c.displaced[ref.Name()]
 	}
-	state, _ := c.classifyQualifier(qualifier)
+	state, _ := c.classifyQualifier(ref.Qualifier())
 	return state == aliasDeferred
 }
 
@@ -852,8 +904,8 @@ func (c *completer) referenceDeferred(qualifier string) bool {
 //
 //   - reported — an undeclared local name, or a qualifier naming no declared
 //     import, draws E_UNKNOWN_TYPE at the reference;
-//   - silently deferred — a declared-but-failed import, whose failure is the
-//     root cause and already carries its own diagnostic.
+//   - silently deferred — a declared-but-failed import or a displaced name,
+//     whose failure or duplicate is the root cause and carries the diagnostic.
 //
 // Either way the root cause is owned elsewhere, so the type check defers rather
 // than stacking a (usually misleading) E_INVALID_PRIMARY_KEY_TYPE on top of a
@@ -1039,9 +1091,9 @@ func (c *completer) validatePrimaryKeys() {
 		if hasDeclaredPrimary(t) {
 			continue
 		}
-		// Skip a type whose supertype chain has an unresolved link (a deferred
-		// cross-schema reference, or an unknown type already reported elsewhere): its primary key may be inherited from an ancestor
-		// not yet visible, and the unresolved reference already carries its own diagnostic.
+		// Skip a type whose supertype chain has an unresolved link: its primary
+		// key may be inherited from an ancestor not yet visible, and the link's
+		// root cause is already reported.
 		if c.hasUnresolvedSupertype(t) {
 			continue
 		}
@@ -1072,8 +1124,8 @@ func hasDeclaredPrimary(t Type) bool {
 
 // hasUnresolvedSupertype reports whether t, or any type in its declared-inheritance
 // closure, names an `extends` supertype that does not resolve at this point in
-// completion — a deferred cross-schema reference, or an unknown type already reported
-// elsewhere. The walk is transitive, not just over t's
+// completion — a deferred cross-schema reference, a displaced name, or an unknown
+// type already reported elsewhere. The walk is transitive, not just over t's
 // direct supertypes: a primary key may be inherited through a local parent that itself
 // extends an unresolved root, so the presence check must skip the whole chain, not only
 // types that declare the unresolved reference directly. Recursion follows local

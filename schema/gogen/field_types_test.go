@@ -263,8 +263,8 @@ func TestMarshal_EveryReservedNameIsAClaimant(t *testing.T) {
 func TestMarshal_OneSchemaSharingACandidateGenerates(t *testing.T) {
 	t.Parallel()
 
-	got := marshalString(t, "schema \"geo\"\n\ntype Region = String\n\ntype Region {\n\tid String primary\n\tr Region\n}\n")
-	assertHolds(t, got, []string{"type DataType_geo__Region string", "type Type_geo__Region struct", "R  *DataType_geo__Region "}, nil)
+	got := marshalString(t, "schema \"geo\"\n\ntype Uri = String\n\ntype URI {\n\tid String primary\n\tr Uri\n}\n")
+	assertHolds(t, got, []string{"type DataType_geo__Uri string", "type Type_geo__URI struct", "R  *DataType_geo__Uri "}, nil)
 }
 
 // TestMarshal_WithInitialismsIsScopedToItsCall pins that an injected acronym
@@ -459,4 +459,18 @@ type TagsElement {
 			"type Tags []Element_p__Tags",
 		}, []string{"type TagsElement string", "type TagsElement struct"})
 	})
+}
+
+// TestMarshal_ADatatypeBesideAnImportedTypeOfItsNameKeepsItsOwnGoName pins that a
+// property of a local datatype takes the datatype's Go name when an imported
+// schema declares a type of that name.
+func TestMarshal_ADatatypeBesideAnImportedTypeOfItsNameKeepsItsOwnGoName(t *testing.T) {
+	t.Parallel()
+
+	_, got := generateSources(t, map[string]string{
+		"main.yammm": "schema \"geo\"\n\nimport \"./lib\" as lib\n\ntype Region = String\n\ntype Place {\n\tid String primary\n\tr Region\n\t--> WITHIN (one) lib.Region\n}\n",
+		"lib.yammm":  "schema \"lib\"\n\ntype Region {\n\tregion_id String primary\n}\n",
+	})
+	assertHolds(t, string(got), []string{"type DataType_geo__Region string", "type Type_lib__Region struct", "R      *DataType_geo__Region "},
+		[]string{"R      *Type_lib__Region "})
 }

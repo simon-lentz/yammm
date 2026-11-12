@@ -201,8 +201,8 @@
 //	Element_<schema>__<DataType>                            a List element enum
 //	Const_<its enum's exact spelling>__<value>              an enum value constant
 //
-// So Url and URL in schema geo are Type_geo__Url and Type_geo__URL, a type and a
-// data type Region are Type_geo__Region and DataType_geo__Region, and the values
+// So Url and URL in schema geo are Type_geo__Url and Type_geo__URL, a data type
+// Uri and a type URI are DataType_geo__Uri and Type_geo__URI, and the values
 // "a-b" and "a_b" of data type Level are Const_DataType_geo__Level__a_2D_b and
 // Const_DataType_geo__Level__a_5F_b.
 //

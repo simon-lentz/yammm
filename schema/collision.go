@@ -165,8 +165,8 @@ func (c *completer) checkPropertyRelationCollisions(t Type) {
 // checkRelationCollisions detects relation name collisions after normalization.
 // checkRelationCollisions reports an association and a composition that reach
 // the merged view under one name. Within one kind the merge already settled a
-// shared name (keep-first, or E_RELATION_COLLISION when the definitions
-// differ), and two own relations under one name are E_DUPLICATE_RELATION, so
+// shared name (keep-first, with E_RELATION_COLLISION when definitions that
+// are known differ), and two own relations under one name are E_DUPLICATE_RELATION, so
 // the only clash left to find is across the two kinds — inherited from
 // different ancestors, or one own and one inherited.
 func (c *completer) checkRelationCollisions(t Type) {
@@ -284,8 +284,9 @@ func (c *completer) validateAssociationTargets() {
 // resolves, records the target's semantic identity on the relation.
 // resolveRelationTargets binds every own relation to its target's identity
 // (phase 3c). A target that does not exist is reported here once; a target
-// behind an import the loader could not resolve is deferred, since the import
-// failure already carries the root cause.
+// behind an import the loader could not resolve, or one whose type declaration
+// is displaced, is deferred, since the import failure or the duplicate already
+// carries the root cause.
 func (c *completer) resolveRelationTargets() {
 	for _, t := range c.schema.types {
 		for r := range t.Associations() {
@@ -300,7 +301,7 @@ func (c *completer) resolveRelationTargets() {
 func (c *completer) resolveRelationTarget(r Relation, kind string) {
 	target := c.resolveTypeRef(r.Target())
 	if target.IsZero() {
-		if c.referenceDeferred(r.Target().Qualifier()) {
+		if c.referenceDeferred(r.Target()) {
 			return
 		}
 		c.errorf(r.Span(), diag.E_UNKNOWN_TYPE,

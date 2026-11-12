@@ -801,9 +801,9 @@ func (c AliasConstraint) String() string {
 //
 // That same-datatype case is not a special case, it is what keeps Equal
 // REFLEXIVE. Callers treat Equal as an equivalence relation, and inheritance
-// merging is one of them: a property whose constraint is not equal to itself is
-// re-detected as conflicting with itself, yielding a diagnostic that names one
-// declaration as both sides of its own conflict, once per carrying ancestor.
+// merging is one of them: were such a constraint not equal to itself, a
+// re-declaration that reads the same datatype would be judged a conflict and
+// marked as refused, and would decide nothing about the annotations it inherits.
 //
 // This method is cycle-safe: it uses ResolveAlias() to unwrap alias chains before
 // delegating to the terminal constraint's Equal method.

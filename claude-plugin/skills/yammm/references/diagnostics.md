@@ -54,10 +54,12 @@ Each issue contains:
 
 One load pass reports every *independent* error in a schema and its import closure -- each exactly once:
 
-- **All import failures are reported**, each at its own declaration, save `E_IMPORT_NOT_ALLOWED`, one issue at the first import; a broken import does not hide its siblings or the schema's own semantic errors. A shared broken import (diamond graphs) is compiled once: its own errors appear once, plus one `E_UPSTREAM_FAIL` per import declaration that names it.
+- **All import failures are reported**, each at its own declaration, save `E_IMPORT_NOT_ALLOWED`, one issue at the first import the parser keeps; a broken import does not hide its siblings, and the schema's own types and datatypes are still judged: a check of one is withheld only when it reads a reference through the failed import, whether the declaration's own, one in a member or a datatype it reads, or one in a type's `extends` chain. A shared broken import (diamond graphs) is compiled once: its own errors appear once, plus one `E_UPSTREAM_FAIL` per import declaration that names it.
 - **References through a failed import are deferred, not re-blamed.** The import failure is the single root-cause diagnostic; `extends`, relation targets, and property datatypes reached through that alias stay silent until the import is fixed. A qualifier that names no declared import at all is a genuine `E_UNKNOWN_TYPE`.
 - **An alias binds once (keep-first).** A repeated alias is reported once (`E_DUPLICATE_IMPORT`) and the later declaration is inert; references resolve against the first binding.
-- **`LoadString` / markdown blocks**: the imports-not-allowed rejection (`E_IMPORT_NOT_ALLOWED`) does not suppress the source's other diagnostics.
+- **A name binds once (keep-first).** Types and datatypes share one namespace. Each later declaration of a name draws `E_DUPLICATE_TYPE` and is not completed: until the duplicate is gone its body draws no issue but the parser's. A reference that reads a declaration refused because the other kind holds the name stays silent.
+- **The inheritance merge reports no conflict on a member of unknown type.** A property or edge property has an unknown type when the parser could not build the type or when the type reads a name that did not resolve; that cause is already reported, once. On each type a property reaches with such a definition, the property's definitions draw no `E_PROPERTY_CONFLICT`. On each type a relation reaches with an unresolved target or such an edge property, the definitions of that relation kind draw no `E_RELATION_COLLISION`. The answer is the same in any order of the `extends` clause.
+- **`LoadString` / markdown blocks**: the imports-not-allowed rejection (`E_IMPORT_NOT_ALLOWED`) does not end the analysis. The rejected aliases are deferred as a failed import's is, and the source's other diagnostics are reported by the same rule.
 - **Truncation is visible**: one load stores at most 100 issues. Past that cap, the CLI's text output appends a dropped-issues note, and the JSON output carries `limitReached` / `droppedCount`.
 
 The all-or-nothing contract is unchanged: any error still yields a zero schema.
@@ -126,7 +128,7 @@ The all-or-nothing contract is unchanged: any error still yields a zero schema.
 | `E_UPSTREAM_FAIL` | Imported schema failed to compile |
 | `E_PROPERTY_CONFLICT` | Conflicting property definitions from inheritance |
 | `E_UNKNOWN_TYPE` | Referenced type or datatype not found (`extends`, relation target, a property datatype, or a datatype declaration's reference such as a `List` element) |
-| `E_DUPLICATE_TYPE` | A type declared more than once, or a datatype declared more than once |
+| `E_DUPLICATE_TYPE` | A name declared more than once in one schema. Types and datatypes share one namespace, so a type and a datatype of one name draw it too. The issue stands at each later declaration and names the first |
 | `E_DUPLICATE_SCHEMA` | Two schemas in one load declare one name, and both compile with no error. A schema with an error takes no name |
 | `E_RELATION_COLLISION` | A type carries two relation definitions under one field name that do not merge: an inherited one that differs from another it carries, or an association and a composition (two relations one type declares under one exact name are `E_DUPLICATE_RELATION`) |
 | `E_LIST_ON_EDGE` | List type used in relationship property |

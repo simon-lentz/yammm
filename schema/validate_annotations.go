@@ -653,8 +653,9 @@ func validateIndexType(c *completer, t Type, _ Property, a Annotation) {
 //     here would blame the annotation for the type's failure and describe a
 //     property that plainly declares a type as "missing type".
 //   - A constraint bottoming out in an unresolved alias: a deferred import, a
-//     reference refused with E_UNKNOWN_TYPE, or a reference to a datatype whose
-//     own constraint the schema parser could not build, each already reported.
+//     displaced name, a reference refused with E_UNKNOWN_TYPE, or a reference
+//     to a datatype whose own constraint the schema parser could not build. The
+//     root cause of each is already reported.
 //
 // The second test is shared with the primary-key rule via
 // [completer.primaryKeyTypeDeferred]. That predicate is named and documented for

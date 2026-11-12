@@ -218,8 +218,11 @@ One load pass reports every *independent* error in the schema and its import
 closure — each exactly once:
 
 - **Import failures accumulate.** Every unresolvable or failed import is
-  reported at its own declaration; one broken import neither hides its
-  siblings nor suppresses the source's own semantic diagnostics. A shared
+  reported at its own declaration; one broken import does not hide its
+  siblings, and the source's own types and data types are still judged: a
+  check of one is withheld only when it reads a reference through the failed
+  import, whether the declaration's own, one in a member or a data type it
+  reads, or one in a type's `extends` chain. A shared
   broken import in a diamond-shaped graph is compiled once — its own
   diagnostics appear once, and each importer adds one `E_UPSTREAM_FAIL` at
   its own declaration.
@@ -237,6 +240,22 @@ closure — each exactly once:
   with `E_DUPLICATE_IMPORT` and stays inert — not loaded, not resolved,
   not wired. References through the alias resolve against the kept first
   binding.
+- **A name binds once (keep-first).** A schema's types and data types share
+  one namespace, and the first declaration of a name is the one that stands.
+  Each later declaration draws `E_DUPLICATE_TYPE`, with the
+  first declaration as its related span, and is not completed: until the
+  duplicate is gone its body draws no issue but the parser's. A reference that wants a
+  declaration refused because a declaration of the other kind holds the name
+  resolves to nothing and is skipped silently.
+- **The inheritance merge reports no conflict on a member of unknown type.**
+  A property or an edge property has an unknown type when the parser could not
+  build the type or when the type reads a name that did not resolve. That
+  cause is already reported, once. On each type a property reaches with such a
+  definition, the property's definitions draw no `E_PROPERTY_CONFLICT`. On
+  each type a relation reaches with an unresolved target or such an edge
+  property, the definitions of that relation kind draw no
+  `E_RELATION_COLLISION`. The answer is the same in any order of the `extends`
+  clause.
 - **The all-or-nothing contract is unchanged.** Any error still yields a
   zero `Schema`; completeness changes what `result` carries, not the
   contract.
@@ -244,9 +263,9 @@ closure — each exactly once:
 `LoadString` — and any load with `WithImportsAllowed(false)` — rejects import
 declarations with a single `E_IMPORT_NOT_ALLOWED`, save an import whose path
 derives a reserved alias, which the parser drops with `E_INVALID_ALIAS`. The
-rejection does not suppress the source's other findings: the
-remaining diagnostics are reported alongside it, with references through
-the rejected aliases deferred. Rejected imports are never probed or
+rejection does not end the analysis: the rejected aliases are deferred as a
+failed import's is, and the source's other diagnostics are reported
+alongside it by the rule for a failed import above. Rejected imports are never probed or
 resolved.
 
 #### Issue limit
@@ -1418,7 +1437,7 @@ Every top-level declaration shares one Go package-block namespace. A schema name
 | List element enum | `Element_<schema>__<DataType>` |
 | enum value constant | `Const_<its enum's exact spelling>__<value>` |
 
-Two schemas' `Region` are `Type_geo__Region` and `Type_common__Region`; a type and a data type `Region` of one schema are `Type_geo__Region` and `DataType_geo__Region`; `Url` and `URL`, which the initialisms map to one name, are `Type_geo__Url` and `Type_geo__URL`; a type named `Graph` is `Type_geo__Graph`. A bare spelling either starts `EDGE_` or holds `_` only after a digit or an `X` and before a digit, and an exact spelling holds `_` directly after its word, so no bare spelling is an exact one; and an exact spelling reads back to one family and one identity. A name therefore depends on the set of claims, never on declaration or import order, and adding a declaration never hands a name to another entity: it can only move a claimant from its bare spelling to its exact one.
+Two schemas' `Region` are `Type_geo__Region` and `Type_common__Region`; `Url` and `URL`, which the initialisms map to one name, are `Type_geo__Url` and `Type_geo__URL`, and a data type `Uri` and a type `URI` are `DataType_geo__Uri` and `Type_geo__URI`; a type named `Graph` is `Type_geo__Graph`. A bare spelling either starts `EDGE_` or holds `_` only after a digit or an `X` and before a digit, and an exact spelling holds `_` directly after its word, so no bare spelling is an exact one; and an exact spelling reads back to one family and one identity. A name therefore depends on the set of claims, never on declaration or import order, and adding a declaration never hands a name to another entity: it can only move a claimant from its bare spelling to its exact one.
 
 ### Imports
 

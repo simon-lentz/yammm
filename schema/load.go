@@ -334,9 +334,9 @@ func Load(ctx context.Context, path string, opts ...LoadOption) (Schema, diag.Re
 // Imports are not supported when loading from a string.
 // The loader always disallows imports for string sources, regardless of other options.
 // The rejection (a single E_IMPORT_NOT_ALLOWED at the first import
-// declaration the parser keeps, which drops one with a reserved alias) does not suppress the source's other diagnostics: analysis
-// continues with the rejected aliases deferred, and the rejected imports
-// are never probed or resolved.
+// declaration the parser keeps, which drops one with a reserved alias) does not end the analysis: it
+// continues with the rejected aliases deferred as a failed import's is, and
+// the rejected imports are never probed or resolved.
 //
 // ctx must not be nil. Passing nil will panic.
 // A non-OK result with a zero Schema indicates failure. result.HasFatal() reports

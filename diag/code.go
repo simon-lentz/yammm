@@ -200,7 +200,8 @@ var (
 	// E_UNKNOWN_TYPE indicates a referenced type cannot be found.
 	E_UNKNOWN_TYPE = NewCode("E_UNKNOWN_TYPE", CategorySchema)
 
-	// E_DUPLICATE_TYPE indicates a type name is defined multiple times.
+	// E_DUPLICATE_TYPE indicates a schema declares one name more than once. A
+	// schema's types and datatypes share one namespace.
 	E_DUPLICATE_TYPE = NewCode("E_DUPLICATE_TYPE", CategorySchema)
 
 	// E_DUPLICATE_SCHEMA indicates two schemas of one load that declare one name.
@@ -295,7 +296,7 @@ var (
 	E_DUPLICATE_IMPORT = NewCode("E_DUPLICATE_IMPORT", CategoryImport)
 
 	// E_IMPORT_ALIAS_COLLISION indicates an import alias collides with a local
-	// type name.
+	// type or datatype name.
 	E_IMPORT_ALIAS_COLLISION = NewCode("E_IMPORT_ALIAS_COLLISION", CategoryImport)
 )
 

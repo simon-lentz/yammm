@@ -155,15 +155,16 @@ func (c *completer) completeTypes() {
 		linearize = func(ref TypeRef) {
 			resolved := c.resolveTypeRef(ref)
 			if resolved.IsZero() {
-				// Defer a qualified ref when its qualifier names an import the
-				// loader saw but could not resolve — the import failure already
-				// carries the root-cause diagnostic, and blaming every reference
-				// through the alias would bury it in noise. With a resolved
+				// Defer a displaced local name, and a qualified ref when its
+				// qualifier names an import the loader saw but could not resolve:
+				// the duplicate or the import failure already carries the
+				// root-cause diagnostic, and blaming every reference to it would
+				// bury it in noise. With a resolved
 				// import, a qualified supertype that still does not resolve is a genuine error (an undefined alias, or a type absent
 				// from the imported schema), mirroring validateRelationTarget;
 				// silently dropping it would strip the child of every inherited
 				// member with no diagnostic.
-				if c.referenceDeferred(ref.Qualifier()) {
+				if c.referenceDeferred(ref) {
 					return
 				}
 				c.errorf(t.Span(), diag.E_UNKNOWN_TYPE,
@@ -224,8 +225,8 @@ func (c *completer) completeTypes() {
 		for i, p := range allProps {
 			if p.IsPrimaryKey() {
 				// A primary whose type bottoms out in an already-diagnosed
-				// unresolvable alias (an unknown name, a deferred import)
-				// is kept as a key without the type check: the declaration
+				// unresolvable alias (an unknown or displaced name, a deferred
+				// import) is kept as a key without the type check: the declaration
 				// IS a primary key — only its type is unknowable here — and
 				// the root cause carries its own diagnostic.
 				if c.primaryKeyTypeDeferred(p.Constraint()) {
@@ -361,8 +362,9 @@ type annotationSource struct {
 // mergeProperties merges own properties with inherited properties.
 // Own properties come first, then inherited (left-to-right supertype order).
 // Identical properties from different ancestors are deduplicated (keep-first).
-// When a child re-declares a parent property, constraint narrowing is attempted:
-// the child's version is accepted if it narrows the parent's (via CanNarrowFrom).
+// A child's re-declaration of a parent property is accepted if it narrows the
+// parent's (via CanNarrowFrom). A property that holds a definition of unknown
+// type ([typeUnknown]) runs the same walk, and its conflict is not reported.
 //
 // The walk decides STRUCTURE only — which Property survives under each name.
 // Annotations are settled afterwards by [completer.resolveInheritedAnnotations],
@@ -422,6 +424,11 @@ func (c *completer) mergeProperties(t Type, supers []ResolvedTypeRef) []Property
 		mergedInto[name] = chain
 	}
 
+	// unjudged names each property that reached t with a definition of unknown
+	// type. No conflict is reported for it on t, in whatever order its
+	// definitions arrive, because a known type there could make them agree.
+	var unjudged map[string]bool
+
 	// Add inherited properties in linearized order
 	for _, superRef := range supers {
 		superType := c.resolveTypeID(superRef.ID())
@@ -432,6 +439,15 @@ func (c *completer) mergeProperties(t Type, supers []ResolvedTypeRef) []Property
 				seen[p.Name()] = p
 				result = append(result, p)
 				continue
+			}
+
+			// The cause of a type that is not known is already reported. The
+			// walk goes on as for any definition; the emission passes the name.
+			if typeUnknown(p) || typeUnknown(existing) {
+				if unjudged == nil {
+					unjudged = make(map[string]bool)
+				}
+				unjudged[p.Name()] = true
 			}
 
 			switch {
@@ -490,6 +506,9 @@ func (c *completer) mergeProperties(t Type, supers []ResolvedTypeRef) []Property
 	// declaration on both sides, which for a chain is more than the two the
 	// message can carry.
 	for _, cl := range clashes {
+		if unjudged[cl.name] {
+			continue
+		}
 		survivors := mergedInto[cl.name]
 		final := seen[cl.name].Origin()
 		first := cl.incomers[0]
@@ -989,8 +1008,9 @@ func (c *completer) recordShadowedAnnotations(own Property, supers []Type) map[s
 // establishes which annotations are well-formed, known, correctly placed, and
 // eligible for their target. Any annotation that drew a diagnostic of its own,
 // or whose argument list failed to parse, is therefore skipped here — as is any
-// re-declaration that itself drew E_PROPERTY_CONFLICT, since a rejected
-// declaration cannot usefully be told to re-state anything.
+// re-declaration the merge refused, whether or not E_PROPERTY_CONFLICT reports
+// the refusal, since a rejected declaration cannot usefully be told to re-state
+// anything.
 //
 // Re-statement is matched by NAME, so the advice stays followable even when two
 // supertypes contributed the same annotation name with different arguments:
@@ -1018,7 +1038,7 @@ func (c *completer) flushShadowedAnnotations() {
 			continue // The annotation is not usable; advising its re-statement would mislead.
 		}
 		if c.conflictedProperties[s.own] {
-			continue // The re-declaration itself drew E_PROPERTY_CONFLICT; nothing to advise.
+			continue // The merge refused the re-declaration; nothing to advise.
 		}
 		key := shadowGroupKey{own: s.own, from: s.from}
 		g, ok := index[key]
@@ -1266,10 +1286,33 @@ func (c *completer) mergeAnnotations(t Type, supers []ResolvedTypeRef) []Annotat
 	return result
 }
 
+// typeUnknown reports whether p's type is not known: the schema parser could
+// not build it, or it reads a name that did not resolve to a constraint, itself
+// or in a List element. The cause of each is already reported.
+func typeUnknown(p Property) bool {
+	constraint := p.Constraint()
+	return constraint == nil || !constraint.IsResolved()
+}
+
+// relationUnknown reports whether r's target did not resolve or r holds an edge
+// property of unknown type. The cause of each is already reported.
+func relationUnknown(r Relation) bool {
+	if r.TargetID().IsZero() {
+		return true
+	}
+	for p := range r.Properties() {
+		if typeUnknown(p) {
+			return true
+		}
+	}
+	return false
+}
+
 // mergeRelations merges own relations with inherited relations.
 // Similar to mergeProperties but for relations of a specific kind.
-// Reports E_RELATION_COLLISION when an inherited relation conflicts
-// with an existing relation (own or from another ancestor).
+// An inherited relation that conflicts with an existing relation (own or
+// from another ancestor) draws E_RELATION_COLLISION, unless a definition of
+// the relation is not known ([relationUnknown]).
 func (c *completer) mergeRelations(t Type, own []Relation, supers []ResolvedTypeRef, kind RelationKind) []Relation {
 	result := own
 	seen := make(map[string]Relation)
@@ -1293,6 +1336,11 @@ func (c *completer) mergeRelations(t Type, own []Relation, supers []ResolvedType
 	// oversight.
 	var collisions []*relationClash
 
+	// unjudged names each relation that reached t with a definition that is not
+	// known. No collision is reported for it on t, in whatever order its
+	// definitions arrive.
+	var unjudged map[string]bool
+
 	for _, superRef := range supers {
 		superType := c.resolveTypeID(superRef.ID())
 
@@ -1305,9 +1353,13 @@ func (c *completer) mergeRelations(t Type, own []Relation, supers []ResolvedType
 
 		for _, r := range inherited {
 			if existing, ok := seen[r.FieldName()]; ok {
-				// An unresolved target already carries its own diagnostic; a
-				// collision report on top of it would blame the same line twice.
-				if existing.TargetID().IsZero() || r.TargetID().IsZero() {
+				// The cause of a relation that is not known is already reported,
+				// and no definition can be judged against it.
+				if relationUnknown(existing) || relationUnknown(r) {
+					if unjudged == nil {
+						unjudged = make(map[string]bool)
+					}
+					unjudged[r.FieldName()] = true
 					continue
 				}
 				if !existing.Equal(r) {
@@ -1339,6 +1391,9 @@ func (c *completer) mergeRelations(t Type, own []Relation, supers []ResolvedType
 	// because the report points at all of them; naming just the first would
 	// leave the user to fix what they were shown and meet the rest on reload.
 	for _, cl := range collisions {
+		if unjudged[cl.survivor.FieldName()] {
+			continue
+		}
 		related := make([]location.RelatedInfo, 0, len(cl.rivals)+1)
 		related = append(related, location.RelatedInfo{
 			Span:    cl.survivor.Span(),
