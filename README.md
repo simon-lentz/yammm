@@ -318,7 +318,7 @@ type Document {
 | `String[minLen, maxLen]` | UTF-8 string with optional length bounds |
 | `Enum["a", "b", ...]` | Fixed set of string values |
 | `Pattern["regex"]` | String matching a regular expression |
-| `Timestamp["format"]` | Date-time (default: RFC3339) |
+| `Timestamp` | Date-time in RFC 3339 |
 | `Date` | Date without time component |
 | `UUID` | Universally unique identifier |
 | `Vector[dimensions]` | Fixed-dimension numeric vector |

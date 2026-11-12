@@ -3,15 +3,12 @@ package gogen_test
 import (
 	"bytes"
 	"context"
-	"fmt"
 	"go/ast"
 	"go/importer"
 	"go/parser"
 	"go/token"
 	"go/types"
-	"maps"
 	"path/filepath"
-	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -265,10 +262,10 @@ func TestMarshal_TypeChecks(t *testing.T) {
 	}
 }
 
-// TestMarshal_TemporalTypes pins the shape a Date or custom-layout Timestamp
-// takes in every position: a generated struct embedding time.Time with a
-// JSON codec that speaks the stored string form, so a value an instance
-// document holds decodes into the generated field.
+// TestMarshal_TemporalTypes pins the shape a Date and a Timestamp take in every
+// position: a Date is a generated struct embedding time.Time with a JSON codec
+// that speaks YYYY-MM-DD, and a Timestamp is time.Time, whose own codec speaks
+// the stored text.
 func TestMarshal_TemporalTypes(t *testing.T) {
 	got, err := gogen.Marshal(loadSchema(t, "temporal"))
 	if err != nil {
@@ -279,47 +276,50 @@ func TestMarshal_TemporalTypes(t *testing.T) {
 		"type Date struct{ time.Time }",
 		"func (v Date) MarshalJSON() ([]byte, error)",
 		"func (v *Date) UnmarshalJSON(b []byte) error",
-		"type Timestamp20060102150405 struct{ time.Time }",
-		"type Timestamp20060102T150405000000000Z0700 struct{ time.Time }",
 		"type Day struct{ time.Time }",
-		"func (v Day) MarshalJSON() ([]byte, error)",
-		"type Wall struct{ time.Time }",
-		"func (v Wall) MarshalJSON() ([]byte, error)",
+		"func (v Day) MarshalJSON() ([]byte, error) { return marshalDate(v.Time) }",
+		"func (v *Day) UnmarshalJSON(b []byte) error { return unmarshalDate(b, &v.Time) }",
 		"type Stamp struct{ time.Time }",
 		"Installed      Date ",
 		"Decommissioned *Date ",
 		"CreatedAt      time.Time ",
-		"SeenWall       *Timestamp20060102150405 ",
-		"SeenAt         Timestamp20060102T150405000000000Z0700 ",
+		"SeenAt         *time.Time ",
 		"Days           []Date ",
-		"Walls          []Timestamp20060102150405 ",
-		"At Timestamp20060102150405 ",
+		"Stamps         []time.Time ",
+		"At time.Time ",
 		"On *Date ",
-		"func marshalTemporal(t time.Time, layout string) ([]byte, error)",
-		"func unmarshalTemporal(b []byte, layout string, dst *time.Time) error",
+		"Since    *time.Time ",
+		"func marshalDate(t time.Time) ([]byte, error)",
+		"func unmarshalDate(b []byte, dst *time.Time) error",
+		"t.Format(time.DateOnly)",
+		"time.Parse(time.DateOnly, s)",
 	} {
 		if !bytes.Contains(got, []byte(want)) {
 			t.Errorf("output missing %q:\n%s", want, got)
 		}
 	}
-	if bytes.Contains(got, []byte("func (v Stamp) MarshalJSON")) {
-		t.Error("a DataType over the default Timestamp layout must not carry its own codec; time.Time's is the stored form")
-	}
-	if n := bytes.Count(got, []byte("type Timestamp20060102150405 struct")); n != 1 {
-		t.Errorf("one layout must yield one type, got %d declarations", n)
+	for _, absent := range []string{
+		"func (v Stamp) MarshalJSON", // time.Time's codec is the stored text
+		"Layout",
+		"layout",
+		"type Timestamp",
+	} {
+		if bytes.Contains(got, []byte(absent)) {
+			t.Errorf("output holds %q:\n%s", absent, got)
+		}
 	}
 }
 
 // TestMarshal_TemporalEdge pins the two positions emitField does not reach
 // through an owning type: a Date primary key in a Where block, and a
-// custom-layout Timestamp on an edge property.
+// Timestamp on an edge property.
 func TestMarshal_TemporalEdge(t *testing.T) {
 	got, err := gogen.Marshal(loadSchema(t, "temporal_edge"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	for _, want := range []string{
-		"type EDGE_Log_on_Day struct {\n\tTargetOn Date                    `json:\"_target_on\"`\n\tAt       Timestamp20060102150405 `json:\"at\"`\n}",
+		"type EDGE_Log_on_Day struct {\n\tTargetOn Date      `json:\"_target_on\"`\n\tAt       time.Time `json:\"at\"`\n}",
 		"type Date struct{ time.Time }",
 	} {
 		if !bytes.Contains(got, []byte(want)) {
@@ -329,14 +329,13 @@ func TestMarshal_TemporalEdge(t *testing.T) {
 }
 
 // TestMarshal_TemporalInsideList pins that a temporal position reached only
-// inside a List generates what it names — the Date or layout type, or the time
-// import — under a List DataType and a nested List property, and that a List
-// of a temporal DataType names that DataType at every depth, so no Date or
-// layout type is generated for it.
+// inside a List generates what it names — the Date type or the time import —
+// under a List DataType and a nested List property, and that a List of a
+// temporal DataType names that DataType at every depth, so no Date type is
+// generated for it.
 func TestMarshal_TemporalInsideList(t *testing.T) {
 	t.Parallel()
 
-	const wall = `type Wall = Timestamp["2006-01-02 15:04:05"]` + "\n"
 	for name, tc := range map[string]struct {
 		body         string
 		want, absent []string
@@ -350,11 +349,6 @@ func TestMarshal_TemporalInsideList(t *testing.T) {
 			want:   []string{"type Dates []Day", "type Day struct{ time.Time }"},
 			absent: []string{"type Date struct"},
 		},
-		"list datatype over a layout datatype": {
-			body:   wall + "type Walls = List<Wall>\ntype Doc {\n\tid String primary\n}\n",
-			want:   []string{"type Walls []Wall", "type Wall struct{ time.Time }"},
-			absent: []string{"type Timestamp20060102150405 struct"},
-		},
 		"nested list property over date": {
 			body: "type Doc {\n\tid String primary\n\tgrid List<List<Date>>\n}\n",
 			want: []string{"Grid [][]Date ", "type Date struct{ time.Time }"},
@@ -364,10 +358,15 @@ func TestMarshal_TemporalInsideList(t *testing.T) {
 			want:   []string{"Grid [][]Day ", "type Day struct{ time.Time }"},
 			absent: []string{"type Date struct"},
 		},
-		"nested list property over a layout datatype": {
-			body:   wall + "type Doc {\n\tid String primary\n\tshifts List<List<Wall>>\n}\n",
-			want:   []string{"Shifts [][]Wall ", "type Wall struct{ time.Time }"},
-			absent: []string{"type Timestamp20060102150405 struct"},
+		"nested list property over a timestamp datatype": {
+			body:   "type At = Timestamp\ntype Doc {\n\tid String primary\n\tshifts List<List<At>>\n}\n",
+			want:   []string{"Shifts [][]At ", "type At struct{ time.Time }"},
+			absent: []string{"func (v At) MarshalJSON", "encoding/json"},
+		},
+		"nested list property over timestamp": {
+			body:   "type Doc {\n\tid String primary\n\tshifts List<List<Timestamp>>\n}\n",
+			want:   []string{"Shifts [][]time.Time ", "import \"time\""},
+			absent: []string{"encoding/json"},
 		},
 		"list datatype over timestamp": {
 			body: "type Stamps = List<Timestamp>\ntype Doc {\n\tid String primary\n}\n",
@@ -377,10 +376,10 @@ func TestMarshal_TemporalInsideList(t *testing.T) {
 			body: "type At = Timestamp\ntype Ats = List<At>\ntype Doc {\n\tid String primary\n}\n",
 			want: []string{"type Ats []At", "type At struct{ time.Time }"},
 		},
-		"layout datatype property": {
-			body:   "type Clock = Timestamp[\"15:04\"]\ntype Doc {\n\tid String primary\n\tc Clock\n}\n",
-			want:   []string{"C  *Clock ", "type Clock struct{ time.Time }"},
-			absent: []string{"type Timestamp1504 struct"},
+		"timestamp datatype property": {
+			body:   "type At = Timestamp\ntype Doc {\n\tid String primary\n\tc At\n}\n",
+			want:   []string{"C  *At ", "type At struct{ time.Time }"},
+			absent: []string{"func (v At) MarshalJSON", "encoding/json"},
 		},
 		"list property over a date datatype": {
 			body:   "type Day = Date\ntype Doc {\n\tid String primary\n\tdays List<Day>\n}\n",
@@ -417,43 +416,9 @@ func TestMarshal_TemporalInsideList(t *testing.T) {
 	}
 }
 
-// TestMarshal_ALayoutAndAnInlineEnumSharingABareSpellingBothTakeExact pins that
-// neither family comes first: a per-layout type and an inline enum deriving one
-// name both take their exact spellings.
-func TestMarshal_ALayoutAndAnInlineEnumSharingABareSpellingBothTakeExact(t *testing.T) {
-	t.Parallel()
-
-	s, res := schema.LoadString(context.Background(), `schema "order"
-
-type TimestampMon {
-	id  String primary
-	jan Enum["a", "b"]
-	at  Timestamp["Mon Jan"]
-}
-`, "order.yammm")
-	if res.HasErrors() {
-		t.Fatalf("load: %v", res.Err())
-	}
-	got, err := gogen.Marshal(s)
-	if err != nil {
-		t.Fatalf("Marshal: %v", err)
-	}
-	for _, want := range []string{
-		"type Timestamp_Mon_20_Jan struct{ time.Time }",
-		"type Enum_order__TimestampMon__jan string",
-		"*Enum_order__TimestampMon__jan `json:\"jan,omitempty\"`",
-		"*Timestamp_Mon_20_Jan          `json:\"at,omitempty\"`",
-	} {
-		if !bytes.Contains(got, []byte(want)) {
-			t.Errorf("output missing %q:\n%s", want, got)
-		}
-	}
-}
-
 // TestMarshal_TemporalOnlyInAnImport pins that registration walks the whole
 // closure: the entry declares no temporal position, and the one import declares
-// a List DataType over Date and a nested List property over a layout, so each
-// is the only position that registers its type.
+// a List DataType over Date and a nested List property over Timestamp.
 func TestMarshal_TemporalOnlyInAnImport(t *testing.T) {
 	t.Parallel()
 
@@ -464,129 +429,13 @@ func TestMarshal_TemporalOnlyInAnImport(t *testing.T) {
 	for _, want := range []string{
 		"type Date struct{ time.Time }",
 		"type Days []Date",
-		"type Timestamp1504Z0700 struct{ time.Time }",
-		"On [][]Timestamp1504Z0700 ",
+		"On [][]time.Time ",
 	} {
 		if !bytes.Contains(got, []byte(want)) {
 			t.Errorf("output missing %q:\n%s", want, got)
 		}
 	}
 }
-
-// TestMarshal_CollidingLayoutsAreNamedByTheirLayoutAlone pins the names of
-// layouts that share a letters-and-digits base: each takes its layout-exact
-// name, the same for any declaration order, and the bare base is emitted for
-// neither. A layout alone takes the bare base, and no name one run gives a
-// layout is given to a different layout by the other runs.
-func TestMarshal_CollidingLayoutsAreNamedByTheirLayoutAlone(t *testing.T) {
-	t.Parallel()
-
-	gen := func(t *testing.T, layouts ...string) map[string]string {
-		t.Helper()
-		return layoutNames(t, "", layouts...)
-	}
-
-	const dashed, bare, underscored = "2006-01-02", "20060102", "2006_01_02"
-	all := gen(t, dashed, bare, underscored)
-	for name, want := range map[string]string{
-		"Timestamp_2006_2D_01_2D_02": dashed,
-		"Timestamp_20060102":         bare,
-		"Timestamp_2006_5F_01_5F_02": underscored,
-	} {
-		if all[name] != want {
-			t.Errorf("%s names layout %q, want %q (all: %v)", name, all[name], want, all)
-		}
-	}
-	for _, alone := range []string{dashed, bare, underscored} {
-		one := gen(t, alone)
-		if one["Timestamp20060102"] != alone {
-			t.Errorf("a lone %q is named %v, want Timestamp20060102", alone, one)
-		}
-		for name, layout := range all {
-			if other, ok := one[name]; ok && other != layout {
-				t.Errorf("%s names %q beside the other layouts and %q alone", name, layout, other)
-			}
-		}
-	}
-	for range 16 {
-		if again := gen(t, underscored, dashed, bare); !maps.Equal(again, all) {
-			t.Fatalf("names depend on declaration order: %v, then %v", all, again)
-		}
-	}
-}
-
-// TestMarshal_LayoutNameNeverPassesToAnotherLayout pins that a layout whose
-// bare base anything else claims — another layout emission names, or a
-// declared type — takes its layout-exact name, so declaring or adding
-// something never hands a generated name from one layout to another. The
-// exact name tells an invalid UTF-8 byte from U+FFFD. A
-// temporal DataType is its own carrier and names no layout type, so its layout
-// claims nothing.
-func TestMarshal_LayoutNameNeverPassesToAnotherLayout(t *testing.T) {
-	t.Parallel()
-
-	const declared = "type Timestamp20060102 {\n\tid String primary\n}\n"
-	before := layoutNames(t, declared, "2006-01-022")
-	after := layoutNames(t, declared, "2006-01-022", "2006-01-02")
-	for name, layout := range before {
-		if other, ok := after[name]; ok && other != layout {
-			t.Errorf("%s names %q, and %q once another layout is added", name, layout, other)
-		}
-	}
-	if before["Timestamp200601022"] != "2006-01-022" || after["Timestamp200601022"] != "2006-01-022" {
-		t.Errorf("a layout whose base nothing else claims is named %v, then %v; want Timestamp200601022 both times", before, after)
-	}
-	if got := after["Timestamp_2006_2D_01_2D_02"]; got != "2006-01-02" {
-		t.Errorf("a layout whose base a declared type holds is named %v, want its exact name", after)
-	}
-
-	// A layout holding an invalid byte would name as U+FFFD does; the DSL
-	// refuses it, so the two never meet.
-	if _, res := schema.LoadString(context.Background(),
-		"schema \"bases\"\n\ntype Doc {\n\tid String primary\n\tp Timestamp[\"a\\xffb\"]\n}\n", "bases.yammm"); !res.HasErrors() {
-		t.Error(`Timestamp["a\xffb"] loads; a layout holding an invalid byte would name as U+FFFD does`)
-	}
-	if shared := layoutNames(t, "", "ab", "a\uFFFDb"); shared["Timestamp_a_FFFD_b"] != "a\uFFFDb" {
-		t.Errorf("U+FFFD's layout, sharing its base with ab, is named %v, want Timestamp_a_FFFD_b", shared)
-	}
-
-	carrier := layoutNames(t, "type Wall = Timestamp[\"2006-01-02\"]\n", "20060102")
-	if got := carrier["Timestamp20060102"]; got != "20060102" {
-		t.Errorf("a DataType's layout claimed the bare base: %v", carrier)
-	}
-}
-
-// layoutNames generates a schema holding decls and one Doc property per
-// layout, and returns each generated layout type's name mapped to its layout.
-func layoutNames(t *testing.T, decls string, layouts ...string) map[string]string {
-	t.Helper()
-	var b strings.Builder
-	b.WriteString("schema \"bases\"\n\n" + decls + "\ntype Doc {\n\tid String primary\n")
-	for i, l := range layouts {
-		fmt.Fprintf(&b, "\tp%d Timestamp[%s]\n", i, strconv.Quote(l))
-	}
-	b.WriteString("}\n")
-	s, res := schema.LoadString(context.Background(), b.String(), "bases.yammm")
-	if res.HasErrors() {
-		t.Fatalf("load: %v", res.Err())
-	}
-	got, err := gogen.Marshal(s)
-	if err != nil {
-		t.Fatalf("Marshal: %v", err)
-	}
-	byName := map[string]string{}
-	for _, m := range layoutDecl.FindAllStringSubmatch(string(got), -1) {
-		layout, err := strconv.Unquote(m[2])
-		if err != nil {
-			t.Fatal(err)
-		}
-		byName[m[1]] = layout
-	}
-	return byName
-}
-
-// layoutDecl matches a generated layout type's doc comment and declaration.
-var layoutDecl = regexp.MustCompile(`// (\w+) is exchanged as a JSON string in the layout ("[^"]*")\.\ntype \w+ struct\{ time\.Time \}`)
 
 // TestMarshal_GraphKeysAreAddressableTags pins the Graph aggregate's json keys
 // as the type tags an instance document is keyed by: bare for the entry schema's types and
@@ -642,30 +491,6 @@ func TestMarshal_GraphKeysAreAddressableTags(t *testing.T) {
 				}
 			}
 		})
-	}
-}
-
-// TestMarshal_ALayoutAndATypeSharingABareSpellingBothTakeExact pins that a
-// schema-declared type has no precedence over a per-layout type: both take
-// their exact spellings.
-func TestMarshal_ALayoutAndATypeSharingABareSpellingBothTakeExact(t *testing.T) {
-	s, res := schema.LoadString(context.Background(),
-		"schema \"clash\"\n\ntype Timestamp20060102150405 {\n\tid String primary\n\tat Timestamp[\"2006-01-02 15:04:05\"]\n}", "clash.yammm")
-	if res.HasErrors() {
-		t.Fatalf("load: %v", res.Err())
-	}
-	got, err := gogen.Marshal(s)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, want := range []string{
-		"type Type_clash__Timestamp20060102150405 struct {\n",
-		"type Timestamp_2006_2D_01_2D_02_20_15_3A_04_3A_05 struct{ time.Time }",
-		"At *Timestamp_2006_2D_01_2D_02_20_15_3A_04_3A_05 ",
-	} {
-		if !bytes.Contains(got, []byte(want)) {
-			t.Errorf("output missing %q:\n%s", want, got)
-		}
 	}
 }
 

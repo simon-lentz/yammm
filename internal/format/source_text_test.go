@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -50,19 +51,38 @@ func readSourceTextAnswers(t *testing.T) []sourceTextAnswer {
 	return rows
 }
 
+// formattedAtV0210Only names the rows the v0.21.0 release formatted and the
+// grammar no longer matches: each writes a format after Timestamp, which is no
+// production.
+var formattedAtV0210Only = []string{
+	"byte order mark in timestamp format",
+	"escape not UTF-8 in timestamp",
+	"invalid byte in timestamp format",
+	"nul in timestamp format",
+	"truncated rune in timestamp format",
+	"two invalid in timestamp format",
+}
+
 // TestSource_FormatsWhatTheGrammarMatches pins the formatter's answer for
 // a source holding text the source rules refuse, an escape whose value is not
 // UTF-8, an escape the language does not have, or a token the grammar does not
-// match, at each site the table writes one. Each answer is the v0.21.0 release's:
+// match, at each site the table writes one. Each answer is the v0.21.0 release's,
+// save the rows formattedAtV0210Only names:
 // the formatter refuses a source the grammar does not match and formats every
 // other, whether or not the source loads.
 func TestSource_FormatsWhatTheGrammarMatches(t *testing.T) {
 	t.Parallel()
-	for _, row := range readSourceTextAnswers(t) {
+	rows := readSourceTextAnswers(t)
+	for _, name := range formattedAtV0210Only {
+		if !slices.ContainsFunc(rows, func(r sourceTextAnswer) bool { return r.name == name && r.formats }) {
+			t.Errorf("the table holds no row %q that v0.21.0 formatted", name)
+		}
+	}
+	for _, row := range rows {
 		t.Run(row.name, func(t *testing.T) {
 			t.Parallel()
 			got, err := formatText(row.input)
-			if !row.formats {
+			if !row.formats || slices.Contains(formattedAtV0210Only, row.name) {
 				if _, refused := errors.AsType[*format.SyntaxError](err); !refused {
 					t.Fatalf("Source = %q, %v; want a *SyntaxError", got, err)
 				}

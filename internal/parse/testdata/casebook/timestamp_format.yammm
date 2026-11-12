@@ -1,6 +1,0 @@
-schema "seeded"
-
-type Alpha {
-	id String primary
-	t Timestamp["x"
-}

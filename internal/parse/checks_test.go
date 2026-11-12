@@ -253,15 +253,6 @@ func TestChecks_UnquoteFailuresAreSyntaxErrors(t *testing.T) {
 				"invalid pattern: unquote string: invalid syntax",
 			}},
 		},
-		{
-			name: "timestamp format",
-			src:  checkSource(`t Timestamp["\x"]`),
-			base: len(checkPrelude),
-			want: []wantIssue{{
-				diag.E_SYNTAX, diag.Error, 12, 16, `"\x"`,
-				"invalid timestamp format: unquote string: invalid syntax",
-			}},
-		},
 	}
 
 	for _, tc := range tests {
@@ -355,7 +346,6 @@ func TestChecks_SingleQuotedLiteralsLoadAtEveryUnquoteSite(t *testing.T) {
 		"\tid String primary\n" +
 		"\tkind Enum['a\"b', 'don\\'t']\n" +
 		"\tcode Pattern['^x\"?$']\n" +
-		"\tts Timestamp['2006-01-02T15:04:05Z07:00']\n" +
 		"}\n"
 	_, issues := Parse([]byte(src), location.NewSourceID("s.yammm"))
 	if len(issues) != 0 {
@@ -387,7 +377,7 @@ func TestChecks_SchemaNameUnquoteFailureMarksTheFileFailed(t *testing.T) {
 // spelling.
 func TestChecks_CarriedValuesNeedNoReparse(t *testing.T) {
 	src := checkSource("n Integer[-3, 7]") +
-		"type U {\n\tid String primary\n\tf Float[-1.5, _]\n\ts String[2, _]\n\tt Timestamp[\"2006\"]\n}\n"
+		"type U {\n\tid String primary\n\tf Float[-1.5, _]\n\ts String[2, _]\n}\n"
 	file, issues := Parse([]byte(src), location.NewSourceID("s.yammm"))
 	if len(issues) != 0 {
 		t.Fatalf("unexpected issues: %v", issues)
@@ -409,9 +399,6 @@ func TestChecks_CarriedValuesNeedNoReparse(t *testing.T) {
 	s := u.Properties[2].Constraint
 	if s.LenMin == nil || *s.LenMin != 2 || s.LenMax != nil {
 		t.Errorf("string length = %v..%v, want 2..unbounded", s.LenMin, s.LenMax)
-	}
-	if got, ok := u.Properties[3].Constraint.Format(); !ok || got != "2006" {
-		t.Errorf("timestamp format = %q ok=%v, want 2006", got, ok)
 	}
 }
 

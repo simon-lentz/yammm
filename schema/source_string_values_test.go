@@ -37,7 +37,7 @@ func jsonKeeps(t *testing.T, v string) bool {
 	return back == v
 }
 
-// TestStringValues_TheDSLAcceptsWhatJSONKeeps holds five places a schema holds a
+// TestStringValues_TheDSLAcceptsWhatJSONKeeps holds four places a schema holds a
 // string value to one rule, against a second reading: a value is accepted
 // exactly when encoding/json writes it back unchanged, as it does every valid
 // UTF-8 string and no other.
@@ -50,9 +50,6 @@ func TestStringValues_TheDSLAcceptsWhatJSONKeeps(t *testing.T) {
 		{"schema name", func(lit string) string { return `schema "` + lit + "\"\n\ntype Car {\n\tid String primary\n}\n" }},
 		{"enum value", func(lit string) string {
 			return "schema \"s\"\n\ntype Car {\n\tid String primary\n\tk Enum[\"" + lit + "\", \"zz\"]\n}\n"
-		}},
-		{"timestamp format", func(lit string) string {
-			return "schema \"s\"\n\ntype Car {\n\tid String primary\n\tt Timestamp[\"" + lit + "\"]\n}\n"
 		}},
 		{"invariant message", func(lit string) string {
 			return "schema \"s\"\n\ntype Car {\n\tid String primary\n\t! \"" + lit + "\" id != \"x\"\n}\n"
@@ -79,8 +76,8 @@ func TestCheckConstraint_RefusesAStringValueNotValidUTF8(t *testing.T) {
 		c    schema.Constraint
 		want string
 	}{
-		"enum value":                {schema.NewEnumConstraint([]string{"a\xff", "b"}), `enum value "a\xff" is not valid UTF-8`},
-		"a list's timestamp format": {schema.NewListConstraint(schema.NewTimestampConstraintFormatted("\xff")), `timestamp format "\xff" is not valid UTF-8`},
+		"enum value":          {schema.NewEnumConstraint([]string{"a\xff", "b"}), `enum value "a\xff" is not valid UTF-8`},
+		"a list's enum value": {schema.NewListConstraint(schema.NewEnumConstraint([]string{"a", "b\xff"})), `enum value "b\xff" is not valid UTF-8`},
 	} {
 		t.Run(name, func(t *testing.T) {
 			if err := schema.CheckConstraint(tc.c); err == nil || !strings.Contains(err.Error(), tc.want) {

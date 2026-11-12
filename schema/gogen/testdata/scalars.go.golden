@@ -6,14 +6,14 @@ import (
 	"time"
 )
 
-// marshalTemporal renders t through layout as a JSON string.
-func marshalTemporal(t time.Time, layout string) ([]byte, error) {
-	return json.Marshal(t.Format(layout))
+// marshalDate renders t as a JSON string in the form YYYY-MM-DD.
+func marshalDate(t time.Time) ([]byte, error) {
+	return json.Marshal(t.Format(time.DateOnly))
 }
 
-// unmarshalTemporal parses a JSON string through layout into *dst. A JSON
+// unmarshalDate parses a JSON string in the form YYYY-MM-DD into *dst. A JSON
 // null leaves *dst unchanged, as time.Time's own UnmarshalJSON does.
-func unmarshalTemporal(b []byte, layout string, dst *time.Time) error {
+func unmarshalDate(b []byte, dst *time.Time) error {
 	if string(b) == "null" {
 		return nil
 	}
@@ -21,7 +21,7 @@ func unmarshalTemporal(b []byte, layout string, dst *time.Time) error {
 	if err := json.Unmarshal(b, &s); err != nil {
 		return err
 	}
-	t, err := time.Parse(layout, s)
+	t, err := time.Parse(time.DateOnly, s)
 	if err != nil {
 		return err
 	}
@@ -29,14 +29,12 @@ func unmarshalTemporal(b []byte, layout string, dst *time.Time) error {
 	return nil
 }
 
-// Date is exchanged as a JSON string in the layout "2006-01-02".
+// Date is exchanged as a JSON string in the form YYYY-MM-DD.
 type Date struct{ time.Time }
 
-const dateLayout = "2006-01-02"
+func (v Date) MarshalJSON() ([]byte, error) { return marshalDate(v.Time) }
 
-func (v Date) MarshalJSON() ([]byte, error) { return marshalTemporal(v.Time, dateLayout) }
-
-func (v *Date) UnmarshalJSON(b []byte) error { return unmarshalTemporal(b, dateLayout, &v.Time) }
+func (v *Date) UnmarshalJSON(b []byte) error { return unmarshalDate(b, &v.Time) }
 
 // County is a US county node.
 type County struct {

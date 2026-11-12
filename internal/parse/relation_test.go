@@ -163,7 +163,7 @@ func TestRelation_CompositionTakesNoBody(t *testing.T) {
 // edge property that stopped forwarding would reach the graph model as an
 // Integer whatever the source declared.
 func TestRelation_EdgePropertyConstraintIsForwarded(t *testing.T) {
-	src := "schema \"s\"\ntype T {\n\tid String primary\n\t--> R B { since Timestamp[\"2006\"] }\n}\n"
+	src := "schema \"s\"\ntype T {\n\tid String primary\n\t--> R B { note String[2, _] }\n}\n"
 
 	file, issues := Parse([]byte(src), location.NewSourceID("s.yammm"))
 
@@ -175,11 +175,11 @@ func TestRelation_EdgePropertyConstraintIsForwarded(t *testing.T) {
 		t.Fatalf("edge properties = %d, want 1", len(props))
 	}
 	c := props[0].Constraint
-	if c == nil || c.Kind != ConstraintTimestamp {
-		t.Fatalf("edge property constraint = %+v, want a Timestamp", c)
+	if c == nil || c.Kind != ConstraintString {
+		t.Fatalf("edge property constraint = %+v, want a String", c)
 	}
-	if got, ok := c.Format(); !ok || got != "2006" {
-		t.Errorf("format = %q ok=%v, want \"2006\" true", got, ok)
+	if c.LenMin == nil || *c.LenMin != 2 || c.LenMax != nil {
+		t.Errorf("length = %v..%v, want 2..unbounded", c.LenMin, c.LenMax)
 	}
 }
 

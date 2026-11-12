@@ -95,7 +95,6 @@ func TestParse_AStringValueIsValidUTF8(t *testing.T) {
 		{"import path", "schema \"s\"\nimport \"a\\xff\"\ntype T {\n\tid String primary\n}\n", diag.E_SYNTAX, "invalid import path: " + cause},
 		{"enum value", checkSource(`e Enum["a\xff", "b", "c"]`), diag.E_SYNTAX, "invalid enum value: " + cause},
 		{"pattern", checkSource(`p Pattern["a\xff"]`), diag.E_SYNTAX, "invalid pattern: " + cause},
-		{"timestamp format", checkSource(`t Timestamp["2006\xff"]`), diag.E_SYNTAX, "invalid timestamp format: " + cause},
 		{"invariant message", "schema \"s\"\ntype T {\n\tid String primary\n\t! \"m\\xff\" id == \"a\"\n}\n", diag.E_SYNTAX, "invalid invariant message: " + cause},
 		{"expression literal", "schema \"s\"\ntype T {\n\tid String primary\n\t! \"m\" id == \"a\\xe2\\x82\"\n}\n", diag.E_INVALID_INVARIANT, "invalid string literal: the value its escapes write is not valid UTF-8"},
 	}

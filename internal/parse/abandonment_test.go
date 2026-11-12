@@ -8,7 +8,7 @@ import (
 	"github.com/simon-lentz/yammm/location"
 )
 
-// These rows record what ten sites do today, so a replacement is scored against
+// These rows record what nine sites do today, so a replacement is scored against
 // a measured bar rather than a remembered one. They are neither a survey of the
 // grammar nor a statement of the rule that decides which construct survives.
 // Every row draws exactly one diagnostic; the duplicates two of them once
@@ -42,14 +42,6 @@ var abandonedGroups = []struct {
 		// just left. Recorded, not endorsed: it is one defect reported twice.
 		name:   "numeric bounds",
 		src:    "schema \"s\"\ntype T {\n\tn Integer[abc, 2]\n}\n",
-		want:   `unexpected token "[" in a type body`,
-		anchor: "[",
-		types:  1,
-		count:  1,
-	},
-	{
-		name:   "timestamp format",
-		src:    "schema \"s\"\ntype T {\n\tt Timestamp[\"x\"\n}\n",
 		want:   `unexpected token "[" in a type body`,
 		anchor: "[",
 		types:  1,

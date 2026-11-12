@@ -78,7 +78,7 @@ func topLevelDecls(t *testing.T, src []byte) map[string]string {
 // declSignatures maps every generated type and value constant to what it
 // denotes, independent of any generated name: a struct by its sorted json
 // keys, an enum type by its sorted values, a value constant by its enum's
-// signature and its value, a layout type by its layout, any other type "type".
+// signature and its value, any other type "type".
 func declSignatures(t *testing.T, src []byte) map[string]string {
 	t.Helper()
 	fset := token.NewFileSet()
@@ -88,7 +88,6 @@ func declSignatures(t *testing.T, src []byte) map[string]string {
 	}
 	values := map[string][]string{} // enum type name -> its values
 	consts := map[string][2]string{}
-	layouts := map[string]string{} // unexported layout const -> layout
 	sigs := map[string]string{}
 	for _, d := range f.Decls {
 		gd, ok := d.(*ast.GenDecl)
@@ -107,7 +106,6 @@ func declSignatures(t *testing.T, src []byte) map[string]string {
 				}
 				v, _ := strconv.Unquote(lit.Value)
 				if sp.Type == nil {
-					layouts[sp.Names[0].Name] = v
 					continue
 				}
 				typ := sp.Type.(*ast.Ident).Name
@@ -143,10 +141,6 @@ func declSignatures(t *testing.T, src []byte) map[string]string {
 				continue
 			}
 			name := sp.Name.Name
-			if layout, ok := layouts[strings.ToLower(name[:1])+name[1:]+"Layout"]; ok {
-				sigs[name] = "layout " + layout
-				continue
-			}
 			if vs, ok := values[name]; ok {
 				sorted := slices.Sorted(slices.Values(vs))
 				sigs[name] = "enum " + strings.Join(sorted, " ")
@@ -162,7 +156,7 @@ func declSignatures(t *testing.T, src []byte) map[string]string {
 }
 
 // collisionSources gives every name family two claimants of one bare
-// spelling, from a type and a data type to a layout and a type. Every struct
+// spelling, from a type and a data type to an inline enum and a type. Every struct
 // whose fields carry json tags holds a key no other struct holds, so its json
 // keys identify it.
 func collisionSources() map[string]string {
@@ -211,13 +205,10 @@ type Graph {
 
 type Stamp {
 	stamp_id String primary
-	at Timestamp["2006-01-02 15:04"]
+	at Timestamp
 	--> TO (one) other.Region
 }
 
-type Timestamp200601021504 {
-	ts_id String primary
-}
 `,
 		"other.yammm": `schema "other"
 
@@ -246,7 +237,6 @@ func TestMarshal_AContestedNameTakesEveryClaimantsExactSpelling(t *testing.T) {
 		"Enum_geo__Region__kind", "Type_geo__RegionKind",
 		"Element_geo__Tags", "Type_geo__TagsElement",
 		"Const_Element_geo__Tags__a_2D_b", "Const_Element_geo__Tags__a_5F_b",
-		"Timestamp_2006_2D_01_2D_02_20_15_3A_04", "Type_geo__Timestamp200601021504",
 		// Sole claimants keep their bare spellings.
 		"Tags", "Stamp", "EDGE_Stamp_to_Region", "TagsElementC", "RegionKindBig",
 		"EDGE_URL_link_RegionKindX",
@@ -260,7 +250,7 @@ func TestMarshal_AContestedNameTakesEveryClaimantsExactSpelling(t *testing.T) {
 	for _, absent := range []string{
 		"Region", "GeoRegion", "GeoRegion2", "URL", "GeoURL", "GeoURL2", "GeoGraph",
 		"RegionKind", "RegionKind2", "TagsElement", "TagsElement2", "TagsElementAB", "TagsElementAB2",
-		"EDGE_URL_link_Region", "EDGE_URL_link_Region2", "Timestamp200601021504",
+		"EDGE_URL_link_Region", "EDGE_URL_link_Region2",
 	} {
 		if _, ok := decls[absent]; ok {
 			t.Errorf("declaration %s holds a contested or suffixed spelling", absent)
@@ -327,10 +317,6 @@ func TestMarshal_ADeclarationAddedNeverRebindsAName(t *testing.T) {
 		"a value whose name another value shares": {
 			before: "type Level = Enum[\"a_b\", \"x\"]\n\ntype Doc {\n\tdoc_id String primary\n\tl Level\n}\n",
 			added:  "type Other = Enum[\"q\", \"r\"]\n\ntype LevelAB {\n\tlab_id String primary\n}\n",
-		},
-		"a layout whose base a type claims": {
-			before: "type Doc {\n\tdoc_id String primary\n\tat Timestamp[\"2006-01-02\"]\n}\n",
-			added:  "type Timestamp20060102 {\n\tt_id String primary\n}\n",
 		},
 		"an association whose name another claims": {
 			before: "type C {\n\tc_id String primary\n}\n\ntype Url {\n\turl_id String primary\n\t--> LINK (one) C\n}\n",

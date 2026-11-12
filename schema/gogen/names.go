@@ -52,7 +52,6 @@ func goPackageName(name string) string {
 const (
 	wordType            = "Type"
 	wordDataType        = "DataType"
-	wordLayout          = "Timestamp"
 	wordAssociation     = "Association"
 	wordEnum            = "Enum"
 	wordAssociationEnum = "AssociationEnum"
@@ -126,7 +125,6 @@ type nameTable struct {
 	types       map[schema.TypeID]string
 	dataTypes   map[schema.DataType]string
 	dtKeys      map[schema.DataType]string // each data type's exact spelling
-	layouts     map[string]string
 	edges       map[schema.Relation]string
 	inlineEnum  map[enumKey]string
 	enumKeys    map[enumKey]string // each inline enum's exact spelling
@@ -144,13 +142,12 @@ type claim struct {
 // buildNameTable names every schema entity's declaration by the package doc's
 // Names rule. Every bare spelling is counted before any name is assigned, so a name
 // depends on the set of claims and never on their order.
-func buildNameTable(s schema.Schema, inits map[string]bool, edges []edgeRec, layouts []string) *nameTable {
+func buildNameTable(s schema.Schema, inits map[string]bool, edges []edgeRec) *nameTable {
 	nt := &nameTable{
 		inits:       inits,
 		types:       map[schema.TypeID]string{},
 		dataTypes:   map[schema.DataType]string{},
 		dtKeys:      map[schema.DataType]string{},
-		layouts:     map[string]string{},
 		edges:       map[schema.Relation]string{},
 		inlineEnum:  map[enumKey]string{},
 		enumKeys:    map[enumKey]string{},
@@ -208,9 +205,6 @@ func buildNameTable(s schema.Schema, inits map[string]bool, edges []edgeRec, lay
 					enumValues(elemBare, elemExact, ec.Values())
 				}
 			}
-			if temporalLayout(dt.Constraint()) != "" {
-				continue
-			}
 			if ec, ok := schema.ResolveAlias(dt.Constraint()).(schema.EnumConstraint); ok {
 				enumValues(bare, exact, ec.Values())
 			}
@@ -227,9 +221,6 @@ func buildNameTable(s schema.Schema, inits map[string]bool, edges []edgeRec, lay
 		parts := []string{e.owner.SchemaName(), e.owner.Name(), rel.Name()}
 		claims = append(claims, claim{bare: bare, exact: edgeKey(e), assign: func(name string) { nt.edges[rel] = name }})
 		inlineEnums(bare, wordAssociation, parts, slices.Collect(rel.Properties()))
-	}
-	for _, layout := range layouts {
-		claims = append(claims, claim{bare: layoutTypeBase(layout), exact: layoutTypeExact(layout), assign: func(name string) { nt.layouts[layout] = name }})
 	}
 
 	claimants := map[string]int{}

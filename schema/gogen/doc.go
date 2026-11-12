@@ -1,6 +1,6 @@
 // Package gogen generates Go source from a yammm schema: one struct per type,
-// named Enum/DataType types and their value constants, generated temporal
-// types, EDGE_ association structs, a Graph aggregate, and the embedded schema
+// named Enum/DataType types and their value constants, a generated Date
+// type, EDGE_ association structs, a Graph aggregate, and the embedded schema
 // source with its SchemaHash. Output is
 // stdlib-only — it imports at most "time" and "encoding/json". Call [Marshal]
 // with a loaded, resolved schema; it returns formatted, type-checked bytes.
@@ -25,10 +25,9 @@
 //     (type <DataType>Element string), plus its value constants.
 //   - A per-owner named type for every inline-enum property
 //     (type <Owner><Field> string), plus its value constants.
-//   - A Date type when a position emits Date, and one type per distinct
-//     custom Timestamp layout a position emits, each a struct embedding
-//     time.Time with a JSON codec that exchanges the value in the string form
-//     the library stores (see Type Mapping).
+//   - A Date type when a position emits Date, a struct embedding time.Time
+//     with a JSON codec that exchanges the value as the text the library
+//     stores (see Type Mapping).
 //   - One struct per type in the closure. Concrete, abstract, and part types are all
 //     emitted — part types because compositions reference them, abstract types
 //     because they document the schema even though inheritance is flattened into
@@ -71,26 +70,20 @@
 //	Float                         →  float64
 //	Boolean                       →  bool
 //	Timestamp                     →  time.Time
-//	Timestamp["<layout>"]         →  Timestamp<layout>  (generated, one per layout)
 //	Date                          →  Date               (generated)
 //	Vector                        →  []float64
 //	List<T>                       →  []T
 //
-// The library stores a Date as "2006-01-02" and a custom-layout Timestamp
-// through its declared layout, and the validator reads those strings. A bare
-// time.Time decodes RFC 3339 alone, so it refuses a Date and every layout whose
-// text is not RFC 3339. The generated Date and per-layout types are
-// structs embedding time.Time — so every time.Time method but MarshalJSON and
-// UnmarshalJSON is promoted, and a value is built as Date{Time: t} — carrying MarshalJSON and UnmarshalJSON that
-// speak the stored form. A per-layout type's bare spelling is "Timestamp" plus
-// the layout's letters and digits (Timestamp20060102150405 for "2006-01-02
-// 15:04:05"). When another entity claims that spelling, the layout takes its
-// exact spelling (Timestamp_2006_2D_01_2D_02 for "2006-01-02"); see Names. A
-// layout named only by a temporal DataType is no entity, since that DataType
-// is its own type. A default-layout Timestamp stays time.Time, whose own codec
-// already exchanges RFC 3339 with nanoseconds, the form the library stores. A
-// DataType resolving to any temporal kind is emitted as
-// struct{ time.Time } too, with the codec its layout needs.
+// The library stores a Date as "2006-01-02", and the validator reads that
+// text. A bare time.Time decodes RFC 3339 alone, so it refuses a Date. The
+// generated Date type is a struct embedding time.Time — so every time.Time
+// method but MarshalJSON and UnmarshalJSON is promoted, and a value is built
+// as Date{Time: t} — carrying MarshalJSON and UnmarshalJSON that speak the
+// stored text. A Timestamp stays time.Time, whose own codec exchanges RFC 3339
+// with nanoseconds, the text the library stores. It decodes and encodes every
+// text the validator stores as written: the validator stores only text
+// time.Time writes. A DataType over a Date or a Timestamp is emitted as
+// struct{ time.Time } too, a Date with the Date codec.
 //
 // Named types are rendered faithfully rather than collapsed to their primitive: a
 // field typed by a named DataType keeps that Go type; a List whose innermost
@@ -107,9 +100,9 @@
 // writes it as a null element, which instance validation refuses
 // (E_TYPE_MISMATCH).
 //
-// Every field but the time.Time a generated temporal type embeds (Date, a
-// per-layout type, or a DataType resolving to Date or Timestamp) carries a json
-// tag preserving the wire name verbatim. An optional
+// Every field but the time.Time a generated temporal type embeds (Date, or a
+// DataType resolving to Date or Timestamp) carries a json tag preserving the
+// wire name verbatim. An optional
 // pointer field adds ,omitempty. An optional slice field adds ,omitzero, which
 // leaves out a nil slice and writes a present empty list as [], since the
 // library keeps an empty list apart from an absent one; encoding/json reads
@@ -173,19 +166,16 @@
 // # Names
 //
 // Every top-level declaration shares one Go package-block namespace. A schema
-// names each type, data type, per-layout type, EDGE_ struct, inline enum, List
+// names each type, data type, EDGE_ struct, inline enum, List
 // element enum and enum value constant, and the exported names gogen emits or
 // once emitted (Graph, SchemaHash, SerializedSources, SerializedEntry,
 // SerializedModel, SerializedModelEntry and Date) are reserved. The unexported
-// declarations gogen adds (serializedSources, marshalTemporal,
-// unmarshalTemporal and a layout constant per temporal type with a codec of
-// its own) start in lower
-// case, so no exported spelling meets them. Each entity has a bare
+// declarations gogen adds (serializedSources, marshalDate and unmarshalDate)
+// start in lower case, so no exported spelling meets them. Each entity has a bare
 // spelling, built from the names as the schema writes them:
 //
 //   - a type or a data type: its name as an exported identifier, under the
 //     initialisms (URL for Url);
-//   - a per-layout type: "Timestamp" and the layout's letters and digits;
 //   - an EDGE_ struct: EDGE_<Owner>_<edge>_<Target>, its owner's and its
 //     target's names as exported identifiers and its relation's field name
 //     (the name in lower case), so Url's and URL's LINK associations to one
@@ -205,7 +195,6 @@
 //
 //	Type_<schema>__<Name>                                   a type
 //	DataType_<schema>__<Name>                               a data type
-//	Timestamp_<layout>                                      a per-layout type
 //	Association_<schema>__<Owner>__<RELATION>               an EDGE_ struct
 //	Enum_<schema>__<Owner>__<field>                         an inline enum on a type
 //	AssociationEnum_<schema>__<Owner>__<RELATION>__<field>  an inline enum on an edge
@@ -299,8 +288,9 @@
 // with go/types. One gofmt pass does not give that for every doc comment: a
 // list item, a numbered item and then an indented line are laid out again by
 // a second pass. Type-checking is hermetic: the output imports at most "time"
-// and "encoding/json" and calls only time.Time.Format, time.Parse, json.Marshal
-// and json.Unmarshal, so a synthetic importer declaring exactly those satisfies
+// and "encoding/json", calls only time.Time.Format, time.Parse, json.Marshal
+// and json.Unmarshal, and names one constant, time.DateOnly, so a synthetic
+// importer declaring exactly those satisfies
 // it with no Go toolchain, GOROOT, or build cache — [Marshal] behaves identically
 // inside the distributed yammm CLI binary, a CI container, or a scratch image, while
 // still catching duplicate declarations, unused imports, and undefined references. A

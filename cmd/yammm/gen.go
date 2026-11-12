@@ -20,13 +20,13 @@ func newGenCmd() *cobra.Command {
 Targets:
 
   --to go          A single file of typed Go structs for every schema type
-                   (including imported types), named Enum/DataType types, a
-                   Date type when a position emits Date, one type per custom
-                   Timestamp layout a position emits, EDGE_ association
-                   structs, a Graph aggregate, and the embedded schema source.
-                   Output is stdlib-only. Use --initialisms to upper-case
-                   extra acronyms (e.g. GUID,JWT) in generated identifiers;
-                   they merge with the default golint acronym set.
+                   (including imported types), named Enum/DataType types and
+                   their value constants, a Date type when a position emits
+                   Date, EDGE_ association structs, a Graph aggregate, and the
+                   embedded schema source with its SchemaHash. Output is
+                   stdlib-only. Use --initialisms to upper-case extra acronyms
+                   (e.g. JWT,OIDC) in generated identifiers; they merge with
+                   the default golint acronym set.
 
   --to md          A self-contained Markdown reference document: a Mermaid
                    class diagram of every type in the import closure, per-type
@@ -45,7 +45,7 @@ source keys are relative to that root.`,
 	cmd.Flags().String("to", "", "target: go or md (required)")
 	cmd.Flags().String("package", "", "go target: generated package name (default: derived from schema name)")
 	cmd.Flags().String("output", "", "output file path (default: stdout)")
-	cmd.Flags().StringSlice("initialisms", nil, "go target: extra acronyms to upper-case in generated names, e.g. GUID,JWT")
+	cmd.Flags().StringSlice("initialisms", nil, "go target: extra acronyms to upper-case in generated names, e.g. JWT,OIDC")
 	registerModuleRootFlag(cmd)
 	cmd.Flags().Bool("no-class-diagram", false, "md target: omit the Mermaid class-diagram section")
 	cmd.Flags().Bool("no-class-members", false, "md target: omit the member lines inside each diagram class")

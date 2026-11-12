@@ -12,6 +12,6 @@
   {
     "description": "constraint-rich schema exercising every constraint kind",
     "schema_name": "constraint_rich",
-    "expected_hash": "sha256:374060f8f3a4d2f5d3d4847886248601a7aeaa82025995de59429fcf6ee8fd1e"
+    "expected_hash": "sha256:69d48c69c7cea54582fedd40dd7df51ef8fa9c067099d441b34e35929ccb48c0"
   }
 ]

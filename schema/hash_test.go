@@ -273,7 +273,7 @@ func TestStructuralHash_ConstraintSensitivity(t *testing.T) {
 		},
 		{"vector dimension", schema.NewVectorConstraint(128), schema.NewVectorConstraint(256), false},
 		{"boolean vs string kind", schema.NewBooleanConstraint(), schema.NewStringConstraint(), false},
-		{"timestamp default vs formatted", schema.NewTimestampConstraint(), schema.NewTimestampConstraintFormatted("2006-01-02T15:04:05Z07:00"), false},
+		{"timestamp vs date kind", schema.NewTimestampConstraint(), schema.NewDateConstraint(), false},
 		{"date vs uuid kind", schema.NewDateConstraint(), schema.NewUUIDConstraint(), false},
 		{"list different element types", schema.NewListConstraint(schema.NewStringConstraint()), schema.NewListConstraint(schema.NewIntegerConstraint()), false},
 		{"list unbounded vs bounded", schema.NewListConstraint(schema.NewStringConstraint()), schema.ListMinLen(schema.NewStringConstraint(), 1), false},
@@ -485,13 +485,10 @@ func TestStructuralHash_ConstraintFieldCoverage(t *testing.T) {
 			"hasMin": true,
 			"hasMax": true,
 		},
-		"BooleanConstraint": {}, // no fields
-		"TimestampConstraint": {
-			"format": true, // TestStructuralHash_ConstraintSensitivity ("timestamp default vs formatted")
-			"fault":  true, // derived from format; CheckConstraint refuses a constraint that sets it
-		},
-		"DateConstraint": {}, // no fields
-		"UUIDConstraint": {}, // no fields
+		"BooleanConstraint":   {}, // no fields
+		"TimestampConstraint": {}, // no fields
+		"DateConstraint":      {}, // no fields
+		"UUIDConstraint":      {}, // no fields
 		"EnumConstraint": {
 			"values":  true, // TestStructuralHash_ConstraintSensitivity ("enum different values")
 			"invalid": true, // derived from values; CheckConstraint refuses a constraint that sets it
@@ -633,7 +630,7 @@ func buildVectorSchemaConstraintRich() schema.Schema {
 		makeProp("int_bounded", schema.IntegerBetween(0, 1000), false, false),
 		makeProp("flt_bounded", schema.FloatBetween(0.0, 100.0), false, false),
 		makeProp("flag", schema.NewBooleanConstraint(), false, false),
-		makeProp("ts", schema.NewTimestampConstraintFormatted("2006-01-02T15:04:05Z"), false, false),
+		makeProp("ts", schema.NewTimestampConstraint(), false, false),
 		makeProp("dt", schema.NewDateConstraint(), false, false),
 		makeProp("uid", schema.NewUUIDConstraint(), false, false),
 		makeProp("status", schema.NewEnumConstraint([]string{"ACTIVE", "INACTIVE"}), false, false),

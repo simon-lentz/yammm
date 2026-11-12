@@ -35,11 +35,10 @@ func (g *generator) emitTypes() error {
 	return nil
 }
 
-// emitNamedTypes emits the temporal types, a named Go type for every DataType,
+// emitNamedTypes emits a named Go type for every DataType,
 // and one for every inline-enum field, each enum with its value constants. An
 // inline enum inherited by several types yields one named type per owner.
 func (g *generator) emitNamedTypes() error {
-	g.emitTemporalTypes()
 	for sc := range g.schema.Closure() {
 		for dt := range sc.DataTypes() {
 			name, ok := g.names.goDataType(dt)
@@ -48,12 +47,13 @@ func (g *generator) emitNamedTypes() error {
 			}
 			// A temporal DataType is its own carrier: a defined type over the
 			// Date struct would inherit no method, so it embeds time.Time itself.
-			if layout := temporalLayout(dt.Constraint()); layout != "" {
-				g.emitTemporalDecl(name, layout)
+			if _, isDate := dt.Constraint().(schema.DateConstraint); isDate {
+				g.dateCodec = true
+				writeDateDecl(g.buf, name)
 				continue
 			}
-			if isDefaultTimestamp(dt.Constraint()) {
-				g.emitDefaultTimestampDecl(name)
+			if _, isTimestamp := dt.Constraint().(schema.TimestampConstraint); isTimestamp {
+				g.emitTimestampDecl(name)
 				continue
 			}
 			if lc, isList := dt.Constraint().(schema.ListConstraint); isList {
@@ -145,9 +145,6 @@ func (g *generator) dataTypeBase(sc schema.Schema, dt schema.DataType) (string, 
 		return g.goBaseType(dt.Constraint())
 	}
 	elemEnum := func() (string, error) {
-		if g.collect != nil {
-			return "", nil
-		}
 		name, ok := g.names.goDataTypeElement(dt)
 		if !ok {
 			return "", fmt.Errorf("gogen: no Go name for datatype %q", dt.Name())
@@ -177,12 +174,8 @@ func dataTypeTarget(sc schema.Schema, ac schema.AliasConstraint) (schema.DataTyp
 	return target, nil
 }
 
-// dataTypeGoName returns target's Go name, or "" in the collect pass, which
-// runs before any name is assigned.
+// dataTypeGoName returns target's Go name.
 func (g *generator) dataTypeGoName(target schema.DataType) (string, error) {
-	if g.collect != nil {
-		return "", nil
-	}
 	goName, ok := g.names.goDataType(target)
 	if !ok {
 		return "", fmt.Errorf("gogen: no Go name for datatype %q", target.Name())
@@ -191,8 +184,7 @@ func (g *generator) dataTypeGoName(target schema.DataType) (string, error) {
 }
 
 // listType renders a List: one "[]" per level around elemName's answer for an
-// innermost DataType, or elemEnum's for an inline enum ("" when elemEnum answers
-// "" in the collect pass, which runs before any name exists); else goBaseType's.
+// innermost DataType, or elemEnum's for an inline enum; else goBaseType's.
 func (g *generator) listType(lc schema.ListConstraint, elemEnum func() (string, error), elemName func(schema.AliasConstraint) (string, error)) (string, error) {
 	depth := 1
 	elem := lc.Element()
@@ -214,7 +206,7 @@ func (g *generator) listType(lc schema.ListConstraint, elemEnum func() (string, 
 		name = n
 	case schema.EnumConstraint:
 		n, err := elemEnum()
-		if err != nil || n == "" {
+		if err != nil {
 			return "", err
 		}
 		name = n
@@ -664,10 +656,6 @@ func (g *generator) goFieldType(owner fieldOwner, p schema.Property) (string, er
 		}
 		typ = name
 	case resolved.Kind() == schema.KindEnum:
-		if g.collect != nil {
-			// An inline enum names no temporal type, and no name is assigned yet.
-			return "", nil
-		}
 		typ = g.names.goInlineEnum(owner.enum, p)
 	case resolved.Kind() == schema.KindList:
 		lc, ok := resolved.(schema.ListConstraint)
@@ -675,10 +663,6 @@ func (g *generator) goFieldType(owner fieldOwner, p schema.Property) (string, er
 			return "", errors.New("gogen: List kind without ListConstraint")
 		}
 		elemEnum := func() (string, error) {
-			if g.collect != nil {
-				// As the scalar arm above.
-				return "", nil
-			}
 			return g.names.goInlineEnum(owner.enum, p), nil
 		}
 		t, err := g.listType(lc, elemEnum, func(ac schema.AliasConstraint) (string, error) {

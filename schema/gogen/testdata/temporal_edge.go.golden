@@ -6,14 +6,14 @@ import (
 	"time"
 )
 
-// marshalTemporal renders t through layout as a JSON string.
-func marshalTemporal(t time.Time, layout string) ([]byte, error) {
-	return json.Marshal(t.Format(layout))
+// marshalDate renders t as a JSON string in the form YYYY-MM-DD.
+func marshalDate(t time.Time) ([]byte, error) {
+	return json.Marshal(t.Format(time.DateOnly))
 }
 
-// unmarshalTemporal parses a JSON string through layout into *dst. A JSON
+// unmarshalDate parses a JSON string in the form YYYY-MM-DD into *dst. A JSON
 // null leaves *dst unchanged, as time.Time's own UnmarshalJSON does.
-func unmarshalTemporal(b []byte, layout string, dst *time.Time) error {
+func unmarshalDate(b []byte, dst *time.Time) error {
 	if string(b) == "null" {
 		return nil
 	}
@@ -21,7 +21,7 @@ func unmarshalTemporal(b []byte, layout string, dst *time.Time) error {
 	if err := json.Unmarshal(b, &s); err != nil {
 		return err
 	}
-	t, err := time.Parse(layout, s)
+	t, err := time.Parse(time.DateOnly, s)
 	if err != nil {
 		return err
 	}
@@ -29,27 +29,12 @@ func unmarshalTemporal(b []byte, layout string, dst *time.Time) error {
 	return nil
 }
 
-// Date is exchanged as a JSON string in the layout "2006-01-02".
+// Date is exchanged as a JSON string in the form YYYY-MM-DD.
 type Date struct{ time.Time }
 
-const dateLayout = "2006-01-02"
+func (v Date) MarshalJSON() ([]byte, error) { return marshalDate(v.Time) }
 
-func (v Date) MarshalJSON() ([]byte, error) { return marshalTemporal(v.Time, dateLayout) }
-
-func (v *Date) UnmarshalJSON(b []byte) error { return unmarshalTemporal(b, dateLayout, &v.Time) }
-
-// Timestamp20060102150405 is exchanged as a JSON string in the layout "2006-01-02 15:04:05".
-type Timestamp20060102150405 struct{ time.Time }
-
-const timestamp20060102150405Layout = "2006-01-02 15:04:05"
-
-func (v Timestamp20060102150405) MarshalJSON() ([]byte, error) {
-	return marshalTemporal(v.Time, timestamp20060102150405Layout)
-}
-
-func (v *Timestamp20060102150405) UnmarshalJSON(b []byte) error {
-	return unmarshalTemporal(b, timestamp20060102150405Layout, &v.Time)
-}
+func (v *Date) UnmarshalJSON(b []byte) error { return unmarshalDate(b, &v.Time) }
 
 type Day struct {
 	On Date `json:"on"`
@@ -61,8 +46,8 @@ type Log struct {
 }
 
 type EDGE_Log_on_Day struct {
-	TargetOn Date                    `json:"_target_on"`
-	At       Timestamp20060102150405 `json:"at"`
+	TargetOn Date      `json:"_target_on"`
+	At       time.Time `json:"at"`
 }
 
 type Graph struct {
@@ -74,7 +59,7 @@ type Graph struct {
 // the name the re-load registers it under, as verbatim .yammm text. Read
 // it through SerializedSources below.
 var serializedSources = map[string]string{
-	"temporal_edge.yammm": "schema \"temporaledge\"\n\ntype Day {\n\ton Date primary\n}\n\ntype Log {\n\tid String primary\n\t--> ON (one) Day {\n\t\tat Timestamp[\"2006-01-02 15:04:05\"] required\n\t}\n}\n",
+	"temporal_edge.yammm": "schema \"temporaledge\"\n\ntype Day {\n\ton Date primary\n}\n\ntype Log {\n\tid String primary\n\t--> ON (one) Day {\n\t\tat Timestamp required\n\t}\n}\n",
 }
 
 // SerializedEntry is the entry-point key into SerializedSources.
@@ -97,4 +82,4 @@ func SerializedSources() map[string][]byte {
 	return m
 }
 
-const SchemaHash = "sha256:1c6bcade4acf1e3420a37f051ac8b886219c3b3a998438825187a226ed114791"
+const SchemaHash = "sha256:0dcf49094c1d93006a6b3fd7262233abb277f85cbdffeb16d3341bee96042c9d"

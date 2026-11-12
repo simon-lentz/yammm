@@ -6,14 +6,14 @@ import (
 	"time"
 )
 
-// marshalTemporal renders t through layout as a JSON string.
-func marshalTemporal(t time.Time, layout string) ([]byte, error) {
-	return json.Marshal(t.Format(layout))
+// marshalDate renders t as a JSON string in the form YYYY-MM-DD.
+func marshalDate(t time.Time) ([]byte, error) {
+	return json.Marshal(t.Format(time.DateOnly))
 }
 
-// unmarshalTemporal parses a JSON string through layout into *dst. A JSON
+// unmarshalDate parses a JSON string in the form YYYY-MM-DD into *dst. A JSON
 // null leaves *dst unchanged, as time.Time's own UnmarshalJSON does.
-func unmarshalTemporal(b []byte, layout string, dst *time.Time) error {
+func unmarshalDate(b []byte, dst *time.Time) error {
 	if string(b) == "null" {
 		return nil
 	}
@@ -21,7 +21,7 @@ func unmarshalTemporal(b []byte, layout string, dst *time.Time) error {
 	if err := json.Unmarshal(b, &s); err != nil {
 		return err
 	}
-	t, err := time.Parse(layout, s)
+	t, err := time.Parse(time.DateOnly, s)
 	if err != nil {
 		return err
 	}
@@ -29,64 +29,25 @@ func unmarshalTemporal(b []byte, layout string, dst *time.Time) error {
 	return nil
 }
 
-// Date is exchanged as a JSON string in the layout "2006-01-02".
+// Date is exchanged as a JSON string in the form YYYY-MM-DD.
 type Date struct{ time.Time }
 
-const dateLayout = "2006-01-02"
+func (v Date) MarshalJSON() ([]byte, error) { return marshalDate(v.Time) }
 
-func (v Date) MarshalJSON() ([]byte, error) { return marshalTemporal(v.Time, dateLayout) }
+func (v *Date) UnmarshalJSON(b []byte) error { return unmarshalDate(b, &v.Time) }
 
-func (v *Date) UnmarshalJSON(b []byte) error { return unmarshalTemporal(b, dateLayout, &v.Time) }
-
-// Timestamp20060102150405 is exchanged as a JSON string in the layout "2006-01-02 15:04:05".
-type Timestamp20060102150405 struct{ time.Time }
-
-const timestamp20060102150405Layout = "2006-01-02 15:04:05"
-
-func (v Timestamp20060102150405) MarshalJSON() ([]byte, error) {
-	return marshalTemporal(v.Time, timestamp20060102150405Layout)
-}
-
-func (v *Timestamp20060102150405) UnmarshalJSON(b []byte) error {
-	return unmarshalTemporal(b, timestamp20060102150405Layout, &v.Time)
-}
-
-// Timestamp20060102T150405000000000Z0700 is exchanged as a JSON string in the layout "2006-01-02T15:04:05.000000000Z07:00".
-type Timestamp20060102T150405000000000Z0700 struct{ time.Time }
-
-const timestamp20060102T150405000000000Z0700Layout = "2006-01-02T15:04:05.000000000Z07:00"
-
-func (v Timestamp20060102T150405000000000Z0700) MarshalJSON() ([]byte, error) {
-	return marshalTemporal(v.Time, timestamp20060102T150405000000000Z0700Layout)
-}
-
-func (v *Timestamp20060102T150405000000000Z0700) UnmarshalJSON(b []byte) error {
-	return unmarshalTemporal(b, timestamp20060102T150405000000000Z0700Layout, &v.Time)
-}
-
-// Day is exchanged as a JSON string in the layout "2006-01-02".
+// Day is exchanged as a JSON string in the form YYYY-MM-DD.
 type Day struct{ time.Time }
 
-const dayLayout = "2006-01-02"
+func (v Day) MarshalJSON() ([]byte, error) { return marshalDate(v.Time) }
 
-func (v Day) MarshalJSON() ([]byte, error) { return marshalTemporal(v.Time, dayLayout) }
-
-func (v *Day) UnmarshalJSON(b []byte) error { return unmarshalTemporal(b, dayLayout, &v.Time) }
+func (v *Day) UnmarshalJSON(b []byte) error { return unmarshalDate(b, &v.Time) }
 
 type Stamp struct{ time.Time }
 
-// Wall is exchanged as a JSON string in the layout "2006-01-02 15:04:05".
-type Wall struct{ time.Time }
-
-const wallLayout = "2006-01-02 15:04:05"
-
-func (v Wall) MarshalJSON() ([]byte, error) { return marshalTemporal(v.Time, wallLayout) }
-
-func (v *Wall) UnmarshalJSON(b []byte) error { return unmarshalTemporal(b, wallLayout, &v.Time) }
-
 type Reading struct {
-	At Timestamp20060102150405 `json:"at"`
-	On *Date                   `json:"on,omitempty"`
+	At time.Time `json:"at"`
+	On *Date     `json:"on,omitempty"`
 }
 
 type Casing struct {
@@ -94,27 +55,25 @@ type Casing struct {
 }
 
 type Sensor struct {
-	ID             string                                 `json:"id"`
-	Installed      Date                                   `json:"installed"`
-	Decommissioned *Date                                  `json:"decommissioned,omitempty"`
-	CreatedAt      time.Time                              `json:"created_at"`
-	SeenWall       *Timestamp20060102150405               `json:"seen_wall,omitempty"`
-	SeenAt         Timestamp20060102T150405000000000Z0700 `json:"seen_at"`
-	Day            *Day                                   `json:"day,omitempty"`
-	Stamp          *Stamp                                 `json:"stamp,omitempty"`
-	Wall           *Wall                                  `json:"wall,omitempty"`
-	Days           []Date                                 `json:"days,omitzero"`
-	Walls          []Timestamp20060102150405              `json:"walls,omitzero"`
-	Labels         []string                               `json:"labels,omitzero"`
-	HasReading     []*Reading                             `json:"has_reading,omitempty"`
-	InCasing       []*Casing                              `json:"in_casing,omitempty"`
-	Feeds          *EDGE_Sensor_feeds_Sensor              `json:"feeds,omitempty"`
-	Neighbours     []*EDGE_Sensor_neighbours_Sensor       `json:"neighbours,omitempty"`
+	ID             string                           `json:"id"`
+	Installed      Date                             `json:"installed"`
+	Decommissioned *Date                            `json:"decommissioned,omitempty"`
+	CreatedAt      time.Time                        `json:"created_at"`
+	SeenAt         *time.Time                       `json:"seen_at,omitempty"`
+	Day            *Day                             `json:"day,omitempty"`
+	Stamp          *Stamp                           `json:"stamp,omitempty"`
+	Days           []Date                           `json:"days,omitzero"`
+	Stamps         []time.Time                      `json:"stamps,omitzero"`
+	Labels         []string                         `json:"labels,omitzero"`
+	HasReading     []*Reading                       `json:"has_reading,omitempty"`
+	InCasing       []*Casing                        `json:"in_casing,omitempty"`
+	Feeds          *EDGE_Sensor_feeds_Sensor        `json:"feeds,omitempty"`
+	Neighbours     []*EDGE_Sensor_neighbours_Sensor `json:"neighbours,omitempty"`
 }
 
 type EDGE_Sensor_feeds_Sensor struct {
-	TargetID string                   `json:"_target_id"`
-	Since    *Timestamp20060102150405 `json:"since,omitempty"`
+	TargetID string     `json:"_target_id"`
+	Since    *time.Time `json:"since,omitempty"`
 }
 
 type EDGE_Sensor_neighbours_Sensor struct {
@@ -129,7 +88,7 @@ type Graph struct {
 // the name the re-load registers it under, as verbatim .yammm text. Read
 // it through SerializedSources below.
 var serializedSources = map[string]string{
-	"temporal.yammm": "schema \"temporal\"\n\ntype Day   = Date\ntype Stamp = Timestamp\ntype Wall  = Timestamp[\"2006-01-02 15:04:05\"]\n\npart type Reading {\n\tat Timestamp[\"2006-01-02 15:04:05\"] required\n\ton Date\n}\n\npart type Casing {\n\tserial String primary\n}\n\ntype Sensor {\n\tid             String primary\n\tinstalled      Date required\n\tdecommissioned Date\n\tcreated_at     Timestamp required\n\tseen_wall      Timestamp[\"2006-01-02 15:04:05\"]\n\tseen_at        Timestamp[\"2006-01-02T15:04:05.000000000Z07:00\"] required\n\tday            Day\n\tstamp          Stamp\n\twall           Wall\n\tdays           List<Date>\n\twalls          List<Timestamp[\"2006-01-02 15:04:05\"]>\n\tlabels         List<String>\n\t*-> HAS_READING (many) Reading\n\t*-> IN_CASING (one) Casing\n\t--> FEEDS (one) Sensor {\n\t\tsince Timestamp[\"2006-01-02 15:04:05\"]\n\t}\n\t--> NEIGHBOURS (many) Sensor\n}\n",
+	"temporal.yammm": "schema \"temporal\"\n\ntype Day   = Date\ntype Stamp = Timestamp\n\npart type Reading {\n\tat Timestamp required\n\ton Date\n}\n\npart type Casing {\n\tserial String primary\n}\n\ntype Sensor {\n\tid             String primary\n\tinstalled      Date required\n\tdecommissioned Date\n\tcreated_at     Timestamp required\n\tseen_at        Timestamp\n\tday            Day\n\tstamp          Stamp\n\tdays           List<Date>\n\tstamps         List<Timestamp>\n\tlabels         List<String>\n\t*-> HAS_READING (many) Reading\n\t*-> IN_CASING (one) Casing\n\t--> FEEDS (one) Sensor {\n\t\tsince Timestamp\n\t}\n\t--> NEIGHBOURS (many) Sensor\n}\n",
 }
 
 // SerializedEntry is the entry-point key into SerializedSources.
@@ -152,4 +111,4 @@ func SerializedSources() map[string][]byte {
 	return m
 }
 
-const SchemaHash = "sha256:dcfae1300515b58f170b0c62342721e1e4f4a26eda69290c1a801026819988c1"
+const SchemaHash = "sha256:71a55d1a179d9d4551c2e921c6ad8a5a2b01a3311cdec051256b966c63166274"

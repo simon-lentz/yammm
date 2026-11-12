@@ -24,18 +24,18 @@ import (
 const temporalDocument = `{"Sensor": [
 	{
 		"id": "s1", "installed": "2026-08-21", "decommissioned": "2026-08-22",
-		"created_at": "2026-08-21T09:30:00.5Z", "seen_wall": "2026-08-21 09:30:00",
-		"seen_at": "2026-08-21T09:30:00.250000000Z", "day": "2026-08-21",
-		"stamp": "2026-08-21T09:30:00Z", "wall": "2026-08-21 09:30:00",
-		"days": ["2026-08-21", "2026-08-22"], "walls": ["2026-08-21 09:30:00"], "labels": [],
-		"has_reading": [{"at": "2026-08-21 10:00:00", "on": "2026-08-21"}],
+		"created_at": "2026-08-21T09:30:00.5Z",
+		"seen_at": "2026-08-21T11:30:00.25+02:00", "day": "2026-08-21",
+		"stamp": "2026-08-21T09:30:00Z",
+		"days": ["2026-08-21", "2026-08-22"], "stamps": ["2026-08-21T09:30:00Z"], "labels": [],
+		"has_reading": [{"at": "2026-08-21T10:00:00Z", "on": "2026-08-21"}],
 		"in_casing": [{"serial": "c1"}],
-		"feeds": {"_target_id": "s1", "since": "2026-08-21 11:00:00"},
+		"feeds": {"_target_id": "s1", "since": "2026-08-21T11:00:00Z"},
 		"neighbours": [{"_target_id": "s2"}]
 	},
 	{
 		"id": "s2", "installed": "2026-08-23", "created_at": "2026-08-23T09:30:00Z",
-		"seen_at": "2026-08-23T09:30:00.000000000Z", "in_casing": [{"serial": "c2"}]
+		"in_casing": [{"serial": "c2"}]
 	}
 ]}`
 
@@ -100,21 +100,19 @@ func TestRoundTrip_Temporal(t *testing.T) {
 		"installed":      {sn.Installed.Time, utc(2026, 8, 21, 0, 0, 0, 0)},
 		"decommissioned": {sn.Decommissioned.Time, utc(2026, 8, 22, 0, 0, 0, 0)},
 		"created_at":     {sn.CreatedAt, utc(2026, 8, 21, 9, 30, 0, 500_000_000)},
-		"seen_wall":      {sn.SeenWall.Time, utc(2026, 8, 21, 9, 30, 0, 0)},
-		"seen_at":        {sn.SeenAt.Time, utc(2026, 8, 21, 9, 30, 0, 250_000_000)},
+		"seen_at":        {*sn.SeenAt, utc(2026, 8, 21, 9, 30, 0, 250_000_000)},
 		"day":            {sn.Day.Time, utc(2026, 8, 21, 0, 0, 0, 0)},
 		"stamp":          {sn.Stamp.Time, utc(2026, 8, 21, 9, 30, 0, 0)},
-		"wall":           {sn.Wall.Time, utc(2026, 8, 21, 9, 30, 0, 0)},
-		"reading.at":     {sn.HasReading[0].At.Time, utc(2026, 8, 21, 10, 0, 0, 0)},
+		"reading.at":     {sn.HasReading[0].At, utc(2026, 8, 21, 10, 0, 0, 0)},
 		"reading.on":     {sn.HasReading[0].On.Time, utc(2026, 8, 21, 0, 0, 0, 0)},
-		"feeds.since":    {sn.Feeds.Since.Time, utc(2026, 8, 21, 11, 0, 0, 0)},
+		"feeds.since":    {*sn.Feeds.Since, utc(2026, 8, 21, 11, 0, 0, 0)},
 	} {
 		if !tc.got.Equal(tc.want) {
 			t.Errorf("%s decoded as %s, want %s", name, tc.got, tc.want)
 		}
 	}
-	if len(sn.Days) != 2 || len(sn.Walls) != 1 {
-		t.Errorf("lists decoded as %d days and %d walls, want 2 and 1", len(sn.Days), len(sn.Walls))
+	if len(sn.Days) != 2 || len(sn.Stamps) != 1 {
+		t.Errorf("lists decoded as %d days and %d stamps, want 2 and 1", len(sn.Days), len(sn.Stamps))
 	}
 	if len(sn.InCasing) != 1 || sn.InCasing[0].Serial != "c1" {
 		t.Errorf("in_casing decoded as %+v, want one casing c1", sn.InCasing)
@@ -140,5 +138,47 @@ func TestRoundTrip_Temporal(t *testing.T) {
 	}
 	if back := readSnapshot(t, s, again); !bytes.Equal(back, want) {
 		t.Errorf("the re-encoded document reads to another graph:\n%s\nwant:\n%s", back, want)
+	}
+}
+
+// The generated Date codec reads YYYY-MM-DD alone, keeps its value at a JSON
+// null as time.Time's own codec does, and writes the text it reads. A
+// generated Timestamp datatype reads RFC 3339 and no date.
+func TestGeneratedTemporal_ReadsItsOwnTextAndKeepsItsValueAtANull(t *testing.T) {
+	t.Parallel()
+	day := time.Date(2026, 8, 21, 0, 0, 0, 0, time.UTC)
+	for name, dst := range map[string]interface {
+		json.Unmarshaler
+		json.Marshaler
+		Equal(time.Time) bool
+	}{
+		"Date":            &temporal.Date{Time: day},
+		"a Date datatype": &temporal.Day{Time: day},
+	} {
+		if err := json.Unmarshal([]byte("null"), dst); err != nil || !dst.Equal(day) {
+			t.Errorf("%s: a null gives %v and the value %v; want no error and the value kept", name, err, dst)
+		}
+		for _, text := range []string{`"2026-08-22T00:00:00Z"`, `"2026-02-30"`, `"10000-01-01"`, `""`, `20260822`} {
+			if err := json.Unmarshal([]byte(text), dst); err == nil || !dst.Equal(day) {
+				t.Errorf("%s: %s gives %v and the value %v; want a refusal and the value kept", name, text, err, dst)
+			}
+		}
+		if err := json.Unmarshal([]byte(`"2026-08-22"`), dst); err != nil || !dst.Equal(day.AddDate(0, 0, 1)) {
+			t.Errorf("%s: a date gives %v and the value %v; want the day after", name, err, dst)
+		}
+		if out, err := json.Marshal(dst); err != nil || string(out) != `"2026-08-22"` {
+			t.Errorf("%s: encodes as %s, %v; want the date it read", name, out, err)
+		}
+	}
+
+	stamp := temporal.Stamp{Time: day}
+	if err := json.Unmarshal([]byte(`"2026-08-22"`), &stamp); err == nil {
+		t.Errorf("a Timestamp datatype reads a date alone")
+	}
+	if err := json.Unmarshal([]byte(`"2026-08-22T01:02:03.5+02:00"`), &stamp); err != nil {
+		t.Fatalf("a Timestamp datatype refuses RFC 3339 text: %v", err)
+	}
+	if out, err := json.Marshal(stamp); err != nil || string(out) != `"2026-08-22T01:02:03.5+02:00"` {
+		t.Errorf("a Timestamp datatype encodes as %s, %v; want the text it read", out, err)
 	}
 }

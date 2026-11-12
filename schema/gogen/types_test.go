@@ -6,13 +6,8 @@ import (
 	"github.com/simon-lentz/yammm/schema"
 )
 
-const wallLayout = "2006-01-02 15:04:05"
-
 func TestGoBaseType(t *testing.T) {
-	g := &generator{temporal: temporalTypes{
-		date:    dateGoName,
-		layouts: map[string]string{wallLayout: "Timestamp20060102150405"},
-	}}
+	g := &generator{}
 	cases := []struct {
 		name string
 		c    schema.Constraint
@@ -23,7 +18,6 @@ func TestGoBaseType(t *testing.T) {
 		{"float", schema.NewFloatConstraint(), "float64"},
 		{"boolean", schema.NewBooleanConstraint(), "bool"},
 		{"timestamp", schema.NewTimestampConstraint(), "time.Time"},
-		{"timestamp_layout", schema.NewTimestampConstraintFormatted(wallLayout), "Timestamp20060102150405"},
 		{"date", schema.NewDateConstraint(), "Date"},
 		{"uuid", schema.NewUUIDConstraint(), "string"},
 		{"enum", schema.NewEnumConstraint([]string{"a", "b"}), "string"},
@@ -31,6 +25,7 @@ func TestGoBaseType(t *testing.T) {
 		{"vector", schema.NewVectorConstraint(8), "[]float64"},
 		{"list_float", schema.NewListConstraint(schema.NewFloatConstraint()), "[]float64"},
 		{"list_date", schema.NewListConstraint(schema.NewDateConstraint()), "[]Date"},
+		{"list_timestamp", schema.NewListConstraint(schema.NewTimestampConstraint()), "[]time.Time"},
 		{"alias", schema.NewAliasConstraint("FIPS", schema.NewStringConstraint()), "string"},
 	}
 	for _, tc := range cases {
@@ -46,17 +41,27 @@ func TestGoBaseType(t *testing.T) {
 	}
 }
 
-// TestGoBaseType_UnregisteredTemporalIsAGeneratorBug pins that a temporal
-// position the pre-pass did not register surfaces as an error rather than
-// as an empty type name that would fail later in format or type-check.
-func TestGoBaseType_UnregisteredTemporalIsAGeneratorBug(t *testing.T) {
-	g := &generator{}
-	for name, c := range map[string]schema.Constraint{
-		"date":   schema.NewDateConstraint(),
-		"layout": schema.NewTimestampConstraintFormatted(wallLayout),
+// TestGoBaseType_ATemporalNameDeclaresWhatItNeeds pins that the one place that
+// writes a temporal name records what the file must declare for it: the time
+// import for a Timestamp, and the Date type for a Date.
+func TestGoBaseType_ATemporalNameDeclaresWhatItNeeds(t *testing.T) {
+	for name, tc := range map[string]struct {
+		c                    schema.Constraint
+		needsTime, needsDate bool
+	}{
+		"string":            {schema.NewStringConstraint(), false, false},
+		"timestamp":         {schema.NewTimestampConstraint(), true, false},
+		"list of timestamp": {schema.NewListConstraint(schema.NewTimestampConstraint()), true, false},
+		"date":              {schema.NewDateConstraint(), false, true},
+		"list of date":      {schema.NewListConstraint(schema.NewDateConstraint()), false, true},
+		"alias of date":     {schema.NewAliasConstraint("Day", schema.NewDateConstraint()), false, true},
 	} {
-		if _, err := g.goBaseType(c); err == nil {
-			t.Errorf("%s: expected an error for an unregistered temporal position", name)
+		g := &generator{}
+		if _, err := g.goBaseType(tc.c); err != nil {
+			t.Fatalf("%s: goBaseType: %v", name, err)
+		}
+		if g.needsTime != tc.needsTime || g.needsDate != tc.needsDate {
+			t.Errorf("%s: needsTime %t, needsDate %t; want %t, %t", name, g.needsTime, g.needsDate, tc.needsTime, tc.needsDate)
 		}
 	}
 }

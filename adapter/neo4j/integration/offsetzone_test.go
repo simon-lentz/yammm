@@ -337,19 +337,17 @@ func TestCoerce_TheServerHoldsAnOffsetOfEighteenHoursAtMost(t *testing.T) {
 		}
 	}
 
-	const toTheSecond = "2006-01-02T15:04:05-07:00:00"
-	for _, text := range []string{"2026-08-19T12:00:00+18:01:00", "2026-08-19T12:00:00-18:01:00", "2026-08-19T12:00:00+18:00:01", "2026-08-19T12:00:00-18:00:01"} {
-		at, err := time.Parse(toTheSecond, text)
-		if err != nil {
-			t.Fatalf("parse %q: %v", text, err)
-		}
-		_, offset := at.Zone()
-		_, err = neo4jdriver.ExecuteQuery(ctx, isolatedDriver(t), "RETURN $v AS v",
-			map[string]any{"v": at.In(time.FixedZone("Offset", offset))}, neo4jdriver.EagerResultTransformer)
+	// The server refuses an offset past the bound, by a second too.
+	for _, offset := range []int{bound + 60, -bound - 60, bound + 1, -bound - 1} {
+		at := time.Date(2026, 8, 19, 12, 0, 0, 0, time.FixedZone("Offset", offset))
+		_, err := neo4jdriver.ExecuteQuery(ctx, isolatedDriver(t), "RETURN $v AS v",
+			map[string]any{"v": at}, neo4jdriver.EagerResultTransformer)
 		if !neo4jdriver.IsNeo4jError(err) {
-			t.Errorf("%s: the server answered %v; want its own refusal, or the adapter's bound of 18 hours is no longer the server's", text, err)
+			t.Errorf("an offset of %d seconds: the server answered %v; want its own refusal, or the adapter's bound of 18 hours is no longer the server's", offset, err)
 		}
-		if _, err := n4j.CoerceParams(map[string]any{"v": text}, n4j.ParamTypes{"v": schema.NewTimestampConstraintFormatted(toTheSecond)}); !errors.Is(err, n4j.ErrUnrepresentable) {
+	}
+	for _, text := range []string{"2026-08-19T12:00:00+18:01", "2026-08-19T12:00:00-18:01"} {
+		if _, err := n4j.CoerceParams(map[string]any{"v": text}, n4j.ParamTypes{"v": schema.NewTimestampConstraint()}); !errors.Is(err, n4j.ErrUnrepresentable) {
 			t.Errorf("%s: CoerceParams = %v, want a refusal that matches ErrUnrepresentable", text, err)
 		}
 	}

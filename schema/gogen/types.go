@@ -7,9 +7,8 @@ import (
 	"github.com/simon-lentz/yammm/schema"
 )
 
-// goBaseType maps a resolved constraint to its Go type, a Date or custom-layout
-// Timestamp to the generated type registerTemporalTypes assigned. In collect
-// mode it records that temporal type and returns an empty name for it.
+// goBaseType maps a resolved constraint to its Go type, a Date to the generated
+// Date type.
 func (g *generator) goBaseType(c schema.Constraint) (string, error) {
 	c = schema.ResolveAlias(c)
 	//exhaustive:enforce
@@ -23,33 +22,14 @@ func (g *generator) goBaseType(c schema.Constraint) (string, error) {
 	case schema.KindBoolean:
 		return "bool", nil
 	case schema.KindTimestamp:
-		tc, ok := c.(schema.TimestampConstraint)
-		if !ok || tc.Format() == "" {
-			// The import is decided where time.Time is written, so no
-			// emitter can name it without importing it.
-			if g.collect == nil {
-				g.needsTime = true
-			}
-			return "time.Time", nil
-		}
-		if g.collect != nil {
-			g.collect.layouts[tc.Format()] = true
-			return "", nil
-		}
-		name, ok := g.temporal.layouts[tc.Format()]
-		if !ok {
-			return "", fmt.Errorf("gogen: timestamp layout %q reached emission without a registered type", tc.Format())
-		}
-		return name, nil
+		// The import is decided where time.Time is written, so no
+		// emitter can name it without importing it.
+		g.needsTime = true
+		return "time.Time", nil
 	case schema.KindDate:
-		if g.collect != nil {
-			g.collect.date = true
-			return "", nil
-		}
-		if g.temporal.date == "" {
-			return "", errors.New("gogen: a Date position reached emission without the Date type registered")
-		}
-		return g.temporal.date, nil
+		// The Date type is declared where its name is written, as the import is.
+		g.needsDate = true
+		return dateGoName, nil
 	case schema.KindVector:
 		return "[]float64", nil
 	case schema.KindList:

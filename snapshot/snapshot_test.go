@@ -1624,20 +1624,6 @@ func TestMarshalLoad_PropertyFidelity(t *testing.T) {
 			"a time.Time-valued Timestamp stores its canonical text")
 	})
 
-	// A declared layout applies to both representations, so the persisted text
-	// satisfies the format the schema declared.
-	t.Run("timestamp_custom_format_applies_to_both_representations", func(t *testing.T) {
-		t.Parallel()
-		s, v := fidelitySchema(t, `Timestamp["2006-01-02 15:04:05"]`)
-		props := fidelityRoundTrip(t, s, v, time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC))
-		assert.Equal(t, "2026-01-01 00:00:00", props["val"],
-			"the declared layout is applied to a time.Time")
-
-		props = fidelityRoundTrip(t, s, v, "2026-01-01 00:00:00")
-		assert.Equal(t, "2026-01-01 00:00:00", props["val"],
-			"a string under the same constraint round-trips through its layout")
-	})
-
 	t.Run("date_from_time_returns_a_string", func(t *testing.T) {
 		t.Parallel()
 		s, v := fidelitySchema(t, "Date")

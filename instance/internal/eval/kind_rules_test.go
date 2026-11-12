@@ -37,7 +37,7 @@ func TestDatatypeCheck_IsTheCheckerRule(t *testing.T) {
 		{"fractional seconds are a Timestamp", "2024-01-15T10:30:00.123456789Z", "Timestamp", true},
 		{"a time.Time is a Timestamp", time.Date(2024, 1, 15, 0, 0, 0, 0, time.UTC), "Timestamp", true},
 		{"an int is not a Timestamp", 12345, "Timestamp", false},
-		{"a date in a declared layout is not a Timestamp", "2030-01-02", "Timestamp", false},
+		{"a date alone is not a Timestamp", "2030-01-02", "Timestamp", false},
 		{"nil is no kind", nil, "String", false},
 		{"a pointer to a string is not a String", new("x"), "String", false},
 		{"a nil pointer is not a String", (*string)(nil), "String", false},

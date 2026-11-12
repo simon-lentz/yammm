@@ -21,9 +21,9 @@ import (
 // the key is the canonical text that value took at entry — so
 // [Snapshot.InstanceByKey] canonicalizes an address that misses as spelled under
 // the type's key constraints, and FormatKey over each text spelling of one
-// instant at one offset addresses it, as does a time.Time at a Timestamp key with
-// no layout. A time.Time at a Date key, or at a Timestamp key whose layout does not read
-// RFC 3339, misses: pass the stored text there. [Instance.PrimaryKey] is the address itself.
+// instant at one offset addresses it, as does a time.Time at a Timestamp key.
+// A time.Time at a Date key misses: pass the stored text there.
+// [Instance.PrimaryKey] is the address itself.
 //
 // Examples:
 //
@@ -36,12 +36,12 @@ import (
 //
 // Calling FormatKey with no arguments, or with a nil slice to spread, renders
 // `null`, since the variadic parameter is then a nil slice. An empty slice spread
-// renders `[]`. [ParseKey] reads a rendered key back, not that case, and its doc
-// names the components it does not read back as written.
+// renders `[]`. [ParseKey] reads a rendered key back and refuses `null`, and
+// its doc names the components it does not read back as written.
 //
 // FormatKey panics if any value cannot be JSON-marshaled (e.g., channels,
-// functions, cyclic structs). This is a programmer error: no key a graph holds
-// holds such a component.
+// functions, cyclic structs, a time.Time outside years 0 to 9999 or at a UTC
+// offset of 24 hours or more). No key a graph holds holds such a component.
 func FormatKey(values ...any) string {
 	data, err := json.Marshal(values)
 	if err != nil {

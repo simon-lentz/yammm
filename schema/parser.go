@@ -237,12 +237,7 @@ func (p *schemaParser) constraint(c *parse.Constraint) (Constraint, DataTypeRef)
 	case parse.ConstraintPattern:
 		return parsedPatternConstraint(c.PatternRegexps()), DataTypeRef{}
 	case parse.ConstraintTimestamp:
-		if format, ok := c.Format(); ok {
-			return p.timestampConstraint(format, c.FormatLit.Span), DataTypeRef{}
-		}
-		// The zero literal, not NewTimestampConstraint's result: the compiler
-		// boxes it with no allocation.
-		return TimestampConstraint{}, DataTypeRef{}
+		return NewTimestampConstraint(), DataTypeRef{}
 	case parse.ConstraintDate:
 		return NewDateConstraint(), DataTypeRef{}
 	case parse.ConstraintUUID:
@@ -258,26 +253,6 @@ func (p *schemaParser) constraint(c *parse.Constraint) (Constraint, DataTypeRef)
 		return aliasConstraint(c)
 	}
 	return nil, DataTypeRef{} // unreachable: ConstraintKind has exactly the twelve forms above
-}
-
-// timestampConstraint builds the constraint of a declared layout from one
-// judgement of it. A layout no Timestamp holds is refused. One that drops a
-// field is a legitimate domain choice, since an upstream feed emits what it
-// emits, so it is accepted and the author is told once, here, what the two
-// probe instants lose under it.
-func (p *schemaParser) timestampConstraint(format string, span location.Span) TimestampConstraint {
-	fault, loss := judgeTimestampLayout(format)
-	if refusal, refused := timestampFaultText(format, fault); refused {
-		p.collector.Collect(diag.NewIssue(diag.Error, diag.E_INVALID_CONSTRAINT, refusal).
-			WithSpan(span).
-			Build())
-	} else if warning, lossy := loss.warning(format); lossy {
-		p.collector.Collect(diag.NewIssue(diag.Warning, diag.W_TIMESTAMP_LOSSY_FORMAT, warning).
-			WithSpan(span).
-			WithHint("declare Timestamp without a format to store RFC 3339 with nanoseconds, which loses none of these").
-			Build())
-	}
-	return TimestampConstraint{format: format, fault: fault}
 }
 
 // aliasConstraint is the one form yielding two outputs from one node: the

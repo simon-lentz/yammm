@@ -76,11 +76,7 @@ func nameTableOf(t *testing.T, s schema.Schema) *nameTable {
 	if err := g.collectEdges(); err != nil {
 		t.Fatal(err)
 	}
-	layouts, err := g.collectTemporalDemand()
-	if err != nil {
-		t.Fatal(err)
-	}
-	return buildNameTable(s, g.inits, g.edges, layouts)
+	return buildNameTable(s, g.inits, g.edges)
 }
 
 // typeNames maps "<schema>.<type>" to its Go name over s's closure.
@@ -183,26 +179,6 @@ func TestBuildNameTable_AReservedNameIsAClaimant(t *testing.T) {
 	}
 }
 
-// TestLayoutTypeBase pins a per-layout type's bare spelling: every letter and
-// digit of the layout, nothing else, behind a fixed prefix. Another claimant
-// of that spelling moves the layout to its exact spelling
-// (TestMarshal_LayoutNameNeverPassesToAnotherLayout).
-func TestLayoutTypeBase(t *testing.T) {
-	cases := map[string]string{
-		"2006-01-02 15:04:05":        "Timestamp20060102150405",
-		"2006-01-02T15:04:05Z07:00":  "Timestamp20060102T150405Z0700",
-		"Jan _2, 2006":               "TimestampJan22006",
-		"--":                         "Timestamp",
-		"02 Jänner 2006":             "Timestamp02Jänner2006",
-		"2006-01-02T15:04:05.000000": "Timestamp20060102T150405000000",
-	}
-	for in, want := range cases {
-		if got := layoutTypeBase(in); got != want {
-			t.Errorf("layoutTypeBase(%q) = %q, want %q", in, got, want)
-		}
-	}
-}
-
 // TestBuildNameTable_ATypeWhoseBareSpellingIsDateTakesItsExactSpelling pins
 // that the emitted Date type's name is a permanent claimant: Date is a DSL
 // keyword, but a type Date_ has the bare spelling Date.
@@ -281,7 +257,7 @@ func TestBuildNameTable_NamesDoNotDependOnImportOrder(t *testing.T) {
 
 // exactArity is how many identity parts each family's exact spelling holds.
 var exactArity = map[string]int{
-	wordType: 2, wordDataType: 2, wordLayout: 1, wordAssociation: 3,
+	wordType: 2, wordDataType: 2, wordAssociation: 3,
 	wordEnum: 3, wordAssociationEnum: 4, wordElement: 2,
 }
 
@@ -295,7 +271,7 @@ func readExact(name string) (string, []string, bool) {
 	if word == wordConst {
 		enumWord, enumRest, ok := strings.Cut(rest, "_")
 		n, known := exactArity[enumWord]
-		if !ok || !known || enumWord == wordLayout || enumWord == wordAssociation || enumWord == wordType {
+		if !ok || !known || enumWord == wordAssociation || enumWord == wordType {
 			return "", nil, false
 		}
 		parts, ok := readParts(enumRest)
@@ -395,7 +371,7 @@ func TestExactSpelling_ReadsBackToItsIdentityAndNoBareSpellingHoldsIt(t *testing
 
 		a, b := goExportedIdent(randomText(r, 8), defaultInitialisms), goExportedIdent(randomText(r, 8), defaultInitialisms)
 		for _, bare := range []string{
-			a, a + b, a + "Element", layoutTypeBase(randomText(r, 8)),
+			a, a + b, a + "Element",
 			"EDGE_" + a + "_" + strings.ToLower(randomText(r, 6)) + "_" + b,
 			"EDGE_" + a + "_x_" + b + a,
 		} {

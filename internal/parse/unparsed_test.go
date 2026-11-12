@@ -28,7 +28,6 @@ func TestParse_UnparsedHoldsTheGrammarFailuresAlone(t *testing.T) {
 		{"inverted bounds", checkSource(`n Integer[5, 1]`), nil},
 		{"an escape with malformed digits in an enum", checkSource(`e Enum["\xZZ", "b"]`), []string{"invalid enum value: unquote string: invalid syntax"}},
 		{"an escape with malformed digits in a pattern", checkSource(`p Pattern["\xZZ"]`), []string{"invalid pattern: unquote string: invalid syntax"}},
-		{"an escape with malformed digits in a format", checkSource(`t Timestamp["\xZZ"]`), []string{"invalid timestamp format: unquote string: invalid syntax"}},
 		{"an escape with malformed digits in a message", checkSource(`! "\xZZ" id != ""`), []string{"invalid invariant message: unquote string: invalid syntax"}},
 		{"an escape with malformed digits in a schema name", "schema \"\\xZZ\"\ntype T {\n\tid String primary\n}\n", []string{"invalid schema name: unquote string: invalid syntax"}},
 		{"an escape with malformed digits in an import path", "schema \"s\"\nimport \"\\xZZ\"\ntype T {\n\tid String primary\n}\n", []string{"invalid import path: unquote string: invalid syntax"}},
@@ -38,11 +37,10 @@ func TestParse_UnparsedHoldsTheGrammarFailuresAlone(t *testing.T) {
 		{"an unterminated type body", "schema \"s\"\ntype T {\n\tid String primary\n", []string{"unexpected end of input in a type body"}},
 		{"a malformed number", checkSource(`n Integer[0x10, 5]`), []string{InvalidNumberMessage("0x10")}},
 		{"no schema header", "type T {\n\tid String primary\n}\n", []string{`unexpected token "type" in the schema header`}},
-		{"three failures in three declarations", "schema \"s\"\ntype A {\n\tid String primary\n\te Enum[\"\\xZZ\", \"b\"]\n}\ntype B {\n\tid String primary primary\n}\ntype C {\n\tn Integer[0x10, 5]\n\tt Timestamp[\"\\xZZ\"]\n}\n", []string{
+		{"three failures in three declarations", "schema \"s\"\ntype A {\n\tid String primary\n\te Enum[\"\\xZZ\", \"b\"]\n}\ntype B {\n\tid String primary primary\n}\ntype C {\n\tn Integer[0x10, 5]\n}\n", []string{
 			"invalid enum value: unquote string: invalid syntax",
 			`unexpected token "}" in a type body`,
 			InvalidNumberMessage("0x10"),
-			"invalid timestamp format: unquote string: invalid syntax",
 		}},
 		{"a refused comment beside an unexpected token", "schema \"s\"\n// a \x00 b\ntype T {\n\tid String primary primary\n}\n", []string{`unexpected token "}" in a type body`}},
 	}

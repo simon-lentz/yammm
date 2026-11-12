@@ -41,7 +41,7 @@ abstract type Vehicle {
 	wheels Integer[1, 18] @index
 	kind Enum["car", "truck"]
 	ratio Float[-1.5, 2.5]
-	made Timestamp["2006-01-02"]
+	made Timestamp
 	tag Code
 	badge other.Badge
 	slug Pattern["^[a-z]+$"]
@@ -128,8 +128,8 @@ func assertVehicle(t *testing.T, ty *TypeDecl) {
 	if got := ty.Properties[3].Constraint; got.FloatMin == nil || *got.FloatMin != -1.5 {
 		t.Errorf("ratio min = %+v, want -1.5", got.FloatMin)
 	}
-	if got, ok := ty.Properties[4].Constraint.Format(); !ok || got != "2006-01-02" {
-		t.Errorf("made format = %q ok=%v", got, ok)
+	if got := ty.Properties[4].Constraint; got.Kind != ConstraintTimestamp {
+		t.Errorf("made = %+v, want a Timestamp", got)
 	}
 	if got := ty.Properties[5].Constraint; got.Kind != ConstraintAlias || got.Alias.Name != "Code" {
 		t.Errorf("tag = %+v, want alias Code", got)

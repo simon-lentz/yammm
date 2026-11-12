@@ -85,7 +85,7 @@ func refusedRuns(source string) int {
 // that has no value: the source rules' diagnostic at each run of refused text,
 // a diagnostic for an escape that breaks the value on its own, and whatever
 // stands when the literal is counted as written. Nothing is said about a value
-// the source did not write: no duplicate, no shortfall, no lossy layout, no
+// the source did not write: no duplicate, no shortfall, no
 // file that was not found, and no unknown alias.
 func TestLoad_OneBreakInALiteralIsOneIssue(t *testing.T) {
 	t.Parallel()
@@ -93,7 +93,6 @@ func TestLoad_OneBreakInALiteralIsOneIssue(t *testing.T) {
 		badValue   = "E_SYNTAX invalid enum value: unquote string: the value its escapes write is not valid UTF-8"
 		badPath    = "E_SYNTAX invalid import path: unquote string: the value its escapes write is not valid UTF-8"
 		badMessage = "E_SYNTAX invalid invariant message: unquote string: the value its escapes write is not valid UTF-8"
-		badFormat  = "E_SYNTAX invalid timestamp format: unquote string: the value its escapes write is not valid UTF-8"
 		badString  = "E_INVALID_INVARIANT invalid string literal: the value its escapes write is not valid UTF-8"
 		oneValue   = "E_INVALID_CONSTRAINT enum must have at least two values (got 1)"
 		outOfRange = `E_INVALID_INVARIANT invalid integer literal: strconv.ParseInt: parsing "99999999999999999999": value out of range`
@@ -156,8 +155,6 @@ func TestLoad_OneBreakInALiteralIsOneIssue(t *testing.T) {
 		{"expression: three inherited call arguments, the one with no value first", "schema \"s\"\nabstract type S {\n\tx Integer\n\t! \"m\" (x -> Default(99999999999999999999)) == 1\n}\nabstract type A {\n\tx Integer\n\t! \"m\" (x -> Default(1)) == 1\n}\nabstract type C {\n\tx Integer\n\t! \"m\" (x -> Default(2)) == 1\n}\ntype D extends S, A, C {\n\tid String primary\n}\n", "", []string{outOfRange, `E_INVARIANT_CONFLICT type "D" inherits definitions of invariant "m" with different expressions (expressions are compared structurally: 1 and 1.0 are different literals)`}},
 		{"expression: an inherited view whose literal with no value is still open", "schema \"s\"\nabstract type S {\n\tx Integer\n\t! \"m\" x == 99999999999999999999\n}\nabstract type U {\n\tx Integer\n\t! \"m\" x == 99999999999999999999\n}\nabstract type C {\n\tx Integer\n\t! \"m\" x == 2\n}\nabstract type M extends S, U {\n\tx Integer\n}\ntype D extends M, C {\n\tid String primary\n}\n", "", []string{outOfRange, outOfRange}},
 		{"expression: a literal out of range in an inherited conflict", "schema \"s\"\nabstract type P {\n\tn Integer\n\t! \"m\" n > 0\n}\nabstract type Q {\n\tn Integer\n\t! \"m\" n < 99999999999999999999\n}\ntype T extends P, Q {\n\tid String primary\n}\n", "", []string{outOfRange, `E_INVARIANT_CONFLICT type "T" inherits definitions of invariant "m" with different expressions (expressions are compared structurally: 1 and 1.0 are different literals)`}},
-		{"timestamp: a raw invalid format", typeBody("t Timestamp[\"\xff\"]"), "", []string{invalidUTF8}},
-		{"timestamp: a lossy layout holding a NUL", typeBody("t Timestamp[\"2006-01-02\x00\"]"), "", []string{strayNUL}},
 		{"pattern: a raw invalid byte", typeBody("p Pattern[\"a\xff\"]"), "", []string{invalidUTF8}},
 		{"pattern: three, the last raw invalid and still counted", typeBody("p Pattern[\"a\", \"b\", \"c\xff\"]"), "", []string{threeGiven, invalidUTF8}},
 		{"pattern: three, the last holding a NUL", typeBody("p Pattern[\"a\", \"b\", \"c\x00\"]"), "", []string{threeGiven, strayNUL}},
@@ -175,7 +172,6 @@ func TestLoad_OneBreakInALiteralIsOneIssue(t *testing.T) {
 		{"datatype: one escape not UTF-8 of two", "schema \"s\"\ntype E = Enum[\"\\xff\", \"b\"]\ntype T {\n\tid String primary\n\te E\n}\n", "\xff", []string{badValue}},
 		{"import: an escape not UTF-8 with an alias, used", "schema \"s\"\nimport \"./d\\xff\" as d\ntype T {\n\tid String primary\n\tk d.K\n}\n", "d\xff", []string{badPath}},
 		{"import: an escape not UTF-8 with no alias", "schema \"s\"\nimport \"./d\\xff\"\ntype T {\n\tid String primary\n}\n", "d\xff", []string{badPath}},
-		{"timestamp: an escape not UTF-8", typeBody(`t Timestamp["\xff"]`), "\xff", []string{badFormat}},
 		{"message: an escape not UTF-8, expression literal out of range", typeBody(`! "\xff" id == 99999999999999999999`), "\xff", []string{badMessage}},
 	}
 	for _, row := range rows {
@@ -234,8 +230,9 @@ func TestLoad_ASourceWithNoRefusedTextAnswersAsV0210(t *testing.T) {
 		lastOne   = `E_INVALID_CONSTRAINT regex pattern "\\x{DFFF}" names the surrogate code point U+DFFF, which no string holds`
 		overThree = "E_INVALID_CONSTRAINT pattern constraint exceeds maximum of 2 patterns (got 3)"
 		overFour  = "E_INVALID_CONSTRAINT pattern constraint exceeds maximum of 2 patterns (got 4)"
-		dateOnlyV = `W_TIMESTAMP_LOSSY_FORMAT timestamp format "2006-01-02" cannot represent an instant: a value stored through it loses its UTC offset, its fractional second, or both`
-		dateOnly  = `W_TIMESTAMP_LOSSY_FORMAT timestamp format "2006-01-02" cannot represent an instant: a value stored through it loses the hour, the minute, the second, the fractional second and the UTC offset`
+		lossy     = `W_TIMESTAMP_LOSSY_FORMAT timestamp format "2006-01-02" cannot represent an instant: a value stored through it loses its UTC offset, its fractional second, or both`
+		badEscape = "E_SYNTAX invalid timestamp format: unquote string: invalid syntax"
+		bracket   = `E_SYNTAX unexpected token "[" in a type body`
 	)
 	type move struct{ gone, added []string }
 	moved := map[string]move{
@@ -260,8 +257,10 @@ func TestLoad_ASourceWithNoRefusedTextAnswersAsV0210(t *testing.T) {
 		"plain: pattern of three, one not compiling":      {added: []string{overThree}},
 		"plain: pattern of three, one a malformed escape": {added: []string{overThree}},
 		"plain: pattern of four, one not compiling":       {gone: []string{overThree}, added: []string{overFour}},
-		// The lossy-layout warning names the fields the layout loses.
-		"plain: timestamp with a lossy layout": {gone: []string{dateOnlyV}, added: []string{dateOnly}},
+		// Timestamp takes no format, so the bracket is a token the grammar
+		// does not match.
+		"plain: timestamp with a lossy layout":     {gone: []string{lossy}, added: []string{bracket}},
+		"plain: timestamp with a malformed escape": {gone: []string{badEscape}, added: []string{bracket}},
 	}
 	data, err := os.ReadFile("testdata/source_text_v0210.tsv")
 	if err != nil {

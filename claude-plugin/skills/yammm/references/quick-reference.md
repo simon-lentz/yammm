@@ -47,7 +47,7 @@ Using `primary required` together is a parse error -- `primary` already implies 
 | `Integer` | `Integer[min, max]` | Signed; negative bounds allowed |
 | `Float` | `Float[min, max]` | Inclusive bounds |
 | `Boolean` | `Boolean` | No parameters |
-| `Timestamp` | `Timestamp` or `Timestamp["format"]` | Default RFC3339 |
+| `Timestamp` | `Timestamp` | RFC 3339 |
 | `Date` | `Date` | Date only |
 | `UUID` | `UUID` | UUID string |
 | `Enum` | `Enum["a", "b", ...]` | Minimum 2 options |

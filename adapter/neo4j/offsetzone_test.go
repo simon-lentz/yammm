@@ -67,14 +67,13 @@ func TestCoerce_AUTCInstantGoesAsOffsetZero(t *testing.T) {
 func TestCoerce_UTCInstantsShareOneLocation(t *testing.T) {
 	t.Parallel()
 	c := schema.NewTimestampConstraint()
-	declared := schema.NewTimestampConstraintFormatted("2006-01-02 15:04:05 -0700")
 	first := coerceTime(t, c, "2026-08-19T12:00:00Z").Location()
-	for text, at := range map[string]schema.Constraint{
-		"2026-08-19T12:00:00Z":        c,
-		"2001-01-01T00:00:00.5+00:00": c,
-		"2026-08-19 12:00:00 +0000":   declared,
+	for _, text := range []string{
+		"2026-08-19T12:00:00Z",
+		"2001-01-01T00:00:00.5+00:00",
+		"2026-08-19T12:00:00-00:00",
 	} {
-		if got := coerceTime(t, at, text).Location(); got != first {
+		if got := coerceTime(t, c, text).Location(); got != first {
 			t.Errorf("%s went in a location of its own, %p beside %p", text, got, first)
 		}
 	}
@@ -92,17 +91,6 @@ func TestCoerce_OffsetRepairPreservesTheInstant(t *testing.T) {
 	got := coerceTime(t, schema.NewTimestampConstraint(), in)
 	if !got.Equal(in) {
 		t.Errorf("coerced %s, want the same instant as %s", got, in)
-	}
-}
-
-// TestCoerce_DeclaredLayoutAlsoCarriesTheDriverZoneName covers the second
-// parse path in the same arm, which a test on the RFC 3339 path alone misses.
-func TestCoerce_DeclaredLayoutAlsoCarriesTheDriverZoneName(t *testing.T) {
-	t.Parallel()
-	c := schema.NewTimestampConstraintFormatted("2006-01-02 15:04:05 -0700")
-	got := coerceTime(t, c, "2026-08-19 12:00:00 +0200")
-	if zone, _ := got.Zone(); zone != driverOffsetZoneName {
-		t.Errorf("zone name = %q, want %q", zone, driverOffsetZoneName)
 	}
 }
 

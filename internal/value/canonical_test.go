@@ -85,32 +85,6 @@ func TestCanonical_TimestampMovesNoKey(t *testing.T) {
 	}
 }
 
-// TestCanonical_TimestampUsesTheDeclaredFormat closes the defect where a
-// custom-format timestamp built from a time.Time was written in RFC 3339 text
-// that does not satisfy its own declared layout.
-func TestCanonical_TimestampUsesTheDeclaredFormat(t *testing.T) {
-	t.Parallel()
-	const layout = "2006-01-02 15:04:05"
-	c := schema.NewTimestampConstraintFormatted(layout)
-
-	got := canon(t, time.Date(2026, 8, 19, 12, 0, 0, 0, time.UTC), c)
-	if got != "2026-08-19 12:00:00" {
-		t.Errorf("Canonical of a time.Time under %q = %#v", layout, got)
-	}
-	if _, err := time.Parse(layout, got.(string)); err != nil {
-		t.Errorf("canonical text does not satisfy its own declared layout: %v", err)
-	}
-
-	// The string arm parses under the declared layout exclusively, matching
-	// what the checker accepts.
-	if got := canon(t, "2026-08-19 12:00:00", c); got != "2026-08-19 12:00:00" {
-		t.Errorf("Canonical of a conforming string = %#v", got)
-	}
-	if _, err := value.Canonical("2026-08-19T12:00:00Z", c); err == nil {
-		t.Error("RFC 3339 text under a declared layout canonicalized; want an error")
-	}
-}
-
 // TestCanonical_UUIDCollapsesEverySpelling pins the fix for the silent
 // primary-key split: uuid.Parse accepts five spellings and every one of them
 // produced its own key.
@@ -192,7 +166,6 @@ func TestCanonical_IsIdempotent(t *testing.T) {
 	}{
 		{"timestamp go native", time.Date(2026, 8, 19, 12, 0, 0, 500000000, time.UTC), schema.NewTimestampConstraint()},
 		{"timestamp non-canonical string", "2026-08-19T12:00:00.000+00:00", schema.NewTimestampConstraint()},
-		{"timestamp declared layout", time.Date(2026, 8, 19, 12, 0, 0, 0, time.UTC), schema.NewTimestampConstraintFormatted("2006-01-02 15:04:05")},
 		{"uuid go native", uuid.MustParse("0a35ef0f-9d40-4b6b-a0a1-0d1a5a0e1f2b"), schema.NewUUIDConstraint()},
 		{"uuid uppercase string", "0A35EF0F-9D40-4B6B-A0A1-0D1A5A0E1F2B", schema.NewUUIDConstraint()},
 		{"date go native", time.Date(2026, 8, 19, 12, 0, 0, 0, time.UTC), schema.NewDateConstraint()},
@@ -238,12 +211,12 @@ func TestCanonical_ListsCanonicalizeElementwise(t *testing.T) {
 	}
 }
 
-// TestCanonical_ResolvesThroughAnAlias holds the DataType path: a
-// Timestamp["layout"] reached through an alias keeps its layout.
+// TestCanonical_ResolvesThroughAnAlias holds the DataType path: a Timestamp
+// reached through an alias is rendered as a Timestamp is.
 func TestCanonical_ResolvesThroughAnAlias(t *testing.T) {
 	t.Parallel()
-	alias := schema.NewAliasConstraint("EventTime", schema.NewTimestampConstraintFormatted("2006-01-02 15:04:05"))
-	if got := canon(t, time.Date(2026, 8, 19, 12, 0, 0, 0, time.UTC), alias); got != "2026-08-19 12:00:00" {
+	alias := schema.NewAliasConstraint("EventTime", schema.NewTimestampConstraint())
+	if got := canon(t, time.Date(2026, 8, 19, 12, 0, 0, 0, time.FixedZone("", 2*3600)), alias); got != "2026-08-19T12:00:00+02:00" {
 		t.Errorf("Canonical through an alias = %#v", got)
 	}
 }
@@ -280,17 +253,20 @@ func TestCanonical_PassesEveryOtherKindThrough(t *testing.T) {
 // cannot, never failing a write.
 func TestCanonical_ReturnsTheInputOnFailure(t *testing.T) {
 	t.Parallel()
+	type carrier string
 	cases := []struct {
 		name string
 		in   any
 		c    schema.Constraint
+		want string // the refusal, where the row holds it
 	}{
-		{"timestamp, wrong type", 42, schema.NewTimestampConstraint()},
-		{"timestamp, unparseable text", "not-a-timestamp", schema.NewTimestampConstraint()},
-		{"timestamp, text its declared layout does not read", "x", schema.NewTimestampConstraintFormatted(time.DateOnly)},
-		{"uuid, wrong type", 42, schema.NewUUIDConstraint()},
-		{"date, wrong type", 42, schema.NewDateConstraint()},
-		{"list element fails", []any{"not-a-timestamp"}, schema.NewListConstraint(schema.NewTimestampConstraint())},
+		{"timestamp, wrong type", 42, schema.NewTimestampConstraint(), "value: cannot canonicalize int as a Timestamp (want a string or time.Time)"},
+		{"timestamp, unparseable text", "not-a-timestamp", schema.NewTimestampConstraint(), `value: "not-a-timestamp" is not an RFC 3339 timestamp`},
+		{"timestamp, unparseable text in a named string", carrier("not-a-timestamp"), schema.NewTimestampConstraint(), `value: "not-a-timestamp" is not an RFC 3339 timestamp`},
+		{"timestamp, a date alone", "2026-08-19", schema.NewTimestampConstraint(), `value: "2026-08-19" is not an RFC 3339 timestamp`},
+		{"uuid, wrong type", 42, schema.NewUUIDConstraint(), ""},
+		{"date, wrong type", 42, schema.NewDateConstraint(), ""},
+		{"list element fails", []any{"not-a-timestamp"}, schema.NewListConstraint(schema.NewTimestampConstraint()), ""},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -298,6 +274,9 @@ func TestCanonical_ReturnsTheInputOnFailure(t *testing.T) {
 			got, err := value.Canonical(tc.in, tc.c)
 			if err == nil {
 				t.Fatal("want an error")
+			}
+			if tc.want != "" && err.Error() != tc.want {
+				t.Errorf("Canonical refuses with %q, want %q", err, tc.want)
 			}
 			if !reflect.DeepEqual(got, tc.in) {
 				t.Errorf("on failure Canonical returned %#v, want the input unchanged", got)
@@ -404,12 +383,12 @@ func TestCanonical_ListRefusesAnArray(t *testing.T) {
 	}
 }
 
-// A time.Time whose text no layout reads back is refused with that text cut to
+// A time.Time whose text does not read back is refused with that text cut to
 // its head: a year past 9999 with nanoseconds and a half-hour zone runs 36 bytes.
 func TestCanonical_AnUnreadTimeIsCutToItsHead(t *testing.T) {
 	t.Parallel()
 	_, err := value.Canonical(time.Date(10000, 1, 1, 0, 0, 0, 123456789, time.FixedZone("", 5*3600+1800)), schema.NewTimestampConstraint())
-	want := `value: a time.Time renders as "10000-01-01T00:00:00.123456789+0"… (36 bytes), which is no timestamp the layout reads back`
+	want := `value: a time.Time renders as "10000-01-01T00:00:00.123456789+0"… (36 bytes), which is no RFC 3339 timestamp`
 	if err == nil || err.Error() != want {
 		t.Errorf("err = %v, want %s", err, want)
 	}
@@ -425,7 +404,6 @@ func TestCanonical_ARefusedLongStringIsCut(t *testing.T) {
 		want string
 	}{
 		{schema.NewTimestampConstraint(), "value: " + cut + " is not an RFC 3339 timestamp"},
-		{schema.NewTimestampConstraintFormatted(time.DateOnly), "value: " + cut + ` does not satisfy the declared timestamp format "2006-01-02"`},
 		{schema.NewUUIDConstraint(), "value: " + cut + " is not a UUID"},
 		{schema.NewDateConstraint(), "value: " + cut + " is not a YYYY-MM-DD date"},
 	} {

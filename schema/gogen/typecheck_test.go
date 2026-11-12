@@ -19,8 +19,8 @@ func TestTypeCheck_RejectsForeignImport(t *testing.T) {
 	}
 }
 
-// TestTypeCheck_ServesTimeAndJSON pins that the stub covers exactly what an
-// emitted temporal type calls: time.Parse, Time.Format, json.Marshal and
+// TestTypeCheck_ServesTimeAndJSON pins that the stub covers what the emitted
+// Date codec names: time.Parse, Time.Format, time.DateOnly, json.Marshal and
 // json.Unmarshal.
 func TestTypeCheck_ServesTimeAndJSON(t *testing.T) {
 	t.Parallel()
@@ -33,14 +33,14 @@ import (
 
 type Date struct{ time.Time }
 
-func (v Date) MarshalJSON() ([]byte, error) { return json.Marshal(v.Format("2006-01-02")) }
+func (v Date) MarshalJSON() ([]byte, error) { return json.Marshal(v.Format(time.DateOnly)) }
 
 func (v *Date) UnmarshalJSON(b []byte) error {
 	var s string
 	if err := json.Unmarshal(b, &s); err != nil {
 		return err
 	}
-	t, err := time.Parse("2006-01-02", s)
+	t, err := time.Parse(time.DateOnly, s)
 	if err != nil {
 		return err
 	}

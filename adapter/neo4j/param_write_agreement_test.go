@@ -26,8 +26,6 @@ type T {
 	f Float
 	b Boolean
 	ts Timestamp
-	tl Timestamp["2006-01-02 15:04"]
-	tz Timestamp["2006-01-02 15:04 -0700"]
 	d Date
 	u UUID
 	e Enum["a", "b"]
@@ -101,20 +99,24 @@ func TestCoerceParams_SendsWhatTheWritePathSendsForTheValidatedValue(t *testing.
 	utc := time.Date(2024, 1, 2, 3, 4, 5, 123456789, time.UTC)
 	zoned := time.Date(2024, 7, 2, 23, 4, 5, 0, newYork)
 	fixed := time.Date(2024, 1, 2, 3, 4, 5, 0, time.FixedZone("X", 3600))
+	seconds := time.Date(2024, 1, 2, 3, 4, 5, 0, time.FixedZone("", 3600+59))
 	far := time.Date(10000, 1, 1, 0, 0, 0, 0, time.UTC)
+	wide := time.Date(2024, 1, 2, 3, 4, 5, 0, time.FixedZone("", 24*3600))
 	id := uuid.MustParse("12345678-1234-1234-1234-123456789abc")
 	const upperID = "12345678-1234-1234-1234-123456789ABC"
 	text, n := "abc", int64(5)
 	var nilText *string
 
 	rows := map[string][]any{
-		"s":  {"abc", namedText("abc"), "", "toolong", 5, json.Number("5"), &text, nilText, []any{"a"}, map[string]string{"a": "b"}, map[string]any{"a": "b"}, map[string]any{}, []map[string]any{{"a": "b"}}},
-		"i":  {int64(5), 5, int32(5), uint8(5), uint64(5), namedInt(5), json.Number("5"), 11, -1, 5.0, json.Number("5.0"), uint64(1 << 63), "5", &n},
-		"f":  {1.5, float32(1.5), namedFloat(1.5), int64(3), 3, uint64(1 << 63), json.Number("-0"), json.Number("0.1"), json.Number("99999999999999999999"), json.Number("1e400"), math.NaN(), math.Inf(1), "1.5"},
-		"b":  {true, false, namedFlag(true), "true", 1},
-		"ts": {"2024-01-02T03:04:05Z", "2024-01-02T03:04:05.123456789+02:00", utc, zoned, fixed, utc.In(time.Local), far, "nope", "2024-01-02", &utc, 5},
-		"tl": {"2024-01-02 03:04", utc, zoned, "2024-01-02T03:04:05Z"},
-		"tz": {"2024-01-02 03:04 -0700", "2024-01-02 03:04 +0000", "2024-01-02 03:04 -0400", "2024-01-02 03:04 +0300", "2024-01-02 03:04 +1800", "2024-01-02 03:04 -1800", "2024-01-02 03:04", utc, zoned, fixed},
+		"s": {"abc", namedText("abc"), "", "toolong", 5, json.Number("5"), &text, nilText, []any{"a"}, map[string]string{"a": "b"}, map[string]any{"a": "b"}, map[string]any{}, []map[string]any{{"a": "b"}}},
+		"i": {int64(5), 5, int32(5), uint8(5), uint64(5), namedInt(5), json.Number("5"), 11, -1, 5.0, json.Number("5.0"), uint64(1 << 63), "5", &n},
+		"f": {1.5, float32(1.5), namedFloat(1.5), int64(3), 3, uint64(1 << 63), json.Number("-0"), json.Number("0.1"), json.Number("99999999999999999999"), json.Number("1e400"), math.NaN(), math.Inf(1), "1.5"},
+		"b": {true, false, namedFlag(true), "true", 1},
+		"ts": {
+			"2024-01-02T03:04:05Z", "2024-01-02T03:04:05.123456789+02:00", "2024-01-02T03:04:05+00:00", "2024-01-02T03:04:05-07:00",
+			"2024-01-02T03:04:05+18:00", "2024-01-02T03:04:05-18:00", "2024-01-02T03:04:05+24:60", "2024-01-02T03:04:05+24:00",
+			utc, zoned, fixed, seconds, utc.In(time.Local), far, wide, "nope", "2024-01-02", "2024-01-02 03:04", "2024-01-02T03:04:05", &utc, 5,
+		},
 		"d":  {"2024-01-02", utc, zoned, far, "01/02/2024", "2024-01-02T03:04:05Z", 5},
 		"u":  {id.String(), upperID, "{" + upperID + "}", id, "zz", &id, 5},
 		"e":  {"a", namedText("b"), "c", 5},

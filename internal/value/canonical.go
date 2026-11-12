@@ -14,9 +14,9 @@ import (
 // Canonical returns val in the single stored representation c defines.
 //
 // Three kinds accept more than one Go representation and store one: a
-// Timestamp renders through its declared layout when it has one and through
-// [time.RFC3339Nano] otherwise, a UUID through [uuid.UUID.String], and a Date
-// through [time.DateOnly] in the value's own location. A string form is parsed
+// Timestamp renders through [time.RFC3339Nano], a UUID through
+// [uuid.UUID.String], and a Date through [time.DateOnly] in the value's own
+// location. A string form is parsed
 // and re-rendered, so one value reaches one spelling whichever way a caller
 // wrote it. A List canonicalizes at its element, so a List over one of those
 // three kinds is rebuilt as a fresh []any. Every other kind, an unresolved
@@ -27,12 +27,9 @@ import (
 // caller that heals what it can and passes through what it cannot may ignore
 // the error and use the value directly.
 //
-// Rendering a Timestamp through a declared layout drops whatever that layout
-// cannot express. A schema declaring such a layout draws
-// [github.com/simon-lentz/yammm/diag.W_TIMESTAMP_LOSSY_FORMAT] at load, save
-// for an offset's seconds. A value is refused when the layout does not read
-// back the text it stores as that same text, and a time.Time is stored as its
-// rendered text is.
+// A Timestamp's stored text drops an offset's seconds. A Timestamp is stored
+// only as text [time.Time.AppendText] writes, so one at a UTC offset of 24
+// hours or more is refused, and a time.Time is stored as its rendered text is.
 func Canonical(val any, c schema.Constraint) (any, error) {
 	if c == nil || Absent(val) {
 		return val, nil
@@ -41,7 +38,7 @@ func Canonical(val any, c schema.Constraint) (any, error) {
 	//exhaustive:enforce
 	switch resolved.Kind() {
 	case schema.KindTimestamp:
-		return canonicalTimestamp(val, resolved)
+		return canonicalTimestamp(val)
 	case schema.KindUUID:
 		return canonicalUUID(val)
 	case schema.KindDate:
@@ -60,10 +57,8 @@ func Canonical(val any, c schema.Constraint) (any, error) {
 	return val, nil
 }
 
-// canonicalTimestamp renders val through the constraint's layout. The layout
-// is the declared one when the constraint carries it, so a custom-format
-// timestamp is stored in text that satisfies its own format.
-func canonicalTimestamp(val any, c schema.Constraint) (any, error) {
+// canonicalTimestamp renders val as RFC 3339 with fractional seconds.
+func canonicalTimestamp(val any) (any, error) {
 	// A time.Time is stored as its rendered text is, so both forms of one
 	// instant reach one spelling.
 	t, isTime := val.(time.Time)
@@ -72,70 +67,38 @@ func canonicalTimestamp(val any, c schema.Constraint) (any, error) {
 	s, isText := GetString(val)
 	switch {
 	case isTime:
-		s = t.Format(timestampLayout(c))
+		s = t.Format(timestampLayout)
 	case !isText:
 		return val, fmt.Errorf("value: cannot canonicalize %T as a Timestamp (want a string or time.Time)", val)
 	}
 	var buf [timestampTextSize]byte
-	stored, verdict := storedTimestamp(buf[:0], s, c)
+	stored, ok := storedTimestamp(buf[:0], s)
 	switch {
-	case verdict == textSettled:
+	case ok && s == string(stored):
 		// Text in its stored form is returned as given, which saves the copy.
-		if s == string(stored) {
-			return s, nil
-		}
+		return s, nil
+	case ok:
 		return string(stored), nil
-	case verdict == textUnsettled:
-		// The copy keeps buf on the stack.
-		return val, fmt.Errorf("value: %s is stored as %q, which does not read back as written", diag.QuoteValue(s), string(stored))
 	case isTime:
-		return val, fmt.Errorf("value: a time.Time renders as %s, which is no timestamp the layout reads back", diag.QuoteValue(s))
-	}
-	if tc, ok := c.(schema.TimestampConstraint); ok && tc.Format() != "" {
-		return val, fmt.Errorf("value: %s does not satisfy the declared timestamp format %q", diag.QuoteValue(s), tc.Format())
+		return val, fmt.Errorf("value: a time.Time renders as %s, which is no RFC 3339 timestamp", diag.QuoteValue(s))
 	}
 	return val, fmt.Errorf("value: %s is not an RFC 3339 timestamp", diag.QuoteValue(s))
 }
 
-// timestampTextSize holds the stored text of RFC 3339 and of most declared
-// layouts on the stack. A longer text costs one allocation.
-const timestampTextSize = 64
+// timestampTextSize holds a Timestamp's stored text on the stack: no stored
+// text is longer than its layout.
+const timestampTextSize = len(timestampLayout)
 
-// textVerdict is how a Timestamp's layout answers one text.
-type textVerdict uint8
-
-const (
-	// textUnread: the layout does not read the text.
-	textUnread textVerdict = iota
-	// textUnsettled: the layout stores the text as text it does not read, or
-	// that it stores as other text again, so a later read would move the value.
-	textUnsettled
-	// textSettled: the layout stores the text as text it stores as itself.
-	textSettled
-)
-
-// storedTimestamp appends to buf the text a Timestamp c stores for s, and
-// judges it. For text c does not read it appends nothing.
-func storedTimestamp(buf []byte, s string, c schema.Constraint) ([]byte, textVerdict) {
-	t, ok := ParseTimestamp(s, c)
+// storedTimestamp appends to buf the text a Timestamp stores for s, and
+// reports whether s is stored. It refuses text [ParseTimestamp] does not read,
+// and an offset hour of 24, which [time.Time.AppendText] does not write.
+func storedTimestamp(buf []byte, s string) ([]byte, bool) {
+	t, ok := ParseTimestamp(s)
 	if !ok {
-		return buf, textUnread
+		return buf, false
 	}
-	layout := timestampLayout(c)
-	stored := t.AppendFormat(buf, layout)
-	// Text already in its stored form was read just now.
-	if string(stored) == s {
-		return stored, textSettled
-	}
-	back, ok := ParseTimestamp(string(stored), c)
-	if !ok {
-		return stored, textUnsettled
-	}
-	var again [timestampTextSize]byte
-	if string(back.AppendFormat(again[:0], layout)) != string(stored) {
-		return stored, textUnsettled
-	}
-	return stored, textSettled
+	stored, err := t.AppendText(buf)
+	return stored, err == nil
 }
 
 // DateText returns t in the text a Date stores, and reports whether that text
@@ -146,31 +109,25 @@ func DateText(t time.Time) (string, bool) {
 	return s, err == nil
 }
 
-// timestampLayout returns the declared Go layout, or RFC 3339 with fractional
-// seconds. RFC3339Nano rather than RFC3339 because RFC3339 carries no fraction:
-// it would truncate a sub-second value and move that instance's primary key,
-// where RFC3339Nano is the text encoding/json already produces for a time.Time.
-func timestampLayout(c schema.Constraint) string {
-	if tc, ok := c.(schema.TimestampConstraint); ok && tc.Format() != "" {
-		return tc.Format()
-	}
-	return time.RFC3339Nano
-}
+// timestampLayout is the layout of a Timestamp's stored text, RFC 3339 with
+// fractional seconds, which is the text [time.Time.AppendText] and
+// encoding/json write for a time.Time. A time.Time is rendered in it and then
+// stored as that text is. RFC3339 carries no fraction: it would truncate a
+// sub-second value and move that instance's primary key.
+const timestampLayout = time.RFC3339Nano
 
-// ParseTimestamp reads s as a Timestamp c reads text: by the declared layout
-// alone when c carries one, and as RFC 3339 with or without fractional seconds
-// otherwise. It reads in UTC, where [time.Parse] reads an offset or an
-// abbreviation the host's zone holds into the host's location, so one text
-// gives one instant in one location on every host. The checker, the canonical
-// form and the Neo4j adapter all read by it.
-func ParseTimestamp(s string, c schema.Constraint) (time.Time, bool) {
+// ParseTimestamp reads s as RFC 3339 text, as the [time.RFC3339] layout reads
+// it, with or without fractional seconds. That reading takes a comma before
+// the fraction, a one-digit hour, an offset minute of 60 and an offset hour of
+// 24, and no lower-case t or z and no leap second. A Timestamp holds no text
+// at an offset hour of 24: [Canonical] refuses it. It reads in UTC, where
+// [time.Parse] reads an offset the host's zone holds into the host's location,
+// so one text gives one instant in one location on every host. The checker,
+// the canonical form and the Neo4j adapter all read by it.
+func ParseTimestamp(s string) (time.Time, bool) {
 	// RFC3339 parses fractional seconds too, so no RFC3339Nano fallback is
 	// needed: nothing that layout accepts, this one refuses.
-	layout := time.RFC3339
-	if tc, ok := c.(schema.TimestampConstraint); ok && tc.Format() != "" {
-		layout = tc.Format()
-	}
-	t, err := time.ParseInLocation(layout, s, time.UTC)
+	t, err := time.ParseInLocation(time.RFC3339, s, time.UTC)
 	return t, err == nil
 }
 

@@ -264,18 +264,6 @@ var (
 	// re-declaration draws at most one warning per direct supertype, and the
 	// warning names that supertype.
 	W_ANNOTATION_SHADOWED = NewCode("W_ANNOTATION_SHADOWED", CategorySchema)
-
-	// W_TIMESTAMP_LOSSY_FORMAT indicates that a Timestamp["layout"] declares a
-	// Go layout that cannot reproduce an instant. Values of the kind are
-	// stored as text rendered through the declared layout, and the message
-	// names each field that one of two probe instants loses there: a calendar
-	// or clock field, the fractional second or its trailing digits, the UTC
-	// offset or its minutes. Warning severity: a wall-clock layout is a
-	// legitimate domain choice, so the declaration is accepted and the author
-	// is told once, on the format literal. A layout that holds a zone
-	// abbreviation, or that does not read back the text it writes for one of
-	// the two instants, draws [E_INVALID_CONSTRAINT] in its place.
-	W_TIMESTAMP_LOSSY_FORMAT = NewCode("W_TIMESTAMP_LOSSY_FORMAT", CategorySchema)
 )
 
 // Syntax codes.

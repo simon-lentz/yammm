@@ -415,48 +415,48 @@ type Post {
 	}, []string{"[]string", "[][]string"})
 }
 
-// TestMarshal_ListEnumNamesAreClaimantsBesideTheLayouts pins that a List inline
-// enum's name and a List DataType's Element name claim their bare spellings as
-// a per-layout type does, so a layout whose base equals one of them and the
-// enum both take their exact spellings.
-func TestMarshal_ListEnumNamesAreClaimantsBesideTheLayouts(t *testing.T) {
+// TestMarshal_ListEnumNamesAreClaimants pins that a List inline enum's name
+// and a List DataType's Element name claim their bare spellings as a type
+// does, so a type of that spelling and the enum both take their exact
+// spellings.
+func TestMarshal_ListEnumNamesAreClaimants(t *testing.T) {
 	t.Parallel()
 
 	t.Run("a List inline enum on a property", func(t *testing.T) {
 		t.Parallel()
 		got := marshalString(t, `schema "p"
 
-type Timestamp2006 {
+type Post {
 	id String primary
 	x  List<Enum["a", "b"]>
-	t  Timestamp["2006 X"]
+}
+
+type PostX {
+	id String primary
 }
 `)
 		assertHolds(t, got, []string{
-			"type Timestamp_2006_20_X struct{ time.Time }",
-			"type Enum_p__Timestamp2006__x string",
-			"X  []Enum_p__Timestamp2006__x `json:\"x,omitzero\"`",
-			"T  *Timestamp_2006_20_X       `json:\"t,omitempty\"`",
-		}, []string{"Timestamp2006X "})
+			"type Type_p__PostX struct {",
+			"type Enum_p__Post__x string",
+			"X  []Enum_p__Post__x `json:\"x,omitzero\"`",
+		}, []string{"type PostX string", "type PostX struct"})
 	})
 
 	t.Run("a List DataType's inline element", func(t *testing.T) {
 		t.Parallel()
 		got := marshalString(t, `schema "p"
 
-type Timestamp2006 = List<Enum["a", "b"]>
+type Tags = List<Enum["a", "b"]>
 
-type Row {
+type TagsElement {
 	id String primary
-	v  Timestamp2006
-	t  Timestamp["2006 Element"]
+	v  Tags
 }
 `)
 		assertHolds(t, got, []string{
-			"type Timestamp_2006_20_Element struct{ time.Time }",
-			"type Element_p__Timestamp2006 string",
-			"type Timestamp2006 []Element_p__Timestamp2006",
-			"T  *Timestamp_2006_20_Element `json:\"t,omitempty\"`",
-		}, []string{"Timestamp2006Element "})
+			"type Type_p__TagsElement struct {",
+			"type Element_p__Tags string",
+			"type Tags []Element_p__Tags",
+		}, []string{"type TagsElement string", "type TagsElement struct"})
 	})
 }

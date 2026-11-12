@@ -307,14 +307,6 @@ type Event {
 }`,
 			wantOK: true,
 		},
-		{
-			name: "timestamp with format",
-			source: `schema "test"
-type Event {
-	createdAt Timestamp["2006-01-02T15:04:05Z07:00"]
-}`,
-			wantOK: true,
-		},
 	}
 
 	for _, tt := range tests {
@@ -1058,61 +1050,6 @@ type Source {
 				}
 				require.NotNil(t, rel, "should have an association with properties")
 				assert.Len(t, rel.Properties, tt.wantRelProps)
-			} else {
-				assert.False(t, result.OK(), "expected errors")
-			}
-		})
-	}
-}
-
-func TestParse_TimestampFormats(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		name       string
-		source     string
-		wantOK     bool
-		wantFormat string
-	}{
-		{
-			name: "timestamp with custom format",
-			source: `schema "test"
-type Event {
-	id UUID primary
-	time Timestamp["2006-01-02T15:04:05Z07:00"]
-}`,
-			wantOK:     true,
-			wantFormat: "2006-01-02T15:04:05Z07:00",
-		},
-		{
-			name: "timestamp with simple format",
-			source: `schema "test"
-type Event {
-	id UUID primary
-	date Timestamp["2006-01-02"]
-}`,
-			wantOK:     true,
-			wantFormat: "2006-01-02",
-		},
-		{
-			name: "timestamp without format",
-			source: `schema "test"
-type Event {
-	id UUID primary
-	created Timestamp
-}`,
-			wantOK:     true,
-			wantFormat: "",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			model, result := parseSchema(t, tt.source)
-			if tt.wantOK {
-				assert.True(t, result.OK(), "expected no errors, got: %v", result)
-				require.NotNil(t, model)
 			} else {
 				assert.False(t, result.OK(), "expected errors")
 			}
@@ -2950,20 +2887,6 @@ type Foo {
 			assert.True(t, foundCode, "expected to find error code %v", tt.wantCode)
 		})
 	}
-}
-
-func TestParse_TimestampInvalidFormat(t *testing.T) {
-	t.Parallel()
-
-	// Test timestamp with invalid escape sequence in format string
-	source := `schema "test"
-type Event {
-	id UUID primary
-	time Timestamp["\xinvalid"]
-}`
-
-	_, result := parseSchema(t, source)
-	assert.False(t, result.OK(), "expected error for invalid escape sequence")
 }
 
 func TestParse_InvariantInvalidMessage(t *testing.T) {

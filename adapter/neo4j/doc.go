@@ -206,18 +206,18 @@
 // validated instance, and a value the validator refuses (a wrong kind, a bound,
 // a member, a pattern) is an error. CoerceParams reads one flat map and walks
 // no value: to coerce the fields of a nested map or of a row, call it on that
-// map. The rule takes the full constraint, not just its kind, so a Timestamp's
-// custom layout is honored; a DataType reference is resolved internally.
+// map. The rule takes the full constraint, not just its kind; a DataType
+// reference is resolved internally.
 //
 //   - Float: a float64. Integer: an int64. Boolean: a bool. String, Enum and
 //     Pattern: a string. Each passes through, and a value of any other Go type
 //     is a coercion failure and returns an error.
 //   - UUID: a string -> its canonical text, lower case with hyphens. A string
 //     that is no UUID is a coercion failure.
-//   - Timestamp: a string -> time.Time (Neo4j ZONED DATETIME), parsed against the
-//     constraint's custom Go layout when it declares one (Timestamp["…"]) and
-//     against RFC3339 otherwise. A string that does not parse, or any other
-//     value, is a coercion failure. The text is read in UTC, so the host's
+//   - Timestamp: a string the validator reads as RFC 3339 -> time.Time (Neo4j
+//     ZONED DATETIME). A string it does not read, or any other value, is a
+//     coercion failure.
+//     The text is read in UTC, so the host's
 //     zone decides nothing, and the instant goes as its offset and never under
 //     a zone name: a UTC instant goes as offset zero. The server holds one
 //     instant under a zone name and under that zone's offset as two unequal
@@ -242,9 +242,10 @@
 // and a time.Time at a Timestamp are three such forms. It refuses two values
 // the validator takes: a value at a List whose element is a collection, and an
 // instant at a UTC offset past 18 hours. A time.Time goes through the text the
-// validator stores it as. At a Timestamp that text is in the constraint's
-// layout, so the instant reaches the server at the precision that text keeps
-// and at its offset. Text under a layout that holds no offset is read as UTC.
+// validator stores it as. At a Timestamp that text is RFC 3339 with fractional
+// seconds, so the instant reaches the server at the offset the text carries.
+// That text holds an offset in whole minutes, so a time.Time whose offset holds
+// seconds moves by those seconds.
 // From a key that holds a constraint no zone name reaches the server, a
 // location's such as Europe/Berlin included, and there a pointer is refused, a
 // nil one too.

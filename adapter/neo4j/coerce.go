@@ -58,15 +58,12 @@ func scalarForm(resolved schema.Constraint, raw any) (any, error) {
 		if !ok {
 			return raw, fmt.Errorf("coerce %s: cannot use %T (want string)", kind, raw)
 		}
-		if t, ok := value.ParseTimestamp(v, resolved); ok {
+		if t, ok := value.ParseTimestamp(v); ok {
 			_, offset := t.Zone()
 			if offset < -maxOffsetSeconds || offset > maxOffsetSeconds {
-				return raw, fmt.Errorf("coerce %s: cannot store %s: its UTC offset %s is past the 18 hours the server holds", kind, diag.QuoteValue(v), t.Format("-07:00:00"))
+				return raw, fmt.Errorf("coerce %s: cannot store %s: its UTC offset %s is past the 18 hours the server holds", kind, diag.QuoteValue(v), t.Format("-07:00"))
 			}
 			return offsetForm(t, offset), nil
-		}
-		if tc, ok := resolved.(schema.TimestampConstraint); ok && tc.Format() != "" {
-			return raw, fmt.Errorf("coerce %s: cannot parse %s against format %q", kind, diag.QuoteValue(v), tc.Format())
 		}
 		return raw, fmt.Errorf("coerce %s: cannot parse %s as an RFC3339 timestamp", kind, diag.QuoteValue(v))
 	case schema.KindDate:

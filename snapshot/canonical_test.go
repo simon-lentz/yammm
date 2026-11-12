@@ -39,7 +39,7 @@ part type Reading {
 type Sensor {
 	id String primary
 	created_at Timestamp
-	logged_at Timestamp["2006-01-02 15:04:05"]
+	logged_at Timestamp
 	aliased EventTime
 	run_id UUID
 	installed Date
@@ -64,7 +64,7 @@ func loadTemporalSchema(t *testing.T) schema.Schema {
 // representation the caller submitted.
 const (
 	canonicalCreated   = "2026-08-19T12:00:00.5Z"
-	canonicalLogged    = "2026-08-19 12:00:00"
+	canonicalLogged    = "2026-08-19T12:00:00+02:00"
 	canonicalRunID     = "0a35ef0f-9d40-4b6b-a0a1-0d1a5a0e1f2b"
 	canonicalInstalled = "2026-08-19"
 )
@@ -74,7 +74,7 @@ func temporalProps(id string, native bool) map[string]any {
 		return map[string]any{
 			"id":         id,
 			"created_at": time.Date(2026, 8, 19, 12, 0, 0, 500000000, time.UTC),
-			"logged_at":  time.Date(2026, 8, 19, 12, 0, 0, 0, time.UTC),
+			"logged_at":  time.Date(2026, 8, 19, 12, 0, 0, 0, time.FixedZone("", 2*60*60)),
 			"aliased":    time.Date(2026, 8, 19, 12, 0, 0, 500000000, time.UTC),
 			"run_id":     uuid.MustParse(canonicalRunID),
 			"installed":  time.Date(2026, 8, 19, 6, 0, 0, 0, time.UTC),
@@ -178,12 +178,6 @@ func TestMarshal_TemporalKindsReachOneFixpoint(t *testing.T) {
 		}
 	}
 
-	// The declared layout is satisfied by the text that was written under it,
-	// which is the second defect closed as a consequence of the first.
-	if _, err := time.Parse("2006-01-02 15:04:05", canonicalLogged); err != nil {
-		t.Fatalf("test constant is not valid under its own layout: %v", err)
-	}
-
 	loaded, lres := snapshot.Load(ctx, fromNative, s)
 	if err := lres.Err(); err != nil {
 		t.Fatalf("Load: %v", err)
@@ -254,10 +248,9 @@ func TestMarshal_HealsOrPassesThroughNonConformingText(t *testing.T) {
 		"id": "s1",
 		// Healable: a non-canonical spelling of a valid instant.
 		"created_at": "2026-08-19T12:00:00.500+00:00",
-		// Unhealable: RFC 3339 text under a declared layout that rejects it.
-		// This is what a pre-release document written under the old defect
-		// holds, so erroring here would make yammm's own output unwritable.
-		"logged_at": "2026-08-19T12:00:00Z",
+		// Unhealable: wall-clock text, which is not RFC 3339. A stored
+		// document can hold it, so erroring here would make it unwritable.
+		"logged_at": "2026-08-19 12:00:00",
 		"run_id":    "not-a-uuid",
 	})
 
@@ -270,7 +263,7 @@ func TestMarshal_HealsOrPassesThroughNonConformingText(t *testing.T) {
 	if !strings.Contains(doc, `"created_at":"`+canonicalCreated+`"`) {
 		t.Errorf("the healable value did not heal\ngot: %s", doc)
 	}
-	if !strings.Contains(doc, `"logged_at":"2026-08-19T12:00:00Z"`) {
+	if !strings.Contains(doc, `"logged_at":"2026-08-19 12:00:00"`) {
 		t.Errorf("the unhealable value was not preserved byte-for-byte\ngot: %s", doc)
 	}
 	if !strings.Contains(doc, `"run_id":"not-a-uuid"`) {
@@ -445,7 +438,7 @@ func TestVerify_HonorsValueConformance(t *testing.T) {
 
 // TestMarshal_TemporalGoldenBytes pins the wire bytes of every canonical
 // spelling the validator produces for Timestamp, UUID and Date — node
-// property, declared-layout property, alias, list element, edge property
+// property, alias, list element, edge property
 // and composed child — so a change to a stored form is a reviewed golden
 // diff rather than a silent move of every persisted key.
 func TestMarshal_TemporalGoldenBytes(t *testing.T) {

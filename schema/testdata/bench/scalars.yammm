@@ -24,7 +24,7 @@ type Measurement {
 	tag Pattern["^[a-z][a-z0-9_]*$"]
 	dual Pattern["^a", "z$"]
 	seen_at Timestamp required
-	stamped Timestamp["2006-01-02T15:04:05Z07:00"]
+	stamped Timestamp
 	on_date Date
 	external UUID
 	embedding Vector[128]

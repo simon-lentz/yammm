@@ -5,7 +5,6 @@ import (
 	"regexp"
 	"strings"
 	"testing"
-	"time"
 	"unicode/utf8"
 
 	"github.com/simon-lentz/yammm/internal/value"
@@ -137,10 +136,6 @@ func TestCheck_ARefusedValueIsQuoted(t *testing.T) {
 		},
 		{"a long date", value.Check(long, schema.NewDateConstraint()), `invalid date format: ` + cut + ` (expected YYYY-MM-DD)`},
 		{"a long timestamp", value.Check(long, schema.NewTimestampConstraint()), `invalid timestamp format: ` + cut},
-		{
-			"a long timestamp under a declared format", value.Check(long, schema.NewTimestampConstraintFormatted(time.DateOnly)),
-			`invalid timestamp format: ` + cut + ` (expected 2006-01-02)`,
-		},
 	} {
 		if c.err == nil || c.err.Error() != c.want {
 			t.Errorf("%s: %v, want %q", c.name, c.err, c.want)

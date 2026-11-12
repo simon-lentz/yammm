@@ -354,8 +354,7 @@ type strTok struct {
 type timC struct {
 	Pos    lexer.Position
 	EndPos lexer.Position
-	Kw     bool    `parser:"@'Timestamp'"`
-	Format *strTok `parser:"('[' @@ ']')?"`
+	Kw     bool `parser:"@'Timestamp'"`
 }
 
 type datC struct {

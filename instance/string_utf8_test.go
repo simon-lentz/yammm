@@ -24,7 +24,6 @@ type Holder {
 	uid UUID
 	day Date
 	at Timestamp
-	stamp Timestamp["2006-01-02 Z07:00"]
 	tags List<String>
 	codes List<Pattern["^a.b$"]>
 	--> LINK (_:many) Target {
@@ -76,7 +75,6 @@ func TestValidateOne_RefusesAStringThatIsNotValidUTF8(t *testing.T) {
 		{"a UUID property", utf8Raw(map[string]any{"uid": "6ba7b810-9dad-11d1-80b4-00c04fd430c\xff"})},
 		{"a Date property", utf8Raw(map[string]any{"day": "2026-01-0\xff"})},
 		{"a Timestamp property", utf8Raw(map[string]any{"at": "2026-01-02T03:04:05\xff"})},
-		{"a Timestamp property with a declared layout", utf8Raw(map[string]any{"stamp": "2026-01-02 \xff\xff\xff"})},
 		{"a List<String> element", utf8Raw(map[string]any{"tags": []any{"ok", invalidText}})},
 		{"a List<String> element in a []string", utf8Raw(map[string]any{"tags": []string{"ok", invalidText}})},
 		{"a List<Pattern> element", utf8Raw(map[string]any{"codes": []any{invalidText}})},
@@ -120,7 +118,7 @@ func TestValidateOne_RefusesAStringThatIsNotValidUTF8(t *testing.T) {
 		raw := utf8Raw(map[string]any{
 			"text": namedText(valid), "code": valid, "kind": "ab",
 			"uid": "6ba7b810-9dad-11d1-80b4-00c04fd430c8", "day": "2026-01-02",
-			"at": "2026-01-02T03:04:05Z", "stamp": "2026-01-02 Z",
+			"at":   "2026-01-02T03:04:05Z",
 			"tags": []string{"é", valid}, "codes": []any{valid},
 			"link": []any{map[string]any{"_target_key": valid, "label": valid, "mark": valid}},
 		})
@@ -144,7 +142,7 @@ func TestCheckValue_RefusesAStringThatIsNotValidUTF8(t *testing.T) {
 		t.Fatalf("load schema: %s", res)
 	}
 	holder, _ := s.Type("Holder")
-	for _, name := range []string{"id", "text", "code", "kind", "uid", "day", "at", "stamp"} {
+	for _, name := range []string{"id", "text", "code", "kind", "uid", "day", "at"} {
 		prop, _ := holder.Property(name)
 		if err := instance.CheckValue(invalidText, prop.Constraint()); err == nil {
 			t.Errorf("CheckValue passed a string that is not valid UTF-8 at %s", name)

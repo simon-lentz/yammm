@@ -15,8 +15,6 @@ const offsetBoundSchema = `schema "bound"
 type T {
 	id String primary
 	at Timestamp
-	seen Timestamp["2006-01-02 15:04:05.000000000 -0700"]
-	tick Timestamp["2006-01-02 15:04:05 -07:00:00"]
 	ats List<Timestamp>
 }
 `
@@ -27,9 +25,10 @@ func offsetRefusal(text, offset string) string {
 }
 
 // The server holds an instant at a UTC offset of 18 hours at most, and the
-// validator takes a wider one. An instant past the bound, by a second too, is
-// refused by name on the write path and by CoerceParams, and one at the bound
-// is sent at its offset.
+// validator takes a wider one. An instant past the bound is refused by name on
+// the write path and by CoerceParams, and one at the bound is sent at its
+// offset. A time.Time is judged by the offset its stored text holds, which
+// drops the offset's seconds.
 func TestCoerce_AnOffsetPastEighteenHoursIsRefusedOnBothPaths(t *testing.T) {
 	t.Parallel()
 	s := loadInline(t, offsetBoundSchema)
@@ -42,6 +41,9 @@ func TestCoerce_AnOffsetPastEighteenHoursIsRefusedOnBothPaths(t *testing.T) {
 		t.Fatalf("ShapeForSchema: %v", res.Err())
 	}
 	const eighteen = 18 * 60 * 60
+	atOffset := func(seconds int) time.Time {
+		return time.Date(2026, 8, 19, 12, 0, 0, 0, time.FixedZone("", seconds))
+	}
 	for _, row := range []struct {
 		prop    string
 		val     any
@@ -50,19 +52,19 @@ func TestCoerce_AnOffsetPastEighteenHoursIsRefusedOnBothPaths(t *testing.T) {
 	}{
 		{"at", "2026-08-19T12:00:00+18:00", eighteen, ""},
 		{"at", "2026-08-19T12:00:00-18:00", -eighteen, ""},
-		{"at", "2026-08-19T12:00:00+18:01", 0, offsetRefusal("2026-08-19T12:00:00+18:01", "+18:01:00")},
-		{"at", "2026-08-19T12:00:00-18:01", 0, offsetRefusal("2026-08-19T12:00:00-18:01", "-18:01:00")},
-		{"at", "2026-08-19T12:00:00+24:00", 0, offsetRefusal("2026-08-19T12:00:00+24:00", "+24:00:00")},
-		{"seen", "2026-08-19 12:00:00.000000000 +1800", eighteen, ""},
-		{"seen", "2026-08-19 12:00:00.000000000 -1800", -eighteen, ""},
-		{"seen", "2026-08-19 12:00:00.000000000 +1801", 0, offsetRefusal("2026-08-19 12:00:00.000000000 +1801", "+18:01:00")},
-		{"seen", "2026-08-19 12:00:00.000000000 -2401", 0, offsetRefusal("2026-08-19 12:00:00.000000000 -2401", "-24:01:00")},
-		{"tick", "2026-08-19 12:00:00 +18:00:00", eighteen, ""},
-		{"tick", "2026-08-19 12:00:00 +18:00:01", 0, offsetRefusal("2026-08-19 12:00:00 +18:00:01", "+18:00:01")},
-		{"tick", "2026-08-19 12:00:00 +18:00:59", 0, offsetRefusal("2026-08-19 12:00:00 +18:00:59", "+18:00:59")},
-		{"tick", "2026-08-19 12:00:00 -18:00:01", 0, offsetRefusal("2026-08-19 12:00:00 -18:00:01", "-18:00:01")},
+		{"at", "2026-08-19T12:00:00+18:01", 0, offsetRefusal("2026-08-19T12:00:00+18:01", "+18:01")},
+		{"at", "2026-08-19T12:00:00-18:01", 0, offsetRefusal("2026-08-19T12:00:00-18:01", "-18:01")},
+		{"at", "2026-08-19T12:00:00+23:59", 0, offsetRefusal("2026-08-19T12:00:00+23:59", "+23:59")},
+		{"at", "2026-08-19T12:00:00.000000001-23:59", 0, offsetRefusal("2026-08-19T12:00:00.000000001-23:59", "-23:59")},
+		{"at", atOffset(eighteen), eighteen, ""},
+		{"at", atOffset(-eighteen), -eighteen, ""},
+		{"at", atOffset(eighteen + 59), eighteen, ""},
+		{"at", atOffset(-eighteen - 59), -eighteen, ""},
+		{"at", atOffset(eighteen + 60), 0, offsetRefusal("2026-08-19T12:00:00+18:01", "+18:01")},
+		{"at", atOffset(-eighteen - 60), 0, offsetRefusal("2026-08-19T12:00:00-18:01", "-18:01")},
 		{"ats", []any{"2026-08-19T12:00:00+18:00", "2026-08-19T12:00:00-18:00"}, 0, ""},
-		{"ats", []any{"2026-08-19T12:00:00Z", "2026-08-19T12:00:00-18:01"}, 0, "list element 1: " + offsetRefusal("2026-08-19T12:00:00-18:01", "-18:01:00")},
+		{"ats", []any{"2026-08-19T12:00:00Z", "2026-08-19T12:00:00-18:01"}, 0, "list element 1: " + offsetRefusal("2026-08-19T12:00:00-18:01", "-18:01")},
+		{"ats", []any{atOffset(eighteen + 60)}, 0, "list element 0: " + offsetRefusal("2026-08-19T12:00:00+18:01", "+18:01")},
 	} {
 		valid, vres := validator.ValidateOne(t.Context(), "T", instance.RawInstance{Properties: map[string]any{"id": "x", row.prop: row.val}})
 		if vres.Err() != nil {
@@ -136,7 +138,7 @@ func TestCoerce_AnOffsetPastEighteenHoursIsRefusedAtEveryPlace(t *testing.T) {
 		atBound = "2026-08-19T12:00:00+18:00"
 		past    = "2026-08-19T12:00:00+18:01"
 	)
-	refusal := offsetRefusal(past, "+18:01:00")
+	refusal := offsetRefusal(past, "+18:01")
 	for _, row := range []struct {
 		name            string
 		key, when, seen string

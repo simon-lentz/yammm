@@ -888,26 +888,6 @@
    ]
   },
   {
-   "file": "timestamp_format.yammm",
-   "category": "G",
-   "defects": [
-    {
-     "id": "d1",
-     "kind": "syntax",
-     "expect_code": "E_SYNTAX",
-     "lines": [
-      5,
-      6
-     ],
-     "anchor": [
-      5,
-      6
-     ],
-     "note": "timestamp format: the format literal's closing bracket is missing \u2014 anchor spans the construct: it opens on the first line and is only detectable by the last, so either is a correct place to report it"
-    }
-   ]
-  },
-  {
    "file": "import_alias_reserved.yammm",
    "category": "G",
    "defects": [

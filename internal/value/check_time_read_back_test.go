@@ -2,6 +2,7 @@ package value_test
 
 import (
 	"errors"
+	"math/rand/v2"
 	"testing"
 	"time"
 
@@ -10,19 +11,16 @@ import (
 	"github.com/simon-lentz/yammm/schema"
 )
 
-const offsetSecondsLayout = "2006-01-02 15:04:05 -07:00:00"
-
-// A time.Time is judged as the text it is stored as, so a time whose text the
+// A time.Time is judged as the text it renders as, so a time whose text the
 // same check refuses is refused, as that text is: a year outside 0 to 9999,
-// and an offset of seconds west of UTC and under a minute, which a layout
-// writes with the sign inside it.
-func TestCheck_ATimeWhoseStoredTextDoesNotReadBackIsRefused(t *testing.T) {
+// and a UTC offset of 24 hours or more.
+func TestCheck_ATimeWhoseTextIsNotStoredIsRefused(t *testing.T) {
 	t.Parallel()
 	far := time.Date(10000, 1, 1, 0, 0, 0, 0, time.UTC)
 	before := time.Date(-1, 1, 1, 0, 0, 0, 0, time.UTC)
-	unnamed := time.Date(2024, 1, 2, 3, 4, 5, 0, time.FixedZone("", 10800))
-	secondsWest := time.Date(2024, 1, 2, 3, 4, 5, 0, time.FixedZone("", -2))
-	toTheSecond := schema.NewTimestampConstraintFormatted(offsetSecondsLayout)
+	at := func(offsetSeconds int) time.Time {
+		return time.Date(2024, 1, 2, 3, 4, 5, 0, time.FixedZone("", offsetSeconds))
+	}
 	for _, c := range []struct {
 		name string
 		val  time.Time
@@ -31,13 +29,21 @@ func TestCheck_ATimeWhoseStoredTextDoesNotReadBackIsRefused(t *testing.T) {
 	}{
 		{"past year 9999 at a Timestamp", far, schema.NewTimestampConstraint(), `invalid timestamp format: "10000-01-01T00:00:00Z"`},
 		{"before year 0 at a Timestamp", before, schema.NewTimestampConstraint(), `invalid timestamp format: "-0001-01-01T00:00:00Z"`},
+		{"before year 0 with a fraction at a Timestamp", before.Add(-time.Nanosecond), schema.NewTimestampConstraint(), `invalid timestamp format: "-0002-12-31T23:59:59.999999999Z"`},
 		{"past year 9999 at a Date", far, schema.NewDateConstraint(), `invalid date format: "10000-01-01" (expected YYYY-MM-DD)`},
-		{"two seconds west under a layout that writes offset seconds", secondsWest, toTheSecond, `invalid timestamp format: "2024-01-02 03:04:05 +00:00:-02" (expected 2006-01-02 15:04:05 -07:00:00)`},
+		{"an offset of 25 hours at a Timestamp", at(25 * 3600), schema.NewTimestampConstraint(), `invalid timestamp format: "2024-01-02T03:04:05+25:00"`},
+		{"an offset of 25 hours west at a Timestamp", at(-25 * 3600), schema.NewTimestampConstraint(), `invalid timestamp format: "2024-01-02T03:04:05-25:00"`},
+		{"an offset of 24 hours at a Timestamp", at(24 * 3600), schema.NewTimestampConstraint(), `invalid timestamp format: "2024-01-02T03:04:05+24:00"`},
+		{"an offset of 24 hours west at a Timestamp", at(-24 * 3600), schema.NewTimestampConstraint(), `invalid timestamp format: "2024-01-02T03:04:05-24:00"`},
+		{"an offset of 24:59 at a Timestamp", at(24*3600 + 59*60), schema.NewTimestampConstraint(), `invalid timestamp format: "2024-01-02T03:04:05+24:59"`},
 	} {
 		err := value.Check(c.val, c.c)
 		var checkErr *value.CheckError
 		if err == nil || !errors.As(err, &checkErr) || checkErr.Kind != value.KindConstraintFail || err.Error() != c.want {
 			t.Errorf("%s: Check = %v; want the constraint failure %q", c.name, err, c.want)
+		}
+		if stored, err := value.Canonical(c.val, c.c); err == nil || stored != any(c.val) {
+			t.Errorf("%s: Canonical = %#v, %v; want the time as given and a refusal", c.name, stored, err)
 		}
 		if _, err := value.Coerce(c.val, c.c); err == nil {
 			t.Errorf("%s: Coerce stored a value its check refuses", c.name)
@@ -49,224 +55,173 @@ func TestCheck_ATimeWhoseStoredTextDoesNotReadBackIsRefused(t *testing.T) {
 		c    schema.Constraint
 	}{
 		{"year 9999 at a Timestamp", time.Date(9999, 12, 31, 23, 59, 59, 0, time.UTC), schema.NewTimestampConstraint()},
+		{"year 0 at a Timestamp", time.Date(0, 1, 1, 0, 0, 0, 0, time.UTC), schema.NewTimestampConstraint()},
 		{"year 0 at a Date", time.Date(0, 1, 1, 0, 0, 0, 0, time.UTC), schema.NewDateConstraint()},
-		{"two seconds east under a layout that writes offset seconds", time.Date(2024, 1, 2, 3, 4, 5, 0, time.FixedZone("", 2)), toTheSecond},
-		{"a minute and two seconds west under that layout", time.Date(2024, 1, 2, 3, 4, 5, 0, time.FixedZone("", -62)), toTheSecond},
-		{"an unnamed zone at a Timestamp", unnamed, schema.NewTimestampConstraint()},
+		{"two seconds east", at(2), schema.NewTimestampConstraint()},
+		{"two seconds west", at(-2), schema.NewTimestampConstraint()},
+		{"a minute and two seconds west", at(-62), schema.NewTimestampConstraint()},
+		{"an unnamed zone", at(10800), schema.NewTimestampConstraint()},
+		{"an offset of 23:59", at(23*3600 + 59*60), schema.NewTimestampConstraint()},
+		{"an offset of 23:59 and 59 seconds west", at(-(24*3600 - 1)), schema.NewTimestampConstraint()},
 	} {
 		if err := value.Check(c.val, c.c); err != nil {
 			t.Errorf("%s: Check = %v; want nil", c.name, err)
 		}
-	}
-}
-
-// Text is judged as the text it is stored as too: text a layout reads and
-// stores as text it does not read back is refused by the check and by the
-// stored form alike, so a value the check passes is one that is stored.
-func TestCheck_TextWhoseStoredTextDoesNotReadBackIsRefused(t *testing.T) {
-	t.Parallel()
-	toTheSecond := schema.NewTimestampConstraintFormatted(offsetSecondsLayout)
-	const (
-		given     = "2024-01-02 03:04:05 -00:00:02"
-		wantCheck = `invalid timestamp format: "2024-01-02 03:04:05 -00:00:02" is stored as "2024-01-02 03:04:05 +00:00:-02", which does not read back as written (expected 2006-01-02 15:04:05 -07:00:00)`
-		wantStore = `value: "2024-01-02 03:04:05 -00:00:02" is stored as "2024-01-02 03:04:05 +00:00:-02", which does not read back as written`
-	)
-	err := value.Check(given, toTheSecond)
-	var checkErr *value.CheckError
-	if err == nil || !errors.As(err, &checkErr) || checkErr.Kind != value.KindConstraintFail || err.Error() != wantCheck {
-		t.Errorf("Check = %v; want the constraint failure %q", err, wantCheck)
-	}
-	if stored, err := value.Canonical(given, toTheSecond); err == nil || err.Error() != wantStore || stored != given {
-		t.Errorf("Canonical = %#v, %v; want the text as given and %q", stored, err, wantStore)
-	}
-	if _, err := value.Coerce(given, toTheSecond); err == nil {
-		t.Error("Coerce stored a value its check refuses")
-	}
-
-	// The controls: text in its stored form, and text stored as other text
-	// the layout reads.
-	for text, want := range map[string]string{
-		"2024-01-02 03:04:05 +00:00:02": "2024-01-02 03:04:05 +00:00:02",
-		"2024-01-02 03:04:05 -00:01:02": "2024-01-02 03:04:05 -00:01:02",
-		"2024-01-02 03:04:05 -00:00:01": "2024-01-02 03:04:05 +00:00:00",
-	} {
-		if err := value.Check(text, toTheSecond); err != nil {
-			t.Errorf("Check(%q) = %v; want nil", text, err)
-		}
-		if stored, err := value.Canonical(text, toTheSecond); err != nil || stored != want {
-			t.Errorf("Canonical(%q) = %#v, %v; want %q", text, stored, err, want)
-		}
-	}
-	// A fraction the layout does not declare is read, and stored without it.
-	noFraction := schema.NewTimestampConstraintFormatted("2006-01-02T15:04:05Z07:00")
-	if err := value.Check("2026-08-19T12:34:56.789+02:00", noFraction); err != nil {
-		t.Errorf("Check of a fraction under a layout with none = %v; want nil", err)
-	}
-	if stored, err := value.Canonical("2026-08-19T12:34:56.789+02:00", noFraction); err != nil || stored != "2026-08-19T12:34:56+02:00" {
-		t.Errorf("Canonical of a fraction under a layout with none = %#v, %v; want it stored without the fraction", stored, err)
-	}
-	for text, want := range map[string]string{
-		"2024-01-02T03:04:05.500Z":      "2024-01-02T03:04:05.5Z",
-		"2024-01-02T03:04:05+00:00":     "2024-01-02T03:04:05Z",
-		"2024-01-02T03:04:05.000+24:00": "2024-01-02T03:04:05+24:00",
-	} {
-		if err := value.Check(text, schema.NewTimestampConstraint()); err != nil {
-			t.Errorf("Check(%q) = %v; want nil", text, err)
-		}
-		if stored, err := value.Canonical(text, schema.NewTimestampConstraint()); err != nil || stored != want {
-			t.Errorf("Canonical(%q) = %#v, %v; want %q", text, stored, err, want)
+		if _, err := value.Coerce(c.val, c.c); err != nil {
+			t.Errorf("%s: Coerce = %v; want the value stored", c.name, err)
 		}
 	}
 }
 
-// The stored text is shown whole beside the given text's head, so a refusal
-// shows where the two differ: here in an offset past the given text's cut.
-// Under no layout the offset +24:60 is one such text, which Go reads as 25
-// hours and writes as text it does not read.
-func TestCheck_AnUnsettledTextsRefusalShowsTheStoredTextWhole(t *testing.T) {
-	t.Parallel()
-	for _, row := range []struct {
-		c         schema.Constraint
-		given     string
-		wantCheck string
-		wantStore string
-	}{
-		{
-			schema.NewTimestampConstraintFormatted("2006-01-02 15:04:05.000000000 -0700"),
-			"2026-08-19 12:00:00.000000000 +2460",
-			`invalid timestamp format: "2026-08-19 12:00:00.000000000 +2"… (35 bytes) is stored as "2026-08-19 12:00:00.000000000 +2500", which does not read back as written (expected 2006-01-02 15:04:05.000000000 -0700)`,
-			`value: "2026-08-19 12:00:00.000000000 +2"… (35 bytes) is stored as "2026-08-19 12:00:00.000000000 +2500", which does not read back as written`,
-		},
-		{
-			schema.NewTimestampConstraint(),
-			"2024-01-02T03:04:05+24:60",
-			`invalid timestamp format: "2024-01-02T03:04:05+24:60" is stored as "2024-01-02T03:04:05+25:00", which does not read back as written`,
-			`value: "2024-01-02T03:04:05+24:60" is stored as "2024-01-02T03:04:05+25:00", which does not read back as written`,
-		},
-	} {
-		if err := value.Check(row.given, row.c); err == nil || err.Error() != row.wantCheck {
-			t.Errorf("Check(%q) = %v; want %s", row.given, err, row.wantCheck)
-		}
-		if stored, err := value.Canonical(row.given, row.c); err == nil || err.Error() != row.wantStore || stored != row.given {
-			t.Errorf("Canonical(%q) = %#v, %v; want the text as given and %s", row.given, stored, err, row.wantStore)
-		}
-	}
-	// The control: the widest offset Go reads back is stored.
-	if stored, err := value.Canonical("2024-01-02T03:04:05+24:59", schema.NewTimestampConstraint()); err != nil || stored != "2024-01-02T03:04:05+24:59" {
-		t.Errorf("Canonical of an offset of 24:59 = %#v, %v; want it stored", stored, err)
-	}
-}
-
-// Stored text is text the layout stores as itself. Under "23_2", a day, an
-// hour and the day again, Go reads "22122" as hour 12 of the 2nd and writes
-// that as "212 2", which it reads as hour 2 and writes as "22 2": a second read
-// would move the value, so the text is refused, and comes back as given.
-func TestCheck_TextWhoseStoredTextIsStoredAsOtherTextIsRefused(t *testing.T) {
+// Text is stored only as text time.Time's own encoder writes. Go reads an
+// offset hour of 24 and its encoder writes none, so the check and the stored
+// form refuse such text alike, as they refuse text Go does not read.
+func TestCheck_TextAtAnOffsetHourOfTwentyFourIsRefused(t *testing.T) {
 	t.Parallel()
 	type carrier string
-	dayHourDay := schema.NewTimestampConstraintFormatted("23_2")
-	if err := schema.CheckConstraint(dayHourDay); err != nil {
-		t.Fatalf("fixture: the layout is refused: %v", err)
-	}
-	const wantCheck = `invalid timestamp format: "22122" is stored as "212 2", which does not read back as written (expected 23_2)`
-	for _, given := range []any{"22122", carrier("22122")} {
-		if err := value.Check(given, dayHourDay); err == nil || err.Error() != wantCheck {
-			t.Errorf("Check(%#v) = %v; want %s", given, err, wantCheck)
+	c := schema.NewTimestampConstraint()
+	for _, row := range []struct {
+		given any
+		shown string
+	}{
+		{"2024-01-02T03:04:05+24:00", `"2024-01-02T03:04:05+24:00"`},
+		{carrier("2024-01-02T03:04:05-24:00"), `"2024-01-02T03:04:05-24:00"`},
+		{"2024-01-02T03:04:05+24:59", `"2024-01-02T03:04:05+24:59"`},
+		// Go reads an offset minute of 60 as the next hour.
+		{"2024-01-02T03:04:05+23:60", `"2024-01-02T03:04:05+23:60"`},
+		{"2024-01-02T03:04:05-24:60", `"2024-01-02T03:04:05-24:60"`},
+		{"2024-01-02T03:04:05.123456789+24:00", `"2024-01-02T03:04:05.123456789+24"… (35 bytes)`},
+	} {
+		err := value.Check(row.given, c)
+		var checkErr *value.CheckError
+		if want := "invalid timestamp format: " + row.shown; err == nil || !errors.As(err, &checkErr) || checkErr.Kind != value.KindConstraintFail || err.Error() != want {
+			t.Errorf("Check(%#v) = %v; want the constraint failure %s", row.given, err, want)
 		}
-		stored, err := value.Canonical(given, dayHourDay)
-		if err == nil || err.Error() != `value: "22122" is stored as "212 2", which does not read back as written` || stored != given {
-			t.Errorf("Canonical(%#v) = %#v, %v; want the value as given and the refusal", given, stored, err)
+		if stored, err := value.Canonical(row.given, c); err == nil || err.Error() != "value: "+row.shown+" is not an RFC 3339 timestamp" || stored != row.given {
+			t.Errorf("Canonical(%#v) = %#v, %v; want the value as given and a refusal that shows %s", row.given, stored, err, row.shown)
 		}
-		if _, err := value.Coerce(given, dayHourDay); err == nil {
-			t.Errorf("Coerce(%#v) stored a value its check refuses", given)
+		if _, err := value.Coerce(row.given, c); err == nil {
+			t.Errorf("Coerce(%#v) stored a value its check refuses", row.given)
 		}
 	}
-	// The controls: the stored text does read, and other text is stored as itself.
-	if _, err := time.ParseInLocation("23_2", "212 2", time.UTC); err != nil {
-		t.Errorf("fixture: the stored text is unread: %v", err)
+
+	// The controls: text in its stored form, and text stored as other text.
+	// The widest offset a Timestamp holds is 23:59.
+	for text, want := range map[string]string{
+		"2024-01-02T03:04:05.5Z":        "2024-01-02T03:04:05.5Z",
+		"2024-01-02T03:04:05.500Z":      "2024-01-02T03:04:05.5Z",
+		"2024-01-02T03:04:05+00:00":     "2024-01-02T03:04:05Z",
+		"2024-01-02T03:04:05-00:00":     "2024-01-02T03:04:05Z",
+		"2024-01-02T03:04:05.000+23:00": "2024-01-02T03:04:05+23:00",
+		"2024-01-02T03:04:05+23:59":     "2024-01-02T03:04:05+23:59",
+		"2024-01-02T03:04:05-23:59":     "2024-01-02T03:04:05-23:59",
+		"2024-01-02T03:04:05+22:60":     "2024-01-02T03:04:05+23:00",
+	} {
+		if err := value.Check(text, c); err != nil {
+			t.Errorf("Check(%q) = %v; want nil", text, err)
+		}
+		if stored, err := value.Canonical(text, c); err != nil || stored != want {
+			t.Errorf("Canonical(%q) = %#v, %v; want %q", text, stored, err, want)
+		}
 	}
-	if stored, err := value.Canonical("101010", dayHourDay); err != nil || stored != "101010" {
-		t.Errorf("Canonical of settled text = %#v, %v; want it stored as given", stored, err)
+}
+
+// Stored text is stored as itself, so no second read moves a stored value,
+// and it is the text time.Time's own encoder writes for the instant it reads
+// as. The times run past both ends of what RFC 3339 text holds, in the year
+// and in the offset.
+func TestCanonical_StoredTextIsStoredAsItself(t *testing.T) {
+	t.Parallel()
+	c := schema.NewTimestampConstraint()
+	r := rand.New(rand.NewPCG(3, 9)) //nolint:gosec // a fixed seed makes the times reproducible
+	stored, refused := 0, 0
+	for range 20000 {
+		zone := time.FixedZone("", r.IntN(2*26*3600)-26*3600)
+		at := time.Date(r.IntN(10030)-15, time.Month(1+r.IntN(12)), 1+r.IntN(28), r.IntN(24), r.IntN(60), r.IntN(60), r.IntN(3)*r.IntN(1_000_000_000), zone)
+		rendered := at.Format(time.RFC3339Nano)
+		first, err := value.Canonical(at, c)
+		fromText, textErr := value.Canonical(rendered, c)
+		if (err == nil) != (textErr == nil) || (err == nil && first != fromText) {
+			t.Fatalf("%s: the time is stored as %#v (%v) and its text as %#v (%v)", rendered, first, err, fromText, textErr)
+		}
+		if (err == nil) != (value.Check(at, c) == nil) || (err == nil) != (value.Check(rendered, c) == nil) {
+			t.Fatalf("%s: Check and Canonical disagree (Canonical: %v)", rendered, err)
+		}
+		if err != nil {
+			refused++
+			continue
+		}
+		stored++
+		again, err := value.Canonical(first, c)
+		if err != nil || again != first {
+			t.Fatalf("%s is stored as %#v, which is stored as %#v (%v)", rendered, first, again, err)
+		}
+		// The stored text keeps the wall clock; it drops an offset's seconds.
+		const wall = "2006-01-02T15:04:05.999999999"
+		back, ok := value.ParseTimestamp(first.(string))
+		if !ok || back.Format(wall) != at.Format(wall) {
+			t.Fatalf("%s is stored as %#v, which reads as %v (ok=%v)", rendered, first, back, ok)
+		}
+		if written, err := back.MarshalText(); err != nil || string(written) != first {
+			t.Fatalf("%s is stored as %#v, which time.Time writes as %q (%v)", rendered, first, written, err)
+		}
+	}
+	if stored < 15000 || refused < 100 {
+		t.Errorf("stored %d times and refused %d; want both in number", stored, refused)
 	}
 }
 
 // A time.Time is stored as its rendered text is stored, so a time and the text
-// it renders as reach one spelling, and a time whose text is refused is
-// refused. RFC 3339 writes an offset under a minute as +00:00, which is stored
-// as Z.
+// it renders as reach one spelling. RFC 3339 writes an offset under a minute
+// as +00:00, which is stored as Z.
 func TestCheck_ATimeIsStoredAsItsRenderedTextIs(t *testing.T) {
 	t.Parallel()
+	c := schema.NewTimestampConstraint()
 	for _, row := range []struct {
 		name     string
 		val      time.Time
-		c        schema.Constraint
 		rendered string
 		stored   string
 	}{
-		{"an offset under a minute", time.Date(2026, 8, 19, 12, 0, 0, 0, time.FixedZone("", 2)), schema.NewTimestampConstraint(), "2026-08-19T12:00:00+00:00", "2026-08-19T12:00:00Z"},
-		{"an offset of whole minutes", time.Date(2026, 8, 19, 12, 0, 0, 0, time.FixedZone("", 120)), schema.NewTimestampConstraint(), "2026-08-19T12:00:00+00:02", "2026-08-19T12:00:00+00:02"},
-		{"a year whose two-digit field reads into another century", time.Date(1950, 6, 1, 0, 0, 0, 0, time.UTC), schema.NewTimestampConstraintFormatted("2006 06"), "1950 50", "2050 50"},
+		{"an offset under a minute", time.Date(2026, 8, 19, 12, 0, 0, 0, time.FixedZone("", 2)), "2026-08-19T12:00:00+00:00", "2026-08-19T12:00:00Z"},
+		{"an offset under a minute, west", time.Date(2026, 8, 19, 12, 0, 0, 0, time.FixedZone("", -59)), "2026-08-19T12:00:00+00:00", "2026-08-19T12:00:00Z"},
+		{"an offset of whole minutes", time.Date(2026, 8, 19, 12, 0, 0, 0, time.FixedZone("", 120)), "2026-08-19T12:00:00+00:02", "2026-08-19T12:00:00+00:02"},
+		{"an offset of minutes and seconds", time.Date(2026, 8, 19, 12, 0, 0, 0, time.FixedZone("", -(5*3600+30))), "2026-08-19T12:00:00-05:00", "2026-08-19T12:00:00-05:00"},
+		{"a named zone", time.Date(2026, 8, 19, 12, 0, 0, 7, time.FixedZone("CEST", 7200)), "2026-08-19T12:00:00.000000007+02:00", "2026-08-19T12:00:00.000000007+02:00"},
 	} {
-		tc, _ := row.c.(schema.TimestampConstraint)
-		layout := tc.Format()
-		if layout == "" {
-			layout = time.RFC3339Nano
-		}
-		if got := row.val.Format(layout); got != row.rendered {
+		if got := row.val.Format(time.RFC3339Nano); got != row.rendered {
 			t.Fatalf("fixture: %s renders as %q; want %q", row.name, got, row.rendered)
 		}
-		if err := value.Check(row.val, row.c); err != nil {
+		if err := value.Check(row.val, c); err != nil {
 			t.Errorf("%s: Check = %v; want nil", row.name, err)
 		}
 		for _, given := range []any{row.val, row.rendered, row.stored} {
-			if stored, err := value.Canonical(given, row.c); err != nil || stored != row.stored {
+			if stored, err := value.Canonical(given, c); err != nil || stored != row.stored {
 				t.Errorf("%s: Canonical(%#v) = %#v, %v; want %q", row.name, given, stored, err, row.stored)
 			}
 		}
-	}
-
-	// Under "21 2" the second of November renders as "211 2", which Go reads
-	// as the first of the month 21 and stores as "21 2", text it does not read.
-	dayMonthDay := schema.NewTimestampConstraintFormatted("21 2")
-	if err := schema.CheckConstraint(dayMonthDay); err != nil {
-		t.Fatalf("fixture: the layout is refused: %v", err)
-	}
-	november := time.Date(1950, 11, 2, 0, 12, 7, 0, time.UTC)
-	const wantCheck = `invalid timestamp format: "211 2" is stored as "21 2", which does not read back as written (expected 21 2)`
-	if err := value.Check(november, dayMonthDay); err == nil || err.Error() != wantCheck {
-		t.Errorf("Check of a time whose text is refused = %v; want %s", err, wantCheck)
-	}
-	if stored, err := value.Canonical(november, dayMonthDay); err == nil || err.Error() != `value: "211 2" is stored as "21 2", which does not read back as written` || stored != any(november) {
-		t.Errorf("Canonical of a time whose text is refused = %#v, %v; want the time as given and the refusal", stored, err)
-	}
-	if _, err := value.Coerce(november, dayMonthDay); err == nil {
-		t.Error("Coerce stored a time its check refuses")
 	}
 }
 
 // Text in its stored form costs one read: the check allocates what
 // time.ParseInLocation alone allocates for it, and the stored form adds the
 // box of the text it returns as given. A time that renders as its stored text
-// adds the rendering. A stored text of 64 bytes or fewer is built on the stack.
+// adds the rendering. The stored text is built on the stack.
 func TestCheck_TextInItsStoredFormAllocatesWhatOneReadDoes(t *testing.T) {
 	raceskip.Skip(t)
-	const long = "Monday, 02 January 2006 15:04:05.000000000 -07:00"
-	for _, row := range []struct {
-		c      schema.Constraint
-		layout string
-		text   string
-	}{
-		{schema.NewTimestampConstraint(), time.RFC3339Nano, "2024-01-02T03:04:05.12Z"},
-		{schema.NewTimestampConstraint(), time.RFC3339Nano, "2024-01-02T03:04:05.12+05:30"},
-		{schema.NewTimestampConstraintFormatted(long), long, "Tuesday, 02 January 2024 03:04:05.120000000 +05:30"},
+	c := schema.NewTimestampConstraint()
+	for _, text := range []string{
+		"2024-01-02T03:04:05.12Z",
+		"2024-01-02T03:04:05.12+05:30",
+		"2024-01-02T03:04:05.123456789-23:59",
 	} {
 		var err error
 		var at time.Time
-		read := testing.AllocsPerRun(100, func() { at, err = time.ParseInLocation(row.layout, row.text, time.UTC) })
+		read := testing.AllocsPerRun(100, func() { at, err = time.ParseInLocation(time.RFC3339Nano, text, time.UTC) })
 		if err != nil {
-			t.Fatalf("fixture: %q: %v", row.text, err)
+			t.Fatalf("fixture: %q: %v", text, err)
 		}
-		var given, instant any = row.text, at
+		var given, instant any = text, at
 		for _, call := range []struct {
 			name      string
 			val       any
@@ -276,12 +231,12 @@ func TestCheck_TextInItsStoredFormAllocatesWhatOneReadDoes(t *testing.T) {
 			{"the text", given, read, read + 1},
 			{"its time", instant, read + 1, read + 2},
 		} {
-			if allocs := testing.AllocsPerRun(100, func() { err = value.Check(call.val, row.c) }); allocs != call.check || err != nil {
-				t.Errorf("%q: Check of %s allocated %v times, %v; want %v of one read's %v", row.text, call.name, allocs, err, call.check, read)
+			if allocs := testing.AllocsPerRun(100, func() { err = value.Check(call.val, c) }); allocs != call.check || err != nil {
+				t.Errorf("%q: Check of %s allocated %v times, %v; want %v of one read's %v", text, call.name, allocs, err, call.check, read)
 			}
 			var stored any
-			if allocs := testing.AllocsPerRun(100, func() { stored, err = value.Canonical(call.val, row.c) }); allocs != call.canonical || err != nil || stored != given {
-				t.Errorf("%q: Canonical of %s = %#v, %v, allocated %v times; want the text and %v allocations of one read's %v", row.text, call.name, stored, err, allocs, call.canonical, read)
+			if allocs := testing.AllocsPerRun(100, func() { stored, err = value.Canonical(call.val, c) }); allocs != call.canonical || err != nil || stored != given {
+				t.Errorf("%q: Canonical of %s = %#v, %v, allocated %v times; want the text and %v allocations of one read's %v", text, call.name, stored, err, allocs, call.canonical, read)
 			}
 		}
 	}

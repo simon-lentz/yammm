@@ -123,7 +123,7 @@ field_name Type            // optional (nullable)
 | `Integer` | `Integer[min, max]` | Signed integer with inclusive bounds |
 | `Float` | `Float[min, max]` | Floating point with inclusive bounds |
 | `Boolean` | `Boolean` | True/false, no parameters |
-| `Timestamp` | `Timestamp` or `Timestamp["fmt"]` | Date-time, default RFC3339 |
+| `Timestamp` | `Timestamp` | Date-time in RFC 3339 |
 | `Date` | `Date` | Date only, no parameters |
 | `UUID` | `UUID` | UUID string, no parameters |
 | `Enum` | `Enum["a", "b", ...]` | Fixed set, minimum 2 options |

@@ -173,11 +173,13 @@ Both patterns must match (AND semantics). Maximum 2 patterns.
 type AlphanumericCode = Pattern["^[A-Z]", "[0-9]$"]    // starts uppercase AND ends digit
 ```
 
-### Timestamp with Custom Format
+### Date-Time Text in Another Form
+
+A `Timestamp` holds RFC 3339 text and takes no format. Declare a `Pattern` to hold date-time text in another form.
 
 ```yammm-snippet
-log_time Timestamp["2006-01-02 15:04:05"]
-compact_date Timestamp["20060102"]
+log_time Pattern["^[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2}$"]
+compact_date Pattern["^[0-9]{8}$"]
 ```
 
 ---

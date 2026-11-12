@@ -27,7 +27,6 @@ type T {
 	e Enum["a", "b"]
 	d Date
 	ts Timestamp
-	tf Timestamp["2006-01-02"]
 	u UUID
 	p Pattern["^a$"]
 	s String
@@ -120,7 +119,7 @@ func TestMessages_RepeatAValueCutToItsHead(t *testing.T) {
 
 	v := instance.NewValidator(s)
 	for prop, val := range map[string]any{
-		"e": longText, "d": longText, "ts": longText, "tf": longText, "u": longText, "p": longText,
+		"e": longText, "d": longText, "ts": longText, "u": longText, "p": longText,
 		"s": longText + "\xff", "n": json.Number(longDigits), "f": json.Number(longDigits + "e400"),
 	} {
 		_, r := v.ValidateOne(ctx, "T", instance.RawInstance{Properties: map[string]any{"id": "a", prop: val}})
@@ -166,7 +165,7 @@ func TestMessages_RepeatAValueCutToItsHead(t *testing.T) {
 	data := snappartstest.Document(t, s, snapparts.Parts{
 		Types: []schema.TypeID{typ.ID()},
 		Instances: []snapparts.Instance{
-			root(longText, map[string]any{"id": longText, "u": longText, "d": longText, "ts": longText, "tf": longText}),
+			root(longText, map[string]any{"id": longText, "u": longText, "d": longText, "ts": longText}),
 			second,
 		},
 		Duplicates: []snapparts.Instance{second},
@@ -174,7 +173,7 @@ func TestMessages_RepeatAValueCutToItsHead(t *testing.T) {
 	_, r = snapshot.Load(ctx, data, s, snapshot.WithRevalidation(diag.Warning), snapshot.WithValueConformance(true))
 	c.result("snapshot.Load", r)
 
-	for _, k := range []schema.Constraint{schema.NewTimestampConstraint(), schema.NewTimestampConstraintFormatted("2006-01-02"), schema.NewDateConstraint()} {
+	for _, k := range []schema.Constraint{schema.NewTimestampConstraint(), schema.NewDateConstraint()} {
 		_, err := neo4jadapter.CoerceParams(map[string]any{"v": longText}, neo4jadapter.ParamTypes{"v": k})
 		c.err("neo4j.CoerceParams", err)
 	}

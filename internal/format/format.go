@@ -451,7 +451,7 @@ func declarationSpacingAction(prev *parse.Token, curr *parse.Token) spacingActio
 
 func isConstraintBracketLeft(text string) bool {
 	switch text {
-	case "Integer", "Float", "String", "Enum", "Pattern", "Timestamp", "Vector", "List":
+	case "Integer", "Float", "String", "Enum", "Pattern", "Vector":
 		return true
 	default:
 		return false

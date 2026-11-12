@@ -11,7 +11,7 @@ type TypeChecker func(val any) (bool, string)
 
 // checkerOf returns the TypeChecker of kind k. A datatype check (`=~ Kind`)
 // applies the rule a property of that kind applies when it declares no
-// constraint: no bounds, layout or member set. A value that holds none is of
+// constraint: no bounds or member set. A value that holds none is of
 // no kind.
 func checkerOf(k schema.ConstraintKind) TypeChecker {
 	return func(val any) (bool, string) {
@@ -48,10 +48,8 @@ func IsUUID() TypeChecker {
 	return checkerOf(schema.KindUUID)
 }
 
-// IsTimestamp returns a TypeChecker that validates timestamp values: a
-// time.Time whose RFC 3339 text reads back, or a string in RFC 3339. It reads
-// RFC 3339 whatever layout a property declares, so "2030-01-02", which a
-// Timestamp["2006-01-02"] property holds, does not match.
+// IsTimestamp returns a TypeChecker that validates timestamp values: the
+// time.Time or the RFC 3339 string a Timestamp property accepts.
 func IsTimestamp() TypeChecker {
 	return checkerOf(schema.KindTimestamp)
 }

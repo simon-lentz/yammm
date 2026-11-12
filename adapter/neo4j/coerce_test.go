@@ -460,55 +460,6 @@ func TestCoerceParams_StrictRejectsWrongScalarType(t *testing.T) {
 	}
 }
 
-func TestCoerceParams_TimestampCustomFormat(t *testing.T) {
-	t.Parallel()
-	// A Timestamp declared with a custom Go layout (Timestamp["…"]) is honored
-	// end-to-end on the direct-Cypher path: a value valid under that layout but
-	// not RFC3339 coerces to time.Time rather than erroring.
-	out, err := CoerceParams(
-		map[string]any{"logged_at": "2024-01-01 12:30:00"},
-		ParamTypes{"logged_at": schema.NewTimestampConstraintFormatted("2006-01-02 15:04:05")},
-	)
-	if err != nil {
-		t.Fatalf("custom-format Timestamp param should coerce: %v", err)
-	}
-	if _, ok := out["logged_at"].(time.Time); !ok {
-		t.Fatalf("logged_at: got %T, want time.Time", out["logged_at"])
-	}
-}
-
-func TestCoerceParams_TimestampListCustomFormat(t *testing.T) {
-	t.Parallel()
-	// The custom layout reaches list elements too (List<Timestamp["…"]>).
-	out, err := CoerceParams(
-		map[string]any{"times": []any{"2024-01-01 12:30:00", "2024-06-15 08:00:00"}},
-		ParamTypes{"times": schema.NewListConstraint(schema.NewTimestampConstraintFormatted("2006-01-02 15:04:05"))},
-	)
-	if err != nil {
-		t.Fatalf("custom-format Timestamp list param should coerce: %v", err)
-	}
-	if _, ok := out["times"].([]time.Time); !ok {
-		t.Fatalf("times: got %T, want []time.Time", out["times"])
-	}
-}
-
-func TestCoerceScalar_TimestampCustomFormatDirect(t *testing.T) {
-	t.Parallel()
-	c := schema.NewTimestampConstraintFormatted("2006-01-02 15:04:05")
-	got, err := coerceScalar(c, "2024-01-01 12:30:00")
-	if err != nil {
-		t.Fatalf("custom-format timestamp should parse: %v", err)
-	}
-	if _, ok := got.(time.Time); !ok {
-		t.Fatalf("got %T, want time.Time", got)
-	}
-	// The declared layout is exclusive (matching validation): a non-matching
-	// string — even a valid RFC3339 one — errors.
-	if _, err := coerceScalar(c, "2024-01-01T12:30:00Z"); err == nil {
-		t.Error("RFC3339 string under a custom layout should error")
-	}
-}
-
 func TestCoerceParams_VectorElementCoercion(t *testing.T) {
 	t.Parallel()
 	// A Vector value carried as []any{int64...} — a hand-built direct-Cypher

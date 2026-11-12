@@ -134,7 +134,7 @@ func TestRecovery_SpansAreNeverInverted(t *testing.T) {
 		"schema \"s\"\ntype T {\n\t*-> C\n}\n",
 		"schema \"s\"\ntype T {\n\t--> R B { w Enum[\"a\",\"b\"] required }\n}\n",
 		"schema \"s\"\ntype T {\n\tid String primary @a(1, \"x\") @b\n\t@@t(y)\n}\n",
-		"schema \"s\"\nimport \"a.yammm\" as al\ntype C = Pattern[\"^a$\"]\ntype T {\n\tx al.Thing\n\ty List<String>[1, 2]\n\tz Timestamp[\"2006\"]\n}\n",
+		"schema \"s\"\nimport \"a.yammm\" as al\ntype C = Pattern[\"^a$\"]\ntype T {\n\tx al.Thing\n\ty List<String>[1, 2]\n\tz Timestamp\n}\n",
 	}
 	for _, src := range sources {
 		t.Run(src, func(t *testing.T) {
@@ -636,9 +636,6 @@ func assertNodeSpansWithinSource(t *testing.T, src string, f *File) {
 		}
 		for _, lit := range c.PatternLits {
 			check(what+" pattern", lit.Span)
-		}
-		if c.FormatLit != nil {
-			check(what+" format", c.FormatLit.Span)
 		}
 		if c.DimsLit != nil {
 			check(what+" dimensions", c.DimsLit.Span)

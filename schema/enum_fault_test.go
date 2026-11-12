@@ -63,7 +63,7 @@ func TestCheckConstraint_AcceptingAllocatesNothing(t *testing.T) {
 		"a List of a reference":   schema.NewListConstraint(schema.NewAliasConstraint("Colour", enum)),
 		"a bounded String":        schema.StringLenBetween(1, 64),
 		"a bounded Float":         schema.FloatBetween(0.5, 2.5),
-		"a formatted Timestamp":   schema.NewTimestampConstraintFormatted("2006-01-02"),
+		"a Timestamp":             schema.NewTimestampConstraint(),
 		"a List of a List":        schema.NewListConstraint(schema.NewListConstraint(schema.IntegerBetween(1, 5))),
 	} {
 		if allocs := testing.AllocsPerRun(100, func() {

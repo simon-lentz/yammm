@@ -345,42 +345,22 @@ func (c BooleanConstraint) NarrowsTo(child Constraint) bool { return c.Equal(chi
 
 func (BooleanConstraint) IsResolved() bool { return true }
 
-// TimestampConstraint constrains timestamp values with an optional format.
-type TimestampConstraint struct {
-	format string
-	fault  timestampFault // why CheckConstraint refuses format
-}
+// TimestampConstraint constrains timestamp values. It has no parameters.
+type TimestampConstraint struct{}
 
-// NewTimestampConstraint creates a TimestampConstraint with no format.
+// NewTimestampConstraint creates a TimestampConstraint.
 func NewTimestampConstraint() TimestampConstraint {
 	return TimestampConstraint{}
-}
-
-// NewTimestampConstraintFormatted creates a TimestampConstraint with a Go time
-// format; an empty format is no format. The format is judged once here, and
-// [CheckConstraint] refuses the constraint of one that is not valid UTF-8, that
-// holds a zone abbreviation, or that does not read back the text it writes for
-// one of two probe instants.
-func NewTimestampConstraintFormatted(format string) TimestampConstraint {
-	fault, _ := judgeTimestampLayout(format)
-	return TimestampConstraint{format: format, fault: fault}
 }
 
 func (TimestampConstraint) Kind() ConstraintKind { return KindTimestamp }
 func (TimestampConstraint) constraint()          {}
 
-func (c TimestampConstraint) Format() string { return c.format }
+func (TimestampConstraint) String() string { return "Timestamp" }
 
-func (c TimestampConstraint) String() string {
-	if c.format == "" {
-		return "Timestamp"
-	}
-	return fmt.Sprintf("Timestamp[%q]", c.format)
-}
-
-func (c TimestampConstraint) Equal(other Constraint) bool {
-	o, ok := ResolveAlias(other).(TimestampConstraint)
-	return ok && c.format == o.format
+func (TimestampConstraint) Equal(other Constraint) bool {
+	_, ok := ResolveAlias(other).(TimestampConstraint)
+	return ok
 }
 
 func (c TimestampConstraint) NarrowsTo(child Constraint) bool { return c.Equal(child) }
@@ -925,8 +905,8 @@ func ResolveAlias(c Constraint) Constraint {
 
 // CheckConstraint returns why c cannot judge a value, or nil when it can. It
 // refuses a nil constraint. It refuses an argument no .yammm source can state,
-// where an empty Timestamp format is no format, a DataType reference under a name no
-// source writes, a List with no element, more than two patterns or one
+// a DataType reference under a name no source writes, a List with no element,
+// more than two patterns or one
 // regexp.Compile refuses, and a constraint of a Go type this package does not
 // construct, such as a pointer to one. A raw constraint meets
 // no completion, so it also refuses a DataType reference resolved to another
@@ -970,17 +950,14 @@ func CheckConstraint(c Constraint) error {
 // [NewAliasConstraint] recorded; completion resolves what the name names.
 func constraintFault(c Constraint) (string, bool) {
 	switch c := c.(type) {
-	case BooleanConstraint, DateConstraint, UUIDConstraint:
-		// Nothing to judge: the DSL states every Boolean, Date and UUID.
+	case BooleanConstraint, TimestampConstraint, DateConstraint, UUIDConstraint:
+		// Nothing to judge: the DSL states every Boolean, Timestamp, Date and UUID.
 	case AliasConstraint:
 		// Completion resolves the name. The zero AliasConstraint meets no
 		// constructor, so its empty name is read here.
 		if c.badName || c.dataTypeName == "" {
 			return fmt.Sprintf("datatype reference %q is not one a .yammm source can write; a reference is a datatype name, or an import alias, a dot and a datatype name", c.dataTypeName), true
 		}
-	case TimestampConstraint:
-		// The zero TimestampConstraint holds no format, which is sound.
-		return timestampFaultText(c.format, c.fault)
 	case IntegerConstraint:
 		lo, hasLo := c.Min()
 		hi, hasHi := c.Max()

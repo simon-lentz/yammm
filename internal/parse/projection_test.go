@@ -328,10 +328,6 @@ func (p projector) constraint(c *Constraint) projConstraint {
 		n.Args = rawLits(c.EnumLits)
 	case ConstraintPattern:
 		n.Args = rawLits(c.PatternLits)
-	case ConstraintTimestamp:
-		if c.FormatLit != nil {
-			n.Args = []string{c.FormatLit.Raw}
-		}
 	case ConstraintVector:
 		if c.DimsLit != nil {
 			n.Args = []string{c.DimsLit.Text}

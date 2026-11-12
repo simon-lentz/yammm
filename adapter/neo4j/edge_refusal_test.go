@@ -17,12 +17,14 @@ func TestBatchEdgeQueries_ARefusalNamesTheRelationOnce(t *testing.T) {
 	}
 }
 
-// Under a declared format a Timestamp's refusal names that format.
-func TestCoerceValue_ATimestampRefusalNamesTheDeclaredFormat(t *testing.T) {
+// A Timestamp's refusal names RFC 3339, for text a date alone too.
+func TestCoerceValue_ATimestampRefusalNamesRFC3339(t *testing.T) {
 	t.Parallel()
-	_, err := coerceValue(schema.NewTimestampConstraintFormatted("2006-01-02"), "nope")
-	const want = `coerce Timestamp: cannot parse "nope" against format "2006-01-02"`
-	if err == nil || err.Error() != want {
-		t.Errorf("error = %v; want %s", err, want)
+	for _, text := range []string{"nope", "2026-08-19", "2026-08-19 12:00:00"} {
+		_, err := coerceValue(schema.NewTimestampConstraint(), text)
+		want := `coerce Timestamp: cannot parse "` + text + `" as an RFC3339 timestamp`
+		if err == nil || err.Error() != want {
+			t.Errorf("error = %v; want %s", err, want)
+		}
 	}
 }

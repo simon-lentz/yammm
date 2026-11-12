@@ -492,16 +492,6 @@ oracle_only (the reference parser built these; this one deliberately does not):
   Gamma.required — ANTLR recovery names a property after the trailing modifier
 allowed_noise: E_INVALID_ANNOTATION — @@index() survives as a bare annotation and reaches its arity check
 
-## timestamp_format.yammm [G]
-first-hit: d1
-noise: 0
-defects:
-  d1   syntax   E_SYNTAX                     matched
-decls:
-  Alpha.id
-  Alpha.t
-  type Alpha
-
 ## two_defects_adjacent_types.yammm [B]
 first-hit: d1
 noise: 0

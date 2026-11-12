@@ -230,12 +230,11 @@ func TestCheck_Boolean(t *testing.T) {
 	}
 }
 
-// TestCheckCoerce_Timestamp covers string and time.Time forms plus the
-// custom-format constraint. Coerce renders both forms to the one stored
-// spelling through value.Canonical, and rejects what Check rejects.
+// TestCheckCoerce_Timestamp covers the string and time.Time forms. Coerce
+// renders both forms to the one stored spelling through value.Canonical, and
+// rejects what Check rejects.
 func TestCheckCoerce_Timestamp(t *testing.T) {
 	defaultC := schema.NewTimestampConstraint()
-	customC := schema.NewTimestampConstraintFormatted("2006-01-02 15:04:05")
 
 	tests := []struct {
 		name       string
@@ -247,6 +246,9 @@ func TestCheckCoerce_Timestamp(t *testing.T) {
 		{"rfc3339_offset", "2024-01-15T10:30:00+05:00", defaultC, false},
 		{"rfc3339_nano", "2024-01-15T10:30:00.123456789Z", defaultC, false},
 		{"invalid_format", "2024/01/15 10:30:00", defaultC, true},
+		{"wall_clock", "2024-01-15 10:30:00", defaultC, true},
+		{"date_alone", "2024-01-15", defaultC, true},
+		{"no_offset", "2024-01-15T10:30:00", defaultC, true},
 		{"wrong_type", 12345, defaultC, true},
 		{"float", 3.14, defaultC, true},
 
@@ -256,10 +258,6 @@ func TestCheckCoerce_Timestamp(t *testing.T) {
 		{"time_zero", time.Time{}, defaultC, false},
 		{"time_fixed", time.Date(2024, 1, 15, 10, 30, 0, 0, time.UTC), defaultC, false},
 		{"time_with_location", time.Date(2024, 1, 15, 10, 30, 0, 0, time.FixedZone("EST", -5*60*60)), defaultC, false},
-
-		// Custom format replaces RFC3339, not extends it.
-		{"custom_format", "2024-01-15 10:30:00", customC, false},
-		{"custom_format_rejects_rfc3339", "2024-01-15T10:30:00Z", customC, true},
 	}
 
 	for _, tt := range tests {
@@ -275,9 +273,8 @@ func TestCheckCoerce_Timestamp(t *testing.T) {
 				t.Fatalf("unexpected error: %v", err)
 			}
 
-			// Coercion renders the value through the constraint's own layout,
-			// so the stored text satisfies the format the schema declared and
-			// names the same instant the caller submitted.
+			// The stored text is RFC 3339 with fractional seconds and names
+			// the instant the caller submitted.
 			coerced, coerceErr := value.Coerce(tt.val, tt.constraint)
 			if coerceErr != nil {
 				t.Fatalf("unexpected error: %v", coerceErr)
@@ -287,13 +284,9 @@ func TestCheckCoerce_Timestamp(t *testing.T) {
 				t.Fatalf("Timestamp coerces to a string, got %T", coerced)
 			}
 
-			layout := time.RFC3339Nano
-			if tc, isTS := tt.constraint.(schema.TimestampConstraint); isTS && tc.Format() != "" {
-				layout = tc.Format()
-			}
-			back, parseErr := time.Parse(layout, text)
+			back, parseErr := time.Parse(time.RFC3339Nano, text)
 			if parseErr != nil {
-				t.Fatalf("coerced text must satisfy the constraint's layout: unexpected error: %v", parseErr)
+				t.Fatalf("coerced text is not RFC 3339: %v", parseErr)
 			}
 			if orig, isTime := tt.val.(time.Time); isTime {
 				if !back.Equal(orig) {

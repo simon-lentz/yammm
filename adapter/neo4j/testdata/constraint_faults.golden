@@ -90,31 +90,16 @@ uuid accepted
 	CoerceParams: map[], param "v": invalid UUID: "x"
 timestamp accepted
 	CheckConstraint: ok
-	CoerceParams: map[], param "v": invalid timestamp format: "x" (expected 2006-01-02)
-timestamp format not UTF-8
-	CheckConstraint: schema: timestamp format "\xff" is not valid UTF-8
-	CoerceParams: map[], param type "v": schema: timestamp format "\xff" is not valid UTF-8
-timestamp format with a zone abbreviation
-	CheckConstraint: schema: timestamp format "2006-01-02 15:04 MST" holds a zone abbreviation, which names no one offset; state the zone as a numeric offset such as Z07:00
-	CoerceParams: map[], param type "v": schema: timestamp format "2006-01-02 15:04 MST" holds a zone abbreviation, which names no one offset; state the zone as a numeric offset such as Z07:00
-timestamp format with a zone abbreviation in a List
-	CheckConstraint: schema: timestamp format "15:04 MST" holds a zone abbreviation, which names no one offset; state the zone as a numeric offset such as Z07:00
-	CoerceParams: map[], param type "v": schema: timestamp format "15:04 MST" holds a zone abbreviation, which names no one offset; state the zone as a numeric offset such as Z07:00
-timestamp format with a zone abbreviation beside an offset
-	CheckConstraint: schema: timestamp format "2006-01-02 15:04 -0700 MST" holds a zone abbreviation, which names no one offset; state the zone as a numeric offset such as Z07:00
-	CoerceParams: map[], param type "v": schema: timestamp format "2006-01-02 15:04 -0700 MST" holds a zone abbreviation, which names no one offset; state the zone as a numeric offset such as Z07:00
-timestamp format not UTF-8 before a zone abbreviation
-	CheckConstraint: schema: timestamp format "15:04 MST\xff" is not valid UTF-8
-	CoerceParams: map[], param type "v": schema: timestamp format "15:04 MST\xff" is not valid UTF-8
-timestamp format that does not read back its own text
-	CheckConstraint: schema: timestamp format "2006-12-02 15:04:05" does not read back the text it writes: it writes 2026-08-19T13:34:56.789123456+05:30 as "2026-819-19 13:34:56"
-	CoerceParams: map[], param type "v": schema: timestamp format "2006-12-02 15:04:05" does not read back the text it writes: it writes 2026-08-19T13:34:56.789123456+05:30 as "2026-819-19 13:34:56"
-timestamp format that does not read back its own text in a List
-	CheckConstraint: schema: timestamp format "52" does not read back the text it writes: it writes 1950-11-23T00:07:08.1-09:30 as "823"
-	CoerceParams: map[], param type "v": schema: timestamp format "52" does not read back the text it writes: it writes 1950-11-23T00:07:08.1-09:30 as "823"
-timestamp format that drops every field
+	CoerceParams: map[], param "v": invalid timestamp format: "x"
+timestamp zero value
 	CheckConstraint: ok
-	CoerceParams: map[], param "v": invalid timestamp format: "x" (expected plain text)
+	CoerceParams: map[], param "v": invalid timestamp format: "x"
+timestamp in a List
+	CheckConstraint: ok
+	CoerceParams: map[], param "v": expected array for list, got string
+timestamp pointer
+	CheckConstraint: schema: a constraint of Go type *schema.TimestampConstraint is none this package constructs
+	CoerceParams: map[], param type "v": schema: a constraint of Go type *schema.TimestampConstraint is none this package constructs
 integer accepted
 	CheckConstraint: ok
 	CoerceParams: map[], param "v": expected integer, got string

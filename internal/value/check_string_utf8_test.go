@@ -14,9 +14,8 @@ import (
 type carrier string
 
 // Every kind held as text refuses a string that is not valid UTF-8 as a type
-// mismatch, before its own rule reads the bytes: the Enum and the layout here
-// are constraints no schema constructor builds, each of which would otherwise
-// accept the string.
+// mismatch, before its own rule reads the bytes: the Enum here is a constraint
+// no schema constructor builds, which would otherwise accept the string.
 func TestCheck_AStringIsValidUTF8AtEveryTextKind(t *testing.T) {
 	t.Parallel()
 	const bad = "a\xffb"
@@ -29,7 +28,6 @@ func TestCheck_AStringIsValidUTF8AtEveryTextKind(t *testing.T) {
 		{"String in a named type", carrier(bad), schema.NewStringConstraint()},
 		{"Pattern its pattern matches", bad, schema.NewPatternConstraint([]*regexp.Regexp{regexp.MustCompile("^a.b$")})},
 		{"Enum holding the string", bad, schema.NewEnumConstraint([]string{bad, "c"})},
-		{"Timestamp whose layout is the string", bad, schema.NewTimestampConstraintFormatted(bad)},
 		{"Timestamp", bad, schema.NewTimestampConstraint()},
 		{"Date", bad, schema.NewDateConstraint()},
 		{"UUID", bad, schema.NewUUIDConstraint()},

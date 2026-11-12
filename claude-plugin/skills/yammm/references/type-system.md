@@ -90,19 +90,16 @@ code Pattern["^[A-Z]", "[0-9]$"]    // must start with uppercase AND end with di
 
 ### Timestamp
 
-Date-time value with optional format specification.
+Date-time value in RFC 3339. No parameters.
 
-**Syntax:** `Timestamp` or `Timestamp["format"]`
+**Syntax:** `Timestamp`
 
-- Default format is RFC 3339: a string is read as `"2006-01-02T15:04:05Z07:00"`, fractional seconds included, and stored as `"2006-01-02T15:04:05.999999999Z07:00"`
-- Format string follows Go time formatting conventions
-- Accepts a string or a `time.Time`; **stores the string**, rendered through the declared format when there is one and through RFC 3339 with nanoseconds otherwise; a `time.Time` whose stored text that rule refuses is refused, such as one outside years 0 to 9999
-- A value stored under a declared format keeps none of the fields the format drops. At schema load a declared layout that the next rule does not refuse writes two instants and reads them back, and draws `W_TIMESTAMP_LOSSY_FORMAT` naming each field lost: the year or its century, the month, the day, the hour or its half of the day, the minute, the second, the fractional second or its digits past a count, the UTC offset or its minutes
-- A declared format is refused with `E_INVALID_CONSTRAINT` when it is empty (`Timestamp[""]`), when it holds a zone abbreviation, such as `"2006-01-02 15:04 MST"`, `"2006-01-02 15:04 -0700 MST"` or Go's `time.RFC1123`, or when it does not read back the text it writes for one of those two instants, such as `"2006-12-02 15:04:05"`. State a zone as a numeric offset (`-0700`, `Z07:00`), never as an abbreviation
+- A string is read as `"2006-01-02T15:04:05Z07:00"`, fractional seconds included, and stored as `"2006-01-02T15:04:05.999999999Z07:00"`
+- Accepts a string or a `time.Time`; **stores the string**, rendered through RFC 3339 with nanoseconds; a value at a UTC offset of 24 hours or more is refused, and so is a `time.Time` outside years 0 to 9999
+- A bracket after `Timestamp` is a syntax error. Declare a `String` or a `Pattern` to hold date-time text in another form
 
 ```yammm-snippet
 created_at Timestamp
-log_time Timestamp["2006-01-02 15:04:05"]
 ```
 
 ### Date

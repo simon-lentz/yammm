@@ -24,7 +24,7 @@ type Car {
 	tag Pattern["^a", "b$"]
 	kind Enum["x", "y"]
 	at Timestamp
-	stamped Timestamp["2006-01-02"]
+	stamps List<Timestamp>
 	on Date
 	id2 UUID
 	ok Boolean

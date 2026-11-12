@@ -39,7 +39,7 @@ Productions are expressions constructed from terms and the following operators, 
 {}  repetition (0 to n times)
 ```
 
-Three naming conventions are used. **UPPER_SNAKE** names a lexical token produced by the lexer (`UC_WORD`, `LC_WORD`, `STRING`, `INTEGER`, `FLOAT`, `REGEXP`, `VARIABLE`, `DOC_COMMENT`, `EOF`) — with one exception, `BOOLEAN`, which is a non-terminal over the two word spellings `true` and `false` and is spelled in upper snake because it stands in for a literal. **CamelCase** names a syntactic non-terminal. **lower case** names a helper non-terminal defined where it is first used — a character class (`upper_letter`, `lower_letter`, `decimal_digit`, `newline`, `line_char`, `escape_sequence`), a single token (`format`, `dimensions`, `minLen`, `maxLen`), or a phrase (`min`, `max`, `exponent`). Literal tokens are enclosed in double quotes `""` or back quotes `` ` ``.
+Three naming conventions are used. **UPPER_SNAKE** names a lexical token the lexer produces (`UC_WORD`, `LC_WORD`, `STRING`, `INTEGER`, `FLOAT`, `REGEXP`, `VARIABLE`, `DOC_COMMENT`, `EOF`), with one exception: `BOOLEAN` is a non-terminal over the two word spellings `true` and `false`, spelled in upper snake because it stands in for a literal. **CamelCase** names a syntactic non-terminal; `UUIDT` is one, the acronym `UUID` before the `T` that ends each built-in type's production. A name that starts in **lower case** is a helper non-terminal with a production of its own: a character class (`upper_letter`, `lower_letter`, `decimal_digit`, `newline`, `line_char`, `string_char`, `regexp_char`), a single token (`dimensions`, `minLen`, `maxLen`), or a phrase (`min`, `max`, `exponent`, `escape_sequence`). Two kinds of lower-case name have no production: a `label=` prefix, described below, which is no non-terminal, and the names `production_name`, `label` and `token` of the notation's own productions above, each of which stands for what its name says. Literal tokens are enclosed in double quotes `""` or back quotes `` ` ``.
 
 Some productions carry `label=` prefixes, which name the field the reference implementation binds (`path=` and `alias=` on `ImportDecl`, `qualifier=` and `name=` on `TypeRef`, `message=` and `expr=` on `Invariant`); the Grammar Summary writes the same productions without them. A `/* … */` description is informal prose standing in for a rule not written out, and a `//` comment is commentary, not grammar.
 
@@ -572,8 +572,7 @@ When a child type re-declares an inherited property, the child's constraint must
 | `Float` | Child min >= parent min AND child max <= parent max |
 | `Enum` | Child values must be a subset of parent values |
 | `List` | Element constraint narrows AND length bounds narrow |
-| `Boolean`, `Date`, `UUID` | Equal only (no parameterized narrowing) |
-| `Timestamp` | Equal only (format must match exactly) |
+| `Boolean`, `Timestamp`, `Date`, `UUID` | Equal only (no parameterized narrowing) |
 | `Pattern` | Equal only (pattern strings must match) |
 | `Vector` | Equal only (dimension must match) |
 
@@ -831,31 +830,21 @@ A pattern follows Go's `regexp` syntax, and one that does not compile is `E_INVA
 
 #### Timestamp
 
-Represents a date-time value with optional format specification:
+Represents a date-time value. It takes no argument:
 
 ```text
-TimestampT = "Timestamp" [ "[" format "]" ] .
-format     = STRING .
+TimestampT = "Timestamp" .
 ```
 
-The format string follows Go's time formatting conventions. When omitted, RFC 3339 with fractional seconds (`"2006-01-02T15:04:05.999999999Z07:00"`) is used.
+A value is RFC 3339 text as Go's `time.RFC3339` layout reads it, with or without fractional seconds, at a UTC offset under 24 hours, such as `2026-08-19T12:00:00.5+02:00`. That reading is not RFC 3339's grammar at every edge: it takes a comma before the fraction, a one-digit hour and an offset minute of `60`, which it reads as the next hour, and it takes no lower-case `t` or `z` and no leap second (`23:59:60`). Declare a property `String` or `Pattern` to hold date-time text in another form, such as a wall-clock time with no offset.
 
-**Accepted input and stored form.** A `Timestamp` property accepts a Go `time.Time` or a string, and **stores the string** rendered through the declared format when one is given and through RFC 3339 with nanoseconds otherwise. A string is parsed and re-rendered, so one instant at one offset reaches one spelling however it was written: `"…+00:00"` stores as `"…Z"`, and `".500Z"` stores as `".5Z"`. The UTC offset survives — an offset records where an observation happened and is data, not formatting. A `time.Time` is rendered through the layout, and that text is judged and stored as a string is, so a time and the text it renders as reach one spelling: RFC 3339 writes an offset under a minute as `+00:00`, which is stored as `Z`. A time whose text the rule refuses is refused, such as a time outside years 0 to 9999. Stored text is text the layout reads and stores as itself: a string that its layout reads and stores as text the layout does not read back as written is refused. Under `"2006-01-02 15:04:05 -07:00:00"` an offset two seconds west of UTC is one, since Go writes it as `+00:00:-02`, which it does not read. Under a layout that writes an offset's minutes, and writes the offset once, the offset `+24:60` is one, since Go reads it as 25 hours and writes `+25:00`, which it does not read. Go reads the offset `-00:00:01` as no offset, so text at it is stored at UTC.
-
-**A declared format that cannot represent an instant loses what it omits.** A value is stored as the text its layout writes, so a value stored under a layout keeps none of the fields the layout drops, and a reader parsing the text back gets a different instant when the value held more than its text keeps. At schema load a declared layout that is not refused writes two instants and reads each text back: 13:34:56.789123456 at UTC+05:30 on 2026-08-19, and 00:07:08.1 at UTC-09:30 on 1950-11-23. It draws `W_TIMESTAMP_LOSSY_FORMAT` when a field of either instant reads back changed, and the message names each field lost: the year or its century, the month, the day, the hour or its half of the day, the minute, the second, the fractional second or its digits past a count, and the UTC offset or its minutes. So `"2006-01-02T15:04:05.000Z07:00"` loses the fractional second past 3 digits. The layout still loads, since a wall-clock layout is a legitimate domain choice. Go reads a fractional second after a seconds field whose layout declares none, so under such a layout a string that holds a fraction is accepted and stored without it. Neither instant's offset holds seconds, since RFC 3339 writes none, so a layout that drops an offset's seconds draws no warning for them. The two instants judge a layout and do not prove it: a layout whose number fields touch with no separator, such as `"2006-01-215:04:05"`, reads both back, and still refuses or misreads a value whose day has one digit.
-
-**A format that no `Timestamp` can hold is refused.** Each of these is `E_INVALID_CONSTRAINT` on the format literal, and draws no warning:
-
-- An empty format, `Timestamp[""]`. `Timestamp` with no format is RFC 3339.
-- A format that holds a zone abbreviation, alone as in `"2006-01-02 15:04 MST"` or beside a numeric offset as in `"2006-01-02 15:04 -0700 MST"`. An abbreviation names no one offset, and Go reads the text `UTC` at an abbreviation as UTC whatever numeric offset stands beside it. A numeric offset, such as `Z07:00`, states the zone. Go's `time.RFC1123`, `time.RFC850`, `time.RFC822` and `time.UnixDate` each hold an abbreviation.
-- A format that does not read back the text it writes for one of the two instants above. `"2006-12-02 15:04:05"` is one: Go reads its `12` as a month and a day, so it writes 19 August 2026 as `2026-819-19`, which it cannot read. The message shows the instant and the text.
+**Accepted input and stored form.** A `Timestamp` property accepts a Go `time.Time` or a string, and **stores the string**, rendered as RFC 3339 with nanoseconds (`"2006-01-02T15:04:05.999999999Z07:00"`). A string is parsed and re-rendered, so one instant at one offset reaches one spelling however it was written: `"…+00:00"` stores as `"…Z"`, and `".500Z"` stores as `".5Z"`. The UTC offset survives — an offset records where an observation happened and is data, not formatting. A `time.Time` is rendered as RFC 3339 with nanoseconds, and that text is judged and stored as a string is, so a time and the text it renders as reach one spelling: RFC 3339 writes an offset under a minute as `+00:00`, which is stored as `Z`. A time whose text the rule refuses is refused, such as a time outside years 0 to 9999 or at a UTC offset of 24 hours or more. Stored text is text Go's `time.Time` writes for itself (`MarshalText`, `MarshalJSON`), so a `time.Time` decodes and encodes every stored value as written. Go's layout reads an offset hour of `24` and `time.Time` writes none, so text at `+24:00`, or at `+23:60`, which Go reads as 24 hours, is refused.
 
 Examples:
 
 ```yammm-snippet
-createdAt Timestamp                                          // the default, RFC3339Nano
-eventTime Timestamp["2006-01-02T15:04:05.000000000Z07:00"]   // explicit, fixed 9-digit fraction
-logTime Timestamp["2006-01-02 15:04:05"]                     // custom, and lossy: no zone, no fraction
+createdAt Timestamp
+seenAt Timestamp required
 ```
 
 #### Date
@@ -1427,7 +1416,7 @@ Supported datatype keywords for type checking:
 - `Timestamp` - checks for valid timestamp values
 - `Date` - checks for valid date values
 
-Each check applies the rule a property of that kind applies when it declares no constraint: `=~ Float` is false for NaN and infinities, `=~ String` is false for a number, and `=~ Timestamp` accepts an RFC 3339 string or a `time.Time` whose RFC 3339 text reads back. A nil is the exception: a property accepts an absent value, and a nil is of no kind, so `x =~ String` is false and `x !~ String` is true while `x` is nil. `=~ Timestamp` reads RFC 3339 whatever layout a property declares: a value stored under `d Timestamp["2006-01-02"]`, such as `"2030-01-02"`, validates there and `d =~ Timestamp` is false. An invariant has no layout to apply, since `=~` judges a value at run time and sees no property's constraint. `Vector`, `List`, `Enum` and `Pattern` are datatype keywords but not type checks — they name a shape or a constraint, not a kind a value can have — and `=~` against one is refused at schema load with `E_INVALID_INVARIANT`.
+Each check applies the rule a property of that kind applies when it declares no constraint: `=~ Float` is false for NaN and infinities, `=~ String` is false for a number, and `=~ Timestamp` accepts the RFC 3339 string or the `time.Time` a `Timestamp` property accepts. A nil is the exception: a property that is not required accepts an absent value, and a nil is of no kind, so `x =~ String` is false and `x !~ String` is true while `x` is nil. `=~` judges a value at run time and sees no property's constraint: at a `String` property, `d =~ Timestamp` is true when the value is text a `Timestamp` property accepts. `Vector`, `List`, `Enum` and `Pattern` are datatype keywords but not type checks — they name a shape or a constraint, not a kind a value can have — and `=~` against one is refused at schema load with `E_INVALID_INVARIANT`.
 
 Numeric type checks follow the property rules: `5 =~ Float` holds, because an integer widens to a float, and `5.0 =~ Integer` does not — a float is never an integer, whole or not.
 
@@ -1766,7 +1755,6 @@ Codes are stable identifiers for programmatic matching. `diag/code.go` holds the
 - `E_UNKNOWN_ANNOTATION`, `E_INVALID_ANNOTATION` — annotation name, placement, arity, argument kind or value, duplicate, or inherited-disagreement errors
 - `E_UNKNOWN_ANNOTATION_TARGET`, `E_INVALID_ANNOTATION_TARGET` — annotation target-property errors (unknown reference / ineligible property)
 - `W_ANNOTATION_SHADOWED` — a re-declaration silently drops an inherited property's annotations (warning)
-- `W_TIMESTAMP_LOSSY_FORMAT` (Warning) — a `Timestamp["layout"]` declares a layout that cannot reproduce an instant, and the message names each field that one of the two probe instants loses; one that holds a zone abbreviation, or that does not read back the text it writes, draws `E_INVALID_CONSTRAINT` in its place
 - `E_REVERSE_CLAUSE_REMOVED` — the schema carries the reverse clause removed in v0.15.0
 
 **Syntax** — parse errors:
@@ -1951,7 +1939,7 @@ BuiltIn    = "Integer" [ "[" IntBound "," IntBound "]" ]
            | "String" [ "[" ListBound "," ListBound "]" ]
            | "Enum" "[" STRING "," STRING { "," STRING } [ "," ] "]"
            | "Pattern" "[" STRING [ "," STRING ] "]"
-           | "Timestamp" [ "[" STRING "]" ]
+           | "Timestamp"
            | "Date"
            | "UUID"
            | "Vector" "[" INTEGER "]"

@@ -5,12 +5,14 @@ import (
 	"context"
 	"fmt"
 	"go/ast"
+	"go/constant"
 	"go/format"
 	"go/parser"
 	"go/token"
 	"go/types"
 	"maps"
 	"strings"
+	"time"
 
 	"github.com/simon-lentz/yammm/schema"
 )
@@ -46,9 +48,11 @@ func CheckPackageName(name string) error {
 	return nil
 }
 
-// WithInitialisms registers additional acronyms (e.g. "GUID", "JWT") that the
-// name-mapper upper-cases wholesale in exported Go identifiers. They MERGE with
-// gogen's default golint set (they do not replace it) and are matched
+// WithInitialisms registers additional acronyms (e.g. "JWT", "OIDC"): the
+// name-mapper upper-cases wholesale a word of a name that equals one, in
+// exported Go identifiers. It ends a word where a digit meets a letter, so an
+// acronym that holds both, such as "S3", changes nothing. Registered acronyms
+// MERGE with gogen's default golint set (they do not replace it) and are matched
 // case-insensitively. This is how a downstream code generator injects its own
 // domain vocabulary without that vocabulary ever living in yammm.
 func WithInitialisms(names ...string) Option {
@@ -147,16 +151,15 @@ type generator struct {
 	schema     schema.Schema
 	pkg        string
 	inits      map[string]bool   // the initialism set every name is derived with
-	names      *nameTable        // nil until the collect pass has run
+	names      *nameTable        // nil until nameDeclarations has run
 	keys       keyRoot           // the root embedded source keys are written against
 	embedded   map[string][]byte // the embedded sources as emitted, by key
 	entryKey   string            // the entry schema's key in embedded
 	schemaHash string            // SchemaHash as emitted
 	buf        *bytes.Buffer
-	temporal   temporalTypes                       // the Date and per-layout Timestamp types
-	collect    *temporalDemand                     // non-nil while collectTemporalDemand dry-runs type resolution
-	needsTime  bool                                // set when any emitted declaration names time.Time
-	needsJSON  bool                                // set when any emitted declaration calls encoding/json
+	needsTime  bool                                // set when a Timestamp is emitted, at a position or as a datatype
+	needsDate  bool                                // set when a position emits the Date type
+	dateCodec  bool                                // set when a datatype over a Date is emitted
 	edges      []edgeRec                           // one per declared association
 	dtFields   map[schema.Property]schema.DataType // DataType-typed property -> the DataType it names
 }
@@ -185,17 +188,13 @@ func (g *generator) nameDeclarations() error {
 	if err := g.collectEdges(); err != nil {
 		return err
 	}
-	layouts, err := g.collectTemporalDemand()
-	if err != nil {
-		return err
-	}
-	g.names = buildNameTable(g.schema, g.inits, g.edges, layouts)
-	g.registerTemporalTypes(layouts)
+	g.names = buildNameTable(g.schema, g.inits, g.edges)
 	return nil
 }
 
-// emit writes the body, prepends header/package/imports, formats, and
-// type-checks. A format or type-check failure is a generator bug, surfaced as an
+// emit writes the body, prepends the header, the package clause, the imports
+// and the Date declarations the body needs, formats, and type-checks. A format
+// or type-check failure is a generator bug, surfaced as an
 // error rather than emitted as broken Go.
 func (g *generator) emit() ([]byte, error) {
 	if err := g.emitNamedTypes(); err != nil {
@@ -217,11 +216,20 @@ func (g *generator) emit() ([]byte, error) {
 	var out bytes.Buffer
 	out.WriteString(generatedHeader)
 	fmt.Fprintf(&out, "package %s\n\n", g.pkg)
+	// The Date type and its helpers are declared here, after emission has
+	// said whether any declaration names them, and before those declarations.
+	codec := g.needsDate || g.dateCodec
 	switch {
-	case g.needsJSON:
+	case codec:
 		out.WriteString("import (\n\t\"encoding/json\"\n\t\"time\"\n)\n\n")
 	case g.needsTime:
 		out.WriteString("import \"time\"\n\n")
+	}
+	if codec {
+		out.WriteString(dateCodecHelpers)
+	}
+	if g.needsDate {
+		writeDateDecl(&out, dateGoName)
 	}
 	out.Write(g.buf.Bytes())
 
@@ -292,8 +300,8 @@ func (stubImporter) Import(path string) (*types.Package, error) {
 	}
 }
 
-// stubTimePackage declares time.Time with Format(layout string) string and
-// time.Parse(layout, value string) (Time, error).
+// stubTimePackage declares time.Time with Format(layout string) string,
+// time.Parse(layout, value string) (Time, error) and the constant time.DateOnly.
 func stubTimePackage() *types.Package {
 	pkg := types.NewPackage("time", "time")
 	str := types.Typ[types.String]
@@ -304,6 +312,7 @@ func stubTimePackage() *types.Package {
 		types.NewTuple(types.NewVar(token.NoPos, pkg, "", str)), false,
 	)))
 	pkg.Scope().Insert(timeT.Obj())
+	pkg.Scope().Insert(types.NewConst(token.NoPos, pkg, "DateOnly", types.Typ[types.UntypedString], constant.MakeString(time.DateOnly)))
 	pkg.Scope().Insert(types.NewFunc(token.NoPos, pkg, "Parse", types.NewSignatureType(nil, nil, nil,
 		types.NewTuple(types.NewVar(token.NoPos, pkg, "layout", str), types.NewVar(token.NoPos, pkg, "value", str)),
 		types.NewTuple(types.NewVar(token.NoPos, pkg, "", timeT), types.NewVar(token.NoPos, pkg, "", universeError())), false)))

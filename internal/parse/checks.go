@@ -80,7 +80,7 @@ func (b *builder) builtin(c *builtinNode, span location.Span) *Constraint {
 	case c.Pat != nil:
 		return b.patternConstraint(c.Pat, span)
 	case c.Tim != nil:
-		return b.timestampConstraint(c.Tim, span)
+		return &Constraint{Kind: ConstraintTimestamp, Span: span}
 	case c.Dat != nil:
 		return &Constraint{Kind: ConstraintDate, Span: span}
 	case c.UUID != nil:
@@ -370,26 +370,6 @@ func SurrogateEscape(pattern string) (rune, bool) {
 // [schema.CheckConstraint] refuses one in the same words.
 func SurrogateMessage(pattern string, r rune) string {
 	return fmt.Sprintf("regex pattern %q names the surrogate code point U+%04X, which no string holds", pattern, r)
-}
-
-func (b *builder) timestampConstraint(c *timC, span location.Span) *Constraint {
-	out := &Constraint{Kind: ConstraintTimestamp, Span: span}
-	if c.Format == nil {
-		return out
-	}
-	f := c.Format
-	lit := Literal{Raw: f.Raw, Span: b.spanOf(f.Pos, f.EndPos)}
-	text, err := unquote(f.Raw)
-	switch {
-	case err != nil:
-		b.reportUnquote(lit.Span, "invalid timestamp format", err)
-	case text == "":
-		b.report(diag.Error, diag.E_INVALID_CONSTRAINT, lit.Span, "timestamp format cannot be empty; declare Timestamp with no format to store RFC 3339 text")
-	default:
-		lit.Text, lit.Kept = text, true
-	}
-	out.FormatLit = &lit
-	return out
 }
 
 func (b *builder) vectorConstraint(c *vecC, span location.Span) *Constraint {

@@ -12,7 +12,7 @@ import (
 	"github.com/simon-lentz/yammm/internal/yammmtest"
 )
 
-// Golden set 2 — the malformed casebook. Fifty-two seeded cases, each
+// Golden set 2 — the malformed casebook. Fifty-one seeded cases, each
 // planting known defects, frozen on two axes: what this parser says about
 // malformed input, and which declarations survive it.
 //

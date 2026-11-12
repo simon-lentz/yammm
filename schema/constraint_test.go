@@ -25,7 +25,6 @@ func TestConstraint_String(t *testing.T) {
 		{"Float", schema.NewFloatConstraint(), "Float"},
 		{"Boolean", schema.NewBooleanConstraint(), "Boolean"},
 		{"Timestamp", schema.NewTimestampConstraint(), "Timestamp"},
-		{"Timestamp formatted", schema.NewTimestampConstraintFormatted("2006-01-02"), `Timestamp["2006-01-02"]`},
 		{"Date", schema.NewDateConstraint(), "Date"},
 		{"UUID", schema.NewUUIDConstraint(), "UUID"},
 		{"Enum", schema.NewEnumConstraint([]string{"a", "b"}), `Enum["a", "b"]`},
@@ -72,9 +71,8 @@ func TestConstraint_Equal(t *testing.T) {
 		{"float different min", schema.FloatBetween(1.5, 10.5), schema.FloatBetween(2.0, 10.5), false},
 		{"boolean same", schema.NewBooleanConstraint(), schema.NewBooleanConstraint(), true},
 		{"boolean vs string", schema.NewBooleanConstraint(), schema.NewStringConstraint(), false},
-		{"timestamp same format", schema.NewTimestampConstraintFormatted("2006-01-02"), schema.NewTimestampConstraintFormatted("2006-01-02"), true},
-		{"timestamp different format", schema.NewTimestampConstraintFormatted("2006-01-02"), schema.NewTimestampConstraintFormatted("2006-01-02T15:04:05Z07:00"), false},
-		{"timestamp no format both", schema.NewTimestampConstraint(), schema.NewTimestampConstraint(), true},
+		{"timestamp same", schema.NewTimestampConstraint(), schema.NewTimestampConstraint(), true},
+		{"timestamp and the zero value", schema.NewTimestampConstraint(), schema.TimestampConstraint{}, true},
 		{"date same", schema.NewDateConstraint(), schema.NewDateConstraint(), true},
 		{"date vs timestamp", schema.NewDateConstraint(), schema.NewTimestampConstraint(), false},
 		{"uuid same", schema.NewUUIDConstraint(), schema.NewUUIDConstraint(), true},
@@ -267,18 +265,6 @@ func TestFloatConstraint_Max_Unbounded(t *testing.T) {
 	assert.False(t, hasMax)
 }
 
-func TestTimestampConstraint_Format(t *testing.T) {
-	c := schema.NewTimestampConstraintFormatted("2006-01-02")
-	format := c.Format()
-	assert.Equal(t, "2006-01-02", format)
-}
-
-func TestTimestampConstraint_Format_NoFormat(t *testing.T) {
-	c := schema.NewTimestampConstraint()
-	format := c.Format()
-	assert.Empty(t, format)
-}
-
 func TestPatternConstraint_Kind(t *testing.T) {
 	p := regexp.MustCompile("^test")
 	c := schema.NewPatternConstraint([]*regexp.Regexp{p})
@@ -397,7 +383,6 @@ func TestConstraint_IsResolved_NonAliasConstraints(t *testing.T) {
 		{"Float bounded", schema.FloatBetween(1.0, 10.0)},
 		{"Boolean", schema.NewBooleanConstraint()},
 		{"Timestamp", schema.NewTimestampConstraint()},
-		{"Timestamp formatted", schema.NewTimestampConstraintFormatted("2006-01-02")},
 		{"Date", schema.NewDateConstraint()},
 		{"UUID", schema.NewUUIDConstraint()},
 		{"Enum", schema.NewEnumConstraint([]string{"a", "b"})},
@@ -920,15 +905,9 @@ func TestNonNarrowableConstraints_NarrowsTo(t *testing.T) {
 			want:   true,
 		},
 		{
-			name:   "timestamp same format",
-			parent: schema.NewTimestampConstraintFormatted("2006-01-02"),
-			child:  schema.NewTimestampConstraintFormatted("2006-01-02"),
-			want:   true,
-		},
-		{
-			name:   "timestamp different format",
-			parent: schema.NewTimestampConstraintFormatted("2006-01-02"),
-			child:  schema.NewTimestampConstraintFormatted("2006-01-02T15:04:05Z07:00"),
+			name:   "timestamp to date",
+			parent: schema.NewTimestampConstraint(),
+			child:  schema.NewDateConstraint(),
 			want:   false,
 		},
 		{
@@ -962,6 +941,31 @@ func TestNonNarrowableConstraints_NarrowsTo(t *testing.T) {
 			t.Parallel()
 			assert.Equal(t, tt.want, tt.parent.NarrowsTo(tt.child))
 		})
+	}
+}
+
+// A kind that takes no parameter is equal to, and narrows to, itself and a
+// datatype over itself, and no other kind.
+func TestParameterlessConstraints_EqualAndNarrowThroughADatatype(t *testing.T) {
+	t.Parallel()
+	kinds := []schema.Constraint{
+		schema.NewBooleanConstraint(),
+		schema.NewTimestampConstraint(),
+		schema.NewDateConstraint(),
+		schema.NewUUIDConstraint(),
+	}
+	for _, a := range kinds {
+		for _, b := range kinds {
+			want := a.Kind() == b.Kind()
+			for _, other := range []schema.Constraint{b, schema.NewAliasConstraint("Named", b)} {
+				if got := a.Equal(other); got != want {
+					t.Errorf("%s.Equal(%s) = %t, want %t", a, other, got, want)
+				}
+				if got := a.NarrowsTo(other); got != want {
+					t.Errorf("%s.NarrowsTo(%s) = %t, want %t", a, other, got, want)
+				}
+			}
+		}
 	}
 }
 

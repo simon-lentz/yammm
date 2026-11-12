@@ -197,12 +197,12 @@ yammm snapshot verify schema.yammm data.ys
 ```bash
 yammm gen --to go schema.yammm
 yammm gen --to go --package models --output models_gen.go schema.yammm
-yammm gen --to go --initialisms GUID,JWT --module-root . schema.yammm
+yammm gen --to go --initialisms JWT,OIDC --module-root . schema.yammm
 yammm gen --to md schema.yammm
 yammm gen --to md --no-class-diagram --output SCHEMA.md schema.yammm
 ```
 
-`--to go` generates Go source via the `schema/gogen` package: one struct per type, named Enum/DataType types, generated `Date` and per-layout `Timestamp` types, `EDGE_` association structs, a Graph aggregate, and the embedded schema source reachable through `SerializedSources()` / `SerializedEntry`. Output is stdlib-only (imports at most `time` and `encoding/json`), formatted and type-checked before being written; schemas with imports are flattened into one self-contained package.
+`--to go` generates Go source via the `schema/gogen` package: one struct per type, named Enum/DataType types, a generated `Date` type, `EDGE_` association structs, a Graph aggregate, and the embedded schema source reachable through `SerializedSources()` / `SerializedEntry`. Output is stdlib-only (imports at most `time` and `encoding/json`), formatted and type-checked before being written; schemas with imports are flattened into one self-contained package.
 
 `--to md` (alias `markdown`) generates a Markdown reference document via the `schema/markdown` package: a Mermaid class diagram of the whole import closure plus per-type sections (flattened property tables with `from <Owner>` inherited-row markers, relation bullets with edge-property sub-tables, invariant source fences) and data-type tables. Same closure flattening; output is deterministic and structurally self-checked before being written.
 
@@ -211,7 +211,7 @@ yammm gen --to md --no-class-diagram --output SCHEMA.md schema.yammm
 | `--to` | Target: `go` or `md` (required) |
 | `--package` | go target: generated package name (default: derived from schema name). A value that is not a Go identifier, or is a keyword or `_`, an empty one included, is a usage error (exit 2), judged before the schema is loaded |
 | `--output` | Output file path (default: stdout) |
-| `--initialisms` | go target: extra acronyms to upper-case in generated names, e.g. `GUID,JWT` |
+| `--initialisms` | go target: extra acronyms to upper-case in generated names, e.g. `JWT,OIDC` |
 | `--module-root` | Root directory for module-style imports (default: the nearest ancestor holding a `yammm.mod` marker, else the schema's directory). Shared by every command that loads a schema: `validate`, `check`, `gen`, `snapshot save`, `snapshot verify`, `neo4j constraints`, `neo4j diff`, `neo4j indexes`. A root that is not a directory the loader can open exits 3 before the schema is parsed, whether or not the schema imports anything |
 | `--no-class-diagram` | md target: omit the Mermaid class-diagram section |
 | `--no-class-members` | md target: keep the diagram and omit the member lines inside each class |

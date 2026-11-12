@@ -139,7 +139,6 @@ The all-or-nothing contract is unchanged: any error still yields a zero schema.
 | `E_INVALID_ANNOTATION` | Annotation placement, arity, argument-kind, keyword, or duplicate violation, or conflicting annotations a type inherits for one property |
 | `E_INVALID_ANNOTATION_TARGET` | Annotation attached to an ineligible property |
 | `W_ANNOTATION_SHADOWED` | A re-declaration silently drops an inherited property's annotations (warning) |
-| `W_TIMESTAMP_LOSSY_FORMAT` | `Timestamp["layout"]` declares a layout that cannot reproduce an instant, so a value stored through it can read back as another instant; the message names each field that one of the loader's two probe instants loses. A layout that holds a zone abbreviation, or that does not read back the text it writes for one of them, draws `E_INVALID_CONSTRAINT` in its place (Warning, v0.13+) |
 
 ### Instance Data and Validation
 

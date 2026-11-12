@@ -105,7 +105,7 @@ func Check(val any, c schema.Constraint) error {
 	case schema.KindBoolean:
 		return checkBoolean(val)
 	case schema.KindTimestamp:
-		return checkTimestamp(val, c)
+		return checkTimestamp(val)
 	case schema.KindDate:
 		return checkDate(val)
 	case schema.KindUUID:
@@ -141,7 +141,7 @@ func Check(val any, c schema.Constraint) error {
 //   - Float → float64
 //   - Boolean → bool, a named carrier reduced to its base
 //   - String, Enum, Pattern → string, a named carrier reduced to its base
-//   - Timestamp, Date, UUID → string, rendered through the constraint
+//   - Timestamp, Date, UUID → string, in the one spelling [Canonical] gives
 //   - Vector → []float64
 //
 // Returns the coerced value and nil error on success. Returns (nil, error)
@@ -475,14 +475,13 @@ func checkBoolean(val any) error {
 }
 
 // checkTimestamp validates that val is a valid timestamp.
-// Accepts a time.Time, or a string parsed against the format, whose stored
-// text reads back as written.
-func checkTimestamp(val any, c schema.Constraint) error {
+// Accepts a time.Time, or a string read as RFC 3339, that [Canonical] stores.
+func checkTimestamp(val any) error {
 	// A time.Time is judged as the text it renders as, so the Go path and the
 	// text path refuse the same values.
 	var s string
 	if t, ok := val.(time.Time); ok {
-		s = t.Format(timestampLayout(c))
+		s = t.Format(timestampLayout)
 	} else {
 		var refused *CheckError
 		if s, refused = textOf(val, "timestamp string or time.Time"); refused != nil {
@@ -493,19 +492,10 @@ func checkTimestamp(val any, c schema.Constraint) error {
 	// Text is judged as the text it is stored as, so a value this check passes
 	// is one [Canonical] stores.
 	var buf [timestampTextSize]byte
-	stored, verdict := storedTimestamp(buf[:0], s, c)
-	if verdict == textSettled {
+	if _, ok := storedTimestamp(buf[:0], s); ok {
 		return nil
 	}
-	given := diag.QuoteValue(s)
-	if verdict == textUnsettled {
-		// The stored text is as long as its layout makes it, so it is shown whole.
-		given += " is stored as " + strconv.Quote(string(stored)) + ", which does not read back as written"
-	}
-	if tc, ok := c.(schema.TimestampConstraint); ok && tc.Format() != "" {
-		return constraintFail("invalid timestamp format: %s (expected %s)", given, tc.Format())
-	}
-	return constraintFail("invalid timestamp format: %s", given)
+	return constraintFail("invalid timestamp format: %s", diag.QuoteValue(s))
 }
 
 // checkDate validates that val is a valid date.
@@ -731,7 +721,7 @@ func toSlice(val any) ([]any, bool) {
 }
 
 // CheckKind reports whether val is a value of kind k under no constraint: no
-// bounds, layout or member set. A value that holds none is of no kind, where
+// bounds or member set. A value that holds none is of no kind, where
 // [Check] passes one.
 func CheckKind(val any, k schema.ConstraintKind) error {
 	switch k {
@@ -746,7 +736,7 @@ func CheckKind(val any, k schema.ConstraintKind) error {
 	case schema.KindUUID:
 		return checkUUID(val)
 	case schema.KindTimestamp:
-		return checkTimestamp(val, nil)
+		return checkTimestamp(val)
 	case schema.KindDate:
 		return checkDate(val)
 	}

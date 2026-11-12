@@ -306,7 +306,10 @@ func hashConstraint(h io.Writer, c Constraint) {
 
 	case TimestampConstraint:
 		writeTag(h, "c:timestamp")
-		writeStr(h, cc.Format())
+		// Hash version 4 writes a format's length here. A Timestamp holds no
+		// format, and leaving the write out would move the hash of every
+		// schema that declares one.
+		writeLen(h, 0)
 
 	case DateConstraint:
 		writeTag(h, "c:date")
