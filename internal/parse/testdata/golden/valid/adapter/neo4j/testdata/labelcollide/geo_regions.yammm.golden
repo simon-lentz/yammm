@@ -1,15 +1,15 @@
 {
-  "name": "\"geo_regions\"",
+  "name": "\"geo__Regions\"",
   "span": {
     "s": 0,
-    "e": 20
+    "e": 21
   },
   "types": [
     {
       "name": "Region",
       "name_span": {
-        "s": 27,
-        "e": 33
+        "s": 28,
+        "e": 34
       },
       "props": [
         {
@@ -17,14 +17,14 @@
           "constraint": {
             "kind": "String",
             "span": {
-              "s": 45,
-              "e": 51
+              "s": 46,
+              "e": 52
             }
           },
           "primary": true,
           "span": {
-            "s": 40,
-            "e": 59
+            "s": 41,
+            "e": 60
           }
         },
         {
@@ -32,20 +32,20 @@
           "constraint": {
             "kind": "String",
             "span": {
-              "s": 69,
-              "e": 75
+              "s": 70,
+              "e": 76
             }
           },
           "required": true,
           "span": {
-            "s": 64,
-            "e": 84
+            "s": 65,
+            "e": 85
           }
         }
       ],
       "span": {
-        "s": 22,
-        "e": 86
+        "s": 23,
+        "e": 87
       }
     }
   ]

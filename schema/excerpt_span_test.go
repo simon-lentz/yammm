@@ -29,7 +29,7 @@ func TestExcerpt_MarksTheParsersSpan(t *testing.T) {
 	t.Parallel()
 
 	// Each line is line 5 of its schema. The invariant spans its line; a
-	// pattern spans its second argument, 21 columns after the tab.
+	// pattern spans its literal, 13 columns after the tab.
 	rows := []struct {
 		name  string
 		line  string
@@ -38,8 +38,8 @@ func TestExcerpt_MarksTheParsersSpan(t *testing.T) {
 	}{
 		{"a tab-indented property of an unknown type", "\tname Strin", diag.E_UNKNOWN_TYPE, "\t" + strings.Repeat("^", 10)},
 		{"an invariant holding wide runes and a combining mark", "\t! \"\u6f22\u5b57 cafe\u0301\" nme -> Len > 0", diag.E_UNKNOWN_PROPERTY, "\t" + strings.Repeat("^", 28)},
-		{"an invalid pattern after wide runes, mid-line", "\tname Pattern[\"\u6f22\u5b57\", \"(\"] required", diag.E_INVALID_CONSTRAINT, "\t" + strings.Repeat(" ", 21) + "^^^"},
-		{"an invalid pattern after a combining mark, mid-line", "\tname Pattern[\"cafe\u0301\", \"(\"] required", diag.E_INVALID_CONSTRAINT, "\t" + strings.Repeat(" ", 21) + "^^^"},
+		{"an invalid pattern holding wide runes, mid-line", "\tname Pattern[\"\u6f22\u5b57(\"] required", diag.E_INVALID_CONSTRAINT, "\t" + strings.Repeat(" ", 13) + strings.Repeat("^", 7)},
+		{"an invalid pattern holding a combining mark, mid-line", "\tname Pattern[\"cafe\u0301(\"] required", diag.E_INVALID_CONSTRAINT, "\t" + strings.Repeat(" ", 13) + strings.Repeat("^", 7)},
 	}
 
 	for _, row := range rows {

@@ -22,10 +22,10 @@ import (
 )
 
 // multibyteSource exercises every width UTF-8 has: ASCII, two-byte Greek,
-// three-byte kanji and a four-byte emoji. Identifiers stay ASCII because the
-// grammar admits no others; the wide runes live where the language allows
-// them — the schema name, a comment, and string values.
-const multibyteSource = "schema \"日本語\"\n" +
+// three-byte kanji and a four-byte emoji. Names stay ASCII because the
+// language admits no others; the wide runes live where the language allows
+// them — a comment and string values.
+const multibyteSource = "schema \"nihongo\"\n" +
 	"// αβγ comment 🎉\n" +
 	"type Doc = String[1, 10]\n" +
 	"type Record {\n" +
@@ -64,13 +64,13 @@ func TestSpans_EndIsExclusive(t *testing.T) {
 		t.Fatalf("fixture does not parse cleanly: %v", issues)
 	}
 
-	span := file.NameSpan
+	span := file.Types[0].Properties[1].Constraint.EnumLits[0].Span
 	width := span.End.Byte - span.Start.Byte
-	if want := len(`"日本語"`); width != want {
-		t.Errorf("schema-name span width = %d bytes, want %d — End must be exclusive", width, want)
+	if want := len(`"日"`); width != want {
+		t.Errorf("enum-value span width = %d bytes, want %d — End must be exclusive", width, want)
 	}
-	if got := multibyteSource[span.Start.Byte:span.End.Byte]; got != `"日本語"` {
-		t.Errorf("schema-name span slices to %q, want the quoted name", got)
+	if got := multibyteSource[span.Start.Byte:span.End.Byte]; got != `"日"` {
+		t.Errorf("enum-value span slices to %q, want the quoted value", got)
 	}
 }
 

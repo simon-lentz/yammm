@@ -1006,10 +1006,9 @@ func (c *completer) recordShadowedAnnotations(own Property, supers []Type) map[s
 // actively wrong for an annotation the same load rejects: following it produces
 // a second copy of the same error. Linearization cannot know that; only [completer.validateAnnotations]
 // establishes which annotations are well-formed, known, correctly placed, and
-// eligible for their target. Any annotation that drew a diagnostic of its own,
-// or whose argument list failed to parse, is therefore skipped here — as is any
-// re-declaration the merge refused, whether or not E_PROPERTY_CONFLICT reports
-// the refusal, since a rejected declaration cannot usefully be told to re-state
+// eligible for their target. Any annotation that drew a diagnostic of its own is
+// therefore skipped here — as is any re-declaration the merge refused, whether
+// or not E_PROPERTY_CONFLICT reports the refusal, since a rejected declaration cannot usefully be told to re-state
 // anything.
 //
 // Re-statement is matched by NAME, so the advice stays followable even when two

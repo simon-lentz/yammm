@@ -1,6 +1,7 @@
 package schema
 
 import (
+	"fmt"
 	"slices"
 	"strings"
 
@@ -222,7 +223,143 @@ func (c *completer) validateRelationTargets() {
 			c.validateCompositionTarget(t, r)
 		}
 	}
+	c.detectRequiredCompositionCycles()
 	c.validateAssociationTargets()
+}
+
+// detectRequiredCompositionCycles refuses each group of types that require one
+// another through compositions alone: every instance in it must hold a child of
+// another kind in it, so none is finite. An optional link ends the chain, so a
+// cycle that holds one stays legal. A group is a strongly connected component
+// of the required links, so its one issue does not depend on declaration order.
+// A cycle stays within one schema, since an import never reaches back to its
+// importer.
+func (c *completer) detectRequiredCompositionCycles() {
+	types := c.schema.types
+	order := make(map[Type]int, len(types))
+	for i, t := range types {
+		order[t] = i
+	}
+	links := make(map[Type][]Relation, len(types))
+	for _, t := range types {
+		for r := range t.AllCompositions() {
+			if r.IsOptional() {
+				continue
+			}
+			if target := c.resolveTypeID(r.TargetID()); !target.IsZero() && c.typeIndex[target.Name()] == target {
+				links[t] = append(links[t], r)
+			}
+		}
+	}
+	for _, group := range c.stronglyConnected(types, links) {
+		c.reportCompositionCycle(group, links, order)
+	}
+}
+
+// stronglyConnected returns the strongly connected components of the required
+// composition links that hold a cycle (more than one type, or a type that
+// requires itself), by Tarjan's algorithm.
+func (c *completer) stronglyConnected(types []Type, links map[Type][]Relation) [][]Type {
+	index := make(map[Type]int, len(types))
+	low := make(map[Type]int, len(types))
+	onStack := make(map[Type]bool, len(types))
+	var stack []Type
+	var groups [][]Type
+	next := 0
+
+	var visit func(t Type)
+	visit = func(t Type) {
+		index[t], low[t] = next, next
+		next++
+		stack = append(stack, t)
+		onStack[t] = true
+		for _, r := range links[t] {
+			w := c.resolveTypeID(r.TargetID())
+			if _, seen := index[w]; !seen {
+				visit(w)
+				low[t] = min(low[t], low[w])
+			} else if onStack[w] {
+				low[t] = min(low[t], index[w])
+			}
+		}
+		if low[t] != index[t] {
+			return
+		}
+		var group []Type
+		for {
+			w := stack[len(stack)-1]
+			stack = stack[:len(stack)-1]
+			onStack[w] = false
+			group = append(group, w)
+			if w == t {
+				break
+			}
+		}
+		if len(group) > 1 || slices.ContainsFunc(links[t], func(r Relation) bool { return c.resolveTypeID(r.TargetID()) == t }) {
+			groups = append(groups, group)
+		}
+	}
+	for _, t := range types {
+		if _, seen := index[t]; !seen {
+			visit(t)
+		}
+	}
+	return groups
+}
+
+// reportCompositionCycle reports one group at its first-declared type. The
+// message names the shortest cycle through that type, and each required link
+// inside the group is related information, so the author sees every link one
+// optional multiplicity can break.
+func (c *completer) reportCompositionCycle(group []Type, links map[Type][]Relation, order map[Type]int) {
+	slices.SortFunc(group, func(a, b Type) int { return order[a] - order[b] })
+	in := make(map[Type]bool, len(group))
+	for _, t := range group {
+		in[t] = true
+	}
+	anchor := group[0]
+
+	// Breadth-first from the anchor back to it, in declaration order, so the
+	// named cycle is the shortest and the same on every load.
+	parent := map[Type]Type{}
+	var closing Type
+	queue := []Type{anchor}
+	for len(queue) > 0 && closing.IsZero() {
+		t := queue[0]
+		queue = queue[1:]
+		for _, r := range links[t] {
+			w := c.resolveTypeID(r.TargetID())
+			if w == anchor {
+				closing = t
+				break
+			}
+			if _, seen := parent[w]; !seen && in[w] {
+				parent[w] = t
+				queue = append(queue, w)
+			}
+		}
+	}
+	names := []string{anchor.Name()}
+	for t := closing; t != anchor; t = parent[t] {
+		names = append(names, t.Name())
+	}
+	slices.Reverse(names[1:])
+	names = append(names, anchor.Name())
+
+	var related []location.RelatedInfo
+	for _, t := range group {
+		for _, r := range links[t] {
+			if w := c.resolveTypeID(r.TargetID()); in[w] {
+				related = append(related, location.RelatedInfo{
+					Span:    r.Span(),
+					Message: fmt.Sprintf("%s requires %s through %s", t.Name(), w.Name(), r.Name()),
+				})
+			}
+		}
+	}
+	c.errorfRelated(anchor.Span(), diag.E_COMPOSITION_CYCLE, related,
+		"composition cycle detected: %s; every composition on it is required, so no instance of %q is finite",
+		strings.Join(names, " -> "), anchor.Name())
 }
 
 // validateAssociationTargets checks that part types don't declare associations

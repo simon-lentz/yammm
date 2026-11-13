@@ -26,8 +26,8 @@ func TestCheckValue_AppliesTheValidatorsRule(t *testing.T) {
 		{"wrong kind", "x", schema.NewIntegerConstraint(), "integer"},
 		{"enum member", "a", schema.NewEnumConstraint([]string{"a", "b"}), ""},
 		{"enum outsider", "c", schema.NewEnumConstraint([]string{"a", "b"}), "c"},
-		{"pattern match", "AB", schema.NewPatternConstraint([]*regexp.Regexp{regexp.MustCompile(`^[A-Z]+$`)}), ""},
-		{"pattern miss", "ab", schema.NewPatternConstraint([]*regexp.Regexp{regexp.MustCompile(`^[A-Z]+$`)}), "pattern"},
+		{"pattern match", "AB", schema.NewPatternConstraint(regexp.MustCompile(`^[A-Z]+$`)), ""},
+		{"pattern miss", "ab", schema.NewPatternConstraint(regexp.MustCompile(`^[A-Z]+$`)), "pattern"},
 		{"alias resolves", int64(50), schema.NewAliasConstraint("Score", schema.IntegerBetween(0, 100)), ""},
 		{"alias rejects", int64(500), schema.NewAliasConstraint("Score", schema.IntegerBetween(0, 100)), "100"},
 		{"nil value is valid", nil, schema.IntegerBetween(0, 10), ""},
@@ -103,7 +103,7 @@ type T {
 	tt, _ := s.Type("T")
 	p, _ := tt.Property("p")
 	loaded := instance.CheckValue("a\nb", p.Constraint())
-	built := instance.CheckValue("a\nb", schema.NewPatternConstraint([]*regexp.Regexp{regexp.MustCompilePOSIX(`^b$`)}))
+	built := instance.CheckValue("a\nb", schema.NewPatternConstraint(regexp.MustCompilePOSIX(`^b$`)))
 	if loaded == nil || built == nil {
 		t.Errorf("CheckValue(%q) = %v from the DSL and %v from CompilePOSIX; want both refused", "a\nb", loaded, built)
 	}

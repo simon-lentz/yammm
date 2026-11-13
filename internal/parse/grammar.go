@@ -55,8 +55,7 @@ type importNode struct {
 }
 
 // anyNameNode is a word in a position that admits either case and refuses
-// every reserved spelling: an import alias, a relation name, or the name of
-// a removed reverse clause (recognized only to report its removal).
+// every reserved spelling: an import alias or a relation name.
 type anyNameNode struct {
 	Pos    lexer.Position
 	EndPos lexer.Position
@@ -109,34 +108,22 @@ type memberNode struct {
 // kind flag, because only an association takes a body. Merging them would
 // accept a composition with edge properties, which the language does not.
 type assocNode struct {
-	Pos     lexer.Position
-	EndPos  lexer.Position
-	Doc     *string      `parser:"@DOC_COMMENT?"`
-	Name    anyNameNode  `parser:"'-->' @@"`
-	Mult    *multNode    `parser:"@@?"`
-	Target  typeRefNode  `parser:"@@"`
-	Reverse *reverseNode `parser:"@@?"`
-	Body    *relBodyNode `parser:"@@?"`
+	Pos    lexer.Position
+	EndPos lexer.Position
+	Doc    *string      `parser:"@DOC_COMMENT?"`
+	Name   anyNameNode  `parser:"'-->' @@"`
+	Mult   *multNode    `parser:"@@?"`
+	Target typeRefNode  `parser:"@@"`
+	Body   *relBodyNode `parser:"@@?"`
 }
 
 type compNode struct {
-	Pos     lexer.Position
-	EndPos  lexer.Position
-	Doc     *string      `parser:"@DOC_COMMENT?"`
-	Name    anyNameNode  `parser:"'*->' @@"`
-	Mult    *multNode    `parser:"@@?"`
-	Target  typeRefNode  `parser:"@@"`
-	Reverse *reverseNode `parser:"@@?"`
-}
-
-// reverseNode recognizes the reverse clause the language removed in
-// v0.15.0, so the parser reports the removal at the clause's name
-// instead of a bare syntax error.
-type reverseNode struct {
 	Pos    lexer.Position
 	EndPos lexer.Position
-	Name   anyNameNode `parser:"'/' @@"`
+	Doc    *string     `parser:"@DOC_COMMENT?"`
+	Name   anyNameNode `parser:"'*->' @@"`
 	Mult   *multNode   `parser:"@@?"`
+	Target typeRefNode `parser:"@@"`
 }
 
 // multNode admits exactly seven spellings. '_' and 'one' each take an optional
@@ -332,15 +319,13 @@ type enuC struct {
 	Values []strTok `parser:"'[' (@@ (',' @@)*)? ','? ']'"`
 }
 
+// patC takes exactly one pattern. A conjunction of patterns is written as an
+// invariant, which names it.
 type patC struct {
-	Pos    lexer.Position
-	EndPos lexer.Position
-	Kw     bool `parser:"@'Pattern'"`
-	// Any number of patterns parses; the maximum of two is a constraint check.
-	// See enuC for why the arity does not live in the grammar. No trailing
-	// comma: patternT has none, and admitting one accepts source the generated
-	// parser rejects.
-	Patterns []strTok `parser:"'[' @@ (',' @@)* ']'"`
+	Pos     lexer.Position
+	EndPos  lexer.Position
+	Kw      bool   `parser:"@'Pattern'"`
+	Pattern strTok `parser:"'[' @@ ']'"`
 }
 
 // strTok is one STRING token with its own extent, so per-value diagnostics

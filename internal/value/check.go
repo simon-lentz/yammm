@@ -563,7 +563,8 @@ func checkEnum(val any, c schema.Constraint) error {
 	return constraintFail("value %s not in enum %v", diag.QuoteValue(s), allowed)
 }
 
-// checkPattern validates that val matches all constraint patterns.
+// checkPattern validates that the constraint's pattern matches val. A
+// constraint that holds no pattern matches no value.
 func checkPattern(val any, c schema.Constraint) error {
 	s, refused := textOf(val, "string for pattern")
 	if refused != nil {
@@ -576,10 +577,12 @@ func checkPattern(val any, c schema.Constraint) error {
 
 	// A pattern's String is its source text, and the hook takes c as it stands, so a
 	// value this path judges allocates nothing.
-	for _, pattern := range expr.PatternRegexps(c) {
-		if !pattern.MatchString(s) {
-			return constraintFail("value %s does not match pattern %s", diag.QuoteValue(s), pattern.String())
-		}
+	pattern := expr.PatternRegexp(c)
+	if pattern == nil {
+		return constraintFail("value %s is judged by a pattern constraint that holds no pattern", diag.QuoteValue(s))
+	}
+	if !pattern.MatchString(s) {
+		return constraintFail("value %s does not match pattern %s", diag.QuoteValue(s), pattern.String())
 	}
 	return nil
 }

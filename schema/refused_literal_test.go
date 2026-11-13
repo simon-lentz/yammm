@@ -96,7 +96,6 @@ func TestLoad_OneBreakInALiteralIsOneIssue(t *testing.T) {
 		badString  = "E_INVALID_INVARIANT invalid string literal: the value its escapes write is not valid UTF-8"
 		oneValue   = "E_INVALID_CONSTRAINT enum must have at least two values (got 1)"
 		outOfRange = `E_INVALID_INVARIANT invalid integer literal: strconv.ParseInt: parsing "99999999999999999999": value out of range`
-		threeGiven = "E_INVALID_CONSTRAINT pattern constraint exceeds maximum of 2 patterns (got 3)"
 	)
 	rows := []struct {
 		name, source string
@@ -156,8 +155,7 @@ func TestLoad_OneBreakInALiteralIsOneIssue(t *testing.T) {
 		{"expression: an inherited view whose literal with no value is still open", "schema \"s\"\nabstract type S {\n\tx Integer\n\t! \"m\" x == 99999999999999999999\n}\nabstract type U {\n\tx Integer\n\t! \"m\" x == 99999999999999999999\n}\nabstract type C {\n\tx Integer\n\t! \"m\" x == 2\n}\nabstract type M extends S, U {\n\tx Integer\n}\ntype D extends M, C {\n\tid String primary\n}\n", "", []string{outOfRange, outOfRange}},
 		{"expression: a literal out of range in an inherited conflict", "schema \"s\"\nabstract type P {\n\tn Integer\n\t! \"m\" n > 0\n}\nabstract type Q {\n\tn Integer\n\t! \"m\" n < 99999999999999999999\n}\ntype T extends P, Q {\n\tid String primary\n}\n", "", []string{outOfRange, `E_INVARIANT_CONFLICT type "T" inherits definitions of invariant "m" with different expressions (expressions are compared structurally: 1 and 1.0 are different literals)`}},
 		{"pattern: a raw invalid byte", typeBody("p Pattern[\"a\xff\"]"), "", []string{invalidUTF8}},
-		{"pattern: three, the last raw invalid and still counted", typeBody("p Pattern[\"a\", \"b\", \"c\xff\"]"), "", []string{threeGiven, invalidUTF8}},
-		{"pattern: three, the last holding a NUL", typeBody("p Pattern[\"a\", \"b\", \"c\x00\"]"), "", []string{threeGiven, strayNUL}},
+		{"pattern: a NUL", typeBody("p Pattern[\"c\x00\"]"), "", []string{strayNUL}},
 		{"schema name: a raw invalid byte", "schema \"s\xff\"\ntype T {\n\tid String primary\n}\n", "", []string{invalidUTF8}},
 		{"import: a raw invalid path with an alias, used", "schema \"s\"\nimport \"./\xff\" as b\ntype T {\n\tid String primary\n\tk b.K\n\t--> REL (one) b.U\n}\n", "", []string{invalidUTF8}},
 		{"import: a raw invalid path with no alias", "schema \"s\"\nimport \"./\xff\"\ntype T {\n\tid String primary\n}\n", "", []string{invalidUTF8}},
@@ -226,15 +224,16 @@ func TestLoad_ASourceWithNoRefusedTextAnswersAsV0210(t *testing.T) {
 		noAlias   = `E_UNKNOWN_TYPE unknown type "d.K" in datatype reference: no import declared with alias "d"`
 		oneValue  = "E_INVALID_CONSTRAINT enum must have at least two values (got 1)"
 		noValue   = "E_INVALID_CONSTRAINT enum must have at least two values (got 0)"
-		surrogate = `E_INVALID_CONSTRAINT regex pattern "\\x{D800}" names the surrogate code point U+D800, which no string holds`
-		lastOne   = `E_INVALID_CONSTRAINT regex pattern "\\x{DFFF}" names the surrogate code point U+DFFF, which no string holds`
-		overThree = "E_INVALID_CONSTRAINT pattern constraint exceeds maximum of 2 patterns (got 3)"
-		overFour  = "E_INVALID_CONSTRAINT pattern constraint exceeds maximum of 2 patterns (got 4)"
+		comma     = `E_SYNTAX unexpected token "," in a type body`
 		lossy     = `W_TIMESTAMP_LOSSY_FORMAT timestamp format "2006-01-02" cannot represent an instant: a value stored through it loses its UTC offset, its fractional second, or both`
 		badEscape = "E_SYNTAX invalid timestamp format: unquote string: invalid syntax"
 		bracket   = `E_SYNTAX unexpected token "[" in a type body`
 	)
-	type move struct{ gone, added []string }
+	// A move with every set replaces the whole of v0.21.0's answer by added.
+	type move struct {
+		gone, added []string
+		every       bool
+	}
 	moved := map[string]move{
 		// The minimum counts every value the source wrote, so a value
 		// dropped for its own fault draws its own diagnostic alone.
@@ -244,19 +243,20 @@ func TestLoad_ASourceWithNoRefusedTextAnswersAsV0210(t *testing.T) {
 		"plain: enum with an empty value":            {gone: []string{oneValue}},
 		// An import whose path has no value still declares its alias.
 		"plain: an import with a malformed escape, used": {gone: []string{noAlias}},
-		// A pattern naming a surrogate is refused, and counts as a pattern.
-		"surrogate: alone":                                 {added: []string{surrogate}},
-		"surrogate: first of two":                          {added: []string{surrogate}},
-		"surrogate: first of three":                        {added: []string{surrogate}},
-		"surrogate: second of three":                       {added: []string{surrogate}},
-		"surrogate: third of three":                        {added: []string{surrogate}},
-		"surrogate: two of three":                          {added: []string{surrogate, lastOne}},
-		"surrogate: one of three beside one not compiling": {added: []string{surrogate, overThree}},
-		"surrogate: one of four beside one not compiling":  {gone: []string{overThree}, added: []string{surrogate, overFour}},
-		// The pattern limit counts every pattern written.
-		"plain: pattern of three, one not compiling":      {added: []string{overThree}},
-		"plain: pattern of three, one a malformed escape": {added: []string{overThree}},
-		"plain: pattern of four, one not compiling":       {gone: []string{overThree}, added: []string{overFour}},
+		// Pattern takes one pattern, so the comma is a token the grammar does
+		// not match.
+		"plain: pattern of two":                            {every: true, added: []string{comma}},
+		"plain: pattern of three":                          {every: true, added: []string{comma}},
+		"plain: pattern of three, one not compiling":       {every: true, added: []string{comma}},
+		"plain: pattern of three, one a malformed escape":  {every: true, added: []string{comma}},
+		"plain: pattern of four, one not compiling":        {every: true, added: []string{comma}},
+		"surrogate: first of two":                          {every: true, added: []string{comma}},
+		"surrogate: first of three":                        {every: true, added: []string{comma}},
+		"surrogate: second of three":                       {every: true, added: []string{comma}},
+		"surrogate: third of three":                        {every: true, added: []string{comma}},
+		"surrogate: two of three":                          {every: true, added: []string{comma}},
+		"surrogate: one of three beside one not compiling": {every: true, added: []string{comma}},
+		"surrogate: one of four beside one not compiling":  {every: true, added: []string{comma}},
 		// Timestamp takes no format, so the bracket is a token the grammar
 		// does not match.
 		"plain: timestamp with a lossy layout":     {gone: []string{lossy}, added: []string{bracket}},
@@ -289,6 +289,9 @@ func TestLoad_ASourceWithNoRefusedTextAnswersAsV0210(t *testing.T) {
 			want = strings.Split(joined, "\n")
 		}
 		m := moved[name]
+		if m.every {
+			want = nil
+		}
 		for _, gone := range m.gone {
 			at := slices.Index(want, gone)
 			if at < 0 {

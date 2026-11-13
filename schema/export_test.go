@@ -85,7 +85,6 @@ var (
 var (
 	TestCompleteModel       = completeModel
 	TestNewParser           = newParser
-	TestIsValidAlias        = isValidAlias
 	TestDeriveAliasFromPath = deriveAliasFromPath
 )
 

@@ -832,24 +832,22 @@ func TestNameHeldOnForeignLabel_BlocksCreate(t *testing.T) {
 	t.Logf("drift reason: %s", diff.Drift[0].Reason)
 }
 
-// A declared index over a (label, properties) a constraint's backing index
-// already serves is never created by the server, even under a different name.
-// @@index over a primary key is explicitly legal in the DSL, so this is
-// reachable from a valid schema — and the backing index does the work the
-// declaration asked for, so the declaration is SATISFIED.
-//
-// It must be neither a Create (the server would never honour it) nor a Drift
-// (nothing could clear it: dropping the backing index means dropping the primary
-// key, so a deploy gate keyed on a clean diff would never pass on a valid,
-// fully-applied schema).
+// The server never creates a declared index over a (label, properties) that a
+// constraint's backing index already serves. A valid schema reaches this when
+// one @@index's emitters disagree: Doc keys on doc_id alone and Rev on (doc_id,
+// rev), so the load accepts it, and Doc's declaration is SATISFIED by its
+// constraint's backing index. It is neither a Create, which the server never
+// honours, nor a Drift, which only dropping the primary key could clear.
 func TestDefinitionServedByConstraintIndex_IsSatisfied(t *testing.T) {
 	ctx := context.Background()
 	driver(t)
 	t.Cleanup(func() { dropAll(t, ctx) })
 
 	s, res := schema.LoadString(ctx, `schema "pk"
-type Doc { doc_id String primary
-           @@index(doc_id) }
+abstract type Base { doc_id String primary
+                     @@index(doc_id) }
+type Doc extends Base { }
+type Rev extends Base { rev String primary }
 `, "pk.yammm")
 	if res.HasErrors() {
 		t.Fatalf("load: %v", res.Err())
@@ -871,13 +869,25 @@ type Doc { doc_id String primary
 			applySchemaDDL(t, ctx, a, s)
 
 			desired, _ := a.IndexesStructured(ctx, s)
-			if len(desired) != 1 {
-				t.Fatalf("expected the one @@index, got %d", len(desired))
+			docLabel, revLabel := a.Label(ctx, "pk", "Doc"), a.Label(ctx, "pk", "Rev")
+			byLabel := map[string]n4j.Index{}
+			for _, ix := range desired {
+				byLabel[ix.Label] = ix
 			}
+			if len(desired) != 2 || byLabel[docLabel].Name == "" || byLabel[revLabel].Name == "" {
+				t.Fatalf("expected the @@index on %s and on %s, got %+v", docLabel, revLabel, desired)
+			}
+			created := map[string]bool{}
 			for _, rec := range query(t, ctx, "SHOW INDEXES YIELD name") {
-				if n, _ := rec["name"].(string); n == desired[0].Name {
-					t.Fatalf("the server created %s beside the constraint's backing index", n)
+				if n, ok := rec["name"].(string); ok {
+					created[n] = true
 				}
+			}
+			if n := byLabel[docLabel].Name; created[n] {
+				t.Fatalf("the server created %s beside the constraint's backing index", n)
+			}
+			if n := byLabel[revLabel].Name; !created[n] {
+				t.Fatalf("the server did not create %s, which no backing index serves", n)
 			}
 
 			parsed, err := n4j.ParseRemoteIndexes(query(t, ctx, n4j.IntrospectIndexesQuery()))
@@ -891,11 +901,22 @@ type Doc { doc_id String primary
 			if len(diff.Drift) != 0 {
 				t.Errorf("reported unclearable drift on a valid, fully-applied schema: %+v", diff.Drift)
 			}
-			if len(diff.Match) != 1 {
-				t.Fatalf("match = %d, want the declaration satisfied by the backing index", len(diff.Match))
+			if len(diff.Match) != 2 {
+				t.Fatalf("match = %d, want both declarations satisfied", len(diff.Match))
 			}
-			if diff.Match[0].Actual.OwningConstraint == "" {
-				t.Error("the matched index should be the constraint's backing index")
+			for _, m := range diff.Match {
+				switch m.Desired.Label {
+				case docLabel:
+					if m.Actual.OwningConstraint == "" {
+						t.Errorf("Doc's declaration matched %s; it should be the constraint's backing index", m.Actual.Name)
+					}
+				case revLabel:
+					if m.Actual.OwningConstraint != "" || m.Actual.Name != m.Desired.Name {
+						t.Errorf("Rev's declaration matched %s (constraint %q); it should be its own index", m.Actual.Name, m.Actual.OwningConstraint)
+					}
+				default:
+					t.Errorf("a match on an unexpected label: %+v", m)
+				}
 			}
 		})
 	}

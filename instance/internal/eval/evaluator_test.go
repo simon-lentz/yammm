@@ -165,8 +165,9 @@ func TestEvaluator_LogicalErrors(t *testing.T) {
 		e       expr.Expression
 		wantErr string
 	}{
-		{"and_first_eval_error", sx("&&", sx("$", lit("undefined")), lit(true)), "undefined variable"},
-		{"or_first_eval_error", sx("||", sx("$", lit("undefined")), lit(false)), "undefined variable"},
+		{"and_first_eval_error", sx("&&", sx("!", lit(int64(1))), lit(true)), "! expects boolean"},
+		{"or_first_eval_error", sx("||", sx("!", lit(int64(1))), lit(false)), "! expects boolean"},
+		{"and_first_unbound", sx("&&", sx("$", lit("undefined")), lit(true)), "expected boolean in &&, got <nil>"},
 		{"not_nil", sx("!", lit(nil)), "boolean"},
 	}
 
@@ -179,13 +180,13 @@ func TestEvaluator_LogicalErrors(t *testing.T) {
 
 func TestEvaluator_And_ShortCircuit(t *testing.T) {
 	// And short-circuits: if the first arg is false, the second is not
-	// evaluated. The second arg would error (undefined variable) if reached.
-	evalEq(t, sx("&&", lit(false), sx("$", lit("undefined"))), false)
+	// evaluated. The second arg would error if reached.
+	evalEq(t, sx("&&", lit(false), sx("!", lit(int64(1)))), false)
 }
 
 func TestEvaluator_Or_ShortCircuit(t *testing.T) {
 	// Or short-circuits: if the first arg is true, the second is not evaluated.
-	evalEq(t, sx("||", lit(true), sx("$", lit("undefined"))), true)
+	evalEq(t, sx("||", lit(true), sx("!", lit(int64(1)))), true)
 }
 
 func TestEvaluator_Ternary(t *testing.T) {
@@ -203,7 +204,7 @@ func TestEvaluator_TernaryErrors(t *testing.T) {
 	})
 
 	t.Run("condition_eval_error", func(t *testing.T) {
-		evalErr(t, sx("?", sx("$", lit("undefined")), lit("yes"), lit("no")), "undefined variable")
+		evalErr(t, sx("?", sx("!", lit(int64(1))), lit("yes"), lit("no")), "! expects boolean")
 	})
 
 	t.Run("nil_condition", func(t *testing.T) {
@@ -221,8 +222,10 @@ func TestEvaluator_Variables(t *testing.T) {
 		assert.Equal(t, 42, result)
 	})
 
-	t.Run("lookup_undefined", func(t *testing.T) {
-		evalErr(t, sx("$", lit("undefined")), "undefined variable")
+	t.Run("lookup_unbound", func(t *testing.T) {
+		// Load refuses a name nothing binds, so an unbound name at evaluation
+		// is an unset member, and it reads nil as a bare name does.
+		evalEq(t, sx("$", lit("undefined")), nil)
 	})
 
 	t.Run("numeric_var_unset", func(t *testing.T) {
@@ -571,8 +574,8 @@ func TestEvaluator_BuiltinCall(t *testing.T) {
 	})
 
 	t.Run("args_eval_error", func(t *testing.T) {
-		e := makeBuiltinCall(list(int64(1)), "Min", []expr.Expression{sx("$", lit("undefined"))}, nil, nil)
-		evalErr(t, e, "undefined")
+		e := makeBuiltinCall(list(int64(1)), "Min", []expr.Expression{sx("!", lit(int64(1)))}, nil, nil)
+		evalErr(t, e, "! expects boolean")
 	})
 
 	t.Run("compare_less", func(t *testing.T) {

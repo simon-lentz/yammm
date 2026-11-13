@@ -1,7 +1,6 @@
 package parse
 
 import (
-	"fmt"
 	"strings"
 	"testing"
 
@@ -111,9 +110,9 @@ func TestParse_AStringValueIsValidUTF8(t *testing.T) {
 		})
 	}
 
-	f, issues := Parse([]byte("schema \"caf\\xc3\\xa9\"\ntype T {\n\tid String primary\n}\n"), location.NewSourceID("s.yammm"))
-	if len(issues) != 0 || f.Name != "café" {
-		t.Errorf("escapes forming UTF-8: name %q, issues %v; want café and none", f.Name, issues)
+	f, issues := Parse([]byte(checkSource(`e Enum["caf\xc3\xa9", "b"]`)), location.NewSourceID("s.yammm"))
+	if got := f.Types[0].Properties[1].Constraint.EnumLits[0].Text; len(issues) != 0 || got != "café" {
+		t.Errorf("escapes forming UTF-8: value %q, issues %v; want café and none", got, issues)
 	}
 	for _, literal := range []string{`"\xff"`, `"\x80"`, `"a\x80"`, `"\xc3"`, `"\xc3\x41"`} {
 		if _, err := unquote(literal); err == nil || err.Error() != cause {
@@ -122,53 +121,23 @@ func TestParse_AStringValueIsValidUTF8(t *testing.T) {
 	}
 }
 
-// TestParse_APatternNamingASurrogateIsRefused pins that a pattern writing a
-// surrogate code point with a \x{…} escape — alone, folded, in a class, in an
-// alternation or as a range's end — is E_INVALID_CONSTRAINT and not kept, while
-// a class spanning the block, the surrogate category, an escaped backslash and
-// quoted text write none.
-func TestParse_APatternNamingASurrogateIsRefused(t *testing.T) {
+// TestParse_APatternNamingASurrogateIsKept pins that a pattern is what
+// regexp.Compile accepts: one writing a surrogate code point with a \x{…}
+// escape, alone, folded, in a class or as a range's end, draws no diagnostic
+// and is kept.
+func TestParse_APatternNamingASurrogateIsKept(t *testing.T) {
 	t.Parallel()
-	for pattern, want := range map[string]rune{
-		`a\\x{D800}b`:              0xD800,
-		`(?i)\\x{DFFF}`:            0xDFFF,
-		`[\\x{DBFF}]`:              0xDBFF,
-		`(x|\\x{DC00})`:            0xDC00,
-		`[\\x{D000}-\\x{D900}]`:    0xD900,
-		`\\x{00D800}`:              0xD800,
-		`\\\\\\x{DABC}`:            0xDABC,
-		`\\Q\\x{D800}\\E\\x{DE00}`: 0xDE00,
+	for _, pattern := range []string{
+		`a\\x{D800}b`, `(?i)\\x{DFFF}`, `[\\x{DBFF}]`, `(x|\\x{DC00})`, `[\\x{D000}-\\x{D900}]`, `\\x{00D800}`,
 	} {
 		t.Run(pattern, func(t *testing.T) {
 			t.Parallel()
 			f, issues := Parse([]byte(checkSource(`p Pattern["`+pattern+`"]`)), location.NewSourceID("s.yammm"))
-			text, err := unquote(`"` + pattern + `"`)
-			if err != nil {
-				t.Fatal(err)
-			}
-			message := fmt.Sprintf("regex pattern %q names the surrogate code point U+%04X, which no string holds", text, want)
-			if !hasMessage(issues, message) {
-				t.Fatalf("no %q in %s", message, messages(issues))
-			}
-			for _, iss := range issues {
-				if iss.Message() == message && iss.Code() != diag.E_INVALID_CONSTRAINT {
-					t.Errorf("code = %s, want E_INVALID_CONSTRAINT", iss.Code())
-				}
-			}
-			if lit := f.Types[0].Properties[1].Constraint.PatternLits[0]; lit.Kept || lit.Regex != nil {
-				t.Errorf("the refused pattern was kept: %+v", lit)
-			}
-		})
-	}
-	for _, pattern := range []string{
-		`[\\x{D000}-\\x{E000}]`, `[^a]`, `\\x{D7FF}\\x{E000}`, `\\p{Cs}`,
-		`\\\\x{D800}`, `\\Q\\x{D800}\\E`, `\\x41`,
-	} {
-		t.Run(pattern, func(t *testing.T) {
-			t.Parallel()
-			_, issues := Parse([]byte(checkSource(`p Pattern["`+pattern+`"]`)), location.NewSourceID("s.yammm"))
 			if len(issues) != 0 {
 				t.Errorf("issues: %s", messages(issues))
+			}
+			if lit := f.Types[0].Properties[1].Constraint.PatternLit; !lit.Kept || lit.Regex == nil {
+				t.Errorf("the pattern was not kept: %+v", lit)
 			}
 		})
 	}
@@ -178,7 +147,7 @@ func TestParse_APatternNamingASurrogateIsRefused(t *testing.T) {
 // as itself is legal text, and that a run of invalid bytes stops before one.
 func TestParse_SourceRulesAcceptTheReplacementCharacter(t *testing.T) {
 	t.Parallel()
-	if _, issues := Parse([]byte("schema \"s\uFFFD\"\n// \uFFFD\ntype T {\n\tid String primary\n}\n"), location.NewSourceID("s.yammm")); len(issues) != 0 {
+	if _, issues := Parse([]byte("schema \"s\"\n// \uFFFD\ntype T {\n\tid String primary\n\te Enum[\"s\uFFFD\", \"b\"]\n}\n"), location.NewSourceID("s.yammm")); len(issues) != 0 {
 		t.Errorf("issues: %s", messages(issues))
 	}
 	_, issues := Parse([]byte("schema \"s\"\n// \xff\uFFFD\ntype T {\n\tid String primary\n}\n"), location.NewSourceID("s.yammm"))
@@ -206,28 +175,5 @@ func TestParse_ARegexLiteralHoldingARefusedByteDrawsOneDiagnostic(t *testing.T) 
 	_, issues := Parse([]byte("schema \"s\"\ntype T {\n\tid String primary\n\t! \"m\" id =~ /a\xffb/\n}\n"), location.NewSourceID("s.yammm"))
 	if len(issues) != 1 || issues[0].Code() != diag.E_SYNTAX || issues[0].Message() != "invalid UTF-8 encoding" {
 		t.Errorf("want one E_SYNTAX at the byte, got %s", messages(issues))
-	}
-}
-
-// TestSurrogateEscape_ReadsThePatternAsRE2Does pins the scan's edges: a compile
-// error is reported before a surrogate, \Q quotes to the pattern's end when no
-// \E closes it, a value wider than sixteen bits is no surrogate, and a \xHH
-// escape does not hide a later \x{…} one.
-func TestSurrogateEscape_ReadsThePatternAsRE2Does(t *testing.T) {
-	t.Parallel()
-	issuesOf := func(pattern string) []diag.Issue {
-		_, issues := Parse([]byte(checkSource(`p Pattern["`+pattern+`"]`)), location.NewSourceID("s.yammm"))
-		return issues
-	}
-	if got := issuesOf(`\\x{D800}(`); len(got) != 1 || !strings.Contains(got[0].Message(), "invalid regex pattern") {
-		t.Errorf("a pattern that does not compile: %s", messages(got))
-	}
-	for _, accepted := range []string{`\\Qa\\x{D800}`, `\\x{1D800}`} {
-		if got := issuesOf(accepted); len(got) != 0 {
-			t.Errorf("%s: %s", accepted, messages(got))
-		}
-	}
-	if got := issuesOf(`\\x41\\x{D800}`); len(got) != 1 || !strings.Contains(got[0].Message(), "U+D800") {
-		t.Errorf("a surrogate after a two-digit escape: %s", messages(got))
 	}
 }

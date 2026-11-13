@@ -66,7 +66,7 @@ func TestIsReserved(t *testing.T) {
 	}
 }
 
-func TestIsValidAlias(t *testing.T) {
+func TestIsIdentifier(t *testing.T) {
 	tests := []struct {
 		name     string
 		input    string
@@ -92,12 +92,16 @@ func TestIsValidAlias(t *testing.T) {
 		{name: "empty string", input: "", expected: false},
 		{name: "contains space", input: "my alias", expected: false},
 		{name: "contains special char", input: "my@alias", expected: false},
+		{name: "the character after Z", input: "A[", expected: false},
+		{name: "the character after 9", input: "a:", expected: false},
+		{name: "the character before a", input: "a`", expected: false},
+		{name: "the character after z first", input: "{a", expected: false},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := schema.TestIsValidAlias(tt.input)
-			assert.Equal(t, tt.expected, result, "IsValidAlias(%q)", tt.input)
+			result := parse.IsIdentifier(tt.input)
+			assert.Equal(t, tt.expected, result, "IsIdentifier(%q)", tt.input)
 		})
 	}
 }

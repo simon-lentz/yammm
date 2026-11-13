@@ -93,24 +93,18 @@ type Document {
 	}
 }
 
-// An empty argument list ("@index()") is a syntax error, and the annotation
-// survives it as a bare "@name": the parenthesised group does not parse, so it
-// is left out and the stray "(" is what fails. The annotation therefore reaches
-// its arity check like any other zero-argument one.
-//
-// Only the arity check may fire. A target check must not, because the argument
-// list it would read was never written.
+// An empty argument list ("@index()") is a syntax error, and that is its one
+// issue: the annotation whose list failed is left out, so neither its arity
+// check nor a target check reads it.
 func TestAnnotation_Parse_EmptyArgList(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name      string
-		body      string
-		wantArity int
+		name string
+		body string
 	}{
-		// @index legitimately takes no arguments, so nothing else is owed.
-		{name: "index", body: "\tx String @index()", wantArity: 0},
-		{name: "vector", body: "\te Vector[8] @vector()", wantArity: 1},
-		{name: "compositeIndex", body: "\tx String\n\t@@index()", wantArity: 1},
+		{name: "index", body: "\tx String @index()"},
+		{name: "vector", body: "\te Vector[8] @vector()"},
+		{name: "compositeIndex", body: "\tx String\n\t@@index()"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -120,10 +114,8 @@ func TestAnnotation_Parse_EmptyArgList(t *testing.T) {
 				t.Fatalf("precondition: an empty argument list is a syntax error, got: %v", res)
 			}
 			counts := codeCounts(res)
-			if n := counts[diag.E_INVALID_ANNOTATION]; n != tt.wantArity {
-				t.Errorf("E_INVALID_ANNOTATION count: got %d, want %d: %v", n, tt.wantArity, res)
-			}
 			for _, code := range []diag.Code{
+				diag.E_INVALID_ANNOTATION,
 				diag.E_INVALID_ANNOTATION_TARGET,
 				diag.E_UNKNOWN_ANNOTATION_TARGET,
 			} {

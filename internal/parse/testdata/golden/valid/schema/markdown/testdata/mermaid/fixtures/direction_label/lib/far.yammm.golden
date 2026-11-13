@@ -1,15 +1,15 @@
 {
-  "name": "\"dir:ction TB\"",
+  "name": "\"dir__ection_TB\"",
   "span": {
     "s": 0,
-    "e": 21
+    "e": 23
   },
   "types": [
     {
       "name": "Beacon",
       "name_span": {
-        "s": 28,
-        "e": 34
+        "s": 30,
+        "e": 36
       },
       "props": [
         {
@@ -17,20 +17,20 @@
           "constraint": {
             "kind": "String",
             "span": {
-              "s": 41,
-              "e": 47
+              "s": 43,
+              "e": 49
             }
           },
           "primary": true,
           "span": {
-            "s": 38,
-            "e": 55
+            "s": 40,
+            "e": 57
           }
         }
       ],
       "span": {
-        "s": 23,
-        "e": 57
+        "s": 25,
+        "e": 59
       }
     }
   ]

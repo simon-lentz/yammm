@@ -37,7 +37,7 @@ func jsonKeeps(t *testing.T, v string) bool {
 	return back == v
 }
 
-// TestStringValues_TheDSLAcceptsWhatJSONKeeps holds four places a schema holds a
+// TestStringValues_TheDSLAcceptsWhatJSONKeeps holds three places a schema holds a
 // string value to one rule, against a second reading: a value is accepted
 // exactly when encoding/json writes it back unchanged, as it does every valid
 // UTF-8 string and no other.
@@ -47,7 +47,6 @@ func TestStringValues_TheDSLAcceptsWhatJSONKeeps(t *testing.T) {
 		name string
 		dsl  func(lit string) string
 	}{
-		{"schema name", func(lit string) string { return `schema "` + lit + "\"\n\ntype Car {\n\tid String primary\n}\n" }},
 		{"enum value", func(lit string) string {
 			return "schema \"s\"\n\ntype Car {\n\tid String primary\n\tk Enum[\"" + lit + "\", \"zz\"]\n}\n"
 		}},
@@ -98,25 +97,16 @@ func TestLoad_RefusesADocHoldingWhatTheSourceRulesRefuse(t *testing.T) {
 	}
 }
 
-// TestPattern_ASurrogateIsRefusedInOneSentence pins the surrogate rule at
-// CheckConstraint and in the DSL, in the same words.
-func TestPattern_ASurrogateIsRefusedInOneSentence(t *testing.T) {
-	c := schema.NewPatternConstraint([]*regexp.Regexp{regexp.MustCompile(`a\x{D800}`)})
-	want := `regex pattern "a\\x{D800}" names the surrogate code point U+D800, which no string holds`
-	if err := schema.CheckConstraint(c); err == nil || !strings.Contains(err.Error(), want) {
-		t.Errorf("CheckConstraint = %v, want %s", err, want)
+// TestPattern_ASurrogateEscapeLoads pins that a pattern is what regexp.Compile
+// accepts: an escape that names a surrogate code point compiles, and it
+// matches no string.
+func TestPattern_ASurrogateEscapeLoads(t *testing.T) {
+	c := schema.NewPatternConstraint(regexp.MustCompile(`a\x{D800}`))
+	if err := schema.CheckConstraint(c); err != nil {
+		t.Errorf("CheckConstraint = %v, want nil", err)
 	}
 	src := "schema \"s\"\n\ntype Car {\n\tid String primary\n\tp Pattern[\"a\\\\x{D800}\"]\n}\n"
-	if _, lres := schema.LoadString(context.Background(), src, "s.yammm"); !strings.Contains(lres.String(), want) {
-		t.Errorf("the DSL: %s; want %s", lres.String(), want)
-	}
-}
-
-// TestNewPatternConstraint_ReportsTheFirstFault pins that a later pattern's
-// surrogate does not replace an earlier pattern's compile fault.
-func TestNewPatternConstraint_ReportsTheFirstFault(t *testing.T) {
-	c := schema.NewPatternConstraint([]*regexp.Regexp{regexp.MustCompilePOSIX("a**"), regexp.MustCompile(`\x{D800}`)})
-	if err := schema.CheckConstraint(c); err == nil || !strings.Contains(err.Error(), `"a**"`) {
-		t.Errorf("CheckConstraint = %v, want the first pattern's fault", err)
+	if _, lres := schema.LoadString(context.Background(), src, "s.yammm"); lres.HasErrors() {
+		t.Errorf("the DSL: %s; want a load", lres.String())
 	}
 }

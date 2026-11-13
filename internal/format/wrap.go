@@ -324,16 +324,6 @@ func tryWrapSingleLineEnum(ln line) ([]string, bool) {
 
 	indent := extractIndent(ln.text)
 
-	// A modifier on the closing "]" line is legal; an ANNOTATION there is not —
-	// it parses and binds to the property, but the loader refuses an annotation
-	// written on a line after its property's (E_INVALID_ANNOTATION). There is
-	// no legal multiline placement for it, so the only correct answer is to
-	// leave the line long. Declining costs a wide line; wrapping costs a schema
-	// that no longer loads.
-	if ln.hasAnnotationFrom(closeAt + 1) {
-		return nil, false
-	}
-
 	// afterBracket starts one past the closing bracket, so the record's comment
 	// offset lands in it at commentAt - (closeAt + 1).
 	comment := ""

@@ -75,17 +75,17 @@ priority Enum["low", "medium", "high", "critical"]
 
 ### Pattern
 
-String validated against one or two regular expressions.
+String validated against one regular expression.
 
-**Syntax:** `Pattern["regex"]` or `Pattern["regex1", "regex2"]`
+**Syntax:** `Pattern["regex"]`
 
-- Follows Go `regexp` package syntax
-- Maximum of 2 patterns (performance cap)
-- When two patterns are provided, the value must match both (conjunction semantics)
+- Exactly one pattern; a second is `E_SYNTAX`. Write a second rule as an invariant.
+- A pattern is what Go's `regexp.Compile` accepts
+- A match is a search: `Pattern["or"]` takes `"north"`. Anchor with `^` and `$` to match the whole value.
 
 ```yammm-snippet
 email Pattern["^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$"]
-code Pattern["^[A-Z]", "[0-9]$"]    // must start with uppercase AND end with digit
+code Pattern["^[A-Z][0-9A-Z]*[0-9]$"]    // an upper-case letter, then upper-case letters and digits, ending in a digit
 ```
 
 ### Timestamp

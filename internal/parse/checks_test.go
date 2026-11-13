@@ -2,6 +2,7 @@ package parse
 
 import (
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 
@@ -341,11 +342,12 @@ func TestChecks_UnquoteResolvesLexerEscapeVocabulary(t *testing.T) {
 // the parse level: a single-quoted literal carrying an unescaped '"' or a \'
 // escape reaches every unquote site and loads without a diagnostic.
 func TestChecks_SingleQuotedLiteralsLoadAtEveryUnquoteSite(t *testing.T) {
-	src := "schema 'sc\"hema'\n" +
+	src := "schema 'sch\\u0065ma'\n" +
 		"type T {\n" +
 		"\tid String primary\n" +
 		"\tkind Enum['a\"b', 'don\\'t']\n" +
 		"\tcode Pattern['^x\"?$']\n" +
+		"\t! 'it\\'s \"set\"' id != \"\"\n" +
 		"}\n"
 	_, issues := Parse([]byte(src), location.NewSourceID("s.yammm"))
 	if len(issues) != 0 {
@@ -463,7 +465,6 @@ func TestChecks_ArityRulesAreChecksNotGrammar(t *testing.T) {
 	for _, tc := range []struct{ name, prop, want string }{
 		{"one enum value", "e Enum[\"a\"]", "enum must have at least two values (got 1)"},
 		{"no enum values", "e Enum[]", "enum must have at least two values (got 0)"},
-		{"three patterns", "p Pattern[\"a\", \"b\", \"c\"]", "pattern constraint exceeds maximum of 2 patterns (got 3)"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			src := "schema \"s\"\ntype T {\n\tid String primary\n\t" + tc.prop + "\n}\n"
@@ -510,11 +511,10 @@ func TestChecks_FloatBoundsCarryTheWrittenSpelling(t *testing.T) {
 	}
 }
 
-// TestChecks_PatternListRejectsATrailingComma pins the grammar against the
-// generated one. patternT carries no trailing COMMA, so admitting one accepts
-// source production refuses — a schema that loads here and not there.
-func TestChecks_PatternListRejectsATrailingComma(t *testing.T) {
-	for _, prop := range []string{`p Pattern["a", "b",]`, `p Pattern["a",]`} {
+// TestChecks_PatternTakesOnePattern pins the grammar: a Pattern takes exactly
+// one literal, so a second, a trailing comma or none is a syntax error.
+func TestChecks_PatternTakesOnePattern(t *testing.T) {
+	for _, prop := range []string{`p Pattern["a", "b"]`, `p Pattern["a", "b", "c"]`, `p Pattern["a",]`, `p Pattern[]`} {
 		src := "schema \"s\"\ntype T {\n\tid String primary\n\t" + prop + "\n}\n"
 		_, issues := Parse([]byte(src), location.NewSourceID("s.yammm"))
 		if len(issues) != 1 || issues[0].Code() != diag.E_SYNTAX {
@@ -523,80 +523,40 @@ func TestChecks_PatternListRejectsATrailingComma(t *testing.T) {
 	}
 }
 
-// TestChecks_PatternArityCountsEveryWrittenPattern pins that the pattern limit
-// counts the patterns the source wrote: a
-// pattern refused for its own fault keeps its diagnostic and still counts.
-func TestChecks_PatternArityCountsEveryWrittenPattern(t *testing.T) {
+// TestChecks_APatternKeepsItsLiteral pins node.go's Kept contract: the literal
+// is always held, and Kept says whether the constraint enforces its regexp.
+func TestChecks_APatternKeepsItsLiteral(t *testing.T) {
 	for _, tc := range []struct {
-		name, prop string
-		wantCodes  []diag.Code
+		text  string
+		kept  bool
+		codes []diag.Code
 	}{
-		{
-			"an uncompilable third pattern counts",
-			`p Pattern["a", "b", "("]`,
-			[]diag.Code{diag.E_INVALID_CONSTRAINT, diag.E_INVALID_CONSTRAINT},
-		},
-		{
-			"a middle pattern regexp refuses counts",
-			`p Pattern["a", "\\x", "b"]`,
-			[]diag.Code{diag.E_INVALID_CONSTRAINT, diag.E_INVALID_CONSTRAINT},
-		},
-		{
-			"three that compile is three",
-			`p Pattern["a", "b", "c"]`,
-			[]diag.Code{diag.E_INVALID_CONSTRAINT},
-		},
+		{`^a$`, true, nil},
+		{`(`, false, []diag.Code{diag.E_INVALID_CONSTRAINT}},
+		{`\x4g`, false, []diag.Code{diag.E_SYNTAX}},
 	} {
-		t.Run(tc.name, func(t *testing.T) {
-			src := "schema \"s\"\ntype T {\n\tid String primary\n\t" + tc.prop + "\n}\n"
-			_, issues := Parse([]byte(src), location.NewSourceID("s.yammm"))
-			if len(issues) != len(tc.wantCodes) {
-				t.Fatalf("got %d issues, want %d: %v", len(issues), len(tc.wantCodes), issues)
-			}
-			for i, want := range tc.wantCodes {
-				if issues[i].Code() != want {
-					t.Errorf("issue %d = %s, want %s", i, issues[i].Code(), want)
-				}
-			}
-		})
-	}
-}
-
-// TestChecks_EveryWrittenPatternKeepsItsLiteral pins node.go's Kept contract at
-// the cap: a consumer reading PatternLits sees everything the author wrote, and
-// Kept is what says which of them the constraint enforces.
-func TestChecks_EveryWrittenPatternKeepsItsLiteral(t *testing.T) {
-	src := "schema \"s\"\ntype T {\n\tid String primary\n\tp Pattern[\"^a$\", \"^b$\", \".*\"]\n}\n"
-	file, _ := Parse([]byte(src), location.NewSourceID("s.yammm"))
-	c := file.Types[0].Properties[1].Constraint
-	if got := len(c.PatternLits); got != 3 {
-		t.Fatalf("PatternLits = %d, want all 3 written literals", got)
-	}
-	for i, want := range []bool{true, true, false} {
-		if c.PatternLits[i].Kept != want {
-			t.Errorf("literal %d (%s) Kept = %v, want %v", i, c.PatternLits[i].Raw, c.PatternLits[i].Kept, want)
+		src := "schema \"s\"\ntype T {\n\tid String primary\n\tp Pattern[\"" + tc.text + "\"]\n}\n"
+		file, issues := Parse([]byte(src), location.NewSourceID("s.yammm"))
+		var codes []diag.Code
+		for _, iss := range issues {
+			codes = append(codes, iss.Code())
 		}
-	}
-	res := c.PatternRegexps()
-	if len(res) != 2 || res[0].String() != "^a$" || res[1].String() != "^b$" {
-		t.Errorf("enforced patterns = %v, want the first two written", res)
-	}
-}
-
-// TestChecks_PatternListIsTruncatedAtTheCap pins that a rejected pattern list
-// does not reach the constraint. The grammar now admits any number, so without
-// the truncation a caller compiling PatternRegexps would enforce patterns the
-// constraint reported as too many.
-func TestChecks_PatternListIsTruncatedAtTheCap(t *testing.T) {
-	src := "schema \"s\"\ntype T {\n\tid String primary\n\tp Pattern[\"a\", \"b\", \"c\", \"d\"]\n}\n"
-	file, issues := Parse([]byte(src), location.NewSourceID("s.yammm"))
-	if len(issues) != 1 {
-		t.Fatalf("got %d issues, want 1: %v", len(issues), issues)
-	}
-	c := file.Types[0].Properties[1].Constraint
-	if got := len(c.PatternRegexps()); got != MaxPatterns {
-		t.Errorf("PatternRegexps() = %d, want %d — the list past the cap must not reach the constraint",
-			got, MaxPatterns)
+		if !slices.Equal(codes, tc.codes) {
+			t.Errorf("%s: codes = %v, want %v", tc.text, codes, tc.codes)
+		}
+		c := file.Types[0].Properties[1].Constraint
+		if !tc.kept && len(tc.codes) == 1 && tc.codes[0] == diag.E_SYNTAX {
+			if c.PatternLit == nil || c.PatternLit.Text != "" || c.PatternLit.Kept || c.PatternRegexp() != nil {
+				t.Errorf("%s: a pattern that does not unquote holds %+v, want no text and no regexp", tc.text, c.PatternLit)
+			}
+			continue
+		}
+		if c.PatternLit == nil || c.PatternLit.Text != tc.text || c.PatternLit.Kept != tc.kept {
+			t.Fatalf("%s: literal = %+v, want its text with Kept %v", tc.text, c.PatternLit, tc.kept)
+		}
+		if re := c.PatternRegexp(); (re != nil) != tc.kept || (re != nil && re.String() != tc.text) {
+			t.Errorf("%s: PatternRegexp = %v, want the regexp only when kept", tc.text, re)
+		}
 	}
 }
 

@@ -42,6 +42,7 @@ func TestStructuralHash_TypeFieldCoverage(t *testing.T) {
 		"sourceID":   "excluded: a hashed path would split embedded:// and disk loads",
 		"span":       "excluded: source location",
 		"nameSpan":   "excluded: source location",
+		"lostMember": "excluded: a schema whose body lost a member does not load",
 		"doc":        "excluded: documentation",
 
 		// Excluded: derived state and caches.

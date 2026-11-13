@@ -1,5 +1,6 @@
-schema "混合Content"
+schema "mixed"
 
+// 混合Content
 // コメント with 日本語
 type MixedType {
 	ascii String required

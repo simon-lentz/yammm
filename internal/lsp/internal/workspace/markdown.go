@@ -167,7 +167,7 @@ func (w *Workspace) analyzeMarkdown(analyzeCtx context.Context, uri string) (mar
 	}
 
 	// Prepend synthetic schema declaration for snippet blocks that lack one.
-	const snippetPrefix = "schema \"_snippet\"\n"
+	const snippetPrefix = "schema \"snippet\"\n"
 	for i := range validBlocks {
 		if !markdown.HasSchemaDeclaration(validBlocks[i].Content) {
 			validBlocks[i].Content = snippetPrefix + validBlocks[i].Content

@@ -22,13 +22,6 @@ type faultRow struct {
 // orders in which two faults of one constraint meet, and one accepted
 // constraint of the kind.
 func faultRows() []faultRow {
-	re := func(sources ...string) []*regexp.Regexp {
-		out := make([]*regexp.Regexp, len(sources))
-		for i, s := range sources {
-			out[i] = regexp.MustCompile(s)
-		}
-		return out
-	}
 	enum := func(values ...string) schema.Constraint { return schema.NewEnumConstraint(values) }
 	str := schema.NewStringConstraint()
 	two := schema.NewEnumConstraint([]string{"a", "b"})
@@ -106,16 +99,11 @@ func faultRows() []faultRow {
 		{"list element fault at depth two", schema.NewListConstraint(schema.NewListConstraint(schema.StringMinLen(-1)))},
 		{"list pointer", &list},
 
-		{"pattern accepted", schema.NewPatternConstraint(re("^a", "b$"))},
+		{"pattern accepted", schema.NewPatternConstraint(regexp.MustCompile("^a"))},
 		{"pattern zero value", schema.PatternConstraint{}},
 		{"pattern none", schema.NewPatternConstraint(nil)},
-		{"pattern three", schema.NewPatternConstraint(re("a", "b", "c"))},
-		{"pattern Perl syntax refuses", schema.NewPatternConstraint([]*regexp.Regexp{regexp.MustCompilePOSIX("a**")})},
-		{"pattern surrogate", schema.NewPatternConstraint(re(`\x{D800}`))},
-		{"pattern three before one refused", schema.NewPatternConstraint([]*regexp.Regexp{regexp.MustCompile("a"), regexp.MustCompile("b"), regexp.MustCompilePOSIX("a**")})},
-		{"pattern two refused", schema.NewPatternConstraint([]*regexp.Regexp{regexp.MustCompilePOSIX("a**"), regexp.MustCompilePOSIX("b**")})},
-		{"pattern surrogate before one refused", schema.NewPatternConstraint([]*regexp.Regexp{regexp.MustCompile(`\x{DFFF}`), regexp.MustCompilePOSIX("a**")})},
-		{"pattern refused before surrogate", schema.NewPatternConstraint([]*regexp.Regexp{regexp.MustCompilePOSIX("a**"), regexp.MustCompile(`\x{DFFF}`)})},
+		{"pattern Perl syntax refuses", schema.NewPatternConstraint(regexp.MustCompilePOSIX("a**"))},
+		{"pattern surrogate escape accepted", schema.NewPatternConstraint(regexp.MustCompile(`\x{D800}`))},
 
 		{"vector accepted", schema.NewVectorConstraint(3)},
 		{"vector zero", schema.NewVectorConstraint(0)},

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"unicode"
 	"unicode/utf8"
 
 	"github.com/alecthomas/participle/v2"
@@ -167,8 +168,10 @@ type builder struct {
 	// whatever order positions are asked for. Counting from the line's start
 	// made a parse quadratic in a line's length for spans nested on one line. Built at the first position asked for.
 	// counted is the bytes positionAt has counted runes over, the marks
-	// included, the measure of that cost: [TestParse_PositionsCostALinesLengthOnce]
-	// and [TestParse_NestedPositionsCostTheSourceOnce] bound it.
+	// included, and the bytes startsLine has read, the measure of that cost:
+	// [TestParse_PositionsCostALinesLengthOnce],
+	// [TestParse_NestedPositionsCostTheSourceOnce] and
+	// [TestParse_AnnotationsCostTheirLineOnce] bound it.
 	runeMarks []int
 	counted   int
 
@@ -237,10 +240,11 @@ func (b *builder) parseHeader(plex *lexer.PeekingLexer) {
 		b.file.SchemaNameFailed = true
 		return
 	}
-	// The grammar admits an empty STRING; the language does not admit an
-	// empty name.
-	if name == "" {
-		b.reportf(diag.E_INVALID_NAME, b.file.NameSpan, "schema name cannot be empty")
+	// The grammar admits any STRING; the language admits an identifier.
+	if !IsIdentifier(name) {
+		b.reportf(diag.E_INVALID_NAME, b.file.NameSpan,
+			"schema name %s is not an identifier: it must begin with an ASCII letter and hold only ASCII letters, digits and underscores",
+			diag.QuoteValue(name))
 		b.file.SchemaNameFailed = true
 		return
 	}
@@ -340,21 +344,27 @@ func (b *builder) parseTypeBody(plex *lexer.PeekingLexer, head *typeHeadNode) {
 // body's end offset. A member that fails costs only itself: the loop reports
 // one diagnostic and re-syncs to the next member start.
 func (b *builder) parseMembers(plex *lexer.PeekingLexer, nt *TypeDecl) int {
+	var skipped skipScan
 	for {
 		t := plex.Peek()
 		if t.EOF() {
 			b.reportUnparsed(diag.Error, b.pointAt(t.Pos), "unexpected end of input in a type body")
+			nt.LostMember = true
 			return len(b.src)
 		}
 		if t.Type == b.ps.tok.rbrace {
+			nt.LostMember = nt.LostMember || skipped.end()
 			plex.Next()
 			return t.Pos.Offset + 1
 		}
 		m, err := tryParse(b.ps.member, plex)
 		if err != nil {
+			from := t.Pos.Offset
 			b.failed(plex, err, diag.Error, "in a type body", func(past int, ends bool) { b.resyncMember(plex, past, ends) })
+			nt.LostMember = nt.LostMember || b.scanSkip(&skipped, from, plex.Peek().Pos.Offset)
 			continue
 		}
+		nt.LostMember = nt.LostMember || skipped.end()
 		b.addMember(nt, m)
 	}
 }
@@ -364,10 +374,12 @@ func (b *builder) addMember(nt *TypeDecl, m *memberNode) {
 	case m.Inv != nil:
 		b.addInvariant(nt, m.Inv)
 	case m.TAnn != nil:
-		nt.Annotations = append(nt.Annotations, b.annotation(
+		if na := b.annotation(
 			m.TAnn.Name, m.TAnn.Args, stripDoc(m.TAnn.Doc),
 			b.spanOf(m.TAnn.Pos, m.TAnn.EndPos), 0,
-		))
+		); na != nil {
+			nt.Annotations = append(nt.Annotations, na)
+		}
 	case m.Assoc != nil:
 		b.addAssociation(nt, m.Assoc)
 	case m.Comp != nil:
@@ -388,7 +400,6 @@ func (b *builder) addAssociation(nt *TypeDecl, a *assocNode) {
 	}
 	b.checkRelationName(rel.Name, rel.NameSpan)
 	rel.Optional, rel.Many = multiplicityOf(a.Mult)
-	b.rejectReverse(a.Reverse)
 	if a.Body != nil {
 		for i := range a.Body.Props {
 			rel.Properties = append(rel.Properties, b.edgeProp(&a.Body.Props[i]))
@@ -408,20 +419,7 @@ func (b *builder) addComposition(nt *TypeDecl, c *compNode) {
 	}
 	b.checkRelationName(rel.Name, rel.NameSpan)
 	rel.Optional, rel.Many = multiplicityOf(c.Mult)
-	b.rejectReverse(c.Reverse)
 	nt.Relations = append(nt.Relations, rel)
-}
-
-// rejectReverse names the removed reverse clause at the span of the clause's
-// name. The grammar keeps the recognizer for exactly this diagnostic: without it, a
-// schema carrying the clause draws a bare unexpected-token error.
-func (b *builder) rejectReverse(rev *reverseNode) {
-	if rev == nil {
-		return
-	}
-	b.reportf(diag.E_REVERSE_CLAUSE_REMOVED, b.spanOf(rev.Name.Pos, rev.Name.EndPos),
-		"the reverse clause was removed in v0.15.0; delete the \"/\", the name %q and any multiplicity after it",
-		rev.Name.value())
 }
 
 func (b *builder) edgeProp(p *relPropNode) *Property {
@@ -477,17 +475,24 @@ func (b *builder) addProp(nt *TypeDecl, p *propNode) {
 	for i := range p.Anns {
 		a := &p.Anns[i]
 		detached := 0
-		if b.positionAt(a.Pos.Offset).Line > nameLine {
+		if b.startsLine(a.Pos.Offset) {
 			detached = nameLine
 		}
-		np.Annotations = append(np.Annotations, b.annotation(
-			a.Name, a.Args, "", b.spanOf(a.Pos, a.EndPos), detached,
-		))
+		if na := b.annotation(a.Name, a.Args, "", b.spanOf(a.Pos, a.EndPos), detached); na != nil {
+			np.Annotations = append(np.Annotations, na)
+		}
 	}
 	nt.Properties = append(nt.Properties, np)
 }
 
+// annotation builds one annotation, or returns nil for one whose argument list
+// did not parse: the list's E_SYNTAX is its one diagnostic, and a bare
+// annotation in the tree would draw a second, false one for having no
+// arguments.
 func (b *builder) annotation(name lcWordNode, args *argsNode, doc string, span location.Span, detached int) *Annotation {
+	if args == nil && b.parenFollows(name.EndPos.Offset) {
+		return nil
+	}
 	na := &Annotation{
 		Name:             name.Value,
 		NameSpan:         b.spanOf(name.Pos, name.EndPos),
@@ -658,9 +663,88 @@ func (b *builder) resyncMember(plex *lexer.PeekingLexer, past int, ends bool) {
 	}
 }
 
+// skipScan carries what recovery skipped in one type body across consecutive
+// skips. Recovery stops at a member start even inside an open parenthesis, so
+// one argument list can be skipped in several pieces.
+type skipScan struct {
+	depth     int  // parentheses the skipped text left open
+	insideAt  int  // the least depth of a member start inside them, 0 for none
+	annotated bool // the last token that is no space or line comment was "@"
+}
+
+// scanSkip reports whether the text [from, to) that recovery skipped may hold
+// a member: a token that can begin one, or an upper-case word such as a
+// misspelled modifier, outside parentheses. An annotation's name, which the
+// grammar reads past spaces and line comments, a comment and the content of a
+// "(...)" that closes hold none.
+func (b *builder) scanSkip(s *skipScan, from, to int) bool {
+	tok := b.ps.tok
+	i, _ := slices.BinarySearchFunc(b.toks, from, func(t lexer.Token, target int) int {
+		return t.Pos.Offset - target
+	})
+	for ; i < len(b.toks) && b.toks[i].Pos.Offset < to; i++ {
+		t := &b.toks[i]
+		if t.Type == tok.ws || t.Type == tok.slComment {
+			continue
+		}
+		name := s.annotated
+		s.annotated = false
+		switch {
+		case t.Type == tok.docComment:
+		case t.Type == tok.lpar:
+			s.depth++
+		case t.Type == tok.rpar:
+			if s.depth > 0 {
+				s.depth--
+				if s.insideAt > s.depth {
+					s.insideAt = 0
+				}
+			}
+		case t.Value == "@":
+			s.annotated = true
+		case name && (t.Type == tok.lcWord || t.Type == tok.ucWord):
+		case t.Type == tok.ucWord || memberStart(tok, t):
+			if s.depth == 0 {
+				return true
+			}
+			if s.insideAt == 0 || s.depth < s.insideAt {
+				s.insideAt = s.depth
+			}
+		}
+	}
+	return false
+}
+
+// end closes the skipped text where parsing resumes or the body ends: a
+// parenthesis still open there may have swallowed a member its author wrote.
+func (s *skipScan) end() bool {
+	lost := s.insideAt > 0
+	*s = skipScan{}
+	return lost
+}
+
+// parenFollows reports whether the first token at or after offset, past
+// whitespace and comments, is "(".
+func (b *builder) parenFollows(offset int) bool {
+	tok := b.ps.tok
+	i, _ := slices.BinarySearchFunc(b.toks, offset, func(t lexer.Token, target int) int {
+		return t.Pos.Offset - target
+	})
+	for ; i < len(b.toks); i++ {
+		switch b.toks[i].Type {
+		case tok.ws, tok.slComment, tok.docComment:
+			continue
+		case tok.lpar:
+			return true
+		}
+		return false
+	}
+	return false
+}
+
 // startsLine reports whether only whitespace precedes offset on its own line.
 // Recovery uses it to tell a member the author began from a name inside the one
-// that just failed.
+// that just failed, and addProp to find an annotation that begins a line.
 func (b *builder) startsLine(offset int) bool {
 	if offset <= 0 || offset > len(b.src) {
 		return true
@@ -669,7 +753,18 @@ func (b *builder) startsLine(offset int) bool {
 	if !atStart {
 		line--
 	}
-	return strings.TrimSpace(b.src[b.lineStarts[line]:offset]) == ""
+	// Backward from offset, so a call reads only the blanks before it: a long
+	// indentation read once per annotation made a line of them quadratic.
+	head := b.src[b.lineStarts[line]:offset]
+	for head != "" {
+		r, size := utf8.DecodeLastRuneInString(head)
+		b.counted += size
+		if !unicode.IsSpace(r) {
+			return false
+		}
+		head = head[:len(head)-size]
+	}
+	return true
 }
 
 // declStart reports whether t can begin a declaration. "import" is one: an

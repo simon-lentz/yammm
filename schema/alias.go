@@ -4,24 +4,6 @@ import (
 	"strings"
 )
 
-// isValidAlias returns true if the alias is a valid identifier per the grammar.
-// Valid aliases must start with a letter (A-Z or a-z) and contain only letters,
-// digits, and underscores. This does NOT check for reserved keywords; use
-// [parse.IsReserved] for that.
-func isValidAlias(alias string) bool {
-	if alias == "" {
-		return false
-	}
-	for i := range len(alias) {
-		c := alias[i]
-		letter := (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z')
-		if !letter && (i == 0 || (c != '_' && (c < '0' || c > '9'))) {
-			return false
-		}
-	}
-	return true
-}
-
 // deriveAliasFromPath extracts the default alias from an import path.
 //
 // Rules:
@@ -65,7 +47,7 @@ func deriveAliasFromPath(path string) string {
 	}
 	// If first character is not a letter, prepend "n" to produce a valid identifier
 	// (e.g., "2parts" -> "n2parts", "___" -> "n___"). This ensures the derived alias
-	// passes isValidAlias which requires starting with a letter.
+	// passes parse.IsIdentifier, which requires starting with a letter.
 	first := segment[0]
 	isLetter := (first >= 'a' && first <= 'z') || (first >= 'A' && first <= 'Z')
 	if !isLetter {

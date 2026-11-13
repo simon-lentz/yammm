@@ -179,32 +179,17 @@ pattern accepted
 	CheckConstraint: ok
 	CoerceParams: map[], param "v": value "x" does not match pattern ^a
 pattern zero value
-	CheckConstraint: schema: pattern constraint needs at least one pattern
-	CoerceParams: map[], param type "v": schema: pattern constraint needs at least one pattern
+	CheckConstraint: schema: pattern constraint needs a pattern
+	CoerceParams: map[], param type "v": schema: pattern constraint needs a pattern
 pattern none
-	CheckConstraint: schema: pattern constraint needs at least one pattern
-	CoerceParams: map[], param type "v": schema: pattern constraint needs at least one pattern
-pattern three
-	CheckConstraint: schema: pattern constraint exceeds maximum of 2 patterns (got 3)
-	CoerceParams: map[], param type "v": schema: pattern constraint exceeds maximum of 2 patterns (got 3)
+	CheckConstraint: schema: pattern constraint needs a pattern
+	CoerceParams: map[], param type "v": schema: pattern constraint needs a pattern
 pattern Perl syntax refuses
 	CheckConstraint: schema: invalid regex pattern "a**": error parsing regexp: invalid nested repetition operator: `**`
 	CoerceParams: map[], param type "v": schema: invalid regex pattern "a**": error parsing regexp: invalid nested repetition operator: `**`
-pattern surrogate
-	CheckConstraint: schema: regex pattern "\\x{D800}" names the surrogate code point U+D800, which no string holds
-	CoerceParams: map[], param type "v": schema: regex pattern "\\x{D800}" names the surrogate code point U+D800, which no string holds
-pattern three before one refused
-	CheckConstraint: schema: pattern constraint exceeds maximum of 2 patterns (got 3)
-	CoerceParams: map[], param type "v": schema: pattern constraint exceeds maximum of 2 patterns (got 3)
-pattern two refused
-	CheckConstraint: schema: invalid regex pattern "a**": error parsing regexp: invalid nested repetition operator: `**`
-	CoerceParams: map[], param type "v": schema: invalid regex pattern "a**": error parsing regexp: invalid nested repetition operator: `**`
-pattern surrogate before one refused
-	CheckConstraint: schema: regex pattern "\\x{DFFF}" names the surrogate code point U+DFFF, which no string holds
-	CoerceParams: map[], param type "v": schema: regex pattern "\\x{DFFF}" names the surrogate code point U+DFFF, which no string holds
-pattern refused before surrogate
-	CheckConstraint: schema: invalid regex pattern "a**": error parsing regexp: invalid nested repetition operator: `**`
-	CoerceParams: map[], param type "v": schema: invalid regex pattern "a**": error parsing regexp: invalid nested repetition operator: `**`
+pattern surrogate escape accepted
+	CheckConstraint: ok
+	CoerceParams: map[], param "v": value "x" does not match pattern \x{D800}
 vector accepted
 	CheckConstraint: ok
 	CoerceParams: map[], param "v": expected array for vector, got string

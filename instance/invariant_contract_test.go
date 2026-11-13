@@ -221,16 +221,17 @@ func TestInvariantContract_AcceptRows(t *testing.T) {
 		{`CUSTOMERS -> Len > 1`, nil},
 		{`CUSTOMERS -> All |$c| { $c != nil }`, nil},
 		{`PLACED_BY == "c1"`, setPlacedBy("c9")},
-		// relation names resolve in either case
-		{`lines -> Len > 0`, nil},
-		{`placed_by != nil`, nil},
 		// self is a bound variable at both layers, so a bare self reads the
 		// owner's members and a parameter named self shadows it
 		{`self.name -> Len > 0`, setName("")},
 		{`self.LINES -> Len > 0`, nil},
-		// a $ variable names a member by its exact spelling
+		// a $ variable names a member by its declared name
 		{`$name -> Len > 0`, setName("")},
-		{`$lines -> Len > 0`, nil},
+		{`$LINES -> Len > 0`, nil},
+		{`$PLACED_BY != nil`, nil},
+		// a $ variable on a member the instance leaves unset reads nil, as the
+		// bare name does
+		{`$note == nil`, setNote("x")},
 		// a bare lambda variable name resolves like the evaluator's scope does
 		{`LINES -> All |$l| { l != nil }`, nil},
 		// a parameter shadows a same-named property, and $self may be rebound
@@ -501,11 +502,12 @@ func TestInvariantContract_RefuseRows(t *testing.T) {
 		{`LINES.qty > 0`, diag.E_INVALID_INVARIANT, "list", "cannot access member", evalErrors},
 		{`LINES -> All |$l| { $l.Len > 0 }`, diag.E_UNKNOWN_PROPERTY, "Len", "", evalAnswersFalse},
 		// an undefined named variable, and a variable that differs only in case
-		{`$undefined > 0`, diag.E_INVALID_INVARIANT, "undefined variable", "undefined variable", evalErrors},
-		{`tags -> All |$myVar| { $myvar -> Len > 0 }`, diag.E_INVALID_INVARIANT, "undefined variable", "undefined variable", evalErrors},
-		// a $ member reference differing from the member's spelling only in case
-		{`$nAme -> Len > 0`, diag.E_INVALID_INVARIANT, "undefined variable", "undefined variable", evalErrors},
-		{`$lInes -> Len > 0`, diag.E_INVALID_INVARIANT, "undefined variable", "undefined variable", evalErrors},
+		{`$undefined > 0`, diag.E_INVALID_INVARIANT, "undefined variable", "", evalAnswersFalse},
+		{`tags -> All |$myVar| { $myvar -> Len > 0 }`, diag.E_INVALID_INVARIANT, "undefined variable", "", evalAnswersFalse},
+		// a $ member reference differing from the member's spelling only in case:
+		// a property's names nothing, a relation's is the relation rule's issue
+		{`$nAme -> Len > 0`, diag.E_INVALID_INVARIANT, "undefined variable", "", evalAnswersFalse},
+		{`$lInes -> Len > 0`, diag.E_INVALID_NAME, "a relation is read by its declared name LINES", "", evalAnswersFalse},
 		// an unknown function, and a call shape the builtin refuses
 		{`LINES -> Bogus > 0`, diag.E_INVALID_INVARIANT, "Bogus", "unknown function", evalErrors},
 		{`LINES -> Len |$l| { $l.qty } > 0`, diag.E_INVALID_INVARIANT, "lambda", "does not accept a lambda", evalErrors},

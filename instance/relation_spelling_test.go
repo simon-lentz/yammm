@@ -14,7 +14,8 @@ import (
 // what the evaluator reads through one it cannot type ([MAIN_LINE, name][0].S).
 // A spelling the checker refuses reads nothing, and one it admits reads the
 // child, so the invariant holds on the good order exactly when the checker
-// admits the spelling. A variable names the relation by its field name.
+// admits the spelling. A variable names the relation by its declared name
+// alone.
 func TestInvariant_TheCheckerAndTheEvaluatorReadARelationByOneRule(t *testing.T) {
 	t.Parallel()
 	for _, spelling := range []string{"ITEM", "item", "Item", "iTEM", "ItEm"} {
@@ -53,14 +54,30 @@ func TestInvariant_TheCheckerAndTheEvaluatorReadARelationByOneRule(t *testing.T)
 			}
 		})
 	}
-	t.Run("a variable by the field name", func(t *testing.T) {
+	t.Run("a variable by the declared name", func(t *testing.T) {
 		t.Parallel()
-		s, res := schema.LoadString(t.Context(), contractSource("$main_line != nil && $placed_by != nil"), "s.yammm")
+		s, res := schema.LoadString(t.Context(), contractSource("$MAIN_LINE != nil && $PLACED_BY != nil"), "s.yammm")
 		if res.HasErrors() {
 			t.Fatalf("load: %v", res.Err())
 		}
 		if vres := validateOrder(t, s, goodOrder()); vres.HasErrors() {
-			t.Errorf("a variable naming a relation by its field name read nothing: %v", vres.Err())
+			t.Errorf("a variable naming a relation by its declared name read nothing: %v", vres.Err())
 		}
 	})
+	for _, spelling := range []string{"$placed_by", "$Placed_By", "$main_line"} {
+		t.Run("a variable in another casing "+spelling, func(t *testing.T) {
+			t.Parallel()
+			_, res := schema.LoadString(t.Context(), contractSource(spelling+" != nil"), "s.yammm")
+			codes := slices.Collect(func(yield func(diag.Code) bool) {
+				for i := range res.Issues() {
+					if !yield(i.Code()) {
+						return
+					}
+				}
+			})
+			if !slices.Equal(codes, []diag.Code{diag.E_INVALID_NAME}) {
+				t.Errorf("%s drew %v, want one E_INVALID_NAME as the bare and member reads draw", spelling, codes)
+			}
+		})
+	}
 }

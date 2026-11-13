@@ -77,14 +77,10 @@ func TestConstraint_Equal(t *testing.T) {
 		{"date vs timestamp", schema.NewDateConstraint(), schema.NewTimestampConstraint(), false},
 		{"uuid same", schema.NewUUIDConstraint(), schema.NewUUIDConstraint(), true},
 		{"uuid vs string", schema.NewUUIDConstraint(), schema.NewStringConstraint(), false},
-		{"pattern same", schema.NewPatternConstraint([]*regexp.Regexp{regexp.MustCompile("^test")}), schema.NewPatternConstraint([]*regexp.Regexp{regexp.MustCompile("^test")}), true},
-		{"pattern different", schema.NewPatternConstraint([]*regexp.Regexp{regexp.MustCompile("^test")}), schema.NewPatternConstraint([]*regexp.Regexp{regexp.MustCompile("^other")}), false},
-		{
-			"pattern different count",
-			schema.NewPatternConstraint([]*regexp.Regexp{regexp.MustCompile("^test")}),
-			schema.NewPatternConstraint([]*regexp.Regexp{regexp.MustCompile("^test"), regexp.MustCompile("end$")}),
-			false,
-		},
+		{"pattern same", schema.NewPatternConstraint(regexp.MustCompile("^test")), schema.NewPatternConstraint(regexp.MustCompile("^test")), true},
+		{"pattern different", schema.NewPatternConstraint(regexp.MustCompile("^test")), schema.NewPatternConstraint(regexp.MustCompile("^other")), false},
+		{"pattern empty and none", schema.NewPatternConstraint(regexp.MustCompile("")), schema.NewPatternConstraint(nil), false},
+		{"pattern none and the zero value", schema.NewPatternConstraint(nil), schema.PatternConstraint{}, true},
 		{"vector same dimension", schema.NewVectorConstraint(128), schema.NewVectorConstraint(128), true},
 		{"vector different dimension", schema.NewVectorConstraint(128), schema.NewVectorConstraint(256), false},
 	}
@@ -113,19 +109,6 @@ func TestEnumConstraint_DefensiveCopy(t *testing.T) {
 	// Constraint should still be unaffected
 	values2 := c.Values()
 	assert.Equal(t, "b", values2[1], "Values() should return defensive copy")
-}
-
-// A constraint holds what its caller gave it, so CheckConstraint can refuse a
-// third pattern the DSL refuses rather than judge a narrower constraint silently.
-func TestPatternConstraint_KeepsEveryPattern(t *testing.T) {
-	p1 := regexp.MustCompile("^a")
-	p2 := regexp.MustCompile("b$")
-	p3 := regexp.MustCompile("c")
-
-	c := schema.NewPatternConstraint([]*regexp.Regexp{p1, p2, p3})
-
-	assert.Equal(t, []string{"^a", "b$", "c"}, c.Patterns())
-	assert.Equal(t, 3, c.PatternCount())
 }
 
 func TestAliasConstraint_ResolvesForEquality(t *testing.T) {
@@ -267,65 +250,45 @@ func TestFloatConstraint_Max_Unbounded(t *testing.T) {
 
 func TestPatternConstraint_Kind(t *testing.T) {
 	p := regexp.MustCompile("^test")
-	c := schema.NewPatternConstraint([]*regexp.Regexp{p})
+	c := schema.NewPatternConstraint(p)
 	assert.Equal(t, schema.KindPattern, c.Kind())
-}
-
-func TestPatternConstraint_Patterns(t *testing.T) {
-	p1 := regexp.MustCompile("^test")
-	p2 := regexp.MustCompile("end$")
-	c := schema.NewPatternConstraint([]*regexp.Regexp{p1, p2})
-
-	strs := c.Patterns()
-	assert.Len(t, strs, 2)
-	assert.Contains(t, strs, "^test")
-	assert.Contains(t, strs, "end$")
-}
-
-func TestPatternConstraint_PatternCount(t *testing.T) {
-	p1 := regexp.MustCompile("^a")
-	p2 := regexp.MustCompile("b$")
-
-	c1 := schema.NewPatternConstraint([]*regexp.Regexp{p1})
-	assert.Equal(t, 1, c1.PatternCount())
-
-	c2 := schema.NewPatternConstraint([]*regexp.Regexp{p1, p2})
-	assert.Equal(t, 2, c2.PatternCount())
 }
 
 func TestPatternConstraint_Pattern(t *testing.T) {
 	p := regexp.MustCompile("^test")
-	c := schema.NewPatternConstraint([]*regexp.Regexp{p})
+	c := schema.NewPatternConstraint(p)
 	assert.Equal(t, "^test", c.Pattern())
 }
 
 func TestPatternConstraint_Pattern_Empty(t *testing.T) {
-	c := schema.NewPatternConstraint([]*regexp.Regexp{})
+	c := schema.NewPatternConstraint(nil)
 	assert.Empty(t, c.Pattern())
 }
 
-func TestPatternRegexps_ReadsTheCompiledPatterns(t *testing.T) {
-	p1 := regexp.MustCompile("^a")
-	p2 := regexp.MustCompile("b$")
-	c := schema.NewPatternConstraint([]*regexp.Regexp{p1, p2})
-
-	compiled := expr.PatternRegexps(c)
-	assert.Len(t, compiled, 2)
-	assert.True(t, compiled[0].MatchString("abc"))
-	assert.True(t, compiled[1].MatchString("ab"))
+func TestPatternRegexp_ReadsTheCompiledPattern(t *testing.T) {
+	c := schema.NewPatternConstraint(regexp.MustCompile("^a"))
+	compiled := expr.PatternRegexp(c)
+	assert.NotNil(t, compiled)
+	assert.True(t, compiled.MatchString("abc"))
+	assert.Nil(t, expr.PatternRegexp(schema.NewPatternConstraint(nil)))
 }
 
 func TestPatternConstraint_String(t *testing.T) {
 	p := regexp.MustCompile("^hello")
-	c := schema.NewPatternConstraint([]*regexp.Regexp{p})
+	c := schema.NewPatternConstraint(p)
 	assert.Equal(t, `Pattern["^hello"]`, c.String())
 }
 
-func TestPatternConstraint_String_Multiple(t *testing.T) {
-	p1 := regexp.MustCompile("^a")
-	p2 := regexp.MustCompile("b$")
-	c := schema.NewPatternConstraint([]*regexp.Regexp{p1, p2})
-	assert.Equal(t, `Pattern["^a", "b$"]`, c.String())
+func TestPatternConstraint_String_None(t *testing.T) {
+	assert.Equal(t, `Pattern[]`, schema.NewPatternConstraint(nil).String())
+}
+
+// The empty pattern is a pattern, which matches every value: it is held and
+// written, unlike a constraint that holds none.
+func TestPatternConstraint_TheEmptyPatternIsHeld(t *testing.T) {
+	c := schema.NewPatternConstraint(regexp.MustCompile(""))
+	assert.Equal(t, `Pattern[""]`, c.String())
+	assert.NoError(t, schema.CheckConstraint(c))
 }
 
 func TestVectorConstraint_Dimension(t *testing.T) {
@@ -386,7 +349,7 @@ func TestConstraint_IsResolved_NonAliasConstraints(t *testing.T) {
 		{"Date", schema.NewDateConstraint()},
 		{"UUID", schema.NewUUIDConstraint()},
 		{"Enum", schema.NewEnumConstraint([]string{"a", "b"})},
-		{"Pattern", schema.NewPatternConstraint([]*regexp.Regexp{regexp.MustCompile("^test")})},
+		{"Pattern", schema.NewPatternConstraint(regexp.MustCompile("^test"))},
 		{"Vector", schema.NewVectorConstraint(128)},
 	}
 
@@ -472,8 +435,8 @@ func TestAliasConstraint_Equal_WithPatternConstraint(t *testing.T) {
 	// This test verifies that comparing aliases resolved to PatternConstraint
 	// does not panic due to hashability issues.
 	p := regexp.MustCompile("^test")
-	pattern1 := schema.NewPatternConstraint([]*regexp.Regexp{p})
-	pattern2 := schema.NewPatternConstraint([]*regexp.Regexp{p})
+	pattern1 := schema.NewPatternConstraint(p)
+	pattern2 := schema.NewPatternConstraint(p)
 
 	alias1 := schema.NewAliasConstraint("Code", pattern1)
 	alias2 := schema.NewAliasConstraint("OtherCode", pattern2)
@@ -505,7 +468,7 @@ func TestAliasConstraint_Equal_DeepChainWithPattern(t *testing.T) {
 	// Test deep alias chain with PatternConstraint at the terminal
 	// A -> B -> C -> PatternConstraint
 	p := regexp.MustCompile("^[a-z]+$")
-	pattern := schema.NewPatternConstraint([]*regexp.Regexp{p})
+	pattern := schema.NewPatternConstraint(p)
 	aliasC := schema.NewAliasConstraint("C", pattern)
 	aliasB := schema.NewAliasConstraint("B", aliasC)
 	aliasA := schema.NewAliasConstraint("A", aliasB)
@@ -912,14 +875,14 @@ func TestNonNarrowableConstraints_NarrowsTo(t *testing.T) {
 		},
 		{
 			name:   "pattern same",
-			parent: schema.NewPatternConstraint([]*regexp.Regexp{regexp.MustCompile("^test")}),
-			child:  schema.NewPatternConstraint([]*regexp.Regexp{regexp.MustCompile("^test")}),
+			parent: schema.NewPatternConstraint(regexp.MustCompile("^test")),
+			child:  schema.NewPatternConstraint(regexp.MustCompile("^test")),
 			want:   true,
 		},
 		{
 			name:   "pattern different",
-			parent: schema.NewPatternConstraint([]*regexp.Regexp{regexp.MustCompile("^a")}),
-			child:  schema.NewPatternConstraint([]*regexp.Regexp{regexp.MustCompile("^b")}),
+			parent: schema.NewPatternConstraint(regexp.MustCompile("^a")),
+			child:  schema.NewPatternConstraint(regexp.MustCompile("^b")),
 			want:   false,
 		},
 		{

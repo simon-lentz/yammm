@@ -25,6 +25,7 @@ type typeState struct {
 	doc        string
 	isAbstract bool
 	isPart     bool
+	lostMember bool // a member of the source body did not parse
 
 	// Own members (declared in this type body)
 	properties   []Property
@@ -202,7 +203,7 @@ func (t Type) HasPrimaryKey() bool {
 
 // Relation returns the relation with the given DSL name (own or inherited), if
 // it exists. Uses O(1) lookup. [Type.RelationByField] is the same lookup on
-// the field name instance data and expressions use.
+// the field name instance data uses.
 func (t Type) Relation(name string) (Relation, bool) {
 	r, ok := t.relByName[name]
 	return r, ok

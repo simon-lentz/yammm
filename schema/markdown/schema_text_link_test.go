@@ -5,9 +5,8 @@ import (
 	"testing"
 )
 
-// TestMarshal_SchemaTextIsNeverALink pins that text a schema supplies — a
-// schema name in a heading, a link and a marker, an invariant message, and a
-// constraint in a <code> cell — reads as no link: GitHub autolinks a www
+// TestMarshal_SchemaTextIsNeverALink pins that text a schema supplies — an
+// invariant message and a constraint in a <code> cell — reads as no link: GitHub autolinks a www
 // host, a URL and an email address even through backslash escapes and entity
 // codes, so an empty HTML comment, which a browser does not show, splits each
 // before its colon, its at sign or the dot after www.
@@ -15,7 +14,7 @@ func TestMarshal_SchemaTextIsNeverALink(t *testing.T) {
 	t.Parallel()
 
 	doc := marshalSources(t, map[string]string{
-		"entry.yammm": `schema "see www.example.com"
+		"entry.yammm": `schema "app"
 
 import "mid.yammm" as m
 
@@ -23,6 +22,7 @@ type Car {
 	id String primary
 	--> AT (one) m.Hub
 	! "mail a@b.com or visit https://x.org/p" id != ""
+	! "see www.example.com" id != "x"
 }
 `,
 		"mid.yammm": `schema "mid"
@@ -35,7 +35,7 @@ type Hub extends f.Base {
 	--> OWNER (one) f.Person
 }
 `,
-		"far.yammm": `schema "mailto:x@y.org"
+		"far.yammm": `schema "far"
 
 type Person {
 	id String primary
@@ -48,12 +48,8 @@ abstract type Base {
 	})
 
 	assertLines(t, doc,
-		"# Schema see www<!---->.example.com",
-		"## Schema mailto<!---->:x<!---->@y.org",
-		"### Person (mailto<!---->:x<!---->@y.org)",
-		"-   `--> OWNER (one)` [Person (mailto<!---->:x<!---->@y.org)](#person-mailtoxyorg)",
 		"-   \"mail a<!---->@b.com or visit https<!---->://x.org/p\"",
-		"| `note` | `String` | from Base (mailto<!---->:x<!---->@y.org) |  |",
+		"-   \"see www<!---->.example.com\"",
 	)
 	if want := "<code>Enum&#91;\"a&#96;b a<!---->@b.com WWW<!---->.q.org ftp<!---->://h\", \"z\"&#93;</code>"; !strings.Contains(doc, want) {
 		t.Errorf("document holds no code cell %q:\n%s", want, doc)

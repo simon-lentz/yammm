@@ -22,7 +22,7 @@ type Measurement {
 	code ShortCode
 	grade Grade
 	tag Pattern["^[a-z][a-z0-9_]*$"]
-	dual Pattern["^a", "z$"]
+	dual Pattern["^a"]
 	seen_at Timestamp required
 	stamped Timestamp
 	on_date Date

@@ -21,7 +21,7 @@ import (
 
 func testSchema(t *testing.T) schema.Schema {
 	t.Helper()
-	s, res := schema.LoadString(t.Context(), `schema "snapshottest-self"
+	s, res := schema.LoadString(t.Context(), `schema "snapshottest_self"
 
 type Person {
 	id String primary
@@ -32,7 +32,7 @@ type Person {
 type Company {
 	id String primary
 }
-`, "snapshottest-self.yammm")
+`, "snapshottest_self.yammm")
 	if res.HasErrors() {
 		t.Fatalf("testSchema: %v", res.Err())
 	}

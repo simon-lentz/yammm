@@ -37,6 +37,8 @@ func TestCode_Category(t *testing.T) {
 	}{
 		{E_INTERNAL, CategorySentinel},
 		{E_INHERIT_CYCLE, CategorySchema},
+		{E_COMPOSITION_CYCLE, CategorySchema},
+		{E_INVALID_EDGE_PROPERTY_TYPE, CategorySchema},
 		{E_SYNTAX, CategorySyntax},
 		{E_IMPORT_RESOLVE, CategoryImport},
 		{E_IMPORT_CYCLE, CategoryImport},

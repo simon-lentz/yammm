@@ -11,7 +11,7 @@ func init() {
 	expr.InvariantExpression = func(inv any) expr.Expression {
 		return inv.(Invariant).expr //nolint:errcheck // each caller passes an Invariant
 	}
-	expr.PatternRegexps = func(constraint any) []*regexp.Regexp {
+	expr.PatternRegexp = func(constraint any) *regexp.Regexp {
 		return constraint.(PatternConstraint).compiled //nolint:errcheck // each caller passes a PatternConstraint
 	}
 }

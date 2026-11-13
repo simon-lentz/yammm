@@ -85,9 +85,9 @@ func (a *Adapter) ShapeForSchema(ctx context.Context, s schema.Schema) (*GraphSh
 		schema: s,
 	}
 
-	// A load refuses a repeated schema name (E_DUPLICATE_SCHEMA), but
-	// [SanitizeIdentifier] maps "geo-regions" and "geo_regions" to one label
-	// prefix, so two names in one closure reach this refusal.
+	// A load refuses a repeated schema name (E_DUPLICATE_SCHEMA), but a name
+	// holding the separator composes one label from two pairs, as schema "a"
+	// with B__C and schema "a__B" with C do, so a closure reaches this refusal.
 	seenLabels := make(map[string]schema.TypeID)
 	for t, label := range a.emittableTypes(ctx, s, collector) {
 		if first, dup := seenLabels[label]; dup {

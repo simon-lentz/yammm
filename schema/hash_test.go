@@ -263,14 +263,8 @@ func TestStructuralHash_ConstraintSensitivity(t *testing.T) {
 		// Enum values are sorted before hashing, so order must not matter.
 		{"enum order insensitive", schema.NewEnumConstraint([]string{"B", "A"}), schema.NewEnumConstraint([]string{"A", "B"}), true},
 		{"enum different count", schema.NewEnumConstraint([]string{"A"}), schema.NewEnumConstraint([]string{"A", "B"}), false},
-		{"pattern different patterns", schema.NewPatternConstraint([]*regexp.Regexp{regexp.MustCompile(`^[A-Z]+$`)}), schema.NewPatternConstraint([]*regexp.Regexp{regexp.MustCompile(`^[0-9]+$`)}), false},
-		// Pattern sets are sorted before hashing, so order must not matter.
-		{
-			"pattern order insensitive",
-			schema.NewPatternConstraint([]*regexp.Regexp{regexp.MustCompile(`^[A-Z]`), regexp.MustCompile(`[0-9]$`)}),
-			schema.NewPatternConstraint([]*regexp.Regexp{regexp.MustCompile(`[0-9]$`), regexp.MustCompile(`^[A-Z]`)}),
-			true,
-		},
+		{"pattern different patterns", schema.NewPatternConstraint(regexp.MustCompile(`^[A-Z]+$`)), schema.NewPatternConstraint(regexp.MustCompile(`^[0-9]+$`)), false},
+		{"pattern empty and none", schema.NewPatternConstraint(regexp.MustCompile("")), schema.NewPatternConstraint(nil), false},
 		{"vector dimension", schema.NewVectorConstraint(128), schema.NewVectorConstraint(256), false},
 		{"boolean vs string kind", schema.NewBooleanConstraint(), schema.NewStringConstraint(), false},
 		{"timestamp vs date kind", schema.NewTimestampConstraint(), schema.NewDateConstraint(), false},
@@ -464,8 +458,8 @@ func assertConstraintsMatch(t *testing.T, propA, propB schema.Property) {
 func TestStructuralHash_ConstraintFieldCoverage(t *testing.T) {
 	// Map of constraint type name → set of field names that are hashed.
 	// Each entry must correspond to a field on the concrete struct.
-	// "compiled" on PatternConstraint is derived from "patterns" and deliberately
-	// not hashed separately — the hash uses Patterns() which returns the source strings.
+	// "compiled" on PatternConstraint is hashed by whether it is nil, and
+	// "invalid" is derived from "pattern".
 	hashedFields := map[string]map[string]bool{
 		"StringConstraint": {
 			"minLen": true, // TestStructuralHash_ConstraintSensitivity ("string unbounded vs min")
@@ -494,9 +488,9 @@ func TestStructuralHash_ConstraintFieldCoverage(t *testing.T) {
 			"invalid": true, // derived from values; CheckConstraint refuses a constraint that sets it
 		},
 		"PatternConstraint": {
-			"patterns": true, // TestStructuralHash_ConstraintSensitivity ("pattern different patterns")
-			"compiled": true, // derived from patterns, not hashed independently
-			"invalid":  true, // derived from patterns; CheckConstraint refuses a constraint that sets it
+			"pattern":  true, // TestStructuralHash_ConstraintSensitivity ("pattern different patterns")
+			"compiled": true, // TestStructuralHash_ConstraintSensitivity ("pattern empty and none")
+			"invalid":  true, // derived from pattern; CheckConstraint refuses a constraint that sets it
 		},
 		"VectorConstraint": {
 			"dimension": true, // TestStructuralHash_ConstraintSensitivity ("vector dimension")
@@ -634,7 +628,7 @@ func buildVectorSchemaConstraintRich() schema.Schema {
 		makeProp("dt", schema.NewDateConstraint(), false, false),
 		makeProp("uid", schema.NewUUIDConstraint(), false, false),
 		makeProp("status", schema.NewEnumConstraint([]string{"ACTIVE", "INACTIVE"}), false, false),
-		makeProp("code", schema.NewPatternConstraint([]*regexp.Regexp{regexp.MustCompile(`^[A-Z]{3}$`)}), false, false),
+		makeProp("code", schema.NewPatternConstraint(regexp.MustCompile(`^[A-Z]{3}$`)), false, false),
 		makeProp("embedding", schema.NewVectorConstraint(128), false, false),
 		makeProp("tags", schema.ListLenBetween(schema.NewStringConstraint(), 1, 10), false, false),
 	}

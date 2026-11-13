@@ -184,5 +184,4 @@ schema/testdata/bench/scalars.yammm
 schema/testdata/bench/wide.yammm
 
 ## excluded (fails production parse by design; covered by its owning package tests)
-internal/format/testdata/golden/removed_reverse.yammm	E_REVERSE_CLAUSE_REMOVED
 internal/format/testdata/golden/semantically_invalid.yammm	E_INVALID_CONSTRAINT

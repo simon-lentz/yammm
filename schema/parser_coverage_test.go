@@ -257,7 +257,7 @@ type Thing {
 type Thing {
 	code Pattern["^[A-Z]+$", "^[0-9]+$"]
 }`,
-			wantOK: true,
+			wantOK: false,
 		},
 		{
 			name: "invalid regex",
@@ -878,10 +878,15 @@ func TestParse_SchemaNameVariations(t *testing.T) {
 			wantName: "test",
 		},
 		{
-			name:     "schema name with escape",
-			source:   `schema "my-schema"`,
+			name:     "schema name with an escape",
+			source:   `schema "my\x5fschema"`,
 			wantOK:   true,
-			wantName: "my-schema",
+			wantName: "my_schema",
+		},
+		{
+			name:   "schema name that is no identifier",
+			source: `schema "my-schema"`,
+			wantOK: false,
 		},
 	}
 
@@ -1438,26 +1443,38 @@ func TestParse_StringEscapeSequences(t *testing.T) {
 	tests := []parseCase{
 		{
 			name: "string with newline escape",
-			source: `schema "test\nwith\nnewlines"
-type Foo { id UUID primary }`,
+			source: `schema "test"
+type Foo {
+	id UUID primary
+	k Enum["test\nwith\nnewlines", "b"]
+}`,
 			wantOK: true,
 		},
 		{
 			name: "string with tab escape",
-			source: `schema "test\twith\ttabs"
-type Foo { id UUID primary }`,
+			source: `schema "test"
+type Foo {
+	id UUID primary
+	k Enum["test\twith\ttabs", "b"]
+}`,
 			wantOK: true,
 		},
 		{
 			name: "string with backslash escape",
-			source: `schema "test\\with\\backslashes"
-type Foo { id UUID primary }`,
+			source: `schema "test"
+type Foo {
+	id UUID primary
+	k Enum["test\\with\\backslashes", "b"]
+}`,
 			wantOK: true,
 		},
 		{
 			name: "string with quote escape",
-			source: `schema "test\"with\"quotes"
-type Foo { id UUID primary }`,
+			source: `schema "test"
+type Foo {
+	id UUID primary
+	k Enum["test\"with\"quotes", "b"]
+}`,
 			wantOK: true,
 		},
 		{
@@ -3136,26 +3153,4 @@ type Source {
 	_, result := parseSchema(t, source)
 	// This is valid syntax - exercises the using clause path
 	_ = result
-}
-
-// TestParse_ReverseClauseRemoved pins the removal at the schema load
-// surface: a schema carrying the clause fails to load with the named code,
-// never a bare syntax error.
-func TestParse_ReverseClauseRemoved(t *testing.T) {
-	t.Parallel()
-
-	const source = `schema "test"
-
-type Parent {
-	id String primary
-	--> CHILD (one) Child / parent (many)
-}
-
-type Child {
-	id String primary
-}`
-	_, result := schema.LoadString(t.Context(), source, "test.yammm")
-	require.True(t, result.HasErrors(), "a schema carrying the reverse clause must fail to load")
-	assert.True(t, result.HasCode(diag.E_REVERSE_CLAUSE_REMOVED),
-		"want E_REVERSE_CLAUSE_REMOVED, got: %s", result.String())
 }

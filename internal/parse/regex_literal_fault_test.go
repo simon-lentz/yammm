@@ -50,7 +50,7 @@ var regexSites = map[string]regexSite{
 			return fmt.Sprintf("E_INVALID_CONSTRAINT invalid regex pattern %q: %v", pattern, err)
 		},
 		valued: func(f *File) string {
-			if lit := f.Types[0].Properties[1].Constraint.PatternLits[0]; lit.Kept || lit.Regex != nil || lit.Text != "" {
+			if lit := f.Types[0].Properties[1].Constraint.PatternLit; lit.Kept || lit.Regex != nil || lit.Text != "" {
 				return fmt.Sprintf("Kept %v, Regex %v, Text %q", lit.Kept, lit.Regex, lit.Text)
 			}
 			return ""
@@ -143,68 +143,41 @@ func TestParse_ARefusedRegexTableHoldsBothVerdicts(t *testing.T) {
 	}
 }
 
-// TestParse_APatternWithNoTextIsCountedButNotCompiled pins the pattern limit
-// and the surrogate rule beside refused text. The limit counts every pattern
-// the source wrote. A pattern holding a NUL is compiled as written, so it is
-// held to the surrogate rule; one holding a byte that is no part of a
-// character is not compiled, so beside the limit nothing but the byte is
-// reported for it. The last rows write an escape and a raw byte that make one
-// character between them: the source holds the raw byte, so the pattern is not
-// compiled.
-func TestParse_APatternWithNoTextIsCountedButNotCompiled(t *testing.T) {
+// TestParse_APatternWithNoTextIsNotCompiled pins a pattern beside refused
+// text. A pattern holding a NUL or a mark is compiled as written; one holding a
+// byte that is no part of a character is not compiled, so nothing but the byte
+// is reported for it. The last row writes an escape and a raw byte that make
+// one character between them: the source holds the raw byte, so the pattern is
+// not compiled.
+func TestParse_APatternWithNoTextIsNotCompiled(t *testing.T) {
 	t.Parallel()
-	const overLimit = "E_INVALID_CONSTRAINT pattern constraint exceeds maximum of 2 patterns (got 3)"
-	const overLimitFour = "E_INVALID_CONSTRAINT pattern constraint exceeds maximum of 2 patterns (got 4)"
 	rows := map[string]struct {
-		patterns string
-		want     []string
+		pattern string
+		want    []string
 	}{
-		"a third pattern holding a NUL counts": {
-			"\"a\", \"b\", \"c\x00\"", []string{nulRefused, overLimit},
+		"a pattern holding a NUL":  {"\"c\x00\"", []string{nulRefused}},
+		"a pattern holding a mark": {"\"c\uFEFF\"", []string{markRefused}},
+		"a NUL that does not compile": {
+			"\"(\x00\"",
+			[]string{nulRefused, "E_INVALID_CONSTRAINT invalid regex pattern \"(\\x00\": error parsing regexp: missing closing ): `(\x00`"},
 		},
-		"a third pattern holding a mark counts": {
-			"\"a\", \"b\", \"c\uFEFF\"", []string{markRefused, overLimit},
-		},
-		"a third pattern holding a NUL that does not compile counts": {
-			"\"a\", \"b\", \"(\x00\"",
-			[]string{nulRefused, overLimit, "E_INVALID_CONSTRAINT invalid regex pattern \"(\\x00\": error parsing regexp: missing closing ): `(\x00`"},
-		},
-		"a third pattern holding an invalid byte counts": {
-			"\"a\", \"b\", \"c\xff\"", []string{invalidRefused, overLimit},
-		},
-		"a first pattern holding an invalid byte counts": {
-			"\"c\xff\", \"a\", \"b\"", []string{invalidRefused, overLimit},
-		},
-		"three patterns beside one holding an invalid byte": {
-			"\"c\xff\", \"a\", \"b\", \"d\"", []string{invalidRefused, overLimitFour},
-		},
-		"a surrogate beside a NUL": {
-			"\"\\\\x{D800}\x00\"",
-			[]string{nulRefused, "E_INVALID_CONSTRAINT " + SurrogateMessage("\\x{D800}\x00", 0xD800)},
-		},
-		"a surrogate beside an invalid byte": {
-			"\"\\\\x{D800}\xff\"", []string{invalidRefused},
-		},
-		"an escape and a raw byte that make one character": {
-			"\"\\xc3\xa9(\"", []string{invalidRefused},
-		},
-		"an escape and a raw byte that make one character, third": {
-			"\"a\", \"b\", \"\\xc3\xa9\"", []string{invalidRefused, overLimit},
-		},
+		"a pattern holding an invalid byte":                {"\"c\xff\"", []string{invalidRefused}},
+		"a surrogate escape beside a NUL":                  {"\"\\\\x{D800}\x00\"", []string{nulRefused}},
+		"a surrogate escape beside an invalid byte":        {"\"\\\\x{D800}\xff\"", []string{invalidRefused}},
+		"an escape and a raw byte that make one character": {"\"\\xc3\xa9(\"", []string{invalidRefused}},
 	}
 	for name, row := range rows {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 			want := slices.Clone(row.want)
 			slices.Sort(want)
-			f, issues := Parse([]byte(checkSource("p Pattern["+row.patterns+"]")), location.NewSourceID("s.yammm"))
+			f, issues := Parse([]byte(checkSource("p Pattern["+row.pattern+"]")), location.NewSourceID("s.yammm"))
 			if got := issueLines(issues); !slices.Equal(got, want) {
 				t.Errorf("issues:\n  %s\nwant:\n  %s", strings.Join(got, "\n  "), strings.Join(want, "\n  "))
 			}
-			for _, lit := range f.Types[0].Properties[1].Constraint.PatternLits {
-				if _, refused := nextTextFault(lit.Raw, 0); refused && (lit.Kept || lit.Regex != nil || lit.Text != "") {
-					t.Errorf("the refused pattern %q has a value: Kept %v, Regex %v, Text %q", lit.Raw, lit.Kept, lit.Regex, lit.Text)
-				}
+			lit := f.Types[0].Properties[1].Constraint.PatternLit
+			if _, refused := nextTextFault(lit.Raw, 0); refused && (lit.Kept || lit.Regex != nil || lit.Text != "") {
+				t.Errorf("the refused pattern %q has a value: Kept %v, Regex %v, Text %q", lit.Raw, lit.Kept, lit.Regex, lit.Text)
 			}
 		})
 	}

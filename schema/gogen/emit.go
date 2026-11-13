@@ -297,8 +297,8 @@ func (g *generator) emitComposition(rel schema.Relation, fields map[string]strin
 	}
 	field := fields[rel.FieldName()]
 	// Every composition is a slice, (one) included: an instance document holds
-	// an array for every multiplicity, and a slice also keeps a required-one
-	// composition cycle legal as a Go type.
+	// an array for every multiplicity, and a slice also keeps a composition
+	// cycle legal as a Go type.
 	fmt.Fprintf(g.buf, "%s []*%s %s\n", field, childName, jsonTag(rel.FieldName(), relationOmit))
 	return nil
 }

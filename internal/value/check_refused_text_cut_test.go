@@ -35,7 +35,7 @@ func TestCheck_ARefusedStringIsQuotedCutToItsHead(t *testing.T) {
 			c    schema.Constraint
 		}{
 			{"string", schema.NewStringConstraint()},
-			{"string for pattern", schema.NewPatternConstraint([]*regexp.Regexp{regexp.MustCompile("a")})},
+			{"string for pattern", schema.NewPatternConstraint(regexp.MustCompile("a"))},
 			{"string for enum", schema.NewEnumConstraint([]string{"a", "b"})},
 			{"date string or time.Time", schema.NewDateConstraint()},
 			{"timestamp string or time.Time", schema.NewTimestampConstraint()},
@@ -123,7 +123,7 @@ func TestCheck_ARefusedValueIsQuoted(t *testing.T) {
 	}{
 		{"UUID", value.Check("xyz", schema.NewUUIDConstraint()), `invalid UUID: "xyz"`},
 		{"enum", value.Check("c", schema.NewEnumConstraint([]string{"a", "b"})), `value "c" not in enum [a b]`},
-		{"pattern", value.Check("b", schema.NewPatternConstraint([]*regexp.Regexp{regexp.MustCompile("^a$")})), `value "b" does not match pattern ^a$`},
+		{"pattern", value.Check("b", schema.NewPatternConstraint(regexp.MustCompile("^a$"))), `value "b" does not match pattern ^a$`},
 		{
 			"a literal that is no number", coerced(value.Coerce(json.Number(long), schema.NewFloatConstraint())),
 			`cannot coerce json.Number "` + long[:32] + `"… (100 bytes) to float64: no JSON number literal`,
@@ -131,7 +131,7 @@ func TestCheck_ARefusedValueIsQuoted(t *testing.T) {
 		{"a long UUID", value.Check(long, schema.NewUUIDConstraint()), `invalid UUID: ` + cut},
 		{"a long enum value", value.Check(long, schema.NewEnumConstraint([]string{"a", "b"})), `value ` + cut + ` not in enum [a b]`},
 		{
-			"a long pattern value", value.Check(long, schema.NewPatternConstraint([]*regexp.Regexp{regexp.MustCompile("^a$")})),
+			"a long pattern value", value.Check(long, schema.NewPatternConstraint(regexp.MustCompile("^a$"))),
 			`value ` + cut + ` does not match pattern ^a$`,
 		},
 		{"a long date", value.Check(long, schema.NewDateConstraint()), `invalid date format: ` + cut + ` (expected YYYY-MM-DD)`},

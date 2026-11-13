@@ -454,8 +454,8 @@ func TestFormatting_MultibyteDocumentEditStartsAtTheOrigin(t *testing.T) {
 func TestIntegration_FormattingRoundTrip_Multibyte(t *testing.T) {
 	t.Parallel()
 
-	unformatted := "schema \"日本語\"\n\ntype   Person{\n    name String  primary // 名前\n    tag String\n}\n// 最後 😀\n"
-	expected := "schema \"日本語\"\n\ntype Person {\n\tname String primary // 名前\n\ttag  String\n}\n// 最後 😀\n"
+	unformatted := "schema \"nihongo\" // 日本語\n\ntype   Person{\n    name String  primary // 名前\n    tag String\n}\n// 最後 😀\n"
+	expected := "schema \"nihongo\" // 日本語\n\ntype Person {\n\tname String primary // 名前\n\ttag  String\n}\n// 最後 😀\n"
 
 	tmpDir := t.TempDir()
 	filePath := filepath.Join(tmpDir, "test.yammm")
@@ -477,9 +477,9 @@ func TestIntegration_FormattingRoundTrip_Multibyte(t *testing.T) {
 	assert.Equal(t, expected, result, "round-trip result != expected")
 
 	ctx := t.Context()
-	s, _ := schema.LoadString(ctx, result, "test.yammm")
-	require.NoError(t, err, "formatted output failed to parse")
-	assert.Equal(t, "日本語", s.Name(), "schema name mismatch")
+	s, res := schema.LoadString(ctx, result, "test.yammm")
+	require.False(t, res.HasErrors(), "formatted output failed to load: %s", res)
+	assert.Equal(t, "nihongo", s.Name(), "schema name mismatch")
 }
 
 func TestCompletion_MultibyteDocument_Integration(t *testing.T) {

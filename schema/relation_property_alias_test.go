@@ -1,6 +1,7 @@
 package schema_test
 
 import (
+	"slices"
 	"testing"
 
 	"github.com/simon-lentz/yammm/diag"
@@ -141,8 +142,15 @@ type County {
 	if !result.HasErrors() {
 		t.Fatal("a Vector-aliased edge property must fail the load")
 	}
-	if !result.HasCode(diag.E_INVALID_CONSTRAINT) {
-		t.Errorf("want E_INVALID_CONSTRAINT, got: %v", result.Err())
+	issues := slices.Collect(result.Issues())
+	if len(issues) != 1 || issues[0].Code() != diag.E_INVALID_EDGE_PROPERTY_TYPE {
+		t.Fatalf("want one E_INVALID_EDGE_PROPERTY_TYPE, got: %v", result)
+	}
+	if want := `relationship property "e" cannot use Vector type`; issues[0].Message() != want {
+		t.Errorf("message %q, want %q", issues[0].Message(), want)
+	}
+	if line := issues[0].Span().Start.Line; line != 12 {
+		t.Errorf("the issue stands on line %d, want the property's line 12", line)
 	}
 }
 
@@ -167,7 +175,7 @@ type County {
 	if !result.HasErrors() {
 		t.Fatal("a List-aliased edge property must fail the load")
 	}
-	if !result.HasCode(diag.E_LIST_ON_EDGE) {
-		t.Errorf("want E_LIST_ON_EDGE, got: %v", result.Err())
+	if !result.HasCode(diag.E_INVALID_EDGE_PROPERTY_TYPE) {
+		t.Errorf("want E_INVALID_EDGE_PROPERTY_TYPE, got: %v", result.Err())
 	}
 }

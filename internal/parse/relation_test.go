@@ -226,40 +226,6 @@ func TestRelation_NamesAreUpperSnake(t *testing.T) {
 	}
 }
 
-// TestRelation_ReverseSeparatorIsNotARegex pins the lexical hazard the
-// removed clause's recognizer keeps: its separator is a slash, and a slash
-// pair on one line is a regex literal. A clause per line must still lex as
-// a separator — evidenced by the named removal diagnostic, never a regex
-// or bare syntax error.
-func TestRelation_ReverseSeparatorIsNotARegex(t *testing.T) {
-	src := relSource("--> WHEELS Wheel / car\n\t--> SPARES Wheel / owner")
-	file, issues := Parse([]byte(src), location.NewSourceID("s.yammm"))
-	if len(issues) != 2 {
-		t.Fatalf("got %d issues, want one removal diagnostic per clause: %v", len(issues), issues)
-	}
-	for i, iss := range issues {
-		if iss.Code() != diag.E_REVERSE_CLAUSE_REMOVED {
-			t.Errorf("issue %d = %s, want %s", i, iss.Code(), diag.E_REVERSE_CLAUSE_REMOVED)
-		}
-	}
-	rels := file.Types[0].Relations
-	if len(rels) != 2 {
-		t.Fatalf("got %d relations, want 2 — the relations survive their removed clauses", len(rels))
-	}
-
-	// Two reverse separators on ONE line is where the regex rule wins and
-	// swallows everything between the slashes.
-	oneLine := relSource("--> WHEELS Wheel / car\t--> SPARES Wheel / owner")
-	_, issues = Parse([]byte(oneLine), location.NewSourceID("s.yammm"))
-	if len(issues) == 0 {
-		t.Fatal("two reverse separators on one line parsed cleanly, want the regex reading")
-	}
-	swallowed := "/ car\t--> SPARES Wheel /"
-	if got := oneLine[issues[0].Span().Start.Byte:issues[0].Span().End.Byte]; got != swallowed {
-		t.Errorf("first issue covers %q, want the swallowed regex %q", got, swallowed)
-	}
-}
-
 // TestRelation_RecoveryTreatsArrowsAsMemberStarts pins that a broken member
 // before a relation does not swallow it.
 func TestRelation_RecoveryTreatsArrowsAsMemberStarts(t *testing.T) {
@@ -307,48 +273,5 @@ func TestRelation_SpansCoverTheWholeDeclaration(t *testing.T) {
 	}
 	if got := src[rel.NameSpan.Start.Byte:rel.NameSpan.End.Byte]; got != "WHEELS" {
 		t.Errorf("name span covers %q, want WHEELS", got)
-	}
-}
-
-// TestRelation_ReverseClauseIsRejected pins the removal: every clause
-// shape draws E_REVERSE_CLAUSE_REMOVED at the backref name's span, and the
-// relation survives — its own semantic checks must still run.
-func TestRelation_ReverseClauseIsRejected(t *testing.T) {
-	for _, tc := range []struct {
-		name, member string
-		wantRemoved  bool
-	}{
-		{"bare name", "--> R Wheel /back", true},
-		{"name with multiplicity", "--> R Wheel /back (one:many)", true},
-		{"refused multiplicity still names the removal", "--> R Wheel /back (many:one)", true},
-		{"composition clause", "*-> C Wheel /back (one)", true},
-		{"no clause at all", "--> R Wheel", false},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			src := relSource(tc.member)
-			file, issues := Parse([]byte(src), location.NewSourceID("s.yammm"))
-			if len(file.Types) == 0 || len(file.Types[0].Relations) != 1 {
-				t.Fatal("the relation must survive its removed clause")
-			}
-			var removed bool
-			for _, iss := range issues {
-				if iss.Code() == diag.E_REVERSE_CLAUSE_REMOVED {
-					removed = true
-					if got := src[iss.Span().Start.Byte:iss.Span().End.Byte]; got != "back" {
-						t.Errorf("diagnostic span covers %q, want the backref name", got)
-					}
-					const wantMessage = `the reverse clause was removed in v0.15.0; delete the "/", the name "back" and any multiplicity after it`
-					if got := iss.Message(); got != wantMessage {
-						t.Errorf("message = %q, want %q", got, wantMessage)
-					}
-				}
-			}
-			if removed != tc.wantRemoved {
-				t.Errorf("removal diagnostic present = %v, want %v: %v", removed, tc.wantRemoved, issues)
-			}
-			if !tc.wantRemoved && len(issues) != 0 {
-				t.Errorf("clause-free member drew %v", issues)
-			}
-		})
 	}
 }

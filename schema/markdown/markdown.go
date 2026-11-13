@@ -595,7 +595,7 @@ func (g *generator) displayName(sch schema.Schema, t schema.Type) (string, strin
 	if tag, ok := schema.AddressableTag(g.entry, t.ID()); ok {
 		return tag, escapeInline(tag)
 	}
-	name := printableName(sch.Name())
+	name := sch.Name()
 	return t.Name() + " (" + name + ")", t.Name() + " (" + escapeInline(name) + ")"
 }
 
@@ -604,18 +604,17 @@ func (g *generator) displayName(sch schema.Schema, t schema.Type) (string, strin
 func (g *generator) buildOutline() {
 	var alloc anchorAllocator
 	add := func(e outlineEntry) {
-		e.md = keepTrailingSpaces(e.md)
 		e.anchor = alloc.allocate(e.text)
 		g.outline = append(g.outline, e)
 	}
-	entryName := printableName(g.entry.Name())
+	entryName := g.entry.Name()
 	add(outlineEntry{kind: kindTitle, level: 1, text: "Schema " + entryName, md: "Schema " + escapeInline(entryName)})
 	if g.cfg.classDiagram {
 		add(outlineEntry{kind: kindClassDiagram, level: 2, text: "Class Diagram", md: "Class Diagram"})
 	}
 	g.addSchemaTypes(add, g.entry, true)
 	for _, sch := range g.closure[1:] {
-		name := printableName(sch.Name())
+		name := sch.Name()
 		text, md := "Schema "+name, "Schema "+escapeInline(name)
 		if alias, ok := g.entry.FindImportAlias(sch.SourceID()); ok {
 			text += " (imported as " + alias + ")"

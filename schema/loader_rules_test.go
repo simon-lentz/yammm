@@ -13,13 +13,14 @@ import (
 	"github.com/simon-lentz/yammm/schema"
 )
 
-// An empty schema name is an authoring error, refused where it was written.
-func TestLoad_EmptySchemaNameIsRefused(t *testing.T) {
+// A schema name that is not an identifier is an authoring error, refused where
+// it was written.
+func TestLoad_ASchemaNameThatIsNoIdentifierIsRefused(t *testing.T) {
 	t.Parallel()
 
-	s, res := schema.LoadString(t.Context(), "schema \"\"\n\ntype T {\n    id String primary\n}\n", "s.yammm")
+	s, res := schema.LoadString(t.Context(), "schema \"my schema\"\n\ntype T {\n    id String primary\n}\n", "s.yammm")
 	if !s.IsZero() {
-		t.Error("a nameless schema must not load")
+		t.Error("a schema whose name is no identifier must not load")
 	}
 	if !res.HasCode(diag.E_INVALID_NAME) {
 		t.Errorf("want E_INVALID_NAME; got %v", res.Err())

@@ -21,7 +21,8 @@ func TestServer_SymlinkedOpenPositionsDiagnosticsIdentically(t *testing.T) {
 		"\n" +
 		"type Doc {\n" +
 		"\tid String primary\n" +
-		"\ttitle Pattern[\"🎉日\", \"🎉日\", \"🎉日\", \"(\"]\n" +
+		"\ttitle String\n" +
+		"\t! \"🎉日🎉日🎉日\" title =~ /(/\n" +
 		"}\n"
 
 	base, err := filepath.EvalSymlinks(t.TempDir())
@@ -69,10 +70,9 @@ func TestServer_SymlinkedOpenPositionsDiagnosticsIdentically(t *testing.T) {
 		return cols
 	}
 
-	// The correct UTF-16 columns for the pattern-limit diagnostic and the
-	// fourth pattern's compile diagnostic. Rune columns — what a registry miss
-	// falls back to — would be [7 37 33 36].
-	want := []uint32{7, 40, 36, 39}
+	// The correct UTF-16 columns of the regex literal's compile diagnostic.
+	// Rune columns — what a registry miss falls back to — would be [21 24].
+	want := []uint32{24, 27}
 
 	if got := columnsAt(realDir, realPath); !slices.Equal(got, want) {
 		t.Errorf("columns at the real path = %v, want %v", got, want)

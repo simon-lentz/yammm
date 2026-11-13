@@ -166,6 +166,10 @@ var (
 	// E_INVALID_COMPOSITION_TARGET indicates a composition targets an invalid type.
 	E_INVALID_COMPOSITION_TARGET = NewCode("E_INVALID_COMPOSITION_TARGET", CategorySchema)
 
+	// E_COMPOSITION_CYCLE indicates a cycle whose every composition is
+	// required, so no instance on it is finite.
+	E_COMPOSITION_CYCLE = NewCode("E_COMPOSITION_CYCLE", CategorySchema)
+
 	// E_INVALID_CONSTRAINT indicates a constraint definition the load refuses, or,
 	// at Warning, a minus sign before the unbounded marker, which has no effect.
 	E_INVALID_CONSTRAINT = NewCode("E_INVALID_CONSTRAINT", CategorySchema)
@@ -181,14 +185,9 @@ var (
 	// matches any literal of its kind.
 	E_INVARIANT_CONFLICT = NewCode("E_INVARIANT_CONFLICT", CategorySchema)
 
-	// E_REVERSE_CLAUSE_REMOVED indicates a schema still carries the
-	// reverse clause ("/ name", with an optional multiplicity) the language
-	// removed in v0.15.0.
-	E_REVERSE_CLAUSE_REMOVED = NewCode("E_REVERSE_CLAUSE_REMOVED", CategorySchema)
-
 	// E_INVALID_NAME indicates a name the schema refuses: its format, a reserved
 	// spelling, or an invariant's read of a relation in a casing other than its
-	// two spellings.
+	// declared name.
 	E_INVALID_NAME = NewCode("E_INVALID_NAME", CategorySchema)
 
 	// E_UPSTREAM_FAIL indicates an imported schema failed to compile.
@@ -214,8 +213,9 @@ var (
 	// association and a composition sharing a name.
 	E_RELATION_COLLISION = NewCode("E_RELATION_COLLISION", CategorySchema)
 
-	// E_LIST_ON_EDGE indicates a List type was used in a relationship property.
-	E_LIST_ON_EDGE = NewCode("E_LIST_ON_EDGE", CategorySchema)
+	// E_INVALID_EDGE_PROPERTY_TYPE indicates a relationship property of a type
+	// an edge does not hold: a List or a Vector, written or through a datatype.
+	E_INVALID_EDGE_PROPERTY_TYPE = NewCode("E_INVALID_EDGE_PROPERTY_TYPE", CategorySchema)
 
 	// E_INVALID_PRIMARY_KEY_TYPE indicates a type not allowed as a primary key.
 	// Only String, UUID, Date, and Timestamp are permitted as primary key types.

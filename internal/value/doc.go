@@ -158,6 +158,6 @@
 // judges or renders, and diag for [diag.QuoteValue], the rule a message that
 // repeats a value follows. They and [Scalar] reach github.com/google/uuid,
 // whose UUID each reads as itself. [Check] reaches internal/expr for the
-// compiled patterns of a Pattern constraint. The edge is one-directional: schema does not import
+// compiled pattern of a Pattern constraint. The edge is one-directional: schema does not import
 // this package, and adding that edge would create a cycle.
 package value

@@ -55,7 +55,7 @@ Each issue contains:
 One load pass reports every *independent* error in a schema and its import closure -- each exactly once:
 
 - **All import failures are reported**, each at its own declaration, save `E_IMPORT_NOT_ALLOWED`, one issue at the first import the parser keeps; a broken import does not hide its siblings, and the schema's own types and datatypes are still judged: a check of one is withheld only when it reads a reference through the failed import, whether the declaration's own, one in a member or a datatype it reads, or one in a type's `extends` chain. A shared broken import (diamond graphs) is compiled once: its own errors appear once, plus one `E_UPSTREAM_FAIL` per import declaration that names it.
-- **References through a failed import are deferred, not re-blamed.** The import failure is the single root-cause diagnostic; `extends`, relation targets, and property datatypes reached through that alias stay silent until the import is fixed. A qualifier that names no declared import at all is a genuine `E_UNKNOWN_TYPE`.
+- **References through a failed import are deferred, not re-blamed.** The import failure is the single root-cause diagnostic; `extends`, relation targets, property datatypes, and a datatype's own `List` element (`type Codes = List<lib.Code>`) reached through that alias stay silent until the import is fixed. A qualifier that names no declared import at all is a genuine `E_UNKNOWN_TYPE`.
 - **An alias binds once (keep-first).** A repeated alias is reported once (`E_DUPLICATE_IMPORT`) and the later declaration is inert; references resolve against the first binding.
 - **A name binds once (keep-first).** Types and datatypes share one namespace. Each later declaration of a name draws `E_DUPLICATE_TYPE` and is not completed: until the duplicate is gone its body draws no issue but the parser's. A reference that reads a declaration refused because the other kind holds the name stays silent.
 - **The inheritance merge reports no conflict on a member of unknown type.** A property or edge property has an unknown type when the parser could not build the type or when the type reads a name that did not resolve; that cause is already reported, once. On each type a property reaches with such a definition, the property's definitions draw no `E_PROPERTY_CONFLICT`. On each type a relation reaches with an unresolved target or such an edge property, the definitions of that relation kind draw no `E_RELATION_COLLISION`. The answer is the same in any order of the `extends` clause.
@@ -119,19 +119,19 @@ The all-or-nothing contract is unchanged: any error still yields a zero schema.
 | `E_PROPERTY_RELATION_COLLISION` | A property's lower-cased name equals a relation's field name |
 | `E_INVALID_ASSOCIATION_TARGET` | Association targets an invalid type, or a part type declares or inherits an association |
 | `E_INVALID_COMPOSITION_TARGET` | Composition targets an invalid type |
+| `E_COMPOSITION_CYCLE` | A cycle of compositions whose every link is required, which no finite instance satisfies; make one link optional |
 | `E_INVALID_CONSTRAINT` | A constraint definition is invalid; at Warning, a `-_` bound whose minus sign has no effect |
 | `E_INVALID_INVARIANT` | An invariant's expression or message is invalid |
 | `E_DUPLICATE_INVARIANT` | One invariant message declared twice on a type |
 | `E_INVARIANT_CONFLICT` | Two inherited definitions of one invariant message differ (a literal with no value matches any literal of its kind) |
-| `E_REVERSE_CLAUSE_REMOVED` | Schema carries the reverse clause removed in v0.15.0 (v0.15+) |
-| `E_INVALID_NAME` | A name the schema refuses: a relation name that is not UPPER_SNAKE, an empty schema name, a property or relation field named `self`, or an invariant reading a relation in a casing other than its name or field name |
+| `E_INVALID_NAME` | A name the schema refuses: a relation name that is not UPPER_SNAKE, a schema name that is not an identifier (an ASCII letter, then letters, digits and underscores), a property named `self`, or an invariant reading a relation in a casing other than its declared name |
 | `E_UPSTREAM_FAIL` | Imported schema failed to compile |
 | `E_PROPERTY_CONFLICT` | Conflicting property definitions from inheritance |
 | `E_UNKNOWN_TYPE` | Referenced type or datatype not found (`extends`, relation target, a property datatype, or a datatype declaration's reference such as a `List` element) |
 | `E_DUPLICATE_TYPE` | A name declared more than once in one schema. Types and datatypes share one namespace, so a type and a datatype of one name draw it too. The issue stands at each later declaration and names the first |
 | `E_DUPLICATE_SCHEMA` | Two schemas in one load declare one name, and both compile with no error. A schema with an error takes no name |
 | `E_RELATION_COLLISION` | A type carries two relation definitions under one field name that do not merge: an inherited one that differs from another it carries, or an association and a composition (two relations one type declares under one exact name are `E_DUPLICATE_RELATION`) |
-| `E_LIST_ON_EDGE` | List type used in relationship property |
+| `E_INVALID_EDGE_PROPERTY_TYPE` | A relationship property of a type an edge does not hold: a `List` or a `Vector`, written or through a datatype |
 | `E_INVALID_PRIMARY_KEY_TYPE` | Type not allowed as primary key |
 | `E_NO_PRIMARY_KEY` | Concrete type declares or inherits no primary key |
 | `E_LOAD_IO_FAILURE` | I/O error during schema loading, or a load whose arguments or options the loader refuses |

@@ -288,9 +288,9 @@ func (a *Adapter) DiffIndexes(
 
 		// A definition already served by a constraint's backing index SATISFIES
 		// the declaration rather than blocking it: the index exists and does the
-		// work, it merely carries the constraint's name. Declaring @@index over a
-		// primary key is legal in the DSL, so this is reachable from a valid
-		// schema — and no action could clear it, since dropping the backing index
+		// work, it merely carries the constraint's name. A valid schema reaches
+		// this when the emitters of one index disagree and one keys on its
+		// property alone — and no action could clear it, since dropping the backing index
 		// means dropping the primary key. Reporting drift here would make a
 		// fully-applied schema diff dirty forever.
 		//

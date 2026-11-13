@@ -14,16 +14,26 @@ import (
 	"github.com/simon-lentz/yammm/internal/yammmtest"
 )
 
-// wantDiagnosticStarts holds the fixture line's diagnostic columns in UTF-16
-// units. The pattern-limit diagnostic starts at the Pattern construct and the
-// compile diagnostic at the fourth pattern, where bytes, runes and units disagree:
+// rangeLine is line 5 of the fixture. Its regex literal does not compile, and
+// the diagnostic starts at the literal, where bytes, runes and units disagree:
 //
-//	title Pattern["🎉日", "🎉日", "🎉日", "("]
-//	       ^7                                     every count
-//	                                    ^36       UTF-16 units
-//	                                    ^48       bytes
-//	                                    ^33       runes
-var wantDiagnosticStarts = []uint32{7, 36}
+//	! "🎉日🎉日🎉日" title =~ /(/
+//	                         ^24   UTF-16 units
+//	                         ^36   bytes
+//	                         ^21   runes
+const rangeLine = "\t! \"🎉日🎉日🎉日\" title =~ /(/"
+
+// rangeSource is the fixture both range tests analyze.
+const rangeSource = "schema \"ranges\"\n" +
+	"\n" +
+	"type Doc {\n" +
+	"\tid String primary\n" +
+	"\ttitle String\n" +
+	rangeLine + "\n" +
+	"}\n"
+
+// wantDiagnosticStarts holds the fixture's diagnostic columns in UTF-16 units.
+var wantDiagnosticStarts = []uint32{24}
 
 // A parse diagnostic's span survives the conversion into an editor range.
 //
@@ -34,14 +44,9 @@ var wantDiagnosticStarts = []uint32{7, 36}
 func TestAnalyze_DiagnosticRangesConvertFromParseSpans(t *testing.T) {
 	t.Parallel()
 
-	// The defect sits after a four-byte emoji and a three-byte kanji on its own
-	// line, so the byte column, the rune column and the UTF-16 column all differ.
-	const src = "schema \"ranges\"\n" +
-		"\n" +
-		"type Doc {\n" +
-		"\tid String primary\n" +
-		"\ttitle Pattern[\"🎉日\", \"🎉日\", \"🎉日\", \"(\"]\n" +
-		"}\n"
+	// The defect sits after four-byte emoji and three-byte kanji on its line,
+	// so the byte column, the rune column and the UTF-16 column all differ.
+	const src = rangeSource
 
 	dir := t.TempDir()
 	path := filepath.Join(dir, "main.yammm")
@@ -91,12 +96,7 @@ func TestAnalyze_DiagnosticRangesConvertFromParseSpans(t *testing.T) {
 func TestAnalyze_DiagnosticRangesConvertAcrossSymlinkedPaths(t *testing.T) {
 	t.Parallel()
 
-	const src = "schema \"ranges\"\n" +
-		"\n" +
-		"type Doc {\n" +
-		"\tid String primary\n" +
-		"\ttitle Pattern[\"🎉日\", \"🎉日\", \"🎉日\", \"(\"]\n" +
-		"}\n"
+	const src = rangeSource
 
 	// Spell the base as the filesystem lists it, so the symlink below is the
 	// only indirection in play.
@@ -139,7 +139,7 @@ func TestAnalyze_DiagnosticRangesConvertAcrossSymlinkedPaths(t *testing.T) {
 func TestAnalyze_DiagnosticRangeFixtureDistinguishesItsCounts(t *testing.T) {
 	t.Parallel()
 
-	const line = "\ttitle Pattern[\"🎉日\", \"🎉日\", \"🎉日\", \"(\"]"
+	line := rangeLine
 	bytes := len(line)
 	runes := utf8.RuneCountInString(line)
 	units := len(utf16.Encode([]rune(line)))

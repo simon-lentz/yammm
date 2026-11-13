@@ -505,12 +505,12 @@ func TestRecovery_ImportFailureIsAnError(t *testing.T) {
 // these rows.
 func TestRecovery_UnterminatedGroupsAreReported(t *testing.T) {
 	tests := []struct {
-		name        string
-		member      string
-		wantProps   int
-		wantIssues  int
-		wantAnchor  string
-		wantBareAnn string // the annotation name a discarded argument list leaves behind
+		name       string
+		member     string
+		wantProps  int
+		wantIssues int
+		wantAnchor string
+		dropsAnn   bool // the annotation whose argument list failed is left out
 	}{
 		{name: "length bounds", member: "s String[1, 2", wantIssues: 1, wantAnchor: "}"},
 		{name: "numeric bounds", member: "n Integer[1, 2", wantIssues: 1, wantAnchor: "}"},
@@ -518,10 +518,10 @@ func TestRecovery_UnterminatedGroupsAreReported(t *testing.T) {
 		{name: "pattern list", member: "p Pattern[\"^a$\"", wantIssues: 1, wantAnchor: "}"},
 		{name: "vector dimensions", member: "v Vector[128", wantIssues: 1, wantAnchor: "}"},
 		{name: "list element", member: "l List<String", wantIssues: 1, wantAnchor: "}"},
-		// The property survives carrying a bare @a the source never wrote.
+		// The property survives, and the annotation whose list failed does not.
 		{
 			name: "annotation arguments", member: "id String primary @a(x",
-			wantProps: 1, wantIssues: 1, wantAnchor: "(", wantBareAnn: "a",
+			wantProps: 1, wantIssues: 1, wantAnchor: "(", dropsAnn: true,
 		},
 		{
 			name: "multiplicity", member: "--> WHEELS (many Wheel",
@@ -550,13 +550,11 @@ func TestRecovery_UnterminatedGroupsAreReported(t *testing.T) {
 			if got := len(file.Types[0].Properties); got != tc.wantProps {
 				t.Fatalf("recorded %d properties, want %d", got, tc.wantProps)
 			}
-			if tc.wantBareAnn == "" {
+			if !tc.dropsAnn {
 				return
 			}
-			anns := file.Types[0].Properties[0].Annotations
-			if len(anns) != 1 || anns[0].Name != tc.wantBareAnn || anns[0].HasParens || len(anns[0].Args) != 0 {
-				t.Errorf("annotations = %+v, want one bare @%s — the fabricated shape this row records",
-					anns, tc.wantBareAnn)
+			if anns := file.Types[0].Properties[0].Annotations; len(anns) != 0 {
+				t.Errorf("annotations = %+v, want none: the one whose list failed is left out", anns)
 			}
 		})
 	}
@@ -634,8 +632,8 @@ func assertNodeSpansWithinSource(t *testing.T, src string, f *File) {
 		for _, lit := range c.EnumLits {
 			check(what+" enum value", lit.Span)
 		}
-		for _, lit := range c.PatternLits {
-			check(what+" pattern", lit.Span)
+		if c.PatternLit != nil {
+			check(what+" pattern", c.PatternLit.Span)
 		}
 		if c.DimsLit != nil {
 			check(what+" dimensions", c.DimsLit.Span)

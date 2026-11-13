@@ -505,97 +505,66 @@ func (c EnumConstraint) NarrowsTo(child Constraint) bool {
 
 func (EnumConstraint) IsResolved() bool { return true }
 
-// PatternConstraint constrains string values to match one or more regex patterns.
-// All patterns must match (conjunction semantics). The DSL states at most two,
-// and [CheckConstraint] refuses more.
+// PatternConstraint constrains string values to those its one regex pattern
+// matches. A match is a search: the pattern matches anywhere in the value
+// unless it is anchored. The zero PatternConstraint holds no pattern, and
+// [CheckConstraint] refuses it.
 type PatternConstraint struct {
-	patterns []string         // source pattern strings (public API)
-	compiled []*regexp.Regexp // compiled patterns (internal validation)
-	invalid  string           // the first source regexp.Compile refuses, with its error
+	pattern  string         // the source text
+	compiled *regexp.Regexp // nil when the constraint holds no pattern
+	invalid  string         // why regexp.Compile refuses the source, with its error
 }
 
-// NewPatternConstraint creates a PatternConstraint holding every pattern given,
-// each non-nil. A pattern means [regexp.Compile] of its source text, as a
-// .yammm source compiles it, so each is compiled again from its source: a
-// regexp built with [regexp.CompilePOSIX] or [regexp.Regexp.Longest] matches
-// by the source's Perl reading. A source that reading refuses, which POSIX
-// syntax can accept (a**), is kept as given, and [CheckConstraint] refuses the
-// constraint as the DSL refuses the pattern. It refuses a pattern writing a
-// surrogate code point with a \x{…} escape too.
-func NewPatternConstraint(patterns []*regexp.Regexp) PatternConstraint {
-	c := PatternConstraint{
-		patterns: make([]string, len(patterns)),
-		compiled: make([]*regexp.Regexp, len(patterns)),
+// NewPatternConstraint creates a PatternConstraint holding pattern. A pattern
+// means [regexp.Compile] of its source text, as a .yammm source compiles it, so
+// it is compiled again from its source: a regexp built with
+// [regexp.CompilePOSIX] or [regexp.Regexp.Longest] matches by the source's Perl
+// reading. A source that reading refuses, which POSIX syntax can accept (a**),
+// is kept as given, and [CheckConstraint] refuses the constraint as the DSL
+// refuses the pattern. A nil pattern gives a constraint that holds none.
+func NewPatternConstraint(pattern *regexp.Regexp) PatternConstraint {
+	if pattern == nil {
+		return PatternConstraint{}
 	}
-	for i, re := range patterns {
-		c.patterns[i] = re.String()
-		perl, err := regexp.Compile(c.patterns[i])
-		if err != nil {
-			perl = re
-			if c.invalid == "" {
-				c.invalid = fmt.Sprintf("invalid regex pattern %q: %v", c.patterns[i], err)
-			}
-		} else if r, found := parse.SurrogateEscape(c.patterns[i]); found && c.invalid == "" {
-			c.invalid = parse.SurrogateMessage(c.patterns[i], r)
-		}
-		c.compiled[i] = perl
+	c := PatternConstraint{pattern: pattern.String()}
+	perl, err := regexp.Compile(c.pattern)
+	if err != nil {
+		perl = pattern
+		c.invalid = fmt.Sprintf("invalid regex pattern %q: %v", c.pattern, err)
 	}
+	c.compiled = perl
 	return c
 }
 
 // parsedPatternConstraint creates a PatternConstraint that keeps compiled, the
-// regexps internal/parse built with [regexp.Compile] from the source's
-// patterns and judged there. It takes the slice as its own.
-func parsedPatternConstraint(compiled []*regexp.Regexp) PatternConstraint {
-	c := PatternConstraint{patterns: make([]string, len(compiled)), compiled: compiled}
-	for i, re := range compiled {
-		c.patterns[i] = re.String()
+// regexp internal/parse built with [regexp.Compile] from the source's pattern
+// and judged there, or nil when the source's pattern was refused.
+func parsedPatternConstraint(compiled *regexp.Regexp) PatternConstraint {
+	if compiled == nil {
+		return PatternConstraint{}
 	}
-	return c
+	return PatternConstraint{pattern: compiled.String(), compiled: compiled}
 }
 
 func (PatternConstraint) Kind() ConstraintKind { return KindPattern }
 func (PatternConstraint) constraint()          {}
 
-// Patterns returns the regex pattern strings. Returns a defensive copy.
-func (c PatternConstraint) Patterns() []string {
-	return slices.Clone(c.patterns)
-}
-
-// PatternCount returns the number of patterns.
-func (c PatternConstraint) PatternCount() int {
-	return len(c.patterns)
-}
-
-// Pattern returns the first (primary) regex pattern.
-// Returns empty string if no patterns exist.
-// For constraints with two patterns, use Patterns() instead.
-func (c PatternConstraint) Pattern() string {
-	if len(c.patterns) == 0 {
-		return ""
-	}
-	return c.patterns[0]
-}
+// Pattern returns the regex pattern's source text, or "" when the constraint
+// holds no pattern.
+func (c PatternConstraint) Pattern() string { return c.pattern }
 
 func (c PatternConstraint) String() string {
-	quoted := make([]string, len(c.patterns))
-	for i, p := range c.patterns {
-		quoted[i] = fmt.Sprintf("%q", p)
+	if c.compiled == nil {
+		return "Pattern[]"
 	}
-	return fmt.Sprintf("Pattern[%s]", strings.Join(quoted, ", "))
+	return fmt.Sprintf("Pattern[%q]", c.pattern)
 }
 
-// Equal compares using order-insensitive pattern string comparison.
+// Equal reports whether other is a PatternConstraint with the same source
+// text. A constraint that holds no pattern equals only another that holds none.
 func (c PatternConstraint) Equal(other Constraint) bool {
 	o, ok := ResolveAlias(other).(PatternConstraint)
-	if !ok || len(c.patterns) != len(o.patterns) {
-		return false
-	}
-	cp := slices.Clone(c.patterns)
-	op := slices.Clone(o.patterns)
-	slices.Sort(cp)
-	slices.Sort(op)
-	return slices.Equal(cp, op)
+	return ok && (c.compiled == nil) == (o.compiled == nil) && c.pattern == o.pattern
 }
 
 func (c PatternConstraint) NarrowsTo(child Constraint) bool { return c.Equal(child) }
@@ -876,8 +845,7 @@ func (c AliasConstraint) IsResolved() bool {
 // prevent infinite loops in malformed schemas.
 //
 // Cycle detection uses datatype names (not constraint values) to avoid
-// hashability issues with slice-containing constraint types like EnumConstraint
-// and PatternConstraint.
+// hashability issues with slice-containing constraint types like EnumConstraint.
 func ResolveAlias(c Constraint) Constraint {
 	// Fast path: not an alias or unresolved
 	ac, ok := c.(AliasConstraint)
@@ -906,12 +874,11 @@ func ResolveAlias(c Constraint) Constraint {
 // CheckConstraint returns why c cannot judge a value, or nil when it can. It
 // refuses a nil constraint. It refuses an argument no .yammm source can state,
 // a DataType reference under a name no source writes, a List with no element,
-// more than two patterns or one
-// regexp.Compile refuses, and a constraint of a Go type this package does not
-// construct, such as a pointer to one. A raw constraint meets
-// no completion, so it also refuses a DataType reference resolved to another
-// reference alone, as a datatype declared as another alone is, and one that
-// resolves to no constraint, at any List depth. The Neo4j adapter's CoerceParams
+// a Pattern with no pattern or one regexp.Compile refuses, and a constraint of
+// a Go type this package does not construct, such as a pointer to one. A raw
+// constraint meets no completion, so it also refuses a DataType reference
+// resolved to another reference alone, as a datatype declared as another alone
+// is, and one that resolves to no constraint, at any List depth. The Neo4j adapter's CoerceParams
 // and instance.CheckValue call it before they read a value.
 func CheckConstraint(c Constraint) error {
 	if c == nil {
@@ -998,11 +965,9 @@ func constraintFault(c Constraint) (string, bool) {
 			return fmt.Sprintf("enum must have at least two values (got %d)", n), true
 		}
 	case PatternConstraint:
-		switch n := c.PatternCount(); {
-		case n == 0:
-			return "pattern constraint needs at least one pattern", true
-		case n > parse.MaxPatterns:
-			return fmt.Sprintf("pattern constraint exceeds maximum of %d patterns (got %d)", parse.MaxPatterns, n), true
+		switch {
+		case c.compiled == nil:
+			return "pattern constraint needs a pattern", true
 		case c.invalid != "":
 			return c.invalid, true
 		}

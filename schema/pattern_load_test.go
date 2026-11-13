@@ -19,7 +19,7 @@ type Zips = List<Zip>[1, 3]
 type Site {
 	id String primary
 	code Pattern["^[A-Z]{2}-[0-9]+$"]
-	both Pattern["^a", "b$"]
+	search Pattern["b"]
 	first Pattern["a|ab"]
 	fold Pattern["(?i)hello"]
 	class Pattern["^[\\p{Greek}\\d]+$"]
@@ -52,9 +52,9 @@ func patternOf(t *testing.T, c schema.Constraint) schema.PatternConstraint {
 }
 
 // A Pattern a load holds is the one the exported constructor builds from the
-// same sources: by Equal, by String, in the structural hash, and in what each
+// same source: by Equal, by String, in the structural hash, and in what its
 // compiled regexp matches and finds.
-func TestLoad_HoldsThePatternsItsSourceStates(t *testing.T) {
+func TestLoad_HoldsThePatternItsSourceStates(t *testing.T) {
 	s, res := schema.LoadString(t.Context(), patternLoadSource, "patterns.yammm")
 	if res.HasErrors() {
 		t.Fatalf("load: %v", res.Err())
@@ -66,27 +66,23 @@ func TestLoad_HoldsThePatternsItsSourceStates(t *testing.T) {
 	var b strings.Builder
 	record := func(name string, c schema.Constraint) {
 		p := patternOf(t, c)
-		compiled := make([]*regexp.Regexp, 0, p.PatternCount())
-		for _, source := range p.Patterns() {
-			compiled = append(compiled, regexp.MustCompile(source))
-		}
+		compiled := regexp.MustCompile(p.Pattern())
 		built := schema.NewPatternConstraint(compiled)
 		fmt.Fprintf(&b, "%s: %s as %s\n", name, c, p)
 		fmt.Fprintf(&b, "\tequal to the constructor's: %t, %t\n", p.Equal(built), built.Equal(p))
 		fmt.Fprintf(&b, "\tCheckConstraint: %v\n", schema.CheckConstraint(c))
-		for i, re := range expr.PatternRegexps(p) {
-			if re.String() != p.Patterns()[i] {
-				t.Errorf("%s: compiled pattern %d reads %q; its source is %q", name, i, re, p.Patterns()[i])
-			}
-			var answers []string
-			for _, v := range patternLoadValues {
-				if got, want := re.FindString(v), compiled[i].FindString(v); got != want {
-					t.Errorf("%s: %q finds %q in %q; a compile of its source finds %q", name, re, got, v, want)
-				}
-				answers = append(answers, fmt.Sprintf("%t:%q", re.MatchString(v), re.FindString(v)))
-			}
-			fmt.Fprintf(&b, "\t%q: %s\n", re, strings.Join(answers, " "))
+		re := expr.PatternRegexp(p)
+		if re.String() != p.Pattern() {
+			t.Errorf("%s: the compiled pattern reads %q; its source is %q", name, re, p.Pattern())
 		}
+		var answers []string
+		for _, v := range patternLoadValues {
+			if got, want := re.FindString(v), compiled.FindString(v); got != want {
+				t.Errorf("%s: %q finds %q in %q; a compile of its source finds %q", name, re, got, v, want)
+			}
+			answers = append(answers, fmt.Sprintf("%t:%q", re.MatchString(v), re.FindString(v)))
+		}
+		fmt.Fprintf(&b, "\t%q: %s\n", re, strings.Join(answers, " "))
 	}
 	for p := range site.AllProperties() {
 		if p.Name() != "id" {
@@ -99,4 +95,18 @@ func TestLoad_HoldsThePatternsItsSourceStates(t *testing.T) {
 	}
 	fmt.Fprintf(&b, "structural hash: %s\n", schema.StructuralHash(s))
 	yammmtest.Golden(t, "pattern_load", []byte(b.String()))
+}
+
+// A pattern's source is held byte for byte: the spaces round it are part of
+// what it matches.
+func TestLoad_APatternKeepsItsSpaces(t *testing.T) {
+	s, res := schema.LoadString(t.Context(), "schema \"p\"\ntype T {\n\tid String primary\n\tp Pattern[\" a \"]\n}\n", "p.yammm")
+	if res.HasErrors() {
+		t.Fatalf("load: %v", res.Err())
+	}
+	typ, _ := s.Type("T")
+	p, _ := typ.Property("p")
+	if got := patternOf(t, p.Constraint()).Pattern(); got != " a " {
+		t.Errorf("Pattern() = %q, want %q", got, " a ")
+	}
 }

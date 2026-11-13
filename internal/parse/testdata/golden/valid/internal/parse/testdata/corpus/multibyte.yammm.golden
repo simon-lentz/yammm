@@ -1,15 +1,16 @@
 {
-  "name": "\"多字节\"",
+  "name": "\"multibyte\"",
+  "doc": "多字节",
   "span": {
     "s": 0,
-    "e": 18
+    "e": 34
   },
   "types": [
     {
       "name": "Pruefstueck",
       "name_span": {
-        "s": 79,
-        "e": 90
+        "s": 95,
+        "e": 106
       },
       "doc": "Dokumentation für Prüfung — höchst wichtig",
       "props": [
@@ -18,14 +19,14 @@
           "constraint": {
             "kind": "String",
             "span": {
-              "s": 97,
-              "e": 103
+              "s": 113,
+              "e": 119
             }
           },
           "primary": true,
           "span": {
-            "s": 94,
-            "e": 111
+            "s": 110,
+            "e": 127
           }
         },
         {
@@ -39,13 +40,13 @@
               "\"🌊 sæson\""
             ],
             "span": {
-              "s": 147,
-              "e": 184
+              "s": 163,
+              "e": 200
             }
           },
           "span": {
-            "s": 113,
-            "e": 184
+            "s": 129,
+            "e": 200
           }
         },
         {
@@ -53,8 +54,8 @@
           "constraint": {
             "kind": "String",
             "span": {
-              "s": 191,
-              "e": 197
+              "s": 207,
+              "e": 213
             }
           },
           "required": true,
@@ -62,14 +63,14 @@
             {
               "name": "writeOnce",
               "span": {
-                "s": 207,
-                "e": 217
+                "s": 223,
+                "e": 233
               }
             }
           ],
           "span": {
-            "s": 186,
-            "e": 217
+            "s": 202,
+            "e": 233
           }
         }
       ],
@@ -81,23 +82,23 @@
               "kind": "ident",
               "text": "label",
               "span": {
-                "s": 227,
-                "e": 232
+                "s": 243,
+                "e": 248
               }
             },
             {
               "kind": "ident",
               "text": "note",
               "span": {
-                "s": 234,
-                "e": 238
+                "s": 250,
+                "e": 254
               }
             }
           ],
           "has_parens": true,
           "span": {
-            "s": 219,
-            "e": 239
+            "s": 235,
+            "e": 255
           }
         }
       ],
@@ -106,21 +107,21 @@
           "msg": "\"libellé non vide\"",
           "expr": "(\u0026\u0026 (!= (p \"label\") \"x\") (=~ (p \"note\") /^é.+$/))",
           "span": {
-            "s": 241,
-            "e": 295
+            "s": 257,
+            "e": 311
           }
         }
       ],
       "span": {
-        "s": 20,
-        "e": 297
+        "s": 36,
+        "e": 313
       }
     }
   ],
   "expressions": [
     {
-      "s": 263,
-      "e": 295
+      "s": 279,
+      "e": 311
     }
   ]
 }

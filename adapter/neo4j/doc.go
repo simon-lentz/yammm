@@ -131,8 +131,7 @@
 // parts. Namespaced labels usually absorb
 // reserved type names — the label "app__MATCH" is not a keyword — but a
 // reserved property name fails wherever a generated constraint or index
-// statement names it, and a reserved type name fails in unscoped (empty schema
-// name) label mode. No generated DDL names an edge property, so no pass checks
+// statement names it. No generated DDL names an edge property, so no pass checks
 // an edge property's name. The write queries write relationship types unquoted
 // too and check only an edge's ([Adapter.BatchEdgeQueries]): a composition's
 // relation name, which the composition statements write, is checked nowhere.
@@ -172,10 +171,9 @@
 // another way, so a merge key would reach the driver under one type while the
 // same property is coerced from this schema to another. A shape is keyed by
 // [schema.TypeID], so two closure types sharing one bare name each get their own
-// label. Two root types render
-// one label only where their sanitized schema and type names compose one
-// label, as two SCHEMA names that sanitize alike do, or schema "a" with type B__C
-// and schema "a__B" with type C; [Adapter.ShapeForSchema] refuses that closure.
+// label. Two root types render one label only where their schema and type
+// names compose one label, as schema "a" with type B__C and schema "a__B" with
+// type C do; [Adapter.ShapeForSchema] refuses that closure.
 //
 // An error marked [ErrUnrepresentable] refuses these values: one its constraint's coercion refuses, a nested collection's, a map at a
 // property the schema declares, a list or a map a document nests more than 256
@@ -383,7 +381,7 @@
 //
 // Ownership is set membership, not a rule applied to a remote object's label
 // string. [Adapter.Label] composes a label from a caller-configurable prefix and
-// separator around two sanitized free-form names and is not invertible, so for
+// separator around a schema name and a type name and is not invertible, so for
 // any rule that reads a schema back out of a label there is a configuration, or
 // a sibling schema name, that satisfies the rule without belonging to the
 // schema. See [Adapter.OwnedLabels] for what the set covers and what it cannot

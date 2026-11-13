@@ -687,7 +687,7 @@ type A {
 }
 type B { id String primary }
 type NoKey { name String }`,
-			want: map[diag.Code]int{diag.E_LIST_ON_EDGE: 1, diag.E_NO_PRIMARY_KEY: 1},
+			want: map[diag.Code]int{diag.E_INVALID_EDGE_PROPERTY_TYPE: 1, diag.E_NO_PRIMARY_KEY: 1},
 		},
 		"rejected primary type and missing primary key": {
 			// The rejected primary draws exactly one diagnostic; the

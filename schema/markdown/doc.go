@@ -250,8 +250,7 @@
 // before a pipe, inside a code span too, so a code span that holds a
 // backslash before a pipe shows the pipe alone. A
 // schema name, an invariant message, the name or import tag the entry gives a
-// type, and a type reference are escaped for Markdown, and a control
-// character in a schema name is written as its Go escape (\n). GitHub reads a
+// type, and a type reference are escaped for Markdown. GitHub reads a
 // www host, a URL and an email address as a link even through an escape, so an
 // empty HTML comment, which a browser does not show, splits each colon, each
 // at sign and each dot that directly follows "www", in any case, in text

@@ -146,7 +146,7 @@ func TestPropertyScope_LookupFold(t *testing.T) {
 		{"lowercase", "username", "Alice", true},
 		{"uppercase", "USERNAME", "Alice", true},
 		{"a relation by its name", "WORKS_AT", "k", true},
-		{"a relation by its field name", "works_at", "k", true},
+		{"a relation by its field name", "works_at", "", false},
 		{"a relation in another casing", "Works_At", "", false},
 	}
 
@@ -188,4 +188,16 @@ func TestPropertyScope_LookupFold_NotFound(t *testing.T) {
 
 	_, found := scope.LookupFold("nonexistent")
 	assert.False(t, found)
+}
+
+// A $ variable names a member exactly: a relation by its declared name, and
+// neither its field name nor a property in another casing.
+func TestPropertyScope_LookupReadsAMemberByItsDeclaredName(t *testing.T) {
+	scope := eval.PropertyScopeFromMap(map[string]any{"name": "Alice", "WORKS_AT": "k"})
+	for lookup, want := range map[string]any{"name": "Alice", "WORKS_AT": "k", "Name": nil, "works_at": nil, "Works_At": nil} {
+		val, found := scope.Lookup(lookup)
+		if found != (want != nil) || (found && val.Unwrap() != want) {
+			t.Errorf("Lookup(%q) = %v, %v; want %v", lookup, val.Unwrap(), found, want)
+		}
+	}
 }

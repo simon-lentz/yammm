@@ -16,13 +16,11 @@ type AnnotationArgKind uint8
 
 const (
 	// ArgUnvalidated is the zero value: the argument's role is not known. It
-	// survives into a sealed schema in four cases — an annotation that failed
-	// validation, one whose argument list failed to parse, one whose check had to
-	// DEFER because the type has an unresolved supertype that may yet supply the
-	// referent (see validateIndexType), and one whose TARGET type could not be
-	// judged, where annotationTargetTypeUnknown returns before any kind is
-	// stamped. A consumer reading a sealed schema must therefore treat
-	// ArgUnvalidated as "not checked", never as "checked and found roleless".
+	// stays on an argument completion did not judge: one of an annotation that
+	// failed validation, of one whose check DEFERRED on an unresolved supertype,
+	// or of one whose TARGET type could not be judged. Each case comes with an
+	// error, so a schema a load returns holds none of them; a consumer still
+	// reads ArgUnvalidated as "not checked", never as "checked and found roleless".
 	ArgUnvalidated AnnotationArgKind = iota
 	// ArgPropertyRef marks an argument that resolves to a property of the type,
 	// e.g. a member of a @@index composite.
@@ -128,11 +126,11 @@ type annotationState struct {
 	span location.Span
 
 	// detachedFrom is the line of the property this annotation binds to, set
-	// only when the annotation was written on a LATER line. Property
-	// annotations are postfix and whitespace is not significant, so an
-	// annotation on its own line binds to the PRECEDING property rather than
-	// the following one a reader would expect; completion reports that rather
-	// than letting the two readings diverge silently.
+	// only when the annotation begins a line. Property annotations are postfix
+	// and whitespace is not significant, so an annotation that begins a line
+	// binds to the PRECEDING property rather than the following one a reader
+	// would expect; completion reports that rather than letting the two
+	// readings diverge silently.
 	detachedFrom int
 }
 
@@ -142,8 +140,8 @@ func newAnnotation(name string, args []AnnotationArg, doc string, span location.
 	return Annotation{&annotationState{name: name, args: args, doc: doc, span: span}}
 }
 
-// setDetachedFrom records the line this annotation was written on, when that
-// is later than the line of the property it binds to. Zero means attached.
+// setDetachedFrom records the line of the property this annotation binds to,
+// when the annotation begins a line. Zero means attached.
 func (a Annotation) setDetachedFrom(line int) { a.detachedFrom = line }
 
 // Name returns the annotation name, without the @ / @@ sigil.

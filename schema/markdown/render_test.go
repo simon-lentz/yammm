@@ -132,31 +132,6 @@ func TestEscapeInline(t *testing.T) {
 	}
 }
 
-// TestPrintableName pins that a schema name's control characters take their
-// Go escapes and every other character is kept.
-func TestPrintableName(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		in, want string
-	}{
-		{"plain name", "plain name"},
-		{"a\nb", `a\nb`},
-		{"a\r\tb", `a\r\tb`},
-		{"a\x00b", `a\x00b`},
-		{"a\u0085b", `a\u0085b`},
-		{`a\"b`, `a\"b`},
-	}
-	for _, tt := range tests {
-		t.Run(tt.want, func(t *testing.T) {
-			t.Parallel()
-			if got := printableName(tt.in); got != tt.want {
-				t.Errorf("printableName(%q) = %q, want %q", tt.in, got, tt.want)
-			}
-		})
-	}
-}
-
 // TestAnchorAllocator pins GitHub's allocation: a repeated slug takes the next
 // free suffix, skipping a suffixed form an earlier heading holds as its own
 // slug.

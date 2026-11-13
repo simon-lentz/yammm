@@ -152,8 +152,8 @@ func TestLoad_AFailedDataTypeKeepsItsShapeForLaterPhases(t *testing.T) {
 		datatypes string
 		want      map[diag.Code]int
 	}{
-		"an unknown element": {"type X = List<Mystery>\n", map[diag.Code]int{diag.E_UNKNOWN_TYPE: 1, diag.E_LIST_ON_EDGE: 1}},
-		"a cycle":            {"type X = List<Y>\ntype Y = List<X>\n", map[diag.Code]int{diag.E_INVALID_CONSTRAINT: 2, diag.E_LIST_ON_EDGE: 1}},
+		"an unknown element": {"type X = List<Mystery>\n", map[diag.Code]int{diag.E_UNKNOWN_TYPE: 1, diag.E_INVALID_EDGE_PROPERTY_TYPE: 1}},
+		"a cycle":            {"type X = List<Y>\ntype Y = List<X>\n", map[diag.Code]int{diag.E_INVALID_CONSTRAINT: 2, diag.E_INVALID_EDGE_PROPERTY_TYPE: 1}},
 	} {
 		t.Run(name, func(t *testing.T) {
 			src := "schema \"p\"\n\n" + tc.datatypes + edge
@@ -178,7 +178,7 @@ func TestLoad_ADataTypeOverAFailedImportStaysAList(t *testing.T) {
 	if !s.IsZero() {
 		t.Fatal("a schema importing a missing file loaded")
 	}
-	wantCounts(t, res, map[diag.Code]int{diag.E_IMPORT_RESOLVE: 1, diag.E_LIST_ON_EDGE: 1, diag.E_UNKNOWN_TYPE: 0})
+	wantCounts(t, res, map[diag.Code]int{diag.E_IMPORT_RESOLVE: 1, diag.E_INVALID_EDGE_PROPERTY_TYPE: 1, diag.E_UNKNOWN_TYPE: 0})
 }
 
 // The primary-key type check names the kind a datatype resolves to, not the

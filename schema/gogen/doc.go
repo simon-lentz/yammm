@@ -308,8 +308,8 @@
 // # Configuration
 //
 //   - [WithPackageName]: override the generated package name. The default is derived
-//     from the schema name, sanitized to a valid lowercase identifier (falling back
-//     to "schema"); a keyword, a predeclared identifier such as nil, string or len,
+//     from the schema name, an identifier, lowered with its underscores dropped; a
+//     keyword, a predeclared identifier such as nil, string or len,
 //     "main" or "init" takes a "_" suffix, since a file importing a package named
 //     for a predeclared identifier can no longer use that identifier, a file of
 //     declarations alone cannot build as package main, and a package named init

@@ -374,12 +374,6 @@
      "decl": "Gamma.required",
      "why": "ANTLR recovery names a property after the trailing modifier"
     }
-   ],
-   "allowed_noise": [
-    {
-     "code": "E_INVALID_ANNOTATION",
-     "why": "@@index() survives as a bare annotation and reaches its arity check"
-    }
    ]
   },
   {
@@ -929,7 +923,7 @@
    ]
   },
   {
-   "file": "reverse_clause.yammm",
+   "file": "slash_after_target.yammm",
    "category": "G",
    "defects": [
     {
@@ -944,7 +938,7 @@
       5,
       6
      ],
-     "note": "reverse clause with no name after the '/' \u2014 anchor spans the construct: it opens on the first line and is only detectable by the last, so either is a correct place to report it"
+     "note": "a '/' after the relation's target \u2014 anchor spans the construct: it opens on the first line and is only detectable by the last, so either is a correct place to report it"
     }
    ]
   },
@@ -1099,7 +1093,7 @@
    ]
   },
   {
-   "file": "failed_reverse_keeps_next.yammm",
+   "file": "slash_after_target_keeps_next.yammm",
    "category": "G",
    "defects": [
     {
@@ -1114,7 +1108,7 @@
       5,
       6
      ],
-     "note": "failed reverse clause followed by a second, well-formed association \u2014 anchor spans the construct: it opens on the first line and is only detectable by the last, so either is a correct place to report it"
+     "note": "a '/' after the relation's target, followed by a second, well-formed association \u2014 anchor spans the construct: it opens on the first line and is only detectable by the last, so either is a correct place to report it"
     }
    ]
   },

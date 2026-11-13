@@ -711,8 +711,9 @@ func (v *Validator) scopeOf(inst ValidInstance) immutable.Map[string] {
 // not a copy; a composition's holds each child's memoised scope, shared, in a
 // list built for a many composition; an association's is built from cloned
 // target keys. A property name starts lower case, so the evaluator tells a
-// relation's entry by its key and reads it by its name or its field name alone
-// (eval's readMember), as docs/SPEC.md states.
+// relation's entry by its key and reads it by its name alone (eval's
+// readMember for a bare name, propertyScope.Lookup for a $ variable), as
+// docs/SPEC.md states.
 //
 // Relations belong here because the schema completer's membersOf index admits
 // them, so an invariant may reference one. The two relation
@@ -798,7 +799,7 @@ func composedChildren(value any) []ValidInstance {
 }
 
 // relationValue renders a relation's entries for the invariant scope: a
-// single-valued relation yields its one entry, so `works_at != nil` reads as a
+// single-valued relation yields its one entry, so `WORKS_AT != nil` reads as a
 // presence test rather than a one-element list.
 func relationValue(rel schema.Relation, entries []any) any {
 	if rel.IsMany() {
@@ -811,7 +812,7 @@ func relationValue(rel schema.Relation, entries []any) any {
 }
 
 // keyValue renders a target key for the invariant scope: a single-component key
-// as its component, so `works_at == "c1"` compares against the value the caller
+// as its component, so `WORKS_AT == "c1"` compares against the value the caller
 // wrote, and a composite key as the component list.
 func keyValue(k immutable.Key) any {
 	parts := k.Clone()

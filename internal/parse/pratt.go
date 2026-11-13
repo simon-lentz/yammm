@@ -590,9 +590,26 @@ var propertyNameExclusions = map[string]bool{
 	"nil": true, "true": true, "false": true,
 }
 
+// IsIdentifier reports whether name is an identifier: an ASCII letter, then
+// ASCII letters, digits and underscores. A schema name and an import alias are
+// identifiers. It does not check for a reserved spelling; [IsReserved] does.
+func IsIdentifier(name string) bool {
+	if name == "" {
+		return false
+	}
+	for i := range len(name) {
+		c := name[i]
+		letter := (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z')
+		if !letter && (i == 0 || (c != '_' && (c < '0' || c > '9'))) {
+			return false
+		}
+	}
+	return true
+}
+
 // IsReserved reports whether name is a spelling the language refuses in a
-// position that admits either case: an import alias, a relation name, a reverse
-// name. It is the union of the lowercase keywords and the built-in type names.
+// position that admits either case: an import alias or a relation name. It is
+// the union of the lowercase keywords and the built-in type names.
 func IsReserved(name string) bool {
 	return reservedLC[name] || datatypeKeywords[name]
 }

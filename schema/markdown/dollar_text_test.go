@@ -8,13 +8,12 @@ import (
 // GitHub reads a pair of dollars outside code as math, and a backslash does not
 // stop it there: its documentation ("Writing mathematical expressions") gives
 // span tags round a dollar as the one escape outside a math expression. The
-// inputs are the four GitHub's rendering of a committed file read as math (a
-// schema name in the title, and three invariant messages), with the two it read
-// as text beside them. No dollar the generator writes outside code may stand
-// bare.
+// inputs are the three invariant messages GitHub's rendering of a committed
+// file read as math, with the two it read as text beside them. No dollar the
+// generator writes outside code may stand bare.
 func TestMarshal_WritesNoBareDollarOutsideCode(t *testing.T) {
 	t.Parallel()
-	s := loadSchema(t, `schema "a $x$ b"
+	s := loadSchema(t, `schema "a"
 
 type T {
 	id String primary
@@ -43,8 +42,8 @@ type T {
 			t.Errorf("a dollar outside code stands bare, which GitHub may read as math: %q", line)
 		}
 	}
-	if want := "# Schema a " + documentedDollar + "x" + documentedDollar + " b\n"; !strings.HasPrefix(string(out), want) {
-		t.Errorf("the title is not %q:\n%s", want, out)
+	if want := "-   \"cost " + documentedDollar + "a" + documentedDollar + " ok\""; !strings.Contains(string(out), want) {
+		t.Errorf("the document holds no line %q:\n%s", want, out)
 	}
 }
 

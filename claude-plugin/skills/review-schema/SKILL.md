@@ -58,7 +58,7 @@ If `$ARGUMENTS` provides a file path, review that file. Otherwise, ask which sch
 - `Vector` takes a single positive integer dimension.
 - `List` uses angle brackets for element type and optional square brackets for length bounds.
 - `List` and `Vector` cannot appear in relationship property blocks.
-- `Pattern` accepts 1 or 2 regex strings (max 2, conjunction semantics).
+- `Pattern` takes exactly one regex; a second rule on the value is an invariant. A match is a search, so anchor with `^` and `$` to match the whole value.
 
 ### 5. Multiplicity
 

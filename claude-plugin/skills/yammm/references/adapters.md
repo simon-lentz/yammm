@@ -148,7 +148,7 @@ inSync := len(cDiff.Drift) == 0 && len(cDiff.Create) == 0 && len(cDiff.Drop) == 
 
 Ownership is set membership, not a prefix test on the remote object's label:
 `Label` composes a label from a caller-configurable prefix and separator around
-two sanitized free-form names and is not invertible, so any rule that tries to
+a schema name and a type name and is not invertible, so any rule that tries to
 read a schema back out of a label can be satisfied by a sibling schema's labels.
 
 `Excluded` counts the remote objects the comparison set aside because the

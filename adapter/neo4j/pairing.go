@@ -15,8 +15,8 @@ import (
 //
 // The diff entry points take this rather than a schema name because ownership
 // cannot be recovered from a label string. [Adapter.Label] composes a label from
-// a caller-configurable prefix and separator around two sanitized free-form
-// names, which is not an invertible function: for any rule that tries to read a
+// a caller-configurable prefix and separator around a schema name and a type
+// name, which is not an invertible function: for any rule that tries to read a
 // schema back out of a label there is a configuration, or a sibling schema name,
 // that satisfies the rule without belonging to the schema. Membership answers
 // the question directly instead.
@@ -24,9 +24,9 @@ type OwnedLabels struct {
 	labels map[string]struct{}
 }
 
-// OwnedLabels returns the labels this adapter emits for s — every named,
-// non-abstract type's label across the whole IMPORT CLOSURE, under the
-// adapter's current configuration.
+// OwnedLabels returns every named, non-abstract type's label across the whole
+// IMPORT CLOSURE of s, under the adapter's current configuration: the labels this
+// adapter emits for s, and a label it refuses to emit (below).
 //
 // The closure, not the entry schema alone: an imported type this schema writes
 // nodes for gets a label, and it is emitted constraints and indexes, so it is
@@ -51,18 +51,11 @@ type OwnedLabels struct {
 // classifies it into no bucket; [ConstraintDiffResult.Excluded] counts it. That
 // is a property of deriving ownership from the schema rather than a gap to be
 // closed by matching labels against a namespace prefix: [Adapter.Label] composes
-// a label from a caller-configurable prefix and separator around two sanitized
-// free-form names, so for any prefix rule there is a sibling schema name or a
+// a label from a caller-configurable prefix and separator around a schema name
+// and a type name, so for any prefix rule there is a sibling schema name or a
 // separator setting that satisfies it without belonging to the schema — and a
 // false positive there is a plan telling an operator to drop another
 // application's constraint.
-//
-// In UNSCOPED mode (an empty schema name) [Adapter.Label] returns the bare
-// sanitized type name, so the set holds bare labels such as `Person`. That is
-// exact — those are the labels this schema writes to — but it means an unrelated
-// application's objects on the same bare label are the schema's to report,
-// because the two are genuinely sharing the label. Scope a schema with a name,
-// or a prefix, to keep the namespaces apart.
 func (a *Adapter) OwnedLabels(ctx context.Context, s schema.Schema) *OwnedLabels {
 	owned := &OwnedLabels{labels: make(map[string]struct{})}
 	for _, label := range a.labeledTypes(ctx, s) {

@@ -87,6 +87,7 @@ func (p *schemaParser) typeDecl(t *parse.TypeDecl) *typeDecl {
 		NameSpan:      t.NameSpan,
 		IsAbstract:    t.IsAbstract,
 		IsPart:        t.IsPart,
+		LostMember:    t.LostMember,
 		Documentation: t.Doc,
 		Span:          t.Span,
 	}
@@ -235,7 +236,7 @@ func (p *schemaParser) constraint(c *parse.Constraint) (Constraint, DataTypeRef)
 	case parse.ConstraintEnum:
 		return parsedEnumConstraint(c.EnumValues()), DataTypeRef{}
 	case parse.ConstraintPattern:
-		return parsedPatternConstraint(c.PatternRegexps()), DataTypeRef{}
+		return parsedPatternConstraint(c.PatternRegexp()), DataTypeRef{}
 	case parse.ConstraintTimestamp:
 		return NewTimestampConstraint(), DataTypeRef{}
 	case parse.ConstraintDate:

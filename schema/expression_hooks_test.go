@@ -2,8 +2,6 @@ package schema_test
 
 import (
 	"reflect"
-	"regexp"
-	"slices"
 	"testing"
 
 	"github.com/simon-lentz/yammm/internal/expr"
@@ -15,8 +13,8 @@ import (
 func TestExpressionHooks_PanicOnAnotherType(t *testing.T) {
 	t.Parallel()
 	yammmtest.AssertPanics(t, func() { expr.InvariantExpression(42) })
-	yammmtest.AssertPanics(t, func() { expr.PatternRegexps(42) })
-	yammmtest.AssertPanics(t, func() { expr.PatternRegexps(schema.NewEnumConstraint([]string{"a"})) })
+	yammmtest.AssertPanics(t, func() { expr.PatternRegexp(42) })
+	yammmtest.AssertPanics(t, func() { expr.PatternRegexp(schema.NewEnumConstraint([]string{"a"})) })
 }
 
 // The tree and the compiled patterns have no public read.
@@ -32,18 +30,9 @@ func TestExpressionReads_LeaveTheExportedSurface(t *testing.T) {
 	}
 }
 
-func TestPatternConstraint_PatternsIsAFreshSlice(t *testing.T) {
-	t.Parallel()
-	c := schema.NewPatternConstraint([]*regexp.Regexp{regexp.MustCompile("^a")})
-	c.Patterns()[0] = "changed"
-	if got := c.Patterns(); !slices.Equal(got, []string{"^a"}) {
-		t.Errorf("Patterns = %v after a write to an earlier result, want [^a]", got)
-	}
-}
-
 func TestAnnotation_ArgsIsAFreshSlice(t *testing.T) {
 	t.Parallel()
-	s, res := schema.LoadString(t.Context(), "schema \"m\"\ntype A {\n@@index(id)\nid String primary\n}\n", "m.yammm")
+	s, res := schema.LoadString(t.Context(), "schema \"m\"\ntype A {\n@@index(name)\nid String primary\nname String\n}\n", "m.yammm")
 	if !res.OK() {
 		t.Fatal(res)
 	}

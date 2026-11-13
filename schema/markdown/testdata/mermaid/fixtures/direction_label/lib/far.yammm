@@ -1,4 +1,4 @@
-schema "dir:ction TB"
+schema "dir__ection_TB"
 
 type Beacon {
 	id String primary

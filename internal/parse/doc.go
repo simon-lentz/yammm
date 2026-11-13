@@ -17,7 +17,7 @@
 // # What Parse reports and what it does not
 //
 // Parse reports the diagnostics a reader of the source alone can justify, and
-// it emits five codes. E_SYNTAX covers text that does not fit the grammar, and
+// it emits four codes. E_SYNTAX covers text that does not fit the grammar, and
 // the source rules: a byte that is not valid UTF-8, a byte order mark past the
 // start and a NUL are refused at the byte inside a comment or a string or
 // regex literal, one diagnostic for each run of one kind; anywhere else one
@@ -33,22 +33,21 @@
 // escape that will not unquote, which is then its one diagnostic — except an
 // annotation argument, which keeps its written spelling and draws nothing. A
 // literal refused either way has no value: no later check judges a value it
-// does not have, and an enum's and a pattern list's count read it as a value
-// written. Of a regex whose escapes unquote, one holding a NUL or a byte order
-// mark is still compiled, as written, so its own compile error stands beside
+// does not have, and an enum's count reads it as a value written. Of a regex
+// whose escapes unquote, one holding a NUL or a byte order mark is still
+// compiled, as written, so its own compile error stands beside
 // the source rule's (in an invariant, unless its message holds an escape that
 // will not unquote, as above), and one holding a byte that is not UTF-8 is not
 // compiled and draws the byte's diagnostic alone. E_INVALID_CONSTRAINT covers a
 // constraint whose written arguments Parse refuses, among them inverted
 // bounds, an unparseable bound, an empty or duplicate enum value,
-// an enum of fewer than two values, more than two patterns, a regex that does
-// not compile or that writes a surrogate code point,
-// and a vector dimension out of range. E_INVALID_INVARIANT covers a literal inside
+// an enum of fewer than two values, a regex that does not compile, and a
+// vector dimension out of range. E_INVALID_INVARIANT covers a literal inside
 // an invariant expression that will not convert, such as a number out of range
-// or an unquotable string. E_INVALID_NAME covers an empty schema name and a
-// relation name that is not UPPER_SNAKE, and E_REVERSE_CLAUSE_REMOVED a
-// relation that still writes the removed reverse clause. Parse never reports anything that needs another
-// declaration, another file, or a resolved name to decide.
+// or an unquotable string. E_INVALID_NAME covers a schema name that is not an
+// identifier and a relation name that is not UPPER_SNAKE. Parse never reports
+// anything that needs another declaration, another file, or a resolved name to
+// decide.
 //
 // Four consequences are worth stating because callers depend on them.
 // E_SYNTAX does not say that the source failed to parse: a caller that needs
@@ -59,8 +58,8 @@
 // escape naming a surrogate is one the language does not have.
 // Callers that want syntax errors alone must filter on the code category
 // (diag.CategorySyntax), not on the presence of any diagnostic at all.
-// Only E_SYNTAX is diag.CategorySyntax: the other four are
-// diag.CategorySchema, so that filter keeps one code of the five and drops
+// Only E_SYNTAX is diag.CategorySyntax: the other three are
+// diag.CategorySchema, so that filter keeps one code of the four and drops
 // every constraint, invariant and name defect — consume the
 // whole slice unless a narrower set is what you mean. And callers must not
 // assume a diagnostic-free parse means a valid schema; it means a well-formed

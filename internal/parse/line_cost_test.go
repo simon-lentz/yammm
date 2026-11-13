@@ -230,3 +230,36 @@ func TestParse_NestedPositionsCostTheSourceOnce(t *testing.T) {
 		})
 	}
 }
+
+// TestParse_AnnotationsCostTheirLineOnce pins that telling whether an
+// annotation begins a line reads the blanks before it alone: a body written on
+// one line behind a long indentation costs in proportion to the source as its
+// annotations grow, as the indentation grows with them.
+func TestParse_AnnotationsCostTheirLineOnce(t *testing.T) {
+	t.Parallel()
+	source := func(n int) string {
+		var b strings.Builder
+		b.WriteString("schema \"s\"\ntype T {" + strings.Repeat(" ", 20*n) + "id String primary")
+		for i := range n {
+			b.WriteString(" p" + strconv.Itoa(i) + " String @index")
+		}
+		b.WriteString(" }\n")
+		return b.String()
+	}
+	counted := func(n int) (src string, bytes int) {
+		src = source(n)
+		b := parsed(src, location.NewSourceID("s.yammm"))
+		if len(b.issues) > 0 {
+			t.Fatalf("%d annotations: %s", n, b.issues[0].Message())
+		}
+		return src, b.counted
+	}
+	const n, factor = 250, 8
+	srcSmall, small := counted(n)
+	srcLarge, large := counted(n * factor)
+	grew := float64(len(srcLarge)) / float64(len(srcSmall))
+	t.Logf("%d bytes count %d; %d bytes count %d", len(srcSmall), small, len(srcLarge), large)
+	if float64(large) > 2*grew*float64(small) {
+		t.Errorf("the source grew %.1f times and the bytes counted %.1f times", grew, float64(large)/float64(small))
+	}
+}

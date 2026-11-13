@@ -208,6 +208,25 @@ type T {
 			want: map[diag.Code]int{diag.E_INVALID_ANNOTATION: 1},
 		},
 		{
+			name: "@vector on a Vector over 4096 dimensions",
+			source: `schema "main"
+type T {
+	id String primary
+	v Vector[4097] @vector(cosine)
+}`,
+			want: map[diag.Code]int{diag.E_INVALID_ANNOTATION_TARGET: 1},
+		},
+		{
+			name: "@vector on a datatype Vector over 4096 dimensions",
+			source: `schema "main"
+type Wide = Vector[65536]
+type T {
+	id String primary
+	v Wide @vector(euclidean)
+}`,
+			want: map[diag.Code]int{diag.E_INVALID_ANNOTATION_TARGET: 1},
+		},
+		{
 			name: "@vector on non-Vector",
 			source: `schema "main"
 type T {
@@ -655,7 +674,7 @@ type T {
 	}
 }
 
-// A property annotation written on its own line binds to the property ABOVE
+// A property annotation that begins a line binds to the property ABOVE
 // it, because the grammar's property-trailing annotation* ignores line breaks.
 // A reader coming from a prefix-decorator language means the property BELOW,
 // and nothing else in the load tells the two readings apart — the schema was
@@ -676,9 +695,43 @@ type Doc {
 	}
 	// The message must name the property it actually attached to, so the user
 	// can see which reading the loader took.
-	for _, want := range []string{"@index", "own line", `"state"`, "@@index"} {
+	for _, want := range []string{
+		"@index", "begins a line", `"state"`, "@@index",
+		"write it after that property on the line where the property ends",
+	} {
 		if !strings.Contains(msg, want) {
 			t.Errorf("message should mention %q; got %q", want, msg)
+		}
+	}
+}
+
+// A Vector of 4096 dimensions takes @vector, and one over it loads unannotated.
+func TestAnnotation_Vector_TakesUpTo4096Dimensions(t *testing.T) {
+	t.Parallel()
+	for _, body := range []string{
+		"id String primary\n\tv Vector[4096] @vector(cosine)",
+		"id String primary\n\tv Vector[65536]",
+	} {
+		if _, res := loadNoErr(t, "schema \"main\"\ntype Doc {\n\t"+body+"\n}"); res.Len() != 0 {
+			t.Errorf("%s: got %v, want a clean load", body, res)
+		}
+	}
+}
+
+// A @vector over more than 4096 dimensions is refused at its property, written
+// or through a datatype.
+func TestAnnotation_Vector_OverTheBoundIsRefusedAtItsProperty(t *testing.T) {
+	t.Parallel()
+	for _, src := range []string{
+		"schema \"main\"\ntype Doc {\n\tid String primary\n\tv Vector[4097] @vector(cosine)\n}",
+		"schema \"main\"\ntype Wide = Vector[5000]\ntype Doc {\n\tid String primary\n\tv Wide @vector(cosine)\n}",
+	} {
+		res := loadStringErr(t, src)
+		wantCounts(t, res, map[diag.Code]int{diag.E_INVALID_ANNOTATION_TARGET: 1})
+		for is := range res.Issues() {
+			if at := src[is.Span().Start.Byte:]; !strings.HasPrefix(at, "v ") {
+				t.Errorf("%q: the refusal stands at %q, want the property", src, at)
+			}
 		}
 	}
 }
@@ -689,6 +742,7 @@ func TestAnnotation_SameLine_StaysValid(t *testing.T) {
 	for _, body := range []string{
 		"id String primary\n\tpublished_on Date @index",
 		"id String primary\n\tfirst_seen Timestamp @writeOnce @index",
+		"id String primary\n\tstate Enum[\n\t\t\"a\",\n\t\t\"b\",\n\t] @index",
 	} {
 		if _, res := loadNoErr(t, "schema \"main\"\ntype Doc {\n\t"+body+"\n}"); res.Len() != 0 {
 			t.Errorf("same-line annotations must load clean, got: %v", res)

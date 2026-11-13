@@ -331,7 +331,7 @@ name String required
 Relationship property blocks cannot use `Vector` or `List` types.
 
 ```yammm-invalid
-// WRONG -- List not allowed in edge properties: E_LIST_ON_EDGE
+// WRONG -- List not allowed in edge properties: E_INVALID_EDGE_PROPERTY_TYPE
 --> RATED (many) Product {
     score Float[0.0, 5.0] required
     tags List<String>

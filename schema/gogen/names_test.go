@@ -40,14 +40,13 @@ func TestGoIdent(t *testing.T) {
 func TestGoPackageName(t *testing.T) {
 	cases := map[string]string{
 		"municipal": "municipal",
-		"Geo Data":  "geodata",
-		"123schema": "schema",
-		"":          "schema",
+		"Geo_Data":  "geodata",
+		"v2_ready":  "v2ready",
 		"type":      "type_",
 		"Main":      "main_",
 		"main":      "main_",
 		"Init":      "init_",
-		"in-it":     "init_",
+		"in_it":     "init_",
 		"nil":       "nil_",
 		"String":    "string_",
 		"error":     "error_",

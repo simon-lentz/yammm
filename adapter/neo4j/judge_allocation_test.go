@@ -21,7 +21,7 @@ type Car {
 	nested List<List<Code>>
 	colour Colour
 	colours List<Colour>
-	tag Pattern["^a", "b$"]
+	tag Pattern["^a"]
 	kind Enum["x", "y"]
 	at Timestamp
 	stamps List<Timestamp>

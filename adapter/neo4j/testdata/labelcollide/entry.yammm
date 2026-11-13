@@ -1,8 +1,8 @@
-schema "geo-regions"
+schema "geo"
 
 import "geo_regions.yammm" as other
 
-type Region {
+type Regions__Region {
     rid String primary
     --> PEER (one) other.Region
 }

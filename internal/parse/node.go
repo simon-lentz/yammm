@@ -18,7 +18,8 @@ type File struct {
 	NameSpan location.Span
 
 	// SchemaNameFailed reports that no usable schema name was produced: the
-	// header did not parse, or it parsed and its literal did not unquote.
+	// header did not parse, its literal did not unquote, or the name is not an
+	// identifier.
 	SchemaNameFailed bool
 
 	Doc  string
@@ -87,6 +88,11 @@ type TypeDecl struct {
 	Relations   []*Relation
 	Invariants  []*Invariant
 	Annotations []*Annotation // the type-level '@@' members
+
+	// LostMember reports that the body may lack a member its author wrote: it
+	// ends at end of input, or text recovery skipped holds, outside parentheses
+	// that close, a token that can begin a member or an upper-case word.
+	LostMember bool
 
 	Doc  string
 	Span location.Span
@@ -176,12 +182,12 @@ const (
 
 // Annotation is one '@name(args)' or '@@name(args)' member. HasParens reports
 // whether an argument list was parsed, so it is true exactly when Args is
-// non-empty: the grammar requires at least one argument inside parentheses, so
-// "@name()" does not parse and records the same shape as a bare "@name" plus
-// its own E_SYNTAX. DetachedFromLine records the shape
+// non-empty: the grammar requires at least one argument inside parentheses. An
+// annotation whose list does not parse, "@name()" among them, is not in the
+// tree, and its E_SYNTAX is its one diagnostic. DetachedFromLine records the shape
 // where what the author wrote and what the grammar binds can disagree: a
-// trailing annotation binds to the property above it even across a line break,
-// so an annotation starting on a later line carries that property's line
+// trailing annotation binds to the property before it even across a line
+// break, so an annotation that begins a line carries that property's line
 // number and every other annotation carries zero.
 type Annotation struct {
 	Name             string
@@ -258,9 +264,8 @@ type Bounds struct {
 // Literal is one written literal argument of a constraint. Kept reports
 // whether the value survived into the constraint: a literal that failed to
 // unquote, holds text the source rules refuse, was empty, duplicated an
-// earlier value, failed to compile, names a surrogate, or is a pattern after
-// MaxPatterns others were kept is recorded here with its extent but does not
-// reach the constraint itself. Text is empty for a literal with no
+// earlier value or failed to compile is recorded here with its extent but does
+// not reach the constraint itself. Text is empty for a literal with no
 // value.
 type Literal struct {
 	Raw   string
@@ -286,10 +291,10 @@ type Constraint struct {
 	Span location.Span
 
 	// Written arguments.
-	Bounds      *Bounds
-	EnumLits    []Literal
-	PatternLits []Literal
-	DimsLit     *IntLit
+	Bounds     *Bounds
+	EnumLits   []Literal
+	PatternLit *Literal // Pattern only
+	DimsLit    *IntLit
 
 	// Values, absent when the source omitted the bound or it did not parse.
 	IntMin, IntMax     *int64
@@ -313,14 +318,11 @@ func (c *Constraint) EnumValues() []string {
 	return out
 }
 
-// PatternRegexps returns the compiled patterns that survived into the
-// constraint, in source order.
-func (c *Constraint) PatternRegexps() []*regexp.Regexp {
-	var out []*regexp.Regexp
-	for _, lit := range c.PatternLits {
-		if lit.Kept {
-			out = append(out, lit.Regex)
-		}
+// PatternRegexp returns the compiled pattern when it survived into the
+// constraint, and nil otherwise.
+func (c *Constraint) PatternRegexp() *regexp.Regexp {
+	if c.PatternLit == nil || !c.PatternLit.Kept {
+		return nil
 	}
-	return out
+	return c.PatternLit.Regex
 }

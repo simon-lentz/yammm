@@ -752,32 +752,41 @@ func (c *completer) typeProperty(children []expr.Expression, sc *staticScope, ow
 
 // relationSpelled reports whether name, which reads a member of t by its
 // folded spelling in an invariant on owner, is a spelling docs/SPEC.md admits:
-// a property in any case, a relation by its UPPER_SNAKE name or its field name.
+// a property in any case, a relation by its declared name alone.
 func (c *completer) relationSpelled(owner, t Type, name string, inv Invariant) bool {
 	rel, ok := t.RelationByField(strings.ToLower(name))
-	if !ok || name == rel.Name() || name == rel.FieldName() {
+	if !ok || name == rel.Name() {
+		return true
+	}
+	// A property of exactly this spelling is the member read; the collision
+	// with the relation is E_PROPERTY_RELATION_COLLISION's report.
+	if _, isProperty := t.Property(name); isProperty {
 		return true
 	}
 	c.invariantErrorf(inv, diag.E_INVALID_NAME,
-		"relation %s on type %q is read as %q in invariant %q on type %q: a relation is read as %s or %s",
-		rel.Name(), t.Name(), name, inv.Name(), owner.Name(), rel.Name(), rel.FieldName())
+		"relation %s on type %q is read as %q in invariant %q on type %q: a relation is read by its declared name %s",
+		rel.Name(), t.Name(), name, inv.Name(), owner.Name(), rel.Name())
 	return false
 }
 
 // typeVariable resolves a lambda parameter, a member of the owner, or a
 // numeric variable, in the evaluator's order. self is an ordinary bound
-// variable, so a parameter of that name shadows it by binding order alone. A
-// numeric variable evaluates to nil when unbound; any other unbound name is a
-// guaranteed evaluation error, so it is refused here.
+// variable, so a parameter of that name shadows it by binding order alone. Any
+// other name names nothing the author declared, so it is refused here.
 func (c *completer) typeVariable(children []expr.Expression, sc *staticScope, owner Type, inv Invariant) staticType {
 	name, _ := expr.StringLiteral(children[0])
 	if t, found := sc.lookupVar(name); found {
 		return t
 	}
-	// A $ variable names a member by its exact spelling, as the evaluator's
-	// scope resolves it; only a bare name folds.
-	if t, found := c.membersOf(owner)[strings.ToLower(name)]; found && memberSpelled(owner, name) {
-		return t
+	// A $ variable names a member exactly, as the evaluator reads it. Another
+	// casing of a relation's name draws relationSpelled's issue at every door.
+	if t, found := c.membersOf(owner)[strings.ToLower(name)]; found {
+		if memberSpelled(owner, name) {
+			return t
+		}
+		if !c.relationSpelled(owner, owner, name, inv) {
+			return unknownType
+		}
 	}
 	if isNumericVar(name) {
 		return unknownType
@@ -787,13 +796,13 @@ func (c *completer) typeVariable(children []expr.Expression, sc *staticScope, ow
 	return unknownType
 }
 
-// memberSpelled reports whether name is the exact spelling of one of t's
-// members: a property's declared name or a relation's field name.
+// memberSpelled reports whether name is the declared name of one of t's
+// members, a property or a relation.
 func memberSpelled(t Type, name string) bool {
 	if _, ok := t.Property(name); ok {
 		return true
 	}
-	_, ok := t.RelationByField(name)
+	_, ok := t.Relation(name)
 	return ok
 }
 

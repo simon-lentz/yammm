@@ -26,7 +26,7 @@ func TestCheck_AStringIsValidUTF8AtEveryTextKind(t *testing.T) {
 	}{
 		{"String", bad, schema.NewStringConstraint()},
 		{"String in a named type", carrier(bad), schema.NewStringConstraint()},
-		{"Pattern its pattern matches", bad, schema.NewPatternConstraint([]*regexp.Regexp{regexp.MustCompile("^a.b$")})},
+		{"Pattern its pattern matches", bad, schema.NewPatternConstraint(regexp.MustCompile("^a.b$"))},
 		{"Enum holding the string", bad, schema.NewEnumConstraint([]string{bad, "c"})},
 		{"Timestamp", bad, schema.NewTimestampConstraint()},
 		{"Date", bad, schema.NewDateConstraint()},

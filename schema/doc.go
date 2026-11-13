@@ -50,8 +50,8 @@
 // internal fault (E_INTERNAL), or input a load cannot begin from, such as no sources, a source key the loader
 // refuses, two keys that name one source, or a source name that is not valid
 // UTF-8 or holds a character that does not print, or a source whose header cannot be parsed, which the parser reports
-// as a Fatal E_SYNTAX. A schema name with no value is an Error, E_SYNTAX, an
-// empty one an Error, E_INVALID_NAME, and a malformed yammm.mod marker an
+// as a Fatal E_SYNTAX. A schema name with no value is an Error, E_SYNTAX, one
+// that is not an identifier an Error, E_INVALID_NAME, and a malformed yammm.mod marker an
 // Error, E_LOAD_MODULE_ROOT_MALFORMED, each with a zero Schema. Check result.HasErrors() to determine semantic success.
 //
 // # Load Options

@@ -15,7 +15,6 @@ import (
 	"strconv"
 	"strings"
 	"testing"
-	"unicode"
 
 	"github.com/simon-lentz/yammm/schema"
 	"github.com/yuin/goldmark"
@@ -317,22 +316,12 @@ func meaningOf(s schema.Schema) diagramMeaning {
 }
 
 // displayOf is the name the document gives t: the entry schema's tag for a
-// type it can address, else "Name (schema)", with each control character of
-// the schema name written as its Go escape.
+// type it can address, else "Name (schema)".
 func displayOf(entry, sch schema.Schema, t schema.Type) string {
 	if tag, ok := schema.AddressableTag(entry, t.ID()); ok {
 		return tag
 	}
-	var b strings.Builder
-	for _, r := range sch.Name() {
-		if unicode.IsControl(r) {
-			q := strconv.QuoteRune(r)
-			b.WriteString(q[1 : len(q)-1])
-			continue
-		}
-		b.WriteRune(r)
-	}
-	return t.Name() + " (" + b.String() + ")"
+	return t.Name() + " (" + sch.Name() + ")"
 }
 
 // dslMultiplicity is the DSL's canonical short multiplicity of a relation's

@@ -327,13 +327,15 @@ func hashConstraint(h io.Writer, c Constraint) {
 		}
 
 	case PatternConstraint:
+		// The count, 0 or 1, keeps the encoding of a pattern list, so a
+		// StructuralHash a consumer stored for a one-pattern constraint holds.
 		writeTag(h, "c:pattern")
-		patterns := cc.Patterns()
-		slices.Sort(patterns)
-		writeLen(h, len(patterns))
-		for _, pat := range patterns {
-			writeStr(h, pat)
+		if cc.compiled == nil {
+			writeLen(h, 0)
+			break
 		}
+		writeLen(h, 1)
+		writeStr(h, cc.Pattern())
 
 	case VectorConstraint:
 		writeTag(h, "c:vector")

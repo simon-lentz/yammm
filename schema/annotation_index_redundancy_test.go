@@ -1,6 +1,7 @@
 package schema_test
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/simon-lentz/yammm/diag"
@@ -164,18 +165,87 @@ type Concrete extends base.Mixin {
 	}
 }
 
-// @@index over a sole primary key is ACCEPTED, unlike the equivalent @index.
-// docs/SPEC.md lists "primary-key members allowed" for @@index with no
-// redundancy caveat: @@index is the explicit-shape construct, so a one-member
-// composite over a sole key is a deliberate request. The two placements differ
-// here by design.
-func TestAnnotation_IndexOnPrimary_TypeLevelOverSoleKeyAccepted(t *testing.T) {
+// A one-member @@index over a sole primary key spells the index @index on that
+// key spells, so it is refused where @index is, at its one member.
+func TestAnnotation_IndexOnPrimary_TypeLevelOverSoleKey_Rejected(t *testing.T) {
+	t.Parallel()
+	const src = `schema "main"
+type T {
+	id String primary
+	@@index(id)
+}`
+	res := loadStringErr(t, src)
+	wantCounts(t, res, map[diag.Code]int{diag.E_INVALID_ANNOTATION_TARGET: 1})
+	if !strings.Contains(res.String(), `@@index over primary-key property "id" alone is redundant`) {
+		t.Errorf("the refusal does not name the @@index: %v", res)
+	}
+	for is := range res.Issues() {
+		if at := src[is.Span().Start.Byte:]; !strings.HasPrefix(at, "id)") {
+			t.Errorf("the refusal stands at %q, want its member", at)
+		}
+	}
+}
+
+// A one-member @@index follows @index through an abstract base: refused when
+// every concrete descendant keys on the member alone, silent when one keys on
+// more.
+func TestAnnotation_IndexOnPrimary_TypeLevelThroughAbstractBase(t *testing.T) {
+	t.Parallel()
+	const src = `schema "main"
+abstract type Base {
+	a String primary
+	@@index(a)
+}
+type Concrete extends Base {
+	x String
+}`
+	res := loadStringErr(t, src)
+	wantCounts(t, res, map[diag.Code]int{diag.E_INVALID_ANNOTATION_TARGET: 1})
+	for is := range res.Issues() {
+		if !strings.Contains(is.Message(), `"Concrete" keys on it alone`) {
+			t.Errorf("the refusal does not name the emitter: %s", is.Message())
+		}
+		related := is.Related()
+		if len(related) != 1 || related[0].Message != "sole primary key emitted here" ||
+			!strings.HasPrefix(src[related[0].Span.Start.Byte:], "type Concrete") {
+			t.Errorf("want one related span at Concrete, the emitter; got %v", related)
+		}
+	}
+	loadNoErr(t, `schema "main"
+abstract type Base {
+	a String primary
+	@@index(a)
+}
+type Concrete extends Base {
+	b String primary
+}`)
+}
+
+// An @@index of two members is never redundant, primary keys or not.
+func TestAnnotation_IndexOnPrimary_TypeLevelOverTwoMembersAccepted(t *testing.T) {
 	t.Parallel()
 	loadNoErr(t, `schema "main"
 type T {
 	id String primary
-	@@index(id)
+	name String
+	@@index(id, name)
 }`)
+}
+
+// A part is keyed on the path it is composed under, so its declared key backs
+// no index: @index and @@index over that key alone both load.
+func TestAnnotation_IndexOnPrimary_PartKeyAccepted(t *testing.T) {
+	t.Parallel()
+	for _, member := range []string{"id String primary @index", "id String primary\n\t@@index(id)"} {
+		loadNoErr(t, strings.ReplaceAll(`schema "main"
+type Owner {
+	id String primary
+	*-> HOLDS (many) Item
+}
+part type Item {
+	MEMBER
+}`, "MEMBER", member))
+	}
 }
 
 // The redundancy check must defer when an emitter has a co-primary that key
@@ -196,5 +266,33 @@ type T {
 	}
 	if !res.HasCode(diag.E_INVALID_PRIMARY_KEY_TYPE) {
 		t.Errorf("the rejected co-primary should still draw E_INVALID_PRIMARY_KEY_TYPE: %v", res)
+	}
+}
+
+// A member lost to a syntax error may be a co-key, so an index over the key
+// that reads as sole draws no redundancy refusal beside the E_SYNTAX: in the
+// emitter's body or in a supertype's.
+func TestAnnotation_IndexOnPrimary_DefersOnALostMember(t *testing.T) {
+	t.Parallel()
+	for _, src := range []string{
+		"schema \"main\"\ntype T {\n\ta String primary\n\tb String Primary\n\t@@index(a)\n}",
+		"schema \"main\"\ntype T {\n\ta String primary @index\n\tb String Primary\n}",
+		"schema \"main\"\nabstract type Base {\n\ta String primary\n\tb String Primary\n}\ntype C extends Base {\n\t@@index(a)\n}",
+	} {
+		res := loadStringErr(t, src)
+		wantCounts(t, res, map[diag.Code]int{diag.E_SYNTAX: 1})
+	}
+}
+
+// An annotation's name written apart from its "@" loses no member, so the
+// emitter is judged and the redundant index is refused beside the E_SYNTAX.
+func TestAnnotation_IndexOnPrimary_IsJudgedPastAnAnnotationNameApartFromItsAtSign(t *testing.T) {
+	t.Parallel()
+	for _, src := range []string{
+		"schema \"main\"\ntype B {\n\tid String primary\n}\ntype T {\n\ta String primary @index\n\t--> R (one) B\n\t@ unique\n}",
+		"schema \"main\"\ntype B {\n\tid String primary\n}\ntype T {\n\ta String primary\n\t@@index(a)\n\t--> R (one) B\n\t@ unique\n}",
+	} {
+		res := loadStringErr(t, src)
+		wantCounts(t, res, map[diag.Code]int{diag.E_SYNTAX: 1, diag.E_INVALID_ANNOTATION_TARGET: 1})
 	}
 }

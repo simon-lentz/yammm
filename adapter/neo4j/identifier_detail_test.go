@@ -71,11 +71,11 @@ func TestInvalidIdentifier_LabelSiteCarriesTheSameContract(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 
-	s, lres := schema.LoadString(ctx, "schema \"«9x\"\n\ntype Person {\n\tid String primary\n}\n", "x.yammm")
+	s, lres := schema.LoadString(ctx, "schema \"x\"\n\ntype Person {\n\tid String primary\n}\n", "x.yammm")
 	if s.IsZero() {
 		t.Fatalf("load: %s", lres)
 	}
-	_, res := New().ShapeForSchema(ctx, s)
+	_, res := New(WithLabelPrefix("9")).ShapeForSchema(ctx, s)
 
 	got := detailsOf(t, res, E_NEO4J_INVALID_IDENTIFIER)
 	if got == nil {

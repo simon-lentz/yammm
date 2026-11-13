@@ -87,11 +87,8 @@
 //
 // Annotations are not aligned into a column of their own: one written on its
 // property's line trails the property by a single space, whatever the width of
-// the surrounding declarations. Line wrapping leaves a single-line property that
-// carries an annotation on its line, because the annotation has no legal place on
-// a continuation line. A multi-line Enum with an annotation on its closing line
-// stays multi-line when it is too wide to fold, and a load refuses it with
-// E_INVALID_ANNOTATION.
+// the surrounding declarations. A wrapped Enum keeps its modifiers and
+// annotations after the closing "]", on the line where the property ends.
 //
 // # Callers
 //

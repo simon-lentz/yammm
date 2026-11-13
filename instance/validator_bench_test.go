@@ -160,7 +160,7 @@ func BenchmarkValidateOne_RelationsPropertyInvariants(b *testing.B) {
 // so the scope carries edge targets and composed children.
 func BenchmarkValidateOne_RelationInvariants(b *testing.B) {
 	benchOrder(b, relationBenchSchema(b, `
-    ! "has_company" works_at != nil
+    ! "has_company" WORKS_AT != nil
     ! "has_items" ITEMS -> Len > 0
     ! "positive" ITEMS -> All |$i| { $i.qty > 0 }
 `))

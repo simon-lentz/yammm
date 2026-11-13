@@ -627,10 +627,10 @@ func elements[T any](raw []any, elem schema.Constraint) (any, error) {
 // declares then routes through [coerceValue], as on the node path.
 //
 // Edge properties are scalar by language rule: List and Vector types on a
-// relationship are rejected at schema-load (diag.E_LIST_ON_EDGE /
-// diag.E_INVALID_CONSTRAINT, both alias-aware), so a declared edge property's
-// constraint is never a List. A []any value still reaches coerceValue's list
-// arm, which refuses it against the scalar constraint.
+// relationship are rejected at schema-load (diag.E_INVALID_EDGE_PROPERTY_TYPE,
+// alias-aware), so a declared edge property's constraint is never a List. A
+// []any value still reaches coerceValue's list arm, which refuses it against
+// the scalar constraint.
 //
 // A property rel does not declare passes through as [heldForm] reads it, for a
 // zero relation or one with no declared properties too. Properties are processed

@@ -212,7 +212,7 @@ func (c *completer) validateInheritedHolderRules(t Type) {
 func (c *completer) validatePropertyAnnotations(t Type, prop Property) {
 	seen := make(map[string]Annotation)
 	for _, a := range prop.annotations {
-		// An annotation on a line of its own binds to the property ABOVE it,
+		// An annotation that begins a line binds to the property ABOVE it,
 		// because the grammar's property-trailing annotation* does not care
 		// about line breaks. A reader used to prefix decorators writes it
 		// expecting the property BELOW, and nothing else in the load
@@ -221,8 +221,8 @@ func (c *completer) validatePropertyAnnotations(t Type, prop Property) {
 		// pick between the readings instead.
 		if a.detachedFrom > 0 {
 			c.annotationErrorf(a, a.Span(), diag.E_INVALID_ANNOTATION,
-				"annotation @%s is written on its own line but attaches to property %q declared on line %d; "+
-					"put it on that property's line, or use @@%s for a type-level annotation",
+				"annotation @%s begins a line but attaches to property %q declared on line %d; "+
+					"write it after that property on the line where the property ends, or use @@%s for a type-level annotation",
 				a.name, prop.Name(), a.detachedFrom, a.name)
 			continue
 		}
@@ -355,14 +355,10 @@ func validateIndexProperty(c *completer, t Type, prop Property, a Annotation) {
 	}
 }
 
-// reportIndexRedundancy reports the "@index over a sole primary key is
-// redundant" error, at span, naming the emitter that made it redundant. When the
-// emitter is not the annotated type t — t may be an abstract mixin that emits
-// nothing — a related span points at the emitter.
-//
-// Only @index reaches here: @@index over a sole primary key is accepted per
-// docs/SPEC.md (see validateIndexType). The helper stays generic in its message
-// so that asymmetry lives at the one call site, not baked into this shape.
+// reportIndexRedundancy reports an index over a sole primary key as redundant,
+// at span, naming the emitter that made it redundant. When the emitter is not
+// the annotated type t — t may be an abstract mixin that emits nothing — a
+// related span points at the emitter.
 func (c *completer) reportIndexRedundancy(a Annotation, span location.Span, t, emitter Type, format string, args ...any) {
 	var related []location.RelatedInfo
 	if emitter != t {
@@ -392,8 +388,9 @@ func (c *completer) reportIndexRedundancy(a Annotation, span location.Span, t, e
 // compositely and genuinely needs the index — there is no edit that satisfies
 // both, and reporting an error the user cannot act on is worse than the
 // redundant index the mixed case emits. The rule therefore reports only what can
-// be safely removed. This is the one case where a redundant index still ships;
-// `yammm neo4j diff` surfaces it against a live database.
+// be safely removed. This is the one case where a redundant index still ships,
+// and no tool reports it: the Neo4j adapter's index diff counts an index a
+// constraint backs as a match.
 //
 // Emitters are measured by their EXTRACTED primary keys, via the non-allocating
 // [Type.primaryKeyCount], not by counting `primary` flags. But an extracted
@@ -401,6 +398,8 @@ func (c *completer) reportIndexRedundancy(a Annotation, span location.Span, t, e
 // primary ([Type.hasRejectedPrimary]) means a composite the user intended
 // currently reads as sole, so the check defers there rather than stacking a
 // redundancy error on the E_INVALID_PRIMARY_KEY_TYPE the user has to fix first.
+// A member lost to a syntax error, in the emitter's body or a supertype's, may
+// be a co-key in the same way ([completer.lostAMember]).
 //
 // It also stays silent when there is no concrete emitter (nothing is emitted, so
 // nothing is redundant) and when any emitter still has an unresolved supertype
@@ -417,14 +416,17 @@ func (c *completer) indexOnPrimaryKeyIsRedundant(t Type) (Type, bool) {
 	var first Type
 	for e := range c.concreteEmitters(t) {
 		// Defer on any emitter whose key shape is not settled: an unresolved
-		// supertype may add a co-key, and a rejected primary means the intended
-		// composite currently reads as sole. Either way the sole-vs-composite
-		// question has no stable answer yet, and firing would stack a redundancy
-		// error on the real one (the unresolved reference, or the bad key type).
-		if c.hasUnresolvedSupertype(e) || e.hasRejectedPrimary() {
+		// supertype may add a co-key, a rejected primary means the intended
+		// composite currently reads as sole, and a member lost to a syntax error
+		// may be a co-key. Either way the sole-vs-composite question has no
+		// stable answer yet, and firing would stack a redundancy error on the
+		// real one (the unresolved reference, the bad key type, or the E_SYNTAX).
+		if c.hasUnresolvedSupertype(e) || e.hasRejectedPrimary() || c.lostAMember(e) {
 			return Type{}, false
 		}
-		if e.primaryKeyCount() != 1 {
+		// A part is keyed on its composed path, so no constraint over its
+		// declared key backs an index.
+		if e.primaryKeyCount() != 1 || e.IsPart() {
 			return Type{}, false
 		}
 		if first.IsZero() {
@@ -489,6 +491,12 @@ func validateVectorProperty(c *completer, _ Type, prop Property, a Annotation) {
 		c.annotationErrorf(a, prop.Span(), diag.E_INVALID_ANNOTATION_TARGET,
 			"@vector requires a Vector property; property %q is %s",
 			prop.Name(), constraintKindName(prop.Constraint()))
+		return
+	}
+	if v, ok := ResolveAlias(prop.Constraint()).(VectorConstraint); ok && v.Dimension() > maxIndexedVectorDimensions {
+		c.annotationErrorf(a, prop.Span(), diag.E_INVALID_ANNOTATION_TARGET,
+			"@vector indexes a Vector of at most %d dimensions; property %q has %d",
+			maxIndexedVectorDimensions, prop.Name(), v.Dimension())
 		return
 	}
 	a.setArgKind(0, ArgKeyword)
@@ -592,7 +600,8 @@ func validateFulltextType(c *completer, t Type, _ Property, a Annotation) {
 
 // validateIndexType checks @@index: at least one property-reference argument,
 // no duplicate references, and each reference resolving to a scalar property of
-// the type (own or inherited; primary-key members are allowed). Unknown-property
+// the type, own or inherited. A primary-key member is allowed, but a one-member
+// @@index over a sole key is redundant where @index on it would be. Unknown-property
 // reporting defers when the type has an unresolved supertype, since the
 // reference may live on a not-yet-visible cross-schema ancestor.
 func validateIndexType(c *completer, t Type, _ Property, a Annotation) {
@@ -633,12 +642,16 @@ func validateIndexType(c *completer, t Type, _ Property, a Annotation) {
 				arg.text, constraintKindName(ref.Constraint()))
 			continue
 		}
-		// No sole-primary-key redundancy check here, unlike @index: docs/SPEC.md
-		// lists "primary-key members allowed" for @@index with no caveat, framing
-		// the redundancy rule as @index-only. @@index is the explicit-shape
-		// construct, so a one-member @@index over a sole key is a deliberate
-		// request, not an accident to flag. The two placements differ here by
-		// design; resolving the difference the other way is a SPEC change.
+		// A one-member @@index over a primary key is the index @index on that
+		// key spells, so it is redundant exactly when @index there is.
+		if a.argCount() == 1 && ref.IsPrimaryKey() {
+			if emitter, redundant := c.indexOnPrimaryKeyIsRedundant(t); redundant {
+				c.reportIndexRedundancy(a, arg.span, t, emitter,
+					"@@index over primary-key property %q alone is redundant: %q keys on it alone, so the uniqueness constraint it emits already backs an index",
+					arg.text, emitter.Name())
+				continue
+			}
+		}
 		a.setArgKind(i, ArgPropertyRef)
 	}
 }
@@ -717,6 +730,10 @@ func constraintKindName(constraint Constraint) string {
 	}
 	return ResolveAlias(constraint).Kind().String()
 }
+
+// maxIndexedVectorDimensions is the most dimensions a Neo4j vector index takes.
+// A Vector may hold more, up to parse.MaxVectorDimensions, but not under @vector.
+const maxIndexedVectorDimensions = 4096
 
 // vectorSimilarityFunctions is the blessed set of @vector similarity keywords —
 // the single source of truth consumed by isVectorSimilarity, the @vector

@@ -223,6 +223,10 @@ func (e *Evaluator) evalTernary(ctx context.Context, children []expr.Expression,
 	return e.evaluate(ctx, children[2], scope)
 }
 
+// evalVar reads a variable: a binding of exactly that name, then a member by
+// its declared name. A name neither binds reads nil, as a bare name does: load
+// refuses a named variable that is neither a parameter nor a member, so what
+// reaches here unbound is an unset member or an unset positional variable.
 func (e *Evaluator) evalVar(children []expr.Expression, scope Scope) (any, error) {
 	if len(children) != 1 {
 		return nil, errors.New("variable lookup requires 1 operand")
@@ -233,25 +237,15 @@ func (e *Evaluator) evalVar(children []expr.Expression, scope Scope) (any, error
 		return nil, errors.New("variable name must be a string literal")
 	}
 
-	// Numeric variables ($0, $1, ...) return nil if not found
-	if isNumericVar(name) {
-		val, found := scope.Lookup(name)
-		if !found {
-			return nil, nil //nolint:nilnil // unset numeric vars are nil
-		}
-		return val.Unwrap(), nil
-	}
-
-	// Named variables must be defined
 	val, found := scope.Lookup(name)
 	if !found {
-		return nil, fmt.Errorf("undefined variable: $%s", name)
+		return nil, nil //nolint:nilnil // an unset member or positional variable is nil
 	}
 	return val.Unwrap(), nil
 }
 
 // evalProperty reads a bare name within the current scope by [Scope.LookupFold]:
-// a property in any ASCII casing, a relation by its name or its field name.
+// a property in any ASCII casing, a relation by its name.
 //
 // Safety: Schema validation prevents types from having multiple properties
 // that fold to the same lowercase name (e.g., "Name" and "name" cannot coexist),
@@ -782,17 +776,4 @@ func (e *Evaluator) not(args []any) (any, error) {
 		return nil, fmt.Errorf("! expects boolean, got %T", args[0])
 	}
 	return !b, nil
-}
-
-// isNumericVar checks if a variable name is numeric ($0, $1, etc.)
-func isNumericVar(name string) bool {
-	if name == "" {
-		return false
-	}
-	for _, r := range name {
-		if r < '0' || r > '9' {
-			return false
-		}
-	}
-	return true
 }

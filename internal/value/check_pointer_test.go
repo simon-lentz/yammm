@@ -36,7 +36,7 @@ func TestCheck_APointerIsNoValueOfAnyKind(t *testing.T) {
 		schema.NewStringConstraint(), schema.NewIntegerConstraint(), schema.NewFloatConstraint(),
 		schema.NewBooleanConstraint(), schema.NewTimestampConstraint(), schema.NewDateConstraint(),
 		schema.NewUUIDConstraint(), schema.NewEnumConstraint([]string{"a"}),
-		schema.NewPatternConstraint([]*regexp.Regexp{regexp.MustCompile("a")}),
+		schema.NewPatternConstraint(regexp.MustCompile("a")),
 		schema.NewVectorConstraint(2), schema.NewListConstraint(schema.NewStringConstraint()),
 		schema.NewAliasConstraint("Name", schema.NewStringConstraint()),
 	} {

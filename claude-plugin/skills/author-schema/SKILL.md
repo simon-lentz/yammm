@@ -42,7 +42,7 @@ If `$ARGUMENTS` provides a description, use it as the starting point for step 1.
 - **Invariants**: Add `! "error_id" expression` for business rules. A built-in function name is matched exactly, capital first: `Len`, `All`, `Any`, `Contains`, etc.
 - **Using `primary required` together is a parse error** -- `primary` already implies required.
 - **Annotations**: Declare store-level intent the model implies. They do not affect which data is valid, and they are excluded from the structural hash, so adding one never invalidates a persisted snapshot.
-  - `@index` on a property the domain says will be filtered or sorted on. Scalars only. Not on a sole primary key -- its uniqueness constraint already backs an index, and the loader rejects it.
+  - `@index` on a property the domain says will be filtered or sorted on. Scalars only. Not on a sole primary key, and no `@@index` over that key alone -- its uniqueness constraint already backs an index, and the loader rejects both. A `part` type's key is the exception.
   - `@@index(a, b)` at the type level for a composite lookup. Argument **order is significant** and should match the intended query shape; write it in the order a caller narrows.
   - `@vector(cosine)` or `@vector(euclidean)` on a `Vector[N]` property. `N` is the embedding model's dimension, so pick the model before writing the type.
   - `@fulltext` on a text property (`String`, `Pattern`, or `Enum`) the domain says will be searched by content -- tokenized match, not the exact filtering `@index` serves. Fine on a primary-key member: the key's uniqueness constraint backs a range index, which cannot serve fulltext queries, so the `@index` redundancy rule does not apply.

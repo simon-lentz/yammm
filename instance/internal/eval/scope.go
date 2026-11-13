@@ -40,7 +40,7 @@ type Scope interface {
 
 	// LookupFold returns the value a bare name reads: a variable of exactly
 	// that name, then a property matched case-insensitively or a relation by
-	// its name or its field name. Returns (zero, false) if not found.
+	// its name. Returns (zero, false) if not found.
 	LookupFold(name string) (immutable.Value, bool)
 
 	// WithVar returns a new Scope with the additional variable binding.
@@ -65,19 +65,12 @@ type propertyScope struct {
 }
 
 // Lookup resolves a variable's name: a variable of exactly that name, then a
-// member spelled exactly, which reads a relation by its name, then a relation
-// by its field name.
+// member by its declared name.
 func (s *propertyScope) Lookup(name string) (immutable.Value, bool) {
 	if v, ok := s.vars[name]; ok {
 		return v, true
 	}
-	if v, ok := s.props.Get(name); ok {
-		return v, true
-	}
-	if key := toUpperASCII(name); key != name && name == toLowerASCII(key) {
-		return s.props.Get(key)
-	}
-	return immutable.Value{}, false
+	return s.props.Get(name)
 }
 
 // LookupFold resolves a bare name the way docs/SPEC.md's scope chain states:
@@ -91,20 +84,16 @@ func (s *propertyScope) LookupFold(name string) (immutable.Value, bool) {
 }
 
 // readMember reads name from an instance's entries: a property by its name in
-// any ASCII casing, a relation by its UPPER_SNAKE name or its field name alone.
-// The entries key a relation by its name, and a property name starts lower
-// case, so name upper-cased finds a relation's key and no property's; a read
-// of it in another casing reads nothing, and the fold that follows reaches
-// properties alone.
+// any ASCII casing, a relation by its UPPER_SNAKE name alone. The entries key a
+// relation by its name, and a property name starts lower case, so name
+// upper-cased finds a relation's key and no property's; a read of it in another
+// casing reads nothing, and the fold that follows reaches properties alone.
 func readMember(props immutable.Properties, name string) (immutable.Value, bool) {
 	if v, ok := props.Get(name); ok {
 		return v, true
 	}
 	if key := toUpperASCII(name); key != name {
-		if v, ok := props.Get(key); ok {
-			if name == toLowerASCII(key) {
-				return v, true
-			}
+		if _, ok := props.Get(key); ok {
 			return immutable.Value{}, false
 		}
 	}
@@ -117,16 +106,6 @@ func toUpperASCII(s string) string {
 	return strings.Map(func(r rune) rune {
 		if 'a' <= r && r <= 'z' {
 			return r - 'a' + 'A'
-		}
-		return r
-	}, s)
-}
-
-// toLowerASCII maps the ASCII letters A-Z to a-z.
-func toLowerASCII(s string) string {
-	return strings.Map(func(r rune) rune {
-		if 'A' <= r && r <= 'Z' {
-			return r - 'A' + 'a'
 		}
 		return r
 	}, s)

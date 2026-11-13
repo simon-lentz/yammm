@@ -11,11 +11,11 @@ import (
 // panics on any other argument.
 var InvariantExpression func(inv any) Expression
 
-// PatternRegexps returns a schema.PatternConstraint's compiled patterns, the
-// constraint's own slice, which a reader must not write. The schema package sets it
-// once, in its init, and nothing writes it after, so a read takes no lock. It takes
-// any because this package sits below schema, and it panics on any other argument.
-var PatternRegexps func(constraint any) []*regexp.Regexp
+// PatternRegexp returns a schema.PatternConstraint's compiled pattern, or nil for
+// a constraint that holds none. The schema package sets it once, in its init, and
+// nothing writes it after, so a read takes no lock. It takes any because this
+// package sits below schema, and it panics on any other argument.
+var PatternRegexp func(constraint any) *regexp.Regexp
 
 // SelfVariable is the name bound to the instance under evaluation. The
 // completer refuses a member of this name, the static checker binds it in the

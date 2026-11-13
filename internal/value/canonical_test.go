@@ -235,7 +235,7 @@ func TestCanonical_PassesEveryOtherKindThrough(t *testing.T) {
 		{"float", 2.5, schema.NewFloatConstraint()},
 		{"boolean", true, schema.NewBooleanConstraint()},
 		{"enum", "a", schema.NewEnumConstraint([]string{"a", "b"})},
-		{"pattern", "ab", schema.NewPatternConstraint([]*regexp.Regexp{regexp.MustCompile("^a")})},
+		{"pattern", "ab", schema.NewPatternConstraint(regexp.MustCompile("^a"))},
 		{"vector", []float64{1, 2}, schema.NewVectorConstraint(2)},
 	}
 	for _, tc := range cases {

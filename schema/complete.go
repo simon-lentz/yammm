@@ -2,7 +2,6 @@ package schema
 
 import (
 	"fmt"
-	"iter"
 	"slices"
 	"strings"
 
@@ -372,6 +371,7 @@ func (c *completer) indexTypes() {
 		if !td.NameSpan.IsZero() {
 			t.setNameSpan(td.NameSpan)
 		}
+		t.lostMember = td.LostMember
 
 		clause := make([]TypeRef, 0, len(td.Inherits))
 		for _, ref := range td.Inherits {
@@ -1004,7 +1004,7 @@ func referenceParts(ref string) (qualifier, name string, ok bool) {
 	if !qualified {
 		return "", ref, isDataTypeName(ref)
 	}
-	if isValidAlias(before) && !parse.IsReserved(before) && isDataTypeName(after) {
+	if parse.IsIdentifier(before) && !parse.IsReserved(before) && isDataTypeName(after) {
 		return before, after, true
 	}
 	return "", ref, false
@@ -1014,7 +1014,7 @@ func referenceParts(ref string) (qualifier, name string, ok bool) {
 // an uppercase letter, then letters, digits and underscores, and no built-in
 // type name.
 func isDataTypeName(s string) bool {
-	return isValidAlias(s) && s[0] <= 'Z' && !parse.IsDatatypeKeyword(s)
+	return parse.IsIdentifier(s) && s[0] <= 'Z' && !parse.IsDatatypeKeyword(s)
 }
 
 // validateRelationProperties validates edge properties on all relations.
@@ -1025,13 +1025,16 @@ func (c *completer) validateRelationProperties() {
 	for _, t := range c.schema.types {
 		for rel := range t.Associations() {
 			for p := range rel.Properties() {
-				if isVectorConstraint(p.Constraint()) {
-					c.errorf(p.Span(), diag.E_INVALID_CONSTRAINT,
-						"relationship property %q cannot use Vector type", p.Name())
+				kind := ""
+				switch {
+				case isVectorConstraint(p.Constraint()):
+					kind = "Vector"
+				case isListConstraint(p.Constraint()):
+					kind = "List"
 				}
-				if isListConstraint(p.Constraint()) {
-					c.errorf(p.Span(), diag.E_LIST_ON_EDGE,
-						"relationship property %q cannot use List type", p.Name())
+				if kind != "" {
+					c.errorf(p.Span(), diag.E_INVALID_EDGE_PROPERTY_TYPE,
+						"relationship property %q cannot use %s type", p.Name(), kind)
 				}
 			}
 		}
@@ -1105,7 +1108,8 @@ func isPrimaryKeyAllowed(constraint Constraint) bool {
 // self is bound to the instance in every invariant, at load and at evaluation
 // alike, so neither the bare name nor $self reaches the property. Own properties only — an
 // inherited one was refused where it was declared. The grammar admits the
-// spelling; this is a binding rule, not a lexical one.
+// spelling; this is a binding rule, not a lexical one. A relation is read by its
+// UPPER_SNAKE name, which is never self.
 func (c *completer) validatePropertyNames() {
 	const why = "the bare name and $self resolve to the instance first, so the member is unreachable by its own name and readable only as self.self"
 	for _, t := range c.schema.types {
@@ -1117,23 +1121,8 @@ func (c *completer) validatePropertyNames() {
 				"property %q in type %q cannot be named %s: %s",
 				p.Name(), t.Name(), expr.SelfVariable, why)
 		}
-		// A relation is a member too, and it is read by its FIELD name, so the
-		// same rule decides it: one rule for both member kinds.
-		for _, rels := range []iterRelationSeq{t.AllAssociations(), t.AllCompositions()} {
-			for rel := range rels {
-				if rel.FieldName() != expr.SelfVariable {
-					continue
-				}
-				c.errorf(rel.Span(), diag.E_INVALID_NAME,
-					"relation %q in type %q cannot have field name %s: %s",
-					rel.Name(), t.Name(), expr.SelfVariable, why)
-			}
-		}
 	}
 }
-
-// iterRelationSeq is the shape both relation iterators share.
-type iterRelationSeq = iter.Seq[Relation]
 
 // validatePrimaryKeys enforces that every concrete (non-abstract, non-part) type
 // declares or inherits at least one primary key. A node needs identity to be added to
@@ -1161,10 +1150,29 @@ func (c *completer) validatePrimaryKeys() {
 		if c.hasUnresolvedSupertype(t) {
 			continue
 		}
+		// A member that did not parse, here or in a supertype, may be the key;
+		// its E_SYNTAX is the report.
+		if c.lostAMember(t) {
+			continue
+		}
 		c.errorf(t.Span(), diag.E_NO_PRIMARY_KEY,
 			"concrete type %q has no primary key; declare a 'primary' property or inherit one from a parent type",
 			t.Name())
 	}
+}
+
+// lostAMember reports whether t or one of its supertypes lost a member of its
+// body to a syntax error.
+func (c *completer) lostAMember(t Type) bool {
+	if t.lostMember {
+		return true
+	}
+	for super := range t.SuperTypes() {
+		if st := c.resolveTypeID(super.ID()); !st.IsZero() && st.lostMember {
+			return true
+		}
+	}
+	return false
 }
 
 // hasDeclaredPrimary reports whether any merged property carries the

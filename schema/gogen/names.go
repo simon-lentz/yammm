@@ -14,7 +14,7 @@ import (
 
 // goExportedIdent converts a yammm name to an exported Go identifier through
 // ident.ToUpperCamelInitialisms. An all-separator name yields "" and a
-// digit-leading one (a schema name such as "2020census") an unexported
+// digit-leading one (an enum value such as "2020") an unexported
 // "_"-prefixed string, so both take an "X" prefix.
 func goExportedIdent(name string, inits map[string]bool) string {
 	out := ident.ToUpperCamelInitialisms(name, inits)
@@ -27,20 +27,11 @@ func goExportedIdent(name string, inits map[string]bool) string {
 	return out
 }
 
-// goPackageName sanitizes a schema name into a lowercase package identifier,
-// or "schema" when nothing usable remains. A keyword, "main", "init" and a
-// predeclared identifier, which an importing file would lose, take "_".
+// goPackageName lowers a schema name, an identifier, into a package name and
+// drops its underscores. A keyword, "main", "init" and a predeclared
+// identifier, which an importing file would lose, take "_".
 func goPackageName(name string) string {
-	var b strings.Builder
-	for _, r := range strings.ToLower(name) {
-		if unicode.IsLetter(r) || unicode.IsDigit(r) {
-			b.WriteRune(r)
-		}
-	}
-	out := b.String()
-	if out == "" || unicode.IsDigit([]rune(out)[0]) {
-		return "schema"
-	}
+	out := strings.ReplaceAll(strings.ToLower(name), "_", "")
 	if token.IsKeyword(out) || types.Universe.Lookup(out) != nil || out == "main" || out == "init" {
 		return out + "_"
 	}

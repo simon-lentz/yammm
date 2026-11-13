@@ -1,4 +1,4 @@
-schema "geo_regions"
+schema "geo__Regions"
 
 type Region {
     code String primary

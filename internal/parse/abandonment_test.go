@@ -56,7 +56,7 @@ var abandonedGroups = []struct {
 		count:  1,
 	},
 	{
-		name:   "reverse clause",
+		name:   "a slash after the target",
 		src:    "schema \"s\"\ntype T {\n\t--> R B /\n}\n",
 		want:   `unexpected token "/" in a type body`,
 		anchor: "/",
@@ -145,7 +145,7 @@ func TestAbandonment_RecoveryStaysInsideTheDeclaration(t *testing.T) {
 		}
 	})
 
-	t.Run("a failed reverse clause keeps the next association", func(t *testing.T) {
+	t.Run("a slash after the target keeps the next association", func(t *testing.T) {
 		src := "schema \"s\"\ntype T {\n\t--> R B /\n\t--> Q C\n}\n"
 		f, _ := Parse([]byte(src), location.NewSourceID("s.yammm"))
 		if len(f.Types) != 1 {

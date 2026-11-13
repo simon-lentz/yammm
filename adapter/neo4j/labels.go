@@ -67,13 +67,13 @@ var cypherReservedKeywords = map[string]struct{}{
 // The order matters and the result is NOT guaranteed to be a valid identifier:
 // an input whose first invalid character precedes a digit ("«9x") has that
 // character stripped after the leading-digit test, so it returns "9x".
-// [Adapter.ShapeForSchema] judges the composed label with [ValidateIdentifier], and
-// refuses a label that is not valid with [E_NEO4J_INVALID_IDENTIFIER] naming it —
-// repairing it here instead would silently accept a schema name the author should
-// see reported. A composed label can be valid over an invalid result: "«9x" under
-// a label prefix, and "日本", which returns "" and composes "__A".
+// [Adapter.ShapeForSchema] judges the composed label, prefix and separator
+// included, with [ValidateIdentifier], and refuses a label that is not valid with
+// [E_NEO4J_INVALID_IDENTIFIER] naming it. A composed label can be valid over an
+// invalid result: "«9x" under a label prefix.
 //
-// This is the same transformation applied to each component in [Adapter.Label].
+// [Adapter.Label] applies it to the schema name and the type name; the prefix
+// and the separator stand as configured.
 func SanitizeIdentifier(s string) string {
 	trimmed := strings.TrimSpace(s)
 	if trimmed == "" {
@@ -152,19 +152,17 @@ func (a *Adapter) Label(ctx context.Context, schemaName, typeName string) string
 // sanitization.
 //
 // The closure, because [Adapter.Label] composes a label from the declaring
-// SCHEMA's name as well as the type's. Sanitizing merges no two type names: the
-// parser enforces the DSL name productions, on which [SanitizeIdentifier] is the
-// identity. It can merge two schema names, because a schema name is a quoted string
-// the parser holds to no name production. Members named "geo-regions" and
-// "geo_regions" sanitize alike and render one label for every same-named type they
-// declare. A type name holding the separator can compose the same label too, as
-// schema "a" with B__C and schema "a__B" with C do.
+// SCHEMA's name as well as the type's. Sanitizing merges no two names: the
+// parser holds type and schema names to identifier productions, on which
+// [SanitizeIdentifier] is the identity. A name holding the separator can
+// compose one label from two pairs, as schema "a" with B__C and schema "a__B"
+// with C do.
 //
 // Returns a [diag.Result] containing one [E_NEO4J_LABEL_COLLISION] issue per
 // colliding label. Its type detail carries full type IDENTITIES, not display
 // names, because the names are what collided:
 //
-//	types file:///a.yammm:Region and file:///b.yammm:Region all render label "geo_regions__Region"
+//	types file:///a.yammm:B__C and file:///b.yammm:C all render label "a__B__C"
 func (a *Adapter) DetectLabelCollisions(ctx context.Context, s schema.Schema) diag.Result {
 	collector := diag.NewCollector(0)
 	labelToTypes := make(map[string][]schema.TypeID)

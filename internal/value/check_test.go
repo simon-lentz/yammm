@@ -431,7 +431,7 @@ func TestCheck_Enum(t *testing.T) {
 
 func TestCheck_Pattern(t *testing.T) {
 	pattern := regexp.MustCompile(`^[A-Z]{2}-\d{4}$`)
-	constraint := schema.NewPatternConstraint([]*regexp.Regexp{pattern})
+	constraint := schema.NewPatternConstraint(pattern)
 
 	tests := []struct {
 		name    string
@@ -913,25 +913,22 @@ func TestCoerce_CanonicalFormsAreStable(t *testing.T) {
 	}
 }
 
-// Every pattern judges the value, and a miss names the pattern that missed.
-func TestCheck_EveryPatternJudges(t *testing.T) {
+// A pattern searches the text, a miss names the pattern, and a constraint that
+// holds no pattern refuses every value.
+func TestCheck_APatternSearchesAndAMissNamesIt(t *testing.T) {
 	t.Parallel()
-	c := schema.NewPatternConstraint([]*regexp.Regexp{regexp.MustCompile("^a"), regexp.MustCompile("b$")})
-	if err := value.Check("ab", c); err != nil {
-		t.Errorf("ab: %v, want nil", err)
-	}
-	for text, missed := range map[string]string{"ac": "b$", "xb": "^a"} {
-		err := value.Check(text, c)
-		if err == nil || !strings.Contains(err.Error(), missed) {
-			t.Errorf("%s: %v, want a miss naming %s", text, err, missed)
+	c := schema.NewPatternConstraint(regexp.MustCompile("b+"))
+	for _, text := range []string{"b", "abc", "xxbb"} {
+		if err := value.Check(text, c); err != nil {
+			t.Errorf("%s: %v, want nil", text, err)
 		}
 	}
-
-	// A text that misses both names the first, on each call: the check reads the
-	// constraint's own slice, which every text shares.
-	for range 2 {
-		if err := value.Check("xy", c); err == nil || !strings.Contains(err.Error(), "^a") {
-			t.Errorf("xy: %v, want a miss naming ^a", err)
+	if err := value.Check("ac", c); err == nil || !strings.Contains(err.Error(), "b+") {
+		t.Errorf("ac: %v, want a miss naming b+", err)
+	}
+	for _, none := range []schema.PatternConstraint{{}, schema.NewPatternConstraint(nil)} {
+		if err := value.Check("b", none); err == nil || !strings.Contains(err.Error(), "holds no pattern") {
+			t.Errorf("a constraint with no pattern: %v, want a refusal", err)
 		}
 	}
 }
@@ -940,7 +937,7 @@ func TestCheck_EveryPatternJudges(t *testing.T) {
 // drop what it holds, so a match allocates under -race alone.
 func TestCheck_APatternAllocatesNothing(t *testing.T) {
 	raceskip.Skip(t)
-	var c schema.Constraint = schema.NewPatternConstraint([]*regexp.Regexp{regexp.MustCompile("^a"), regexp.MustCompile("b$")})
+	var c schema.Constraint = schema.NewPatternConstraint(regexp.MustCompile("^a"))
 	var text any = "ab"
 	var err error
 	if allocs := testing.AllocsPerRun(100, func() { err = value.Check(text, c) }); allocs != 0 {
@@ -1040,10 +1037,13 @@ func TestCheck_ARefusalCarriesItsKind(t *testing.T) {
 		"a uint64 above a Float's maximum": {
 			uint64(math.MaxUint64), schema.FloatBetween(0, 1), value.KindConstraintFail, "float 1.8446744073709552e+19 exceeds maximum 1",
 		},
-		"a NaN":                       {math.NaN(), schema.NewFloatConstraint(), value.KindConstraintFail, "float value is not finite (NaN or Inf)"},
-		"an infinity":                 {math.Inf(1), schema.NewFloatConstraint(), value.KindConstraintFail, "float value is not finite (NaN or Inf)"},
-		"no member of an Enum":        {"b", schema.NewEnumConstraint([]string{"a"}), value.KindConstraintFail, ""},
-		"no match of a Pattern":       {"b", schema.NewPatternConstraint([]*regexp.Regexp{regexp.MustCompile("^a$")}), value.KindConstraintFail, ""},
+		"a NaN":                 {math.NaN(), schema.NewFloatConstraint(), value.KindConstraintFail, "float value is not finite (NaN or Inf)"},
+		"an infinity":           {math.Inf(1), schema.NewFloatConstraint(), value.KindConstraintFail, "float value is not finite (NaN or Inf)"},
+		"no member of an Enum":  {"b", schema.NewEnumConstraint([]string{"a"}), value.KindConstraintFail, ""},
+		"no match of a Pattern": {"b", schema.NewPatternConstraint(regexp.MustCompile("^a$")), value.KindConstraintFail, ""},
+		"a Pattern that holds none": {
+			"b", schema.PatternConstraint{}, value.KindConstraintFail, `value "b" is judged by a pattern constraint that holds no pattern`,
+		},
 		"a short vector":              {[]any{1.0}, schema.NewVectorConstraint(2), value.KindConstraintFail, "vector has 1 elements, expected 2"},
 		"a long vector":               {[]any{1.0, 2.0}, schema.NewVectorConstraint(1), value.KindConstraintFail, "vector has 2 elements, expected 1"},
 		"a long stored vector":        {[]float64{1, 2}, schema.NewVectorConstraint(1), value.KindConstraintFail, "vector has 2 elements, expected 1"},
@@ -1113,7 +1113,7 @@ func TestCheck_AConstraintOfAnotherTypeIsRefused(t *testing.T) {
 	t.Parallel()
 	str, integer, float := schema.StringLenBetween(1, 2), schema.IntegerBetween(1, 2), schema.FloatBetween(1, 2)
 	enum := schema.NewEnumConstraint([]string{"a"})
-	pattern := schema.NewPatternConstraint([]*regexp.Regexp{regexp.MustCompile("a")})
+	pattern := schema.NewPatternConstraint(regexp.MustCompile("a"))
 	vector := schema.NewVectorConstraint(1)
 	list := schema.NewListConstraint(schema.NewStringConstraint())
 	for _, tc := range []struct {

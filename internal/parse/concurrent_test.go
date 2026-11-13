@@ -382,7 +382,7 @@ func (fp fingerprint) constraint(c *Constraint) {
 	fmt.Fprintf(fp.out, "%v/%v/%v/%v/%v/%v/%v",
 		deref(c.IntMin), deref(c.IntMax), deref(c.FloatMin), deref(c.FloatMax),
 		deref(c.LenMin), deref(c.LenMax), deref(c.VectorDims))
-	fmt.Fprintf(fp.out, "%v/%v", c.EnumValues(), c.PatternRegexps())
+	fmt.Fprintf(fp.out, "%v/%v", c.EnumValues(), c.PatternRegexp())
 	if c.Alias != nil {
 		fmt.Fprintf(fp.out, "a%s.%s", c.Alias.Qualifier, c.Alias.Name)
 	}

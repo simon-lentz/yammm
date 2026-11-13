@@ -109,21 +109,6 @@ defects:
   d1   syntax   E_SYNTAX                     matched
 decls:
 
-## failed_reverse_keeps_next.yammm [G]
-first-hit: d1
-noise: 0
-defects:
-  d1   syntax   E_SYNTAX                     matched
-decls:
-  Alpha --> Q
-  Alpha --> R
-  Alpha.id
-  Beta.id
-  Gamma.id
-  type Alpha
-  type Beta
-  type Gamma
-
 ## import_alias_datatype.yammm [G]
 first-hit: d2
 noise: 0
@@ -379,18 +364,6 @@ decls:
   type Alpha
   type Beta
 
-## reverse_clause.yammm [G]
-first-hit: d1
-noise: 0
-defects:
-  d1   syntax   E_SYNTAX                     matched
-decls:
-  Alpha --> R
-  Alpha.id
-  Beta.id
-  type Alpha
-  type Beta
-
 ## semantic_above_missing_pk.yammm [C]
 first-hit: d2
 noise: 0
@@ -453,6 +426,33 @@ decls:
   type Alpha
   type Beta
 
+## slash_after_target.yammm [G]
+first-hit: d1
+noise: 0
+defects:
+  d1   syntax   E_SYNTAX                     matched
+decls:
+  Alpha --> R
+  Alpha.id
+  Beta.id
+  type Alpha
+  type Beta
+
+## slash_after_target_keeps_next.yammm [G]
+first-hit: d1
+noise: 0
+defects:
+  d1   syntax   E_SYNTAX                     matched
+decls:
+  Alpha --> Q
+  Alpha --> R
+  Alpha.id
+  Beta.id
+  Gamma.id
+  type Alpha
+  type Beta
+  type Gamma
+
 ## stray_char.yammm [A]
 first-hit: d1
 noise: 0
@@ -490,7 +490,6 @@ decls:
   type Gamma
 oracle_only (the reference parser built these; this one deliberately does not):
   Gamma.required — ANTLR recovery names a property after the trailing modifier
-allowed_noise: E_INVALID_ANNOTATION — @@index() survives as a bare annotation and reaches its arity check
 
 ## two_defects_adjacent_types.yammm [B]
 first-hit: d1

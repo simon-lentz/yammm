@@ -1,4 +1,4 @@
-schema "*b* _c_ \\d $y$ ﬂ°x¶ß #1; <i>&amp; direction LR"
+schema "b__c__direction_LR"
 
 type Mark {
 	id String primary

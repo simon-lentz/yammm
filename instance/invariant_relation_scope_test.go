@@ -54,8 +54,8 @@ func populatedOrder() map[string]any {
 }
 
 // An invariant may name a relation, and it reads the relation's real value.
-// The schema completer's membersOf index has always admitted relation field
-// names, so such an invariant loaded clean — but invariants were evaluated before edges and
+// The schema completer admits a relation read by its declared name, so such an
+// invariant loaded clean — but invariants were evaluated before edges and
 // compositions were computed, against a scope holding node properties only. A
 // relation therefore read nil, and an invariant over one REJECTED EVERY
 // CONFORMING INSTANCE.
@@ -72,11 +72,11 @@ func TestInvariantRelationScope_ReadsRealValues(t *testing.T) {
 		inv  string
 		want bool
 	}{
-		{"association presence", `works_at != nil`, true},
+		{"association presence", `WORKS_AT != nil`, true},
 		{"association key by DSL name", `WORKS_AT == "c1"`, true},
-		{"association key by field name", `works_at == "c1"`, true},
+		{"association key by a variable", `$WORKS_AT == "c1"`, true},
 		{"composition length", `ITEMS -> Len == 2`, true},
-		{"composition length by field name", `items -> Len == 2`, true},
+		{"composition length by a variable", `$ITEMS -> Len == 2`, true},
 		{"composition is not nil", `ITEMS != nil`, true},
 		{"a false claim still fails", `ITEMS -> Len == 99`, false},
 	} {
@@ -121,9 +121,11 @@ func TestInvariantRelationScope_AbsentRelationIsNil(t *testing.T) {
 		name string
 		inv  string
 	}{
-		{"absent association", `works_at == nil`},
-		{"absent composition", `items == nil`},
+		{"absent association", `WORKS_AT == nil`},
+		{"absent composition", `ITEMS == nil`},
 		{"absent composition has no length", `ITEMS -> Len == 0`},
+		{"absent association by a variable", `$WORKS_AT == nil`},
+		{"absent composition by a variable", `$ITEMS == nil`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if ok, detail := relationInvariant(t, tc.inv, map[string]any{}); !ok {

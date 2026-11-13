@@ -68,8 +68,7 @@ func TestCheckConstraint_RefusesEveryConstraintTheDSLRefuses(t *testing.T) {
 		{"a one-value enum", `Enum["a"]`, schema.NewEnumConstraint([]string{"a"}), "at least two values"},
 		{"a zero-dimension vector", "Vector[0]", schema.NewVectorConstraint(0), "vector dimensions"},
 		{"a vector past the maximum", "Vector[65537]", schema.NewVectorConstraint(65537), "vector dimensions"},
-		{"three patterns", `Pattern["a", "b", "c"]`, schema.NewPatternConstraint([]*regexp.Regexp{regexp.MustCompile("a"), regexp.MustCompile("b"), regexp.MustCompile("c")}), "exceeds maximum of 2 patterns"},
-		{"a pattern Perl syntax refuses", `Pattern["a**"]`, schema.NewPatternConstraint([]*regexp.Regexp{regexp.MustCompilePOSIX("a**")}), `invalid regex pattern "a**"`},
+		{"a pattern Perl syntax refuses", `Pattern["a**"]`, schema.NewPatternConstraint(regexp.MustCompilePOSIX("a**")), `invalid regex pattern "a**"`},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -104,7 +103,7 @@ func TestCheckConstraint_RefusesANegativeLength(t *testing.T) {
 // A Pattern with no pattern is one the DSL cannot write.
 func TestCheckConstraint_RefusesAPatternWithNone(t *testing.T) {
 	err := schema.CheckConstraint(schema.NewPatternConstraint(nil))
-	if err == nil || !strings.Contains(err.Error(), "needs at least one pattern") {
+	if err == nil || !strings.Contains(err.Error(), "needs a pattern") {
 		t.Errorf("CheckConstraint = %v, want a refusal naming the missing pattern", err)
 	}
 }
@@ -302,7 +301,6 @@ func TestLoad_KeepsAListsLengthBoundsAroundAnAlias(t *testing.T) {
 // meets completion to resolve.
 func TestCheckConstraint_RefusesWhatNoSchemaHolds(t *testing.T) {
 	str := schema.NewStringConstraint()
-	three := schema.NewPatternConstraint([]*regexp.Regexp{regexp.MustCompile("a"), regexp.MustCompile("b"), regexp.MustCompile("c")})
 	for name, tc := range map[string]struct {
 		c    schema.Constraint
 		want string
@@ -310,8 +308,8 @@ func TestCheckConstraint_RefusesWhatNoSchemaHolds(t *testing.T) {
 		"nil":                                                 {nil, "no constraint"},
 		"inverted integer bounds":                             {schema.IntegerBetween(5, 1), "integer bounds inverted"},
 		"a List with no element":                              {schema.NewListConstraint(nil), "list has no element constraint"},
-		"three patterns":                                      {three, "exceeds maximum of 2 patterns"},
-		"a pattern Perl syntax refuses":                       {schema.NewPatternConstraint([]*regexp.Regexp{regexp.MustCompilePOSIX("a**")}), `invalid regex pattern "a**"`},
+		"a pattern constraint with no pattern":                {schema.NewPatternConstraint(nil), "needs a pattern"},
+		"a pattern Perl syntax refuses":                       {schema.NewPatternConstraint(regexp.MustCompilePOSIX("a**")), `invalid regex pattern "a**"`},
 		"a pointer to a constraint":                           {&str, "none this package constructs"},
 		"an unresolved DataType reference":                    {schema.NewAliasConstraint("Code", nil), `datatype "Code" resolves to no constraint`},
 		"a List of an unresolved reference":                   {schema.NewListConstraint(schema.NewAliasConstraint("Code", nil)), `datatype "Code" resolves to no constraint`},
@@ -341,7 +339,7 @@ type Car {
 	code Code
 	codes Codes
 	nested List<List<Code>>
-	tag Pattern["^a", "b$"]
+	tag Pattern["^a"]
 	kind Enum["x", "y"]
 	at Timestamp
 	on Date
@@ -375,12 +373,12 @@ type Car {
 // that skips the judge still holds a working regexp; the judge refuses it.
 func TestNewPatternConstraint_KeepsASourcePerlSyntaxRefuses(t *testing.T) {
 	posix := regexp.MustCompilePOSIX("a**")
-	c := schema.NewPatternConstraint([]*regexp.Regexp{posix})
-	if got := expr.PatternRegexps(c); len(got) != 1 || got[0] != posix {
-		t.Errorf("PatternRegexps = %v; want the caller's regexp", got)
+	c := schema.NewPatternConstraint(posix)
+	if got := expr.PatternRegexp(c); got != posix {
+		t.Errorf("PatternRegexp = %v; want the caller's regexp", got)
 	}
-	if got := c.Patterns(); len(got) != 1 || got[0] != "a**" {
-		t.Errorf("Patterns = %v; want [a**]", got)
+	if got := c.Pattern(); got != "a**" {
+		t.Errorf("Pattern = %q; want a**", got)
 	}
 }
 

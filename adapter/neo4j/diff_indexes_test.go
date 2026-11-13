@@ -519,9 +519,9 @@ func TestDiffIndexes_RelationshipIndexDoesNotBlockNodeCreate(t *testing.T) {
 	wantCounts(t, asNode, 1, 0, 0, 0, 0)
 }
 
-// Declaring @@index over a primary key is legal in the DSL, and the server
-// serves that definition from the constraint's backing index rather than
-// creating a second one. The declaration is therefore satisfied, not blocked:
+// A valid schema declares an index over a sole primary key when the index's
+// emitters disagree, and the server serves that definition from the
+// constraint's backing index rather than creating a second one. The declaration is therefore satisfied, not blocked:
 // reporting drift would be permanent, since dropping the backing index means
 // dropping the primary key, and any deploy gate keyed on a clean diff could
 // never pass on a valid, fully-applied schema.

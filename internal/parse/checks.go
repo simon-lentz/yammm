@@ -6,7 +6,6 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
-	"unicode/utf16"
 	"unicode/utf8"
 
 	"github.com/simon-lentz/yammm/diag"
@@ -272,104 +271,35 @@ func (b *builder) enumConstraint(c *enuC, span location.Span) *Constraint {
 	return out
 }
 
-// MaxPatterns is the largest pattern list a Pattern constraint accepts. The
-// count is of the patterns the source wrote, so a pattern refused for its own
-// fault counts and draws its own diagnostic too. Every written literal stays
-// in PatternLits, and at most MaxPatterns of them carry a Regex, so nothing
-// downstream enforces a pattern past the cap. [schema.CheckConstraint] refuses
-// a longer list by the same bound.
-const MaxPatterns = 2
-
 func (b *builder) patternConstraint(c *patC, span location.Span) *Constraint {
-	out := &Constraint{Kind: ConstraintPattern, Span: span}
-	kept := 0
-	for i := range c.Patterns {
-		p := &c.Patterns[i]
-		lit := Literal{Raw: p.Raw, Span: b.spanOf(p.Pos, p.EndPos)}
-		written, err := unquote(p.Raw)
-		refused := errors.Is(err, errRefusedText)
-		if err != nil && !refused {
-			b.reportUnquote(lit.Span, "invalid pattern", err)
-			out.PatternLits = append(out.PatternLits, lit)
-			continue
-		}
-		if !utf8.ValidString(p.Raw) {
-			// The byte is reported where it stands, and the pattern has no
-			// text to compile.
-			out.PatternLits = append(out.PatternLits, lit)
-			continue
-		}
-		if !refused {
-			lit.Text = written
-		}
-		// A NUL and a byte order mark are characters regexp reads, so a pattern
-		// the source rules refuse for one is still judged, as written.
-		re, err := regexp.Compile(written)
-		surrogate, namesSurrogate := SurrogateEscape(written)
-		switch {
-		case err != nil:
-			b.reportf(diag.E_INVALID_CONSTRAINT, lit.Span,
-				"invalid regex pattern %q: %v", written, err)
-		case namesSurrogate:
-			b.reportf(diag.E_INVALID_CONSTRAINT, lit.Span, "%s", SurrogateMessage(written, surrogate))
-		case !refused && kept < MaxPatterns:
-			lit.Regex, lit.Kept = re, true
-			kept++
-		}
-		out.PatternLits = append(out.PatternLits, lit)
+	p := &c.Pattern
+	lit := &Literal{Raw: p.Raw, Span: b.spanOf(p.Pos, p.EndPos)}
+	out := &Constraint{Kind: ConstraintPattern, Span: span, PatternLit: lit}
+	written, err := unquote(p.Raw)
+	refused := errors.Is(err, errRefusedText)
+	if err != nil && !refused {
+		b.reportUnquote(lit.Span, "invalid pattern", err)
+		return out
 	}
-	if len(c.Patterns) > MaxPatterns {
-		b.reportf(diag.E_INVALID_CONSTRAINT, span,
-			"pattern constraint exceeds maximum of %d patterns (got %d)", MaxPatterns, len(c.Patterns))
+	if !utf8.ValidString(p.Raw) {
+		// The byte is reported where it stands, and the pattern has no text to
+		// compile.
+		return out
+	}
+	if !refused {
+		lit.Text = written
+	}
+	// A NUL and a byte order mark are characters regexp reads, so a pattern the
+	// source rules refuse for one is still judged, as written.
+	re, err := regexp.Compile(written)
+	switch {
+	case err != nil:
+		b.reportf(diag.E_INVALID_CONSTRAINT, lit.Span,
+			"invalid regex pattern %q: %v", written, err)
+	case !refused:
+		lit.Regex, lit.Kept = re, true
 	}
 	return out
-}
-
-// SurrogateEscape returns the first surrogate code point (U+D800 to U+DFFF)
-// that pattern writes with a \x{…} escape, the one spelling RE2 has for one,
-// and reports whether there is one. Go's regexp compiles it, but no string
-// holds a surrogate, so it has no reading another dialect shares; a Pattern
-// constraint refuses it as a string literal refuses \uD800. Text between \Q and \E is
-// literal, and a class that spans the surrogate block writes none.
-func SurrogateEscape(pattern string) (rune, bool) {
-	for i := 0; i < len(pattern); i++ {
-		if pattern[i] != '\\' || i+1 >= len(pattern) {
-			continue
-		}
-		switch pattern[i+1] {
-		case 'Q':
-			end := strings.Index(pattern[i+2:], `\E`)
-			if end < 0 {
-				return 0, false
-			}
-			i += 2 + end + 1
-		case 'x':
-			rest := pattern[i+2:]
-			if !strings.HasPrefix(rest, "{") {
-				i++
-				continue
-			}
-			end := strings.IndexByte(rest, '}')
-			if end < 0 {
-				return 0, false
-			}
-			// A surrogate fits sixteen bits; a longer value is none.
-			v, err := strconv.ParseUint(rest[1:end], 16, 16)
-			if r := rune(uint16(v)); err == nil && utf16.IsSurrogate(r) {
-				return r, true
-			}
-			i += 2 + end
-		default:
-			i++
-		}
-	}
-	return 0, false
-}
-
-// SurrogateMessage is the diagnostic for a pattern [SurrogateEscape] refuses;
-// [schema.CheckConstraint] refuses one in the same words.
-func SurrogateMessage(pattern string, r rune) string {
-	return fmt.Sprintf("regex pattern %q names the surrogate code point U+%04X, which no string holds", pattern, r)
 }
 
 func (b *builder) vectorConstraint(c *vecC, span location.Span) *Constraint {

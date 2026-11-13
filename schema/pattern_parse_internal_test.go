@@ -10,10 +10,10 @@ import (
 	"github.com/simon-lentz/yammm/location"
 )
 
-// The loader's Pattern holds the regexps the parser compiled, each the same
-// object, so a source's pattern is compiled once a load.
-func TestSchemaParser_KeepsTheParsersRegexps(t *testing.T) {
-	src := "schema \"s\"\n\ntype Zip = Pattern[\"^[0-9]{5}$\"]\n\ntype T {\n\tid String primary\n\tboth Pattern[\"^a\", \"b$\"]\n\tzips List<Pattern[\"^z\"]>\n}\n"
+// The loader's Pattern holds the regexp the parser compiled, the same object,
+// so a source's pattern is compiled once a load.
+func TestSchemaParser_KeepsTheParsersRegexp(t *testing.T) {
+	src := "schema \"s\"\n\ntype Zip = Pattern[\"^[0-9]{5}$\"]\n\ntype T {\n\tid String primary\n\tone Pattern[\"^a\"]\n\tzips List<Pattern[\"^z\"]>\n}\n"
 	id := location.NewSourceID("test://s.yammm")
 	file, issues := parse.Parse([]byte(src), id)
 	if len(issues) != 0 {
@@ -31,27 +31,22 @@ func TestSchemaParser_KeepsTheParsersRegexps(t *testing.T) {
 		if !ok {
 			t.Fatalf("constraint = %T; want a PatternConstraint", c)
 		}
-		want := node.PatternRegexps()
-		if len(held.compiled) != len(want) || len(held.patterns) != len(want) || held.invalid != "" {
-			t.Fatalf("%s holds %d regexps, %d sources and the fault %q; want %d and none", held, len(held.compiled), len(held.patterns), held.invalid, len(want))
+		want := node.PatternRegexp()
+		if want == nil || held.compiled != want || held.invalid != "" {
+			t.Fatalf("%s holds %p and the fault %q; want the parser's regexp %p and none", held, held.compiled, held.invalid, want)
 		}
-		for i, re := range want {
-			if held.compiled[i] != re {
-				t.Errorf("%s: regexp %d is not the one the parser compiled", held, i)
-			}
-			if held.patterns[i] != re.String() {
-				t.Errorf("%s: source %d = %q; want %q", held, i, held.patterns[i], re)
-			}
+		if held.pattern != want.String() {
+			t.Errorf("%s: source = %q; want %q", held, held.pattern, want)
 		}
 	}
 	raceskip.Skip(t)
 	node := parsed[1]
-	var compiled []*regexp.Regexp
+	var compiled *regexp.Regexp
 	var built Constraint
-	reading := testing.AllocsPerRun(100, func() { compiled = node.PatternRegexps() })
+	reading := testing.AllocsPerRun(100, func() { compiled = node.PatternRegexp() })
 	building := testing.AllocsPerRun(100, func() { built, _ = p.constraint(node) })
-	if building != reading+2 {
-		t.Errorf("the loader allocates %v building a Pattern where reading its regexps allocates %v; want two more, the sources and the constraint", building, reading)
+	if reading != 0 || building != 1 {
+		t.Errorf("reading the regexp allocates %v and building the Pattern %v; want 0 and 1, the constraint", reading, building)
 	}
 	_, _ = compiled, built
 }

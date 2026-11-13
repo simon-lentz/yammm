@@ -165,12 +165,16 @@ Test membership in a list literal:
 type Email = Pattern["^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$"]
 ```
 
-### Two-Pattern Conjunction
+### A Second Rule on One Value
 
-Both patterns must match (AND semantics). Maximum 2 patterns.
+A `Pattern` takes one pattern. Write a second rule as an invariant, which names it.
 
 ```yammm-snippet
-type AlphanumericCode = Pattern["^[A-Z]", "[0-9]$"]    // starts uppercase AND ends digit
+type Part {
+	id String primary
+	code Pattern["^[A-Z]"]
+	! "code ends in a digit" code == nil || code =~ /[0-9]$/
+}
 ```
 
 ### Date-Time Text in Another Form

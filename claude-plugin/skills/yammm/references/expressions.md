@@ -95,7 +95,7 @@ From highest to lowest:
 | 12 | Logical OR `\|\|` | Left |
 | 13 | Ternary `? { then : else }` | Left |
 
-The three postfix operators share one level and apply left to right: `$self.tags[0]` indexes the property and `$i.name -> Len` pipes it. The name after `.` is a property or relation name, never an expression, and any word may stand there — `$self.type` reads a property named `type`, `$self.in` a relation named `IN`.
+The three postfix operators share one level and apply left to right: `$self.tags[0]` indexes the property and `$i.name -> Len` pipes it. The name after `.` is a property or relation name, never an expression, and any word may stand there — `$self.type` reads a property named `type`, `$self.IN` a relation named `IN`.
 
 Parentheses override precedence as usual.
 
@@ -160,7 +160,7 @@ address.city        // nested property access
 
 Property access on existing instances returns **nil** for properties not present on the object (enabling `Then`/`Lest` nil-guarded patterns). This allows safe navigation without raising evaluation errors.
 
-Every reference whose receiver the checker can type is checked statically at schema load: the checker types each sub-expression it reads and follows the type through member access, indexing and pipeline stages. A member or an index read from a value of unknown kind, such as `Reduce`'s result, is not judged until evaluation. A property the type does not declare draws `E_UNKNOWN_PROPERTY`, and a relation read in a casing other than its name or field name draws `E_INVALID_NAME`. Every other reference, index or call the checker refuses draws `E_INVALID_INVARIANT`, such as `$c.name` over `--> CUSTOMERS`, `age[0]`, an undefined named variable, an unknown function, `age -> Upper` and `name -> Match("nor")`. A builtin's result is typed by its subkind — `Len` a number, `Upper` a string, `StartsWith` a boolean — so `name -> Len -> Upper` is refused too. An invariant whose whole expression is of a known kind that is no boolean — a string, a number, a list or an instance — is refused the same way: `! "m" name -> Len` does not load. An expression of unknown kind loads, and so does the `nil` literal.
+Every reference whose receiver the checker can type is checked statically at schema load: the checker types each sub-expression it reads and follows the type through member access, indexing and pipeline stages. A member or an index read from a value of unknown kind, such as `Reduce`'s result, is not judged until evaluation. A property the type does not declare draws `E_UNKNOWN_PROPERTY`, and a relation read in a casing other than its declared name, its lower-case field name included, draws `E_INVALID_NAME`. Every other reference, index or call the checker refuses draws `E_INVALID_INVARIANT`, such as `$c.name` over `--> CUSTOMERS`, `age[0]`, an undefined named variable, an unknown function, `age -> Upper` and `name -> Match("nor")`. A builtin's result is typed by its subkind — `Len` a number, `Upper` a string, `StartsWith` a boolean — so `name -> Len -> Upper` is refused too. An invariant whose whole expression is of a known kind that is no boolean — a string, a number, a list or an instance — is refused the same way: `! "m" name -> Len` does not load. An expression of unknown kind loads, and so does the `nil` literal.
 
 ---
 
@@ -206,7 +206,7 @@ vocabulary cannot decide; it is pinned by the tracked contract corpus at
 - `$self` -- bound to the current instance during invariant evaluation
 - `$0`, `$1`, ... -- positional variables (evaluator-local, default nil)
 - `$item`, `$acc`, etc. -- named lambda parameters
-- A named variable reads a lambda parameter first, then the instance's own member of that exact spelling (`$age` reads the property `age`). A name bound by neither is rejected at schema load (`E_INVALID_INVARIANT`)
+- A named variable reads a lambda parameter first, then the instance's own member of that exact spelling (`$age` reads the property `age`). A name bound by neither is rejected at schema load: `E_INVALID_NAME` when it spells a relation's name in another casing (`$works_at` for `WORKS_AT`), else `E_INVALID_INVARIANT`
 
 ---
 

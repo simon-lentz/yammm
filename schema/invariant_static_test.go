@@ -168,9 +168,11 @@ func TestStaticInvariant_Table(t *testing.T) {
 		`CUSTOMERS -> Len > 0`,
 		`CUSTOMERS -> All |$c| { $c != nil }`,
 		`PLACED_BY == "c1"`,
-		// relation names resolve in either case
-		`lines -> Len > 0`,
-		`placed_by != nil`,
+		// a $ variable reads a relation by its declared name
+		`$LINES -> Len > 0`,
+		`$PLACED_BY != nil`,
+		// a parameter is named as any variable is
+		`LINES -> All |$L| { $L.qty > 0 }`,
 		// a bare lambda variable name resolves like the evaluator's scope does
 		`LINES -> All |$l| { l != nil }`,
 		// a body that is the nil literal is a body, not an absent one
@@ -267,7 +269,7 @@ func TestStaticInvariant_Table(t *testing.T) {
 		t.Run("accepts "+inv, func(t *testing.T) {
 			t.Parallel()
 			if res := loadInvariant(t, inv); res.Err() != nil {
-				t.Errorf("legal invariant refused: %v", res.Err())
+				t.Errorf("legal invariant refused: %v", res)
 			}
 		})
 	}
@@ -300,7 +302,7 @@ func TestStaticInvariant_Table(t *testing.T) {
 		{`name.length > 0`, diag.E_INVALID_INVARIANT, "no members"},
 		{`LINES.qty > 0`, diag.E_INVALID_INVARIANT, "list"},
 		{`LINES -> All |$l| { $l.Len > 0 }`, diag.E_UNKNOWN_PROPERTY, "Len"},
-		// an undefined named variable is a guaranteed evaluation error, and a
+		// a named variable that names nothing declared is refused, and a
 		// variable name never folds
 		{`$undefined > 0`, diag.E_INVALID_INVARIANT, "undefined variable"},
 		{`tags -> All |$myVar| { $myvar -> Len > 0 }`, diag.E_INVALID_INVARIANT, "undefined variable"},
@@ -657,29 +659,32 @@ func issueWithCode(res diag.Result, code diag.Code) (diag.Issue, bool) {
 	return diag.Issue{}, false
 }
 
-// TestStaticInvariant_RelationIsReadInItsTwoSpellings pins docs/SPEC.md's
-// rule: an invariant reads a relation by its UPPER_SNAKE name or its field
-// name, whether bare or as a member, and any other casing is refused at load
-// with E_INVALID_NAME; a property is read in any casing.
-func TestStaticInvariant_RelationIsReadInItsTwoSpellings(t *testing.T) {
+// TestStaticInvariant_RelationIsReadByItsDeclaredName pins docs/SPEC.md's
+// rule: an invariant reads a relation by its declared UPPER_SNAKE name, whether
+// bare, as a member or after $, and a bare or member read in any other casing,
+// the field name among them, is refused at load with E_INVALID_NAME; a property
+// is read in any casing.
+func TestStaticInvariant_RelationIsReadByItsDeclaredName(t *testing.T) {
 	t.Parallel()
 
 	for _, inv := range []string{
-		`PLACED_BY != nil`, `placed_by != nil`,
-		`MAIN_LINE.ITEM != nil`, `MAIN_LINE.item != nil`,
+		`PLACED_BY != nil`, `$PLACED_BY != nil`,
+		`MAIN_LINE.ITEM != nil`, `$MAIN_LINE.ITEM != nil`,
 		`LINES -> All |$l| { $l.ITEM != nil }`,
 		`Name != ""`, `MAIN_LINE.QTY > 0`,
 	} {
 		t.Run("accepts "+inv, func(t *testing.T) {
 			t.Parallel()
 			if res := loadInvariant(t, inv); res.Err() != nil {
-				t.Errorf("legal invariant refused: %v", res.Err())
+				t.Errorf("legal invariant refused: %v", res)
 			}
 		})
 	}
 	// Each refusal is one diagnostic: a read after the miscased relation is not
 	// typed on, and a second read of it in one invariant is the same mistake.
 	for _, c := range []struct{ inv, relation, holder, read string }{
+		{`placed_by != nil`, "PLACED_BY", "Order", "placed_by"},
+		{`MAIN_LINE.item != nil`, "ITEM", "Line", "item"},
 		{`Placed_By != nil`, "PLACED_BY", "Order", "Placed_By"},
 		{`pLACED_BY != nil`, "PLACED_BY", "Order", "pLACED_BY"},
 		{`Main_Line != nil`, "MAIN_LINE", "Order", "Main_Line"},
@@ -688,6 +693,8 @@ func TestStaticInvariant_RelationIsReadInItsTwoSpellings(t *testing.T) {
 		{`MAIN_LINE.Item.nope != nil`, "ITEM", "Line", "Item"},
 		{`Main_Line.nope != nil`, "MAIN_LINE", "Order", "Main_Line"},
 		{`Placed_By != nil && Placed_By != nil`, "PLACED_BY", "Order", "Placed_By"},
+		{`$placed_by != nil`, "PLACED_BY", "Order", "placed_by"},
+		{`$Main_Line.ITEM != nil`, "MAIN_LINE", "Order", "Main_Line"},
 	} {
 		t.Run("refuses "+c.inv, func(t *testing.T) {
 			t.Parallel()
@@ -701,6 +708,32 @@ func TestStaticInvariant_RelationIsReadInItsTwoSpellings(t *testing.T) {
 				t.Errorf("message %q, want it to start %q", msg, want)
 			}
 		})
+	}
+}
+
+// A property spelled exactly as the read is the member read, though it collides
+// with a relation: the collision is the one issue.
+func TestStaticInvariant_APropertyThatCollidesWithARelationIsReadByItsName(t *testing.T) {
+	t.Parallel()
+	src := `schema "c"
+
+type C {
+    id String primary
+}
+
+type T {
+    id String primary
+    wORKS_AT String
+    --> WORKS_AT (_) C
+
+    ! "bare" wORKS_AT != ""
+    ! "variable" $wORKS_AT != ""
+}
+`
+	_, res := schema.LoadString(t.Context(), src, "c.yammm")
+	issues := slices.Collect(res.Issues())
+	if len(issues) != 1 || issues[0].Code() != diag.E_PROPERTY_RELATION_COLLISION {
+		t.Errorf("want one E_PROPERTY_RELATION_COLLISION; got %v", res)
 	}
 }
 

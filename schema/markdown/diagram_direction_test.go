@@ -36,14 +36,14 @@ func TestMarshal_NoClassIDHoldsDirection(t *testing.T) {
 }
 
 // TestMarshal_EntityCodesNeverSpellDirection pins that a schema named
-// "dir:ction TB" generates: its label codes the colon and the space, so no
-// reading of it holds a direction statement. The self-check's reading of the
+// "dir__ection_TB" generates: its label codes the two underscores between
+// "dir" and "ection", so no reading of it holds a direction statement. The self-check's reading of the
 // codes themselves is TestCheckDiagram_ReadsTheDiagramAsMermaidDoes's.
 func TestMarshal_EntityCodesNeverSpellDirection(t *testing.T) {
 	t.Parallel()
 
 	doc := string(mustMarshal(t, loadTestdata(t, "mermaid/fixtures/direction_label/main")))
-	assertLines(t, doc, `    class Beacon__dir_ction_TB_["Beacon#32;#40;dir#58;ction#32;TB#41;"] {`)
+	assertLines(t, doc, `    class Beacon__dir__ection_TB_["Beacon#32;#40;dir#95;#95;ection_TB#41;"] {`)
 }
 
 // TestMarshal_ClassLabelHoldsNoSyntax pins that a class label writes every
@@ -54,7 +54,7 @@ func TestMarshal_ClassLabelHoldsNoSyntax(t *testing.T) {
 	t.Parallel()
 
 	doc := string(mustMarshal(t, loadTestdata(t, "mermaid/fixtures/label_text/main")))
-	assertLines(t, doc, `    class Mark___b___c___d__y____x____1___i__amp__direc_tion_LR_["Mark#32;#40;#42;b#42;#32;#95;c#95;#32;#92;d#32;#36;y#36;#32;#64258;#176;x#182;#223;#32;#35;1#59;#32;#60;i#62;#38;amp#59;#32;direction#32;LR#41;"] {`)
+	assertLines(t, doc, `    class Mark__b__c__direc_tion_LR_["Mark#32;#40;b#95;#95;c#95;#95;direction_LR#41;"] {`)
 }
 
 // TestCheckDiagram_ReadsTheDiagramAsMermaidDoes pins two rules of the check's

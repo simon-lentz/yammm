@@ -12,7 +12,7 @@ Every `.yammm` file begins with a schema declaration:
 schema "inventory"
 ```
 
-The name is a quoted string. One schema per file.
+The name is a quoted identifier: an ASCII letter, then ASCII letters, digits and underscores (`E_INVALID_NAME` otherwise). One schema per file.
 
 ---
 
@@ -127,7 +127,7 @@ field_name Type            // optional (nullable)
 | `Date` | `Date` | Date only, no parameters |
 | `UUID` | `UUID` | UUID string, no parameters |
 | `Enum` | `Enum["a", "b", ...]` | Fixed set, minimum 2 options |
-| `Pattern` | `Pattern["regex"]` or `Pattern["r1", "r2"]` | Regex-validated string. Max 2 patterns; both must match (conjunction). |
+| `Pattern` | `Pattern["regex"]` | Regex-validated string. One pattern; a match is a search, so anchor with `^` and `$`. |
 | `Vector` | `Vector[dims]` | Fixed-dimension numeric vector |
 | `List` | `List<Type>[min, max]` | Ordered collection, optional length bounds |
 
@@ -159,9 +159,10 @@ References between independently existing types:
 
 Associations cannot target part types.
 
-Relation names are UPPER_SNAKE (`E_INVALID_NAME` otherwise). The relation's
-field name — its key in instance data and in invariant expressions — is the
-name in lower case: `WORKS_AT` is read as `works_at`.
+Relation names are UPPER_SNAKE (`E_INVALID_NAME` otherwise; a reserved word or a datatype keyword in that place, such as `type` or `String`, is `E_SYNTAX`). The relation's
+field name — its key in instance data — is the name in lower case: `WORKS_AT`
+arrives as `works_at`. An invariant reads the relation by its declared name
+alone: `WORKS_AT`, `$self.WORKS_AT`, `$WORKS_AT`.
 
 ### Edge Properties
 
@@ -214,9 +215,9 @@ Blessed annotations:
 
 | Annotation | Placement | Arguments | Target |
 | - | - | - | - |
-| `@index` | property | none | a scalar property that is not the sole primary key |
-| `@@index(p, …)` | type | one or more property references (ordered) | scalar properties; primary-key members allowed |
-| `@vector(sim)` | property | `cosine` \| `euclidean` | a `Vector[N]` property |
+| `@index` | property | none | a scalar property; refused only when every concrete type that emits it keys on that property alone (a `part` type never does; an emitter in another schema file is not seen) |
+| `@@index(p, …)` | type | one or more property references (ordered) | scalar properties; primary-key members allowed; one argument is refused only where `@index` on it is |
+| `@vector(sim)` | property | `cosine` \| `euclidean` | a `Vector[N]` property, N at most 4096 |
 | `@fulltext` | property | none | a text property (`String`, `Pattern`, `Enum`); primary keys allowed |
 | `@@fulltext(p, …)` | type | one or more property references (ordered) | text properties; primary-key members allowed |
 | `@writeOnce` | property | none | any non-primary-key property |

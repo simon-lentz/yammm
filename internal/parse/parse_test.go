@@ -137,8 +137,8 @@ func assertVehicle(t *testing.T, ty *TypeDecl) {
 	if got := ty.Properties[6].Constraint; got.Alias == nil || got.Alias.Qualifier != "other" {
 		t.Errorf("badge = %+v, want qualified alias", got)
 	}
-	if got := ty.Properties[7].Constraint.PatternRegexps(); len(got) != 1 {
-		t.Errorf("slug patterns = %v, want 1", got)
+	if got := ty.Properties[7].Constraint.PatternRegexp(); got == nil {
+		t.Errorf("slug pattern = %v, want one", got)
 	}
 	if got := ty.Properties[8].Constraint; got.VectorDims == nil || *got.VectorDims != 128 {
 		t.Errorf("vec dims = %+v, want 128", got.VectorDims)
@@ -306,20 +306,33 @@ func TestParse_PostfixOperatorsChainLeftToRight(t *testing.T) {
 	}
 }
 
-// TestParse_EmptySchemaNameIsRefused pins that the grammar's STRING may be
-// empty but the language's schema name may not: the header is refused at the
-// name's span and no usable name is produced, so the loader stops there.
-func TestParse_EmptySchemaNameIsRefused(t *testing.T) {
-	src := "schema \"\"\ntype T {\n\tid String primary\n}\n"
-	file, issues := Parse([]byte(src), location.NewSourceID("s.yammm"))
-	if len(issues) != 1 || issues[0].Code() != diag.E_INVALID_NAME {
-		t.Fatalf("got %v, want one E_INVALID_NAME", issues)
+// TestParse_ASchemaNameIsAnIdentifier pins that the grammar's STRING may hold
+// any text but the language's schema name is an identifier: a name that is
+// not one is refused at the name's span and no usable name is produced, so the
+// loader stops there. A reserved word and a run of underscores are identifiers.
+func TestParse_ASchemaNameIsAnIdentifier(t *testing.T) {
+	for _, name := range []string{"", " ", "\\t", "my-schema", "a.b", "3d", "my schema", "caf\u00e9", "_x"} {
+		src := "schema \"" + name + "\"\ntype T {\n\tid String primary\n}\n"
+		file, issues := Parse([]byte(src), location.NewSourceID("s.yammm"))
+		if len(issues) != 1 || issues[0].Code() != diag.E_INVALID_NAME {
+			t.Errorf("%q: got %v, want one E_INVALID_NAME", name, issues)
+			continue
+		}
+		if got := src[issues[0].Span().Start.Byte:issues[0].Span().End.Byte]; got != `"`+name+`"` {
+			t.Errorf("%q: diagnostic span covers %q, want the name literal", name, got)
+		}
+		if !file.SchemaNameFailed || file.Name != "" {
+			t.Errorf("%q: SchemaNameFailed = %v, Name = %q; want no usable name", name, file.SchemaNameFailed, file.Name)
+		}
+		if want := "schema name " + diag.QuoteValue(strings.ReplaceAll(name, `\t`, "\t")) + " is not an identifier"; !strings.HasPrefix(issues[0].Message(), want) {
+			t.Errorf("%q: message %q, want it to start %q", name, issues[0].Message(), want)
+		}
 	}
-	if got := src[issues[0].Span().Start.Byte:issues[0].Span().End.Byte]; got != `""` {
-		t.Errorf("diagnostic span covers %q, want the empty name literal", got)
-	}
-	if !file.SchemaNameFailed {
-		t.Error("an empty schema name must count as no usable name")
+	for _, name := range []string{"a", "Geo", "geo_regions", "a__b", "type", "v2"} {
+		src := "schema \"" + name + "\"\ntype T {\n\tid String primary\n}\n"
+		if file, issues := Parse([]byte(src), location.NewSourceID("s.yammm")); len(issues) != 0 || file.Name != name {
+			t.Errorf("%q: name %q, issues %v; want the name and none", name, file.Name, issues)
+		}
 	}
 }
 
@@ -543,6 +556,16 @@ func TestParse_DetachedAnnotationRecordsItsPropertyLine(t *testing.T) {
 			"on the property's line",
 			"schema \"s\"\ntype T {\n\tid String primary @index\n}\n",
 			0,
+		},
+		{
+			"after a property that spans lines",
+			"schema \"s\"\ntype T {\n\tid Enum[\n\t\t\"a\",\n\t\t\"b\",\n\t] primary @index\n}\n",
+			0,
+		},
+		{
+			"on its own line, indented deeper",
+			"schema \"s\"\ntype T {\n\tid Enum[\"a\", \"b\"] primary\n\t\t@index\n}\n",
+			3,
 		},
 		{
 			// A bare CR is a line break to internal/source and to the LSP, but
@@ -1094,5 +1117,22 @@ func TestParse_ExpressionFailuresCarryAnExtent(t *testing.T) {
 					sp.Start.Byte, sp.End.Byte)
 			}
 		})
+	}
+}
+
+// TestParse_ARelationTakesNoClauseAfterItsTarget pins that a "/" after a
+// relation's target, the removed reverse clause's spelling among its forms, is
+// one syntax error at the "/".
+func TestParse_ARelationTakesNoClauseAfterItsTarget(t *testing.T) {
+	for _, rel := range []string{"--> R (one) B / back", "--> R B / back (one)", "*-> R (one) B / back", "--> R B /"} {
+		src := "schema \"s\"\ntype A {\n\tid String primary\n\t" + rel + "\n}\n"
+		_, issues := Parse([]byte(src), location.NewSourceID("s.yammm"))
+		if len(issues) != 1 || issues[0].Code() != diag.E_SYNTAX {
+			t.Errorf("%s: got %v, want one E_SYNTAX", rel, issues)
+			continue
+		}
+		if got := src[issues[0].Span().Start.Byte:issues[0].Span().End.Byte]; got != "/" {
+			t.Errorf("%s: the error covers %q, want the \"/\"", rel, got)
+		}
 	}
 }

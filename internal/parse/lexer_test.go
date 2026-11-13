@@ -94,6 +94,20 @@ func TestLex_FirstMatchOrdering(t *testing.T) {
 			},
 		},
 		{
+			name: "a variable names a relation by its upper-case name",
+			src:  "$WORKS_AT",
+			want: []Token{{Kind: "VARIABLE", Value: "$WORKS_AT", Start: 0, End: 9}},
+		},
+		{
+			name: "a variable begins with a letter or a digit",
+			src:  "$_x",
+			want: []Token{
+				{Kind: "DOLLAR", Value: "$", Start: 0, End: 1},
+				{Kind: "USCORE", Value: "_", Start: 1, End: 2},
+				{Kind: "LC_WORD", Value: "x", Start: 2, End: 3},
+			},
+		},
+		{
 			name: "keywords are ordinary words",
 			src:  "schema String",
 			want: []Token{

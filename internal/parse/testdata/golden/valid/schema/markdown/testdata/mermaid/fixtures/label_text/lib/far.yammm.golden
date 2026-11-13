@@ -1,15 +1,15 @@
 {
-  "name": "\"*b* _c_ \\\\d $y$ ﬂ°x¶ß #1; \u003ci\u003e\u0026amp; direction LR\"",
+  "name": "\"b__c__direction_LR\"",
   "span": {
     "s": 0,
-    "e": 61
+    "e": 27
   },
   "types": [
     {
       "name": "Mark",
       "name_span": {
-        "s": 68,
-        "e": 72
+        "s": 34,
+        "e": 38
       },
       "props": [
         {
@@ -17,20 +17,20 @@
           "constraint": {
             "kind": "String",
             "span": {
-              "s": 79,
-              "e": 85
+              "s": 45,
+              "e": 51
             }
           },
           "primary": true,
           "span": {
-            "s": 76,
-            "e": 93
+            "s": 42,
+            "e": 59
           }
         }
       ],
       "span": {
-        "s": 63,
-        "e": 95
+        "s": 29,
+        "e": 61
       }
     }
   ]

@@ -442,34 +442,6 @@ func escapeInline(s string) string {
 
 func isAlnum(r rune) bool { return unicode.IsLetter(r) || unicode.IsDigit(r) }
 
-// keepTrailingSpaces writes a heading's trailing spaces as character
-// references. An ATX heading drops trailing spaces from its text, so a schema
-// name that ends in one would otherwise not read as written.
-func keepTrailingSpaces(md string) string {
-	trimmed := strings.TrimRight(md, " ")
-	return trimmed + strings.Repeat("&#32;", len(md)-len(trimmed))
-}
-
-// printableName writes each control character of a schema name as its Go
-// escape (\n, \t, \x00), so a name holding a line break stays on one line in
-// a heading, a link, a table cell or a diagram label. The escape is text, so
-// the heading's anchor and the rendered heading slug alike.
-func printableName(s string) string {
-	if !strings.ContainsFunc(s, unicode.IsControl) {
-		return s
-	}
-	var b strings.Builder
-	for _, r := range s {
-		if unicode.IsControl(r) {
-			q := strconv.QuoteRune(r)
-			b.WriteString(q[1 : len(q)-1])
-			continue
-		}
-		b.WriteRune(r)
-	}
-	return b.String()
-}
-
 // mermaidID sanitizes a display name into a Mermaid class identifier: every
 // character outside ASCII letters, digits and underscores (notably the dots in
 // qualified type names) becomes an underscore. Mermaid's class-diagram lexer

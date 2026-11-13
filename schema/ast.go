@@ -96,6 +96,7 @@ type typeDecl struct {
 	Annotations   []*annotationDecl // Type-level @@name(args) members
 	IsPart        bool
 	IsAbstract    bool
+	LostMember    bool // a member of the body did not parse
 	Documentation string
 	Span          location.Span // Span of the entire type declaration
 }
@@ -157,9 +158,9 @@ type annotationDecl struct {
 	Span          location.Span
 
 	// DetachedFromLine is the source line of the property this annotation was
-	// parsed as trailing, set only when the annotation begins on a LATER line
-	// — the shape where what the author wrote and what the grammar binds can
-	// disagree. Zero for a same-line annotation and for every type-level one.
+	// parsed as trailing, set only when the annotation begins a line — the
+	// shape where what the author wrote and what the grammar binds can
+	// disagree. Zero for any other annotation and for every type-level one.
 	DetachedFromLine int
 }
 

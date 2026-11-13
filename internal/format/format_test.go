@@ -289,10 +289,11 @@ func TestSource_MultibyteParseable(t *testing.T) {
 	// YAMMM identifiers are ASCII-only, but string literals can contain Unicode
 	t.Parallel()
 
-	input := `schema "CJKテスト"
+	input := `schema "cjk"
 
 type JapaneseUser {
-	name String primary
+	id String primary
+	name Enum["テスト", "日本語"]
 }
 `
 
@@ -309,7 +310,9 @@ type JapaneseUser {
 		assert.Fail(t, "Source: formatted multibyte content should be parseable without errors")
 	}
 	if !s.IsZero() {
-		assert.Equal(t, "CJKテスト", s.Name(), "Source: schema name")
+		user, _ := s.Type("JapaneseUser")
+		name, _ := user.Property("name")
+		assert.Equal(t, `Enum["テスト", "日本語"]`, name.Constraint().String(), "Source: the Enum's values")
 	}
 }
 

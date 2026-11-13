@@ -95,8 +95,8 @@ func (r Relation) Name() string {
 	return r.name
 }
 
-// FieldName returns the field name instance data and expressions use: the
-// relation name in lower case, "WORKS_AT" → "works_at". A relation name is
+// FieldName returns the field name instance data uses: the relation name in
+// lower case, "WORKS_AT" → "works_at". A relation name is
 // UPPER_SNAKE, so the two spellings differ only by case. Cached at completion.
 func (r Relation) FieldName() string {
 	return r.fieldName
