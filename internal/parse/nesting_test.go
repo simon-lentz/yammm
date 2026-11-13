@@ -10,6 +10,7 @@ import (
 	"github.com/alecthomas/participle/v2/lexer"
 
 	"github.com/simon-lentz/yammm/diag"
+	"github.com/simon-lentz/yammm/internal/raceskip"
 	"github.com/simon-lentz/yammm/location"
 )
 
@@ -71,12 +72,28 @@ func TestParse_ExpressionNestsAtMostMaxNestingLevels(t *testing.T) {
 			if got := syntaxIssues(t, nestingSchema("String", build(MaxNesting))); len(got) != 0 {
 				t.Errorf("height %d: got %v, want no syntax error", MaxNesting, got)
 			}
-			// Two levels over the bound, and far over it.
-			for _, n := range []int{MaxNesting + 2, 100_000} {
-				got := syntaxIssues(t, nestingSchema("String", build(n)))
-				if len(got) != 1 || got[0].Message() != refusal {
-					t.Errorf("height %d: got %v, want one %q", n, got, refusal)
-				}
+			// The binary right shape builds even heights alone, so the next height is two over.
+			got := syntaxIssues(t, nestingSchema("String", build(MaxNesting+2)))
+			if len(got) != 1 || got[0].Message() != refusal {
+				t.Errorf("height %d: got %v, want one %q", MaxNesting+2, got, refusal)
+			}
+		})
+	}
+}
+
+// An expression far over the bound draws the one refusal that an expression
+// two levels over it draws.
+func TestParse_AnExpressionFarOverTheBoundIsRefusedOnce(t *testing.T) {
+	t.Parallel()
+	// The text is read on one goroutine, and the detector multiplies each lex.
+	raceskip.Skip(t)
+	const refusal = "expression nests deeper than 1000 levels"
+	for shape, build := range expressionOfHeight {
+		t.Run(shape, func(t *testing.T) {
+			t.Parallel()
+			got := syntaxIssues(t, nestingSchema("String", build(100_000)))
+			if len(got) != 1 || got[0].Message() != refusal {
+				t.Errorf("got %v, want one %q", got, refusal)
 			}
 		})
 	}
@@ -388,21 +405,33 @@ func TestParse_ATooDeepExpressionWithAnOpenBracketRecoversAsAShallowOne(t *testi
 
 func TestParse_ListNestsAtMostMaxNestingLevels(t *testing.T) {
 	t.Parallel()
-	const refusal = "List nests deeper than 1000 levels"
 	if got := syntaxIssues(t, nestingSchema(nestedList(MaxNesting), "true")); len(got) != 0 {
 		t.Errorf("%d levels: got %v, want no syntax error", MaxNesting, got)
 	}
-	for _, n := range []int{MaxNesting + 1, 100_000} {
-		text := nestingSchema(nestedList(n), "true")
-		got := syntaxIssues(t, text)
-		if len(got) != 1 || got[0].Message() != refusal {
-			t.Fatalf("%d levels: got %v, want one %q", n, got, refusal)
-		}
-		// The issue stands on the first List past the bound.
-		want := strings.Index(text, "List<") + MaxNesting*len("List<")
-		if start := got[0].Span().Start.Byte; start != want {
-			t.Errorf("%d levels: issue at byte %d, want %d", n, start, want)
-		}
+	listRefusedAtTheBound(t, MaxNesting+1)
+}
+
+// A List far over the bound is refused where a List one level over it is.
+func TestParse_AListFarOverTheBoundIsRefusedAtTheBound(t *testing.T) {
+	t.Parallel()
+	// The text is read on one goroutine, and the detector multiplies each lex.
+	raceskip.Skip(t)
+	listRefusedAtTheBound(t, 100_000)
+}
+
+// listRefusedAtTheBound requires that a List nested n levels draws the one
+// refusal, on the first List past the bound.
+func listRefusedAtTheBound(t *testing.T, n int) {
+	t.Helper()
+	const refusal = "List nests deeper than 1000 levels"
+	text := nestingSchema(nestedList(n), "true")
+	got := syntaxIssues(t, text)
+	if len(got) != 1 || got[0].Message() != refusal {
+		t.Fatalf("%d levels: got %v, want one %q", n, got, refusal)
+	}
+	want := strings.Index(text, "List<") + MaxNesting*len("List<")
+	if start := got[0].Span().Start.Byte; start != want {
+		t.Errorf("%d levels: issue at byte %d, want %d", n, start, want)
 	}
 }
 
@@ -515,6 +544,8 @@ func expressionLexer(t *testing.T, ps *parsers, src string) *lexer.PeekingLexer 
 // expression parses, and at the token the parser refuses when it does not.
 func TestSkipExpression_StopsWhereTheParserStops(t *testing.T) {
 	t.Parallel()
+	// The draw is read on one goroutine, and the detector multiplies each lex.
+	raceskip.Skip(t)
 	ps := mustParsers()
 	words := []string{
 		"a", "b", "B", "Integer", "in", "as", "nil", "true", "1", "2.5", `"s"`, "/r/", "$x", "_",
