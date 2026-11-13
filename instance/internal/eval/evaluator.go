@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"math"
 	"regexp"
-	"strings"
 
 	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/internal/expr"
@@ -57,9 +56,6 @@ func (e *Evaluator) evaluate(ctx context.Context, expression expr.Expression, sc
 	switch ex := expression.(type) {
 	case *expr.Literal:
 		return ex.Val, nil
-	case expr.DatatypeLiteral:
-		// Return a type checker for the datatype
-		return e.datatypeChecker(string(ex))
 	case expr.SExpr:
 		return e.evalSExpr(ctx, ex, scope)
 	default:
@@ -72,7 +68,7 @@ func (e *Evaluator) evaluate(ctx context.Context, expression expr.Expression, sc
 var operatorOps = map[string]bool{
 	"+": true, "-": true, "*": true, "/": true, "%": true, "-x": true,
 	"==": true, "!=": true, "<": true, "<=": true, ">": true, ">=": true,
-	"=~": true, "!~": true, "in": true, "!": true, "^": true,
+	"=~": true, "!~": true, "in": true, "!": true,
 }
 
 // evalSExpr evaluates an S-expression.
@@ -101,7 +97,7 @@ func (e *Evaluator) evalSExpr(ctx context.Context, sexpr expr.SExpr, scope Scope
 	}
 
 	// Check if it's a builtin
-	if def, ok := lookupBuiltin(strings.ToLower(op)); ok {
+	if def, ok := lookupBuiltin(op); ok {
 		return e.evalBuiltin(ctx, def, children, scope)
 	}
 
@@ -152,18 +148,18 @@ func (e *Evaluator) evalSExpr(ctx context.Context, sexpr expr.SExpr, scope Scope
 		return e.greaterOrEqual(args)
 
 	// Pattern matching
-	case "=~":
-		return e.match(args)
-	case "!~":
-		return e.notMatch(args)
+	case "=~", "!~":
+		matched, err := e.match(op, args)
+		if err != nil {
+			return nil, err
+		}
+		return matched == (op == "=~"), nil
 	case "in":
 		return e.inOp(args)
 
 	// Logical
 	case "!":
 		return e.not(args)
-	case "^":
-		return e.xor(args)
 
 	default:
 		return nil, fmt.Errorf("unknown function: %s", op)
@@ -322,11 +318,8 @@ func (e *Evaluator) accessMember(obj any, name string) (any, error) {
 }
 
 func (e *Evaluator) evalSlice(ctx context.Context, children []expr.Expression, scope Scope) (any, error) {
-	if len(children) < 2 {
-		return nil, errors.New("slice access requires an index")
-	}
-	if len(children) > 2 {
-		return nil, errors.New("slice access accepts exactly one index")
+	if len(children) != 2 {
+		return nil, errors.New("index access requires exactly 2 operands")
 	}
 
 	// Evaluate the receiver
@@ -742,40 +735,22 @@ func (e *Evaluator) greaterOrEqual(args []any) (any, error) {
 
 // --- Pattern matching ---
 
-func (e *Evaluator) match(args []any) (any, error) {
+// match reports whether args, the operands of op, are a string and a pattern
+// that matches it. op is =~ or !~, and an error names it.
+func (e *Evaluator) match(op string, args []any) (bool, error) {
 	if len(args) != 2 {
-		return nil, errors.New("=~ requires 2 operands")
+		return false, fmt.Errorf("%s requires 2 operands", op)
 	}
 
-	left, right := args[0], args[1]
-
-	switch matcher := right.(type) {
-	case *regexp.Regexp:
-		s, ok := left.(string)
-		if !ok {
-			return nil, fmt.Errorf("=~ left operand must be string, got %T", left)
-		}
-		return matcher.MatchString(s), nil
-
-	case TypeChecker:
-		ok, _ := matcher(left)
-		return ok, nil
-
-	default:
-		return nil, fmt.Errorf("=~ right operand must be regexp or type checker, got %T", right)
-	}
-}
-
-func (e *Evaluator) notMatch(args []any) (any, error) {
-	result, err := e.match(args)
-	if err != nil {
-		return nil, err
-	}
-	b, ok := result.(bool)
+	pattern, ok := args[1].(*regexp.Regexp)
 	if !ok {
-		return nil, errors.New("!~ internal error: match did not return bool")
+		return false, fmt.Errorf("%s right operand must be a pattern, got %T", op, args[1])
 	}
-	return !b, nil
+	s, ok := args[0].(string)
+	if !ok {
+		return false, fmt.Errorf("%s left operand must be string, got %T", op, args[0])
+	}
+	return pattern.MatchString(s), nil
 }
 
 func (e *Evaluator) inOp(args []any) (any, error) {
@@ -809,21 +784,6 @@ func (e *Evaluator) not(args []any) (any, error) {
 	return !b, nil
 }
 
-func (e *Evaluator) xor(args []any) (any, error) {
-	if len(args) != 2 {
-		return nil, fmt.Errorf("^ requires 2 operands, got %d", len(args))
-	}
-	left, ok := args[0].(bool)
-	if !ok {
-		return nil, fmt.Errorf("^ expects boolean operands, got %T", args[0])
-	}
-	right, ok := args[1].(bool)
-	if !ok {
-		return nil, fmt.Errorf("^ expects boolean operands, got %T", args[1])
-	}
-	return left != right, nil
-}
-
 // isNumericVar checks if a variable name is numeric ($0, $1, etc.)
 func isNumericVar(name string) bool {
 	if name == "" {
@@ -835,23 +795,4 @@ func isNumericVar(name string) bool {
 		}
 	}
 	return true
-}
-
-// datatypeCheckers maps each datatype check expr.IsDatatypeCheck admits to
-// its kind's checker. A name absent here is an error, never another kind's
-// check by default.
-var datatypeCheckers = map[string]func() TypeChecker{
-	"string": IsString, "integer": IsInteger, "float": IsFloat, "boolean": IsBoolean,
-	"uuid": IsUUID, "timestamp": IsTimestamp, "date": IsDate,
-}
-
-// datatypeChecker returns the TypeChecker for a datatype name, by the set
-// [expr.IsDatatypeCheck] defines for both layers; the static checker refuses
-// any other name at load.
-func (e *Evaluator) datatypeChecker(name string) (TypeChecker, error) {
-	mk, ok := datatypeCheckers[strings.ToLower(name)]
-	if !ok || !expr.IsDatatypeCheck(name) {
-		return nil, fmt.Errorf("unknown datatype: %s", name)
-	}
-	return mk(), nil
 }

@@ -206,7 +206,9 @@ func TestParse_NestedPositionsCostTheSourceOnce(t *testing.T) {
 			return checkSource("n Integer\n\t! \"nested\" " + strings.Repeat("(", n) + "n" + strings.Repeat(")", n) + " > 0")
 		},
 	}
-	const depth, factor = 500, 8
+	// The deeper source stays inside MaxNesting, the parentheses with the
+	// comparison over them.
+	const depth, factor = 120, 8
 	for name, source := range sources {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()

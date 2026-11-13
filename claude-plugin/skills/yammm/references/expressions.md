@@ -21,14 +21,17 @@ The expression language is used within invariant declarations (`! "message" expr
 | `>=` | Greater than or equal |
 | `&&` | Logical AND (short-circuit) |
 | `\|\|` | Logical OR (short-circuit) |
-| `^` | Logical XOR |
 | `!` | Logical NOT (unary) |
 | `in` | Collection membership (mismatched types skip, not errors) |
-| `=~` | Pattern match (regex) or type check |
-| `!~` | Negated pattern match or type check |
+| `=~` | Pattern match: a string on the left, a regex literal on the right |
+| `!~` | Negated pattern match |
 | `->` | Pipeline operator |
 | `.` | Property access |
 | `?` | Ternary conditional (`cond ? { then : else }`) |
+
+The static check judges each operand at load. Arithmetic takes numbers, `%` and an index take integers, `!`, `&&`, `||` and a condition take booleans, and an ordered comparison takes values the total order ranks. An operand of another known kind draws `E_INVALID_INVARIANT`, and so does the `nil` literal where a kind is stated. A float is never an integer, whole or not: `tags[1.0]` and `n % 2.0` are refused.
+
+The language has no exclusive-or operator. For two booleans, write `a != b`.
 
 ### Logical AND
 
@@ -43,24 +46,24 @@ The expression language is used within invariant declarations (`! "message" expr
 
 `==` and `!=` on mismatched types return not-equal (false / true respectively) rather than raising errors. This allows safe heterogeneous comparisons.
 
-### Pattern and Type Match
+### Pattern Match
 
-`=~` and `!~` support two modes:
-
-**Regex matching** (right operand is a regex literal):
+`=~` and `!~` take a string on the left and a regex literal on the right:
 
 ```yammm-snippet
 ! "valid_email" email =~ /.+@.+\..+/
 ```
 
-**Type checking** (right operand is a datatype keyword):
+A match is a search: `name =~ /or/` holds for `"north"`. To match the whole string, anchor the pattern: `name =~ /^north$/`.
+
+A regex literal is no value. It stands only on the right of `=~` or `!~` and as the argument of `Match`. Anywhere else it draws `E_INVALID_INVARIANT`.
+
+A datatype keyword is no operand: `value =~ Integer` is a syntax error. To test a value's kind, compare its `TypeOf`:
 
 ```yammm-snippet
-! "must_be_integer" value =~ Integer
-! "not_a_string" data !~ String
+! "must_be_integer" value -> TypeOf == "integer"
+! "not_a_string" data -> TypeOf != "string"
 ```
-
-Supported type keywords: `String`, `Integer` (alias `Int`), `Float` (alias `Number`), `Boolean` (alias `Bool`), `UUID`, `Timestamp`, `Date`.
 
 ### Addition / Concatenation
 
@@ -86,15 +89,19 @@ From highest to lowest:
 | 6 | Additive `+`, `-` | Left |
 | 7 | Comparison `<`, `<=`, `>`, `>=` | Left |
 | 8 | Membership `in` | Left |
-| 9 | Regex/type match `=~`, `!~` | Left |
+| 9 | Regex match `=~`, `!~` | Left |
 | 10 | Equality `==`, `!=` | Left |
 | 11 | Logical AND `&&` | Left |
-| 12 | Logical OR/XOR `\|\|`, `^` | Left |
+| 12 | Logical OR `\|\|` | Left |
 | 13 | Ternary `? { then : else }` | Left |
 
 The three postfix operators share one level and apply left to right: `$self.tags[0]` indexes the property and `$i.name -> Len` pipes it. The name after `.` is a property or relation name, never an expression, and any word may stand there — `$self.type` reads a property named `type`, `$self.in` a relation named `IN`.
 
 Parentheses override precedence as usual.
+
+Where an operand can stand, a `-` directly before a number is the literal's sign: `-5` is one literal, and `-5 -> Abs` pipes it. After a left operand the `-` is subtraction, so `n -5` is `n - 5`. Before any other operand, `-` is unary minus and binds tighter than the postfix operators, so write `-(x.y)` to negate a member.
+
+An expression nests at most 1,000 levels. A deeper one is a syntax error.
 
 ---
 
@@ -136,6 +143,8 @@ values -> Reduce(0) |$acc, $val| { $acc + $val }
 
 Lambda parameters shadow outer variables within their body.
 
+`Reduce` binds its accumulator and its element under two names. A lambda that gives both one name, such as `|$x, $x|`, draws `E_INVALID_INVARIANT`.
+
 ---
 
 ## Property Access
@@ -151,7 +160,7 @@ address.city        // nested property access
 
 Property access on existing instances returns **nil** for properties not present on the object (enabling `Then`/`Lest` nil-guarded patterns). This allows safe navigation without raising evaluation errors.
 
-Every reference is checked statically at schema load: the checker types each sub-expression and follows the type through member access, indexing and pipeline stages. A property the type does not declare draws `E_UNKNOWN_PROPERTY`, and a relation read in a casing other than its name or field name draws `E_INVALID_NAME`. Every other reference, index or call the checker refuses draws `E_INVALID_INVARIANT`, such as `$c.name` over `--> CUSTOMERS`, `age[0]`, an undefined named variable, an unknown function, `age -> Upper` and `name -> Match("nor")`. A builtin's result is typed by its subkind — `Len` a number, `Upper` a string, `StartsWith` a boolean — so `name -> Len -> Upper` is refused too.
+Every reference whose receiver the checker can type is checked statically at schema load: the checker types each sub-expression it reads and follows the type through member access, indexing and pipeline stages. A member or an index read from a value of unknown kind, such as `Reduce`'s result, is not judged until evaluation. A property the type does not declare draws `E_UNKNOWN_PROPERTY`, and a relation read in a casing other than its name or field name draws `E_INVALID_NAME`. Every other reference, index or call the checker refuses draws `E_INVALID_INVARIANT`, such as `$c.name` over `--> CUSTOMERS`, `age[0]`, an undefined named variable, an unknown function, `age -> Upper` and `name -> Match("nor")`. A builtin's result is typed by its subkind — `Len` a number, `Upper` a string, `StartsWith` a boolean — so `name -> Len -> Upper` is refused too. An invariant whose whole expression is of a known kind that is no boolean — a string, a number, a list or an instance — is refused the same way: `! "m" name -> Len` does not load. An expression of unknown kind loads, and so does the `nil` literal.
 
 ---
 
@@ -162,9 +171,9 @@ items[0]            // first element
 items[2]            // third element
 ```
 
-Works on strings (rune-indexed) and lists. Out-of-bounds indexing returns **nil** rather than raising an error, as does indexing `nil`. A non-integer index is an evaluation error.
+Works on strings (rune-indexed) and lists. Out-of-bounds indexing returns **nil** rather than raising an error, as does indexing a value that is nil, whatever the index. The index is an integer: an index of another known kind is refused at load, and on a value that is not nil an index that is no integer at evaluation, nil among them, is an evaluation error.
 
-The bracket takes exactly one index. There is no range slice: `expr[a, b]` draws an evaluation error, and so does the empty `expr[]`. The grammar admits both spellings and a trailing comma (`expr[a,]`, evaluated as `expr[a]`) -- do not write any of them.
+The bracket takes exactly one index. There is no range slice: `expr[a, b]`, the empty `expr[]` and a trailing comma (`expr[a,]`) are each a syntax error.
 
 These spellings are checked against the loader when this document is tested:
 
@@ -180,9 +189,15 @@ The else-less ternary is rejected at load time, not at evaluation:
 ! "no else branch" tags -> Len > 0 ? { true }  // E_SYNTAX
 ```
 
-The bracket arity rules and the `TypeOf` vocabulary are evaluation-time
-outcomes, which the fence vocabulary cannot decide; they are pinned by the
-tracked contract corpus at `instance/testdata/contract/`.
+So is a bracket that does not hold one index:
+
+```yammm-invalid
+! "two indexes" tags[0, 1] == "alpha"  // E_SYNTAX
+```
+
+The `TypeOf` vocabulary is an evaluation-time outcome, which the fence
+vocabulary cannot decide; it is pinned by the tracked contract corpus at
+`instance/testdata/contract/`.
 
 ---
 
@@ -210,7 +225,7 @@ Note: `_` has distinct non-nil meanings in bounds (`Integer[0, _]`) and multipli
 
 ## Built-in Functions
 
-All built-in functions are invoked via the pipeline operator. The left-hand side is the implicit first argument. Function names are capitalized.
+All built-in functions are invoked via the pipeline operator. The left-hand side is the implicit first argument. A function's name is matched exactly, as the tables below write it: `name -> len` draws `E_INVALID_INVARIANT`.
 
 ### String Functions
 
@@ -227,7 +242,7 @@ All built-in functions are invoked via the pipeline operator. The left-hand side
 | `StartsWith` | `s -> StartsWith(prefix)` | True if string starts with prefix |
 | `EndsWith` | `s -> EndsWith(suffix)` | True if string ends with suffix |
 | `Replace` | `s -> Replace(old, new)` | Replace all occurrences |
-| `Substring` | `s -> Substring(start)` or `s -> Substring(start, end)` | Extract substring by rune indices. The `end` argument is optional and defaults to string length. |
+| `Substring` | `s -> Substring(start)` or `s -> Substring(start, end)` | Extract substring by rune indices, each an integer. The `end` argument is optional and defaults to string length. |
 | `Match` | `s -> Match(/pattern/)` | Regex match with captures |
 
 ### Collection Functions
@@ -245,7 +260,7 @@ All built-in functions are invoked via the pipeline operator. The left-hand side
 | `First` | `list -> First` | First element (nil if empty) |
 | `Last` | `list -> Last` | Last element (nil if empty) |
 | `Sum` | `list -> Sum` | Sum numeric elements |
-| `Sort` | `list -> Sort` | Sort in natural order |
+| `Sort` | `list -> Sort` | Sort by the total order. The elements are values the total order ranks: nil, scalars, or lists that hold no instance. A list of instances is refused |
 | `Reverse` | `list -> Reverse` | Reverse element order |
 | `Flatten` | `list -> Flatten` | Flatten one level of nesting |
 | `Compact` | `list -> Compact` | Remove nil entries |
@@ -287,7 +302,7 @@ The nil guards are typed by one rule: each yields one of its alternatives, and t
 
 | Function | Signature | Description |
 | -------- | --------- | ----------- |
-| `TypeOf` | `val -> TypeOf` | DSL type name as string: `"nil"`, `"boolean"`, `"integer"`, `"float"`, `"string"`, `"list"`, `"map"`, or `"pattern"` (`"unknown"` for anything else). The name comes from the value, not the declared property type; validation stores `Timestamp`, `Date` and `UUID` as text, so all three yield `"string"` |
+| `TypeOf` | `val -> TypeOf` | DSL type name as string: `"nil"`, `"boolean"`, `"integer"`, `"float"`, `"string"`, `"list"`, or `"map"` (`"unknown"` for anything else). The name comes from the value, not the declared property type; validation stores `Timestamp`, `Date` and `UUID` as text, so all three yield `"string"` |
 | `IsNil` | `val -> IsNil` | True if value is nil |
 
 ---

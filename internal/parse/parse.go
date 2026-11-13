@@ -222,7 +222,7 @@ func (b *builder) parseHeader(plex *lexer.PeekingLexer) {
 		// declaration, so everything it skips belongs to other constructs and a
 		// malformed literal in any of them would take over this diagnostic.
 		from := plex.Peek().Pos.Offset
-		past := resumeFloor(err, from)
+		past, _ := resumeFloor(err, from)
 		b.syntaxErr(diag.Fatal, err, "in the schema header", from, past)
 		b.resync(plex, past, false, func(t *lexer.Token) bool { return declStart(b.ps.tok, t) })
 		return
@@ -255,7 +255,7 @@ func (b *builder) parseImports(plex *lexer.PeekingLexer) {
 		}
 		imp, err := tryParse(b.ps.imp, plex)
 		if err != nil {
-			b.failed(plex, err, diag.Error, "in an import declaration", func(past int) {
+			b.failed(plex, err, diag.Error, "in an import declaration", func(past int, _ bool) {
 				b.resync(plex, past, true, func(t *lexer.Token) bool {
 					return declStart(b.ps.tok, t)
 				})
@@ -298,7 +298,7 @@ func (b *builder) parseDecls(plex *lexer.PeekingLexer) {
 		}
 		head, headErr := tryParse(b.ps.typeHead, plex)
 		if headErr != nil {
-			b.failed(plex, deeperErr(dtErr, headErr), diag.Error, "in a declaration", func(past int) {
+			b.failed(plex, deeperErr(dtErr, headErr), diag.Error, "in a declaration", func(past int, _ bool) {
 				b.resync(plex, past, true, func(t *lexer.Token) bool { return declStart(b.ps.tok, t) })
 			})
 			continue
@@ -352,7 +352,7 @@ func (b *builder) parseMembers(plex *lexer.PeekingLexer, nt *TypeDecl) int {
 		}
 		m, err := tryParse(b.ps.member, plex)
 		if err != nil {
-			b.failed(plex, err, diag.Error, "in a type body", func(past int) { b.resyncMember(plex, past) })
+			b.failed(plex, err, diag.Error, "in a type body", func(past int, ends bool) { b.resyncMember(plex, past, ends) })
 			continue
 		}
 		b.addMember(nt, m)
@@ -620,11 +620,18 @@ func (b *builder) resync(plex *lexer.PeekingLexer, past int, atLeastOne bool, st
 	}
 }
 
-// resyncMember re-syncs inside a type body, stopping at the closing brace
-// without consuming it or at the next member start. A member start is believed
-// only at a marker or at a line's first token, because every name a failed
-// member owns sits mid-line behind the token that failed.
-func (b *builder) resyncMember(plex *lexer.PeekingLexer, past int) {
+// resyncMember re-syncs inside a type body: at past when ends says the failed
+// member ends there, so what follows is read as it stands. Else it stops at the
+// closing brace without consuming it or at the next member start, believed at a
+// marker and at a line's first token: any other name sits mid-line behind the
+// token that failed.
+func (b *builder) resyncMember(plex *lexer.PeekingLexer, past int, ends bool) {
+	if ends {
+		for t := plex.Peek(); !t.EOF() && t.Pos.Offset < past; t = plex.Peek() {
+			plex.Next()
+		}
+		return
+	}
 	lb, rb := b.ps.tok.lbrace, b.ps.tok.rbrace
 	depth, consumed := 0, 0
 	for {
@@ -721,30 +728,38 @@ func deeperErr(a, c error) error {
 // re-syncs first, because the extent recovery skipped is the extent the failed
 // construct covers, and only then does the whole of a malformed construct
 // become visible. what names the construct, for the diagnostic.
-func (b *builder) failed(plex *lexer.PeekingLexer, err error, sev diag.Severity, what string, resync func(past int)) {
+func (b *builder) failed(plex *lexer.PeekingLexer, err error, sev diag.Severity, what string, resync func(past int, ends bool)) {
 	from := plex.Peek().Pos.Offset
 	resync(resumeFloor(err, from))
 	b.syntaxErr(sev, err, what, from, plex.Peek().Pos.Offset)
 }
 
-// resumeFloor returns the byte the failed parse reached. Recovery that restarts
-// before it re-parses text the failed construct already owns and reports the
-// same defect a second time. A participle error carrying no position falls back
-// to from, which bounds nothing and leaves the old behaviour.
-func resumeFloor(err error, from int) int {
-	if pe, ok := errors.AsType[participle.Error](err); ok {
-		return pe.Position().Offset
+// resumeFloor returns the byte the failed parse reached, and whether the
+// failed construct is known to end there. Recovery that restarts before it
+// re-parses text the failed construct already owns and reports the same defect
+// a second time. A participle error carrying no position falls back to from,
+// which bounds nothing.
+func resumeFloor(err error, from int) (past int, ends bool) {
+	if ee, ok := errors.AsType[*exprError](err); ok && ee.reach > ee.pos.Offset {
+		return ee.reach, ee.ends
 	}
-	return from
+	if pe, ok := errors.AsType[participle.Error](err); ok {
+		return pe.Position().Offset, false
+	}
+	return from, false
 }
 
 // syntaxErr turns a participle failure into one diagnostic. A malformed
-// numeric literal anywhere in [from, to) owns the diagnosis; see the package
-// doc for the construct rule and for why what replaces participle's own
-// expected-set.
+// numeric literal anywhere in [from, to) owns the diagnosis, and after it a
+// List nested past the bound; see the package doc for the construct rule and
+// for why what replaces participle's own expected-set.
 func (b *builder) syntaxErr(sev diag.Severity, err error, what string, from, to int) {
 	if bad := b.firstInvalidNumber(from, to); bad != nil {
 		b.reportUnparsed(sev, b.tokenSpan(bad), InvalidNumberMessage(bad.Value))
+		return
+	}
+	if deep := b.firstDeepList(from, to); deep != nil {
+		b.reportUnparsed(sev, b.tokenSpan(deep), fmt.Sprintf("List nests deeper than %d levels", MaxNesting))
 		return
 	}
 	if ut, ok := errors.AsType[*participle.UnexpectedTokenError](err); ok {

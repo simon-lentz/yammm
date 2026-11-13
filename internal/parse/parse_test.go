@@ -273,8 +273,6 @@ func sexprString(e expr.Expression) string {
 		default:
 			return fmt.Sprintf("%#v", val)
 		}
-	case expr.DatatypeLiteral:
-		return "dt:" + string(v)
 	}
 	return fmt.Sprintf("<%T>", e)
 }

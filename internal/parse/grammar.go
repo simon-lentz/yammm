@@ -385,8 +385,9 @@ type intTok struct {
 type lstC struct {
 	Pos    lexer.Position
 	EndPos lexer.Position
-	Kw     bool            `parser:"@'List'"`
-	Elem   *constraintNode `parser:"'<' @@ '>'"`
+	Kw     bool            `parser:"@'List' '<'"`
+	Level  listLevel       `parser:"@@"`
+	Elem   *constraintNode `parser:"@@ '>'"`
 	Bounds *lenBoundsC     `parser:"@@?"`
 }
 
@@ -476,16 +477,25 @@ func buildParsers() {
 		var diags []exprDiag
 		p := newExprParser(lx, &diags, tok)
 		start := lx.Peek().Pos.Offset
-		e, err := p.parse(0)
+		first := lx.MakeCheckpoint()
+		e, _, err := p.parse(0)
 		if err != nil {
+			if p.deep != nil {
+				lx.LoadCheckpoint(first)
+				p.deep.reach, p.deep.ends = skipExpression(lx, tok)
+			}
 			return nil, err
 		}
 		return exprResult{E: e, Diags: diags, Start: start, End: p.lastEnd, NoValue: p.noValue}, nil
+	})
+	listOpt := participle.ParseTypeWith(func(lx *lexer.PeekingLexer) (listLevel, error) {
+		return checkListLevel(lx, tok)
 	})
 	opts := []participle.Option{
 		participle.Lexer(def),
 		participle.Elide(elidedTokens...),
 		exprOpt,
+		listOpt,
 		participle.UseLookahead(2),
 	}
 	if built.schemaHead, err = participle.Build[schemaHeadNode](opts...); err != nil {

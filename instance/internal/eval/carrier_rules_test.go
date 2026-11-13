@@ -89,19 +89,6 @@ func TestArithmeticBuiltins_KeepAnIntegerCarrierInteger(t *testing.T) {
 	}
 }
 
-// The Date and Timestamp type checkers read a named string as the String
-// checker does.
-func TestTemporalTypeCheckers_ReadANamedString(t *testing.T) {
-	t.Parallel()
-	type named string
-	if ok, msg := eval.IsDate()(named("2030-01-01")); !ok {
-		t.Errorf("IsDate(a named string) = false: %s", msg)
-	}
-	if ok, msg := eval.IsTimestamp()(named("2030-01-01T00:00:00Z")); !ok {
-		t.Errorf("IsTimestamp(a named string) = false: %s", msg)
-	}
-}
-
 // A nil expression is an evaluation error, not a silent nil: the completer
 // refuses an invariant without one, so nothing downstream tolerates it.
 func TestEvaluate_NilExpressionIsAnError(t *testing.T) {
@@ -116,14 +103,14 @@ func TestEvaluate_NilExpressionIsAnError(t *testing.T) {
 func TestEvaluator_DirectBuiltinCallShortForm(t *testing.T) {
 	t.Parallel()
 	ev := eval.NewEvaluator()
-	if got, err := ev.Evaluate(t.Context(), sx("len", lit("hello")), eval.EmptyScope()); err != nil || got != int64(5) {
-		t.Errorf("(len \"hello\") = %v, %v; want 5", got, err)
+	if got, err := ev.Evaluate(t.Context(), sx("Len", lit("hello")), eval.EmptyScope()); err != nil || got != int64(5) {
+		t.Errorf("(Len \"hello\") = %v, %v; want 5", got, err)
 	}
-	if got, err := ev.Evaluate(t.Context(), sx("abs", lit(int64(-42))), eval.EmptyScope()); err != nil || got != int64(42) {
-		t.Errorf("(abs -42) = %v, %v; want 42", got, err)
+	if got, err := ev.Evaluate(t.Context(), sx("Abs", lit(int64(-42))), eval.EmptyScope()); err != nil || got != int64(42) {
+		t.Errorf("(Abs -42) = %v, %v; want 42", got, err)
 	}
-	if got, err := ev.Evaluate(t.Context(), sx("compare", lit(int64(5)), lit([]expr.Expression{lit(int64(10))})), eval.EmptyScope()); err != nil || got != int64(-1) {
-		t.Errorf("(compare 5 (args 10)) = %v, %v; want -1", got, err)
+	if got, err := ev.Evaluate(t.Context(), sx("Compare", lit(int64(5)), lit([]expr.Expression{lit(int64(10))})), eval.EmptyScope()); err != nil || got != int64(-1) {
+		t.Errorf("(Compare 5 (args 10)) = %v, %v; want -1", got, err)
 	}
 }
 

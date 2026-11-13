@@ -65,16 +65,18 @@ func TestIndexing_StringPropertyStillIndexes(t *testing.T) {
 	}
 }
 
-// The empty index list and the two-index list parse — the bracket grammar is
-// more permissive than the language — and the evaluator refuses both on every
-// input, so the static checker refuses them at load. The evaluator's own
-// refusal is pinned by the contract table's refuse rows.
-func TestIndexing_IndexArityIsRefusedAtLoad(t *testing.T) {
-	for _, inv := range []string{`tags[] -> IsNil`, `tags[0, 1] -> IsNil`} {
+// A bracket holds one index: none, two, and one with a trailing comma are
+// each a syntax error.
+func TestIndexing_BracketHoldsOneIndex(t *testing.T) {
+	for inv, want := range map[string]string{
+		`tags[] -> IsNil`:     "expected an index before ']'",
+		`tags[0, 1] -> IsNil`: "expected ']' after one index",
+		`tags[0,] -> IsNil`:   "expected ']' after one index",
+	} {
 		src := "schema \"x\"\n\ntype T {\n\tid String primary\n\ttags List<String>\n\t! \"probe\" " + inv + "\n}\n"
 		_, res := schema.LoadString(t.Context(), src, "x.yammm")
-		if !res.HasCode(diag.E_INVALID_INVARIANT) || !strings.Contains(res.Err().Error(), "exactly one index") {
-			t.Errorf("%s: want E_INVALID_INVARIANT naming the index count; got %v", inv, res.Err())
+		if !res.HasCode(diag.E_SYNTAX) || !strings.Contains(res.Err().Error(), want) {
+			t.Errorf("%s: want E_SYNTAX %q; got %v", inv, want, res.Err())
 		}
 	}
 }

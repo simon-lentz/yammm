@@ -24,8 +24,9 @@ import (
 // hash covers every rule that decides what instance data is valid — an
 // imported type's constraints decide validity for every instance of it the
 // importing schema admits. Version 4 (v0.21.0) writes a relation target as
-// the pair (owning schema name, type name) and normalizes the two float
-// zeros, so two closure members declaring one type name no longer collide.
+// the pair (owning schema name, type name), so two closure members declaring
+// one type name no longer collide, and normalizes the two float zeros of a
+// Float bound.
 const StructuralHashVersion = 4
 
 // StructuralHash returns a deterministic "sha256:<hex>" digest of the rules
@@ -206,9 +207,6 @@ func hashExpression(w io.Writer, e expr.Expression) {
 	case expr.Op:
 		writeTag(w, "x:op")
 		writeStr(w, string(n))
-	case expr.DatatypeLiteral:
-		writeTag(w, "x:dt")
-		writeStr(w, string(n))
 	case *expr.Literal:
 		writeTag(w, "x:lit")
 		hashLiteralValue(w, n.Val)
@@ -230,8 +228,10 @@ func hashLiteralValue(w io.Writer, v any) {
 		writeTag(w, "l:int")
 		writeInt64(w, val)
 	case float64:
+		// A literal's zero keeps its sign, where a bound's does not: x / -0.0
+		// and x / 0.0 evaluate apart.
 		writeTag(w, "l:float")
-		writeFloat64(w, val)
+		writeFloat64Bits(w, val)
 	case bool:
 		writeTag(w, "l:bool")
 		writeBool(w, val)
@@ -412,12 +412,17 @@ func writeInt64(h io.Writer, v int64) {
 }
 
 // writeFloat64 writes a float64 as 8 bytes IEEE 754 big-endian
-// (via [math.Float64bits]).
+// (via [math.Float64bits]), the two zeros as one.
 func writeFloat64(h io.Writer, v float64) {
 	// FloatConstraint.Equal compares with ==, which calls the two zeros equal.
 	if v == 0 {
 		v = 0
 	}
+	writeFloat64Bits(h, v)
+}
+
+// writeFloat64Bits writes a float64 as its 8 IEEE 754 bytes, big-endian.
+func writeFloat64Bits(h io.Writer, v float64) {
 	var buf [8]byte
 	binary.BigEndian.PutUint64(buf[:], math.Float64bits(v))
 	hwrite(h, buf[:])

@@ -1942,7 +1942,7 @@ type Thing {
 			wantOK: true,
 		},
 		{
-			name: "invariant with xor",
+			name: "invariant with a caret, which is no operator",
 			source: `schema "test"
 type Thing {
 	id UUID primary
@@ -1950,7 +1950,7 @@ type Thing {
 	b Boolean
 	! "Exclusive or" a ^ b
 }`,
-			wantOK: true,
+			wantOK: false,
 		},
 		{
 			name: "invariant with less than or equal",

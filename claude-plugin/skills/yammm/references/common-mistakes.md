@@ -307,8 +307,8 @@ age Integer
 The schema load checks every call in an invariant. A name no built-in holds draws
 `E_INVALID_INVARIANT` ("unknown function"). A receiver of a kind the built-in
 refuses on every input draws the same code: `Contains` takes a list, so a `String`
-receiver is refused. A built-in name matches in any case, so `name -> len` is
-`name -> Len`. The tables in `expressions.md` spell each name capitalized.
+receiver is refused. A built-in name is matched exactly, so `name -> len` is
+refused as `name -> Length` is. The tables in `expressions.md` spell each name.
 
 ```yammm-invalid
 // WRONG -- no built-in is named Length, and Contains takes a list: E_INVALID_INVARIANT
@@ -420,26 +420,25 @@ type User {
 
 ## 19. Reusing an Invariant Message
 
-An invariant's string is its **message** and doubles as its **name**. Reusing one
-is not an error — the schema loads clean and both invariants evaluate — but the
-name is load-bearing in two ways, so a duplicate costs you something.
+An invariant's string is its **message** and doubles as its **name**, which is
+its identity on the type.
 
-Within a type, two invariants sharing a message produce two failures reporting
-the same text, and nothing in the diagnostic says which expression tripped.
+Within a type, a message is declared once. A second invariant with the same
+message draws `E_DUPLICATE_INVARIANT`, and the schema does not load.
 
-Across inheritance it matters more: invariants merge by name, keep-first, so a
-subtype declaring a parent's message **overrides** the parent's invariant rather
-than adding to it. That is the intended way to refine an inherited rule — and a
-silent surprise if the collision was accidental.
+Across inheritance, invariants merge by name: a subtype declaring a parent's
+message **overrides** the parent's invariant rather than adding to it. That is
+the intended way to refine an inherited rule — and a silent surprise if the
+collision was accidental.
 
-```yammm-snippet
-// RISKY -- both evaluate; both failures read "check"
+```yammm-invalid
+// WRONG -- one message twice on a type: E_DUPLICATE_INVARIANT
 ! "check" name -> Len > 0
 ! "check" email -> Len > 0
 ```
 
 ```yammm-snippet
-// BETTER -- each failure names the rule that tripped
+// RIGHT -- each failure names the rule that tripped
 ! "name_not_empty" name -> Len > 0
 ! "email_not_empty" email -> Len > 0
 ```

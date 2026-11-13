@@ -860,8 +860,9 @@ func (v *Validator) evaluateInvariants(
 			issue := diag.NewIssue(
 				diag.Error,
 				ErrEvalError,
-				"invariant evaluation error: "+err.Error(),
-			).WithDetail(diag.DetailKeyTypeName, typeName)
+				fmt.Sprintf("invariant %q: %v", inv.Name(), err),
+			).WithDetail(diag.DetailKeyTypeName, typeName).
+				WithDetail(diag.DetailKeyInvariantName, inv.Name())
 			withProvenance(issue, prov, base.String())
 			collector.Collect(issue.Build())
 			continue
@@ -872,7 +873,8 @@ func (v *Validator) evaluateInvariants(
 				diag.Error,
 				ErrInvariantFail,
 				inv.Name(),
-			).WithDetail(diag.DetailKeyTypeName, typeName)
+			).WithDetail(diag.DetailKeyTypeName, typeName).
+				WithDetail(diag.DetailKeyInvariantName, inv.Name())
 			withProvenance(issue, prov, base.String())
 			collector.Collect(issue.Build())
 		}

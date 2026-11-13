@@ -39,7 +39,7 @@ If `$ARGUMENTS` provides a description, use it as the starting point for step 1.
 - **Part types and compositions**: Declare `part type` for entities that have no independent existence. Reference them only via `*->`. Part types cannot declare associations (`-->`), and cannot be the target of one. They are exempt from the primary-key requirement, but may declare a `primary` — prefer one in a `(many)` composition, where it gives each child a stable identity instead of a positional index.
 - **Associations**: Use `-->` for relationships between independent types. An association must target a concrete type (not abstract or part) — its edge is resolved by the target's primary key, which only concrete instances have. Edge properties cannot use `Vector` or `List` types.
 - **Lists**: Use `List<ElementType>` for ordered multi-value fields. Add length bounds when the domain has known limits.
-- **Invariants**: Add `! "error_id" expression` for business rules. Use capitalized built-in functions: `Len`, `All`, `Any`, `Contains`, etc.
+- **Invariants**: Add `! "error_id" expression` for business rules. A built-in function name is matched exactly, capital first: `Len`, `All`, `Any`, `Contains`, etc.
 - **Using `primary required` together is a parse error** -- `primary` already implies required.
 - **Annotations**: Declare store-level intent the model implies. They do not affect which data is valid, and they are excluded from the structural hash, so adding one never invalidates a persisted snapshot.
   - `@index` on a property the domain says will be filtered or sorted on. Scalars only. Not on a sole primary key -- its uniqueness constraint already backs an index, and the loader rejects it.

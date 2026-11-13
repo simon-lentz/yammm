@@ -17,7 +17,6 @@
 //   - [SExpr]: S-expression representing an operation with children
 //   - [Literal]: Literal value (string, int64, float64, bool, *regexp.Regexp, nil, []Expression, []string)
 //   - [Op]: Operation name (e.g., "+", "&&", "Any")
-//   - [DatatypeLiteral]: Data type name for type checking expressions
 //
 // # Compilation vs Evaluation
 //
@@ -33,7 +32,8 @@
 // a body, and how it types its result and lambda parameters. [LookupBuiltin]
 // exposes the catalogue. The evaluator enforces the arity and body fields from
 // this table and panics at start on a builtin the table lacks. The schema layer's
-// static checker follows types through pipelines with the other fields. Each
+// static checker follows types through pipelines with the other fields, and
+// judges an operator's operands by the same [ArgKind]. Each
 // builtin's implementation checks its own kinds and computes its own result, so
 // nothing ties those fields to the evaluator.
 //

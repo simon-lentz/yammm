@@ -59,7 +59,6 @@ var rules = lexer.Rules{"Root": {
 	{Name: "PIPE", Pattern: `\|`},
 	{Name: "PERIOD", Pattern: `\.`},
 	{Name: "PERCENT", Pattern: `%`},
-	{Name: "HAT", Pattern: `\^`},
 	{Name: "ANY_OTHER", Pattern: `(?s:.)`},
 }}
 

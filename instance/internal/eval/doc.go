@@ -25,17 +25,11 @@
 //	result, err := evaluator.Evaluate(ctx, expr, scope)
 //	boolResult, err := evaluator.EvaluateBool(ctx, expr, scope)
 //
-// # Type Checking
-//
-// A datatype check (`=~ Kind`) reads its [TypeChecker] here. Each applies the
-// rule internal/value's Check applies to a property of that kind that declares
-// no constraint, save that a value that holds none is of no kind.
-//
 // # Built-in Functions
 //
 // The evaluator implements every builtin the catalogue in
-// [github.com/simon-lentz/yammm/internal/expr] defines, under the names the
-// DSL resolves case-insensitively:
+// [github.com/simon-lentz/yammm/internal/expr] defines, each under its exact
+// name:
 //
 //   - Collection: Map, Filter, Count, All, Any, AllOrNone, Reduce, Compact, Unique, Len, Sum, First, Last, Sort, Reverse, Flatten, Contains
 //   - Numeric: Abs, Floor, Ceil, Round, Min, Max, Compare

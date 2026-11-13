@@ -319,8 +319,8 @@ func TestRecovery_DeclarationLevelRegexIsNotADocComment(t *testing.T) {
 // lets recovery restart before the construct that failed.
 func TestRecovery_ResumeFloorFallsBackToTheConstructStart(t *testing.T) {
 	const from = 42
-	if got := resumeFloor(errors.New("no position"), from); got != from {
-		t.Errorf("resumeFloor(plain error, %d) = %d, want %d", from, got, from)
+	if got, ends := resumeFloor(errors.New("no position"), from); got != from || ends {
+		t.Errorf("resumeFloor(plain error, %d) = %d, %t; want %d and no known end", from, got, ends, from)
 	}
 }
 

@@ -20,7 +20,6 @@ func TestExpression_Op(t *testing.T) {
 		{"Empty SExpr", expr.SExpr{}, ""},
 		{"Literal", expr.NewLiteral("hello"), "lit"},
 		{"Op", expr.Op("test"), "test"},
-		{"DatatypeLiteral", expr.DatatypeLiteral("Integer"), "dt"},
 	}
 
 	for _, tt := range tests {
@@ -45,9 +44,6 @@ func TestExpression_Children(t *testing.T) {
 
 	// Op has no children
 	assert.Nil(t, expr.Op("+").Children())
-
-	// DatatypeLiteral has no children
-	assert.Nil(t, expr.DatatypeLiteral("String").Children())
 }
 
 func TestExpression_Literal(t *testing.T) {
@@ -58,9 +54,6 @@ func TestExpression_Literal(t *testing.T) {
 
 	// Op.Literal returns the op string
 	assert.Equal(t, "+", expr.Op("+").Literal())
-
-	// DatatypeLiteral.Literal returns the type name
-	assert.Equal(t, "Integer", expr.DatatypeLiteral("Integer").Literal())
 
 	// SExpr.Literal returns the op
 	assert.Equal(t, "+", expr.SExpr{expr.Op("+"), expr.NewLiteral(1)}.Literal())
@@ -97,10 +90,6 @@ func TestStringLiteral(t *testing.T) {
 		assert.False(t, ok)
 	})
 
-	t.Run("datatype literal is not a string literal", func(t *testing.T) {
-		_, ok := expr.StringLiteral(expr.DatatypeLiteral("Integer"))
-		assert.False(t, ok)
-	})
 	t.Run("op is not a string literal", func(t *testing.T) {
 		// Op.Literal() returns the operator's spelling, which is a string;
 		// an operator standing alone must not pass as a name either.
@@ -182,7 +171,7 @@ func TestParamsLiteral(t *testing.T) {
 	})
 
 	t.Run("non-literal expression", func(t *testing.T) {
-		_, ok := expr.ParamsLiteral(expr.DatatypeLiteral("String"))
+		_, ok := expr.ParamsLiteral(expr.Op("String"))
 		assert.False(t, ok)
 	})
 }
@@ -216,10 +205,6 @@ func TestExpression_Children_EdgeCases(t *testing.T) {
 	// Test Op children
 	op := expr.Op("+")
 	assert.Nil(t, op.Children())
-
-	// Test DatatypeLiteral children
-	dt := expr.DatatypeLiteral("String")
-	assert.Nil(t, dt.Children())
 }
 
 func TestSExpr_Empty(t *testing.T) {

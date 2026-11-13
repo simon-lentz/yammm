@@ -9,15 +9,14 @@ import (
 	"github.com/simon-lentz/yammm/internal/expr"
 )
 
-func TestLookupBuiltin_IsCaseInsensitive(t *testing.T) {
-	for _, name := range []string{"Len", "len", "LEN"} {
-		s, ok := expr.LookupBuiltin(name)
-		if !ok || s.Name != "Len" {
-			t.Errorf("LookupBuiltin(%q) = %+v, %v; want the Len spec", name, s, ok)
-		}
+func TestLookupBuiltin_ReadsTheExactName(t *testing.T) {
+	if s, ok := expr.LookupBuiltin("Len"); !ok || s.Name != "Len" {
+		t.Errorf(`LookupBuiltin("Len") = %+v, %v; want the Len spec`, s, ok)
 	}
-	if _, ok := expr.LookupBuiltin("Bogus"); ok {
-		t.Error("an unknown name must not resolve")
+	for _, name := range []string{"len", "LEN", "lEN", "Bogus", ""} {
+		if s, ok := expr.LookupBuiltin(name); ok {
+			t.Errorf("LookupBuiltin(%q) = %+v; want no builtin", name, s)
+		}
 	}
 }
 
@@ -60,7 +59,7 @@ func TestBuiltins_FieldsAgree(t *testing.T) {
 		}
 		elementOfReceiver := s.Params == expr.BindElement || s.Params == expr.BindAccumulatorElement ||
 			s.Result == expr.ResultElement || s.Result == expr.ResultFlattened
-		takesList := s.Receiver == expr.RecvList || s.Receiver == expr.RecvScalarList ||
+		takesList := s.Receiver == expr.RecvList || s.Receiver == expr.RecvSeededList || s.Receiver == expr.RecvOrderedList ||
 			s.Receiver == expr.RecvStringList || s.Receiver == expr.RecvNumericList
 		if elementOfReceiver && !takesList {
 			t.Errorf("%s: binds or yields an element of its receiver but does not take a list", s.Name)
@@ -78,8 +77,8 @@ func TestBuiltins_FieldsAgree(t *testing.T) {
 		}
 	}
 	sub, _ := expr.LookupBuiltin("Substring")
-	if k, ok := sub.ArgAt(1); !ok || k != expr.ArgNumber {
-		t.Errorf("Substring's second argument: %v, %v; want a number", k, ok)
+	if k, ok := sub.ArgAt(1); !ok || k != expr.ArgInteger {
+		t.Errorf("Substring's second argument: %v, %v; want an integer", k, ok)
 	}
 	coalesce, _ := expr.LookupBuiltin("Coalesce")
 	if k, ok := coalesce.ArgAt(7); !ok || k != expr.ArgAny {
@@ -91,21 +90,5 @@ func TestBuiltins_FieldsAgree(t *testing.T) {
 	lest, _ := expr.LookupBuiltin("Lest")
 	if !lest.AcceptBody || lest.Params != expr.BindNone || lest.MaxParams != 0 {
 		t.Errorf("Lest evaluates its body in the caller's scope: AcceptBody, BindNone, MaxParams 0; got %+v", lest)
-	}
-}
-
-// The datatype checks are the seven kinds a value can be checked against at
-// runtime, matched case-insensitively; a shape or constraint keyword is not
-// one, although the parser emits a DatatypeLiteral for it.
-func TestIsDatatypeCheck(t *testing.T) {
-	for _, name := range []string{"String", "Integer", "Float", "Boolean", "UUID", "Timestamp", "Date", "integer", "uuid"} {
-		if !expr.IsDatatypeCheck(name) {
-			t.Errorf("IsDatatypeCheck(%q) = false", name)
-		}
-	}
-	for _, name := range []string{"Vector", "List", "Enum", "Pattern", "int", "number", "bool", ""} {
-		if expr.IsDatatypeCheck(name) {
-			t.Errorf("IsDatatypeCheck(%q) = true", name)
-		}
 	}
 }

@@ -189,7 +189,9 @@ func lexicalLines(text string) ([]line, []parse.Token, error) {
 				e.write(sep, chunkPlain)
 			}
 
+			e.inExpr = true
 			e.writeToken(tok)
+			e.inExpr = false
 			prev = tok
 			prevInExpr = true
 			continue

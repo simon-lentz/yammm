@@ -10,52 +10,6 @@ import (
 	"github.com/simon-lentz/yammm/schema"
 )
 
-// `=~ Timestamp` reads RFC 3339 whatever the property declares: an invariant
-// sees the held value and no property's constraint.
-func TestDatatypeCheck_TimestampReadsRFC3339WhateverAPropertyDeclares(t *testing.T) {
-	t.Parallel()
-	load := func(t *testing.T, property string) *instance.Validator {
-		t.Helper()
-		s, res := schema.LoadString(t.Context(), "schema \"t\"\n\ntype T {\n\tid String primary\n\td "+property+"\n\t! \"rfc\" d =~ Timestamp\n}\n", "t.yammm")
-		if res.HasErrors() {
-			t.Fatal(res)
-		}
-		return instance.NewValidator(s)
-	}
-	rows := []struct {
-		name     string
-		property string
-		value    any
-		wantCode diag.Code
-	}{
-		{"a date at a Date property fails the check", "Date", "2030-01-02", diag.E_INVARIANT_FAIL},
-		{"a time.Time at a Date property fails the check", "Date", time.Date(2030, 1, 2, 0, 0, 0, 0, time.UTC), diag.E_INVARIANT_FAIL},
-		{"a date at a String property fails the check", "String", "2030-01-02", diag.E_INVARIANT_FAIL},
-		{"RFC 3339 text at a String property passes the check", "String", "2030-01-02T00:00:00Z", diag.Code{}},
-		{"RFC 3339 text at a Timestamp property passes the check", "Timestamp", "2030-01-02T00:00:00Z", diag.Code{}},
-		{"a time.Time at a Timestamp property passes the check", "Timestamp", time.Date(2030, 1, 2, 0, 0, 0, 0, time.UTC), diag.Code{}},
-	}
-	for _, r := range rows {
-		t.Run(r.name, func(t *testing.T) {
-			t.Parallel()
-			_, res := load(t, r.property).ValidateOne(t.Context(), "T", instance.RawInstance{Properties: map[string]any{"id": "1", "d": r.value}})
-			if r.wantCode.IsZero() {
-				if res.HasErrors() {
-					t.Fatalf("ValidateOne = %v, want no error", res)
-				}
-				return
-			}
-			var codes []diag.Code
-			for issue := range res.Issues() {
-				codes = append(codes, issue.Code())
-			}
-			if len(codes) != 1 || codes[0] != r.wantCode {
-				t.Fatalf("ValidateOne codes = %v, want exactly %v", codes, r.wantCode)
-			}
-		})
-	}
-}
-
 // A time.Time and the text it renders as are one value: the validator stores
 // both as one text, at a key too, so a graph holds one instance for the two.
 // RFC 3339 writes an offset under a minute as +00:00, which is stored as Z.

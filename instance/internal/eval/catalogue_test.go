@@ -16,7 +16,7 @@ func TestBuiltinRegistry_MatchesTheCatalogue(t *testing.T) {
 		t.Fatal(err)
 	}
 	for name := range strings.FieldsSeq(string(data)) {
-		if _, ok := lookupBuiltin(strings.ToLower(name)); !ok {
+		if _, ok := lookupBuiltin(name); !ok {
 			t.Errorf("catalogue entry %s has no implementation", name)
 		}
 	}

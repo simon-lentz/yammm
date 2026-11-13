@@ -107,4 +107,4 @@ first_seen Timestamp   @writeOnce            // set on create only
 ! "all_valid" ITEMS -> All |$item| { $item.quantity > 0 }
 ```
 
-Built-in functions are capitalized: `Len`, `All`, `Any`, `Filter`, `Map`, `Reduce`, `Contains`, `Sum`, `Default`, `Coalesce`, `IsNil`, etc. See `expressions.md` for the full expression language.
+A built-in function name is matched exactly, capital first: `Len`, `All`, `Any`, `Filter`, `Map`, `Reduce`, `Contains`, `Sum`, `Default`, `Coalesce`, `IsNil`, etc. See `expressions.md` for the full expression language.

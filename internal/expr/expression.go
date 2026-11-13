@@ -3,7 +3,6 @@ package expr
 import (
 	"regexp"
 	"slices"
-	"strings"
 )
 
 // InvariantExpression returns a schema.Invariant's tree. The schema package sets it
@@ -33,19 +32,17 @@ type Expression interface {
 	// For SExpr, this is the first element (e.g., "+", "&&", "Any").
 	// For Literal, this is "lit".
 	// For Op, this is the operation string itself.
-	// For DatatypeLiteral, this is "dt".
 	Op() string
 
 	// Children returns the child expressions.
 	// For SExpr, these are the operands (excluding the operation).
-	// For Literal, Op, and DatatypeLiteral, this returns an empty slice.
+	// For Literal and Op, this returns an empty slice.
 	Children() []Expression
 
 	// Literal returns the literal value for literal nodes.
 	// For SExpr, this returns the Op() value.
 	// For Literal, this returns the wrapped value.
 	// For Op, this returns the operation string.
-	// For DatatypeLiteral, this returns the type name string.
 	Literal() any
 
 	// unexported marker to prevent external implementations
@@ -140,7 +137,7 @@ func (*Literal) expression() {}
 //   - Logical: "&&", "||", "!"
 //   - Matching: "=~", "!~", "in"
 //   - Control: "?" (ternary)
-//   - Access: "$" (variable), "p" (property), "." (member), "@" (slice), "[]" (list)
+//   - Access: "$" (variable), "p" (property), "." (member), "@" (index), "[]" (list)
 //   - Builtins: "Any", "All", "AllOrNone", "Filter", "Map", "Reduce", etc.
 type Op string
 
@@ -161,46 +158,6 @@ func (o Op) Literal() any {
 
 // expression implements Expression.
 func (Op) expression() {}
-
-// DatatypeLiteral is a datatype keyword in an expression: the right operand
-// of `=~` and `!~` (docs/SPEC.md "Type checking"). The parser emits one for
-// every datatype keyword; [IsDatatypeCheck] says which of them name a check.
-type DatatypeLiteral string
-
-// datatypeChecks are the datatype keywords `=~` checks a value against, by
-// the runtime rule of the same kind. Vector, List, Enum and Pattern are
-// datatype keywords too, but they name a shape or a constraint rather than a
-// kind a value can have, so no check exists for them.
-var datatypeChecks = map[string]bool{
-	"string": true, "integer": true, "float": true, "boolean": true,
-	"uuid": true, "timestamp": true, "date": true,
-}
-
-// IsDatatypeCheck reports whether name — matched case-insensitively, as the
-// evaluator resolves it — is a datatype `=~` can check. The static checker
-// refuses any other DatatypeLiteral at load, so the evaluator never meets one
-// from a parsed schema.
-func IsDatatypeCheck(name string) bool {
-	return datatypeChecks[strings.ToLower(name)]
-}
-
-// Op implements Expression.
-func (DatatypeLiteral) Op() string {
-	return "dt"
-}
-
-// Children implements Expression.
-func (DatatypeLiteral) Children() []Expression {
-	return nil
-}
-
-// Literal implements Expression.
-func (d DatatypeLiteral) Literal() any {
-	return string(d)
-}
-
-// expression implements Expression.
-func (DatatypeLiteral) expression() {}
 
 // StringLiteral extracts the string a [*Literal] wraps. Any other node returns
 // false — including an [SExpr], whose Literal() is its op name and is not a

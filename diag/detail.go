@@ -31,6 +31,11 @@ const (
 	// DetailKeyRelationName is the relation name involved.
 	DetailKeyRelationName = "relation"
 
+	// DetailKeyInvariantName is the name of the invariant an instance failed
+	// or the evaluator could not run. [E_INVARIANT_FAIL] and [E_EVAL_ERROR]
+	// carry it.
+	DetailKeyInvariantName = "invariant"
+
 	// DetailKeyPrimaryKey is the primary key value.
 	DetailKeyPrimaryKey = "pk"
 

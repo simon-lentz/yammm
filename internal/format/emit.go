@@ -17,6 +17,7 @@ const (
 // comma is inside a literal, and phase 1 is the last place that holds it.
 type emitter struct {
 	lineStart bool
+	inExpr    bool            // what is written is a token of an invariant's expression
 	cur       strings.Builder // the line being built
 	curLex    lexical
 	done      []line
@@ -54,6 +55,7 @@ func (e *emitter) append(text string, kind chunkKind) {
 	}
 	start := e.cur.Len()
 	e.cur.WriteString(text)
+	e.curLex.expr = e.curLex.expr || e.inExpr
 	switch kind {
 	case chunkLiteral:
 		e.curLex.literals = append(e.curLex.literals, span{start: start, end: start + len(text)})

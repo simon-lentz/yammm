@@ -122,10 +122,20 @@ func TestStaticInvariant_Table(t *testing.T) {
 		`(STAG -> Default(NTAG)).label != ""`,
 		`STAG.tag -> Upper != ""`,
 		`NTAG.tag -> Abs > 0`,
-		// Min and Max with an argument are typed by the total order, so the
-		// stage that takes the ranked type loads
+		// Then runs no body on nil, so its parameter is never the nil literal
+		`(nil -> Then |$x| { $x -> Upper }) == nil`,
+		`(nil -> Then { $0 % 2 }) == nil`,
+		// the empty list literal has no element, so nothing read from it is
+		// of a known kind
+		`[] -> All |$x| { !$x && $x % 2 == 0 }`,
+		`[][0] -> Upper != ""`,
+		`[][0][0] == nil`,
+		`([] -> First)[0] == nil`,
+		// Min with an argument is the lower of the two, and Max is of either
+		// kind, since an absent higher side leaves the lower
 		`(name -> Min(1)) -> Abs > 0`,
 		`(name -> Max(1)) -> Upper != ""`,
+		`(name -> Max(1)) -> Abs > 0`,
 		// compositions: children are instances
 		`LINES -> All |$l| { $l.qty > 0 }`,
 		`LINES -> All { $0.qty > 0 }`,
@@ -198,10 +208,6 @@ func TestStaticInvariant_Table(t *testing.T) {
 		`(name -> Default("n")) -> Upper == "N"`,
 		`MAIN_LINE.qty -> Default(0) > -1`,
 		`(PLACED_BY -> Default("c1")) == "c1"`,
-		// a datatype check names a kind a value can have
-		`name =~ String`,
-		`MAIN_LINE.qty =~ Integer`,
-		`name !~ Timestamp`,
 		// an association reads as its target's primary key: a String key is a
 		// string, a composite key a list of strings
 		`PLACED_BY + "!" == "c1!"`,
@@ -218,8 +224,8 @@ func TestStaticInvariant_Table(t *testing.T) {
 		// in with the nil literal on its right is false, not an error
 		`!(1 in nil)`,
 		// Compare ranks any two values the total order ranks: a list above a string
-		`LINES -> Compare("a") > 0`,
 		`REGION -> Compare("a") > 0`,
+		`matrix -> Compare("a") > 0`,
 		// the nil-guard family types by one rule, the join of every value it can
 		// yield: Coalesce and Lest as Default does, Then as its body
 		`(note -> Coalesce("x")) -> Upper == "X"`,
@@ -332,10 +338,11 @@ func TestStaticInvariant_Table(t *testing.T) {
 		{`name -> Filter |$c| { true } -> Len > 0`, diag.E_INVALID_INVARIANT, "takes a list"},
 		{`PLACED_BY -> Sort -> Len > 0`, diag.E_INVALID_INVARIANT, "takes a list"},
 		{`tags -> Upper == "A"`, diag.E_INVALID_INVARIANT, "takes a string"},
-		{`LINES -> Sort -> First.qty > 0`, diag.E_INVALID_INVARIANT, "list of scalars"},
+		{`LINES -> Sort -> First.qty > 0`, diag.E_INVALID_INVARIANT, "Sort takes a list of values the total order ranks"},
 		// the bracket takes one index, and a number cannot be indexed
-		{`tags[] -> IsNil`, diag.E_INVALID_INVARIANT, "exactly one index"},
-		{`tags[0, 1] -> IsNil`, diag.E_INVALID_INVARIANT, "exactly one index"},
+		{`tags[] -> IsNil`, diag.E_SYNTAX, "expected an index before ']'"},
+		{`tags[0, 1] -> IsNil`, diag.E_SYNTAX, "expected ']' after one index"},
+		{`tags[0,] -> IsNil`, diag.E_SYNTAX, "expected ']' after one index"},
 		{`LINES[0].qty[0] > 0`, diag.E_INVALID_INVARIANT, "a number cannot be indexed"},
 		// a receiver the builtin refuses on every input: a number into a string
 		// builtin, a string into a numeric one, a number into Len, Min or Max
@@ -353,8 +360,8 @@ func TestStaticInvariant_Table(t *testing.T) {
 		{`(name != "" ? { name : name }) -> Abs > 0`, diag.E_INVALID_INVARIANT, "takes a number"},
 		// a boolean result cannot be indexed
 		{`(name == "n")[0] != nil`, diag.E_INVALID_INVARIANT, "a boolean cannot be indexed"},
-		// a pattern is the third scalar the arm names, and each draws its own
-		{`/re/[0] != nil`, diag.E_INVALID_INVARIANT, "a pattern cannot be indexed"},
+		// a pattern literal is no value, so it is no receiver of an index
+		{`/re/[0] != nil`, diag.E_INVALID_INVARIANT, "a pattern literal stands only on the right of =~ or !~ and as the argument of Match"},
 		// Default's fallback of another kind reaches the next stage unpredicted
 		{`(tags -> Default("none") -> First) == nil`, diag.E_INVALID_INVARIANT, "Default"},
 		{`(name -> Default(1)) -> Upper == "A"`, diag.E_INVALID_INVARIANT, "Default"},
@@ -362,11 +369,14 @@ func TestStaticInvariant_Table(t *testing.T) {
 		// Min and Max with an argument rank a scalar against it, never a list
 		{`tags -> Max("z") != ""`, diag.E_INVALID_INVARIANT, "argument"},
 		{`tags -> Min("z") != ""`, diag.E_INVALID_INVARIANT, "argument"},
-		// a shape or a constraint keyword is not a datatype check
-		{`name =~ Vector`, diag.E_INVALID_INVARIANT, "Vector"},
-		{`name =~ List`, diag.E_INVALID_INVARIANT, "List"},
-		{`name =~ Enum`, diag.E_INVALID_INVARIANT, "Enum"},
-		{`name !~ Pattern`, diag.E_INVALID_INVARIANT, "Pattern"},
+		// a datatype keyword is no operand, on the right of =~ as anywhere
+		{`name =~ String`, diag.E_SYNTAX, `unexpected keyword "String" in an expression`},
+		{`MAIN_LINE.qty =~ Integer`, diag.E_SYNTAX, `unexpected keyword "Integer" in an expression`},
+		{`name !~ Timestamp`, diag.E_SYNTAX, `unexpected keyword "Timestamp" in an expression`},
+		{`name =~ Vector`, diag.E_SYNTAX, `unexpected keyword "Vector" in an expression`},
+		{`name =~ List`, diag.E_SYNTAX, `unexpected keyword "List" in an expression`},
+		{`name =~ Enum`, diag.E_SYNTAX, `unexpected keyword "Enum" in an expression`},
+		{`name !~ Pattern`, diag.E_SYNTAX, `unexpected keyword "Pattern" in an expression`},
 		// a composite key is a list at evaluation time, not a string
 		{`REGION -> Upper != ""`, diag.E_INVALID_INVARIANT, "takes a string"},
 		{`REGION + "!" != ""`, diag.E_INVALID_INVARIANT, "+ takes"},
@@ -382,11 +392,11 @@ func TestStaticInvariant_Table(t *testing.T) {
 		{`nil + 1 > 0`, diag.E_INVALID_INVARIANT, "+ takes"},
 		{`(name + nil) != ""`, diag.E_INVALID_INVARIANT, "+ takes"},
 		// and under the other arithmetic operators, and unary minus
-		{`(-nil) > 0`, diag.E_INVALID_INVARIANT, "unary - takes a number"},
-		{`nil - 1 > 0`, diag.E_INVALID_INVARIANT, "- takes two numbers"},
-		{`nil * 1 > 0`, diag.E_INVALID_INVARIANT, "* takes two numbers"},
-		{`nil / 1 > 0`, diag.E_INVALID_INVARIANT, "/ takes two numbers"},
-		{`nil % 1 > 0`, diag.E_INVALID_INVARIANT, "% takes two numbers"},
+		{`(-nil) > 0`, diag.E_INVALID_INVARIANT, "unary - takes a number as its operand"},
+		{`nil - 1 > 0`, diag.E_INVALID_INVARIANT, "- takes a number as its left operand"},
+		{`nil * 1 > 0`, diag.E_INVALID_INVARIANT, "* takes a number as its left operand"},
+		{`nil / 1 > 0`, diag.E_INVALID_INVARIANT, "/ takes a number as its left operand"},
+		{`nil % 1 > 0`, diag.E_INVALID_INVARIANT, "% takes an integer as its left operand"},
 		// every refuse arm of Default and the receiver kinds has its row
 		{`PLACED_BY -> Default(0) -> Abs > 0`, diag.E_INVALID_INVARIANT, "Default"},
 		// the nil-guard family refuses alternatives of disjoint kinds, and a
@@ -400,10 +410,16 @@ func TestStaticInvariant_Table(t *testing.T) {
 		// a member the union's alternatives declare at disjoint kinds
 		{`(STAG -> Default(NTAG)).tag -> Upper != ""`, diag.E_INVALID_INVARIANT, "disjoint kinds"},
 		{`(NTAG -> Default(STAG)).tag != nil`, diag.E_INVALID_INVARIANT, "disjoint kinds"},
-		// Min and Max rank receiver against argument, so the mixed pair is one
-		// type exactly and the stage that refuses THAT type refuses it
+		// With runs its body on nil, so its parameter can be the nil literal
+		{`(nil -> With |$x| { $x -> Upper }) == nil`, diag.E_INVALID_INVARIANT, "Upper takes a string"},
+		{`(name -> Then |$x| { $x % 2 }) == nil`, diag.E_INVALID_INVARIANT, "% takes an integer"},
+		// the empty list literal joins any list as that list
+		{`([] + tags)[0] -> Abs > 0`, diag.E_INVALID_INVARIANT, "takes a number"},
+		{`(tags + [])[0] -> Abs > 0`, diag.E_INVALID_INVARIANT, "takes a number"},
+		{`(tags -> Default([]))[0] -> Abs > 0`, diag.E_INVALID_INVARIANT, "takes a number"},
+		// Min of a string and a number is the number, so a string stage
+		// refuses it
 		{`(name -> Min(1)) -> Upper != ""`, diag.E_INVALID_INVARIANT, "takes a string"},
-		{`(name -> Max(1)) -> Abs > 0`, diag.E_INVALID_INVARIANT, "takes a number"},
 		{`(note -> Lest { 1 }) -> Upper == "A"`, diag.E_INVALID_INVARIANT, "Lest"},
 		{`(extras -> Lest { "x" }) -> First == "x"`, diag.E_INVALID_INVARIANT, "Lest"},
 		{`(MAIN_LINE -> Then |$l| { $l.qty }) -> Upper != ""`, diag.E_INVALID_INVARIANT, "takes a string"},
@@ -430,7 +446,9 @@ func TestStaticInvariant_Table(t *testing.T) {
 		{`(tags -> Join(",")) -> Abs > 0`, diag.E_INVALID_INVARIANT, "takes a number"},
 		{`(name -> IsNil) -> Len > 0`, diag.E_INVALID_INVARIANT, "takes a string, a list or a map"},
 		{`MAIN_LINE -> Compare("a") > 0`, diag.E_INVALID_INVARIANT, "total order"},
-		{`LINES -> Min != nil`, diag.E_INVALID_INVARIANT, "list of scalars"},
+		{`LINES -> Min != nil`, diag.E_INVALID_INVARIANT, "Min takes a list of values the total order ranks"},
+		// a list of instances is ranked by no position, whatever stands beside it
+		{`LINES -> Compare("a") > 0`, diag.E_INVALID_INVARIANT, "Compare takes a value the total order ranks, and its receiver is not one"},
 		{`MAIN_LINE -> Upper != ""`, diag.E_INVALID_INVARIANT, "takes a string"},
 		{`MAIN_LINE -> Abs > 0`, diag.E_INVALID_INVARIANT, "takes a number"},
 		{`LINES -> Sum > 0`, diag.E_INVALID_INVARIANT, "list of numbers"},

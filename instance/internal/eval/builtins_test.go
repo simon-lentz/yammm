@@ -1062,7 +1062,8 @@ func TestBuiltin_TypeOf(t *testing.T) {
 		{"float32", float32(1.5), "float"},
 		{"bool", true, "boolean"},
 		{"nil", nil, "nil"},
-		{"regexp", regexp.MustCompile("a"), "pattern"},
+		// A pattern is no value an expression holds.
+		{"regexp", regexp.MustCompile("a"), "unknown"},
 		{"slice", []any{1, 2, 3}, "list"},
 		{"typed_slice", []string{"a"}, "list"},
 		// An array is not a list, so TypeOf names its Go type rather than
@@ -1072,7 +1073,7 @@ func TestBuiltin_TypeOf(t *testing.T) {
 		{"map", map[string]any{"a": 1}, "map"},
 		{"typed_map", map[int]string{}, "map"},
 		{"immutable_map", immutable.WrapMap(map[string]any{}), "map"},
-		{"func", eval.TypeChecker(nil), "unknown"},
+		{"func", func() {}, "unknown"},
 		{"struct", struct{}{}, "unknown"},
 	}
 

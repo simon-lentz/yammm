@@ -105,11 +105,11 @@ func TestContract_ErrCorpus(t *testing.T) {
 	s, data := contractFixture(t, "contract_err.yammm", "data_err.json")
 
 	want := []string{
-		"E_EVAL_ERROR: invariant evaluation error: division by zero",
-		"E_EVAL_ERROR: invariant evaluation error: expected boolean, got int64",
-		"E_EVAL_ERROR: invariant evaluation error: min of empty sequence",
-		"E_EVAL_ERROR: invariant evaluation error: modulo by zero",
-		"E_EVAL_ERROR: invariant evaluation error: reduce of empty sequence with no initial value",
+		`E_EVAL_ERROR: invariant "x_int_div_zero": division by zero`,
+		`E_EVAL_ERROR: invariant "x_min_empty": min of empty sequence`,
+		`E_EVAL_ERROR: invariant "x_mod_zero": modulo by zero`,
+		`E_EVAL_ERROR: invariant "x_nonbool_invariant_result": expected boolean, got int64`,
+		`E_EVAL_ERROR: invariant "x_reduce_empty_no_init": reduce of empty sequence with no initial value`,
 		"E_INVARIANT_FAIL: f_nil_result_is_falsey",
 	}
 

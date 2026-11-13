@@ -433,8 +433,6 @@ func renderExpr(e expr.Expression) string {
 		return "(" + strings.Join(parts, " ") + ")"
 	case expr.Op:
 		return string(v)
-	case expr.DatatypeLiteral:
-		return "(dt " + string(v) + ")"
 	default:
 		return renderLiteral(e.Literal())
 	}

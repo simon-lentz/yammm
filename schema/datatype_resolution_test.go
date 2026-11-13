@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/simon-lentz/yammm/diag"
+	"github.com/simon-lentz/yammm/internal/parse"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -106,6 +107,31 @@ func TestLoad_RefusesADataTypeCycleAtEachMember(t *testing.T) {
 	}
 }
 
+// A cycle that nests more List levels than the bound is a cycle at each member:
+// none is counted through the others and refused for the List bound.
+func TestLoad_ADataTypeCyclePastTheListBoundIsACycle(t *testing.T) {
+	t.Parallel()
+	const members, levels = 60, 20 // 1,200 levels round the cycle, under the load's issue limit
+	if members*levels <= parse.MaxNesting {
+		t.Fatalf("the cycle nests %d levels, which is within the bound", members*levels)
+	}
+	var b strings.Builder
+	b.WriteString("schema \"p\"\n\n")
+	for i := 1; i <= members; i++ {
+		fmt.Fprintf(&b, "type L%d = %sL%d%s\n", i, strings.Repeat("List<", levels), i%members+1, strings.Repeat(">", levels))
+	}
+	b.WriteString("type T {\n\tid String primary\n}\n")
+	res := loadStringErr(t, b.String())
+	if res.Len() != members {
+		t.Errorf("got %d issues, want one at each of the %d members", res.Len(), members)
+	}
+	for issue := range res.Issues() {
+		if issue.Code() != diag.E_INVALID_CONSTRAINT || !strings.Contains(issue.Message(), "forms a cycle") {
+			t.Fatalf("got %v: %s, want a cycle member", issue.Code(), issue.Message())
+		}
+	}
+}
+
 // declarationLine returns the 1-based line of "type <name> =" in src.
 func declarationLine(src, name string) int {
 	for i, line := range strings.Split(src, "\n") {
@@ -179,5 +205,28 @@ func TestLoad_APrimaryKeyTypedByAListDataTypeNamesTheList(t *testing.T) {
 				t.Error("no E_INVALID_PRIMARY_KEY_TYPE")
 			}
 		})
+	}
+}
+
+// A local datatype over an imported one of its own name names another schema's
+// datatype, so it is no cycle.
+func TestLoad_ADataTypeOverAnImportedOneOfItsNameIsNoCycle(t *testing.T) {
+	t.Parallel()
+
+	s, res := schema.LoadSourcesWithEntry(t.Context(), map[string][]byte{
+		"main.yammm": []byte(`schema "main"
+import "./lib" as lib
+type Codes = List<lib.Codes>
+type T {
+    id String primary
+    codes Codes
+}
+`),
+		"lib.yammm": []byte(`schema "lib"
+type Codes = List<String>
+`),
+	}, "main.yammm", t.TempDir())
+	if s.IsZero() || res.Len() != 0 {
+		t.Fatalf("got %v, want the schema to load", res)
 	}
 }

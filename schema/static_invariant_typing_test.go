@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/simon-lentz/yammm/diag"
+	"github.com/simon-lentz/yammm/schema"
 )
 
 // TestStaticInvariant_GuardVerdictDoesNotDependOnOrder pins that a nil guard
@@ -66,48 +67,69 @@ func TestStaticInvariant_GuardStillAdmitsAgreeingAlternatives(t *testing.T) {
 	}
 }
 
-// TestStaticInvariant_MinMaxTypedByTheTotalOrder pins that Min and Max with an
-// argument are typed by the order internal/value.Order implements — a number
-// ranks below a string — rather than merged to a scalar of unknown subkind. The
-// merged typing admitted both rows below, each of which fails at evaluation on
-// every instance. Restoring mergeType turns them red.
+// Min with an argument is typed by the order internal/value.Order implements,
+// which ranks a number below a string and nil below both: the result is the
+// lower of the two, or nil when either is absent. Max yields the lower when the
+// higher is absent, so its result is of either kind and no stage refuses it.
 func TestStaticInvariant_MinMaxTypedByTheTotalOrder(t *testing.T) {
 	t.Parallel()
 
-	rows := []struct {
-		inv  string
-		want string
-	}{
-		// Min of a string and a number is the number, so a string stage refuses it.
-		{`(name -> Min(1)) -> Upper != ""`, "takes a string"},
-		// Max of the same pair is the string, so a numeric stage refuses it.
-		{`(name -> Max(1)) -> Abs > 0`, "takes a number"},
-	}
-	for _, row := range rows {
-		t.Run(row.inv, func(t *testing.T) {
-			t.Parallel()
-			res := loadInvariant(t, row.inv)
-			if res.Err() == nil {
-				t.Fatalf("a mixed Min/Max pair reached a stage that refuses it, and loaded clean")
-			}
-			if !hasCodeMentioning(res, diag.E_INVALID_INVARIANT, row.want) {
-				t.Errorf("want E_INVALID_INVARIANT mentioning %q; got %v", row.want, res.Err())
-			}
-		})
+	// Min of a string and a number is the number, so a string stage refuses it.
+	res := loadInvariant(t, `(name -> Min(1)) -> Upper != ""`)
+	if !hasCodeMentioning(res, diag.E_INVALID_INVARIANT, "takes a string") {
+		t.Errorf("want E_INVALID_INVARIANT mentioning %q; got %v", "takes a string", res.Err())
 	}
 
-	// The controls: the ranked result is the exact type, so the stage that
-	// takes THAT type loads clean, and a same-subkind pair is unaffected.
 	for _, inv := range []string{
 		`(name -> Min(1)) -> Abs > 0`,
-		`(name -> Max(1)) -> Upper != ""`,
 		`(name -> Min("z")) -> Upper != ""`,
+		`(name -> Max(1)) -> Upper != ""`,
+		`(name -> Max(1)) -> Abs > 0`,
+		`(1 -> Max(name)) -> Abs > 0`,
+		`!(f1 -> Max(name))`,
 		`(MAIN_LINE.qty -> Max(1)) -> Abs > 0`,
 	} {
 		t.Run(inv, func(t *testing.T) {
 			t.Parallel()
 			if res := loadInvariant(t, inv); res.Err() != nil {
-				t.Errorf("the ranked result was refused at the stage that takes it: %v", res.Err())
+				t.Errorf("the ranked result was refused at a stage that takes it: %v", res.Err())
+			}
+		})
+	}
+
+	// Max of two numbers is a number, so a string stage refuses it.
+	res = loadInvariant(t, `(MAIN_LINE.qty -> Max(1)) -> Upper != ""`)
+	if !hasCodeMentioning(res, diag.E_INVALID_INVARIANT, "takes a string") {
+		t.Errorf("want E_INVALID_INVARIANT mentioning %q; got %v", "takes a string", res.Err())
+	}
+}
+
+// A concatenation of two association keys is a list like any other: a member
+// read from it names the list, and one read from its element the association.
+func TestStaticInvariant_AConcatenationOfKeysIsReadAsAList(t *testing.T) {
+	t.Parallel()
+	const head = `schema "s"
+
+type Depot {
+	region String primary
+	code String primary
+	name String
+}
+
+type Order {
+	id String primary
+	--> DEPOT (one) Depot
+	! "m" `
+	for inv, want := range map[string]string{
+		`DEPOT.name == "x"`:              "is read through an association",
+		`(DEPOT + DEPOT).name == "x"`:    "is read from a list",
+		`(DEPOT + DEPOT)[0].name == "x"`: "is read through an association",
+	} {
+		t.Run(inv, func(t *testing.T) {
+			t.Parallel()
+			_, res := schema.LoadString(t.Context(), head+inv+"\n}\n", "s.yammm")
+			if !hasCodeMentioning(res, diag.E_INVALID_INVARIANT, want) {
+				t.Errorf("want E_INVALID_INVARIANT mentioning %q; got %v", want, res.Err())
 			}
 		})
 	}
@@ -165,7 +187,7 @@ func TestStaticInvariant_NilLiteralRefusedAtATypedArgument(t *testing.T) {
 	t.Parallel()
 
 	for _, inv := range []string{
-		`name -> Substring(nil) != ""`,    // ArgNumber
+		`name -> Substring(nil) != ""`,    // ArgInteger
 		`name -> TrimPrefix(nil) != ""`,   // ArgString
 		`name -> Match(nil) -> Len > 0`,   // ArgPattern
 		`name -> Substring(1, nil) != ""`, // the repeat position is typed too
@@ -182,13 +204,12 @@ func TestStaticInvariant_NilLiteralRefusedAtATypedArgument(t *testing.T) {
 		})
 	}
 
-	// The controls: ArgAny admits nil, the receiver rule is unchanged, and a
-	// value the checker cannot type still passes at a typed position.
+	// The controls: ArgAny admits nil, and a value the checker cannot type
+	// still passes at a typed position.
 	for _, inv := range []string{
 		`name -> Coalesce(nil) != ""`,
 		`name -> Default(nil) != ""`,
 		`tags -> Contains(nil) == false`,
-		`nil -> Substring(1) == nil`,
 		`name -> Substring(tags -> Reduce(0) |$a, $b| { $a }) != ""`,
 	} {
 		t.Run(inv, func(t *testing.T) {

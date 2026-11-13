@@ -27,15 +27,13 @@
 //   - [encoding/json.Number] that is a JSON number literal, as the integer it
 //     spells when it is an integer literal and as a float otherwise; one
 //     holding other text is no number and has no strata
-//   - string and *regexp.Regexp (regexp compared via String())
+//   - string
 //   - slices of supported types (lexicographic comparison)
 //
 // This package is the single authority on what a value IS. A predeclared type
 // is answered by a type switch; anything else is read in the one form [Scalar]
 // defines. A pointer is a value of no form, a nil one too: it has no strata,
-// it is not absent, and every check refuses it. The one exception is a non-nil
-// *regexp.Regexp, the evaluator's pattern literal, which orders as its text. A
-// non-nil slice is a list, as
+// it is not absent, and every check refuses it. A non-nil slice is a list, as
 // [ListElems] reads one, and a nil one holds none and is [NilStrata]; a named
 // scalar (type MyInt int) takes the strata and value of its base. The fallback
 // runs only when the type switch misses, so canonical input pays nothing for it.

@@ -39,6 +39,15 @@ func evalEq(t *testing.T, e expr.Expression, want any) {
 	yammmtest.Diff(t, want, result)
 }
 
+// evalErrIs evaluates e and requires the error whose whole text is want.
+func evalErrIs(t *testing.T, e expr.Expression, want string) {
+	t.Helper()
+	got, err := eval.NewEvaluator().Evaluate(t.Context(), e, eval.EmptyScope())
+	if err == nil || err.Error() != want {
+		t.Errorf("Evaluate(%v) = %v, %v; want the error %q", e, got, err, want)
+	}
+}
+
 // evalErr evaluates e in an empty scope, requires an error, and — when substr
 // is non-empty — requires the error message to contain substr.
 func evalErr(t *testing.T, e expr.Expression, substr string) {

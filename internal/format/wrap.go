@@ -58,26 +58,10 @@ func wrapLongLines(ls []line) []line {
 			i++
 			continue
 		}
-		// Category 1: Existing multiline Enum constructs
-		if isMultilineEnumStart(ln) {
-			collected, nextIdx := collectMultilineConstruct(ls, i)
-			result = append(result, tryCollapseEnum(collected)...)
-			i = nextIdx
-			continue
-		}
-
-		// Category 1: Existing multiline extends constructs
-		if isMultilineExtendsStart(ln) {
-			collapsed, nextIdx := collapseMultilineExtends(ls, i)
+		// Category 1: Existing multiline Enum, extends and datatype alias Enum
+		// constructs
+		if collapsed, nextIdx, ok := collapseDeclaration(ls, i); ok {
 			result = append(result, collapsed...)
-			i = nextIdx
-			continue
-		}
-
-		// Category 1: Existing multiline datatype alias Enum
-		if isMultilineDatatypeAliasEnumStart(ln) {
-			collected, nextIdx := collectMultilineConstruct(ls, i)
-			result = append(result, tryCollapseDatatypeAliasEnum(collected)...)
 			i = nextIdx
 			continue
 		}
@@ -92,13 +76,7 @@ func wrapLongLines(ls []line) []line {
 
 		// Category 2: Long single lines — try wrapping
 		if displayWidth(ln.text) > lineWidthThreshold {
-			if wrapped, ok := tryWrapSingleLineEnum(ln); ok {
-				result = append(result, contentLines(wrapped)...)
-			} else if wrapped, ok := tryWrapSingleLineExtends(ln); ok {
-				result = append(result, contentLines(wrapped)...)
-			} else if wrapped, ok := tryWrapDatatypeAliasEnum(ln); ok {
-				result = append(result, contentLines(wrapped)...)
-			} else if wrapped, ok := tryWrapInvariant(ln); ok {
+			if wrapped, ok := wrapLongLine(ln); ok {
 				result = append(result, contentLines(wrapped)...)
 			} else {
 				result = append(result, ln)
@@ -113,6 +91,45 @@ func wrapLongLines(ls []line) []line {
 	}
 
 	return result
+}
+
+// collapseDeclaration collapses the multiline Enum, extends clause or datatype
+// alias Enum that starts at ls[i], and returns the index after it. A line of an
+// invariant's expression starts none, whatever words it spells.
+func collapseDeclaration(ls []line, i int) ([]line, int, bool) {
+	ln := ls[i]
+	switch {
+	case ln.lex.expr:
+		return nil, i, false
+	case isMultilineEnumStart(ln):
+		collected, nextIdx := collectMultilineConstruct(ls, i)
+		return tryCollapseEnum(collected), nextIdx, true
+	case isMultilineExtendsStart(ln):
+		collapsed, nextIdx := collapseMultilineExtends(ls, i)
+		return collapsed, nextIdx, true
+	case isMultilineDatatypeAliasEnumStart(ln):
+		collected, nextIdx := collectMultilineConstruct(ls, i)
+		return tryCollapseDatatypeAliasEnum(collected), nextIdx, true
+	}
+	return nil, i, false
+}
+
+// wrapLongLine wraps a line past the threshold by the rule of the construct it
+// holds. A line of an invariant's expression is read by the invariant rule
+// alone: it holds no Enum type and no extends clause, whatever words it spells.
+func wrapLongLine(ln line) ([]string, bool) {
+	if !ln.lex.expr {
+		if wrapped, ok := tryWrapSingleLineEnum(ln); ok {
+			return wrapped, true
+		}
+		if wrapped, ok := tryWrapSingleLineExtends(ln); ok {
+			return wrapped, true
+		}
+		if wrapped, ok := tryWrapDatatypeAliasEnum(ln); ok {
+			return wrapped, true
+		}
+	}
+	return tryWrapInvariant(ln)
 }
 
 // reindentConstruct re-emits a multiline bracket or extends construct that

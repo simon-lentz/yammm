@@ -24,13 +24,15 @@ type span struct {
 	end   int
 }
 
-// lexical is what the lexer knows about one line: where a trailing comment
-// begins, and where the string and regex literals are. Phases read it instead
+// lexical is what phase 1 records about one line: where a trailing comment
+// begins, where the string and regex literals are, and whether the line holds
+// a token of an invariant's expression. Phases read it instead
 // of re-deriving it, which is how a comma inside a literal came to be read as
 // a value separator.
 type lexical struct {
 	commentAt int    // byte offset of the trailing comment, or noComment
 	literals  []span // literal extents, in source order
+	expr      bool   // phase 1's record alone: the line holds a token of an invariant's expression
 }
 
 // noComment is commentAt's value on a line with no trailing comment.

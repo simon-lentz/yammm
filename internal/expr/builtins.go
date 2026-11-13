@@ -1,9 +1,6 @@
 package expr
 
-import (
-	"slices"
-	"strings"
-)
+import "slices"
 
 // BuiltinResult states how a pipeline builtin types its result, relative to
 // its receiver. The static checker in the schema layer uses it to follow a
@@ -11,12 +8,17 @@ import (
 type BuiltinResult uint8
 
 const (
-	// ResultNumber is a number (Len, Sum, Count, Abs, Floor, Ceil, Round,
-	// Compare). The static checker types each result by its subkind, as it
+	// ResultNumber is a number the static checker does not know to be a float
+	// (Len, Count and Compare, which yield an integer, and Sum, which yields an
+	// integer or a float). The checker types each result by its subkind, as it
 	// types a receiver and an argument by theirs, so the stage after the call
 	// is judged: a number into a string builtin is refused at load.
 	ResultNumber BuiltinResult = iota
-	// ResultReceiver is the receiver's own type (Sort, Filter, Default).
+	// ResultReceiverNumber is a number, a float when the receiver is one (Abs,
+	// Floor, Ceil, Round).
+	ResultReceiverNumber
+	// ResultReceiver is a list: the receiver's type, and the empty list for a
+	// receiver that is always nil (Filter, Compact, Unique, Sort, Reverse).
 	ResultReceiver
 	// ResultElement is one element of the receiver (First, Last).
 	ResultElement
@@ -31,8 +33,9 @@ const (
 	// ResultList is a list of scalars (Split, Match).
 	ResultList
 	// ResultElementOrArg is one element of a list receiver when the call has no
-	// argument, and the receiver or the argument when it has one (Min, Max),
-	// typed as whichever end of the total order the builtin yields.
+	// argument, and the receiver or the argument when it has one (Min, Max).
+	// The order ranks nil lowest, so Min with an argument is the lower-ranked
+	// of the two, and Max is either: the lower when the higher is absent.
 	ResultElementOrArg
 	// ResultReceiverOrArg is the receiver's type when the receiver holds a
 	// value and the first non-nil argument's when it is nil (Default,
@@ -63,17 +66,23 @@ const (
 	BindNone ParamBinding = iota
 	// BindElement: the single parameter (or $0) is one element of the receiver.
 	BindElement
-	// BindReceiver: the single parameter (or $0) is the receiver itself.
+	// BindReceiver: the single parameter (or $0) is the receiver itself, nil
+	// when the receiver is nil (With).
 	BindReceiver
+	// BindPresentReceiver: the single parameter (or $0) is the receiver, which
+	// is never nil: the builtin runs no body on a nil receiver (Then).
+	BindPresentReceiver
 	// BindAccumulatorElement: the first parameter (or $0) is the accumulator,
 	// the second (or $1) is one element of the receiver.
 	BindAccumulatorElement
 )
 
 // ReceiverKind states what a builtin accepts as its receiver. The evaluator
-// refuses the rest on every input, so the static checker refuses it at load.
-// A kind is as narrow as the implementation: a string builtin takes a string,
-// not any scalar, because a number reaching it fails on every instance.
+// refuses the rest, so the static checker refuses it at load. A kind is as
+// narrow as the implementation: a string builtin takes a string, not any
+// scalar, because a number reaching it is an error. The three kinds that name
+// the total order are narrower than the evaluator, which ranks a list above
+// every scalar whatever the list holds.
 type ReceiverKind uint8
 
 const (
@@ -81,12 +90,18 @@ const (
 	RecvAny ReceiverKind = iota
 	// RecvList: a list. A scalar, an instance or an association key is refused.
 	RecvList
+	// RecvSeededList: a list, and nil only when the call has an argument, the
+	// seed: with none the builtin errors on a list of no element. Reduce alone
+	// takes it.
+	RecvSeededList
 	// RecvOrdered: any value the total order ranks — a scalar, an association
-	// key, a list. An instance is refused. Compare alone takes it.
+	// key, a list of such values. An instance is refused, and a list that holds
+	// one. Compare alone takes it.
 	RecvOrdered
-	// RecvScalarList: a list of scalars. A list of instances is refused as a
-	// scalar is, because the elements are ordered.
-	RecvScalarList
+	// RecvOrderedList: a list of values the total order ranks. A scalar is
+	// refused, and a list that holds an instance at any depth, because the
+	// elements are ordered. Sort alone takes it.
+	RecvOrderedList
 	// RecvString: a string. A number, a boolean, a list or an instance is
 	// refused.
 	RecvString
@@ -96,11 +111,11 @@ const (
 	// RecvSized: a string, a list or a map (an instance among them); nil
 	// yields zero. A number or a boolean is refused.
 	RecvSized
-	// RecvListOrArg: a list when the call has no argument, when the builtin
-	// ranks the list's elements; a scalar when it has one, when the builtin
-	// ranks receiver against argument. An instance is refused either way, a
-	// list with an argument. What the call RESULTS in is [ResultElementOrArg]'s
-	// question, not this one's.
+	// RecvListOrArg: a list of values the total order ranks when the call has
+	// no argument, when the builtin ranks the list's elements; a scalar when it
+	// has one, when the builtin ranks receiver against argument. An instance is
+	// refused either way, a list with an argument. What the call RESULTS in is
+	// [ResultElementOrArg]'s question, not this one's.
 	RecvListOrArg
 	// RecvStringList: a list of strings. A list of numbers or instances is
 	// refused.
@@ -110,9 +125,12 @@ const (
 	RecvNumericList
 )
 
-// ArgKind states what a builtin accepts at one argument position. As with
-// [ReceiverKind], the evaluator refuses the rest on every input, so the static
-// checker refuses it at load.
+// ArgKind states what a builtin accepts at one argument position, and what an
+// operator accepts as an operand. As with [ReceiverKind], the evaluator refuses
+// every other value that is not nil where it reads the position, so the static
+// checker refuses one at load, whether or not an evaluation reads it. ArgOrdered
+// is the one kind the checker holds narrower than the evaluator, which ranks a
+// list above every scalar whatever the list holds.
 type ArgKind uint8
 
 const (
@@ -121,13 +139,20 @@ const (
 	// ArgString: a string. A number, a boolean, a list or an instance is
 	// refused (TrimPrefix, Split, Join's separator, Replace's two).
 	ArgString
-	// ArgNumber: a number (Substring's indices).
+	// ArgNumber: an integer or a float (the arithmetic operators but `%`).
 	ArgNumber
-	// ArgPattern: a regular-expression literal (Match).
+	// ArgInteger: an integer. A number the checker knows to be a float is
+	// refused, whole or not (Substring's indices, an index, `%`).
+	ArgInteger
+	// ArgBoolean: a boolean (`!`, `&&`, `||`, a conditional's condition).
+	ArgBoolean
+	// ArgPattern: a pattern literal, as written (Match). The right of `=~` and
+	// `!~` takes one by the checker's own rule, with its own message.
 	ArgPattern
 	// ArgOrdered: any value the total order ranks — a scalar, an association
-	// key, a list. An instance is refused (Compare, and Min and Max with an
-	// argument).
+	// key, a list of such values, nil. An instance is refused, and a list that
+	// holds one (Compare, Min and Max with an argument, the ordering
+	// operators).
 	ArgOrdered
 )
 
@@ -138,8 +163,12 @@ func (k ArgKind) String() string {
 		return "a string"
 	case ArgNumber:
 		return "a number"
+	case ArgInteger:
+		return "an integer"
+	case ArgBoolean:
+		return "a boolean"
 	case ArgPattern:
-		return "a pattern"
+		return "a pattern literal"
 	case ArgOrdered:
 		return "a value the total order ranks"
 	case ArgAny:
@@ -182,7 +211,7 @@ func (s BuiltinSpec) ArgAt(i int) (ArgKind, bool) {
 var builtinSpecs = map[string]BuiltinSpec{}
 
 func spec(name string, minArgs, maxArgs, maxParams int, acceptBody bool, recv ReceiverKind, result BuiltinResult, params ParamBinding, args ...ArgKind) {
-	builtinSpecs[strings.ToLower(name)] = BuiltinSpec{
+	builtinSpecs[name] = BuiltinSpec{
 		Name: name, MinArgs: minArgs, MaxArgs: maxArgs, MaxParams: maxParams,
 		AcceptBody: acceptBody, Receiver: recv, Result: result, Params: params, Args: args,
 	}
@@ -190,7 +219,7 @@ func spec(name string, minArgs, maxArgs, maxParams int, acceptBody bool, recv Re
 
 func init() {
 	// Collection
-	spec("Reduce", 0, 1, 2, true, RecvList, ResultUnknown, BindAccumulatorElement, ArgAny)
+	spec("Reduce", 0, 1, 2, true, RecvSeededList, ResultUnknown, BindAccumulatorElement, ArgAny)
 	spec("Map", 0, 0, 1, true, RecvList, ResultBodyList, BindElement)
 	spec("Filter", 0, 0, 1, true, RecvList, ResultReceiver, BindElement)
 	spec("Count", 0, 0, 1, true, RecvList, ResultNumber, BindElement)
@@ -203,21 +232,21 @@ func init() {
 	spec("Sum", 0, 0, 0, false, RecvNumericList, ResultNumber, BindNone)
 	spec("First", 0, 0, 0, false, RecvList, ResultElement, BindNone)
 	spec("Last", 0, 0, 0, false, RecvList, ResultElement, BindNone)
-	spec("Sort", 0, 0, 0, false, RecvScalarList, ResultReceiver, BindNone)
+	spec("Sort", 0, 0, 0, false, RecvOrderedList, ResultReceiver, BindNone)
 	spec("Reverse", 0, 0, 0, false, RecvList, ResultReceiver, BindNone)
 	spec("Flatten", 0, 0, 0, false, RecvList, ResultFlattened, BindNone)
 	spec("Contains", 1, 1, 0, false, RecvList, ResultBoolean, BindNone, ArgAny)
 
 	// Control flow
-	spec("Then", 0, 0, 1, true, RecvAny, ResultBody, BindReceiver)
+	spec("Then", 0, 0, 1, true, RecvAny, ResultBody, BindPresentReceiver)
 	spec("Lest", 0, 0, 0, true, RecvAny, ResultReceiverOrBody, BindNone)
 	spec("With", 0, 0, 1, true, RecvAny, ResultBody, BindReceiver)
 
 	// Numeric
-	spec("Abs", 0, 0, 0, false, RecvNumeric, ResultNumber, BindNone)
-	spec("Floor", 0, 0, 0, false, RecvNumeric, ResultNumber, BindNone)
-	spec("Ceil", 0, 0, 0, false, RecvNumeric, ResultNumber, BindNone)
-	spec("Round", 0, 0, 0, false, RecvNumeric, ResultNumber, BindNone)
+	spec("Abs", 0, 0, 0, false, RecvNumeric, ResultReceiverNumber, BindNone)
+	spec("Floor", 0, 0, 0, false, RecvNumeric, ResultReceiverNumber, BindNone)
+	spec("Ceil", 0, 0, 0, false, RecvNumeric, ResultReceiverNumber, BindNone)
+	spec("Round", 0, 0, 0, false, RecvNumeric, ResultReceiverNumber, BindNone)
 	spec("Min", 0, 1, 0, false, RecvListOrArg, ResultElementOrArg, BindNone, ArgOrdered)
 	spec("Max", 0, 1, 0, false, RecvListOrArg, ResultElementOrArg, BindNone, ArgOrdered)
 	spec("Compare", 1, 1, 0, false, RecvOrdered, ResultNumber, BindNone, ArgOrdered)
@@ -233,7 +262,7 @@ func init() {
 	spec("StartsWith", 1, 1, 0, false, RecvString, ResultBoolean, BindNone, ArgString)
 	spec("EndsWith", 1, 1, 0, false, RecvString, ResultBoolean, BindNone, ArgString)
 	spec("Replace", 2, 2, 0, false, RecvString, ResultString, BindNone, ArgString, ArgString)
-	spec("Substring", 1, 2, 0, false, RecvString, ResultString, BindNone, ArgNumber, ArgNumber)
+	spec("Substring", 1, 2, 0, false, RecvString, ResultString, BindNone, ArgInteger, ArgInteger)
 
 	// Pattern matching
 	spec("Match", 1, 1, 0, false, RecvString, ResultList, BindNone, ArgPattern)
@@ -245,10 +274,9 @@ func init() {
 	spec("Coalesce", 1, -1, 0, false, RecvAny, ResultReceiverOrArg, BindNone, ArgAny)
 }
 
-// LookupBuiltin returns the spec for a builtin by name, matched
-// case-insensitively as the pipeline resolves names.
+// LookupBuiltin returns the spec for the builtin of exactly this name.
 func LookupBuiltin(name string) (BuiltinSpec, bool) {
-	s, ok := builtinSpecs[strings.ToLower(name)]
+	s, ok := builtinSpecs[name]
 	// Args is the value type's only reference-typed field; unaliased, a caller
 	// writing through it cannot corrupt the catalogue.
 	s.Args = slices.Clone(s.Args)

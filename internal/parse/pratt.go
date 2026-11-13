@@ -13,7 +13,7 @@ import (
 	"github.com/simon-lentz/yammm/internal/expr"
 )
 
-// Binding powers for the invariant-expression grammar, tightest last. Three
+// Binding powers for the invariant-expression grammar, tightest last. Two
 // of them contradict a C-family reading; see the package doc.
 const (
 	precIf    = 7
@@ -44,7 +44,7 @@ var binaryPrec = map[string]int{
 	"=~": precMatch, "!~": precMatch,
 	"==": precEq, "!=": precEq,
 	"&&": precAnd,
-	"||": precOr, "^": precOr,
+	"||": precOr,
 }
 
 // exprError satisfies participle's Error interface so an expression failure
@@ -53,6 +53,11 @@ var binaryPrec = map[string]int{
 type exprError struct {
 	pos lexer.Position
 	msg string
+	// reach is the byte recovery resumes at when the error owns more of the
+	// source than the token at pos, else zero. ends reports that the expression
+	// ends there, so the token at reach belongs to what follows it.
+	reach int
+	ends  bool
 }
 
 func (e *exprError) Error() string            { return fmt.Sprintf("%s: %s", e.pos, e.msg) }
@@ -73,8 +78,13 @@ type exprParser struct {
 	diags   *[]exprDiag
 	tok     tokenTypes
 	lastEnd int
+	// depth is the number of parse calls in progress. Each one's result sits a
+	// level below its caller's, so depth never exceeds the tree's height.
+	depth int
 	// noValue records each literal that has no value, see [exprResult.NoValue].
 	noValue []NoValueLiteral
+	// deep is the error that refused the expression for its depth, or nil.
+	deep *exprError
 }
 
 func newExprParser(lx *lexer.PeekingLexer, diags *[]exprDiag, tok tokenTypes) *exprParser {
@@ -96,35 +106,82 @@ func (p *exprParser) diagf(start, end int, format string, args ...any) {
 	*p.diags = append(*p.diags, exprDiag{Msg: fmt.Sprintf(format, args...), Start: start, End: end})
 }
 
-func (p *exprParser) parse(minPrec int) (expr.Expression, error) {
-	left, err := p.prefix()
+// level returns the height of a node over operands of the given heights, and
+// refuses one past MaxNesting at t, the token that adds the level.
+func (p *exprParser) level(t *lexer.Token, operands ...int) (int, error) {
+	h := 1
+	for _, o := range operands {
+		h = max(h, o+1)
+	}
+	if h > MaxNesting {
+		return 0, p.tooDeep(t)
+	}
+	return h, nil
+}
+
+// tooDeep refuses the level t adds. The error owns every token of the
+// expression, which [skipExpression] reads once the parse has returned.
+func (p *exprParser) tooDeep(t *lexer.Token) error {
+	p.deep = &exprError{pos: t.Pos, msg: fmt.Sprintf("expression nests deeper than %d levels", MaxNesting)}
+	return p.deep
+}
+
+// parse parses one expression whose operators bind at least as tightly as
+// minPrec, and returns it with the height of its tree: a name or a literal is
+// one level, and an operator, a call, an index, a member read, a list and a
+// pair of parentheses each add one to the highest operand.
+func (p *exprParser) parse(minPrec int) (expr.Expression, int, error) {
+	// A chain of prefixes recurses before any height is known.
+	if p.depth == MaxNesting {
+		return nil, 0, p.tooDeep(p.lx.Peek())
+	}
+	p.depth++
+	e, h, err := p.operators(minPrec)
+	p.depth--
+	return e, h, err
+}
+
+func (p *exprParser) operators(minPrec int) (expr.Expression, int, error) {
+	left, h, err := p.prefix()
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	for {
 		t := p.lx.Peek()
 		if t.EOF() {
-			return left, nil
+			return left, h, nil
 		}
 		switch {
 		case t.Type == p.tok.lbrack && precPostfix >= minPrec:
 			p.next()
-			args, err := p.exprListUntil(p.tok.rbrack, false)
-			if err != nil {
-				return nil, err
+			if p.lx.Peek().Type == p.tok.rbrack {
+				return nil, 0, p.errf(p.lx.Peek(), "expected an index before ']'")
 			}
-			left = append(expr.SExpr{expr.Op("@"), left}, args...)
+			index, ih, err := p.parse(0)
+			if err != nil {
+				return nil, 0, err
+			}
+			if err := p.expect(p.tok.rbrack, "']' after one index"); err != nil {
+				return nil, 0, err
+			}
+			if h, err = p.level(t, h, ih); err != nil {
+				return nil, 0, err
+			}
+			left = expr.SExpr{expr.Op("@"), left, index}
 
 		case t.Type == p.tok.arrow && precPostfix >= minPrec:
 			p.next()
 			name := p.lx.Peek()
-			if !p.isPlainWord(name) {
-				return nil, p.errf(name, "expected function name after '->'")
+			if !p.isWord(name) {
+				return nil, 0, p.errf(name, "expected function name after '->'")
 			}
 			p.next()
-			node, err := p.fcall(left, name.Value)
+			node, ch, err := p.fcall(left, name.Value)
 			if err != nil {
-				return nil, err
+				return nil, 0, err
+			}
+			if h, err = p.level(t, h, ch); err != nil {
+				return nil, 0, err
 			}
 			left = node
 
@@ -132,28 +189,37 @@ func (p *exprParser) parse(minPrec int) (expr.Expression, error) {
 			p.next()
 			name := p.lx.Peek()
 			if !p.isWord(name) {
-				return nil, p.errf(name, "expected a member name after '.'")
+				return nil, 0, p.errf(name, "expected a member name after '.'")
 			}
 			p.next()
+			if h, err = p.level(t, h); err != nil {
+				return nil, 0, err
+			}
 			left = expr.SExpr{expr.Op("."), left, expr.NewLiteral(name.Value)}
 
 		case t.Type == p.tok.qmark && precIf >= minPrec:
 			p.next()
-			node, err := p.conditional(left)
+			node, bh, err := p.conditional(left)
 			if err != nil {
-				return nil, err
+				return nil, 0, err
+			}
+			if h, err = p.level(t, h, bh); err != nil {
+				return nil, 0, err
 			}
 			left = node
 
 		default:
 			prec, ok := binaryPrec[t.Value]
 			if !ok || prec < minPrec {
-				return left, nil
+				return left, h, nil
 			}
 			p.next()
-			right, err := p.parse(prec + 1)
+			right, rh, err := p.parse(prec + 1)
 			if err != nil {
-				return nil, err
+				return nil, 0, err
+			}
+			if h, err = p.level(t, h, rh); err != nil {
+				return nil, 0, err
 			}
 			left = expr.SExpr{expr.Op(t.Value), left, right}
 		}
@@ -161,99 +227,150 @@ func (p *exprParser) parse(minPrec int) (expr.Expression, error) {
 }
 
 // conditional parses the "{ then : else }" tail of a conditional whose '?' the
-// caller has already consumed. The else branch is required: a two-operand
-// conditional can never evaluate, so the missing ':' is a syntax error here
-// rather than a guaranteed evaluation error later.
-func (p *exprParser) conditional(cond expr.Expression) (expr.Expression, error) {
+// caller has already consumed, and returns the higher branch's height. The else
+// branch is required: a two-operand conditional can never evaluate, so the
+// missing ':' is a syntax error here rather than a guaranteed evaluation error
+// later.
+func (p *exprParser) conditional(cond expr.Expression) (expr.Expression, int, error) {
 	if err := p.expect(p.tok.lbrace, "'{' after '?'"); err != nil {
-		return nil, err
+		return nil, 0, err
 	}
-	trueBranch, err := p.parse(0)
+	trueBranch, th, err := p.parse(0)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	if err := p.expect(p.tok.colon, "':' and an else branch in a conditional"); err != nil {
-		return nil, err
+		return nil, 0, err
 	}
-	falseBranch, err := p.parse(0)
+	falseBranch, fh, err := p.parse(0)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	if err := p.expect(p.tok.rbrace, "'}' closing conditional"); err != nil {
-		return nil, err
+		return nil, 0, err
 	}
-	return expr.SExpr{expr.Op("?"), cond, trueBranch, falseBranch}, nil
+	return expr.SExpr{expr.Op("?"), cond, trueBranch, falseBranch}, max(th, fh), nil
 }
 
-func (p *exprParser) prefix() (expr.Expression, error) {
+func (p *exprParser) prefix() (expr.Expression, int, error) {
 	t := p.lx.Peek()
 	if t.EOF() {
-		return nil, p.errf(t, "expected expression")
+		return nil, 0, p.errf(t, "expected expression")
 	}
 	if t.Type == p.tok.invalidNumber {
-		return nil, p.errf(t, "%s", InvalidNumberMessage(t.Value))
+		return nil, 0, p.errf(t, "%s", InvalidNumberMessage(t.Value))
 	}
 	switch t.Type {
 	case p.tok.minus:
 		p.next()
-		right, err := p.parse(precUminus)
-		if err != nil {
-			return nil, err
+		// A minus before a number is the literal's sign, as it is a bound's,
+		// so the lowest int64 can be written.
+		if n := p.lx.Peek(); n.Type == p.tok.integer || n.Type == p.tok.float {
+			return p.number(n, t), 1, nil
 		}
-		return expr.SExpr{expr.Op("-x"), right}, nil
+		right, rh, err := p.parse(precUminus)
+		if err != nil {
+			return nil, 0, err
+		}
+		h, err := p.level(t, rh)
+		if err != nil {
+			return nil, 0, err
+		}
+		return expr.SExpr{expr.Op("-x"), right}, h, nil
 	case p.tok.exclamation:
 		p.next()
-		right, err := p.parse(precNot)
+		right, rh, err := p.parse(precNot)
 		if err != nil {
-			return nil, err
+			return nil, 0, err
 		}
-		return expr.SExpr{expr.Op("!"), right}, nil
+		h, err := p.level(t, rh)
+		if err != nil {
+			return nil, 0, err
+		}
+		return expr.SExpr{expr.Op("!"), right}, h, nil
 	case p.tok.lpar:
 		p.next()
-		inner, err := p.parse(0)
+		inner, ih, err := p.parse(0)
 		if err != nil {
-			return nil, err
+			return nil, 0, err
 		}
 		if err := p.expect(p.tok.rpar, "')'"); err != nil {
-			return nil, err
+			return nil, 0, err
 		}
-		return inner, nil
+		h, err := p.level(t, ih)
+		if err != nil {
+			return nil, 0, err
+		}
+		return inner, h, nil
 	case p.tok.lbrack:
 		p.next()
-		elems, err := p.exprListUntil(p.tok.rbrack, false)
+		elems, eh, err := p.exprListUntil(p.tok.rbrack, false)
 		if err != nil {
-			return nil, err
+			return nil, 0, err
 		}
-		return append(expr.SExpr{expr.Op("[]")}, elems...), nil
+		h, err := p.level(t, eh)
+		if err != nil {
+			return nil, 0, err
+		}
+		return append(expr.SExpr{expr.Op("[]")}, elems...), h, nil
 	case p.tok.variable:
 		p.next()
-		return expr.SExpr{expr.Op("$"), expr.NewLiteral(t.Value[1:])}, nil
+		return expr.SExpr{expr.Op("$"), expr.NewLiteral(t.Value[1:])}, 1, nil
 	case p.tok.uscore:
 		p.next()
-		return expr.NewLiteral(nil), nil
-	case p.tok.str, p.tok.integer, p.tok.float, p.tok.regexp:
-		return p.literal(t), nil
+		return expr.NewLiteral(nil), 1, nil
+	case p.tok.integer, p.tok.float:
+		return p.number(t, nil), 1, nil
+	case p.tok.str, p.tok.regexp:
+		return p.literal(t), 1, nil
 	case p.tok.ucWord:
-		p.next()
 		if datatypeKeywords[t.Value] {
-			return expr.DatatypeLiteral(t.Value), nil
+			return nil, 0, p.errf(t, "unexpected keyword %q in an expression", t.Value)
 		}
-		return expr.SExpr{expr.Op("p"), expr.NewLiteral(t.Value)}, nil
+		p.next()
+		return expr.SExpr{expr.Op("p"), expr.NewLiteral(t.Value)}, 1, nil
 	case p.tok.lcWord:
-		return p.lcWord(t)
+		e, err := p.lcWord(t)
+		return e, 1, err
 	}
-	return nil, p.errf(t, "unexpected token %q in an expression", t.Value)
+	return nil, 0, p.errf(t, "unexpected token %q in an expression", t.Value)
 }
 
-// literal converts a literal token. When the conversion fails it substitutes
-// a nil literal and reports a diagnostic, save for text the source rules
-// refuse, which they report. The expression stays well-formed either way,
-// which is what keeps one bad literal from cascading.
+// number converts the number token t, which the caller has peeked, with the
+// minus token sign before it when the source wrote one. A text no int64 or
+// float64 holds is a literal with no value, reported over the sign and the
+// digits.
+func (p *exprParser) number(t, sign *lexer.Token) expr.Expression {
+	p.next()
+	start, end := t.Pos.Offset, t.Pos.Offset+len(t.Value)
+	text := t.Value
+	if sign != nil {
+		start, text = sign.Pos.Offset, "-"+text
+	}
+	if t.Type == p.tok.integer {
+		i, err := strconv.ParseInt(text, 10, 64)
+		if err != nil {
+			p.diagf(start, end, "invalid integer literal: %v", err)
+			return p.literalWithNoValue(IntegerLiteral)
+		}
+		return expr.NewLiteral(i)
+	}
+	f, err := strconv.ParseFloat(text, 64)
+	if err != nil {
+		p.diagf(start, end, "invalid float literal: %v", err)
+		return p.literalWithNoValue(FloatLiteral)
+	}
+	return expr.NewLiteral(f)
+}
+
+// literal converts a string or a pattern token. When the conversion fails it
+// substitutes a nil literal and reports a diagnostic, save for text the source
+// rules refuse, which they report. The expression stays well-formed either
+// way, which is what keeps one bad literal from cascading.
 func (p *exprParser) literal(t *lexer.Token) expr.Expression {
 	p.next()
 	start, end := t.Pos.Offset, t.Pos.Offset+len(t.Value)
-	switch t.Type {
-	case p.tok.str:
+	if t.Type == p.tok.str {
 		s, err := unquote(t.Value)
 		switch {
 		case errors.Is(err, errRefusedText):
@@ -267,39 +384,24 @@ func (p *exprParser) literal(t *lexer.Token) expr.Expression {
 			return p.literalWithNoValue(StringLiteral)
 		}
 		return expr.NewLiteral(s)
-	case p.tok.integer:
-		i, err := strconv.ParseInt(t.Value, 10, 64)
-		if err != nil {
-			p.diagf(start, end, "invalid integer literal: %v", err)
-			return p.literalWithNoValue(IntegerLiteral)
-		}
-		return expr.NewLiteral(i)
-	case p.tok.float:
-		f, err := strconv.ParseFloat(t.Value, 64)
-		if err != nil {
-			p.diagf(start, end, "invalid float literal: %v", err)
-			return p.literalWithNoValue(FloatLiteral)
-		}
-		return expr.NewLiteral(f)
-	default: // REGEXP
-		// A literal the source rules refuse has no value, and its bytes are
-		// reported where they stand. One holding a byte that is no part of a
-		// character has no text to compile. A NUL and a byte order mark are
-		// characters regexp reads, so a compile error beside one is the
-		// pattern's own and is reported.
-		if !utf8.ValidString(t.Value) {
-			return p.literalWithNoValue(RegexLiteral)
-		}
-		re, err := regexp.Compile(t.Value[1 : len(t.Value)-1])
-		if err != nil {
-			p.diagf(start, end, "invalid regexp literal: %v", err)
-			return p.literalWithNoValue(RegexLiteral)
-		}
-		if _, refused := nextTextFault(t.Value, 0); refused {
-			return p.literalWithNoValue(RegexLiteral)
-		}
-		return expr.NewLiteral(re)
 	}
+	// A pattern the source rules refuse has no value, and its bytes are
+	// reported where they stand. One holding a byte that is no part of a
+	// character has no text to compile. A NUL and a byte order mark are
+	// characters regexp reads, so a compile error beside one is the
+	// pattern's own and is reported.
+	if !utf8.ValidString(t.Value) {
+		return p.literalWithNoValue(RegexLiteral)
+	}
+	re, err := regexp.Compile(t.Value[1 : len(t.Value)-1])
+	if err != nil {
+		p.diagf(start, end, "invalid regexp literal: %v", err)
+		return p.literalWithNoValue(RegexLiteral)
+	}
+	if _, refused := nextTextFault(t.Value, 0); refused {
+		return p.literalWithNoValue(RegexLiteral)
+	}
+	return expr.NewLiteral(re)
 }
 
 // literalWithNoValue stands in for a literal of kind that has no value, whose
@@ -333,36 +435,38 @@ func (p *exprParser) lcWord(t *lexer.Token) (expr.Expression, error) {
 }
 
 // fcall parses the optional (args), |params| and { body } tail of a pipeline
-// call, producing the five-element shape. Absent args and params are empty
-// lists; an absent body is a nil Expression, so a body that is the nil
-// literal — `{ nil }` or `{ _ }` — stays a body.
-func (p *exprParser) fcall(lhs expr.Expression, name string) (expr.Expression, error) {
+// call, producing the five-element shape and the height of its highest
+// argument or body. Absent args and params are empty lists; an absent body is
+// a nil Expression, so a body that is the nil literal — `{ nil }` or `{ _ }` —
+// stays a body.
+func (p *exprParser) fcall(lhs expr.Expression, name string) (expr.Expression, int, error) {
 	var args, params, body expr.Expression
+	h := 0
 	if p.lx.Peek().Type == p.tok.lpar {
 		p.next()
-		list, err := p.exprListUntil(p.tok.rpar, true)
+		list, ah, err := p.exprListUntil(p.tok.rpar, true)
 		if err != nil {
-			return nil, err
+			return nil, 0, err
 		}
-		args = expr.NewLiteral(list)
+		args, h = expr.NewLiteral(list), ah
 	}
 	if p.lx.Peek().Type == p.tok.pipe {
 		names, err := p.lambdaParams()
 		if err != nil {
-			return nil, err
+			return nil, 0, err
 		}
 		params = expr.NewLiteral(names)
 	}
 	if p.lx.Peek().Type == p.tok.lbrace {
 		p.next()
-		inner, err := p.parse(0)
+		inner, bh, err := p.parse(0)
 		if err != nil {
-			return nil, err
+			return nil, 0, err
 		}
 		if err := p.expect(p.tok.rbrace, "'}' closing call body"); err != nil {
-			return nil, err
+			return nil, 0, err
 		}
-		body = inner
+		body, h = inner, max(h, bh)
 	}
 	if args == nil {
 		args = expr.NewLiteral([]expr.Expression{})
@@ -370,7 +474,7 @@ func (p *exprParser) fcall(lhs expr.Expression, name string) (expr.Expression, e
 	if params == nil {
 		params = expr.NewLiteral([]string{})
 	}
-	return expr.SExpr{expr.Op(name), lhs, args, params, body}, nil
+	return expr.SExpr{expr.Op(name), lhs, args, params, body}, h, nil
 }
 
 // lambdaParams parses the |$a, $b| parameter list, whose opening pipe the
@@ -401,42 +505,44 @@ func (p *exprParser) lambdaParams() ([]string, error) {
 
 // exprListUntil parses a possibly-empty, comma-separated, trailing-comma
 // tolerant expression list terminated by the named closing token, which it
-// consumes. The empty list is non-nil, because a consumer building its own through
-// make and a nil slice compares unequal to that under cmp and DeepEqual.
-func (p *exprParser) exprListUntil(closer lexer.TokenType, bareComma bool) ([]expr.Expression, error) {
+// consumes, and returns the height of its highest element. The empty list is
+// non-nil, because a consumer building its own through make and a nil slice
+// compares unequal to that under cmp and DeepEqual.
+func (p *exprParser) exprListUntil(closer lexer.TokenType, bareComma bool) ([]expr.Expression, int, error) {
 	out := []expr.Expression{}
+	h := 0
 	for {
 		t := p.lx.Peek()
 		if t.Type == closer {
 			p.next()
-			return out, nil
+			return out, h, nil
 		}
 		// A call's argument list admits one comma with no arguments at all:
 		// the grammar's optional trailing COMMA sits outside its argument
-		// group, so "f(,)" is legal. The list and index forms put the same
-		// COMMA inside their group, so "[,]" is not, and they pass false.
+		// group, so "f(,)" is legal. The list form puts the same COMMA
+		// inside its group, so "[,]" is not, and it passes false.
 		if bareComma && len(out) == 0 && t.Type == p.tok.comma {
 			p.next()
 			if p.lx.Peek().Type != closer {
-				return nil, p.errf(p.lx.Peek(), "expected a closing delimiter after ','")
+				return nil, 0, p.errf(p.lx.Peek(), "expected a closing delimiter after ','")
 			}
 			p.next()
-			return out, nil
+			return out, h, nil
 		}
-		e, err := p.parse(0)
+		e, eh, err := p.parse(0)
 		if err != nil {
-			return nil, err
+			return nil, 0, err
 		}
-		out = append(out, e)
+		out, h = append(out, e), max(h, eh)
 		if p.lx.Peek().Type == p.tok.comma {
 			p.next()
 			continue
 		}
 		if p.lx.Peek().Type == closer {
 			p.next()
-			return out, nil
+			return out, h, nil
 		}
-		return nil, p.errf(p.lx.Peek(), "expected ',' or closing delimiter in an expression list")
+		return nil, 0, p.errf(p.lx.Peek(), "expected ',' or closing delimiter in an expression list")
 	}
 }
 
@@ -449,28 +555,16 @@ func (p *exprParser) expect(want lexer.TokenType, what string) error {
 	return nil
 }
 
-// isWord reports whether t is a word of either case. The member position after
-// '.' takes any word: a property or a relation field may be spelled like a
-// keyword (a property named type, a relation named IN), the position admits
-// nothing but a name, and the type's members decide whether it resolves.
+// isWord reports whether t is a word of either case. The positions after '.'
+// and after '->' take any word: each admits nothing but a name, so a keyword's
+// spelling is a name there, and the type's members or the builtin catalogue
+// decide whether it resolves.
 func (p *exprParser) isWord(t *lexer.Token) bool {
 	return t.Type == p.tok.ucWord || t.Type == p.tok.lcWord
 }
 
-// isPlainWord reports whether t can stand as an ordinary identifier — the
-// function-name position after '->' is the caller.
-func (p *exprParser) isPlainWord(t *lexer.Token) bool {
-	if t.Type == p.tok.ucWord {
-		return !datatypeKeywords[t.Value]
-	}
-	if t.Type == p.tok.lcWord {
-		return !reservedLC[t.Value]
-	}
-	return false
-}
-
-// datatypeKeywords are the eleven built-in type names. They are never ordinary
-// identifiers, so UC_WORD positions that admit a name exclude them.
+// datatypeKeywords are the eleven built-in type names. One is no operand and
+// no declared name. After '->' and after '.' it is a name, as any word is.
 var datatypeKeywords = map[string]bool{
 	"Integer": true, "Float": true, "Boolean": true, "String": true,
 	"Enum": true, "Pattern": true, "Timestamp": true, "Date": true,

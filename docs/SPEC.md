@@ -207,7 +207,7 @@ The following character sequences represent operators and punctuation:
 ```text
 +     -     *     /     %           // arithmetic
 ==    !=    <     <=    >     >=    // comparison
-&&    ||    ^     !                 // logical
+&&    ||    !                       // logical
 =~    !~                            // regex match
 in                                  // membership
 ->                                  // pipeline/function call
@@ -242,6 +242,10 @@ Examples:
 2.5e10
 1.0e-5
 ```
+
+A numeric literal token holds no sign. In an `Integer` or a `Float` bound, and in an expression wherever an operand can stand, a `-` directly before the token is the literal's sign: `-5` is one literal, and so is `-9223372036854775808`, the least `Integer`. After a left operand in an expression the `-` is subtraction.
+
+An `INTEGER` literal outside the range of `int64` is refused, save in a `Float` bound, which reads it as its nearest `float64`. A `FLOAT` literal is read as its nearest `float64`, in an expression and in a `Float` bound, as a data value is. A literal too near zero for a `float64` to hold, such as `1.0e-400`, is read as `0.0`. A literal no finite `float64` holds, such as `1.0e999`, is refused.
 
 ### String Literals
 
@@ -563,7 +567,7 @@ Inheritance rules:
 
 A property that reaches a type with a definition of unknown type draws no `E_PROPERTY_CONFLICT` on that type. A type is unknown when the parser could not build it (`Vector[0]`) or when it reads a name that did not resolve to a constraint, itself or as a `List` element. Whatever the cause, it is already reported, once. The conflict is withheld in any order of the `extends` clause, because a known type there could make the definitions agree. Only the report is withheld: the merge keeps the definition it would keep, and the property's annotations are judged as for any property. A type the parser reports and still builds, such as `String[5, 1]`, is known and is judged.
 
-**Invariant merging:** Own invariants come first, then those inherited from each direct supertype in declaration order, each supertype contributing the set it has already merged. An invariant's message is its identity, and must not be empty (`E_INVALID_INVARIANT`). A subtype's declaration overrides an inherited one of the same name at any depth — a grandparent's rule cannot reappear past a parent that replaced it. One type may not declare a message twice (`E_DUPLICATE_INVARIANT`), and two inherited definitions of one message must carry the same expression; a disagreement is `E_INVARIANT_CONFLICT`, reported once on the type that inherits them, naming every rival. Expressions are compared structurally, as the structural hash compares them: `n > 1` and `n > 1.0` are different expressions, because an integer and a float literal are different literals. A literal with no value, whose own diagnostic already refuses the source, matches any literal of the kind the source wrote there (a string, an integer, a float or a regular expression), so the definitions of one message conflict only when no value for each such literal makes them all one, whatever order the supertypes are named in. One definition reached through two ancestors merges silently.
+**Invariant merging:** Own invariants come first, then those inherited from each direct supertype in declaration order, each supertype contributing the set it has already merged. An invariant's message is its identity, and must not be empty (`E_INVALID_INVARIANT`). A subtype's declaration overrides an inherited one of the same name at any depth — a grandparent's rule cannot reappear past a parent that replaced it. One type may not declare a message twice (`E_DUPLICATE_INVARIANT`), and two inherited definitions of one message must carry the same expression; a disagreement is `E_INVARIANT_CONFLICT`, reported once on the type that inherits them, naming every rival. Expressions are compared structurally, as the structural hash compares them: `n > 1` and `n > 1.0` are different expressions, because an integer and a float literal are different literals. `n > -1` and `n > -(1)` are different expressions too: the first holds the literal `-1`, and the second negates the literal `1`. A literal with no value, whose own diagnostic already refuses the source, matches any literal of the kind the source wrote there (a string, an integer, a float or a regular expression), so the definitions of one message conflict only when no value for each such literal makes them all one, whatever order the supertypes are named in. One definition reached through two ancestors merges silently.
 
 ### Constraint Narrowing
 
@@ -927,7 +931,9 @@ matrix List<List<Integer>>                 // nested list
 embeddings List<Vector[768]>               // list of vectors
 ```
 
-Validation accepts JSON arrays where each element passes the element type's constraint. Length bounds (when present) are checked against the array length.
+Validation accepts JSON arrays where each element passes the element type's constraint. Length bounds (when present) are checked against the array length. A list reports its first bad element alone: validation stops at the first element that fails, and the elements after it are not checked.
+
+A `List` nests at most 1,000 levels. A deeper one written in one type is a syntax error (`E_SYNTAX`), reported at the first `List` past the limit. The count runs through each datatype a `List` names: a datatype or a property whose `List` passes the limit that way is refused at load (`E_INVALID_CONSTRAINT`), at its declaration. A declaration that names a datatype refused this way does not load and draws no second issue for the limit, so one chain of datatypes past the limit is one issue for it.
 
 **Restrictions:**
 
@@ -1264,7 +1270,11 @@ type Person {
 }
 ```
 
-An invariant whose expression evaluates to `nil` **fails** the invariant (`E_INVARIANT_FAIL` — nil is falsey). An invariant whose expression evaluates to any non-boolean, non-nil value is an **evaluation error** (`E_EVAL_ERROR`).
+An invariant whose expression evaluates to `nil` **fails** the invariant (`E_INVARIANT_FAIL` — nil is falsey). An invariant whose expression evaluates to any non-boolean, non-nil value is an **evaluation error** (`E_EVAL_ERROR`). Where the static check knows the kind of the whole expression and that kind is no boolean — a string, a number, a list or an instance — the schema does not load (`E_INVALID_INVARIANT`): `! "m" name` and `! "m" age + 1` are refused. An expression whose kind the check does not know loads, and so does the `nil` literal.
+
+Both diagnostics name the invariant in the `invariant` detail, beside the `type` detail. The message of `E_INVARIANT_FAIL` is the invariant's message string, and the detail holds the same string. The message of `E_EVAL_ERROR` is `invariant "<message>": <cause>`, with the message string written as a quoted string: a `"` or a `\` in it is escaped.
+
+An instance that draws any other error runs no invariant. The validator evaluates invariants last, and only when the instance's properties and relations drew no error.
 
 ### Expression Grammar
 
@@ -1274,7 +1284,7 @@ Expressions support a rich set of operators and built-in functions.
 Expr = Literal
      | "[" [ Expr { "," Expr } [ "," ] ] "]"           // list
      | "-" Expr                                         // unary minus
-     | Expr "[" [ Expr { "," Expr } ] "]"              // indexing
+     | Expr "[" Expr "]"                                // indexing
      | Expr "->" Name [ Arguments ] [ Parameters ] [ "{" Expr "}" ]  // pipeline
      | Expr "." Name                                    // property access
      | "!" Expr                                         // logical not
@@ -1282,30 +1292,53 @@ Expr = Literal
      | Expr ( "+" | "-" ) Expr                         // additive
      | Expr ( "<" | "<=" | ">" | ">=" ) Expr           // comparison
      | Expr "in" Expr                                   // membership
-     | Expr ( "=~" | "!~" ) Expr                       // regex match
+     | Expr ( "=~" | "!~" ) REGEXP                     // regex match
      | Expr ( "==" | "!=" ) Expr                       // equality
      | Expr "&&" Expr                                   // logical and
-     | Expr ( "||" | "^" ) Expr                        // logical or/xor
+     | Expr "||" Expr                                   // logical or
      | Expr "?" "{" Expr ":" Expr "}"                  // ternary
      | "(" Expr ")"                                     // grouping
      | VARIABLE                                         // variable reference
      | PropertyName                                     // property reference
-     | DataTypeKeyword                                  // datatype literal
      | UC_WORD                                          // relation name
-     | "_"                                              // nil literal
-     | "nil"                                            // nil literal (alias)
      .
 
-Arguments  = "(" [ Expr { "," Expr } ] [ "," ] ")" .
+Literal    = STRING | [ "-" ] ( INTEGER | FLOAT ) | BOOLEAN | "_" | "nil" .
+Arguments  = "(" [ Argument { "," Argument } ] [ "," ] ")" .
+Argument   = Expr | REGEXP .                            // REGEXP: Match alone
 Parameters = "|" VARIABLE { "," VARIABLE } [ "," ] "|" .
 Name       = LC_WORD | UC_WORD .
 ```
 
-The `Name` after `->` is a built-in function's name. The `Name` after `.` is a
-member — a property or a relation's field name — and admits any word, keywords
-included: a property may be named `type` and a relation `IN`, so `$self.type`
-and `$self.in` are member accesses. Whether the member exists is the type's
-question, answered by the static check below, not the grammar's.
+The `Name` after `->` is a built-in function's name, matched exactly: `Len` is
+a function and `len` is not. The position admits any word, and a word that
+names no function is refused at load (`E_INVALID_INVARIANT`). The `Name` after
+`.` is a member — a property, or a relation by its name or its field name — and admits any word,
+keywords included: a property may be named `type` and a relation `IN`, so
+`$self.type` and `$self.in` are member accesses. Whether the member exists is
+the type's question, answered by the static check below, not the grammar's.
+
+A `-` directly before an `INTEGER` or a `FLOAT` token is the literal's sign,
+wherever an operand can stand: `-5 -> Abs` pipes the literal `-5`. After a left
+operand the `-` is subtraction, so `n -5` is `n - 5`. Before any other operand
+it is unary minus.
+
+A datatype keyword — `String`, `Integer`, `Float`, `Boolean`, `Timestamp`,
+`Date`, `UUID`, `Enum`, `Pattern`, `Vector` or `List` — is no operand, and one
+where an operand stands is a syntax error (`E_SYNTAX`). To test a value's kind, compare
+its `TypeOf`.
+
+A regex literal is no value. It stands only on the right of `=~` or `!~` and as
+the argument of `Match`, and anywhere else it is refused at load
+(`E_INVALID_INVARIANT`). The reference parser reads any expression in those two
+positions, so the static check reports one that is no regex literal.
+
+An expression's tree is at most 1,000 levels deep, and a deeper one is a syntax
+error (`E_SYNTAX`). A literal or a name is one level. Each operator, call, index,
+member read, list literal and pair of parentheses is one level above its
+deepest operand. So a
+name under 999 pipeline stages loads, as a chain of 999 `+` does, and one more
+stage or one more `+` does not.
 
 > **`_` and `nil` in expressions.** Within invariant expressions, `_` and `nil` are interchangeable — both produce a nil literal. Use whichever reads more naturally: `end_date == nil` for null-guard idioms, `end_date == _` for consistency with other DSL contexts. Note that `_` retains distinct, non-nil roles in constraint bounds (`Integer[0, _]`) and multiplicity (`(_:many)`), where `nil` cannot be used.
 
@@ -1326,7 +1359,7 @@ Operators are listed from highest to lowest precedence:
 | 9 | Regex match `=~`, `!~` | Left |
 | 10 | Equality `==`, `!=` | Left |
 | 11 | Logical and `&&` | Left |
-| 12 | Logical or/xor `\|\|`, `^` | Left |
+| 12 | Logical or `\|\|` | Left |
 | 13 | Ternary `? { then : else }` | Left |
 
 The three postfix operators share one level and apply left to right: `$self.tags[0]` indexes the property, `$i.name -> Len` pipes it, and `LINES -> First.qty` reads a member of the pipeline's result. The name after `.` is a property or relation name, never an expression.
@@ -1334,6 +1367,30 @@ The three postfix operators share one level and apply left to right: `$self.tags
 Parentheses group as usual.
 
 ### Operators
+
+#### Operand Kinds
+
+The static check judges each operand by one table, as it judges a builtin's receiver and its arguments:
+
+| Operator | Operand | Takes |
+| -------- | ------- | ----- |
+| `-`, `*`, `/`, unary `-` | each | a number |
+| `%` | each | an integer |
+| `expr[i]` | the index | an integer |
+| `!`, `&&`, `\|\|` | each | a boolean |
+| `? { : }` | the condition | a boolean |
+| `<`, `<=`, `>`, `>=` | each | a value the total order ranks |
+| `=~`, `!~` | the left | a string |
+| `=~`, `!~` | the right | a regex literal |
+| `+` | both | two numbers, two strings or two lists |
+| `in` | the right | a list |
+| `==`, `!=` | each | any value |
+
+An operand of a known kind that its operator does not take is refused at load (`E_INVALID_INVARIANT`): the evaluator refuses every non-nil value of that kind where it reads the operand, save at an ordered comparison, where the check is the narrower of the two ([Comparison Operators](#comparison-operators)). The check refuses the right operand of `&&` and `||` by the same rule, though the evaluator does not read it when the left operand decides: `flag || name` does not load. The message names the operator and what it takes, as in `% takes an integer as its right operand`. An operand whose kind the check does not know loads, save on the right of `=~` and `!~`, which takes a regex literal alone.
+
+The `nil` literal is refused at each of these positions but three: an ordered comparison ranks it below every value, `in` reads it as an empty list, and equality takes any value. An optional property that is absent at evaluation is not the literal. It loads, and the operator's own section states what the evaluator does with it.
+
+The check knows when a number is a float. A `Float` property, a float literal, an element of a `Vector` or of a `List<Float>`, and arithmetic with a float operand are floats, and so is `Abs`, `Floor`, `Ceil` or `Round` of a float. A float where an integer is taken is refused, whole or not: `tags[1.0]` and `count % 2.0` do not load. Every other number loads there. `Sum` is one over any list, since an empty list sums to the integer `0`.
 
 #### Arithmetic Operators
 
@@ -1364,6 +1421,8 @@ Integer arithmetic is exact within `int64`. A result outside it — `+`, `-`, `*
 
 Ordered comparisons (`<`, `<=`, `>`, `>=`) follow a **total order across type strata** — `nil` < booleans < numbers < strings < lists — so a mixed-type ordered comparison is defined, not false: `1 < "a"` is true, `nil < 0` is true, and `false < true` is true. Within the numeric stratum, integers and floats compare exactly. Floats order `-Inf` < finite < `+Inf` < `NaN`, and `NaN` equals `NaN`, so `Sort`, `Unique`, and `Contains` treat non-finite values consistently. An ordered comparison on an unsupported shape (a map) is an evaluation error.
 
+The total order ranks no instance. The static check refuses an instance, and a list that holds one, as an operand of an ordered comparison and as a value `Sort`, `Min`, `Max` or `Compare` ranks. The refusal is by the operand's type: at evaluation a list ranks above every scalar whatever it holds, so `LINES < 1` would answer, and it does not load.
+
 Timestamp comparison is string comparison: RFC 3339 values with mixed UTC offsets do not order by instant. `Date` values (`YYYY-MM-DD`) order correctly by construction. `UUID` values order over their canonical lowercase text.
 
 #### Logical Operators
@@ -1372,8 +1431,9 @@ Timestamp comparison is string comparison: RFC 3339 values with mixed UTC offset
 !    logical not
 &&   logical and (short-circuit)
 ||   logical or (short-circuit)
-^    logical xor
 ```
+
+Each operand is a boolean. An operand that is `nil` at evaluation is an evaluation error, not false: guard an optional flag with `flag == nil || ...`. The language has no exclusive-or operator. For two booleans, `a != b` is exclusive or.
 
 #### Membership Operator
 
@@ -1387,42 +1447,26 @@ Example:
 ! "status must be valid" status in ["active", "inactive", "pending"]
 ```
 
-#### Pattern and Type Match Operators
+The right operand is a list. A right operand that is `nil` at evaluation is an empty list, so the test is false. Any other right operand that is no list is an evaluation error.
+
+#### Pattern Match Operators
 
 ```text
-=~   matches pattern or type
-!~   does not match pattern or type
+=~   matches pattern
+!~   does not match pattern
 ```
 
-These operators support two modes:
-
-**Regular expression matching:** When the right operand is a regex literal, performs pattern matching:
+The left operand is a string and the right operand is a regex literal:
 
 ```yammm-snippet
 ! "email must be valid" email =~ /.+@.+\..+/
 ```
 
-**Type checking:** When the right operand is one of the datatype keywords listed below, checks whether the value matches that type at runtime:
+A match is a search. The pattern matches when any part of the string matches it, as Go's `regexp.MatchString` reads one: `name =~ /or/` holds for `"north"`. To match the whole string, anchor the pattern: `name =~ /^north$/`.
 
-```yammm-snippet
-! "value must be integer" value =~ Integer
-! "price must be numeric" price =~ Float
-! "must not be string" data !~ String
-```
+A left operand that is no string is an evaluation error, `nil` among them: guard an optional property, as in `email == nil || email =~ /.+@.+/`. The static check refuses a left operand of another known kind, and a right operand that is no regex literal (`E_INVALID_INVARIANT`).
 
-Supported datatype keywords for type checking:
-
-- `String` - checks for string values
-- `Integer` - checks for integer values
-- `Float` - checks for floating-point values
-- `Boolean` - checks for boolean values
-- `UUID` - checks for valid UUID strings
-- `Timestamp` - checks for valid timestamp values
-- `Date` - checks for valid date values
-
-Each check applies the rule a property of that kind applies when it declares no constraint: `=~ Float` is false for NaN and infinities, `=~ String` is false for a number, and `=~ Timestamp` accepts the RFC 3339 string or the `time.Time` a `Timestamp` property accepts. A nil is the exception: a property that is not required accepts an absent value, and a nil is of no kind, so `x =~ String` is false and `x !~ String` is true while `x` is nil. `=~` judges a value at run time and sees no property's constraint: at a `String` property, `d =~ Timestamp` is true when the value is text a `Timestamp` property accepts. `Vector`, `List`, `Enum` and `Pattern` are datatype keywords but not type checks — they name a shape or a constraint, not a kind a value can have — and `=~` against one is refused at schema load with `E_INVALID_INVARIANT`.
-
-Numeric type checks follow the property rules: `5 =~ Float` holds, because an integer widens to a float, and `5.0 =~ Integer` does not — a float is never an integer, whole or not.
+The operators test no datatype. To test a value's kind, compare its `TypeOf`: `value -> TypeOf == "integer"`.
 
 #### Ternary Operator
 
@@ -1435,6 +1479,8 @@ Example:
 ```yammm-snippet
 ! "adult status" age >= 18 ? { "adult" : "minor" } == category
 ```
+
+The condition is a boolean. A condition that is `nil` at evaluation is an evaluation error, as any other non-boolean is.
 
 The else branch is required. Omitting the `:` branch is a load-time syntax error:
 
@@ -1450,7 +1496,7 @@ type T {
 
 ### Indexing
 
-The bracket operator accepts exactly one index:
+The bracket operator takes exactly one index expression:
 
 ```text
 expr[index]        // single element access
@@ -1461,9 +1507,9 @@ Works on:
 - Strings (rune indexing)
 - Lists
 
-A non-integer index is an evaluation error. An out-of-range index evaluates to `nil`, not an error. Indexing `nil` evaluates to `nil`. There is no range slice: two or more bracket arguments draw an evaluation error.
+The index is an integer. An index of another known kind, a float among them, is refused at load (`E_INVALID_INVARIANT`). Indexing a value that is `nil` at evaluation evaluates to `nil`, whatever the index, and the `nil` literal as the receiver is refused at load. On any other value, an index that is no integer at evaluation, `nil` among them, is an evaluation error. An out-of-range index evaluates to `nil`, not an error.
 
-The bracket grammar is more permissive than the language: it also accepts an empty index list (`expr[]`, an evaluation error) and a trailing comma (`expr[a,]`, evaluated as `expr[a]`). These parse without a diagnostic — do not write either.
+There is no range slice. An empty bracket (`expr[]`), a second index (`expr[a, b]`) and a trailing comma (`expr[a,]`) are each a syntax error (`E_SYNTAX`).
 
 ### Property Access
 
@@ -1475,9 +1521,13 @@ name               // implicit property reference
 $item.price        // lambda parameter property
 ```
 
-Invariant expressions are checked **statically** at schema load. The checker types every sub-expression — an instance, an association key, a list, a scalar — and follows the type through member access, indexing and every pipeline stage whose builtin declares its result (`Reduce` declares none), so a lambda parameter is the element its collection holds and `ITEMS -> Map |$i| { $i.PART } -> All |$p| { $p.sku != "" }` binds `$p` to a `Part`. A builtin's result is typed by its subkind — `Len`, `Sum`, `Count`, `Compare` and the numeric functions yield a number; `Upper`, `Lower`, `Trim`, `TrimPrefix`, `TrimSuffix`, `Join`, `Replace`, `Substring` and `TypeOf` a string; `Split` and `Match` a list of strings; the predicates and `IsNil` a boolean; `Min` and `Max` with an argument the receiver or the argument, ranked by the total order — so the stage after it is judged: `name -> Len -> Upper` is refused, as `age -> Upper` is. Among what it rejects: a reference to a property not declared on the type (`E_UNKNOWN_PROPERTY`), however the instance was reached; a member read through an association key, a scalar or a list (`E_INVALID_INVARIANT`); an undefined named variable; a function name the language does not define; and a call shape its builtin refuses — a missing or unexpected lambda, too many parameters, too few or too many arguments; and a receiver or an argument of a kind its builtin refuses on every input (`E_INVALID_INVARIANT`) — `age -> Upper` on a number, `name -> Match("nor")` with a string where a pattern is required, `name -> Substring("a")` with a string where a number is — because an invariant that fails on every instance is a defect in the schema, not in the data.
+Invariant expressions are checked **statically** at schema load. The checker types every sub-expression it reads — as an instance, an association key, a list, a scalar, a value that is always `nil`, or a value of no known kind — and follows the type through member access, indexing and every pipeline stage whose builtin declares its result (`Reduce` declares none), so a lambda parameter is the element its collection holds and `ITEMS -> Map |$i| { $i.PART } -> All |$p| { $p.sku != "" }` binds `$p` to a `Part`. The one sub-expression it does not read is the body of a lambda written on a builtin that takes none: the lambda itself is refused. A builtin's result is typed by its subkind — `Len`, `Count`, `Compare` and `Sum` yield a number, and `Abs`, `Floor`, `Ceil` and `Round` a number that is a float when the receiver is one ([Operand Kinds](#operand-kinds)); `Upper`, `Lower`, `Trim`, `TrimPrefix`, `TrimSuffix`, `Join`, `Replace`, `Substring` and `TypeOf` a string; `Split` and `Match` a list of strings; the predicates and `IsNil` a boolean; `Min` with an argument the lower-ranked of the two where both are scalars the total order separates (a boolean, a number, a string) and a value of either's kind for any other pair, and `Max` with an argument a value of either's kind, since it yields the lower one when the higher is absent — so the stage after it is judged: `name -> Len -> Upper` is refused, as `age -> Upper` is. Among what it rejects: a reference to a property not declared on the type (`E_UNKNOWN_PROPERTY`), however the instance was reached; a member read through an association key, a scalar or a list (`E_INVALID_INVARIANT`); an undefined named variable; a function name the language does not define; and a call shape its builtin refuses — a missing or unexpected lambda, too many parameters, too few or too many arguments; and a receiver or an argument of a kind its builtin refuses on every input (`E_INVALID_INVARIANT`) — `age -> Upper` on a number, `name -> Match("nor")` with a string where a pattern is required, `name -> Substring("a")` with a string where an integer is — because a call that errors on every value of that kind is a defect in the schema, not in the data.
 
-**The nil guards are typed by one rule.** `Default`, `Coalesce` and `Lest` evaluate to one of their alternatives — the receiver, or the fallback that stands in for it when the receiver is nil — and `Then` to its body, or nil for an absent receiver. The checker types each as what every alternative agrees on, so the stage after the guard is typed by a value it predicted. Alternatives of different kinds — a string beside a number, a list beside a scalar, an instance beside either — are refused at load (`E_INVALID_INVARIANT`): `(name -> Coalesce(1)) -> Upper` and `(note -> Lest { 1 }) -> Upper` are refused as `(name -> Default(1)) -> Upper` is, and `note -> Lest { true }` is refused because with `note` present the invariant evaluates to a string. The nil literal stands in for any receiver and the empty list literal for any list. Two instance types agree on the members both declare, whatever their ancestry: after `(A_SLOT -> Default(B_SLOT))` a member declared on `A` and on `B` reads, and a member declared on one of them alone is `E_UNKNOWN_PROPERTY`, since the evaluator would read nil there on the input that selects the other. A conditional and a list literal join their branches the same way, and admit alternatives of different kinds as a value of unknown kind. At evaluation time, a declared-but-absent optional property evaluates to `nil` — this is what makes the `IsNil` / `Then` / `Lest` / `Default` guard idioms work. Member access on a non-map value is an evaluation error; member access on `nil` evaluates to `nil`.
+**The `nil` literal is refused where a position takes no `nil`.** It is refused as an operand at every position the [Operand Kinds](#operand-kinds) table lists but the three it names, as an argument that takes a string, an integer or a pattern, as the receiver of an index or of a member read, and as the receiver of a builtin that errors on nil: each function that takes a string receiver (the string functions but `Join`, and `Match`), `Abs`, `Floor`, `Ceil` and `Round`, `Min` and `Max` with no argument, and `Reduce` with no initial value. The literal is a mistake the schema's author can see. An expression the check knows is always nil is judged as the literal is: `x -> Then { nil }` and `[nil][0]` are two. The empty list `[]` has no element, so the check knows no kind for a value read from it. `Then` runs no body on nil, so the check knows no kind for the parameter of `nil -> Then { ... }`. A property that is absent at evaluation is data, and the guards below are for it.
+
+**A lambda binds each name once.** `Reduce` binds its accumulator and its element, as its two parameters or as `$0` and `$1`. A lambda that gives both one name is refused at load (`E_INVALID_INVARIANT`): `|$x, $x|`, and also `|$1|`, whose one parameter names the accumulator and leaves the element as `$1`.
+
+**The nil guards are typed by one rule.** `Default`, `Coalesce` and `Lest` evaluate to one of their alternatives — the receiver, or the fallback that stands in for it when the receiver is nil — and `Then` to its body, or nil for an absent receiver. The checker types each as what every alternative agrees on, so the stage after the guard is typed by a value it predicted. Alternatives of different kinds — a string beside a number, a list beside a scalar, an instance beside either — are refused at load (`E_INVALID_INVARIANT`): `(name -> Coalesce(1)) -> Upper` and `(note -> Lest { 1 }) -> Upper` are refused as `(name -> Default(1)) -> Upper` is, and `note -> Lest { true }` is refused because with `note` present the invariant evaluates to a string. The nil literal stands in for any receiver and the empty list literal for any list. Two instance types agree on the members both declare, whatever their ancestry: after `(A_SLOT -> Default(B_SLOT))` a member declared on `A` and on `B` with one kind reads, a member the two declare with different kinds is refused (`E_INVALID_INVARIANT`), and a member declared on one of them alone is `E_UNKNOWN_PROPERTY`, since the evaluator would read nil there on the input that selects the other. A conditional and a list literal join their branches the same way, and admit alternatives of different kinds: two scalars of different kinds are a scalar of unknown kind, which still has no members and is no list, two lists whose elements differ are a list whose element joins the same way, and any other such pair is a value of unknown kind. At evaluation time, a declared-but-absent optional property evaluates to `nil` — this is what makes the `IsNil` / `Then` / `Lest` / `Default` guard idioms work. Member access on a non-map value is an evaluation error; member access on `nil` evaluates to `nil`.
 
 **Relations are in scope**, under the relation's field name — the UPPER_SNAKE
 name in lower case — so `WORKS_AT` and `works_at` read one entry as a bare name
@@ -1543,6 +1593,8 @@ Built-in functions are invoked via the pipeline `->` syntax; the left-hand side 
 expr -> function(args)|$params|{ body }
 ```
 
+A function's name is matched exactly, as the tables below write it: `Len` is a function, and `len` is refused at load as an unknown function.
+
 #### Collection Functions
 
 | Function | Description |
@@ -1559,7 +1611,7 @@ expr -> function(args)|$params|{ body }
 | `Sum` | Sum numeric elements: `items -> Sum` |
 | `First` | First element (nil if empty): `items -> First` |
 | `Last` | Last element (nil if empty): `items -> Last` |
-| `Sort` | Sort elements: `items -> Sort` |
+| `Sort` | Sort elements by the total order: `items -> Sort`. The elements are values the total order ranks: nil, scalars, or lists that hold no instance. A list of instances is refused |
 | `Reverse` | Reverse element order: `items -> Reverse` |
 | `Flatten` | Flatten one level of nesting: `items -> Flatten` |
 | `Contains` | Check if element exists: `items -> Contains(value)` |
@@ -1592,7 +1644,7 @@ Results on an empty collection are a mixed family:
 | `Round` | Round to the nearest whole number (banker's rounding); the result keeps the operand's kind, as `Floor` and `Ceil` do — a Float yields a Float |
 | `Min` | Minimum value: `a -> Min(b)` or `items -> Min` |
 | `Max` | Maximum value: `a -> Max(b)` or `items -> Max` |
-| `Compare` | Three-way comparison: `a -> Compare(b)` returns -1, 0, or 1, for any two values the total order ranks; an instance is refused |
+| `Compare` | Three-way comparison: `a -> Compare(b)` returns -1, 0, or 1, for any two values the total order ranks; an instance is refused, and a list that holds one |
 
 #### String Functions
 
@@ -1608,7 +1660,7 @@ Results on an empty collection are a mixed family:
 | `StartsWith` | Check prefix: `s -> StartsWith("pre")` |
 | `EndsWith` | Check suffix: `s -> EndsWith("suf")` |
 | `Replace` | Replace all occurrences: `s -> Replace("old", "new")` |
-| `Substring` | Extract substring: `s -> Substring(start)` or `s -> Substring(start, end)`; negative indices count from the end; out-of-range indices clamp |
+| `Substring` | Extract substring: `s -> Substring(start)` or `s -> Substring(start, end)`; each index is an integer; negative indices count from the end; out-of-range indices clamp |
 
 #### Control Flow Functions
 
@@ -1628,7 +1680,7 @@ Results on an empty collection are a mixed family:
 
 | Function | Description |
 | -------- | ----------- |
-| `TypeOf` | DSL type name as string: `value -> TypeOf` yields `"nil"`, `"boolean"`, `"integer"`, `"float"`, `"string"`, `"list"`, `"map"`, or `"pattern"`; any value outside that vocabulary yields `"unknown"`. The name comes from the value, not from the declared property type, so a `Timestamp`, `Date` or `UUID` property yields `"string"` — validation stores all three as text, whichever Go representation the caller submitted |
+| `TypeOf` | DSL type name as string: `value -> TypeOf` yields `"nil"`, `"boolean"`, `"integer"`, `"float"`, `"string"`, `"list"`, or `"map"`; any value outside that vocabulary yields `"unknown"`. The name comes from the value, not from the declared property type, so a `Timestamp`, `Date` or `UUID` property yields `"string"` — validation stores all three as text, whichever Go representation the caller submitted |
 | `IsNil` | Check if nil: `value -> IsNil` |
 | `Default` | Return default if nil: `value -> Default(fallback)`; typed as the join of receiver and fallback |
 | `Coalesce` | Return first non-nil: `a -> Coalesce(b, c)`; typed as the join of receiver and every argument |

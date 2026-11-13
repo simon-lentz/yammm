@@ -324,24 +324,38 @@ func TestEvaluator_Match(t *testing.T) {
 	t.Run("not_match", func(t *testing.T) {
 		evalEq(t, sx("!~", lit("goodbye world"), lit(pattern)), true)
 	})
+
+	t.Run("not_match_false", func(t *testing.T) {
+		evalEq(t, sx("!~", lit("hello world"), lit(pattern)), false)
+	})
 }
 
-func TestEvaluator_MatchWithTypeChecker(t *testing.T) {
-	t.Run("match_integer", func(t *testing.T) {
-		evalEq(t, sx("=~", lit(int64(42)), expr.DatatypeLiteral("integer")), true)
-	})
+// A match names its own operator in an error, and names a right operand that
+// is no pattern before a left operand that is no string.
+func TestEvaluator_MatchErrors(t *testing.T) {
+	pattern := regexp.MustCompile(`a`)
+	for _, op := range []string{"=~", "!~"} {
+		evalErrIs(t, sx(op, lit("a"), lit("a")), op+" right operand must be a pattern, got string")
+		evalErrIs(t, sx(op, lit(int64(1)), lit("a")), op+" right operand must be a pattern, got string")
+		evalErrIs(t, sx(op, lit(int64(1)), lit(pattern)), op+" left operand must be string, got int64")
+		evalErrIs(t, sx(op, lit("a")), op+" requires 2 operands")
+		evalErrIs(t, sx(op, lit("a"), lit(pattern), lit("a")), op+" requires 2 operands")
+	}
+}
 
-	t.Run("no_match_integer", func(t *testing.T) {
-		evalEq(t, sx("=~", lit("not-an-int"), expr.DatatypeLiteral("integer")), false)
-	})
+// The evaluator holds no exclusive or: a tree that names one is an unknown
+// function, reported before any operand is evaluated.
+func TestEvaluator_CaretIsNoOperator(t *testing.T) {
+	evalErrIs(t, sx("^", lit(true), lit(false)), "unknown function: ^")
+	evalErrIs(t, sx("^", sx("$", lit("undefined")), lit(true)), "unknown function: ^")
+}
 
-	t.Run("not_match_with_type", func(t *testing.T) {
-		evalEq(t, sx("!~", lit("not-a-number"), expr.DatatypeLiteral("float")), true)
-	})
-
-	t.Run("match_invalid_right_operand", func(t *testing.T) {
-		evalErr(t, sx("=~", lit("test"), lit(int64(42))), "regexp or type checker")
-	})
+// An index node holds a receiver and one index.
+func TestEvaluator_IndexTakesTwoOperands(t *testing.T) {
+	xs := lit([]any{"a", "b"})
+	for _, e := range []expr.Expression{sx("@"), sx("@", xs), sx("@", xs, lit(int64(0)), lit(int64(1)))} {
+		evalErrIs(t, e, "index access requires exactly 2 operands")
+	}
 }
 
 func TestEvaluator_Negate(t *testing.T) {
@@ -524,82 +538,61 @@ func TestEvaluator_IndexBoundsOverflow(t *testing.T) {
 	})
 }
 
-func TestEvaluator_DatatypeLiteral(t *testing.T) {
-	ev := eval.NewEvaluator()
-	scope := eval.EmptyScope()
-
-	// The seven names expr.IsDatatypeCheck admits, in the spelling the
-	// evaluator folds them to; the parser only ever emits the capitalized form.
-	datatypes := []string{"string", "integer", "float", "boolean", "uuid", "timestamp", "date"}
-
-	for _, name := range datatypes {
-		t.Run(name, func(t *testing.T) {
-			result, err := ev.Evaluate(t.Context(), expr.DatatypeLiteral(name), scope)
-			require.NoError(t, err)
-			assert.NotNil(t, result) // result is a TypeChecker function
-		})
-	}
-
-	t.Run("unknown_datatype_errors", func(t *testing.T) {
-		evalErr(t, expr.DatatypeLiteral("unknown"), "unknown datatype")
-	})
-}
-
 // TestEvaluator_BuiltinCall covers the five-element call form the parser
 // emits for every DSL function call — receiver, args literal, params literal,
-// body, with an absent part as an empty literal or nil — through the lower-
-// case name the pipeline reaches the registry by.
+// body, with an absent part as an empty literal or nil — through the name
+// the registry holds.
 func TestEvaluator_BuiltinCall(t *testing.T) {
 	t.Run("len", func(t *testing.T) {
-		evalEq(t, makeBuiltinCall(lit("hello"), "len", nil, nil, nil), int64(5))
+		evalEq(t, makeBuiltinCall(lit("hello"), "Len", nil, nil, nil), int64(5))
 	})
 
 	t.Run("abs", func(t *testing.T) {
-		evalEq(t, makeBuiltinCall(lit(int64(-42)), "abs", nil, nil, nil), int64(42))
+		evalEq(t, makeBuiltinCall(lit(int64(-42)), "Abs", nil, nil, nil), int64(42))
 	})
 
 	t.Run("floor", func(t *testing.T) {
-		evalEq(t, makeBuiltinCall(lit(3.7), "floor", nil, nil, nil), 3.0)
+		evalEq(t, makeBuiltinCall(lit(3.7), "Floor", nil, nil, nil), 3.0)
 	})
 
 	t.Run("ceil", func(t *testing.T) {
-		evalEq(t, makeBuiltinCall(lit(3.2), "ceil", nil, nil, nil), 4.0)
+		evalEq(t, makeBuiltinCall(lit(3.2), "Ceil", nil, nil, nil), 4.0)
 	})
 
 	t.Run("round", func(t *testing.T) {
-		evalEq(t, makeBuiltinCall(lit(3.5), "round", nil, nil, nil), 4.0)
+		evalEq(t, makeBuiltinCall(lit(3.5), "Round", nil, nil, nil), 4.0)
 	})
 
 	t.Run("with_params_and_body", func(t *testing.T) {
 		// [1,2,3] -> Map(x => x + 1)
-		e := makeBuiltinCall(list(int64(1), int64(2), int64(3)), "map", nil, []string{"x"},
+		e := makeBuiltinCall(list(int64(1), int64(2), int64(3)), "Map", nil, []string{"x"},
 			sx("+", sx("$", lit("x")), lit(int64(1))))
 		evalEq(t, e, []any{int64(2), int64(3), int64(4)})
 	})
 
 	t.Run("args_eval_error", func(t *testing.T) {
-		e := makeBuiltinCall(list(int64(1)), "min", []expr.Expression{sx("$", lit("undefined"))}, nil, nil)
+		e := makeBuiltinCall(list(int64(1)), "Min", []expr.Expression{sx("$", lit("undefined"))}, nil, nil)
 		evalErr(t, e, "undefined")
 	})
 
 	t.Run("compare_less", func(t *testing.T) {
-		evalEq(t, makeBuiltinCall(lit(int64(5)), "compare", []expr.Expression{lit(int64(10))}, nil, nil), int64(-1))
+		evalEq(t, makeBuiltinCall(lit(int64(5)), "Compare", []expr.Expression{lit(int64(10))}, nil, nil), int64(-1))
 	})
 
 	t.Run("compare_equal", func(t *testing.T) {
-		evalEq(t, makeBuiltinCall(lit(int64(5)), "compare", []expr.Expression{lit(int64(5))}, nil, nil), int64(0))
+		evalEq(t, makeBuiltinCall(lit(int64(5)), "Compare", []expr.Expression{lit(int64(5))}, nil, nil), int64(0))
 	})
 }
 
 func TestEvaluator_BuiltinErrors(t *testing.T) {
 	t.Run("too_many_args", func(t *testing.T) {
-		e := makeBuiltinCall(lit(int64(5)), "abs", []expr.Expression{lit(int64(1)), lit(int64(2))}, nil, nil)
+		e := makeBuiltinCall(lit(int64(5)), "Abs", []expr.Expression{lit(int64(1)), lit(int64(2))}, nil, nil)
 		evalErr(t, e, "accepts at most")
 	})
 
 	t.Run("too_many_params", func(t *testing.T) {
 		// map only accepts 1 param
-		e := makeBuiltinCall(list(int64(1)), "map", nil, []string{"x", "y", "z"}, lit(int64(1)))
+		e := makeBuiltinCall(list(int64(1)), "Map", nil, []string{"x", "y", "z"}, lit(int64(1)))
 		evalErr(t, e, "accepts at most")
 	})
 }
@@ -631,35 +624,35 @@ func TestEvaluator_MemberAccess_NameOnly(t *testing.T) {
 // the unsupported-type error an array now draws with them.
 func TestEvaluator_BuiltinLenReflectPaths(t *testing.T) {
 	t.Run("typed_slice_int", func(t *testing.T) {
-		evalEq(t, makeBuiltinCall(lit([]int{1, 2, 3, 4, 5}), "len", nil, nil, nil), int64(5))
+		evalEq(t, makeBuiltinCall(lit([]int{1, 2, 3, 4, 5}), "Len", nil, nil, nil), int64(5))
 	})
 
 	t.Run("typed_slice_string", func(t *testing.T) {
-		evalEq(t, makeBuiltinCall(lit([]string{"a", "b", "c"}), "len", nil, nil, nil), int64(3))
+		evalEq(t, makeBuiltinCall(lit([]string{"a", "b", "c"}), "Len", nil, nil, nil), int64(3))
 	})
 
 	t.Run("nil_slice_returns_zero", func(t *testing.T) {
 		var nilSlice []int
-		evalEq(t, makeBuiltinCall(lit(nilSlice), "len", nil, nil, nil), int64(0))
+		evalEq(t, makeBuiltinCall(lit(nilSlice), "Len", nil, nil, nil), int64(0))
 	})
 
 	// An array is not a list, so Len refuses one as it refuses a number: the
 	// rule value.ListElems states, now at every reader.
 	t.Run("array_type_is_refused", func(t *testing.T) {
-		evalErr(t, makeBuiltinCall(lit([4]int{1, 2, 3, 4}), "len", nil, nil, nil), "unsupported for type")
+		evalErr(t, makeBuiltinCall(lit([4]int{1, 2, 3, 4}), "Len", nil, nil, nil), "unsupported for type")
 	})
 
 	t.Run("map_type", func(t *testing.T) {
-		evalEq(t, makeBuiltinCall(lit(map[string]int{"a": 1, "b": 2}), "len", nil, nil, nil), int64(2))
+		evalEq(t, makeBuiltinCall(lit(map[string]int{"a": 1, "b": 2}), "Len", nil, nil, nil), int64(2))
 	})
 
 	t.Run("nil_map_returns_zero", func(t *testing.T) {
 		var nilMap map[string]int
-		evalEq(t, makeBuiltinCall(lit(nilMap), "len", nil, nil, nil), int64(0))
+		evalEq(t, makeBuiltinCall(lit(nilMap), "Len", nil, nil, nil), int64(0))
 	})
 
 	t.Run("unsupported_type_errors", func(t *testing.T) {
-		evalErr(t, makeBuiltinCall(lit(struct{ X int }{X: 1}), "len", nil, nil, nil), "unsupported")
+		evalErr(t, makeBuiltinCall(lit(struct{ X int }{X: 1}), "Len", nil, nil, nil), "unsupported")
 	})
 }
 
@@ -667,14 +660,14 @@ func TestEvaluator_BuiltinLenReflectPaths(t *testing.T) {
 // consume sequences must accept typed slices, not just []any.
 func TestEvaluator_SliceConversion(t *testing.T) {
 	t.Run("sum_typed_slice_int", func(t *testing.T) {
-		evalEq(t, makeBuiltinCall(lit([]int{1, 2, 3, 4, 5}), "sum", nil, nil, nil), int64(15))
+		evalEq(t, makeBuiltinCall(lit([]int{1, 2, 3, 4, 5}), "Sum", nil, nil, nil), int64(15))
 	})
 
 	t.Run("sum_typed_slice_float", func(t *testing.T) {
-		evalEq(t, makeBuiltinCall(lit([]float64{1.5, 2.5, 3.0}), "sum", nil, nil, nil), 7.0)
+		evalEq(t, makeBuiltinCall(lit([]float64{1.5, 2.5, 3.0}), "Sum", nil, nil, nil), 7.0)
 	})
 
 	t.Run("non_slice_errors", func(t *testing.T) {
-		evalErr(t, makeBuiltinCall(lit(int64(42)), "sum", nil, nil, nil), "expects a list")
+		evalErr(t, makeBuiltinCall(lit(int64(42)), "Sum", nil, nil, nil), "expects a list")
 	})
 }

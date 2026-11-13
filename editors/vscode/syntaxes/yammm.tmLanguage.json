@@ -240,7 +240,7 @@
     },
     "expression-operators": {
       "comment": "Expression operators. Multi-char operators listed before single-char to avoid partial matches. \\|\\| matches literal ||.",
-      "match": "==|!=|>=|<=|=~|!~|\\|\\||&&|->|[><+\\-*/%!^]|\\bin\\b",
+      "match": "==|!=|>=|<=|=~|!~|\\|\\||&&|->|[><+\\-*/%!]|\\bin\\b",
       "name": "keyword.operator.yammm"
     },
     "expression-keywords": {

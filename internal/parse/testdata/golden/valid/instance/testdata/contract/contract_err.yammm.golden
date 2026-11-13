@@ -63,24 +63,24 @@
         },
         {
           "msg": "\"x_nonbool_invariant_result\"",
-          "expr": "(+ 5 1)",
+          "expr": "(Reduce ([] 5 1) (args 0) (params a x) (+ ($ \"a\") ($ \"x\")))",
           "span": {
             "s": 372,
-            "e": 408
+            "e": 443
           }
         },
         {
           "msg": "\"f_nil_result_is_falsey\"",
           "expr": "(Then nil (args ) (params v) true)",
           "span": {
-            "s": 410,
-            "e": 462
+            "s": 445,
+            "e": 497
           }
         }
       ],
       "span": {
         "s": 23,
-        "e": 464
+        "e": 499
       }
     }
   ],
@@ -103,11 +103,11 @@
     },
     {
       "s": 403,
-      "e": 408
+      "e": 443
     },
     {
-      "s": 437,
-      "e": 462
+      "s": 472,
+      "e": 497
     }
   ]
 }

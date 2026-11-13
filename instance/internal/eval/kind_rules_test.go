@@ -4,59 +4,10 @@ import (
 	"encoding/json"
 	"math"
 	"testing"
-	"time"
 
 	"github.com/simon-lentz/yammm/immutable"
-	"github.com/simon-lentz/yammm/instance/internal/eval"
 	"github.com/simon-lentz/yammm/internal/expr"
 )
-
-// A datatype check (`=~ Kind`) is the property checker's rule for that kind:
-// what a property of the kind refuses, the check refuses.
-func TestDatatypeCheck_IsTheCheckerRule(t *testing.T) {
-	t.Parallel()
-	type carrier string
-	type flag bool
-	rows := []struct {
-		name string
-		val  any
-		kind string
-		want bool
-	}{
-		{"NaN is not a Float", math.NaN(), "Float", false},
-		{"+Inf is not a Float", math.Inf(1), "Float", false},
-		{"an integer is a Float", int64(3), "Float", true},
-		{"uint64 above int64 is not an Integer", uint64(1 << 63), "Integer", false},
-		{"a whole float is not an Integer", 3.0, "Integer", false},
-		{"a whole-valued exponent literal is not an Integer", json.Number("3e0"), "Integer", false},
-		{"an integer literal is an Integer", json.Number("3"), "Integer", true},
-		{"a fractional float is not an Integer", 3.5, "Integer", false},
-		{"a named string carrier is a String", carrier("x"), "String", true},
-		{"a json.Number is not a String", json.Number("1"), "String", false},
-		{"a named bool carrier is a Boolean", flag(true), "Boolean", true},
-		{"fractional seconds are a Timestamp", "2024-01-15T10:30:00.123456789Z", "Timestamp", true},
-		{"a time.Time is a Timestamp", time.Date(2024, 1, 15, 0, 0, 0, 0, time.UTC), "Timestamp", true},
-		{"an int is not a Timestamp", 12345, "Timestamp", false},
-		{"a date alone is not a Timestamp", "2030-01-02", "Timestamp", false},
-		{"nil is no kind", nil, "String", false},
-		{"a pointer to a string is not a String", new("x"), "String", false},
-		{"a nil pointer is not a String", (*string)(nil), "String", false},
-		{"a pointer to an int64 is not an Integer", new(int64(3)), "Integer", false},
-		{"a pointer to a time is not a Timestamp", new(time.Date(2024, 1, 15, 0, 0, 0, 0, time.UTC)), "Timestamp", false},
-	}
-	for _, r := range rows {
-		t.Run(r.name, func(t *testing.T) {
-			t.Parallel()
-			got, err := eval.NewEvaluator().Evaluate(t.Context(), sx("=~", lit(r.val), expr.DatatypeLiteral(r.kind)), eval.EmptyScope())
-			if err != nil {
-				t.Fatal(err)
-			}
-			if got != r.want {
-				t.Errorf("%#v =~ %s = %v, want %v", r.val, r.kind, got, r.want)
-			}
-		})
-	}
-}
 
 // Member access folds a property's name by immutable.Properties' rule — ASCII
 // only, the alphabetically first key on a collision — and reads a relation,
@@ -168,15 +119,4 @@ func TestMinMax_WithArgumentRefuseAListReceiver(t *testing.T) {
 	}
 	evalEq(t, makeBuiltinCall(lit("a"), "Max", []expr.Expression{lit("z")}, nil, nil), "z")
 	evalEq(t, makeBuiltinCall(lit(nil), "Max", []expr.Expression{lit("z")}, nil, nil), "z")
-}
-
-// A datatype the language cannot check at runtime — a shape or a constraint
-// keyword the parser still emits as a DatatypeLiteral — is an error, by the
-// one set internal/expr defines for both layers.
-func TestDatatypeCheck_UnknownNameErrors(t *testing.T) {
-	t.Parallel()
-	for _, name := range []string{"Vector", "List", "Enum", "Pattern", "int", "number"} {
-		evalErr(t, sx("=~", lit("x"), expr.DatatypeLiteral(name)), "unknown datatype")
-	}
-	evalEq(t, sx("=~", lit("x"), expr.DatatypeLiteral("STRING")), true)
 }

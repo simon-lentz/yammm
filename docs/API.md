@@ -1533,13 +1533,14 @@ The formatter then applies a five-phase pipeline:
 4. **Column alignment:** pads the member-name column, measured in display cells, so the column after it lines up — the type for a property, the multiplicity for a relationship (its target when it has none), the `=` for a datatype alias — and aligns trailing inline comments. It runs over contiguous runs of one member kind — properties, relationships, and file-scope datatype aliases. A line joins a run when it is a relationship, a datatype alias on one line, or a property whose type is an upper-case name, alone or after an import's alias and a dot; a kind change, a multiline construct and every other line (a blank or comment-only line, a type head or closing brace, an invariant, a `@@` annotation) break the run. A type-block boundary breaks a run because its brace lines are not alignable, not because blocks are tracked
 5. **Text finalization:** trims trailing whitespace from each line, removes trailing blank lines, and ensures the file ends with a newline
 
-Phase 1 records the lexer's view of each line as it emits that line. The record holds three facts:
+Phase 1 records what it knows of each line as it emits that line. The record holds four facts:
 
 - the class of the line — blank, comment, or content
 - the offset where a trailing comment starts, when the line has one
 - the extent of every string and regex literal
+- whether the line holds a token of an invariant's expression, which the parse tree gives
 
-A blank line inside a block comment is comment text, not a section break. Phases 2 and 3 read this record, which phase 1 builds from the token stream it already holds, at no second lex. Phase 3 builds lines from pieces of others and has no record for them. So whenever phase 3 changed the text, phase 4 reads a record lexed from phase 3's text; when it changed nothing, phase 4 reads phase 1's. No phase derives these facts from the text by hand.
+A blank line inside a block comment is comment text, not a section break. Phases 2 and 3 read this record, which phase 1 builds from the token stream it already holds, at no second lex. Phase 3 builds lines from pieces of others and has no record for them. So whenever phase 3 changed the text, phase 4 reads a record lexed from phase 3's text; when it changed nothing, phase 4 reads phase 1's. A record lexed from phase 3's text holds the first three facts, and phase 3 alone reads the fourth. Phases 2 to 4 derive none of the first three facts from the text by hand.
 
 Three consequences follow. A comma inside a string literal is not a value separator. A bracket inside a comment does not open or close a construct. A comment line is never wrapped, aligned, or read as an enum value or a type name, whatever its text looks like. A comment inside a multiline enum or `extends` list keeps its place, and the formatter re-indents the construct instead of collapsing it.
 

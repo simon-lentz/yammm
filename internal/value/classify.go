@@ -41,8 +41,8 @@ func (k Kind) String() string {
 }
 
 // Classify normalizes a runtime scalar into a Kind and possibly transformed
-// value. It is used by runtime validation to stay aligned with type checker
-// expectations.
+// value. The value checks of this package, TypeOf and the value comparisons of
+// the graph and the snapshot decoder read a scalar's kind by it.
 //
 // A predeclared type is answered by its type, and every other value by the
 // form [Scalar] reads it in: a named type as its base value. A json.Number is classified by its spelling: an integer

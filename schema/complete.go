@@ -3,6 +3,7 @@ package schema
 import (
 	"fmt"
 	"iter"
+	"slices"
 	"strings"
 
 	"github.com/simon-lentz/yammm/diag"
@@ -174,10 +175,9 @@ type completer struct {
 	// report. The shadow warning does not advise editing such a declaration.
 	conflictedProperties map[Property]bool
 
-	// dtStates and dtStack drive [completer.resolveDataType]: each datatype's
-	// resolution state, and the datatypes whose resolution is in progress.
+	// dtStates holds each datatype's resolution state, for
+	// [completer.resolveDataType].
 	dtStates map[DataType]dtState
-	dtStack  []DataType
 }
 
 func (c *completer) complete() Schema {
@@ -718,7 +718,9 @@ func convertAnnotations(decls []*annotationDecl) []Annotation {
 // reference graph, each once, so a datatype is complete before any reference
 // copies its constraint, whatever the declaration order. A reference cycle
 // runs through List elements alone, since no door admits a datatype declared as
-// another, and is reported at every datatype on it.
+// another, and is reported at every datatype on it. A datatype or a property
+// whose List nests past the parser's bound through the datatypes it names is
+// refused as one the source writes out is.
 func (c *completer) resolveAliasConstraints() {
 	c.dtStates = make(map[DataType]dtState, len(c.schema.dataTypes))
 	for _, dt := range c.schema.dataTypes {
@@ -726,7 +728,7 @@ func (c *completer) resolveAliasConstraints() {
 	}
 	for _, t := range c.schema.types {
 		for p := range t.Properties() {
-			if resolved, ok := c.resolveConstraint(p.Constraint(), p.Span()); ok {
+			if resolved, ok := c.resolveConstraint(p.Constraint(), p.Span()); ok && c.listWithinBound(resolved, p.Span()) {
 				p.setConstraint(resolved)
 			}
 		}
@@ -747,37 +749,99 @@ const (
 	dtResolving
 	dtResolved
 	dtFailed
+	dtTooDeep // failed: its List nests past the bound, which one issue reports
 )
 
-// resolveDataType resolves dt's constraint once. A datatype re-entered while
-// it resolves closes a cycle: every datatype on the stack from it upward is
-// reported and fails. A datatype that fails keeps its declared constraint.
+// resolveDataType resolves dt's constraint once, after that of each datatype
+// the chain from dt names, and nests no call per link. A chain that returns to
+// one of its datatypes is a cycle: each datatype from that one on is reported
+// and fails, and a datatype that fails keeps its declared constraint.
 func (c *completer) resolveDataType(dt DataType) {
-	switch c.dtStates[dt] {
-	case dtResolved, dtFailed:
-		return
-	case dtResolving:
-		i := len(c.dtStack) - 1
-		for c.dtStack[i] != dt {
-			i--
+	var chain []DataType
+walk:
+	for next, named := dt, true; named; next, named = c.namedDataType(next) {
+		switch c.dtStates[next] {
+		case dtUnvisited:
+			c.dtStates[next] = dtResolving
+			chain = append(chain, next)
+		case dtResolving:
+			for _, member := range chain[slices.Index(chain, next):] {
+				c.errorf(member.Span(), diag.E_INVALID_CONSTRAINT,
+					"datatype %q forms a cycle", member.Name())
+				c.dtStates[member] = dtFailed
+			}
+			break walk
+		case dtResolved, dtFailed, dtTooDeep:
+			break walk
 		}
-		for _, member := range c.dtStack[i:] {
-			c.errorf(member.Span(), diag.E_INVALID_CONSTRAINT,
-				"datatype %q forms a cycle", member.Name())
+	}
+	for _, member := range slices.Backward(chain) {
+		if c.dtStates[member] == dtFailed {
+			continue
+		}
+		resolved, ok := c.resolveConstraint(member.Constraint(), member.Span())
+		switch {
+		case !ok:
 			c.dtStates[member] = dtFailed
+		case !c.listWithinBound(resolved, member.Span()):
+			c.dtStates[member] = dtTooDeep
+		default:
+			member.setConstraint(resolved)
+			c.dtStates[member] = dtResolved
 		}
-		return
 	}
-	c.dtStates[dt] = dtResolving
-	c.dtStack = append(c.dtStack, dt)
-	resolved, ok := c.resolveConstraint(dt.Constraint(), dt.Span())
-	c.dtStack = c.dtStack[:len(c.dtStack)-1]
-	if c.dtStates[dt] == dtFailed || !ok {
-		c.dtStates[dt] = dtFailed
-		return
+}
+
+// namedDataType returns the local datatype that dt's constraint names under
+// its List levels, as [completer.resolveReference] finds it.
+func (c *completer) namedDataType(dt DataType) (DataType, bool) {
+	con := dt.Constraint()
+	for {
+		list, ok := con.(ListConstraint)
+		if !ok {
+			break
+		}
+		con = list.Element()
 	}
-	dt.setConstraint(resolved)
-	c.dtStates[dt] = dtResolved
+	alias, ok := con.(AliasConstraint)
+	if !ok {
+		return DataType{}, false
+	}
+	qualifier, name, _ := referenceParts(alias.DataTypeName())
+	if qualifier != "" {
+		return DataType{}, false
+	}
+	named, found := c.dataIndex[name]
+	return named, found
+}
+
+// listWithinBound reports whether the List levels of con, a resolved
+// constraint, stay within [parse.MaxNesting] through the datatypes it names,
+// and reports one past it at span. A datatype con names passed here or was
+// reported too deep where it is declared: con is then refused with no issue of
+// its own, and the count ends within twice the bound.
+func (c *completer) listWithinBound(con Constraint, span location.Span) bool {
+	levels := 0
+	for {
+		switch x := con.(type) {
+		case ListConstraint:
+			levels++
+			con = x.Element()
+			continue
+		case AliasConstraint:
+			if dt, local := c.dataIndex[x.DataTypeName()]; local && c.dtStates[dt] == dtTooDeep {
+				return false
+			}
+			con = x.Resolved()
+			continue
+		}
+		break
+	}
+	if levels <= parse.MaxNesting {
+		return true
+	}
+	c.errorf(span, diag.E_INVALID_CONSTRAINT, "List nests deeper than %d levels", parse.MaxNesting)
+	return false
 }
 
 // resolveConstraint resolves every datatype reference in con, at any List

@@ -3,7 +3,6 @@ package value
 import (
 	"encoding/json"
 	"reflect"
-	"regexp"
 
 	"github.com/simon-lentz/yammm/immutable"
 )
@@ -25,9 +24,7 @@ const (
 // Returns InvalidStrata for types with no category: a pointer, nil or not, a
 // non-nil map, a channel, a function, a struct other than an [immutable.Slice]
 // and a nil [immutable] container, and a json.Number that is no JSON number
-// literal. The one pointer with a category is a non-nil *regexp.Regexp, the
-// evaluator's pattern literal, which is StringStrata. A value that holds none
-// ([Absent]) is NilStrata, and a scalar takes
+// literal. A value that holds none ([Absent]) is NilStrata, and a scalar takes
 // the strata of the form [Scalar] reads it in, so the categories agree with
 // [Order] and with the extraction functions.
 func TypeStrata(a any) int {
@@ -49,12 +46,6 @@ func TypeStrata(a any) int {
 	case float32, float64:
 		return NumericStrata
 	case string:
-		return StringStrata
-	case *regexp.Regexp:
-		// The evaluator's pattern literal. A nil one is a pointer like any other.
-		if x == nil {
-			return InvalidStrata
-		}
 		return StringStrata
 	case json.Number:
 		// Numeric here because Classify says numeric; a lexical number that

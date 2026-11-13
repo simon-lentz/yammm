@@ -1067,8 +1067,7 @@ func TestCheck_ARefusalCarriesItsKind(t *testing.T) {
 }
 
 // An alias that resolves to nothing is refused by the check and by the
-// coercion, alone and as a list's element, and CheckKind refuses a kind that
-// has no bare check.
+// coercion, alone and as a list's element.
 func TestCheckAndCoerce_RefuseWhatHasNoRule(t *testing.T) {
 	t.Parallel()
 	gone := schema.NewAliasConstraint("Gone", nil)
@@ -1084,11 +1083,6 @@ func TestCheckAndCoerce_RefuseWhatHasNoRule(t *testing.T) {
 	}
 	if got, err := value.Coerce([]any{"x"}, schema.NewListConstraint(gone)); got != nil || err == nil || err.Error() != "element [0]: "+want {
 		t.Errorf("Coerce of an element at an unresolved alias = %#v, %v; want nil and the element named", got, err)
-	}
-	for _, k := range []schema.ConstraintKind{schema.KindEnum, schema.KindPattern, schema.KindVector, schema.KindList, schema.KindAlias} {
-		if err := value.CheckKind("x", k); err == nil || err.Error() != "value: no bare check for kind "+k.String() {
-			t.Errorf("CheckKind at %s = %v; want a refusal that names the kind", k, err)
-		}
 	}
 }
 
@@ -1109,6 +1103,34 @@ func TestCoerce_AVectorNamesTheElementItRefuses(t *testing.T) {
 	} {
 		if got, err := value.Coerce(tc.v, c); got != nil || err == nil || err.Error() != tc.want {
 			t.Errorf("%s: Coerce = %#v, %v; want nil and %q", name, got, err, tc.want)
+		}
+	}
+}
+
+// A constraint that reports a kind and is not that kind's type is refused, so
+// no value passes it with its bounds unread. A pointer to a constraint is one.
+func TestCheck_AConstraintOfAnotherTypeIsRefused(t *testing.T) {
+	t.Parallel()
+	str, integer, float := schema.StringLenBetween(1, 2), schema.IntegerBetween(1, 2), schema.FloatBetween(1, 2)
+	enum := schema.NewEnumConstraint([]string{"a"})
+	pattern := schema.NewPatternConstraint([]*regexp.Regexp{regexp.MustCompile("a")})
+	vector := schema.NewVectorConstraint(1)
+	list := schema.NewListConstraint(schema.NewStringConstraint())
+	for _, tc := range []struct {
+		val  any
+		c    schema.Constraint
+		want string
+	}{
+		{"a", &str, "invalid string constraint type"},
+		{int64(1), &integer, "invalid integer constraint type"},
+		{1.5, &float, "invalid float constraint type"},
+		{"a", &enum, "invalid enum constraint type"},
+		{"a", &pattern, "invalid pattern constraint type"},
+		{[]float64{1}, &vector, "invalid vector constraint type"},
+		{[]any{"a"}, &list, "invalid list constraint type"},
+	} {
+		if err := value.Check(tc.val, tc.c); err == nil || err.Error() != tc.want {
+			t.Errorf("Check(%v, %T) = %v, want %q", tc.val, tc.c, err, tc.want)
 		}
 	}
 }

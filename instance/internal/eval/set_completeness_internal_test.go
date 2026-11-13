@@ -48,26 +48,3 @@ func TestListReaders_AgreeOnEveryShape(t *testing.T) {
 		}
 	}
 }
-
-// Every datatype check expr.IsDatatypeCheck admits has a checker, and a name
-// it does not admit is an error: no name falls through to another kind's
-// checker by default.
-func TestDatatypeChecker_CoversTheSetAndRefusesTheRest(t *testing.T) {
-	t.Parallel()
-	e := NewEvaluator()
-	for _, name := range []string{"String", "Integer", "Float", "Boolean", "UUID", "Timestamp", "Date", "date", "DATE"} {
-		if c, err := e.datatypeChecker(name); err != nil || c == nil {
-			t.Errorf("datatypeChecker(%q) = %v, %v; want a checker", name, c, err)
-		}
-	}
-	for _, name := range []string{"Vector", "List", "Enum", "Pattern", "number", ""} {
-		if _, err := e.datatypeChecker(name); err == nil {
-			t.Errorf("datatypeChecker(%q) = nil error, want unknown datatype", name)
-		}
-	}
-	// A String check must not answer as a Date check would.
-	c, _ := e.datatypeChecker("String")
-	if ok, _ := c(int64(5)); ok {
-		t.Error("the String checker accepted an integer")
-	}
-}

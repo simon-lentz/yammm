@@ -51,9 +51,6 @@ func TestTypeStrata(t *testing.T) {
 	// Strings
 	assertEqual(t, value.StringStrata, value.TypeStrata("hello"))
 
-	// Regexp
-	assertEqual(t, value.StringStrata, value.TypeStrata(regexp.MustCompile("x")))
-
 	// Slices
 	assertEqual(t, value.SliceStrata, value.TypeStrata([]string{"a"}))
 	assertEqual(t, value.SliceStrata, value.TypeStrata([]int{1, 2}))
@@ -173,11 +170,8 @@ func TestOrder_JSONNumberIsNumeric(t *testing.T) {
 	}
 }
 
-// Order compares a named type by its base value rather than erroring.
-//
-// Mutation: reverting GetInt64/GetFloat64/toStringComparable/toBool to a bare
-// type switch turns this red while TypeStrata still reports a valid strata,
-// which is the half-fixed state that would make Order's slice arm panic.
+// Order compares a named type by its base value on either side, and Equal
+// follows it.
 func TestOrder_NamedTypesCompareAsTheirBase(t *testing.T) {
 	tests := []struct {
 		name  string
@@ -188,6 +182,10 @@ func TestOrder_NamedTypesCompareAsTheirBase(t *testing.T) {
 		{"namedFloat greater than float64", namedFloat64(1.2), float64(1.0), 1},
 		{"namedInt greater than int", namedInt(42), int(10), 1},
 		{"namedString less than string", namedString("hello"), "world", -1},
+		{"namedString greater than string", namedString("x"), "a", 1},
+		{"string less than namedString", "a", namedString("x"), -1},
+		{"namedString equal to namedString", namedString("x"), namedString("x"), 0},
+		{"namedString equal to string", namedString("x"), "x", 0},
 		{"namedBool greater than bool", namedBool(true), false, 1},
 		{"namedInt64 equal to int64", namedInt64(7), int64(7), 0},
 	}
@@ -200,6 +198,9 @@ func TestOrder_NamedTypesCompareAsTheirBase(t *testing.T) {
 			}
 			if got != tt.want {
 				t.Errorf("Order(%v, %v) = %d, want %d", tt.left, tt.right, got, tt.want)
+			}
+			if equal := value.Equal(tt.left, tt.right); equal != (tt.want == 0) {
+				t.Errorf("Equal(%v, %v) = %t", tt.left, tt.right, equal)
 			}
 		})
 	}
@@ -589,7 +590,6 @@ func TestOrder_Invariants(t *testing.T) {
 		nan,
 		"a",
 		[]any{"a"},
-		[]*regexp.Regexp{regexp.MustCompile("x")},
 	}
 	for _, v := range equalVals {
 		lr, err := value.Order(v, v)
@@ -1085,75 +1085,28 @@ func TestCompareUint64Float64(t *testing.T) {
 	}
 }
 
-// TestOrder_StringComparableEdgeCases tests edge cases in toStringComparable
-// through the Order function (toStringComparable is unexported).
-func TestOrder_StringComparableEdgeCases(t *testing.T) {
-	// A nil regexp is a pointer like any other: it orders against nothing and
-	// equals nothing, itself and nil included.
-	var nilRegexp *regexp.Regexp
-	for name, other := range map[string]any{"a string": "test", "itself": nilRegexp, "nil": nil, "a nil slice": []any(nil)} {
-		t.Run("nil regexp and "+name, func(t *testing.T) {
-			if got, err := value.Order(nilRegexp, other); err == nil {
-				t.Errorf("Order(nil regexp, %s) = %d, want a refusal", name, got)
-			}
-			if got, err := value.Order(other, nilRegexp); err == nil {
-				t.Errorf("Order(%s, nil regexp) = %d, want a refusal", name, got)
-			}
-			if value.Equal(nilRegexp, other) || value.Equal(other, nilRegexp) {
-				t.Errorf("Equal(nil regexp, %s) = true", name)
-			}
-		})
+// A compiled pattern is a pointer like any other, nil or not: it has no
+// stratum, it orders against nothing and it equals nothing, itself included.
+func TestOrder_PatternIsNotAValue(t *testing.T) {
+	var none *regexp.Regexp
+	for name, pattern := range map[string]*regexp.Regexp{"nil": none, "compiled": regexp.MustCompile("abc")} {
+		for otherName, other := range map[string]any{"a string": "abc", "itself": pattern, "nil": nil, "a nil slice": []any(nil)} {
+			t.Run(name+" pattern and "+otherName, func(t *testing.T) {
+				if got, err := value.Order(pattern, other); err == nil {
+					t.Errorf("Order(pattern, %s) = %d, want a refusal", otherName, got)
+				}
+				if got, err := value.Order(other, pattern); err == nil {
+					t.Errorf("Order(%s, pattern) = %d, want a refusal", otherName, got)
+				}
+				if value.Equal(pattern, other) || value.Equal(other, pattern) {
+					t.Errorf("Equal(pattern, %s) = true", otherName)
+				}
+			})
+		}
+		if s := value.TypeStrata(pattern); s != value.InvalidStrata {
+			t.Errorf("TypeStrata(%s pattern) = %d, want InvalidStrata", name, s)
+		}
 	}
-	if s := value.TypeStrata(nilRegexp); s != value.InvalidStrata {
-		t.Errorf("TypeStrata(nil regexp) = %d, want InvalidStrata", s)
-	}
-
-	// Test valid regexp comparisons
-	t.Run("regexp vs regexp equal", func(t *testing.T) {
-		r1 := regexp.MustCompile("abc")
-		r2 := regexp.MustCompile("abc")
-		cmp, err := value.Order(r1, r2)
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if cmp != 0 {
-			t.Errorf("expected 0 (equal), got %d", cmp)
-		}
-	})
-
-	t.Run("regexp vs regexp less", func(t *testing.T) {
-		r1 := regexp.MustCompile("abc")
-		r2 := regexp.MustCompile("def")
-		cmp, err := value.Order(r1, r2)
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if cmp != -1 {
-			t.Errorf("expected -1 (less), got %d", cmp)
-		}
-	})
-
-	t.Run("regexp vs string", func(t *testing.T) {
-		r := regexp.MustCompile("abc")
-		cmp, err := value.Order(r, "abc")
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if cmp != 0 {
-			t.Errorf("expected 0 (equal), got %d", cmp)
-		}
-	})
-
-	t.Run("string vs regexp", func(t *testing.T) {
-		r := regexp.MustCompile("def")
-		cmp, err := value.Order("abc", r)
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if cmp != -1 {
-			t.Errorf("expected -1 (less), got %d", cmp)
-		}
-	})
 }
 
 // TestGetInt64_UintptrOverflow tests uintptr overflow handling in GetInt64.

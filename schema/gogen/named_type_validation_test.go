@@ -31,9 +31,6 @@ type (
 
 // A value of every carrier shape the generator emits validates against the
 // schema it was generated from.
-//
-// Mutation: reverting classifyNamedBase in internal/value, or toStringComparable's
-// reflect fallback, turns this red with the E_TYPE_MISMATCH the defect produced.
 func TestNamedTypes_GeneratedCarriersValidate(t *testing.T) {
 	s := loadSchema(t, "named")
 	v := instance.NewValidator(s)

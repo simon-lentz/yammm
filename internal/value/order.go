@@ -8,7 +8,6 @@ import (
 	"math"
 	"math/big"
 	"reflect"
-	"regexp"
 	"strconv"
 	"strings"
 
@@ -31,20 +30,6 @@ func sliceAccessor(v any) (int, func(int) any) {
 	}
 	rv := reflect.ValueOf(v)
 	return rv.Len(), func(i int) any { return rv.Index(i).Interface() }
-}
-
-// toStringComparable converts strings and regexps to comparable string values.
-func toStringComparable(v any) (string, error) {
-	switch s := v.(type) {
-	case string:
-		return s, nil
-	case *regexp.Regexp:
-		return s.String(), nil
-	}
-	if s, ok := GetString(v); ok {
-		return s, nil
-	}
-	return "", fmt.Errorf("value: expected string or regexp values, got %T", v)
 }
 
 // TypeOrder orders types canonically and returns 1 if left has a type greater than right, 0 if
@@ -181,14 +166,9 @@ func Order(left, right any) (int, error) {
 		return 0, fmt.Errorf("value: expected numeric values (left %T, right %T)", left, right)
 
 	case StringStrata:
-		ls, err := toStringComparable(left)
-		if err != nil {
-			return 0, err
-		}
-		rs, err := toStringComparable(right)
-		if err != nil {
-			return 0, err
-		}
+		// TypeStrata reports StringStrata only for a value GetString reads.
+		ls, _ := GetString(left)
+		rs, _ := GetString(right)
 		return strings.Compare(ls, rs), nil
 
 	case SliceStrata:
@@ -388,9 +368,8 @@ func GetBool(val any) (bool, bool) {
 }
 
 // GetString extracts a string, accepting a named type over string. It rejects
-// *regexp.Regexp, which toStringComparable accepts for ordering but which is not
-// a value any string-kinded constraint holds, and a json.Number, which is a
-// named type over string but a number to every other getter here.
+// a json.Number, which is a named type over string but a number to every other
+// getter here.
 func GetString(val any) (string, bool) {
 	if s, ok := val.(string); ok {
 		return s, true

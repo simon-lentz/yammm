@@ -350,10 +350,9 @@ func checkString(val any, c schema.Constraint) error {
 		return refused
 	}
 
-	// Check length bounds if available
 	sc, ok := c.(schema.StringConstraint)
 	if !ok {
-		return nil // No bounds to check
+		return errors.New("invalid string constraint type")
 	}
 
 	// Use rune count per SPEC: string length is counted in runes, not bytes
@@ -399,10 +398,9 @@ func checkInteger(val any, c schema.Constraint) error {
 		return typeMismatch("expected integer, got %T", val)
 	}
 
-	// Check bounds if available
 	ic, ok := c.(schema.IntegerConstraint)
 	if !ok {
-		return nil // No bounds to check
+		return errors.New("invalid integer constraint type")
 	}
 
 	if lo, hasMin := ic.Min(); hasMin && i < lo {
@@ -413,6 +411,10 @@ func checkInteger(val any, c schema.Constraint) error {
 	}
 	return nil
 }
+
+// vectorElementConstraint is the constraint of a Vector's element: a Float with
+// no bounds.
+var vectorElementConstraint schema.Constraint = schema.NewFloatConstraint()
 
 // checkFloat validates that val is a float or integer with optional bounds.
 // An integer widens: an unsigned value above math.MaxInt64 and an integer
@@ -451,10 +453,9 @@ func checkFloat(val any, c schema.Constraint) error {
 		return constraintFail("float value is not finite (NaN or Inf)")
 	}
 
-	// Check bounds if available
 	fc, ok := c.(schema.FloatConstraint)
 	if !ok {
-		return nil // No bounds to check
+		return errors.New("invalid float constraint type")
 	}
 
 	if lo, hasMin := fc.Min(); hasMin && f < lo {
@@ -608,7 +609,7 @@ func checkVector(val any, c schema.Constraint) error {
 
 	for i, f := range stored {
 		if !IsFinite(f) {
-			return vectorElement(i, checkFloat(f, nil))
+			return vectorElement(i, checkFloat(f, vectorElementConstraint))
 		}
 	}
 	// Each element is judged by the Float rule, and coerceVector converts each
@@ -617,7 +618,7 @@ func checkVector(val any, c schema.Constraint) error {
 		if Absent(elem) {
 			return typeMismatch("vector element [%d]: expected float, got null", i)
 		}
-		if err := checkFloat(elem, nil); err != nil {
+		if err := checkFloat(elem, vectorElementConstraint); err != nil {
 			return vectorElement(i, err)
 		}
 	}
@@ -718,27 +719,4 @@ func coerceList(val any, c schema.Constraint) (any, error) {
 // toSlice converts val to []any if it's a slice.
 func toSlice(val any) ([]any, bool) {
 	return ListElems(val)
-}
-
-// CheckKind reports whether val is a value of kind k under no constraint: no
-// bounds or member set. A value that holds none is of no kind, where
-// [Check] passes one.
-func CheckKind(val any, k schema.ConstraintKind) error {
-	switch k {
-	case schema.KindString:
-		return checkString(val, nil)
-	case schema.KindInteger:
-		return checkInteger(val, nil)
-	case schema.KindFloat:
-		return checkFloat(val, nil)
-	case schema.KindBoolean:
-		return checkBoolean(val)
-	case schema.KindUUID:
-		return checkUUID(val)
-	case schema.KindTimestamp:
-		return checkTimestamp(val)
-	case schema.KindDate:
-		return checkDate(val)
-	}
-	return fmt.Errorf("value: no bare check for kind %s", k)
 }

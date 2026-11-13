@@ -111,10 +111,10 @@ func register(name string, fn builtinFunc) {
 	if !ok {
 		panic("eval: builtin " + name + " is not in the expr catalogue")
 	}
-	builtinRegistry[strings.ToLower(name)] = builtinDef{spec: spec, fn: fn}
+	builtinRegistry[name] = builtinDef{spec: spec, fn: fn}
 }
 
-// lookupBuiltin returns the builtin definition if it exists.
+// lookupBuiltin returns the definition of the builtin of exactly this name.
 func lookupBuiltin(name string) (builtinDef, bool) {
 	def, ok := builtinRegistry[name]
 	return def, ok
@@ -974,12 +974,11 @@ func builtinTypeOf(_ context.Context, _ builtinEvaluator, lhs any, _ []any, _ []
 }
 
 // dslTypeName maps an evaluator value onto the DSL type vocabulary that TypeOf
-// reports: "nil", "boolean", "integer", "float", "string", "list", "map",
-// "pattern", or "unknown" for any shape outside it. A scalar is read the way
+// reports: "nil", "boolean", "integer", "float", "string", "list", "map", or
+// "unknown" for any shape outside it. A scalar is read the way
 // [value.Classify] reads it, so a json.Number is the number it spells and a
 // named carrier is its base kind; the vocabulary is finer than
-// [value.TypeStrata]'s, which groups every numeric together and patterns with
-// strings.
+// [value.TypeStrata]'s, which groups every numeric together.
 //
 // A Timestamp, Date or UUID reports as "string": [value.Coerce] renders all
 // three to text, and invariants evaluate on coerced values, so no time.Time or
@@ -989,8 +988,6 @@ func dslTypeName(v any) string {
 		return "nil"
 	}
 	switch v.(type) {
-	case *regexp.Regexp:
-		return "pattern"
 	case immutable.Slice:
 		return "list"
 	case immutable.Map[string]:

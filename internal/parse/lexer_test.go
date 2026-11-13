@@ -19,6 +19,11 @@ func TestLex_FirstMatchOrdering(t *testing.T) {
 			want: []Token{{Kind: "FLOAT", Value: "2.5e10", Start: 0, End: 6}},
 		},
 		{
+			name: "a caret is no operator",
+			src:  "^",
+			want: []Token{{Kind: "ANY_OTHER", Value: "^", Start: 0, End: 1}},
+		},
+		{
 			name: "a float with trailing junk falls through to the malformed rule",
 			src:  "1.5e5x",
 			want: []Token{{Kind: "INVALID_NUMBER", Value: "1.5e5x", Start: 0, End: 6}},

@@ -78,9 +78,9 @@
 // Parse always returns a file node. A source that fails entirely yields an
 // empty node plus diagnostics, never nil.
 //
-// One rule overrides the diagnostic a failed construct would otherwise carry:
-// a malformed numeric literal anywhere inside the construct owns the
-// diagnosis. "0x10 is not a number" explains the failure, where the token the
+// Two rules override the diagnostic a failed construct would otherwise carry.
+// A malformed numeric literal anywhere inside the construct owns the
+// diagnosis, and after it a List nested past the bound (see Nesting) does. "0x10 is not a number" explains the failure, where the token the
 // parser happened to stop on describes only its symptom — and the parser can
 // stop before ever reaching the literal, since Integer[0x10, 5] fails at the
 // '[' because an Integer with no bounds is itself well-formed. The construct's
@@ -181,8 +181,8 @@
 // # Expression precedence
 //
 // Invariant expressions are parsed by a Pratt parser whose binding powers are
-// the language's own law. Three of them contradict what a C-family reading
-// predicts, and all three are observable:
+// the language's own law. Two of them contradict what a C-family reading
+// predicts, and both are observable:
 //
 //   - Indexing, pipeline calls and property access are one postfix level and
 //     chain left to right, so "$self.tags[0]" indexes the property and
@@ -191,8 +191,27 @@
 //     operand", while negating with '!' parses as "negate the indexed operand".
 //   - 'in' binds tighter than the regex-match operators, which bind tighter
 //     than equality.
-//   - '^' is exclusive-or, at the same level as logical or. It is not a power
-//     operator.
+//
+// Where an operand can stand, a minus directly before a number token is the
+// literal's sign and no operator, so "-9223372036854775808" is one integer
+// literal, as a bound reads it. After a left operand the minus is subtraction.
+//
+// # Nesting
+//
+// An expression's tree and a List's element nesting each hold at most
+// MaxNesting levels, and a source past either is one E_SYNTAX. Every later
+// walk of a tree this package returns therefore recurses a bounded number of
+// times. A List that passes the bound through the datatypes it names is the
+// schema layer's to refuse.
+//
+// A deep List is refused at the first List keyword nested in MaxNesting
+// others. A deep expression is refused at the operator, bracket or call that
+// adds the level over the bound. Where prefix operators and brackets nest past
+// the bound before any operand is read, it is refused at the first token
+// nested that deep. Its error owns every token the expression parser would
+// read. When those tokens are a whole expression, what follows them is read as
+// it stands, on the expression's line too. When they are not, recovery resumes
+// as it does after the token that parser refuses.
 //
 // # Concurrency
 //
