@@ -959,38 +959,21 @@ func (c *completer) referenceDeferred(ref TypeRef) bool {
 	return state == aliasDeferred
 }
 
-// primaryKeyTypeDeferred reports whether a primary property's primary-key TYPE
-// check should be skipped because its constraint bottoms out in an unresolved
-// alias. Such a terminal's type is unknowable here, so validating it against the
-// allowed key types (String, UUID, Date, Timestamp) is meaningless — and its
-// unresolvability is already accounted for by alias resolution (phase 3,
-// [completer.resolveAliasConstraints]), which runs before this check:
+// constraintKindUnknown reports whether a constraint's kind is not known: the schema
+// parser could not build the type (a nil constraint, such as a Vector dimension
+// it refused), or the constraint bottoms out in an alias that did not resolve
+// (an undeclared name, a deferred import, a displaced name). The cause of each
+// is already reported, so a rule that judges a property by its kind, as the
+// primary-key and annotation-target rules do, defers rather than stack a second
+// issue on it. A List is known whatever its element resolves to, since no such
+// rule reads the element; one whose element the parser could not build, such as
+// List<Vector[0]>, is nil.
 //
-//   - reported — an undeclared local name, or a qualifier naming no declared
-//     import, draws E_UNKNOWN_TYPE at the reference;
-//   - silently deferred — a declared-but-failed import or a displaced name,
-//     whose failure or duplicate is the root cause and carries the diagnostic.
-//
-// Either way the root cause is owned elsewhere, so the type check defers rather
-// than stacking a (usually misleading) E_INVALID_PRIMARY_KEY_TYPE on top of a
-// reported error. A resolved terminal (a builtin, or an alias resolved to one)
-// is checked normally, and so is a reference to a local datatype that failed (a
-// cycle, an unknown element): it carries the datatype's declared List, which is
-// no primary key whatever its element.
-//
-// Keying off the terminal's resolved state alone — not a re-derived
-// qualifier prediction — is what keeps this in step with
-// [completer.resolveReference]: every unresolved terminal it leaves behind was
-// reported or deferred there, and a resolved one is the only shape this checks.
-//
-// This couples to [completer.resolveAliasConstraints] leaving a deferred
-// terminal as an unresolved AliasConstraint. A change
-// that instead resolved such terminals to a placeholder would silently flip this
-// predicate to false and resurface a mis-attributed E_INVALID_PRIMARY_KEY_TYPE,
-// so the two must move together.
-func (c *completer) primaryKeyTypeDeferred(constraint Constraint) bool {
+// It couples to [completer.resolveAliasConstraints] leaving an unresolved
+// terminal as an [AliasConstraint]: a placeholder there would turn this false.
+func constraintKindUnknown(constraint Constraint) bool {
 	if constraint == nil {
-		return false
+		return true
 	}
 	terminal, isAlias := ResolveAlias(constraint).(AliasConstraint)
 	return isAlias && !terminal.IsResolved()
@@ -1081,19 +1064,8 @@ func isListConstraint(constraint Constraint) bool {
 // permitted as a primary key. Only String, UUID, Date, and Timestamp are
 // allowed. Aliases are unwrapped to check the resolved type.
 func isPrimaryKeyAllowed(constraint Constraint) bool {
-	if constraint == nil {
-		return false
-	}
-	// Unwrap aliases to the resolved type.
-	for {
-		alias, ok := constraint.(AliasConstraint)
-		if !ok || alias.Resolved() == nil {
-			break
-		}
-		constraint = alias.Resolved()
-	}
 	//exhaustive:enforce
-	switch constraint.Kind() {
+	switch ResolveAlias(constraint).Kind() {
 	case KindString, KindUUID, KindDate, KindTimestamp:
 		return true
 	case KindInteger, KindFloat, KindBoolean, KindEnum,

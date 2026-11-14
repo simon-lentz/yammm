@@ -381,9 +381,9 @@ func (c *completer) validateAssociationTargets() {
 					continue
 				}
 				// Reported once, on the first part type in the chain that
-				// inherits it. The whole linearized ancestry is read, so a
-				// non-part type between two part types does not hide the one
-				// that already reported.
+				// inherits it. The whole linearized ancestry is read: an
+				// abstract type between two part types is refused
+				// (E_INVALID_SUPERTYPE), and must not hide the first.
 				if c.aPartAncestorCarries(t, r) {
 					continue
 				}

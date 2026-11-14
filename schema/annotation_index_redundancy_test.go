@@ -52,6 +52,24 @@ type Derived extends Base {
 	}
 }
 
+// Every concrete descendant of an abstract type is an emitter: one that keys
+// on the property alone and one that adds a key disagree, as above.
+func TestAnnotation_IndexOnPrimary_EmittersThroughAbstractBaseDisagree_Silent(t *testing.T) {
+	t.Parallel()
+	_, res := loadNoErr(t, `schema "main"
+abstract type Base {
+	id String primary @index
+}
+type Zed extends Base {
+}
+type Yak extends Base {
+	k String primary
+}`)
+	if n := codeCounts(res)[diag.E_INVALID_ANNOTATION_TARGET]; n != 0 {
+		t.Errorf("Yak keys on id and k, so the index serves it; got %d: %v", n, res)
+	}
+}
+
 // An abstract type emits no constraint of its own, so redundancy is decided by
 // its concrete descendants — here the single descendant keys on `a` alone.
 func TestAnnotation_IndexOnPrimary_SoleKeyThroughAbstractBase_Rejected(t *testing.T) {

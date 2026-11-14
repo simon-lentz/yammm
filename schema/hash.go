@@ -17,16 +17,19 @@ import (
 )
 
 // StructuralHashVersion identifies the version of the structural hashing
-// algorithm. Bump this when the hash algorithm changes in a way that
-// invalidates previous hashes. Version 2 (v0.15.0) added invariants and
-// the abstract/part markers. Version 3 (v0.17.0) widened the input from
-// the entry schema's own declarations to its whole import closure, so the
-// hash covers every rule that decides what instance data is valid — an
-// imported type's constraints decide validity for every instance of it the
-// importing schema admits. Version 4 (v0.21.0) writes a relation target as
+// algorithm: a snapshot that records another version draws
+// E_SNAPSHOT_UNSUPPORTED_HASH_ALGORITHM, and its hash is not compared.
+// Version 2 (v0.15.0) added invariants and the abstract/part markers.
+// Version 3 (v0.17.0) widened the input from the entry schema's own
+// declarations to its whole import closure, since an imported type's
+// constraints decide validity for every instance of it the importing schema
+// admits. Version 4 (v0.21.0) writes a relation target as
 // the pair (owning schema name, type name), so two closure members declaring
 // one type name no longer collide, and normalizes the two float zeros of a
-// Float bound.
+// Float bound. Within version 4, a composite key is hashed in key order and a
+// negative number in an invariant as a signed literal, so a v0.21 hash of a
+// schema with a composite key declared out of name order, or with such a
+// number, no longer matches.
 const StructuralHashVersion = 4
 
 // StructuralHash returns a deterministic "sha256:<hex>" digest of the rules
@@ -92,12 +95,9 @@ func hashType(h io.Writer, typ Type, owners map[location.SourceID]string) {
 	writeBool(h, typ.IsAbstract())
 	writeBool(h, typ.IsPart())
 
-	// Primary keys (sorted by name).
-	pks := slices.Collect(typ.PrimaryKeys())
-	slices.SortFunc(pks, func(a, b Property) int {
-		return compareName(a.Name(), b.Name())
-	})
-	for _, pk := range pks {
+	// The key in the order the type holds it, unsorted: a composite key's
+	// order decides validity, since an instance reads its key as a list.
+	for pk := range typ.PrimaryKeys() {
 		writeTag(h, "pk")
 		writeStr(h, pk.Name())
 		hashConstraint(h, pk.Constraint())

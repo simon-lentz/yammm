@@ -14,7 +14,7 @@ import (
 // body-reading surface refuses a document whose schema identity it cannot
 // check, and a header-only read stays classifiable for dispatch. The old
 // algorithm is the current one minus one, so the test follows every bump:
-// a document written by the previous release draws this signal — and NOT
+// a document written under the previous algorithm draws this signal — and NOT
 // E_SNAPSHOT_INCOMPATIBLE_SCHEMA, because a version mismatch skips the
 // hash comparison — which is what a consumer's cutover routes on.
 func TestLoad_RefusesAnOldHashAlgorithm(t *testing.T) {

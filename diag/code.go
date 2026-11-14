@@ -170,6 +170,11 @@ var (
 	// required, so no instance on it is finite.
 	E_COMPOSITION_CYCLE = NewCode("E_COMPOSITION_CYCLE", CategorySchema)
 
+	// E_INVALID_SUPERTYPE indicates an extends clause names a type of a kind the
+	// subtype may not extend: a supertype is abstract or of the subtype's own
+	// kind, so an abstract type extends abstract types alone.
+	E_INVALID_SUPERTYPE = NewCode("E_INVALID_SUPERTYPE", CategorySchema)
+
 	// E_INVALID_CONSTRAINT indicates a constraint definition the load refuses, or,
 	// at Warning, a minus sign before the unbounded marker, which has no effect.
 	E_INVALID_CONSTRAINT = NewCode("E_INVALID_CONSTRAINT", CategorySchema)

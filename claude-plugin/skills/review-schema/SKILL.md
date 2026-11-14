@@ -95,7 +95,7 @@ If `$ARGUMENTS` provides a file path, review that file. Otherwise, ask which sch
 
 ### 9. Inheritance
 
-- The target of `extends` must be an `abstract type`.
+- A supertype is an `abstract type` or of the subtype's own kind; an abstract type extends abstract types alone (`E_INVALID_SUPERTYPE`).
 - A child type can narrow parent constraint bounds but never widen them.
 - A child type can add new fields and relationships not present on the parent.
 - A child type does not redeclare the same field without narrowing the constraint.

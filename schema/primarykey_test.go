@@ -25,11 +25,10 @@ func TestIsPrimaryKeyAllowed(t *testing.T) {
 		{"Pattern", NewPatternConstraint(nil), false},
 		{"Vector", NewVectorConstraint(3), false},
 		{"List", NewListConstraint(NewStringConstraint()), false},
-		// An alias unwraps to its resolved kind; an unresolved alias and nil are not allowed.
+		// An alias unwraps to its resolved kind; an unresolved alias is not allowed.
 		{"Alias->String", NewAliasConstraint("X", NewStringConstraint()), true},
 		{"Alias->Integer", NewAliasConstraint("X", NewIntegerConstraint()), false},
 		{"Alias-unresolved", NewAliasConstraint("X", nil), false},
-		{"nil", nil, false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

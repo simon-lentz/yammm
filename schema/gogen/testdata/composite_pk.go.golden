@@ -49,4 +49,4 @@ func SerializedSources() map[string][]byte {
 	return m
 }
 
-const SchemaHash = "sha256:8ad5317ef7fa18f4202b29a4e75a18321d55ed07fb705bc0971d8347c3836da1"
+const SchemaHash = "sha256:fd84e2610222185fd889846695f4a44e0125277a8a99b7f99b90049d88750775"

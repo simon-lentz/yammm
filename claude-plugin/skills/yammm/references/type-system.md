@@ -269,7 +269,7 @@ type Document extends Auditable, Named {
 }
 ```
 
-Multiple inheritance is supported (comma-separated parents). The target of `extends` must be an `abstract type`.
+Multiple inheritance is supported (comma-separated parents). A supertype is an `abstract type` or of the subtype's own kind: a concrete type extends abstract and concrete types, a `part type` extends abstract and part types, and an abstract type extends abstract types alone (`E_INVALID_SUPERTYPE`). `extends` includes members and gives no substitution: a relation to a supertype holds no instance of a subtype.
 
 ### What Is Inherited
 

@@ -60,6 +60,7 @@ func TestLoad_ARivalReachedTwiceIsRelatedOnce(t *testing.T) {
 		"a property origin": "schema \"o\"\n\nabstract type S {\n\tname Integer\n}\n\nabstract type R {\n\tname Boolean\n}\n\nabstract type X1 extends R {\n}\n\nabstract type X2 {\n\tname Boolean\n}\n\ntype T extends S, X1, X2 {\n\tid String primary\n}\n",
 		"a relation rival":  "schema \"r\"\n\n" + rivals + "type T extends S, X1 {\n\tid String primary\n}\n",
 		"two routes":        "schema \"t\"\n\n" + rivals + "abstract type X2 extends R {\n}\n\ntype T extends S, X1, X2 {\n\tid String primary\n}\n",
+		"a merged copy":     "schema \"m\"\n\nabstract type Base {\n\tx String @index\n}\n\nabstract type Ann {\n\tx String @fulltext\n}\n\nabstract type P1 extends Base, Ann {\n}\n\nabstract type Wide {\n\tx Integer\n}\n\ntype T extends P1, Wide {\n\tid String primary\n}\n",
 	} {
 		issues := issuesOfSource(t, src)
 		if len(issues) == 0 {

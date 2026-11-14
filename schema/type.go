@@ -168,7 +168,9 @@ func (t Type) AllProperties() iter.Seq[Property] {
 	return slices.Values(t.allProperties)
 }
 
-// PrimaryKeys returns an iterator over primary key properties.
+// PrimaryKeys returns an iterator over primary key properties in key order:
+// the type's own key properties in declaration order, then inherited ones in
+// linearization order. A composite key is read and stored in this order.
 func (t Type) PrimaryKeys() iter.Seq[Property] {
 	return slices.Values(t.primaryKeys)
 }

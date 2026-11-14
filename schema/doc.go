@@ -82,9 +82,10 @@
 // [StructuralHash] computes a deterministic SHA-256 digest over the rules that
 // decide what instance data is valid, across the schema's whole import
 // closure. For every member of [Schema.Closure] it hashes the member's schema
-// name, its types with their properties, primary keys, relations,
-// compositions, supertypes, constraints, invariants and abstract and part
-// markers, and its data types. Each member is framed under its schema name, the entry schema
+// name, its types with their properties, primary keys (a composite key in
+// key order, since an instance reads it as a list), relations, compositions,
+// supertypes, constraints, invariants and abstract and part markers, and its
+// data types. Each member is framed under its schema name, the entry schema
 // first and the rest ordered by name, so the order imports are declared in does
 // not enter the digest. A relation target is the pair (owning schema name, type
 // name). Closure membership is part of the identity, so the digest moves on a

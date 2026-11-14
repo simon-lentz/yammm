@@ -395,9 +395,9 @@ type T extends A, B {
 }
 
 // The inherited-association refusal is reported once, on the first part type
-// in the chain. Asking only the direct supertypes lets a non-part type between
-// two part types hide the one that already reported, so the refusal is drawn
-// twice for one declaration.
+// in the chain, in a chain that puts an abstract type between two part types.
+// That chain is itself refused (E_INVALID_SUPERTYPE), and asking only the
+// direct supertypes would draw the association refusal twice there.
 func TestPartType_InheritedAssociationReportedOncePerChain(t *testing.T) {
 	t.Parallel()
 	const src = `schema "s"
@@ -431,6 +431,9 @@ part type P1 extends Mid {
 	}
 	if len(reported) != 1 {
 		t.Fatalf("the refusal was reported %d times, want 1: %v", len(reported), reported)
+	}
+	if n := codeCounts(res)[diag.E_INVALID_SUPERTYPE]; n != 1 {
+		t.Errorf("want one E_INVALID_SUPERTYPE for Mid extends P0, got %d: %v", n, res)
 	}
 	if !strings.Contains(reported[0], `"P0"`) {
 		t.Errorf("reported on %q; want the first part type in the chain, P0", reported[0])

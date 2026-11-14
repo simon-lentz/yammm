@@ -538,6 +538,8 @@ func TestAnnotation_Validation_UnbuiltConstraintNoTargetCascade(t *testing.T) {
 		{"vector", "\te Vector[0] @vector(cosine)"},
 		{"index", "\te Vector[0] @index"},
 		{"compositeIndex", "\te Vector[0]\n\t@@index(e)"},
+		{"fulltext", "\te Vector[0] @fulltext"},
+		{"compositeFulltext", "\te Vector[0]\n\t@@fulltext(e)"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

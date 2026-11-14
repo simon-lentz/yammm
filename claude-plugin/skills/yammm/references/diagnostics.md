@@ -112,6 +112,7 @@ The all-or-nothing contract is unchanged: any error still yields a zero schema.
 | Code | Meaning |
 | ---- | ------- |
 | `E_INHERIT_CYCLE` | Inheritance chain contains a cycle |
+| `E_INVALID_SUPERTYPE` | An `extends` clause names a type of a kind the subtype may not extend: a supertype is abstract or of the subtype's own kind |
 | `E_UNKNOWN_PROPERTY` | Referenced property not found on its type |
 | `E_DUPLICATE_PROPERTY` | Property defined more than once on a type, or an edge property defined more than once on a relation |
 | `E_DUPLICATE_RELATION` | Relation defined more than once on a type |
@@ -126,7 +127,7 @@ The all-or-nothing contract is unchanged: any error still yields a zero schema.
 | `E_INVARIANT_CONFLICT` | Two inherited definitions of one invariant message differ (a literal with no value matches any literal of its kind) |
 | `E_INVALID_NAME` | A name the schema refuses: a relation name that is not UPPER_SNAKE, a schema name that is not an identifier (an ASCII letter, then letters, digits and underscores), a property named `self`, or an invariant reading a relation in a casing other than its declared name |
 | `E_UPSTREAM_FAIL` | Imported schema failed to compile |
-| `E_PROPERTY_CONFLICT` | Conflicting property definitions from inheritance |
+| `E_PROPERTY_CONFLICT` | A type's own declaration of a property does not narrow an inherited one, or, with none, no inherited declaration narrows every other |
 | `E_UNKNOWN_TYPE` | Referenced type or datatype not found (`extends`, relation target, a property datatype, or a datatype declaration's reference such as a `List` element) |
 | `E_DUPLICATE_TYPE` | A name declared more than once in one schema. Types and datatypes share one namespace, so a type and a datatype of one name draw it too. The issue stands at each later declaration and names the first |
 | `E_DUPLICATE_SCHEMA` | Two schemas in one load declare one name, and both compile with no error. A schema with an error takes no name |

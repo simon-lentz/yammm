@@ -32,8 +32,7 @@ type Car {
 	*-> WHEEL (one) Wheel
 }
 
-type Base {
-	id String primary
+abstract type Base {
 	pos String @writeOnce
 }
 

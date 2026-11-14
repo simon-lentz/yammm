@@ -336,13 +336,13 @@ func validateIndexProperty(c *completer, t Type, prop Property, a Annotation) {
 			"@index takes no arguments; for a composite index use @@index(...) at the type level")
 		return
 	}
-	if c.annotationTargetTypeUnknown(prop.Constraint()) {
+	if constraintKindUnknown(prop.Constraint()) {
 		return // the target's type is already diagnosed; blaming the annotation would bury it
 	}
 	if !isIndexableScalar(prop.Constraint()) {
 		c.annotationErrorf(a, prop.Span(), diag.E_INVALID_ANNOTATION_TARGET,
 			"@index requires a scalar property; property %q is %s",
-			prop.Name(), constraintKindName(prop.Constraint()))
+			prop.Name(), ResolveAlias(prop.Constraint()).Kind())
 		return
 	}
 	if !prop.IsPrimaryKey() {
@@ -484,13 +484,13 @@ func validateVectorProperty(c *completer, _ Type, prop Property, a Annotation) {
 			"unknown @vector similarity %q: must be %s", a.args[0].text, strings.Join(vectorSimilarityFunctions, " or "))
 		return
 	}
-	if c.annotationTargetTypeUnknown(prop.Constraint()) {
+	if constraintKindUnknown(prop.Constraint()) {
 		return
 	}
 	if !isVectorConstraint(prop.Constraint()) {
 		c.annotationErrorf(a, prop.Span(), diag.E_INVALID_ANNOTATION_TARGET,
 			"@vector requires a Vector property; property %q is %s",
-			prop.Name(), constraintKindName(prop.Constraint()))
+			prop.Name(), ResolveAlias(prop.Constraint()).Kind())
 		return
 	}
 	if v, ok := ResolveAlias(prop.Constraint()).(VectorConstraint); ok && v.Dimension() > maxIndexedVectorDimensions {
@@ -536,13 +536,13 @@ func validateFulltextProperty(c *completer, _ Type, prop Property, a Annotation)
 			"@fulltext takes no arguments; for a multi-property fulltext index use @@fulltext(...) at the type level")
 		return
 	}
-	if c.annotationTargetTypeUnknown(prop.Constraint()) {
+	if constraintKindUnknown(prop.Constraint()) {
 		return // the target's type is already diagnosed; blaming the annotation would bury it
 	}
 	if !isFulltextEligible(prop.Constraint()) {
 		c.annotationErrorf(a, prop.Span(), diag.E_INVALID_ANNOTATION_TARGET,
 			"@fulltext requires a text property (String, Pattern, or Enum); property %q is %s",
-			prop.Name(), constraintKindName(prop.Constraint()))
+			prop.Name(), ResolveAlias(prop.Constraint()).Kind())
 	}
 }
 
@@ -585,13 +585,13 @@ func validateFulltextType(c *completer, t Type, _ Property, a Annotation) {
 			}
 			continue
 		}
-		if c.annotationTargetTypeUnknown(ref.Constraint()) {
+		if constraintKindUnknown(ref.Constraint()) {
 			continue
 		}
 		if !isFulltextEligible(ref.Constraint()) {
 			c.annotationErrorf(a, arg.span, diag.E_INVALID_ANNOTATION_TARGET,
 				"@@fulltext member %q must be a text property (String, Pattern, or Enum); it is %s",
-				arg.text, constraintKindName(ref.Constraint()))
+				arg.text, ResolveAlias(ref.Constraint()).Kind())
 			continue
 		}
 		a.setArgKind(i, ArgPropertyRef)
@@ -633,13 +633,13 @@ func validateIndexType(c *completer, t Type, _ Property, a Annotation) {
 			}
 			continue
 		}
-		if c.annotationTargetTypeUnknown(ref.Constraint()) {
+		if constraintKindUnknown(ref.Constraint()) {
 			continue
 		}
 		if !isIndexableScalar(ref.Constraint()) {
 			c.annotationErrorf(a, arg.span, diag.E_INVALID_ANNOTATION_TARGET,
 				"@@index member %q must be a scalar property; it is %s",
-				arg.text, constraintKindName(ref.Constraint()))
+				arg.text, ResolveAlias(ref.Constraint()).Kind())
 			continue
 		}
 		// A one-member @@index over a primary key is the index @index on that
@@ -656,39 +656,10 @@ func validateIndexType(c *completer, t Type, _ Property, a Annotation) {
 	}
 }
 
-// annotationTargetTypeUnknown reports whether an annotation target's type cannot
-// be judged at annotation-validation time, in which case the eligibility check
-// must defer. Two shapes qualify, and both already carry their own diagnostic:
-//
-//   - A nil constraint, which a property's type the schema parser could not
-//     build leaves: a Vector dimension refused with E_INVALID_CONSTRAINT, or a
-//     List of one. Checking eligibility
-//     here would blame the annotation for the type's failure and describe a
-//     property that plainly declares a type as "missing type".
-//   - A constraint bottoming out in an unresolved alias: a deferred import, a
-//     displaced name, a reference refused with E_UNKNOWN_TYPE, or a reference
-//     to a datatype whose own constraint the schema parser could not build. The
-//     root cause of each is already reported.
-//
-// The second test is shared with the primary-key rule via
-// [completer.primaryKeyTypeDeferred]. That predicate is named and documented for
-// its primary-key caller, but what it computes — "this constraint's terminal is
-// not knowable yet" — is the annotation question too. It is shared rather than
-// duplicated so one notion of "unresolved terminal" governs both; anyone
-// NARROWING it for a primary-key reason must keep that in mind, or annotation
-// targets start drawing eligibility errors stacked on the alias error the user
-// actually needs to fix.
-func (c *completer) annotationTargetTypeUnknown(constraint Constraint) bool {
-	return constraint == nil || c.primaryKeyTypeDeferred(constraint)
-}
-
 // isIndexableScalar reports whether a property constraint's underlying kind is a
 // scalar type eligible for a range index. Vector, List, and unresolved aliases
 // are not indexable scalars. Aliases are resolved to their terminal first.
 func isIndexableScalar(constraint Constraint) bool {
-	if constraint == nil {
-		return false
-	}
 	//exhaustive:enforce
 	switch ResolveAlias(constraint).Kind() {
 	case KindString, KindUUID, KindEnum, KindPattern, KindInteger,
@@ -708,9 +679,6 @@ func isIndexableScalar(constraint Constraint) bool {
 // opaque identifier, not tokenized text. Aliases are resolved to their terminal
 // first.
 func isFulltextEligible(constraint Constraint) bool {
-	if constraint == nil {
-		return false
-	}
 	//exhaustive:enforce
 	switch ResolveAlias(constraint).Kind() {
 	case KindString, KindPattern, KindEnum:
@@ -721,14 +689,6 @@ func isFulltextEligible(constraint Constraint) bool {
 	default:
 		return false
 	}
-}
-
-// constraintKindName returns the resolved kind name for diagnostics.
-func constraintKindName(constraint Constraint) string {
-	if constraint == nil {
-		return "missing type"
-	}
-	return ResolveAlias(constraint).Kind().String()
 }
 
 // maxIndexedVectorDimensions is the most dimensions a Neo4j vector index takes.

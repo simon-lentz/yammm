@@ -476,7 +476,7 @@ type Person {
 }
 ```
 
-A schema's types and data types share one namespace: a schema declares a name once, as a type or as a [data type alias](#data-type-aliases). A second declaration of a name, of either kind, is `E_DUPLICATE_TYPE` at that declaration. A name an import brings is another schema's: a reference reaches it through the import's alias, so it never meets a local name.
+A schema's types and data types share one namespace: a schema declares a name once, as a type or as a [data type alias](#data-type-aliases). A second declaration of a name, of either kind, is `E_DUPLICATE_TYPE` at that declaration. Type and data type names are matched exactly, as every reader of the model matches them, so two names that differ only in case, such as `Person` and `PERSON`, are two names. A name an import brings is another schema's: a reference reaches it through the import's alias, so it never meets a local name.
 
 ### Type Identity
 
@@ -544,7 +544,8 @@ type Document extends Named, Timestamped {
 
 Inheritance rules:
 
-- Properties, associations, and compositions are inherited from parent types
+- `extends` includes members: properties, associations, compositions, invariants and annotations are inherited from parent types. It gives no substitution: a relation that targets a supertype holds no instance of a subtype, and an instance validates against the type it names alone
+- A supertype is abstract, or of the subtype's own kind: a concrete type extends abstract and concrete types, a part type extends abstract and part types, and an abstract type extends abstract types alone. Any other supertype is `E_INVALID_SUPERTYPE`, at its name in the `extends` clause
 - Child types may override inherited properties with compatible narrower constraints
 - A part type carries no association, declared or inherited (`E_INVALID_ASSOCIATION_TARGET`)
 - Relationship definitions must be unique after inheritance. Two relations of one kind reaching a type under one field name are an error when their definitions **differ** — a different declared spelling, target, multiplicity, or edge-property set; structurally identical ones, at least one of them inherited, are deduplicated keep-first with no diagnostic. Two relations a type declares itself under one name are `E_DUPLICATE_RELATION`, whatever their kinds. An association and a composition that reach one type under one name, at least one of them inherited, are caught separately, after both merges, as `E_RELATION_COLLISION` naming both declarations. Between two definitions of one kind, `E_RELATION_COLLISION` is reported once per collision on each type the two definitions reach, its own or inherited: ancestors that merely carry a relation forward do not repeat it, and two ancestors declaring structurally identical rivals are one collision, since a single edit to the surviving declaration resolves both. Between an association and a composition it is reported on a type that carries both, unless a direct supertype of that type already carries both. Within one kind the diagnostic's related locations name the surviving declaration and one group of identical rivals; across the two kinds they name the association and the composition. A relation that reaches a type with a definition whose target did not resolve, or that holds an edge property of unknown type, is not judged on that type: the cause is already reported, and the definitions of that relation kind draw no `E_RELATION_COLLISION` from one another there, in any order of the `extends` clause.
@@ -557,18 +558,18 @@ Inheritance rules:
 2. Inherited **properties, relations and type-level annotations** follow in that ancestors-first order, so the most distant ancestor is read before the nearest. **Invariants and property-level annotations do not** — see Invariant merging and Annotation Inheritance below, where a subtype reads each direct supertype's already-merged set so a nearer declaration wins
 3. When the same ancestor is reachable via multiple paths (diamond inheritance), the first occurrence is kept and duplicates are skipped
 
-**Property conflict resolution:**
+**Property conflict resolution:** A type's own declaration must narrow every inherited one; with none, the inherited declaration that narrows every other is the property, and with none of those the load fails. A declaration narrows another when the two are equal or it is a valid narrowing of the other (see Constraint Narrowing). The rule reads every declaration of the name that reaches the type through its ancestors, so its answer does not depend on the order of the `extends` clause. Equal declarations can still differ in their documentation and in the data type they name. Among them, the merged view holds the one the first direct supertype holds, in the order of the `extends` clause, skipping a supertype another one extends: a supertype's re-declaration stands in place of the declaration it re-declares.
 
 | Situation | Result |
 | --------- | ------ |
-| Child re-declares with narrower constraint | Child's version is used |
-| Inherited property narrows an earlier ancestor's | Narrower version replaces wider |
-| Child re-declares with a constraint that is not a valid narrowing | `E_PROPERTY_CONFLICT`, unless the property has a definition of unknown type (below) |
-| Two inherited properties are incompatible, and the type does not re-declare the property | `E_PROPERTY_CONFLICT`, unless the property has a definition of unknown type (below) |
+| Child re-declares with a constraint that narrows every inherited one | Child's version is used |
+| Child does not re-declare, and one inherited declaration narrows every other | That declaration is used |
+| Child re-declares with a constraint that does not narrow an inherited one | `E_PROPERTY_CONFLICT`, unless the property has a definition of unknown type (below) |
+| Child does not re-declare, and no inherited declaration narrows every other | `E_PROPERTY_CONFLICT`, unless the property has a definition of unknown type (below) |
 
-`E_PROPERTY_CONFLICT` is reported once per conflict per affected type, so ancestors that merely carry a conflicting property forward do not repeat the diagnostic. The message names the declaration that survived the merge and the first one that clashed with it; the diagnostic's related locations name **every** declaration involved — both the full set that merged into the surviving definition (including declarations absorbed as equal-or-wider, and any that later took over as a narrower survivor) and every declaration on the conflicting side. Resolving the conflict may require editing any of them, so none is omitted. A subtype that inherits a conflicting combination and does not re-declare the property re-detects the conflict and reports it independently, unless the exception below withholds the report.
+`E_PROPERTY_CONFLICT` is reported once per type and property, at the type. When the type declares the property, the related locations name its declaration and each inherited one it does not narrow, and the message names the first of those. Otherwise they name every inherited declaration, and the message names two of them, neither of which narrows the other. A subtype that inherits the same declarations and does not re-declare the property reports the conflict too, unless the exception below withholds the report.
 
-A property that reaches a type with a definition of unknown type draws no `E_PROPERTY_CONFLICT` on that type. A type is unknown when the parser could not build it (`Vector[0]`) or when it reads a name that did not resolve to a constraint, itself or as a `List` element. Whatever the cause, it is already reported, once. The conflict is withheld in any order of the `extends` clause, because a known type there could make the definitions agree. Only the report is withheld: the merge keeps the definition it would keep, and the property's annotations are judged as for any property. A type the parser reports and still builds, such as `String[5, 1]`, is known and is judged.
+A property that reaches a type with a definition of unknown type draws no `E_PROPERTY_CONFLICT` on that type. A type is unknown when the parser could not build it (`Vector[0]`) or when it reads a name that did not resolve to a constraint, itself or as a `List` element. Whatever the cause, it is already reported, once. The conflict is withheld in any order of the `extends` clause, because a known type there could make the definitions agree. Only the report is withheld. A type's own declaration is the property whatever it inherits. With none, the merged view holds the definition the rule gives, or, with none, the first definition of unknown type in linearization order, so a rule that reads the property's kind defers to the reported cause when that definition's kind is unknown. A `List` whose element names an unresolved name is still a List, so a rule that refuses a List, such as an `@@index` member's, still judges it. The property's annotations are judged as for any property. A type the parser reports and still builds, such as `String[5, 1]`, is known and is judged.
 
 **Invariant merging:** Own invariants come first, then those inherited from each direct supertype in declaration order, each supertype contributing the set it has already merged. An invariant's message is its identity, and must not be empty (`E_INVALID_INVARIANT`). A subtype's declaration overrides an inherited one of the same name at any depth — a grandparent's rule cannot reappear past a parent that replaced it. One type may not declare a message twice (`E_DUPLICATE_INVARIANT`), and two inherited definitions of one message must carry the same expression; a disagreement is `E_INVARIANT_CONFLICT`, reported once on the type that inherits them, naming every rival. Expressions are compared structurally, as the structural hash compares them: `n > 1` and `n > 1.0` are different expressions, because an integer and a float literal are different literals. `n > -1` and `n > -(1)` are different expressions too: the first holds the literal `-1`, and the second negates the literal `1`. A literal with no value, whose own diagnostic already refuses the source, matches any literal of the kind the source wrote there (a string, an integer, a float or a regular expression), so the definitions of one message conflict only when no value for each such literal makes them all one, whatever order the supertypes are named in. One definition reached through two ancestors merges silently.
 
@@ -630,7 +631,7 @@ type Car {
 }
 ```
 
-Every concrete (instantiable) type must declare or inherit at least one primary property. A type with no primary key has no identity — it cannot be added to a graph or referenced by an association — so it is rejected at load with `E_NO_PRIMARY_KEY`. Abstract types (never instantiated) and part types (identified through their parent composition) are exempt. A type may declare more than one primary property; together they form a composite key. A type whose body, or a supertype's body, may have lost a member to a syntax error draws no `E_NO_PRIMARY_KEY`: the lost member may be its key, and the `E_SYNTAX` is the report. A body may have lost a member when it ends at end of input, or when the text the parser skipped holds, outside parentheses that close, a token a member can begin with or an upper-case word; an annotation's name, next to its `@` or after spaces and line comments, and an argument list that does not parse lose none.
+Every concrete (instantiable) type must declare or inherit at least one primary property. A type with no primary key has no identity — it cannot be added to a graph or referenced by an association — so it is rejected at load with `E_NO_PRIMARY_KEY`. Abstract types (never instantiated) and part types (identified through their parent composition) are exempt. A type may declare more than one primary property; together they form a composite key. A key's properties are in key order: the type's own primary properties in declaration order, then inherited ones in linearization order (see [Inheritance](#inheritance)). An instance's key, a stored key and a key read as a list follow that order, and the structural hash reads it. A type whose body, or a supertype's body, may have lost a member to a syntax error draws no `E_NO_PRIMARY_KEY`: the lost member may be its key, and the `E_SYNTAX` is the report. A body may have lost a member when it ends at end of input, or when the text the parser skipped holds, outside parentheses that close, a token a member can begin with or an upper-case word; an annotation's name, next to its `@` or after spaces and line comments, and an argument list that does not parse lose none.
 
 **Required properties** must be present in all instances:
 
@@ -1796,6 +1797,7 @@ Codes are stable identifiers for programmatic matching. `diag/code.go` holds the
 - `E_DUPLICATE_TYPE` — a schema declares one name more than once: two types, two data types, or a type and a data type, which share one namespace. The issue stands at each later declaration and names the first
 - `E_DUPLICATE_SCHEMA` — two schemas in one load declare one name. A schema whose load reported an error takes no name and draws no such report
 - `E_INHERIT_CYCLE` — circular inheritance chain
+- `E_INVALID_SUPERTYPE` — an `extends` clause names a type of a kind the subtype may not extend: a supertype is abstract or of the subtype's own kind
 - `E_UNKNOWN_TYPE` — unresolvable type reference
 - `E_DUPLICATE_PROPERTY`, `E_UNKNOWN_PROPERTY` — a property declared twice on one type or an edge property twice on one association, or an invariant reading a member the type it reads neither declares nor inherits
 - `E_DUPLICATE_RELATION`, `E_RELATION_COLLISION` — relation conflicts
@@ -1810,7 +1812,7 @@ Codes are stable identifiers for programmatic matching. `diag/code.go` holds the
 - `E_INVALID_PRIMARY_KEY_TYPE` — disallowed type for primary key
 - `E_NO_PRIMARY_KEY` — concrete type declares or inherits no primary key
 - `E_INVALID_EDGE_PROPERTY_TYPE` — a relationship property of a type an edge does not hold: a `List` or a `Vector`, written or through a datatype
-- `E_PROPERTY_CONFLICT` — conflicting inherited properties
+- `E_PROPERTY_CONFLICT` — a type's own declaration of a property does not narrow an inherited one, or, with none, no inherited declaration narrows every other
 - `E_UPSTREAM_FAIL` — imported schema failed to compile
 - `E_LOAD_IO_FAILURE` — I/O error during schema loading, or a load whose arguments or options the loader refuses
 - `E_LOAD_MODULE_ROOT_MALFORMED` — a `yammm.mod` module-root marker holds content other than comment lines, is not a regular file, is larger than the size limit, or is a link that resolves to no file
@@ -1920,7 +1922,7 @@ Codes are stable identifiers for programmatic matching. `diag/code.go` holds the
 Each compiled schema has a deterministic structural hash (SHA-256) computed over its whole import closure. For every member schema — the entry schema and each schema it imports, directly or transitively — the input covers:
 
 - The member's schema name
-- Type names, properties (with constraints and modifiers), the primary-key set, relations (with targets and cardinalities), compositions, association edge properties, and each supertype by its type name
+- Type names, properties (with constraints and modifiers), the primary key with its properties in key order, relations (with targets and cardinalities), compositions, association edge properties, and each supertype by its type name
 - Each type's `abstract` and `part` markers
 - Invariant expressions (the invariant's *name* is excluded — it is the failure message)
 - Data type names and constraints
@@ -1936,9 +1938,9 @@ Two more facts are outside the hash, and two schemas that hash the same can diff
 
 So a test that compares generated code's `SchemaHash` constant with the hash cannot see stale generated code after any change the hash leaves out: the generated code embeds the schema sources and their documentation comments. After a change to the name surface, a supertype's owner or a property's data type, a field's Go type or a graph field can differ too.
 
-The hash is deterministic. Most inputs are sorted by name; invariant blobs are sorted by their serialized bytes, and the operands of one expression are hashed in declared order, because operand order is semantic.
+The hash is deterministic. Most inputs are sorted by name; invariant blobs are sorted by their serialized bytes. Two inputs keep their order, because it is semantic: a primary key's properties, in key order, and the operands of one expression, in declared order.
 
-The hash format is `sha256:<hex>`. A structural hash version (currently `4`) is bumped when the algorithm changes; version 2 arrived in v0.15.0 with invariants and the `abstract` / `part` markers, version 3 in v0.17.0 when the input widened to the whole import closure, and version 4 when a relation target became the pair (owning schema name, type name) so two closure members declaring one type name no longer collide. The hash enables schema compatibility checking for `.ys` snapshots: `E_SNAPSHOT_INCOMPATIBLE_SCHEMA` is emitted when a snapshot's persisted hash does not match the current schema.
+The hash format is `sha256:<hex>`. A structural hash version (currently `4`) names the algorithm, and a snapshot that records another version draws `E_SNAPSHOT_UNSUPPORTED_HASH_ALGORITHM` and its hash is not compared; version 2 arrived in v0.15.0 with invariants and the `abstract` / `part` markers, version 3 in v0.17.0 when the input widened to the whole import closure, and version 4 in v0.21.0 when a relation target became the pair (owning schema name, type name) so two closure members declaring one type name no longer collide. A hash can also move within a version: under version 4 a composite key is now hashed in key order and a negative number in an invariant as a signed literal, so a hash v0.21 stored for a schema with a composite key declared out of name order, or with such a number, no longer matches. The hash enables schema compatibility checking for `.ys` snapshots: `E_SNAPSHOT_INCOMPATIBLE_SCHEMA` is emitted when a snapshot's persisted hash does not match the current schema.
 
 ## Grammar Summary
 
