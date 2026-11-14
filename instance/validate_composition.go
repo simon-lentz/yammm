@@ -112,13 +112,6 @@ func (v *Validator) validateComposition(
 	relPath path.Builder,
 	depth int,
 ) (immutable.Value, bool) {
-	// An explicit null is a shape error whatever the optionality.
-	if IsAbsent(rawValue) {
-		collector.Collect(shapeMismatch(rel, fmt.Sprintf("composition %q: null is not a valid composition value", rel.Name()),
-			"array", "null", prov, relPath))
-		return immutable.Value{}, false
-	}
-
 	// Compositions always expect an array (accept typed slices via reflection)
 	arr, ok := toSliceOfAny(rawValue)
 	if !ok {

@@ -645,16 +645,20 @@ type Person {
 Properties without modifiers are **optional** and may be omitted from instance data.
 
 **An explicit `null` is the absent case.** For a property — on a type or on an
-association's edge — instance data carrying `null` is treated exactly as if the
-key were not there: a required property draws `E_MISSING_REQUIRED`, and an
-optional one is dropped rather than stored. The other slots that accept a
-`null` keep their own rules, because none is a property: an association's
-value must be an object or an array of objects, so `{"employer": null}` reports
-`E_EDGE_SHAPE_MISMATCH` rather than reading as absent (leave the key out to
-omit the association); a foreign-key component is a structural key position and
-reports `E_TYPE_MISMATCH`; a composition value must be an array and reports
-`E_EDGE_SHAPE_MISMATCH`; and a `null` element of a `(many)` association array
-or a `null` composition child reports `E_EDGE_SHAPE_MISMATCH` too.
+association's edge — and for a relation, a `null` value is treated exactly as
+the value left out. A required property draws
+`E_MISSING_REQUIRED`, a required composition draws
+`E_UNRESOLVED_REQUIRED_COMPOSITION`, a required association draws
+`graph.Check`'s `E_UNRESOLVED_REQUIRED` with the reason `absent`, and an
+optional property or relation is dropped rather than stored. A `null` in a
+slot that holds part of a value keeps that slot's own rule: a foreign-key
+component is a structural key position and reports `E_TYPE_MISMATCH`, a `null`
+element of a `(many)` association array or a `null` composition child reports
+`E_EDGE_SHAPE_MISMATCH`, and a `null` inside a List or a Vector is refused as
+the next paragraph states. The key that holds a `null` is still a key: it is
+matched to its member as a key holding a value is, so it is an unknown field
+where it names none, and it is judged beside another key for the same member as
+that key would be.
 
 **A `null` inside a collection is not the absent case.** No element position is
 optional, so the element constraint applies to it and `["a", null]` is rejected
@@ -1077,7 +1081,7 @@ type Car {
 }
 ```
 
-Composition data is embedded inline in instance documents rather than using reference objects, and is **always an array**, `(one)` included. Anything else draws `E_EDGE_SHAPE_MISMATCH`. This differs from associations, where `(one)` takes a single object.
+Composition data is embedded inline in instance documents rather than using reference objects, and is **always an array**, `(one)` included. A `null` is the composition left out; any other value that is not an array draws `E_EDGE_SHAPE_MISMATCH`. This differs from associations, where `(one)` takes a single object.
 
 A part instance is identified through its parent composition, not by a global key. The library mints no address for one. An exporter that must give each part node an identity of its own — the Neo4j adapter's `_composed_key` property is the only one that does — derives it from the **owning root**, not from the immediate parent: the root's identity in that store, the root's key, then one segment per composition hop — for a `(one)` composition the relation name alone, since the slot holds exactly one child; for a `many` composition the relation name and either the child's key or, for a **keyless** part, its array position. Rooting the address at the owning root is what keeps it correct below depth one, and carrying the root's identity is what stops two root types that share a key value and a relation name from naming one part node. A positional segment is **not stable across writes**; it is safe only under replace semantics, where a parent write deletes and recreates its composed subtree.
 
@@ -1848,7 +1852,7 @@ Codes are stable identifiers for programmatic matching. `diag/code.go` holds the
 - `E_MISSING_FK_TARGET` — an edge object holds none of its target's `_target_` foreign-key fields
 - `E_PARTIAL_COMPOSITE_FK` — partial composite foreign key
 - `E_UNKNOWN_EDGE_FIELD` — unknown field in edge data
-- `E_EDGE_SHAPE_MISMATCH` — an edge or a composition value has a JSON shape its relation does not take, such as an object where an array belongs or the reverse, a null or a scalar, or a composed child or a `(many)` edge element that is not an object; and, at `graph.NewFromSnapshot` under another schema, an `"empty"` unresolved record under a `(one)` association, the record an empty list leaves
+- `E_EDGE_SHAPE_MISMATCH` — an edge or a composition value has a JSON shape its relation does not take, such as an object where an array belongs or the reverse, a scalar, or a composed child or a `(many)` edge element that is not an object; and, at `graph.NewFromSnapshot` under another schema, an `"empty"` unresolved record under a `(one)` association, the record an empty list leaves
 - `E_UNRESOLVED_REQUIRED_COMPOSITION` — required composition unresolved
 - `E_COMPOSITION_DEPTH_EXCEEDED` — composed nesting exceeds the depth limit (32), the bound the `.ys` reader holds a document to with `E_SNAPSHOT_DEPTH_EXCEEDED`, so a snapshot can carry every nesting a validator accepts
 - `E_DUPLICATE_COMPOSED_PK` — a composition slot cannot hold this child: two children of one `(many)` slot share a primary key, or a `(one)` slot is given several. Listed here as well as under Graph: the validator raises it over the children it validates together. The import raises it over the snapshot it is given, and `snapshot.Load` and `snapshot.Verify` raise it for two children of a keyed `(many)` slot at one canonical key and for a `(one)` slot a document holds several children in; `snapshot.Info` reads without a schema and makes no such claim

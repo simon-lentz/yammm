@@ -13,9 +13,14 @@ const dateGoName = "Date"
 // dateCodecHelpers is the two unexported functions every Date codec delegates
 // to. Unexported names cannot collide with schema-derived identifiers, which
 // are always exported, so they need no reservation.
-const dateCodecHelpers = `// marshalDate renders t as a JSON string in the form YYYY-MM-DD.
+const dateCodecHelpers = `// marshalDate renders t as a JSON string in the form YYYY-MM-DD. It refuses a
+// year outside 0 to 9999, which Format writes in a form unmarshalDate refuses.
 func marshalDate(t time.Time) ([]byte, error) {
-	return json.Marshal(t.Format(time.DateOnly))
+	s := t.Format(time.DateOnly)
+	if _, err := time.Parse(time.DateOnly, s); err != nil {
+		return nil, err
+	}
+	return json.Marshal(s)
 }
 
 // unmarshalDate parses a JSON string in the form YYYY-MM-DD into *dst. A JSON

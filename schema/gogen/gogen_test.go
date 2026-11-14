@@ -124,7 +124,7 @@ func TestMarshal_CrossSchemaInheritance(t *testing.T) {
 		"Region", "RegionCode", // inherited DataType property kept its named type
 		"HasMarker", "[]*Marker", // inherited composition resolved
 		`json:"region"`,
-		`json:"has_marker,omitempty"`,
+		`json:"has_marker,omitzero"`,
 	} {
 		if !bytes.Contains(got, []byte(want)) {
 			t.Errorf("output missing %q", want)

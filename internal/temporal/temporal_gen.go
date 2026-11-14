@@ -6,9 +6,14 @@ import (
 	"time"
 )
 
-// marshalDate renders t as a JSON string in the form YYYY-MM-DD.
+// marshalDate renders t as a JSON string in the form YYYY-MM-DD. It refuses a
+// year outside 0 to 9999, which Format writes in a form unmarshalDate refuses.
 func marshalDate(t time.Time) ([]byte, error) {
-	return json.Marshal(t.Format(time.DateOnly))
+	s := t.Format(time.DateOnly)
+	if _, err := time.Parse(time.DateOnly, s); err != nil {
+		return nil, err
+	}
+	return json.Marshal(s)
 }
 
 // unmarshalDate parses a JSON string in the form YYYY-MM-DD into *dst. A JSON
@@ -65,10 +70,10 @@ type Sensor struct {
 	Days           []Date                           `json:"days,omitzero"`
 	Stamps         []time.Time                      `json:"stamps,omitzero"`
 	Labels         []string                         `json:"labels,omitzero"`
-	HasReading     []*Reading                       `json:"has_reading,omitempty"`
-	InCasing       []*Casing                        `json:"in_casing,omitempty"`
-	Feeds          *EDGE_Sensor_feeds_Sensor        `json:"feeds,omitempty"`
-	Neighbours     []*EDGE_Sensor_neighbours_Sensor `json:"neighbours,omitempty"`
+	HasReading     []*Reading                       `json:"has_reading,omitzero"`
+	InCasing       []*Casing                        `json:"in_casing"`
+	Feeds          *EDGE_Sensor_feeds_Sensor        `json:"feeds"`
+	Neighbours     []*EDGE_Sensor_neighbours_Sensor `json:"neighbours,omitzero"`
 }
 
 type EDGE_Sensor_feeds_Sensor struct {

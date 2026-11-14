@@ -296,50 +296,6 @@ func TestValidateCompositions_NotArray(t *testing.T) {
 	assert.Contains(t, result.String(), "expected array")
 }
 
-func TestValidateCompositions_ExplicitNull_Optional(t *testing.T) {
-	// Per architecture spec: null is always a shape error, even for optional compositions.
-	s := compositionSchema(t, true)
-
-	validator := instance.NewValidator(s)
-
-	raw := instance.RawInstance{
-		Properties: map[string]any{
-			"id":        "1",
-			"addresses": nil, // Explicit null - always a shape error
-		},
-	}
-
-	valid, result := validator.ValidateOne(t.Context(), "Person", raw)
-
-	assert.True(t, valid.IsZero())
-	require.False(t, result.OK())
-	assert.Contains(t, result.String(), "null is not a valid composition value")
-
-	yammmtest.GoldenJSON(t, "composition_diag_null_optional", issueProjection(result))
-}
-
-func TestValidateCompositions_ExplicitNull_Required(t *testing.T) {
-	// Per architecture spec: null is always a shape error.
-	s := compositionSchema(t, false)
-
-	validator := instance.NewValidator(s)
-
-	raw := instance.RawInstance{
-		Properties: map[string]any{
-			"id":        "1",
-			"addresses": nil, // Explicit null - always a shape error
-		},
-	}
-
-	valid, result := validator.ValidateOne(t.Context(), "Person", raw)
-
-	assert.True(t, valid.IsZero())
-	require.False(t, result.OK())
-	assert.Contains(t, result.String(), "null is not a valid composition value")
-
-	yammmtest.GoldenJSON(t, "composition_diag_null_required", issueProjection(result))
-}
-
 func TestValidateCompositions_ReasonDetail_Absent(t *testing.T) {
 	// Verify E_UNRESOLVED_REQUIRED_COMPOSITION includes reason="absent" for missing field.
 	s := compositionSchema(t, false)
@@ -502,10 +458,10 @@ type Person {
 	_, result = validator.ValidateOne(t.Context(), "Person", person([]any{}...))
 	require.True(t, result.OK(), result.String())
 
-	// A nil slice is no empty array: it holds no value, so it is the null a
-	// composition refuses, as encoding/json writes it.
+	// A nil slice is no empty array: it holds no value, so it is the absent
+	// slot an explicit null is, as encoding/json writes it.
 	_, nullResult := validator.ValidateOne(t.Context(), "Person", instance.RawInstance{Properties: map[string]any{"id": "1", "home": nil}})
 	_, result = validator.ValidateOne(t.Context(), "Person", person())
-	require.False(t, result.OK())
+	require.True(t, result.OK(), result.String())
 	assert.Equal(t, nullResult.String(), result.String(), "a nil slice must draw what an explicit null draws")
 }

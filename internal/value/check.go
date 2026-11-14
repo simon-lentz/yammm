@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"reflect"
 	"slices"
 	"strconv"
 	"strings"
@@ -484,6 +485,9 @@ func checkTimestamp(val any) error {
 	if t, ok := val.(time.Time); ok {
 		s = t.Format(timestampLayout)
 	} else {
+		if wrapsTime(val) {
+			return wrappedTimeRefusal("timestamp", val)
+		}
 		var refused *CheckError
 		if s, refused = textOf(val, "timestamp string or time.Time"); refused != nil {
 			return refused
@@ -497,6 +501,35 @@ func checkTimestamp(val any) error {
 		return nil
 	}
 	return constraintFail("invalid timestamp format: %s", diag.QuoteValue(s))
+}
+
+// wrappedTimeRefusal refuses val, a generated time type's value ([wrapsTime]),
+// at a position of kind Date or Timestamp, and tells it to pass its .Time,
+// since the library reads no such struct.
+func wrappedTimeRefusal(kind string, val any) *CheckError {
+	return typeMismatch("expected %s string or time.Time (pass a generated type's .Time), got %T", kind, val)
+}
+
+// wrapsTime reports whether val is a struct whose one field is an embedded
+// time.Time, the shape of a generated Date or Timestamp data type, or a non-nil
+// pointer to one; a nil pointer is not, since none is passed as nil. It reads
+// one field at most and allocates nothing.
+func wrapsTime(val any) bool {
+	t := reflect.TypeOf(val)
+	if t == nil {
+		return false
+	}
+	if t.Kind() == reflect.Pointer {
+		if reflect.ValueOf(val).IsNil() {
+			return false
+		}
+		t = t.Elem()
+	}
+	if t.Kind() != reflect.Struct || t.NumField() != 1 {
+		return false
+	}
+	f := t.Field(0)
+	return f.Anonymous && f.Type == reflect.TypeFor[time.Time]()
 }
 
 // checkDate validates that val is a valid date.
@@ -516,6 +549,9 @@ func checkDate(val any) error {
 		val = s
 	}
 
+	if wrapsTime(val) {
+		return wrappedTimeRefusal("date", val)
+	}
 	s, refused := textOf(val, "date string or time.Time")
 	if refused != nil {
 		return refused

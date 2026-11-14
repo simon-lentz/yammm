@@ -11,7 +11,7 @@ type State struct {
 type County struct {
 	Fips    string                      `json:"fips"`
 	Zips    []StateCode                 `json:"zips,omitzero"`
-	InState *EDGE_County_in_state_State `json:"in_state,omitempty"`
+	InState *EDGE_County_in_state_State `json:"in_state"`
 }
 
 type EDGE_County_in_state_State struct {

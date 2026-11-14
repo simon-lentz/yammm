@@ -69,15 +69,15 @@ func TestValidateOne_ANilSliceOrMapIsAbsentAtEveryNullRuleSite(t *testing.T) {
 			}
 		}
 	})
-	t.Run("edge value nil map and nil slice are the null an explicit null is", func(t *testing.T) {
+	t.Run("edge value nil map and nil slice are the absent value an explicit null is", func(t *testing.T) {
 		t.Parallel()
 		_, oneControl := v.ValidateOne(t.Context(), "T", instance.RawInstance{Properties: map[string]any{"id": "x", "must": "m", "at": nil}})
 		_, one := v.ValidateOne(t.Context(), "T", instance.RawInstance{Properties: map[string]any{"id": "x", "must": "m", "at": map[string]any(nil)}})
 		_, manyControl := v.ValidateOne(t.Context(), "T", instance.RawInstance{Properties: map[string]any{"id": "x", "must": "m", "lines": nil}})
 		_, many := v.ValidateOne(t.Context(), "T", instance.RawInstance{Properties: map[string]any{"id": "x", "must": "m", "lines": []any(nil)}})
 		for name, pair := range map[string][2]diag.Result{"a nil map at a (one) association": {oneControl, one}, "a nil slice at a (many) composition": {manyControl, many}} {
-			if !slices.Equal(codes(pair[0]), codes(pair[1])) || !pair[1].HasCode(diag.E_EDGE_SHAPE_MISMATCH) {
-				t.Errorf("%s drew %v, an explicit null %v; want the same E_EDGE_SHAPE_MISMATCH", name, codes(pair[1]), codes(pair[0]))
+			if !slices.Equal(codes(pair[0]), codes(pair[1])) || pair[1].Err() != nil {
+				t.Errorf("%s drew %v, an explicit null %v; want both accepted as absent", name, codes(pair[1]), codes(pair[0]))
 			}
 		}
 	})

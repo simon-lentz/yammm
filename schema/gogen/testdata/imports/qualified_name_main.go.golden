@@ -7,10 +7,10 @@ type Type_main__Bar struct {
 
 type Holder struct {
 	ID          string                            `json:"id"`
-	HasAFoo     *EDGE_Holder_has_a_foo_Foo        `json:"has_a_foo,omitempty"`
-	HasBFoo     *EDGE_Holder_has_b_foo_Foo        `json:"has_b_foo,omitempty"`
-	HasAFooType *EDGE_Holder_has_a_foo_type_AFoo  `json:"has_a_foo_type,omitempty"`
-	HasMainBar  *EDGE_Holder_has_main_bar_MainBar `json:"has_main_bar,omitempty"`
+	HasAFoo     *EDGE_Holder_has_a_foo_Foo        `json:"has_a_foo"`
+	HasBFoo     *EDGE_Holder_has_b_foo_Foo        `json:"has_b_foo"`
+	HasAFooType *EDGE_Holder_has_a_foo_type_AFoo  `json:"has_a_foo_type"`
+	HasMainBar  *EDGE_Holder_has_main_bar_MainBar `json:"has_main_bar"`
 }
 
 type Type_a__Foo struct {

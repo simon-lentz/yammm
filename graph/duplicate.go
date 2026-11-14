@@ -130,7 +130,8 @@ func (u UnresolvedEdge) Required() bool {
 
 // Reason explains why the edge is unresolved:
 //   - "target_missing": the target instance is not in the graph
-//   - "absent": the association field is missing from the instance data
+//   - "absent": the instance data leaves the association field out or holds no
+//     value there, such as null
 //   - "empty": the association array is present but empty
 func (u UnresolvedEdge) Reason() string {
 	if u.IsZero() {

@@ -13,6 +13,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/simon-lentz/yammm/internal/ident"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -33,6 +34,16 @@ func TestGoIdent(t *testing.T) {
 	for in, want := range cases {
 		if got := goExportedIdent(in, defaultInitialisms); got != want {
 			t.Errorf("goExportedIdent(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+// Every default acronym is one WithInitialisms accepts, so the default set
+// holds no entry no word can equal.
+func TestDefaultInitialisms_EachIsAnAcronymAWordCanEqual(t *testing.T) {
+	for _, a := range slices.Sorted(maps.Keys(defaultInitialisms)) {
+		if !ident.IsInitialism(a) {
+			t.Errorf("default initialism %q holds a rune that is not a letter", a)
 		}
 	}
 }

@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/simon-lentz/yammm/internal/ident"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -50,18 +51,16 @@ func CheckPackageName(name string) error {
 
 // WithInitialisms registers additional acronyms (e.g. "JWT", "OIDC"): the
 // name-mapper upper-cases wholesale a word of a name that equals one, in
-// exported Go identifiers. It ends a word where a digit meets a letter, so an
-// acronym that holds both, such as "S3", changes nothing. Registered acronyms
-// MERGE with gogen's default golint set (they do not replace it) and are matched
-// case-insensitively. This is how a downstream code generator injects its own
-// domain vocabulary without that vocabulary ever living in yammm.
+// exported Go identifiers. A word is letters alone, so [Marshal] refuses an
+// acronym that is empty or holds any other rune, such as "S3", with
+// [ErrInvalidInitialism]. Registered acronyms MERGE with gogen's default golint
+// set and are matched case-insensitively.
 func WithInitialisms(names ...string) Option {
 	return func(c *config) { c.initialisms = append(c.initialisms, names...) }
 }
 
-// defaultInitialisms is golint's commonInitialisms list, lower-cased. "utf8"
-// never matches, because the tokenizer splits it at the digit; it stays for
-// parity with golint.
+// defaultInitialisms is golint's commonInitialisms list, lower-cased, less
+// "utf8": a word never holds a digit, so it could not match.
 //
 //nolint:gochecknoglobals // Intentional: static lookup table for name mapping.
 var defaultInitialisms = map[string]bool{
@@ -71,7 +70,7 @@ var defaultInitialisms = map[string]bool{
 	"qps": true, "ram": true, "rhs": true, "rpc": true, "sla": true,
 	"smtp": true, "sql": true, "ssh": true, "tcp": true, "tls": true,
 	"ttl": true, "udp": true, "ui": true, "uid": true, "uuid": true,
-	"uri": true, "url": true, "utf8": true, "vm": true, "xml": true,
+	"uri": true, "url": true, "vm": true, "xml": true,
 	"xmpp": true, "xsrf": true, "xss": true,
 }
 
@@ -111,6 +110,11 @@ func newGenerator(s schema.Schema, opts ...Option) (*generator, error) {
 		pkg = goPackageName(s.Name())
 	} else if err := CheckPackageName(pkg); err != nil {
 		return nil, err
+	}
+	for _, a := range cfg.initialisms {
+		if !ident.IsInitialism(a) {
+			return nil, fmt.Errorf("%w: WithInitialisms(%q) must be one or more letters", ErrInvalidInitialism, a)
+		}
 	}
 	keys, err := resolveKeyRoot(s)
 	if err != nil {

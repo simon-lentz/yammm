@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -32,8 +33,85 @@ func TestGen_InvalidPackageExitsUsage(t *testing.T) {
 	}
 }
 
-// TestGen_GeneratorFailureExitsRuntime pins that only the package-name refusal
-// becomes a usage error: a schema gogen refuses is still a generation failure.
+// An --initialisms acronym no word of a name can equal is a usage error naming
+// the flag, judged before the schema is read, as a bad --package is.
+func TestGen_InvalidInitialismExitsUsage(t *testing.T) {
+	for _, tc := range []struct {
+		flags          []string
+		refused, input string
+	}{
+		{[]string{"S3"}, "S3", "testdata/valid.yammm"},
+		{[]string{"JWT,"}, "", "testdata/valid.yammm"},
+		{[]string{""}, "", "testdata/valid.yammm"},
+		{[]string{"JWT", ""}, "", "testdata/valid.yammm"},
+		{[]string{"", "JWT"}, "", "testdata/valid.yammm"},
+		{[]string{"JWT,o-idc"}, "o-idc", "testdata/valid.yammm"},
+		{[]string{"S3,JWT"}, "S3", "testdata/valid.yammm"},
+		{[]string{"UTF8"}, "UTF8", "testdata/no_such_schema.yammm"},
+	} {
+		t.Run(strings.Join(tc.flags, " "), func(t *testing.T) {
+			args := []string{"gen", "--to", "go"}
+			for _, f := range tc.flags {
+				args = append(args, "--initialisms", f)
+			}
+			code, stdout, errOut := runCLI(t, append(args, tc.input)...)
+			if code != cli.ExitUsage {
+				t.Errorf("exit code = %d, want %d:\n%s", code, cli.ExitUsage, errOut)
+			}
+			if stdout != "" {
+				t.Errorf("stdout is not empty: %q", stdout)
+			}
+			if !strings.Contains(errOut, `--initialisms "`+tc.refused+`"`) {
+				t.Errorf("stderr does not name --initialisms %q:\n%s", tc.refused, errOut)
+			}
+			if strings.Contains(errOut, "WithInitialisms") {
+				t.Errorf("stderr names the library option, not the flag:\n%s", errOut)
+			}
+		})
+	}
+	code, stdout, errOut := runCLI(t, "gen", "--to", "go", "--initialisms", "JWT", "--initialisms", "url,OIDC", "testdata/valid.yammm")
+	if code != 0 || stdout == "" {
+		t.Errorf("valid acronyms over two occurrences exit %d:\n%s", code, errOut)
+	}
+}
+
+// Shell completion offers --initialisms again once it is given, as it offers
+// every flag that may repeat.
+func TestGen_CompletionOffersInitialismsAgain(t *testing.T) {
+	code, stdout, errOut := runCLI(t, "__complete", "gen", "testdata/valid.yammm", "--to", "go", "--initialisms", "JWT", "--i")
+	if code != 0 {
+		t.Fatalf("completion exit %d:\n%s", code, errOut)
+	}
+	if !slices.ContainsFunc(strings.Split(stdout, "\n"), func(l string) bool {
+		return strings.HasPrefix(l, "--initialisms")
+	}) {
+		t.Errorf("completion after one --initialisms does not offer it again:\n%s", stdout)
+	}
+}
+
+// gen's help prints --initialisms with no default, as it prints every flag
+// whose default is empty.
+func TestGen_InitialismsHelpPrintsNoDefault(t *testing.T) {
+	code, stdout, errOut := runCLI(t, "gen", "--help")
+	if code != 0 {
+		t.Fatalf("gen --help exit %d:\n%s", code, errOut)
+	}
+	var line string
+	for l := range strings.Lines(stdout) {
+		if strings.Contains(l, "--initialisms strings") {
+			line = l
+		}
+	}
+	if line == "" {
+		t.Fatalf("help has no --initialisms line:\n%s", stdout)
+	}
+	if strings.Contains(line, "default") {
+		t.Errorf("help prints a default for --initialisms: %q", line)
+	}
+}
+
+// TestGen_GeneratorFailureExitsRuntime pins that only the flag refusals become
+// usage errors: a schema gogen refuses is still a generation failure.
 // One source reached by two import paths, through a symlinked directory, has
 // no embedded store the re-load can read.
 func TestGen_GeneratorFailureExitsRuntime(t *testing.T) {

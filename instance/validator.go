@@ -576,7 +576,8 @@ func nameList(keys []string) string {
 }
 
 // relationState is what the member index knows about one relation's input:
-// absent, present under key, or collided — two keys fold to its field and
+// absent (the zero value, which a relation with no entry reads as), present
+// under key, or collided — two keys fold to its field and
 // the collision was reported once at the object, so the relation is neither
 // absent nor present and the caller moves on.
 type relationState uint8
@@ -597,11 +598,14 @@ type relationInput struct {
 // buildRelationMapping reads each relation's entry from the member index:
 // present under the key that claims it, or collided, reported here once at the
 // object before any pass runs, so both member kinds report from one site and no
-// pass's gate can swallow the report.
+// pass's gate can swallow the report. A relation with no entry is absent: no key
+// claims it, or its key holds no value ([IsAbsent]), as a property's null is.
 func buildRelationMapping(claims objectClaims, props map[string]any, collector *diag.Collector, prov location.Provenance, base path.Builder) map[schema.Relation]relationInput {
 	rels := make(map[schema.Relation]relationInput, len(claims.rels)+len(claims.relCollisions))
 	for rel, key := range claims.rels {
-		rels[rel] = relationInput{state: relationPresent, key: key, value: props[key]}
+		if v := props[key]; !IsAbsent(v) {
+			rels[rel] = relationInput{state: relationPresent, key: key, value: v}
+		}
 	}
 	for _, c := range claims.relCollisions {
 		in := relationInput{state: relationCollided, candidates: c.keys}

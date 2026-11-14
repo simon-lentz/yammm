@@ -1,11 +1,13 @@
 package main
 
 import (
+	"encoding/csv"
 	"strings"
 
 	"github.com/spf13/cobra"
 
 	"github.com/simon-lentz/yammm/cmd/yammm/internal/cli"
+	"github.com/simon-lentz/yammm/internal/ident"
 	"github.com/simon-lentz/yammm/schema"
 	"github.com/simon-lentz/yammm/schema/gogen"
 	"github.com/simon-lentz/yammm/schema/markdown"
@@ -26,7 +28,8 @@ Targets:
                    embedded schema source with its SchemaHash. Output is
                    stdlib-only. Use --initialisms to upper-case extra acronyms
                    (e.g. JWT,OIDC) in generated identifiers; they merge with
-                   the default golint acronym set.
+                   the default golint acronym set, and each is one or more
+                   letters.
 
   --to md          A self-contained Markdown reference document: a Mermaid
                    class diagram of every type in the import closure, per-type
@@ -45,7 +48,7 @@ source keys are relative to that root.`,
 	cmd.Flags().String("to", "", "target: go or md (required)")
 	cmd.Flags().String("package", "", "go target: generated package name (default: derived from schema name)")
 	cmd.Flags().String("output", "", "output file path (default: stdout)")
-	cmd.Flags().StringSlice("initialisms", nil, "go target: extra acronyms to upper-case in generated names, e.g. JWT,OIDC")
+	cmd.Flags().Var(&acronymsValue{}, "initialisms", "go target: extra acronyms to upper-case in generated names, e.g. JWT,OIDC")
 	registerModuleRootFlag(cmd)
 	cmd.Flags().Bool("no-class-diagram", false, "md target: omit the Mermaid class-diagram section")
 	cmd.Flags().Bool("no-class-members", false, "md target: omit the member lines inside each diagram class")
@@ -73,6 +76,40 @@ func rejectInapplicableFlags(cmd *cobra.Command, target string) error {
 	return nil
 }
 
+// acronymsValue is --initialisms' value, a [cobra.SliceValue] as StringSlice
+// is, so completion offers the flag again. It reads an occurrence as
+// StringSlice does, save that an empty one is one empty acronym for runGen to
+// refuse, where StringSlice drops it.
+type acronymsValue struct{ vals []string }
+
+var _ cobra.SliceValue = (*acronymsValue)(nil)
+
+// String renders no acronyms as "", the default pflag's help prints no
+// "(default ...)" for.
+func (a *acronymsValue) String() string {
+	if len(a.vals) == 0 {
+		return ""
+	}
+	return "[" + strings.Join(a.vals, ",") + "]"
+}
+
+func (a *acronymsValue) Type() string { return "strings" }
+
+func (a *acronymsValue) Set(s string) error {
+	if s == "" {
+		a.vals = append(a.vals, "")
+		return nil
+	}
+	fields, err := csv.NewReader(strings.NewReader(s)).Read()
+	if err != nil {
+		return err
+	}
+	a.vals = append(a.vals, fields...)
+	return nil
+}
+
+func (a *acronymsValue) GetSlice() []string { return a.vals }
+
 func runGen(cmd *cobra.Command, args []string, sink *cli.DiagnosticSink) error {
 	toFormat, _ := cmd.Flags().GetString("to")
 	outputPath, _ := cmd.Flags().GetString("output")
@@ -88,10 +125,17 @@ func runGen(cmd *cobra.Command, args []string, sink *cli.DiagnosticSink) error {
 		return err
 	}
 	// A flag refused before any lookup is a usage error whatever the schema
-	// holds, so --package is judged before the load, and when given empty too.
+	// holds, so --package and --initialisms are judged before the load, and
+	// when given empty too.
 	if pkgName, _ := cmd.Flags().GetString("package"); cmd.Flags().Changed("package") {
 		if err := gogen.CheckPackageName(pkgName); err != nil {
 			return cli.Usagef("invalid --package %q: a Go package name is an identifier that is not a keyword and not \"_\"", pkgName)
+		}
+	}
+	initialisms := cmd.Flags().Lookup("initialisms").Value.(cobra.SliceValue).GetSlice()
+	for _, a := range initialisms {
+		if !ident.IsInitialism(a) {
+			return cli.Usagef("invalid --initialisms %q: an acronym is one or more letters", a)
 		}
 	}
 
@@ -116,7 +160,6 @@ func runGen(cmd *cobra.Command, args []string, sink *cli.DiagnosticSink) error {
 	switch target {
 	case "go":
 		pkgName, _ := cmd.Flags().GetString("package")
-		initialisms, _ := cmd.Flags().GetStringSlice("initialisms")
 		var opts []gogen.Option
 		if pkgName != "" {
 			opts = append(opts, gogen.WithPackageName(pkgName))

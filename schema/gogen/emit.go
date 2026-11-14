@@ -299,7 +299,7 @@ func (g *generator) emitComposition(rel schema.Relation, fields map[string]strin
 	// Every composition is a slice, (one) included: an instance document holds
 	// an array for every multiplicity, and a slice also keeps a composition
 	// cycle legal as a Go type.
-	fmt.Fprintf(g.buf, "%s []*%s %s\n", field, childName, jsonTag(rel.FieldName(), relationOmit))
+	fmt.Fprintf(g.buf, "%s []*%s %s\n", field, childName, jsonTag(rel.FieldName(), relationOmit(rel)))
 	return nil
 }
 
@@ -317,7 +317,7 @@ func (g *generator) emitAssociation(rel schema.Relation, fields map[string]strin
 	}
 	// A pointer even for a required (one): a required-one relation cycle
 	// rendered as a value type would be an illegal recursive Go type.
-	fmt.Fprintf(g.buf, "%s %s%s %s\n", field, star, edgeName, jsonTag(rel.FieldName(), relationOmit))
+	fmt.Fprintf(g.buf, "%s %s%s %s\n", field, star, edgeName, jsonTag(rel.FieldName(), relationOmit(rel)))
 	return nil
 }
 
@@ -611,10 +611,21 @@ func (g *generator) emitField(owner fieldOwner, p schema.Property, fields map[st
 	return nil
 }
 
-// relationOmit is every relation field's json option. A relation is never
-// written null, so an unset one is left out; instance validation refuses a
-// null, and a required relation's absence is refused where yammm checks presence.
-const relationOmit = "omitempty"
+// relationOmit returns rel's json option by propertyOmit's rule: a required
+// relation's field is always written, so an unset one writes null, which
+// instance validation reads as absent. An optional relation whose field is a
+// slice, a composition or a (many) association, takes omitzero, so a present
+// empty list, which the library keeps, is written back.
+func relationOmit(rel schema.Relation) string {
+	switch {
+	case !rel.IsOptional():
+		return ""
+	case rel.IsComposition() || rel.IsMany():
+		return "omitzero"
+	default:
+		return "omitempty"
+	}
+}
 
 // propertyOmit returns p's json option. An optional slice takes omitzero, so a
 // present empty list, which the library keeps, is written back rather than

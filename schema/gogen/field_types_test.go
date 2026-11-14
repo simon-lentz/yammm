@@ -3,6 +3,8 @@ package gogen_test
 import (
 	"bytes"
 	"context"
+	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -124,11 +126,11 @@ type Person {
 	}, []string{"Role     string"})
 }
 
-// TestMarshal_JSONTagsOmitOnlyWhatIsAbsent pins each field's json option: an
-// optional pointer omits nil, an optional slice omits only nil so a present
-// empty list survives a re-encode, a required property carries none, and every
-// relation omits an unset field, since instance validation refuses a null
-// relation.
+// TestMarshal_JSONTagsOmitOnlyWhatIsAbsent pins each field's json option, one
+// rule for a property and a relation: an optional pointer omits nil, an
+// optional slice omits only nil so a present empty list survives a re-encode,
+// and a required field carries none, so an unset one writes null, which
+// instance validation reads as absent.
 func TestMarshal_JSONTagsOmitOnlyWhatIsAbsent(t *testing.T) {
 	t.Parallel()
 
@@ -145,10 +147,13 @@ type Doc {
 	tags  List<String>
 	vec   Vector[2]
 	*-> PARTS (one) Part
+	*-> SPARE (_:one) Part
 	*-> MORE (many) Part
+	*-> ALL (one:many) Part
 	--> LINK (one) Doc
 	--> MAYBE Doc
 	--> MANY (many) Doc
+	--> SOME (one:many) Doc
 }
 `)
 	assertHolds(t, got, []string{
@@ -157,11 +162,14 @@ type Doc {
 		"`json:\"req\"`",
 		"`json:\"tags,omitzero\"`",
 		"`json:\"vec,omitzero\"`",
-		"Parts []*Part              `json:\"parts,omitempty\"`",
-		"More  []*Part              `json:\"more,omitempty\"`",
-		"Link  *EDGE_Doc_link_Doc   `json:\"link,omitempty\"`",
+		"Parts []*Part              `json:\"parts\"`",
+		"Spare []*Part              `json:\"spare,omitzero\"`",
+		"More  []*Part              `json:\"more,omitzero\"`",
+		"All   []*Part              `json:\"all\"`",
+		"Link  *EDGE_Doc_link_Doc   `json:\"link\"`",
 		"Maybe *EDGE_Doc_maybe_Doc  `json:\"maybe,omitempty\"`",
-		"Many  []*EDGE_Doc_many_Doc `json:\"many,omitempty\"`",
+		"Many  []*EDGE_Doc_many_Doc `json:\"many,omitzero\"`",
+		"Some  []*EDGE_Doc_some_Doc `json:\"some\"`",
 		"TargetID string `json:\"_target_id\"`",
 	}, nil)
 }
@@ -293,6 +301,36 @@ func TestMarshal_WithInitialismsIsScopedToItsCall(t *testing.T) {
 	}
 	if got, err := gogen.Marshal(s); err != nil || !bytes.Contains(got, []byte("JwtToken string")) {
 		t.Errorf("Marshal after concurrent WithInitialisms calls = %v, want JwtToken:\n%s", err, got)
+	}
+}
+
+// A WithInitialisms acronym that no word of a name can equal, one empty or
+// holding a rune that is not a letter, is refused as the caller's input with
+// ErrInvalidInitialism, and the message names it. Letters alone, in any
+// script, are accepted.
+func TestMarshal_RefusesAnInitialismNoWordCanEqual(t *testing.T) {
+	t.Parallel()
+	s := loadSchema(t, "initialisms")
+	for _, a := range []string{"", "S3", "utf8", "o-idc", "JWT TOKEN", "a_b", "x.y"} {
+		for _, opts := range [][]string{{"JWT", a}, {a, "JWT"}} {
+			got, err := gogen.Marshal(s, gogen.WithInitialisms(opts...))
+			if !errors.Is(err, gogen.ErrInvalidInitialism) || errors.Is(err, gogen.ErrInvalidPackageName) {
+				t.Errorf("WithInitialisms(%q) = %v, want ErrInvalidInitialism alone", opts, err)
+				continue
+			}
+			want := fmt.Sprintf("gogen: invalid initialism: WithInitialisms(%q)", a)
+			if got != nil || !strings.HasPrefix(err.Error(), want) {
+				t.Errorf("WithInitialisms(%q) gives %d bytes and %v; want no output and a message starting %s", opts, len(got), err, want)
+			}
+		}
+	}
+	if _, err := gogen.Marshal(s, gogen.WithPackageName("my-pkg")); errors.Is(err, gogen.ErrInvalidInitialism) {
+		t.Errorf("a bad package name is marked ErrInvalidInitialism: %v", err)
+	}
+	for _, a := range []string{"JWT", "oidc", "Ünï", "ДНК"} {
+		if _, err := gogen.Marshal(s, gogen.WithInitialisms(a)); err != nil {
+			t.Errorf("WithInitialisms(%q) = %v, want it accepted", a, err)
+		}
 	}
 }
 

@@ -6,7 +6,7 @@ type RegionCode string
 type City struct {
 	Name      string     `json:"name"`
 	Region    RegionCode `json:"region"`
-	HasMarker []*Marker  `json:"has_marker,omitempty"`
+	HasMarker []*Marker  `json:"has_marker,omitzero"`
 }
 
 type Marker struct {
@@ -15,7 +15,7 @@ type Marker struct {
 
 type Located struct {
 	Region    RegionCode `json:"region"`
-	HasMarker []*Marker  `json:"has_marker,omitempty"`
+	HasMarker []*Marker  `json:"has_marker,omitzero"`
 }
 
 type Graph struct {

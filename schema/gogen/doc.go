@@ -42,22 +42,31 @@
 // A type's or a property's schema doc-comment, an edge property's included,
 // becomes the Go declaration's doc-comment, one "//" line for each of its
 // lines; every other doc-comment, a data type's, a relation's, an invariant's,
-// an annotation's and the schema's own among them, is not written.
-// The text is the loaded schema's, whose continuation lines lost the
-// indentation they all share, byte for byte, when the parser read the comment,
-// so layout that indents every continuation line alike makes no code block;
-// lines indented by different bytes, such as a tab on one and spaces on
-// another, share none and keep theirs, which the Go doc-comment formatter
-// reads as a code block. A line
-// indented deeper than the rest keeps the difference and is rendered as a
-// code block: gofmt puts a blank "//" line before it, and after it when text
-// follows. A line Go would read as a build line — "+build ignore" as a "//"
-// line, which gofmt moves into the file's build constraints — is written as a
-// one-line /* */ comment in the same comment group, which neither gofmt nor go
-// vet reads as one, so the doc's words read unchanged; gofmt then leaves that group
-// as written. A form feed in such a line is written as a space: gofmt counts
-// a form feed in a comment as a line end, and would join the next line of the
-// group, or the field the comment documents, to a /* */ comment holding one.
+// an annotation's and the schema's own among them, is not written. The text is
+// the loaded schema's, whose continuation lines lost the indentation they all
+// share, byte for byte, when the parser read the comment, so layout that
+// indents every continuation line alike makes no code block; lines indented by
+// different bytes, such as a tab on one and spaces on another, share none and
+// keep theirs, which the Go doc-comment formatter reads as a code block, or as
+// a list when the first starts with a list marker ("-", "*", "+", "•", or a
+// number and "." or ")"). Lines indented deeper than the rest keep the
+// difference and are read by the same rule. [Marshal] formats its output with
+// go/format, and the toolchain that builds its caller decides what that does to
+// a doc comment: Go 1.26 rewrites every one as go/doc reads it, and Go 1.27 a
+// type's alone, leaving a field's as written. A rewritten comment can differ
+// from the schema's words: a code block gains a blank "//" line before it, and
+// after it when text follows; a list is indented again and its markers written
+// "-" or "<n>."; a one-line paragraph that reads as a heading, such as
+// "Overview" between two paragraphs, gains "# "; and in text, each pair of
+// backquotes outside a run of three becomes an opening curly double quote and
+// each pair of single quotes a closing one. A line Go would read as a build
+// line — "+build ignore" as a "//" line, which gofmt moves into the file's
+// build constraints — is written as a one-line /* */ comment in the same
+// comment group, which neither gofmt nor go vet reads as one, so the doc's
+// words read unchanged; go/format then leaves the whole group as written. A
+// form feed in such a line is written as a space: gofmt counts a form feed in a
+// comment as a line end, and would join the next line of the group, or the
+// field the comment documents, to a /* */ comment holding one.
 //
 // # Type Mapping
 //
@@ -74,16 +83,19 @@
 //	Vector                        →  []float64
 //	List<T>                       →  []T
 //
-// The library stores a Date as "2006-01-02", and the validator reads that
-// text. A bare time.Time decodes RFC 3339 alone, so it refuses a Date. The
-// generated Date type is a struct embedding time.Time — so every time.Time
-// method but MarshalJSON and UnmarshalJSON is promoted, and a value is built
-// as Date{Time: t} — carrying MarshalJSON and UnmarshalJSON that speak the
-// stored text. A Timestamp stays time.Time, whose own codec exchanges RFC 3339
-// with nanoseconds, the text the library stores. It decodes and encodes every
-// text the validator stores as written: the validator stores only text
-// time.Time writes. A DataType over a Date or a Timestamp is emitted as
-// struct{ time.Time } too, a Date with the Date codec.
+// The library stores a Date as "2006-01-02", and the validator reads that text.
+// A bare time.Time decodes RFC 3339 alone, so it refuses a Date. The generated
+// Date type is a struct embedding time.Time — so every time.Time method but
+// MarshalJSON and UnmarshalJSON is promoted, and a value is built as
+// Date{Time: t} — carrying MarshalJSON and UnmarshalJSON that speak the stored text.
+// MarshalJSON refuses a year outside 0 to 9999, which UnmarshalJSON could not
+// read back. The validator reads a generated Date or temporal DataType only
+// through JSON or as its .Time: the value itself draws E_TYPE_MISMATCH, whose
+// message says to pass .Time. A Timestamp stays time.Time, whose own codec
+// exchanges RFC 3339 with nanoseconds, the text the library stores. It decodes
+// and encodes every text the validator stores as written: the validator stores
+// only text time.Time writes. A DataType over a Date or a Timestamp is emitted
+// as struct{ time.Time } too, a Date with the Date codec.
 //
 // Named types are rendered faithfully rather than collapsed to their primitive: a
 // field typed by a named DataType keeps that Go type; a List whose innermost
@@ -102,15 +114,19 @@
 //
 // Every field but the time.Time a generated temporal type embeds (Date, or a
 // DataType resolving to Date or Timestamp) carries a json tag preserving the
-// wire name verbatim. An optional
-// pointer field adds ,omitempty. An optional slice field adds ,omitzero, which
-// leaves out a nil slice and writes a present empty list as [], since the
-// library keeps an empty list apart from an absent one; encoding/json reads
-// omitzero from Go 1.24, and a consumer built below it writes a nil slice as
-// null, which instance validation reads as an absent optional. Every relation field
-// adds ,omitempty, required ones included: instance validation refuses a null
-// relation, and a required relation left unset is refused where presence is
-// checked.
+// wire name verbatim. An optional pointer field adds ,omitempty. An optional
+// slice field adds ,omitzero, which leaves out a nil slice and writes a present
+// empty list as [], since the library keeps an empty list apart from an absent
+// one; encoding/json reads omitzero from Go 1.24, and a consumer built below it
+// writes a nil slice as null, which instance validation reads as an absent
+// optional. A relation field takes the same rule by its Go kind: an optional
+// composition and an optional to-many association, each a slice, add ,omitzero,
+// and an optional to-one association, a pointer, adds ,omitempty. A required
+// field adds neither. A required relation and a required List or Vector
+// property are a slice or a pointer, so an unset one is written null, which
+// instance validation reads as the key left out and refuses where presence is
+// checked; a required scalar property holds a value, so an unset one is written
+// as its zero value.
 //
 // # Associations and the Graph Aggregate
 //
@@ -223,7 +239,9 @@
 // key field is "Target" and then the key property's name as an exported
 // identifier. Two fields whose bare spellings meet each take "Field_" and their
 // wire key, which their json tag also holds: Field_foo_1 and Field_foo1 for
-// foo_1 and foo1.
+// foo_1 and foo1. A Graph field is named by its type's Go name, bare or exact,
+// so it moves when that name moves; its json tag, the type's AddressableTag,
+// does not.
 //
 // # Embedded Source
 //
@@ -243,8 +261,9 @@
 // consumer sees do not vary with how many files a schema happens to span.
 //
 // A key is the name the re-load registers a source under, never an absolute
-// generation-machine path, so the output is byte-reproducible across checkouts
-// and CI. The entry keys by its path under the load's recorded module root
+// generation-machine path, so the output of a generator one Go toolchain
+// builds is byte-reproducible across checkouts and CI. The entry keys by its
+// path under the load's recorded module root
 // ([github.com/simon-lentz/yammm/schema.Schema.ModuleRoot] — supplied by the
 // caller, discovered from a yammm.mod marker, a synthetic root, or the entry
 // file's own directory), compared as
@@ -317,10 +336,11 @@
 //     included, must be a Go identifier that is not a keyword and not "_", and may
 //     be "main", "init" or a predeclared identifier.
 //   - [WithInitialisms]: register extra acronyms (e.g. "JWT") the name mapper
-//     upper-cases wholesale in exported identifiers. They merge with gogen's default
-//     golint acronym set and are matched case-insensitively. This is how a downstream
-//     generator injects its own domain vocabulary without that vocabulary ever living
-//     in yammm.
+//     upper-cases wholesale in exported identifiers. They merge with gogen's
+//     default golint acronym set, less "utf8", and are matched
+//     case-insensitively. An acronym is one or more letters, since a word of a
+//     name holds nothing else. This is how a downstream generator injects its
+//     own domain vocabulary without that vocabulary ever living in yammm.
 //
 // # Error Conditions
 //
@@ -329,6 +349,8 @@
 //   - the [WithPackageName] value cannot head a package clause
 //     ([ErrInvalidPackageName]; [CheckPackageName] applies the same rule
 //     before a schema is loaded);
+//   - a [WithInitialisms] acronym is empty or holds a rune that is not a letter
+//     ([ErrInvalidInitialism]);
 //   - a source is imported by two paths under two keys, two sources take one
 //     key, a source has no path relative to the root, a LoadString name has
 //     no base, or a key is one the re-load's key rule refuses (see Embedded

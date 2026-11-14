@@ -8,6 +8,25 @@ import (
 	"github.com/simon-lentz/yammm/internal/ident"
 )
 
+// IsInitialism accepts letters alone, in any script, and refuses any other
+// string; ToUpperCamelInitialisms upper-cases a word equal to an accepted one.
+func TestIsInitialism(t *testing.T) {
+	for s, want := range map[string]bool{
+		"jwt": true, "JWT": true, "Ünï": true, "ДНК": true, "中x": true,
+		"": false, "s3": false, "utf8": false, "a_b": false, "a b": false, "a-b": false, "é\u0301": false,
+	} {
+		if got := ident.IsInitialism(s); got != want {
+			t.Errorf("IsInitialism(%q) = %v, want %v", s, got, want)
+		}
+		if want {
+			lower := strings.ToLower(s)
+			if got := ident.ToUpperCamelInitialisms("x_"+lower, map[string]bool{lower: true}); got != "X"+strings.ToUpper(lower) {
+				t.Errorf("ToUpperCamelInitialisms(x_%s) = %q, want the word upper-cased", lower, got)
+			}
+		}
+	}
+}
+
 func TestToUpperCamelInitialisms_NilSetCapitalizes(t *testing.T) {
 	tests := []struct {
 		name  string

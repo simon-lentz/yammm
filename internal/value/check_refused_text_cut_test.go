@@ -2,11 +2,16 @@ package value_test
 
 import (
 	"encoding/json"
+	"errors"
+	"fmt"
+	"reflect"
 	"regexp"
 	"strings"
 	"testing"
+	"time"
 	"unicode/utf8"
 
+	"github.com/simon-lentz/yammm/internal/raceskip"
 	"github.com/simon-lentz/yammm/internal/value"
 	"github.com/simon-lentz/yammm/schema"
 )
@@ -91,6 +96,86 @@ func TestCheck_AValueThatIsNoStringIsNamedByItsType(t *testing.T) {
 	} {
 		if err := value.Check(5, k.c); err == nil || err.Error() != k.want {
 			t.Errorf("5 at %s: %v, want %q", k.c.Kind(), err, k.want)
+		}
+	}
+}
+
+// A struct whose one field is an embedded time.Time, a generated Date or
+// Timestamp data type's shape, is refused at a Date or Timestamp position with
+// a message that says to pass its .Time. A struct that holds a time.Time under
+// a name or beside another field, and a nil pointer, are not told so.
+func TestCheck_AGeneratedTimeTypeIsToldToPassItsTime(t *testing.T) {
+	t.Parallel()
+	type generatedDate struct{ time.Time }
+	type namedTime struct{ At time.Time }
+	type otherEmbed struct{ fmt.Stringer }
+	type timeAndMore struct {
+		time.Time
+		X int
+	}
+	at := time.Date(2026, 8, 21, 0, 0, 0, 0, time.UTC)
+	for _, c := range []struct {
+		val  any
+		c    schema.Constraint
+		want string
+	}{
+		{generatedDate{at}, schema.NewDateConstraint(), "expected date string or time.Time (pass a generated type's .Time), got value_test.generatedDate"},
+		{&generatedDate{at}, schema.NewDateConstraint(), "expected date string or time.Time (pass a generated type's .Time), got *value_test.generatedDate"},
+		{generatedDate{at}, schema.NewTimestampConstraint(), "expected timestamp string or time.Time (pass a generated type's .Time), got value_test.generatedDate"},
+		{namedTime{at}, schema.NewDateConstraint(), "expected date string or time.Time, got value_test.namedTime"},
+		{otherEmbed{}, schema.NewDateConstraint(), "expected date string or time.Time, got value_test.otherEmbed"},
+		{timeAndMore{Time: at}, schema.NewDateConstraint(), "expected date string or time.Time, got value_test.timeAndMore"},
+		{&timeAndMore{Time: at}, schema.NewTimestampConstraint(), "expected timestamp string or time.Time, got *value_test.timeAndMore"},
+		{(*generatedDate)(nil), schema.NewDateConstraint(), "expected date string or time.Time, got *value_test.generatedDate"},
+	} {
+		var ce *value.CheckError
+		if err := value.Check(c.val, c.c); !errors.As(err, &ce) || ce.Kind != value.KindTypeMismatch || err.Error() != c.want {
+			t.Errorf("%T at %s: %v, want a type mismatch %q", c.val, c.c.Kind(), err, c.want)
+		}
+	}
+	if err := value.Check(generatedDate{at}.Time, schema.NewDateConstraint()); err != nil {
+		t.Errorf("the struct's .Time is refused: %v", err)
+	}
+}
+
+// A refusal at a Date or Timestamp position allocates no more than the same
+// refusal at a UUID position, whose message names no generated type: the check
+// for a generated time type's shape costs a refusal nothing, however many
+// fields the refused struct has, and a hinted refusal is built in place of the
+// plain one. The detector makes sync.Pool drop a quarter of what fmt returns to
+// it, so a refusal's count varies under -race alone.
+func TestCheck_ATimeRefusalAllocatesNoMoreThanAUUIDRefusal(t *testing.T) {
+	raceskip.Skip(t)
+	type wide struct{ A, B, C, D, E, F, G, H int }
+	type generatedDate struct{ time.Time }
+	at := time.Date(2026, 8, 21, 0, 0, 0, 0, time.UTC)
+	var fields []reflect.StructField
+	for i := range 300 {
+		fields = append(fields, reflect.StructField{Name: fmt.Sprintf("F%d", i), Type: reflect.TypeFor[int]()})
+	}
+	widest := reflect.New(reflect.StructOf(fields))
+	uuid := schema.NewUUIDConstraint()
+	for _, c := range []schema.Constraint{schema.NewDateConstraint(), schema.NewTimestampConstraint()} {
+		for _, r := range []struct {
+			name string
+			v    any
+		}{
+			{"int", 5},
+			{"bool", true},
+			{"[]any", []any{}},
+			{"wide", wide{}},
+			{"*wide", &wide{}},
+			{"nil *wide", (*wide)(nil)},
+			{"300 fields", widest.Elem().Interface()},
+			{"*300 fields", widest.Interface()},
+			{"generated", generatedDate{at}},
+			{"*generated", &generatedDate{at}},
+		} {
+			want := testing.AllocsPerRun(100, func() { _ = value.Check(r.v, uuid) })
+			got := testing.AllocsPerRun(100, func() { _ = value.Check(r.v, c) })
+			if got > want {
+				t.Errorf("%s at %s: %v allocations, want at most %v, a UUID refusal's", r.name, c.Kind(), got, want)
+			}
 		}
 	}
 }

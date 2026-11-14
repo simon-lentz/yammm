@@ -25,6 +25,22 @@ func ToUpperCamelInitialisms(s string, initialisms map[string]bool) string {
 	return joinCamelTokens(tokens)
 }
 
+// IsInitialism reports whether s is one or more letters, the only runes a word
+// ToUpperCamelInitialisms matches against its initialism set can hold. A word
+// never holds a digit or a separator, because the tokenizer ends a word at
+// each.
+func IsInitialism(s string) bool {
+	if s == "" {
+		return false
+	}
+	for _, r := range s {
+		if !unicode.IsLetter(r) {
+			return false
+		}
+	}
+	return true
+}
+
 type token struct {
 	text      string
 	isNumber  bool

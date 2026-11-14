@@ -111,11 +111,12 @@ func (v ValidInstance) Properties() immutable.Properties {
 }
 
 // Edge returns the validated edge data for a relation.
-// Returns the zero ValidEdgeData and false if the relation is absent or the
-// receiver is zero. A many association given an empty array returns a
-// non-zero ValidEdgeData with no targets, and true. A (many) association lists
-// each target key once (E_DUPLICATE_EDGE), a (one) association refuses an empty
-// array (E_EDGE_SHAPE_MISMATCH), and a composition is not in Edge.
+// Returns the zero ValidEdgeData and false if the relation is absent, its key
+// left out or holding no value ([IsAbsent]), or the receiver is zero. A many
+// association given an empty array returns a non-zero ValidEdgeData with no
+// targets, and true. A (many) association lists each target key once
+// (E_DUPLICATE_EDGE), a (one) association refuses an empty array
+// (E_EDGE_SHAPE_MISMATCH), and a composition is not in Edge.
 func (v ValidInstance) Edge(relationName string) (ValidEdgeData, bool) {
 	if v.IsZero() {
 		return ValidEdgeData{}, false

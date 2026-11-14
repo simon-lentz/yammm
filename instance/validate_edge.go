@@ -75,13 +75,6 @@ func (v *Validator) validateEdgeData(
 	prov location.Provenance,
 	relPath path.Builder,
 ) (ValidEdgeData, bool) {
-	// An explicit null is a shape error whatever the multiplicity.
-	if IsAbsent(rawValue) {
-		collector.Collect(shapeMismatch(rel, "edge "+rel.Name()+": null is not a valid edge value",
-			expectedShapeForRelation(rel), "null", prov, relPath))
-		return ValidEdgeData{}, false
-	}
-
 	if rel.IsMany() {
 		arr, ok := toSliceOfAny(rawValue)
 		if !ok {
@@ -533,15 +526,6 @@ func kindOf(v any) string {
 		return "number"
 	}
 	return reflect.TypeOf(v).String()
-}
-
-// expectedShapeForRelation returns the expected JSON shape description for a relation.
-// Used in error messages to indicate what shape was expected.
-func expectedShapeForRelation(rel schema.Relation) string {
-	if rel.IsMany() {
-		return "array"
-	}
-	return "object"
 }
 
 // toSliceOfAny reads val as an array as every list position reads one

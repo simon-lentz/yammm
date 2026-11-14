@@ -18,9 +18,9 @@ import (
 	"github.com/simon-lentz/yammm/snapshot"
 )
 
-// temporalDocument holds an empty list, which the library keeps apart from an
-// absent one, a to-many association, a (one) composition, and a sensor whose
-// required association is not yet set.
+// temporalDocument holds an empty list and an empty optional composition, each
+// of which the library keeps apart from an absent one, a to-many association, a
+// (one) composition, and a sensor whose required association is not yet set.
 const temporalDocument = `{"Sensor": [
 	{
 		"id": "s1", "installed": "2026-08-21", "decommissioned": "2026-08-22",
@@ -35,7 +35,7 @@ const temporalDocument = `{"Sensor": [
 	},
 	{
 		"id": "s2", "installed": "2026-08-23", "created_at": "2026-08-23T09:30:00Z",
-		"in_casing": [{"serial": "c2"}]
+		"in_casing": [{"serial": "c2"}], "has_reading": []
 	}
 ]}`
 
@@ -131,10 +131,11 @@ func TestRoundTrip_Temporal(t *testing.T) {
 	if err != nil {
 		t.Fatalf("re-encode: %v", err)
 	}
-	// The validator reads a null optional property as an absent one, so the
-	// graphs below cannot tell a written null from a left-out key.
-	if bytes.Contains(again, []byte("null")) {
-		t.Errorf("the re-encoded document writes a null:\n%s", again)
+	// An unset field is written null only when it is required, s2's feeds
+	// here; the graph comparison below shows the validator reads that null as
+	// the key left out.
+	if bytes.Count(again, []byte("null")) != 1 || !bytes.Contains(again, []byte(`"feeds":null}`)) {
+		t.Errorf("the re-encoded document writes a null other than s2's unset feeds:\n%s", again)
 	}
 	if back := readSnapshot(t, s, again); !bytes.Equal(back, want) {
 		t.Errorf("the re-encoded document reads to another graph:\n%s\nwant:\n%s", back, want)
@@ -180,5 +181,91 @@ func TestGeneratedTemporal_ReadsItsOwnTextAndKeepsItsValueAtANull(t *testing.T) 
 	}
 	if out, err := json.Marshal(stamp); err != nil || string(out) != `"2026-08-22T01:02:03.5+02:00"` {
 		t.Errorf("a Timestamp datatype encodes as %s, %v; want the text it read", out, err)
+	}
+}
+
+// The generated Date codec writes no date it refuses to read: a year outside 0
+// to 9999 is refused at the encode, and the value's text is never written.
+func TestGeneratedTemporal_WritesNoDateItCannotRead(t *testing.T) {
+	t.Parallel()
+	for _, year := range []int{-1, 10000} {
+		at := time.Date(year, 1, 2, 0, 0, 0, 0, time.UTC)
+		for name, v := range map[string]json.Marshaler{
+			"Date":            temporal.Date{Time: at},
+			"a Date datatype": temporal.Day{Time: at},
+		} {
+			if out, err := json.Marshal(v); err == nil {
+				t.Errorf("%s of year %d encodes as %s; want a refusal", name, year, out)
+			}
+			if out, err := v.MarshalJSON(); out != nil || err == nil {
+				t.Errorf("%s of year %d: MarshalJSON gives %q, %v; want no bytes and an error", name, year, out, err)
+			}
+		}
+	}
+	for _, year := range []int{0, 9999} {
+		at := time.Date(year, 12, 31, 0, 0, 0, 0, time.UTC)
+		out, err := json.Marshal(temporal.Date{Time: at})
+		if err != nil {
+			t.Fatalf("year %d: %v", year, err)
+		}
+		var back temporal.Date
+		if err := json.Unmarshal(out, &back); err != nil || !back.Equal(at) {
+			t.Errorf("year %d encodes as %s, which reads back as %v, %v", year, out, back, err)
+		}
+	}
+}
+
+// compositionsOf validates each instance doc holds and returns, per instance,
+// the sorted names of the compositions it keeps, an empty one included.
+func compositionsOf(t *testing.T, s schema.Schema, doc []byte) [][]string {
+	t.Helper()
+	parsed, res := jsondata.Parse(t.Context(), location.NewSourceID("test://temporal.json"), doc)
+	if !res.OK() {
+		t.Fatalf("parse: %s\n%s", res, doc)
+	}
+	v := instance.NewValidator(s)
+	var out [][]string
+	for _, raw := range parsed["Sensor"] {
+		valid, res := v.ValidateOne(t.Context(), "Sensor", raw)
+		if !res.OK() {
+			t.Fatalf("validate: %s\n%s", res, doc)
+		}
+		var names []string
+		for name := range valid.Compositions() {
+			names = append(names, name)
+		}
+		slices.Sort(names)
+		out = append(out, names)
+	}
+	return out
+}
+
+// A present empty optional composition survives the generated types' round
+// trip: the validator keeps it apart from an absent one, which the graph's
+// snapshot does not show.
+func TestRoundTrip_TemporalKeepsAnEmptyComposition(t *testing.T) {
+	path, err := filepath.Abs(filepath.Join("..", "..", "..", "..", "schema", "gogen", "testdata", "temporal.yammm"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s, res := schema.Load(t.Context(), path)
+	if res.HasErrors() {
+		t.Fatalf("load: %s", res)
+	}
+	doc := []byte(temporalDocument)
+	var got temporal.Graph
+	if err := json.Unmarshal(doc, &got); err != nil {
+		t.Fatal(err)
+	}
+	again, err := json.Marshal(got)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := compositionsOf(t, s, doc)
+	if !slices.Equal(want[1], []string{"HAS_READING", "IN_CASING"}) {
+		t.Fatalf("the document's second sensor keeps compositions %v, want HAS_READING empty and IN_CASING", want[1])
+	}
+	if back := compositionsOf(t, s, again); !slices.EqualFunc(back, want, slices.Equal[[]string]) {
+		t.Errorf("the re-encoded document keeps compositions %v, want %v:\n%s", back, want, again)
 	}
 }
