@@ -133,7 +133,7 @@ func TestUpdateMetadata_DoesNotFabricateAnAttestation(t *testing.T) {
 	t.Parallel()
 	_, data := attWireFixture(t)
 
-	// A pre-v0.15.0 document: the same bytes with the attestation removed.
+	// A document that states no claim: the same bytes with the attestation removed.
 	// UpdateMetadata never verifies integrity, so the edit is safe here.
 	stripped := bytes.Replace(data, []byte(attTrueSegment), nil, 1)
 	if bytes.Equal(stripped, data) {
@@ -145,12 +145,12 @@ func TestUpdateMetadata_DoesNotFabricateAnAttestation(t *testing.T) {
 		t.Fatalf("UpdateMetadata: %s", res.String())
 	}
 	if bytes.Contains(out, []byte(`"attestation"`)) {
-		t.Fatal("UpdateMetadata fabricated an attestation on a pre-v0.15.0 document")
+		t.Fatal("UpdateMetadata fabricated an attestation on a document that states none")
 	}
 }
 
 // TestLoad_AbsentAttestationSurvivesTheRoundTrip pins that silence stays
-// silence. A pre-v0.15.0 document carries no attestation, and no claim is a
+// silence. A document can carry no attestation, and no claim is a
 // weaker statement than a claim that both dimensions are false — so a load
 // must report absence and the next Marshal must write none.
 //

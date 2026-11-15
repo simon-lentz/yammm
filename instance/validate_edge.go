@@ -240,7 +240,9 @@ func memberName(fk string, p schema.Property) string {
 
 // validateEdgeTarget validates a single edge target object at targetPath, and
 // reports whether a foreign-key field or an edge property holds a [Refused]
-// value. A refused target is nil and reports nothing for that value.
+// value. A refused target is nil and reports nothing for that value. A
+// foreign-key field holding a [value.Resolved] gives the key its component
+// unjudged.
 func (v *Validator) validateEdgeTarget(
 	rel schema.Relation,
 	elem any,
@@ -314,6 +316,10 @@ func (v *Validator) validateEdgeTarget(
 		presentFKFields = append(presentFKFields, fkFieldName)
 		val := obj[inputKey]
 		fkPath := targetPath.Key(inputKey).String()
+		if r, ok := val.(value.Resolved); ok {
+			pkComponents = append(pkComponents, r.Value)
+			continue
+		}
 		if isRefused(val) {
 			refused = true
 			continue

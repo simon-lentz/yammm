@@ -112,12 +112,15 @@ const (
 	// Used with E_INTERNAL diagnostics to provide debugging context.
 	DetailKeyStackTrace = "stack_trace"
 
-	// DetailKeyExpectedHash is the expected hash value.
-	// Used with E_SNAPSHOT_INCOMPATIBLE_SCHEMA and E_SNAPSHOT_INTEGRITY_MISMATCH.
+	// DetailKeyExpectedHash is the hash a check expects: the schema's structural
+	// hash at E_SNAPSHOT_INCOMPATIBLE_SCHEMA, and the hash the header states at
+	// E_SNAPSHOT_INTEGRITY_MISMATCH (empty where it holds none).
 	DetailKeyExpectedHash = "expected_hash"
 
-	// DetailKeyActualHash is the actual computed hash value.
-	// Used with E_SNAPSHOT_INCOMPATIBLE_SCHEMA and E_SNAPSHOT_INTEGRITY_MISMATCH.
+	// DetailKeyActualHash is the hash a check found: the schema hash the header
+	// states at E_SNAPSHOT_INCOMPATIBLE_SCHEMA, and the hash computed over the
+	// document at E_SNAPSHOT_INTEGRITY_MISMATCH. A header with no integrity_hash
+	// member has no computed hash, so its issue carries no actual_hash.
 	DetailKeyActualHash = "actual_hash"
 
 	// DetailKeySchemaName is a schema's declared name: the snapshot header's for

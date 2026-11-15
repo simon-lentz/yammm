@@ -20,20 +20,17 @@ import (
 // Timestamp, Date or UUID anywhere is inactive and every method returns its
 // input untouched.
 //
-// Primary keys are canonicalized too, and every position that ADDRESSES an
-// instance is canonicalized with them — an instance's own key, an edge's
-// endpoint keys, a duplicate's key, an unresolved record's endpoints. That is the whole of the rule: a key moves only if every
-// reference to it moves in the same pass. One value then has one spelling in
-// the graph, which indexes, sorts and resolves edges by it, and the document
-// inherits that spelling.
+// A primary key moves only at a door that takes one from outside the graph:
+// the import, which re-keys an instance and every reference to it under the
+// importing schema, and an address a caller looks an instance up by. The
+// rebuild takes keys as the document writes them, since the reader refuses a
+// key component its kind stores as other text. One value then has one spelling
+// in the graph, which indexes, sorts and resolves edges by it.
 type canonicalizer struct {
 	byType    map[schema.TypeID][]schema.Property
 	byEdge    map[edgeKey][]schema.Property
 	byKeyType map[schema.TypeID][]keyPosition
-	// byTarget is each association's declared target, the type its records'
-	// target keys are canonicalized under.
-	byTarget map[edgeKey]schema.TypeID
-	inactive bool
+	inactive  bool
 }
 
 // keyPosition names one primary-key component whose kind canonicalizes: its
@@ -58,7 +55,6 @@ func newCanonicalizer(s schema.Schema) *canonicalizer {
 		byType:    make(map[schema.TypeID][]schema.Property),
 		byEdge:    make(map[edgeKey][]schema.Property),
 		byKeyType: make(map[schema.TypeID][]keyPosition),
-		byTarget:  make(map[edgeKey]schema.TypeID),
 		inactive:  true,
 	}
 	for sc := range s.Closure() {
@@ -90,9 +86,6 @@ func newCanonicalizer(s schema.Schema) *canonicalizer {
 						}
 					}
 					c.byEdge[edgeKey{source: id, relation: rel.Name()}] = eps
-					if rel.IsAssociation() {
-						c.byTarget[edgeKey{source: id, relation: rel.Name()}] = rel.TargetID()
-					}
 					c.inactive = c.inactive && len(eps) == 0
 				}
 			}
@@ -222,13 +215,13 @@ func apply(props immutable.Properties, ps []schema.Property) immutable.Propertie
 }
 
 // instance rewrites an instance's properties and those of its composed
-// children, which carry their own types.
+// children, which carry their own types. Its key stays as the document wrote
+// it.
 func (c *canonicalizer) instance(ip snapparts.Instance) snapparts.Instance {
 	if c.inactive {
 		return ip
 	}
 	ip.Properties = c.properties(ip.TypeID, ip.Properties)
-	ip.PrimaryKey = c.key(ip.TypeID, ip.PrimaryKey)
 
 	if len(ip.Composed) > 0 {
 		composed := make(map[string][]snapparts.Instance, len(ip.Composed))
@@ -274,34 +267,4 @@ func (c *canonicalizer) edgeProperties(source schema.TypeID, relation string, pr
 		return props
 	}
 	return apply(props, c.edgeProps(source, relation))
-}
-
-// edge rewrites an edge's own properties, whose constraints hang off the
-// source type's relation rather than off either endpoint type.
-func (c *canonicalizer) edge(ep snapparts.Edge) snapparts.Edge {
-	ep.Properties = c.edgeProperties(ep.SourceType, ep.Relation, ep.Properties)
-	if c.inactive {
-		return ep
-	}
-	// Both endpoints move with the instances they address, or the edge stops
-	// resolving against an index whose keys this same pass rewrote.
-	ep.SourceKey = c.key(ep.SourceType, ep.SourceKey)
-	ep.TargetKey = c.key(c.byTarget[edgeKey{source: ep.SourceType, relation: ep.Relation}], ep.TargetKey)
-	return ep
-}
-
-// unresolved rewrites a forward reference's edge properties, which reach the
-// wire through the same relation a resolved edge's do, and both its addresses.
-// The target key renders under the target type's constraints as a validator
-// renders an edge's target: the instance it names does not exist, but
-// the relation's declared target type does, and a record built through Add
-// and one rebuilt from parts must carry one address for one input.
-func (c *canonicalizer) unresolved(up snapparts.Unresolved) snapparts.Unresolved {
-	up.Properties = c.edgeProperties(up.SourceType, up.Relation, up.Properties)
-	if c.inactive {
-		return up
-	}
-	up.SourceKey = c.key(up.SourceType, up.SourceKey)
-	up.TargetKey = c.key(c.byTarget[edgeKey{source: up.SourceType, relation: up.Relation}], up.TargetKey)
-	return up
 }

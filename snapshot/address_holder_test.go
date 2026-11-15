@@ -3,7 +3,6 @@ package snapshot_test
 import (
 	"context"
 	"maps"
-	"regexp"
 	"strings"
 	"testing"
 
@@ -28,7 +27,6 @@ func TestRead_ARootWhoseKeyIsRefusedHoldsNoAddress(t *testing.T) {
 		map[string]any{"$type": "Person", "id": "p0"},
 		map[string]any{"$type": "Person", "id": "p1", "BOSS": map[string]any{"_target_id": "p0"}, "WORKS_AT": map[string]any{"_target_id": "c1"}},
 	)
-	doc = regexp.MustCompile(`"integrity_hash":"[^"]*"`).ReplaceAllString(doc, `"integrity_hash":""`)
 	const twin = `{"key":["p1"],"properties":{"id":"p9"},"provenance":null}`
 	before := func(doc string) string {
 		return editOnce(t, doc, `{"key":["p1"],"properties":{"id":"p1"}`, twin+`,{"key":["p1"],"properties":{"id":"p1"}`)
@@ -54,8 +52,8 @@ func TestRead_ARootWhoseKeyIsRefusedHoldsNoAddress(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
-			_, l := snapshot.Load(ctx, []byte(c.doc), s)
-			for surface, res := range map[string]diag.Result{"Load": l, "Verify": snapshot.Verify(ctx, []byte(c.doc), s)} {
+			_, l := snapshot.Load(ctx, rehashDocument(t, []byte(c.doc)), s)
+			for surface, res := range map[string]diag.Result{"Load": l, "Verify": snapshot.Verify(ctx, rehashDocument(t, []byte(c.doc)), s)} {
 				var got []diag.Code
 				for issue := range res.Issues() {
 					got = append(got, issue.Code())
@@ -86,13 +84,12 @@ func TestRead_ARootOfAKeylessTypeHoldsNoAddress(t *testing.T) {
 	ctx := context.Background()
 	s := loadReaderSchema(t)
 	doc := readerDoc(t, s, map[string]any{"$type": "Company", "id": "c1"})
-	doc = regexp.MustCompile(`"integrity_hash":"[^"]*"`).ReplaceAllString(doc, `"integrity_hash":""`)
 	doc = editOnce(t, doc, `{"schema":"rd","name":"Company"}]`, `{"schema":"rd","name":"Company"},{"schema":"rd","name":"Tag"}]`)
 	doc = editOnce(t, doc, `"provenance":null}]}]`, `"provenance":null}]},{"type":1,"items":[`+
 		`{"key":null,"properties":{"label":"a"},"provenance":null},{"key":null,"properties":{"label":"b"},"provenance":null},`+
 		`{"key":null,"properties":{"label":"c"},"provenance":null}]}]`)
-	_, l := snapshot.Load(ctx, []byte(doc), s)
-	for surface, res := range map[string]diag.Result{"Load": l, "Verify": snapshot.Verify(ctx, []byte(doc), s)} {
+	_, l := snapshot.Load(ctx, rehashDocument(t, []byte(doc)), s)
+	for surface, res := range map[string]diag.Result{"Load": l, "Verify": snapshot.Verify(ctx, rehashDocument(t, []byte(doc)), s)} {
 		if res.Len() != 1 || !hasCode(res, diag.E_SNAPSHOT_INVALID_ROOT) {
 			t.Errorf("%s: %s, want one %s", surface, res, diag.E_SNAPSHOT_INVALID_ROOT)
 		}
@@ -106,12 +103,11 @@ func TestRead_RootsWithUnreadableKeysAreNoDuplicates(t *testing.T) {
 	ctx := context.Background()
 	s := loadReaderSchema(t)
 	doc := readerDoc(t, s, map[string]any{"$type": "Company", "id": "c1"})
-	doc = regexp.MustCompile(`"integrity_hash":"[^"]*"`).ReplaceAllString(doc, `"integrity_hash":""`)
 	bad := `{"key":[["x"]],"properties":{"id":"c1"},"provenance":null}`
 	doc = editOnce(t, doc, `{"key":["c1"],"properties":{"id":"c1"},"provenance":null}`, bad+`,`+bad)
-	_, l := snapshot.Load(ctx, []byte(doc), s)
-	_, i := snapshot.Info(ctx, []byte(doc))
-	for surface, res := range map[string]diag.Result{"Load": l, "Verify": snapshot.Verify(ctx, []byte(doc), s), "Info": i} {
+	_, l := snapshot.Load(ctx, rehashDocument(t, []byte(doc)), s)
+	_, i := snapshot.Info(ctx, rehashDocument(t, []byte(doc)))
+	for surface, res := range map[string]diag.Result{"Load": l, "Verify": snapshot.Verify(ctx, rehashDocument(t, []byte(doc)), s), "Info": i} {
 		if res.Len() != 2 || hasCode(res, diag.E_DUPLICATE_PK) || !strings.Contains(res.String(), "is not a scalar graph.ParseKey reads back") {
 			t.Errorf("%s: %s, want two refusals of the key and no %s", surface, res, diag.E_DUPLICATE_PK)
 		}
@@ -129,13 +125,12 @@ func TestRead_ASoundRootHoldsTheAddressARefusedRootStoodAt(t *testing.T) {
 		map[string]any{"$type": "Person", "id": "p0", "KNOWS": []any{map[string]any{"_target_id": "p8"}}},
 		map[string]any{"$type": "Person", "id": "p1", "BOSS": map[string]any{"_target_id": "p0"}, "WORKS_AT": map[string]any{"_target_id": "c1"}},
 	)
-	doc = regexp.MustCompile(`"integrity_hash":"[^"]*"`).ReplaceAllString(doc, `"integrity_hash":""`)
 	const (
 		root = `{"key":["p1"],"properties":{"id":"p1"}`
 		twin = `{"key":["p1"],"properties":{"id":"p9"},"provenance":null},`
 	)
 	refusedThenSound := editOnce(t, doc, root, twin+root)
-	if _, res := snapshot.Load(ctx, []byte(doc), s); res.HasErrors() {
+	if _, res := snapshot.Load(ctx, rehashDocument(t, []byte(doc)), s); res.HasErrors() {
 		t.Fatalf("control: %s", res)
 	}
 	for name, c := range map[string]struct {
@@ -153,8 +148,8 @@ func TestRead_ASoundRootHoldsTheAddressARefusedRootStoodAt(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
-			_, l := snapshot.Load(ctx, []byte(c.doc), s)
-			for surface, res := range map[string]diag.Result{"Load": l, "Verify": snapshot.Verify(ctx, []byte(c.doc), s)} {
+			_, l := snapshot.Load(ctx, rehashDocument(t, []byte(c.doc)), s)
+			for surface, res := range map[string]diag.Result{"Load": l, "Verify": snapshot.Verify(ctx, rehashDocument(t, []byte(c.doc)), s)} {
 				got := map[diag.Code]int{}
 				for issue := range res.Issues() {
 					got[issue.Code()]++
@@ -192,7 +187,7 @@ type Target {
 		Instances:  []snapparts.Instance{{TypeID: keyless, PrimaryKey: key, Properties: immutable.WrapProperties(map[string]any{"v": "x"})}},
 		Unresolved: []snapparts.Unresolved{{SourceType: keyless, SourceKey: key, Relation: "NEEDS", Reason: "absent"}},
 	})
-	got := snapshot.Verify(ctx, doc, s)
+	got := snapshot.Verify(ctx, rehashDocument(t, doc), s)
 	if got.Len() != 1 || got.HasCode(diag.E_SNAPSHOT_DANGLING_REFERENCE) {
 		t.Errorf("Verify: %s, want the type's one refusal", got)
 	}
@@ -233,7 +228,7 @@ type Solid {
 		}},
 		Edges: []snapparts.Edge{{Relation: "POINTS", SourceType: holder, SourceKey: key("h1"), TargetKey: key("stated")}},
 	})
-	got := snapshot.Verify(ctx, doc, s, snapshot.WithIssueLimit(0))
+	got := snapshot.Verify(ctx, rehashDocument(t, doc), s, snapshot.WithIssueLimit(0))
 	if !got.HasCode(diag.E_SNAPSHOT_DANGLING_REFERENCE) {
 		t.Errorf("Verify: %s, want %s for the edge", got, diag.E_SNAPSHOT_DANGLING_REFERENCE)
 	}

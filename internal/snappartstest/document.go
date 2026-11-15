@@ -5,7 +5,9 @@ package snappartstest
 import (
 	"bytes"
 	"cmp"
+	"crypto/sha256"
 	"encoding/json"
+	"fmt"
 	"maps"
 	"math"
 	"slices"
@@ -33,8 +35,8 @@ func Loaded(tb testing.TB, s schema.Schema, parts snapparts.Parts) graph.Snapsho
 
 // Document writes parts as the .ys document that states them, for a fixture the
 // reader judges: a document may hold what a validator refuses, such as a number
-// no finite float64 holds, or a text under an Integer. Its integrity hash is empty,
-// which no check compares, and each edge stands under the root its source key
+// no finite float64 holds, or a text under an Integer. It carries the integrity
+// hash of its own bytes, and each edge stands under the root its source key
 // spells. A value no document holds, such as a time.Time or a string that is not
 // valid UTF-8, fails tb.
 func Document(tb testing.TB, s schema.Schema, parts snapparts.Parts) []byte {
@@ -90,7 +92,27 @@ func Document(tb testing.TB, s schema.Schema, parts snapparts.Parts) []byte {
 	if err := enc.Encode(doc); err != nil {
 		tb.Fatalf("snappartstest.Document: %v", err)
 	}
-	return bytes.TrimSpace(buf.Bytes())
+	return sign(tb, bytes.TrimSpace(buf.Bytes()))
+}
+
+// unsigned is the header member a document holds before it is signed: the
+// canonical form the integrity hash is computed over.
+var unsigned = []byte(`"integrity_hash":""`)
+
+// sign stores in data the integrity hash of data itself, as Marshal does: the
+// SHA-256 of the document whose integrity_hash is empty. The header is encoded
+// first, and each member before its integrity_hash is a number or a string,
+// whose quotes JSON escapes, so the header's member is the first one: a
+// property of that name holding "" comes after it.
+func sign(tb testing.TB, data []byte) []byte {
+	tb.Helper()
+	before, after, found := bytes.Cut(data, unsigned)
+	if !found {
+		tb.Fatalf("snappartstest.Document: the document holds no empty integrity_hash")
+		return data
+	}
+	sum := fmt.Sprintf(`"integrity_hash":"sha256:%x"`, sha256.Sum256(data))
+	return slices.Concat(before, []byte(sum), after)
 }
 
 // The wire shapes the reader decodes, field for field in the order Marshal writes

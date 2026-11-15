@@ -12,60 +12,6 @@ import (
 	"github.com/simon-lentz/yammm/snapshot"
 )
 
-// respellAfter rewrites the first occurrence of from that follows marker, so
-// one address in a document moves while every other rendering of the same
-// value stays as written.
-func respellAfter(t *testing.T, data []byte, marker, from, to string) []byte {
-	t.Helper()
-	at := bytes.Index(data, []byte(marker))
-	if at < 0 {
-		t.Fatalf("respellAfter: %q not in the document", marker)
-	}
-	rel := bytes.Index(data[at:], []byte(from))
-	if rel < 0 {
-		t.Fatalf("respellAfter: %q not found after %q", from, marker)
-	}
-	i := at + rel
-	out := append([]byte{}, data[:i]...)
-	out = append(out, to...)
-	return append(out, data[i+len(from):]...)
-}
-
-// TestLoad_DuplicateRecordKeyAgreesAcrossSpellings pins that a duplicate record
-// whose stated key and carried instance key spell one instant two ways is not
-// malformed. Every other address in validateDiagnostics moved to the canonical
-// form and this equality check stayed on the document's raw text, so a foreign
-// writer that spelled the two differently was refused a document whose
-// addresses agree. Comparing the raw spellings again turns this red.
-func TestLoad_DuplicateRecordKeyAgreesAcrossSpellings(t *testing.T) {
-	t.Parallel()
-	s := foreignSpellingSchema(t)
-	sensor := instancetest.Valid(t, s, "Sensor", map[string]any{
-		"observed_at": canonicalStamp,
-		"readings":    []any{map[string]any{"taken_at": canonicalStamp}},
-	})
-
-	g := graph.New(s)
-	if r := g.Add(t.Context(), sensor); !r.OK() {
-		t.Fatalf("add: %s", r)
-	}
-	if r := g.Add(t.Context(), instancetest.Valid(t, s, "Sensor", map[string]any{"observed_at": canonicalStamp})); r.OK() {
-		t.Fatal("a duplicate root was accepted")
-	}
-
-	data, mr := snapshot.Marshal(t.Context(), g.Snapshot())
-	if mr.HasErrors() {
-		t.Fatalf("marshal: %s", mr)
-	}
-	// Only the duplicate record's STATED key moves, so it disagrees as text
-	// with the instance it carries and names the same value.
-	doc := rehashDocument(t, respellAfter(t, data, `"duplicates"`, canonicalStamp, rawStamp))
-
-	if _, res := snapshot.Load(t.Context(), doc, s); hasCode(res, diag.E_SNAPSHOT_MALFORMED) {
-		t.Errorf("two spellings of one instant were called a key disagreement: %s", res)
-	}
-}
-
 // oneSlotReaderSchema declares a (one) ADDRESS composition beside a (_:many)
 // LINES, so the reader's cardinality guard has both the shape it refuses and
 // the shape it must leave alone.

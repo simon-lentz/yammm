@@ -17,7 +17,7 @@ import (
 // [schema.CheckConstraint], and one it refuses is an error whatever the value.
 //
 // It is exported for a caller that admits schema-typed values without a
-// [Validator], such as the snapshot reader. A violation returns the checker's
+// [Validator]. A violation returns the checker's
 // message; a panic inside the check returns an [InternalError] that matches
 // [ErrInternalFailure], as it does for the validator.
 func CheckValue(val any, c schema.Constraint) error {

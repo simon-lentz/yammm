@@ -10,7 +10,6 @@ import (
 	"github.com/simon-lentz/yammm/internal/snapparts"
 
 	"github.com/google/uuid"
-	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/instance"
@@ -320,119 +319,6 @@ func TestLoad_CanonicalizesNonConformingWireText(t *testing.T) {
 	}
 	if got := v.Unwrap(); got != canonicalCreated {
 		t.Errorf("loaded created_at = %#v, want %q — Load did not render it", got, canonicalCreated)
-	}
-}
-
-// nonConformingDocument returns a .ys whose created_at holds text no Timestamp
-// constraint can render. The bytes are edited after marshalling because
-// nothing in the library will write such a value — which is the point: a
-// document can hold one, and until this option nothing could say so.
-func nonConformingDocument(t *testing.T, s schema.Schema) []byte {
-	t.Helper()
-	data, result := snapshot.Marshal(context.Background(), buildTemporalSnapshot(t, s, false))
-	if err := result.Err(); err != nil {
-		t.Fatalf("Marshal: %v", err)
-	}
-	edited := strings.Replace(string(data),
-		`"created_at":"`+canonicalCreated+`"`,
-		`"created_at":"not-a-timestamp"`, 1)
-	if edited == string(data) {
-		t.Fatal("fixture did not carry created_at; the edit is a no-op")
-	}
-	return []byte(edited)
-}
-
-// TestLoad_ValueConformanceReportsAndStillReturns covers the option's whole
-// contract in one place, both halves of it. Warning severity means Load
-// returns the snapshot together with the finding: reporting a document is not
-// refusing it.
-func TestLoad_ValueConformanceReportsAndStillReturns(t *testing.T) {
-	t.Parallel()
-	ctx := context.Background()
-	s := loadTemporalSchema(t)
-	data := nonConformingDocument(t, s)
-
-	loaded, result := snapshot.Load(ctx, data, s,
-		snapshot.WithIntegrityCheck(false), snapshot.WithValueConformance(true))
-	if err := result.Err(); err != nil {
-		t.Fatalf("Load refused a non-conforming document: %v", err)
-	}
-	if loaded.IsZero() {
-		t.Fatal("Load returned no snapshot; the option must report, not reject")
-	}
-	if !result.HasCode(diag.W_SNAPSHOT_VALUE_NONCONFORMING) {
-		t.Errorf("no conformance warning: %s", result)
-	}
-	if !result.HasWarnings() {
-		t.Error("the finding is not a warning")
-	}
-}
-
-// TestLoad_ValueConformanceIsOffByDefault is the control that tells the option
-// from a hard-coded warning. Without it, a test asserting only the finding
-// would pass against an implementation that always reports.
-func TestLoad_ValueConformanceIsOffByDefault(t *testing.T) {
-	t.Parallel()
-	ctx := context.Background()
-	s := loadTemporalSchema(t)
-	data := nonConformingDocument(t, s)
-
-	_, result := snapshot.Load(ctx, data, s, snapshot.WithIntegrityCheck(false))
-	if result.HasCode(diag.W_SNAPSHOT_VALUE_NONCONFORMING) {
-		t.Errorf("a conformance warning without the option: %s", result)
-	}
-}
-
-// TestLoad_ValueConformanceFalseIsOff pins that an explicit false is the
-// default: the option carries a value, and false must not read as presence.
-func TestLoad_ValueConformanceFalseIsOff(t *testing.T) {
-	t.Parallel()
-	ctx := context.Background()
-	s := loadTemporalSchema(t)
-	data := nonConformingDocument(t, s)
-
-	_, result := snapshot.Load(ctx, data, s,
-		snapshot.WithIntegrityCheck(false), snapshot.WithValueConformance(false))
-	if result.HasCode(diag.W_SNAPSHOT_VALUE_NONCONFORMING) {
-		t.Errorf("a conformance warning under WithValueConformance(false): %s", result)
-	}
-}
-
-// TestLoad_ValueConformanceIsSilentOnAConformingDocument is the positive
-// control. Without it the option could report everything and still pass.
-func TestLoad_ValueConformanceIsSilentOnAConformingDocument(t *testing.T) {
-	t.Parallel()
-	ctx := context.Background()
-	s := loadTemporalSchema(t)
-
-	data, result := snapshot.Marshal(ctx, buildTemporalSnapshot(t, s, true))
-	if err := result.Err(); err != nil {
-		t.Fatalf("Marshal: %v", err)
-	}
-
-	_, lres := snapshot.Load(ctx, data, s, snapshot.WithValueConformance(true))
-	if lres.HasCode(diag.W_SNAPSHOT_VALUE_NONCONFORMING) {
-		t.Errorf("a conforming document drew a conformance warning: %s", lres)
-	}
-}
-
-// TestVerify_HonorsValueConformance is why the walk lives in the shared
-// validation body rather than at materialization: Verify stops before a
-// Snapshot exists, so a check placed later would be absent from the surface
-// whose whole job is answering whether a document is sound.
-func TestVerify_HonorsValueConformance(t *testing.T) {
-	t.Parallel()
-	ctx := context.Background()
-	s := loadTemporalSchema(t)
-	data := nonConformingDocument(t, s)
-
-	if result := snapshot.Verify(ctx, data, s, snapshot.WithIntegrityCheck(false)); result.HasCode(diag.W_SNAPSHOT_VALUE_NONCONFORMING) {
-		t.Errorf("Verify reported without the option: %s", result)
-	}
-	result := snapshot.Verify(ctx, data, s,
-		snapshot.WithIntegrityCheck(false), snapshot.WithValueConformance(true))
-	if !result.HasCode(diag.W_SNAPSHOT_VALUE_NONCONFORMING) {
-		t.Errorf("Verify did not report under the option: %s", result)
 	}
 }
 

@@ -173,8 +173,8 @@ func TestSnapshotInfo_DirDiagnosticsIsAlwaysTheWire(t *testing.T) {
 	}
 }
 
-// stripAttestation rewrites a .ys header into one a pre-v0.15.0 writer would
-// have produced. The integrity hash covers the header, so only the
+// stripAttestation rewrites a .ys header into one that states no claim, as
+// Marshal writes for a snapshot that holds none. The integrity hash covers the header, so only the
 // header-only readers accept the result — which is where both nil arms run.
 func stripAttestation(t *testing.T, path string) {
 	t.Helper()
@@ -192,8 +192,8 @@ func stripAttestation(t *testing.T, path string) {
 	}
 }
 
-// TestSnapshotInfo_AbsentAttestationRenders covers the pre-v0.15.0 branch of
-// both renderers. Neither arm was asserted, so a JSON reader could not tell an
+// TestSnapshotInfo_AbsentAttestationRenders covers the unstated-claim branch
+// of both renderers. Neither arm was asserted, so a JSON reader could not tell an
 // unstated claim from a false one, and a mutation that rendered the absence as
 // values=false associations=false survived.
 func TestSnapshotInfo_AbsentAttestationRenders(t *testing.T) {

@@ -257,10 +257,11 @@ type Clerk extends Base {
 }
 `
 
-// The reader compares every record's address in canonical form, and reads a
-// type's inherited associations as its own. Verify reports what the reader
-// finds alone, so each refusal is read there.
-func TestVerify_RecordFactsCompareCanonicalKeysAndInheritedAssociations(t *testing.T) {
+// The reader compares every record's address as written, refusing a key its
+// kind stores as other text, and reads a type's inherited associations as its
+// own. Verify reports what the reader finds alone, so each refusal is read
+// there.
+func TestVerify_RecordFactsCompareKeysAsWrittenAndReadInheritedAssociations(t *testing.T) {
 	t.Parallel()
 	s, res := schema.LoadString(t.Context(), stampsSchema, "stamps.yammm")
 	if res.HasErrors() {
@@ -291,25 +292,33 @@ func TestVerify_RecordFactsCompareCanonicalKeysAndInheritedAssociations(t *testi
 			clerk, key, relation, map[bool]int{true: slot, false: clerk}[relation == "BOOKS"], target, required, reason)
 	}
 	rootKey := `"key":[` + canonical + `],"properties"`
+	const respelledAt = `spells component 0 in a form its Timestamp key property "at" does not store`
 
 	for _, c := range []struct {
 		name  string
 		edits []readerEdit
 		want  string
 	}{
-		{"a root spelled another way that holds its edge", []readerEdit{{rootKey, `"key":[` + foreign + `],"properties"`}}, ""},
+		{"a root spelled another way that holds its edge", []readerEdit{{rootKey, `"key":[` + foreign + `],"properties"`}}, respelledAt},
+		{"an absent record at the root's key", []readerEdit{
+			{books, ""},
+			{`"unresolved":[]`, record("BOOKS", canonical, "null", "absent", true)},
+		}, ""},
 		{"an absent record whose source key is spelled another way", []readerEdit{
 			{books, ""},
 			{`"unresolved":[]`, record("BOOKS", foreign, "null", "absent", true)},
-		}, ""},
+		}, respelledAt},
 		{
 			"an inherited required association with no record",
 			[]readerEdit{{books, ""}},
 			`holds no edge and no record under the required association "BOOKS"`,
 		},
+		{"a target_missing record naming a root", []readerEdit{
+			{`"unresolved":[]`, record("SEES", canonical, "["+canonical+"]", "target_missing", false)},
+		}, "which a root holds"},
 		{"a target_missing record naming a root by another spelling", []readerEdit{
 			{`"unresolved":[]`, record("SEES", canonical, "["+foreign+"]", "target_missing", false)},
-		}, "which a root holds"},
+		}, respelledAt},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()

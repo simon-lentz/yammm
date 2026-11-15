@@ -59,22 +59,22 @@ func TestRead_TheComposedDepthBoundIsTheValidators(t *testing.T) {
 	if res.HasErrors() {
 		t.Fatalf("marshal: %s", res)
 	}
-	if _, res := snapshot.Load(ctx, data, s); res.HasErrors() {
+	if _, res := snapshot.Load(ctx, rehashDocument(t, data), s); res.HasErrors() {
 		t.Errorf("Load at the bound: %s", res)
 	}
-	if res := snapshot.Verify(ctx, data, s); res.HasErrors() {
+	if res := snapshot.Verify(ctx, rehashDocument(t, data), s); res.HasErrors() {
 		t.Errorf("Verify at the bound: %s", res)
 	}
 
 	if _, res := v.ValidateOne(ctx, "Root", instance.RawInstance{Properties: nestedRoot(instance.MaxComposedDepth + 1)}); !res.HasErrors() {
 		t.Error("the validator accepts a tree one level past the bound")
 	}
-	doc := sbIntegrity.ReplaceAllString(string(data), `"integrity_hash":""`)
+	doc := string(data)
 	const leaf = `{"key":["c"],"type":0,"properties":{"code":"c"},"provenance":null}`
 	deeper := []byte(editOnce(t, doc, leaf,
 		`{"key":["c"],"type":0,"properties":{"code":"c"},"composed":{"NEXT":[`+leaf+`]},"provenance":null}`))
-	_, l := snapshot.Load(ctx, deeper, s)
-	for surface, got := range map[string]diag.Result{"Load": l, "Verify": snapshot.Verify(ctx, deeper, s)} {
+	_, l := snapshot.Load(ctx, rehashDocument(t, deeper), s)
+	for surface, got := range map[string]diag.Result{"Load": l, "Verify": snapshot.Verify(ctx, rehashDocument(t, deeper), s)} {
 		if got.Len() != 1 || !got.HasCode(diag.E_SNAPSHOT_DEPTH_EXCEEDED) {
 			t.Errorf("%s one level past the bound: %s, want one %s", surface, got, diag.E_SNAPSHOT_DEPTH_EXCEEDED)
 		}

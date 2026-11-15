@@ -17,9 +17,8 @@
 //
 // The .ys header carries the writing library's attestation of values and
 // associations, whose rules [graph.Attestation] states. The integrity hash is an unkeyed SHA-256 of the
-// document: it detects corruption and an edit nobody rehashed, save in a document
-// whose stored hash is empty, which no check compares. Anyone can
-// recompute it, so it stops no deliberate edit: any process can write a document
+// document: it detects corruption and an edit nobody rehashed, and a document
+// whose header holds no hash fails the check. Anyone can recompute it, so it stops no deliberate edit: any process can write a document
 // whose header claims what its instances never earned and hash it. The unforgeable
 // point is the instance layer, and the attestation is the writer's word, not a proof.
 //
@@ -43,9 +42,7 @@
 // property outside its constraint, a required property absent, or an
 // invariant violation. [WithRevalidation] is the option that reports them —
 // the real validator, run at load time over each root the structural checks
-// left whole, as the option's doc defines it —
-// and [WithValueConformance] the narrower
-// canonical-form check.
+// left whole, as the option's doc defines it.
 // Duplicates and unresolved records ride the document as data
 // ([graph.Snapshot.Duplicates], [graph.Snapshot.Unresolved]); a rejected
 // duplicate's payload is outside the attestation, and whether an unresolved
@@ -222,7 +219,6 @@
 //
 //   - [WithIssueLimit]: maximum issues stored (default 100; 0 for unlimited); the walk completes unless the context is cancelled
 //   - [WithIntegrityCheck]: with false, skip SHA-256 integrity verification (useful for debugging)
-//   - [WithValueConformance]: report a root's or a composed child's stored Timestamp/Date/UUID values that do not conform to their constraints (Warning)
 //   - [WithRevalidation]: run each root the structural checks left whole, with its composed children, edges and target_missing records, back through the real validator, reported at the given severity
 //
 // # Error Handling

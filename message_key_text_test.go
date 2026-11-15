@@ -2,6 +2,8 @@ package yammm_test
 
 import (
 	"context"
+	"crypto/sha256"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -205,9 +207,13 @@ func TestMessages_RepeatAKeyCutToItsHead(t *testing.T) {
 		return strings.Replace(header, old, replacement, 1)
 	}
 	const typesTable = `,"types":[{"schema":"keys","name":"P"},{"schema":"keys","name":"T"},{"schema":"keys","name":"U"}]`
+	// docWith signs what it writes: the hash of the document whose
+	// integrity_hash is empty, as Marshal computes it.
 	docWith := func(hdr, instances, duplicates, unresolved string) []byte {
-		return []byte(`{"yammm_snapshot":` + hdr + typesTable + `,"instances":[` + instances +
-			`],"diagnostics":{"duplicates":[` + duplicates + `],"unresolved":[` + unresolved + `]}}`)
+		unsigned := `{"yammm_snapshot":` + hdr + typesTable + `,"instances":[` + instances +
+			`],"diagnostics":{"duplicates":[` + duplicates + `],"unresolved":[` + unresolved + `]}}`
+		sum := fmt.Sprintf(`"integrity_hash":"sha256:%x"`, sha256.Sum256([]byte(unsigned)))
+		return []byte(strings.Replace(unsigned, `"integrity_hash":""`, sum, 1))
 	}
 	doc := func(instances, duplicates, unresolved string) []byte {
 		return docWith(header, instances, duplicates, unresolved)

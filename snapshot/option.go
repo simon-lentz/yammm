@@ -112,7 +112,6 @@ type LoadOption func(*loadConfig)
 
 type loadConfig struct {
 	skipIntegrityCheck bool
-	valueConformance   bool
 
 	// headerOnly marks the surfaces that read a header without trusting a
 	// body. They keep the hash-algorithm mismatch non-fatal, so dispatch
@@ -159,26 +158,6 @@ func WithIssueLimit(limit int) LoadOption {
 	}
 }
 
-// WithValueConformance selects whether [Load] and [Verify] report a root's or a
-// composed child's stored value that does not conform to its schema constraint, as a Warning carrying
-// [github.com/simon-lentz/yammm/diag.W_SNAPSHOT_VALUE_NONCONFORMING]. Off by
-// default, so nothing changes and the walk costs nothing when nobody asks.
-//
-// It reports values of the three kinds that have a canonical stored form —
-// Timestamp, Date and UUID — and of a list of them, and nothing else. Bounds, enums, patterns and
-// invariants stay unchecked. This is not re-validation, and a document it
-// reports nothing for is not thereby valid; [WithRevalidation] is the full
-// check.
-//
-// Warning severity is deliberate: Load still returns the snapshot together
-// with the findings. Reporting a document is not refusing it, and each reported
-// value is kept as it arrived — this option re-validates nothing.
-func WithValueConformance(report bool) LoadOption {
-	return func(c *loadConfig) {
-		c.valueConformance = report
-	}
-}
-
 // WithRevalidation makes [Load] and [Verify] run root instances, their
 // composed children, edges, target_missing records and invariants included,
 // back through the real validator
@@ -192,12 +171,10 @@ func WithValueConformance(report bool) LoadOption {
 // reader walks stands at its address. The reader walks no root of an instances
 // entry that repeats a types-table row or names none. An edge that names no root
 // does not stop it, since the validator does not judge whether a target exists, unless it stands beside
-// another record under a (one) association. The validator judges no target key
-// component its key property refuses on an edge whose target no sound root
-// holds, or on a target_missing record whose target a refused unit stands at or
-// states: the edge's reference issue, or the unit's refusal, stands for it. As for any value
-// it refuses, it then runs no later pass of that root: its composed children and
-// invariants go unjudged. A listing that repeats a target no sound root holds
+// another record under a (one) association. The validator judges no edge's
+// target key, which the root at that address, the refusal of a unit there or
+// the edge's reference issue judges, nor the target key of a target_missing
+// record whose target a refused unit stands at or states. A listing that repeats a target no sound root holds
 // alone is left out of the root's run, so the target's own issue stands for the
 // repeat and the root's later passes still run.
 // No duplicate record's instance is run. It judges values — bounds,
@@ -219,8 +196,8 @@ func WithRevalidation(severity diag.Severity) LoadOption {
 // validation still runs and produces diagnostics with the standard snapshot
 // codes. This follows etcd's SkipHashCheck pattern and supports debugging
 // workflows where .ys files have been hand-edited for inspection. With true —
-// the default — a mismatch draws E_SNAPSHOT_INTEGRITY_MISMATCH. An empty stored
-// hash is skipped either way.
+// the default — a mismatch, or a header that holds no hash (an empty, null or
+// absent integrity_hash), draws E_SNAPSHOT_INTEGRITY_MISMATCH.
 func WithIntegrityCheck(check bool) LoadOption {
 	return func(c *loadConfig) {
 		c.skipIntegrityCheck = !check

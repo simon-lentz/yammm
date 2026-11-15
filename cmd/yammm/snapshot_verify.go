@@ -25,7 +25,6 @@ Warnings are rendered to stderr.`,
 	}
 
 	cmd.Flags().Bool("skip-integrity-check", false, "skip integrity hash verification (for hand-edited files)")
-	cmd.Flags().Bool("value-conformance", false, "report stored Timestamp/Date/UUID values that do not conform to their constraints")
 	cmd.Flags().Bool("revalidate", false, "run root instances back through the validator and report findings as warnings")
 
 	registerModuleRootFlag(cmd)
@@ -34,7 +33,6 @@ Warnings are rendered to stderr.`,
 
 func runSnapshotVerify(cmd *cobra.Command, args []string, sink *cli.DiagnosticSink) error {
 	skipIntegrity, _ := cmd.Flags().GetBool("skip-integrity-check")
-	valueConformance, _ := cmd.Flags().GetBool("value-conformance")
 	revalidate, _ := cmd.Flags().GetBool("revalidate")
 
 	schemaPath := args[0]
@@ -67,7 +65,6 @@ func runSnapshotVerify(cmd *cobra.Command, args []string, sink *cli.DiagnosticSi
 	// Build options.
 	opts := []snapshot.LoadOption{
 		snapshot.WithIntegrityCheck(!skipIntegrity),
-		snapshot.WithValueConformance(valueConformance),
 	}
 	if revalidate {
 		opts = append(opts, snapshot.WithRevalidation(diag.Warning))

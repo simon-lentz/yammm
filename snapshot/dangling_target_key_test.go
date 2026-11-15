@@ -36,6 +36,10 @@ type S {
 	--> TO_U (_:many) U
 }
 
+type Y {
+	at Timestamp primary
+}
+
 part type Line {
 	n Integer[0, 5]
 }
@@ -43,20 +47,26 @@ part type Line {
 type T {
 	id String primary
 	age Integer[0, 150]
+	score Integer
 	*-> LINES (_:many) Line
-	--> TO_U (_:many) U
+	--> TO_U (_:many) U {
+		w Integer[0, 5]
+	}
 	--> TO_V (_:many) V
 	--> TO_W (_:many) W
 	--> TO_X (_:many) X
+	--> TO_S (_:many) S
+	--> TO_Y (_:many) Y
+	! "score low" score < 10
 }
 `
 
 const sourceUUID = "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11"
 
 // danglingKeyDoc marshals a graph whose root t1 holds one edge under each of
-// its associations, every one resolving, a composed Line, and a target_missing
-// record under TO_U naming u9; and whose root S, keyed by sourceUUID, holds one
-// edge to u2.
+// its associations, every one resolving, the one under TO_U to u1 with an edge
+// property, a composed Line, and a target_missing record under TO_U naming u9;
+// and whose root S, keyed by sourceUUID, holds one edge to u2.
 func danglingKeyDoc(t *testing.T) (schema.Schema, []byte) {
 	t.Helper()
 	ctx := t.Context()
@@ -76,13 +86,16 @@ func danglingKeyDoc(t *testing.T) (schema.Schema, []byte) {
 		{"V", map[string]any{"id": "v1", "day": "2024-01-02"}},
 		{"W", map[string]any{"day": "2024-01-02"}},
 		{"X", map[string]any{"code": "abc"}},
+		{"Y", map[string]any{"at": "2024-01-02T00:00:00Z"}},
 		{"T", map[string]any{
-			"id": "t1", "age": int64(30),
+			"id": "t1", "age": int64(30), "score": int64(1),
 			"lines": []any{map[string]any{"n": int64(1)}},
-			"to_u":  []any{map[string]any{"_target_id": "u1"}, map[string]any{"_target_id": "u9"}},
+			"to_u":  []any{map[string]any{"_target_id": "u1", "w": int64(1)}, map[string]any{"_target_id": "u9"}},
 			"to_v":  []any{map[string]any{"_target_id": "v1", "_target_day": "2024-01-02"}},
 			"to_w":  []any{map[string]any{"_target_day": "2024-01-02"}},
 			"to_x":  []any{map[string]any{"_target_code": "abc"}},
+			"to_s":  []any{map[string]any{"_target_id": sourceUUID}},
+			"to_y":  []any{map[string]any{"_target_at": "2024-01-02T00:00:00Z"}},
 		}},
 	} {
 		vi, vr := v.ValidateOne(ctx, raw.typ, instance.RawInstance{Properties: raw.props})
@@ -109,10 +122,10 @@ func readIssues(res diag.Result) []string {
 }
 
 // An edge that names no root draws the one reference issue, whatever its target
-// key's components hold, and revalidation judges no component of it that its
-// key property refuses. A target_missing record names a target as an edge
-// does: revalidation judges its key unless a refused unit stands at its target,
-// as it judges an edge's.
+// key's components hold, and revalidation judges no component of it: the key is
+// judged at its address, and the root holding the edge is judged whole. A
+// target_missing record's key is judged unless a refused unit stands at its
+// target.
 func TestRead_AnEdgeThatNamesNoRootDrawsOneIssueForItsKey(t *testing.T) {
 	t.Parallel()
 	s, doc := danglingKeyDoc(t)
@@ -121,6 +134,8 @@ func TestRead_AnEdgeThatNamesNoRootDrawsOneIssueForItsKey(t *testing.T) {
 		edgeV  = `"target_key":["v1","2024-01-02"]`
 		edgeW  = `"target_key":["2024-01-02"]`
 		edgeX  = `"target_key":["abc"]`
+		edgeS  = `"target_key":["` + sourceUUID + `"]`
+		edgeY  = `"target_key":["2024-01-02T00:00:00Z"]`
 		lostU9 = `"target_key":["u9"]`
 	)
 	dangling := func(phrase string) []string {
@@ -193,13 +208,46 @@ func TestRead_AnEdgeThatNamesNoRootDrawsOneIssueForItsKey(t *testing.T) {
 			reval: []string{diag.E_CONSTRAINT_FAIL.String() + `: revalidation of dk#T[["t1"]]: `},
 		},
 		{
-			// A refused value stops the root's later passes, as a member error does.
 			name: "a refused key beside a composed child its constraint refuses",
 			edits: [][2]string{
 				{edgeU, strings.Replace(edgeU, `"u1"`, `5`, 1)},
 				{`"n":1`, `"n":9`},
 			},
 			plain: dangling(`dk#U[[5]]`),
+			reval: []string{diag.E_CONSTRAINT_FAIL.String() + `: revalidation of dk#T[["t1"]]: `},
+		},
+		{
+			name: "a refused key beside an invariant break",
+			edits: [][2]string{
+				{edgeU, strings.Replace(edgeU, `"u1"`, `5`, 1)},
+				{`"score":1`, `"score":50`},
+			},
+			plain: dangling(`dk#U[[5]]`),
+			reval: []string{diag.E_INVARIANT_FAIL.String() + `: revalidation of dk#T[["t1"]]: `},
+		},
+		{
+			name: "a refused key beside an edge property out of its bounds on the same edge",
+			edits: [][2]string{
+				{edgeU, strings.Replace(edgeU, `"u1"`, `5`, 1)},
+				{`"properties":{"w":1}`, `"properties":{"w":9}`},
+			},
+			plain: dangling(`dk#U[[5]]`),
+			reval: []string{diag.E_CONSTRAINT_FAIL.String() + `: revalidation of dk#T[["t1"]]: edge property "w"`},
+		},
+		{
+			name:  "a UUID key no UUID reads",
+			edits: [][2]string{{edgeS, `"target_key":["zzz"]`}},
+			plain: dangling(`dk#S[["zzz"]]`),
+		},
+		{
+			name:  "a Timestamp key no Timestamp reads",
+			edits: [][2]string{{edgeY, `"target_key":["2024-01-02 00:00"]`}},
+			plain: dangling(`dk#Y[["2024-01-02 00:00"]]`),
+		},
+		{
+			name:  "a Timestamp key naming the root's instant at another offset",
+			edits: [][2]string{{edgeY, `"target_key":["2024-01-02T01:00:00+01:00"]`}},
+			plain: dangling(`dk#Y[["2024-01-02T01:00:00+01:00"]]`),
 		},
 		{
 			name:  "a refused key on the second edge of a list",
@@ -213,7 +261,8 @@ func TestRead_AnEdgeThatNamesNoRootDrawsOneIssueForItsKey(t *testing.T) {
 				{`"id":"` + sourceUUID + `"`, `"id":"` + strings.ToUpper(sourceUUID) + `"`},
 				{`"target_key":["u2"]`, `"target_key":[5]`},
 			},
-			plain: dangling(`dk#U[[5]] in dk#S[["a0eebc99`),
+			plain: append(dangling(`dk#U[[5]] in dk#S[["A0EEBC99`),
+				diag.E_SNAPSHOT_MALFORMED.String()+`: instance of dk#S stores key ["A0EEBC99`),
 		},
 		{
 			name: "a refused key at the address a refused root states",

@@ -75,46 +75,6 @@ func TestAdd_RootDuplicateRecordCarriesTheCanonicalAddress(t *testing.T) {
 	}
 }
 
-// TestRebuild_DuplicateRecordResolvesFromEverySpelling pins that a duplicate
-// record spelled raw still resolves its conflict, because its key is rewritten
-// before the index is read. Reverting the rewrite turns the lookup into a miss.
-func TestRebuild_DuplicateRecordResolvesFromEverySpelling(t *testing.T) {
-	t.Parallel()
-	s := keyedDuplicateSchema(t)
-	sensorID := mustTypeID(t, s, "Sensor")
-
-	snap := rebuild(s, snapparts.Parts{
-		Types: []schema.TypeID{sensorID},
-		Instances: []snapparts.Instance{
-			{
-				TypeID:     sensorID,
-				PrimaryKey: immutable.WrapKey([]any{canonStamp}),
-				Properties: immutable.WrapProperties(map[string]any{"observed_at": canonStamp}),
-			},
-		},
-		// Every address in the record is spelled RAW.
-		Duplicates: []snapparts.Instance{{
-			TypeID:     sensorID,
-			PrimaryKey: immutable.WrapKey([]any{rawStamp}),
-			Properties: immutable.WrapProperties(map[string]any{"observed_at": rawStamp}),
-		}},
-	})
-
-	dups := slices.Collect(snap.Duplicates())
-	if len(dups) != 1 {
-		t.Fatalf("duplicates = %d, want 1", len(dups))
-	}
-	d := dups[0]
-	if d.Conflict().IsZero() {
-		t.Error("the conflict did not resolve from the raw spelling")
-	} else if got, want := d.Conflict().PrimaryKey().String(), graph.FormatKey(canonStamp); got != want {
-		t.Errorf("conflict key = %s, want %s", got, want)
-	}
-	if got, want := d.Instance().PrimaryKey().String(), graph.FormatKey(canonStamp); got != want {
-		t.Errorf("rejected instance key = %s, want the canonical %s", got, want)
-	}
-}
-
 // TestRebuild_EdgePropertyAloneKeepsTheCanonicalizerActive pins the term edge
 // properties contribute to the canonicalizer's inactive flag. Every key and every
 // instance property here is a String; the one canonicalizing kind in the schema is

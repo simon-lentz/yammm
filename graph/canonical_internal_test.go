@@ -8,7 +8,6 @@ import (
 	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/internal/instancetest"
 	"github.com/simon-lentz/yammm/internal/raceskip"
-	"github.com/simon-lentz/yammm/internal/snapparts"
 	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/location/path"
 	"github.com/simon-lentz/yammm/schema"
@@ -102,35 +101,23 @@ func TestCanonicalizerAddress_PlainKeyAllocatesNothing(t *testing.T) {
 	}
 }
 
-// TestRebuild_IndexKeyIsTheCanonicalKey pins the index's own keying, which a
-// lookup that canonicalizes its address cannot show: a rebuilt Timestamp-keyed
-// instance entered by a raw spelling is indexed once, under the canonical text,
-// on the rebuild path and on the Add path alike.
-func TestRebuild_IndexKeyIsTheCanonicalKey(t *testing.T) {
+// TestAdd_IndexKeyIsTheCanonicalKey pins the index's own keying, which a
+// lookup that canonicalizes its address cannot show: a Timestamp-keyed
+// instance entered by a raw spelling is indexed once, under the canonical text.
+func TestAdd_IndexKeyIsTheCanonicalKey(t *testing.T) {
 	s := canonicalizerSchema(t)
 	stamped, _ := s.Type("Stamped")
 	const raw, canonical = "2020-01-02T03:04:05+00:00", `["2020-01-02T03:04:05Z"]`
-	rebuilt := rebuildSnapshot(s, snapparts.Parts{
-		Types: []schema.TypeID{stamped.ID()},
-		Instances: []snapparts.Instance{
-			{
-				TypeID: stamped.ID(), PrimaryKey: immutable.WrapKey([]any{raw}),
-				Properties: immutable.WrapProperties(map[string]any{"observed_at": raw}),
-			},
-		},
-	})
 	g := New(s)
 	if r := g.Add(t.Context(), instancetest.Valid(t, s, "Stamped", map[string]any{"observed_at": raw})); !r.OK() {
 		t.Fatalf("add: %s", r)
 	}
-	for name, snap := range map[string]Snapshot{"rebuild": rebuilt, "Add": g.Snapshot()} {
-		idx := snap.instanceIndex[stamped.ID()]
-		if len(idx) != 1 {
-			t.Errorf("%s path: index holds %d entries, want 1", name, len(idx))
-		}
-		if _, ok := idx[canonical]; !ok {
-			t.Errorf("%s path: index keys = %v, want %s", name, slices.Collect(maps.Keys(idx)), canonical)
-		}
+	idx := g.Snapshot().instanceIndex[stamped.ID()]
+	if len(idx) != 1 {
+		t.Errorf("index holds %d entries, want 1", len(idx))
+	}
+	if _, ok := idx[canonical]; !ok {
+		t.Errorf("index keys = %v, want %s", slices.Collect(maps.Keys(idx)), canonical)
 	}
 }
 

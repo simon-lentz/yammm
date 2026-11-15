@@ -73,7 +73,7 @@ type SnapshotInfo struct { //nolint:revive // intentional stutter — mirrors .y
 
 	// File metadata.
 	FileSize        int64  // len(data)
-	IntegrityStatus string // "ok", "mismatch", or "skipped"
+	IntegrityStatus string // "ok" or "mismatch"
 }
 
 // Info reads summary metadata and statistics from a .ys file without
@@ -82,7 +82,9 @@ type SnapshotInfo struct { //nolint:revive // intentional stutter — mirrors .y
 // Info uses the shared streamDecoder infrastructure. It holds the decoded
 // instances section in memory, so peak usage scales with document size.
 //
-// Info verifies the integrity hash and reports the result in IntegrityStatus.
+// Info verifies the integrity hash and reports the result in IntegrityStatus:
+// a header that holds no hash (an empty, null or absent integrity_hash) is a
+// mismatch.
 // Schema hash cannot be verified (no schema available).
 //
 // Cost scales with file size because Info decodes the instance sections
@@ -116,9 +118,12 @@ type SnapshotInfo struct { //nolint:revive // intentional stutter — mirrors .y
 // materialization. It resolves no schema, so a document Info summarizes cleanly
 // can still fail Load or Verify on the schema hash, on schema resolution, on
 // each check of the graph package doc's "Structural facts" that needs a
-// schema, on two spellings of one Timestamp or UUID key, which Info compares
-// as written and Load and Verify fold, and under [WithRevalidation] on the
-// values. Info runs the checks that need none, such as a key component
+// schema, on a Timestamp, Date or UUID key component its kind stores as other
+// text, and under [WithRevalidation] on the values. Info compares keys as
+// written, so it reports such a component only where it parts two keys that
+// name one address: a reference and the root it names as a dangling
+// reference, a duplicate's key and the key its instance carries as malformed.
+// Info runs the checks that need none, such as a key component
 // [graph.ParseKey] cannot read back, an undocumented reason and two roots
 // whose stored keys it accepts at one address, comparing keys as the reader's
 // number rule renders
@@ -449,7 +454,8 @@ func HeaderOnlyRead(ctx context.Context, r io.Reader) (*HeaderInfo, diag.Result)
 }
 
 // headerAttestation converts the decoded header's claim for the Info
-// surfaces. Nil means the document was written before v0.15.0.
+// surfaces. Nil means the document states no claim, as Marshal writes one of a
+// snapshot that holds none.
 func (sd *streamDecoder) headerAttestation() *graph.Attestation {
 	a := sd.header.Attestation
 	if a == nil {

@@ -11,9 +11,10 @@ import (
 	"github.com/simon-lentz/yammm/snapshot"
 )
 
-// The reader's two value checks judge a Timestamp as the validator does: each
-// reports one at a UTC offset hour of 24, at a key and at a property, and
-// neither reports one at the widest offset the validator stores.
+// Revalidation judges a Timestamp as the validator does: it reports one at a
+// UTC offset hour of 24, at a key and at a property, and not one at the widest
+// offset the validator stores. The reader does not refuse such a key as
+// respelled, since its kind stores no text for it.
 func TestLoad_ATimestampAtAnOffsetHourOfTwentyFourIsReported(t *testing.T) {
 	t.Parallel()
 	s, res := schema.LoadString(t.Context(), "schema \"offsets\"\n\ntype Sensor {\n\tobserved_at Timestamp primary\n\tseen Timestamp\n}\n", "offsets.yammm")
@@ -32,17 +33,9 @@ func TestLoad_ATimestampAtAnOffsetHourOfTwentyFourIsReported(t *testing.T) {
 	if mr.HasErrors() {
 		t.Fatalf("marshal: %s", mr)
 	}
-	checks := map[string]struct {
-		option snapshot.LoadOption
-		code   diag.Code
-	}{
-		"WithRevalidation":     {snapshot.WithRevalidation(diag.Error), diag.E_CONSTRAINT_FAIL},
-		"WithValueConformance": {snapshot.WithValueConformance(true), diag.W_SNAPSHOT_VALUE_NONCONFORMING},
-	}
-	for name, check := range checks {
-		if _, res := snapshot.Load(t.Context(), data, s, check.option); res.HasCode(check.code) {
-			t.Fatalf("control: %s reports the widest offset: %s", name, res)
-		}
+	revalidate := snapshot.WithRevalidation(diag.Error)
+	if _, res := snapshot.Load(t.Context(), data, s, revalidate); res.HasCode(diag.E_CONSTRAINT_FAIL) {
+		t.Fatalf("control: revalidation reports the widest offset: %s", res)
 	}
 	for position, stamp := range map[string]string{"a key": key, "a property": property} {
 		if !bytes.Contains(data, []byte(stamp)) {
@@ -50,13 +43,11 @@ func TestLoad_ATimestampAtAnOffsetHourOfTwentyFourIsReported(t *testing.T) {
 		}
 		wide := stamp[:len(stamp)-len("+23:59")] + "+24:00"
 		doc := rehashDocument(t, bytes.ReplaceAll(data, []byte(stamp), []byte(wide)))
-		for name, check := range checks {
-			if _, res := snapshot.Load(t.Context(), doc, s, check.option); !res.HasCode(check.code) {
-				t.Errorf("Load under %s of %s at %s: %s; want %v", name, wide, position, res, check.code)
-			}
-			if res := snapshot.Verify(t.Context(), doc, s, check.option); !res.HasCode(check.code) {
-				t.Errorf("Verify under %s of %s at %s: %s; want %v", name, wide, position, res, check.code)
-			}
+		if _, res := snapshot.Load(t.Context(), doc, s, revalidate); !res.HasCode(diag.E_CONSTRAINT_FAIL) {
+			t.Errorf("Load of %s at %s: %s; want E_CONSTRAINT_FAIL", wide, position, res)
+		}
+		if res := snapshot.Verify(t.Context(), doc, s, revalidate); !res.HasCode(diag.E_CONSTRAINT_FAIL) {
+			t.Errorf("Verify of %s at %s: %s; want E_CONSTRAINT_FAIL", wide, position, res)
 		}
 	}
 }

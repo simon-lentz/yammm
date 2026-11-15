@@ -125,7 +125,7 @@ func TestLoad_ReadsANumberAtTheKindItsPositionDeclares(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
 			doc := numberRuleDoc(t, s, gauge, c.prop, c.spelled)
-			snap, res := snapshot.Load(t.Context(), doc, s)
+			snap, res := snapshot.Load(t.Context(), rehashDocument(t, doc), s)
 			if !res.OK() {
 				t.Fatalf("Load: %s", res)
 			}
@@ -151,7 +151,7 @@ func TestLoad_ReadsANumberAtTheKindItsPositionDeclares(t *testing.T) {
 			if !strings.Contains(string(data), c.written) {
 				t.Errorf("the document does not state %s:\n%s", c.written, data)
 			}
-			again, lres := snapshot.Load(t.Context(), data, s)
+			again, lres := snapshot.Load(t.Context(), rehashDocument(t, data), s)
 			if !lres.OK() {
 				t.Fatalf("second Load: %s", lres)
 			}
@@ -173,7 +173,7 @@ func TestLoad_RevalidationRefusesAnIntegerPastInt64AtAnInteger(t *testing.T) {
 	s, gauge := loadNumberRuleSchema(t)
 	for prop, refused := range map[string]bool{"count": true, "level": false} {
 		doc := numberRuleDoc(t, s, gauge, prop, json.Number("9223372036854775808"))
-		_, res := snapshot.Load(t.Context(), doc, s, snapshot.WithRevalidation(diag.Error))
+		_, res := snapshot.Load(t.Context(), rehashDocument(t, doc), s, snapshot.WithRevalidation(diag.Error))
 		if got := res.HasCode(diag.E_TYPE_MISMATCH); got != refused {
 			t.Errorf("%s: revalidation refused = %v, want %v: %s", prop, got, refused, res)
 		}
@@ -244,7 +244,7 @@ func TestRead_AKeyHoldsOnlyNumbersThatReadBack(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
 			c.parts.Types = []schema.TypeID{gauge}
-			res := snapshot.Verify(t.Context(), snappartstest.Document(t, s, c.parts), s, snapshot.WithIssueLimit(0))
+			res := snapshot.Verify(t.Context(), rehashDocument(t, snappartstest.Document(t, s, c.parts)), s, snapshot.WithIssueLimit(0))
 			found := false
 			for issue := range res.Errors() {
 				found = found || issue.Code() == diag.E_SNAPSHOT_MALFORMED && strings.Contains(issue.Message(), c.phrase)
@@ -256,21 +256,21 @@ func TestRead_AKeyHoldsOnlyNumbersThatReadBack(t *testing.T) {
 	}
 
 	doc := snappartstest.Document(t, s, snapparts.Parts{Types: []schema.TypeID{gauge}, Instances: []snapparts.Instance{sound}})
-	if res := snapshot.Verify(t.Context(), doc, s); !res.OK() {
+	if res := snapshot.Verify(t.Context(), rehashDocument(t, doc), s); !res.OK() {
 		t.Errorf("a key 1 whose property is 1 was refused: %s", res)
 	}
 
 	withDup := string(snappartstest.Document(t, s, snapparts.Parts{
 		Types: []schema.TypeID{gauge}, Instances: []snapparts.Instance{sound}, Duplicates: []snapparts.Instance{sound},
 	}))
-	if res := snapshot.Verify(t.Context(), []byte(withDup), s); !res.OK() {
+	if res := snapshot.Verify(t.Context(), rehashDocument(t, []byte(withDup)), s); !res.OK() {
 		t.Errorf("a duplicate of the key 1 was refused: %s", res)
 	}
 	for name, edit := range map[string][2]string{
 		"a duplicate record's key 1.0": {`"duplicates":[{"type":0,"key":[1],`, `"duplicates":[{"type":0,"key":[1.0],`},
 		"a conflict key 1.0":           {`"conflict":{"type":0,"key":[1]}`, `"conflict":{"type":0,"key":[1.0]}`},
 	} {
-		res := snapshot.Verify(t.Context(), []byte(editOnce(t, withDup, edit[0], edit[1])), s, snapshot.WithIssueLimit(0))
+		res := snapshot.Verify(t.Context(), rehashDocument(t, []byte(editOnce(t, withDup, edit[0], edit[1]))), s, snapshot.WithIssueLimit(0))
 		if sbFailures(res) != 1 || !strings.Contains(res.String(), `states`) || !strings.Contains(res.String(), `[1.0], whose component 0 is not a scalar graph.ParseKey reads back`) {
 			t.Errorf("%s: want its one refusal: %s", name, res)
 		}
@@ -287,7 +287,7 @@ func TestRead_AKeyHoldsOnlyNumbersThatReadBack(t *testing.T) {
 		"a duplicate record's key 1.0 beside its instance's key 2": {`"duplicates":[{"type":0,"key":[2],`, `"duplicates":[{"type":0,"key":[1.0],`},
 		"a conflict key 1.0 naming no root":                        {`"conflict":{"type":0,"key":[2]}`, `"conflict":{"type":0,"key":[1.0]}`},
 	} {
-		res := snapshot.Verify(t.Context(), []byte(editOnce(t, withDupOfTwo, edit[0], edit[1])), s, snapshot.WithIssueLimit(0))
+		res := snapshot.Verify(t.Context(), rehashDocument(t, []byte(editOnce(t, withDupOfTwo, edit[0], edit[1]))), s, snapshot.WithIssueLimit(0))
 		if sbFailures(res) != 1 || !strings.Contains(res.String(), `[1.0], whose component 0 is not a scalar graph.ParseKey reads back`) {
 			t.Errorf("%s: want its one refusal: %s", name, res)
 		}
@@ -301,7 +301,7 @@ func TestRead_AKeyHoldsOnlyNumbersThatReadBack(t *testing.T) {
 			TargetKey: immutable.WrapKey([]any{"ghost"}), Reason: "target_missing",
 		}},
 	}))
-	res := snapshot.Verify(t.Context(), []byte(editOnce(t, withRecord, `"source_type":0`, `"source_type":9`)), s, snapshot.WithIssueLimit(0))
+	res := snapshot.Verify(t.Context(), rehashDocument(t, []byte(editOnce(t, withRecord, `"source_type":0`, `"source_type":9`))), s, snapshot.WithIssueLimit(0))
 	if sbFailures(res) != 2 || !strings.Contains(res.String(), `source references types table row 9`) ||
 		!strings.Contains(res.String(), `unresolved record 0 states source key [1.0], whose component 0`) {
 		t.Errorf("a record of an unresolved row with source key 1.0: want both refusals: %s", res)
@@ -311,7 +311,7 @@ func TestRead_AKeyHoldsOnlyNumbersThatReadBack(t *testing.T) {
 	// read to one value of one kind.
 	for _, kp := range [][2]json.Number{{"1.5", "1.50"}, {"0", "-0"}, {"100", "100"}} {
 		doc := snappartstest.Document(t, s, snapparts.Parts{Types: []schema.TypeID{gauge}, Instances: []snapparts.Instance{root(kp[0], kp[1])}})
-		if res := snapshot.Verify(t.Context(), doc, s); !res.OK() {
+		if res := snapshot.Verify(t.Context(), rehashDocument(t, doc), s); !res.OK() {
 			t.Errorf("key [%s] with property %s was refused: %s", kp[0], kp[1], res)
 		}
 	}
@@ -333,7 +333,7 @@ func TestLoad_ReadsAnUnresolvedRecordsNumberAtItsRelationsKind(t *testing.T) {
 			Properties: immutable.WrapProperties(map[string]any{"weight": json.Number("2")}),
 		}},
 	})
-	snap, res := snapshot.Load(t.Context(), doc, s)
+	snap, res := snapshot.Load(t.Context(), rehashDocument(t, doc), s)
 	if !res.OK() {
 		t.Fatalf("Load: %s", res)
 	}

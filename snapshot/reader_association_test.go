@@ -170,9 +170,9 @@ func TestReader_RefusesAnUnresolvedRecordTheGraphCannotStage(t *testing.T) {
 	}
 }
 
-// A (one) association holding two records is reported once, and the count
-// folds two spellings of one source instant.
-func TestReader_CountsAOneOnceByItsCanonicalSource(t *testing.T) {
+// A (one) association holding two records is reported once, the record counted
+// at the source key it states.
+func TestReader_CountsAOneOnceAtItsSource(t *testing.T) {
 	t.Parallel()
 	s := loadReaderSchema(t)
 	doc := readerDoc(t, s,
@@ -180,8 +180,8 @@ func TestReader_CountsAOneOnceByItsCanonicalSource(t *testing.T) {
 		map[string]any{"$type": "Event", "at": canonicalStamp, "HOST": map[string]any{"_target_id": "c1"}},
 		map[string]any{"$type": "Event", "at": "2021-01-01T00:00:00Z", "HOST": map[string]any{"_target_id": "c9"}},
 	)
-	respelled := editOnce(t, doc, `"source_key":["2021-01-01T00:00:00Z"]`, `"source_key":["`+rawStamp+`"]`)
-	for surface, res := range readBoth(t, s, respelled) {
+	moved := editOnce(t, doc, `"source_key":["2021-01-01T00:00:00Z"]`, `"source_key":["`+canonicalStamp+`"]`)
+	for surface, res := range readBoth(t, s, moved) {
 		n := 0
 		for issue := range res.Issues() {
 			if issue.Code() == diag.E_GRAPH_CARDINALITY {

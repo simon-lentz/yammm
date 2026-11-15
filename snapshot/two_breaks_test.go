@@ -271,7 +271,7 @@ func TestRead_TwoBreaksDrawTheIssuesOfEach(t *testing.T) {
 	s, doc := singleBreakDoc(t)
 	rows := sbRows()
 	verify := func(mode sbMode, text string) int {
-		return sbJudged(snapshot.Verify(t.Context(), []byte(text), s, mode.opts...))
+		return sbJudged(snapshot.Verify(t.Context(), rehashDocument(t, []byte(text)), s, mode.opts...))
 	}
 	apart := make([]int, len(rows))
 	var plain map[[2]int]int
@@ -335,7 +335,7 @@ func TestRead_AnElementOfOneFieldStatesSomething(t *testing.T) {
 		for _, element := range elements {
 			t.Run(element, func(t *testing.T) {
 				t.Parallel()
-				res := snapshot.Verify(t.Context(), []byte(editOnce(t, doc, anchor, anchor+element+`,`)), s, snapshot.WithIssueLimit(0))
+				res := snapshot.Verify(t.Context(), rehashDocument(t, []byte(editOnce(t, doc, anchor, anchor+element+`,`))), s, snapshot.WithIssueLimit(0))
 				if sbFailures(res) == 0 || strings.Contains(res.String(), "states nothing") {
 					t.Errorf("want the element's own facts refused: %s", res)
 				}
@@ -355,7 +355,7 @@ func TestRead_AnElementOfEmptyValuesStatesNothing(t *testing.T) {
 		for _, element := range elements {
 			t.Run(element, func(t *testing.T) {
 				t.Parallel()
-				res := snapshot.Verify(t.Context(), []byte(editOnce(t, doc, anchor, anchor+element+`,`)), s, snapshot.WithIssueLimit(0))
+				res := snapshot.Verify(t.Context(), rehashDocument(t, []byte(editOnce(t, doc, anchor, anchor+element+`,`))), s, snapshot.WithIssueLimit(0))
 				if sbFailures(res) != 1 || !strings.Contains(res.String(), "states nothing") {
 					t.Errorf("want one issue that the element states nothing: %s", res)
 				}
@@ -370,7 +370,7 @@ func TestRead_ACapKeepsARecordsIssueOverAnEdges(t *testing.T) {
 	t.Parallel()
 	s, doc := singleBreakDoc(t)
 	edited := editOnce(t, editOnce(t, doc, sbMentor, `"MENTOR":[{"target_type":4,"target_key":["p7"],"properties":{}}]`), sbRootDup, `{"type":1,"key":["c1"],`+sbDupInstance+`,"conflict":{"type":1,"key":["c9"]}}`)
-	res := snapshot.Verify(t.Context(), []byte(edited), s, snapshot.WithIssueLimit(1))
+	res := snapshot.Verify(t.Context(), rehashDocument(t, []byte(edited)), s, snapshot.WithIssueLimit(1))
 	if !strings.Contains(res.String(), "duplicate conflict") {
 		t.Errorf("want the duplicate's issue kept: %s", res)
 	}
@@ -405,7 +405,7 @@ func TestRead_ADanglingEdgeBesideAnotherRecordStopsRevalidation(t *testing.T) {
 			if c.record != "" {
 				edited = editOnce(t, edited, sbUnresolved, sbUnresolved+c.record+`,`)
 			}
-			res := snapshot.Verify(t.Context(), []byte(edited), s, snapshot.WithRevalidation(diag.Error), snapshot.WithIssueLimit(0))
+			res := snapshot.Verify(t.Context(), rehashDocument(t, []byte(edited)), s, snapshot.WithRevalidation(diag.Error), snapshot.WithIssueLimit(0))
 			// The document's two required records at p2 draw their warning at this severity.
 			if n := sbFailures(res) - 2; n != len(c.want) {
 				t.Errorf("%d issues beside the two records' warnings, want %v: %s", n, c.want, res)
@@ -482,7 +482,7 @@ func TestRead_EachBreakOfARecordDrawsItsOwnIssue(t *testing.T) {
 			for _, e := range c.edits {
 				doc = editOnce(t, doc, e[0], e[1])
 			}
-			read := snapshot.Verify(t.Context(), []byte(doc), s, snapshot.WithIssueLimit(0))
+			read := snapshot.Verify(t.Context(), rehashDocument(t, []byte(doc)), s, snapshot.WithIssueLimit(0))
 			if sbFailures(read) != c.read {
 				t.Errorf("the reader draws %d issues, want %d: %s", sbFailures(read), c.read, read)
 			}
@@ -506,7 +506,8 @@ part type K {
 // A key property holds its number however the document spells it, so a reference to
 // that number is a reference to the address the refused root states. A negative zero
 // and an integer past int64 do not read back, so each states no address and a
-// reference spelled so is its own break.
+// reference spelled so is its own break: a duplicate's stored key and its
+// conflict key are two.
 func TestRead_AKeyPropertyStatesItsNumberInAnySpelling(t *testing.T) {
 	t.Parallel()
 	s, res := schema.LoadString(t.Context(), numberKeySchema, "nk.yammm")
@@ -530,7 +531,7 @@ func TestRead_AKeyPropertyStatesItsNumberInAnySpelling(t *testing.T) {
 	if res.HasErrors() {
 		t.Fatalf("Marshal: %s", res)
 	}
-	doc := sbIntegrity.ReplaceAllString(string(data), `"integrity_hash":""`)
+	doc := string(data)
 	const (
 		n10     = `{"key":["n10"],"properties":{"id":"n10"},"provenance":null}`
 		link    = `"LINK":[{"target_type":1,"target_key":["n20"],"properties":{}}]`
@@ -560,8 +561,8 @@ func TestRead_AKeyPropertyStatesItsNumberInAnySpelling(t *testing.T) {
 		{"a number past int64 and an edge to its nearest float, which is no key", [][2]string{stated(`18446744073709551615`), edgeTo(`18446744073709552000`)}, 2},
 		{"1.0 and a record of 1", [][2]string{stated(`1.0`), recordOf(`1`)}, 1},
 		{"1.0 and a duplicate whose conflict is 1", [][2]string{stated(`1.0`), dupOf(`1`)}, 1},
-		{"-0.0 and a duplicate whose conflict is -0.0", [][2]string{stated(`-0.0`), dupOf(`-0.0`)}, 2},
-		{"-0e0 and a duplicate whose conflict is -0e0", [][2]string{stated(`-0e0`), dupOf(`-0e0`)}, 2},
+		{"-0.0 and a duplicate whose conflict is -0.0", [][2]string{stated(`-0.0`), dupOf(`-0.0`)}, 3},
+		{"-0e0 and a duplicate whose conflict is -0e0", [][2]string{stated(`-0e0`), dupOf(`-0e0`)}, 3},
 		{"-0.0 and a record of -0.0", [][2]string{stated(`-0.0`), recordOf(`-0.0`)}, 2},
 	} {
 		t.Run(c.name, func(t *testing.T) {
@@ -570,7 +571,7 @@ func TestRead_AKeyPropertyStatesItsNumberInAnySpelling(t *testing.T) {
 			for _, e := range c.edits {
 				edited = editOnce(t, edited, e[0], e[1])
 			}
-			read := snapshot.Verify(t.Context(), []byte(edited), s, snapshot.WithIssueLimit(0))
+			read := snapshot.Verify(t.Context(), rehashDocument(t, []byte(edited)), s, snapshot.WithIssueLimit(0))
 			if strings.Contains(read.String(), "failed to read") {
 				t.Fatalf("the edited document does not parse: %s", read)
 			}
@@ -588,7 +589,7 @@ func TestRead_ARecordOfARefusedRowNamesNoReference(t *testing.T) {
 	s, doc := singleBreakDoc(t)
 	for _, targetRow := range []string{`null`, `99`} {
 		edited := editOnce(t, doc, sbUnresolved, sbUnresolved+`{"source_type":4,"source_key":["p7"],"relation":"KNOWS","target_type":`+targetRow+`,"target_key":["p8"],"required":false,"reason":"target_missing"},`)
-		res := snapshot.Verify(t.Context(), []byte(edited), s, snapshot.WithIssueLimit(0))
+		res := snapshot.Verify(t.Context(), rehashDocument(t, []byte(edited)), s, snapshot.WithIssueLimit(0))
 		if hasCode(res, diag.E_SNAPSHOT_DANGLING_REFERENCE) || !strings.Contains(res.String(), "target") {
 			t.Errorf("target row %s: want the row's refusal alone: %s", targetRow, res)
 		}
@@ -613,7 +614,7 @@ func TestRead_ARecordOfTwoRefusedRowsDrawsTheIssueOfEach(t *testing.T) {
 	t.Parallel()
 	s, doc := singleBreakDoc(t)
 	edited := editOnce(t, doc, sbUnresolved, sbUnresolved+`{"source_type":99,"source_key":["p7"],"relation":"KNOWS","target_type":99,"target_key":["p8"],"required":false,"reason":"target_missing"},`)
-	res := snapshot.Verify(t.Context(), []byte(edited), s, snapshot.WithIssueLimit(0))
+	res := snapshot.Verify(t.Context(), rehashDocument(t, []byte(edited)), s, snapshot.WithIssueLimit(0))
 	if sbFailures(res) != 2 || !strings.Contains(res.String(), "source") || !strings.Contains(res.String(), "target") {
 		t.Errorf("the reader draws %d issues, want one for each row: %s", sbFailures(res), res)
 	}
@@ -638,7 +639,7 @@ func TestRead_ARootOfATypeThatCannotHoldOneHoldsNoAddress(t *testing.T) {
 	if res.HasErrors() {
 		t.Fatalf("Marshal: %s", res)
 	}
-	doc := sbIntegrity.ReplaceAllString(string(data), `"integrity_hash":""`)
+	doc := string(data)
 	doc = editOnce(t, doc, `"types":[{"schema":"rl","name":"Company"}]`, `"types":[{"schema":"rl","name":"Base"},{"schema":"rl","name":"Company"}]`)
 	doc = strings.Replace(doc, `{"type":0,"items":[{"key":["c1"]`, `{"type":1,"items":[{"key":["c1"]`, 1)
 	const absent = `{"source_type":0,"source_key":["b1"],"relation":"OWNER","target_type":1,"target_key":null,"required":true,"reason":"absent"}`
@@ -662,7 +663,7 @@ func TestRead_ARootOfATypeThatCannotHoldOneHoldsNoAddress(t *testing.T) {
 			for _, e := range c.edits {
 				edited = editOnce(t, edited, e[0], e[1])
 			}
-			read := snapshot.Verify(t.Context(), []byte(edited), s, snapshot.WithIssueLimit(0))
+			read := snapshot.Verify(t.Context(), rehashDocument(t, []byte(edited)), s, snapshot.WithIssueLimit(0))
 			if sbFailures(read) != c.want || !hasCode(read, diag.E_SNAPSHOT_INVALID_ROOT) {
 				t.Errorf("the reader draws %d issues, want %d: %s", sbFailures(read), c.want, read)
 			}
@@ -716,7 +717,7 @@ func TestRead_ARefusedKeyIsNamedAsSpelled(t *testing.T) {
 			for _, e := range c.edits {
 				edited = editOnce(t, edited, e[0], e[1])
 			}
-			res := snapshot.Verify(t.Context(), []byte(edited), s, snapshot.WithIssueLimit(0))
+			res := snapshot.Verify(t.Context(), rehashDocument(t, []byte(edited)), s, snapshot.WithIssueLimit(0))
 			if !strings.Contains(res.String(), c.want) {
 				t.Fatalf("the refusal does not name the key as spelled: %s", res)
 			}
@@ -750,10 +751,10 @@ func TestRead_ARootOfATypeThatCannotHoldOneNamesItsKeyAsSpelled(t *testing.T) {
 	if res.HasErrors() {
 		t.Fatalf("Marshal: %s", res)
 	}
-	doc := sbIntegrity.ReplaceAllString(string(data), `"integrity_hash":""`)
+	doc := string(data)
 	doc = editOnce(t, doc, `"types":[]`, `"types":[{"schema":"rl","name":"Base"}]`)
 	doc = editOnce(t, doc, `"instances":[]`, `"instances":[{"type":0,"items":[{"key":[[1.0]],"properties":{"id":"b1"},"provenance":null}]}]`)
-	read := snapshot.Verify(t.Context(), []byte(doc), s, snapshot.WithIssueLimit(0))
+	read := snapshot.Verify(t.Context(), rehashDocument(t, []byte(doc)), s, snapshot.WithIssueLimit(0))
 	if !strings.Contains(read.String(), `stores key [[1.0]], whose component 0`) {
 		t.Errorf("the refusal does not name the key as spelled: %s", read)
 	}
@@ -771,7 +772,7 @@ func TestRead_RecordsOfNoSourceRowCostLinearly(t *testing.T) {
 		}
 		edited := []byte(editOnce(t, editOnce(t, doc, `{"type":4,"items":[`, `{"type":4,"items":[`+roots.String()), sbUnresolved, sbUnresolved+records.String()))
 		return testing.AllocsPerRun(1, func() {
-			if res := snapshot.Verify(t.Context(), edited, s, snapshot.WithIssueLimit(1)); res.OK() {
+			if res := snapshot.Verify(t.Context(), rehashDocument(t, edited), s, snapshot.WithIssueLimit(1)); res.OK() {
 				t.Fatal("the document is accepted")
 			}
 		})
@@ -789,7 +790,7 @@ func TestRead_AReferenceCheckRunsBeforeTheOneCount(t *testing.T) {
 	t.Parallel()
 	s, doc := singleBreakDoc(t)
 	edited := []byte(editOnce(t, doc, sbMentor, `"MENTOR":[{"target_type":4,"target_key":["p2"],"properties":{}},{"target_type":4,"target_key":["p7"],"properties":{}}]`))
-	read := snapshot.Verify(t.Context(), edited, s, snapshot.WithIssueLimit(0))
+	read := snapshot.Verify(t.Context(), rehashDocument(t, edited), s, snapshot.WithIssueLimit(0))
 	if sbFailures(read) != 1 || !hasCode(read, diag.E_SNAPSHOT_DANGLING_REFERENCE) {
 		t.Errorf("the reader draws %s, want the dangling reference alone", read)
 	}

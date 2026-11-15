@@ -158,7 +158,8 @@
 // over a snapshot bound to another schema, derives its records again, refusing
 // an "empty" record under a (one) association, and refuses one that breaks any
 // other fact, save an "absent" record under a relation that is no association of
-// that schema, which it drops.
+// that schema, which it drops, and a Timestamp, Date or UUID key component that
+// schema stores as other text, which it moves to that text.
 // The facts are the whole promise: a shape they do not name, such as a
 // property value its constraint refuses, can pass the reader. A type that
 // cannot hold a root is one break, however many positions name it, and a root of
@@ -180,8 +181,11 @@
 //     so the integer 1 and the float 1.0 disagree. So a list or a map, an
 //     integer literal no int64 holds, a literal no finite float64 holds, and a
 //     number ParseKey reads back at another rendering (one spelled
-//     1.0, or a negative zero) are refused. Two roots of one type never share a
-//     canonical address.
+//     1.0, or a negative zero) are refused. A Timestamp, Date or UUID component
+//     of a stored key, a target key, a record's source key, or a duplicate's key
+//     or conflict key that its kind can render is the text its kind stores, so
+//     every address compares as written; a component its kind cannot render is
+//     no address of an instance of that kind, which revalidation judges. Two roots of one type never share a canonical address.
 //   - Names. Every stored property and edge property name is declared.
 //   - Associations. Every edge and unresolved record is under an association
 //     its source's type declares. An edge's target is an instance of that

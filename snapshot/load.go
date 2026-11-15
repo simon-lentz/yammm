@@ -25,13 +25,11 @@ import (
 // satisfies its constraint, and whether an invariant holds, is the writer's
 // claim (see the package's Validity Contract). [WithRevalidation] runs each
 // root the structural checks left whole, with its composed children, edges and
-// target_missing records, back through the real validator;
-// [WithValueConformance] is the narrower canonical-form check. Whatever the
+// target_missing records, back through the real validator. Whatever the
 // options say, Load refuses a document that breaks the .ys format, a string of
 // invalid UTF-8 or half a surrogate pair among such breaks, or a fact of the
 // graph package doc's "Structural facts", save that
-// [WithIntegrityCheck](false) skips the integrity hash, and an empty stored hash
-// is skipped under any option.
+// [WithIntegrityCheck](false) skips the integrity hash.
 //
 // A number materializes by the value rule at the kind its position declares. At
 // a Float, and at a Vector element, a number literal is its nearest float64, so

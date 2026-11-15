@@ -15,7 +15,9 @@ import (
 // snap need not have been built against s. The import derives its records again
 // under s, refusing an "empty" record under a (one) association, and refuses one
 // that breaks another fact of the package doc's "Structural facts" under s, save
-// an "absent" record under a relation that is no association of s, which it drops. It stores a number at a Float of s as the
+// an "absent" record under a relation that is no association of s, which it drops,
+// and a Timestamp, Date or UUID key component s stores as other text, which it
+// moves to that text. It stores a number at a Float of s as the
 // validator does, as its nearest float64. A refusal returns a nil Graph and one
 // diagnostic for each break, naming a position, and nothing is installed. A break
 // that reads a unit another diagnostic refused can draw none. A snapshot bound to s already holds to the facts

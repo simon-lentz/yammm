@@ -199,10 +199,10 @@ func printHeaderInfo(w interface{ Write([]byte) (int, error) }, header *headerIn
 }
 
 // printAttestation renders the header's validity claim, or names its
-// absence: a pre-v0.15.0 writer states no claim at all.
+// absence: a document written from a snapshot that holds no claim states none.
 func printAttestation(w interface{ Write([]byte) (int, error) }, att *attestationDTO) {
 	if att == nil {
-		fmt.Fprintf(w, "  Attested:   not stated (pre-v0.15.0 writer)\n")
+		fmt.Fprintf(w, "  Attested:   not stated\n")
 		return
 	}
 	fmt.Fprintf(w, "  Attested:   values=%t associations=%t\n", att.Values, att.Associations)

@@ -12,10 +12,10 @@ import (
 )
 
 // TestInstanceByKey_AnySpellingOnEveryPath pins that a Timestamp-keyed
-// instance entered by a non-canonical spelling is
-// found by its own key, by FormatKey of the canonical text and by FormatKey
-// of the spelling the caller wrote, on a snapshot built through Add and on
-// one rebuilt from parts.
+// instance is found by its own key, by FormatKey of the canonical text and by
+// FormatKey of another spelling of it, on a snapshot built through Add from a
+// non-canonical spelling and on one rebuilt from parts, which hold the
+// canonical text.
 func TestInstanceByKey_AnySpellingOnEveryPath(t *testing.T) {
 	t.Parallel()
 	s := callerSpellingSchema(t)
@@ -32,7 +32,7 @@ func TestInstanceByKey_AnySpellingOnEveryPath(t *testing.T) {
 		Types: []schema.TypeID{runID},
 		Instances: []snapparts.Instance{
 			{
-				TypeID: runID, PrimaryKey: immutable.WrapKey([]any{rawInstant}),
+				TypeID: runID, PrimaryKey: immutable.WrapKey([]any{canonInstant}),
 				Properties: immutable.WrapProperties(map[string]any{"at": rawInstant}),
 			},
 		},

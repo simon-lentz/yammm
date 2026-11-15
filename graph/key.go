@@ -15,10 +15,11 @@ import (
 // FormatKey renders primary key components as the JSON array string the
 // graph's addresses use: ["value1", value2, ...].
 //
-// It renders the values AS GIVEN and canonicalizes nothing; the graph does,
-// at every address it receives. The graph indexes an instance by the key it
-// carries. For a Timestamp, Date or UUID key whose constraint renders the value,
-// the key is the canonical text that value took at entry — so
+// It renders the values AS GIVEN and canonicalizes nothing. The graph indexes
+// an instance by the key it carries, and moves a key only at the import of a
+// snapshot of another schema and at [Snapshot.InstanceByKey]'s lookup. For a
+// Timestamp, Date or UUID key whose constraint renders the value, the key is
+// the canonical text that value took at entry — so
 // [Snapshot.InstanceByKey] canonicalizes an address that misses as spelled under
 // the type's key constraints, and FormatKey over each text spelling of one
 // instant at one offset addresses it, as does a time.Time at a Timestamp key.

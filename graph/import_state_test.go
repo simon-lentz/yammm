@@ -10,6 +10,7 @@ import (
 	"github.com/simon-lentz/yammm/internal/instancetest"
 	"github.com/simon-lentz/yammm/internal/snapparts"
 	"github.com/simon-lentz/yammm/internal/snappartstest"
+	"github.com/simon-lentz/yammm/snapshot"
 )
 
 const importStateSchema = `schema "import_state"
@@ -143,27 +144,29 @@ func TestImport_AKeyShorterThanTheImportingSchemasIsRefused(t *testing.T) {
 	}
 }
 
-// A component no constraint renders stays as written, and the components after it
-// are still canonical.
-func TestLoad_CanonicalizesTheKeyComponentsAfterOneItCannotRender(t *testing.T) {
+// A component no constraint renders stays as written, and a component after it
+// is still held to the text its kind stores: the reader refuses another
+// spelling of it.
+func TestLoad_JudgesTheKeyComponentsAfterOneItCannotRender(t *testing.T) {
 	t.Parallel()
 	s := loadEntry(t, "schema \"m\"\ntype C {\n b Timestamp primary\n c UUID primary\n}\n")
 	const upper, lower = "6BA7B810-9DAD-11D1-80B4-00C04FD430C8", "6ba7b810-9dad-11d1-80b4-00c04fd430c8"
 	c := typeIDOf(t, s, "C")
-	snap := snappartstest.Loaded(t, s, snapparts.Parts{Instances: []snapparts.Instance{{
-		TypeID: c, PrimaryKey: immutable.WrapKey([]any{"not a time", upper}),
-		Properties: immutable.WrapProperties(map[string]any{"b": "not a time", "c": upper}),
-	}}})
-	roots := slices.Collect(snap.InstancesOf(c))
+	parts := func(u string) snapparts.Parts {
+		return snapparts.Parts{Instances: []snapparts.Instance{{
+			TypeID: c, PrimaryKey: immutable.WrapKey([]any{"not a time", u}),
+			Properties: immutable.WrapProperties(map[string]any{"b": "not a time", "c": upper}),
+		}}}
+	}
+	roots := slices.Collect(snappartstest.Loaded(t, s, parts(lower)).InstancesOf(c))
 	if len(roots) != 1 {
 		t.Fatalf("read %d roots, want 1", len(roots))
 	}
-	key := roots[0].PrimaryKey()
-	if got := key.Get(1).Unwrap(); got != lower {
-		t.Errorf("second component %v, want %s", got, lower)
+	if got := roots[0].PrimaryKey().String(); got != graph.FormatKey("not a time", lower) {
+		t.Errorf("key %s, want the first component as written and the second as stored", got)
 	}
-	if got := key.Get(0).Unwrap(); got != "not a time" {
-		t.Errorf("first component %v, want it as written", got)
+	if _, res := snapshot.Load(t.Context(), snappartstest.Document(t, s, parts(upper)), s); !res.HasCode(diag.E_SNAPSHOT_MALFORMED) {
+		t.Errorf("a second component in upper case: %s; want %s", res, diag.E_SNAPSHOT_MALFORMED)
 	}
 }
 

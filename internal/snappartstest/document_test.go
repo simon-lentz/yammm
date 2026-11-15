@@ -1,6 +1,7 @@
 package snappartstest_test
 
 import (
+	"crypto/sha256"
 	"fmt"
 	"math"
 	"slices"
@@ -82,8 +83,8 @@ func documentShapes(t *testing.T) (schema.Schema, snapparts.Parts) {
 
 // Document states each shape where Marshal writes it: a table row for every type
 // named or reached, a group for every root type and denoted type, an edge under the
-// root its source key spells, a composed child with its type, and a whole float
-// with its indicator.
+// root its source key spells, a composed child with its type, a whole float with
+// its indicator, and the integrity hash of its own bytes.
 func TestDocument_WritesEveryShapeWhereTheFormatHoldsIt(t *testing.T) {
 	t.Parallel()
 	s, parts := documentShapes(t)
@@ -108,6 +109,8 @@ func TestDocument_WritesEveryShapeWhereTheFormatHoldsIt(t *testing.T) {
 		`"duplicates":[{"type":3,"key":["p2"],"instance":{"key":["p2"],"properties":{"id":"p2","score":3.5},"provenance":null},"conflict":{"type":3,"key":["p2"]}}],` +
 		`"unresolved":[{"source_type":3,"source_key":["p1"],"relation":"MENTOR","target_type":1,"target_key":["c9"],"required":false,"reason":"target_missing"}]` +
 		`}}`
+	// The document carries the hash of its own bytes with integrity_hash empty.
+	want = strings.Replace(want, `"integrity_hash":""`, fmt.Sprintf(`"integrity_hash":"sha256:%x"`, sha256.Sum256([]byte(want))), 1)
 	if got := string(snappartstest.Document(t, s, parts)); got != want {
 		t.Errorf("Document wrote\n%s\nwant\n%s", got, want)
 	}
@@ -288,5 +291,27 @@ func TestDocument_WritesAProvenanceRawPathAsHeld(t *testing.T) {
 	doc := string(snappartstest.Document(t, s, parts))
 	if !strings.Contains(doc, `"source_name":"feed","path":"not a path"`) {
 		t.Errorf("no raw path in:\n%s", doc)
+	}
+}
+
+// A property named integrity_hash holding "" is the header's member's bytes
+// again: Document signs the header's member, and the reader verifies it.
+func TestDocument_SignsTheHeaderBesideAPropertyOfTheSameName(t *testing.T) {
+	t.Parallel()
+	s, res := schema.LoadString(t.Context(), "schema \"named\"\n\ntype H {\n\tid String primary\n\tintegrity_hash String\n}\n", "named.yammm")
+	if res.HasErrors() {
+		t.Fatalf("schema: %s", res)
+	}
+	h := typeID(t, s, "H")
+	parts := snapparts.Parts{Instances: []snapparts.Instance{{
+		TypeID: h, PrimaryKey: immutable.WrapKey([]any{"h1"}),
+		Properties: immutable.WrapProperties(map[string]any{"id": "h1", "integrity_hash": ""}),
+	}}}
+	data := snappartstest.Document(t, s, parts)
+	if !strings.Contains(string(data), `"properties":{"id":"h1","integrity_hash":""}`) {
+		t.Fatalf("Document moved the property:\n%s", data)
+	}
+	if res := snapshot.Verify(t.Context(), data, s); res.HasErrors() {
+		t.Errorf("Verify: %s", res)
 	}
 }

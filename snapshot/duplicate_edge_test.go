@@ -113,8 +113,8 @@ func TestRead_ATargetNamedTwiceUnderOneAssociationIsRefused(t *testing.T) {
 			want:  []string{diag.E_SNAPSHOT_MALFORMED.String() + `: edge 1 under "TO_U" of de#T[["t1"]] names target de#U[["u1"]], which an edge before it names`},
 		},
 		{
-			name:  "an edge under a second spelling of the key",
-			edits: [][2]string{{`"target_key":["` + keyB + `"]`, `"target_key":["` + keyAUpper + `"]`}},
+			name:  "an edge under the key an edge before it names",
+			edits: [][2]string{{`"target_key":["` + keyB + `"]`, `"target_key":["` + keyA + `"]`}},
 			want:  []string{diag.E_SNAPSHOT_MALFORMED.String() + `: edge 1 under "TO_K" of de#T[["t1"]] names target de#K[`},
 		},
 		{

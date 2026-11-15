@@ -43,25 +43,6 @@ const (
 	fromBody
 )
 
-// withoutIntegrityHash blanks the stored hash so every surface sees the same
-// bytes and the structural verdict is what the test observes. Info takes no
-// skip-integrity option, so blanking is the only way to compare all four.
-func withoutIntegrityHash(t *testing.T, data []byte) []byte {
-	t.Helper()
-	const anchor = `"integrity_hash":"`
-	start := bytes.Index(data, []byte(anchor))
-	if start < 0 {
-		t.Fatalf("fixture shape changed; %s not found", anchor)
-	}
-	valueStart := start + len(anchor)
-	end := bytes.IndexByte(data[valueStart:], '"')
-	if end < 0 {
-		t.Fatalf("fixture shape changed; integrity_hash value is unterminated")
-	}
-	out := append([]byte{}, data[:valueStart]...)
-	return append(out, data[valueStart+end:]...)
-}
-
 // spliceAfter inserts text immediately before the document's final brace.
 func spliceAfter(t *testing.T, data []byte, text string) []byte {
 	t.Helper()
@@ -90,7 +71,7 @@ func swapSections(t *testing.T, data []byte) []byte {
 func TestParity_EverySurfaceAgrees(t *testing.T) {
 	ctx := context.Background()
 	s := testSchemaWithComposition(t)
-	clean := withoutIntegrityHash(t, v3Doc(t))
+	clean := v3Doc(t)
 
 	cases := []struct {
 		name string
@@ -164,9 +145,9 @@ func TestParity_EverySurfaceAgrees(t *testing.T) {
 			}
 
 			verdicts := map[string]bool{
-				"Load":   refusedBy(t, func() diag.Result { _, r := snapshot.Load(ctx, edited, s); return r }),
-				"Verify": refusedBy(t, func() diag.Result { return snapshot.Verify(ctx, edited, s) }),
-				"Info":   refusedBy(t, func() diag.Result { _, r := snapshot.Info(ctx, edited); return r }),
+				"Load":   refusedBy(t, func() diag.Result { _, r := snapshot.Load(ctx, rehashDocument(t, edited), s); return r }),
+				"Verify": refusedBy(t, func() diag.Result { return snapshot.Verify(ctx, rehashDocument(t, edited), s) }),
+				"Info":   refusedBy(t, func() diag.Result { _, r := snapshot.Info(ctx, rehashDocument(t, edited)); return r }),
 			}
 			if tc.seen == fromShape {
 				verdicts["UpdateMetadata"] = refusedBy(t, func() diag.Result {
@@ -198,15 +179,15 @@ func TestParity_EverySurfaceAgrees(t *testing.T) {
 func TestParity_EverySurfaceAcceptsAWellFormedDocument(t *testing.T) {
 	ctx := context.Background()
 	s := testSchemaWithComposition(t)
-	clean := withoutIntegrityHash(t, v3Doc(t))
+	clean := v3Doc(t)
 
-	if _, res := snapshot.Load(ctx, clean, s); res.HasErrors() {
+	if _, res := snapshot.Load(ctx, rehashDocument(t, clean), s); res.HasErrors() {
 		t.Errorf("Load refused a well-formed document: %v", res)
 	}
-	if res := snapshot.Verify(ctx, clean, s); res.HasErrors() {
+	if res := snapshot.Verify(ctx, rehashDocument(t, clean), s); res.HasErrors() {
 		t.Errorf("Verify refused a well-formed document: %v", res)
 	}
-	if info, res := snapshot.Info(ctx, clean); res.HasErrors() || info == nil {
+	if info, res := snapshot.Info(ctx, rehashDocument(t, clean)); res.HasErrors() || info == nil {
 		t.Errorf("Info refused a well-formed document: %v", res)
 	}
 	if out, res := snapshot.UpdateMetadata(ctx, clean, map[string]string{"k": "v"}); res.HasErrors() || len(out) == 0 {

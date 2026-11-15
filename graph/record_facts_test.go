@@ -2,10 +2,8 @@ package graph_test
 
 import (
 	"slices"
-	"strings"
 	"testing"
 
-	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/internal/snapparts"
 	"github.com/simon-lentz/yammm/schema"
@@ -106,43 +104,5 @@ func TestRebuild_HoldsEachRecordAddMakes(t *testing.T) {
 				t.Errorf("%d unresolved records, want %d", got, c.wantRecs)
 			}
 		})
-	}
-}
-
-// An edge may spell either endpoint any way its UUID constraint accepts, and still
-// addresses the root at that UUID.
-func TestRebuild_AnEdgeResolvesItsEndpointsByCanonicalKeys(t *testing.T) {
-	t.Parallel()
-	s := loadAs(t, `schema "ids"
-
-type Company {
-	id UUID primary
-}
-
-type Employee {
-	id UUID primary
-	--> WORKS_AT (one) Company
-}
-`)
-	const company, employee = "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11", "b1ffcd88-8d1a-4ef8-bb6d-6bb9bd380a22"
-	compID, empID := mustTypeID(t, s, "Company"), mustTypeID(t, s, "Employee")
-	upper := func(k string) immutable.Key { return immutable.WrapKey([]any{strings.ToUpper(k)}) }
-	snap := rebuild(s, snapparts.Parts{
-		Types: []schema.TypeID{compID, empID},
-		Instances: []snapparts.Instance{
-			{TypeID: compID, PrimaryKey: immutable.WrapKey([]any{company}), Properties: immutable.WrapProperties(map[string]any{"id": company})},
-			{TypeID: empID, PrimaryKey: immutable.WrapKey([]any{employee}), Properties: immutable.WrapProperties(map[string]any{"id": employee})},
-		},
-		Edges: []snapparts.Edge{{Relation: "WORKS_AT", SourceType: empID, SourceKey: upper(employee), TargetKey: upper(company)}},
-	})
-	edges := slices.Collect(snap.Edges())
-	if len(edges) != 1 {
-		t.Fatalf("%d edges, want 1", len(edges))
-	}
-	if got, want := edges[0].Source().PrimaryKey().String(), graph.FormatKey(employee); got != want {
-		t.Errorf("source = %s, want %s", got, want)
-	}
-	if got, want := edges[0].Target().PrimaryKey().String(), graph.FormatKey(company); got != want {
-		t.Errorf("target = %s, want %s", got, want)
 	}
 }

@@ -115,38 +115,6 @@ func TestNewFromSnapshot_ReKeyIsANoOpOnTheCommonPath(t *testing.T) {
 	}
 }
 
-// A key component and a key property that spell one value two ways store one
-// spelling.
-func TestRebuild_KeyComponentAgreesAcrossSpellings(t *testing.T) {
-	t.Parallel()
-	s := loadSchemaAt(t, `schema "key_and_property"
-
-type Run {
-	at Timestamp primary
-	alt Timestamp
-}
-`, "key_and_property.yammm")
-	runID := mustTypeID(t, s, "Run")
-
-	snap := rebuild(s, snapparts.Parts{
-		Types: []schema.TypeID{runID},
-		Instances: []snapparts.Instance{
-			{
-				TypeID:     runID,
-				PrimaryKey: immutable.WrapKey([]any{rawInstant}),
-				Properties: immutable.WrapProperties(map[string]any{"at": canonInstant}),
-			},
-		},
-	})
-	inst := slices.Collect(snap.InstancesOf(runID))[0]
-	if got, want := inst.PrimaryKey().String(), graph.FormatKey(canonInstant); got != want {
-		t.Errorf("key = %s, want %s", got, want)
-	}
-	if at, _ := inst.Property("at"); at.Unwrap() != canonInstant {
-		t.Errorf("at = %v, want %s", at.Unwrap(), canonInstant)
-	}
-}
-
 // Under an importing schema that makes the key a Timestamp, a key and a key
 // property that spell one instant two ways agree. Comparing the two raw turns this
 // red.

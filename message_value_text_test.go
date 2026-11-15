@@ -170,7 +170,7 @@ func TestMessages_RepeatAValueCutToItsHead(t *testing.T) {
 		},
 		Duplicates: []snapparts.Instance{second},
 	})
-	_, r = snapshot.Load(ctx, data, s, snapshot.WithRevalidation(diag.Warning), snapshot.WithValueConformance(true))
+	_, r = snapshot.Load(ctx, data, s, snapshot.WithRevalidation(diag.Warning))
 	c.result("snapshot.Load", r)
 
 	for _, k := range []schema.Constraint{schema.NewTimestampConstraint(), schema.NewDateConstraint()} {

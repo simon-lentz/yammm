@@ -22,12 +22,12 @@ func init() {
 // doc's "Structural facts" first, so every reference below resolves and this
 // constructor refuses nothing. It judges no property value's constraint.
 //
-// Property values and keys are rewritten into the representation their schema
+// Property values are rewritten into the representation their schema
 // constraint stores, so a graph rebuilt from a document equals one built through
 // validation and a snapshot round trip reaches a fixpoint on the first pass. A
-// value the constraint cannot render is kept as it arrived. Every position that
-// addresses an instance moves with its key, so an edge or a duplicate record
-// spelled another way still resolves.
+// value the constraint cannot render is kept as it arrived. Keys are taken as
+// written: the reader refuses a key component its kind stores as other text, so
+// every address is already the one a validator stores.
 func rebuildSnapshot(s schema.Schema, parts snapparts.Parts) Snapshot {
 	canon := newCanonicalizer(s)
 
@@ -50,9 +50,6 @@ func rebuildSnapshot(s schema.Schema, parts snapparts.Parts) Snapshot {
 		typeID := ip.TypeID
 		idx := instanceIndex[typeID]
 		inst := rebuildInstance(name, canon.instance(ip))
-		// Indexed by the key the instance CARRIES, never the document's
-		// spelling: every lookup below canonicalizes first, and the
-		// snapshot's own accessors read this same index.
 		keyStr := inst.PrimaryKey().String()
 		instances[typeID] = append(instances[typeID], inst)
 		idx[keyStr] = inst
@@ -61,10 +58,7 @@ func rebuildSnapshot(s schema.Schema, parts snapparts.Parts) Snapshot {
 	// Step 2: Create Edge records, resolving references.
 	edges := make([]Edge, 0, len(parts.Edges))
 	for _, ep := range parts.Edges {
-		// Canonicalized BEFORE the lookup: step 1 rewrote the instance keys the
-		// index is built from, so an endpoint resolved from the document's
-		// spelling would miss an instance that is present.
-		ep = canon.edge(ep)
+		ep.Properties = canon.edgeProperties(ep.SourceType, ep.Relation, ep.Properties)
 		source := lookupInstance(instanceIndex, ep.SourceType, ep.SourceKey.String())
 		target := lookupInstance(instanceIndex, associationTarget(s, ep.SourceType, ep.Relation), ep.TargetKey.String())
 		edges = append(edges, newEdge(ep.Relation, source, target, ep.Properties))
@@ -82,10 +76,7 @@ func rebuildSnapshot(s schema.Schema, parts snapparts.Parts) Snapshot {
 	// Step 4: Create UnresolvedEdge records.
 	unresolvedEdges := make([]UnresolvedEdge, 0, len(parts.Unresolved))
 	for _, up := range parts.Unresolved {
-		// Both addresses move: the source with the instances step 1 rewrote,
-		// the target under the relation's declared target type, as a validator
-		// rendered it.
-		up = canon.unresolved(up)
+		up.Properties = canon.edgeProperties(up.SourceType, up.Relation, up.Properties)
 		source := lookupInstance(instanceIndex, up.SourceType, up.SourceKey.String())
 
 		// Key.String() renders a keyless key as "[]", but UnresolvedEdge.TargetKey

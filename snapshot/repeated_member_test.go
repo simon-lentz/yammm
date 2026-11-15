@@ -3,7 +3,6 @@ package snapshot_test
 import (
 	"context"
 	"maps"
-	"regexp"
 	"strings"
 	"testing"
 
@@ -14,9 +13,9 @@ import (
 
 // Marshal never writes an object that repeats a member name, and the reader
 // already refuses a repeated top-level section. A repeat anywhere below is
-// refused the same way, with the integrity hash blanked as a hand edit leaves
-// it, which turns the hash check off under the default options: encoding/json
-// would keep the last of two members, or merge two objects under one field.
+// refused the same way, with the integrity hash re-signed over the edit, so
+// the hash check passes under the default options: encoding/json would keep
+// the last of two members, or merge two objects under one field.
 // Every surface that holds the whole document refuses it, UpdateMetadata among
 // them, whose fresh hash would otherwise bless the document. A member of an
 // object the reader decodes into a struct, spelled in another case than the
@@ -30,14 +29,13 @@ func TestReader_RefusesAnObjectThatRepeatsAMember(t *testing.T) {
 		map[string]any{"$type": "Person", "id": "p0"},
 		map[string]any{"$type": "Person", "id": "p1", "BOSS": map[string]any{"_target_id": "p0"}, "WORKS_AT": map[string]any{"_target_id": "c1"}},
 	)
-	doc = regexp.MustCompile(`"integrity_hash":"[^"]*"`).ReplaceAllString(doc, `"integrity_hash":""`)
 	read := func(doc string) map[string]diag.Result {
-		_, l := snapshot.Load(context.Background(), []byte(doc), s)
-		_, i := snapshot.Info(context.Background(), []byte(doc))
+		_, l := snapshot.Load(context.Background(), rehashDocument(t, []byte(doc)), s)
+		_, i := snapshot.Info(context.Background(), rehashDocument(t, []byte(doc)))
 		_, h := snapshot.HeaderOnly(context.Background(), []byte(doc))
 		_, u := snapshot.UpdateMetadata(context.Background(), []byte(doc), map[string]string{"k": "v"})
 		return map[string]diag.Result{
-			"Load": l, "Verify": snapshot.Verify(context.Background(), []byte(doc), s), "Info": i,
+			"Load": l, "Verify": snapshot.Verify(context.Background(), rehashDocument(t, []byte(doc)), s), "Info": i,
 			"HeaderOnly": h, "UpdateMetadata": u,
 		}
 	}
@@ -92,7 +90,7 @@ func TestReader_KeepsMapKeysThatDifferOnlyInCase(t *testing.T) {
 	if res.HasErrors() {
 		t.Fatalf("Marshal: %s", res)
 	}
-	if _, lres := snapshot.Load(ctx, data, s); lres.HasErrors() {
+	if _, lres := snapshot.Load(ctx, rehashDocument(t, data), s); lres.HasErrors() {
 		t.Errorf("Load: %s", lres)
 	}
 	info, hres := snapshot.HeaderOnly(ctx, data)

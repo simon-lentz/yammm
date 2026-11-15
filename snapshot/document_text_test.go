@@ -46,7 +46,7 @@ func textDocument(t *testing.T) (string, schema.Schema) {
 		TypeID: note.ID(), PrimaryKey: immutable.WrapKey([]any{"KEY"}),
 		Properties: immutable.WrapProperties(map[string]any{"id": "KEY", "body": "BODY", "tags": []any{"ELEMENT"}}),
 	}}}))
-	return editOnce(t, doc, `"features":[]`, `"features":[],"metadata":{"run":"META"}`), s
+	return string(rehashDocument(t, []byte(editOnce(t, doc, `"features":[]`, `"features":[],"metadata":{"run":"META"}`)))), s
 }
 
 // textPosition is a place a document spells a string, as the edit that puts text
@@ -74,7 +74,7 @@ var (
 
 func (p textPosition) edit(t *testing.T, doc, text string) []byte {
 	t.Helper()
-	return []byte(editOnce(t, doc, p.from, p.to(text)))
+	return rehashDocument(t, []byte(editOnce(t, doc, p.from, p.to(text))))
 }
 
 // wholeDocumentReaders are the surfaces that hold the whole document.
@@ -205,7 +205,7 @@ func TestReaders_ReadValidTextBackUnchanged(t *testing.T) {
 			doc = editOnce(t, doc, `"id":"KEY"`, `"id":"`+c.spelling+`"`)
 			doc = editOnce(t, doc, `"body":"BODY"`, `"body":"`+c.spelling+`"`)
 			doc = editOnce(t, doc, `"tags":["ELEMENT"]`, `"tags":["`+c.spelling+`"]`)
-			data := []byte(doc)
+			data := rehashDocument(t, []byte(doc))
 
 			for _, r := range wholeDocumentReaders {
 				if res := r.read(ctx, data, s); res.HasErrors() {
@@ -220,7 +220,7 @@ func TestReaders_ReadValidTextBackUnchanged(t *testing.T) {
 			}
 			loadTextNote(t, written, s, note.ID(), c.want)
 
-			info, res := snapshot.Info(ctx, data)
+			info, res := snapshot.Info(ctx, rehashDocument(t, data))
 			if res.HasErrors() {
 				t.Fatalf("Info: %s", res)
 			}
@@ -258,7 +258,7 @@ func TestReaders_ReadValidTextBackUnchanged(t *testing.T) {
 // element.
 func loadTextNote(t *testing.T, doc []byte, s schema.Schema, id schema.TypeID, want string) graph.Snapshot {
 	t.Helper()
-	snap, res := snapshot.Load(t.Context(), doc, s)
+	snap, res := snapshot.Load(t.Context(), rehashDocument(t, doc), s)
 	if res.HasErrors() {
 		t.Fatalf("Load: %s", res)
 	}

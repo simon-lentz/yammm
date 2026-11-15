@@ -84,7 +84,7 @@
 // # Value Functions
 //
 // [CheckValue] is the validator's per-value rule, exported for code outside the
-// validator that reads a value under a constraint, as the snapshot reader does.
+// validator that reads a value under a constraint.
 // It accepts a nil constraint, and a value that holds none ([IsAbsent]) under a
 // constraint [schema.CheckConstraint] accepts; it refuses a constraint that
 // function refuses, whatever the value.

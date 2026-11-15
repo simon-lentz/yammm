@@ -2,7 +2,6 @@ package snapshot_test
 
 import (
 	"context"
-	"regexp"
 	"strings"
 	"testing"
 
@@ -24,7 +23,6 @@ func TestRead_AnEmptyEdgeListIsHeldToItsName(t *testing.T) {
 		map[string]any{"$type": "Person", "id": "p0"},
 		map[string]any{"$type": "Person", "id": "p1", "BOSS": map[string]any{"_target_id": "p0"}, "WORKS_AT": map[string]any{"_target_id": "c1"}},
 	)
-	doc = regexp.MustCompile(`"integrity_hash":"[^"]*"`).ReplaceAllString(doc, `"integrity_hash":""`)
 	for name, c := range map[string]struct {
 		list    string
 		refused bool
@@ -36,12 +34,12 @@ func TestRead_AnEmptyEdgeListIsHeldToItsName(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 			edited := []byte(editOnce(t, doc, `"edges":{"BOSS"`, `"edges":{`+c.list+`,"BOSS"`))
-			_, plain := snapshot.Load(ctx, edited, s)
-			_, warn := snapshot.Load(ctx, edited, s, snapshot.WithRevalidation(diag.Warning))
-			_, fail := snapshot.Load(ctx, edited, s, snapshot.WithRevalidation(diag.Error))
+			_, plain := snapshot.Load(ctx, rehashDocument(t, edited), s)
+			_, warn := snapshot.Load(ctx, rehashDocument(t, edited), s, snapshot.WithRevalidation(diag.Warning))
+			_, fail := snapshot.Load(ctx, rehashDocument(t, edited), s, snapshot.WithRevalidation(diag.Error))
 			for surface, res := range map[string]diag.Result{
 				"Load": plain, "Load, revalidating at Warning": warn, "Load, revalidating at Error": fail,
-				"Verify, revalidating at Error": snapshot.Verify(ctx, edited, s, snapshot.WithRevalidation(diag.Error)),
+				"Verify, revalidating at Error": snapshot.Verify(ctx, rehashDocument(t, edited), s, snapshot.WithRevalidation(diag.Error)),
 			} {
 				failures := 0
 				for issue := range res.Issues() {

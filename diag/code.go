@@ -390,10 +390,10 @@ var (
 
 	// E_DUPLICATE_COMPOSED_PK indicates a composition slot that cannot hold a
 	// child: two children of one (many) slot share a primary key, or a (one)
-	// slot is given several. The validator and the import raise it, and snapshot.Load and Verify raise it for a (one)
-	// slot a document fills more than once and for two children of a keyed
-	// (many) slot at one canonical key. Info reads without a schema, which the checks need to know a
-	// relation's cardinality and its target's key, so it makes no such claim.
+	// slot is given several. The validator and the import raise it. snapshot.Load
+	// and Verify raise it for a (one) slot a document fills more than once and
+	// for two children of a keyed (many) slot at one key, compared as written.
+	// Info reads without a schema, which the checks need, so it makes no such claim.
 	E_DUPLICATE_COMPOSED_PK = NewCode("E_DUPLICATE_COMPOSED_PK", CategoryGraph)
 
 	// E_DUPLICATE_EDGE indicates a (many) association that names one target
@@ -539,7 +539,8 @@ var (
 	E_SNAPSHOT_DEPTH_EXCEEDED = NewCode("E_SNAPSHOT_DEPTH_EXCEEDED", CategorySnapshot)
 
 	// E_SNAPSHOT_INTEGRITY_MISMATCH indicates the integrity hash does not match the
-	// document content. The file may be corrupted, truncated, or modified.
+	// document content, or the header holds none: an empty, null or absent
+	// integrity_hash. The file may be corrupted, truncated, or modified.
 	E_SNAPSHOT_INTEGRITY_MISMATCH = NewCode("E_SNAPSHOT_INTEGRITY_MISMATCH", CategorySnapshot)
 
 	// E_SNAPSHOT_UNSUPPORTED_HASH_ALGORITHM indicates a schema hash
@@ -603,16 +604,6 @@ var (
 	// W_SNAPSHOT_UNRESOLVED_REQUIRED is raised at whatever severity
 	// snapshot.WithRevalidation was given.
 	W_UPDATE_METADATA_FALLBACK = NewCode("W_UPDATE_METADATA_FALLBACK", CategorySnapshot)
-
-	// W_SNAPSHOT_VALUE_NONCONFORMING indicates that a root's or a composed
-	// child's stored property value does not conform to the schema constraint
-	// its property declares.
-	// Reported only when the caller passes snapshot.WithValueConformance, and
-	// only for the kinds that have a canonical stored form — Timestamp, Date
-	// and UUID. It is not re-validation: bounds, enums, patterns and
-	// invariants are not checked, so silence is not a proof of validity.
-	// Warning severity, so Load still returns the snapshot.
-	W_SNAPSHOT_VALUE_NONCONFORMING = NewCode("W_SNAPSHOT_VALUE_NONCONFORMING", CategorySnapshot)
 
 	// W_SNAPSHOT_UNRESOLVED_REQUIRED indicates a loaded document carries an
 	// unresolved record for an association the schema declares required, which

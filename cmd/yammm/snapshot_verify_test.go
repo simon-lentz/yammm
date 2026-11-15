@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"regexp"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -48,6 +49,31 @@ func TestSnapshotVerify_SkipIntegrityCheck(t *testing.T) {
 	// With --skip-integrity-check, structural validation still runs but
 	// the integrity hash mismatch is not an error.
 	code := executeCmd(t, "snapshot", "verify", "--skip-integrity-check", "testdata/valid.yammm", ysPath)
+	assert.Equal(t, cli.ExitOK, code)
+}
+
+func TestSnapshotVerify_EmptyIntegrityHash(t *testing.T) {
+	t.Parallel()
+
+	tmpDir := t.TempDir()
+	ysPath := createYSFixture(t, tmpDir)
+
+	data, err := os.ReadFile(ysPath)
+	require.NoError(t, err)
+
+	unsigned := regexp.MustCompile(`"integrity_hash": ?"sha256:[0-9a-f]{64}"`).ReplaceAll(data, []byte(`"integrity_hash":""`))
+	require.NotEqual(t, data, unsigned, "the fixture holds no signed integrity_hash")
+	require.NoError(t, os.WriteFile(ysPath, unsigned, 0o600))
+
+	code, stderr := executeCmdStderr(t, "snapshot", "verify", "testdata/valid.yammm", ysPath)
+	assert.Equal(t, cli.ExitValidation, code)
+	assert.Contains(t, stderr, "E_SNAPSHOT_INTEGRITY_MISMATCH")
+
+	code, stderr = executeCmdStderr(t, "snapshot", "info", ysPath)
+	assert.Equal(t, cli.ExitValidation, code)
+	assert.Contains(t, stderr, "E_SNAPSHOT_INTEGRITY_MISMATCH")
+
+	code = executeCmd(t, "snapshot", "verify", "--skip-integrity-check", "testdata/valid.yammm", ysPath)
 	assert.Equal(t, cli.ExitOK, code)
 }
 
