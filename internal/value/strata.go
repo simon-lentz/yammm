@@ -51,7 +51,7 @@ func TypeStrata(a any) int {
 		// Numeric here because Classify says numeric; a lexical number that
 		// ordered as a string would compare against int64 by strata rank and
 		// answer without erroring.
-		if !immutable.IsNumberLiteral(x) {
+		if !IsNumberLiteral(x) {
 			return InvalidStrata
 		}
 		return NumericStrata

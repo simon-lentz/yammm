@@ -1339,12 +1339,12 @@ func TestMarshalLoad_UnresolvedEdgePropertiesRoundTrip(t *testing.T) {
 
 	role, ok := u.Property("role")
 	require.True(t, ok, "Property(role) should round-trip")
-	roleStr, _ := role.String()
+	roleStr, _ := role.AsString()
 	require.Equal(t, "Engineer", roleStr)
 
 	since, ok := u.Property("since")
 	require.True(t, ok, "Property(since) should round-trip")
-	sinceInt, _ := since.Int()
+	sinceInt, _ := since.AsInt()
 	require.Equal(t, int64(2020), sinceInt)
 
 	// snapshottest.CompareSnapshots asserts the full per-field diff,
@@ -1540,9 +1540,9 @@ func TestMarshalLoad_PropertyFidelity(t *testing.T) {
 		require.Len(t, items, 1)
 		val, ok := items[0].Properties().Get("val")
 		require.True(t, ok)
-		got, isFloat := val.Unwrap().(float64)
+		got, isFloat := val.Any().(float64)
 		if !isFloat {
-			t.Fatalf("round trip produced %T, want float64 — the whole float narrowed", val.Unwrap())
+			t.Fatalf("round trip produced %T, want float64 — the whole float narrowed", val.Any())
 		}
 		if got != 1.0 {
 			t.Errorf("round trip produced %v, want 1.0", got)

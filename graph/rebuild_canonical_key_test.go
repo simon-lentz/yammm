@@ -145,9 +145,9 @@ func assertSameProperties(t *testing.T, what string, a, b immutable.Properties) 
 			t.Errorf("%s property %q: absent on the Add path", what, name)
 		case !inRebuild:
 			t.Errorf("%s property %q: absent on the rebuild path", what, name)
-		case got.Unwrap() != want.Unwrap():
+		case got.Any() != want.Any():
 			t.Errorf("%s property %q: Add %v (%T), rebuild %v (%T)",
-				what, name, got.Unwrap(), got.Unwrap(), want.Unwrap(), want.Unwrap())
+				what, name, got.Any(), got.Any(), want.Any(), want.Any())
 		}
 	}
 }

@@ -417,17 +417,17 @@ func TestEvaluator_MemberAccess_EdgeCases(t *testing.T) {
 	})
 
 	t.Run("access_map_exact_match", func(t *testing.T) {
-		m := immutable.WrapMap(map[string]any{"name": "Alice", "age": int64(30)})
+		m := immutable.WrapProperties(map[string]any{"name": "Alice", "age": int64(30)})
 		evalEq(t, sx(".", lit(m), lit("name")), "Alice")
 	})
 
 	t.Run("access_map_case_insensitive", func(t *testing.T) {
-		m := immutable.WrapMap(map[string]any{"Name": "Alice"})
+		m := immutable.WrapProperties(map[string]any{"Name": "Alice"})
 		evalEq(t, sx(".", lit(m), lit("name")), "Alice")
 	})
 
 	t.Run("access_map_missing_key_returns_nil", func(t *testing.T) {
-		m := immutable.WrapMap(map[string]any{"name": "Alice"})
+		m := immutable.WrapProperties(map[string]any{"name": "Alice"})
 		evalEq(t, sx(".", lit(m), lit("nonexistent")), nil)
 	})
 
@@ -606,7 +606,7 @@ func TestEvaluator_BuiltinErrors(t *testing.T) {
 // pipeline is the only call form.
 func TestEvaluator_MemberAccess_NameOnly(t *testing.T) {
 	t.Run("builtin_name_is_a_plain_member", func(t *testing.T) {
-		evalEq(t, sx(".", lit(immutable.WrapMap(map[string]any{"len": int64(7)})), lit("len")), int64(7))
+		evalEq(t, sx(".", lit(immutable.WrapProperties(map[string]any{"len": int64(7)})), lit("len")), int64(7))
 	})
 
 	t.Run("builtin_name_on_a_list_is_not_a_call", func(t *testing.T) {
@@ -614,7 +614,7 @@ func TestEvaluator_MemberAccess_NameOnly(t *testing.T) {
 	})
 
 	t.Run("sexpr_member_errors", func(t *testing.T) {
-		evalErr(t, sx(".", lit(immutable.WrapMap(map[string]any{"name": "Alice"})), sx("p", lit("name"))), "must be a string literal")
+		evalErr(t, sx(".", lit(immutable.WrapProperties(map[string]any{"name": "Alice"})), sx("p", lit("name"))), "must be a string literal")
 	})
 
 	t.Run("third_operand_errors", func(t *testing.T) {

@@ -4,7 +4,6 @@ import (
 	"maps"
 
 	"github.com/simon-lentz/yammm/immutable"
-	"github.com/simon-lentz/yammm/internal/expr"
 )
 
 // EmptyScope returns an empty Scope with no bindings.
@@ -15,13 +14,9 @@ func EmptyScope() Scope {
 }
 
 // PropertyScopeFromMap returns a Scope backed by a raw property map, with $self
-// bound to it. WithClone isolates the caller's map.
+// bound to it. The wrap copies the caller's map.
 func PropertyScopeFromMap(props map[string]any) Scope {
-	m := immutable.WrapMap(props, immutable.WithClone(true))
-	return &propertyScope{
-		props: immutable.PropertiesOf(m),
-		vars:  map[string]immutable.Value{expr.SelfVariable: immutable.Wrap(m)},
-	}
+	return PropertyScopeOf(immutable.WrapProperties(props))
 }
 
 // mapScope is a simple variable-only scope.

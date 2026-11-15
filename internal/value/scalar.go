@@ -13,13 +13,13 @@ import (
 // Scalar returns v in the one form the validator reads a scalar in ([Classify]):
 // a string, bool, int64, uint64, float32 or float64 for a value of that kind, a
 // named type as its base value; a json.Number that is a JSON number literal
-// ([immutable.IsNumberLiteral]), a time.Time or a uuid.UUID as itself; nil for a
+// ([IsNumberLiteral]), a time.Time or a uuid.UUID as itself; nil for a
 // value that holds none ([Absent]). It reports false for every other value: a
 // json.Number holding other text, a pointer, nil or not, a struct, an array, a
 // map, a slice, a channel, a function and a complex number.
 func Scalar(v any) (any, bool) {
 	held, ok := form(v)
-	if n, isNumber := held.(json.Number); isNumber && !immutable.IsNumberLiteral(n) {
+	if n, isNumber := held.(json.Number); isNumber && !IsNumberLiteral(n) {
 		return nil, false
 	}
 	return held, ok
@@ -29,7 +29,7 @@ func Scalar(v any) (any, bool) {
 // literal: the value Scalar refuses for its text alone, which a refusal names.
 func UnreadNumber(v any) (json.Number, bool) {
 	n, ok := v.(json.Number)
-	return n, ok && !immutable.IsNumberLiteral(n)
+	return n, ok && !IsNumberLiteral(n)
 }
 
 var numberType = reflect.TypeFor[json.Number]()
@@ -41,14 +41,14 @@ func literal(rv reflect.Value) (json.Number, bool) {
 		return "", false
 	}
 	n := json.Number(rv.String())
-	return n, immutable.IsNumberLiteral(n)
+	return n, IsNumberLiteral(n)
 }
 
 // NumberLiteral returns v when it is a json.Number whose text is a JSON number
 // literal.
 func NumberLiteral(v any) (json.Number, bool) {
 	n, ok := v.(json.Number)
-	return n, ok && immutable.IsNumberLiteral(n)
+	return n, ok && IsNumberLiteral(n)
 }
 
 // Absent reports whether v holds no value: nil, a nil map, a nil slice or a nil

@@ -65,8 +65,8 @@ func TestNewFromSnapshot_ANumberAtAFloatImportsAsItsFloat64(t *testing.T) {
 	})
 	// The snapshot's own schema holds each as an integer, or the test reads nothing.
 	root := slices.Collect(snap.InstancesOf(tid))[0]
-	if got, _ := root.Properties().Get("n"); got.Unwrap() != int64(5) {
-		t.Fatalf("under the snapshot's schema n is %#v, want int64(5)", got.Unwrap())
+	if got, _ := root.Properties().Get("n"); got.Any() != int64(5) {
+		t.Fatalf("under the snapshot's schema n is %#v, want int64(5)", got.Any())
 	}
 
 	g, res := graph.NewFromSnapshot(bound, snap)
@@ -80,8 +80,8 @@ func TestNewFromSnapshot_ANumberAtAFloatImportsAsItsFloat64(t *testing.T) {
 		if !ok {
 			t.Fatalf("%s: no property %q", where, name)
 		}
-		got := []any{v.Unwrap()}
-		if s, ok := v.Unwrap().(immutable.Slice); ok {
+		got := []any{v.Any()}
+		if s, ok := v.Any().(immutable.Slice); ok {
 			got = s.Clone()
 		}
 		if len(got) != len(want) {

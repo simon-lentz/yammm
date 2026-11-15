@@ -525,7 +525,7 @@ func TestGraph_Edge_Properties(t *testing.T) {
 	if !ok {
 		t.Error("Edge should have 'role' property")
 	} else {
-		roleStr, _ := role.String()
+		roleStr, _ := role.AsString()
 		if roleStr != "Engineer" {
 			t.Errorf("Edge role should be 'Engineer', got %q", roleStr)
 		}
@@ -535,7 +535,7 @@ func TestGraph_Edge_Properties(t *testing.T) {
 	if !ok {
 		t.Error("Edge should have 'since' property")
 	} else {
-		sinceInt, _ := since.Int()
+		sinceInt, _ := since.AsInt()
 		if sinceInt != 2020 {
 			t.Errorf("Edge since should be 2020, got %d", sinceInt)
 		}
@@ -577,14 +577,14 @@ func TestGraph_UnresolvedEdge_Properties(t *testing.T) {
 	role, ok := u.Property("role")
 	if !ok {
 		t.Error("unresolved edge should have 'role' property")
-	} else if roleStr, _ := role.String(); roleStr != "Engineer" {
+	} else if roleStr, _ := role.AsString(); roleStr != "Engineer" {
 		t.Errorf("Property(role): got %q, want %q", roleStr, "Engineer")
 	}
 
 	since, ok := u.Property("since")
 	if !ok {
 		t.Error("unresolved edge should have 'since' property")
-	} else if sinceInt, _ := since.Int(); sinceInt != 2020 {
+	} else if sinceInt, _ := since.AsInt(); sinceInt != 2020 {
 		t.Errorf("Property(since): got %d, want 2020", sinceInt)
 	}
 

@@ -80,7 +80,7 @@ func TestValidateOne_ANullRelationIsTheRelationLeftOut(t *testing.T) {
 			if g, w := slices.Sorted(keysOf(gotVI.Edges())), slices.Sorted(keysOf(wantVI.Edges())); !slices.Equal(g, w) {
 				t.Errorf("%s = %#v: edges %v, want %v", field, null, g, w)
 			}
-			if g, w := slices.Sorted(keysOf(gotVI.Compositions())), slices.Sorted(keysOf(wantVI.Compositions())); !slices.Equal(g, w) {
+			if g, w := composedRelations(gotVI), composedRelations(wantVI); !slices.Equal(g, w) {
 				t.Errorf("%s = %#v: compositions %v, want %v", field, null, g, w)
 			}
 		}
@@ -117,9 +117,23 @@ func TestValidateOne_ANullRelationDrawsNoShapeError(t *testing.T) {
 	if edges := slices.Collect(keysOf(vi.Edges())); len(edges) != 0 {
 		t.Errorf("a null association was stored: %v", edges)
 	}
-	if comps := slices.Sorted(keysOf(vi.Compositions())); !slices.Equal(comps, []string{"C_REQ_MANY", "C_REQ_ONE"}) {
+	if comps := composedRelations(vi); !slices.Equal(comps, []string{"C_REQ_MANY", "C_REQ_ONE"}) {
 		t.Errorf("compositions %v, want the two required ones alone", comps)
 	}
+}
+
+// composedRelations returns the sorted names of the relations vi composes at
+// least one child under.
+func composedRelations(vi instance.ValidInstance) []string {
+	var names []string
+	for rel := range vi.Type().AllCompositions() {
+		for range vi.Composed(rel.Name()) {
+			names = append(names, rel.Name())
+			break
+		}
+	}
+	slices.Sort(names)
+	return names
 }
 
 func keysOf[V any](seq func(func(string, V) bool)) func(func(string) bool) {

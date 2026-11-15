@@ -355,9 +355,8 @@ type H {
 	}
 	refused := &recordingTB{TB: t}
 	var child instance.ValidInstance
-	for _, composed := range instancetest.Valid(t, holder, "H", map[string]any{"id": "h", "ps": []any{map[string]any{"id": "p"}}}).Compositions() {
-		children, _ := composed.Slice()
-		child = children.Get(0).Unwrap().(instance.ValidInstance)
+	for c := range instancetest.Valid(t, holder, "H", map[string]any{"id": "h", "ps": []any{map[string]any{"id": "p"}}}).Composed("PS") {
+		child = c
 	}
 	snapshottest.BuildSnapshot(refused, holder, child)
 	if len(refused.fatals) != 1 || !strings.Contains(refused.fatals[0], "instance 0 was refused") {

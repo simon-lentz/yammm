@@ -248,8 +248,8 @@ func ListElems(val any) ([]any, bool) {
 			return nil, false
 		}
 		elems := make([]any, v.Len())
-		for i, e := range v.Iter2() {
-			elems[i] = e.Unwrap()
+		for i := range elems {
+			elems[i] = v.At(i).Any()
 		}
 		return elems, true
 	}

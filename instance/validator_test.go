@@ -59,7 +59,7 @@ type Person {
 	// Check property access
 	nameVal, ok := valid.Property("name")
 	require.True(t, ok)
-	name, ok := nameVal.String()
+	name, ok := nameVal.AsString()
 	require.True(t, ok)
 	assert.Equal(t, "Alice", name)
 }
@@ -280,7 +280,7 @@ type Person {
 	// Property should be stored with canonical name
 	firstNameVal, ok := valid.Property("firstName")
 	require.True(t, ok)
-	firstName, ok := firstNameVal.String()
+	firstName, ok := firstNameVal.AsString()
 	require.True(t, ok)
 	assert.Equal(t, "Alice", firstName)
 }
@@ -411,7 +411,7 @@ type Person {
 	// Get the name before mutation
 	nameVal, ok := valid.Property("name")
 	require.True(t, ok)
-	nameBefore, _ := nameVal.String()
+	nameBefore, _ := nameVal.AsString()
 
 	// Mutate the original raw instance
 	raw.Properties["name"] = "Bob"
@@ -419,7 +419,7 @@ type Person {
 	// The ValidInstance should not be affected
 	nameVal, ok = valid.Property("name")
 	require.True(t, ok)
-	nameAfter, _ := nameVal.String()
+	nameAfter, _ := nameVal.AsString()
 
 	assert.Equal(t, nameBefore, nameAfter, "ValidInstance should be immutable")
 	assert.Equal(t, "Alice", nameAfter)
@@ -888,15 +888,12 @@ type %s {
 
 	childProp := func(t *testing.T, valid instance.ValidInstance, relation string, idx int, prop, want string) {
 		t.Helper()
-		composed, ok := composedOf(valid, relation)
-		require.True(t, ok)
-		composedSlice, ok := composed.Slice()
-		require.True(t, ok)
-		require.Greater(t, composedSlice.Len(), idx)
-		child := composedSlice.Get(idx).Unwrap().(instance.ValidInstance)
+		children := composedOf(valid, relation)
+		require.Greater(t, len(children), idx)
+		child := children[idx]
 		val, ok := child.Property(prop)
 		require.True(t, ok)
-		got, ok := val.String()
+		got, ok := val.AsString()
 		require.True(t, ok)
 		assert.Equal(t, want, got, "isolation failed: %s[%d].%s was mutated", relation, idx, prop)
 	}
@@ -936,11 +933,7 @@ type %s {
 			},
 			verify: func(t *testing.T, valid instance.ValidInstance) {
 				t.Helper()
-				composed, ok := composedOf(valid, "NOTES")
-				require.True(t, ok)
-				composedSlice, ok := composed.Slice()
-				require.True(t, ok)
-				require.Equal(t, 2, composedSlice.Len(), "original slice length should be preserved")
+				require.Len(t, composedOf(valid, "NOTES"), 2, "original slice length should be preserved")
 				childProp(t, valid, "NOTES", 0, "text", "Original Note 1")
 				childProp(t, valid, "NOTES", 1, "text", "Original Note 2")
 			},
@@ -979,9 +972,7 @@ type %s {
 			verify: func(t *testing.T, valid instance.ValidInstance) {
 				t.Helper()
 				childProp(t, valid, "DETAILS", 0, "value", "Original Value")
-				composed, _ := composedOf(valid, "DETAILS")
-				composedSlice, _ := composed.Slice()
-				child := composedSlice.Get(0).Unwrap().(instance.ValidInstance)
+				child := composedOf(valid, "DETAILS")[0]
 				assert.Equal(t, `["1"]`, child.PrimaryKey().String(), "isolation failed: PK was mutated")
 			},
 		},
@@ -1019,11 +1010,11 @@ type Person {
 				require.Len(t, targets, 1)
 				roleVal, ok := targets[0].Property("role")
 				require.True(t, ok)
-				role, _ := roleVal.String()
+				role, _ := roleVal.AsString()
 				assert.Equal(t, "Original Role", role, "isolation failed: role was mutated")
 				dateVal, ok := targets[0].Property("startDate")
 				require.True(t, ok)
-				date, _ := dateVal.String()
+				date, _ := dateVal.AsString()
 				assert.Equal(t, "2024-01-01", date, "isolation failed: startDate was mutated")
 				assert.Equal(t, `["42"]`, targets[0].TargetKey().String(), "isolation failed: target key was mutated")
 			},

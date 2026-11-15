@@ -31,8 +31,8 @@ func TestValidateOne_ATimeAndItsTextReachOneKey(t *testing.T) {
 			t.Errorf("%#v: the key is %s; want [%q]", given, key, stored)
 		}
 		for _, name := range []string{"at", "seen"} {
-			if held, _ := valid.Property(name); held.Unwrap() != stored {
-				t.Errorf("%#v: %s holds %#v; want %q", given, name, held.Unwrap(), stored)
+			if held, _ := valid.Property(name); held.Any() != stored {
+				t.Errorf("%#v: %s holds %#v; want %q", given, name, held.Any(), stored)
 			}
 		}
 	}
@@ -91,8 +91,8 @@ func TestValidateOne_AnOffsetHourOfTwentyFourIsRefused(t *testing.T) {
 			continue
 		}
 		held, _ := valid.Property("at")
-		if held.Unwrap() != stored {
-			t.Errorf("%#v: at holds %#v; want %q", given, held.Unwrap(), stored)
+		if held.Any() != stored {
+			t.Errorf("%#v: at holds %#v; want %q", given, held.Any(), stored)
 		}
 		var decoded time.Time
 		encoded, err := json.Marshal(stored)

@@ -127,8 +127,8 @@ func TestValidateOne_RefusesAStringThatIsNotValidUTF8(t *testing.T) {
 		if inst.IsZero() || res.HasErrors() {
 			t.Fatalf("ValidateOne refused valid text: %s", res)
 		}
-		if got, _ := inst.Property("text"); got.Unwrap() != valid {
-			t.Errorf("text = %q, want %q", got.Unwrap(), valid)
+		if got, _ := inst.Property("text"); got.Any() != valid {
+			t.Errorf("text = %q, want %q", got.Any(), valid)
 		}
 	})
 }

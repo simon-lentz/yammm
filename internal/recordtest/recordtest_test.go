@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/internal/recordtest"
 	"github.com/simon-lentz/yammm/internal/yammmtest"
 )
@@ -128,4 +129,25 @@ func TestWalk_AnIteratorThatAnswersDifferentlyOnItsSecondRangeFails(t *testing.T
 func TestWalk_AZeroHandleAndAWalkedSliceRender(t *testing.T) {
 	yammmtest.Diff(t, []string{"root = zero"}, recordtest.Walk(node{}, recordtest.Options{}))
 	wantLine(t, recordtest.Walk(tree("a", 1), recordtest.Options{}), "root.Handles/0 = len 1")
+}
+
+type bagState struct{ props immutable.Properties }
+
+type bag struct{ *bagState }
+
+func (b bag) IsZero() bool                { return b.bagState == nil }
+func (b bag) Props() immutable.Properties { return b.props }
+
+// TestWalk_RendersPropertiesByContent holds two Properties of one content to one
+// rendering, whatever was read of either: a read fills a cache, not content.
+func TestWalk_RendersPropertiesByContent(t *testing.T) {
+	src := map[string]any{"b": int64(2), "a": int64(1)}
+	read := bag{&bagState{props: immutable.WrapProperties(src)}}
+	unread := bag{&bagState{props: immutable.WrapProperties(src)}}
+	for range read.props.Keys() {
+	}
+	if _, ok := read.props.GetFold("A"); !ok {
+		t.Fatal("GetFold(A) found nothing")
+	}
+	yammmtest.Diff(t, recordtest.Walk(unread, recordtest.Options{}), recordtest.Walk(read, recordtest.Options{}))
 }

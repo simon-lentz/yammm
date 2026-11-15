@@ -84,9 +84,9 @@ func TestRecordIterators_ARangeAllocatesNothing(t *testing.T) {
 			}
 			rangeCount = n
 		},
-		"ValidInstance.Compositions": func() {
+		"ValidInstance.Composed": func() {
 			n := 0
-			for range held.Compositions() {
+			for range held.Composed("NONE") {
 				n++
 			}
 			rangeCount = n

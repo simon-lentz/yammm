@@ -678,7 +678,7 @@ func TestGraph_CompositeKey_TwoComponents(t *testing.T) {
 	}
 	if !found.IsZero() {
 		val, _ := found.Property("value")
-		if str, _ := val.String(); str != "us-east-0" {
+		if str, _ := val.AsString(); str != "us-east-0" {
 			t.Errorf("Wrong value for composite key: %s", str)
 		}
 	}
@@ -1122,7 +1122,7 @@ func TestAdd_NestedCompositionReachesTheGrandchild(t *testing.T) {
 	nameVal, ok := grandchildren[0].Property("name")
 	if !ok {
 		t.Error("Expected name property on grandchild")
-	} else if name, ok := nameVal.String(); !ok || name != "GrandChild 1" {
+	} else if name, ok := nameVal.AsString(); !ok || name != "GrandChild 1" {
 		t.Errorf("Expected grandchild name 'GrandChild 1', got %q", name)
 	}
 }

@@ -4,7 +4,6 @@ import (
 	"iter"
 	"maps"
 	"slices"
-	"strings"
 	"sync"
 
 	"github.com/simon-lentz/yammm/immutable"
@@ -29,7 +28,7 @@ type validInstanceState struct {
 	primaryKey immutable.Key
 	properties immutable.Properties
 	edges      map[string]ValidEdgeData
-	composed   map[string]immutable.Value
+	composed   map[string][]ValidInstance
 	provenance location.Provenance
 
 	// scope is the instance's invariant scope, built once by
@@ -43,7 +42,7 @@ type validInstanceState struct {
 // scope itself rather than rebuild the child's subtree at every level.
 type scopeMemo struct {
 	once sync.Once
-	m    immutable.Map[string]
+	m    immutable.Properties
 }
 
 // newValidInstance adopts edges and composed, which the validator owns.
@@ -53,7 +52,7 @@ func newValidInstance(
 	pk immutable.Key,
 	props immutable.Properties,
 	edges map[string]ValidEdgeData,
-	composed map[string]immutable.Value,
+	composed map[string][]ValidInstance,
 	provenance location.Provenance,
 ) ValidInstance {
 	return ValidInstance{&validInstanceState{
@@ -110,7 +109,8 @@ func (v ValidInstance) Properties() immutable.Properties {
 	return v.properties
 }
 
-// Edge returns the validated edge data for a relation.
+// Edge returns the validated edge data for the relation named relationName,
+// its DSL name or its field name.
 // Returns the zero ValidEdgeData and false if the relation is absent, its key
 // left out or holding no value ([IsAbsent]), or the receiver is zero. A many
 // association given an empty array returns a non-zero ValidEdgeData with no
@@ -121,17 +121,12 @@ func (v ValidInstance) Edge(relationName string) (ValidEdgeData, bool) {
 	if v.IsZero() {
 		return ValidEdgeData{}, false
 	}
-	if edge, ok := v.edges[relationName]; ok {
-		return edge, true
+	rel, ok := relationByEitherName(v.typ, relationName)
+	if !ok {
+		return ValidEdgeData{}, false
 	}
-	// The field-name spelling: the DSL name lower-cased, the rule every
-	// name-taking surface of this package accepts.
-	for name, edge := range v.edges {
-		if strings.ToLower(name) == relationName {
-			return edge, true
-		}
-	}
-	return ValidEdgeData{}, false
+	edge, ok := v.edges[rel.Name()]
+	return edge, ok
 }
 
 // Provenance returns the source location metadata.
@@ -154,16 +149,32 @@ func (v ValidInstance) Edges() iter.Seq2[string, ValidEdgeData] {
 	return maps.All(edges)
 }
 
-// Compositions returns an iterator over all compositions. Each value holds an
-// [immutable.Slice] of non-zero ValidInstance values, in input order.
-// The iteration order is not guaranteed to be deterministic.
-func (v ValidInstance) Compositions() iter.Seq2[string, immutable.Value] {
-	// One return lets the compiler resolve the closure at the call, so a range over it keeps its variables off the heap.
-	var composed map[string]immutable.Value
-	if !v.IsZero() {
-		composed = v.composed
+// Composed returns an iterator over the children composed under the relation
+// named relationName, its DSL name or its field name, in input order. It yields
+// nothing for a relation the instance holds no child under.
+func (v ValidInstance) Composed(relationName string) iter.Seq[ValidInstance] {
+	// One closure and no other statement keeps Composed inlinable, so a range over
+	// it keeps its variables off the heap; the closure reads the children when it runs.
+	return func(yield func(ValidInstance) bool) {
+		for _, child := range v.composedUnder(relationName) {
+			if !yield(child) {
+				return
+			}
+		}
 	}
-	return maps.All(composed)
+}
+
+// composedUnder returns the children under relationName, and nil for the zero
+// instance. A schema lookup resolves the name, so a field name allocates nothing.
+func (v ValidInstance) composedUnder(relationName string) []ValidInstance {
+	if v.IsZero() {
+		return nil
+	}
+	rel, ok := relationByEitherName(v.typ, relationName)
+	if !ok {
+		return nil
+	}
+	return v.composed[rel.Name()]
 }
 
 // ValidEdgeData represents validated association edge data.

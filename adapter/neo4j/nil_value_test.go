@@ -26,7 +26,7 @@ func TestWrite_AValueThatHoldsNoneReachesTheDriverAsNil(t *testing.T) {
 	}
 	raw := map[string]any{"id": "x"}
 	maps.Copy(raw, nones)
-	params, err := propsToParamMap(immutable.WrapProperties(raw, immutable.WithClone(true)), typ)
+	params, err := propsToParamMap(immutable.WrapProperties(raw), typ)
 	if err != nil {
 		t.Fatalf("propsToParamMap: %v", err)
 	}
@@ -106,7 +106,7 @@ func TestWrite_AValueThatHoldsNoneAtANestedCollectionIsNil(t *testing.T) {
 		"a nil map":   map[string]any(nil),
 	} {
 		raw := map[string]any{"id": "g1", "matrix": none}
-		params, err := propsToParamMap(immutable.WrapProperties(raw, immutable.WithClone(true)), typ)
+		params, err := propsToParamMap(immutable.WrapProperties(raw), typ)
 		if err != nil {
 			t.Errorf("%s: propsToParamMap: %v", name, err)
 			continue

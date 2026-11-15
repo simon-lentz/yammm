@@ -14,9 +14,9 @@ import (
 
 func stored(t *testing.T, elems ...any) any {
 	t.Helper()
-	s := immutable.Wrap(elems).Unwrap()
+	s := immutable.Wrap(elems).Any()
 	if _, ok := s.(immutable.Slice); !ok {
-		t.Fatalf("fixture: Wrap([]any).Unwrap() is %T, want immutable.Slice", s)
+		t.Fatalf("fixture: Wrap([]any).Any() is %T, want immutable.Slice", s)
 	}
 	return s
 }

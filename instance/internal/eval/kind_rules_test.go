@@ -16,7 +16,7 @@ import (
 // receiver.
 func TestAccessMember_FoldsByThePropertiesRule(t *testing.T) {
 	t.Parallel()
-	m := immutable.WrapMap(map[string]any{"Name": "mixed", "name": "lower", "É": "acute", "WORKS_AT": "k", "ZONE_AT": "z"})
+	m := immutable.WrapProperties(map[string]any{"Name": "mixed", "name": "lower", "É": "acute", "WORKS_AT": "k", "ZONE_AT": "z"})
 	t.Run("exact match first", func(t *testing.T) {
 		t.Parallel()
 		evalEq(t, sx(".", lit(m), lit("name")), "lower")

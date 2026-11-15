@@ -10,8 +10,8 @@ import (
 // Ownership Isolation Tests for the graph package
 //
 // These tests verify that the Graph maintains proper ownership semantics
-// for ValidInstance data. Since ValidInstance is immutable by design
-// (via immutable.WrapProperties with WithClone in the validator), these tests verify:
+// for ValidInstance data. ValidInstance is immutable: the validator wraps what
+// it read with immutable.WrapProperties, which copies it. These tests verify:
 //
 // 1. Each Snapshot returns independent, deep-copied instances (isolation)
 // 2. Within a single snapshot, references are consistent
@@ -70,7 +70,7 @@ func TestGraph_SnapshotIsolation(t *testing.T) {
 	if !ok {
 		t.Fatal("Expected name property on parent")
 	}
-	name, ok := nameVal.String()
+	name, ok := nameVal.AsString()
 	if !ok || name != "Parent 1" {
 		t.Errorf("Expected parent name 'Parent 1', got %q", name)
 	}
@@ -137,7 +137,7 @@ func TestGraph_ComposedChildAccess(t *testing.T) {
 			t.Errorf("Child %s missing name property", pkStr)
 			continue
 		}
-		name, ok := nameVal.String()
+		name, ok := nameVal.AsString()
 		if !ok {
 			t.Errorf("Child %s name is not a string", pkStr)
 			continue
@@ -203,7 +203,7 @@ func TestGraph_InstanceReferencePreservation(t *testing.T) {
 	if !ok {
 		t.Fatal("Expected name property")
 	}
-	name, ok := nameVal.String()
+	name, ok := nameVal.AsString()
 	if !ok || name != "Alice" {
 		t.Errorf("Expected name 'Alice', got %q", name)
 	}

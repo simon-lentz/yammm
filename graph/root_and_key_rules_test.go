@@ -53,7 +53,7 @@ func importCar(t *testing.T, key, vin any) diag.Result {
 }
 
 // A validator refuses a part type at a root, so the one route to Add is a child
-// read out of [instance.ValidInstance.Compositions].
+// read out of [instance.ValidInstance.Composed].
 func TestAdd_ComposedChildAtARoot_Keyed(t *testing.T) {
 	t.Parallel()
 	s := testSchemaWithComposition(t)
@@ -85,9 +85,10 @@ func TestAdd_ComposedChildAtARoot_Keyless(t *testing.T) {
 // firstChild reads a validated child out of the one composition inst holds.
 func firstChild(t *testing.T, inst instance.ValidInstance) instance.ValidInstance {
 	t.Helper()
-	for _, composed := range inst.Compositions() {
-		children, _ := composed.Slice()
-		return children.Get(0).Unwrap().(instance.ValidInstance)
+	for rel := range inst.Type().AllCompositions() {
+		for child := range inst.Composed(rel.Name()) {
+			return child
+		}
 	}
 	t.Fatal("the instance holds no composition")
 	return instance.ValidInstance{}

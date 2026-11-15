@@ -2,26 +2,20 @@ package instance_test
 
 import (
 	"fmt"
+	"slices"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/instance"
 	"github.com/simon-lentz/yammm/internal/yammmtest"
 	"github.com/simon-lentz/yammm/schema"
 )
 
-// composedOf reads one composition relation through the Compositions
-// iterator, the surviving accessor.
-func composedOf(vi instance.ValidInstance, relation string) (immutable.Value, bool) {
-	for rel, children := range vi.Compositions() {
-		if rel == relation {
-			return children, true
-		}
-	}
-	return immutable.Value{}, false
+// composedOf returns the children vi composes under relation, in input order.
+func composedOf(vi instance.ValidInstance, relation string) []instance.ValidInstance {
+	return slices.Collect(vi.Composed(relation))
 }
 
 // compositionSchema builds the canonical composition schema — part type
@@ -76,9 +70,7 @@ type Person {
 	require.True(t, result.OK())
 	require.False(t, valid.IsZero())
 
-	composed, ok := composedOf(valid, "ADDRESSES")
-	require.True(t, ok)
-	require.False(t, composed.IsNil())
+	assert.Len(t, composedOf(valid, "ADDRESSES"), 1)
 }
 
 func TestValidateCompositions_Multiple(t *testing.T) {
@@ -113,9 +105,11 @@ type Person {
 	require.True(t, result.OK())
 	require.False(t, valid.IsZero())
 
-	composed, ok := composedOf(valid, "ADDRESSES")
-	require.True(t, ok)
-	require.False(t, composed.IsNil())
+	children := composedOf(valid, "ADDRESSES")
+	require.Len(t, children, 3)
+	for i, want := range []string{`["100"]`, `["101"]`, `["102"]`} {
+		assert.Equal(t, want, children[i].PrimaryKey().String(), "child %d", i)
+	}
 }
 
 func TestValidateCompositions_Optional_Nil(t *testing.T) {
@@ -135,10 +129,7 @@ func TestValidateCompositions_Optional_Nil(t *testing.T) {
 	require.True(t, result.OK())
 	require.False(t, valid.IsZero())
 
-	// No composition should be present
-	composed, ok := composedOf(valid, "ADDRESSES")
-	assert.False(t, ok)
-	assert.True(t, composed.IsNil())
+	assert.Empty(t, composedOf(valid, "ADDRESSES"))
 }
 
 func TestValidateCompositions_Optional_Empty(t *testing.T) {
@@ -158,10 +149,7 @@ func TestValidateCompositions_Optional_Empty(t *testing.T) {
 	require.True(t, result.OK())
 	require.False(t, valid.IsZero())
 
-	// Composition should be present but empty
-	composed, ok := composedOf(valid, "ADDRESSES")
-	require.True(t, ok)
-	require.False(t, composed.IsNil())
+	assert.Empty(t, composedOf(valid, "ADDRESSES"))
 }
 
 func TestValidateCompositions_Required_Missing(t *testing.T) {

@@ -21,7 +21,7 @@ import (
 // shadowing behavior:
 //
 //	// Create base scope
-//	base := eval.PropertyScopeOf(immutable.WrapMap(props))
+//	base := eval.PropertyScopeOf(immutable.WrapProperties(props))
 //
 //	// Add variables from another source
 //	combined := base.WithVar("x", 1).WithVar("y", 2)
@@ -51,9 +51,9 @@ type Scope interface {
 // PropertyScopeOf returns a Scope over a map that is already wrapped, with
 // $self bound to it. Nothing is copied: the caller holds the map as a memo
 // and hands the same one to every evaluation that reads it.
-func PropertyScopeOf(m immutable.Map[string]) Scope {
+func PropertyScopeOf(m immutable.Properties) Scope {
 	return &propertyScope{
-		props: immutable.PropertiesOf(m),
+		props: m,
 		vars:  map[string]immutable.Value{expr.SelfVariable: immutable.Wrap(m)},
 	}
 }

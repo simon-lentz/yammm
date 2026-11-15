@@ -18,44 +18,35 @@ type Key struct {
 	components []Value
 
 	// str is the canonical string representation, precomputed at construction.
-	// Always "[]" for empty/zero keys (both Key{} and WrapKey(nil)).
+	// It is empty only for the zero Key, which WrapKey(nil) returns, and String
+	// reports "[]" for it.
 	str string
 }
 
-// WrapKey wraps key components with ownership transfer semantics.
+// WrapKey returns components held immutably as a key. It copies the slice, and
+// wraps each component as [Wrap] does, so a later change to components reaches
+// nothing it returned, save through a struct, a pointer or an array, which Wrap
+// stores as given.
 //
-// After calling WrapKey, the caller MUST NOT retain or use any reference
-// to components or any mutable value reachable from components. Mutation
-// after WrapKey is undefined behavior.
-//
-// WrapKey panics if any component cannot be JSON-marshaled. This includes:
-//   - Channels and functions
-//   - Cyclic data structures, which the wrap itself refuses
-//   - NaN or Inf floating-point values
-//   - Maps with unsupported key types (e.g., struct keys; int keys are converted to strings)
-//
-// This is a programmer error—key components must be JSON-compatible values.
-// This behavior matches [graph.FormatKey].
-//
-// Pass [WithClone] with true to deep-clone what would be stored as-is — a
-// non-string-keyed map and its contents — so the caller can retain it.
-func WrapKey(components []any, opts ...Option) Key {
+// WrapKey panics if encoding/json refuses what [Key.Clone] returns for a
+// component, such as a channel, a function, a complex number, a cyclic value, a
+// NaN or infinite float, or a time.Time outside years 0 to 9999. A key
+// component is a programmer's value.
+func WrapKey(components []any) Key {
 	if components == nil {
-		return Key{str: "[]"}
+		return Key{}
 	}
 
-	cfg := resolveConfig(opts)
 	wrapped := make([]Value, len(components))
 	for i, c := range components {
-		wrapped[i] = Value{val: wrapValue(c, cfg.clone)}
+		wrapped[i] = Value{val: wrapValue(c)}
 	}
 	return Key{components: wrapped, str: computeKeyString(wrapped)}
 }
 
-// Get returns the key component at the given index.
-//
-// Panics if i is out of bounds, matching Go slice semantics.
-func (k Key) Get(i int) Value {
+// At returns the component at index i. It panics if i is out of range, as a
+// slice index does.
+func (k Key) At(i int) Value {
 	return k.components[i]
 }
 
@@ -64,21 +55,16 @@ func (k Key) Len() int {
 	return len(k.components)
 }
 
-// Iter returns an iterator over the key components.
-func (k Key) Iter() iter.Seq[Value] {
+// Values returns an iterator over the components in order.
+func (k Key) Values() iter.Seq[Value] {
 	return slices.Values(k.components)
 }
 
-// Clone returns a deep copy of the key components as a mutable []any.
-//
-// This is the escape hatch for callers who need to modify values.
-// The returned slice is independent of the immutable Key.
-//
-// Clone preserves Go slice semantics: it returns nil for keys constructed
-// from nil input (WrapKey(nil) or Key{}), and an empty slice for keys
-// constructed from empty input (WrapKey([]any{})). Both cases have
-// String() == "[]", but Clone() distinguishes them for callers that need
-// to differentiate nil vs empty slices.
+// Clone returns the components as a new []any, each as [Value.Clone] returns
+// it: a container at every depth is copied, and what [Value.Clone] shares is
+// shared with the Key. It returns nil for a key built from nil (WrapKey(nil)
+// or Key{}) and an empty slice for one built from none (WrapKey([]any{})); both
+// keys print "[]".
 func (k Key) Clone() []any {
 	if k.components == nil {
 		return nil
@@ -97,11 +83,15 @@ func (k Key) Clone() []any {
 // [graph.FormatKey] output. The string is precomputed at construction time.
 //
 // The invariant key.String() == graph.FormatKey(key.Clone()...) holds for every
-// key built from components. It does not hold for a key built from none:
-// [Key.Clone] returns nil there, and spreading a nil slice through a variadic
-// parameter renders `null`, while String reports `[]`. A component whose type
-// has its own JSON encoding and a slice or map kind, such as []byte, is wrapped
-// by its kind, so String follows Clone and not that encoding.
+// key built from a non-nil slice, save one holding a pointer, struct or array,
+// at any depth, that refers to data changed after the wrap: such a value is
+// stored as given, and String is computed at the wrap. It does not hold for a
+// key built from nil (WrapKey(nil) or Key{}): [Key.Clone] returns nil there, and
+// spreading a nil slice through a variadic parameter renders `null`, while
+// String reports `[]`. A component of a
+// slice kind or a string-keyed map kind with its own JSON encoding, such as
+// []byte, is wrapped by its kind, so String follows Clone and not that encoding;
+// a map with another key type keeps its type, and with it that encoding.
 //
 // Examples:
 //

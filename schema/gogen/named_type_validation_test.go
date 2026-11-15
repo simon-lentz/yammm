@@ -100,8 +100,8 @@ func TestNamedTypes_AreStoredAsTheirBaseType(t *testing.T) {
 		if !ok {
 			t.Fatalf("property %q missing from the validated instance", name)
 		}
-		if got, isString := v.Unwrap().(string); !isString {
-			t.Errorf("property %q stored as %T, want string", name, v.Unwrap())
+		if got, isString := v.Any().(string); !isString {
+			t.Errorf("property %q stored as %T, want string", name, v.Any())
 		} else if got == "" {
 			t.Errorf("property %q stored empty", name)
 		}

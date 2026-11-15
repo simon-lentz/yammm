@@ -1072,7 +1072,7 @@ func TestBuiltin_TypeOf(t *testing.T) {
 		{"immutable_slice", immutable.WrapSlice([]any{int64(1)}), "list"},
 		{"map", map[string]any{"a": 1}, "map"},
 		{"typed_map", map[int]string{}, "map"},
-		{"immutable_map", immutable.WrapMap(map[string]any{}), "map"},
+		{"immutable_map", immutable.WrapProperties(map[string]any{}), "map"},
 		{"func", func() {}, "unknown"},
 		{"struct", struct{}{}, "unknown"},
 	}
@@ -1106,7 +1106,7 @@ func TestBuiltin_IsNil(t *testing.T) {
 		"a nil slice":               {[]any(nil), true},
 		"a nil slice of strings":    {[]string(nil), true},
 		"a nil map":                 {map[string]any(nil), true},
-		"a nil immutable container": {immutable.Wrap([]any(nil)).Unwrap(), true},
+		"a nil immutable container": {immutable.Wrap([]any(nil)).Any(), true},
 		"an empty list":             {[]any{}, false},
 		"an empty string":           {"", false},
 		"a nil pointer":             {(*string)(nil), false},

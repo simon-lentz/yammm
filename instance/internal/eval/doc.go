@@ -10,7 +10,7 @@
 // A bare property name reads through the scope's LookupFold method, a $ variable
 // reads through its Lookup method, and WithVar binds a variable.
 //
-//	scope := eval.PropertyScopeOf(immutable.WrapMap(map[string]any{
+//	scope := eval.PropertyScopeOf(immutable.WrapProperties(map[string]any{
 //	    "name": "Alice",
 //	    "age":  30,
 //	}))

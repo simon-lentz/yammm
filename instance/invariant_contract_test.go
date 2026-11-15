@@ -465,7 +465,7 @@ func TestInvariantContract_RefuseRows(t *testing.T) {
 	}
 	scope := eval.PropertyScopeOf(v.scopeOf(good))
 	empty := map[string]any{}
-	emptyScope := eval.PropertyScopeOf(immutable.WrapMap(empty))
+	emptyScope := eval.PropertyScopeOf(immutable.WrapProperties(empty))
 
 	// Every row states what the EVALUATOR does with the shape the checker
 	// refuses: a fragment of the error it produces, or — where its arm cannot
@@ -703,7 +703,7 @@ func TestInvariantContract_RefuseRows(t *testing.T) {
 		{`MAIN_LINE.qty + 1`, diag.E_INVALID_INVARIANT, `evaluates to a number, and an invariant evaluates to a boolean`, "expected boolean, got int64", evalErrors},
 		{`vec[0]`, diag.E_INVALID_INVARIANT, `evaluates to a number, and an invariant evaluates to a boolean`, "expected boolean, got float64", evalErrors},
 		{`tags`, diag.E_INVALID_INVARIANT, `evaluates to a list, and an invariant evaluates to a boolean`, "expected boolean, got immutable.Slice", evalErrors},
-		{`MAIN_LINE`, diag.E_INVALID_INVARIANT, `evaluates to an instance, and an invariant evaluates to a boolean`, "expected boolean, got immutable.Map", evalErrors},
+		{`MAIN_LINE`, diag.E_INVALID_INVARIANT, `evaluates to an instance, and an invariant evaluates to a boolean`, "expected boolean, got immutable.Properties", evalErrors},
 		{`name -> Len`, diag.E_INVALID_INVARIANT, `evaluates to a number, and an invariant evaluates to a boolean`, "expected boolean, got int64", evalErrors},
 		{`f1 ? { name : name }`, diag.E_INVALID_INVARIANT, `evaluates to a string, and an invariant evaluates to a boolean`, "expected boolean, got string", evalErrors},
 		// a builtin is called by its exact name

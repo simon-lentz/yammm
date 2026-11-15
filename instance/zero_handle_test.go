@@ -28,7 +28,7 @@ func TestZeroValidRecords_ReportZeroAndHoldNothing(t *testing.T) {
 	for range valid.Edges() {
 		t.Error("a zero instance holds no edge")
 	}
-	for range valid.Compositions() {
+	for range valid.Composed("R") {
 		t.Error("a zero instance holds no composition")
 	}
 

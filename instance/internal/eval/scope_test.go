@@ -28,7 +28,7 @@ func TestMapScope_WithVar(t *testing.T) {
 		newScope := scope.WithVar("x", 42)
 		val, found := newScope.Lookup("x")
 		assert.True(t, found)
-		assert.Equal(t, 42, val.Unwrap())
+		assert.Equal(t, 42, val.Any())
 	})
 
 	t.Run("original_unchanged", func(t *testing.T) {
@@ -44,8 +44,8 @@ func TestMapScope_WithVar(t *testing.T) {
 		v1, _ := s1.Lookup("x")
 		v2, _ := s2.Lookup("x")
 
-		assert.Equal(t, 1, v1.Unwrap())
-		assert.Equal(t, 2, v2.Unwrap())
+		assert.Equal(t, 1, v1.Any())
+		assert.Equal(t, 2, v2.Any())
 	})
 }
 
@@ -72,7 +72,7 @@ func TestMapScope_LookupFold(t *testing.T) {
 			val, found := scope.LookupFold(tt.lookup)
 			assert.Equal(t, tt.found, found)
 			if found {
-				assert.Equal(t, tt.expected, val.Unwrap())
+				assert.Equal(t, tt.expected, val.Any())
 			}
 		})
 	}
@@ -88,7 +88,7 @@ func TestPropertyScope(t *testing.T) {
 	t.Run("lookup_property", func(t *testing.T) {
 		val, found := scope.Lookup("name")
 		assert.True(t, found)
-		assert.Equal(t, "Alice", val.Unwrap())
+		assert.Equal(t, "Alice", val.Any())
 	})
 
 	t.Run("lookup_missing", func(t *testing.T) {
@@ -105,7 +105,7 @@ func TestPropertyScope_VariablePrecedence(t *testing.T) {
 
 	val, found := scope.Lookup("x")
 	assert.True(t, found)
-	assert.Equal(t, "from_var", val.Unwrap()) // variable takes precedence
+	assert.Equal(t, "from_var", val.Any()) // variable takes precedence
 }
 
 func TestPropertyScopeFromMap(t *testing.T) {
@@ -117,7 +117,7 @@ func TestPropertyScopeFromMap(t *testing.T) {
 	t.Run("lookup", func(t *testing.T) {
 		val, found := scope.Lookup("name")
 		assert.True(t, found)
-		assert.Equal(t, "Bob", val.Unwrap())
+		assert.Equal(t, "Bob", val.Any())
 	})
 
 	t.Run("isolation", func(t *testing.T) {
@@ -125,7 +125,7 @@ func TestPropertyScopeFromMap(t *testing.T) {
 		props["name"] = "Changed"
 		val, found := scope.Lookup("name")
 		assert.True(t, found)
-		assert.Equal(t, "Bob", val.Unwrap())
+		assert.Equal(t, "Bob", val.Any())
 	})
 }
 
@@ -155,7 +155,7 @@ func TestPropertyScope_LookupFold(t *testing.T) {
 			val, found := scope.LookupFold(tt.lookup)
 			assert.Equal(t, tt.found, found)
 			if found {
-				assert.Equal(t, tt.expected, val.Unwrap())
+				assert.Equal(t, tt.expected, val.Any())
 			}
 		})
 	}
@@ -172,12 +172,12 @@ func TestPropertyScope_LookupFold_VariablePrecedence(t *testing.T) {
 	exact := eval.PropertyScopeFromMap(props).WithVar("name", "FromVar")
 	val, found := exact.LookupFold("name")
 	assert.True(t, found)
-	assert.Equal(t, "FromVar", val.Unwrap())
+	assert.Equal(t, "FromVar", val.Any())
 
 	differing := eval.PropertyScopeFromMap(props).WithVar("NAME", "FromVar")
 	val, found = differing.LookupFold("name")
 	assert.True(t, found)
-	assert.Equal(t, "FromProps", val.Unwrap())
+	assert.Equal(t, "FromProps", val.Any())
 }
 
 func TestPropertyScope_LookupFold_NotFound(t *testing.T) {
@@ -196,8 +196,8 @@ func TestPropertyScope_LookupReadsAMemberByItsDeclaredName(t *testing.T) {
 	scope := eval.PropertyScopeFromMap(map[string]any{"name": "Alice", "WORKS_AT": "k"})
 	for lookup, want := range map[string]any{"name": "Alice", "WORKS_AT": "k", "Name": nil, "works_at": nil, "Works_At": nil} {
 		val, found := scope.Lookup(lookup)
-		if found != (want != nil) || (found && val.Unwrap() != want) {
-			t.Errorf("Lookup(%q) = %v, %v; want %v", lookup, val.Unwrap(), found, want)
+		if found != (want != nil) || (found && val.Any() != want) {
+			t.Errorf("Lookup(%q) = %v, %v; want %v", lookup, val.Any(), found, want)
 		}
 	}
 }

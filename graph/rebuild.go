@@ -172,12 +172,11 @@ func compareEdges(a, b Edge) int {
 // A composite renders by its content (see renderValue), so allocation never
 // decides, and quoting keeps one string apart from two.
 func compareProps(a, b immutable.Properties) int {
-	// The key order is precomputed at construction, so collecting it costs one
-	// allocation and no sort. An earlier rewrite walked two iter.Pull2
-	// coroutines to save that allocation and paid a coroutine pair per call
-	// instead, inside a comparator a sort runs O(n log n) times.
-	an := slices.Collect(a.SortedKeys())
-	bn := slices.Collect(b.SortedKeys())
+	// Keys reads the order a Properties sorts once and keeps, so collecting it
+	// costs one allocation after that sort; a pair of iter.Pull2 coroutines
+	// costs more per call.
+	an := slices.Collect(a.Keys())
+	bn := slices.Collect(b.Keys())
 	for i := range min(len(an), len(bn)) {
 		if c := cmp.Compare(an[i], bn[i]); c != 0 {
 			return c
@@ -197,7 +196,7 @@ func compareProps(a, b immutable.Properties) int {
 // %#v, which quotes strings and writes a nil container apart from an empty one; a
 // container's own %v would print its address.
 func renderValue(v immutable.Value) string {
-	return fmt.Sprintf("%T|%#v", v.Unwrap(), v.Clone())
+	return fmt.Sprintf("%T|%#v", v.Any(), v.Clone())
 }
 
 // compareUnresolved orders unresolved records by (sourceType, sourceKey,

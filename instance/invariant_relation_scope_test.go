@@ -135,6 +135,26 @@ func TestInvariantRelationScope_AbsentRelationIsNil(t *testing.T) {
 	}
 }
 
+// An empty composition is an empty list, not an absent one: the null guard
+// tells the two apart.
+func TestInvariantRelationScope_EmptyCompositionIsNotNil(t *testing.T) {
+	for _, tc := range []struct {
+		inv  string
+		want bool
+	}{
+		{`ITEMS != nil`, true},
+		{`ITEMS == nil`, false},
+		{`ITEMS -> IsNil`, false},
+		{`ITEMS -> Len == 0`, true},
+	} {
+		t.Run(tc.inv, func(t *testing.T) {
+			if ok, detail := relationInvariant(t, tc.inv, map[string]any{"items": []any{}}); ok != tc.want {
+				t.Errorf("%s = %v, want %v: %s", tc.inv, ok, tc.want, detail)
+			}
+		})
+	}
+}
+
 // An association's target is a REFERENCE: the instance holds the foreign key,
 // never the target's row, so reaching for a target property can never read a
 // value. The static checker refuses it at load; the evaluator's own refusal

@@ -241,7 +241,7 @@ func (e *Evaluator) evalVar(children []expr.Expression, scope Scope) (any, error
 	if !found {
 		return nil, nil //nolint:nilnil // an unset member or positional variable is nil
 	}
-	return val.Unwrap(), nil
+	return val.Any(), nil
 }
 
 // evalProperty reads a bare name within the current scope by [Scope.LookupFold]:
@@ -269,7 +269,7 @@ func (e *Evaluator) evalProperty(children []expr.Expression, scope Scope) (any, 
 	if !found {
 		return nil, nil //nolint:nilnil // missing property → nil enables lest/then patterns
 	}
-	return val.Unwrap(), nil
+	return val.Any(), nil
 }
 
 // evalMember reads one named member of the receiver. The member position holds
@@ -294,19 +294,19 @@ func (e *Evaluator) evalMember(ctx context.Context, children []expr.Expression, 
 }
 
 // accessMember reads name from obj. A map a member is read from is an
-// immutable.Map[string] — a stored value unwraps to one and every scope wraps
+// immutable.Properties — a stored value unwraps to one and every scope wraps
 // its map — and it reads by [readMember], the rule a bare name reads by. Nil
 // reads nil, and any other value is an error.
 func (e *Evaluator) accessMember(obj any, name string) (any, error) {
 	if obj == nil {
 		return nil, nil //nolint:nilnil // member access on nil returns nil
 	}
-	m, ok := obj.(immutable.Map[string])
+	m, ok := obj.(immutable.Properties)
 	if !ok {
 		return nil, fmt.Errorf("cannot access member on %T", obj)
 	}
-	if val, exists := readMember(immutable.PropertiesOf(m), name); exists {
-		return val.Unwrap(), nil
+	if val, exists := readMember(m, name); exists {
+		return val.Any(), nil
 	}
 	return nil, nil //nolint:nilnil // missing key returns nil
 }
@@ -351,18 +351,14 @@ func (e *Evaluator) accessIndex(obj, idx any) (any, error) {
 	}
 
 	// A List-typed property arrives as immutable.Slice, not []any — that is
-	// what Value.Unwrap returns for a collection.
+	// what Value.Any returns for a collection.
 	if slice, ok := obj.(immutable.Slice); ok {
 		// Bounds-check in int64 like the arms above: narrowing first would
 		// wrap a large index into range on a 32-bit build.
 		if i < 0 || i >= int64(slice.Len()) {
 			return nil, nil //nolint:nilnil // out of bounds returns nil
 		}
-		v, ok := slice.GetOK(int(i))
-		if !ok {
-			return nil, nil //nolint:nilnil // out of bounds returns nil
-		}
-		return v.Unwrap(), nil
+		return slice.At(int(i)).Any(), nil
 	}
 
 	// Handle string - index by rune, not byte (per SPEC)

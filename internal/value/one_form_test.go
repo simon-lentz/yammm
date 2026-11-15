@@ -327,11 +327,10 @@ func TestUnreadNumber_NamesOnlyTextThatIsNoLiteral(t *testing.T) {
 func TestReaders_AnImmutableContainerHoldingNilHoldsNone(t *testing.T) {
 	t.Parallel()
 	for name, v := range map[string]any{
-		"a wrapped nil slice": immutable.Wrap([]any(nil)).Unwrap(),
-		"a wrapped nil map":   immutable.Wrap(map[string]any(nil)).Unwrap(),
+		"a wrapped nil slice": immutable.Wrap([]any(nil)).Any(),
+		"a wrapped nil map":   immutable.Wrap(map[string]any(nil)).Any(),
 		"a nil Properties":    immutable.WrapProperties(nil),
 		"a nil Key":           immutable.WrapKey(nil),
-		"a nil int-keyed Map": immutable.WrapMap(map[int]any(nil)),
 	} {
 		if !value.Absent(v) {
 			t.Errorf("Absent(%s) = false", name)
@@ -350,22 +349,14 @@ func TestReaders_AnImmutableContainerHoldingNilHoldsNone(t *testing.T) {
 		}
 	}
 	for name, pair := range map[string][2]any{
-		"a wrapped nil slice and a wrapped empty one": {immutable.Wrap([]any(nil)).Unwrap(), immutable.Wrap([]any{}).Unwrap()},
-		"a wrapped nil map and a wrapped empty one":   {immutable.Wrap(map[string]any(nil)).Unwrap(), immutable.Wrap(map[string]any{}).Unwrap()},
+		"a wrapped nil slice and a wrapped empty one": {immutable.Wrap([]any(nil)).Any(), immutable.Wrap([]any{}).Any()},
+		"a wrapped nil map and a wrapped empty one":   {immutable.Wrap(map[string]any(nil)).Any(), immutable.Wrap(map[string]any{}).Any()},
 		"a nil Properties and an empty map":           {immutable.WrapProperties(nil), map[string]any{}},
 	} {
 		if value.Equal(pair[0], pair[1]) || value.Equal(pair[1], pair[0]) {
 			t.Errorf("Equal(%s) = true", name)
 		}
 	}
-}
-
-// Map is a generic type of the immutable container's name in another package.
-// It embeds the container, so reflect names its instances as it names the
-// container's, Map[string].
-type Map[K comparable] struct {
-	immutable.Map[K]
-	Name string
 }
 
 // A struct that embeds an immutable container holding nil is a struct, read as
@@ -375,9 +366,8 @@ func TestReaders_AStructEmbeddingANilContainerHoldsAValue(t *testing.T) {
 	structStrata := value.TypeStrata(struct{ A int }{})
 	for name, v := range map[string]any{
 		"a struct embedding a nil Slice":      struct{ immutable.Slice }{},
-		"a struct embedding a nil Map[int]":   struct{ immutable.Map[int] }{},
 		"a struct embedding a nil Properties": struct{ immutable.Properties }{},
-		"another package's Map":               Map[string]{},
+		"a struct embedding a nil Key":        struct{ immutable.Key }{},
 	} {
 		if value.Absent(v) {
 			t.Errorf("Absent(%s) = true", name)
@@ -408,7 +398,7 @@ func TestEqual_ANilMapIsNoEmptyMap(t *testing.T) {
 		if !value.Equal(nilMap, nil) || !value.Equal(nil, nilMap) {
 			t.Errorf("Equal(%s, nil) = false", name)
 		}
-		for _, empty := range []any{map[string]any{}, immutable.Wrap(map[string]any{}).Unwrap()} {
+		for _, empty := range []any{map[string]any{}, immutable.Wrap(map[string]any{}).Any()} {
 			if value.Equal(nilMap, empty) || value.Equal(empty, nilMap) {
 				t.Errorf("Equal(%s, %#v) = true", name, empty)
 			}

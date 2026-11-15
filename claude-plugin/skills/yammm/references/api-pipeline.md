@@ -168,7 +168,7 @@ valid.PrimaryKey()                 // immutable.Key
 valid.Property("name")             // (immutable.Value, bool)
 valid.Properties()                 // immutable.Properties
 valid.Edge("WORKS_AT")             // (ValidEdgeData, bool)
-valid.Compositions()               // iter.Seq2[string, immutable.Value]
+valid.Composed("ITEMS")            // iter.Seq[ValidInstance]: the children under one composition, in input order
 valid.Provenance()                 // location.Provenance
 ```
 

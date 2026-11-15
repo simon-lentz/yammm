@@ -40,7 +40,7 @@ func Equal(a, b any) bool {
 		return err == nil && cmp == 0
 	}
 	// Only a value the order cannot rank reaches here: a map compares in
-	// place, entry by entry, so an instance comparison allocates nothing.
+	// place, entry by entry, and builds no Go map.
 	if !isMap(a) || !isMap(b) || mapLen(a) != mapLen(b) {
 		return false
 	}
@@ -56,11 +56,11 @@ func Equal(a, b any) bool {
 	return equal
 }
 
-// isMap reports whether v is a map shape [Equal] reads: an [immutable.Map],
-// [immutable.Properties], or a string-keyed Go map.
+// isMap reports whether v is a map shape [Equal] reads: an
+// [immutable.Properties] or a string-keyed Go map.
 func isMap(v any) bool {
 	switch v.(type) {
-	case immutable.Map[string], immutable.Properties, map[string]any:
+	case immutable.Properties, map[string]any:
 		return true
 	}
 	rv := reflect.ValueOf(v)
@@ -69,8 +69,6 @@ func isMap(v any) bool {
 
 func mapLen(v any) int {
 	switch m := v.(type) {
-	case immutable.Map[string]:
-		return m.Len()
 	case immutable.Properties:
 		return m.Len()
 	case map[string]any:
@@ -82,12 +80,9 @@ func mapLen(v any) int {
 // mapLookup reads one entry of a map shape, unwrapped.
 func mapLookup(v any, key string) (any, bool) {
 	switch m := v.(type) {
-	case immutable.Map[string]:
-		val, ok := m.Get(key)
-		return val.Unwrap(), ok
 	case immutable.Properties:
 		val, ok := m.Get(key)
-		return val.Unwrap(), ok
+		return val.Any(), ok
 	case map[string]any:
 		val, ok := m[key]
 		return val, ok
@@ -107,15 +102,9 @@ func mapLookup(v any, key string) (any, bool) {
 // false.
 func rangeMap(v any, yield func(string, any) bool) {
 	switch m := v.(type) {
-	case immutable.Map[string]:
-		for k, val := range m.Range() {
-			if !yield(k, val.Unwrap()) {
-				return
-			}
-		}
 	case immutable.Properties:
-		for k, val := range m.Range() {
-			if !yield(k, val.Unwrap()) {
+		for k, val := range m.All() {
+			if !yield(k, val.Any()) {
 				return
 			}
 		}

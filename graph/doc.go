@@ -123,7 +123,7 @@
 // snapshot of another schema and the snapshot reader apply all three. [Graph.Add]
 // takes an instance a validator of its own load built, and that validator
 // refuses an abstract or a part type at a root, so Add checks the key and the
-// part rule, which a child read out of [instance.ValidInstance.Compositions] can
+// part rule, which a child read out of [instance.ValidInstance.Composed] can
 // still break. [Graph.AddOrMerge] runs the code [Graph.Add] runs, and a snapshot of
 // the importing schema was held to them where it was built. A type is
 // ineligible when it
@@ -404,9 +404,9 @@
 // order listed, and a type breaking both draws the first:
 //
 //   - E_GRAPH_MISSING_PK: the type declares no primary key, so the root is a
-//     keyless part read out of [instance.ValidInstance.Compositions]
+//     keyless part read out of [instance.ValidInstance.Composed]
 //   - E_GRAPH_INVALID_COMPOSITION: the root is a keyed part read out of
-//     [instance.ValidInstance.Compositions]
+//     [instance.ValidInstance.Composed]
 //   - E_DUPLICATE_PK: the primary key already exists for this type
 //   - E_CONTEXT_CANCELLED: the context was cancelled
 //

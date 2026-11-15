@@ -1,4 +1,4 @@
-package immutable
+package value
 
 import (
 	"encoding/json"

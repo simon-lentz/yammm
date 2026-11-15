@@ -143,7 +143,7 @@ func (g *Graph) add(ctx context.Context, inst instance.ValidInstance, name strin
 	}
 
 	// A validator refuses a part type at a root, so only a child read out of
-	// [instance.ValidInstance.Compositions] arrives here.
+	// [instance.ValidInstance.Composed] arrives here.
 	if !typ.HasPrimaryKey() {
 		opCollector.Collect(diag.NewIssue(diag.Error, diag.E_GRAPH_MISSING_PK,
 			fmt.Sprintf("type %s has no primary key; cannot add to graph", diag.QuoteValue(g.tagForm(typeID)))).
@@ -460,12 +460,12 @@ func checkKey(typ schema.Type, key immutable.Key, property func(string) (immutab
 	i := 0
 	for pk := range typ.PrimaryKeys() {
 		val, ok := property(pk.Name())
-		if !ok || value.Absent(val.Unwrap()) {
+		if !ok || value.Absent(val.Any()) {
 			return fmt.Errorf("primary key property %q is absent or null", pk.Name())
 		}
-		if !keyComponentAgrees(key.Get(i), val, pk.Constraint(), canon) {
+		if !keyComponentAgrees(key.At(i), val, pk.Constraint(), canon) {
 			return fmt.Errorf("primary key component %d disagrees with property %q (%s vs %s)",
-				i, pk.Name(), diag.CutValue(quoteKeyValue(key.Get(i).Unwrap())), diag.CutValue(quoteKeyValue(val.Unwrap())))
+				i, pk.Name(), diag.CutValue(quoteKeyValue(key.At(i).Any())), diag.CutValue(quoteKeyValue(val.Any())))
 		}
 		i++
 	}
@@ -485,7 +485,7 @@ func checkKey(typ schema.Type, key immutable.Key, property func(string) (immutab
 func keyComponentAgrees(component, property immutable.Value, c schema.Constraint, canon *canonicalizer) bool {
 	// One scalar stored twice is one value in every form, so the common case
 	// renders nothing; any other pair reaches the canonical form.
-	if sameScalar(component.Unwrap(), property.Unwrap()) {
+	if sameScalar(component.Any(), property.Any()) {
 		return true
 	}
 	x, y := canon.canonicalOrRaw(component, c), canon.canonicalOrRaw(property, c)

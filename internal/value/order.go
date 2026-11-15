@@ -20,13 +20,7 @@ import (
 // the recursive [Order] call rather than being deep-copied.
 func sliceAccessor(v any) (int, func(int) any) {
 	if s, ok := v.(immutable.Slice); ok {
-		return s.Len(), func(i int) any {
-			elem, ok := s.GetOK(i)
-			if !ok {
-				return nil
-			}
-			return elem.Unwrap()
-		}
+		return s.Len(), func(i int) any { return s.At(i).Any() }
 	}
 	rv := reflect.ValueOf(v)
 	return rv.Len(), func(i int) any { return rv.Index(i).Interface() }
@@ -211,7 +205,7 @@ func isWideInteger(v any) bool {
 // wideInteger returns the literal [isWideInteger] reports.
 func wideInteger(v any) (json.Number, bool) {
 	n, ok := NumberLiteral(v)
-	if !ok || !immutable.IsIntegerLiteral(n) {
+	if !ok || !IsIntegerLiteral(n) {
 		return "", false
 	}
 	_, err := strconv.ParseInt(string(n), 10, 64)

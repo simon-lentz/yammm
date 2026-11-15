@@ -114,7 +114,7 @@ func TestValidInstance_Property(t *testing.T) {
 	t.Run("existing_property", func(t *testing.T) {
 		val, ok := vi.Property("name")
 		require.True(t, ok)
-		s, ok := val.String()
+		s, ok := val.AsString()
 		require.True(t, ok)
 		assert.Equal(t, "Alice", s)
 	})
@@ -122,7 +122,7 @@ func TestValidInstance_Property(t *testing.T) {
 	t.Run("another_property", func(t *testing.T) {
 		val, ok := vi.Property("age")
 		require.True(t, ok)
-		i, ok := val.Int()
+		i, ok := val.AsInt()
 		require.True(t, ok)
 		assert.Equal(t, int64(30), i)
 	})
@@ -144,12 +144,12 @@ func TestValidInstance_Properties(t *testing.T) {
 
 	nameVal, ok := allProps.Get("name")
 	require.True(t, ok)
-	name, _ := nameVal.String()
+	name, _ := nameVal.AsString()
 	assert.Equal(t, "Bob", name)
 
 	emailVal, ok := allProps.Get("email")
 	require.True(t, ok)
-	email, _ := emailVal.String()
+	email, _ := emailVal.AsString()
 	assert.Equal(t, "bob@example.com", email)
 }
 
@@ -165,6 +165,15 @@ func TestValidInstance_Edge(t *testing.T) {
 		require.True(t, ok)
 		require.False(t, edge.IsZero())
 		assert.Len(t, slices.Collect(edge.Targets()), 1)
+
+		byField, ok := vi.Edge("manager")
+		require.True(t, ok, "the field-name spelling")
+		assert.Len(t, slices.Collect(byField.Targets()), 1)
+
+		for _, name := range []string{"MANAGER", "manager", "nonexistent"} {
+			allocs := testing.AllocsPerRun(10, func() { _, _ = vi.Edge(name) })
+			assert.Zero(t, allocs, "Edge(%q) allocates", name)
+		}
 	})
 
 	t.Run("missing_edge", func(t *testing.T) {
@@ -287,7 +296,7 @@ func TestValidEdgeTarget_Properties(t *testing.T) {
 		result := target.Properties()
 		sinceVal, ok := result.Get("since")
 		require.True(t, ok)
-		since, _ := sinceVal.String()
+		since, _ := sinceVal.AsString()
 		assert.Equal(t, "2024-01-01", since)
 	})
 
@@ -329,7 +338,7 @@ func TestValidInstance_Edges_Iterator(t *testing.T) {
 	})
 }
 
-func TestValidInstance_Compositions_Iterator(t *testing.T) {
+func TestValidInstance_Composed(t *testing.T) {
 	s := loadValidRecords(t)
 	t.Run("with_compositions", func(t *testing.T) {
 		vi := instancetest.Valid(t, s, "Person", map[string]any{
@@ -338,30 +347,32 @@ func TestValidInstance_Compositions_Iterator(t *testing.T) {
 			"phones":    []any{map[string]any{"id": "2"}},
 		})
 
-		count := 0
-		for name, val := range vi.Compositions() {
-			count++
-			assert.NotEmpty(t, name)
-			assert.False(t, val.IsNil())
-			children, ok := val.Slice()
-			require.True(t, ok, "a composition holds a slice")
-			for child := range children.Iter() {
-				held, ok := child.Unwrap().(instance.ValidInstance)
-				require.True(t, ok, "a composition holds instances")
-				assert.False(t, held.IsZero())
-			}
+		for rel, wantKey := range map[string]string{"ADDRESSES": `["1"]`, "PHONES": `["2"]`} {
+			children := slices.Collect(vi.Composed(rel))
+			require.Len(t, children, 1, rel)
+			assert.Equal(t, wantKey, children[0].PrimaryKey().String(), rel)
 		}
-		assert.Equal(t, 2, count)
+		assert.Empty(t, slices.Collect(vi.Composed("NONE")))
+		assert.Len(t, slices.Collect(vi.Composed("addresses")), 1, "the field-name spelling")
+
+		// A writer ranges it once per record, so a range that moved its
+		// variables to the heap would cost each record an allocation.
+		for _, name := range []string{"ADDRESSES", "addresses", "NONE"} {
+			allocs := testing.AllocsPerRun(10, func() {
+				for child := range vi.Composed(name) {
+					_ = child
+				}
+			})
+			assert.Zero(t, allocs, "a range over Composed(%q) allocates", name)
+		}
 	})
 
 	t.Run("no_compositions", func(t *testing.T) {
 		vi := instancetest.Valid(t, s, "Person", map[string]any{"id": "1"})
 
-		count := 0
-		for range vi.Compositions() {
-			count++
+		for rel := range vi.Type().AllCompositions() {
+			assert.Empty(t, slices.Collect(vi.Composed(rel.Name())), rel.Name())
 		}
-		assert.Equal(t, 0, count)
 	})
 }
 
@@ -371,7 +382,7 @@ func TestValidEdgeTarget_Property(t *testing.T) {
 
 		val, ok := target.Property("since")
 		require.True(t, ok)
-		s, ok := val.String()
+		s, ok := val.AsString()
 		require.True(t, ok)
 		assert.Equal(t, "2024-01-01", s)
 	})

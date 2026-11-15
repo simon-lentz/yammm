@@ -229,7 +229,7 @@ func assertProp(t *testing.T, props immutable.Properties, name, want string) {
 	if !ok {
 		t.Fatalf("property %q missing", name)
 	}
-	if got := v.Unwrap(); got != want {
+	if got := v.Any(); got != want {
 		t.Errorf("property %q = %#v, want %q", name, got, want)
 	}
 }

@@ -519,7 +519,7 @@ func heldFormAt(x any, c schema.Constraint, depth int) (any, bool, error) {
 // its nearest float64, which an Integer position then refuses as a float. A
 // literal no such number holds is [errUnheldNumber].
 func driverNumber(n json.Number, c schema.Constraint) (any, error) {
-	if immutable.IsIntegerLiteral(n) && !renders(c, schema.KindFloat) {
+	if value.IsIntegerLiteral(n) && !renders(c, schema.KindFloat) {
 		i, err := n.Int64()
 		if err != nil {
 			return nil, errUnheldNumber
@@ -725,7 +725,7 @@ func extractKeyProps(props immutable.Properties, shape *nodeShape) (map[string]a
 			missing = append(missing, name)
 			continue
 		}
-		unwrapped := val.Unwrap()
+		unwrapped := val.Any()
 		if value.Absent(unwrapped) {
 			nilKeys = append(nilKeys, name)
 			continue

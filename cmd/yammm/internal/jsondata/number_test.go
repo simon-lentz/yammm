@@ -29,7 +29,7 @@ func numberSchemaless(t *testing.T, doc string) map[string]any {
 }
 
 // The parser reads a number by the module's lexical rule,
-// immutable.IsIntegerLiteral: a float indicator means float64 and an integer
+// value.IsIntegerLiteral: a float indicator means float64 and an integer
 // literal means int64. An integer literal no int64 holds, and -0, keep their
 // text, which the validator then judges; a literal with an indicator is a float
 // however long its digit run.
@@ -214,7 +214,7 @@ func TestParse_IntegerLiteralOutsideInt64IsAFloatAtAFloat(t *testing.T) {
 		t.Fatalf("validate: %s", vres.String())
 	}
 	got, _ := valid[0].Property("f")
-	if f, ok := got.Unwrap().(float64); !ok || f != 1e20 {
-		t.Errorf("f = %#v, want float64(1e20)", got.Unwrap())
+	if f, ok := got.Any().(float64); !ok || f != 1e20 {
+		t.Errorf("f = %#v, want float64(1e20)", got.Any())
 	}
 }

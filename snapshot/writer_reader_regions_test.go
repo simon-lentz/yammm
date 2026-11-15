@@ -202,8 +202,8 @@ func TestMarshal_NestedCompositionSurvivesToDepthTwo(t *testing.T) {
 	if len(leaves) != 1 {
 		t.Fatalf("LEAF = %d, want 1 — the grandchild was dropped between marshal and load", len(leaves))
 	}
-	if got, ok := leaves[0].Properties().Get("label"); !ok || got.Unwrap() != "deep" {
-		t.Errorf("grandchild label = %v, want %q", got.Unwrap(), "deep")
+	if got, ok := leaves[0].Properties().Get("label"); !ok || got.Any() != "deep" {
+		t.Errorf("grandchild label = %v, want %q", got.Any(), "deep")
 	}
 }
 

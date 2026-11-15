@@ -12,8 +12,8 @@ import (
 	"github.com/tidwall/jsonc"
 
 	"github.com/simon-lentz/yammm/diag"
-	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/instance"
+	"github.com/simon-lentz/yammm/internal/value"
 	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/location/path"
 )
@@ -525,7 +525,7 @@ func normalizeNumbers(m map[string]any) {
 // literal a finite float64 holds is that float64. Every other number keeps its
 // text as a json.Number, because the validator judges it at the property's kind:
 //
-//   - An integer literal outside the int64 range ([immutable.IsIntegerLiteral]).
+//   - An integer literal outside the int64 range ([value.IsIntegerLiteral]).
 //     An Integer refuses it, and a Float reads it as its nearest float64. Its
 //     nearest float64 can be another integer: for a literal just below
 //     math.MinInt64 it is -2^63, which is MinInt64.
@@ -538,7 +538,7 @@ func normalizeNumbers(m map[string]any) {
 func normalizeValue(v any) any {
 	switch val := v.(type) {
 	case json.Number:
-		if immutable.IsIntegerLiteral(val) {
+		if value.IsIntegerLiteral(val) {
 			if i, err := strconv.ParseInt(string(val), 10, 64); err == nil && val != "-0" {
 				return i
 			}

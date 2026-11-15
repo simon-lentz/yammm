@@ -169,7 +169,7 @@ func checkRecordIdentity(t *testing.T, snap graph.Snapshot) {
 	if !ok {
 		t.Fatal("no edge property role")
 	}
-	if text, ok := role.String(); !ok || text != "buyer" {
+	if text, ok := role.AsString(); !ok || text != "buyer" {
 		t.Errorf("role = %q, %v, want buyer", text, ok)
 	}
 

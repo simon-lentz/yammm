@@ -1,187 +1,152 @@
-// Package immutable provides immutable wrapper types for Go values.
-//
-// This package provides compile-time immutability guarantees for values that
-// appear in public API signatures throughout the YAMMM library. It depends only
-// on the standard library.
-//
-// # Design Principles
-//
-// The immutable package follows several key design principles:
-//
-//   - Zero-cost reads for primitives: Accessing a string or number incurs no
-//     allocation. The underlying value is returned directly via type-safe accessors.
-//   - Recursive wrapping for nested structures: String-keyed maps and slices are
-//     recursively wrapped at construction time, not access time. This is a
-//     one-time cost. A map keyed by no string is stored as it is.
-//   - Type-safe API: Generic types where appropriate ([Map]), specialized types
-//     where semantics matter ([Key], [Properties]).
-//   - Iterator-first access: Collections expose [iter.Seq] and [iter.Seq2] iterators
-//     as the primary API for zero-allocation iteration.
+// Package immutable holds Go values immutably for the public API of the YAMMM
+// library. It depends only on the standard library.
 //
 // # Core Types
 //
-// [Value] wraps an arbitrary Go value and provides immutable access.
-// [Wrap] handles typed maps (e.g., map[string]int) and typed slices
-// (e.g., []string) via reflection — callers do not need to convert to
-// map[K]any or []any before wrapping:
+// [Value] holds one value. [Properties] holds a string-keyed map, such as an
+// instance's or an edge's properties. [Wrap] makes one of each string-keyed map
+// it reaches, save inside a map with a non-string key.
+// [Slice] holds a list. [Key] holds the components of a primary or foreign key.
+//
+// [Wrap] takes any Go value and copies each map and slice it reaches into the
+// matching container. A map with a non-string key is the exception: Wrap stores
+// a deep copy of it as Go data (see Copies). A typed map such as map[string]int
+// and a typed slice such as []string need no conversion first:
 //
 //	val := immutable.Wrap(someData)
-//	if s, ok := val.String(); ok {
+//	if s, ok := val.AsString(); ok {
 //	    fmt.Println(s)
 //	}
 //
-// [Map] provides immutable access to a map with pre-wrapped values.
-//
-//	m := immutable.WrapMap(data)
-//	for k, v := range m.Range() {
-//	    fmt.Printf("%v: %v\n", k, v.Unwrap())
-//	}
-//
-// [Slice] provides immutable access to a slice with pre-wrapped elements:
-//
-//	s := immutable.WrapSlice(items)
-//	for v := range s.Iter() {
-//	    fmt.Println(v.Unwrap())
-//	}
-//
-// [Properties] is a specialized wrapper for instance property maps, providing
-// case-insensitive lookup via [Properties.GetFold]:
+// [WrapProperties], [WrapSlice] and [WrapKey] take a map[string]any or a
+// []any and return the container itself:
 //
 //	props := immutable.WrapProperties(data)
+//	for name, v := range props.All() {
+//	    fmt.Printf("%s: %v\n", name, v)
+//	}
 //	if v, ok := props.GetFold("UserName"); ok {
-//	    // matches "username", "USERNAME", "UserName", etc. (ASCII only)
+//	    // matches "username", "USERNAME" and "UserName" (ASCII letters only)
 //	}
 //
-// [Key] wraps primary or foreign key components and provides a canonical string
-// representation via [Key.String]:
-//
-//	key := immutable.WrapKey([]any{"us", 12345})
+//	key := immutable.WrapKey([]any{"us", int64(12345)})
 //	fmt.Println(key.String()) // ["us",12345]
 //
-// The specialized [WrapMap] and [WrapSlice] functions require map[K]any and
-// []any respectively.
+// # Reading a Value
 //
-// # Ownership Semantics
+// Each As method reads one stored form, and reports false for any other.
+// [Value.AsInt] reads an int64, the form an Integer is stored in. It reads no
+// other integer type and no float. [Value.AsFloat] reads a float64 alone.
+// [Value.AsBool], [Value.AsString] and [Value.AsSlice] read a bool, a string
+// and a [Slice]. A [Properties] or a [Key] is read with a type assertion on
+// [Value.Any]:
 //
-// By default, Wrap constructors (Wrap, WrapMap, WrapSlice, WrapProperties, WrapKey)
-// implement whole-graph ownership transfer. After calling Wrap(v), the caller MUST NOT
-// retain or use any reference to v or any mutable value reachable from v.
-// Mutation after Wrap is undefined behavior.
+//	if props, ok := val.Any().(immutable.Properties); ok {
+//	    // ...
+//	}
 //
-//	data := map[string]any{"key": "value"}
-//	wrapped := immutable.WrapMap(data)
-//	// data must not be used after this point
+// [Value.Any] returns the stored value: a scalar as itself, and a container as
+// the container. A map with a non-string key is stored as a Go map, so Any
+// returns a fresh deep copy of it. [Value.Clone] returns the stored value as
+// mutable Go data.
+// [Value.String] formats what Clone returns, so a Value prints as Go data.
 //
-// Wrap copies each string-keyed map and slice it walks into an immutable
-// container, so a mutation of the caller's map or slice header after Wrap does
-// not reach the wrapped value. It walks into no struct, pointer, array or map
-// with a non-string key: it stores each as it is, with what it holds. [WithClone]
-// reaches only such a map: with true, the map is deep-cloned first, each map and
-// slice inside it at every depth, and the caller can retain and mutate the
-// original. A struct, a pointer or an array inside it is copied as it is, so
-// what a pointer refers to stays shared:
+// # Copies
 //
-//	data := map[string]any{"by_id": map[int]any{1: "value"}}
-//	wrapped := immutable.WrapMap(data, immutable.WithClone(true))
-//	data["by_id"].(map[int]any)[1] = "modified" // safe: wrapped holds a clone
+// Every constructor copies what it is given. After the call, a change the
+// caller makes to its value reaches nothing the constructor returned, save
+// through a value the rules store as given. The copy follows these rules:
 //
-// Use bare Wrap when you control the value's origin (e.g., freshly constructed in the
-// same scope). Use WithClone(true) when the value comes from external sources, is
-// shared, or when ownership cannot be verified.
+//   - A map whose key kind is string becomes a [Properties]. Its values are
+//     copied by the same rules.
+//   - A slice of any element type becomes a [Slice]. Its elements are copied by
+//     the same rules.
+//   - A map with another key type becomes a deep copy of its own type. Each map
+//     and slice inside it is copied as Go data. A [Value] or a container inside
+//     it contributes its content as Go data where the element type holds that
+//     data, and is kept as itself where it does not, as in a map[int]Value.
+//   - Any other value, a scalar, a struct, a pointer, an array, a channel or a
+//     function among them, is stored as given.
 //
-// Note: cloning reaches only what is stored as-is. Struct values, pointer
-// values and arrays are stored as-is on every path and are never cloned. For
-// full isolation of struct-based data, do not mutate the original after Wrap,
-// or pass a map/slice representation of the data.
+// A value stored as given is not walked, so what it refers to stays shared
+// with the caller. To keep such data apart from the caller, give a map or a
+// slice in its place, or do not change it after the call.
 //
 // # Arrays
 //
-// An array is stored as it is, not wrapped as a [Slice]. An array is how this
-// library spells a scalar carrier rather than a list — uuid.UUID is [16]byte —
-// so wrapping one as a Slice would turn a single UUID into sixteen byte values.
-// No decoder here produces an array for a list position.
+// An array is stored as it is, not wrapped as a [Slice]. This library spells a
+// scalar carrier as an array, not a list: uuid.UUID is [16]byte. A Slice
+// would turn one UUID into sixteen byte values. No decoder here produces an
+// array for a list position.
 //
 // # Wrapping a wrapper
 //
-// A constructor given one of this package's own wrappers adopts it rather than
-// storing it as an opaque struct. A [Value] contributes its content, so no
-// Value ever holds a Value; a [Map], [Slice], [Properties] or [Key] is already
-// immutable and is stored as itself. What reads such a value — [Value.IsNil], a
-// Clone, a [Key]'s canonical string — reads the content rather than an empty
-// struct. A [Map], [Slice], [Properties] or [Key] reached through a map stored
-// as given is read through too, at every depth. A [Value] there is not adopted:
-// a Clone returns it as it is, and a [Key]'s canonical string renders it as an
-// empty object. An adopted [Value] is taken as it is, so [WithClone] does not
-// reach it: a map the earlier constructor stored as-is is still shared with its
-// original. A pointer to a wrapper is a pointer, and a struct that embeds one is
-// a struct: each is stored as it is.
+// A constructor that gets one of this package's own types adopts it. It does
+// not store it as an opaque struct. A [Value] contributes its content, so no
+// Value directly holds a Value. A [Properties], a [Slice] or a [Key] is already
+// immutable, and is stored as itself. Inside a map with a non-string key the
+// copy rule decides instead. As a result, a Clone and a [Key]'s
+// canonical string read the content, not an empty struct. The one exception
+// is an element a map with a non-string key keeps as itself, as in a
+// map[int]Value: Clone shares it, and a Key's canonical string renders it as
+// an empty object, as encoding/json does. A pointer to one of
+// these types is a pointer, and a struct that embeds one is a struct. Each is
+// stored as given.
 //
 // # Cyclic values
 //
-// A map or slice that refers to itself is refused with a panic, which a caller
-// can recover from; a cycle closed through a pointer or a struct field is stored
-// as given and never walked, save by a [Key]'s canonical string: encoding/json
-// renders it, so [WrapKey] panics on one. A map with non-string keys is stored
-// as it is; the default wrap does not walk it, so a cycle inside one is refused
-// only when something does: [WithClone] and [WrapKey] at construction, or a
-// Clone afterwards. The walk counts its depth and, past the point where real data
-// stops nesting, records the maps and slices on its path — the shape
-// encoding/json uses, so an ordinary value pays a counter and nothing more.
-// Without it such a value exhausts the stack, and a fatal runtime error is not
-// something a caller can contain.
+// The walk refuses a map or a slice that refers to itself with a panic, which a
+// caller can recover from. A value Wrap stores as given is not walked, so a
+// cycle through one is stored with it. Two readers walk it anyway. [WrapKey]
+// renders its key with encoding/json, so it panics on a cycle encoding/json
+// follows. [Value.String] formats with fmt, so String exhausts the stack on a
+// cycle fmt follows.
+// The walk counts its depth. Past the depth where real data
+// stops, it records the maps and slices on its path, as encoding/json does. An
+// ordinary value pays for a counter and nothing more. Without this guard, a cyclic value exhausts
+// the stack, and a caller cannot recover from that fatal runtime error.
 //
 // # Nil Semantics
 //
-// [Value.IsNil] returns true for:
-//   - Literal nil passed to [Wrap]
-//   - Typed nil pointers, channels, functions, interfaces
-//   - Nil maps and slices
-//   - A nil [Map], [Slice], [Properties] or [Key] a constructor adopted
-//
-// A nil string-keyed map or a nil slice is still wrapped as a [Map] or [Slice],
-// so [Value.Map] or [Value.Slice] reports true, which tells a nil-typed value
-// from literal nil, and [IsNilContainer] tells a nil container from an empty
-// one:
+// [Wrap] stores literal nil as nil, so [Value.Any] returns nil. A nil
+// string-keyed map becomes a nil [Properties], and a nil slice becomes a nil
+// [Slice]. Each is a container, so it stays apart from literal nil.
+// [IsNilContainer] tells a nil container from an empty one:
 //
 //	var m map[string]any // nil map
 //	v := immutable.Wrap(m)
-//	v.IsNil()     // true (nil map)
-//	v.Map()       // (zero Map, true) - IS a map, just nil
+//	v.Any()                                   // Properties{}: a container
+//	immutable.IsNilContainer(v.Any())         // true: a nil container
+//	immutable.IsNilContainer(immutable.Wrap(map[string]any{}).Any()) // false
 //
-// For literal nil:
-//
-//	v := immutable.Wrap(nil)
-//	v.IsNil()     // true (literal nil)
-//	v.Map()       // (zero Map, false) - NOT a map
-//
-// A nil map with non-string keys is stored as that typed nil: IsNil reports
-// true, [Value.Map] reports false, and [Value.Unwrap] returns the typed nil.
+// A nil map with another key type is copied as that typed nil. A nil pointer,
+// a nil channel and a nil function are stored as given. A Clone of a nil
+// container returns a typed nil, so a nil container and an empty one stay apart
+// as Go data too.
 //
 // # Thread Safety
 //
-// All immutable types are safe for concurrent read access. Their entries never
-// change after construction. A string-keyed [Map] computes its sorted keys and
-// case-folded index once, on the first [PropertiesOf], under a sync.Once, so
-// concurrent first use is safe too. Multiple goroutines can simultaneously call
-// Get, Iter, Keys, Range, and other read methods.
+// All types in this package are safe for concurrent read access. Their content
+// does not change after construction. A [Properties] sorts its names on the
+// first Keys, All or GetFold miss, and builds its case-folded index on the
+// first GetFold miss, each once, under a sync.Once. Every copy of that
+// Properties shares the result, and concurrent first use is safe.
 //
 // # Performance Characteristics
 //
 // | Operation | Cost | Notes |
 // | --------- | ---- | ----- |
-// | Wrap(primitive) | O(1), one allocation | Primitives stored directly; the allocation holds the options |
-// | Wrap(map) | O(n) | Iterates map once to wrap values |
-// | Wrap(slice) | O(n) | Iterates slice once to wrap elements |
-// | Wrap(any, WithClone(true)) | O(n) deep | Clones non-string-keyed maps recursively, a wrapper inside one to its content; other structs and pointers stored as-is |
-// | Get(key) / Get(i) | O(1) | Map/slice lookup |
-// | Keys() / Iter() | O(1) start | Iterator creation is cheap |
-// | Clone() | O(n) deep | Copies every container, and every map stored as given with each map and slice inside it; any other value, a Value inside such a map included, is returned as stored |
+// | Wrap(scalar) | O(1) | The scalar is stored as given |
+// | Wrap(map) / Wrap(slice) | O(n) deep | Copies each map and slice it reaches |
+// | Get(name) / At(i) | O(1) | A map or slice lookup |
+// | GetFold(name) | O(1) after the first miss | A miss of the exact name reads the folded index; the first miss sorts the names and builds it in O(n log n), and a later one allocates nothing for a name of up to 64 bytes |
+// | Keys() / All() / Values() | O(1) start | Keys and All visit names in sorted order; the first Keys, All or GetFold miss sorts them in O(n log n), and after that a range allocates nothing |
+// | Clone() | O(n) deep | Copies every container to Go data; a value stored as given and an element a map with a non-string key keeps as itself are returned as stored |
 //
 // # Escape Hatch
 //
-// Each collection type provides a Clone() method that returns a mutable copy
-// of the underlying data. This is the intentional escape hatch for callers
-// who need to modify values:
+// Each type has a Clone method that returns a mutable copy of its content as Go
+// data. A caller that must change a value uses it:
 //
 //	props := instance.Properties()
 //	mutable := props.Clone()

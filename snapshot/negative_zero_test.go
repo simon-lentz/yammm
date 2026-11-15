@@ -26,8 +26,8 @@ func TestMarshal_ANegativeZeroKeepsItsSignAtAFloat(t *testing.T) {
 	holderT, _ := s.Type("Holder")
 	props := map[string]any{"id": "h1", "f": json.Number("-0"), "v": []any{json.Number("-0"), json.Number("1")}}
 	valid := instancetest.Valid(t, s, "Holder", props)
-	if stored, _ := valid.Property("f"); !negativeZero(stored.Unwrap()) {
-		t.Fatalf("the validator stores -0 at a Float as %#v; want a negative zero", stored.Unwrap())
+	if stored, _ := valid.Property("f"); !negativeZero(stored.Any()) {
+		t.Fatalf("the validator stores -0 at a Float as %#v; want a negative zero", stored.Any())
 	}
 	g := graph.New(s)
 	if r := g.Add(t.Context(), valid); r.HasErrors() {
@@ -53,8 +53,8 @@ func TestMarshal_ANegativeZeroKeepsItsSignAtAFloat(t *testing.T) {
 		if !ok {
 			t.Fatalf("%s: Load: no Holder h1", name)
 		}
-		if p, _ := inst.Property("f"); !negativeZero(p.Unwrap()) {
-			t.Errorf("%s: f read back as %#v from %s", name, p.Unwrap(), data)
+		if p, _ := inst.Property("f"); !negativeZero(p.Any()) {
+			t.Errorf("%s: f read back as %#v from %s", name, p.Any(), data)
 		}
 		p, _ := inst.Property("v")
 		switch v := p.Clone().(type) {

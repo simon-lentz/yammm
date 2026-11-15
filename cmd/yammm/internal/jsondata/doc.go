@@ -131,7 +131,7 @@
 // # Dependencies
 //
 //	cmd/yammm/internal/jsondata  ──imports──▶  instance, diag, location, location/path,
-//	                                           immutable, github.com/tidwall/jsonc
+//	                                           internal/value, github.com/tidwall/jsonc
 //
 // [tidwall/jsonc]: https://github.com/tidwall/jsonc
 package jsondata

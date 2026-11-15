@@ -50,10 +50,10 @@ func TestCheckValue_JudgesAValueAsItsForm(t *testing.T) {
 			return nil, false
 		}
 		p, ok := inst.Property(prop)
-		if !ok || p.IsNil() {
+		if !ok || p.Any() == nil {
 			return nil, false
 		}
-		return p.Unwrap(), true
+		return p.Any(), true
 	}
 	type named string
 	text := "x"
@@ -182,8 +182,8 @@ func TestValidateOne_AValueThatHoldsNoneIsAnAbsentProperty(t *testing.T) {
 		inst, res := v.ValidateOne(t.Context(), "T", instance.RawInstance{Properties: map[string]any{"id": "x", "must": "m", "name": none}})
 		if res.Err() != nil || inst.IsZero() {
 			t.Errorf("%s at an optional property: %v", name, codes(res))
-		} else if p, ok := inst.Property("name"); ok && !p.IsNil() {
-			t.Errorf("%s at an optional property stored %#v", name, p.Unwrap())
+		} else if p, ok := inst.Property("name"); ok && p.Any() != nil {
+			t.Errorf("%s at an optional property stored %#v", name, p.Any())
 		}
 		if _, res := v.ValidateOne(t.Context(), "T", instance.RawInstance{Properties: map[string]any{"id": "x", "must": none}}); !res.HasCode(diag.E_MISSING_REQUIRED) {
 			t.Errorf("%s at a required property: want E_MISSING_REQUIRED, got %v", name, codes(res))

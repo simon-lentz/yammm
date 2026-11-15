@@ -45,7 +45,7 @@
 //
 // A non-nil [immutable.Slice] is a slice for every purpose here, and a nil one,
 // like every nil [immutable] container ([immutable.IsNilContainer]), holds no
-// value. It is the shape Value.Unwrap returns for a List- or Vector-typed
+// value. It is the shape Value.Any returns for a List- or Vector-typed
 // property, and it is a struct, so neither a type switch over predeclared types
 // nor a reflect.Slice test names it; [TypeStrata] and [Order] both carry an
 // explicit case.
@@ -81,7 +81,7 @@
 //
 // [Classify] determines what a value IS, not what it should be per schema. It
 // reads a json.Number by its spelling, and only a JSON number literal
-// ([github.com/simon-lentz/yammm/immutable.IsNumberLiteral]) is a number: an
+// ([IsNumberLiteral]) is a number: an
 // integer literal is an integer, and any other literal is a float:
 //   - json.Number("42") → IntKind (an optional '-' and digits alone)
 //   - json.Number("3.0") → FloatKind (has a decimal point)

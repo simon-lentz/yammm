@@ -26,9 +26,9 @@ func TestCheckAndCoerce_ReadAStoredList(t *testing.T) {
 		{"a List", []any{"a", "b"}, lc, []any{"a", "b"}},
 		{"a Vector", []any{1.5, 2.5}, vc, []float64{1.5, 2.5}},
 	} {
-		in := immutable.Wrap(c.in).Unwrap()
+		in := immutable.Wrap(c.in).Any()
 		if _, ok := in.(immutable.Slice); !ok {
-			t.Fatalf("fixture: Wrap([]any).Unwrap() is %T, want immutable.Slice", in)
+			t.Fatalf("fixture: Wrap([]any).Any() is %T, want immutable.Slice", in)
 		}
 		if err := value.Check(in, c.c); err != nil {
 			t.Errorf("Check(immutable.Slice) at %s = %v, want nil", c.name, err)
@@ -140,7 +140,7 @@ func TestCheckAndCoerce_AValueThatHoldsNoneIsNil(t *testing.T) {
 		schema.NewStringConstraint(), schema.NewIntegerConstraint(), schema.NewTimestampConstraint(),
 		schema.NewVectorConstraint(2), schema.NewListConstraint(schema.NewStringConstraint()),
 	} {
-		for _, v := range []any{nil, []any(nil), []string(nil), map[string]any(nil), immutable.Wrap([]any(nil)).Unwrap()} {
+		for _, v := range []any{nil, []any(nil), []string(nil), map[string]any(nil), immutable.Wrap([]any(nil)).Any()} {
 			if err := value.Check(v, c); err != nil {
 				t.Errorf("Check(%#v) at %s = %v; want nil", v, c.Kind(), err)
 			}

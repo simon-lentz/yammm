@@ -70,7 +70,7 @@ func TestAdd_RootDuplicateRecordCarriesTheCanonicalAddress(t *testing.T) {
 	if !ok {
 		t.Fatal(`rejected duplicate has no "observed_at" property`)
 	}
-	if got := v.Unwrap(); got != canonStamp {
+	if got := v.Any(); got != canonStamp {
 		t.Errorf("rejected duplicate property observed_at = %v, want the canonical %s", got, canonStamp)
 	}
 }
@@ -131,7 +131,7 @@ type Doc {
 	if !ok {
 		t.Fatal(`the edge carries no "seen_at" property`)
 	}
-	if got := v.Unwrap(); got != canonStamp {
+	if got := v.Any(); got != canonStamp {
 		t.Errorf("edge property seen_at = %v, want the canonical %s", got, canonStamp)
 	}
 }

@@ -8,7 +8,6 @@ import (
 	"strings"
 
 	"github.com/simon-lentz/yammm/diag"
-	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/internal/value"
 )
 
@@ -85,7 +84,7 @@ func ParseKey(s string) ([]any, error) {
 		case []any, map[string]any:
 			return nil, fmt.Errorf("graph.ParseKey: component %d is not a scalar: %T", i, read)
 		case json.Number:
-			if immutable.IsIntegerLiteral(n) {
+			if value.IsIntegerLiteral(n) {
 				return nil, fmt.Errorf("graph.ParseKey: component %d is an integer literal no int64 holds: %v", i, diag.CutValue(string(n)))
 			}
 			return nil, fmt.Errorf("graph.ParseKey: component %d is a number literal no finite float64 holds: %v", i, diag.CutValue(string(n)))

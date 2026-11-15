@@ -11,7 +11,7 @@ import (
 )
 
 // wireFloat marks a float so it emits with a float indicator (".", "e", or "E"),
-// the set [immutable.IsIntegerLiteral] reads. Without it, a whole float emits
+// the set [value.IsIntegerLiteral] reads. Without it, a whole float emits
 // int-shaped and reads back as an int64 at every position but a Float or a
 // Vector element.
 type wireFloat float64

@@ -2,6 +2,7 @@ package graph
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 
@@ -100,11 +101,11 @@ func TestCompareProps_OrdersCompositeValuesByContent(t *testing.T) {
 	}{
 		{"a map holding a slice", func() any { return map[string]any{"x": int64(1), "y": []any{"a"}} }},
 		{"a slice holding a map", func() any { return []any{map[string]any{"k": int64(1)}} }},
-		// A container reached through a map the package stores as given. Only a
-		// Map[string] carries a pointer, so a nested one decides the order by the
-		// address of its memoised view unless the clone reads through it.
-		{"a stored-as-is map holding a Map[string]", func() any {
-			return map[int]any{1: immutable.WrapMap(map[string]any{"a": int64(1)})}
+		// A container reached through a map with a non-string key. A Properties
+		// carries a pointer to its sorted view, so a nested one decides the order
+		// by that address unless the clone reads through it.
+		{"a map with an int key holding a Properties", func() any {
+			return map[int]any{1: immutable.WrapProperties(map[string]any{"a": int64(1)})}
 		}},
 		{"a stored-as-is map holding a Properties of a map", func() any {
 			return map[int]any{1: immutable.WrapProperties(map[string]any{"a": map[string]any{"b": int64(1)}})}
@@ -229,28 +230,29 @@ func TestCompareProps_DiscriminatesByStoredTypeBeforeContent(t *testing.T) {
 	t.Parallel()
 	props := func(v any) immutable.Properties { return immutable.WrapProperties(map[string]any{"p": v}) }
 
-	sameContent := props(immutable.WrapProperties(map[string]any{"a": int64(1)}))
-	asMap := props(immutable.WrapMap(map[string]any{"a": int64(1)}))
-	if compareProps(sameContent, asMap) == 0 {
-		t.Error("a Properties and a Map[string] of one content compare equal; the stored type does not reach the key")
+	// A Slice and a Key of one component clone to one []any.
+	sameContent := props(immutable.WrapSlice([]any{int64(1)}))
+	asKey := props(immutable.WrapKey([]any{int64(1)}))
+	if compareProps(sameContent, asKey) == 0 {
+		t.Error("a Slice and a Key of one content compare equal; the stored type does not reach the key")
 	}
-	if compareProps(sameContent, asMap) != -compareProps(asMap, sameContent) {
+	if compareProps(sameContent, asKey) != -compareProps(asKey, sameContent) {
 		t.Error("compareProps is not antisymmetric over two container types of one content")
 	}
 
-	// Map[string] sorts below Properties by type name, and above it by content,
-	// so a key that leads with the content reverses this pair.
-	lo := props(immutable.WrapMap(map[string]any{"z": int64(1)}))
-	hi := props(immutable.WrapProperties(map[string]any{"a": int64(1)}))
+	// Key sorts below Slice by type name, and above it by content, so a key
+	// that leads with the content reverses this pair.
+	lo := props(immutable.WrapKey([]any{"z"}))
+	hi := props(immutable.WrapSlice([]any{"a"}))
 	if compareProps(lo, hi) >= 0 {
-		t.Error("a Map[string] does not sort below a Properties; the key leads with the content, not the type")
+		t.Error("a Key does not sort below a Slice; the key leads with the content, not the type")
 	}
 }
 
 // TestRenderValue_SeparatorAppearsOnceForEveryStoredType holds the claim
 // renderValue's godoc rests on: the type and the content are split on a byte
-// no Go type name can hold. A type argument carries its whole import path, so
-// a separator drawn from that alphabet splits in the wrong place.
+// no Go type name can hold. A named key type prints its package name, so a
+// separator drawn from an identifier's alphabet splits in the wrong place.
 func TestRenderValue_SeparatorAppearsOnceForEveryStoredType(t *testing.T) {
 	t.Parallel()
 	values := []any{
@@ -261,7 +263,7 @@ func TestRenderValue_SeparatorAppearsOnceForEveryStoredType(t *testing.T) {
 		map[int]any{1: "a"},
 		immutable.WrapProperties(map[string]any{"a": int64(1)}),
 		immutable.WrapKey([]any{int64(1)}),
-		immutable.WrapMap(map[schema.TypeID]any{orderingTypeID(t, "T"): int64(1)}),
+		map[schema.TypeID]any{orderingTypeID(t, "T"): int64(1)},
 	}
 	for _, in := range values {
 		v, ok := immutable.WrapProperties(map[string]any{"p": in}).Get("p")
@@ -272,7 +274,7 @@ func TestRenderValue_SeparatorAppearsOnceForEveryStoredType(t *testing.T) {
 		if n := strings.Count(got, "|"); n != 1 {
 			t.Errorf("renderValue writes %d separators for %T, want 1: %s", n, in, got)
 		}
-		wantType := fmt.Sprintf("%T", v.Unwrap())
+		wantType := fmt.Sprintf("%T", v.Any())
 		if prefix, _, _ := strings.Cut(got, "|"); prefix != wantType {
 			t.Errorf("renderValue's type half reads %q for %T, want %q", prefix, in, wantType)
 		}
@@ -315,5 +317,15 @@ func TestCompareDuplicates_ProvenanceOrdersByWhatADocumentWrites(t *testing.T) {
 				t.Errorf("compareDuplicates(after, before) = %d, want positive", got)
 			}
 		})
+	}
+}
+
+// TestUndeclaredNames_InSortedOrder holds the undeclared names to sorted order:
+// a caller that merges the issues into a collector with a limit keeps the first.
+func TestUndeclaredNames_InSortedOrder(t *testing.T) {
+	props := immutable.WrapProperties(map[string]any{"gamma": 1, "id": 2, "alpha": 3, "beta": 4})
+	got := undeclaredNames(props, func(n string) bool { return n == "id" })
+	if want := []string{"alpha", "beta", "gamma"}; !slices.Equal(got, want) {
+		t.Errorf("undeclaredNames = %v, want %v", got, want)
 	}
 }

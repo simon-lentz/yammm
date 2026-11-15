@@ -15,7 +15,7 @@ import (
 // which is how a scalar carrier is spelled (uuid.UUID is [16]byte).
 func TestListReaders_AgreeOnEveryShape(t *testing.T) {
 	t.Parallel()
-	s := immutable.Wrap([]any{int64(1), "a"}).Unwrap()
+	s := immutable.Wrap([]any{int64(1), "a"}).Any()
 	for _, tc := range []struct {
 		name string
 		in   any
@@ -39,7 +39,7 @@ func TestListReaders_AgreeOnEveryShape(t *testing.T) {
 			}
 		})
 	}
-	for _, none := range []any{nil, []any(nil), []string(nil), immutable.Wrap([]any(nil)).Unwrap()} {
+	for _, none := range []any{nil, []any(nil), []string(nil), immutable.Wrap([]any(nil)).Any()} {
 		if got, err := asSlice("T", none); err != nil || got == nil || len(got) != 0 {
 			t.Errorf("asSlice(%#v) = %#v, %v; want an empty list", none, got, err)
 		}

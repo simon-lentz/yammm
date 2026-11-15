@@ -50,7 +50,7 @@ func documentShapes(t *testing.T) (schema.Schema, snapparts.Parts) {
 	}
 	company, person, card, empty := typeID(t, s, "Company"), typeID(t, s, "Person"), typeID(t, s, "Card"), typeID(t, s, "Empty")
 	key := func(k string) immutable.Key { return immutable.WrapKey([]any{k}) }
-	props := func(m map[string]any) immutable.Properties { return immutable.WrapProperties(m) }
+	props := immutable.WrapProperties
 	return s, snapparts.Parts{
 		Types: []schema.TypeID{empty},
 		Instances: []snapparts.Instance{

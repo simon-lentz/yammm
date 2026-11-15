@@ -480,10 +480,10 @@ func (v *Validator) validateEdgeTarget(
 		return nil, refused
 	}
 
-	targetKey := immutable.WrapKey(pkComponents, immutable.WithClone(true))
+	targetKey := immutable.WrapKey(pkComponents)
 	var edgeProperties immutable.Properties
 	if len(edgeProps) > 0 {
-		edgeProperties = immutable.WrapProperties(edgeProps, immutable.WithClone(true))
+		edgeProperties = immutable.WrapProperties(edgeProps)
 	}
 
 	return &ValidEdgeTarget{targetKey: targetKey, properties: edgeProperties}, false
@@ -498,7 +498,7 @@ func kindOf(v any) string {
 		return "null"
 	}
 	switch x := v.(type) {
-	case map[string]any, immutable.Map[string], immutable.Properties:
+	case map[string]any, immutable.Properties:
 		return "object"
 	case []any, immutable.Slice:
 		return "array"
@@ -509,7 +509,7 @@ func kindOf(v any) string {
 	case float64, float32, int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64:
 		return "number"
 	case json.Number:
-		if immutable.IsNumberLiteral(x) {
+		if value.IsNumberLiteral(x) {
 			return "number"
 		}
 		return "json.Number"
@@ -542,7 +542,7 @@ func toSliceOfAny(val any) ([]any, bool) {
 }
 
 // toMapOfAny converts val to map[string]any if it's a string-keyed map: a
-// map[string]any, an [immutable.Map] or [immutable.Properties] with each entry
+// map[string]any, an [immutable.Properties] with each entry
 // unwrapped, or a typed map. A value that
 // holds none, a nil map included, is no object: it is the null [kindOf] names.
 func toMapOfAny(val any) (map[string]any, bool) {
@@ -552,10 +552,8 @@ func toMapOfAny(val any) (map[string]any, bool) {
 	switch m := val.(type) {
 	case map[string]any:
 		return m, true
-	case immutable.Map[string]:
-		return unwrapEntries(m.Len(), m.Range()), true
 	case immutable.Properties:
-		return unwrapEntries(m.Len(), m.Range()), true
+		return unwrapEntries(m.Len(), m.All()), true
 	}
 	rv := reflect.ValueOf(val)
 	if rv.Kind() != reflect.Map {
@@ -572,12 +570,12 @@ func toMapOfAny(val any) (map[string]any, bool) {
 }
 
 // unwrapEntries copies an immutable map's entries, each unwrapped as
-// [immutable.Value.Unwrap] holds it: one level, as [value.ListElems] reads a
+// [immutable.Value.Any] holds it: one level, as [value.ListElems] reads a
 // list, so a field no reader reads is never walked.
 func unwrapEntries(n int, entries iter.Seq2[string, immutable.Value]) map[string]any {
 	out := make(map[string]any, n)
 	for k, v := range entries {
-		out[k] = v.Unwrap()
+		out[k] = v.Any()
 	}
 	return out
 }

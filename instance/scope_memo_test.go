@@ -56,10 +56,8 @@ func TestScope_ParentHoldsTheChildsMemo(t *testing.T) {
 		t.Fatal(res.Err())
 	}
 	var child ValidInstance
-	for name, val := range root.Compositions() {
-		if name == "NEXT" {
-			child = composedChildren(val.Unwrap())[0]
-		}
+	for c := range root.Composed("NEXT") {
+		child = c
 	}
 	if child.IsZero() {
 		t.Fatal("no NEXT composition on the root")
@@ -69,7 +67,7 @@ func TestScope_ParentHoldsTheChildsMemo(t *testing.T) {
 	if !ok {
 		t.Fatal("the root's scope has no entry under the composition's name")
 	}
-	parentHeld := entry.Unwrap()
+	parentHeld := entry.Any()
 	if entriesPointer(parentHeld) != entriesPointer(childMemo) {
 		t.Error("the parent's scope holds a copy of the child's scope, not its memo")
 	}

@@ -2,10 +2,10 @@ package instance_test
 
 import (
 	"context"
+	"slices"
 	"testing"
 
 	"github.com/simon-lentz/yammm/diag"
-	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/instance"
 	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/location/path"
@@ -49,25 +49,10 @@ func detailValues(is diag.Issue, key string) []string {
 	return out
 }
 
-func kids(val any) []instance.ValidInstance {
-	var out []instance.ValidInstance
-	switch c := val.(type) {
-	case instance.ValidInstance:
-		out = append(out, c)
-	case []instance.ValidInstance:
-		out = append(out, c...)
-	case immutable.Slice:
-		for e := range c.Iter() {
-			out = append(out, kids(e.Unwrap())...)
-		}
-	}
-	return out
-}
-
 func composedChildren(inst instance.ValidInstance) []instance.ValidInstance {
 	var out []instance.ValidInstance
-	for _, val := range inst.Compositions() {
-		out = append(out, kids(val.Unwrap())...)
+	for rel := range inst.Type().AllCompositions() {
+		out = slices.AppendSeq(out, inst.Composed(rel.Name()))
 	}
 	return out
 }

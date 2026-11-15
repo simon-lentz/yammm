@@ -390,7 +390,7 @@ var floatElement schema.Constraint = schema.NewFloatConstraint()
 // the reader and the validator have read every other number as ReadAt would.
 func mayReadFloat(v immutable.Value, c schema.Constraint) bool {
 	rc := schema.ResolveAlias(c)
-	switch x := v.Unwrap().(type) {
+	switch x := v.Any().(type) {
 	case int64, json.Number:
 		_, ok := rc.(schema.FloatConstraint)
 		return ok
@@ -404,7 +404,7 @@ func mayReadFloat(v immutable.Value, c schema.Constraint) bool {
 		default:
 			return false
 		}
-		for e := range x.Iter() {
+		for e := range x.Values() {
 			if mayReadFloat(e, elem) {
 				return true
 			}

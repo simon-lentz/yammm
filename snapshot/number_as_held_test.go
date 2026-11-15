@@ -58,8 +58,8 @@ func TestMarshal_AFloatHeldUnderAnIntegerIsWrittenAsHeld(t *testing.T) {
 	if !ok {
 		t.Fatal("the instance did not load")
 	}
-	if n, _ := got.Property("n"); n.Unwrap() != float64(6) {
-		t.Errorf("n loaded as %#v, want float64(6)", n.Unwrap())
+	if n, _ := got.Property("n"); n.Any() != float64(6) {
+		t.Errorf("n loaded as %#v, want float64(6)", n.Any())
 	}
 
 	_, rres := snapshot.Load(ctx, data, s, snapshot.WithRevalidation(diag.Error))
@@ -94,8 +94,8 @@ func TestMarshal_ANumberNoFloatHoldsReadsBackAsTheLiteral(t *testing.T) {
 	if !ok {
 		t.Fatal("the instance did not load")
 	}
-	if n, _ := inst.Property("n"); n.Unwrap() != json.Number("1e400") {
-		t.Errorf("1e400 read back as %#v", n.Unwrap())
+	if n, _ := inst.Property("n"); n.Any() != json.Number("1e400") {
+		t.Errorf("1e400 read back as %#v", n.Any())
 	}
 }
 

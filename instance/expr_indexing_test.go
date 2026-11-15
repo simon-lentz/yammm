@@ -29,7 +29,7 @@ func invariantHolds(t *testing.T, decls, inv string, props map[string]any) (bool
 }
 
 // A List-typed property is indexable. Its value arrives as immutable.Slice —
-// what Value.Unwrap returns for a collection — which the bracket operator did
+// what Value.Any returns for a collection — which the bracket operator did
 // not handle, so every List index was an evaluation error against the SPEC.
 func TestIndexing_ListPropertyIsIndexable(t *testing.T) {
 	const decls = "\ttags List<String>\n"
@@ -82,7 +82,7 @@ func TestIndexing_BracketHoldsOneIndex(t *testing.T) {
 }
 
 // Len counts a map's entries. The DSL declares no map datatype, so the only
-// map an expression sees is $self — carried as immutable.Map[string], a
+// map an expression sees is $self — carried as immutable.Properties, a
 // struct the reflect.Map arm never matches, which is why the SPEC's "or map"
 // was false. TypeOf already named it "map", so the two disagreed.
 func TestLen_CountsSelfMapEntries(t *testing.T) {

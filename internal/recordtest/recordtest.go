@@ -20,6 +20,8 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+
+	"github.com/simon-lentz/yammm/immutable"
 )
 
 const maxDepth = 24
@@ -331,6 +333,11 @@ func (w *walker) dump(v reflect.Value, depth int) string {
 	case reflect.Struct:
 		if p := t.PkgPath(); p == "sync" || p == "sync/atomic" {
 			return t.String()
+		}
+		if t == reflect.TypeFor[immutable.Properties]() {
+			// Its other field caches a read's sorted names, so two equal values
+			// differ there by what was read of each.
+			return t.String() + "{entries:" + w.dump(v.FieldByName("entries"), depth+1) + "}"
 		}
 		parts := make([]string, 0, t.NumField())
 		for i := range t.NumField() {

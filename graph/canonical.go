@@ -127,7 +127,7 @@ func (c *canonicalizer) key(id schema.TypeID, k immutable.Key) immutable.Key {
 		if pos.index >= k.Len() {
 			break
 		}
-		canonical, err := value.Canonical(k.Get(pos.index).Unwrap(), pos.prop.Constraint())
+		canonical, err := value.Canonical(k.At(pos.index).Any(), pos.prop.Constraint())
 		if err != nil {
 			continue
 		}
@@ -161,7 +161,7 @@ func (c *canonicalizer) address(id schema.TypeID, key string) string {
 // canonical form, where c cannot render it, or where nothing canonicalizes at
 // all. It compares two values that must agree; it never decides an address.
 func (c *canonicalizer) canonicalOrRaw(v immutable.Value, con schema.Constraint) any {
-	raw := v.Unwrap()
+	raw := v.Any()
 	if c.inactive || !value.Canonicalizes(con) {
 		return raw
 	}

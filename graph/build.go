@@ -34,11 +34,9 @@ func (g *Graph) build(typ schema.Type, inst instance.ValidInstance, stage *[]sta
 		stageRelation(rel, inst, stage)
 	}
 
-	for relationName, composedValue := range inst.Compositions() {
-		children, _ := composedValue.Slice()
-		for i := range children.Len() {
-			child := children.Get(i).Unwrap().(instance.ValidInstance) //nolint:errcheck // Compositions states the element type.
-			graphInst.addComposed(relationName, g.build(child.Type(), child, stage))
+	for rel := range typ.AllCompositions() {
+		for child := range inst.Composed(rel.Name()) {
+			graphInst.addComposed(rel.Name(), g.build(child.Type(), child, stage))
 		}
 	}
 

@@ -317,7 +317,7 @@ type Person {
 	// Check edge property
 	roleVal, ok := slices.Collect(edge.Targets())[0].Properties().Get("role")
 	require.True(t, ok)
-	role, ok := roleVal.String()
+	role, ok := roleVal.AsString()
 	require.True(t, ok)
 	assert.Equal(t, "engineer", role)
 }
@@ -1004,7 +1004,7 @@ type County {
 		require.True(t, ok)
 		tagVal, ok := slices.Collect(edge.Targets())[0].Properties().Get("code_tag")
 		require.True(t, ok)
-		tag, ok := tagVal.String()
+		tag, ok := tagVal.AsString()
 		require.True(t, ok)
 		assert.Equal(t, "CA", tag)
 	})

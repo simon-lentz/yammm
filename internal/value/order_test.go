@@ -106,7 +106,7 @@ func TestTypeStrata_NamedTypesTakeTheirUnderlyingKind(t *testing.T) {
 	}
 }
 
-// An immutable.Slice is what Value.Unwrap returns for a List- or Vector-typed
+// An immutable.Slice is what Value.Any returns for a List- or Vector-typed
 // property, and it is a struct, so no reflect kind names it. Without the
 // explicit case every invariant comparing a list was an evaluation error.
 //
@@ -115,9 +115,9 @@ func TestTypeStrata_NamedTypesTakeTheirUnderlyingKind(t *testing.T) {
 // error this whole change removes.
 func TestTypeStrata_ImmutableSliceIsASlice(t *testing.T) {
 	wrapped := immutable.Wrap([]any{"a", "b"})
-	slice, ok := wrapped.Slice()
+	slice, ok := wrapped.AsSlice()
 	if !ok {
-		t.Fatalf("Wrap([]any) did not produce a Slice, got %T", wrapped.Unwrap())
+		t.Fatalf("Wrap([]any) did not produce a Slice, got %T", wrapped.Any())
 	}
 	if got := value.TypeStrata(slice); got != value.SliceStrata {
 		t.Errorf("TypeStrata(immutable.Slice) = %d, want SliceStrata (%d)", got, value.SliceStrata)
@@ -214,7 +214,7 @@ func TestOrder_NamedTypesCompareAsTheirBase(t *testing.T) {
 // case must land together.
 func TestOrder_ImmutableSliceComparesElementwise(t *testing.T) {
 	sliceOf := func(elems ...any) any {
-		s, ok := immutable.Wrap(elems).Slice()
+		s, ok := immutable.Wrap(elems).AsSlice()
 		if !ok {
 			t.Fatalf("Wrap did not produce a Slice")
 		}

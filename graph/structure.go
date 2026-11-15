@@ -525,10 +525,10 @@ func keyArity(t schema.Type) int {
 }
 
 // undeclaredNames returns the names of props that declared rejects, in sorted
-// order. The clean case allocates nothing.
+// order. The clean case allocates nothing once props has sorted its names.
 func undeclaredNames(props immutable.Properties, declared func(string) bool) []string {
 	var out []string
-	for name := range props.SortedKeys() {
+	for name := range props.Keys() {
 		if !declared(name) {
 			out = append(out, name)
 		}

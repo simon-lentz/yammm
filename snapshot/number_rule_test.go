@@ -338,8 +338,8 @@ func TestLoad_ReadsAnUnresolvedRecordsNumberAtItsRelationsKind(t *testing.T) {
 		t.Fatalf("Load: %s", res)
 	}
 	for rec := range snap.Unresolved() {
-		if got, _ := rec.Properties().Get("weight"); got.Unwrap() != float64(2) {
-			t.Errorf("the record's weight is %#v, want float64(2)", got.Unwrap())
+		if got, _ := rec.Properties().Get("weight"); got.Any() != float64(2) {
+			t.Errorf("the record's weight is %#v, want float64(2)", got.Any())
 		}
 	}
 	data, mres := snapshot.Marshal(t.Context(), snap)

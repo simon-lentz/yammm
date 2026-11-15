@@ -276,9 +276,11 @@ part type Shard {
 	})
 
 	children := map[string]instance.ValidInstance{}
-	for rel, composed := range basin.Compositions() {
-		list, _ := composed.Slice()
-		children[rel] = list.Get(0).Unwrap().(instance.ValidInstance)
+	for _, rel := range []string{"MARKS", "PIECES"} {
+		for child := range basin.Composed(rel) {
+			children[rel] = child
+			break
+		}
 	}
 	for rel, want := range map[string]struct {
 		code diag.Code

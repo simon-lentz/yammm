@@ -101,9 +101,9 @@ func edgesOf(snap graph.Snapshot) []string {
 	var out []string
 	for e := range snap.Edges() {
 		var props []string
-		for name := range e.Properties().SortedKeys() {
+		for name := range e.Properties().Keys() {
 			v, _ := e.Property(name)
-			props = append(props, fmt.Sprintf("%s: %q", name, v.Unwrap()))
+			props = append(props, fmt.Sprintf("%s: %q", name, v.Any()))
 		}
 		out = append(out, fmt.Sprintf("%s->%s{%s}", e.Relation(), e.Target().PrimaryKey(), strings.Join(props, ", ")))
 	}
@@ -203,8 +203,8 @@ func TestMerge_InstallsTheDuplicatesEdgesOnTheHeldInstance(t *testing.T) {
 		t.Errorf("edges %q, want %q", got, want)
 	}
 	held, _ := snap.InstanceByKey(mustTypeID(t, s, "Issue"), `["i1"]`)
-	if title, _ := held.Property("title"); title.Unwrap() != "held title" {
-		t.Errorf("title %v; the held instance's properties must stand", title.Unwrap())
+	if title, _ := held.Property("title"); title.Any() != "held title" {
+		t.Errorf("title %v; the held instance's properties must stand", title.Any())
 	}
 	if n := len(slices.Collect(snap.Duplicates())); n != 0 {
 		t.Errorf("%d duplicates; a merge records none", n)

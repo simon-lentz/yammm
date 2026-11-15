@@ -122,7 +122,8 @@ type SnapshotInfo struct { //nolint:revive // intentional stutter — mirrors .y
 // text, and under [WithRevalidation] on the values. Info compares keys as
 // written, so it reports such a component only where it parts two keys that
 // name one address: a reference and the root it names as a dangling
-// reference, a duplicate's key and the key its instance carries as malformed.
+// reference, a duplicate's key and the key its instance carries as malformed,
+// and a duplicate's conflict and the key the duplicate carries as malformed.
 // Info runs the checks that need none, such as a key component
 // [graph.ParseKey] cannot read back, an undocumented reason and two roots
 // whose stored keys it accepts at one address, comparing keys as the reader's

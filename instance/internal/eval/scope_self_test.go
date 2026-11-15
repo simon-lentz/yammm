@@ -20,9 +20,9 @@ func TestPropertyScopeFromMap_BindsSelfWithoutRewrapping(t *testing.T) {
 	if !ok {
 		t.Fatal("$self is not bound")
 	}
-	sm, ok := self.Map()
+	sm, ok := self.Any().(immutable.Properties)
 	if !ok {
-		t.Fatalf("$self is %T, want a map", self.Unwrap())
+		t.Fatalf("$self is %T, want a map", self.Any())
 	}
 	// A wrapped map is not comparable, so sharing is read through a scalar
 	// member: the same entries answer both lookups.
@@ -33,11 +33,11 @@ func TestPropertyScopeFromMap_BindsSelfWithoutRewrapping(t *testing.T) {
 	}
 	nestedSelf, _ := sm.Get("nested")
 	nestedProp, _ := scope.LookupFold("nested")
-	ns, _ := nestedSelf.Map()
-	np, _ := nestedProp.Map()
+	ns, _ := nestedSelf.Any().(immutable.Properties)
+	np, _ := nestedProp.Any().(immutable.Properties)
 	ys, _ := ns.Get("y")
 	yp, _ := np.Get("y")
-	if ys != yp || ys.Unwrap() != "z" {
+	if ys != yp || ys.Any() != "z" {
 		t.Error("$self.nested.y and the property lookup do not share one wrapped value")
 	}
 
@@ -48,17 +48,17 @@ func TestPropertyScopeFromMap_BindsSelfWithoutRewrapping(t *testing.T) {
 	}
 
 	// On a 40-property instance the one wrap is ~405 allocations and the
-	// scope's bookkeeping (sorted keys, folded index, the self binding, the
-	// struct) under 20; a second recursive wrap adds ~400 again. The old
+	// scope's bookkeeping (the self binding, the struct) under 20; a second
+	// recursive wrap adds ~400 again. The old
 	// construction — WrapProperties beside Wrap of the raw map — is the
 	// figure this must beat.
 	big := map[string]any{}
 	for i := range 40 {
 		big["p"+string(rune('a'+i%26))+string(rune('a'+i/26))] = map[string]any{"x": int64(i), "y": "s", "z": []any{int64(1), int64(2), int64(3)}}
 	}
-	oneWrap := testing.AllocsPerRun(20, func() { _ = immutable.WrapMap(big, immutable.WithClone(true)) })
+	oneWrap := testing.AllocsPerRun(20, func() { _ = immutable.WrapProperties(big) })
 	twoWraps := testing.AllocsPerRun(20, func() {
-		_ = immutable.WrapProperties(big, immutable.WithClone(true))
+		_ = immutable.WrapProperties(big)
 		_ = immutable.Wrap(big)
 	})
 	scoped := testing.AllocsPerRun(20, func() { _ = eval.PropertyScopeFromMap(big) })

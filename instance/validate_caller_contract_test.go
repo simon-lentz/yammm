@@ -332,7 +332,7 @@ func TestValidInstance_ZeroHandleIsSafe(t *testing.T) {
 	for range vi.Edges() {
 		n++
 	}
-	for range vi.Compositions() {
+	for range vi.Composed("x") {
 		n++
 	}
 	if n != 0 {
@@ -421,7 +421,7 @@ func TestValidateOne_JSONNumberIsNotAString(t *testing.T) {
 	if res.Err() != nil {
 		t.Fatalf("control: json.Number at an Integer property refused: %v", res.Err())
 	}
-	if n, _ := vi.Property("n"); n.Unwrap() != int64(42) {
-		t.Errorf("stored %#v, want int64(42)", n.Unwrap())
+	if n, _ := vi.Property("n"); n.Any() != int64(42) {
+		t.Errorf("stored %#v, want int64(42)", n.Any())
 	}
 }

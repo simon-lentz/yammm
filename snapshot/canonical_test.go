@@ -317,7 +317,7 @@ func TestLoad_CanonicalizesNonConformingWireText(t *testing.T) {
 	if !ok {
 		t.Fatal("created_at missing after load")
 	}
-	if got := v.Unwrap(); got != canonicalCreated {
+	if got := v.Any(); got != canonicalCreated {
 		t.Errorf("loaded created_at = %#v, want %q — Load did not render it", got, canonicalCreated)
 	}
 }

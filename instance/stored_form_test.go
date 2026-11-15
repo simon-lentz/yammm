@@ -56,10 +56,10 @@ type T {
 		t.Run(name, func(t *testing.T) {
 			stored, _ := inst.Property(name)
 			var storedGo any
-			if sl, ok := stored.Slice(); ok {
+			if sl, ok := stored.AsSlice(); ok {
 				storedGo = sl.Clone()
 			} else {
-				storedGo = stored.Unwrap()
+				storedGo = stored.Any()
 			}
 			if !reflect.DeepEqual(storedGo, toAnyForm(row.want)) {
 				t.Errorf("stored %s from %#v = %#v, want %#v", name, row.raw, storedGo, row.want)

@@ -31,15 +31,15 @@ type T {
 	for _, name := range lists {
 		raw[name] = nil
 	}
-	props := immutable.WrapProperties(raw, immutable.WithClone(true))
+	props := immutable.WrapProperties(raw)
 	snap := rebuild(s, snapparts.Parts{Instances: []snapparts.Instance{{
 		TypeID: typ.ID(), PrimaryKey: immutable.WrapKey([]any{"x"}), Properties: props,
 	}}})
 	for inst := range snap.AllInstances() {
 		for _, name := range lists {
 			val, ok := inst.Property(name)
-			if !ok || !val.IsNil() {
-				t.Errorf("%s: stored = %v, IsNil = %v; want null", name, ok, val.IsNil())
+			if !ok || val.Any() != nil {
+				t.Errorf("%s: stored = %v, value = %#v; want null", name, ok, val.Any())
 			}
 		}
 	}

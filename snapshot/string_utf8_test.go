@@ -64,19 +64,19 @@ func TestMarshal_AStringReadsBackAsTheBytesHeld(t *testing.T) {
 		if !ok {
 			t.Fatalf("Load(%q): no Holder h1", text)
 		}
-		if got, _ := inst.Property("text"); got.Unwrap() != text {
-			t.Errorf("text read back as %q, want %q", got.Unwrap(), text)
+		if got, _ := inst.Property("text"); got.Any() != text {
+			t.Errorf("text read back as %q, want %q", got.Any(), text)
 		}
 		tags, _ := inst.Property("tags")
-		if elems, ok := tags.Slice(); !ok || elems.Len() != 2 || elems.Get(1).Unwrap() != text {
-			t.Errorf("tags read back as %v, want its second element %q", tags.Unwrap(), text)
+		if elems, ok := tags.AsSlice(); !ok || elems.Len() != 2 || elems.At(1).Any() != text {
+			t.Errorf("tags read back as %v, want its second element %q", tags.Any(), text)
 		}
 		edges := slices.Collect(loaded.EdgesFrom(inst))
 		if len(edges) != 1 {
 			t.Fatalf("Load(%q): %d edges", text, len(edges))
 		}
-		if got, _ := edges[0].Properties().Get("label"); got.Unwrap() != text {
-			t.Errorf("label read back as %q, want %q", got.Unwrap(), text)
+		if got, _ := edges[0].Properties().Get("label"); got.Any() != text {
+			t.Errorf("label read back as %q, want %q", got.Any(), text)
 		}
 	}
 }

@@ -396,8 +396,8 @@ func builtinLen(_ context.Context, _ builtinEvaluator, lhs any, _ []any, _ []str
 		return int64(len(v)), nil
 	case immutable.Slice:
 		return int64(v.Len()), nil
-	case immutable.Map[string]:
-		// A Map is a struct, so the reflect.Map arm below never sees it.
+	case immutable.Properties:
+		// Properties is a struct, so the reflect.Map arm below never sees it.
 		return int64(v.Len()), nil
 	}
 
@@ -990,7 +990,7 @@ func dslTypeName(v any) string {
 	switch v.(type) {
 	case immutable.Slice:
 		return "list"
-	case immutable.Map[string]:
+	case immutable.Properties:
 		return "map"
 	}
 	switch kind, _ := value.Classify(v); kind {

@@ -136,7 +136,7 @@ func validated(ctx context.Context, v *instance.Validator, raw instance.RawInsta
 		return nil, false
 	}
 	got, _ := vi.Property(prop)
-	return got.Unwrap(), true
+	return got.Any(), true
 }
 
 // ysTemplate writes a .ys document holding n 0 and f 0.5, whose numbers

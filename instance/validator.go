@@ -500,12 +500,11 @@ func (v *Validator) validateProperties(ctx context.Context, typ schema.Type, typ
 
 	// The instance is built before its invariants run, so they read the one
 	// scope its parent will read too (scopeOf). A failed invariant discards it.
-	// WithClone isolates the instance from the caller's raw input.
 	validInstance := newValidInstance(
 		typeName,
 		typ,
-		immutable.WrapKey(pkComponents, immutable.WithClone(true)),
-		immutable.WrapProperties(validatedProps, immutable.WithClone(true)),
+		immutable.WrapKey(pkComponents),
+		immutable.WrapProperties(validatedProps),
 		edges,
 		composed,
 		prov,
@@ -702,9 +701,9 @@ func (v *Validator) exactMatchShadowing(typ schema.Type, inputName string, mappi
 // instance as a composed child holds this same map in its own scope. One
 // scope per instance is what keeps a composed tree's evaluation linear in
 // its depth.
-func (v *Validator) scopeOf(inst ValidInstance) immutable.Map[string] {
+func (v *Validator) scopeOf(inst ValidInstance) immutable.Properties {
 	inst.scope.once.Do(func() {
-		inst.scope.m = immutable.WrapMap(v.invariantScope(inst))
+		inst.scope.m = immutable.WrapProperties(v.invariantScope(inst))
 	})
 	return inst.scope.m
 }
@@ -740,8 +739,8 @@ func (v *Validator) scopeOf(inst ValidInstance) immutable.Map[string] {
 func (v *Validator) invariantScope(inst ValidInstance) map[string]any {
 	props := inst.Properties()
 	scope := make(map[string]any, props.Len()+len(inst.edges)+len(inst.composed))
-	for k, val := range props.Range() {
-		scope[k] = val.Unwrap()
+	for k, val := range props.All() {
+		scope[k] = val.Any()
 	}
 	typ := inst.typ
 
@@ -758,11 +757,11 @@ func (v *Validator) invariantScope(inst ValidInstance) map[string]any {
 	}
 
 	for rel := range typ.AllCompositions() {
-		value, ok := inst.composed[rel.Name()]
+		children, ok := inst.composed[rel.Name()]
 		if !ok {
 			continue
 		}
-		scope[rel.Name()] = v.composedScopeValue(rel, value.Unwrap())
+		scope[rel.Name()] = v.composedScopeValue(rel, children)
 	}
 
 	return scope
@@ -772,8 +771,7 @@ func (v *Validator) invariantScope(inst ValidInstance) map[string]any {
 // child for a composition that is not many, a list otherwise, each child its
 // own memoised scope — an instance whose properties and relations are in
 // scope, held rather than rebuilt.
-func (v *Validator) composedScopeValue(rel schema.Relation, value any) any {
-	children := composedChildren(value)
+func (v *Validator) composedScopeValue(rel schema.Relation, children []ValidInstance) any {
 	scopes := make([]any, 0, len(children))
 	for _, child := range children {
 		scopes = append(scopes, v.scopeOf(child))
@@ -785,21 +783,6 @@ func (v *Validator) composedScopeValue(rel schema.Relation, value any) any {
 		return nil
 	}
 	return scopes[0]
-}
-
-// composedChildren unwraps a validated composition value into its children.
-func composedChildren(value any) []ValidInstance {
-	switch c := value.(type) {
-	case ValidInstance:
-		return []ValidInstance{c}
-	case immutable.Slice:
-		out := make([]ValidInstance, 0, c.Len())
-		for elem := range c.Iter() {
-			out = append(out, composedChildren(elem.Unwrap())...)
-		}
-		return out
-	}
-	return nil
 }
 
 // relationValue renders a relation's entries for the invariant scope: a
@@ -943,7 +926,7 @@ func (v *Validator) PrimaryKeyOf(typeName string, raw RawInstance) (schema.TypeI
 	if len(components) == 0 {
 		return schema.TypeID{}, immutable.Key{}, false
 	}
-	return typ.ID(), immutable.WrapKey(components, immutable.WithClone(true)), true
+	return typ.ID(), immutable.WrapKey(components), true
 }
 
 // withProvenance sets an issue's path and source name, and its span when the

@@ -216,7 +216,8 @@ func TestGeneratedTemporal_WritesNoDateItCannotRead(t *testing.T) {
 }
 
 // compositionsOf validates each instance doc holds and returns, per instance,
-// the sorted names of the compositions it keeps, an empty one included.
+// the sorted names of the compositions its document states, an empty one
+// included.
 func compositionsOf(t *testing.T, s schema.Schema, doc []byte) [][]string {
 	t.Helper()
 	parsed, res := jsondata.Parse(t.Context(), location.NewSourceID("test://temporal.json"), doc)
@@ -224,15 +225,20 @@ func compositionsOf(t *testing.T, s schema.Schema, doc []byte) [][]string {
 		t.Fatalf("parse: %s\n%s", res, doc)
 	}
 	v := instance.NewValidator(s)
+	sensor, ok := s.Type("Sensor")
+	if !ok {
+		t.Fatal("no type Sensor")
+	}
 	var out [][]string
 	for _, raw := range parsed["Sensor"] {
-		valid, res := v.ValidateOne(t.Context(), "Sensor", raw)
-		if !res.OK() {
+		if _, res := v.ValidateOne(t.Context(), "Sensor", raw); !res.OK() {
 			t.Fatalf("validate: %s\n%s", res, doc)
 		}
 		var names []string
-		for name := range valid.Compositions() {
-			names = append(names, name)
+		for rel := range sensor.AllCompositions() {
+			if held, ok := raw.Properties[rel.FieldName()]; ok && held != nil {
+				names = append(names, rel.Name())
+			}
 		}
 		slices.Sort(names)
 		out = append(out, names)
@@ -241,7 +247,7 @@ func compositionsOf(t *testing.T, s schema.Schema, doc []byte) [][]string {
 }
 
 // A present empty optional composition survives the generated types' round
-// trip: the validator keeps it apart from an absent one, which the graph's
+// trip: the document keeps it apart from an absent one, which the graph's
 // snapshot does not show.
 func TestRoundTrip_TemporalKeepsAnEmptyComposition(t *testing.T) {
 	path, err := filepath.Abs(filepath.Join("..", "..", "..", "..", "schema", "gogen", "testdata", "temporal.yammm"))

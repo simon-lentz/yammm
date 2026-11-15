@@ -181,10 +181,8 @@ part type Piece {
 		t.Fatalf("imported-type composition must validate: %s", result)
 	}
 	foundPiece := false
-	for rel, children := range valid.Compositions() {
-		if rel == "HAS_PIECE" && !children.IsNil() {
-			foundPiece = true
-		}
+	for range valid.Composed("HAS_PIECE") {
+		foundPiece = true
 	}
 	if !foundPiece {
 		t.Fatal("HAS_PIECE children missing from validated instance")
@@ -244,10 +242,8 @@ func TestValidate_CrossSchemaInheritedRelations(t *testing.T) {
 		t.Errorf("target count = %d, want 1", got)
 	}
 	foundMarker := false
-	for rel, children := range valid.Compositions() {
-		if rel == "HAS_MARKER" && !children.IsNil() {
-			foundMarker = true
-		}
+	for range valid.Composed("HAS_MARKER") {
+		foundMarker = true
 	}
 	if !foundMarker {
 		t.Fatal("HAS_MARKER children missing from validated instance")

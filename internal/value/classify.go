@@ -2,8 +2,6 @@ package value
 
 import (
 	"encoding/json"
-
-	"github.com/simon-lentz/yammm/immutable"
 )
 
 // Kind identifies the semantic type of a runtime value.
@@ -90,7 +88,7 @@ func Classify(val any) (Kind, any) {
 
 // classifyNumber is [Classify] over a JSON number literal.
 func classifyNumber(v json.Number) (Kind, any) {
-	if immutable.IsIntegerLiteral(v) {
+	if IsIntegerLiteral(v) {
 		if n, err := v.Int64(); err == nil {
 			return IntKind, n
 		}

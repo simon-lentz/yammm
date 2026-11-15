@@ -3,7 +3,6 @@ package value
 import (
 	"encoding/json"
 
-	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -15,7 +14,7 @@ import (
 func Read(v any) any {
 	switch t := v.(type) {
 	case json.Number:
-		if !immutable.IsNumberLiteral(t) {
+		if !IsNumberLiteral(t) {
 			return v
 		}
 		_, n := classifyNumber(t)
@@ -67,7 +66,7 @@ func readFloat(v any) any {
 	case int64:
 		return float64(t)
 	case json.Number:
-		if immutable.IsNumberLiteral(t) {
+		if IsNumberLiteral(t) {
 			if f, err := t.Float64(); err == nil {
 				return f
 			}

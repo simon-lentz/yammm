@@ -101,10 +101,13 @@ func (i Instance) Property(name string) (immutable.Value, bool) {
 	return i.properties.Get(name)
 }
 
-// Properties returns all validated property values.
+// Properties returns the instance's property values. For an instance
+// [Graph.Add] took, they are as the validator stored them. A snapshot load and
+// an import put a value they read in the validator's form where its kind has
+// one and the value renders in it, and keep any other value as read.
 //
-// The returned Properties is immutable. Use [immutable.Properties.SortedRange]
-// for deterministic iteration or [immutable.Properties.Clone] for a mutable copy.
+// The returned Properties is immutable: [immutable.Properties.All] visits it in
+// name order, and [immutable.Properties.Clone] returns a mutable copy.
 func (i Instance) Properties() immutable.Properties {
 	if i.IsZero() {
 		return immutable.Properties{}

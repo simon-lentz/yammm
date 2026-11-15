@@ -115,8 +115,8 @@ func TestCheckValue_ANilSliceAtAListHoldsNoValue(t *testing.T) {
 			if res.Err() != nil {
 				t.Fatalf("%s = %#v: %s", prop, nilSlice, res)
 			}
-			if stored, ok := inst.Property(prop); ok && !stored.IsNil() {
-				t.Errorf("%s = %#v stored %#v, want no value", prop, nilSlice, stored.Unwrap())
+			if stored, ok := inst.Property(prop); ok && stored.Any() != nil {
+				t.Errorf("%s = %#v stored %#v, want no value", prop, nilSlice, stored.Any())
 			}
 		}
 	}
@@ -188,16 +188,16 @@ func TestValidate_ANilContainerAtARelationAgreesWithItsJSONForm(t *testing.T) {
 	}
 }
 
-// A nil immutable container holds no value, as immutable.Value.IsNil reads it:
+// A nil immutable container holds no value, as immutable.IsNilContainer reads it:
 // at a property it is the absent case, and IsAbsent reports it.
 func TestValidate_ANilImmutableContainerIsNull(t *testing.T) {
 	t.Parallel()
 	v := instance.NewValidator(loadT(t, nilContainerSchema))
 	base := map[string]any{"id": "x", "reqTags": []any{"a"}, "reqVec": []float64{1, 2}}
 	for name, none := range map[string]any{
-		"a nil Properties":    immutable.WrapProperties(nil),
-		"a nil Key":           immutable.WrapKey(nil),
-		"a nil int-keyed Map": immutable.WrapMap(map[int]any(nil)),
+		"a nil Properties": immutable.WrapProperties(nil),
+		"a nil Key":        immutable.WrapKey(nil),
+		"a nil Slice":      immutable.WrapSlice(nil),
 	} {
 		if !instance.IsAbsent(none) {
 			t.Errorf("IsAbsent(%s) = false", name)
@@ -264,10 +264,10 @@ func TestValidate_AnImmutableContainerAtARelationReadsAsWhatItHolds(t *testing.T
 	} {
 		plain["id"] = "x"
 		plain["head"] = []any{line}
-		wrapped := immutable.WrapProperties(plain, immutable.WithClone(true))
+		wrapped := immutable.WrapProperties(plain)
 		held := make(map[string]any, len(plain))
-		for k, val := range wrapped.Range() {
-			held[k] = val.Unwrap()
+		for k, val := range wrapped.All() {
+			held[k] = val.Any()
 		}
 		plainValid, plainRes := v.ValidateOne(t.Context(), "T", instance.RawInstance{Properties: plain})
 		heldValid, heldRes := v.ValidateOne(t.Context(), "T", instance.RawInstance{Properties: held})
@@ -284,8 +284,11 @@ func TestValidate_AnImmutableContainerAtARelationReadsAsWhatItHolds(t *testing.T
 				t.Errorf("%s: edge %s holds %d targets from the Go value, %v from its immutable form", name, rel, len(slices.Collect(edge.Targets())), heldEdge)
 			}
 		}
-		if got, want := maps.Collect(heldValid.Compositions()), maps.Collect(plainValid.Compositions()); len(got) != len(want) {
-			t.Errorf("%s: %d compositions from the Go value, %d from its immutable form", name, len(want), len(got))
+		for rel := range plainValid.Type().AllCompositions() {
+			got, want := slices.Collect(heldValid.Composed(rel.Name())), slices.Collect(plainValid.Composed(rel.Name()))
+			if len(got) != len(want) {
+				t.Errorf("%s: %s composes %d children from the Go value, %d from its immutable form", name, rel.Name(), len(want), len(got))
+			}
 		}
 	}
 
@@ -302,11 +305,9 @@ func TestValidate_AnImmutableContainerAtARelationReadsAsWhatItHolds(t *testing.T
 			t.Errorf("%s at a (one) relation drew\n%s\nwant its type named", want, res)
 		}
 	}
-	cycle := map[int]any{}
-	cycle[0] = cycle
-	unread := map[string]any{"_target_id": "c", "junk": cycle}
+	unread := map[string]any{"_target_id": "c", "junk": map[int]any{0: []any{"x"}}}
 	_, plainRes := v.ValidateOne(t.Context(), "T", instance.RawInstance{Properties: props(unread)})
-	_, heldRes := v.ValidateOne(t.Context(), "T", instance.RawInstance{Properties: props(immutable.WrapMap(unread))})
+	_, heldRes := v.ValidateOne(t.Context(), "T", instance.RawInstance{Properties: props(immutable.WrapProperties(unread))})
 	if plainRes.String() != heldRes.String() {
 		t.Errorf("a field no reader reads drew\n%s\nfrom the Go value and\n%s\nfrom its immutable form", plainRes, heldRes)
 	}

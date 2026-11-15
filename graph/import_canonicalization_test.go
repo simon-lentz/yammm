@@ -175,7 +175,7 @@ type Doc {
 	if !ok {
 		t.Fatal(`the edge carries no "seen_at" property`)
 	}
-	if got := v.Unwrap(); got != canonInstant {
+	if got := v.Any(); got != canonInstant {
 		t.Errorf("the Add path stored edge property seen_at = %v, want the canonical %s", got, canonInstant)
 	}
 }
@@ -238,8 +238,8 @@ type Doc {
 		}},
 	}
 	persisted := rebuild(inert, parts)
-	if v, _ := slices.Collect(persisted.Edges())[0].Properties().Get("seen_at"); v.Unwrap() != rawInstant {
-		t.Fatalf("the persisted edge property is %v, want the raw %s", v.Unwrap(), rawInstant)
+	if v, _ := slices.Collect(persisted.Edges())[0].Properties().Get("seen_at"); v.Any() != rawInstant {
+		t.Fatalf("the persisted edge property is %v, want the raw %s", v.Any(), rawInstant)
 	}
 
 	edges := slices.Collect(mustImport(t, s, persisted).Snapshot().Edges())
@@ -250,7 +250,7 @@ type Doc {
 	if !ok {
 		t.Fatal(`the imported edge carries no "seen_at" property`)
 	}
-	if got := v.Unwrap(); got != canonInstant {
+	if got := v.Any(); got != canonInstant {
 		t.Errorf("the import path stored edge property seen_at = %v, want the canonical %s", got, canonInstant)
 	}
 }

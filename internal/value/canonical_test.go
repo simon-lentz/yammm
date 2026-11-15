@@ -361,9 +361,9 @@ func TestCanonical_ListRefusesANonList(t *testing.T) {
 func TestCanonical_ListReadsAnImmutableSlice(t *testing.T) {
 	t.Parallel()
 	lc := schema.NewListConstraint(schema.NewTimestampConstraint())
-	in := immutable.Wrap([]any{time.Date(2026, 8, 19, 12, 0, 0, 0, time.UTC), "2026-08-19T13:00:00+00:00"}).Unwrap()
+	in := immutable.Wrap([]any{time.Date(2026, 8, 19, 12, 0, 0, 0, time.UTC), "2026-08-19T13:00:00+00:00"}).Any()
 	if _, ok := in.(immutable.Slice); !ok {
-		t.Fatalf("fixture: Wrap([]any).Unwrap() is %T, want immutable.Slice", in)
+		t.Fatalf("fixture: Wrap([]any).Any() is %T, want immutable.Slice", in)
 	}
 	got := canon(t, in, lc)
 	want := []any{"2026-08-19T12:00:00Z", "2026-08-19T13:00:00Z"}
