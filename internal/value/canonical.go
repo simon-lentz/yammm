@@ -123,7 +123,7 @@ const timestampLayout = time.RFC3339Nano
 // at an offset hour of 24: [Canonical] refuses it. It reads in UTC, where
 // [time.Parse] reads an offset the host's zone holds into the host's location,
 // so one text gives one instant in one location on every host. The checker,
-// the canonical form and the Neo4j adapter all read by it.
+// the canonical form and the neo4j write path all read by it.
 func ParseTimestamp(s string) (time.Time, bool) {
 	// RFC3339 parses fractional seconds too, so no RFC3339Nano fallback is
 	// needed: nothing that layout accepts, this one refuses.
@@ -134,7 +134,7 @@ func ParseTimestamp(s string) (time.Time, bool) {
 // ParseUUID reads s as a UUID's text: the hyphenated form, that form between
 // braces or after "urn:uuid:", or 32 hex digits, in either case. [uuid.Parse]
 // alone reads any 38 bytes that hold a UUID between two bytes it does not
-// check. The checker, the canonical form and the Neo4j adapter all read by it.
+// check. The checker, the canonical form and the neo4j write path all read by it.
 func ParseUUID(s string) (uuid.UUID, bool) {
 	if uuid.Validate(s) != nil {
 		return uuid.Nil, false

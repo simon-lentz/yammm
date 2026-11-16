@@ -21,14 +21,15 @@
 //   - [github.com/simon-lentz/yammm/graph]: Instance graph construction and integrity checking
 //   - [github.com/simon-lentz/yammm/snapshot]: Graph snapshot persistence in the .ys format
 //
-// Adapters — a schema and its data in one platform's form:
-//
-//   - [github.com/simon-lentz/yammm/adapter/neo4j]: Neo4j constraint and index DDL, Cypher query building, and drift diffs
-//
 // Generators — an artifact from a schema:
 //
+//   - [github.com/simon-lentz/yammm/schema/cypher]: Neo4j constraint and index DDL, and the storage mapping it shares with neo4j
 //   - [github.com/simon-lentz/yammm/schema/gogen]: Go source generation from a schema
 //   - [github.com/simon-lentz/yammm/schema/markdown]: Markdown + Mermaid documentation generation from a schema
+//
+// The Neo4j write path — a graph's data in Neo4j's form, and the drift diff:
+//
+//   - [github.com/simon-lentz/yammm/neo4j]: Cypher write queries, parameter coercion, introspection and the constraint and index diff
 //
 // The formatter and the language server are internal packages. Their surfaces
 // are the binaries: the yammm CLI's fmt command and yammm-lsp.
@@ -39,7 +40,8 @@
 // internal/yammmtest, the repo-wide support for golden files, structural diffs
 // and a context that counts its cancellation checks.
 //
-// Adapters depend on library packages; library packages never depend on adapters.
+// The neo4j package depends on library packages; no library package depends
+// on neo4j, and only neo4j and the CLI import the Neo4j driver.
 //
 // # Entry Points
 //

@@ -235,19 +235,18 @@ Per-target flags are enforced with a usage error: `--package`/`--initialisms` ap
 ```bash
 yammm neo4j constraints schema.yammm
 yammm neo4j constraints --edition community schema.yammm
-yammm neo4j constraints --named=false schema.yammm
+yammm neo4j constraints --node-keys schema.yammm
 ```
 
-Generates `CREATE CONSTRAINT IF NOT EXISTS` Cypher statements from a schema.
+Generates `CREATE CONSTRAINT IF NOT EXISTS` Cypher statements from a schema. Every constraint carries a name.
 
 | Flag | Default | Description |
 | ---- | ------- | ----------- |
 | `--edition` | `enterprise` | `enterprise` or `community` |
-| `--named` | `true` | Generate named constraints |
 | `--node-keys` | `false` | Emit NODE KEY instead of separate UNIQUE + NOT NULL for primary keys (Enterprise; under `--edition community` it degrades to UNIQUE with `W_NEO4J_NODE_KEY_UNSUPPORTED`) |
 | `--scalar-types` | `true` | Emit `IS :: <TYPE>` constraints for scalar, List and Vector properties |
 | `--required-only-types` | `false` | Restrict type constraints to required properties |
-| `--separator` | `__` | Label separator (schema__Type) |
+| `--separator` | `__` | Label separator (schema__Type); an empty value means `__` |
 | `--prefix` | *(none)* | Global label prefix, if the target graph was generated with one |
 
 ### neo4j indexes
@@ -256,11 +255,11 @@ Generates `CREATE CONSTRAINT IF NOT EXISTS` Cypher statements from a schema.
 yammm neo4j indexes schema.yammm
 ```
 
-Generates `CREATE INDEX` / `CREATE VECTOR INDEX` / `CREATE FULLTEXT INDEX ... IF NOT EXISTS` Cypher statements from a schema's `@index` / `@@index` / `@vector` / `@fulltext` / `@@fulltext` annotations. Index names are always emitted and indexes apply to every edition, so this command takes the label flags but none of the constraint-shape flags (`--edition`, `--named`, `--node-keys`, `--scalar-types`, `--required-only-types`).
+Generates `CREATE INDEX` / `CREATE VECTOR INDEX` / `CREATE FULLTEXT INDEX ... IF NOT EXISTS` Cypher statements from a schema's `@index` / `@@index` / `@vector` / `@fulltext` / `@@fulltext` annotations. Index names are always emitted and indexes apply to every edition, so this command takes the label flags but none of the constraint-shape flags (`--edition`, `--node-keys`, `--scalar-types`, `--required-only-types`).
 
 | Flag | Default | Description |
 | ---- | ------- | ----------- |
-| `--separator` | `__` | Label separator (schema__Type) |
+| `--separator` | `__` | Label separator (schema__Type); an empty value means `__` |
 | `--prefix` | *(none)* | Global label prefix, if the target graph was generated with one |
 
 ### neo4j diff
@@ -270,22 +269,20 @@ yammm neo4j diff --uri bolt://localhost:7687 schema.yammm
 yammm neo4j diff --uri bolt://localhost:7687 --edition community --separator __ schema.yammm
 ```
 
-Compares desired schema constraints **and indexes** against the live database (index diffing is on by default; `--indexes=false` declares no index, prints the constraint half alone and leaves index drift out of the exit code, while the indexes it reads still block constraint creates). Reports constraints and indexes to create, drop, and those already present. Each drift line is followed by one `blocker:` line (`index blocker:` for an index drift) per database object its create needs dropped first, the constraints first. A schema-owned remote index that the schema could declare, that no declaration takes and that no drift names surfaces as a drop until it is annotated.
+Compares desired schema constraints **and indexes** against the live database, in one plan: the indexes it reads block constraint creates, and the constraints it reads block index creates. Reports constraints and indexes to create, drop, and those already present. Each drift line is followed by one `blocker:` line (`index blocker:` for an index drift) per database object its create needs dropped first, the constraints first. A schema-owned remote index that the schema could declare, that no declaration takes and that no drift names surfaces as a drop until it is annotated.
 
 `diff` computes its desired side exactly as `constraints` and `indexes` emit it, so it takes **the same flags** — set every one of them to match how the target graph was generated. A flag left at its default when the graph was built with another value makes the desired side disagree with the database by construction, and the plan reports drift the operator never introduced.
 
 | Flag | Default | Description |
 | ---- | ------- | ----------- |
-| `--indexes` | `true` | Include index drift in the diff and the exit code; `--indexes=false` is constraints-only |
 | `--edition` | `enterprise` | `enterprise` or `community` (governs which constraints are diffed, on **both** sides) |
-| `--named` | `true` | Named constraints; with `false` every pairing falls through to semantic identity |
 | `--node-keys` | `false` | Compare against NODE KEY instead of separate UNIQUE + NOT NULL for primary keys (Enterprise; under `--edition community` the desired side degrades to UNIQUE, and `diff` prints `W_NEO4J_NODE_KEY_UNSUPPORTED` only beside a generation error) |
 | `--scalar-types` | `true` | Emit `IS :: <TYPE>` constraints for scalar, List and Vector properties |
 | `--required-only-types` | `false` | Restrict type constraints to required properties |
-| `--separator` | `__` | Label separator (schema__Type) |
+| `--separator` | `__` | Label separator (schema__Type); an empty value means `__` |
 | `--prefix` | *(none)* | Global label prefix, if the target graph was generated with one |
 
-Exit codes: `0` only when everything compared came back in sync. Drift, creates, or drops (constraints or indexes) exit `1`. A definition that could **not** be verified exits `3` — an index whose configuration the server did not report, a TYPE constraint whose enforced type it did not report, or an index introspection that failed outright and degraded the run to constraints-only. None is reported as success: a drift gate must not read "no drift" from a comparison that never ran. Drift outranks unverified, so a run with both exits `1`.
+Exit codes: `0` only when everything compared came back in sync. Drift, creates, or drops (constraints or indexes) exit `1`. A definition that could **not** be verified exits `3` — an index whose configuration the server did not report, an index still populating, or a TYPE constraint whose enforced type it did not report — and so does a constraint or index introspection that failed or returned rows the diff cannot read. None is reported as success: a drift gate must not read "no drift" from a comparison that never ran. Drift outranks unverified, so a run with both exits `1`.
 
 Every command that takes the label flags — the three `neo4j` commands —
 refuses a `--prefix` or `--separator` whose composed label is not a Neo4j
@@ -330,9 +327,8 @@ command prints, and names what some commands find and do not print.
   first warning and no other issue of that file, and under `--format json`
   each entry's `diagnostics`. The exit code is read from every file's result.
 - **`yammm neo4j diff` prints a generation warning only beside an error.** It
-  generates the constraints it compares, and the indexes unless
-  `--indexes=false`. It prints what a generation reports only when that
-  generation's own report holds an error. So for a schema whose constraints
+  generates the constraints and the indexes it compares. It prints what a
+  generation reports only when that generation's own report holds an error. So for a schema whose constraints
   generate with no error, `neo4j diff --edition community` prints no
   `W_NEO4J_EDITION_CONSTRAINT_OMITTED` where
   `yammm neo4j constraints --edition community` prints one. The diagnostics

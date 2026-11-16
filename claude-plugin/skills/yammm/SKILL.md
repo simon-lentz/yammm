@@ -4,7 +4,7 @@ description: >-
   YAMMM schema DSL, Go library, and CLI. ALWAYS activate when
   working with .yammm files, writing Go code that imports yammm
   packages, running yammm CLI commands, or any question about
-  yammm's type system, validation, graph construction, adapters,
+  yammm's type system, validation, graph construction, Neo4j,
   diagnostics, or expression language -- even for quick lookups.
   Triggers on "yammm schema", "yammm validate", ".yammm file",
   "yammm API", "yammm check", "yammm invariant".
@@ -20,7 +20,7 @@ YAMMM is a schema DSL, Go library, and CLI for typed data validation, graph cons
 data path:
   .yammm file --> schema.Load() --> instance.Validate() --> graph.Add()
                                                                 |
-        neo4j.BatchNodeQueries() <-- graph.Snapshot() <-- graph.Check()
+        neo4j.NodeQueries()      <-- graph.Snapshot() <-- graph.Check()
                                        |
                                   snapshot.Marshal() (.ys)
 
@@ -32,7 +32,7 @@ generator path:
 The two paths are independent: the data path carries instances, while the
 generators are schema-in, bytes-out and never touch instance data.
 
-An operation that reports diagnostics returns a `diag.Result`, beside the value where the call produces one, with stable error codes and precise source locations. Some operations return an `error` instead, among them the Neo4j adapter's batch query builders and the two generators. Loaded schemas and validated instances are immutable and thread-safe; a snapshot has no method that changes it and is safe for concurrent reads, and a record is a handle, so no caller holds its address.
+An operation that reports diagnostics returns a `diag.Result`, beside the value where the call produces one, with stable error codes and precise source locations. Some operations return an `error` instead, among them the Neo4j batch query builders and the gogen and markdown generators. Loaded schemas and validated instances are immutable and thread-safe; a snapshot has no method that changes it and is safe for concurrent reads, and a record is a handle, so no caller holds its address.
 
 ---
 
@@ -44,7 +44,7 @@ Define types, properties, relationships, invariants, annotations, and imports in
 
 ### Use the Go Library
 
-Load schemas, validate raw data, build instance graphs, persist snapshots, and write them to Neo4j. The public API lives in packages `schema`, `instance`, `graph`, `snapshot`, and `adapter/neo4j`. All results are immutable and thread-safe.
+Load schemas, validate raw data, build instance graphs, persist snapshots, and write them to Neo4j. The public API lives in packages `schema`, `instance`, `graph`, `snapshot`, `schema/cypher` and `neo4j`. All results are immutable and thread-safe.
 
 ### Use the CLI
 
@@ -67,8 +67,8 @@ Load schemas, validate raw data, build instance graphs, persist snapshots, and w
 ## Key Design Principles
 
 - **Immutability**: Loaded schemas and validated instances are immutable and thread-safe; a snapshot has no method that changes it and is safe for concurrent reads, and a record is a handle, so no caller holds its address.
-- **Structured diagnostics**: An operation that reports diagnostics returns a `diag.Result`, beside the value where the call produces one. The Neo4j batch query builders and the generators return an `error`. Stable error codes (`E_*`). Precise source locations.
-- **Layer discipline**: Foundation (`location`, `diag`, `immutable`) -> Primary API (`schema`, `instance`, `graph`, `snapshot`) -> Adapters (`neo4j`). Adapters import the library; the library never imports adapters.
+- **Structured diagnostics**: An operation that reports diagnostics returns a `diag.Result`, beside the value where the call produces one. The Neo4j batch query builders and the `gogen` and `markdown` generators return an `error`. Stable error codes (`E_*`). Precise source locations.
+- **Layer discipline**: Foundation (`location`, `diag`, `immutable`) -> Primary API (`schema`, `instance`, `graph`, `snapshot`) -> Generators (`schema/cypher`, `schema/gogen`, `schema/markdown`) and the Neo4j write path (`neo4j`). `neo4j` imports the library; the library never imports `neo4j`.
 - **Deterministic output**: Snapshots, graph traversal, and diagnostic ordering are deterministic and reproducible.
 
 ---
@@ -84,7 +84,7 @@ Load schemas, validate raw data, build instance graphs, persist snapshots, and w
 | `references/type-system.md` | Constraint types, aliases, abstract/part, inheritance | Type system questions, narrowing rules, PK restrictions |
 | `references/patterns.md` | Common modeling patterns with examples | Looking for schema design patterns |
 | `references/api-pipeline.md` | Go API: load -> validate -> graph -> snapshot | Writing Go code that uses yammm packages |
-| `references/adapters.md` | Neo4j adapter and gogen/markdown generator usage | Writing to Neo4j, or generating Go / Markdown from a schema |
+| `references/adapters.md` | Neo4j DDL, write path and diff, and gogen/markdown generator usage | Writing to Neo4j, or generating Go / Markdown from a schema |
 | `references/diagnostics.md` | Error codes, troubleshooting | Understanding or fixing errors |
 | `references/cli.md` | CLI commands and workflows | Using yammm from the terminal |
 

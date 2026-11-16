@@ -5,9 +5,9 @@ import (
 	"strings"
 	"testing"
 
-	adaptern4j "github.com/simon-lentz/yammm/adapter/neo4j"
-	"github.com/simon-lentz/yammm/cmd/yammm/internal/cli"
+	"github.com/simon-lentz/yammm/neo4j"
 	"github.com/simon-lentz/yammm/schema"
+	"github.com/simon-lentz/yammm/schema/cypher"
 )
 
 // A composite key's uniqueness constraint is backed by an index that already
@@ -23,8 +23,8 @@ func TestNeo4jDiff_ABackingIndexThatServesADeclarationIsReportedOnce(t *testing.
 	if err := loaded.Err(); err != nil {
 		t.Fatal(err)
 	}
-	adapter := adaptern4j.New()
-	desired, result := adapter.IndexesStructured(t.Context(), s)
+	cfg := cypher.Config{}
+	desired, result := cfg.Indexes(s)
 	if err := result.Err(); err != nil || len(desired) != 1 {
 		t.Fatalf("%d declared indexes, want 1: %v", len(desired), err)
 	}
@@ -43,16 +43,22 @@ func TestNeo4jDiff_ABackingIndexThatServesADeclarationIsReportedOnce(t *testing.
 				"name": "gs__T_a_b_unique", "type": "RANGE", "entityType": "NODE", "state": c.state,
 				"labelsOrTypes": []any{"gs__T"}, "properties": []any{"a", "b"}, "owningConstraint": "gs__T_a_b_unique",
 			}}
-			log := &queryLog{replies: []queryReply{{}, {records: rows}}}
-			var diagnostics bytes.Buffer
-			state, err := fetchRemoteState(t.Context(), log.run, "neo4j", cli.NewDiagnosticSink(&diagnostics, cli.FormatText, true, false))
-			if err != nil || state.indexFailed || len(state.indexes) != 1 {
-				t.Fatalf("fetchRemoteState: %v, index read failed: %v, %d indexes", err, state.indexFailed, len(state.indexes))
+			key := map[string]any{
+				"name": "gs__T_a_b_unique", "type": "UNIQUENESS", "entityType": "NODE",
+				"labelsOrTypes": []any{"gs__T"}, "properties": []any{"a", "b"},
+			}
+			log := &queryLog{replies: []queryReply{{records: []map[string]any{key}}, {records: rows}}}
+			state, err := fetchRemoteState(t.Context(), log.run, "neo4j")
+			if err != nil || len(state.indexes) != 1 {
+				t.Fatalf("fetchRemoteState: %v, %d indexes", err, len(state.indexes))
 			}
 
-			owned := adapter.OwnedLabels(t.Context(), s)
+			plan, res := neo4j.Diff(cfg, s, state.constraints, state.indexes)
+			if res.HasErrors() {
+				t.Fatal(res)
+			}
 			var out bytes.Buffer
-			printIndexDiffResult(&out, &adapter.Diff(nil, desired, nil, state.indexes, owned).Indexes, owned)
+			printIndexDiff(&out, &plan.Indexes, cfg.OwnedLabels(s))
 			if !strings.Contains(out.String(), c.line) {
 				t.Errorf("the report lacks %q:\n%s", c.line, out.String())
 			}

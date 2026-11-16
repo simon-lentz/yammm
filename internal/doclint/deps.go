@@ -30,8 +30,8 @@ const (
 // or a row.
 //
 // A row's subject names a package, which need not be the one whose doc.go
-// carries it: adapter/doc.go tabulates its whole family, one row per sibling,
-// and each row is read against that sibling's own imports. A directory whose
+// carries it: a doc.go can tabulate a whole family, one row per sibling, and
+// each row is read against that sibling's own imports. A directory whose
 // only Go file is doc.go imports nothing itself, which says nothing about the
 // rows it publishes, so there is no doc-only skip.
 //
@@ -196,9 +196,9 @@ func (p *Package) dependencyRows() (rows []depRow, file string, hasHeading bool)
 		doc := f.Doc.Text()
 		rows := dependencyRowsIn(doc)
 		// Rows are the claim, and a heading is how a file announces it carries
-		// them. Either alone is enough to read the file: adapter/doc.go
-		// tabulates its family under "Dependency Direction" and owes its rows
-		// just the same, and a heading with no row is the error below.
+		// them. Either alone is enough to read the file: a family table under
+		// another heading owes its rows just the same, and a heading with no
+		// row is the error below.
 		if len(rows) == 0 && !strings.Contains(doc, depHeading) {
 			continue
 		}

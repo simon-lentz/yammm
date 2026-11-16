@@ -6,8 +6,9 @@ import (
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/internal/doclint"
 
-	// Each adapter registers its own codes with diag when it is imported.
-	_ "github.com/simon-lentz/yammm/adapter/neo4j"
+	// Each Neo4j package registers its own codes with diag when it is imported.
+	_ "github.com/simon-lentz/yammm/neo4j"
+	_ "github.com/simon-lentz/yammm/schema/cypher"
 )
 
 // TestModuleCitesRegisteredCodes points the code-citation checker at the
@@ -41,6 +42,6 @@ func TestModuleCitesRegisteredCodes(t *testing.T) {
 }
 
 const (
-	commentCitationFloor  = 620
+	commentCitationFloor  = 617
 	markdownCitationFloor = 470
 )

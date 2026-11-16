@@ -78,7 +78,7 @@ Primary key types: `String`, `UUID`, `Date`, `Timestamp` only. Aliases that reso
 
 ## Annotations
 
-Validated metadata for adapters (indexes, write-once). Property-level `@name`, type-level `@@name`.
+Validated metadata for downstream tools (indexes, write-once). Property-level `@name`, type-level `@@name`.
 
 ```yammm-snippet
 state      String      @index                // single-property range index

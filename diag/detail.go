@@ -61,7 +61,7 @@ const (
 	DetailKeyDetail = "detail"
 
 	// DetailKeyFormat names the format an issue is about: "json" for a data
-	// file the CLI reads, "neo4j" for the Cypher the Neo4j adapter writes.
+	// file the CLI reads, "neo4j" for the Cypher the Neo4j packages write.
 	DetailKeyFormat = "format"
 
 	// DetailKeyTargetType is the target type name (for cross-reference errors).

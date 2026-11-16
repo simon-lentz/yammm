@@ -110,7 +110,7 @@ func (a AnnotationArg) displayText() string {
 }
 
 // Annotation is a validated @name / @@name decorator carried on a property or
-// type. Meaning (DDL emission, write-shape derivation) lives in adapters; the
+// type. Meaning (DDL emission, write-shape derivation) lives in its readers; the
 // core carries structure and, after completion, validated argument kinds.
 // Annotations are immutable after schema completion.
 type Annotation struct{ *annotationState }

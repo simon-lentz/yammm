@@ -42,16 +42,15 @@ func TestRun_LabelFlagsAreRefusedBeforeWork(t *testing.T) {
 	}
 }
 
-// An empty --separator composes each label from the schema and type names
-// alone. Two types that then compose one label are the library's
-// E_NEO4J_LABEL_COLLISION, raised at the types.
-func TestRun_AnEmptySeparatorComposesLabelsWithNone(t *testing.T) {
+// An empty --separator is the default separator, as an empty
+// cypher.Config.LabelSeparator is.
+func TestRun_AnEmptySeparatorIsTheDefault(t *testing.T) {
 	code, stdout, stderr := runCLI(t, "neo4j", "constraints", "--separator", "", "testdata/valid.yammm")
 	if code != cli.ExitOK {
 		t.Fatalf("exit code = %d, want %d; stderr:\n%s", code, cli.ExitOK, stderr)
 	}
-	if !strings.Contains(stdout, "FOR (n:testPerson)") {
-		t.Errorf("stdout does not label Person as testPerson:\n%s", stdout)
+	if !strings.Contains(stdout, "FOR (n:test__Person)") {
+		t.Errorf("stdout does not label Person as test__Person:\n%s", stdout)
 	}
 }
 
@@ -91,5 +90,51 @@ func TestRun_DiffRefusesAMissingURIBeforeLoading(t *testing.T) {
 	}
 	if stdout != "" {
 		t.Errorf("stdout = %q, want nothing", stdout)
+	}
+}
+
+// TestRun_DiffJudgesTheIndexesBeforeConnecting: a schema whose constraints
+// generate and whose indexes do not is refused before `neo4j diff` connects, so
+// an unreachable server never decides the exit code.
+func TestRun_DiffJudgesTheIndexesBeforeConnecting(t *testing.T) {
+	code, stdout, stderr := runCLI(t, "neo4j", "diff", "--uri", "bolt://127.0.0.1:1", "--scalar-types=false", "testdata/reserved_index.yammm")
+	if code != cli.ExitValidation {
+		t.Errorf("exit code = %d, want %d; stderr:\n%s", code, cli.ExitValidation, stderr)
+	}
+	if !strings.Contains(stderr, "E_NEO4J_INVALID_IDENTIFIER") {
+		t.Errorf("stderr does not report the index refusal:\n%s", stderr)
+	}
+	if stdout != "" {
+		t.Errorf("stdout = %q, want nothing", stdout)
+	}
+}
+
+// TestRun_ScalarTypesOffOutranksRequiredOnly: --scalar-types=false emits no
+// type constraint whatever --required-only-types says.
+func TestRun_ScalarTypesOffOutranksRequiredOnly(t *testing.T) {
+	code, stdout, stderr := runCLI(t, "neo4j", "constraints", "--scalar-types=false", "--required-only-types", "testdata/valid.yammm")
+	if code != cli.ExitOK {
+		t.Fatalf("exit code = %d, want %d; stderr:\n%s", code, cli.ExitOK, stderr)
+	}
+	if strings.Contains(stdout, "IS ::") {
+		t.Errorf("stdout holds a type constraint:\n%s", stdout)
+	}
+	if !strings.Contains(stdout, "CREATE CONSTRAINT") {
+		t.Errorf("stdout holds no constraint:\n%s", stdout)
+	}
+}
+
+// TestRun_EditionIsReadInAnyCase: --edition takes its value in any case.
+func TestRun_EditionIsReadInAnyCase(t *testing.T) {
+	lower, wantOut, stderr := runCLI(t, "neo4j", "constraints", "--edition", "community", "testdata/valid.yammm")
+	if lower != cli.ExitOK {
+		t.Fatalf("exit code = %d, want %d; stderr:\n%s", lower, cli.ExitOK, stderr)
+	}
+	code, stdout, stderr := runCLI(t, "neo4j", "constraints", "--edition", "Community", "testdata/valid.yammm")
+	if code != cli.ExitOK {
+		t.Fatalf("exit code = %d, want %d; stderr:\n%s", code, cli.ExitOK, stderr)
+	}
+	if stdout != wantOut {
+		t.Errorf("--edition Community emits otherwise than --edition community:\n%s\nwant:\n%s", stdout, wantOut)
 	}
 }

@@ -1,0 +1,11 @@
+schema "inherit_test"
+
+abstract type Tracked {
+    run_id            String required
+    source_fetched_at Timestamp required
+}
+
+type Entity extends Tracked {
+    id   String primary
+    name String required
+}

@@ -8,10 +8,11 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/simon-lentz/yammm/adapter/neo4j"
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/graph"
+	"github.com/simon-lentz/yammm/neo4j"
 	"github.com/simon-lentz/yammm/schema"
+	"github.com/simon-lentz/yammm/schema/cypher"
 )
 
 // The Go snippets in API.md are prose: nothing compiles them, so a signature
@@ -23,7 +24,7 @@ import (
 // These tests close that gap for the neo4j diff and introspection surface,
 // whose call shapes appear in three places that must agree: docs/API.md
 // ("Constraint Diffing", "Index Diffing", "Introspection Queries"), the package
-// documentation in adapter/neo4j/doc.go ("Diff Scope"), and
+// documentation in neo4j/doc.go ("Diff Scope"), and
 // claude-plugin/skills/yammm/references/adapters.md ("Diffing Against a Live
 // Database"). A change here that breaks compilation is the signal to update all
 // three.
@@ -48,21 +49,20 @@ func loadProbeSchema(t *testing.T, ctx context.Context) schema.Schema {
 }
 
 // TestDocumentedDiffCallShapes pins the diff call shapes the documentation
-// shows: ownership computed once via OwnedLabels and passed to both halves,
-// each half taking the other's remote objects as the variadic blocker list, and
-// six result buckets on each. It is a compile-time assertion first — the
-// runtime assertions only guard against the entry points silently returning
+// shows: one Diff over the mapping, the schema and both kinds of remote rows,
+// and six result buckets on each half. It is a compile-time assertion first —
+// the runtime assertions only guard against the entry points silently returning
 // nothing to classify.
 func TestDocumentedDiffCallShapes(t *testing.T) {
 	ctx := context.Background()
 	s := loadProbeSchema(t, ctx)
-	adapter := neo4j.New()
+	c := cypher.Config{}
 
-	desiredConstraints, cResult := adapter.ConstraintsStructured(ctx, s)
+	desiredConstraints, cResult := c.Constraints(s)
 	if err := cResult.Err(); err != nil {
 		t.Fatalf("generating constraints: %v", err)
 	}
-	desiredIndexes, iResult := adapter.IndexesStructured(ctx, s)
+	desiredIndexes, iResult := c.Indexes(s)
 	if err := iResult.Err(); err != nil {
 		t.Fatalf("generating indexes: %v", err)
 	}
@@ -72,10 +72,12 @@ func TestDocumentedDiffCallShapes(t *testing.T) {
 	var actualConstraints []neo4j.RemoteConstraint
 	var actualIndexes []neo4j.RemoteIndex
 
-	owned := adapter.OwnedLabels(ctx, s)
-
-	plan := adapter.Diff(desiredConstraints, desiredIndexes, actualConstraints, actualIndexes, owned)
+	plan, result := neo4j.Diff(c, s, actualConstraints, actualIndexes)
+	if err := result.Err(); err != nil {
+		t.Fatalf("planning: %v", err)
+	}
 	cDiff, iDiff := plan.Constraints, plan.Indexes
+	owned := c.OwnedLabels(s)
 
 	// Every bucket the documentation names, on both results.
 	cBuckets := len(cDiff.Match) + len(cDiff.Drift) + len(cDiff.Create) + len(cDiff.Drop) +
@@ -104,7 +106,7 @@ func TestDocumentedDiffCallShapes(t *testing.T) {
 	// OwnedLabels accessors, which a caller reporting on a drop or drift needs
 	// to resolve a remote object's labels the way the diff did.
 	if _, ok := owned.LabelOf([]string{"Probe__Document"}); !ok {
-		t.Error("OwnedLabels does not own the label the adapter emits for Document")
+		t.Error("OwnedLabels does not own the label the mapping gives Document")
 	}
 	if !owned.Contains("Probe__Document") {
 		t.Error("OwnedLabels.Contains disagrees with LabelOf")
@@ -143,27 +145,27 @@ func TestDocumentedRemoteIndexSurface(t *testing.T) {
 // exact projection is documented because a caller running it against a server
 // that does not support a column fails, so the column list is a contract.
 func TestDocumentedIntrospectionQueries(t *testing.T) {
-	if got, want := neo4j.IntrospectConstraintsQuery(), "SHOW CONSTRAINTS YIELD *"; got != want {
-		t.Errorf("IntrospectConstraintsQuery() = %q, documented as %q", got, want)
+	if got, want := neo4j.ShowConstraints, "SHOW CONSTRAINTS YIELD *"; got != want {
+		t.Errorf("ShowConstraints = %q, documented as %q", got, want)
 	}
 
-	indexQuery := neo4j.IntrospectIndexesQuery()
+	indexQuery := neo4j.ShowIndexes
 	for _, column := range []string{
 		"name", "type", "entityType", "labelsOrTypes",
 		"properties", "options", "state", "owningConstraint",
 	} {
 		if !strings.Contains(indexQuery, column) {
-			t.Errorf("IntrospectIndexesQuery() omits the documented column %q: %s", column, indexQuery)
+			t.Errorf("ShowIndexes omits the documented column %q: %s", column, indexQuery)
 		}
 	}
 	// Constraint-backing and LOOKUP indexes are deliberately returned: a filter
 	// on either would silently remove rows the diff needs to detect a blocked
 	// create.
 	if strings.Contains(indexQuery, "WHERE") {
-		t.Errorf("IntrospectIndexesQuery() filters the rows API.md documents as every index: %s", indexQuery)
+		t.Errorf("ShowIndexes filters the rows API.md documents as every index: %s", indexQuery)
 	}
 	if strings.Contains(indexQuery, "owningConstraint IS NULL") {
-		t.Errorf("IntrospectIndexesQuery() filters out constraint-backing indexes, "+
+		t.Errorf("ShowIndexes filters out constraint-backing indexes, "+
 			"which the documented diff behavior depends on receiving: %s", indexQuery)
 	}
 }

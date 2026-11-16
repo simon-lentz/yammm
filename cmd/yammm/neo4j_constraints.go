@@ -5,7 +5,6 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/simon-lentz/yammm/adapter/neo4j"
 	"github.com/simon-lentz/yammm/cmd/yammm/internal/cli"
 	"github.com/simon-lentz/yammm/schema"
 )
@@ -28,7 +27,7 @@ func newNeo4jConstraintsCmd() *cobra.Command {
 }
 
 func runNeo4jConstraints(cmd *cobra.Command, args []string, sink *cli.DiagnosticSink) error {
-	opts, err := constraintOptions(cmd)
+	c, err := constraintConfig(cmd)
 	if err != nil {
 		return err
 	}
@@ -49,9 +48,7 @@ func runNeo4jConstraints(cmd *cobra.Command, args []string, sink *cli.Diagnostic
 		return err
 	}
 
-	adapter := neo4j.New(opts...)
-
-	statements, constraintResult := adapter.ConstraintsForSchema(cmd.Context(), s)
+	constraints, constraintResult := c.Constraints(s)
 	sink.Add(constraintResult)
 	sink.Flush()
 	if sink.Result().HasErrors() {
@@ -60,8 +57,8 @@ func runNeo4jConstraints(cmd *cobra.Command, args []string, sink *cli.Diagnostic
 
 	// Print each statement
 	w := cmd.OutOrStdout()
-	for _, stmt := range statements {
-		fmt.Fprintln(w, stmt)
+	for _, con := range constraints {
+		fmt.Fprintln(w, con.Statement)
 	}
 
 	return nil

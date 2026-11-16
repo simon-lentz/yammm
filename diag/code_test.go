@@ -90,7 +90,9 @@ func TestCodeCategory_String(t *testing.T) {
 		{CategoryImport, "import"},
 		{CategoryInstance, "instance"},
 		{CategoryGraph, "graph"},
-		{CategoryAdapter, "adapter"},
+		{CategoryNeo4j, "neo4j"},
+		{CategorySnapshot, "snapshot"},
+		{CodeCategory(0), "unknown"},
 		{CodeCategory(255), "unknown"},
 	}
 
@@ -215,7 +217,7 @@ func TestCodes_EveryCodeIsInOneListedCategory(t *testing.T) {
 		CategoryImport,
 		CategoryInstance,
 		CategoryGraph,
-		CategoryAdapter,
+		CategoryNeo4j,
 		CategorySnapshot,
 	}
 

@@ -7,7 +7,7 @@
 //
 // # Schema-In, Bytes-Out
 //
-// Unlike adapter/neo4j, gogen has no instance-data path: it never parses,
+// Like schema/cypher and unlike neo4j, gogen has no instance-data path: it never parses,
 // validates, or serializes instances. It imports neither instance nor graph.
 // It maps a completed schema to Go source, nothing more. It also returns a plain error rather than the
 // [github.com/simon-lentz/yammm/diag.Result] the library's loading, validation
@@ -374,7 +374,8 @@
 // Schema annotations do not shape the generated Go: no struct field, tag, enum,
 // or method reflects them. They describe store-level concerns — index shape,
 // write-once behaviour — that a Go type does not express, and
-// [github.com/simon-lentz/yammm/adapter/neo4j] is where they are read.
+// [github.com/simon-lentz/yammm/schema/cypher] and
+// [github.com/simon-lentz/yammm/neo4j] are where they are read.
 //
 // They do survive in the embedded source, which is held verbatim and reachable
 // through SerializedSources. A schema re-loaded from it carries its annotations,
@@ -395,7 +396,7 @@
 //
 // gogen imports one core internal package, internal/ident, for the
 // identifier-casing transform that turns schema names into Go identifiers.
-// It does not import instance and, unlike adapter/neo4j, imports neither graph
+// It does not import instance and, unlike neo4j, imports neither graph
 // nor diag. The
 // generated output depends only on the standard library, importing at most
 // "time" and "encoding/json".

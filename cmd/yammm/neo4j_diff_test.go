@@ -5,25 +5,25 @@ import (
 	"strings"
 	"testing"
 
-	adaptern4j "github.com/simon-lentz/yammm/adapter/neo4j"
+	"github.com/simon-lentz/yammm/neo4j"
+	"github.com/simon-lentz/yammm/schema/cypher"
 
 	"github.com/stretchr/testify/assert"
 
 	"github.com/simon-lentz/yammm/cmd/yammm/internal/cli"
-	"github.com/simon-lentz/yammm/schema"
 )
 
-func TestPrintDiffResult_AllMatch(t *testing.T) {
+func TestPrintConstraintDiff_AllMatch(t *testing.T) {
 	t.Parallel()
 
-	diff := &adaptern4j.ConstraintDiffResult{
-		Match: []adaptern4j.ConstraintMatch{
-			{Desired: adaptern4j.Constraint{Name: "c1"}, Actual: adaptern4j.RemoteConstraint{Name: "c1"}},
+	diff := &neo4j.ConstraintDiff{
+		Match: []neo4j.ConstraintMatch{
+			{Desired: cypher.Constraint{Name: "c1"}, Actual: neo4j.RemoteConstraint{Name: "c1"}},
 		},
 	}
 
 	var buf bytes.Buffer
-	printDiffResult(&buf, diff)
+	printConstraintDiff(&buf, diff)
 
 	assert.Contains(t, buf.String(), "matched: 1")
 	assert.Contains(t, buf.String(), "0 drifted")
@@ -31,27 +31,27 @@ func TestPrintDiffResult_AllMatch(t *testing.T) {
 	assert.Contains(t, buf.String(), "0 to drop")
 }
 
-func TestPrintDiffResult_WithDrift(t *testing.T) {
+func TestPrintConstraintDiff_WithDrift(t *testing.T) {
 	t.Parallel()
 
-	diff := &adaptern4j.ConstraintDiffResult{
-		Drift: []adaptern4j.ConstraintDrift{
+	diff := &neo4j.ConstraintDiff{
+		Drift: []neo4j.ConstraintDrift{
 			{
-				Desired: adaptern4j.Constraint{Name: "c1"},
-				Blockers: adaptern4j.Blockers{
-					Constraints: []adaptern4j.RemoteConstraint{{Name: "c1", Type: "NODE_PROPERTY_TYPE", LabelsOrTypes: []string{"app__T"}, Properties: []string{"x"}}},
-					Indexes:     []adaptern4j.RemoteIndex{{Name: "held", Type: "TEXT", LabelsOrTypes: []string{"app__T"}, Properties: []string{"x"}}},
+				Desired: cypher.Constraint{Name: "c1"},
+				Blockers: neo4j.Blockers{
+					Constraints: []neo4j.RemoteConstraint{{Name: "c1", Type: "NODE_PROPERTY_TYPE", LabelsOrTypes: []string{"app__T"}, Properties: []string{"x"}}},
+					Indexes:     []neo4j.RemoteIndex{{Name: "held", Type: "TEXT", LabelsOrTypes: []string{"app__T"}, Properties: []string{"x"}}},
 				},
 				Reason: "type mismatch",
 			},
 		},
-		Create: []adaptern4j.Constraint{
+		Create: []cypher.Constraint{
 			{Name: "c2", Statement: "CREATE CONSTRAINT c2 ..."},
 		},
 	}
 
 	var buf bytes.Buffer
-	printDiffResult(&buf, diff)
+	printConstraintDiff(&buf, diff)
 
 	assert.Contains(t, buf.String(), "drift: c1")
 	assert.Contains(t, buf.String(), "type mismatch")
@@ -60,33 +60,33 @@ func TestPrintDiffResult_WithDrift(t *testing.T) {
 	assert.Contains(t, buf.String(), "create: CREATE CONSTRAINT c2")
 }
 
-func TestPrintIndexDiffResult_AllMatch(t *testing.T) {
+func TestPrintIndexDiff_AllMatch(t *testing.T) {
 	t.Parallel()
 
-	diff := &adaptern4j.IndexDiffResult{
-		Match: []adaptern4j.IndexMatch{
-			{Desired: adaptern4j.Index{Name: "i1"}, Actual: adaptern4j.RemoteIndex{Name: "i1"}},
+	diff := &neo4j.IndexDiff{
+		Match: []neo4j.IndexMatch{
+			{Desired: cypher.Index{Name: "i1"}, Actual: neo4j.RemoteIndex{Name: "i1"}},
 		},
 	}
 
 	var buf bytes.Buffer
-	printIndexDiffResult(&buf, diff, nil)
+	printIndexDiff(&buf, diff, nil)
 
 	assert.Contains(t, buf.String(), "matched: 1 indexes")
 	assert.Contains(t, buf.String(), "0 to create")
 	assert.Contains(t, buf.String(), "0 to drop")
 }
 
-func TestPrintIndexDiffResult_DriftCreateDrop(t *testing.T) {
+func TestPrintIndexDiff_DriftCreateDrop(t *testing.T) {
 	t.Parallel()
 
-	diff := &adaptern4j.IndexDiffResult{
-		Drift: []adaptern4j.IndexDrift{
+	diff := &neo4j.IndexDiff{
+		Drift: []neo4j.IndexDrift{
 			{
-				Desired: adaptern4j.Index{Name: "i1"},
-				Blockers: adaptern4j.Blockers{
-					Constraints: []adaptern4j.RemoteConstraint{{Name: "nn", Type: "NODE_PROPERTY_EXISTENCE", LabelsOrTypes: []string{"test__Foo"}, Properties: []string{"v"}}},
-					Indexes: []adaptern4j.RemoteIndex{
+				Desired: cypher.Index{Name: "i1"},
+				Blockers: neo4j.Blockers{
+					Constraints: []neo4j.RemoteConstraint{{Name: "nn", Type: "NODE_PROPERTY_EXISTENCE", LabelsOrTypes: []string{"test__Foo"}, Properties: []string{"v"}}},
+					Indexes: []neo4j.RemoteIndex{
 						{Name: "i1", Type: "VECTOR", LabelsOrTypes: []string{"test__Foo"}, Properties: []string{"v"}},
 						{Name: "pk", Type: "RANGE", LabelsOrTypes: []string{"test__Foo"}, Properties: []string{"id"}, OwningConstraint: "pk"},
 					},
@@ -94,16 +94,16 @@ func TestPrintIndexDiffResult_DriftCreateDrop(t *testing.T) {
 				Reason: "vector dimension mismatch",
 			},
 		},
-		Create: []adaptern4j.Index{
+		Create: []cypher.Index{
 			{Name: "i2", Statement: "CREATE INDEX i2 IF NOT EXISTS ..."},
 		},
-		Drop: []adaptern4j.RemoteIndex{
+		Drop: []neo4j.RemoteIndex{
 			{Name: "i3", Type: "RANGE", LabelsOrTypes: []string{"test__Foo"}},
 		},
 	}
 
 	var buf bytes.Buffer
-	printIndexDiffResult(&buf, diff, nil)
+	printIndexDiff(&buf, diff, nil)
 
 	assert.Contains(t, buf.String(), "index drift: i1")
 	assert.Contains(t, buf.String(), "vector dimension mismatch")
@@ -114,27 +114,27 @@ func TestPrintIndexDiffResult_DriftCreateDrop(t *testing.T) {
 	assert.Contains(t, buf.String(), "index drop: i3")
 }
 
-// TestPrintDiffResult_BlockersFollowTheirDrift pins each blocker line under its
+// TestPrintConstraintDiff_BlockersFollowTheirDrift pins each blocker line under its
 // own drift, constraints first, with every label and property joined, and names
 // a row whose type is unknown by its own kind.
-func TestPrintDiffResult_BlockersFollowTheirDrift(t *testing.T) {
+func TestPrintConstraintDiff_BlockersFollowTheirDrift(t *testing.T) {
 	t.Parallel()
 
-	diff := &adaptern4j.ConstraintDiffResult{
-		Drift: []adaptern4j.ConstraintDrift{
+	diff := &neo4j.ConstraintDiff{
+		Drift: []neo4j.ConstraintDrift{
 			{
-				Desired: adaptern4j.Constraint{Name: "c1"},
-				Blockers: adaptern4j.Blockers{
-					Constraints: []adaptern4j.RemoteConstraint{{Name: "c1", Type: "NODE_KEY", LabelsOrTypes: []string{"app__T"}, Properties: []string{"a", "b"}}},
-					Indexes:     []adaptern4j.RemoteIndex{{Name: "multi", Type: "TEXT", LabelsOrTypes: []string{"app__T", "app__U"}, Properties: []string{"a"}}},
+				Desired: cypher.Constraint{Name: "c1"},
+				Blockers: neo4j.Blockers{
+					Constraints: []neo4j.RemoteConstraint{{Name: "c1", Type: "NODE_KEY", LabelsOrTypes: []string{"app__T"}, Properties: []string{"a", "b"}}},
+					Indexes:     []neo4j.RemoteIndex{{Name: "multi", Type: "TEXT", LabelsOrTypes: []string{"app__T", "app__U"}, Properties: []string{"a"}}},
 				},
 				Reason: "r1",
 			},
 			{
-				Desired: adaptern4j.Constraint{Name: "c2"},
-				Blockers: adaptern4j.Blockers{
-					Constraints: []adaptern4j.RemoteConstraint{{Name: "untyped", LabelsOrTypes: []string{"app__T"}, Properties: []string{"b"}}},
-					Indexes:     []adaptern4j.RemoteIndex{{Name: "range", LabelsOrTypes: []string{"app__T"}, Properties: []string{"b"}, OwningConstraint: "k"}},
+				Desired: cypher.Constraint{Name: "c2"},
+				Blockers: neo4j.Blockers{
+					Constraints: []neo4j.RemoteConstraint{{Name: "untyped", LabelsOrTypes: []string{"app__T"}, Properties: []string{"b"}}},
+					Indexes:     []neo4j.RemoteIndex{{Name: "range", LabelsOrTypes: []string{"app__T"}, Properties: []string{"b"}, OwningConstraint: "k"}},
 				},
 				Reason: "r2",
 			},
@@ -142,7 +142,7 @@ func TestPrintDiffResult_BlockersFollowTheirDrift(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	printDiffResult(&buf, diff)
+	printConstraintDiff(&buf, diff)
 
 	assert.Contains(t, buf.String(), "drift: c1 (r1)\n"+
 		"  blocker: NODE_KEY constraint \"c1\" on app__T(a, b)\n"+
@@ -152,28 +152,28 @@ func TestPrintDiffResult_BlockersFollowTheirDrift(t *testing.T) {
 		"  blocker: index \"range\" on app__T(b), which backs constraint \"k\": drop the constraint\n")
 }
 
-// TestPrintIndexDiffResult_BlockersFollowTheirDrift pins each index blocker line
+// TestPrintIndexDiff_BlockersFollowTheirDrift pins each index blocker line
 // under its own drift, constraints first, with every label and property joined,
 // names the owning constraint of a backing index, and names a row whose type is
 // unknown by its own kind.
-func TestPrintIndexDiffResult_BlockersFollowTheirDrift(t *testing.T) {
+func TestPrintIndexDiff_BlockersFollowTheirDrift(t *testing.T) {
 	t.Parallel()
 
-	diff := &adaptern4j.IndexDiffResult{
-		Drift: []adaptern4j.IndexDrift{
+	diff := &neo4j.IndexDiff{
+		Drift: []neo4j.IndexDrift{
 			{
-				Desired: adaptern4j.Index{Name: "i1"},
-				Blockers: adaptern4j.Blockers{Indexes: []adaptern4j.RemoteIndex{
+				Desired: cypher.Index{Name: "i1"},
+				Blockers: neo4j.Blockers{Indexes: []neo4j.RemoteIndex{
 					{Name: "idx", Type: "RANGE", LabelsOrTypes: []string{"app__T"}, Properties: []string{"a", "b"}, OwningConstraint: "c"},
 					{Name: "multi", Type: "TEXT", LabelsOrTypes: []string{"app__T", "app__U"}, Properties: []string{"a"}},
 				}},
 				Reason: "r1",
 			},
 			{
-				Desired: adaptern4j.Index{Name: "i2"},
-				Blockers: adaptern4j.Blockers{
-					Constraints: []adaptern4j.RemoteConstraint{{Name: "nn", Type: "NODE_PROPERTY_EXISTENCE", LabelsOrTypes: []string{"app__T"}, Properties: []string{"b"}}},
-					Indexes:     []adaptern4j.RemoteIndex{{Name: "untyped", LabelsOrTypes: []string{"app__T"}, Properties: []string{"b"}}},
+				Desired: cypher.Index{Name: "i2"},
+				Blockers: neo4j.Blockers{
+					Constraints: []neo4j.RemoteConstraint{{Name: "nn", Type: "NODE_PROPERTY_EXISTENCE", LabelsOrTypes: []string{"app__T"}, Properties: []string{"b"}}},
+					Indexes:     []neo4j.RemoteIndex{{Name: "untyped", LabelsOrTypes: []string{"app__T"}, Properties: []string{"b"}}},
 				},
 				Reason: "r2",
 			},
@@ -181,7 +181,7 @@ func TestPrintIndexDiffResult_BlockersFollowTheirDrift(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	printIndexDiffResult(&buf, diff, nil)
+	printIndexDiff(&buf, diff, nil)
 
 	assert.Contains(t, buf.String(), "index drift: i1 (r1)\n"+
 		"  index blocker: RANGE index \"idx\" on app__T(a, b), which backs constraint \"c\": drop the constraint\n"+
@@ -207,8 +207,8 @@ func TestNeo4jDiff_EnvVarSatisfiesURI(t *testing.T) {
 	assert.Equal(t, cli.ExitRuntime, code)
 }
 
-// TestNeo4jDiff_AcceptsConfigFlags proves the --edition, --separator, and
-// --named flags are wired (mirroring the constraints command): the command
+// TestNeo4jDiff_AcceptsConfigFlags proves the --edition and --separator flags
+// are wired (mirroring the constraints command): the command
 // proceeds past flag parsing to the connection attempt (which fails on the
 // refused loopback port), so the exit code is not the usage code. The targeted
 // "invalid edition" message (written to os.Stderr, which in-process cobra
@@ -217,104 +217,20 @@ func TestNeo4jDiff_EnvVarSatisfiesURI(t *testing.T) {
 func TestNeo4jDiff_AcceptsConfigFlags(t *testing.T) {
 	t.Parallel()
 	code := executeCmd(t, "neo4j", "diff", "--uri", "neo4j://127.0.0.1:1",
-		"--edition", "community", "--separator", "__", "--named=false", "testdata/valid.yammm")
+		"--edition", "community", "--separator", "__", "testdata/valid.yammm")
 	assert.NotEqual(t, 2, code)
-}
-
-// TestNeo4jDiff_IndexesFlag proves the --indexes opt-out is wired: with
-// --indexes=false the command parses the flag and proceeds to the connection
-// attempt (which fails on the refused loopback port), so the exit code is not
-// the usage code.
-func TestNeo4jDiff_IndexesFlag(t *testing.T) {
-	t.Parallel()
-	code := executeCmd(t, "neo4j", "diff", "--uri", "neo4j://127.0.0.1:1",
-		"--indexes=false", "testdata/valid.yammm")
-	assert.NotEqual(t, 2, code)
-}
-
-// TestNeo4jDiffExit pins the exit-code contract of the two diff halves. The
-// load-bearing rows are the two incomplete comparisons — "unavailable"
-// (introspection failed) and "unverified" (an index whose configuration the
-// server would not disclose). Both keep the printed constraint diff but must not
-// report success: a drift gate would otherwise read exit 0 as "no drift" from a
-// comparison that never ran.
-// TestIndexOutcomeBeforeDiff pins the step between the read and the exit table:
-// only a read that was ASKED FOR and failed is unavailable, so --indexes=false
-// over a server that cannot report indexes still exits 0.
-func TestIndexOutcomeBeforeDiff(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		name            string
-		enabled, failed bool
-		want            indexDiffOutcome
-	}{
-		{"asked for and read", true, false, indexDiffSkipped},
-		{"asked for and unreadable", true, true, indexDiffUnavailable},
-		{"opted out, read fine", false, false, indexDiffSkipped},
-		{"opted out, unreadable", false, true, indexDiffSkipped},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			if got := indexOutcomeBeforeDiff(tt.enabled, tt.failed); got != tt.want {
-				t.Errorf("indexOutcomeBeforeDiff(%v, %v) = %v, want %v",
-					tt.enabled, tt.failed, got, tt.want)
-			}
-		})
-	}
-}
-
-func TestNeo4jDiffExit(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		name                 string
-		constraintDrift      bool
-		constraintUnverified bool
-		indexes              indexDiffOutcome
-		want                 int
-	}{
-		{"all clean", false, false, indexDiffClean, cli.ExitOK},
-		{"opted out of index diffing", false, false, indexDiffSkipped, cli.ExitOK},
-		{"constraint drift", true, false, indexDiffClean, cli.ExitValidation},
-		{"index drift", false, false, indexDiffDrifted, cli.ExitValidation},
-		{"both drifted", true, false, indexDiffDrifted, cli.ExitValidation},
-		{"index diff unavailable", false, false, indexDiffUnavailable, cli.ExitRuntime},
-		{"constraint drift outranks unavailable", true, false, indexDiffUnavailable, cli.ExitValidation},
-		{"index unverified", false, false, indexDiffUnverified, cli.ExitRuntime},
-		{"constraint drift outranks unverified", true, false, indexDiffUnverified, cli.ExitValidation},
-		// A constraint the server would not fully describe is unverified in the
-		// same sense an index is, and must not exit 0 — even when the index half
-		// is clean, and even when the caller opted out of index diffing entirely.
-		{"constraint unverified", false, true, indexDiffClean, cli.ExitRuntime},
-		{"constraint unverified with indexes skipped", false, true, indexDiffSkipped, cli.ExitRuntime},
-		{"constraint drift outranks constraint unverified", true, true, indexDiffClean, cli.ExitValidation},
-		{"index drift outranks constraint unverified", false, true, indexDiffDrifted, cli.ExitValidation},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			if got := neo4jDiffExit(tt.constraintDrift, tt.constraintUnverified, tt.indexes); got != tt.want {
-				t.Errorf("neo4jDiffExit(%v, %v, %v) = %d, want %d",
-					tt.constraintDrift, tt.constraintUnverified, tt.indexes, got, tt.want)
-			}
-		})
-	}
 }
 
 // An index whose configuration the database did not report is printed as
 // unverified, never folded into the matched count: "we could not check this" and
 // "this is in sync" are different claims.
-func TestPrintIndexDiffResult_Unverified(t *testing.T) {
+func TestPrintIndexDiff_Unverified(t *testing.T) {
 	t.Parallel()
 
 	var buf bytes.Buffer
-	printIndexDiffResult(&buf, &adaptern4j.IndexDiffResult{
-		Unverified: []adaptern4j.IndexUnverified{{
-			Desired: adaptern4j.Index{Name: "test__Entity_embedding_vector_idx"},
+	printIndexDiff(&buf, &neo4j.IndexDiff{
+		Unverified: []neo4j.IndexUnverified{{
+			Desired: cypher.Index{Name: "test__Entity_embedding_vector_idx"},
 			Reason:  "database reported no vector configuration",
 		}},
 	}, nil)
@@ -331,40 +247,76 @@ func TestPrintIndexDiffResult_Unverified(t *testing.T) {
 	}
 }
 
-// A constraint that realises the primary key and holds a declared index's name
-// drifts, so the index can be created. After a failed index read the plan
-// declares no index, and the printed constraint half carries no such move.
-func TestPlanRemoteState_AFailedIndexReadDeclaresNoIndex(t *testing.T) {
+// TestNeo4jDiffExit pins the exit-code contract of the plan. A change on
+// either half outranks an unverified object, and an unverified object on either
+// half must not report success: a drift gate would otherwise read exit 0 as "no
+// drift" from a comparison that never ran.
+func TestNeo4jDiffExit(t *testing.T) {
 	t.Parallel()
-	s, loaded := schema.LoadString(t.Context(), "schema \"cx\"\n\ntype Doc {\n\tid String primary\n\tbody String @index\n}\n", "cx.yammm")
-	if err := loaded.Err(); err != nil {
-		t.Fatal(err)
-	}
-	adapter := adaptern4j.New(adaptern4j.WithEdition(adaptern4j.Community))
-	desired, result := adapter.ConstraintsStructured(t.Context(), s)
-	if err := result.Err(); err != nil || len(desired) != 1 {
-		t.Fatalf("%d declared constraints, want 1: %v", len(desired), err)
-	}
-	desiredIndexes, result := adapter.IndexesStructured(t.Context(), s)
-	if err := result.Err(); err != nil || len(desiredIndexes) != 1 {
-		t.Fatalf("%d declared indexes, want 1: %v", len(desiredIndexes), err)
-	}
-	holder := desiredIndexes[0].Name
-	key := adaptern4j.RemoteConstraint{Name: holder, Type: "UNIQUENESS", EntityType: "NODE", LabelsOrTypes: []string{desired[0].Label}, Properties: []string{"id"}}
-	backing := adaptern4j.RemoteIndex{Name: holder, Type: "RANGE", EntityType: "NODE", State: "ONLINE", LabelsOrTypes: key.LabelsOrTypes, Properties: key.Properties, OwningConstraint: holder}
-	owned := adapter.OwnedLabels(t.Context(), s)
 
-	read := planRemoteState(adapter, desired, desiredIndexes,
-		remoteState{constraints: []adaptern4j.RemoteConstraint{key}, indexes: []adaptern4j.RemoteIndex{backing}}, indexDiffSkipped, owned)
-	if len(read.Constraints.Drift) != 1 {
-		t.Fatalf("after a read, constraints = %+v; want the key drifted so the index can take its name", read.Constraints)
+	var (
+		cDrift      = neo4j.ConstraintDiff{Drift: []neo4j.ConstraintDrift{{}}}
+		cCreate     = neo4j.ConstraintDiff{Create: []cypher.Constraint{{}}}
+		cDrop       = neo4j.ConstraintDiff{Drop: []neo4j.RemoteConstraint{{}}}
+		cUnverified = neo4j.ConstraintDiff{Unverified: []neo4j.ConstraintUnverified{{}}}
+		iDrift      = neo4j.IndexDiff{Drift: []neo4j.IndexDrift{{}}}
+		iCreate     = neo4j.IndexDiff{Create: []cypher.Index{{}}}
+		iDrop       = neo4j.IndexDiff{Drop: []neo4j.RemoteIndex{{}}}
+		iUnverified = neo4j.IndexDiff{Unverified: []neo4j.IndexUnverified{{}}}
+	)
+	tests := []struct {
+		name string
+		plan neo4j.Plan
+		want int
+	}{
+		{"all clean", neo4j.Plan{}, cli.ExitOK},
+		{"excluded objects alone", neo4j.Plan{
+			Constraints: neo4j.ConstraintDiff{Excluded: 2},
+			Indexes:     neo4j.IndexDiff{Excluded: 3},
+		}, cli.ExitOK},
+		{"constraint drift", neo4j.Plan{Constraints: cDrift}, cli.ExitValidation},
+		{"constraint create", neo4j.Plan{Constraints: cCreate}, cli.ExitValidation},
+		{"constraint drop", neo4j.Plan{Constraints: cDrop}, cli.ExitValidation},
+		{"index drift", neo4j.Plan{Indexes: iDrift}, cli.ExitValidation},
+		{"index create", neo4j.Plan{Indexes: iCreate}, cli.ExitValidation},
+		{"index drop", neo4j.Plan{Indexes: iDrop}, cli.ExitValidation},
+		{"constraint unverified", neo4j.Plan{Constraints: cUnverified}, cli.ExitRuntime},
+		{"index unverified", neo4j.Plan{Indexes: iUnverified}, cli.ExitRuntime},
+		{"constraint drift outranks index unverified", neo4j.Plan{Constraints: cDrift, Indexes: iUnverified}, cli.ExitValidation},
+		{"index drop outranks constraint unverified", neo4j.Plan{Constraints: cUnverified, Indexes: iDrop}, cli.ExitValidation},
 	}
-	failed := planRemoteState(adapter, desired, desiredIndexes,
-		remoteState{constraints: []adaptern4j.RemoteConstraint{key}, indexFailed: true}, indexDiffUnavailable, owned)
-	if len(failed.Constraints.Match) != 1 || len(failed.Constraints.Drift) != 0 {
-		t.Errorf("after a failed read, constraints = %+v; want the key matched", failed.Constraints)
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := neo4jDiffExit(tt.plan); got != tt.want {
+				t.Errorf("neo4jDiffExit(%s) = %d, want %d", tt.name, got, tt.want)
+			}
+		})
 	}
-	if n := len(failed.Indexes.Drift) + len(failed.Indexes.Create); n != 0 {
-		t.Errorf("after a failed read, indexes = %+v; want no index planned", failed.Indexes)
+}
+
+// TestReportPlan_WritesBothHalves pins that the report names the index half
+// beside the constraint half: a plan whose only change is an index must not
+// print as a constraint report alone.
+func TestReportPlan_WritesBothHalves(t *testing.T) {
+	t.Parallel()
+
+	plan := neo4j.Plan{
+		Constraints: neo4j.ConstraintDiff{Create: []cypher.Constraint{{Name: "c_new", Statement: "CREATE CONSTRAINT c_new"}}},
+		Indexes:     neo4j.IndexDiff{Create: []cypher.Index{{Name: "i_new", Statement: "CREATE INDEX i_new"}}},
+	}
+
+	var buf bytes.Buffer
+	reportPlan(&buf, plan, nil)
+	out := buf.String()
+
+	for _, want := range []string{"c_new", "i_new", "\nsummary: ", "\nindex summary: "} {
+		if !strings.Contains(out, want) {
+			t.Errorf("report lacks %q; got:\n%s", want, out)
+		}
+	}
+	if c, i := strings.Index(out, "c_new"), strings.Index(out, "i_new"); c > i {
+		t.Errorf("the constraint half must come first; got:\n%s", out)
 	}
 }

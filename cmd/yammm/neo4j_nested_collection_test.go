@@ -35,13 +35,12 @@ func TestNeo4jCommands_RefuseANestedCollectionUnderEveryFlag(t *testing.T) {
 		{"--scalar-types=false"},
 		{"--scalar-types=false", "--required-only-types"},
 		{"--scalar-types=false", "--edition", "community"},
-		{"--scalar-types=false", "--node-keys", "--named=false"},
+		{"--scalar-types=false", "--node-keys"},
 	}
 	for _, flags := range flagSets {
 		for _, command := range [][]string{
 			{"neo4j", "constraints"},
 			{"neo4j", "diff", "--uri", "neo4j://127.0.0.1:1"},
-			{"neo4j", "diff", "--uri", "neo4j://127.0.0.1:1", "--indexes=false"},
 		} {
 			args := append(append(append([]string{}, command...), flags...), nested)
 			t.Run(strings.Join(args[:len(args)-1], " "), func(t *testing.T) {

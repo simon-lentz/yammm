@@ -842,8 +842,8 @@ func (sd *streamDecoder) checkEdgeListName(row int, key []any, relation string) 
 // per-child check. A slot under a name the parent's type does not declare as a
 // composition is refused: no declared target exists to read a child back as. A
 // (one) slot holding several children is refused: the (one) composed key
-// segment carries no discriminating element, so the adapter would mint one
-// byte-identical _composed_key for both. A schema-less read, or a parent row
+// segment carries no discriminating element, so the neo4j write path would
+// mint one byte-identical _composed_key for both. A schema-less read, or a parent row
 // that resolves to no type, makes no claim, as every other schema-derived check
 // here.
 func (sd *streamDecoder) checkComposedSlot(row int, relation string, occupants int) (schema.TypeID, bool) {

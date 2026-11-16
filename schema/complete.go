@@ -1099,7 +1099,7 @@ func (c *completer) validatePropertyNames() {
 // validatePrimaryKeys enforces that every concrete (non-abstract, non-part) type
 // declares or inherits at least one primary key. A node needs identity to be added to
 // a graph (see Graph.Add / E_GRAPH_MISSING_PK) or referenced by an association;
-// enforcing it at load fails fast for every consumer (gogen, the neo4j adapter, the
+// enforcing it at load fails fast for every consumer (gogen, schema/cypher, neo4j, the
 // LSP), not only graph construction. Abstract types (not instantiable) and part types
 // (embedded, no independent identity — PK-less parts are a supported composition
 // feature) are exempt. Errors are collected; the caller's final error gate aborts.

@@ -75,7 +75,7 @@ The all-or-nothing contract is unchanged: any error still yields a zero schema.
 5. **Invariant error** -- `E_INVARIANT_FAIL` (expression returned false) or `E_EVAL_ERROR` (expression bug).
 6. **Graph error** -- a code of the Graph table below, such as `E_DUPLICATE_PK` (duplicate key) or `E_UNRESOLVED_REQUIRED` (missing required association).
 7. **Snapshot error** -- See the Snapshot section. Corrupt, incompatible, or dangling references.
-8. **Adapter error** -- Neo4j-specific codes in the Adapter section.
+8. **Neo4j error** -- Neo4j-specific codes in the Neo4j section.
 
 ---
 
@@ -206,15 +206,16 @@ The all-or-nothing contract is unchanged: any error still yields a zero schema.
 | `W_SNAPSHOT_UNRESOLVED_REQUIRED` | A loaded document carries an unresolved record, one no structural check refused, for an association the schema declares required (read from the schema, never the record); reported only under `snapshot.WithRevalidation`, at that option's severity (v0.15+) |
 | `W_SNAPSHOT_PATH_EXTENSION` | A snapshot was written to a path that does not end in `.ys`; the write succeeded, and a reader that discovers snapshots by extension will not find it |
 
-### Adapter
+### Neo4j
 
-| Code | Adapter | Meaning |
-| ---- | ------- | ------- |
-| `E_NEO4J_LABEL_COLLISION` | Neo4j | Two types produce the same Neo4j label |
-| `E_NEO4J_INVALID_IDENTIFIER` | Neo4j | Name not valid as Neo4j identifier |
-| `E_NEO4J_UNSUPPORTED_TYPE` | Neo4j | Constraint kind has no Neo4j type mapping |
-| `E_NEO4J_UNKNOWN_PROPERTY` | Neo4j | An index annotation names a property the type does not have |
-| `E_NEO4J_INVALID_INDEX_TARGET` | Neo4j | An index annotation names a property whose type cannot carry it (`@index` or `@@index` on a non-scalar, `@vector` on a non-Vector or a non-positive dimension, `@fulltext` or `@@fulltext` on a non-text property) |
-| `W_NEO4J_NODE_KEY_UNSUPPORTED` | Neo4j | `WithNodeKeyConstraints(true)` combined with `WithEdition(Community)`; NODE KEY is Enterprise-only, so UNIQUE is emitted for primary keys instead (Warning, v0.9.1+) |
-| `W_NEO4J_EDITION_CONSTRAINT_OMITTED` | Neo4j | `WithEdition(Community)` dropped NOT NULL and PROPERTY_TYPE constraints the schema declares; reported once per call with a count per omitted kind (Warning, v0.14+) |
-| `W_NEO4J_INDEXES_UNREADABLE` | Neo4j | A comparison could not read the database's indexes, so the half needing them did not run; the constraint half is complete, but a declaration whose name an index already holds reads as a create that will not take effect (Warning) |
+`schema/cypher` and `neo4j` register these codes when either is linked.
+
+| Code | Meaning |
+| ---- | ------- |
+| `E_NEO4J_LABEL_COLLISION` | Two types produce the same Neo4j label |
+| `E_NEO4J_INVALID_IDENTIFIER` | Name not valid as Neo4j identifier |
+| `E_NEO4J_UNSUPPORTED_TYPE` | Constraint kind has no Neo4j type mapping |
+| `E_NEO4J_UNKNOWN_PROPERTY` | An index annotation names a property the type does not have |
+| `E_NEO4J_INVALID_INDEX_TARGET` | An index annotation names a property whose type cannot carry it (`@index` or `@@index` on a non-scalar, `@vector` on a non-Vector or a non-positive dimension, `@fulltext` or `@@fulltext` on a non-text property) |
+| `W_NEO4J_NODE_KEY_UNSUPPORTED` | `cypher.Config{NodeKeys: true, Edition: cypher.Community}` (`--node-keys --edition community`); NODE KEY is Enterprise-only, so UNIQUE is emitted for primary keys instead (Warning, v0.9.1+) |
+| `W_NEO4J_EDITION_CONSTRAINT_OMITTED` | The Community edition dropped NOT NULL and PROPERTY_TYPE constraints the schema declares; reported once per call with a count per omitted kind (Warning, v0.14+) |

@@ -389,7 +389,7 @@ func (c *completer) reportIndexRedundancy(a Annotation, span location.Span, t, e
 // both, and reporting an error the user cannot act on is worse than the
 // redundant index the mixed case emits. The rule therefore reports only what can
 // be safely removed. This is the one case where a redundant index still ships,
-// and no tool reports it: the Neo4j adapter's Diff counts an online index a
+// and no tool reports it: the neo4j package's Diff counts an online index a
 // constraint backs as the declared index's match while the plan keeps that
 // constraint.
 //

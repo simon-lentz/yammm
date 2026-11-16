@@ -8,10 +8,10 @@ import (
 
 	"github.com/spf13/cobra"
 
-	adaptern4j "github.com/simon-lentz/yammm/adapter/neo4j"
 	"github.com/simon-lentz/yammm/cmd/yammm/internal/cli"
-	"github.com/simon-lentz/yammm/diag"
+	"github.com/simon-lentz/yammm/neo4j"
 	"github.com/simon-lentz/yammm/schema"
+	"github.com/simon-lentz/yammm/schema/cypher"
 )
 
 func newNeo4jDiffCmd() *cobra.Command {
@@ -19,10 +19,10 @@ func newNeo4jDiffCmd() *cobra.Command {
 		Use:   "diff <schema.yammm>",
 		Short: "Compare schema constraints and indexes against a live Neo4j database",
 		Long: "Performs a semantic five-way diff between desired schema constraints and indexes and their actual database state:\n" +
-			"matched, drifted, to-create, to-drop, and unverified (present, but the server did not report enough to compare it).\n\n" +
-			"Any drift, missing definition, or undeclared schema-owned definition exits 1; an unverifiable definition exits 3; nothing is applied. " +
-			"An index in the database that the schema does not declare counts as drift — declare it with @index/@@index/@vector/@fulltext/@@fulltext, " +
-			"or pass --indexes=false for a constraints-only diff.",
+			"matched, drifted, to-create, to-drop, and unverified (present, but the server did not report enough to compare it, or an index still populating).\n\n" +
+			"A plan with any drift, create or drop, in either half, exits 1, and outranks an unverifiable definition, " +
+			"which exits 3; a database whose constraints or indexes cannot be read exits 3; nothing is applied. " +
+			"An undeclared index on a schema-owned label can be planned for a drop — declare it with @index/@@index/@vector/@fulltext/@@fulltext to keep it.",
 		Args: cobra.ExactArgs(1),
 		RunE: withDiagnostics(runNeo4jDiff),
 	}
@@ -34,7 +34,6 @@ func newNeo4jDiffCmd() *cobra.Command {
 	registerConnectionFlags(cmd)
 	registerLabelFlags(cmd)
 	registerConstraintFlags(cmd)
-	cmd.Flags().Bool("indexes", true, "include index drift in the diff and exit code; --indexes=false is constraints-only")
 
 	registerModuleRootFlag(cmd)
 	return cmd
@@ -45,12 +44,11 @@ func runNeo4jDiff(cmd *cobra.Command, args []string, sink *cli.DiagnosticSink) e
 	username, _ := cmd.Flags().GetString("username")
 	password, _ := cmd.Flags().GetString("password")
 	database, _ := cmd.Flags().GetString("database")
-	indexesEnabled, _ := cmd.Flags().GetBool("indexes")
 
 	if uri == "" {
 		return cli.Usagef("--uri is required (or set YAMMM_NEO4J_URI)")
 	}
-	opts, err := constraintOptions(cmd)
+	c, err := constraintConfig(cmd)
 	if err != nil {
 		return err
 	}
@@ -71,24 +69,15 @@ func runNeo4jDiff(cmd *cobra.Command, args []string, sink *cli.DiagnosticSink) e
 		return err
 	}
 
-	// The adapter matches the target graph's generation settings.
-	adapter := adaptern4j.New(opts...)
-	desired, constraintResult := adapter.ConstraintsStructured(cmd.Context(), s)
-	if constraintResult.HasErrors() {
-		sink.Add(constraintResult)
-		return cli.Exit(cli.ExitForResult(constraintResult))
+	// The desired side is judged before any connection, so a schema the
+	// generators refuse is reported without a server.
+	if _, result := c.Constraints(s); result.HasErrors() {
+		sink.Add(result)
+		return cli.Exit(cli.ExitForResult(result))
 	}
-
-	// Generate desired indexes (skipped in constraints-only mode so index-annotation
-	// errors do not block a constraints-only diff).
-	var desiredIndexes []adaptern4j.Index
-	if indexesEnabled {
-		di, indexResult := adapter.IndexesStructured(cmd.Context(), s)
-		if indexResult.HasErrors() {
-			sink.Add(indexResult)
-			return cli.Exit(cli.ExitForResult(indexResult))
-		}
-		desiredIndexes = di
+	if _, result := c.Indexes(s); result.HasErrors() {
+		sink.Add(result)
+		return cli.Exit(cli.ExitForResult(result))
 	}
 
 	// Connect to database
@@ -99,122 +88,72 @@ func runNeo4jDiff(cmd *cobra.Command, args []string, sink *cli.DiagnosticSink) e
 	}
 	defer driver.Close(ctx)
 
-	state, err := fetchRemoteState(ctx, cli.DriverQueries(driver), database, sink)
+	state, err := fetchRemoteState(ctx, cli.DriverQueries(driver), database)
 	if err != nil {
 		return err
 	}
-	// The index read is the last phase that diagnoses, so everything the
-	// command has to say is in the sink and precedes the diff report.
+	plan, result := neo4j.Diff(c, s, state.constraints, state.indexes)
+	if result.HasErrors() {
+		sink.Add(result)
+		return cli.Exit(cli.ExitForResult(result))
+	}
 	sink.Flush()
 
-	indexes := indexOutcomeBeforeDiff(indexesEnabled, state.indexFailed)
-
-	// The label set is computed once from the schema and scopes both halves of
-	// the plan, so ownership is exact membership rather than a guess parsed back
-	// out of each remote object's label. Without --indexes the plan declares no
-	// index, and only its constraint half is printed.
-	owned := adapter.OwnedLabels(cmd.Context(), s)
-	plan := planRemoteState(adapter, desired, desiredIndexes, state, indexes, owned)
-	diff := &plan.Constraints
-
-	w := cmd.OutOrStdout()
-	printDiffResult(w, diff)
-
-	if indexesEnabled && indexes != indexDiffUnavailable {
-		indexDiff := &plan.Indexes
-		printIndexDiffResult(w, indexDiff, owned)
-		switch {
-		case len(indexDiff.Drift) > 0 || len(indexDiff.Create) > 0 || len(indexDiff.Drop) > 0:
-			indexes = indexDiffDrifted
-		case len(indexDiff.Unverified) > 0:
-			indexes = indexDiffUnverified
-		default:
-			indexes = indexDiffClean
-		}
-	}
-
-	constraintDrift := len(diff.Drift) > 0 || len(diff.Create) > 0 || len(diff.Drop) > 0
-	return cli.Exit(neo4jDiffExit(constraintDrift, len(diff.Unverified) > 0, indexes))
+	// Diff scopes the plan by its own owned set; this one names an index Drop's
+	// owned label in the report, by membership rather than a guess parsed back
+	// out of the remote object's label.
+	reportPlan(cmd.OutOrStdout(), plan, c.OwnedLabels(s))
+	return cli.Exit(neo4jDiffExit(plan))
 }
 
-// planRemoteState plans the declarations against state. After a failed index
-// read the plan declares no index: its index half is not printed, and an index
-// declaration must not move a constraint by rows the read did not return.
-func planRemoteState(adapter *adaptern4j.Adapter, desired []adaptern4j.Constraint, desiredIndexes []adaptern4j.Index,
-	state remoteState, indexes indexDiffOutcome, owned *adaptern4j.OwnedLabels,
-) *adaptern4j.DiffResult {
-	if indexes == indexDiffUnavailable {
-		desiredIndexes = nil
-	}
-	return adapter.Diff(desired, desiredIndexes, state.constraints, state.indexes, owned)
+// reportPlan writes both halves of plan, the constraints' first.
+func reportPlan(w io.Writer, plan neo4j.Plan, owned *cypher.OwnedLabels) {
+	printConstraintDiff(w, &plan.Constraints)
+	printIndexDiff(w, &plan.Indexes, owned)
 }
 
-// indexesUnreadable reports a degraded index read as the diagnostic it is.
-//
-// Prose on a stream reached no --format json consumer in any form, and this is
-// the one message in the command that changes what its output means.
-func indexesUnreadable(cause error) diag.Result {
-	c := diag.NewCollectorUnlimited()
-	c.Collect(diag.NewIssue(diag.Warning, adaptern4j.W_NEO4J_INDEXES_UNREADABLE,
-		fmt.Sprintf("indexes could NOT be read (%v); a constraint whose name an index holds is reported as a create that will not take effect", cause)).Build())
-	return c.Result()
-}
-
-// remoteState is the database side of a diff: the constraints it reported, the
-// indexes it could report, and whether the index read failed.
+// remoteState is the database side of a diff: the constraints and the indexes
+// it reported.
 type remoteState struct {
-	constraints []adaptern4j.RemoteConstraint
-	indexes     []adaptern4j.RemoteIndex
-	indexFailed bool
+	constraints []neo4j.RemoteConstraint
+	indexes     []neo4j.RemoteIndex
 }
 
-// fetchRemoteState reads both halves of the database side through run,
-// reporting a degraded index read to sink.
+// fetchRemoteState reads both halves of the database side through run.
 //
-// It takes the runner rather than a driver so both queries, both parsers, the
-// projection check and the degraded path are reachable without a server — the
-// absence that left this whole command unasserted past its --uri guard.
-func fetchRemoteState(ctx context.Context, run cli.QueryRunner, database string, sink *cli.DiagnosticSink) (remoteState, error) {
-	records, err := run(ctx, database, adaptern4j.IntrospectConstraintsQuery())
+// It takes the runner rather than a driver so both queries, both parsers and
+// the projection check are reachable without a server — the absence that left
+// this whole command unasserted past its --uri guard.
+func fetchRemoteState(ctx context.Context, run cli.QueryRunner, database string) (remoteState, error) {
+	records, err := run(ctx, database, neo4j.ShowConstraints)
 	if err != nil {
 		return remoteState{}, cli.Runtimef("fetch constraints: %v", err)
 	}
 
-	constraints, err := adaptern4j.ParseRemoteConstraints(records)
+	constraints, err := neo4j.ParseConstraints(records)
 	if err != nil {
 		return remoteState{}, cli.Runtimef("parse constraints: %v", err)
 	}
 	if n := untypedRemoteObjects(len(constraints), func(i int) string { return constraints[i].Type }); n > 0 {
 		return remoteState{}, unreadableProjection(n, len(constraints), "constraint", "SHOW CONSTRAINTS")
 	}
-	state := remoteState{constraints: constraints}
 
-	// Fetch actual indexes whatever --indexes says: index and constraint names
-	// share one namespace, so the plan's CONSTRAINT half needs the index rows to
-	// know whether a CREATE CONSTRAINT would be refused. --indexes=false opts out of comparing indexes, not
-	// out of classifying constraints accurately — reading it as the latter makes
-	// the same declaration print as an unfixable Create under one flag and
-	// actionable drift under the other. On a server that cannot report indexes
-	// the diff degrades rather than discarding the constraint half, but it says
-	// so, and does not exit 0 when indexes were asked for.
-	indexRecords, indexErr := run(ctx, database, adaptern4j.IntrospectIndexesQuery())
-	switch {
-	case indexErr != nil:
-		sink.Add(indexesUnreadable(indexErr))
-		state.indexFailed = true
-	default:
-		parsed, parseErr := adaptern4j.ParseRemoteIndexes(indexRecords)
-		if parseErr != nil {
-			sink.Add(indexesUnreadable(fmt.Errorf("parse indexes: %w", parseErr)))
-			state.indexFailed = true
-			break
-		}
-		if n := untypedRemoteObjects(len(parsed), func(i int) string { return parsed[i].Type }); n > 0 {
-			return remoteState{}, unreadableProjection(n, len(parsed), "index", "SHOW INDEXES")
-		}
-		state.indexes = parsed
+	// Index and constraint names share one namespace, so the plan's CONSTRAINT
+	// half needs the index rows to know whether a CREATE CONSTRAINT would be
+	// refused. A diff without them is no diff, so a failed read fails the
+	// command as a failed constraint read does.
+	indexRecords, err := run(ctx, database, neo4j.ShowIndexes)
+	if err != nil {
+		return remoteState{}, cli.Runtimef("fetch indexes: %v", err)
 	}
-	return state, nil
+	indexes, err := neo4j.ParseIndexes(indexRecords)
+	if err != nil {
+		return remoteState{}, cli.Runtimef("parse indexes: %v", err)
+	}
+	if n := untypedRemoteObjects(len(indexes), func(i int) string { return indexes[i].Type }); n > 0 {
+		return remoteState{}, unreadableProjection(n, len(indexes), "index", "SHOW INDEXES")
+	}
+	return remoteState{constraints: constraints, indexes: indexes}, nil
 }
 
 // untypedRemoteObjects counts parsed remote objects that carry a name but no
@@ -262,50 +201,20 @@ func unreadableProjection(untyped, total int, object, query string) error {
 		untyped, total, object, query, object)
 }
 
-// indexDiffOutcome records what the index half of a diff produced, so the exit
-// code can tell "compared, found drift" apart from "never compared".
-type indexDiffOutcome int
-
-const (
-	indexDiffSkipped     indexDiffOutcome = iota // --indexes=false: the caller opted out
-	indexDiffClean                               // compared; every index verified in sync
-	indexDiffDrifted                             // compared; drift, creates, or drops found
-	indexDiffUnverified                          // compared, but an index's definition could not be checked
-	indexDiffUnavailable                         // requested, but index introspection failed
-)
-
-// indexOutcomeBeforeDiff classifies the index half from the read alone, before
-// any comparison runs.
-//
-// A read that was asked for and failed is unavailable; everything else is
-// skipped, the enabled-and-healthy case included, because the comparison that
-// follows is what classifies it. Opting out with --indexes=false is not a
-// failure even when the server could not have answered: nothing was asked for.
-func indexOutcomeBeforeDiff(enabled, readFailed bool) indexDiffOutcome {
-	if enabled && readFailed {
-		return indexDiffUnavailable
-	}
-	return indexDiffSkipped
-}
-
-// neo4jDiffExit maps the two halves of the diff onto an exit code.
+// neo4jDiffExit maps the plan onto an exit code, reading both halves.
 //
 // Drift wins: it is the actionable signal, and a caller that sees exit 1 goes
-// looking at the printed diff either way. The incomplete-comparison outcomes are
-// the interesting case — none may exit 0. Degrading to constraints-only on a
-// failed introspection is right (the constraint half already printed is worth
-// keeping, and the warning names what it cannot see), and so is reporting an
-// object whose definition the server would not disclose; but in each the caller asked for drift and did not get it,
-// so reporting success would let a drift gate read "no drift" from a comparison
-// that never ran. That reasoning is not specific to indexes: a TYPE constraint
-// on a server too old to report its property type is unverified in exactly the
-// same sense, and is treated the same. Opting out with --indexes=false is a
-// different thing entirely: nothing was asked for, so nothing is owed.
-func neo4jDiffExit(constraintDrift, constraintUnverified bool, indexes indexDiffOutcome) int {
-	if constraintDrift || indexes == indexDiffDrifted {
+// looking at the printed diff either way. An unverified object — one whose
+// definition the server would not disclose, such as a TYPE constraint on a
+// server too old to report its property type — must not exit 0: the caller
+// asked for drift and did not get it, so reporting success would let a drift
+// gate read "no drift" from a comparison that never ran.
+func neo4jDiffExit(plan neo4j.Plan) int {
+	cs, is := plan.Constraints, plan.Indexes
+	if len(cs.Drift)+len(cs.Create)+len(cs.Drop)+len(is.Drift)+len(is.Create)+len(is.Drop) > 0 {
 		return cli.ExitValidation
 	}
-	if constraintUnverified || indexes == indexDiffUnavailable || indexes == indexDiffUnverified {
+	if len(cs.Unverified)+len(is.Unverified) > 0 {
 		return cli.ExitRuntime
 	}
 	return cli.ExitOK
@@ -339,11 +248,11 @@ func printDiffSummary(w io.Writer, prefix, noun string, match, drift, create, dr
 	}
 }
 
-// constraintLabel identifies a constraint in report output. Names are suppressed
-// under --named=false, where printing Name alone yields a blank identifier and a
-// list of drift lines an operator cannot tell apart; the label and members
-// always identify it.
-func constraintLabel(c adaptern4j.Constraint) string {
+// constraintLabel identifies a constraint in report output. A hand-built
+// constraint can have no name, where printing Name alone yields a blank
+// identifier and a list of drift lines an operator cannot tell apart; the label
+// and members always identify it.
+func constraintLabel(c cypher.Constraint) string {
 	if c.Name != "" {
 		return c.Name
 	}
@@ -353,19 +262,19 @@ func constraintLabel(c adaptern4j.Constraint) string {
 // ownedLabelOf reports which of a remote object's labels the schema owns — the
 // same label the diff scoped it by.
 //
-// Its only caller passes [adaptern4j.IndexDiffResult].Drop entries, every one of
+// Its only caller passes [neo4j.IndexDiff].Drop entries, every one of
 // which the diff admitted through ownership, so the lookup succeeds. The
-// fallback exists because IndexDiffResult is an exported type a consumer may
+// fallback exists because IndexDiff is an exported type a consumer may
 // build or filter itself: naming every label the object carries beats printing
 // a blank where an identifier belongs.
-func ownedLabelOf(owned *adaptern4j.OwnedLabels, labels []string) string {
+func ownedLabelOf(owned *cypher.OwnedLabels, labels []string) string {
 	if l, ok := owned.LabelOf(labels); ok {
 		return l
 	}
 	return strings.Join(labels, "|")
 }
 
-func printDiffResult(w io.Writer, diff *adaptern4j.ConstraintDiffResult) {
+func printConstraintDiff(w io.Writer, diff *neo4j.ConstraintDiff) {
 	printMatchedLine(w, "constraints", len(diff.Match))
 
 	for _, d := range diff.Drift {
@@ -396,7 +305,7 @@ func printDiffResult(w io.Writer, diff *adaptern4j.ConstraintDiffResult) {
 	}
 }
 
-func printIndexDiffResult(w io.Writer, diff *adaptern4j.IndexDiffResult, owned *adaptern4j.OwnedLabels) {
+func printIndexDiff(w io.Writer, diff *neo4j.IndexDiff, owned *cypher.OwnedLabels) {
 	printMatchedLine(w, "indexes", len(diff.Match))
 
 	for _, d := range diff.Drift {
@@ -431,7 +340,7 @@ func printIndexDiffResult(w io.Writer, diff *adaptern4j.IndexDiffResult, owned *
 // constraints first, and for a constraint's backing index the constraint to drop.
 // Pairing matches on identity as well as name, so a blocker often carries an
 // operator's own name and appears in no other line of the report.
-func printBlockers(w io.Writer, prefix string, b adaptern4j.Blockers) {
+func printBlockers(w io.Writer, prefix string, b neo4j.Blockers) {
 	for _, c := range b.Constraints {
 		fmt.Fprintf(w, "%s%s %q on %s(%s)\n", prefix, blockerKind(c.Type, "constraint"), c.Name,
 			strings.Join(c.LabelsOrTypes, "|"), strings.Join(c.Properties, ", "))

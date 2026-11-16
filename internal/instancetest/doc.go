@@ -2,7 +2,7 @@
 // instance-layer values in tests across packages.
 //
 // It exists because test helpers that multiple test packages need — the
-// graph, snapshot, and adapter test suites all construct
+// graph, snapshot, and neo4j test suites all construct
 // [github.com/simon-lentz/yammm/instance] values — require an importable
 // home visible module-wide, and the generic test toolkit
 // (internal/yammmtest) stays domain-free by design. Every instance it builds

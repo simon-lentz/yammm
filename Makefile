@@ -23,14 +23,14 @@ test:
 gate:
 	scripts/stagedtree.sh && pre-commit run --all-files --hook-stage manual
 
-# Round-trips the neo4j adapter against a real server in Docker: the emitted DDL
+# Round-trips the neo4j package against a real server in Docker: the emitted DDL
 # is executed, the introspection queries are run for real, and what comes back is
 # diffed against what was applied. Behind a build tag because it needs Docker,
 # which the pre-commit gate does not.
 #
 # Runs the whole server matrix, one image after another. Enterprise entries start
-# with the evaluation licence accepted, because that is the edition the adapter
-# targets: NOT NULL, TYPE, and NODE KEY constraints and the propertyType column
+# with the evaluation licence accepted, because that is the edition schema/cypher
+# targets by default: NOT NULL, TYPE, and NODE KEY constraints and the propertyType column
 # are all Enterprise-only. The Community entry exercises the edition gating,
 # where those tests skip rather than fail.
 #
@@ -59,7 +59,7 @@ test-integration:
 	for image in $(NEO4J_TEST_IMAGES); do \
 		echo "==> $$image"; \
 		YAMMM_NEO4J_TEST_IMAGE=$$image go test -count=1 -tags neo4j_integration \
-			-timeout 20m ./adapter/neo4j/integration/ || failed="$$failed $$image"; \
+			-timeout 20m ./neo4j/integration/ || failed="$$failed $$image"; \
 	done; \
 	if [ -n "$$failed" ]; then echo "integration tests failed on:$$failed"; exit 1; fi
 

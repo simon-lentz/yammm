@@ -200,7 +200,7 @@ Composition targets must be `part type`.
 
 ## Annotations
 
-Validated metadata that downstream adapters turn into store DDL (indexes, write-once markers). Property-level annotations trail a property with a single `@`; type-level annotations are body members with a doubled `@@`.
+Validated metadata that downstream tools read: the index annotations become store DDL, and write-once markers split a write. Property-level annotations trail a property with a single `@`; type-level annotations are body members with a doubled `@@`.
 
 ```yammm-snippet
 state        String      @index

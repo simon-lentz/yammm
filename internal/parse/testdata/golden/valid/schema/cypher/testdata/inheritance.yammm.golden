@@ -1,0 +1,105 @@
+{
+  "name": "\"inherit_test\"",
+  "span": {
+    "s": 0,
+    "e": 21
+  },
+  "types": [
+    {
+      "name": "Tracked",
+      "name_span": {
+        "s": 37,
+        "e": 44
+      },
+      "abstract": true,
+      "props": [
+        {
+          "name": "run_id",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 69,
+              "e": 75
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 51,
+            "e": 84
+          }
+        },
+        {
+          "name": "source_fetched_at",
+          "constraint": {
+            "kind": "Timestamp",
+            "span": {
+              "s": 107,
+              "e": 116
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 89,
+            "e": 125
+          }
+        }
+      ],
+      "span": {
+        "s": 23,
+        "e": 127
+      }
+    },
+    {
+      "name": "Entity",
+      "name_span": {
+        "s": 134,
+        "e": 140
+      },
+      "extends": [
+        {
+          "name": "Tracked",
+          "span": {
+            "s": 149,
+            "e": 156
+          }
+        }
+      ],
+      "props": [
+        {
+          "name": "id",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 168,
+              "e": 174
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 163,
+            "e": 182
+          }
+        },
+        {
+          "name": "name",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 192,
+              "e": 198
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 187,
+            "e": 207
+          }
+        }
+      ],
+      "span": {
+        "s": 129,
+        "e": 209
+      }
+    }
+  ]
+}

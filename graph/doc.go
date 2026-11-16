@@ -216,8 +216,8 @@
 // neither a Float nor a Vector element, or a literal no finite float64 holds),
 // and lists and string-keyed maps of those. Each has a
 // form on the .ys wire, so [github.com/simon-lentz/yammm/snapshot.Marshal] meets no
-// value it cannot write. A data writer can still refuse one: adapter/neo4j has
-// no spelling for some, and its doc names them.
+// value it cannot write. A data writer can still refuse one: the neo4j package
+// has no spelling for some, and its doc names them.
 //
 // Whether an association is required is read from the schema, never taken from
 // a constructor's input: [UnresolvedEdge.Required] is derived by every
@@ -359,7 +359,7 @@
 // part instance is found through its parent composition, so
 // [Snapshot.InstanceByKey] never returns one and this package mints none; a
 // store that must give each part node an identity derives it, and
-// [github.com/simon-lentz/yammm/adapter/neo4j] is the only one that does.
+// [github.com/simon-lentz/yammm/neo4j] is the only one that does.
 //
 // # Error Handling
 //

@@ -97,9 +97,9 @@ func TestRootGroup_AnEmptyPartGroupIsRefused(t *testing.T) {
 
 // TestRootGroup_LoadRefusesIneligibleTypes is the READER half, and it is
 // defence in depth: this library cannot write such a document, but a foreign
-// writer can, and admitting one hands the caller a snapshot no adapter can
-// consume — adapter/neo4j fails mid-write extracting a key the type does not
-// declare.
+// writer can, and admitting one hands the caller a snapshot no writer can
+// consume — the neo4j package fails mid-write extracting a key the type does
+// not declare.
 func TestRootGroup_LoadRefusesIneligibleTypes(t *testing.T) {
 	ctx := context.Background()
 	s := vLoad(t)

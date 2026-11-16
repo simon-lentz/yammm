@@ -292,4 +292,4 @@ jobs:
       - name: Integration tests
         env:
           YAMMM_NEO4J_TEST_IMAGE: ${{ matrix.image }}
-        run: go test -count=1 -tags neo4j_integration -timeout 20m -v ./adapter/neo4j/integration/
+        run: go test -count=1 -tags neo4j_integration -timeout 20m -v ./neo4j/integration/

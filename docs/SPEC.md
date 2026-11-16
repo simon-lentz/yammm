@@ -950,7 +950,7 @@ A `List` nests at most 1,000 levels. A deeper one written in one type is a synta
 - List types cannot be used as primary keys (see [Primary Key Types](#primary-key-types)).
 - List types cannot be used in relationship (edge) properties.
 
-**Neo4j portability.** A list whose *element* is itself a collection — `List<List<T>>`, `List<Vector[N]>`, or a list of a list-typed alias — is valid yammm and validates normally, but has no equivalent in Neo4j, which has no nested collection property type. `yammm neo4j constraints` rejects such a property with `E_NEO4J_UNSUPPORTED_TYPE` under every flag, `--scalar-types=false` included, and because constraint generation is all-or-nothing it emits **nothing for the whole schema**, not just for that property. `yammm neo4j indexes` does not make the check, and prints the schema's index statements. The Neo4j adapter's write path refuses a value of such a property, an empty list included, and not an absent one. `yammm neo4j constraints` judges a property on each concrete type and part type with a valid label that declares or inherits it. Two exceptions follow from that: it does not report a property of a type whose label is no valid identifier, which it reports with `E_NEO4J_INVALID_IDENTIFIER` instead, or a property declared on an abstract type that no such type extends. Model the inner collection as a `part type` reached by a composition if the model must be written to Neo4j.
+**Neo4j portability.** A list whose *element* is itself a collection — `List<List<T>>`, `List<Vector[N]>`, or a list of a list-typed alias — is valid yammm and validates normally, but has no equivalent in Neo4j, which has no nested collection property type. `yammm neo4j constraints` rejects such a property with `E_NEO4J_UNSUPPORTED_TYPE` under every flag, `--scalar-types=false` included, and because constraint generation is all-or-nothing it emits **nothing for the whole schema**, not just for that property. `yammm neo4j indexes` does not make the check, and prints the schema's index statements. The `neo4j` write path refuses a value of such a property, an empty list included, and not an absent one. `yammm neo4j constraints` judges a property on each concrete type and part type with a valid label that declares or inherits it. Two exceptions follow from that: it does not report a property of a type whose label is no valid identifier, which it reports with `E_NEO4J_INVALID_IDENTIFIER` instead, or a property declared on an abstract type that no such type extends. Model the inner collection as a `part type` reached by a composition if the model must be written to Neo4j.
 
 **Narrowing:**
 
@@ -1083,7 +1083,7 @@ type Car {
 
 Composition data is embedded inline in instance documents rather than using reference objects, and is **always an array**, `(one)` included. A `null` is the composition left out; any other value that is not an array draws `E_EDGE_SHAPE_MISMATCH`. This differs from associations, where `(one)` takes a single object.
 
-A part instance is identified through its parent composition, not by a global key. The library mints no address for one. An exporter that must give each part node an identity of its own — the Neo4j adapter's `_composed_key` property is the only one that does — derives it from the **owning root**, not from the immediate parent: the root's identity in that store, the root's key, then one segment per composition hop — for a `(one)` composition the relation name alone, since the slot holds exactly one child; for a `many` composition the relation name and either the child's key or, for a **keyless** part, its array position. Rooting the address at the owning root is what keeps it correct below depth one, and carrying the root's identity is what stops two root types that share a key value and a relation name from naming one part node. A positional segment is **not stable across writes**; it is safe only under replace semantics, where a parent write deletes and recreates its composed subtree.
+A part instance is identified through its parent composition, not by a global key. The library mints no address for one. An exporter that must give each part node an identity of its own — the `neo4j` package's `_composed_key` property is the only one that does — derives it from the **owning root**, not from the immediate parent: the root's identity in that store, the root's key, then one segment per composition hop — for a `(one)` composition the relation name alone, since the slot holds exactly one child; for a `many` composition the relation name and either the child's key or, for a **keyless** part, its array position. Rooting the address at the owning root is what keeps it correct below depth one, and carrying the root's identity is what stops two root types that share a key value and a relation name from naming one part node. A positional segment is **not stable across writes**; it is safe only under replace semantics, where a parent write deletes and recreates its composed subtree.
 
 ### Multiplicity
 
@@ -1165,7 +1165,7 @@ For **to-many associations**, use an array of edge objects:
 
 ## Annotations
 
-Annotations attach validated, store-agnostic metadata to properties and types. The core validates their structure and eligibility at load; downstream adapters interpret them (for example, turning them into index or write-shape DDL). Annotations do not change what instance data is valid, and they are excluded from the structural hash.
+Annotations attach validated, store-agnostic metadata to properties and types. The core validates their structure and eligibility at load; downstream generators and writers interpret them (for example, turning them into index DDL or a write shape). Annotations do not change what instance data is valid, and they are excluded from the structural hash.
 
 ### Syntax
 
@@ -1788,7 +1788,7 @@ YAMMM uses structured diagnostics with stable error codes. The Go programmatic i
 
 ### Diagnostic Codes
 
-Codes are stable identifiers for programmatic matching. `diag/code.go` holds the built-in codes, and `adapter/neo4j` registers its own on import. Categories and their codes:
+Codes are stable identifiers for programmatic matching. `diag/code.go` holds the built-in codes, and the Neo4j mapping's codes, which `schema/cypher` declares, register when it is imported. Categories and their codes:
 
 **Sentinel** — internal conditions:
 
@@ -1896,16 +1896,15 @@ Codes are stable identifiers for programmatic matching. `diag/code.go` holds the
 - `W_SNAPSHOT_UNRESOLVED_REQUIRED` — under `WithRevalidation`, a loaded document carries an unresolved record, one no structural check refused, for a required association
 - `W_SNAPSHOT_PATH_EXTENSION` (Warning) — a snapshot was written to a path that does not end in `.ys`. The write succeeded; a reader that discovers snapshots by extension will not find it
 
-**Adapter** — platform errors. Each code below is registered by its adapter package when that package is linked:
+**Neo4j** — Neo4j mapping and write errors. `schema/cypher` and `neo4j` register each code below when either is linked:
 
 - `E_NEO4J_LABEL_COLLISION` — two types render the same Neo4j label
 - `E_NEO4J_INVALID_IDENTIFIER` — an identifier is not usable unquoted in generated Cypher
-- `E_NEO4J_UNSUPPORTED_TYPE` — a property kind the adapter cannot express
+- `E_NEO4J_UNSUPPORTED_TYPE` — a property kind Neo4j cannot store
 - `E_NEO4J_UNKNOWN_PROPERTY` — an annotation names a property the type does not declare
 - `E_NEO4J_INVALID_INDEX_TARGET` — an index annotation targets an ineligible property
 - `W_NEO4J_NODE_KEY_UNSUPPORTED` (Warning) — NODE KEY is unavailable on this edition
 - `W_NEO4J_EDITION_CONSTRAINT_OMITTED` (Warning) — a constraint was omitted because the edition does not support it
-- `W_NEO4J_INDEXES_UNREADABLE` (Warning) — a comparison could not read the database's indexes, so the half needing them did not run. The constraint half is complete; a declaration whose name an index already holds reads as a create that will not take effect
 
 ## File Extension and Conventions
 

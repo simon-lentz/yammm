@@ -18,7 +18,7 @@
 # on, the plain and race builds and the build with .golangci.yml's tags,
 # mermaid and neo4j_integration, which its check job lints; linux/amd64 with
 # the mermaid tag for schema/markdown and with the neo4j_integration tag for
-# adapter/neo4j/integration, the one package each of those jobs tests; and
+# neo4j/integration, the one package each of those jobs tests; and
 # linux/amd64 under GOEXPERIMENT=jsonv2, plain and race. The check lists each
 # with its own cgo setting and no GOFLAGS from any host alike; --host asks no
 # other target and does not judge it.
@@ -134,7 +134,7 @@ if [ "${1:-}" != "--host" ]; then
 	done
 	builds+=(
 		"linux/amd64 1 - -tags=mermaid schema/markdown"
-		"linux/amd64 1 - -tags=neo4j_integration adapter/neo4j/integration"
+		"linux/amd64 1 - -tags=neo4j_integration neo4j/integration"
 		"linux/amd64 1 jsonv2 - -"
 		"linux/amd64 1 jsonv2 -race -"
 	)

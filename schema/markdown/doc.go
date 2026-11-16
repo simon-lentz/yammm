@@ -8,7 +8,7 @@
 //
 // # Schema-In, Bytes-Out
 //
-// Like schema/gogen — and unlike adapter/neo4j —
+// Like schema/gogen and schema/cypher — and unlike neo4j —
 // markdown has no instance-data path: it never parses, validates, or
 // serializes instances. It imports neither instance nor graph. It maps
 // a completed schema to one Markdown document, nothing more, and returns a
@@ -308,7 +308,7 @@
 // line: the invariant's fence dedents its continuation lines by the column the
 // invariant starts at. The generated reference describes
 // the data model; where a schema's annotations land as store DDL is
-// [github.com/simon-lentz/yammm/adapter/neo4j]'s output, and `yammm neo4j
+// [github.com/simon-lentz/yammm/schema/cypher]'s output, and `yammm neo4j
 // indexes` renders it.
 //
 // They do reach the generator indirectly: a property inherited from several

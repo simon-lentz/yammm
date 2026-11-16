@@ -7,9 +7,10 @@ import (
 
 	"github.com/simon-lentz/yammm/diag"
 
-	// Blank imports register adapter-defined diagnostic codes so AllCodes()
+	// Blank imports register the Neo4j packages' diagnostic codes so AllCodes()
 	// includes them. This is a test file, so the coupling is acceptable.
-	_ "github.com/simon-lentz/yammm/adapter/neo4j"
+	_ "github.com/simon-lentz/yammm/neo4j"
+	_ "github.com/simon-lentz/yammm/schema/cypher"
 )
 
 // diagnosticsRefPath is the path to the plugin's diagnostics reference file,

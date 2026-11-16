@@ -8,7 +8,7 @@
 // package's directory; [GoldenJSON] canonically marshals a value first.
 // Both rewrite the file when the -update flag is set:
 //
-//	go test ./adapter/neo4j/... -update
+//	go test ./schema/cypher/... -update
 //
 // The flag is registered only in test binaries that import yammmtest, so
 // always pass -update per package — a repo-wide `go test ./... -update`

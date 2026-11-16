@@ -1,15 +1,14 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"strings"
 	"testing"
 
-	adaptern4j "github.com/simon-lentz/yammm/adapter/neo4j"
 	"github.com/simon-lentz/yammm/cmd/yammm/internal/cli"
+	"github.com/simon-lentz/yammm/neo4j"
 )
 
 // recordedCall is one query a command issued.
@@ -43,7 +42,7 @@ func (q *queryLog) run(_ context.Context, database, query string) ([]map[string]
 }
 
 // recordedConstraints is a SHOW CONSTRAINTS YIELD * reading of a database
-// written by this adapter: a primary key, a required property, a scalar type
+// written under the default mapping: a primary key, a required property, a scalar type
 // constraint, and a relationship-scoped constraint.
 func recordedConstraints() []map[string]any {
 	return []map[string]any{
@@ -87,51 +86,33 @@ func recordedConstraints() []map[string]any {
 	}
 }
 
-// TestFetchRemoteState_DegradesOnAnUnreadableIndexRead: a server that cannot
-// report indexes must leave the constraint reading intact, say the index half
-// did not happen, and tell the operator so under a code a machine consumer can
-// match.
-func TestFetchRemoteState_DegradesOnAnUnreadableIndexRead(t *testing.T) {
+// TestFetchRemoteState_AnIndexReadFailureIsRuntime: the plan's constraint half
+// needs the index rows, since both kinds share one namespace, so an index read
+// that fails or returns records the parser refuses fails the command and names
+// its step.
+func TestFetchRemoteState_AnIndexReadFailureIsRuntime(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
 		name  string
 		index queryReply
+		step  string
 		cause string
 	}{
-		{"the index query fails", queryReply{err: errors.New("unsupported in this edition")}, "unsupported in this edition"},
-		{"an index record has no name", queryReply{records: []map[string]any{{"type": "RANGE"}}}, "parse indexes"},
+		{"the index query fails", queryReply{err: errors.New("unsupported in this edition")}, "fetch indexes", "unsupported in this edition"},
+		{"an index record has no name", queryReply{records: []map[string]any{{"type": "RANGE"}}}, "parse indexes", "record 0: missing index name"},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			log := &queryLog{replies: []queryReply{{records: recordedConstraints()}, tt.index}}
-
-			var out bytes.Buffer
-			sink := cli.NewDiagnosticSink(&out, cli.FormatText, true, false)
-			state, err := fetchRemoteState(t.Context(), log.run, "neo4j", sink)
-			if err != nil {
-				t.Fatalf("a degraded index read must not fail the diff: %v", err)
+			_, err := fetchRemoteState(t.Context(), log.run, "neo4j")
+			if code := cli.ExitForError(err); code != cli.ExitRuntime {
+				t.Errorf("exit code = %d, want %d: %v", code, cli.ExitRuntime, err)
 			}
-			if !state.indexFailed {
-				t.Error("the index read failed and the state does not say so")
-			}
-			if len(state.constraints) != len(recordedConstraints()) {
-				t.Errorf("kept %d constraints, want %d — the constraint diff must survive",
-					len(state.constraints), len(recordedConstraints()))
-			}
-			if !sink.Result().HasCode(adaptern4j.W_NEO4J_INDEXES_UNREADABLE) {
-				t.Errorf("a degraded read must report %s; got: %s",
-					adaptern4j.W_NEO4J_INDEXES_UNREADABLE, sink.Result())
-			}
-			if sink.Result().HasErrors() {
-				t.Error("a degraded read is a warning, not a failure")
-			}
-			// The cause is the whole diagnostic value: an operator acts on
-			// "unsupported in this edition" and cannot act on "could not read".
-			if !strings.Contains(sink.Result().String(), tt.cause) {
-				t.Errorf("the warning does not name the cause %q; got: %s", tt.cause, sink.Result())
+			if err == nil || !strings.Contains(err.Error(), tt.step) || !strings.Contains(err.Error(), tt.cause) {
+				t.Errorf("error %v does not name the step %q and the cause %q", err, tt.step, tt.cause)
 			}
 		})
 	}
@@ -167,8 +148,7 @@ func TestFetchRemoteState_RefusesAnUnreadableProjection(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			log := &queryLog{replies: tt.replies}
-			sink := cli.NewDiagnosticSink(&bytes.Buffer{}, cli.FormatText, true, false)
-			_, err := fetchRemoteState(t.Context(), log.run, "neo4j", sink)
+			_, err := fetchRemoteState(t.Context(), log.run, "neo4j")
 			if err == nil {
 				t.Fatal("an unreadable type column must not be reported as a clean comparison")
 			}
@@ -183,7 +163,7 @@ func TestFetchRemoteState_RefusesAnUnreadableProjection(t *testing.T) {
 }
 
 // TestFetchRemoteState_ReadsBothHalvesWhenTheServerAnswers is the clean control
-// the degraded cases are read against.
+// the failing cases are read against.
 func TestFetchRemoteState_ReadsBothHalvesWhenTheServerAnswers(t *testing.T) {
 	t.Parallel()
 
@@ -195,9 +175,7 @@ func TestFetchRemoteState_ReadsBothHalvesWhenTheServerAnswers(t *testing.T) {
 	}
 	log := &queryLog{replies: []queryReply{{records: recordedConstraints()}, {records: indexes}}}
 
-	var out bytes.Buffer
-	sink := cli.NewDiagnosticSink(&out, cli.FormatText, true, false)
-	state, err := fetchRemoteState(t.Context(), log.run, "analytics", sink)
+	state, err := fetchRemoteState(t.Context(), log.run, "analytics")
 	if err != nil {
 		t.Fatalf("fetchRemoteState: %v", err)
 	}
@@ -206,20 +184,14 @@ func TestFetchRemoteState_ReadsBothHalvesWhenTheServerAnswers(t *testing.T) {
 			t.Errorf("query %d ran against database %q, want the one asked for, %q", i, call.database, "analytics")
 		}
 	}
-	if state.indexFailed {
-		t.Error("the index read succeeded and the state says it failed")
-	}
 	if len(state.constraints) != len(recordedConstraints()) || len(state.indexes) != 1 {
 		t.Errorf("read %d constraints and %d indexes, want %d and 1",
 			len(state.constraints), len(state.indexes), len(recordedConstraints()))
 	}
-	if sink.Result().Len() != 0 {
-		t.Errorf("a clean read reported %s", sink.Result())
-	}
-	if log.calls[0].query != adaptern4j.IntrospectConstraintsQuery() {
+	if log.calls[0].query != neo4j.ShowConstraints {
 		t.Errorf("first query = %q, want the constraints projection", log.calls[0].query)
 	}
-	if log.calls[1].query != adaptern4j.IntrospectIndexesQuery() {
+	if log.calls[1].query != neo4j.ShowIndexes {
 		t.Errorf("second query = %q, want the indexes projection", log.calls[1].query)
 	}
 }
@@ -238,8 +210,7 @@ func TestFetchRemoteState_ConstraintFailuresAreRuntime(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 			log := &queryLog{replies: []queryReply{c.reply}}
-			var out bytes.Buffer
-			_, err := fetchRemoteState(t.Context(), log.run, "neo4j", cli.NewDiagnosticSink(&out, cli.FormatText, true, false))
+			_, err := fetchRemoteState(t.Context(), log.run, "neo4j")
 			if code := cli.ExitForError(err); code != cli.ExitRuntime {
 				t.Errorf("exit code = %d, want %d: %v", code, cli.ExitRuntime, err)
 			}

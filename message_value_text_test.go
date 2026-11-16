@@ -10,12 +10,12 @@ import (
 
 	"github.com/simon-lentz/yammm/internal/snapparts"
 
-	neo4jadapter "github.com/simon-lentz/yammm/adapter/neo4j"
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/instance"
 	"github.com/simon-lentz/yammm/internal/snappartstest"
+	"github.com/simon-lentz/yammm/neo4j"
 	"github.com/simon-lentz/yammm/schema"
 	"github.com/simon-lentz/yammm/snapshot"
 )
@@ -174,7 +174,7 @@ func TestMessages_RepeatAValueCutToItsHead(t *testing.T) {
 	c.result("snapshot.Load", r)
 
 	for _, k := range []schema.Constraint{schema.NewTimestampConstraint(), schema.NewDateConstraint()} {
-		_, err := neo4jadapter.CoerceParams(map[string]any{"v": longText}, neo4jadapter.ParamTypes{"v": k})
+		_, err := neo4j.CoerceParams(map[string]any{"v": longText}, neo4j.ParamTypes{"v": k})
 		c.err("neo4j.CoerceParams", err)
 	}
 

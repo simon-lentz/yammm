@@ -11,9 +11,9 @@ import (
 	"strings"
 	"testing"
 
-	adaptern4j "github.com/simon-lentz/yammm/adapter/neo4j"
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/location"
+	"github.com/simon-lentz/yammm/neo4j"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -478,9 +478,9 @@ func TestJoinExitErrors(t *testing.T) {
 	})
 }
 
-// markedRefusal returns adapter/neo4j's refusal of a float at an Integer, which
-// wraps the coercion error and the adapter's class.
+// markedRefusal returns the neo4j package's refusal of a float at an Integer,
+// which wraps the coercion error and the package's class.
 func markedRefusal() error {
-	_, err := adaptern4j.CoerceParams(map[string]any{"v": 2.5}, adaptern4j.ParamTypes{"v": schema.NewIntegerConstraint()})
+	_, err := neo4j.CoerceParams(map[string]any{"v": 2.5}, neo4j.ParamTypes{"v": schema.NewIntegerConstraint()})
 	return err
 }

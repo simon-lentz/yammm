@@ -156,5 +156,5 @@
 //
 //	immutable  ──imports──▶  (stdlib only)
 //
-// It must not import schema, instance, graph, or adapter.
+// It must not import schema, instance, graph, schema/cypher or neo4j.
 package immutable

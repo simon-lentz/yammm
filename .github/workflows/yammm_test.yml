@@ -391,7 +391,7 @@ jobs:
         run: npm ci --ignore-scripts
       - name: Parse the diagrams
         run: go test -count=1 -tags mermaid -timeout 5m -v ./schema/markdown/
-  # The adapter compares its own literals against strings a Neo4j server fills
+  # The neo4j package compares its own literals against strings a Neo4j server fills
   # in. Those strings change between server generations — the node uniqueness
   # constraint type is reported as UNIQUENESS by 5.x and NODE_PROPERTY_UNIQUENESS
   # by 2026.x — and a stale comparison fails SILENTLY, reporting a correct
@@ -402,7 +402,7 @@ jobs:
   #
   # Behind the neo4j_integration build tag, so scripts/test.sh stays Docker-free.
   # Linux only: GitHub's Windows and macOS runners cannot run the Linux server
-  # image, and the adapter is platform-independent Go. `make test-integration`
+  # image, and the Neo4j packages are platform-independent Go. `make test-integration`
   # runs the same matrix on a developer's machine.
   integration:
     name: Neo4j ${{ matrix.label }}
@@ -414,12 +414,12 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # The oldest generation the adapter claims to support. Its constraint
+          # The oldest generation the Neo4j packages claim to support. Its constraint
           # vocabulary differs from current, so this entry is the one that
           # catches a fix applied only to the newer spelling.
           - image: neo4j:5.26-enterprise
             label: 5.26 Enterprise
-          # The pinned default, matching adapter/neo4j/integration's defaultImage.
+          # The pinned default, matching neo4j/integration's defaultImage.
           - image: neo4j:2026.05.0-enterprise
             label: 2026.05 Enterprise
           # Community exercises the edition gating: the emitter drops to UNIQUE
@@ -439,4 +439,4 @@ jobs:
         # -count=1 because the environment variable that selects the image is
         # read at run time: a cached result from another matrix entry would be
         # reported as this entry's pass.
-        run: go test -count=1 -tags neo4j_integration -timeout 20m -v ./adapter/neo4j/integration/
+        run: go test -count=1 -tags neo4j_integration -timeout 20m -v ./neo4j/integration/

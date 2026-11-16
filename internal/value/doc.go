@@ -6,7 +6,7 @@
 //
 // This package is internal to the YAMMM module and is not importable by external
 // consumers per Go's internal/ package semantics. The validator, the expression
-// evaluator, the graph, the snapshot reader and the Neo4j adapter read a value
+// evaluator, the graph, the snapshot reader and the neo4j write path read a value
 // by it.
 //
 // # Value Comparison

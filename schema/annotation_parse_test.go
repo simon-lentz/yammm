@@ -9,8 +9,8 @@ import (
 // Grammar-level acceptance for schema annotations: these schemas must parse and
 // carry their annotations onto the model. The grammar assigns them no meaning —
 // eligibility is settled in a later completion phase ([completer.validateAnnotations],
-// exercised in annotation_validate_test.go) and the emitted DDL is the adapters'
-// concern (adapter/neo4j) — so a case here proves only that the shape reaches
+// exercised in annotation_validate_test.go) and the emitted DDL is a
+// generator's concern (schema/cypher) — so a case here proves only that the shape reaches
 // the model intact.
 
 func TestAnnotation_Grammar_PropertyLevelParses(t *testing.T) {

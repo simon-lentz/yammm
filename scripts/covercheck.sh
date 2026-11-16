@@ -6,9 +6,9 @@
 # "total:" line over an atomic-mode profile.
 #
 # Usage:
-#   scripts/covercheck.sh before ./adapter/neo4j   # record the baseline
+#   scripts/covercheck.sh before ./neo4j   # record the baseline
 #   ... make test changes ...
-#   scripts/covercheck.sh after  ./adapter/neo4j   # compare; exit 1 on drop
+#   scripts/covercheck.sh after  ./neo4j   # compare; exit 1 on drop
 #
 # Profiles and totals are stored under $COVERCHECK_DIR (default
 # /tmp/covercheck). An intended drop (deleting a genuine duplicate whose
@@ -17,7 +17,7 @@
 set -euo pipefail
 
 usage() {
-  echo "usage: $0 before|after <pkg>   (e.g. $0 before ./adapter/neo4j)" >&2
+  echo "usage: $0 before|after <pkg>   (e.g. $0 before ./neo4j)" >&2
   exit 2
 }
 

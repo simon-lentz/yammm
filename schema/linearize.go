@@ -1116,8 +1116,8 @@ func literalKindOf(v any) parse.LiteralKind {
 //
 // It deduplicates inherited-against-existing ONLY: an own-vs-own duplicate is
 // deliberately left in place — exactly as mergeInvariants leaves own duplicates
-// — so the merged view an adapter reads reflects what the type body actually
-// declares. validateTypeAnnotations reports the duplicate independently, off the
+// — so the merged view the generators and the write path read reflects what the
+// type body actually declares. validateTypeAnnotations reports the duplicate independently, off the
 // raw own slice, so the two never interact.
 func (c *completer) mergeAnnotations(t Type, supers []ResolvedTypeRef) []Annotation {
 	result := slices.Collect(t.Annotations())

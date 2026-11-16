@@ -11,7 +11,8 @@ type CodeCategory uint8
 
 const (
 	// CategorySentinel is for sentinel codes like E_INTERNAL and E_CONTEXT_CANCELLED.
-	CategorySentinel CodeCategory = iota
+	// The zero CodeCategory names no category.
+	CategorySentinel CodeCategory = iota + 1
 
 	// CategorySchema is for schema compilation errors.
 	CategorySchema
@@ -29,9 +30,9 @@ const (
 	// CategoryGraph is for graph-layer errors.
 	CategoryGraph
 
-	// CategoryAdapter is for the codes an adapter package registers when it is
-	// linked, such as adapter/neo4j's.
-	CategoryAdapter
+	// CategoryNeo4j is for the Neo4j mapping's codes, which schema/cypher
+	// declares.
+	CategoryNeo4j
 
 	// CategorySnapshot is for snapshot persistence errors.
 	CategorySnapshot
@@ -52,8 +53,8 @@ func (c CodeCategory) String() string {
 		return "instance"
 	case CategoryGraph:
 		return "graph"
-	case CategoryAdapter:
-		return "adapter"
+	case CategoryNeo4j:
+		return "neo4j"
 	case CategorySnapshot:
 		return "snapshot"
 	default:
@@ -65,7 +66,7 @@ func (c CodeCategory) String() string {
 //
 // Error codes are stable identifiers that tools can match on, even when
 // message text changes. Codes are created and registered via NewCode().
-// Built-in codes are defined in this package; adapter and consumer
+// Built-in codes are defined in this package; the Neo4j mapping and consumer
 // packages define their own domain-specific codes using the same function.
 //
 // Code.String() values are globally unique across all registered codes.
@@ -104,7 +105,7 @@ var (
 // Codes should be defined as package-level variables so that
 // registration happens at program startup:
 //
-//	var E_MY_ERROR = diag.NewCode("E_MY_ERROR", diag.CategoryAdapter)
+//	var E_MY_ERROR = diag.NewCode("E_MY_ERROR", diag.CategoryNeo4j)
 func NewCode(value string, cat CodeCategory) Code {
 	if value == "" {
 		panic("diag.NewCode: empty code value")

@@ -721,7 +721,7 @@ type AliasConstraint struct {
 
 // NewAliasConstraint creates an AliasConstraint referencing a DataType. A
 // raw-constraint caller with no schema, such as [instance.CheckValue] or the
-// Neo4j adapter's CoerceParams, reads the resolved
+// neo4j package's CoerceParams, reads the resolved
 // argument as the alias's meaning. Completion builds each resolved alias with
 // this function, so in a loaded schema a DataType reference means its
 // declaration and nothing else. [CheckConstraint] refuses a reference whose resolved argument is nil, and a
@@ -878,7 +878,7 @@ func ResolveAlias(c Constraint) Constraint {
 // a Go type this package does not construct, such as a pointer to one. A raw
 // constraint meets no completion, so it also refuses a DataType reference
 // resolved to another reference alone, as a datatype declared as another alone
-// is, and one that resolves to no constraint, at any List depth. The Neo4j adapter's CoerceParams
+// is, and one that resolves to no constraint, at any List depth. The neo4j package's CoerceParams
 // and instance.CheckValue call it before they read a value.
 func CheckConstraint(c Constraint) error {
 	if c == nil {

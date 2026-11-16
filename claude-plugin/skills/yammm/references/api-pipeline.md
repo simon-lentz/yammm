@@ -1,6 +1,6 @@
 # Go API Pipeline Reference
 
-The yammm Go library follows a four-stage pipeline: **load schema -> validate instances -> build graph -> persist or write**. An operation that reports diagnostics returns a `diag.Result`, beside the value where the call produces one, with stable error codes and, where a diagnostic has a source position, its span. Some operations return an `error` instead, among them the Neo4j adapter's `BatchNodeQueries` and `BatchEdgeQueries`, `gogen.Marshal` and `markdown.Marshal`, and `instance.BuilderFor`.
+The yammm Go library follows a four-stage pipeline: **load schema -> validate instances -> build graph -> persist or write**. An operation that reports diagnostics returns a `diag.Result`, beside the value where the call produces one, with stable error codes and, where a diagnostic has a source position, its span. Some operations return an `error` instead, among them `neo4j.NodeQueries` and `neo4j.EdgeQueries`, `gogen.Marshal` and `markdown.Marshal`, and `instance.BuilderFor`.
 
 ---
 

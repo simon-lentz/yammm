@@ -14,7 +14,7 @@ YAMMM is a Go library for defining schemas in a small DSL (`.yammm` files) and v
 - **Runtime validation**: Validate Go maps against compiled schemas, and JSON data files with `yammm check`
 - **Relationship modeling**: Associations (references) and compositions (ownership) with multiplicity
 - **Invariants**: Boolean constraint expressions evaluated at validation time
-- **Schema annotations**: Declare validated `@index` / `@@index` / `@vector` / `@fulltext` / `@@fulltext` metadata that adapters turn into store DDL, and `@writeOnce` properties that the Neo4j write path sets once
+- **Schema annotations**: Declare validated `@index` / `@@index` / `@vector` / `@fulltext` / `@@fulltext` metadata that generators turn into store DDL, and `@writeOnce` properties that the Neo4j write path sets once
 - **Graph construction**: Build in-memory graphs from validated instances with integrity checking
 - **Graph persistence**: Save, load, verify, inspect, and edit-metadata-in-place graph snapshots (`.ys` format)
 - **Batch assembly**: Validate and add from many workers through one validator and one graph, merging a record listed under several parents, and resume a batch from a prior snapshot
@@ -184,8 +184,8 @@ The module is organized into layers with strict dependency ordering:
 ```text
 Primary API              : schema, instance, graph, snapshot
 Foundation               : location, diag, immutable
-Adapter                  : adapter/neo4j
-Generator                : schema/gogen, schema/markdown
+Neo4j write path         : neo4j
+Generator                : schema/cypher, schema/gogen, schema/markdown
 CLI                      : cmd/yammm, cmd/yammm-lsp
 Internal                 : internal/* (no compatibility guarantees), the formatter and the language server among them
 ```
@@ -201,7 +201,8 @@ Internal                 : internal/* (no compatibility guarantees), the formatt
 | `diag` | Structured diagnostics with stable error codes |
 | `location` | Source positions, spans, and canonical paths |
 | `immutable` | Immutable data structures for validated output |
-| `adapter/neo4j` | The Neo4j mapping of a schema; its package doc lists what it holds |
+| `schema/cypher` | The Neo4j mapping of a schema: labels, constraint and index DDL |
+| `neo4j` | Neo4j write queries, parameter coercion, introspection and the drift diff |
 | `schema/gogen` | Go source generation from a schema; its package doc lists what it emits |
 | `schema/markdown` | Markdown + Mermaid documentation generation from a schema |
 
@@ -213,7 +214,7 @@ Diagnostic-producing operations return `(T, diag.Result)`:
 - `result.HasErrors()`: Any Error or Fatal issue
 - `result.OK()`: Success (may have warnings). A validator's zero instance beside it held an `instance.Refused` value, which its producer reported
 
-The pure transformations of the Neo4j adapter and the generators (Cypher batch queries, Go source, and Markdown generation) return their output beside a Go `error`, as `(T, error)`, but for `adapter/neo4j`'s `BuildBatchRelationshipMergeQuery`, a query template that cannot fail; the Neo4j adapter's schema-derived DDL builders and its label-collision check report through a `diag.Result`, and its drop-statement builders return `(string, error)`. Snapshot serialization (`snapshot.Marshal`) is diagnostic-producing and returns `(T, diag.Result)`.
+The pure transformations of the `neo4j` write path and the generators (Cypher batch queries, Go source, and Markdown generation) return their output beside a Go `error`, as `(T, error)`, but for `neo4j`'s `BuildBatchRelationshipMergeQuery`, a query template that cannot fail; `schema/cypher`'s DDL builders and its label-collision check, and `neo4j.Diff`, report through a `diag.Result`, and the drop-statement builders return `(string, error)`. Snapshot serialization (`snapshot.Marshal`) is diagnostic-producing and returns `(T, diag.Result)`.
 
 ## Schema Language
 
@@ -281,7 +282,7 @@ type Person {
 
 ### Annotations
 
-Annotations attach validated, store-agnostic metadata that adapters turn into store DDL. They do not change which instance data is valid, and they are excluded from the structural hash, so adding one never invalidates a persisted snapshot.
+Annotations attach validated, store-agnostic metadata for the generators and the write path to read: `schema/cypher` turns the index annotations into DDL, and `neo4j` splits a write on `@writeOnce`. They do not change which instance data is valid, and they are excluded from the structural hash, so adding one never invalidates a persisted snapshot.
 
 ```yammm
 type Document {

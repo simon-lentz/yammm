@@ -1,0 +1,13 @@
+schema "part_test"
+
+part type LineItem {
+    line_id     String primary
+    description String required
+    quantity    Integer required
+}
+
+type Order {
+    order_id String primary
+    customer String required
+    *-> ITEMS (_:many) LineItem
+}

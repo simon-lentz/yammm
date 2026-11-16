@@ -5,7 +5,6 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/simon-lentz/yammm/adapter/neo4j"
 	"github.com/simon-lentz/yammm/cmd/yammm/internal/cli"
 	"github.com/simon-lentz/yammm/schema"
 )
@@ -30,7 +29,7 @@ func newNeo4jIndexesCmd() *cobra.Command {
 }
 
 func runNeo4jIndexes(cmd *cobra.Command, args []string, sink *cli.DiagnosticSink) error {
-	labelOpts, err := labelOptions(cmd)
+	c, err := labelConfig(cmd)
 	if err != nil {
 		return err
 	}
@@ -51,9 +50,7 @@ func runNeo4jIndexes(cmd *cobra.Command, args []string, sink *cli.DiagnosticSink
 		return err
 	}
 
-	adapter := neo4j.New(labelOpts...)
-
-	statements, indexResult := adapter.IndexesForSchema(cmd.Context(), s)
+	indexes, indexResult := c.Indexes(s)
 	sink.Add(indexResult)
 	sink.Flush()
 	if sink.Result().HasErrors() {
@@ -62,8 +59,8 @@ func runNeo4jIndexes(cmd *cobra.Command, args []string, sink *cli.DiagnosticSink
 
 	// Print each statement
 	w := cmd.OutOrStdout()
-	for _, stmt := range statements {
-		fmt.Fprintln(w, stmt)
+	for _, idx := range indexes {
+		fmt.Fprintln(w, idx.Statement)
 	}
 
 	return nil

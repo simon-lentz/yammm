@@ -17,8 +17,8 @@
 //     via slices.Collect. The [Issue] accessors that return reference types
 //     ([Issue.Related], [Issue.Details]) return defensive copies.
 //   - Stable error codes: [Code] values are stable identifiers that tools can
-//     match on, even when message text changes. The code set is open: adapters
-//     and consumers register codes through [NewCode].
+//     match on, even when message text changes. The code set is open: the Neo4j
+//     mapping and consumers register codes through [NewCode].
 //   - Deterministic ordering: [Collector.Result] sorts issues by location, a span
 //     in [location.Compare] order, then by code, so output is stable across runs.
 //   - Builder pattern: [IssueBuilder] is the only valid construction path for
@@ -147,7 +147,7 @@
 //
 //	diag  ──imports──▶  location, golang.org/x/text/width
 //
-// It must not import schema, instance, graph, or adapter.
+// It must not import schema, instance, graph, schema/cypher, or neo4j.
 //
 // # v0.3.0 Diagnostic Code Additions
 //

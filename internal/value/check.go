@@ -86,8 +86,8 @@ func floatText(val, norm any) string {
 }
 
 // Check reports whether val conforms to c: nil if it does, or an error that
-// describes the violation. The validator, the snapshot reader and the Neo4j
-// adapter's parameter coercion all judge a value by it.
+// describes the violation. The validator, the snapshot reader and the neo4j
+// package's parameter coercion all judge a value by it.
 func Check(val any, c schema.Constraint) error {
 	if Absent(val) {
 		// No value is valid for an optional property; the required check is
