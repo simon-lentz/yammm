@@ -61,7 +61,7 @@ indexes, result := adapter.IndexesStructured(ctx, s)
 
 Property-level `@index` emits a single-property range index; type-level `@@index(a, b)` a composite range index (declared order significant); property-level `@vector(cosine|euclidean)` a vector index (dimension from the `Vector[N]` constraint); property-level `@fulltext` and type-level `@@fulltext(a, b)` fulltext indexes (`CREATE FULLTEXT INDEX ... ON EACH [...]`). Index names are always emitted; two indexes whose readable names would collide are disambiguated with a short deterministic digest. A load refuses an index annotation with no eligible target (`E_UNKNOWN_ANNOTATION_TARGET`, `E_INVALID_ANNOTATION_TARGET`), so no schema it returns draws the adapter's own codes for the two cases, `E_NEO4J_UNKNOWN_PROPERTY` and `E_NEO4J_INVALID_INDEX_TARGET`. Indexes emit for every edition (unlike constraints); the `CREATE VECTOR INDEX ... OPTIONS` form requires Neo4j 5.15+. Apply every constraint statement before every index statement: a range index over a primary key's properties in their order is the index a UNIQUE or NODE KEY constraint creates, so applied first it makes the server refuse the constraint with `IndexAlreadyExists`, and applied after it creates nothing.
 
-`DiffIndexes` returns an `*IndexDiffResult` with **five** sets: Match/Drift/Create/Drop plus **Unverified** — indexes present on both sides whose definition could not be compared (no readable vector configuration, or still `POPULATING`). `DiffConstraints` has the same five sets, its `Unverified` covering a TYPE constraint whose remote record carries no `propertyType`, so its enforced type was not compared. A drift gate must count `Unverified` as an incomplete check, not a pass; summing only Drift+Create+Drop reports an unchecked index as in sync. Composite property order is significant, and a schema-owned remote index with no declaration reports as a drop when the schema could have declared it, and is counted in `Excluded` otherwise. See [Diffing Against a Live Database](#diffing-against-a-live-database) for the call shape.
+`Diff` returns a `*DiffResult` whose `Indexes` has **five** sets: Match/Drift/Create/Drop plus **Unverified** — indexes present on both sides whose definition could not be compared (no readable vector configuration, or still `POPULATING`). Its `Constraints` has the same five sets, its `Unverified` covering a TYPE constraint whose remote record carries no `propertyType`, so its enforced type was not compared. A drift gate must count `Unverified` as an incomplete check, not a pass; summing only Drift+Create+Drop reports an unchecked index as in sync. Composite property order is significant. A schema-owned remote index that the schema could have declared, that no declaration takes and that no drift names reports as a drop. See [Diffing Against a Live Database](#diffing-against-a-live-database) for the call shape.
 
 ### Query Generation
 
@@ -117,48 +117,70 @@ checks labels and each edge's relationship type only. Namespaced labels usually 
 
 ### Diffing Against a Live Database
 
-Both diffs are scoped by an `*OwnedLabels` — the labels the schema owns, a
-superset of those the adapter emits for it. Build it once and pass it to both halves. The trailing
-variadic argument is the **other** side's remote objects: index and constraint
-names share one Neo4j namespace, and every emitted statement carries
-`IF NOT EXISTS`, so a declaration whose name the database already holds creates
-nothing. Over a name of its own kind the statement is a silent no-op, and a
-constraint's backing index counts as an index. Over the other kind's name the server
-refuses it. Passing both sides lets each diff report that
-as drift naming the holder.
+`Diff` returns one plan over both sides, scoped by an `*OwnedLabels` — the
+labels the schema owns, a superset of those the adapter emits for it. Index and
+constraint names share one Neo4j namespace, every emitted statement carries
+`IF NOT EXISTS`, and a constraint's drop also removes its backing index. A drop
+that one side needs can therefore remove an object the other side matched, so
+one fixed point settles both sides. A caller that declares no indexes passes
+`nil` for them.
 
 ```go
 owned := adapter.OwnedLabels(ctx, s)
 
-cDiff := adapter.DiffConstraints(desiredConstraints, actualConstraints, owned, actualIndexes...)
-iDiff := adapter.DiffIndexes(desiredIndexes, actualIndexes, owned, actualConstraints...)
+plan := adapter.Diff(desiredConstraints, desiredIndexes, actualConstraints, actualIndexes, owned)
+cDiff, iDiff := plan.Constraints, plan.Indexes
 
-// Both results carry: Match, Drift, Create, Drop, Unverified, Excluded
+// Both halves carry: Match, Drift, Create, Drop, Unverified, Excluded
 inSync := len(cDiff.Drift) == 0 && len(cDiff.Create) == 0 && len(cDiff.Drop) == 0 &&
     len(cDiff.Unverified) == 0 // omitting Unverified reports an unchecked object as verified
 ```
+
+Each drift carries `Blockers`: every database object its create needs dropped,
+as `Blockers.Constraints` and `Blockers.Indexes`, each drop target once. The
+plan converges in one apply in this order:
+
+1. Drop every drift's blockers on both sides, once for each drop target. Drop
+   each `Drop` the caller applies in this step too.
+2. Create every constraint in `Constraints.Create` and every constraint drift's
+   `Desired`.
+3. Create every index in `Indexes.Create` and every index drift's `Desired`.
+
+Drop each of `Blockers.Constraints` with `DropConstraintStatement` and each of
+`Blockers.Indexes` with `DropIndexStatement`. An index with an
+`OwningConstraint` goes with that constraint's drop. Before the drops, compare each constraint
+create with the data: UNIQUE needs no duplicate tuple, NOT NULL needs every
+node to hold the property, TYPE needs every value of the type, and NODE KEY
+needs both UNIQUE's and NOT NULL's. A refused create leaves the label without
+the dropped object's guarantee.
+
+A declared index that a constraint's backing index serves, and that pairing
+left without a row of its own, is matched by it while it is online, `Unverified` while it
+is `POPULATING`, and drifted while it is `FAILED`. When the plan drops the
+constraint of an online or `POPULATING` one, as a blocker or as a `Drop`, the
+index is a `Create` unless another blocker makes it a drift. Where the caller
+leaves that `Drop` unapplied, the server takes the create as a no-op while the
+constraint stands. A `FAILED` backing
+index is dropped with its constraint; where a declaration realises that
+constraint, it drifts too, and the apply creates both again.
 
 Ownership is set membership, not a prefix test on the remote object's label:
 `Label` composes a label from a caller-configurable prefix and separator around
 a schema name and a type name and is not invertible, so any rule that tries to
 read a schema back out of a label can be satisfied by a sibling schema's labels.
 
-`Excluded` counts the remote objects the comparison set aside because the
-schema owns no label they carry, or they are of a kind this
-configuration cannot declare: on the constraint side a relationship
-constraint, a node constraint kind the DSL cannot express, and under
-`WithEdition(Community)` every kind but UNIQUE; on the index side every row
-`RemoteIndex.Declarable` refuses. A counted object that holds the name of a
-declaration nothing realises is also the `Actual` of that declaration's drift, as
-is a UNIQUE or NODE KEY over the key a declaration of the other kind needs: a
-NODE KEY under `WithEdition(Community)`, or one on a declared label the owned
-set leaves out. A
-constraint's backing index that serves a declared index is that declaration's
-`Actual` and is not counted. The count is not drift; in a
-shared database a non-zero count is normal. It exists so "0 to drop" is not read
-as "the database is accounted for": ownership is derived from the schema in hand,
-so objects left behind by a type since deleted or renamed sit on a label no
-current type declares.
+`Excluded` counts the remote objects the plan leaves alone: no `Actual`, no
+`Drop`, and no object whose drop target a drift on either side names or a
+`Drop` removes. Each is on a label the
+schema does not own, or of a kind this configuration cannot declare: on the
+constraint side a relationship constraint, a node constraint kind the DSL
+cannot express, and under `WithEdition(Community)` every kind but UNIQUE; on
+the index side every row `RemoteIndex.Declarable` refuses. Every remote row is
+in one place only. The count is not drift: in a shared database a non-zero
+count is normal. It exists so "0 to drop" is not read as "the database is
+accounted for": ownership is derived from the schema in hand, so objects left
+behind by a type since deleted or renamed sit on a label no current type
+declares.
 
 ---
 

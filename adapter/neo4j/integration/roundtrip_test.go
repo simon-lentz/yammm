@@ -182,7 +182,14 @@ func TestRoundTripDiffIsClean(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parsing constraints: %v", err)
 	}
-	cd := a.DiffConstraints(desiredConstraints, actualConstraints, owned)
+	desiredIndexes, _ := a.IndexesStructured(ctx, s)
+	actualIndexes, err := n4j.ParseRemoteIndexes(query(t, ctx, n4j.IntrospectIndexesQuery()))
+	if err != nil {
+		t.Fatalf("parsing indexes: %v", err)
+	}
+	plan := a.Diff(desiredConstraints, desiredIndexes, actualConstraints, actualIndexes, owned)
+
+	cd := &plan.Constraints
 	if len(cd.Match) != len(desiredConstraints) {
 		t.Errorf("constraints: matched %d of %d", len(cd.Match), len(desiredConstraints))
 	}
@@ -209,12 +216,7 @@ func TestRoundTripDiffIsClean(t *testing.T) {
 		t.Logf("  constraint drop: %s", d.Name)
 	}
 
-	desiredIndexes, _ := a.IndexesStructured(ctx, s)
-	actualIndexes, err := n4j.ParseRemoteIndexes(query(t, ctx, n4j.IntrospectIndexesQuery()))
-	if err != nil {
-		t.Fatalf("parsing indexes: %v", err)
-	}
-	id := a.DiffIndexes(desiredIndexes, actualIndexes, owned)
+	id := &plan.Indexes
 	if len(id.Match) != len(desiredIndexes) {
 		t.Errorf("indexes: matched %d of %d", len(id.Match), len(desiredIndexes))
 	}
@@ -274,8 +276,16 @@ func TestIntrospectIndexesQuery_ShapeIsAsParsed(t *testing.T) {
 		assertType[string](t, rec, "type")
 		assertType[string](t, rec, "entityType")
 		assertType[string](t, rec, "state")
-		assertSliceOfString(t, rec, "labelsOrTypes")
-		assertSliceOfString(t, rec, "properties")
+		// A LOOKUP index reports null labels and properties, which the parser
+		// reads as none.
+		if rec["type"] == "LOOKUP" {
+			if rec["labelsOrTypes"] != nil || rec["properties"] != nil {
+				t.Errorf("LOOKUP index %v reports labels %v and properties %v, want null", rec["name"], rec["labelsOrTypes"], rec["properties"])
+			}
+		} else {
+			assertSliceOfString(t, rec, "labelsOrTypes")
+			assertSliceOfString(t, rec, "properties")
+		}
 		if _, ok := rec["options"].(map[string]any); !ok {
 			t.Errorf("options is %T, but parseMapField asserts map[string]any", rec["options"])
 		}
@@ -290,8 +300,9 @@ func TestIntrospectIndexesQuery_ShapeIsAsParsed(t *testing.T) {
 		t.Errorf("parsed %d of %d live records", len(parsed), len(records))
 	}
 	for _, ri := range parsed {
-		if ri.Name == "" || ri.Type == "" || len(ri.LabelsOrTypes) == 0 || len(ri.Properties) == 0 {
-			t.Errorf("a live index parsed with empty fields: %+v", ri)
+		lookup := ri.Type == "LOOKUP"
+		if ri.Name == "" || ri.Type == "" || lookup != (len(ri.LabelsOrTypes) == 0) || lookup != (len(ri.Properties) == 0) {
+			t.Errorf("a live index parsed with empty fields, or a LOOKUP index with labels or properties: %+v", ri)
 		}
 		if ri.State == "" {
 			t.Errorf("index %q parsed with no State; IsOnline() would treat it as online", ri.Name)
@@ -388,7 +399,7 @@ func TestConstraintBackedIndex_CarriesOwningConstraint(t *testing.T) {
 
 	// Fed in unfiltered, none of them may be reported as an orphan to drop.
 	owned := a.OwnedLabels(ctx, s)
-	diff := a.DiffIndexes(nil, parsed, owned)
+	diff := &a.Diff(nil, nil, nil, parsed, owned).Indexes
 	if len(diff.Drop) != 0 {
 		t.Errorf("%d constraint-backing index(es) reported as drops; dropping one removes a primary key's index",
 			len(diff.Drop))

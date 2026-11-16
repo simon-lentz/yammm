@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-// blockingProbe runs DiffConstraints for one desired UNIQUE constraint on
+// blockingProbe plans one desired UNIQUE constraint on
 // (probe__Doc, title) against a single remote index.
 func blockingProbe(t *testing.T, ri RemoteIndex) *ConstraintDiffResult {
 	t.Helper()
@@ -15,14 +15,14 @@ func blockingProbe(t *testing.T, ri RemoteIndex) *ConstraintDiffResult {
 		Label:      "probe__Doc",
 		Properties: []string{"title"},
 	}}
-	return New().DiffConstraints(desired, nil, ownedSet("probe__Doc"), ri)
+	return &New().Diff(desired, nil, nil, []RemoteIndex{ri}, ownedSet("probe__Doc")).Constraints
 }
 
-// TestDiffConstraints_OnlyARangeNodeIndexBlocks pins the rule measured against
+// TestConstraintDiff_OnlyARangeNodeIndexBlocks pins the rule measured against
 // both server generations: a uniqueness constraint backs itself with a RANGE
 // index and the server refuses only a duplicate of that one. Every other index
 // kind, and any relationship index, is an object it is created beside.
-func TestDiffConstraints_OnlyARangeNodeIndexBlocks(t *testing.T) {
+func TestConstraintDiff_OnlyARangeNodeIndexBlocks(t *testing.T) {
 	t.Parallel()
 	base := RemoteIndex{
 		Name:          "other_idx",
@@ -78,13 +78,13 @@ func TestDiffConstraints_OnlyARangeNodeIndexBlocks(t *testing.T) {
 	}
 }
 
-// TestDiffConstraints_FulltextOnASolePrimaryKeyConverges drives the schema
+// TestConstraintDiff_FulltextOnASolePrimaryKeyConverges drives the schema
 // shape docs/SPEC.md blesses through the adapter's own emitters, because that
 // is the path on which the two of them contradicted each other: the index
 // emitter produced a FULLTEXT index for `title String primary @fulltext` and
 // the constraint diff then reported the UNIQUE constraint it emits for the same
 // property as blocked by it, forever.
-func TestDiffConstraints_FulltextOnASolePrimaryKeyConverges(t *testing.T) {
+func TestConstraintDiff_FulltextOnASolePrimaryKeyConverges(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	a, s, _ := setupWrite(t, "fulltext_pk.yammm")
@@ -114,7 +114,7 @@ func TestDiffConstraints_FulltextOnASolePrimaryKeyConverges(t *testing.T) {
 		t.Fatal("the fixture emitted no FULLTEXT index, so it cannot exercise the collision")
 	}
 
-	plan := a.DiffConstraints(constraints, nil, a.OwnedLabels(ctx, s), remote...)
+	plan := &a.Diff(constraints, nil, nil, remote, a.OwnedLabels(ctx, s)).Constraints
 	for _, d := range plan.Drift {
 		t.Errorf("a schema the SPEC blesses reports permanent drift: %s -> %s", d.Desired.Name, d.Reason)
 	}
@@ -123,13 +123,13 @@ func TestDiffConstraints_FulltextOnASolePrimaryKeyConverges(t *testing.T) {
 	}
 }
 
-// TestDiffConstraints_CompositeIndexBlocksInDeclaredOrderOnly pins what both
+// TestConstraintDiff_CompositeIndexBlocksInDeclaredOrderOnly pins what both
 // server generations do with a composite backing index: property order is
 // significant for an index, so a RANGE index over the constraint's properties
 // in another order is an object the constraint is created beside, not a
 // blocker. Sorting the definition key would report Drift the server never
 // raises, on every run.
-func TestDiffConstraints_CompositeIndexBlocksInDeclaredOrderOnly(t *testing.T) {
+func TestConstraintDiff_CompositeIndexBlocksInDeclaredOrderOnly(t *testing.T) {
 	t.Parallel()
 	desired := []Constraint{{
 		Name:       "probe__Doc_title_year_unique",
@@ -157,7 +157,7 @@ func TestDiffConstraints_CompositeIndexBlocksInDeclaredOrderOnly(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			plan := New().DiffConstraints(desired, nil, ownedSet("probe__Doc"), tc.index)
+			plan := &New().Diff(desired, nil, nil, []RemoteIndex{tc.index}, ownedSet("probe__Doc")).Constraints
 			if gotDrift := len(plan.Drift) > 0; gotDrift != tc.wantDrift {
 				t.Errorf("Drift=%d Create=%d; want blocking=%v", len(plan.Drift), len(plan.Create), tc.wantDrift)
 			}

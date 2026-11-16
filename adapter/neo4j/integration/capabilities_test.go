@@ -164,7 +164,7 @@ func TestNodeKeyRequest_EnforcesPrimaryKeyOnEitherEdition(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parsing constraints: %v", err)
 	}
-	cd := a.DiffConstraints(constraints, actual, a.OwnedLabels(ctx, s))
+	cd := &a.Diff(constraints, nil, actual, nil, a.OwnedLabels(ctx, s)).Constraints
 	if len(cd.Match) != len(constraints) {
 		t.Errorf("matched %d of %d emitted constraints; drift=%d create=%d drop=%d unverified=%d",
 			len(cd.Match), len(constraints),
@@ -224,7 +224,7 @@ func TestTypeConstraint_PropertyTypeRoundTrips(t *testing.T) {
 	}
 
 	// And they must compare equal, not drift.
-	diff := a.DiffConstraints(desired, parsed, a.OwnedLabels(ctx, s))
+	diff := &a.Diff(desired, nil, parsed, nil, a.OwnedLabels(ctx, s)).Constraints
 	if len(diff.Unverified) != 0 {
 		for _, u := range diff.Unverified {
 			t.Errorf("unverified: %s (%s)", u.Desired.Name, u.Reason)
@@ -270,7 +270,7 @@ func TestTypeConstraint_DriftIsDetected(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ParseRemoteConstraints: %v", err)
 	}
-	diff := a.DiffConstraints([]n4j.Constraint{target}, parsed, a.OwnedLabels(ctx, s))
+	diff := &a.Diff([]n4j.Constraint{target}, nil, parsed, nil, a.OwnedLabels(ctx, s)).Constraints
 	if len(diff.Drift) != 1 {
 		t.Fatalf("drift = %d, want 1 (schema declares %s, database enforces STRING)", len(diff.Drift), target.TypeExpr)
 	}
@@ -314,7 +314,7 @@ func TestTypeConstraint_MissingPropertyTypeIsUnverified(t *testing.T) {
 		t.Fatalf("ParseRemoteConstraints: %v", err)
 	}
 
-	diff := a.DiffConstraints(typeConstraints, parsed, a.OwnedLabels(ctx, s))
+	diff := &a.Diff(typeConstraints, nil, parsed, nil, a.OwnedLabels(ctx, s)).Constraints
 	if len(diff.Unverified) != len(typeConstraints) {
 		t.Errorf("unverified = %d, want %d — an uncompared constraint must not read as matched",
 			len(diff.Unverified), len(typeConstraints))
@@ -350,7 +350,7 @@ func TestUndeclarableIndexKinds_AreNotDropped(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ParseRemoteIndexes: %v", err)
 	}
-	diff := a.DiffIndexes(desired, parsed, a.OwnedLabels(ctx, s))
+	diff := &a.Diff(nil, desired, nil, parsed, a.OwnedLabels(ctx, s)).Indexes
 	for _, d := range diff.Drop {
 		t.Errorf("index %q (%s) reported as a drop; the schema cannot declare that kind", d.Name, d.Type)
 	}
@@ -417,7 +417,7 @@ func TestNameHeldByAnotherKind_ServerBehavior(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ParseRemoteIndexes: %v", err)
 	}
-	diff := a.DiffIndexes([]n4j.Index{rangeIdx}, parsed, a.OwnedLabels(ctx, s))
+	diff := &a.Diff(nil, []n4j.Index{rangeIdx}, nil, parsed, a.OwnedLabels(ctx, s)).Indexes
 	if len(diff.Create) != 0 {
 		t.Errorf("reported %d Create(s) for a name the database already holds; the plan cannot converge", len(diff.Create))
 	}
@@ -453,7 +453,7 @@ func TestRelationshipObjects_AreNotClaimed(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ParseRemoteIndexes: %v", err)
 	}
-	for _, d := range a.DiffIndexes(desiredIdx, parsedIdx, owned).Drop {
+	for _, d := range a.Diff(nil, desiredIdx, nil, parsedIdx, owned).Indexes.Drop {
 		if d.EntityType == "RELATIONSHIP" {
 			t.Errorf("relationship index %q reported as a drop", d.Name)
 		}
@@ -464,7 +464,7 @@ func TestRelationshipObjects_AreNotClaimed(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ParseRemoteConstraints: %v", err)
 	}
-	for _, d := range a.DiffConstraints(desiredCons, parsedCons, owned).Drop {
+	for _, d := range a.Diff(desiredCons, nil, parsedCons, nil, owned).Constraints.Drop {
 		if d.EntityType == "RELATIONSHIP" {
 			t.Errorf("relationship constraint %q reported as a drop", d.Name)
 		}
@@ -500,7 +500,7 @@ func TestRelationshipIndex_DoesNotBlockNodeIndexCreate(t *testing.T) {
 		t.Fatalf("ParseRemoteIndexes: %v", err)
 	}
 
-	diff := a.DiffIndexes(desired, parsed, a.OwnedLabels(ctx, s))
+	diff := &a.Diff(nil, desired, nil, parsed, a.OwnedLabels(ctx, s)).Indexes
 	var created bool
 	for _, c := range diff.Create {
 		if c.Label == "rt__Document" && slices.Equal(c.Properties, []string{"state"}) {
@@ -548,7 +548,7 @@ func TestUndeclaredSchemaOwnedIndex_IsDropped(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ParseRemoteIndexes: %v", err)
 	}
-	diff := a.DiffIndexes(desired, parsed, a.OwnedLabels(ctx, s))
+	diff := &a.Diff(nil, desired, nil, parsed, a.OwnedLabels(ctx, s)).Indexes
 	if len(diff.Drop) != 1 || diff.Drop[0].Name != "rt_adhoc" {
 		t.Errorf("drops = %d; want exactly the undeclared rt_adhoc", len(diff.Drop))
 		for _, d := range diff.Drop {
@@ -583,7 +583,7 @@ func TestSiblingSchemaInSameDatabase_IsNotClaimed(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ParseRemoteIndexes: %v", err)
 	}
-	diff := a.DiffIndexes(desired, parsed, a.OwnedLabels(ctx, s))
+	diff := &a.Diff(nil, desired, nil, parsed, a.OwnedLabels(ctx, s)).Indexes
 	for _, d := range diff.Drop {
 		t.Errorf("index %q on %v belongs to another schema and was reported as a drop", d.Name, d.LabelsOrTypes)
 	}
@@ -621,6 +621,13 @@ func TestNodeIndex_ReportsExactlyOneLabel(t *testing.T) {
 		if typ == "FULLTEXT" {
 			if len(labels) > 1 {
 				sawMulti = true
+			}
+			continue
+		}
+		// A LOOKUP index covers every label and reports none.
+		if typ == "LOOKUP" {
+			if rec["labelsOrTypes"] != nil {
+				t.Errorf("LOOKUP index %v reports labels %v, want null", rec["name"], rec["labelsOrTypes"])
 			}
 			continue
 		}
@@ -664,7 +671,7 @@ func TestYieldStarCaller_ConstraintIndexesNotDropped(t *testing.T) {
 	}
 
 	desired, _ := a.IndexesStructured(ctx, s)
-	diff := a.DiffIndexes(desired, parsed, a.OwnedLabels(ctx, s))
+	diff := &a.Diff(nil, desired, nil, parsed, a.OwnedLabels(ctx, s)).Indexes
 	for _, d := range diff.Drop {
 		t.Errorf("YIELD * caller told to drop %q (owningConstraint=%q)", d.Name, d.OwningConstraint)
 	}
@@ -716,7 +723,7 @@ func TestPopulatingIndex_IsUnverified(t *testing.T) {
 		}
 		if strings.EqualFold(state, "POPULATING") {
 			sawPopulating = true
-			diff := a.DiffIndexes(desired, parsed, owned)
+			diff := &a.Diff(nil, desired, nil, parsed, owned).Indexes
 			if len(diff.Unverified) != 1 {
 				t.Errorf("a POPULATING index gave unverified=%d match=%d drift=%d; want unverified=1",
 					len(diff.Unverified), len(diff.Match), len(diff.Drift))
@@ -747,7 +754,7 @@ func TestPopulatingIndex_IsUnverified(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ParseRemoteIndexes: %v", err)
 	}
-	if diff := a.DiffIndexes(desired, parsed, owned); len(diff.Match) != 1 {
+	if diff := &a.Diff(nil, desired, nil, parsed, owned).Indexes; len(diff.Match) != 1 {
 		t.Errorf("once ONLINE the index should match; got match=%d unverified=%d",
 			len(diff.Match), len(diff.Unverified))
 	}
@@ -822,7 +829,7 @@ func TestNameHeldOnForeignLabel_BlocksCreate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ParseRemoteIndexes: %v", err)
 	}
-	diff := a.DiffIndexes([]n4j.Index{target}, parsed, a.OwnedLabels(ctx, s))
+	diff := &a.Diff(nil, []n4j.Index{target}, nil, parsed, a.OwnedLabels(ctx, s)).Indexes
 	if len(diff.Create) != 0 {
 		t.Errorf("reported %d Create(s) for a name a foreign label already holds; the plan cannot converge", len(diff.Create))
 	}
@@ -894,7 +901,7 @@ type Rev extends Base { rev String primary }
 			if err != nil {
 				t.Fatalf("ParseRemoteIndexes: %v", err)
 			}
-			diff := a.DiffIndexes(desired, parsed, a.OwnedLabels(ctx, s))
+			diff := &a.Diff(nil, desired, nil, parsed, a.OwnedLabels(ctx, s)).Indexes
 			if len(diff.Create) != 0 {
 				t.Errorf("reported a Create the server will never honour: %+v", diff.Create)
 			}
@@ -1014,7 +1021,7 @@ func TestHandNamedFulltextIndex_IsClaimedByIdentity(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ParseRemoteIndexes: %v", err)
 	}
-	diff := a.DiffIndexes([]n4j.Index{ft}, parsed, a.OwnedLabels(ctx, s))
+	diff := &a.Diff(nil, []n4j.Index{ft}, nil, parsed, a.OwnedLabels(ctx, s)).Indexes
 	if len(diff.Match) != 1 {
 		t.Fatalf("match = %d, want 1 (the legacy index claimed by identity)", len(diff.Match))
 	}
@@ -1050,7 +1057,7 @@ func TestUndeclaredFulltextIndex_IsDropped(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ParseRemoteIndexes: %v", err)
 	}
-	diff := a.DiffIndexes(desired, parsed, a.OwnedLabels(ctx, s))
+	diff := &a.Diff(nil, desired, nil, parsed, a.OwnedLabels(ctx, s)).Indexes
 	if len(diff.Drop) != 1 || diff.Drop[0].Name != "rt_adhoc_ft" {
 		t.Errorf("drops = %d; want exactly the undeclared rt_adhoc_ft", len(diff.Drop))
 		for _, d := range diff.Drop {
@@ -1109,21 +1116,27 @@ func TestMultiLabelFulltext_DoesNotBlockSingleLabelCreate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ParseRemoteIndexes: %v", err)
 	}
-	diff := a.DiffIndexes([]n4j.Index{ft}, parsed, a.OwnedLabels(ctx, s))
+	diff := &a.Diff(nil, []n4j.Index{ft}, nil, parsed, a.OwnedLabels(ctx, s)).Indexes
 	if len(diff.Match) != 1 {
 		t.Errorf("match = %d, want 1 (the declared single-label index)", len(diff.Match))
 	}
 	if len(diff.Drop) != 0 {
 		t.Errorf("drops = %d, want 0: the multi-label object is excluded, not dropped", len(diff.Drop))
 	}
-	if diff.Excluded != 1 {
-		t.Errorf("Excluded = %d; want the multi-label row counted", diff.Excluded)
+	lookups := 0
+	for _, ri := range parsed {
+		if ri.Type == "LOOKUP" {
+			lookups++
+		}
+	}
+	if diff.Excluded != 1+lookups {
+		t.Errorf("Excluded = %d; want the multi-label row and the %d LOOKUP rows counted", diff.Excluded, lookups)
 	}
 }
 
 // One namespace holds index and constraint names, and IF NOT EXISTS answers for a
 // name of its own kind alone: over the other kind's name the server refuses the
-// statement, so the diff's alsoBlocking argument separates a no-op from a failure.
+// statement, so reading both kinds' rows separates a no-op from a failure.
 func TestNameHeldAcrossKinds_ServerResponse(t *testing.T) {
 	ctx := context.Background()
 	driver(t)

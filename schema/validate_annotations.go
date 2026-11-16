@@ -389,8 +389,9 @@ func (c *completer) reportIndexRedundancy(a Annotation, span location.Span, t, e
 // both, and reporting an error the user cannot act on is worse than the
 // redundant index the mixed case emits. The rule therefore reports only what can
 // be safely removed. This is the one case where a redundant index still ships,
-// and no tool reports it: the Neo4j adapter's index diff counts an index a
-// constraint backs as a match.
+// and no tool reports it: the Neo4j adapter's Diff counts an online index a
+// constraint backs as the declared index's match while the plan keeps that
+// constraint.
 //
 // Emitters are measured by their EXTRACTED primary keys, via the non-allocating
 // [Type.primaryKeyCount], not by counting `primary` flags. But an extracted

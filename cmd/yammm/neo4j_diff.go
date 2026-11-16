@@ -103,31 +103,25 @@ func runNeo4jDiff(cmd *cobra.Command, args []string, sink *cli.DiagnosticSink) e
 	if err != nil {
 		return err
 	}
-	actual, actualIndexes := state.constraints, state.indexes
 	// The index read is the last phase that diagnoses, so everything the
 	// command has to say is in the sink and precedes the diff report.
 	sink.Flush()
 
 	indexes := indexOutcomeBeforeDiff(indexesEnabled, state.indexFailed)
 
-	// Diff constraints
 	// The label set is computed once from the schema and scopes both halves of
-	// the diff, so ownership is exact membership rather than a guess parsed back
-	// out of each remote object's label.
+	// the plan, so ownership is exact membership rather than a guess parsed back
+	// out of each remote object's label. Without --indexes the plan declares no
+	// index, and only its constraint half is printed.
 	owned := adapter.OwnedLabels(cmd.Context(), s)
+	plan := planRemoteState(adapter, desired, desiredIndexes, state, indexes, owned)
+	diff := &plan.Constraints
 
-	diff := adapter.DiffConstraints(desired, actual, owned, actualIndexes...)
-
-	// Print constraint diff result
 	w := cmd.OutOrStdout()
 	printDiffResult(w, diff)
 
-	// A schema-owned remote index with no declaration surfaces as a drop. The
-	// remote constraints go the other way across the shared name namespace: a
-	// NOT NULL or TYPE constraint has no backing index, so it appears in no
-	// SHOW INDEXES row and only reaches the index diff this way.
 	if indexesEnabled && indexes != indexDiffUnavailable {
-		indexDiff := adapter.DiffIndexes(desiredIndexes, actualIndexes, owned, actual...)
+		indexDiff := &plan.Indexes
 		printIndexDiffResult(w, indexDiff, owned)
 		switch {
 		case len(indexDiff.Drift) > 0 || len(indexDiff.Create) > 0 || len(indexDiff.Drop) > 0:
@@ -141,6 +135,18 @@ func runNeo4jDiff(cmd *cobra.Command, args []string, sink *cli.DiagnosticSink) e
 
 	constraintDrift := len(diff.Drift) > 0 || len(diff.Create) > 0 || len(diff.Drop) > 0
 	return cli.Exit(neo4jDiffExit(constraintDrift, len(diff.Unverified) > 0, indexes))
+}
+
+// planRemoteState plans the declarations against state. After a failed index
+// read the plan declares no index: its index half is not printed, and an index
+// declaration must not move a constraint by rows the read did not return.
+func planRemoteState(adapter *adaptern4j.Adapter, desired []adaptern4j.Constraint, desiredIndexes []adaptern4j.Index,
+	state remoteState, indexes indexDiffOutcome, owned *adaptern4j.OwnedLabels,
+) *adaptern4j.DiffResult {
+	if indexes == indexDiffUnavailable {
+		desiredIndexes = nil
+	}
+	return adapter.Diff(desired, desiredIndexes, state.constraints, state.indexes, owned)
 }
 
 // indexesUnreadable reports a degraded index read as the diagnostic it is.
@@ -183,14 +189,13 @@ func fetchRemoteState(ctx context.Context, run cli.QueryRunner, database string,
 	}
 	state := remoteState{constraints: constraints}
 
-	// Fetch actual indexes BEFORE diffing constraints, and do it whatever
-	// --indexes says: index and constraint names share one namespace, so the
-	// CONSTRAINT diff needs the index names to know whether a CREATE CONSTRAINT
-	// would be refused. --indexes=false opts out of comparing indexes, not
+	// Fetch actual indexes whatever --indexes says: index and constraint names
+	// share one namespace, so the plan's CONSTRAINT half needs the index rows to
+	// know whether a CREATE CONSTRAINT would be refused. --indexes=false opts out of comparing indexes, not
 	// out of classifying constraints accurately — reading it as the latter makes
 	// the same declaration print as an unfixable Create under one flag and
 	// actionable drift under the other. On a server that cannot report indexes
-	// the diff degrades rather than discarding the constraint diff, but it says
+	// the diff degrades rather than discarding the constraint half, but it says
 	// so, and does not exit 0 when indexes were asked for.
 	indexRecords, indexErr := run(ctx, database, adaptern4j.IntrospectIndexesQuery())
 	switch {
@@ -227,8 +232,8 @@ func fetchRemoteState(ctx context.Context, run cli.QueryRunner, database string,
 // projection and is therefore entitled to treat a missing column as broken.
 //
 // A count of EXCLUDED objects would be the wrong signal despite looking sharper.
-// The diffs fold "not on a label this schema owns" and "of a kind this
-// configuration cannot declare" into one Excluded counter, so an all-excluded
+// Each half of the plan folds "not on a label this schema owns" and "of a kind
+// this configuration cannot declare" into one Excluded counter, so an all-excluded
 // comparison is also what a first provision against a database shared with other
 // applications looks like — healthy, and every declaration a legitimate create.
 func untypedRemoteObjects(n int, typeAt func(int) string) int {
@@ -288,9 +293,9 @@ func indexOutcomeBeforeDiff(enabled, readFailed bool) indexDiffOutcome {
 // Drift wins: it is the actionable signal, and a caller that sees exit 1 goes
 // looking at the printed diff either way. The incomplete-comparison outcomes are
 // the interesting case — none may exit 0. Degrading to constraints-only on a
-// failed introspection is right (the constraint diff already printed is complete
-// and worth keeping), and so is reporting an object whose definition the server
-// would not disclose; but in each the caller asked for drift and did not get it,
+// failed introspection is right (the constraint half already printed is worth
+// keeping, and the warning names what it cannot see), and so is reporting an
+// object whose definition the server would not disclose; but in each the caller asked for drift and did not get it,
 // so reporting success would let a drift gate read "no drift" from a comparison
 // that never ran. That reasoning is not specific to indexes: a TYPE constraint
 // on a server too old to report its property type is unverified in exactly the
@@ -322,7 +327,8 @@ func printMatchedLine(w io.Writer, noun string, matched int) {
 // five buckets are what the diff compared, and objects it could not compare do
 // not belong in that count. Naming them is what stops "0 to drop" from reading
 // as "the database is accounted for" — a type deleted since the last apply
-// leaves objects that land here and nowhere else.
+// leaves objects that land here, or on a blocker line where one holds a
+// declared name.
 func printDiffSummary(w io.Writer, prefix, noun string, match, drift, create, drop, unverified, excluded int) {
 	total := match + drift + create + drop + unverified
 	fmt.Fprintf(w, "\n%ssummary: %d matched, %d drifted, %d to create, %d to drop, %d unverified (total: %d)\n",
@@ -363,7 +369,8 @@ func printDiffResult(w io.Writer, diff *adaptern4j.ConstraintDiffResult) {
 	printMatchedLine(w, "constraints", len(diff.Match))
 
 	for _, d := range diff.Drift {
-		fmt.Fprintf(w, "drift: %s%s (%s)\n", constraintLabel(d.Desired), remoteSuffix(d.Actual.Name, constraintLabel(d.Desired)), d.Reason)
+		fmt.Fprintf(w, "drift: %s (%s)\n", constraintLabel(d.Desired), d.Reason)
+		printBlockers(w, "  blocker: ", d.Blockers)
 	}
 
 	for _, c := range diff.Create {
@@ -393,7 +400,8 @@ func printIndexDiffResult(w io.Writer, diff *adaptern4j.IndexDiffResult, owned *
 	printMatchedLine(w, "indexes", len(diff.Match))
 
 	for _, d := range diff.Drift {
-		fmt.Fprintf(w, "index drift: %s%s (%s)\n", d.Desired.Name, remoteSuffix(d.Actual.Name, d.Desired.Name), d.Reason)
+		fmt.Fprintf(w, "index drift: %s (%s)\n", d.Desired.Name, d.Reason)
+		printBlockers(w, "  index blocker: ", d.Blockers)
 	}
 
 	for _, c := range diff.Create {
@@ -419,13 +427,28 @@ func printIndexDiffResult(w io.Writer, diff *adaptern4j.IndexDiffResult, owned *
 	}
 }
 
-// remoteSuffix names the database object a drift line refers to, when its name
-// differs from the desired object's. Pairing matches on identity as well as
-// name, so a drifted object frequently carries an operator's own name — and it
-// appears in no other line of the report, leaving nothing to act on.
-func remoteSuffix(remote, desired string) string {
-	if remote == "" || remote == desired {
-		return ""
+// printBlockers writes one line per object a drift's create needs dropped, the
+// constraints first, and for a constraint's backing index the constraint to drop.
+// Pairing matches on identity as well as name, so a blocker often carries an
+// operator's own name and appears in no other line of the report.
+func printBlockers(w io.Writer, prefix string, b adaptern4j.Blockers) {
+	for _, c := range b.Constraints {
+		fmt.Fprintf(w, "%s%s %q on %s(%s)\n", prefix, blockerKind(c.Type, "constraint"), c.Name,
+			strings.Join(c.LabelsOrTypes, "|"), strings.Join(c.Properties, ", "))
 	}
-	return " [database: " + remote + "]"
+	for _, i := range b.Indexes {
+		line := fmt.Sprintf("%s%s %q on %s(%s)", prefix, blockerKind(i.Type, "index"), i.Name,
+			strings.Join(i.LabelsOrTypes, "|"), strings.Join(i.Properties, ", "))
+		if i.OwningConstraint != "" {
+			line += fmt.Sprintf(", which backs constraint %q: drop the constraint", i.OwningConstraint)
+		}
+		fmt.Fprintln(w, line)
+	}
+}
+
+func blockerKind(typ, noun string) string {
+	if typ == "" {
+		return noun
+	}
+	return typ + " " + noun
 }

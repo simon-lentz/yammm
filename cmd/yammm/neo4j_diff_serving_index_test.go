@@ -52,7 +52,7 @@ func TestNeo4jDiff_ABackingIndexThatServesADeclarationIsReportedOnce(t *testing.
 
 			owned := adapter.OwnedLabels(t.Context(), s)
 			var out bytes.Buffer
-			printIndexDiffResult(&out, adapter.DiffIndexes(desired, state.indexes, owned), owned)
+			printIndexDiffResult(&out, &adapter.Diff(nil, desired, nil, state.indexes, owned).Indexes, owned)
 			if !strings.Contains(out.String(), c.line) {
 				t.Errorf("the report lacks %q:\n%s", c.line, out.String())
 			}

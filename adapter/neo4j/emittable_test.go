@@ -229,13 +229,10 @@ func TestOwnedLabels_NilOwnsNothing(t *testing.T) {
 	if _, ok := owned.LabelOf([]string{"a", "b"}); ok {
 		t.Error("a nil OwnedLabels resolved an owned label")
 	}
-	got := New().DiffIndexes(
-		[]Index{{Name: "i", Kind: IndexRange, Label: "app__T", Properties: []string{"x"}}},
-		[]RemoteIndex{{
-			Name: "i", Type: "RANGE", EntityType: "NODE",
-			LabelsOrTypes: []string{"app__T"}, Properties: []string{"x"},
-		}}, nil,
-	)
+	got := &New().Diff(nil, []Index{{Name: "i", Kind: IndexRange, Label: "app__T", Properties: []string{"x"}}}, nil, []RemoteIndex{{
+		Name: "i", Type: "RANGE", EntityType: "NODE",
+		LabelsOrTypes: []string{"app__T"}, Properties: []string{"x"},
+	}}, nil).Indexes
 	// Nothing is owned, so nothing matches and nothing drops. Blocking is
 	// collected before ownership, though, so the taken name still reports as
 	// drift naming the holder — passing a nil by mistake surfaces the conflict
@@ -243,9 +240,6 @@ func TestOwnedLabels_NilOwnsNothing(t *testing.T) {
 	wantCounts(t, got, 0, 1, 0, 0, 0)
 
 	// With no remote holding the name there is nothing to block, and it is a Create.
-	free := New().DiffIndexes(
-		[]Index{{Name: "i", Kind: IndexRange, Label: "app__T", Properties: []string{"x"}}},
-		nil, nil,
-	)
+	free := &New().Diff(nil, []Index{{Name: "i", Kind: IndexRange, Label: "app__T", Properties: []string{"x"}}}, nil, nil, nil).Indexes
 	wantCounts(t, free, 0, 0, 1, 0, 0)
 }

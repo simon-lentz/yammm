@@ -126,7 +126,7 @@ func (a *Adapter) ConstraintsStructured(ctx context.Context, s schema.Schema) ([
 
 	disambiguateConstraintNames(constraints)
 
-	// Edition gating, through the same list [Adapter.DiffConstraints] decides
+	// Edition gating, through the same list [Adapter.Diff] decides
 	// declarability by, so the desired side of a diff and its actual side are
 	// filtered identically.
 	if kinds := a.declarableConstraintKinds(); len(kinds) < len(allConstraintKinds) {

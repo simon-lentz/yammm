@@ -76,10 +76,10 @@
 //
 // The default image is Enterprise, started with the evaluation licence
 // accepted, because Enterprise is the edition the adapter targets by default.
-// NOT NULL, TYPE, and NODE KEY constraints are Enterprise-only, as is the
-// propertyType column the constraint diff compares and its Unverified bucket
-// turns on — on Community the adapter emits UNIQUE alone and three of its four
-// constraint kinds would never execute here.
+// NOT NULL, TYPE, and NODE KEY constraints are Enterprise-only. On Community no
+// record carries the propertyType value that the constraint half of a plan
+// compares and its Unverified bucket turns on, the adapter emits UNIQUE alone,
+// and three of its four constraint kinds would never execute here.
 //
 // YAMMM_NEO4J_TEST_IMAGE overrides the image. Pointing it at a Community image
 // is supported and the licence acceptance is inert there: the adapter under test

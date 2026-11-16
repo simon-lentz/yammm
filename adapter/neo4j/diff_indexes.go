@@ -1,7 +1,12 @@
 package neo4j
 
 import (
+	"cmp"
 	"fmt"
+	"math"
+	"reflect"
+	"slices"
+	"strconv"
 	"strings"
 )
 
@@ -14,16 +19,15 @@ type IndexDiffResult struct {
 	// identical semantic definitions.
 	Match []IndexMatch
 
-	// Drift contains indexes present in the database that do not serve what the
-	// schema declares, and that a CREATE cannot fix. Four producers: a vector
-	// index whose dimension or similarity differs; an index holding a desired
-	// index's name under a different definition; one in a state that serves no
-	// queries (FAILED); and a desired index whose name is held by a kind the DSL
-	// cannot express. Each needs a drop before the declaration can be realised.
+	// Drift contains the desired indexes a CREATE alone cannot realise, in the
+	// desired list's order, each with every database object whose drop its
+	// create needs. The package doc's Index Diffing section lists what makes a
+	// declaration drift.
 	Drift []IndexDrift
 
-	// Create contains indexes defined in the schema that are absent from the
-	// database.
+	// Create contains indexes defined in the schema that nothing realises once
+	// the plan's drops run, and that nothing blocks. An index served by the
+	// backing index of a constraint the plan drops is one.
 	Create []Index
 
 	// Drop contains schema-owned indexes in the database that have no
@@ -32,7 +36,9 @@ type IndexDiffResult struct {
 	// multi-label FULLTEXT index, a relationship index, and a constraint's
 	// backing index are all left out even on an owned label: none is something
 	// a schema edit could account for, so reporting them would be drift that
-	// never clears. See [RemoteIndex.Declarable].
+	// never clears. See [RemoteIndex.Declarable]. An index a drift on either
+	// side names among its Blockers is not also a Drop. A caller that applies
+	// Drops drops them before any create.
 	Drop []RemoteIndex
 
 	// Unverified contains indexes that exist in both by semantic key but whose
@@ -42,16 +48,10 @@ type IndexDiffResult struct {
 	// verified.
 	Unverified []IndexUnverified
 
-	// Excluded counts the remote indexes the comparison neither paired nor
-	// dropped: the schema owns no label they carry, or [RemoteIndex.Declarable]
-	// refuses them (a kind the DSL cannot declare, more than one label, a
-	// relationship index, a constraint's backing index). A backing index that
-	// serves a declaration is that declaration's Actual, in Match, Drift or
-	// Unverified, and is not counted.
-	// A counted row that blocks a declaration's CREATE is also the Actual of
-	// that Drift: blocking is not being compared. See
-	// [ConstraintDiffResult.Excluded], which carries the same meaning and the
-	// same reason for existing.
+	// Excluded counts the remote indexes the plan leaves alone: no Match or
+	// Unverified Actual, no Drop, and no row whose drop target a drift on either
+	// side names or a Drop removes. Each is on a label the schema does not own,
+	// or [RemoteIndex.Declarable] refuses it. [ConstraintDiffResult.Excluded] gives the reason the count exists.
 	Excluded int
 }
 
@@ -70,277 +70,175 @@ type IndexMatch struct {
 	Actual  RemoteIndex
 }
 
-// IndexDrift pairs a desired index with an actual index that has the same
-// semantic key but a different definition.
+// IndexDrift pairs a desired index with every database object standing in its
+// way.
 type IndexDrift struct {
 	Desired Index
-	Actual  RemoteIndex
-	Reason  string // Human-readable drift description
+
+	// Blockers holds every database object to drop before Desired can be
+	// created, at least one. A blocker can be unowned or undeclarable.
+	Blockers Blockers
+
+	// Reason has one clause per blocker, the realisation's first where the drift
+	// pairs one.
+	Reason string
 }
 
-// DiffIndexes performs a semantic diff between desired schema indexes and
-// actual database indexes. Each desired index is a Match, a Drift, a Create or
-// Unverified; an owned remote index that no declaration takes and the schema
-// could declare ([RemoteIndex.Declarable]) is a Drop; and a remote row that is no
-// declaration's Actual and no Drop is counted in Excluded.
-//
-// Only indexes on labels the schema owns are matched, created or dropped — see
-// [Adapter.OwnedLabels], which the caller builds once and passes in — and any
-// remote index can block a desired one's creation. Desired
-// indexes are matched to remote ones in three phases: name and identity
-// together, then identity alone, then name alone; see [pairObjects] for why that
-// order matters.
-//
-// Composite property order is significant, a deliberate divergence from
-// [Adapter.DiffConstraints], which sorts properties to pair them: SHOW INDEXES
-// reports properties in index-definition order, so the order-sensitive identity
-// is sound. A same-set/different-order remote index is therefore a distinct index:
-// Create and, if [RemoteIndex.Declarable] accepts it, Drop when its name differs
-// too, and Drift when it holds the desired index's name.
-//
-// A schema-owned remote index that [RemoteIndex.Declarable] accepts and no
-// declaration matches is reported as a Drop — the drift the index feature
-// exists to surface; an owned index it refuses is counted in Excluded instead,
-// unless it is a constraint's backing index that serves a declaration, which is
-// that declaration's Actual: a match where it serves queries, drift where it is
-// FAILED and unverified where it is POPULATING. Drops are reported, never applied.
-//
-// Index and constraint names share ONE namespace. A constraint backed by an
-// index appears in SHOW INDEXES under the constraint's name and is seen here
-// automatically; a constraint with NO backing index — NOT NULL and TYPE — never
-// appears there at all, so a caller that introspected constraints passes them as
-// alsoBlocking and a desired index that no remote index realises, whose name one
-// of them holds, is reported as drift naming the holder. Omitting them is weaker: such an index then reports
-// as a Create the server refuses on every run.
-func (a *Adapter) DiffIndexes(
-	desired []Index,
-	actual []RemoteIndex,
-	owned *OwnedLabels,
-	alsoBlocking ...RemoteConstraint,
-) *IndexDiffResult {
-	result := &IndexDiffResult{}
+// indexSide is the index half of a plan while [Adapter.Diff] settles it. actual
+// is sorted, orphans are the owned, declarable rows no declaration took, and
+// unmatched the declarations pairing left without a row.
+type indexSide struct {
+	actual    []RemoteIndex
+	plans     []indexPlan
+	unmatched []int
+	orphans   []scoped[RemoteIndex]
+	claimed   []string
+}
 
-	// Blockers are collected from EVERY remote object, before ownership or
-	// declarability filtering, because the conditions under which a CREATE
-	// does nothing or is refused are not scoped the way ownership is:
-	//
-	//   - Index names are global. An index on a label this schema does not own,
-	//     of a kind it cannot declare, still holds its name against every CREATE
-	//     in the database — and a constraint's backing index holds the
-	//     constraint's name, so constraint and index names share one namespace.
-	//   - A (label, properties, kind) already served by an existing index is not
-	//     created again under a second name, which is how a constraint's backing
-	//     index absorbs a declared @@index over a primary key.
-	//
-	// byDefinition holds each definition's first row by its position in actual,
-	// which is what tells one row from another: a name does not, since a
-	// caller's rows may share one or have none.
-	byName := make(map[string]RemoteIndex, len(actual))
-	byDefinition := make(map[string]int, len(actual))
-	for i, ri := range actual {
-		if ri.Name != "" {
-			if _, taken := byName[ri.Name]; !taken {
-				byName[ri.Name] = ri
-			}
-		}
-		// Names are global, but definitions are not: node and relationship
-		// indexes occupy separate namespaces, so a relationship index whose type
-		// happens to be spelled like a node label does not stop the server from
-		// creating that node index. Only node indexes can serve a node
-		// definition. Type is upper-cased to meet [desiredIndexKey]'s canonical
-		// spelling, which is what this map is looked up by.
-		if ri.EntityType != "" && !strings.EqualFold(ri.EntityType, "NODE") {
-			continue
-		}
-		// A multi-label node index serves no single-label declaration either:
-		// the server creates the declaration beside it, so keying it here would
-		// report a create the server actually performs as blocked. Its NAME
-		// still blocks, through byName above. FULLTEXT is the only kind the
-		// server creates multi-label today; the guard is on the count so that
-		// stays true by construction rather than by enumeration.
-		if len(ri.LabelsOrTypes) > 1 {
-			continue
-		}
-		def := identityKey(append(
-			[]string{firstLabel(ri.LabelsOrTypes), strings.ToUpper(ri.Type)}, ri.Properties...,
-		)...)
-		if _, taken := byDefinition[def]; !taken {
-			byDefinition[def] = i
-		}
-	}
-	// A constraint with no backing index — NOT NULL and TYPE — appears in no
-	// SHOW INDEXES row, so its name reaches this diff only through alsoBlocking.
-	// It is kept in its OWN map, not folded into byName, and consulted only
-	// after [indexCreateBlocker] has found no index holding the name: an index
-	// holding it is the more precise finding, and a constraint holding it is
-	// the rarer case. Its message is built at that site rather than by
-	// [describeIndexBlocker], because it names the constraint's own Type.
-	blockingConstraints := make(map[string]RemoteConstraint, len(alsoBlocking))
-	for _, rc := range alsoBlocking {
-		if rc.Name == "" {
-			continue
-		}
-		if _, taken := byName[rc.Name]; taken {
-			continue
-		}
-		if _, taken := blockingConstraints[rc.Name]; !taken {
-			blockingConstraints[rc.Name] = rc
-		}
-	}
-
-	// Excluded counts remote rows the comparison never reached, and whether it
-	// reached a BACKING index is not knowable here: one that serves a
-	// declaration becomes that declaration's Actual below, and counting it now
-	// would report the same row twice. Every row pairing does not take is therefore
-	// held back, by position, and counted at the end by what the comparison did
-	// with it.
+// pairIndexes pairs desired indexes with the owned remote indexes
+// [RemoteIndex.Declarable] accepts, in three phases: name and identity
+// together, then identity alone, then name alone; see [pairObjects].
+//
+// Composite property order is significant, a deliberate divergence from the
+// constraint side, which sorts properties to pair them: SHOW INDEXES reports
+// properties in index-definition order, so the order-sensitive identity is
+// sound. A same-set, different-order remote index is a distinct index.
+func pairIndexes(desired []Index, actual []RemoteIndex, owned *OwnedLabels, t targets) indexSide {
+	side := indexSide{actual: actual}
 	var ownedRemotes []scoped[RemoteIndex]
-	heldBack := make(map[int]struct{})
-	for i, ri := range actual {
-		label, isOwned := owned.ownedLabel(ri.LabelsOrTypes)
-		if !isOwned || !ri.Declarable() {
-			heldBack[i] = struct{}{}
-			continue
+	for at, ri := range actual {
+		if label, isOwned := owned.ownedLabel(ri.LabelsOrTypes); isOwned && ri.Declarable() {
+			ownedRemotes = append(ownedRemotes, scoped[RemoteIndex]{obj: ri, label: label, at: at})
 		}
-		ownedRemotes = append(ownedRemotes, scopedObject(ri, label))
 	}
 
-	pairs, unmatched, orphans := pairObjects(desired, ownedRemotes, identityFuncs[Index, scoped[RemoteIndex]]{
-		desiredName: func(d Index) string { return d.Name },
+	positions := make([]int, len(desired))
+	for i := range positions {
+		positions[i] = i
+	}
+	pairs, unmatched, orphans := pairObjects(positions, ownedRemotes, identityFuncs[int, scoped[RemoteIndex]]{
+		desiredName: func(i int) string { return desired[i].Name },
 		actualName:  func(o scoped[RemoteIndex]) string { return o.obj.Name },
-		desiredKey:  desiredIndexKey,
+		desiredKey:  func(i int) string { return desiredIndexKey(desired[i]) },
 		actualKey:   remoteIndexKey,
 	})
+	side.unmatched, side.orphans = unmatched, orphans
 
+	side.plans = make([]indexPlan, len(desired))
+	for i, d := range desired {
+		side.plans[i] = indexPlan{desired: d, state: planCreate}
+	}
 	for _, p := range pairs {
-		d, ri := p.Desired, p.Actual.obj
+		d, ri := desired[p.Desired], p.Actual.obj
+		if ri.Name != "" {
+			side.claimed = append(side.claimed, ri.Name)
+		}
+		cp := &side.plans[p.Desired]
+		cp.realisation, cp.at, cp.realised, cp.state = &ri, p.Actual.at, t.index(ri), planMatch
 
 		// Only a name-only pair can have disagreeing identities; the other two
 		// phases match on identity by construction. The database already holds
 		// the name, and every emitted statement carries IF NOT EXISTS, so a
-		// CREATE would silently do nothing — the index must be dropped and
-		// recreated.
+		// CREATE would silently do nothing.
 		if p.byName {
-			result.Drift = append(result.Drift, IndexDrift{
-				Desired: d,
-				Actual:  ri,
-				Reason: fmt.Sprintf("index %q exists with a different definition: schema %s, database %s",
-					ri.Name, describeIndexShape(d.Properties, indexKindToRemoteType(d.Kind)),
-					describeIndexShape(ri.Properties, ri.Type)),
-			})
+			cp.state = planDrift
+			cp.ownCause = fmt.Sprintf("index %q exists with a different definition: schema %s, database %s",
+				ri.Name, describeIndexShape(d.Properties, indexKindToRemoteType(d.Kind)),
+				describeIndexShape(ri.Properties, ri.Type))
 			continue
 		}
 
 		// Drift before unverifiability, throughout: a fact the database
 		// disclosed that disagrees with the declaration is definite and
 		// actionable, and outranks anything the database would not disclose or
-		// has not finished doing. A wrong vector dimension is wrong whether or
-		// not the index has finished populating.
+		// has not finished doing.
 		if reason, drifted := vectorDrift(d, ri); drifted {
-			result.Drift = append(result.Drift, IndexDrift{
-				Desired: d,
-				Actual:  ri,
-				Reason:  reason,
-			})
+			cp.state, cp.ownCause = planDrift, reason
 			continue
 		}
-
-		// An index that exists but does not serve queries is not in sync,
-		// however exactly its definition matches.
-		if reason, actionable := indexStateProblem(ri); reason != "" {
-			result.append(actionable, d, ri, reason)
+		if classifyIndexState(cp, ri) {
 			continue
 		}
-
 		if reason, unverifiable := vectorConfigUnreadable(d, ri); unverifiable {
-			result.Unverified = append(result.Unverified, IndexUnverified{
-				Desired: d,
-				Actual:  ri,
-				Reason:  reason,
-			})
-			continue
-		}
-
-		result.Match = append(result.Match, IndexMatch{
-			Desired: d,
-			Actual:  ri,
-		})
-	}
-
-	// Names pairing already handed to a declaration. A remote object here still
-	// holds its name against every other CREATE, so it still blocks — but the
-	// message must say the holder is this schema's own realisation of a different
-	// declaration, or the report reads as if one object were both in sync and to
-	// be dropped for no stated reason.
-	claimed := make(map[string]struct{}, len(pairs))
-	for _, p := range pairs {
-		if n := p.Actual.obj.Name; n != "" {
-			claimed[n] = struct{}{}
+			cp.state, cp.unverifiedReason = planUnverified, reason
 		}
 	}
+	return side
+}
 
-	// A desired index the pairing did not realise is only a Create if the server
-	// would actually create it. Where something already blocks the statement, the
-	// CREATE is a silent no-op or a refusal, and reporting it produces a plan that repeats
-	// unchanged forever, so it is drift naming what to remove first.
-	for _, d := range unmatched {
-		key := desiredIndexKey(d)
+// serveFromBackingIndexes gives each unmatched declaration a constraint's
+// backing index that serves its definition, as its realisation. Such an index
+// satisfies the declaration rather than blocking it: the server accepts the
+// declaration's create beside it as a no-op. Its state is checked as a paired
+// index's is.
+func (side indexSide) serveFromBackingIndexes(f indexBlockerFinder, t targets) {
+	for _, i := range side.unmatched {
+		cp := &side.plans[i]
+		if at, served := f.backingFor(desiredIndexKey(cp.desired)); served {
+			ri := side.actual[at]
+			cp.realisation, cp.at, cp.realised, cp.served, cp.state = &ri, at, t.index(ri), true, planMatch
+			classifyIndexState(cp, ri)
+		}
+	}
+}
 
-		// A definition already served by a constraint's backing index SATISFIES
-		// the declaration rather than blocking it: the index exists and does the
-		// work, it merely carries the constraint's name. A valid schema reaches
-		// this when the emitters of one index disagree and one keys on its
-		// property alone — and no action could clear it, since dropping the backing index
-		// means dropping the primary key. Reporting drift here would make a
-		// fully-applied schema diff dirty forever.
-		//
-		// The state check is the same one every paired index goes through: an
-		// index that exists but does not serve queries is not in sync however
-		// exactly it fits the declaration, and a backing index is no exception.
-		// In either state the row was compared, so it is no longer held back.
-		if at, ok := byDefinition[key]; ok && actual[at].OwningConstraint != "" {
-			served := actual[at]
-			delete(heldBack, at)
-			if reason, actionable := indexStateProblem(served); reason != "" {
-				result.append(actionable, d, served, reason)
-				continue
+// result files every settled plan and accounts for every remote row: a row is a
+// Match or Unverified Actual, a Drop, a row whose target removed holds, or
+// counted in Excluded. An orphan a drift names is no Drop.
+func (side indexSide) result(blocking, removed map[string]struct{}, t targets) IndexDiffResult {
+	var r IndexDiffResult
+	accounted := make([]bool, len(side.actual))
+	for _, cp := range side.plans {
+		switch cp.state {
+		case planMatch:
+			r.Match = append(r.Match, IndexMatch{Desired: cp.desired, Actual: *cp.realisation})
+			accounted[cp.at] = true
+		case planUnverified:
+			r.Unverified = append(r.Unverified, IndexUnverified{Desired: cp.desired, Actual: *cp.realisation, Reason: cp.unverifiedReason})
+			accounted[cp.at] = true
+		case planCreate:
+			r.Create = append(r.Create, cp.desired)
+		case planDrift:
+			drift := IndexDrift{Desired: cp.desired}
+			clauses := make([]string, 0, len(cp.blockers))
+			for _, b := range cp.blockers {
+				b.addTo(&drift.Blockers)
+				clauses = append(clauses, b.why)
 			}
-			result.Match = append(result.Match, IndexMatch{Desired: d, Actual: served})
-			continue
+			drift.Reason = strings.Join(clauses, "; ")
+			r.Drift = append(r.Drift, drift)
 		}
-		if blocker, blocked := indexCreateBlocker(d, key, byName, byDefinition, actual); blocked {
-			// Not deleted from heldBack: blocking a create is not being
-			// compared. The row is still one the diff can neither match nor
-			// drop, which is what Excluded counts.
-			result.Drift = append(result.Drift, IndexDrift{
-				Desired: d,
-				Actual:  blocker,
-				Reason:  describeIndexBlocker(d, blocker, claimed),
-			})
-			continue
-		}
-		// Only after the index namespace comes up empty: a constraint holding the
-		// name is the rarer case, and a real index holding it is the more precise
-		// finding.
-		if rc, taken := blockingConstraints[d.Name]; taken && d.Name != "" {
-			result.Drift = append(result.Drift, IndexDrift{
-				Desired: d,
-				Actual:  RemoteIndex{Name: rc.Name, LabelsOrTypes: rc.LabelsOrTypes, Properties: rc.Properties},
-				Reason: fmt.Sprintf("name %q is already held by a %s constraint on %s; index and constraint names share one namespace, so drop or rename it before this index can be created",
-					rc.Name, rc.Type, describeLabels(rc.LabelsOrTypes)),
-			})
-			continue
-		}
-		result.Create = append(result.Create, d)
 	}
-	for _, o := range orphans {
-		result.Drop = append(result.Drop, o.obj)
+	for _, o := range side.orphans {
+		if _, isBlocker := blocking[t.index(o.obj)]; !isBlocker {
+			r.Drop = append(r.Drop, o.obj)
+			accounted[o.at] = true
+		}
 	}
+	for at, ri := range side.actual {
+		if _, gone := removed[t.index(ri)]; !accounted[at] && !gone {
+			r.Excluded++
+		}
+	}
+	return r
+}
 
-	// What the comparison never used is what was never compared.
-	result.Excluded += len(heldBack)
+type indexPlan = plan[Index, RemoteIndex]
 
-	return result
+// classifyIndexState files a plan whose realisation does not serve queries: a
+// FAILED index is drift and a POPULATING one unverified. It reports whether it
+// filed the plan.
+func classifyIndexState(cp *indexPlan, ri RemoteIndex) bool {
+	reason, actionable := indexStateProblem(ri)
+	switch {
+	case reason == "":
+		return false
+	case actionable:
+		cp.state, cp.ownCause = planDrift, reason
+	default:
+		cp.state, cp.unverifiedReason = planUnverified, reason
+	}
+	return true
 }
 
 // indexStateProblem reports why a remote index does not serve queries, and
@@ -356,17 +254,6 @@ func indexStateProblem(ri RemoteIndex) (reason string, actionable bool) {
 	}
 	return fmt.Sprintf("index %q is in state %s and does not serve queries; drop and recreate it",
 		ri.Name, ri.State), true
-}
-
-// append files one desired/actual pair under Drift or Unverified, so the two
-// call sites that classify an index state cannot disagree about which bucket a
-// state belongs in.
-func (r *IndexDiffResult) append(actionable bool, d Index, ri RemoteIndex, reason string) {
-	if actionable {
-		r.Drift = append(r.Drift, IndexDrift{Desired: d, Actual: ri, Reason: reason})
-		return
-	}
-	r.Unverified = append(r.Unverified, IndexUnverified{Desired: d, Actual: ri, Reason: reason})
 }
 
 // describeIndexShape renders an index's members and kind for a drift message.
@@ -444,21 +331,21 @@ func DeclarableIndexType(remoteType string) bool {
 }
 
 // Declarable reports whether a remote index is one a schema could have
-// declared, and therefore one [Adapter.DiffIndexes] can pair or drop when the
+// declared, and therefore one [Adapter.Diff] can pair or drop when the
 // schema owns its label.
 //
 // Four rules, all of which must hold.
 //
 // The kind must be one the DSL has vocabulary for — see [DeclarableIndexType].
-// SHOW INDEXES reports every non-LOOKUP, non-constraint-backed index on a
-// schema-owned label, including TEXT, POINT, and the Neo4j 4.x-historical
-// BTREE, and including relationship indexes, which the adapter never emits.
+// [IntrospectIndexesQuery] reports every index, including TEXT, POINT, LOOKUP,
+// the Neo4j 4.x-historical BTREE, relationship indexes, which the adapter never
+// emits, and constraints' backing indexes.
 // Classifying one of those as an undeclared drop would report drift that no
 // schema edit could resolve, leaving the all-or-nothing constraints-only mode
 // as the only escape. An unreported kind is deliberately not declarable, for
-// the reason [DeclarableIndexType] gives; such an object still blocks names,
-// because blockers are collected before this filter, so it is not invisible,
-// only unclassified.
+// the reason [DeclarableIndexType] gives. Such an object still blocks names,
+// because blockers are collected from every row whatever this filter says, so
+// it is not invisible, only unclassified.
 //
 // The index must own at most one label. A multi-label node index — FULLTEXT is
 // the only kind the server creates that way (`FOR (n:A|B)`) — is not
@@ -471,8 +358,12 @@ func DeclarableIndexType(remoteType string) bool {
 // with its constraint, so reporting one as an undeclared orphan advises
 // dropping the index behind a primary key. [IntrospectIndexesQuery] yields
 // those rows deliberately — they are blockers the diff must see — so this check
-// keeps them out of pairing and drops. One that serves a declaration is still
-// that declaration's Actual, which [Adapter.DiffIndexes] finds by definition.
+// keeps them out of pairing and drops. One can serve the definition of a
+// declaration that pairing left without a row. While the plan keeps its
+// constraint, it is that declaration's Actual, or its drift's first blocker
+// where it is FAILED. Where the plan drops the constraint of an online or
+// POPULATING one, the declaration is a Create unless another blocker makes it
+// a Drift.
 //
 // The entity type must be NODE or unreported. An unreported one is treated as
 // NODE: the field is absent only where a server or fixture does not report it,
@@ -569,7 +460,7 @@ func vectorDrift(d Index, ri RemoteIndex) (string, bool) {
 }
 
 // firstLabel returns the label a remote object's DEFINITION is keyed by. Only
-// single-label rows are keyed — [Adapter.DiffIndexes] skips a multi-label row
+// single-label rows are keyed — [Adapter.Diff] skips a multi-label row
 // before computing its definition key, because a multi-label index serves no
 // single-label declaration — so the "first" label is the row's only label; the
 // function merely stays total for the empty slice a hand-built record can
@@ -587,46 +478,228 @@ func firstLabel(labels []string) string {
 // `FOR (n:Other|Doc)` reports both, and naming only the first sends the operator
 // looking under a label the object does not exclusively belong to.
 func describeLabels(labels []string) string {
+	if len(labels) == 0 {
+		return "no label"
+	}
 	return strings.Join(labels, "|")
 }
 
-// indexCreateBlocker reports the remote index, if any, that would make the
-// emitted CREATE for d silently do nothing.
+// indexBlockerFinder indexes every remote object that can block a desired
+// index's create, by the name or the definition it blocks.
 //
-// Two independent conditions, both observed against a live server:
+// Two conditions, both observed against a live server:
 //
 //   - Its NAME is already held. Index names are global — across labels, across
-//     kinds, and shared with constraint names via their backing indexes — so a
-//     CREATE under a taken name is skipped whatever else differs.
+//     kinds, and shared with constraint names — so a CREATE under a taken name
+//     is skipped whatever else differs.
 //   - Its DEFINITION is already served by another PLAIN index. An index over the
 //     same label, properties, and kind is not created a second time under a
 //     different name.
 //
-// A definition served by a constraint's BACKING index does not reach here: the
-// caller treats that as satisfying the declaration, because no action could
-// clear it. The caller passes the desired index's identity key, which it has
-// already computed for that test, and the rows byDefinition's positions index.
-func indexCreateBlocker(d Index, key string, byName map[string]RemoteIndex, byDefinition map[string]int, actual []RemoteIndex) (RemoteIndex, bool) {
-	if blocker, taken := byName[d.Name]; taken && d.Name != "" {
-		return blocker, true
-	}
-	if at, served := byDefinition[key]; served {
-		return actual[at], true
-	}
-	return RemoteIndex{}, false
+// A definition served by a constraint's BACKING index satisfies the
+// declaration instead; see backingFor.
+type indexBlockerFinder struct {
+	actual []RemoteIndex
+	byName map[string][]int
+	// byDefinition holds positions in actual, since a name does not tell one
+	// row from another: a caller's rows may share one or have none.
+	byDefinition map[string][]int
+	// constraintByName reaches a NOT NULL or TYPE constraint, which no SHOW
+	// INDEXES row carries; a key constraint's backing index row is named first
+	// and shares its drop target.
+	constraintByName map[string][]RemoteConstraint
+	claimed          map[string]struct{}
+	targets          targets
 }
 
-// describeIndexBlocker explains which of the two blocking conditions applies and
-// what has to be removed, so the operator has an action rather than a repeat.
-//
-// claimed holds the names pairing already gave to a declaration. A blocker in
-// that set is this schema's own realisation of some OTHER declaration that
-// happens to carry this one's generated name; dropping it is still the right
-// move, because the next apply re-creates it under its own name, but the report
-// otherwise shows one object as both matched and to-be-dropped with nothing
-// connecting the two lines.
+func newIndexBlockerFinder(actual []RemoteIndex, constraints []RemoteConstraint, claimed map[string]struct{}, t targets) indexBlockerFinder {
+	f := indexBlockerFinder{
+		actual:           actual,
+		byName:           make(map[string][]int),
+		byDefinition:     make(map[string][]int),
+		constraintByName: make(map[string][]RemoteConstraint),
+		claimed:          claimed,
+		targets:          t,
+	}
+	for i, ri := range actual {
+		if ri.Name != "" {
+			f.byName[ri.Name] = append(f.byName[ri.Name], i)
+		}
+		// Node and relationship indexes occupy separate definition namespaces,
+		// and a multi-label node index serves no single-label declaration: the
+		// server creates the declaration beside either. Their NAMES still block.
+		if ri.EntityType != "" && !strings.EqualFold(ri.EntityType, "NODE") {
+			continue
+		}
+		if len(ri.LabelsOrTypes) > 1 {
+			continue
+		}
+		def := identityKey(append(
+			[]string{firstLabel(ri.LabelsOrTypes), strings.ToUpper(ri.Type)}, ri.Properties...,
+		)...)
+		f.byDefinition[def] = append(f.byDefinition[def], i)
+	}
+	for _, rc := range constraints {
+		if rc.Name != "" {
+			f.constraintByName[rc.Name] = append(f.constraintByName[rc.Name], rc)
+		}
+	}
+	return f
+}
+
+// backingFor returns the position of a constraint's backing index that serves
+// the definition key, if one does.
+func (f indexBlockerFinder) backingFor(key string) (int, bool) {
+	for _, at := range f.byDefinition[key] {
+		if f.actual[at].OwningConstraint != "" {
+			return at, true
+		}
+	}
+	return 0, false
+}
+
+// blockers returns every remote object that keeps d's create from taking
+// effect, each with the clause that explains it. A backing index serving d's
+// definition is no blocker; see backingFor.
+func (f indexBlockerFinder) blockers(d Index) []blocker {
+	var out []blocker
+	if d.Name != "" {
+		for _, at := range f.byName[d.Name] {
+			out = append(out, blocker{index: &f.actual[at], target: f.targets.index(f.actual[at]), why: describeIndexBlocker(d, f.actual[at], f.claimed)})
+		}
+	}
+	for _, at := range f.byDefinition[desiredIndexKey(d)] {
+		if ri := &f.actual[at]; ri.OwningConstraint == "" {
+			out = append(out, blocker{index: ri, target: f.targets.index(*ri), why: describeIndexBlocker(d, *ri, f.claimed)})
+		}
+	}
+	if d.Name != "" {
+		for _, rc := range f.constraintByName[d.Name] {
+			out = append(out, blocker{
+				constraint: &rc,
+				target:     f.targets.constraint(rc),
+				why: fmt.Sprintf("name %q is already held by a %s constraint on %s; index and constraint names share one namespace, so drop or rename it before this index can be created",
+					rc.Name, rc.Type, describeLabels(rc.LabelsOrTypes)),
+			})
+		}
+	}
+	return out
+}
+
+// remoteIndexRecordKey identifies one remote index record.
+func remoteIndexRecordKey(ri RemoteIndex) string {
+	return identityKey(append(append(
+		[]string{ri.Name, ri.Type, ri.EntityType, ri.State, ri.OwningConstraint, strconv.Itoa(len(ri.LabelsOrTypes))},
+		ri.LabelsOrTypes...), ri.Properties...)...)
+}
+
+// compareRemoteIndexes is the order [Adapter.Diff] reads indexes in, so no
+// result depends on the order the server returned rows in.
+func compareRemoteIndexes(x, y RemoteIndex) int {
+	return cmp.Or(
+		cmp.Compare(x.Name, y.Name),
+		cmp.Compare(x.Type, y.Type),
+		cmp.Compare(x.EntityType, y.EntityType),
+		slices.Compare(x.LabelsOrTypes, y.LabelsOrTypes),
+		slices.Compare(x.Properties, y.Properties),
+		cmp.Compare(x.State, y.State),
+		cmp.Compare(x.OwningConstraint, y.OwningConstraint),
+		compareValues(reflect.ValueOf(x.Options), reflect.ValueOf(y.Options)),
+	)
+}
+
+// compareValues orders two valid values totally: by type, then by value. The
+// printed form is not enough, since int64(3) and float64(3) both print as 3.
+// A nil map, slice, pointer or interface comes first, a map orders by its
+// entries in key order, a float by its bits after its value, and a func,
+// channel or unsafe pointer by its printed form. Two distinct types that print
+// one name and one package order by their values.
+func compareValues(x, y reflect.Value) int {
+	if c := cmp.Compare(x.Type().String(), y.Type().String()); c != 0 {
+		return c
+	}
+	if c := cmp.Compare(x.Type().PkgPath(), y.Type().PkgPath()); c != 0 {
+		return c
+	}
+	if c := cmp.Compare(x.Kind(), y.Kind()); c != 0 {
+		return c
+	}
+	switch x.Kind() {
+	case reflect.Map, reflect.Slice, reflect.Pointer, reflect.Interface:
+		if c := cmp.Compare(boolRank(!x.IsNil()), boolRank(!y.IsNil())); c != 0 || x.IsNil() {
+			return c
+		}
+	}
+	switch x.Kind() {
+	case reflect.Bool:
+		return cmp.Compare(boolRank(x.Bool()), boolRank(y.Bool()))
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		return cmp.Compare(x.Int(), y.Int())
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
+		return cmp.Compare(x.Uint(), y.Uint())
+	case reflect.Float32, reflect.Float64:
+		return compareFloats(x.Float(), y.Float())
+	case reflect.Complex64, reflect.Complex128:
+		return cmp.Or(compareFloats(real(x.Complex()), real(y.Complex())), compareFloats(imag(x.Complex()), imag(y.Complex())))
+	case reflect.String:
+		return cmp.Compare(x.String(), y.String())
+	case reflect.Pointer, reflect.Interface:
+		return compareValues(x.Elem(), y.Elem())
+	case reflect.Slice, reflect.Array:
+		for i := range min(x.Len(), y.Len()) {
+			if c := compareValues(x.Index(i), y.Index(i)); c != 0 {
+				return c
+			}
+		}
+		return cmp.Compare(x.Len(), y.Len())
+	case reflect.Map:
+		return slices.CompareFunc(sortedEntries(x), sortedEntries(y), compareEntries)
+	case reflect.Struct:
+		for i := range x.NumField() {
+			if c := compareValues(x.Field(i), y.Field(i)); c != 0 {
+				return c
+			}
+		}
+		return 0
+	}
+	return cmp.Compare(fmt.Sprint(x), fmt.Sprint(y))
+}
+
+// compareFloats orders NaN first, then by value, then by bits, so -0 and +0
+// and two NaN payloads are told apart.
+func compareFloats(x, y float64) int {
+	return cmp.Or(cmp.Compare(x, y), cmp.Compare(math.Float64bits(x), math.Float64bits(y)))
+}
+
+// entry is one map entry. A map can hold two NaN keys, so entries with equal
+// keys order by value.
+type entry struct{ key, value reflect.Value }
+
+func compareEntries(a, b entry) int {
+	return cmp.Or(compareValues(a.key, b.key), compareValues(a.value, b.value))
+}
+
+func sortedEntries(m reflect.Value) []entry {
+	entries := make([]entry, 0, m.Len())
+	for it := m.MapRange(); it.Next(); {
+		entries = append(entries, entry{it.Key(), it.Value()})
+	}
+	slices.SortFunc(entries, compareEntries)
+	return entries
+}
+
+func boolRank(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
+}
+
+// describeIndexBlocker says why blocker keeps d's create from taking effect and
+// what to drop. A name in claimed is another declaration's realisation, whose
+// own drift creates it again under its own name.
 func describeIndexBlocker(d Index, blocker RemoteIndex, claimed map[string]struct{}) string {
-	// Guarded on a non-empty desired name: DiffIndexes is public API and a
+	// Guarded on a non-empty desired name: Diff is public API and a
 	// caller may build Index values with no name at all, in which case an
 	// equally nameless blocker is a DEFINITION block, not a name collision.
 	if d.Name != "" && blocker.Name == d.Name {
@@ -635,7 +708,7 @@ func describeIndexBlocker(d Index, blocker RemoteIndex, claimed map[string]struc
 				blocker.Name, blocker.OwningConstraint)
 		}
 		if _, isOurs := claimed[blocker.Name]; isOurs {
-			return fmt.Sprintf("index name %q is already held by a %s index on %s that realises another declaration in this schema; drop it — the next apply recreates it under its own name",
+			return fmt.Sprintf("index name %q is already held by a %s index on %s that realises another declaration in this schema; drop it, and that declaration is created again under its own name",
 				blocker.Name, blocker.Type, describeLabels(blocker.LabelsOrTypes))
 		}
 		return fmt.Sprintf("index name %q is already held by a %s index on %s; drop it before this index can be created",

@@ -32,23 +32,6 @@ func wantAnswer(t *testing.T, ctx context.Context, stmt, code string) {
 	}
 }
 
-func liveConstraintDiff(t *testing.T, ctx context.Context, a *n4j.Adapter, s schema.Schema) *n4j.ConstraintDiffResult {
-	t.Helper()
-	desired, res := a.ConstraintsStructured(ctx, s)
-	if res.HasErrors() {
-		t.Fatalf("emitting constraints: %v", res.Err())
-	}
-	constraints, err := n4j.ParseRemoteConstraints(query(t, ctx, n4j.IntrospectConstraintsQuery()))
-	if err != nil {
-		t.Fatalf("ParseRemoteConstraints: %v", err)
-	}
-	indexes, err := n4j.ParseRemoteIndexes(query(t, ctx, n4j.IntrospectIndexesQuery()))
-	if err != nil {
-		t.Fatalf("ParseRemoteIndexes: %v", err)
-	}
-	return a.DiffConstraints(desired, constraints, a.OwnedLabels(ctx, s), indexes...)
-}
-
 // A primary key flipped between UNIQUE and NODE KEY, by an option or an older
 // database, converges in one apply in the consumer's order.
 func TestKeyKindFlip_ConvergesInOneApply(t *testing.T) {
@@ -74,14 +57,14 @@ func TestKeyKindFlip_ConvergesInOneApply(t *testing.T) {
 			dropAll(t, ctx)
 			applySchemaDDL(t, ctx, tc.from, s)
 
-			applyInConsumerOrder(t, ctx, liveConstraintDiff(t, ctx, tc.to, s))
-			requireCleanDiff(t, liveConstraintDiff(t, ctx, tc.to, s))
+			applyPlan(t, ctx, liveDiff(t, ctx, tc.to, s))
+			requireCleanPlan(t, liveDiff(t, ctx, tc.to, s))
 		})
 	}
 }
 
 // A UNIQUE that name pairing gives to another declaration still blocks the NODE
-// KEY over its key: the plan names it twice, and the second drop is a no-op.
+// KEY over its key: two drifts name it, and it is dropped once.
 func TestKeyKindHolderPairedByName_ConvergesInOneApply(t *testing.T) {
 	ctx := context.Background()
 	driver(t)
@@ -99,12 +82,12 @@ func TestKeyKindHolderPairedByName_ConvergesInOneApply(t *testing.T) {
 	run(t, ctx, "CREATE CONSTRAINT flip__Doc_name_not_null FOR (n:flip__Doc) REQUIRE n.id IS UNIQUE")
 
 	to := n4j.New(n4j.WithNodeKeyConstraints(true))
-	applyInConsumerOrder(t, ctx, liveConstraintDiff(t, ctx, to, s))
-	requireCleanDiff(t, liveConstraintDiff(t, ctx, to, s))
+	applyPlan(t, ctx, liveDiff(t, ctx, to, s))
+	requireCleanPlan(t, liveDiff(t, ctx, to, s))
 }
 
-// A TYPE drift whose Desired takes the name a key-kind drift drops runs after
-// that drop: run first, its create would be skipped while the UNIQUE holds the name.
+// A TYPE drift whose Desired takes the name a key-kind drift drops converges:
+// every drop runs before any create, so the UNIQUE no longer holds the name.
 func TestDriftThatTakesAnotherDriftsName_ConvergesInOneApply(t *testing.T) {
 	ctx := context.Background()
 	driver(t)
@@ -120,41 +103,8 @@ func TestDriftThatTakesAnotherDriftsName_ConvergesInOneApply(t *testing.T) {
 	run(t, ctx, "CREATE CONSTRAINT flip__Doc_z_type FOR (n:flip__Doc) REQUIRE n.id IS UNIQUE")
 
 	to := n4j.New(n4j.WithNodeKeyConstraints(true))
-	applyInConsumerOrder(t, ctx, liveConstraintDiff(t, ctx, to, s))
-	requireCleanDiff(t, liveConstraintDiff(t, ctx, to, s))
-}
-
-// applyInConsumerOrder runs a plan as the consumer's apply does: every Create,
-// then each Drift as a drop of its Actual and a create of its Desired, then every
-// Drop.
-func applyInConsumerOrder(t *testing.T, ctx context.Context, plan *n4j.ConstraintDiffResult) {
-	t.Helper()
-	for _, c := range plan.Create {
-		run(t, ctx, c.Statement)
-	}
-	for _, d := range plan.Drift {
-		drop, err := n4j.DropConstraintStatement(d.Actual.Name)
-		if err != nil {
-			t.Fatalf("drift on %s names no droppable constraint: %+v", d.Desired.Statement, d.Actual)
-		}
-		run(t, ctx, drop)
-		run(t, ctx, d.Desired.Statement)
-	}
-	for _, rc := range plan.Drop {
-		drop, err := n4j.DropConstraintStatement(rc.Name)
-		if err != nil {
-			t.Fatalf("DropConstraintStatement(%q): %v", rc.Name, err)
-		}
-		run(t, ctx, drop)
-	}
-}
-
-func requireCleanDiff(t *testing.T, plan *n4j.ConstraintDiffResult) {
-	t.Helper()
-	if len(plan.Drift)+len(plan.Create)+len(plan.Drop)+len(plan.Unverified) != 0 {
-		t.Errorf("the second diff is not clean: drift %+v, create %+v, drop %+v, unverified %+v",
-			plan.Drift, plan.Create, plan.Drop, plan.Unverified)
-	}
+	applyPlan(t, ctx, liveDiff(t, ctx, to, s))
+	requireCleanPlan(t, liveDiff(t, ctx, to, s))
 }
 
 // constraintDefinitionKey keeps a composite's property order because the server

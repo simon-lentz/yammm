@@ -64,7 +64,7 @@ func TestCanonicalRemoteConstraintType(t *testing.T) {
 	}
 }
 
-func TestDiffConstraints_UniquenessSpellingsAllMatch(t *testing.T) {
+func TestConstraintDiff_UniquenessSpellingsAllMatch(t *testing.T) {
 	t.Parallel()
 
 	for _, spelling := range uniquenessSpellings {
@@ -80,7 +80,7 @@ func TestDiffConstraints_UniquenessSpellingsAllMatch(t *testing.T) {
 				LabelsOrTypes: []string{"test__Entity"}, Properties: []string{"id"},
 			}}
 
-			result := a.DiffConstraints(desired, actual, testOwned())
+			result := &a.Diff(desired, nil, actual, nil, testOwned()).Constraints
 
 			// The specific misbehaviour this guards: an unrecognised spelling
 			// makes the remote constraint undeclarable, so it is Excluded rather

@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/assert"
 
 	"github.com/simon-lentz/yammm/cmd/yammm/internal/cli"
+	"github.com/simon-lentz/yammm/schema"
 )
 
 func TestPrintDiffResult_AllMatch(t *testing.T) {
@@ -37,8 +38,11 @@ func TestPrintDiffResult_WithDrift(t *testing.T) {
 		Drift: []adaptern4j.ConstraintDrift{
 			{
 				Desired: adaptern4j.Constraint{Name: "c1"},
-				Actual:  adaptern4j.RemoteConstraint{Name: "c1"},
-				Reason:  "type mismatch",
+				Blockers: adaptern4j.Blockers{
+					Constraints: []adaptern4j.RemoteConstraint{{Name: "c1", Type: "NODE_PROPERTY_TYPE", LabelsOrTypes: []string{"app__T"}, Properties: []string{"x"}}},
+					Indexes:     []adaptern4j.RemoteIndex{{Name: "held", Type: "TEXT", LabelsOrTypes: []string{"app__T"}, Properties: []string{"x"}}},
+				},
+				Reason: "type mismatch",
 			},
 		},
 		Create: []adaptern4j.Constraint{
@@ -51,6 +55,8 @@ func TestPrintDiffResult_WithDrift(t *testing.T) {
 
 	assert.Contains(t, buf.String(), "drift: c1")
 	assert.Contains(t, buf.String(), "type mismatch")
+	assert.Contains(t, buf.String(), "  blocker: NODE_PROPERTY_TYPE constraint \"c1\" on app__T(x)\n")
+	assert.Contains(t, buf.String(), "  blocker: TEXT index \"held\" on app__T(x)\n")
 	assert.Contains(t, buf.String(), "create: CREATE CONSTRAINT c2")
 }
 
@@ -78,8 +84,14 @@ func TestPrintIndexDiffResult_DriftCreateDrop(t *testing.T) {
 		Drift: []adaptern4j.IndexDrift{
 			{
 				Desired: adaptern4j.Index{Name: "i1"},
-				Actual:  adaptern4j.RemoteIndex{Name: "i1"},
-				Reason:  "vector dimension mismatch",
+				Blockers: adaptern4j.Blockers{
+					Constraints: []adaptern4j.RemoteConstraint{{Name: "nn", Type: "NODE_PROPERTY_EXISTENCE", LabelsOrTypes: []string{"test__Foo"}, Properties: []string{"v"}}},
+					Indexes: []adaptern4j.RemoteIndex{
+						{Name: "i1", Type: "VECTOR", LabelsOrTypes: []string{"test__Foo"}, Properties: []string{"v"}},
+						{Name: "pk", Type: "RANGE", LabelsOrTypes: []string{"test__Foo"}, Properties: []string{"id"}, OwningConstraint: "pk"},
+					},
+				},
+				Reason: "vector dimension mismatch",
 			},
 		},
 		Create: []adaptern4j.Index{
@@ -95,8 +107,88 @@ func TestPrintIndexDiffResult_DriftCreateDrop(t *testing.T) {
 
 	assert.Contains(t, buf.String(), "index drift: i1")
 	assert.Contains(t, buf.String(), "vector dimension mismatch")
+	assert.Contains(t, buf.String(), "  index blocker: VECTOR index \"i1\" on test__Foo(v)\n")
+	assert.Contains(t, buf.String(), "  index blocker: RANGE index \"pk\" on test__Foo(id), which backs constraint \"pk\": drop the constraint\n")
+	assert.Contains(t, buf.String(), "  index blocker: NODE_PROPERTY_EXISTENCE constraint \"nn\" on test__Foo(v)\n")
 	assert.Contains(t, buf.String(), "index create: CREATE INDEX i2")
 	assert.Contains(t, buf.String(), "index drop: i3")
+}
+
+// TestPrintDiffResult_BlockersFollowTheirDrift pins each blocker line under its
+// own drift, constraints first, with every label and property joined, and names
+// a row whose type is unknown by its own kind.
+func TestPrintDiffResult_BlockersFollowTheirDrift(t *testing.T) {
+	t.Parallel()
+
+	diff := &adaptern4j.ConstraintDiffResult{
+		Drift: []adaptern4j.ConstraintDrift{
+			{
+				Desired: adaptern4j.Constraint{Name: "c1"},
+				Blockers: adaptern4j.Blockers{
+					Constraints: []adaptern4j.RemoteConstraint{{Name: "c1", Type: "NODE_KEY", LabelsOrTypes: []string{"app__T"}, Properties: []string{"a", "b"}}},
+					Indexes:     []adaptern4j.RemoteIndex{{Name: "multi", Type: "TEXT", LabelsOrTypes: []string{"app__T", "app__U"}, Properties: []string{"a"}}},
+				},
+				Reason: "r1",
+			},
+			{
+				Desired: adaptern4j.Constraint{Name: "c2"},
+				Blockers: adaptern4j.Blockers{
+					Constraints: []adaptern4j.RemoteConstraint{{Name: "untyped", LabelsOrTypes: []string{"app__T"}, Properties: []string{"b"}}},
+					Indexes:     []adaptern4j.RemoteIndex{{Name: "range", LabelsOrTypes: []string{"app__T"}, Properties: []string{"b"}, OwningConstraint: "k"}},
+				},
+				Reason: "r2",
+			},
+		},
+	}
+
+	var buf bytes.Buffer
+	printDiffResult(&buf, diff)
+
+	assert.Contains(t, buf.String(), "drift: c1 (r1)\n"+
+		"  blocker: NODE_KEY constraint \"c1\" on app__T(a, b)\n"+
+		"  blocker: TEXT index \"multi\" on app__T|app__U(a)\n"+
+		"drift: c2 (r2)\n"+
+		"  blocker: constraint \"untyped\" on app__T(b)\n"+
+		"  blocker: index \"range\" on app__T(b), which backs constraint \"k\": drop the constraint\n")
+}
+
+// TestPrintIndexDiffResult_BlockersFollowTheirDrift pins each index blocker line
+// under its own drift, constraints first, with every label and property joined,
+// names the owning constraint of a backing index, and names a row whose type is
+// unknown by its own kind.
+func TestPrintIndexDiffResult_BlockersFollowTheirDrift(t *testing.T) {
+	t.Parallel()
+
+	diff := &adaptern4j.IndexDiffResult{
+		Drift: []adaptern4j.IndexDrift{
+			{
+				Desired: adaptern4j.Index{Name: "i1"},
+				Blockers: adaptern4j.Blockers{Indexes: []adaptern4j.RemoteIndex{
+					{Name: "idx", Type: "RANGE", LabelsOrTypes: []string{"app__T"}, Properties: []string{"a", "b"}, OwningConstraint: "c"},
+					{Name: "multi", Type: "TEXT", LabelsOrTypes: []string{"app__T", "app__U"}, Properties: []string{"a"}},
+				}},
+				Reason: "r1",
+			},
+			{
+				Desired: adaptern4j.Index{Name: "i2"},
+				Blockers: adaptern4j.Blockers{
+					Constraints: []adaptern4j.RemoteConstraint{{Name: "nn", Type: "NODE_PROPERTY_EXISTENCE", LabelsOrTypes: []string{"app__T"}, Properties: []string{"b"}}},
+					Indexes:     []adaptern4j.RemoteIndex{{Name: "untyped", LabelsOrTypes: []string{"app__T"}, Properties: []string{"b"}}},
+				},
+				Reason: "r2",
+			},
+		},
+	}
+
+	var buf bytes.Buffer
+	printIndexDiffResult(&buf, diff, nil)
+
+	assert.Contains(t, buf.String(), "index drift: i1 (r1)\n"+
+		"  index blocker: RANGE index \"idx\" on app__T(a, b), which backs constraint \"c\": drop the constraint\n"+
+		"  index blocker: TEXT index \"multi\" on app__T|app__U(a)\n"+
+		"index drift: i2 (r2)\n"+
+		"  index blocker: NODE_PROPERTY_EXISTENCE constraint \"nn\" on app__T(b)\n"+
+		"  index blocker: index \"untyped\" on app__T(b)\n")
 }
 
 func TestNeo4jDiff_EnvVarSatisfiesURI(t *testing.T) {
@@ -236,5 +328,43 @@ func TestPrintIndexDiffResult_Unverified(t *testing.T) {
 	}
 	if strings.Contains(out, "matched: 1") {
 		t.Errorf("an unverified index must not be counted as matched; got:\n%s", out)
+	}
+}
+
+// A constraint that realises the primary key and holds a declared index's name
+// drifts, so the index can be created. After a failed index read the plan
+// declares no index, and the printed constraint half carries no such move.
+func TestPlanRemoteState_AFailedIndexReadDeclaresNoIndex(t *testing.T) {
+	t.Parallel()
+	s, loaded := schema.LoadString(t.Context(), "schema \"cx\"\n\ntype Doc {\n\tid String primary\n\tbody String @index\n}\n", "cx.yammm")
+	if err := loaded.Err(); err != nil {
+		t.Fatal(err)
+	}
+	adapter := adaptern4j.New(adaptern4j.WithEdition(adaptern4j.Community))
+	desired, result := adapter.ConstraintsStructured(t.Context(), s)
+	if err := result.Err(); err != nil || len(desired) != 1 {
+		t.Fatalf("%d declared constraints, want 1: %v", len(desired), err)
+	}
+	desiredIndexes, result := adapter.IndexesStructured(t.Context(), s)
+	if err := result.Err(); err != nil || len(desiredIndexes) != 1 {
+		t.Fatalf("%d declared indexes, want 1: %v", len(desiredIndexes), err)
+	}
+	holder := desiredIndexes[0].Name
+	key := adaptern4j.RemoteConstraint{Name: holder, Type: "UNIQUENESS", EntityType: "NODE", LabelsOrTypes: []string{desired[0].Label}, Properties: []string{"id"}}
+	backing := adaptern4j.RemoteIndex{Name: holder, Type: "RANGE", EntityType: "NODE", State: "ONLINE", LabelsOrTypes: key.LabelsOrTypes, Properties: key.Properties, OwningConstraint: holder}
+	owned := adapter.OwnedLabels(t.Context(), s)
+
+	read := planRemoteState(adapter, desired, desiredIndexes,
+		remoteState{constraints: []adaptern4j.RemoteConstraint{key}, indexes: []adaptern4j.RemoteIndex{backing}}, indexDiffSkipped, owned)
+	if len(read.Constraints.Drift) != 1 {
+		t.Fatalf("after a read, constraints = %+v; want the key drifted so the index can take its name", read.Constraints)
+	}
+	failed := planRemoteState(adapter, desired, desiredIndexes,
+		remoteState{constraints: []adaptern4j.RemoteConstraint{key}, indexFailed: true}, indexDiffUnavailable, owned)
+	if len(failed.Constraints.Match) != 1 || len(failed.Constraints.Drift) != 0 {
+		t.Errorf("after a failed read, constraints = %+v; want the key matched", failed.Constraints)
+	}
+	if n := len(failed.Indexes.Drift) + len(failed.Indexes.Create); n != 0 {
+		t.Errorf("after a failed read, indexes = %+v; want no index planned", failed.Indexes)
 	}
 }

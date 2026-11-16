@@ -218,7 +218,7 @@ func dropAll(t *testing.T, ctx context.Context) {
 			if name == "" {
 				continue
 			}
-			// LOOKUP indexes are built in and cannot be dropped by name.
+			// Every database starts with its LOOKUP indexes, so they are kept.
 			if typ, _ := rec["type"].(string); typ == "LOOKUP" {
 				continue
 			}

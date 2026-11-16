@@ -270,7 +270,7 @@ yammm neo4j diff --uri bolt://localhost:7687 schema.yammm
 yammm neo4j diff --uri bolt://localhost:7687 --edition community --separator __ schema.yammm
 ```
 
-Compares desired schema constraints **and indexes** against the live database (index diffing is on by default; `--indexes=false` restores the pre-v0.9.0 constraints-only behaviour, exit code included). Reports constraints and indexes to create, drop, and those already present. A schema-owned remote index with no declaration surfaces as a drop until it is annotated.
+Compares desired schema constraints **and indexes** against the live database (index diffing is on by default; `--indexes=false` declares no index, prints the constraint half alone and leaves index drift out of the exit code, while the indexes it reads still block constraint creates). Reports constraints and indexes to create, drop, and those already present. Each drift line is followed by one `blocker:` line (`index blocker:` for an index drift) per database object its create needs dropped first, the constraints first. A schema-owned remote index that the schema could declare, that no declaration takes and that no drift names surfaces as a drop until it is annotated.
 
 `diff` computes its desired side exactly as `constraints` and `indexes` emit it, so it takes **the same flags** — set every one of them to match how the target graph was generated. A flag left at its default when the graph was built with another value makes the desired side disagree with the database by construction, and the plan reports drift the operator never introduced.
 

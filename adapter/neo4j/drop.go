@@ -7,23 +7,22 @@ import (
 
 // DropConstraintStatement returns the Cypher that removes a constraint by name.
 //
-// The name comes from introspection or from a diff result, so it is whatever a
-// person or another tool created, not something this package generated. Every
-// non-empty name is backtick-quoted, so it cannot alter the statement's
-// shape and no name is undroppable — including a Cypher reserved word, where
-// refusing would be the opposite of what a DROP builder is for. An empty or
-// all-space name is an error wrapping [ErrEmptyIdentifier] — there is no object
-// it could name.
+// The name comes from introspection or from a diff result, so a person or
+// another tool can have created it. Every name that holds a character other
+// than white space is backtick-quoted, so it cannot alter the statement's
+// shape and no such name is undroppable — including a Cypher reserved word,
+// where refusing would be the opposite of what a DROP builder is for. An empty
+// or all-white-space name is an error wrapping [ErrEmptyIdentifier] — there is
+// no object it could name.
 //
 // Quoting unconditionally rather than only when [ValidateIdentifier] objects
 // removes this path's dependence on that validator's reserved-word table: the
 // table does not match the Neo4j documentation it cites, and a DROP builder
 // that had to know which words are reserved would need it to.
 //
-// The caller owns the choice of verb. Index and constraint names share one
-// namespace, so the object blocking a desired constraint may be an index; see
-// [ConstraintDrift.Actual], whose empty Type with a non-empty Name is the
-// discriminator that selects [DropIndexStatement] instead.
+// The caller owns the choice of verb: a [Blockers] lists constraints and
+// indexes apart, and an index with an OwningConstraint is dropped by dropping
+// that constraint.
 //
 // This builds a statement. It does not execute one.
 func DropConstraintStatement(name string) (string, error) {

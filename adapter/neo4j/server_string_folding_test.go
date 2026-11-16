@@ -21,7 +21,7 @@ func lowerCased(rc RemoteConstraint) RemoteConstraint {
 	return rc
 }
 
-func TestDiffConstraints_FoldsServerColumnCase(t *testing.T) {
+func TestConstraintDiff_FoldsServerColumnCase(t *testing.T) {
 	t.Parallel()
 	a := New()
 
@@ -44,7 +44,7 @@ func TestDiffConstraints_FoldsServerColumnCase(t *testing.T) {
 		}),
 	}
 
-	result := a.DiffConstraints(desired, actual, testOwned())
+	result := &a.Diff(desired, nil, actual, nil, testOwned()).Constraints
 
 	if len(result.Match) != 2 {
 		t.Errorf("Match = %d; want 2 — a case difference in a server column is not drift", len(result.Match))
@@ -63,7 +63,7 @@ func TestDiffConstraints_FoldsServerColumnCase(t *testing.T) {
 // The TYPE-constraint comparison is the one that reads propertyType, and it
 // compares against a string the ADAPTER emits rather than one it looks up, so a
 // fold there is easy to leave out. A genuine mismatch must still be drift.
-func TestDiffConstraints_TypeExprFoldDoesNotHideRealDrift(t *testing.T) {
+func TestConstraintDiff_TypeExprFoldDoesNotHideRealDrift(t *testing.T) {
 	t.Parallel()
 	a := New()
 
@@ -76,7 +76,7 @@ func TestDiffConstraints_TypeExprFoldDoesNotHideRealDrift(t *testing.T) {
 		PropertyType: "string",
 	}}
 
-	result := a.DiffConstraints(desired, actual, testOwned())
+	result := &a.Diff(desired, nil, actual, nil, testOwned()).Constraints
 
 	if len(result.Drift) != 1 {
 		t.Fatalf("Drift = %d; want 1 — INTEGER vs STRING is a real type mismatch whatever the case", len(result.Drift))

@@ -23,7 +23,7 @@ import (
 // These tests close that gap for the neo4j diff and introspection surface,
 // whose call shapes appear in three places that must agree: docs/API.md
 // ("Constraint Diffing", "Index Diffing", "Introspection Queries"), the package
-// documentation in adapter/neo4j/doc.go ("Diff Scope and Name Blocking"), and
+// documentation in adapter/neo4j/doc.go ("Diff Scope"), and
 // claude-plugin/skills/yammm/references/adapters.md ("Diffing Against a Live
 // Database"). A change here that breaks compilation is the signal to update all
 // three.
@@ -74,8 +74,8 @@ func TestDocumentedDiffCallShapes(t *testing.T) {
 
 	owned := adapter.OwnedLabels(ctx, s)
 
-	cDiff := adapter.DiffConstraints(desiredConstraints, actualConstraints, owned, actualIndexes...)
-	iDiff := adapter.DiffIndexes(desiredIndexes, actualIndexes, owned, actualConstraints...)
+	plan := adapter.Diff(desiredConstraints, desiredIndexes, actualConstraints, actualIndexes, owned)
+	cDiff, iDiff := plan.Constraints, plan.Indexes
 
 	// Every bucket the documentation names, on both results.
 	cBuckets := len(cDiff.Match) + len(cDiff.Drift) + len(cDiff.Create) + len(cDiff.Drop) +
@@ -156,11 +156,11 @@ func TestDocumentedIntrospectionQueries(t *testing.T) {
 			t.Errorf("IntrospectIndexesQuery() omits the documented column %q: %s", column, indexQuery)
 		}
 	}
-	// Constraint-backing indexes are deliberately returned; only LOOKUP indexes
-	// are filtered out. A reinstated owningConstraint filter would silently
-	// remove the rows the diff needs to detect a blocked CREATE INDEX.
-	if !strings.Contains(indexQuery, "type <> 'LOOKUP'") {
-		t.Errorf("IntrospectIndexesQuery() does not filter LOOKUP indexes: %s", indexQuery)
+	// Constraint-backing and LOOKUP indexes are deliberately returned: a filter
+	// on either would silently remove rows the diff needs to detect a blocked
+	// create.
+	if strings.Contains(indexQuery, "WHERE") {
+		t.Errorf("IntrospectIndexesQuery() filters the rows API.md documents as every index: %s", indexQuery)
 	}
 	if strings.Contains(indexQuery, "owningConstraint IS NULL") {
 		t.Errorf("IntrospectIndexesQuery() filters out constraint-backing indexes, "+

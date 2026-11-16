@@ -46,7 +46,7 @@ func assertCounts(t *testing.T, noun string, gotMatch, gotDrift, gotCreate, gotD
 	}
 }
 
-func TestDiffIndexes_AllMatch(t *testing.T) {
+func TestIndexDiff_AllMatch(t *testing.T) {
 	t.Parallel()
 	a := New()
 
@@ -59,10 +59,10 @@ func TestDiffIndexes_AllMatch(t *testing.T) {
 		{Name: "i2", Type: "VECTOR", EntityType: "NODE", LabelsOrTypes: []string{"test__Entity"}, Properties: []string{"embedding"}, Options: vectorOptions(768, "cosine")},
 	}
 
-	wantCounts(t, a.DiffIndexes(desired, actual, testOwned()), 2, 0, 0, 0, 0)
+	wantCounts(t, &a.Diff(nil, desired, nil, actual, testOwned()).Indexes, 2, 0, 0, 0, 0)
 }
 
-func TestDiffIndexes_CreateNew(t *testing.T) {
+func TestIndexDiff_CreateNew(t *testing.T) {
 	t.Parallel()
 	a := New()
 
@@ -74,14 +74,14 @@ func TestDiffIndexes_CreateNew(t *testing.T) {
 		{Name: "i1", Type: "RANGE", EntityType: "NODE", LabelsOrTypes: []string{"test__Entity"}, Properties: []string{"state"}},
 	}
 
-	result := a.DiffIndexes(desired, actual, testOwned())
+	result := &a.Diff(nil, desired, nil, actual, testOwned()).Indexes
 	wantCounts(t, result, 1, 0, 1, 0, 0)
 	if !slices.Equal(result.Create[0].Properties, []string{"published_on"}) {
 		t.Errorf("Create[0].Properties = %v; want [published_on]", result.Create[0].Properties)
 	}
 }
 
-func TestDiffIndexes_DropOrphaned(t *testing.T) {
+func TestIndexDiff_DropOrphaned(t *testing.T) {
 	t.Parallel()
 	a := New()
 
@@ -93,17 +93,17 @@ func TestDiffIndexes_DropOrphaned(t *testing.T) {
 		{Name: "i2", Type: "RANGE", EntityType: "NODE", LabelsOrTypes: []string{"test__Entity"}, Properties: []string{"old_field"}},
 	}
 
-	result := a.DiffIndexes(desired, actual, testOwned())
+	result := &a.Diff(nil, desired, nil, actual, testOwned()).Indexes
 	wantCounts(t, result, 1, 0, 0, 1, 0)
 	if result.Drop[0].Properties[0] != "old_field" {
 		t.Errorf("Drop[0] property = %q; want old_field", result.Drop[0].Properties[0])
 	}
 }
 
-// TestDiffIndexes_OrderSensitive pins the deliberate divergence from the
+// TestIndexDiff_OrderSensitive pins the deliberate divergence from the
 // constraint diff: a composite index whose remote property order differs is a
 // distinct index — Create + Drop, not Match.
-func TestDiffIndexes_OrderSensitive(t *testing.T) {
+func TestIndexDiff_OrderSensitive(t *testing.T) {
 	t.Parallel()
 	a := New()
 
@@ -114,10 +114,10 @@ func TestDiffIndexes_OrderSensitive(t *testing.T) {
 		{Name: "i1", Type: "RANGE", EntityType: "NODE", LabelsOrTypes: []string{"test__Entity"}, Properties: []string{"b", "a"}},
 	}
 
-	wantCounts(t, a.DiffIndexes(desired, actual, testOwned()), 0, 0, 1, 1, 0)
+	wantCounts(t, &a.Diff(nil, desired, nil, actual, testOwned()).Indexes, 0, 0, 1, 1, 0)
 }
 
-func TestDiffIndexes_VectorDimensionDrift(t *testing.T) {
+func TestIndexDiff_VectorDimensionDrift(t *testing.T) {
 	t.Parallel()
 	a := New()
 
@@ -128,14 +128,14 @@ func TestDiffIndexes_VectorDimensionDrift(t *testing.T) {
 		{Name: "i1", Type: "VECTOR", EntityType: "NODE", LabelsOrTypes: []string{"test__Entity"}, Properties: []string{"embedding"}, Options: vectorOptions(512, "cosine")},
 	}
 
-	result := a.DiffIndexes(desired, actual, testOwned())
+	result := &a.Diff(nil, desired, nil, actual, testOwned()).Indexes
 	wantCounts(t, result, 0, 1, 0, 0, 0)
 	if !strings.Contains(result.Drift[0].Reason, "dimension") {
 		t.Errorf("Drift reason = %q; want a dimension mismatch", result.Drift[0].Reason)
 	}
 }
 
-func TestDiffIndexes_VectorSimilarityDrift(t *testing.T) {
+func TestIndexDiff_VectorSimilarityDrift(t *testing.T) {
 	t.Parallel()
 	a := New()
 
@@ -146,18 +146,18 @@ func TestDiffIndexes_VectorSimilarityDrift(t *testing.T) {
 		{Name: "i1", Type: "VECTOR", EntityType: "NODE", LabelsOrTypes: []string{"test__Entity"}, Properties: []string{"embedding"}, Options: vectorOptions(768, "euclidean")},
 	}
 
-	result := a.DiffIndexes(desired, actual, testOwned())
+	result := &a.Diff(nil, desired, nil, actual, testOwned()).Indexes
 	wantCounts(t, result, 0, 1, 0, 0, 0)
 	if !strings.Contains(result.Drift[0].Reason, "similarity") {
 		t.Errorf("Drift reason = %q; want a similarity mismatch", result.Drift[0].Reason)
 	}
 }
 
-// TestDiffIndexes_VectorSimilarityCaseInsensitive pins that the similarity
+// TestIndexDiff_VectorSimilarityCaseInsensitive pins that the similarity
 // comparison is case-insensitive: Neo4j reports the similarity function
 // uppercased ("COSINE"), while the schema side is lowercase ("cosine"), so a
 // case-sensitive compare would misclassify every in-sync vector index as drift.
-func TestDiffIndexes_VectorSimilarityCaseInsensitive(t *testing.T) {
+func TestIndexDiff_VectorSimilarityCaseInsensitive(t *testing.T) {
 	t.Parallel()
 	a := New()
 
@@ -168,10 +168,10 @@ func TestDiffIndexes_VectorSimilarityCaseInsensitive(t *testing.T) {
 		{Name: "i1", Type: "VECTOR", EntityType: "NODE", LabelsOrTypes: []string{"test__Entity"}, Properties: []string{"embedding"}, Options: vectorOptions(768, "COSINE")},
 	}
 
-	wantCounts(t, a.DiffIndexes(desired, actual, testOwned()), 1, 0, 0, 0, 0)
+	wantCounts(t, &a.Diff(nil, desired, nil, actual, testOwned()).Indexes, 1, 0, 0, 0, 0)
 }
 
-func TestDiffIndexes_FiltersNonOwned(t *testing.T) {
+func TestIndexDiff_FiltersNonOwned(t *testing.T) {
 	t.Parallel()
 	a := New()
 
@@ -184,12 +184,12 @@ func TestDiffIndexes_FiltersNonOwned(t *testing.T) {
 	}
 
 	// The other-schema index is neither matched nor reported as a drop.
-	wantCounts(t, a.DiffIndexes(desired, actual, testOwned()), 1, 0, 0, 0, 0)
+	wantCounts(t, &a.Diff(nil, desired, nil, actual, testOwned()).Indexes, 1, 0, 0, 0, 0)
 }
 
-// TestDiffIndexes_EmptyDesired_AllDrop pins the always-on drift behavior: a
+// TestIndexDiff_EmptyDesired_AllDrop pins the always-on drift behavior: a
 // schema-owned remote index with no declaration is reported as a drop.
-func TestDiffIndexes_EmptyDesired_AllDrop(t *testing.T) {
+func TestIndexDiff_EmptyDesired_AllDrop(t *testing.T) {
 	t.Parallel()
 	a := New()
 
@@ -198,23 +198,23 @@ func TestDiffIndexes_EmptyDesired_AllDrop(t *testing.T) {
 		{Name: "i2", Type: "VECTOR", EntityType: "NODE", LabelsOrTypes: []string{"test__Entity"}, Properties: []string{"embedding"}, Options: vectorOptions(768, "cosine")},
 	}
 
-	wantCounts(t, a.DiffIndexes(nil, actual, testOwned()), 0, 0, 0, 2, 0)
+	wantCounts(t, &a.Diff(nil, nil, nil, actual, testOwned()).Indexes, 0, 0, 0, 2, 0)
 }
 
-func TestDiffIndexes_Empty(t *testing.T) {
+func TestIndexDiff_Empty(t *testing.T) {
 	t.Parallel()
 	a := New()
-	wantCounts(t, a.DiffIndexes(nil, nil, testOwned()), 0, 0, 0, 0, 0)
+	wantCounts(t, &a.Diff(nil, nil, nil, nil, testOwned()).Indexes, 0, 0, 0, 0, 0)
 }
 
-// SHOW INDEXES reports every non-LOOKUP, non-constraint-backed index, including
-// kinds the DSL cannot express (TEXT, POINT, and 4.x BTREE), multi-label
+// SHOW INDEXES reports every index, including kinds the DSL cannot express
+// (TEXT, POINT, LOOKUP, and 4.x BTREE), multi-label
 // FULLTEXT indexes (a declaration always targets one label), and relationship
 // indexes the adapter never emits. Classifying one as an undeclared drop
 // reports drift no schema edit can resolve. Single-label FULLTEXT is
 // deliberately absent here: it IS declarable — see
-// [TestDiffIndexes_UndeclaredFulltextDrops].
-func TestDiffIndexes_IgnoresUndeclarableKinds(t *testing.T) {
+// [TestIndexDiff_UndeclaredFulltextDrops].
+func TestIndexDiff_IgnoresUndeclarableKinds(t *testing.T) {
 	t.Parallel()
 	a := New()
 
@@ -224,15 +224,16 @@ func TestDiffIndexes_IgnoresUndeclarableKinds(t *testing.T) {
 		{Name: "pt", Type: "POINT", EntityType: "NODE", LabelsOrTypes: []string{"test__Entity"}, Properties: []string{"loc"}},
 		{Name: "bt", Type: "BTREE", EntityType: "NODE", LabelsOrTypes: []string{"test__Entity"}, Properties: []string{"legacy"}},
 		{Name: "rel", Type: "RANGE", EntityType: "RELATIONSHIP", LabelsOrTypes: []string{"test__Entity"}, Properties: []string{"since"}},
+		{Name: "lk", Type: "LOOKUP", EntityType: "NODE"},
 	}
 
-	wantCounts(t, a.DiffIndexes(nil, actual, testOwned()), 0, 0, 0, 0, 0)
+	wantCounts(t, &a.Diff(nil, nil, nil, actual, testOwned()).Indexes, 0, 0, 0, 0, 0)
 }
 
 // A remote RANGE index on a schema-owned label with no declaration IS drift the
 // schema can resolve, so it stays a drop — the undeclarable-kind exemption must
 // not swallow the case the feature exists for.
-func TestDiffIndexes_UndeclaredRangeStillDrops(t *testing.T) {
+func TestIndexDiff_UndeclaredRangeStillDrops(t *testing.T) {
 	t.Parallel()
 	a := New()
 
@@ -240,7 +241,7 @@ func TestDiffIndexes_UndeclaredRangeStillDrops(t *testing.T) {
 		{Name: "r", Type: "RANGE", EntityType: "NODE", LabelsOrTypes: []string{"test__Entity"}, Properties: []string{"state"}},
 	}
 
-	wantCounts(t, a.DiffIndexes(nil, actual, testOwned()), 0, 0, 0, 1, 0)
+	wantCounts(t, &a.Diff(nil, nil, nil, actual, testOwned()).Indexes, 0, 0, 0, 1, 0)
 }
 
 // allIndexKinds must contain every kind indexKindToRemoteType recognises.
@@ -305,22 +306,22 @@ func TestIndexKind_RemoteTypesAreDistinct(t *testing.T) {
 // undeclared definition the diff exists to surface: one realises the
 // declaration and the other is a drop. Both must be reported, so pairing has to
 // be one-to-one rather than a lookup by identity.
-func TestDiffIndexes_DuplicateOfMatchedIndexStillDrops(t *testing.T) {
+func TestIndexDiff_DuplicateOfMatchedIndexStillDrops(t *testing.T) {
 	t.Parallel()
 	a := New()
 
 	desired := []Index{
-		{Kind: IndexRange, Label: "test__Entity", Properties: []string{"code"}},
+		{Name: "test__Entity_code_idx", Kind: IndexRange, Label: "test__Entity", Properties: []string{"code"}},
 	}
 	actual := []RemoteIndex{
 		{Name: "test__Entity_code_idx", Type: "RANGE", EntityType: "NODE", LabelsOrTypes: []string{"test__Entity"}, Properties: []string{"code"}},
 		{Name: "hand_made_code_lookup", Type: "RANGE", EntityType: "NODE", LabelsOrTypes: []string{"test__Entity"}, Properties: []string{"code"}},
 	}
 
-	got := a.DiffIndexes(desired, actual, testOwned())
+	got := &a.Diff(nil, desired, nil, actual, testOwned()).Indexes
 	wantCounts(t, got, 1, 0, 0, 1, 0)
 	if len(got.Drop) == 1 && got.Drop[0].Name != "hand_made_code_lookup" {
-		t.Errorf("Drop[0].Name = %q; the SECOND member of the bucket is the undeclared duplicate", got.Drop[0].Name)
+		t.Errorf("Drop[0].Name = %q; the row the declaration's name does not pair is the undeclared duplicate", got.Drop[0].Name)
 	}
 }
 
@@ -328,7 +329,7 @@ func TestDiffIndexes_DuplicateOfMatchedIndexStillDrops(t *testing.T) {
 // as unverified, not as a match: remoteIndexKey matches on label/properties/type
 // only, so a wrongly-dimensioned remote index would otherwise be reported as in
 // sync.
-func TestDiffIndexes_VectorMissingConfig_Unverified(t *testing.T) {
+func TestIndexDiff_VectorMissingConfig_Unverified(t *testing.T) {
 	t.Parallel()
 	a := New()
 
@@ -339,7 +340,7 @@ func TestDiffIndexes_VectorMissingConfig_Unverified(t *testing.T) {
 		{Name: "i1", Type: "VECTOR", EntityType: "NODE", LabelsOrTypes: []string{"test__Entity"}, Properties: []string{"embedding"}},
 	}
 
-	got := a.DiffIndexes(desired, actual, testOwned())
+	got := &a.Diff(nil, desired, nil, actual, testOwned()).Indexes
 	wantCounts(t, got, 0, 0, 0, 0, 1)
 	if got.Unverified[0].Reason == "" {
 		t.Error("an unverified entry should carry a reason")
@@ -349,7 +350,7 @@ func TestDiffIndexes_VectorMissingConfig_Unverified(t *testing.T) {
 // When only one vector setting is unreadable, the reason must name which — a
 // single fixed "no vector configuration" message sent an operator looking for a
 // server that reports no options at all, when one setting had in fact been read.
-func TestDiffIndexes_VectorPartialConfig_ReasonNamesTheGap(t *testing.T) {
+func TestIndexDiff_VectorPartialConfig_ReasonNamesTheGap(t *testing.T) {
 	t.Parallel()
 	desired := []Index{{
 		Kind: IndexVector, Label: "test__Entity", Properties: []string{"embedding"},
@@ -366,11 +367,11 @@ func TestDiffIndexes_VectorPartialConfig_ReasonNamesTheGap(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			got := New().DiffIndexes(desired, []RemoteIndex{{
+			got := &New().Diff(nil, desired, nil, []RemoteIndex{{
 				Name: "i1", Type: "VECTOR", EntityType: "NODE",
 				LabelsOrTypes: []string{"test__Entity"}, Properties: []string{"embedding"},
 				Options: map[string]any{"indexConfig": tc.cfg},
-			}}, testOwned())
+			}}, testOwned()).Indexes
 			wantCounts(t, got, 0, 0, 0, 0, 1)
 			if !strings.Contains(got.Unverified[0].Reason, tc.want) {
 				t.Errorf("reason = %q; should name the %s as the unread setting",
@@ -384,20 +385,17 @@ func TestDiffIndexes_VectorPartialConfig_ReasonNamesTheGap(t *testing.T) {
 // actionable, so it outranks a second setting being unreadable: each setting is
 // compared independently, and a demonstrably wrong dimension is drift whether or
 // not the similarity function beside it could be read.
-func TestDiffIndexes_ReadableDriftOutranksUnreadable(t *testing.T) {
+func TestIndexDiff_ReadableDriftOutranksUnreadable(t *testing.T) {
 	t.Parallel()
-	got := New().DiffIndexes(
-		[]Index{{
-			Kind: IndexVector, Label: "test__Entity", Properties: []string{"embedding"},
-			VectorDimensions: 768, VectorSimilarity: "cosine",
-		}},
-		[]RemoteIndex{{
-			Name: "i1", Type: "VECTOR", EntityType: "NODE",
-			LabelsOrTypes: []string{"test__Entity"}, Properties: []string{"embedding"},
-			// Dimension readable and wrong; similarity absent.
-			Options: map[string]any{"indexConfig": map[string]any{"vector.dimensions": int64(512)}},
-		}}, ownedSet("test__Entity"),
-	)
+	got := &New().Diff(nil, []Index{{
+		Kind: IndexVector, Label: "test__Entity", Properties: []string{"embedding"},
+		VectorDimensions: 768, VectorSimilarity: "cosine",
+	}}, nil, []RemoteIndex{{
+		Name: "i1", Type: "VECTOR", EntityType: "NODE",
+		LabelsOrTypes: []string{"test__Entity"}, Properties: []string{"embedding"},
+		// Dimension readable and wrong; similarity absent.
+		Options: map[string]any{"indexConfig": map[string]any{"vector.dimensions": int64(512)}},
+	}}, ownedSet("test__Entity")).Indexes
 
 	wantCounts(t, got, 0, 1, 0, 0, 0)
 	if !strings.Contains(got.Drift[0].Reason, "dimension") {
@@ -409,7 +407,7 @@ func TestDiffIndexes_ReadableDriftOutranksUnreadable(t *testing.T) {
 // column while serving no queries, so a definition-only comparison calls it in
 // sync. POPULATING is transient and resolves on its own, so it is unverified
 // rather than a change to apply.
-func TestDiffIndexes_IndexState(t *testing.T) {
+func TestIndexDiff_IndexState(t *testing.T) {
 	t.Parallel()
 	desired := []Index{{Name: "i", Kind: IndexRange, Label: "test__Entity", Properties: []string{"state"}}}
 
@@ -424,11 +422,11 @@ func TestDiffIndexes_IndexState(t *testing.T) {
 	} {
 		t.Run("state="+tc.state, func(t *testing.T) {
 			t.Parallel()
-			got := New().DiffIndexes(desired, []RemoteIndex{{
+			got := &New().Diff(nil, desired, nil, []RemoteIndex{{
 				Name: "i", Type: "RANGE", EntityType: "NODE",
 				LabelsOrTypes: []string{"test__Entity"}, Properties: []string{"state"},
 				State: tc.state,
-			}}, testOwned())
+			}}, testOwned()).Indexes
 			if len(got.Match) != tc.match || len(got.Drift) != tc.drift || len(got.Unverified) != tc.unverified {
 				t.Errorf("match/drift/unverified = %d/%d/%d; want %d/%d/%d",
 					len(got.Match), len(got.Drift), len(got.Unverified),
@@ -442,13 +440,13 @@ func TestDiffIndexes_IndexState(t *testing.T) {
 // the diff must not report one as an undeclared orphan — even when the caller
 // introspected with `SHOW INDEXES YIELD *` instead of IntrospectIndexesQuery(),
 // which filters them server-side.
-func TestDiffIndexes_IgnoresConstraintBackedIndexes(t *testing.T) {
+func TestIndexDiff_IgnoresConstraintBackedIndexes(t *testing.T) {
 	t.Parallel()
-	got := New().DiffIndexes(nil, []RemoteIndex{{
+	got := &New().Diff(nil, nil, nil, []RemoteIndex{{
 		Name: "test__Entity_id_unique", Type: "RANGE", EntityType: "NODE",
 		LabelsOrTypes: []string{"test__Entity"}, Properties: []string{"id"},
 		OwningConstraint: "test__Entity_id_unique",
-	}}, testOwned())
+	}}, testOwned()).Indexes
 	if len(got.Drop) != 0 {
 		t.Errorf("Drop = %d; a constraint-backing index is not independently declarable", len(got.Drop))
 	}
@@ -459,31 +457,25 @@ func TestDiffIndexes_IgnoresConstraintBackedIndexes(t *testing.T) {
 // exactly realises a declaration cannot pair: it becomes an orphan to drop while
 // the declaration becomes a create, so the plan tells the operator to drop the
 // very index satisfying the schema.
-func TestDiffIndexes_LowercaseRemoteTypeStillPairs(t *testing.T) {
+func TestIndexDiff_LowercaseRemoteTypeStillPairs(t *testing.T) {
 	t.Parallel()
-	got := New().DiffIndexes(
-		[]Index{{Name: "app__T_x_idx", Kind: IndexRange, Label: "app__T", Properties: []string{"x"}}},
-		[]RemoteIndex{{
-			// A consumer that lower-cases the SHOW INDEXES type column.
-			Name: "app__T_x_idx", Type: "range", EntityType: "NODE",
-			LabelsOrTypes: []string{"app__T"}, Properties: []string{"x"}, State: "ONLINE",
-		}}, appOwned(),
-	)
+	got := &New().Diff(nil, []Index{{Name: "app__T_x_idx", Kind: IndexRange, Label: "app__T", Properties: []string{"x"}}}, nil, []RemoteIndex{{
+		// A consumer that lower-cases the SHOW INDEXES type column.
+		Name: "app__T_x_idx", Type: "range", EntityType: "NODE",
+		LabelsOrTypes: []string{"app__T"}, Properties: []string{"x"}, State: "ONLINE",
+	}}, appOwned()).Indexes
 	wantCounts(t, got, 1, 0, 0, 0, 0)
 }
 
 // Pairing by identity alone must survive the same case difference: with the
 // names disagreeing, only the identity key can match the pair, so a
 // case-sensitive key reports Create + Drop for one already-correct index.
-func TestDiffIndexes_LowercaseRemoteTypePairsByIdentity(t *testing.T) {
+func TestIndexDiff_LowercaseRemoteTypePairsByIdentity(t *testing.T) {
 	t.Parallel()
-	got := New().DiffIndexes(
-		[]Index{{Name: "schema_name", Kind: IndexRange, Label: "app__T", Properties: []string{"x"}}},
-		[]RemoteIndex{{
-			Name: "database_name", Type: "range", EntityType: "NODE",
-			LabelsOrTypes: []string{"app__T"}, Properties: []string{"x"}, State: "ONLINE",
-		}}, appOwned(),
-	)
+	got := &New().Diff(nil, []Index{{Name: "schema_name", Kind: IndexRange, Label: "app__T", Properties: []string{"x"}}}, nil, []RemoteIndex{{
+		Name: "database_name", Type: "range", EntityType: "NODE",
+		LabelsOrTypes: []string{"app__T"}, Properties: []string{"x"}, State: "ONLINE",
+	}}, appOwned()).Indexes
 	wantCounts(t, got, 1, 0, 0, 0, 0)
 }
 
@@ -492,15 +484,12 @@ func TestDiffIndexes_LowercaseRemoteTypePairsByIdentity(t *testing.T) {
 // owned node label must not absorb a node index's definition, or the CREATE is
 // never emitted and the operator is told to drop an unrelated relationship
 // index.
-func TestDiffIndexes_RelationshipIndexDoesNotBlockNodeCreate(t *testing.T) {
+func TestIndexDiff_RelationshipIndexDoesNotBlockNodeCreate(t *testing.T) {
 	t.Parallel()
-	got := New().DiffIndexes(
-		[]Index{{Name: "app__T_since_idx", Kind: IndexRange, Label: "app__T", Properties: []string{"since"}}},
-		[]RemoteIndex{{
-			Name: "rel_idx", Type: "RANGE", EntityType: "RELATIONSHIP",
-			LabelsOrTypes: []string{"app__T"}, Properties: []string{"since"}, State: "ONLINE",
-		}}, appOwned(),
-	)
+	got := &New().Diff(nil, []Index{{Name: "app__T_since_idx", Kind: IndexRange, Label: "app__T", Properties: []string{"since"}}}, nil, []RemoteIndex{{
+		Name: "rel_idx", Type: "RANGE", EntityType: "RELATIONSHIP",
+		LabelsOrTypes: []string{"app__T"}, Properties: []string{"since"}, State: "ONLINE",
+	}}, appOwned()).Indexes
 	wantCounts(t, got, 0, 0, 1, 0, 0)
 	if len(got.Drop) != 0 {
 		t.Error("a relationship index was claimed as a droppable schema object")
@@ -509,13 +498,10 @@ func TestDiffIndexes_RelationshipIndexDoesNotBlockNodeCreate(t *testing.T) {
 	// The same record as a NODE index is owned, declarable, and realises the
 	// declaration — so the outcome above turns on the entity type alone and not
 	// on the record being unrecognisable for some other reason.
-	asNode := New().DiffIndexes(
-		[]Index{{Name: "app__T_since_idx", Kind: IndexRange, Label: "app__T", Properties: []string{"since"}}},
-		[]RemoteIndex{{
-			Name: "rel_idx", Type: "RANGE", EntityType: "NODE",
-			LabelsOrTypes: []string{"app__T"}, Properties: []string{"since"}, State: "ONLINE",
-		}}, appOwned(),
-	)
+	asNode := &New().Diff(nil, []Index{{Name: "app__T_since_idx", Kind: IndexRange, Label: "app__T", Properties: []string{"since"}}}, nil, []RemoteIndex{{
+		Name: "rel_idx", Type: "RANGE", EntityType: "NODE",
+		LabelsOrTypes: []string{"app__T"}, Properties: []string{"since"}, State: "ONLINE",
+	}}, appOwned()).Indexes
 	wantCounts(t, asNode, 1, 0, 0, 0, 0)
 }
 
@@ -525,17 +511,14 @@ func TestDiffIndexes_RelationshipIndexDoesNotBlockNodeCreate(t *testing.T) {
 // reporting drift would be permanent, since dropping the backing index means
 // dropping the primary key, and any deploy gate keyed on a clean diff could
 // never pass on a valid, fully-applied schema.
-func TestDiffIndexes_ConstraintBackedDefinitionSatisfiesDeclaration(t *testing.T) {
+func TestIndexDiff_ConstraintBackedDefinitionSatisfiesDeclaration(t *testing.T) {
 	t.Parallel()
 	backing := RemoteIndex{
 		Name: "pk__Doc_doc_id_unique", Type: "RANGE", EntityType: "NODE",
 		LabelsOrTypes: []string{"app__T"}, Properties: []string{"doc_id"},
 		OwningConstraint: "pk__Doc_doc_id_unique", State: "ONLINE",
 	}
-	got := New().DiffIndexes(
-		[]Index{{Name: "app__T_doc_id_idx", Kind: IndexRange, Label: "app__T", Properties: []string{"doc_id"}}},
-		[]RemoteIndex{backing}, appOwned(),
-	)
+	got := &New().Diff(nil, []Index{{Name: "app__T_doc_id_idx", Kind: IndexRange, Label: "app__T", Properties: []string{"doc_id"}}}, nil, []RemoteIndex{backing}, appOwned()).Indexes
 	wantCounts(t, got, 1, 0, 0, 0, 0)
 	if got.Match[0].Actual.Name != backing.Name {
 		t.Errorf("Match Actual = %q; want the backing index that serves the definition", got.Match[0].Actual.Name)
@@ -546,10 +529,7 @@ func TestDiffIndexes_ConstraintBackedDefinitionSatisfiesDeclaration(t *testing.T
 	// the definitions agreeing, not on the index merely backing a constraint.
 	elsewhere := backing
 	elsewhere.Properties = []string{"other_id"}
-	got = New().DiffIndexes(
-		[]Index{{Name: "app__T_doc_id_idx", Kind: IndexRange, Label: "app__T", Properties: []string{"doc_id"}}},
-		[]RemoteIndex{elsewhere}, appOwned(),
-	)
+	got = &New().Diff(nil, []Index{{Name: "app__T_doc_id_idx", Kind: IndexRange, Label: "app__T", Properties: []string{"doc_id"}}}, nil, []RemoteIndex{elsewhere}, appOwned()).Indexes
 	wantCounts(t, got, 0, 0, 1, 0, 0)
 }
 
@@ -558,7 +538,7 @@ func TestDiffIndexes_ConstraintBackedDefinitionSatisfiesDeclaration(t *testing.T
 // paired index goes through applies here too: skipping it reports a POPULATING
 // or FAILED backing index as in sync and a deploy gate exits 0 while nothing
 // serves the declared lookup.
-func TestDiffIndexes_ConstraintBackedDefinitionHonoursState(t *testing.T) {
+func TestIndexDiff_ConstraintBackedDefinitionHonoursState(t *testing.T) {
 	t.Parallel()
 	a := New()
 	desired := []Index{{
@@ -575,16 +555,16 @@ func TestDiffIndexes_ConstraintBackedDefinitionHonoursState(t *testing.T) {
 
 	// Control: ONLINE is the satisfied case, so the assertions below turn on the
 	// state and not on the branch being unreachable.
-	wantCounts(t, a.DiffIndexes(desired, backing("ONLINE"), ownedSet("app__Doc")), 1, 0, 0, 0, 0)
-	wantCounts(t, a.DiffIndexes(desired, backing("POPULATING"), ownedSet("app__Doc")), 0, 0, 0, 0, 1)
-	wantCounts(t, a.DiffIndexes(desired, backing("FAILED"), ownedSet("app__Doc")), 0, 1, 0, 0, 0)
+	wantCounts(t, &a.Diff(nil, desired, nil, backing("ONLINE"), ownedSet("app__Doc")).Indexes, 1, 0, 0, 0, 0)
+	wantCounts(t, &a.Diff(nil, desired, nil, backing("POPULATING"), ownedSet("app__Doc")).Indexes, 0, 0, 0, 0, 1)
+	wantCounts(t, &a.Diff(nil, desired, nil, backing("FAILED"), ownedSet("app__Doc")).Indexes, 0, 1, 0, 0, 0)
 }
 
 // A NOT NULL or TYPE constraint has no backing index, so it appears in no SHOW
 // INDEXES row — but its name still occupies the one namespace indexes share with
-// constraints. Reaching the index diff only through alsoBlocking, it must turn a
-// Create the server refuses into drift naming the holder.
-func TestDiffIndexes_ConstraintNameBlocksCreate(t *testing.T) {
+// constraints. Read from the constraint rows alone, it must turn a Create the
+// server refuses into drift naming the holder.
+func TestIndexDiff_ConstraintNameBlocksCreate(t *testing.T) {
 	t.Parallel()
 	a := New()
 	desired := []Index{{
@@ -595,7 +575,7 @@ func TestDiffIndexes_ConstraintNameBlocksCreate(t *testing.T) {
 		LabelsOrTypes: []string{"app__T"}, Properties: []string{"y"},
 	}
 
-	got := a.DiffIndexes(desired, nil, ownedSet("app__T"), blocker)
+	got := &a.Diff(nil, desired, []RemoteConstraint{blocker}, nil, ownedSet("app__T")).Indexes
 	wantCounts(t, got, 0, 1, 0, 0, 0)
 	if len(got.Drift) == 1 && !strings.Contains(got.Drift[0].Reason, "constraint") {
 		t.Errorf("Reason = %q; want it to name the constraint holding the name", got.Drift[0].Reason)
@@ -603,19 +583,19 @@ func TestDiffIndexes_ConstraintNameBlocksCreate(t *testing.T) {
 
 	// Control: not passing the constraint is the degraded contract — the same
 	// declaration is a Create, because nothing told the diff the name was taken.
-	wantCounts(t, a.DiffIndexes(desired, nil, ownedSet("app__T")), 0, 0, 1, 0, 0)
+	wantCounts(t, &a.Diff(nil, desired, nil, nil, ownedSet("app__T")).Indexes, 0, 0, 1, 0, 0)
 
 	// Control: a constraint whose name collides with nothing leaves the create
 	// alone, so the branch turns on the name and not on any constraint existing.
 	free := blocker
 	free.Name = "app__T_y_not_null"
-	wantCounts(t, a.DiffIndexes(desired, nil, ownedSet("app__T"), free), 0, 0, 1, 0, 0)
+	wantCounts(t, &a.Diff(nil, desired, []RemoteConstraint{free}, nil, ownedSet("app__T")).Indexes, 0, 0, 1, 0, 0)
 }
 
 // A blocker pairing already handed to another declaration still blocks — the
-// server no-ops the CREATE either way — but the report otherwise shows one
-// object as both matched and to be dropped with nothing connecting the lines.
-func TestDiffIndexes_BlockerThatRealisesAnotherDeclarationSaysSo(t *testing.T) {
+// server no-ops the CREATE either way — so the declaration it realises is
+// created again under its own name, and each drift says which.
+func TestIndexDiff_BlockerThatRealisesAnotherDeclarationSaysSo(t *testing.T) {
 	t.Parallel()
 	a := New()
 	desired := []Index{
@@ -629,10 +609,15 @@ func TestDiffIndexes_BlockerThatRealisesAnotherDeclarationSaysSo(t *testing.T) {
 		LabelsOrTypes: []string{"app__T"}, Properties: []string{"sku"},
 	}}
 
-	got := a.DiffIndexes(desired, actual, ownedSet("app__T"))
-	wantCounts(t, got, 1, 1, 0, 0, 0)
-	if len(got.Drift) == 1 && !strings.Contains(got.Drift[0].Reason, "realises another declaration") {
-		t.Errorf("Reason = %q; want it to say the holder realises another declaration", got.Drift[0].Reason)
+	got := &a.Diff(nil, desired, nil, actual, ownedSet("app__T")).Indexes
+	wantCounts(t, got, 0, 2, 0, 0, 0)
+	if len(got.Drift) == 2 {
+		if !strings.Contains(got.Drift[0].Reason, "realises another declaration in this schema; drop it, and that declaration is created again under its own name") {
+			t.Errorf("Reason = %q; want it to say the holder realises another declaration, created again in this apply", got.Drift[0].Reason)
+		}
+		if !strings.Contains(got.Drift[1].Reason, "realises this declaration") {
+			t.Errorf("Reason = %q; want it to say its realisation is dropped for another", got.Drift[1].Reason)
+		}
 	}
 
 	// Control: a blocker that realises nothing this schema declares gets the
@@ -641,7 +626,7 @@ func TestDiffIndexes_BlockerThatRealisesAnotherDeclarationSaysSo(t *testing.T) {
 		Name: "app__T_code_idx", Type: "TEXT", EntityType: "NODE",
 		LabelsOrTypes: []string{"other__Thing"}, Properties: []string{"z"},
 	}}
-	plain := a.DiffIndexes(desired[:1], foreign, ownedSet("app__T"))
+	plain := &a.Diff(nil, desired[:1], nil, foreign, ownedSet("app__T")).Indexes
 	if len(plain.Drift) != 1 {
 		t.Fatalf("got %d drift entries; want 1", len(plain.Drift))
 	}
@@ -653,7 +638,7 @@ func TestDiffIndexes_BlockerThatRealisesAnotherDeclarationSaysSo(t *testing.T) {
 // A FULLTEXT node index really does report several labels, so a message telling
 // an operator which object to drop must name all of them — naming the first
 // sends them looking under a label the object does not exclusively belong to.
-func TestDiffIndexes_BlockerMessageNamesEveryLabel(t *testing.T) {
+func TestIndexDiff_BlockerMessageNamesEveryLabel(t *testing.T) {
 	t.Parallel()
 	desired := []Index{{
 		Name: "app__Doc_body_idx", Kind: IndexRange, Label: "app__Doc", Properties: []string{"body"},
@@ -663,7 +648,7 @@ func TestDiffIndexes_BlockerMessageNamesEveryLabel(t *testing.T) {
 		LabelsOrTypes: []string{"other__Thing", "app__Doc"}, Properties: []string{"body"},
 	}}
 
-	got := New().DiffIndexes(desired, actual, ownedSet("app__Doc"))
+	got := &New().Diff(nil, desired, nil, actual, ownedSet("app__Doc")).Indexes
 	if len(got.Drift) != 1 {
 		t.Fatalf("got %d drift entries; want 1", len(got.Drift))
 	}
@@ -672,11 +657,11 @@ func TestDiffIndexes_BlockerMessageNamesEveryLabel(t *testing.T) {
 	}
 }
 
-// DiffIndexes is public API and a caller may build Index values with no name —
+// Diff is public API and a caller may build Index values with no name —
 // every fixture in this file does. A nameless desired index blocked by an
 // equally nameless remote is a DEFINITION block, and describing it as a name
 // collision tells the operator to drop an index called "".
-func TestDiffIndexes_NamelessBlockerIsDescribedAsADefinition(t *testing.T) {
+func TestIndexDiff_NamelessBlockerIsDescribedAsADefinition(t *testing.T) {
 	t.Parallel()
 	desired := []Index{{Kind: IndexRange, Label: "app__T", Properties: []string{"x"}}}
 	actual := []RemoteIndex{{
@@ -686,22 +671,22 @@ func TestDiffIndexes_NamelessBlockerIsDescribedAsADefinition(t *testing.T) {
 
 	// The remote is declarable and on an owned label, so pairing claims it by
 	// identity; a second nameless declaration of the same definition is the one
-	// that reaches the blocker path.
-	got := New().DiffIndexes(append(desired, desired[0]), actual, ownedSet("app__T"))
-	if len(got.Drift) != 1 {
-		t.Fatalf("got %d drift entries; want 1: %+v", len(got.Drift), got)
+	// that reaches the blocker path, and the first is created again.
+	got := &New().Diff(nil, append(desired, desired[0]), nil, actual, ownedSet("app__T")).Indexes
+	if len(got.Drift) != 2 {
+		t.Fatalf("got %d drift entries; want 2: %+v", len(got.Drift), got)
 	}
-	if strings.Contains(got.Drift[0].Reason, `index name ""`) {
-		t.Errorf("Reason = %q; a nameless pair is a definition block, not a name collision", got.Drift[0].Reason)
+	if strings.Contains(got.Drift[1].Reason, `index name ""`) {
+		t.Errorf("Reason = %q; a nameless pair is a definition block, not a name collision", got.Drift[1].Reason)
 	}
-	if !strings.Contains(got.Drift[0].Reason, "definition is already served") {
-		t.Errorf("Reason = %q; want the definition-block message", got.Drift[0].Reason)
+	if !strings.Contains(got.Drift[1].Reason, "definition is already served") {
+		t.Errorf("Reason = %q; want the definition-block message", got.Drift[1].Reason)
 	}
 }
 
 // Objects the diff could not compare must be counted, or an empty Drop reads as
 // "the database is accounted for".
-func TestDiffIndexes_ExcludedCountsWhatWasNotCompared(t *testing.T) {
+func TestIndexDiff_ExcludedCountsWhatWasNotCompared(t *testing.T) {
 	t.Parallel()
 	actual := []RemoteIndex{
 		{Name: "mine", Type: "RANGE", EntityType: "NODE", LabelsOrTypes: []string{"app__T"}, Properties: []string{"x"}},
@@ -711,10 +696,7 @@ func TestDiffIndexes_ExcludedCountsWhatWasNotCompared(t *testing.T) {
 		// A label no current type declares.
 		{Name: "stale", Type: "RANGE", EntityType: "NODE", LabelsOrTypes: []string{"app__Publisher"}, Properties: []string{"id"}},
 	}
-	got := New().DiffIndexes(
-		[]Index{{Name: "mine", Kind: IndexRange, Label: "app__T", Properties: []string{"x"}}},
-		actual, ownedSet("app__T"),
-	)
+	got := &New().Diff(nil, []Index{{Name: "mine", Kind: IndexRange, Label: "app__T", Properties: []string{"x"}}}, nil, actual, ownedSet("app__T")).Indexes
 	wantCounts(t, got, 1, 0, 0, 0, 0)
 	if got.Excluded != 2 {
 		t.Errorf("Excluded = %d; want the multi-label FULLTEXT and stale-label indexes counted", got.Excluded)
@@ -725,7 +707,7 @@ func TestDiffIndexes_ExcludedCountsWhatWasNotCompared(t *testing.T) {
 // hand-named registry: a remote FULLTEXT row whose (label, kind, properties)
 // equal a declaration's pairs by identity in phase two regardless of its name —
 // Match under the legacy name, no rename, no DDL.
-func TestDiffIndexes_FulltextIdentityPairingUnderForeignName(t *testing.T) {
+func TestIndexDiff_FulltextIdentityPairingUnderForeignName(t *testing.T) {
 	t.Parallel()
 	desired := []Index{{
 		Name: "app__Doc_body_fulltext_idx", Kind: IndexFulltext,
@@ -735,7 +717,7 @@ func TestDiffIndexes_FulltextIdentityPairingUnderForeignName(t *testing.T) {
 		Name: "legacy_body_fulltext", Type: "FULLTEXT", EntityType: "NODE",
 		LabelsOrTypes: []string{"app__Doc"}, Properties: []string{"body"},
 	}}
-	got := New().DiffIndexes(desired, actual, ownedSet("app__Doc"))
+	got := &New().Diff(nil, desired, nil, actual, ownedSet("app__Doc")).Indexes
 	wantCounts(t, got, 1, 0, 0, 0, 0)
 	if len(got.Match) == 1 && got.Match[0].Actual.Name != "legacy_body_fulltext" {
 		t.Errorf("Match.Actual.Name = %q; want the legacy name claimed as-is", got.Match[0].Actual.Name)
@@ -745,18 +727,18 @@ func TestDiffIndexes_FulltextIdentityPairingUnderForeignName(t *testing.T) {
 // The declarability flip: an owned, undeclared, single-label FULLTEXT row is a
 // Drop — the drift authority the fulltext annotations exist to provide. Before
 // FULLTEXT became declarable such a row was merely Excluded.
-func TestDiffIndexes_UndeclaredFulltextDrops(t *testing.T) {
+func TestIndexDiff_UndeclaredFulltextDrops(t *testing.T) {
 	t.Parallel()
 	actual := []RemoteIndex{{
 		Name: "orphan_ft", Type: "FULLTEXT", EntityType: "NODE",
 		LabelsOrTypes: []string{"test__Entity"}, Properties: []string{"body"},
 	}}
-	wantCounts(t, New().DiffIndexes(nil, actual, testOwned()), 0, 0, 0, 1, 0)
+	wantCounts(t, &New().Diff(nil, nil, nil, actual, testOwned()).Indexes, 0, 0, 0, 1, 0)
 }
 
 // A fulltext name held under a different definition is drift, exactly as for
 // range: the CREATE carries IF NOT EXISTS and would silently no-op.
-func TestDiffIndexes_FulltextNameOnlyPairingIsDrift(t *testing.T) {
+func TestIndexDiff_FulltextNameOnlyPairingIsDrift(t *testing.T) {
 	t.Parallel()
 	desired := []Index{{
 		Name: "app__Doc_body_fulltext_idx", Kind: IndexFulltext,
@@ -766,7 +748,7 @@ func TestDiffIndexes_FulltextNameOnlyPairingIsDrift(t *testing.T) {
 		Name: "app__Doc_body_fulltext_idx", Type: "FULLTEXT", EntityType: "NODE",
 		LabelsOrTypes: []string{"app__Doc"}, Properties: []string{"title"},
 	}}
-	got := New().DiffIndexes(desired, actual, ownedSet("app__Doc"))
+	got := &New().Diff(nil, desired, nil, actual, ownedSet("app__Doc")).Indexes
 	wantCounts(t, got, 0, 1, 0, 0, 0)
 	if len(got.Drift) == 1 && !strings.Contains(got.Drift[0].Reason, "FULLTEXT") {
 		t.Errorf("Reason = %q; want the shapes rendered with their FULLTEXT kind", got.Drift[0].Reason)
@@ -777,7 +759,7 @@ func TestDiffIndexes_FulltextNameOnlyPairingIsDrift(t *testing.T) {
 // declaration: it stays out of identity pairing and out of the definition
 // map — the server creates the declaration beside it, so the declaration is a
 // genuine Create — and it is counted in Excluded, not dropped.
-func TestDiffIndexes_MultiLabelFulltextExcludedAndDoesNotBlockDefinition(t *testing.T) {
+func TestIndexDiff_MultiLabelFulltextExcludedAndDoesNotBlockDefinition(t *testing.T) {
 	t.Parallel()
 	desired := []Index{{
 		Name: "app__Doc_body_fulltext_idx", Kind: IndexFulltext,
@@ -787,7 +769,7 @@ func TestDiffIndexes_MultiLabelFulltextExcludedAndDoesNotBlockDefinition(t *test
 		Name: "combined_ft", Type: "FULLTEXT", EntityType: "NODE",
 		LabelsOrTypes: []string{"app__Doc", "other__Thing"}, Properties: []string{"body"},
 	}}
-	got := New().DiffIndexes(desired, actual, ownedSet("app__Doc"))
+	got := &New().Diff(nil, desired, nil, actual, ownedSet("app__Doc")).Indexes
 	wantCounts(t, got, 0, 0, 1, 0, 0)
 	if got.Excluded != 1 {
 		t.Errorf("Excluded = %d; want the multi-label row counted", got.Excluded)
@@ -797,7 +779,7 @@ func TestDiffIndexes_MultiLabelFulltextExcludedAndDoesNotBlockDefinition(t *test
 // A multi-label FULLTEXT row's NAME still blocks every CREATE — blockers are
 // collected before the declarability filter — and the blocker message names
 // every label the object carries.
-func TestDiffIndexes_MultiLabelFulltextNameStillBlocks(t *testing.T) {
+func TestIndexDiff_MultiLabelFulltextNameStillBlocks(t *testing.T) {
 	t.Parallel()
 	desired := []Index{{
 		Name: "held_name", Kind: IndexFulltext, Label: "app__Doc", Properties: []string{"body"},
@@ -806,10 +788,10 @@ func TestDiffIndexes_MultiLabelFulltextNameStillBlocks(t *testing.T) {
 		Name: "held_name", Type: "FULLTEXT", EntityType: "NODE",
 		LabelsOrTypes: []string{"app__Doc", "other__Thing"}, Properties: []string{"other"},
 	}}
-	got := New().DiffIndexes(desired, actual, ownedSet("app__Doc"))
+	got := &New().Diff(nil, desired, nil, actual, ownedSet("app__Doc")).Indexes
 	wantCounts(t, got, 0, 1, 0, 0, 0)
-	if got.Excluded != 1 {
-		t.Errorf("Excluded = %d; want the multi-label row counted", got.Excluded)
+	if got.Excluded != 0 {
+		t.Errorf("Excluded = %d; the multi-label row is a blocker, not excluded", got.Excluded)
 	}
 	if len(got.Drift) == 1 && !strings.Contains(got.Drift[0].Reason, "app__Doc|other__Thing") {
 		t.Errorf("Reason = %q; want every label the blocker carries", got.Drift[0].Reason)
@@ -818,7 +800,7 @@ func TestDiffIndexes_MultiLabelFulltextNameStillBlocks(t *testing.T) {
 
 // Index state applies to fulltext exactly as to range: FAILED is actionable
 // drift, POPULATING is unverified.
-func TestDiffIndexes_FulltextStateProblems(t *testing.T) {
+func TestIndexDiff_FulltextStateProblems(t *testing.T) {
 	t.Parallel()
 	desired := []Index{{
 		Name: "app__Doc_body_fulltext_idx", Kind: IndexFulltext,
@@ -830,15 +812,15 @@ func TestDiffIndexes_FulltextStateProblems(t *testing.T) {
 			LabelsOrTypes: []string{"app__Doc"}, Properties: []string{"body"}, State: state,
 		}}
 	}
-	wantCounts(t, New().DiffIndexes(desired, remote("FAILED"), ownedSet("app__Doc")), 0, 1, 0, 0, 0)
-	wantCounts(t, New().DiffIndexes(desired, remote("POPULATING"), ownedSet("app__Doc")), 0, 0, 0, 0, 1)
+	wantCounts(t, &New().Diff(nil, desired, nil, remote("FAILED"), ownedSet("app__Doc")).Indexes, 0, 1, 0, 0, 0)
+	wantCounts(t, &New().Diff(nil, desired, nil, remote("POPULATING"), ownedSet("app__Doc")).Indexes, 0, 0, 0, 0, 1)
 }
 
 // Analyzer configuration is a documented known limit, not compared: the schema
 // cannot declare one, so a remote fulltext row with a custom analyzer but
 // matching (label, properties) reads as Match — the vector config probes are
 // kind-gated and must not fire on a FULLTEXT pair.
-func TestDiffIndexes_FulltextAnalyzerNotCompared(t *testing.T) {
+func TestIndexDiff_FulltextAnalyzerNotCompared(t *testing.T) {
 	t.Parallel()
 	desired := []Index{{
 		Name: "app__Doc_body_fulltext_idx", Kind: IndexFulltext,
@@ -852,7 +834,7 @@ func TestDiffIndexes_FulltextAnalyzerNotCompared(t *testing.T) {
 			"fulltext.eventually_consistent": false,
 		}},
 	}}
-	wantCounts(t, New().DiffIndexes(desired, actual, ownedSet("app__Doc")), 1, 0, 0, 0, 0)
+	wantCounts(t, &New().Diff(nil, desired, nil, actual, ownedSet("app__Doc")).Indexes, 1, 0, 0, 0, 0)
 }
 
 // Every remote row lands in exactly one bucket. A backing index that serves a
@@ -861,7 +843,7 @@ func TestDiffIndexes_FulltextAnalyzerNotCompared(t *testing.T) {
 //
 // Mutation: incrementing Excluded for a non-declarable owned row in the
 // ownership loop, as the code did before, turns this red.
-func TestDiffIndexes_BackingIndexIsMatchedOrExcluded_NotBoth(t *testing.T) {
+func TestIndexDiff_BackingIndexIsMatchedOrExcluded_NotBoth(t *testing.T) {
 	t.Parallel()
 	desired := []Index{{
 		Name: "app__T_id_idx", Kind: IndexRange,
@@ -873,7 +855,7 @@ func TestDiffIndexes_BackingIndexIsMatchedOrExcluded_NotBoth(t *testing.T) {
 		State: "ONLINE", OwningConstraint: "app__T_id_unique",
 	}}
 
-	got := New().DiffIndexes(desired, backing, appOwned())
+	got := &New().Diff(nil, desired, nil, backing, appOwned()).Indexes
 	accounted := len(got.Match) + len(got.Drift) + len(got.Create) + len(got.Drop) +
 		len(got.Unverified) + got.Excluded
 	if accounted != len(backing) {
@@ -891,7 +873,7 @@ func TestDiffIndexes_BackingIndexIsMatchedOrExcluded_NotBoth(t *testing.T) {
 
 // A backing index that serves NO declaration stays excluded: it is a row the
 // diff can neither match nor drop.
-func TestDiffIndexes_UnusedBackingIndexStaysExcluded(t *testing.T) {
+func TestIndexDiff_UnusedBackingIndexStaysExcluded(t *testing.T) {
 	t.Parallel()
 	backing := []RemoteIndex{{
 		Name: "app__T_other_unique", Type: "RANGE", EntityType: "NODE",
@@ -899,7 +881,7 @@ func TestDiffIndexes_UnusedBackingIndexStaysExcluded(t *testing.T) {
 		State: "ONLINE", OwningConstraint: "app__T_other_unique",
 	}}
 
-	got := New().DiffIndexes(nil, backing, appOwned())
+	got := &New().Diff(nil, nil, nil, backing, appOwned()).Indexes
 	if got.Excluded != 1 {
 		t.Errorf("Excluded = %d; a backing index serving no declaration is not compared", got.Excluded)
 	}

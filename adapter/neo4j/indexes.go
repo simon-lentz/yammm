@@ -200,7 +200,7 @@ func (a *Adapter) emittableTypes(ctx context.Context, s schema.Schema, collector
 // [Adapter.DetectLabelCollisions] and [Adapter.OwnedLabels] all reach their
 // types through this function, so what the adapter creates and what it claims
 // cannot diverge. That is what keeps the diff safe: a label is owned exactly
-// when it is desired, so widening the walk can never make [Adapter.DiffConstraints]
+// when it is desired, so widening the walk can never make [Adapter.Diff]
 // plan a DROP for a label the emitter still writes. Narrowing one caller without
 // the others would break that, which is why they share one walk.
 //

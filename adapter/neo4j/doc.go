@@ -349,119 +349,174 @@
 // The package generates Cypher queries for inspecting a live Neo4j database:
 //
 //   - [IntrospectConstraintsQuery]: fetches all constraints
-//   - [IntrospectIndexesQuery]: fetches every non-LOOKUP index, including the
-//     index backing a constraint — [RemoteIndex.OwningConstraint] identifies
-//     those, and the diff needs them because they block a CREATE INDEX by name
-//     and by definition
+//   - [IntrospectIndexesQuery]: fetches every index, including the index
+//     backing a constraint — [RemoteIndex.OwningConstraint] identifies those,
+//     and the diff needs them because they block a CREATE INDEX by name and by
+//     definition — and the LOOKUP indexes, whose names block creates too
 //
 // Parse the results with [ParseRemoteConstraints] and [ParseRemoteIndexes].
 // [ParseRemoteIndexes] reads the index options map, so
 // [RemoteIndex.VectorDimensions] and [RemoteIndex.VectorSimilarity] expose a
 // vector index's configuration for drift detection.
 //
-// # Diff Scope and Name Blocking
+// # Diff Scope
 //
-// Both diff entry points take an [*OwnedLabels] — the labels a schema owns,
-// every named, non-abstract member type's label, a superset of the labels
-// this adapter emits
-// ([Adapter.OwnedLabels] says which the emitters leave out), built once with [Adapter.OwnedLabels] and passed
-// to both halves:
+// [Adapter.Diff] compares a schema's constraints and indexes with the
+// database's and returns one plan, a [DiffResult], over both. It takes an
+// [*OwnedLabels], built once with [Adapter.OwnedLabels]. The set holds every
+// named, non-abstract member type's label, a superset of the labels this
+// adapter emits:
 //
 //	owned := adapter.OwnedLabels(ctx, s)
-//	cDiff := adapter.DiffConstraints(desiredConstraints, actualConstraints, owned, actualIndexes...)
-//	iDiff := adapter.DiffIndexes(desiredIndexes, actualIndexes, owned, actualConstraints...)
+//	plan := adapter.Diff(desiredConstraints, desiredIndexes, actualConstraints, actualIndexes, owned)
 //
 // Ownership is set membership, not a rule applied to a remote object's label
 // string. [Adapter.Label] composes a label from a caller-configurable prefix and
-// separator around a schema name and a type name and is not invertible, so for
-// any rule that reads a schema back out of a label there is a configuration, or
-// a sibling schema name, that satisfies the rule without belonging to the
-// schema. See [Adapter.OwnedLabels] for what the set covers and what it cannot
-// see.
+// separator around a schema name and a type name, and the function has no
+// inverse. For any rule that reads a schema back out of a label, a
+// configuration or a sibling schema name satisfies the rule without belonging
+// to the schema. [Adapter.OwnedLabels] says what the set covers.
 //
-// Both results carry an Excluded count — the remote objects the comparison
-// set aside because the schema owns no label they carry, or could not declare
-// them as they stand under this configuration ([RemoteIndex.Declarable] states
-// the index side's rule). One can still stand as the Actual of a Drift, where
-// it holds the name of a declaration nothing realises, already serves the
-// definition of an index a declaration asks for, or is a UNIQUE or NODE KEY
-// over the key a declaration of the other kind needs: a NODE KEY under
-// [WithEdition](Community), or one on a declared label the owned set leaves out.
-// It is deliberately not drift; in a database shared with other applications a
-// non-zero count is the normal state. It exists so that "0 to drop" cannot be
-// read as "the database is accounted for": ownership is derived from the schema
-// in hand, so objects left behind by a type deleted or renamed since the last
-// apply sit on a label no current type declares and nothing can name them.
+// Only an owned remote object is paired with a declaration or is a Drop. Any
+// remote object, owned or not, can block a declaration's create, and the plan
+// then drops it.
 //
-// The trailing variadic argument is the OTHER side's remote objects. Index and
-// constraint names share ONE Neo4j namespace, and every emitted statement
-// carries IF NOT EXISTS, so a declaration whose name the database already holds
-// creates nothing. Over a name of its own kind the statement is a silent no-op,
-// and a constraint's backing index counts as an index. Over the other kind's name
-// the server refuses it: a CREATE INDEX over a NOT NULL or TYPE constraint's name,
-// and a CREATE CONSTRAINT over a plain index's name. Passing both sides lets each diff
-// report such a declaration as drift naming the holder. A constraint backed by
-// an index appears in SHOW INDEXES under the constraint's name and is seen
-// automatically; NOT NULL and TYPE constraints have no backing index and reach
-// [Adapter.DiffIndexes] only this way. Omitting the argument is weaker: the
-// blocked declaration then reports as a create on every run, which the server
-// refuses.
+// # One Plan Over Both Sides
+//
+// Index and constraint names share one Neo4j namespace. Every emitted statement
+// carries IF NOT EXISTS, so a create over a name that an object of its own kind
+// holds does nothing. A UNIQUE or NODE KEY constraint's backing index holds the
+// constraint's name as an index, so an index create over that name does
+// nothing too. The server refuses a constraint create over an index's name, and
+// an index create over a NOT NULL or TYPE constraint's name. A constraint's drop
+// also removes its backing index. A drop that one side needs
+// can therefore remove an object that the other side matched. [Adapter.Diff]
+// settles both sides in one fixed point, so its plan converges in one apply.
+//
+// Each remote row has a drop target, the object that one DROP removes. A
+// backing index's target is its constraint. A Match or Unverified declaration
+// whose realisation a drift names among its Blockers moves to Drift, with that
+// realisation first, and the apply creates it again under its own name. An
+// index that an online or POPULATING backing index serves becomes a Create
+// when the plan drops that constraint, as a blocker or as a Drop, unless
+// another blocker makes it a Drift. Where the caller leaves that Drop
+// unapplied, the server takes the create as a no-op while the backing index
+// stands.
+//
+// A row is in one place only. It is a Match or Unverified Actual, a Drop, a row
+// whose drop target a drift names or a Drop removes, or it is counted in
+// Excluded. A row that a drift on either side names is never a Drop. Excluded
+// counts the rows the plan leaves alone: rows on a label the schema does not
+// own, and rows the schema cannot declare as they stand. A non-zero count is
+// normal in a shared database. It exists so that "0 to drop" does not read as
+// "the database is accounted for". An object that a type deleted or renamed
+// since the last apply left behind is on a label that no current type declares.
+// No declaration pairs with it, and it is a blocker only where it holds a
+// declared name.
+//
+// The plan does not depend on the order of the rows passed in. [Adapter.Diff]
+// sorts its own copies, and among equal candidates the first in that order
+// wins. Match, Unverified, Create and Drift keep the declarations' order.
 //
 // # Constraint Diffing
 //
-// [Adapter.DiffConstraints] produces a [ConstraintDiffResult] classifying
-// desired vs. actual constraints into FIVE categories: matched, drifted (a
-// different definition under the same identity, a name the database already
-// holds, a UNIQUE or NODE KEY declaration whose label and properties, in its
-// order, a RANGE index already serves under another name, or one beside a constraint of the
-// other of those two kinds over the same label and properties in the same
-// order), to-create, to-drop, and unverified (present, but the server did not
-// report what was needed to compare it). The server refuses a UNIQUE and a NODE
-// KEY constraint over one key, so the other kind's constraint is that drift's
-// Actual and is not also a to-drop: drop it, then create the declaration. A
-// NODE KEY also requires every node to hold each key property, and the server
-// refuses it while a node lacks one. Applied after the drop, that refusal leaves
-// the key with no uniqueness constraint, so check the data before the drop.
-// A caller deciding "is this in sync?"
-// must consult Unverified as well: treating it as matched reports an unchecked
-// constraint as verified.
+// [DiffResult.Constraints] classifies the constraints into FIVE categories:
+// matched, drifted, to-create, to-drop, and unverified. An unverified constraint
+// is present, but the server did not report what the comparison needs. A caller
+// that decides "is this in sync?" must read Unverified too. To treat it as
+// matched reports an unchecked constraint as verified.
 //
-// Unverified is reachable when the records came from a query that does not yield
-// propertyType — a caller introspecting with its own Cypher rather than
+// A declaration drifts when a CREATE alone cannot realise it.
+// [ConstraintDrift.Blockers] names every database object that its create needs
+// dropped. These producers add objects:
+//
+//   - a TYPE constraint that pairs with the declaration and enforces another
+//     type, or a constraint that holds the declaration's name under another
+//     definition: that object;
+//   - a constraint or an index, on any label, that holds the declaration's name,
+//     when the declaration drifts or nothing realises it. A declaration that
+//     another object realises stays a Match beside a name holder, and the plan
+//     creates nothing for it;
+//   - for a UNIQUE or NODE KEY declaration, a plain RANGE index over its label
+//     and properties in its order, under any name;
+//   - for a UNIQUE or NODE KEY declaration, a constraint of the other of those
+//     two kinds over its label and properties in its order. The server refuses
+//     the two side by side;
+//   - the object that realises the declaration, when a drift on either side
+//     needs that object dropped.
+//
+// Pairing goes in phases: name and identity together, then the definition with
+// its properties in the declared order, then identity alone, then name alone.
+//
+// Unverified is reachable when the records came from a query that does not
+// return propertyType, for example a caller's own Cypher in place of
 // [IntrospectConstraintsQuery]. A server too old to report that column is also
-// too old to hold a TYPE constraint, so such a constraint lands in to-create
-// there, or in drift where an object holding its name blocks the create.
+// too old to hold a TYPE constraint. There, such a declaration is a to-create,
+// or a drift when an object that holds its name blocks the create.
 //
 // # Index Diffing
 //
-// [Adapter.DiffIndexes] produces an [IndexDiffResult] classifying desired vs.
-// actual indexes into FIVE categories: matched, drifted, to-create, to-drop, and
-// unverified (present, but its configuration could not be read, or it is still
-// populating). As with constraints, Unverified is neither in sync nor drifted and
-// must be consulted separately.
+// [DiffResult.Indexes] classifies the indexes into FIVE categories: matched,
+// drifted, to-create, to-drop, and unverified. An unverified index is present,
+// but its configuration was not readable or it is still populating. As with
+// constraints, Unverified is neither in sync nor drifted.
 //
-// Drift has four producers, so [IndexDrift.Actual] is not always an index kind
-// the schema could declare: a vector index whose dimension or similarity
-// differs; a definition change under a name the database already holds; an index
-// in a state that serves no queries and will not recover on its own (FAILED; a
-// POPULATING index is unverified); and a desired index the server will not
-// create, because its name or its whole definition is already taken. There
-// the Actual is the blocker: an index of any kind or on any label, a
-// constraint's backing index, an index that realises another declaration of
-// this schema, or, when the caller passes constraints as alsoBlocking, a
-// constraint with no backing index, whose Actual carries its name, labels and
-// properties and no index type. Composite property order is
-// significant, a deliberate divergence from [Adapter.DiffConstraints]: a
-// same-set/different-order remote index is a distinct index — create + drop when
-// its name differs too and [RemoteIndex.Declarable] accepts it, create alone when
-// that refuses it, and drift when it holds the desired index's name. A
-// schema-owned remote index that [RemoteIndex.Declarable] accepts and no
-// declaration matches is reported as a drop — the drift the index feature
-// exists to surface. An owned index it refuses is never a drop: it is counted in [IndexDiffResult.Excluded], a
-// blocker included, unless it is a constraint's backing index that serves a
-// declaration. That row is the declaration's Actual and is not counted: a match
-// where it serves queries ([RemoteIndex.IsOnline]), drift where it is FAILED,
-// and unverified where it is POPULATING. Drops are reported, never applied.
+// A declaration drifts when a CREATE alone cannot realise it.
+// [IndexDrift.Blockers] names every database object that its create needs
+// dropped. These producers add objects:
+//
+//   - a vector index that pairs with the declaration and differs in dimension
+//     or similarity, an index that holds the declaration's name under another
+//     definition, or a paired index in the FAILED state: that index. A
+//     POPULATING index is unverified;
+//   - an index of any kind, on any label, that holds the declaration's name. A
+//     constraint's backing index is one, and stands for its constraint;
+//   - a plain index over the same label, kind and properties in the same order,
+//     under another name;
+//   - a constraint with no backing index that holds the declaration's name;
+//   - the index that realises the declaration, when a drift on either side
+//     needs it dropped. A FAILED backing index that serves the declaration is
+//     its first blocker. An online or POPULATING one is no blocker: when the
+//     plan drops its constraint, the declaration is a Create unless another
+//     blocker makes it a Drift.
+//
+// Composite property order is significant, unlike the constraint side. A
+// remote index over the same properties in another order is a distinct index.
+// An owned remote index that [RemoteIndex.Declarable] accepts, that no
+// declaration matches, and that no drift names is a Drop. An owned index that
+// it refuses is never a Drop. A constraint's backing index can still serve a
+// declaration that pairing left without a row of its own. While the plan keeps
+// the constraint, that row is the declaration's Actual where it serves queries
+// ([RemoteIndex.IsOnline]) and where it is POPULATING (Unverified), and the
+// first of its drift's Blockers where it is FAILED. Where the plan drops the
+// constraint of an online or POPULATING one, the declaration is a Create
+// unless another blocker makes it a Drift.
+//
+// # Applying a Plan
+//
+// A [DiffResult] converges in one apply, in this order:
+//
+//  1. Drop every object that a constraint drift or an index drift names among
+//     its Blockers. Drop each drop target once, and drop each Drop that the
+//     caller applies in this step too. Drop each of Blockers.Constraints with
+//     [DropConstraintStatement] and each of Blockers.Indexes with
+//     [DropIndexStatement]. An index with a non-empty OwningConstraint is a
+//     constraint's backing index: drop that constraint.
+//  2. Create every constraint in Constraints.Create and every constraint
+//     drift's Desired.
+//  3. Create every index in Indexes.Create and every index drift's Desired. An
+//     index created before a constraint whose backing index serves its
+//     definition makes the server refuse that constraint.
+//
+// A constraint's create succeeds only when the data meets it. A refused create
+// after step 1 leaves the label without the dropped object's guarantee. Before
+// step 1, compare each create's precondition with the data:
+//
+//   - UNIQUE: no two nodes on the label hold one tuple of the properties;
+//   - NOT NULL: every node on the label holds the property;
+//   - TYPE: every value of the property on the label is of the declared type;
+//   - NODE KEY: both the UNIQUE and the NOT NULL preconditions, for every key
+//     property.
 //
 // # Configuration
 //

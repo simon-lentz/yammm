@@ -7,7 +7,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestDiffConstraints_AllMatch(t *testing.T) {
+func TestConstraintDiff_AllMatch(t *testing.T) {
 	t.Parallel()
 	a := New()
 
@@ -21,14 +21,14 @@ func TestDiffConstraints_AllMatch(t *testing.T) {
 		{Name: "c2", Type: "NODE_PROPERTY_EXISTENCE", EntityType: "NODE", LabelsOrTypes: []string{"test__Entity"}, Properties: []string{"name"}},
 	}
 
-	result := a.DiffConstraints(desired, actual, testOwned())
+	result := &a.Diff(desired, nil, actual, nil, testOwned()).Constraints
 	assert.Len(t, result.Match, 2)
 	assert.Empty(t, result.Drift)
 	assert.Empty(t, result.Create)
 	assert.Empty(t, result.Drop)
 }
 
-func TestDiffConstraints_CreateNew(t *testing.T) {
+func TestConstraintDiff_CreateNew(t *testing.T) {
 	t.Parallel()
 	a := New()
 
@@ -42,13 +42,13 @@ func TestDiffConstraints_CreateNew(t *testing.T) {
 		{Name: "c1", Type: "UNIQUENESS", EntityType: "NODE", LabelsOrTypes: []string{"test__Entity"}, Properties: []string{"id"}},
 	}
 
-	result := a.DiffConstraints(desired, actual, testOwned())
+	result := &a.Diff(desired, nil, actual, nil, testOwned()).Constraints
 	assert.Len(t, result.Match, 1)
 	assert.Len(t, result.Create, 1)
 	assert.Equal(t, "STRING", result.Create[0].TypeExpr)
 }
 
-func TestDiffConstraints_DropOrphaned(t *testing.T) {
+func TestConstraintDiff_DropOrphaned(t *testing.T) {
 	t.Parallel()
 	a := New()
 
@@ -62,13 +62,13 @@ func TestDiffConstraints_DropOrphaned(t *testing.T) {
 		{Name: "c2", Type: "NODE_PROPERTY_EXISTENCE", EntityType: "NODE", LabelsOrTypes: []string{"test__Entity"}, Properties: []string{"old_field"}},
 	}
 
-	result := a.DiffConstraints(desired, actual, testOwned())
+	result := &a.Diff(desired, nil, actual, nil, testOwned()).Constraints
 	assert.Len(t, result.Match, 1)
 	assert.Len(t, result.Drop, 1)
 	assert.Equal(t, "old_field", result.Drop[0].Properties[0])
 }
 
-func TestDiffConstraints_TypeDrift(t *testing.T) {
+func TestConstraintDiff_TypeDrift(t *testing.T) {
 	t.Parallel()
 	a := New()
 
@@ -81,7 +81,7 @@ func TestDiffConstraints_TypeDrift(t *testing.T) {
 		{Name: "c1", Type: "NODE_PROPERTY_TYPE", EntityType: "NODE", LabelsOrTypes: []string{"test__Entity"}, Properties: []string{"name"}, PropertyType: "INTEGER"},
 	}
 
-	result := a.DiffConstraints(desired, actual, testOwned())
+	result := &a.Diff(desired, nil, actual, nil, testOwned()).Constraints
 	assert.Empty(t, result.Match)
 	assert.Len(t, result.Drift, 1)
 	assert.Contains(t, result.Drift[0].Reason, "property type mismatch")
@@ -89,7 +89,7 @@ func TestDiffConstraints_TypeDrift(t *testing.T) {
 	assert.Contains(t, result.Drift[0].Reason, "database INTEGER")
 }
 
-func TestDiffConstraints_FiltersNonOwnedConstraints(t *testing.T) {
+func TestConstraintDiff_FiltersNonOwnedConstraints(t *testing.T) {
 	t.Parallel()
 	a := New()
 
@@ -103,22 +103,22 @@ func TestDiffConstraints_FiltersNonOwnedConstraints(t *testing.T) {
 		{Name: "other", Type: "UNIQUENESS", EntityType: "NODE", LabelsOrTypes: []string{"other_schema__Foo"}, Properties: []string{"id"}},
 	}
 
-	result := a.DiffConstraints(desired, actual, testOwned())
+	result := &a.Diff(desired, nil, actual, nil, testOwned()).Constraints
 	assert.Len(t, result.Match, 1)
 	assert.Empty(t, result.Drop) // other_schema constraints not reported as drops
 }
 
-func TestDiffConstraints_Empty(t *testing.T) {
+func TestConstraintDiff_Empty(t *testing.T) {
 	t.Parallel()
 	a := New()
-	result := a.DiffConstraints(nil, nil, testOwned())
+	result := &a.Diff(nil, nil, nil, nil, testOwned()).Constraints
 	assert.Empty(t, result.Match)
 	assert.Empty(t, result.Drift)
 	assert.Empty(t, result.Create)
 	assert.Empty(t, result.Drop)
 }
 
-func TestDiffConstraints_CompositeKeys(t *testing.T) {
+func TestConstraintDiff_CompositeKeys(t *testing.T) {
 	t.Parallel()
 	a := New()
 
@@ -131,6 +131,6 @@ func TestDiffConstraints_CompositeKeys(t *testing.T) {
 		{Name: "c1", Type: "UNIQUENESS", EntityType: "NODE", LabelsOrTypes: []string{"test__Record"}, Properties: []string{"record_id", "schema_id"}},
 	}
 
-	result := a.DiffConstraints(desired, actual, testOwned())
+	result := &a.Diff(desired, nil, actual, nil, testOwned()).Constraints
 	require.Len(t, result.Match, 1)
 }

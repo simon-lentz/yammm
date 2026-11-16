@@ -1,18 +1,17 @@
 package neo4j
 
-import "testing"
+import (
+	"slices"
+	"testing"
+)
 
-// Every remote row DiffIndexes is given lands in one bucket: it is the Actual
-// a declaration was compared with (a Match, an Unverified, or a Drift that is
-// not a block), a Drop, or one of the rows Excluded counts. A block is the one
-// entry outside that rule: its Actual is the row that holds a declaration's
-// name or definition against a CREATE, which the comparison never took, so a
-// blocker is still counted where it was.
+// Every remote index row lands in one place: it is the Actual a declaration was
+// compared with (a Match or an Unverified), a row some drift names among its
+// Blockers, a Drop, or one of the rows Excluded counts.
 //
-// The oracle is the count: each case states its rows, how many of its Drift
-// entries are blocks, and what each bucket holds, and the buckets less the
-// blocks must add up to the rows.
-func TestDiffIndexes_EveryRemoteRowLandsInOneBucket(t *testing.T) {
+// The oracle is the count: each case states what each bucket holds, and the
+// buckets plus the distinct rows the drifts name must add up to the rows.
+func TestIndexDiff_EveryRemoteRowLandsInOneBucket(t *testing.T) {
 	t.Parallel()
 
 	const label = "app__T"
@@ -38,8 +37,7 @@ func TestDiffIndexes_EveryRemoteRowLandsInOneBucket(t *testing.T) {
 		actual  []RemoteIndex
 		owned   *OwnedLabels
 		// match, drift, create, drop, unverified, excluded
-		want   [6]int
-		blocks int
+		want [6]int
 	}{
 		{
 			name:    "a backing index that serves a declaration and is online",
@@ -106,26 +104,23 @@ func TestDiffIndexes_EveryRemoteRowLandsInOneBucket(t *testing.T) {
 			want:    [6]int{1, 0, 0, 0, 0, 0},
 		},
 		{
-			name:    "an undeclarable row that holds a declaration's name blocks it and stays counted",
+			name:    "an undeclarable row that holds a declaration's name blocks it and is not excluded",
 			desired: []Index{declared("idx", "id")},
 			actual:  []RemoteIndex{undeclarable("idx", "TEXT", "a")},
-			want:    [6]int{0, 1, 0, 0, 0, 1},
-			blocks:  1,
+			want:    [6]int{0, 1, 0, 0, 0, 0},
 		},
 		{
-			name:    "a row on another label that holds a declaration's name blocks it and stays counted",
+			name:    "a row on another label that holds a declaration's name blocks it and is not excluded",
 			desired: []Index{declared("idx", "id")},
 			actual:  []RemoteIndex{plain("idx", "other__Thing", "x")},
-			want:    [6]int{0, 1, 0, 0, 0, 1},
-			blocks:  1,
+			want:    [6]int{0, 1, 0, 0, 0, 0},
 		},
 		{
-			name:    "a row on a label the set does not hold that holds a declaration's definition blocks it and stays counted",
+			name:    "a row on a label the set does not hold that holds a declaration's definition blocks it and is not excluded",
 			desired: []Index{declared("idx", "id")},
 			actual:  []RemoteIndex{plain("held", label, "id")},
 			owned:   ownedSet("app__Other"),
-			want:    [6]int{0, 1, 0, 0, 0, 1},
-			blocks:  1,
+			want:    [6]int{0, 1, 0, 0, 0, 0},
 		},
 		{
 			name:    "one of each",
@@ -147,21 +142,28 @@ func TestDiffIndexes_EveryRemoteRowLandsInOneBucket(t *testing.T) {
 			if owned == nil {
 				owned = ownedSet(label)
 			}
-			got := New().DiffIndexes(c.desired, c.actual, owned)
+			got := &New().Diff(nil, c.desired, nil, c.actual, owned).Indexes
 			counts := [6]int{len(got.Match), len(got.Drift), len(got.Create), len(got.Drop), len(got.Unverified), got.Excluded}
 			if counts != c.want {
 				t.Errorf("match, drift, create, drop, unverified, excluded = %v, want %v", counts, c.want)
 			}
-			if landed := counts[0] + counts[1] - c.blocks + counts[3] + counts[4] + counts[5]; landed != len(c.actual) {
-				t.Errorf("%d remote rows landed %d times: %v with %d blocks", len(c.actual), landed, counts, c.blocks)
+			named := make(map[string]struct{})
+			for _, d := range got.Drift {
+				for _, b := range d.Blockers.Indexes {
+					named[remoteIndexRecordKey(b)] = struct{}{}
+				}
+			}
+			if landed := counts[0] + counts[3] + counts[4] + counts[5] + len(named); landed != len(c.actual) {
+				t.Errorf("%d remote rows landed %d times: %v with %d rows named by drifts", len(c.actual), landed, counts, len(named))
 			}
 		})
 	}
 }
 
-// A definition is served, or blocked, by the first row that holds it, whatever
-// rows stand before that one: the comparison finds the row by where it stands.
-func TestDiffIndexes_ADefinitionBelongsToItsFirstRowWhereverItStands(t *testing.T) {
+// A definition is served by the first row that holds it in the diff's record
+// order, whatever rows stand before that one in the input, and a row realising
+// one declaration blocks another declaration of its definition.
+func TestIndexDiff_ADefinitionBelongsToItsFirstRowInRecordOrder(t *testing.T) {
 	t.Parallel()
 	const label = "app__T"
 	unrelated := RemoteIndex{Name: "unrelated", Type: "TEXT", EntityType: "NODE", LabelsOrTypes: []string{label}, Properties: []string{"a"}}
@@ -172,24 +174,20 @@ func TestDiffIndexes_ADefinitionBelongsToItsFirstRowWhereverItStands(t *testing.
 		}
 	}
 
-	served := New().DiffIndexes(
-		[]Index{{Name: "idx", Kind: IndexRange, Label: label, Properties: []string{"id"}}},
-		[]RemoteIndex{unrelated, backing("first"), backing("second")}, ownedSet(label))
+	served := &New().Diff(nil, []Index{{Name: "idx", Kind: IndexRange, Label: label, Properties: []string{"id"}}}, nil, []RemoteIndex{unrelated, backing("first"), backing("second")}, ownedSet(label)).Indexes
 	if len(served.Match) != 1 || served.Match[0].Actual.Name != "first" || served.Excluded != 2 {
 		t.Errorf("match = %+v, excluded = %d; want the first backing index matched and two rows excluded", served.Match, served.Excluded)
 	}
 
 	// Two declarations of one definition: pairing gives the row to the one
-	// whose name it holds, and the row then blocks the other's CREATE.
-	blocked := New().DiffIndexes(
-		[]Index{
-			{Name: "mine", Kind: IndexRange, Label: label, Properties: []string{"x"}},
-			{Name: "again", Kind: IndexRange, Label: label, Properties: []string{"x"}},
-		},
-		[]RemoteIndex{unrelated, {Name: "mine", Type: "RANGE", EntityType: "NODE", State: "ONLINE", LabelsOrTypes: []string{label}, Properties: []string{"x"}}},
-		ownedSet(label))
-	if len(blocked.Match) != 1 || len(blocked.Drift) != 1 || blocked.Drift[0].Actual.Name != "mine" || blocked.Excluded != 1 {
-		t.Errorf("match = %+v, drift = %+v, excluded = %d; want one match, the second declaration blocked by index \"mine\", and one row excluded",
+	// whose name it holds, and the row then blocks the other's CREATE, so the
+	// declaration it realises is created again too.
+	blocked := &New().Diff(nil, []Index{
+		{Name: "mine", Kind: IndexRange, Label: label, Properties: []string{"x"}},
+		{Name: "again", Kind: IndexRange, Label: label, Properties: []string{"x"}},
+	}, nil, []RemoteIndex{unrelated, {Name: "mine", Type: "RANGE", EntityType: "NODE", State: "ONLINE", LabelsOrTypes: []string{label}, Properties: []string{"x"}}}, ownedSet(label)).Indexes
+	if len(blocked.Match) != 0 || len(blocked.Drift) != 2 || !slices.Equal(blockerNames(blocked.Drift[1].Blockers), []string{"i:mine"}) || blocked.Excluded != 1 {
+		t.Errorf("match = %+v, drift = %+v, excluded = %d; want no match, both declarations blocked by index \"mine\", and one row excluded",
 			blocked.Match, blocked.Drift, blocked.Excluded)
 	}
 }

@@ -196,7 +196,6 @@ func TestIntrospectIndexesQuery_YieldsOptionsAndState(t *testing.T) {
 		"options",          // vector configuration, for drift detection
 		"state",            // FAILED/POPULATING must not read as in sync
 		"owningConstraint", // constraint-backing indexes must be visible as blockers
-		"type <> 'LOOKUP'",
 	} {
 		if !strings.Contains(q, want) {
 			t.Errorf("IntrospectIndexesQuery() is missing %q:\n%s", want, q)
@@ -207,6 +206,10 @@ func TestIntrospectIndexesQuery_YieldsOptionsAndState(t *testing.T) {
 	// blocks outside what the diff can observe.
 	if strings.Contains(q, "owningConstraint IS NULL") {
 		t.Errorf("IntrospectIndexesQuery() still filters out constraint-backing indexes:\n%s", q)
+	}
+	// A LOOKUP index can hold any name, and that name blocks a create.
+	if strings.Contains(q, "LOOKUP") {
+		t.Errorf("IntrospectIndexesQuery() filters out LOOKUP indexes:\n%s", q)
 	}
 }
 

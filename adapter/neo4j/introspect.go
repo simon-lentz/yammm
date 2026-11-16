@@ -41,7 +41,7 @@ type RemoteConstraint struct {
 // Parse from database output via [ParseRemoteIndexes].
 type RemoteIndex struct {
 	Name          string         // Index name
-	Type          string         // "RANGE", "TEXT", "POINT", "FULLTEXT", "VECTOR" (BTREE is Neo4j 4.x-historical)
+	Type          string         // "RANGE", "TEXT", "POINT", "FULLTEXT", "VECTOR", "LOOKUP" (BTREE is Neo4j 4.x-historical)
 	EntityType    string         // "NODE" or "RELATIONSHIP"
 	LabelsOrTypes []string       // Labels or relationship types
 	Properties    []string       // Indexed properties
@@ -57,15 +57,18 @@ type RemoteIndex struct {
 	// OwningConstraint names the constraint this index backs, or is empty for a
 	// standalone index.
 	//
-	// [IntrospectIndexesQuery] yields these rows, and [Adapter.DiffIndexes] needs
+	// [IntrospectIndexesQuery] yields these rows, and [Adapter.Diff] needs
 	// them: a backing index holds its constraint's name against every CREATE
 	// INDEX in the database, and already serves the (label, properties, kind) it
 	// covers, so both are conditions under which the server silently no-ops a
 	// declared index. It is this field that keeps them out of pairing and drops —
 	// a backing index is created and dropped with its constraint and is never
 	// independently declarable, so reporting one as an undeclared orphan advises
-	// dropping the index behind a primary key. One that serves a declaration is
-	// still that declaration's Actual.
+	// dropping the index behind a primary key. One that serves a declaration
+	// pairing left without a row is that declaration's Actual, or its drift's
+	// first blocker where it is FAILED, while the plan keeps its constraint.
+	// Where the plan drops the constraint of an online or POPULATING one, the
+	// declaration is a Create unless another blocker makes it a Drift.
 	//
 	// A consumer filtering rows itself must test this field rather than assume
 	// the query excluded them.
@@ -144,11 +147,10 @@ func (ri RemoteIndex) indexConfig() (map[string]any, bool) {
 // is a bad exchange. The diff reports a TYPE record with no propertyType that
 // pairs with a desired TYPE constraint by its definition in
 // [ConstraintDiffResult.Unverified]. One that holds the name of a desired
-// constraint no record realises is a Drift, and one no desired constraint pairs
-// with is a Drop when it is owned and declarable and is counted in Excluded
-// otherwise. A desired TYPE constraint with no record is a Create, or a Drift
-// where another constraint holds its name, or an index the caller passes as
-// alsoBlocking.
+// constraint no record realises is a blocker of that declaration's drift. One
+// that no desired constraint pairs with and no drift names is a Drop when it is
+// owned and declarable, and is counted in Excluded otherwise. A desired TYPE constraint with no record is a Create, or a Drift
+// where another constraint or an index holds its name.
 //
 // [IntrospectIndexesQuery] is explicit for the opposite reason: every column it
 // names has been present across the supported range, so it can state its
@@ -157,26 +159,30 @@ func IntrospectConstraintsQuery() string {
 	return "SHOW CONSTRAINTS YIELD *"
 }
 
-// IntrospectIndexesQuery returns the Cypher query for fetching every index the
-// diff must consider. Filters out only LOOKUP indexes, which no schema
-// declares.
+// IntrospectIndexesQuery returns the Cypher query for fetching every index.
+//
+// LOOKUP indexes are INCLUDED although no schema declares one. A LOOKUP index
+// can hold any name, and an index's name blocks a create whatever its kind:
+// the server refuses a constraint over it and takes no effect from an index
+// over it. [RemoteIndex.Declarable] refuses them, so they only block names.
 //
 // Constraint-backing indexes are deliberately INCLUDED. They are never paired by
 // name or dropped — [RemoteIndex.Declarable] rejects them on
-// [RemoteIndex.OwningConstraint] — and one that serves a declaration is that
-// declaration's Actual; and they block: a CREATE INDEX whose name they
-// hold takes no effect, and neither does one whose (label, properties, kind)
-// they already serve. Excluding them here would put the definition block outside
-// what the diff can observe, and leave the name block to alsoBlocking, and a
-// blocked declaration reports as a Create that takes no
-// effect on every run.
+// [RemoteIndex.OwningConstraint] — and one that serves a declaration pairing
+// left without a row is that declaration's Actual, or its drift's first
+// blocker where it is FAILED, while the plan keeps its constraint. Where the
+// plan drops the constraint of an online or POPULATING one, the declaration is
+// a Create unless another blocker makes it a Drift. A CREATE INDEX whose name
+// a backing index holds takes no effect, so that backing index blocks it, and
+// neither does one whose (label, properties, kind) a backing index already
+// serves. Excluding them here would hide both, and such a declaration would
+// report as a Create that takes no effect on every run.
 //
 // Yields the options map so vector configuration is visible, and the state so an
 // index that exists but does not serve queries is distinguishable from a healthy
 // one.
 func IntrospectIndexesQuery() string {
-	return "SHOW INDEXES YIELD name, type, entityType, labelsOrTypes, properties, options, state, owningConstraint " +
-		"WHERE type <> 'LOOKUP'"
+	return "SHOW INDEXES YIELD name, type, entityType, labelsOrTypes, properties, options, state, owningConstraint"
 }
 
 // ParseRemoteConstraints parses SHOW CONSTRAINTS YIELD * output into structured values.
