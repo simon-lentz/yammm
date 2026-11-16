@@ -3,7 +3,6 @@ package graph_test
 import (
 	"context"
 	"slices"
-	"strings"
 	"testing"
 
 	"github.com/simon-lentz/yammm/diag"
@@ -322,82 +321,4 @@ func refusedTypeNames(res diag.Result) []string {
 		}
 	}
 	return names
-}
-
-// loadDeepBeacon loads the entry, base and deep closure with deep's Beacon
-// declared as beacon, and returns the entry schema and deep's schema.
-func loadDeepBeacon(t *testing.T, beacon string) (s, deep schema.Schema) {
-	t.Helper()
-	s, result := schema.LoadSourcesWithEntry(t.Context(), map[string][]byte{
-		"entry.yammm": []byte("schema \"entry\"\n\nimport \"base.yammm\" as base\n"),
-		"base.yammm":  []byte("schema \"base\"\n\nimport \"deep.yammm\" as deep\n\ntype Basin {\n\tid String primary\n}\n"),
-		"deep.yammm":  []byte("schema \"deep\"\n\n" + beacon),
-	}, "entry.yammm", ".", schema.WithSourcesOnly(true))
-	if result.HasErrors() {
-		t.Fatalf("load fixture: %s", result)
-	}
-	base, _ := s.ImportByAlias("base")
-	d, _ := base.Schema().ImportByAlias("deep")
-	return s, d.Schema()
-}
-
-// TestNewFromSnapshot_NamesARefusedTypeAsTheImportingSchemaRendersIt pins that
-// the import's refusals of a root name its type by the importing schema's
-// rendering, as every other graph diagnostic does, not by its whole identity.
-func TestNewFromSnapshot_NamesARefusedTypeAsTheImportingSchemaRendersIt(t *testing.T) {
-	t.Parallel()
-	for _, c := range []struct {
-		name, from, into, want string
-		keys                   []string
-	}{
-		{
-			"an undeclared property",
-			"type Beacon {\n\tid String primary\n\tpower Float\n}\n",
-			"type Beacon {\n\tid String primary\n}\n",
-			`deep#Beacon[["d1"]] holds property "power"`,
-			[]string{"d1"},
-		},
-		{
-			"two keys at one address",
-			"type Beacon {\n\tid String primary\n}\n",
-			"type Beacon {\n\tid Timestamp primary\n}\n",
-			"two instances of type deep#Beacon at address",
-			[]string{"2030-01-01T00:00:00Z", "2030-01-01T00:00:00+00:00"},
-		},
-		{
-			"a type that cannot hold a root",
-			"type Beacon {\n\tid String primary\n}\n",
-			"part type Beacon {\n\tid String primary\n}\n",
-			"types entry 0 denotes deep#Beacon, which",
-			[]string{"d1"},
-		},
-	} {
-		t.Run(c.name, func(t *testing.T) {
-			t.Parallel()
-			from, deep := loadDeepBeacon(t, c.from)
-			into, _ := loadDeepBeacon(t, c.into)
-			src := graph.New(from)
-			for _, key := range c.keys {
-				props := map[string]any{"id": key}
-				if strings.Contains(c.from, "power") {
-					props["power"] = float64(1)
-				}
-				if res := src.Add(context.Background(), instancetest.Valid(t, deep, "Beacon", props)); !res.OK() {
-					t.Fatalf("add %s: %s", key, res)
-				}
-			}
-			g, res := graph.NewFromSnapshot(into, src.Snapshot())
-			if g != nil {
-				t.Fatal("a refused import returned a graph")
-			}
-			var messages []string
-			for issue := range res.Errors() {
-				if strings.Contains(issue.Message(), c.want) {
-					return
-				}
-				messages = append(messages, issue.Message())
-			}
-			t.Errorf("no refusal names %q: %q", c.want, messages)
-		})
-	}
 }

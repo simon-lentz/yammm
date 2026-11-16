@@ -74,7 +74,7 @@ func TestSnapshotAttestation_SeededGraphANDsTheLoadedClaim(t *testing.T) {
 	// A true claim survives a seed followed by validated adds.
 	g1 := graph.New(s)
 	mustOK(t, g1.Add(t.Context(), instancetest.Valid(t, s, "Company", map[string]any{"id": "c1", "name": "n"})))
-	g2 := mustImport(t, s, g1.Snapshot())
+	g2 := graph.NewFromSnapshot(g1.Snapshot())
 	mustOK(t, g2.Add(t.Context(), instancetest.Valid(t, s, "Company", map[string]any{"id": "c2", "name": "n"})))
 	if att := g2.Snapshot().Attestation(); !att.Values {
 		t.Fatalf("seed from a true claim plus validated adds attests %+v, want Values true", att)
@@ -90,7 +90,7 @@ func TestSnapshotAttestation_SeededGraphANDsTheLoadedClaim(t *testing.T) {
 		}},
 		Attestation: &snapparts.Attestation{Values: false, Associations: true},
 	})
-	g4 := mustImport(t, s, unproven)
+	g4 := graph.NewFromSnapshot(unproven)
 	mustOK(t, g4.Add(t.Context(), instancetest.Valid(t, s, "Company", map[string]any{"id": "c4", "name": "n"})))
 	if att := g4.Snapshot().Attestation(); att.Values {
 		t.Fatal("seed from a false claim ANDed to true after a validated add")

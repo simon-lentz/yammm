@@ -712,19 +712,40 @@ func countCode(result diag.Result, code diag.Code) int {
 	return count
 }
 
-// mustImport imports snap into a new graph bound to s and fails the test when
-// the import is refused.
-func mustImport(tb testing.TB, s schema.Schema, snap graph.Snapshot) *graph.Graph {
-	tb.Helper()
-	g, res := graph.NewFromSnapshot(s, snap)
-	if res.HasErrors() {
-		tb.Fatalf("NewFromSnapshot: %s", res)
-	}
-	return g
-}
-
 // rebuild constructs a snapshot from parts, as the snapshot package does from a
 // document it read.
 func rebuild(s schema.Schema, parts snapparts.Parts) graph.Snapshot {
 	return snapparts.Rebuild[graph.Snapshot](s, parts)
+}
+
+func loadAs(t *testing.T, src string) schema.Schema {
+	t.Helper()
+	s, res := schema.LoadString(t.Context(), src, "entry.yammm")
+	if res.HasErrors() {
+		t.Fatalf("load: %s", res)
+	}
+	return s
+}
+
+func loadEntry(t *testing.T, src string) schema.Schema {
+	t.Helper()
+	s, res := schema.LoadString(t.Context(), src, "entry.yammm")
+	if res.HasErrors() {
+		t.Fatalf("load: %s", res)
+	}
+	return s
+}
+
+func typeIDOf(t *testing.T, s schema.Schema, name string) schema.TypeID {
+	t.Helper()
+	typ, ok := s.Type(name)
+	if !ok {
+		t.Fatalf("type %s not found", name)
+	}
+	return typ.ID()
+}
+
+func rootInstance(t *testing.T, s schema.Schema, name, key string) instance.ValidInstance {
+	t.Helper()
+	return instancetest.Valid(t, s, name, map[string]any{"id": key})
 }

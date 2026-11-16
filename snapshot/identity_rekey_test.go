@@ -23,17 +23,6 @@ import (
 // keyed by [schema.TypeID]. These tests drive the positions where a name key
 // merged or dropped instances.
 
-// mustImport imports snap into a new graph bound to s and fails the test when
-// the import is refused.
-func mustImport(tb testing.TB, s schema.Schema, snap graph.Snapshot) *graph.Graph {
-	tb.Helper()
-	g, res := graph.NewFromSnapshot(s, snap)
-	if res.HasErrors() {
-		tb.Fatalf("NewFromSnapshot: %s", res)
-	}
-	return g
-}
-
 // hasCode reports whether the result carries an issue with the given code.
 func hasCode(result diag.Result, code diag.Code) bool {
 	for issue := range result.Issues() {
@@ -84,7 +73,7 @@ func TestImportSnapshot_KeepsATransitivelyImportedComposedChild(t *testing.T) {
 		},
 	})
 
-	after := mustImport(t, s, built).Snapshot()
+	after := graph.NewFromSnapshot(built).Snapshot()
 	roots := slices.Collect(after.InstancesOf(siteID))
 	if len(roots) != 1 {
 		t.Fatalf("importing dropped the root: want 1, got %d", len(roots))
@@ -170,7 +159,7 @@ func TestGraphSnapshot_SeparatesOneNameTwoSchemasDeclare(t *testing.T) {
 	s := loadIdentitySchema(t)
 
 	built, _, _ := sameNameBeacons(t, s)
-	after := mustImport(t, s, built).Snapshot()
+	after := graph.NewFromSnapshot(built).Snapshot()
 
 	var count int
 	for range after.AllInstances() {
@@ -207,9 +196,8 @@ func TestRoundTrip_SeparatesOneNameTwoSchemasDeclare(t *testing.T) {
 }
 
 // TestImportSnapshot_ResolvesJSONFieldForImportedSource pins the source-side
-// lookup behind an unresolved edge's reported input field. An imported source
-// type's tag is alias-qualified, and a local-name-only lookup misses it, so
-// the field a consumer needs to locate the fault was reported empty.
+// lookup behind an unresolved edge's reported input field: the relation's field
+// name, read through an imported source type whose tag is alias-qualified.
 func TestImportSnapshot_ResolvesJSONFieldForImportedSource(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -240,26 +228,26 @@ func TestImportSnapshot_ResolvesJSONFieldForImportedSource(t *testing.T) {
 		}},
 	})
 
-	checked := mustImport(t, s, built).Check(ctx)
+	checked := graph.NewFromSnapshot(built).Check(ctx)
 
-	var seen, populated bool
+	var seen bool
+	field := "<none>"
 	for issue := range checked.Issues() {
 		if issue.Code() != diag.E_UNRESOLVED_REQUIRED {
 			continue
 		}
 		seen = true
 		for _, d := range issue.Details() {
-			if d.Key == diag.DetailKeyJSONField && d.Value != "" {
-				populated = true
+			if d.Key == diag.DetailKeyJSONField {
+				field = d.Value
 			}
 		}
 	}
 	if !seen {
 		t.Fatalf("no %s issue was reported: %s", diag.E_UNRESOLVED_REQUIRED, checked)
 	}
-	if !populated {
-		t.Errorf("the %s detail is empty for an imported source type, so a consumer cannot locate the input field",
-			diag.DetailKeyJSONField)
+	if field != "near" {
+		t.Errorf("the %s detail is %q, want the relation's field name %q", diag.DetailKeyJSONField, field, "near")
 	}
 }
 

@@ -16,8 +16,8 @@ import (
 // concurrent read access from multiple goroutines.
 //
 // Instances are created internally, by [Graph.Add] and [Graph.AddOrMerge], the
-// snapshot package's reader, and the snapshot copies [Graph.Snapshot] and the
-// import take.
+// snapshot package's reader, and the snapshot copies [Graph.Snapshot] and
+// [NewFromSnapshot] take.
 // A root is accessed via [Snapshot.AllInstances], [Snapshot.InstancesOf], or
 // [Snapshot.InstanceByKey]; a composed child via [Instance.Composed]; and the
 // instances an edge, a duplicate or an unresolved record names via that
@@ -102,9 +102,10 @@ func (i Instance) Property(name string) (immutable.Value, bool) {
 }
 
 // Properties returns the instance's property values. For an instance
-// [Graph.Add] took, they are as the validator stored them. A snapshot load and
-// an import put a value they read in the validator's form where its kind has
-// one and the value renders in it, and keep any other value as read.
+// [Graph.Add] took, they are as the validator stored them. A snapshot load puts
+// a value it reads in the validator's form where its kind has one and the value
+// renders in it, and keeps any other value as read; an import keeps the values
+// it copies.
 //
 // The returned Properties is immutable: [immutable.Properties.All] visits it in
 // name order, and [immutable.Properties.Clone] returns a mutable copy.

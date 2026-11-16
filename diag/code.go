@@ -347,8 +347,7 @@ var (
 	E_UNKNOWN_EDGE_FIELD = NewCode("E_UNKNOWN_EDGE_FIELD", CategoryInstance)
 
 	// E_EDGE_SHAPE_MISMATCH indicates an edge's or a composition's value has a
-	// shape its relation does not take, or that a snapshot an import reads holds
-	// an "empty" record under a (one) association.
+	// shape its relation does not take.
 	E_EDGE_SHAPE_MISMATCH = NewCode("E_EDGE_SHAPE_MISMATCH", CategoryInstance)
 
 	// E_UNRESOLVED_REQUIRED_COMPOSITION indicates a required composition is unresolved.
@@ -383,14 +382,13 @@ var (
 	// E_DUPLICATE_PK indicates a primary key stated twice for one type: by two
 	// instances added to a graph, by two root instances whose stored keys the key
 	// rule both accepts, in a snapshot that snapshot.Info reads or, of a type that
-	// can hold one, that a graph imports under another schema or snapshot.Load or
-	// Verify reads, or by two root instances a yammm data command reads from its
+	// can hold one, that snapshot.Load or Verify reads, or by two root instances a yammm data command reads from its
 	// data files and --into file, one of them refused.
 	E_DUPLICATE_PK = NewCode("E_DUPLICATE_PK", CategoryGraph)
 
 	// E_DUPLICATE_COMPOSED_PK indicates a composition slot that cannot hold a
 	// child: two children of one (many) slot share a primary key, or a (one)
-	// slot is given several. The validator and the import raise it. snapshot.Load
+	// slot is given several. The validator raises it. snapshot.Load
 	// and Verify raise it for a (one) slot a document fills more than once and
 	// for two children of a keyed (many) slot at one key, compared as written.
 	// Info reads without a schema, which the checks need, so it makes no such claim.
@@ -399,12 +397,9 @@ var (
 	// E_DUPLICATE_EDGE indicates a (many) association that names one target
 	// twice for one source: a graph holds one edge per source, association and
 	// target. The validator raises it for a target key one listing repeats where
-	// no other check refused either listing, and the import for an edge and a
-	// "target_missing" record, or two such records, that a snapshot built under
-	// another schema holds at one canonical target key. snapshot.Load and Verify
-	// refuse such a document with
-	// E_SNAPSHOT_MALFORMED where no other check refused the repeating listing,
-	// one sound root (of a type that can hold a root, its stored key admitted by
+	// no other check refused either listing. snapshot.Load and Verify refuse such
+	// a document with E_SNAPSHOT_MALFORMED where no other check refused the
+	// repeating listing, one sound root (of a type that can hold a root, its stored key admitted by
 	// the key rule) holds the source's address alone, and an edge's target's,
 	// and no root stands at a record's target and no refused unit states it.
 	// Elsewhere the issue at the listing, the source or the target stands for
@@ -414,43 +409,23 @@ var (
 	// E_UNRESOLVED_REQUIRED indicates a required association is unresolved.
 	E_UNRESOLVED_REQUIRED = NewCode("E_UNRESOLVED_REQUIRED", CategoryGraph)
 
-	// E_GRAPH_TYPE_NOT_FOUND indicates a type identity in an imported snapshot
-	// that names no type of the schema.
-	E_GRAPH_TYPE_NOT_FOUND = NewCode("E_GRAPH_TYPE_NOT_FOUND", CategoryGraph)
-
 	// E_GRAPH_INVALID_COMPOSITION indicates an invalid composition in graph operations.
 	E_GRAPH_INVALID_COMPOSITION = NewCode("E_GRAPH_INVALID_COMPOSITION", CategoryGraph)
 
-	// E_GRAPH_MISSING_PK indicates a root whose type declares no primary key,
-	// or a types entry denoting such a type in a snapshot the import is given.
-	// An instance of a keyed type whose own key is empty or absent draws
-	// E_GRAPH_INVALID_PK.
+	// E_GRAPH_MISSING_PK indicates an instance added at a root whose type
+	// declares no primary key.
 	E_GRAPH_MISSING_PK = NewCode("E_GRAPH_MISSING_PK", CategoryGraph)
 
 	// E_GRAPH_CARDINALITY indicates a (one) association holding more than one
 	// record: a merge at graph.Graph.AddOrMerge that would add a second target,
 	// or several edges and unresolved records no check refused, together in a
-	// snapshot or a .ys document.
+	// .ys document.
 	E_GRAPH_CARDINALITY = NewCode("E_GRAPH_CARDINALITY", CategoryGraph)
 
-	// E_GRAPH_UNKNOWN_RELATION indicates instance data or an association
-	// record under a relation name the type does not declare in that slot, or
-	// an association record naming a target other than the association's
-	// declared one. The import reports it at Error, and the .ys reader reports an undeclared association name with it.
+	// E_GRAPH_UNKNOWN_RELATION indicates an association record, or an empty
+	// edge list, under a relation name the type does not declare as an
+	// association. The .ys reader reports it.
 	E_GRAPH_UNKNOWN_RELATION = NewCode("E_GRAPH_UNKNOWN_RELATION", CategoryGraph)
-
-	// E_GRAPH_ABSTRACT_TYPE indicates a types entry that denotes an abstract type,
-	// with or without a root of it, in a snapshot imported under a schema that makes
-	// the type abstract. The validator refuses an abstract type of its own schema
-	// with E_ABSTRACT_TYPE.
-	E_GRAPH_ABSTRACT_TYPE = NewCode("E_GRAPH_ABSTRACT_TYPE", CategoryGraph)
-
-	// E_GRAPH_INVALID_PK indicates a keyed type's primary key that is empty,
-	// has the wrong arity, has a key property that is absent or null, or
-	// disagrees with the instance's own key properties; an association target
-	// key of the wrong arity; or a key stored on a composed child whose type
-	// declares no primary key.
-	E_GRAPH_INVALID_PK = NewCode("E_GRAPH_INVALID_PK", CategoryGraph)
 )
 
 // Snapshot persistence codes.

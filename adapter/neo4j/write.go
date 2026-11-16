@@ -116,16 +116,12 @@ func WithEdgeChunkSize(size int) WriteOption {
 // whole (see [NodeQueryKind]). A phase with more rows than the chunk size
 // produces several queries.
 //
-// Requires a [GraphShape] that [Adapter.ShapeForSchema] built from this snapshot's
-// schema object, and refuses any other, another load of one source included:
-// that load can declare a key another way, so a merge key would reach the driver
-// under one type while the same property is coerced from this schema to another.
-// A shape is keyed by [schema.TypeID], so two closure types sharing one bare name
-// each get their own label.
+// Each call derives every type's label and keys from the snapshot's own schema
+// (see the package doc's "Write Surface"), and refuses a zero snapshot with
+// [ErrZeroSnapshot].
 func (a *Adapter) BatchNodeQueries(
 	ctx context.Context,
 	result graph.Snapshot,
-	shapes *GraphShape,
 	opts ...WriteOption,
 ) ([]*BatchNodeQuery, error) {
 	cfg := defaultWriteConfig()
@@ -133,7 +129,8 @@ func (a *Adapter) BatchNodeQueries(
 		opt(&cfg)
 	}
 
-	if err := requireShapeFor(shapes, result.Schema()); err != nil {
+	shapes, err := a.writeShape(ctx, result)
+	if err != nil {
 		return nil, err
 	}
 	var queries []*BatchNodeQuery
@@ -143,15 +140,8 @@ func (a *Adapter) BatchNodeQueries(
 			return nil, fmt.Errorf("batch node queries: %w", err)
 		}
 		typeName := schema.TagForm(result.Schema(), typeID)
-		nodeShape, ok := shapes.types[typeID]
-		if !ok {
-			return nil, fmt.Errorf("no shape for type %s", typeID)
-		}
-
-		schemaType, ok := result.Schema().TypeByID(typeID)
-		if !ok {
-			return nil, fmt.Errorf("type %q not found in schema", typeName)
-		}
+		nodeShape := shapes.types[typeID]
+		schemaType, _ := result.Schema().TypeByID(typeID)
 
 		// The effective immutable set is the type's derived @writeOnce keys.
 		writeOnceKeys := nodeShape.immutableKeys
@@ -209,21 +199,14 @@ func (a *Adapter) BatchNodeQueries(
 // BatchEdgeQueries generates UNWIND-batched MERGE queries for edges,
 // grouped by (sourceType, relationType, targetType) signature.
 //
-// Returns one [BatchEdgeQuery] per signature per chunk. A shape is keyed by
-// [schema.TypeID], so two closure types sharing one bare name each get their own
-// label.
-//
-// shapes must come from [Adapter.ShapeForSchema] over this snapshot's schema
-// object, and [Adapter.BatchNodeQueries] states what else is
-// refused. It must cover the whole import closure, not just the entry schema: every
-// edge's source and target type is looked up in it, and a missing entry returns
-// "no shape for source type ..." or "no shape for target type ..." with no
-// further explanation. Build it with
-// [Adapter.ShapeForSchema], which walks the closure.
+// Returns one [BatchEdgeQuery] per signature per chunk. Each endpoint's label and
+// keys are derived as [Adapter.BatchNodeQueries] derives them, so a zero snapshot
+// and a schema whose labels that derivation refuses are refused here too. An edge
+// whose relationship type is no valid identifier, a reserved keyword included, is
+// refused with [ValidateIdentifier]'s error.
 func (a *Adapter) BatchEdgeQueries(
 	ctx context.Context,
 	result graph.Snapshot,
-	shapes *GraphShape,
 	opts ...WriteOption,
 ) ([]*BatchEdgeQuery, error) {
 	cfg := defaultWriteConfig()
@@ -231,7 +214,8 @@ func (a *Adapter) BatchEdgeQueries(
 		opt(&cfg)
 	}
 
-	if err := requireShapeFor(shapes, result.Schema()); err != nil {
+	shapes, err := a.writeShape(ctx, result)
+	if err != nil {
 		return nil, err
 	}
 
@@ -269,14 +253,8 @@ func (a *Adapter) BatchEdgeQueries(
 		}
 		sigEdges := groups[sig]
 
-		srcShape, ok := shapes.types[sig.sourceType]
-		if !ok {
-			return nil, fmt.Errorf("no shape for source type %s", sig.sourceType)
-		}
-		tgtShape, ok := shapes.types[sig.targetType]
-		if !ok {
-			return nil, fmt.Errorf("no shape for target type %s", sig.targetType)
-		}
+		srcShape := shapes.types[sig.sourceType]
+		tgtShape := shapes.types[sig.targetType]
 
 		// Resolve the relation so typed edge properties coerce to
 		// driver-native types; a zero rel means coerceRelProps passes them through.
@@ -705,54 +683,24 @@ func coerceKey(shape *nodeShape, name string, raw any) (any, error) {
 	return cv, nil
 }
 
-// extractKeyProps extracts the shape's primary key properties from immutable
-// properties, coercing each against its declared constraint. All keys must be
-// present and hold a value.
+// extractKeyProps returns a root's primary key properties, each coerced against
+// its declared constraint, and every key it cannot coerce as one joined error. A
+// root of a snapshot holds each key property with a value: the validator and the
+// .ys reader refuse one that does not.
 func extractKeyProps(props immutable.Properties, shape *nodeShape) (map[string]any, error) {
-	keyNames := shape.primaryKeys
-	if len(keyNames) == 0 {
-		return nil, errors.New("no primary keys defined")
-	}
-
-	result := make(map[string]any, len(keyNames))
-	var missing []string
-	var nilKeys []string
-	var coerceErrs []error
-
-	for _, name := range keyNames {
-		val, ok := props.Get(name)
-		if !ok {
-			missing = append(missing, name)
-			continue
-		}
-		unwrapped := val.Any()
-		if value.Absent(unwrapped) {
-			nilKeys = append(nilKeys, name)
-			continue
-		}
-		cv, err := coerceKey(shape, name, unwrapped)
+	result := make(map[string]any, len(shape.primaryKeys))
+	var errs []error
+	for _, name := range shape.primaryKeys {
+		val, _ := props.Get(name)
+		cv, err := coerceKey(shape, name, val.Any())
 		if err != nil {
-			// Collected, not returned: this function is built to report every
-			// bad key in one pass, and returning here discarded the missing and
-			// nil lists it had already accumulated — so a caller with three
-			// problems learned of whichever the loop met last.
-			coerceErrs = append(coerceErrs, err)
+			errs = append(errs, err)
 			continue
 		}
 		result[name] = cv
 	}
-
-	if len(coerceErrs) > 0 {
-		return nil, errors.Join(append(keyListErrs(missing, nilKeys), coerceErrs...)...)
-	}
-	if len(missing) > 0 && len(nilKeys) > 0 {
-		return nil, unrepresentable("missing required primary key(s): %v; nil primary key(s): %v", missing, nilKeys)
-	}
-	if len(missing) > 0 {
-		return nil, unrepresentable("missing required primary key(s): %v", missing)
-	}
-	if len(nilKeys) > 0 {
-		return nil, unrepresentable("nil primary key(s): %v", nilKeys)
+	if len(errs) > 0 {
+		return nil, errors.Join(errs...)
 	}
 	return result, nil
 }
@@ -805,17 +753,4 @@ func groupEdgesBySignature(edges []graph.Edge) map[edgeSignature][]graph.Edge {
 		groups[sig] = append(groups[sig], edge)
 	}
 	return groups
-}
-
-// keyListErrs renders the missing and nil key lists as errors, so a coercion
-// failure can be reported beside them instead of in place of them.
-func keyListErrs(missing, nilKeys []string) []error {
-	var errs []error
-	if len(missing) > 0 {
-		errs = append(errs, fmt.Errorf("missing required primary key(s): %v", missing))
-	}
-	if len(nilKeys) > 0 {
-		errs = append(errs, fmt.Errorf("nil primary key(s): %v", nilKeys))
-	}
-	return errs
 }

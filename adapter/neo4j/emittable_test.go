@@ -34,7 +34,7 @@ func TestEmittableTypes_InvalidLabelIsGated(t *testing.T) {
 	})
 	t.Run("shape", func(t *testing.T) {
 		t.Parallel()
-		got, result := a.ShapeForSchema(ctx, s)
+		got, result := a.shapeFor(ctx, s)
 		assertGated(t, got == nil, result.HasCode(E_NEO4J_INVALID_IDENTIFIER), result.Err())
 	})
 }

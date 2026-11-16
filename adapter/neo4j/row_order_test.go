@@ -2,6 +2,7 @@ package neo4j
 
 import (
 	"context"
+	"errors"
 	"slices"
 	"strings"
 	"testing"
@@ -27,7 +28,7 @@ func rowValues(t *testing.T, params map[string]any, key string) []any {
 // A replace row deletes one root's stale children, so a root with no row keeps them.
 func TestBatchNodeQueries_EveryRootHoldsAReplaceRowInKeyOrder(t *testing.T) {
 	t.Parallel()
-	a, s, v, shape := setupWrite(t, "composed_nested.yammm")
+	a, s, v := setupWrite(t, "composed_nested.yammm")
 	snap := buildGraphResult(t, s, v, map[string][]map[string]any{
 		"Order": {
 			{"order_id": "o2", "customer": "c"},
@@ -35,7 +36,7 @@ func TestBatchNodeQueries_EveryRootHoldsAReplaceRowInKeyOrder(t *testing.T) {
 			{"order_id": "o3", "customer": "c"},
 		},
 	})
-	queries, err := a.BatchNodeQueries(t.Context(), snap, shape)
+	queries, err := a.BatchNodeQueries(t.Context(), snap)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -55,7 +56,7 @@ func TestBatchNodeQueries_EveryRootHoldsAReplaceRowInKeyOrder(t *testing.T) {
 
 func TestBatchEdgeQueries_RowsHoldTheSnapshotsEdgeOrder(t *testing.T) {
 	t.Parallel()
-	a, s, v, shape := setupWrite(t, "write_basic.yammm")
+	a, s, v := setupWrite(t, "write_basic.yammm")
 	books := make([]map[string]any, 0, 3)
 	for _, id := range []string{"b2", "b1", "b3"} {
 		books = append(books, map[string]any{
@@ -67,7 +68,7 @@ func TestBatchEdgeQueries_RowsHoldTheSnapshotsEdgeOrder(t *testing.T) {
 		"Publisher": {{"publisher_id": "p", "name": "n"}},
 		"Book":      books,
 	})
-	queries, err := a.BatchEdgeQueries(t.Context(), snap, shape)
+	queries, err := a.BatchEdgeQueries(t.Context(), snap)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -100,13 +101,12 @@ func TestConstraintsForSchema_TheEntrySchemasTypesComeBeforeAnImports(t *testing
 
 func TestBatchQueries_AZeroSnapshotIsRefusedAndDoesNotPanic(t *testing.T) {
 	t.Parallel()
-	a, _, _, shape := setupWrite(t, "write_basic.yammm")
-	const want = "snapshot carries no schema"
-	if _, err := a.BatchNodeQueries(t.Context(), graph.Snapshot{}, shape); err == nil || !strings.Contains(err.Error(), want) {
-		t.Errorf("BatchNodeQueries = %v, want %q", err, want)
+	a, _, _ := setupWrite(t, "write_basic.yammm")
+	if _, err := a.BatchNodeQueries(t.Context(), graph.Snapshot{}); !errors.Is(err, ErrZeroSnapshot) {
+		t.Errorf("BatchNodeQueries = %v, want ErrZeroSnapshot", err)
 	}
-	if _, err := a.BatchEdgeQueries(t.Context(), graph.Snapshot{}, shape); err == nil || !strings.Contains(err.Error(), want) {
-		t.Errorf("BatchEdgeQueries = %v, want %q", err, want)
+	if _, err := a.BatchEdgeQueries(t.Context(), graph.Snapshot{}); !errors.Is(err, ErrZeroSnapshot) {
+		t.Errorf("BatchEdgeQueries = %v, want ErrZeroSnapshot", err)
 	}
 }
 

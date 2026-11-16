@@ -103,12 +103,7 @@ func runSnapshotSave(cmd *cobra.Command, args []string, sink *cli.DiagnosticSink
 		if loadResult.HasErrors() {
 			return cli.Exit(cli.ExitForResult(loadResult))
 		}
-		var importResult diag.Result
-		g, importResult = graph.NewFromSnapshot(s, snap)
-		sink.Add(importResult)
-		if importResult.HasErrors() {
-			return cli.Exit(cli.ExitForResult(importResult))
-		}
+		g = graph.NewFromSnapshot(snap)
 		imported = header
 	}
 

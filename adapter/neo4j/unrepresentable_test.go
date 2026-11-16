@@ -5,6 +5,7 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/schema"
 )
@@ -25,9 +26,9 @@ func TestErrUnrepresentable_MarksEveryRefusalOfAValue(t *testing.T) {
 		"an edge's map":                   {label: map[string]any{"a": "b"}},
 		"an edge's Timestamp":             {when: "not a time"},
 	} {
-		a, shape, snap := holderSnapshot(t, h)
-		_, nodeErr := a.BatchNodeQueries(t.Context(), snap, shape)
-		_, edgeErr := a.BatchEdgeQueries(t.Context(), snap, shape)
+		a, snap := holderSnapshot(t, h)
+		_, nodeErr := a.BatchNodeQueries(t.Context(), snap)
+		_, edgeErr := a.BatchEdgeQueries(t.Context(), snap)
 		err := errors.Join(nodeErr, edgeErr)
 		if err == nil || !errors.Is(err, ErrUnrepresentable) {
 			t.Errorf("%s: error = %v; want ErrUnrepresentable", name, err)
@@ -45,12 +46,8 @@ func TestErrUnrepresentable_MarksEveryRefusalOfAValue(t *testing.T) {
 			map[string]any{"p": map[string]any{"x": 1}}, ParamTypes{"p": schema.NewStringConstraint()})),
 		"CoerceParams, rows at a declared key": second(CoerceParams(
 			map[string]any{"rows": []map[string]any{{"x": 1}}}, ParamTypes{"rows": schema.NewStringConstraint()})),
-		"a nil primary key": second(extractKeyProps(immutable.WrapProperties(map[string]any{"id": nil}),
-			&nodeShape{label: "Holder", primaryKeys: []string{"id"}})),
-		"a missing primary key": second(extractKeyProps(immutable.WrapProperties(map[string]any{}),
-			&nodeShape{label: "Holder", primaryKeys: []string{"id"}})),
-		"a missing primary key beside a nil one": second(extractKeyProps(immutable.WrapProperties(map[string]any{"b": nil}),
-			&nodeShape{label: "Holder", primaryKeys: []string{"a", "b"}})),
+		"a primary key its constraint refuses": second(extractKeyProps(immutable.WrapProperties(map[string]any{"id": "x"}),
+			&nodeShape{label: "Holder", primaryKeys: []string{"id"}, keyConstraints: map[string]schema.Constraint{"id": schema.NewDateConstraint()}})),
 	} {
 		if !errors.Is(err, ErrUnrepresentable) {
 			t.Errorf("%s: error = %v; want ErrUnrepresentable", name, err)
@@ -62,14 +59,13 @@ func TestErrUnrepresentable_MarksEveryRefusalOfAValue(t *testing.T) {
 }
 
 // A caller's own error is not a refusal of the data: a constraint
-// CheckConstraint refuses and a shape the adapter did not build carry no class.
+// CheckConstraint refuses and a zero snapshot carry no class.
 func TestErrUnrepresentable_MarksNoCallersError(t *testing.T) {
 	t.Parallel()
-	a, _, snap := holderSnapshot(t, holderValues{})
 	for name, err := range map[string]error{
 		"a refused constraint at CoerceParams": second(CoerceParams(nil, ParamTypes{"p": schema.ListConstraint{}})),
-		"a shape the adapter did not build":    second(a.BatchNodeQueries(t.Context(), snap, &GraphShape{})),
-		"a shape with no primary key":          second(extractKeyProps(immutable.WrapProperties(map[string]any{}), &nodeShape{label: "Holder"})),
+		"a zero snapshot at BatchNodeQueries":  second(New().BatchNodeQueries(t.Context(), graph.Snapshot{})),
+		"a zero snapshot at BatchEdgeQueries":  second(New().BatchEdgeQueries(t.Context(), graph.Snapshot{})),
 	} {
 		if err == nil || errors.Is(err, ErrUnrepresentable) {
 			t.Errorf("%s: error = %v; want an error without ErrUnrepresentable", name, err)

@@ -44,7 +44,7 @@ constraints, result := adapter.ConstraintsStructured(ctx, s)
 // Each Constraint has: Name, Kind, Label, Properties, TypeExpr, Statement
 ```
 
-Generation is **all-or-nothing**: any validation error returns `(nil, result)`, so one unemittable property withholds every constraint of the schema rather than emitting a partial script that looks complete. Beside a name Neo4j refuses as an identifier (Cypher reserved words, below) and two types that compose one label (`E_NEO4J_LABEL_COLLISION`), the one shape a *valid* schema can hit is a list whose element resolves to a collection, a List or a Vector, the list and its element each written directly or through an alias — legal yammm, but Neo4j has no nested collection property type, so `ConstraintsForSchema` and `ConstraintsStructured` report `E_NEO4J_UNSUPPORTED_TYPE` whatever the constraint options set, `WithScalarTypeConstraints(false)` included. `IndexesForSchema` and `ShapeForSchema` do not make that check. The write path does: `BatchNodeQueries` and `CoerceParams` refuse a value of such a property with an error wrapping `ErrUnsupportedListElem`, an empty list included, and read a value that holds none as nil, which `BatchNodeQueries` writes as null. The property is judged on each concrete type and part type with a valid label that declares or inherits it, so one declared on an abstract type that no such type extends is not reported. Model the inner collection as a `part type` reached by a composition. A `Vector[N]` property is fine; it maps to `LIST<FLOAT NOT NULL>`.
+Generation is **all-or-nothing**: any validation error returns `(nil, result)`, so one unemittable property withholds every constraint of the schema rather than emitting a partial script that looks complete. Beside a name Neo4j refuses as an identifier (Cypher reserved words, below) and two types that compose one label (`E_NEO4J_LABEL_COLLISION`), the one shape a *valid* schema can hit is a list whose element resolves to a collection, a List or a Vector, the list and its element each written directly or through an alias — legal yammm, but Neo4j has no nested collection property type, so `ConstraintsForSchema` and `ConstraintsStructured` report `E_NEO4J_UNSUPPORTED_TYPE` whatever the constraint options set, `WithScalarTypeConstraints(false)` included. `IndexesForSchema` does not make that check. The write path does: `BatchNodeQueries` and `CoerceParams` refuse a value of such a property with an error wrapping `ErrUnsupportedListElem`, an empty list included, and read a value that holds none as nil, which `BatchNodeQueries` writes as null. The property is judged on each concrete type and part type with a valid label that declares or inherits it, so one declared on an abstract type that no such type extends is not reported. Model the inner collection as a `part type` reached by a composition. A `Vector[N]` property is fine; it maps to `LIST<FLOAT NOT NULL>`.
 
 ### Index Generation
 
@@ -63,29 +63,21 @@ Property-level `@index` emits a single-property range index; type-level `@@index
 
 `DiffIndexes` returns an `*IndexDiffResult` with **five** sets: Match/Drift/Create/Drop plus **Unverified** — indexes present on both sides whose definition could not be compared (no readable vector configuration, or still `POPULATING`). `DiffConstraints` has the same five sets, its `Unverified` covering a TYPE constraint whose remote record carries no `propertyType`, so its enforced type was not compared. A drift gate must count `Unverified` as an incomplete check, not a pass; summing only Drift+Create+Drop reports an unchecked index as in sync. Composite property order is significant, and a schema-owned remote index with no declaration reports as a drop when the schema could have declared it, and is counted in `Excluded` otherwise. See [Diffing Against a Live Database](#diffing-against-a-live-database) for the call shape.
 
-### Graph Shape
-
-```go
-shape, result := adapter.ShapeForSchema(ctx, s)
-// shape holds each non-abstract type's label, primary keys and @writeOnce keys, exports no field,
-// and is the input to BatchNodeQueries and BatchEdgeQueries
-```
-
 ### Query Generation
 
 ```go
 // Batch node queries for an entire snapshot
-nodeQueries, err := adapter.BatchNodeQueries(ctx, snapshot, shape,
+nodeQueries, err := adapter.BatchNodeQueries(ctx, snapshot,
     neo4jAdapter.WithNodeChunkSize(5000), // max nodes per UNWIND batch
 )
 
 // Batch edge queries
-edgeQueries, err := adapter.BatchEdgeQueries(ctx, snapshot, shape,
+edgeQueries, err := adapter.BatchEdgeQueries(ctx, snapshot,
     neo4jAdapter.WithEdgeChunkSize(5000),
 )
 ```
 
-Each `BatchNodeQuery` / `BatchEdgeQuery` contains a Cypher statement and parameters map ready for driver execution.
+Each `BatchNodeQuery` / `BatchEdgeQuery` contains a Cypher statement and parameters map ready for driver execution. Each call derives every closure type's label, primary keys and `@writeOnce` keys from the snapshot's own schema under the adapter's label options, refuses a closure whose labels collide (`E_NEO4J_LABEL_COLLISION`) or are no valid identifiers (`E_NEO4J_INVALID_IDENTIFIER`), and refuses a zero snapshot with `ErrZeroSnapshot`.
 
 A type's write-once properties come from its `@writeOnce` annotations (`ImmutableKeysFor(t)` returns them, own and inherited); the derived set per type drives the ON CREATE / ON MATCH split, selected per type in a batch. Node merges only — relationship merges have no ON CREATE / ON MATCH split.
 
@@ -117,8 +109,8 @@ its grammar refuses as a property name, four are Cypher keywords too (`as`,
 wherever a generated constraint or index statement writes it, because property names appear unquoted in generated Cypher; the
 check is case-insensitive. Under `WithEdition(Community)`,
 `WithScalarTypeConstraints(false)` or `WithRequiredOnlyTypeConstraints(true)`
-fewer statements write a name, so fewer are checked, and `ShapeForSchema`
-checks labels only. Namespaced labels usually absorb reserved type names
+fewer statements write a name, so fewer are checked, and the write path
+checks labels and each edge's relationship type only. Namespaced labels usually absorb reserved type names
 (`inventory__MATCH` is fine). Check early with
 `ValidateIdentifier(name, context)` or by running `ConstraintsForSchema` and
 `IndexesForSchema` before write time.
@@ -176,7 +168,7 @@ current type declares.
 import "github.com/simon-lentz/yammm/schema/gogen"
 ```
 
-Schema-in, bytes-out: `gogen.Marshal` maps a loaded, resolved schema to formatted, type-checked Go source — one struct per type, named Enum/DataType types, a generated `Date` type when a position emits `Date` (it embeds `time.Time` with a JSON codec in the stored string form), `EDGE_` association structs, a Graph aggregate keyed as an instance document keys a type's array, and the embedded schema source, reachable through `SerializedSources()` / `SerializedEntry`, which re-loads hermetically (under `schema.WithSyntheticRoot`, no filesystem participation). Generated output is stdlib-only (imports at most `time` and `encoding/json`) and byte-reproducible across checkouts for a generator one Go toolchain builds. Unlike `adapter/neo4j` it has no instance-data path, and it returns a plain `error` where the Neo4j adapter's schema-derived DDL and shape builders return a `diag.Result`.
+Schema-in, bytes-out: `gogen.Marshal` maps a loaded, resolved schema to formatted, type-checked Go source — one struct per type, named Enum/DataType types, a generated `Date` type when a position emits `Date` (it embeds `time.Time` with a JSON codec in the stored string form), `EDGE_` association structs, a Graph aggregate keyed as an instance document keys a type's array, and the embedded schema source, reachable through `SerializedSources()` / `SerializedEntry`, which re-loads hermetically (under `schema.WithSyntheticRoot`, no filesystem participation). Generated output is stdlib-only (imports at most `time` and `encoding/json`) and byte-reproducible across checkouts for a generator one Go toolchain builds. Unlike `adapter/neo4j` it has no instance-data path, and it returns a plain `error` where the Neo4j adapter's schema-derived DDL builders and its label-collision check return a `diag.Result`.
 
 Schemas with imports are flattened into one self-contained package. A name unique in the closure stays bare; a name two entities claim, or a reserved name such as `Graph` claims, gives every claimant its exact spelling, which names its kind and its identity (for a type, its schema and name): two schemas' `Region` become `Type_geo__Region` / `Type_common__Region`, and a datatype `Uri` and a type `URI` of one schema, which the initialisms map to one Go name, become `DataType_geo__Uri` / `Type_geo__URI`. No name depends on declaration order, and adding a declaration never hands a name to another entity.
 
@@ -202,7 +194,7 @@ A write reports through an `error`, not a `diag.Result`, so the adapter carries 
 
 | Sentinel | Adapter | Meaning |
 | -------- | ------- | ------- |
-| `neo4j.ErrUnrepresentable` | Neo4j | `BatchNodeQueries` and `BatchEdgeQueries` refuse a value Neo4j would not store as held: one its constraint's coercion refuses, a nested collection's (matching `ErrUnsupportedListElem` too), a map at a property the schema declares, a list or a map a document nests more than 256 levels deep, a `json.Number` that is an integer literal past `int64` at any position but a `Float` or a `Vector` element, or that no finite `float64` holds, or a primary key that is absent or holds no value; `CoerceParams` marks its refusals of a value so too. No other error carries the class: a caller's own, such as a constraint `schema.CheckConstraint` refuses, a `GraphShape` the adapter did not build for the snapshot's schema or a relationship type that is no valid identifier, and a cancelled context |
+| `neo4j.ErrUnrepresentable` | Neo4j | `BatchNodeQueries` and `BatchEdgeQueries` refuse a value Neo4j would not store as held: one its constraint's coercion refuses, a nested collection's (matching `ErrUnsupportedListElem` too), a map at a property the schema declares, a list or a map a document nests more than 256 levels deep, a `json.Number` that is an integer literal past `int64` at any position but a `Float` or a `Vector` element, or that no finite `float64` holds; `CoerceParams` marks its refusals of a value so too. No other error carries the class: a caller's own, such as a constraint `schema.CheckConstraint` refuses, a zero snapshot, a closure whose labels collide or are no valid identifiers, a relationship type that is no valid identifier, and a cancelled context |
 
 An I/O failure and a cancellation do not match it.
 

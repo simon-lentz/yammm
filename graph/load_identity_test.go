@@ -8,7 +8,6 @@ import (
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/internal/instancetest"
 	"github.com/simon-lentz/yammm/schema"
-	"github.com/simon-lentz/yammm/snapshot"
 )
 
 const loadIdentitySource = "schema \"loads\"\n\ntype T {\n\tid String primary\n}\n"
@@ -157,33 +156,4 @@ func TestAdd_TypeOutsideTheGraphsClosurePanics(t *testing.T) {
 	inst := instancetest.Valid(t, members["a"], "Top", map[string]any{"id": "x"})
 	g := graph.New(members["b"])
 	assertAnotherLoadPanic(t, func() { g.Add(t.Context(), inst) })
-}
-
-// A snapshot crosses loads through the import, and the seeded graph takes what
-// its own load validated. Only an instance another load validated panics.
-func TestNewFromSnapshot_SeedOfAnotherLoad(t *testing.T) {
-	t.Parallel()
-	ctx := t.Context()
-	s := loadSchemaAt(t, loadIdentitySource, "loads.yammm")
-	first := graph.New(s)
-	if r := first.Add(ctx, instancetest.Valid(t, s, "T", map[string]any{"id": "t1"})); !r.OK() {
-		t.Fatalf("Add: %s", r)
-	}
-	data, res := snapshot.Marshal(ctx, first.Snapshot())
-	if res.HasErrors() {
-		t.Fatalf("Marshal: %s", res)
-	}
-	seed, res := snapshot.Load(ctx, data, s)
-	if res.HasErrors() {
-		t.Fatalf("Load: %s", res)
-	}
-
-	again := loadSchemaAt(t, loadIdentitySource, "loads.yammm")
-	g := mustImport(t, again, seed)
-	if r := g.Add(ctx, instancetest.Valid(t, again, "T", map[string]any{"id": "t2"})); !r.OK() {
-		t.Errorf("an add its own load validated: %s", r)
-	}
-	assertAnotherLoadPanic(t, func() {
-		g.Add(ctx, instancetest.Valid(t, s, "T", map[string]any{"id": "t3"}))
-	})
 }

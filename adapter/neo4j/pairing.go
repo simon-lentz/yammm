@@ -37,8 +37,8 @@ type OwnedLabels struct {
 // them.
 //
 // The set is every such type's label, and ownership checks no identifier.
-// [Adapter.ShapeForSchema], [Adapter.ConstraintsStructured] and
-// [Adapter.IndexesStructured] each REFUSE the whole schema with
+// [Adapter.BatchNodeQueries], [Adapter.BatchEdgeQueries],
+// [Adapter.ConstraintsStructured] and [Adapter.IndexesStructured] each REFUSE the whole schema with
 // [E_NEO4J_INVALID_IDENTIFIER] when a type's label is not a valid Neo4j
 // identifier, emitting nothing (see [SanitizeIdentifier]); this set still
 // names such a label, because a database may hold objects on it from an

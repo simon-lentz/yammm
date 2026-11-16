@@ -77,7 +77,7 @@ func TestBatchEdgeQueries_ImportedSourceTypeWritesUnderClosureShape(t *testing.T
 	}
 
 	a := New()
-	shapes, shapeRes := a.ShapeForSchema(ctx, s)
+	shapes, shapeRes := a.shapeFor(ctx, s)
 	if shapeRes.HasErrors() {
 		t.Fatalf("shape: %s", shapeRes)
 	}
@@ -86,7 +86,7 @@ func TestBatchEdgeQueries_ImportedSourceTypeWritesUnderClosureShape(t *testing.T
 		t.Fatal("the closure walk did not produce a shape for the imported source type")
 	}
 
-	queries, err := a.BatchEdgeQueries(ctx, built, shapes)
+	queries, err := a.BatchEdgeQueries(ctx, built)
 	if err != nil {
 		t.Fatalf("BatchEdgeQueries: %v", err)
 	}
@@ -125,8 +125,8 @@ type Hub {
 }
 `
 
-// TestShapeForSchema_TransitivelyImportedTypeKeepsItsOwnLabel pins the reason
-// GraphShape is keyed by identity. The deep Hub has the name of the entry
+// TestShapeFor_TransitivelyImportedTypeKeepsItsOwnLabel pins the reason a shape
+// is keyed by identity. The deep Hub has the name of the entry
 // schema's own Hub — a different label, different merge keys, different
 // required fields — and it gets its own closure-provided shape rather than being
 // merged into the entry Hub's.
@@ -134,9 +134,9 @@ type Hub {
 // [TestBatchNodeQueries_TransitivelyImportedRootWritesUnderItsOwnLabel] writes
 // the pair.
 //
-// Mutation: keying GraphShape.Types by the type's name instead of by TypeID
+// Mutation: keying graphShape.types by the type's name instead of by TypeID
 // collapses the pair and turns this red.
-func TestShapeForSchema_TransitivelyImportedTypeKeepsItsOwnLabel(t *testing.T) {
+func TestShapeFor_TransitivelyImportedTypeKeepsItsOwnLabel(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 
@@ -169,7 +169,7 @@ func TestShapeForSchema_TransitivelyImportedTypeKeepsItsOwnLabel(t *testing.T) {
 	}
 
 	a := New()
-	shapes, shapeRes := a.ShapeForSchema(ctx, s)
+	shapes, shapeRes := a.shapeFor(ctx, s)
 	if shapeRes.HasErrors() {
 		t.Fatalf("shape: %s", shapeRes)
 	}
@@ -236,11 +236,11 @@ func TestBatchNodeQueries_TransitivelyImportedRootWritesUnderItsOwnLabel(t *test
 	})
 
 	a := New()
-	shapes, shapeRes := a.ShapeForSchema(ctx, s)
+	shapes, shapeRes := a.shapeFor(ctx, s)
 	if shapeRes.HasErrors() {
 		t.Fatalf("shape: %s", shapeRes)
 	}
-	queries, err := a.BatchNodeQueries(ctx, built, shapes)
+	queries, err := a.BatchNodeQueries(ctx, built)
 	if err != nil {
 		t.Fatalf("BatchNodeQueries: %v", err)
 	}

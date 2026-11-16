@@ -158,7 +158,7 @@ data, result := snapshot.Marshal(ctx, g.Snapshot())
 
 For a source that lists one record under several parents, `g.AddOrMerge(ctx, valid)` takes `Add`'s place: at a primary key the graph already holds, a record with no composed children merges: its association targets are installed on the held root and `merged` is true. A record with composed children is refused there as `Add` refuses a duplicate (`E_DUPLICATE_PK`), and a merge that would give a `(one)` association a second target is refused whole (`E_GRAPH_CARDINALITY`); `merged` is false whenever the result holds an error.
 
-To resume a persisted batch on a later run, seed the graph from a loaded snapshot with `graph.NewFromSnapshot(s, snap)`, which takes a snapshot bound to the schema as it stands and refuses one built against another schema that breaks any of the schema's structural facts, save that it derives the Records fact's records again, refusing an `empty` record under a (one) association, drops an absent record under a relation that is no association of the schema, and moves a `Timestamp`, `Date` or `UUID` key component the schema stores as other text to that text — new adds resolve against the seeded instances and `Check` covers the union. `snapshot.UpdateMetadata` rewrites a snapshot's metadata in place, without a full load/re-marshal round-trip; `snapshot.UpdateMetadataOrReMarshal` falls back to that round-trip, with `W_UPDATE_METADATA_FALLBACK`, when the in-place rewrite refuses for any reason but a cancelled context or metadata that is not valid UTF-8.
+To resume a persisted batch on a later run, seed the graph from a loaded snapshot with `graph.NewFromSnapshot(snap)`, which binds the graph to the snapshot's own schema and installs its records as they stand — new adds resolve against the seeded instances and `Check` covers the union. `snapshot.UpdateMetadata` rewrites a snapshot's metadata in place, without a full load/re-marshal round-trip; `snapshot.UpdateMetadataOrReMarshal` falls back to that round-trip, with `W_UPDATE_METADATA_FALLBACK`, when the in-place rewrite refuses for any reason but a cancelled context or metadata that is not valid UTF-8.
 
 ### Build Instances Programmatically
 
@@ -213,7 +213,7 @@ Diagnostic-producing operations return `(T, diag.Result)`:
 - `result.HasErrors()`: Any Error or Fatal issue
 - `result.OK()`: Success (may have warnings). A validator's zero instance beside it held an `instance.Refused` value, which its producer reported
 
-The pure transformations of the Neo4j adapter and the generators (Cypher batch queries, Go source, and Markdown generation) return their output beside a Go `error`, as `(T, error)`, but for `adapter/neo4j`'s `BuildBatchRelationshipMergeQuery`, a query template that cannot fail; the Neo4j adapter's schema-derived DDL and shape builders report through a `diag.Result`, and its drop-statement builders return `(string, error)`. Snapshot serialization (`snapshot.Marshal`) is diagnostic-producing and returns `(T, diag.Result)`.
+The pure transformations of the Neo4j adapter and the generators (Cypher batch queries, Go source, and Markdown generation) return their output beside a Go `error`, as `(T, error)`, but for `adapter/neo4j`'s `BuildBatchRelationshipMergeQuery`, a query template that cannot fail; the Neo4j adapter's schema-derived DDL builders and its label-collision check report through a `diag.Result`, and its drop-statement builders return `(string, error)`. Snapshot serialization (`snapshot.Marshal`) is diagnostic-producing and returns `(T, diag.Result)`.
 
 ## Schema Language
 

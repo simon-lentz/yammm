@@ -40,7 +40,7 @@ func loadClosureDDLSchema(t *testing.T) schema.Schema {
 }
 
 // An imported type the write path creates nodes for must also get its DDL and
-// its ownership. ShapeForSchema walks the import closure and gives base.Basin a
+// its ownership. The write path's shape walks the import closure and gives base.Basin a
 // label, so BatchNodeQueries writes Basin nodes; a constraint walk over the
 // entry schema's own types alone left those nodes with no uniqueness
 // constraint, no index, and no entry in OwnedLabels — which also made them
@@ -51,9 +51,9 @@ func TestClosureDDL_ImportedTypeGetsConstraintsIndexesAndOwnership(t *testing.T)
 	s := loadClosureDDLSchema(t)
 	a := New()
 
-	shape, sres := a.ShapeForSchema(ctx, s)
+	shape, sres := a.shapeFor(ctx, s)
 	if shape == nil {
-		t.Fatalf("ShapeForSchema: %s", sres)
+		t.Fatalf("shapeFor: %s", sres)
 	}
 	var basinLabel string
 	for id, ns := range shape.types {
@@ -62,7 +62,7 @@ func TestClosureDDL_ImportedTypeGetsConstraintsIndexesAndOwnership(t *testing.T)
 		}
 	}
 	if basinLabel == "" {
-		t.Fatal("ShapeForSchema gave the imported type no label; the premise of this test is gone")
+		t.Fatal("shapeFor gave the imported type no label; the premise of this test is gone")
 	}
 
 	constraints, cres := a.ConstraintsForSchema(ctx, s)
@@ -98,9 +98,9 @@ func TestClosureDDL_EmitSetAndOwnSetAgree(t *testing.T) {
 	a := New()
 
 	owned := a.OwnedLabels(ctx, s)
-	shape, sres := a.ShapeForSchema(ctx, s)
+	shape, sres := a.shapeFor(ctx, s)
 	if shape == nil {
-		t.Fatalf("ShapeForSchema: %s", sres)
+		t.Fatalf("shapeFor: %s", sres)
 	}
 	for id, ns := range shape.types {
 		if !owned.Contains(ns.label) {

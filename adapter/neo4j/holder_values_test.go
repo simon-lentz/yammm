@@ -57,17 +57,13 @@ type holderValues struct {
 // holderSnapshot reads a document of Holder h1, which no validator judged: h.props
 // beside its key, one LINK to Target t1 carrying h.label, and one composed Note
 // holding h.note.
-func holderSnapshot(t *testing.T, h holderValues) (*Adapter, *GraphShape, graph.Snapshot) {
+func holderSnapshot(t *testing.T, h holderValues) (*Adapter, graph.Snapshot) {
 	t.Helper()
 	s, res := schema.LoadString(t.Context(), holderSchema, "holder.yammm")
 	if res.HasErrors() {
 		t.Fatalf("load schema: %s", res)
 	}
 	a := New()
-	shape, sres := a.ShapeForSchema(t.Context(), s)
-	if sres.HasErrors() {
-		t.Fatalf("ShapeForSchema: %s", sres)
-	}
 	targetT, _ := s.Type("Target")
 	holderT, _ := s.Type("Holder")
 	noteT, _ := s.Type("Note")
@@ -96,7 +92,7 @@ func holderSnapshot(t *testing.T, h holderValues) (*Adapter, *GraphShape, graph.
 			Properties: immutable.WrapProperties(map[string]any{"label": label, "mark": h.mark, "when": h.when}),
 		}},
 	})
-	return a, shape, snap
+	return a, snap
 }
 
 // deepList holds leaf inside depth lists.
@@ -141,9 +137,9 @@ func TestBatchQueries_ADocumentValueNoDriverHoldsIsNeverSent(t *testing.T) {
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
-			a, shape, snap := holderSnapshot(t, c.holds)
-			_, nerr := a.BatchNodeQueries(t.Context(), snap, shape)
-			_, eerr := a.BatchEdgeQueries(t.Context(), snap, shape)
+			a, snap := holderSnapshot(t, c.holds)
+			_, nerr := a.BatchNodeQueries(t.Context(), snap)
+			_, eerr := a.BatchEdgeQueries(t.Context(), snap)
 			refusal, other := nerr, eerr
 			if c.refusedBy == "edges" {
 				refusal, other = eerr, nerr
@@ -183,16 +179,16 @@ func TestBatchQueries_EachValueIsSentInItsForm(t *testing.T) {
 	const spelled = "2024-01-02T04:04:05+01:00"
 	at := time.Date(2024, 1, 2, 3, 4, 5, 0, time.UTC)
 	const id = "12345678-1234-1234-1234-123456789abc"
-	a, shape, snap := holderSnapshot(t, holderValues{
+	a, snap := holderSnapshot(t, holderValues{
 		props: map[string]any{"at": spelled, "uid": id, "text": "x", "tags": []any{"a"}},
 		label: "y",
 		when:  spelled,
 	})
-	nodes, err := a.BatchNodeQueries(t.Context(), snap, shape)
+	nodes, err := a.BatchNodeQueries(t.Context(), snap)
 	if err != nil {
 		t.Fatalf("BatchNodeQueries: %v", err)
 	}
-	edges, err := a.BatchEdgeQueries(t.Context(), snap, shape)
+	edges, err := a.BatchEdgeQueries(t.Context(), snap)
 	if err != nil {
 		t.Fatalf("BatchEdgeQueries: %v", err)
 	}
@@ -226,11 +222,11 @@ func TestBatchQueries_TheRefusalNamesTheFirstPropertyInSortedOrder(t *testing.T)
 	t.Parallel()
 	const huge = json.Number("1e400")
 	for range 30 {
-		a, shape, snap := holderSnapshot(t, holderValues{props: map[string]any{"text": huge, "code": huge, "uid": huge}, label: huge, mark: huge})
-		if _, err := a.BatchNodeQueries(t.Context(), snap, shape); err == nil || !strings.Contains(err.Error(), `property "code"`) {
+		a, snap := holderSnapshot(t, holderValues{props: map[string]any{"text": huge, "code": huge, "uid": huge}, label: huge, mark: huge})
+		if _, err := a.BatchNodeQueries(t.Context(), snap); err == nil || !strings.Contains(err.Error(), `property "code"`) {
 			t.Fatalf("BatchNodeQueries: %v, want the refusal of property \"code\"", err)
 		}
-		if _, err := a.BatchEdgeQueries(t.Context(), snap, shape); err == nil || !strings.Contains(err.Error(), `property "label"`) {
+		if _, err := a.BatchEdgeQueries(t.Context(), snap); err == nil || !strings.Contains(err.Error(), `property "label"`) {
 			t.Fatalf("BatchEdgeQueries: %v, want the refusal of property \"label\"", err)
 		}
 	}
@@ -240,16 +236,16 @@ func TestBatchQueries_TheRefusalNamesTheFirstPropertyInSortedOrder(t *testing.T)
 func TestBatchQueries_ValidTextIsSentAsHeld(t *testing.T) {
 	t.Parallel()
 	for _, text := range []string{"a�b", "é✓", "", "\x00"} {
-		a, shape, snap := holderSnapshot(t, holderValues{
+		a, snap := holderSnapshot(t, holderValues{
 			props: map[string]any{"text": text, "tags": []any{"ok", text}},
 			label: text,
 			note:  map[string]any{"body": text, "marks": []any{text}},
 		})
-		nodes, err := a.BatchNodeQueries(t.Context(), snap, shape)
+		nodes, err := a.BatchNodeQueries(t.Context(), snap)
 		if err != nil {
 			t.Fatalf("BatchNodeQueries(%q): %v", text, err)
 		}
-		edges, err := a.BatchEdgeQueries(t.Context(), snap, shape)
+		edges, err := a.BatchEdgeQueries(t.Context(), snap)
 		if err != nil {
 			t.Fatalf("BatchEdgeQueries(%q): %v", text, err)
 		}
@@ -283,20 +279,23 @@ func TestBatchQueries_ValidTextIsSentAsHeld(t *testing.T) {
 }
 
 // A key is sent from the instance's properties, so a key no driver number holds is
-// refused too, beside the missing and the null keys the same call reports.
+// refused too, beside another key's refusal the same call reports.
 func TestExtractKeyProps_AKeyNoDriverNumberHoldsIsRefusedBesideTheOthers(t *testing.T) {
 	t.Parallel()
-	shape := &nodeShape{label: "Holder", primaryKeys: []string{"id", "region", "code"}}
-	_, err := extractKeyProps(immutable.WrapProperties(map[string]any{"id": json.Number("1e400"), "code": nil}), shape)
+	shape := &nodeShape{
+		label: "Holder", primaryKeys: []string{"id", "region", "code"},
+		keyConstraints: map[string]schema.Constraint{"region": schema.NewDateConstraint()},
+	}
+	_, err := extractKeyProps(immutable.WrapProperties(map[string]any{"id": json.Number("1e400"), "region": "not-a-date", "code": "c"}), shape)
 	if !errors.Is(err, errUnheldNumber) {
 		t.Fatalf("extractKeyProps = %v; want errUnheldNumber", err)
 	}
-	for _, want := range []string{`primary key "id"`, "missing required primary key(s): [region]", "nil primary key(s): [code]"} {
+	for _, want := range []string{`primary key "id"`, `primary key "region": coerce Date`} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("the error does not hold %q: %v", want, err)
 		}
 	}
-	if keys, err := extractKeyProps(immutable.WrapProperties(map[string]any{"id": "a�b", "region": "é", "code": "c"}), shape); err != nil || keys["id"] != "a�b" {
+	if keys, err := extractKeyProps(immutable.WrapProperties(map[string]any{"id": "a�b", "region": "2026-01-02", "code": "é"}), shape); err != nil || keys["id"] != "a�b" {
 		t.Errorf("valid keys: %v, %v", keys, err)
 	}
 }

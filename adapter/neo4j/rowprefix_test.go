@@ -44,7 +44,7 @@ func TestBatchRelationshipMergeQuery_ComposesFromTheExportedRowPrefixes(t *testi
 // template reads — the other half of the contract, from the writer's side.
 func TestBatchEdgeQueries_KeysRowsOnTheExportedRowPrefixes(t *testing.T) {
 	t.Parallel()
-	a, s, v, shapes := setupWrite(t, "edge_mixed.yammm")
+	a, s, v := setupWrite(t, "edge_mixed.yammm")
 	snap := buildGraphResult(t, s, v, map[string][]map[string]any{
 		"Company": {{"company_id": "c1", "name": "Acme"}},
 		"Employee": {{
@@ -54,7 +54,7 @@ func TestBatchEdgeQueries_KeysRowsOnTheExportedRowPrefixes(t *testing.T) {
 		}},
 	})
 
-	batches, err := a.BatchEdgeQueries(t.Context(), snap, shapes)
+	batches, err := a.BatchEdgeQueries(t.Context(), snap)
 	if err != nil {
 		t.Fatalf("BatchEdgeQueries: %v", err)
 	}

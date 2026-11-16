@@ -2,10 +2,13 @@ package neo4j
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
 	"testing"
+
+	"github.com/simon-lentz/yammm/diag"
 )
 
 // TestAdapter_ShapesUnaffectedByEdition pins that edition gates constraint
@@ -16,7 +19,7 @@ func TestAdapter_ShapesUnaffectedByEdition(t *testing.T) {
 	s := loadSchema(t, "basic.yammm")
 	a := New(WithEdition(Community))
 
-	shape, result := a.ShapeForSchema(context.Background(), s)
+	shape, result := a.shapeFor(context.Background(), s)
 	if err := result.Err(); err != nil {
 		t.Fatal(err)
 	}
@@ -66,7 +69,7 @@ func TestAdapter_LabelOptionConsistency(t *testing.T) {
 				t.Errorf("no constraint contains label %q", tc.wantLabel)
 			}
 
-			shape, result := a.ShapeForSchema(ctx, s)
+			shape, result := a.shapeFor(ctx, s)
 			if err := result.Err(); err != nil {
 				t.Fatal(err)
 			}
@@ -77,7 +80,7 @@ func TestAdapter_LabelOptionConsistency(t *testing.T) {
 			graphResult := buildGraphResult(t, s, v, map[string][]map[string]any{
 				"Entity": {{"id": "e1", "name": "test", "count": int64(1), "active": true, "created_at": "2024-01-01T00:00:00Z"}},
 			})
-			nodeQueries, err := a.BatchNodeQueries(ctx, graphResult, shape)
+			nodeQueries, err := a.BatchNodeQueries(ctx, graphResult)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -96,11 +99,7 @@ func TestAdapter_LabelConsistency(t *testing.T) {
 	s, v := loadSchemaAndValidator(t, "multiple_types.yammm")
 	a := New()
 	ctx := context.Background()
-
-	shape, result := a.ShapeForSchema(ctx, s)
-	if err := result.Err(); err != nil {
-		t.Fatal(err)
-	}
+	shape := mustShape(t, a, s)
 
 	structured, result := a.ConstraintsStructured(ctx, s)
 	if err := result.Err(); err != nil {
@@ -118,7 +117,7 @@ func TestAdapter_LabelConsistency(t *testing.T) {
 		"Gadget": {{"uid": "g1", "sku": "S1"}},
 	})
 
-	nodeQueries, err := a.BatchNodeQueries(ctx, graphResult, shape)
+	nodeQueries, err := a.BatchNodeQueries(ctx, graphResult)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -169,10 +168,6 @@ func TestAdapter_ThreadSafety(t *testing.T) {
 	ctx := context.Background()
 
 	// Pre-build immutable inputs for write operations.
-	shape, result := a.ShapeForSchema(ctx, s)
-	if err := result.Err(); err != nil {
-		t.Fatal(err)
-	}
 	graphResult := buildGraphResult(t, s, v, map[string][]map[string]any{
 		"Publisher": {{"publisher_id": "iss1", "name": "Test Publisher"}},
 		"Book":      {{"publisher_id": "iss1", "book_id": "i1", "title": "Test Book", "by_publisher": map[string]any{"_target_publisher_id": "iss1"}}},
@@ -181,7 +176,7 @@ func TestAdapter_ThreadSafety(t *testing.T) {
 	var wg sync.WaitGroup
 	errs := make(chan error, 50)
 
-	// Run ConstraintsForSchema, ShapeForSchema, Label, BatchNodeQueries,
+	// Run ConstraintsForSchema, shapeFor, Label, BatchNodeQueries,
 	// and BatchEdgeQueries concurrently.
 	for range 10 {
 		wg.Go(func() {
@@ -191,7 +186,7 @@ func TestAdapter_ThreadSafety(t *testing.T) {
 			}
 		})
 		wg.Go(func() {
-			_, result := a.ShapeForSchema(ctx, s)
+			_, result := a.shapeFor(ctx, s)
 			if err := result.Err(); err != nil {
 				errs <- fmt.Errorf("shape: %w", err)
 			}
@@ -200,12 +195,12 @@ func TestAdapter_ThreadSafety(t *testing.T) {
 			_ = a.Label(ctx, "test", "Type")
 		})
 		wg.Go(func() {
-			if _, err := a.BatchNodeQueries(ctx, graphResult, shape); err != nil {
+			if _, err := a.BatchNodeQueries(ctx, graphResult); err != nil {
 				errs <- fmt.Errorf("batch nodes: %w", err)
 			}
 		})
 		wg.Go(func() {
-			if _, err := a.BatchEdgeQueries(ctx, graphResult, shape); err != nil {
+			if _, err := a.BatchEdgeQueries(ctx, graphResult); err != nil {
 				errs <- fmt.Errorf("batch edges: %w", err)
 			}
 		})
@@ -216,5 +211,76 @@ func TestAdapter_ThreadSafety(t *testing.T) {
 
 	for err := range errs {
 		t.Errorf("concurrent error: %v", err)
+	}
+}
+
+// One snapshot written by two adapters takes each receiver's labels, on node
+// and edge statements alike: the labels come from the adapter that writes.
+func TestBatchQueries_TheReceiverDecidesTheLabels(t *testing.T) {
+	t.Parallel()
+	_, s, v := setupWrite(t, "write_basic.yammm")
+	snap := buildGraphResult(t, s, v, map[string][]map[string]any{
+		"Publisher": {{"publisher_id": "iss1", "name": "Test Publisher"}},
+		"Book":      {{"publisher_id": "iss1", "book_id": "i1", "title": "Test Book", "by_publisher": map[string]any{"_target_publisher_id": "iss1"}}},
+	})
+	for _, a := range []*Adapter{New(), New(WithLabelPrefix("app_")), New(WithLabelSeparator("_x_"))} {
+		book, publisher := a.Label(t.Context(), s.Name(), "Book"), a.Label(t.Context(), s.Name(), "Publisher")
+		nodes, err := a.BatchNodeQueries(t.Context(), snap)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var written []string
+		for _, q := range nodes {
+			written = append(written, q.Statement)
+		}
+		edges, err := a.BatchEdgeQueries(t.Context(), snap)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(edges) != 1 {
+			t.Fatalf("%s: %d edge queries, want 1", book, len(edges))
+		}
+		all := strings.Join(written, "\n")
+		for _, want := range []string{":" + book + " ", ":" + publisher + " "} {
+			if !strings.Contains(all, want) {
+				t.Errorf("no node statement writes %q:\n%s", want, all)
+			}
+		}
+		for _, want := range []string{":" + book + " ", ":" + publisher + " "} {
+			if !strings.Contains(edges[0].Statement, want) {
+				t.Errorf("the edge statement does not match %q:\n%s", want, edges[0].Statement)
+			}
+		}
+	}
+}
+
+// A label no identifier holds is the schema's fault, not the data's: both calls
+// refuse before they emit, and a caller reads the derivation's issue through the
+// error.
+func TestBatchQueries_ALabelNoIdentifierHoldsIsRefused(t *testing.T) {
+	t.Parallel()
+	_, s, v := setupWrite(t, "write_basic.yammm")
+	snap := buildGraphResult(t, s, v, map[string][]map[string]any{
+		"Publisher": {{"publisher_id": "iss1", "name": "Test Publisher"}},
+	})
+	a := New(WithLabelSeparator("-"))
+	for name, call := range map[string]func() (int, error){
+		"BatchNodeQueries": func() (int, error) { q, err := a.BatchNodeQueries(t.Context(), snap); return len(q), err },
+		"BatchEdgeQueries": func() (int, error) { q, err := a.BatchEdgeQueries(t.Context(), snap); return len(q), err },
+	} {
+		n, err := call()
+		if err == nil || n != 0 {
+			t.Fatalf("%s: %d queries, error %v; want none and a refusal", name, n, err)
+		}
+		re, ok := errors.AsType[*diag.ResultError](err)
+		if !ok || !re.Result.HasCode(E_NEO4J_INVALID_IDENTIFIER) {
+			t.Errorf("%s: error %v carries no E_NEO4J_INVALID_IDENTIFIER", name, err)
+		}
+		if errors.Is(err, ErrUnrepresentable) {
+			t.Errorf("%s: error %v is marked ErrUnrepresentable", name, err)
+		}
+		if !strings.HasPrefix(err.Error(), "label the schema's types: ") {
+			t.Errorf("%s: error %q does not name the derivation", name, err)
+		}
 	}
 }

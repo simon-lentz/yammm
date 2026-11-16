@@ -78,14 +78,19 @@ var (
 	// [ErrUnsupportedListElem]), an instant at a UTC offset past 18 hours, a map
 	// at a property the schema declares, a list
 	// or a map nested more than 256 levels deep, a number no driver number holds,
-	// a primary key that is absent or holds no value, and, at [CoerceParams], a
-	// value the validator refuses at its constraint.
+	// and, at [CoerceParams], a value the validator refuses at its constraint.
 	// It is the class, matched with errors.Is; each message names the property,
 	// the param or the key. It
 	// separates a refusal of the data from a caller's own error, such as a
-	// constraint [schema.CheckConstraint] refuses or a [GraphShape] the adapter
-	// did not build, which no message text can.
+	// constraint [schema.CheckConstraint] refuses or a zero snapshot, which no
+	// message text can.
 	ErrUnrepresentable = errors.New("neo4j adapter: the value cannot be stored as held")
+
+	// ErrZeroSnapshot is the error [Adapter.BatchNodeQueries] and
+	// [Adapter.BatchEdgeQueries] return for a zero
+	// [github.com/simon-lentz/yammm/graph.Snapshot], which
+	// carries no schema to derive a label or a key from.
+	ErrZeroSnapshot = errors.New("neo4j adapter: zero snapshot")
 )
 
 // detailKeyLabel is the neo4j-specific detail key for generated label strings.

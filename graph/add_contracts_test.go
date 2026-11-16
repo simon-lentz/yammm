@@ -2,7 +2,6 @@ package graph_test
 
 import (
 	"context"
-	"math"
 	"slices"
 	"testing"
 
@@ -104,33 +103,6 @@ part type Wheel {
 	}
 	if att := g.Snapshot().Attestation(); !att.Values {
 		t.Fatal("a fully validated record did not attest Values")
-	}
-}
-
-// TestCheckStoredKey_FastPathAgreesWithTheRendering pins the kinds the scalar
-// fast path may settle. Go equality and the canonical key rendering disagree on
-// float64 (-0.0 == 0.0 but [-0] != [0]) and on nil (a typed nil is not == to an
-// untyped one, but both render [null]), so neither may short-circuit. The
-// schema layer allows only String, UUID, Date and Timestamp primary keys, so a
-// float64 component reaches the check through an import of a rebuilt snapshot.
-func TestCheckStoredKey_FastPathAgreesWithTheRendering(t *testing.T) {
-	t.Parallel()
-	negZero := math.Copysign(0, -1)
-	if graph.FormatKey(negZero) == graph.FormatKey(float64(0)) {
-		t.Skip("this toolchain renders -0.0 and 0.0 alike; the case cannot arise")
-	}
-
-	// Key 0.0 against property -0.0: the rendering separates them, so the key
-	// is forged even though Go equality would call the pair equal.
-	if res := importCar(t, float64(0), negZero); res.OK() {
-		t.Error("a 0.0 key against a -0.0 property was accepted; the canonical rendering separates them")
-	} else {
-		assertHasCode(t, res, diag.E_GRAPH_INVALID_PK)
-	}
-
-	// The matching case still passes, so the guard is not simply refusing floats.
-	if res := importCar(t, float64(1.5), float64(1.5)); !res.OK() {
-		t.Errorf("a matching float key was refused: %s", res.String())
 	}
 }
 

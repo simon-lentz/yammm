@@ -67,8 +67,8 @@ var cypherReservedKeywords = map[string]struct{}{
 // The order matters and the result is NOT guaranteed to be a valid identifier:
 // an input whose first invalid character precedes a digit ("«9x") has that
 // character stripped after the leading-digit test, so it returns "9x".
-// [Adapter.ShapeForSchema] judges the composed label, prefix and separator
-// included, with [ValidateIdentifier], and refuses a label that is not valid with
+// The write path judges the composed label, prefix and separator included, with
+// [ValidateIdentifier], and refuses a label that is not valid with
 // [E_NEO4J_INVALID_IDENTIFIER] naming it. A composed label can be valid over an
 // invalid result: "«9x" under a label prefix.
 //

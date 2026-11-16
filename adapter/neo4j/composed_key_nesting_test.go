@@ -15,7 +15,7 @@ import (
 // that every address the graph holds is the spelling the instance carries.
 func TestBatchNodeQueries_NestedComposedKeysUnderACanonicalRoot(t *testing.T) {
 	t.Parallel()
-	a, s, v, shape := setupWrite(t, "composed_nested.yammm")
+	a, s, v := setupWrite(t, "composed_nested.yammm")
 	// The root's key is written in a NON-canonical spelling; every address
 	// below must carry the canonical one.
 	snap := buildGraphResult(t, s, v, map[string][]map[string]any{
@@ -31,7 +31,7 @@ func TestBatchNodeQueries_NestedComposedKeysUnderACanonicalRoot(t *testing.T) {
 		}},
 	})
 
-	queries, err := a.BatchNodeQueries(context.Background(), snap, shape)
+	queries, err := a.BatchNodeQueries(context.Background(), snap)
 	if err != nil {
 		t.Fatal(err)
 	}

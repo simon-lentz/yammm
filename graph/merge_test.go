@@ -333,7 +333,7 @@ func TestMerge_MergesIntoASeededInstance(t *testing.T) {
 	g := graph.New(s)
 	mustAdd(t, g, roots(t, s)...)
 	mustAdd(t, g, issue(t, s, "i1", "t", with(with(required(), "ISSUED_BY", target{"a", nil}), "LEAD", target{"a", nil})))
-	seeded := mustImport(t, s, g.Snapshot())
+	seeded := graph.NewFromSnapshot(g.Snapshot())
 	mustMerge(t, seeded, issue(t, s, "i1", "t", with(required(), "ISSUED_BY", target{"a", nil}, target{"b", nil})))
 	if merged, res := seeded.AddOrMerge(t.Context(), issue(t, s, "i1", "t", with(required(), "LEAD", target{"b", nil}))); merged || !res.HasCode(diag.E_GRAPH_CARDINALITY) {
 		t.Errorf("merged %v, %s; the imported LEAD edge must count", merged, res)
@@ -790,7 +790,7 @@ func TestAddOrMerge_AMidRunSnapshotSeedsAResume(t *testing.T) {
 		if res.HasErrors() {
 			t.Fatalf("the snapshot of %d listings: Load: %s", k, res)
 		}
-		resumed := mustImport(t, s, loaded)
+		resumed := graph.NewFromSnapshot(loaded)
 		if got := edgesOf(resumed.Snapshot()); !slices.Equal(got, edgesAt(k)) {
 			t.Fatalf("the seed from %d listings holds edges %q, want %q", k, got, edgesAt(k))
 		}

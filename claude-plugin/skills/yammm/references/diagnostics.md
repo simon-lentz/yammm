@@ -160,7 +160,7 @@ The all-or-nothing contract is unchanged: any error still yields a zero schema.
 | `E_PARTIAL_COMPOSITE_FK` | Partial composite foreign key |
 | `E_UNKNOWN_EDGE_FIELD` | Unknown field in edge data |
 | `E_DUPLICATE_EDGE` | A `(many)` association lists one target key twice for one source, where no other check refused either listing |
-| `E_EDGE_SHAPE_MISMATCH` | An edge's or a composition's value has a shape its relation does not take; at `graph.NewFromSnapshot` under another schema, an `"empty"` unresolved record under a `(one)` association |
+| `E_EDGE_SHAPE_MISMATCH` | An edge's or a composition's value has a shape its relation does not take |
 | `E_UNRESOLVED_REQUIRED_COMPOSITION` | Required composition is unresolved |
 | `E_COMPOSITION_DEPTH_EXCEEDED` | Composed nesting deeper than the bound (32) |
 | `E_INVALID_TYPE_TAG` | A JSON top-level key is not a type name |
@@ -171,17 +171,14 @@ The all-or-nothing contract is unchanged: any error still yields a zero schema.
 
 | Code | Meaning |
 | ---- | ------- |
-| `E_DUPLICATE_PK` | Duplicate primary key: two instances added to a graph, two roots whose stored keys the key rule both accepts, in a snapshot or a `.ys` document, or two roots of a data command's input, one of them refused. A read under a schema counts only roots of a type that can hold one |
+| `E_DUPLICATE_PK` | Duplicate primary key: two instances added to a graph, two roots whose stored keys the key rule both accepts, in a `.ys` document, or two roots of a data command's input, one of them refused. A read under a schema counts only roots of a type that can hold one |
 | `E_DUPLICATE_COMPOSED_PK` | Two children of one `(many)` composition share a primary key, or a `(one)` composition holds several |
-| `E_DUPLICATE_EDGE` | An edge and a `target_missing` record, or two such records, of one source under a `(many)` association name one target, in a snapshot imported under another schema; the `.ys` reader refuses such records, and two such edges, as `E_SNAPSHOT_MALFORMED` where no other check refused the repeating listing, one sound root (of a type that can hold a root, its stored key admitted by the key rule) holds the source's address alone, and an edge's target's, and no root stands at a record's target and no refused unit states it; elsewhere the issue at the listing, the source or the target stands for the repeat |
+| `E_DUPLICATE_EDGE` | A `(many)` association lists one target key twice for one source, where no other check refused either listing; the `.ys` reader refuses an edge and a `target_missing` record, or two such records, of one source that name one target, and two such edges, as `E_SNAPSHOT_MALFORMED` where no other check refused the repeating listing, one sound root (of a type that can hold a root, its stored key admitted by the key rule) holds the source's address alone, and an edge's target's, and no root stands at a record's target and no refused unit states it; elsewhere the issue at the listing, the source or the target stands for the repeat |
 | `E_UNRESOLVED_REQUIRED` | Required association is unresolved |
-| `E_GRAPH_TYPE_NOT_FOUND` | A type identity an imported snapshot states that the schema does not resolve |
 | `E_GRAPH_INVALID_COMPOSITION` | Invalid composition in graph operations |
-| `E_GRAPH_MISSING_PK` | A root, or an imported snapshot's types entry, whose type declares no primary key |
-| `E_GRAPH_CARDINALITY` | A `(one)` association holds more than one record: a merge at `Graph.AddOrMerge` that would add a second target, several edges and unresolved records no check refused, in a snapshot or `.ys` document (v0.15+) |
-| `E_GRAPH_UNKNOWN_RELATION` | Instance data or an association record under a relation name the type does not declare in that slot, or an association record naming a target type the schema resolves, other than the declared one (v0.15+) |
-| `E_GRAPH_ABSTRACT_TYPE` | An imported snapshot's root or types entry naming a type the importing schema makes abstract (v0.15+) |
-| `E_GRAPH_INVALID_PK` | A keyed type's primary key empty, of the wrong arity, with a key property absent or null, or disagreeing with its own key properties; an association target key of the wrong arity; or a key stored on a composed child whose type declares no primary key (v0.15+) |
+| `E_GRAPH_MISSING_PK` | An instance added at a root whose type declares no primary key |
+| `E_GRAPH_CARDINALITY` | A `(one)` association holds more than one record: a merge at `Graph.AddOrMerge` that would add a second target, or several edges and unresolved records no check refused in a `.ys` document (v0.15+) |
+| `E_GRAPH_UNKNOWN_RELATION` | An association record or an empty edge list under a relation name the type does not declare as an association (v0.15+) |
 
 ### Snapshot
 

@@ -1,8 +1,7 @@
 // Package neo4j generates Neo4j 5 constraint and index DDL, label mappings,
-// graph shape metadata, parameterized write queries and their coerced
-// parameters, introspection queries, and constraint/index drift diffs from
-// yammm schemas and live Neo4j databases, and it sanitizes and validates Neo4j
-// identifiers.
+// parameterized write queries and their coerced parameters, introspection
+// queries, and constraint/index drift diffs from yammm schemas and live Neo4j
+// databases, and it sanitizes and validates Neo4j identifiers.
 //
 // # Architectural Position
 //
@@ -150,14 +149,9 @@
 // heirs and statements write it, as the index pass does; under
 // [WithScalarTypeConstraints](false), [WithRequiredOnlyTypeConstraints](true)
 // or [WithEdition]([Community]) it checks fewer, and the index pass then covers properties named only by an
-// @index / @@index / @vector / @fulltext / @@fulltext annotation. Note that [Adapter.ShapeForSchema]
-// validates the label only — it is not a property-name gate.
-//
-// # Graph Shape
-//
-// [Adapter.ShapeForSchema] converts a schema into a [GraphShape] describing
-// the Neo4j node structure (labels, primary keys and their constraints, and
-// @writeOnce keys per type) and holding the schema it came from. The shape is required input for write query generation, and exports no field.
+// @index / @@index / @vector / @fulltext / @@fulltext annotation. The write path
+// validates each type's label and each edge's relationship type — it is not a
+// property-name gate.
 //
 // # Write Surface
 //
@@ -166,31 +160,30 @@
 // snapshot's write surface, and the package has no single-item write. Hand-built
 // Cypher can use [BuildBatchRelationshipMergeQuery] and [CoerceParams].
 //
-// Both require a [GraphShape] that [Adapter.ShapeForSchema] built from the
-// snapshot's schema object, and refuse any other: another load can declare a key
-// another way, so a merge key would reach the driver under one type while the
-// same property is coerced from this schema to another. A shape is keyed by
-// [schema.TypeID], so two closure types sharing one bare name each get their own
-// label. Two root types render one label only where their schema and type
-// names compose one label, as schema "a" with type B__C and schema "a__B" with
-// type C do; [Adapter.ShapeForSchema] refuses that closure.
+// Each call derives every type's label, primary keys with their constraints, and
+// @writeOnce keys from the snapshot's own schema under the adapter's label
+// options, so a merge key and the property it names are coerced under one
+// schema. A type's entry is keyed by [schema.TypeID], so two closure types
+// sharing one bare name each get their own label. Two root types render one
+// label only where their schema and type names compose one label, as schema "a"
+// with type B__C and schema "a__B" with type C do; both calls refuse that
+// closure with [E_NEO4J_LABEL_COLLISION], and a zero snapshot with
+// [ErrZeroSnapshot].
 //
 // An error marked [ErrUnrepresentable] refuses these values: one its constraint's coercion refuses, a nested collection's, a map at a
 // property the schema declares, a list or a map a document nests more than 256
-// levels deep, a [encoding/json.Number] no driver number holds, or a primary key
-// that is absent or holds no value. An integer literal a finite float64 holds
+// levels deep, or a [encoding/json.Number] no driver number holds. An integer literal a finite float64 holds
 // passes them at a Float position and rounds to its nearest float64. No snapshot these writers accept holds a property the schema does not
 // declare: the validator keeps one out of a graph, and
-// [github.com/simon-lentz/yammm/snapshot.Load] and [graph.NewFromSnapshot] refuse
-// one. Of the values the mark refuses, a validated snapshot holds two, which
+// [github.com/simon-lentz/yammm/snapshot.Load] refuses one. Of the values the mark refuses, a validated snapshot holds two, which
 // the validator accepts: a nested collection's, and an instant at a UTC offset
 // past 18 hours. Any other is held only by a snapshot whose values no
 // validator refused at Error. [CoerceParams] marks its
 // refusals of a value so too. No other error
 // carries the class: a caller's own, such as a constraint
-// [schema.CheckConstraint] refuses, a [GraphShape] the adapter did not build
-// for the snapshot's schema or a relationship type that is no valid identifier,
-// and a cancelled context.
+// [schema.CheckConstraint] refuses, a zero snapshot, a closure whose labels
+// collide or are no valid identifiers, a relationship type that is no valid
+// identifier, and a cancelled context.
 //
 // # Parameter Coercion
 //
@@ -250,8 +243,7 @@
 //
 // On the write path the rule refuses those two values, and beside them only a
 // value no validator refused at Error: one snapshot.Load read without
-// revalidating at Error, or one graph.NewFromSnapshot imported under another
-// schema, which holds no value to its constraint. There it judges a value's
+// revalidating at Error. There it judges a value's
 // form and never its bounds, members or pattern, nor a Vector's dimension. A
 // Timestamp, a Date and a UUID are forms, so their text is parsed.
 //
@@ -315,8 +307,8 @@
 // because the depth-2 parent MATCH is scoped by the PART label and not by the
 // root, so two root types sharing a key value and a relation name would
 // otherwise mint one address for children under one part label —
-// [Adapter.ShapeForSchema] refuses a closure whose labels collide, which is
-// what makes the label exact. And it carries NO source path: a type identity
+// the write path refuses a closure whose labels collide, which is what makes the
+// label exact. And it carries NO source path: a type identity
 // renders a file-backed schema's absolute path, which would put the writing
 // machine's directory layout on every part node and change every address when
 // the schema file moves.
@@ -324,14 +316,14 @@
 // # Write-Once Derivation
 //
 // [ImmutableKeysFor] returns a type's @writeOnce-annotated properties (own and
-// inherited). [Adapter.ShapeForSchema] records them on the shape, and the
-// node write path selects the immutable-key shape per type from that set,
+// inherited). The node write path selects the immutable-key shape per type from
+// that set,
 // so a @writeOnce property is set on node creation and never rewritten on a
 // subsequent MERGE.
 //
-// The guarantee does not depend on the caller holding a [schema.Type]: the keys
-// travel on the shape, which every write entry point already receives, and a
-// caller cannot change them.
+// The guarantee does not depend on the caller holding a [schema.Type]: the write
+// path derives the keys from the snapshot's schema on every call, and a caller
+// cannot change them.
 //
 // # Cypher Builders
 //

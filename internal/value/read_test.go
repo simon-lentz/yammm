@@ -104,30 +104,6 @@ func TestRead_HasNoDepthBound(t *testing.T) {
 	}
 }
 
-func TestReadsAsFloat_NamesEveryPositionReadAtReadsAsAFloat(t *testing.T) {
-	t.Parallel()
-	float := schema.NewFloatConstraint()
-	for _, c := range []struct {
-		name string
-		c    schema.Constraint
-		want bool
-	}{
-		{"a Float", float, true},
-		{"an alias of Float", schema.NewAliasConstraint("Ratio", float), true},
-		{"a Vector", schema.NewVectorConstraint(2), true},
-		{"a List of Float", schema.NewListConstraint(float), true},
-		{"a List of List of Float", schema.NewListConstraint(schema.NewListConstraint(float)), true},
-		{"an Integer", schema.NewIntegerConstraint(), false},
-		{"a List of Integer", schema.NewListConstraint(schema.NewIntegerConstraint()), false},
-		{"a String", schema.NewStringConstraint(), false},
-		{"no constraint", nil, false},
-	} {
-		if got := value.ReadsAsFloat(c.c); got != c.want {
-			t.Errorf("%s: ReadsAsFloat = %v, want %v", c.name, got, c.want)
-		}
-	}
-}
-
 func TestReadAt_ReadsANumberAtTheKindItsPositionDeclares(t *testing.T) {
 	t.Parallel()
 	float := schema.NewFloatConstraint()

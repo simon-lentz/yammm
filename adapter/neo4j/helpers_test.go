@@ -29,17 +29,22 @@ func loadSchemaAndValidator(t *testing.T, name string) (schema.Schema, *instance
 	return s, instance.NewValidator(s)
 }
 
-// setupWrite loads a fixture and prepares the full write-path harness:
-// a default adapter, the sealed schema, its validator, and the graph shape.
-func setupWrite(t *testing.T, fixture string) (*Adapter, schema.Schema, *instance.Validator, *GraphShape) {
+// setupWrite loads a fixture and prepares the write-path harness: a default
+// adapter, the sealed schema and its validator.
+func setupWrite(t *testing.T, fixture string) (*Adapter, schema.Schema, *instance.Validator) {
 	t.Helper()
 	s, v := loadSchemaAndValidator(t, fixture)
-	a := New()
-	shape, result := a.ShapeForSchema(context.Background(), s)
-	if err := result.Err(); err != nil {
-		t.Fatalf("ShapeForSchema(%s): %v", fixture, err)
+	return New(), s, v
+}
+
+// mustShape returns the shape a's write path derives for s.
+func mustShape(t *testing.T, a *Adapter, s schema.Schema) *graphShape {
+	t.Helper()
+	shape, res := a.shapeFor(t.Context(), s)
+	if res.HasErrors() {
+		t.Fatalf("shapeFor: %s", res)
 	}
-	return a, s, v, shape
+	return shape
 }
 
 // buildGraphResult validates instances and builds a graph.Snapshot.
@@ -62,9 +67,9 @@ func buildGraphResult(t *testing.T, s schema.Schema, v *instance.Validator, inst
 	return g.Snapshot()
 }
 
-// typeID resolves a type name against the schema. GraphShape is keyed by
-// identity, so a test that names a type in its fixture resolves it here and
-// fails loudly when the fixture and the schema disagree.
+// typeID resolves a type name against the schema. A shape is keyed by identity,
+// so a test that names a type in its fixture resolves it here and fails loudly
+// when the fixture and the schema disagree.
 func typeID(t *testing.T, s schema.Schema, name string) schema.TypeID {
 	t.Helper()
 	ty, ok := s.Type(name)

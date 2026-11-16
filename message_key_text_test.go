@@ -47,54 +47,6 @@ abstract type A {
 }
 `
 
-// longTypeName is a type name the cut shortens.
-var longTypeName = "L" + strings.Repeat("Z", 100)
-
-// NewFromSnapshot reads a snapshot of pairFrom under pairTo. Both load under
-// one source name, so a type both declare has one identity in both.
-var (
-	pairFrom = `schema "pair"
-
-type T {
-	id String primary
-	--> NEEDS (_:one) ` + longTypeName + `
-	*-> PARTS (many) P
-}
-
-type ` + longTypeName + ` {
-	id String primary
-}
-
-part type P {
-	pid String primary
-}
-
-part type Q {
-	pid String primary
-}
-`
-	pairTo = `schema "pair"
-
-type T {
-	id String primary
-	--> NEEDS (_:one) U
-	*-> PARTS (many) Q
-}
-
-type U {
-	id String primary
-}
-
-part type P {
-	pid String primary
-}
-
-part type Q {
-	pid String primary
-}
-`
-)
-
 // Every message the graph and snapshot paths write about a key, a relation or
 // another name the data writes repeats its head alone, whichever rule draws
 // it, and a short one is shown as the rule's form shows it.
@@ -165,26 +117,6 @@ func TestMessages_RepeatAKeyCutToItsHead(t *testing.T) {
 	if err != nil {
 		shows("ParseKey a cut array", err.Error(), `graph: parsing key "[1,": `)
 	}
-
-	from, res := schema.LoadString(ctx, pairFrom, "pair.yammm")
-	if res.HasErrors() {
-		t.Fatal(res)
-	}
-	into, res := schema.LoadString(ctx, pairTo, "pair.yammm")
-	if res.HasErrors() {
-		t.Fatal(res)
-	}
-	old := graph.New(from)
-	if r := old.Add(ctx, instancetest.Valid(t, from, longTypeName, map[string]any{"id": "l"})); r.HasErrors() {
-		t.Fatal(r)
-	}
-	if r := old.Add(ctx, instancetest.Valid(t, from, "T", map[string]any{
-		"id": "t", "needs": map[string]any{"_target_id": "l"}, "parts": []any{map[string]any{"pid": longText}},
-	})); r.HasErrors() {
-		t.Fatal(r)
-	}
-	_, r := graph.NewFromSnapshot(into, old.Snapshot())
-	result("NewFromSnapshot under another schema", r)
 
 	empty, r := snapshot.Marshal(ctx, graph.New(s).Snapshot())
 	if r.HasErrors() {

@@ -150,14 +150,14 @@ func (a *Adapter) IndexesStructured(ctx context.Context, s schema.Schema) ([]Ind
 }
 
 // emittableTypes yields each (type, label) pair for the named, non-abstract
-// types of s whose label is a valid Neo4j identifier, in schema declaration
-// order.
+// types of s and of every schema in its import closure whose label is a valid
+// Neo4j identifier, in closure order then schema declaration order.
 //
 // A type whose label fails identifier validation is skipped after collecting
 // E_NEO4J_INVALID_IDENTIFIER — and the SCHEMA IS THEN REFUSED ENTIRELY: this is
 // the shared gate of [Adapter.ConstraintsStructured],
-// [Adapter.IndexesStructured] and [Adapter.ShapeForSchema], and all three end
-// on a non-OK result by returning nil. "Skipped" describes this iterator's
+// [Adapter.IndexesStructured] and the write path's shapeFor, and all
+// three end on a non-OK result by returning nil. "Skipped" describes this iterator's
 // walk, never a partial emission.
 //
 // Callers that also run [Adapter.DetectLabelCollisions] walk the type list
@@ -167,8 +167,8 @@ func (a *Adapter) IndexesStructured(ctx context.Context, s schema.Schema) ([]Ind
 // the coupling a shared walk would create between a diagnostic and an emitter.
 //
 // The type name is trimmed, and the trimmed form is what the label is built
-// from. [Adapter.ShapeForSchema]'s map is keyed by [schema.TypeID], so no
-// lookup depends on the trim. A load rejects a name with surrounding whitespace
+// from. The write path's shape is keyed by [schema.TypeID], so no lookup
+// depends on the trim. A load rejects a name with surrounding whitespace
 // (the grammar's UC_WORD production), and a schema comes from a load alone, so
 // the trim changes no name.
 func (a *Adapter) emittableTypes(ctx context.Context, s schema.Schema, collector *diag.Collector) iter.Seq2[schema.Type, string] {
@@ -190,8 +190,8 @@ func (a *Adapter) emittableTypes(ctx context.Context, s schema.Schema, collector
 // of s AND OF EVERY SCHEMA IN ITS IMPORT CLOSURE, in closure order then schema
 // declaration order, WITHOUT validating the label.
 //
-// The closure is the scope because [Adapter.ShapeForSchema] gives every closure
-// member's types a label and the write path then writes nodes under it. A walk
+// The closure is the scope because the write path gives every closure member's
+// types a label and writes nodes under it. A walk
 // over the entry schema's own types alone left an imported type with a label and
 // node writes, and with no constraint, no index and no ownership.
 //

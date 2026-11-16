@@ -110,26 +110,3 @@ func TestRebuild_RendersARootsNameFromItsIdentity(t *testing.T) {
 		t.Errorf("TypeName() = %q, want the alias-qualified b.Basin", got)
 	}
 }
-
-// The snapshot's names were rendered under its own schema's alias; the graph
-// that imports it renders them under its own.
-func TestNewFromSnapshot_RendersNamesUnderTheImportingSchema(t *testing.T) {
-	t.Parallel()
-	sb, basin := loadAliased(t, aliasEntryB, "b")
-	sx, basinX := loadAliased(t, aliasEntryX, "x")
-	if basin != basinX {
-		t.Fatalf("the two entries resolve Basin to %s and %s, want one identity", basin, basinX)
-	}
-	snap := rebuild(sb, snapparts.Parts{
-		Types: []schema.TypeID{basin},
-		Instances: []snapparts.Instance{{
-			TypeID:     basin,
-			PrimaryKey: immutable.WrapKey([]any{"b1"}),
-			Properties: immutable.WrapProperties(map[string]any{"id": "b1"}),
-		}},
-	})
-	got := slices.Collect(mustImport(t, sx, snap).Snapshot().InstancesOf(basin))[0].TypeName()
-	if got != "x.Basin" {
-		t.Errorf("imported TypeName() = %q, want x.Basin, the importing schema's rendering", got)
-	}
-}

@@ -99,7 +99,7 @@ func TestNewFromSnapshot_AnAddResolvesAgainstTheSeed(t *testing.T) {
 	s := employerSchema(t, false)
 	seed := seedOf(t, s, company("acme"), person("alice"))
 
-	g := mustImport(t, s, seed)
+	g := graph.NewFromSnapshot(seed)
 	if res := addRecords(t, g, s, personAt("bob", "acme")); res.HasErrors() {
 		t.Fatalf("add bob: %s", res)
 	}
@@ -133,7 +133,7 @@ func TestNewFromSnapshot_AnAddResolvesASeededRecord(t *testing.T) {
 		t.Fatalf("the seed holds %d unresolved records, want 1", n)
 	}
 
-	g := mustImport(t, s, seed)
+	g := graph.NewFromSnapshot(seed)
 	if res := addRecords(t, g, s, company("acme")); res.HasErrors() {
 		t.Fatalf("add acme: %s", res)
 	}
@@ -151,7 +151,7 @@ func TestNewFromSnapshot_AnAddResolvesASeededRecord(t *testing.T) {
 func TestNewFromSnapshot_ASeededRecordFailsCheck(t *testing.T) {
 	t.Parallel()
 	s := employerSchema(t, true)
-	g := mustImport(t, s, seedOf(t, s, personAt("alice", "missing")))
+	g := graph.NewFromSnapshot(seedOf(t, s, personAt("alice", "missing")))
 	if res := g.Check(t.Context()); !res.HasCode(diag.E_UNRESOLVED_REQUIRED) {
 		t.Errorf("Check = %s, want E_UNRESOLVED_REQUIRED from the seeded record", res)
 	}
@@ -166,7 +166,7 @@ func TestNewFromSnapshot_ASeededRecordFailsCheck(t *testing.T) {
 func TestNewFromSnapshot_AnAddAtASeededKeyIsADuplicate(t *testing.T) {
 	t.Parallel()
 	s := employerSchema(t, false)
-	g := mustImport(t, s, seedOf(t, s, person("alice")))
+	g := graph.NewFromSnapshot(seedOf(t, s, person("alice")))
 
 	res := addRecords(t, g, s, employerRecord{"Person", map[string]any{"id": "alice", "name": "Alice the Second"}})
 	if !res.HasCode(diag.E_DUPLICATE_PK) {
@@ -201,7 +201,7 @@ func TestNewFromSnapshot_ALoadedSnapshotSeedsAResume(t *testing.T) {
 		t.Fatalf("Load: %s", res)
 	}
 
-	g := mustImport(t, s, loaded)
+	g := graph.NewFromSnapshot(loaded)
 	if res := addRecords(t, g, s, personAt("bob", "acme")); res.HasErrors() {
 		t.Fatalf("second run: %s", res)
 	}

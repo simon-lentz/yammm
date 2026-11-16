@@ -17,7 +17,7 @@ import (
 // too: the property's type is what Neo4j cannot hold.
 func TestBatchNodeQueries_RefusesANestedCollectionValue(t *testing.T) {
 	t.Parallel()
-	a, s, v, shape := setupWrite(t, "nested_collection.yammm")
+	a, s, v := setupWrite(t, "nested_collection.yammm")
 	for name, tc := range map[string]struct {
 		property string
 		value    any
@@ -32,7 +32,7 @@ func TestBatchNodeQueries_RefusesANestedCollectionValue(t *testing.T) {
 			snap := buildGraphResult(t, s, v, map[string][]map[string]any{
 				"Grid": {{"id": "g1", tc.property: tc.value}},
 			})
-			_, err := a.BatchNodeQueries(context.Background(), snap, shape)
+			_, err := a.BatchNodeQueries(context.Background(), snap)
 			if !errors.Is(err, ErrUnsupportedListElem) {
 				t.Fatalf("BatchNodeQueries error = %v; want ErrUnsupportedListElem", err)
 			}
@@ -46,11 +46,11 @@ func TestBatchNodeQueries_RefusesANestedCollectionValue(t *testing.T) {
 // A composed part's nested collection property is refused as a root's is.
 func TestBatchNodeQueries_RefusesAComposedPartsNestedCollectionValue(t *testing.T) {
 	t.Parallel()
-	a, s, v, shape := setupWrite(t, "nested_collection.yammm")
+	a, s, v := setupWrite(t, "nested_collection.yammm")
 	snap := buildGraphResult(t, s, v, map[string][]map[string]any{
 		"Grid": {{"id": "g1", "cells": []any{map[string]any{"label": "c1", "matrix": []any{[]any{int64(1)}}}}}},
 	})
-	_, err := a.BatchNodeQueries(context.Background(), snap, shape)
+	_, err := a.BatchNodeQueries(context.Background(), snap)
 	if !errors.Is(err, ErrUnsupportedListElem) {
 		t.Fatalf("BatchNodeQueries error = %v; want ErrUnsupportedListElem", err)
 	}
@@ -70,8 +70,8 @@ func TestBatchNodeQueries_RefusesANestedCollectionBeforeItsElements(t *testing.T
 	} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
-			a, shape, snap := holderSnapshot(t, holderValues{props: map[string]any{"nested": value}})
-			_, err := a.BatchNodeQueries(t.Context(), snap, shape)
+			a, snap := holderSnapshot(t, holderValues{props: map[string]any{"nested": value}})
+			_, err := a.BatchNodeQueries(t.Context(), snap)
 			if !errors.Is(err, ErrUnsupportedListElem) || !errors.Is(err, ErrUnrepresentable) {
 				t.Fatalf("BatchNodeQueries error = %v; want ErrUnsupportedListElem and ErrUnrepresentable", err)
 			}
@@ -86,15 +86,15 @@ func TestBatchNodeQueries_RefusesANestedCollectionBeforeItsElements(t *testing.T
 // absent property does.
 func TestBatchNodeQueries_WritesAnAbsentNestedCollection(t *testing.T) {
 	t.Parallel()
-	a, s, v, shape := setupWrite(t, "nested_collection.yammm")
+	a, s, v := setupWrite(t, "nested_collection.yammm")
 	snap := buildGraphResult(t, s, v, map[string][]map[string]any{
 		"Grid": {{"id": "g1", "cells": []any{map[string]any{"label": "c1"}}}},
 	})
-	if _, err := a.BatchNodeQueries(context.Background(), snap, shape); err != nil {
+	if _, err := a.BatchNodeQueries(context.Background(), snap); err != nil {
 		t.Fatalf("BatchNodeQueries: %v", err)
 	}
-	a, shape, snap = holderSnapshot(t, holderValues{props: map[string]any{"nested": nil}})
-	nodes, err := a.BatchNodeQueries(t.Context(), snap, shape)
+	a, snap = holderSnapshot(t, holderValues{props: map[string]any{"nested": nil}})
+	nodes, err := a.BatchNodeQueries(t.Context(), snap)
 	if err != nil {
 		t.Fatalf("BatchNodeQueries, a null: %v", err)
 	}

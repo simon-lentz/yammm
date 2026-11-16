@@ -21,9 +21,9 @@ func TestBatchQueries_RefuseAMapValue(t *testing.T) {
 		"a part's String":  {holderValues{note: map[string]any{"body": map[string]any{"a": "b"}}}, `part holder__Note: property "body": coerce String: ` + refusal},
 		"an edge's String": {holderValues{label: map[string]any{"a": "b"}}, `relation "LINK": property "label": coerce String: ` + refusal},
 	} {
-		a, shape, snap := holderSnapshot(t, tc.h)
-		_, nodeErr := a.BatchNodeQueries(t.Context(), snap, shape)
-		_, edgeErr := a.BatchEdgeQueries(t.Context(), snap, shape)
+		a, snap := holderSnapshot(t, tc.h)
+		_, nodeErr := a.BatchNodeQueries(t.Context(), snap)
+		_, edgeErr := a.BatchEdgeQueries(t.Context(), snap)
 		err := nodeErr
 		if err == nil {
 			err = edgeErr

@@ -1,17 +1,13 @@
 package graph_test
 
 import (
-	"math"
 	"slices"
-	"strings"
 	"testing"
 
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/graph"
-	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/instance"
 	"github.com/simon-lentz/yammm/internal/instancetest"
-	"github.com/simon-lentz/yammm/internal/snapparts"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -35,21 +31,6 @@ func loadCarSchema(t *testing.T) schema.Schema {
 		t.Fatalf("load schema: %s", res.String())
 	}
 	return s
-}
-
-// importCar imports one Car, holding the given key and vin, into a second load of
-// the schema, which the key rule walks. A schema allows no number key, so a number
-// key reaches the rule only through a rebuilt snapshot.
-func importCar(t *testing.T, key, vin any) diag.Result {
-	t.Helper()
-	built := loadCarSchema(t)
-	snap := rebuild(built, snapparts.Parts{Instances: []snapparts.Instance{{
-		TypeID:     mustTypeID(t, built, "Car"),
-		PrimaryKey: immutable.WrapKey([]any{key}),
-		Properties: immutable.WrapProperties(map[string]any{"vin": vin}),
-	}}})
-	_, res := graph.NewFromSnapshot(loadCarSchema(t), snap)
-	return res
 }
 
 // A validator refuses a part type at a root, so the one route to Add is a child
@@ -181,41 +162,5 @@ part type Wheel {
 	car := slices.Collect(g.Snapshot().InstancesOf(mustTypeID(t, sm, "Car")))[0]
 	if n := car.ComposedCount("WHEELS"); n != 2 {
 		t.Errorf("keyless siblings attached = %d, want 2", n)
-	}
-}
-
-// The import accepts a number key component ParseKey reads back at the same
-// rendering, whatever its Go type: the rule is the rendering, not the type.
-// float64(5) renders as the literal 5, which reads back as int64(5) and renders
-// alike.
-func TestNewFromSnapshot_AcceptsANumberKeyThatRendersBackUnchanged(t *testing.T) {
-	t.Parallel()
-	for _, v := range []any{float64(5), int64(5), int64(math.MaxInt64), float64(1.5)} {
-		if res := importCar(t, v, v); res.HasErrors() {
-			t.Errorf("key [%v] (%T): NewFromSnapshot = %s, want no refusal", v, v, res)
-		}
-	}
-}
-
-// The import refuses a key component that disagrees with its key property whatever
-// Go type both hold.
-func TestNewFromSnapshot_RefusesAKeyTheKeyRuleRefuses(t *testing.T) {
-	t.Parallel()
-	for _, c := range []struct {
-		name      string
-		key, prop any
-		phrase    string
-	}{
-		{"two integers", int64(1), int64(2), "disagrees with property"},
-		{"two bools", false, true, "disagrees with property"},
-		{"a null key property", "v1", nil, "is absent or null"},
-	} {
-		t.Run(c.name, func(t *testing.T) {
-			t.Parallel()
-			res := importCar(t, c.key, c.prop)
-			if !res.HasCode(diag.E_GRAPH_INVALID_PK) || !strings.Contains(res.String(), c.phrase) {
-				t.Errorf("NewFromSnapshot = %s, want E_GRAPH_INVALID_PK naming %q", res, c.phrase)
-			}
-		})
 	}
 }

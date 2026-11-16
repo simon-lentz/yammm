@@ -1,17 +1,13 @@
 package graph
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
-	"errors"
 	"fmt"
 	"sync"
 
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/instance"
-	"github.com/simon-lentz/yammm/internal/value"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -27,8 +23,8 @@ type Graph struct {
 	schema schema.Schema
 	mu     sync.RWMutex
 
-	// canon rewrites what the import brings in, and a [Snapshot]'s received
-	// addresses, into the form a validator stores.
+	// canon rewrites a [Snapshot]'s received addresses into the form a
+	// validator stores.
 	canon *canonicalizer
 
 	// instances indexes instances by TypeID, then by PK string.
@@ -378,8 +374,8 @@ func (g *Graph) Snapshot() Snapshot {
 	}
 
 	// The Values attestation is graph-level state, never an instance walk:
-	// a seeded graph's imported clones all report Validated() == false
-	// while the accumulator carries the loaded header's claim.
+	// a graph seeded from a loaded snapshot holds clones that report
+	// Validated() == false while the accumulator carries the header's claim.
 	hasInstance := false
 	for _, typeInstances := range g.instances {
 		if len(typeInstances) > 0 {
@@ -409,26 +405,6 @@ func (g *Graph) Snapshot() Snapshot {
 	return newSnapshot(g.schema, g.canon, types, instances, instanceIndex, edges, duplicates, unresolved, att)
 }
 
-// identityText renders a type identity for a message: whole where s resolves
-// it. Otherwise the caller wrote it, so its name is cut as a value is, and so is
-// its schema path unless a schema of the closure carries that path.
-func identityText(s schema.Schema, id schema.TypeID) string {
-	if _, ok := s.TypeByID(id); ok {
-		return id.String()
-	}
-	name := diag.CutValue(id.Name())
-	path := id.SchemaPath()
-	if path.IsZero() {
-		return name
-	}
-	for cs := range s.Closure() {
-		if cs.SourceID() == path {
-			return path.String() + ":" + name
-		}
-	}
-	return diag.CutValue(path.String()) + ":" + name
-}
-
 // tagForm renders id under the graph's schema, as every name the graph
 // returns and every graph diagnostic does.
 func (g *Graph) tagForm(id schema.TypeID) string {
@@ -441,112 +417,4 @@ func (g *Graph) findInstance(typeID schema.TypeID, key string) Instance {
 		return typeInstances[key]
 	}
 	return Instance{}
-}
-
-// checkKey rejects an empty key, a key whose arity disagrees with the type's
-// declared primary keys, a key property that is absent or holds none
-// ([value.Absent]), and a component that disagrees with its key property. A key
-// states what the instance's own properties state, so a key property the
-// instance does not hold leaves the key unstated. Every component reads back
-// through [ParseKey]: a validator stores only strings in a key, and the snapshot
-// reader refuses any other component that does not.
-func checkKey(typ schema.Type, key immutable.Key, property func(string) (immutable.Value, bool), canon *canonicalizer) error {
-	if key.Len() == 0 {
-		return errors.New("primary key is empty")
-	}
-	if declared := keyArity(typ); key.Len() != declared {
-		return fmt.Errorf("primary key has %d components; type declares %d", key.Len(), declared)
-	}
-	i := 0
-	for pk := range typ.PrimaryKeys() {
-		val, ok := property(pk.Name())
-		if !ok || value.Absent(val.Any()) {
-			return fmt.Errorf("primary key property %q is absent or null", pk.Name())
-		}
-		if !keyComponentAgrees(key.At(i), val, pk.Constraint(), canon) {
-			return fmt.Errorf("primary key component %d disagrees with property %q (%s vs %s)",
-				i, pk.Name(), diag.CutValue(quoteKeyValue(key.At(i).Any())), diag.CutValue(quoteKeyValue(val.Any())))
-		}
-		i++
-	}
-	return nil
-}
-
-// keyComponentAgrees reports whether a key component and its property hold the
-// same value. Identical scalars settle it without allocating, which is what
-// keeps the check affordable once per composed child rather than once per root;
-// any other pair agrees when both are of one kind and render alike, the form
-// that decides key equality on the wire. The rendering keeps -0.0 and 0.0 apart,
-// and reads a typed nil as an untyped one.
-//
-// Both sides are first put in the form the constraint stores, so two spellings
-// of one Timestamp agree: the graph holds one spelling per value, and refusing
-// the pair here would refuse a record the rebuild path accepts.
-func keyComponentAgrees(component, property immutable.Value, c schema.Constraint, canon *canonicalizer) bool {
-	// One scalar stored twice is one value in every form, so the common case
-	// renders nothing; any other pair reaches the canonical form.
-	if sameScalar(component.Any(), property.Any()) {
-		return true
-	}
-	x, y := canon.canonicalOrRaw(component, c), canon.canonicalOrRaw(property, c)
-	return sameKind(x, y) && renderKeyValue(x) == renderKeyValue(y)
-}
-
-// sameKind reports whether x and y are of one value kind. The rendering alone
-// does not decide agreement: an int64 1 and a float64 1.0 both render [1], and a
-// float is never an integer.
-func sameKind(x, y any) bool {
-	kx, _ := value.Classify(x)
-	ky, _ := value.Classify(y)
-	return kx == ky
-}
-
-// sameScalar reports whether x and y are one string, int64 or bool. It never
-// reports a float or a nil equal, for the reasons keyComponentAgrees states.
-func sameScalar(x, y any) bool {
-	switch xv := x.(type) {
-	case string:
-		yv, ok := y.(string)
-		return ok && xv == yv
-	case int64:
-		yv, ok := y.(int64)
-		return ok && xv == yv
-	case bool:
-		yv, ok := y.(bool)
-		return ok && xv == yv
-	}
-	return false
-}
-
-// renderKeyValue renders one unwrapped value in the canonical key form.
-func renderKeyValue(v any) string {
-	return immutable.WrapKey([]any{v}).String()
-}
-
-// quoteKeyValue renders v as renderKeyValue does, save that every whole float in
-// it keeps a ".0", at any depth, so a message never shows a float as the integer
-// it equals: the two disagree as key values.
-func quoteKeyValue(v any) string {
-	return renderKeyValue(markWholeFloats(immutable.Wrap(v).Clone()))
-}
-
-// markWholeFloats returns v, a value [immutable.Value.Clone] returned, with each
-// float that encoding/json writes with no fraction or exponent replaced by the
-// json.Number of that text and ".0". It rewrites lists and maps in place.
-func markWholeFloats(v any) any {
-	switch t := v.(type) {
-	case float64, float32:
-		if text, err := json.Marshal(t); err == nil && !bytes.ContainsAny(text, ".eE") {
-			return json.Number(string(text) + ".0")
-		}
-	case []any:
-		for i, e := range t {
-			t[i] = markWholeFloats(e)
-		}
-	case map[string]any:
-		for k, e := range t {
-			t[k] = markWholeFloats(e)
-		}
-	}
-	return v
 }

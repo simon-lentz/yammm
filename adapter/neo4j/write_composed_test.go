@@ -10,9 +10,9 @@ import (
 	"github.com/simon-lentz/yammm/graph"
 )
 
-func nestedGraphResult(t *testing.T) (*Adapter, *GraphShape, graph.Snapshot) {
+func nestedGraphResult(t *testing.T) (*Adapter, graph.Snapshot) {
 	t.Helper()
-	a, s, v, shape := setupWrite(t, "composed_nested.yammm")
+	a, s, v := setupWrite(t, "composed_nested.yammm")
 	snap := buildGraphResult(t, s, v, map[string][]map[string]any{
 		"Order": {{
 			"order_id": "o1",
@@ -33,14 +33,14 @@ func nestedGraphResult(t *testing.T) (*Adapter, *GraphShape, graph.Snapshot) {
 			},
 		}},
 	})
-	return a, shape, snap
+	return a, snap
 }
 
 func TestBatchNodeQueries_ComposedPhaseOrder(t *testing.T) {
 	t.Parallel()
-	a, shape, snap := nestedGraphResult(t)
+	a, snap := nestedGraphResult(t)
 
-	queries, err := a.BatchNodeQueries(context.Background(), snap, shape)
+	queries, err := a.BatchNodeQueries(context.Background(), snap)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -73,9 +73,9 @@ func TestBatchNodeQueries_ComposedPhaseOrder(t *testing.T) {
 // labels, so the path cannot escape the composed subtree.
 func TestBatchNodeQueries_ComposedReplaceStatement(t *testing.T) {
 	t.Parallel()
-	a, shape, snap := nestedGraphResult(t)
+	a, snap := nestedGraphResult(t)
 
-	queries, err := a.BatchNodeQueries(context.Background(), snap, shape)
+	queries, err := a.BatchNodeQueries(context.Background(), snap)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -108,9 +108,9 @@ func TestBatchNodeQueries_ComposedReplaceStatement(t *testing.T) {
 
 func TestBatchNodeQueries_ComposedCreateStatements(t *testing.T) {
 	t.Parallel()
-	a, shape, snap := nestedGraphResult(t)
+	a, snap := nestedGraphResult(t)
 
-	queries, err := a.BatchNodeQueries(context.Background(), snap, shape)
+	queries, err := a.BatchNodeQueries(context.Background(), snap)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -162,9 +162,9 @@ func TestBatchNodeQueries_ComposedCreateStatements(t *testing.T) {
 // grows linearly with depth and no escape compounds.
 func TestBatchNodeQueries_ComposedKeys(t *testing.T) {
 	t.Parallel()
-	a, shape, snap := nestedGraphResult(t)
+	a, snap := nestedGraphResult(t)
 
-	queries, err := a.BatchNodeQueries(context.Background(), snap, shape)
+	queries, err := a.BatchNodeQueries(context.Background(), snap)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -243,9 +243,9 @@ func TestBatchNodeQueries_ComposedKeys(t *testing.T) {
 
 func TestBatchNodeQueries_ComposedChunkStraddle(t *testing.T) {
 	t.Parallel()
-	a, shape, snap := nestedGraphResult(t)
+	a, snap := nestedGraphResult(t)
 
-	queries, err := a.BatchNodeQueries(context.Background(), snap, shape, WithNodeChunkSize(1))
+	queries, err := a.BatchNodeQueries(context.Background(), snap, WithNodeChunkSize(1))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -284,9 +284,9 @@ func TestBatchNodeQueries_ComposedChunkStraddle(t *testing.T) {
 // and a keyless part, each reached by a (one) slot. Until this fixture existed
 // no schema in this package declared a (one) composition at all, so nothing
 // here could exercise the address a (one) slot writes.
-func oneCompositionGraphResult(t *testing.T) (*Adapter, *GraphShape, graph.Snapshot) {
+func oneCompositionGraphResult(t *testing.T) (*Adapter, graph.Snapshot) {
 	t.Helper()
-	a, s, v, shape := setupWrite(t, "composed_one.yammm")
+	a, s, v := setupWrite(t, "composed_one.yammm")
 	snap := buildGraphResult(t, s, v, map[string][]map[string]any{
 		"Invoice": {{
 			"invoice_id": "i1",
@@ -299,7 +299,7 @@ func oneCompositionGraphResult(t *testing.T) (*Adapter, *GraphShape, graph.Snaps
 			},
 		}},
 	})
-	return a, shape, snap
+	return a, snap
 }
 
 // TestBatchNodeQueries_OneCompositionComposedKeys pins the _composed_key a
@@ -308,9 +308,9 @@ func oneCompositionGraphResult(t *testing.T) (*Adapter, *GraphShape, graph.Snaps
 // always be 0 and the child's own key identifies nothing the name does not.
 func TestBatchNodeQueries_OneCompositionComposedKeys(t *testing.T) {
 	t.Parallel()
-	a, shape, snap := oneCompositionGraphResult(t)
+	a, snap := oneCompositionGraphResult(t)
 
-	queries, err := a.BatchNodeQueries(context.Background(), snap, shape)
+	queries, err := a.BatchNodeQueries(context.Background(), snap)
 	if err != nil {
 		t.Fatal(err)
 	}

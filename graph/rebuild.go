@@ -268,3 +268,19 @@ func writtenPath(p location.Provenance) string {
 	}
 	return p.Path().String()
 }
+
+// associationTarget returns the declared target of relation, an association of
+// source under s. The reader refuses a record under any other name first.
+func associationTarget(s schema.Schema, source schema.TypeID, relation string) schema.TypeID {
+	t, _ := s.TypeByID(source)
+	rel, _ := t.Relation(relation)
+	return rel.TargetID()
+}
+
+// requiredUnder reports whether relation, an association of source under s, is
+// required, as [Graph.Add] derives an unresolved record's Required.
+func requiredUnder(s schema.Schema, source schema.TypeID, relation string) bool {
+	t, _ := s.TypeByID(source)
+	rel, _ := t.Relation(relation)
+	return !rel.IsOptional()
+}

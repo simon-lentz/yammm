@@ -36,10 +36,6 @@ func TestCoerce_AnOffsetPastEighteenHoursIsRefusedOnBothPaths(t *testing.T) {
 	types := ParamTypesForType(typ)
 	validator := instance.NewValidator(s)
 	a := New()
-	shape, res := a.ShapeForSchema(t.Context(), s)
-	if res.Err() != nil {
-		t.Fatalf("ShapeForSchema: %v", res.Err())
-	}
 	const eighteen = 18 * 60 * 60
 	atOffset := func(seconds int) time.Time {
 		return time.Date(2026, 8, 19, 12, 0, 0, 0, time.FixedZone("", seconds))
@@ -74,7 +70,7 @@ func TestCoerce_AnOffsetPastEighteenHoursIsRefusedOnBothPaths(t *testing.T) {
 		if res := g.Add(t.Context(), valid); res.Err() != nil {
 			t.Fatalf("%s = %#v: graph.Add: %v", row.prop, row.val, res.Err())
 		}
-		nodes, writeErr := a.BatchNodeQueries(t.Context(), g.Snapshot(), shape)
+		nodes, writeErr := a.BatchNodeQueries(t.Context(), g.Snapshot())
 		params, paramErr := CoerceParams(map[string]any{row.prop: row.val}, types)
 		if row.refused == "" {
 			sent := sentProp(nodes, row.prop)
@@ -130,10 +126,6 @@ func TestCoerce_AnOffsetPastEighteenHoursIsRefusedAtEveryPlace(t *testing.T) {
 	s := loadInline(t, offsetBoundPlacesSchema)
 	validator := instance.NewValidator(s)
 	a := New()
-	shape, res := a.ShapeForSchema(t.Context(), s)
-	if res.Err() != nil {
-		t.Fatalf("ShapeForSchema: %v", res.Err())
-	}
 	const (
 		atBound = "2026-08-19T12:00:00+18:00"
 		past    = "2026-08-19T12:00:00+18:01"
@@ -164,8 +156,8 @@ func TestCoerce_AnOffsetPastEighteenHoursIsRefusedAtEveryPlace(t *testing.T) {
 				t.Fatalf("%s: graph.Add: %v", row.name, res.Err())
 			}
 		}
-		_, nodeErr := a.BatchNodeQueries(t.Context(), g.Snapshot(), shape)
-		_, edgeErr := a.BatchEdgeQueries(t.Context(), g.Snapshot(), shape)
+		_, nodeErr := a.BatchNodeQueries(t.Context(), g.Snapshot())
+		_, edgeErr := a.BatchEdgeQueries(t.Context(), g.Snapshot())
 		for path, got := range map[string]struct {
 			err  error
 			want string

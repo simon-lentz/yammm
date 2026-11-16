@@ -2,8 +2,6 @@ package snapshot_test
 
 import (
 	"iter"
-	"os"
-	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -11,7 +9,6 @@ import (
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/instance"
-	"github.com/simon-lentz/yammm/internal/instancetest"
 	"github.com/simon-lentz/yammm/internal/recordtest"
 	"github.com/simon-lentz/yammm/internal/snapparts"
 	"github.com/simon-lentz/yammm/internal/snappartstest"
@@ -137,11 +134,7 @@ func TestCopies_EveryRecordNamesTheRecordsOfItsOwnSnapshot(t *testing.T) {
 	}
 	imported := func(from graph.Snapshot) graph.Snapshot {
 		t.Helper()
-		copied, res := graph.NewFromSnapshot(s, from)
-		if res.HasErrors() {
-			t.Fatal(res)
-		}
-		return copied.Snapshot()
+		return graph.NewFromSnapshot(from).Snapshot()
 	}
 	for label, snap := range map[string]graph.Snapshot{
 		"built": built, "second": g.Snapshot(), "loaded": loaded,
@@ -154,11 +147,7 @@ func TestCopies_EveryRecordNamesTheRecordsOfItsOwnSnapshot(t *testing.T) {
 func TestCopies_TwoSnapshotsOfAGraphShareNoRecord(t *testing.T) {
 	_, g := copiesGraph(t)
 	first, second := g.Snapshot(), g.Snapshot()
-	copied, res := graph.NewFromSnapshot(first.Schema(), first)
-	if res.HasErrors() {
-		t.Fatal(res)
-	}
-	imported := copied.Snapshot()
+	imported := graph.NewFromSnapshot(first).Snapshot()
 	for label, other := range map[string]graph.Snapshot{"second": second, "imported": imported} {
 		held := map[graph.Instance]bool{}
 		for d := range other.Duplicates() {
@@ -194,95 +183,6 @@ func TestCopies_ADuplicateWalksTheSameBuiltAndLoaded(t *testing.T) {
 	}
 	yammmtest.Diff(t, recordtest.Walk(built, loadedRecordsOptions()), recordtest.Walk(loaded, loadedRecordsOptions()))
 	yammmtest.Diff(t, walks(built), walks(loaded))
-}
-
-func TestImport_ACopyUnderAnotherAliasRenamesItsRecordsAndLeavesTheSourceAlone(t *testing.T) {
-	ctx := t.Context()
-	dir := t.TempDir()
-	write := func(name, body string) string {
-		t.Helper()
-		p := filepath.Join(dir, name)
-		if err := os.WriteFile(p, []byte(body), 0o600); err != nil {
-			t.Fatal(err)
-		}
-		return p
-	}
-	write("lib.yammm", "schema \"lib\"\n\npart type P {\n\tk String primary\n}\n\ntype T {\n\tid String primary\n\t*-> PS (many) P\n}\n")
-	load := func(file, alias string) schema.Schema {
-		t.Helper()
-		s, res := schema.Load(ctx, write(file, "schema \"m"+alias+"\"\n\nimport \"./lib\" as "+alias+"\n\ntype Host {\n\tid String primary\n}\n"))
-		if res.HasErrors() {
-			t.Fatal(res)
-		}
-		return s
-	}
-	xs, ys := load("x.yammm", "x"), load("y.yammm", "y")
-	g := graph.New(xs)
-	v := instance.NewValidator(xs)
-	for range 2 {
-		valid, res := v.ValidateOne(ctx, "x.T", instance.RawInstance{Properties: map[string]any{
-			"id": "t1", "ps": []any{map[string]any{"k": "p1"}},
-		}})
-		if !res.OK() {
-			t.Fatal(res)
-		}
-		_ = g.Add(ctx, valid)
-	}
-	source := g.Snapshot()
-	copied, res := graph.NewFromSnapshot(ys, source)
-	if res.HasErrors() {
-		t.Fatal(res)
-	}
-	names := func(snap graph.Snapshot) []string {
-		var out []string
-		for inst := range snap.AllInstances() {
-			out = append(out, inst.TypeName())
-			for child := range inst.Composed("PS") {
-				out = append(out, child.TypeName())
-			}
-		}
-		for d := range snap.Duplicates() {
-			out = append(out, d.Instance().TypeName(), d.Conflict().TypeName())
-		}
-		return out
-	}
-	yammmtest.Diff(t, []string{"y.T", "y.P", "y.T", "y.T"}, names(copied.Snapshot()))
-	yammmtest.Diff(t, []string{"x.T", "x.P", "x.T", "x.T"}, names(source))
-}
-
-func TestImport_ADuplicatesKeyMovesToTheNewSchemasForm(t *testing.T) {
-	ctx := t.Context()
-	load := func(keyType string) schema.Schema {
-		t.Helper()
-		s, res := schema.LoadString(ctx, "schema \"r\"\n\ntype Run {\n\tat "+keyType+" primary\n}\n", "r.yammm")
-		if res.HasErrors() {
-			t.Fatal(res)
-		}
-		return s
-	}
-	before, after := load("String"), load("Timestamp")
-	const raw = "2020-01-02T03:04:05.000+01:00"
-	inst := instancetest.Valid(t, before, "Run", map[string]any{"at": raw})
-	g := graph.New(before)
-	_ = g.Add(ctx, inst)
-	_ = g.Add(ctx, inst)
-	copied, res := graph.NewFromSnapshot(after, g.Snapshot())
-	if res.HasErrors() {
-		t.Fatal(res)
-	}
-	snap := copied.Snapshot()
-	var root string
-	for r := range snap.AllInstances() {
-		root = r.PrimaryKey().String()
-	}
-	if strings.Contains(root, raw) {
-		t.Fatalf("the root's key %s did not move", root)
-	}
-	for d := range snap.Duplicates() {
-		if got := d.Instance().PrimaryKey().String(); got != root {
-			t.Errorf("the duplicate's key = %s, want %s", got, root)
-		}
-	}
 }
 
 func TestSnapshot_EachIteratorRangesAgainAndStopsAtABreak(t *testing.T) {
@@ -359,7 +259,7 @@ func TestSnapshot_CollectionsHoldTheirDocumentedOrder(t *testing.T) {
 
 func TestZeroRoots_EachPanicNamesTheCallAndWhatIsZero(t *testing.T) {
 	ctx := t.Context()
-	s, g := copiesGraph(t)
+	_, g := copiesGraph(t)
 	built := g.Snapshot()
 	data, res := snapshot.Marshal(ctx, built)
 	if res.HasErrors() {
@@ -368,8 +268,7 @@ func TestZeroRoots_EachPanicNamesTheCallAndWhatIsZero(t *testing.T) {
 	for want, call := range map[string]func(){
 		"graph.New: zero Schema":                          func() { graph.New(schema.Schema{}) },
 		"instance.NewValidator: zero Schema":              func() { instance.NewValidator(schema.Schema{}) },
-		"graph.NewFromSnapshot: zero Snapshot":            func() { _, _ = graph.NewFromSnapshot(s, graph.Snapshot{}) },
-		"graph.NewFromSnapshot: zero Schema":              func() { _, _ = graph.NewFromSnapshot(schema.Schema{}, built) },
+		"graph.NewFromSnapshot: zero Snapshot":            func() { graph.NewFromSnapshot(graph.Snapshot{}) },
 		"graph.Add: zero ValidInstance":                   func() { g.Add(ctx, instance.ValidInstance{}) },
 		"graph.AddOrMerge: zero ValidInstance":            func() { _, _ = g.AddOrMerge(ctx, instance.ValidInstance{}) },
 		"snapshot.Marshal: zero Snapshot":                 func() { _, _ = snapshot.Marshal(ctx, graph.Snapshot{}) },
@@ -380,10 +279,6 @@ func TestZeroRoots_EachPanicNamesTheCallAndWhatIsZero(t *testing.T) {
 		if got := yammmtest.AssertPanics(t, call); got != want {
 			t.Errorf("panic = %v, want %q", got, want)
 		}
-	}
-	// A zero schema is named before a zero snapshot, as the parameters stand.
-	if got := yammmtest.AssertPanics(t, func() { _, _ = graph.NewFromSnapshot(schema.Schema{}, graph.Snapshot{}) }); got != "graph.NewFromSnapshot: zero Schema" {
-		t.Errorf("NewFromSnapshot with both arguments zero: panic = %v", got)
 	}
 }
 

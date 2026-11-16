@@ -20,12 +20,10 @@ import (
 // Timestamp, Date or UUID anywhere is inactive and every method returns its
 // input untouched.
 //
-// A primary key moves only at a door that takes one from outside the graph:
-// the import, which re-keys an instance and every reference to it under the
-// importing schema, and an address a caller looks an instance up by. The
-// rebuild takes keys as the document writes them, since the reader refuses a
-// key component its kind stores as other text. One value then has one spelling
-// in the graph, which indexes, sorts and resolves edges by it.
+// A primary key moves only at an address a caller looks an instance up by.
+// The rebuild takes keys as the document writes them, since the reader refuses
+// a key component its kind stores as other text. One value then has one
+// spelling in the graph, which indexes, sorts and resolves edges by it.
 type canonicalizer struct {
 	byType    map[schema.TypeID][]schema.Property
 	byEdge    map[edgeKey][]schema.Property
@@ -157,24 +155,8 @@ func (c *canonicalizer) address(id schema.TypeID, key string) string {
 	return c.key(id, immutable.WrapKey(components)).String()
 }
 
-// canonicalOrRaw is v in the form c stores, or v as it arrived where c has no
-// canonical form, where c cannot render it, or where nothing canonicalizes at
-// all. It compares two values that must agree; it never decides an address.
-func (c *canonicalizer) canonicalOrRaw(v immutable.Value, con schema.Constraint) any {
-	raw := v.Any()
-	if c.inactive || !value.Canonicalizes(con) {
-		return raw
-	}
-	canonical, err := value.Canonical(raw, con)
-	if err != nil {
-		return raw
-	}
-	return canonical
-}
-
 // properties rewrites an instance's properties under the declared constraints
-// of id. The import and the rebuild path both reach it, so each stores what a
-// validator stores.
+// of id, so the rebuild path stores what a validator stores.
 func (c *canonicalizer) properties(id schema.TypeID, props immutable.Properties) immutable.Properties {
 	if c.inactive {
 		return props
@@ -237,28 +219,10 @@ func (c *canonicalizer) instance(ip snapparts.Instance) snapparts.Instance {
 	return ip
 }
 
-// reinstance rewrites a freshly cloned Instance and its composed children in
-// place, as instance rewrites its parts. The clone is not yet reachable
-// from the graph, so writing it is safe; key is idempotent, so an already
-// canonical instance is unchanged.
-func (c *canonicalizer) reinstance(inst Instance) {
-	if c.inactive {
-		return
-	}
-	inst.primaryKey = c.key(inst.typeID, inst.primaryKey)
-	inst.properties = c.properties(inst.typeID, inst.properties)
-	for _, children := range inst.composed {
-		for _, child := range children {
-			c.reinstance(child)
-		}
-	}
-}
-
 // edgeProperties rewrites an edge's own properties under the constraints the
-// source type's relation declares. The import and the rebuild path both reach
-// it, so each stores what a validator stores. An
-// edge with no property holds the zero Properties on every path, because a
-// document's {} cannot say which empty value the writer held.
+// source type's relation declares, so the rebuild stores what a validator
+// stores. An edge with no property holds the zero Properties on every path,
+// because a document's {} cannot say which empty value the writer held.
 func (c *canonicalizer) edgeProperties(source schema.TypeID, relation string, props immutable.Properties) immutable.Properties {
 	if props.Len() == 0 {
 		return immutable.Properties{}

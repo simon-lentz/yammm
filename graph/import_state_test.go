@@ -32,10 +32,7 @@ type R {
 func TestImport_AnEmptySnapshotLeavesTheNextAddsClaimStanding(t *testing.T) {
 	t.Parallel()
 	s := loadEntry(t, importStateSchema)
-	g, res := graph.NewFromSnapshot(s, graph.New(s).Snapshot())
-	if res.HasErrors() {
-		t.Fatalf("import: %s", res)
-	}
+	g := graph.NewFromSnapshot(graph.New(s).Snapshot())
 	mustOK(t, g.Add(t.Context(), rootInstance(t, s, "T", "a")))
 	if att := g.Snapshot().Attestation(); !att.Values {
 		t.Errorf("attestation %+v, want Values true", att)
@@ -50,10 +47,7 @@ func TestImport_ADocumentWithNoAttestationKeepsValuesUnattested(t *testing.T) {
 		TypeID: typeIDOf(t, s, "T"), PrimaryKey: immutable.WrapKey([]any{"b"}),
 		Properties: immutable.WrapProperties(map[string]any{"id": "b"}),
 	}}})
-	g, res := graph.NewFromSnapshot(s, seed)
-	if res.HasErrors() {
-		t.Fatalf("import: %s", res)
-	}
+	g := graph.NewFromSnapshot(seed)
 	mustOK(t, g.Add(t.Context(), rootInstance(t, s, "T", "c")))
 	if att := g.Snapshot().Attestation(); att.Values {
 		t.Errorf("attestation %+v, want Values false", att)
@@ -72,7 +66,7 @@ func TestImport_AHeldTargetCountsTowardAOneAssociation(t *testing.T) {
 		"o":  map[string]any{"_target_id": "x"},
 		"m":  []any{map[string]any{"_target_id": "x"}},
 	})))
-	seeded := mustImport(t, s, g.Snapshot())
+	seeded := graph.NewFromSnapshot(g.Snapshot())
 	merged, res := seeded.AddOrMerge(ctx, instancetest.Valid(t, s, "R", map[string]any{
 		"id": "r",
 		"o":  map[string]any{"_target_id": "y"},
@@ -131,19 +125,6 @@ func TestDuplicate_KeepsItsInstancesValidatedBit(t *testing.T) {
 	}
 }
 
-// A key shorter than the importing schema's is its own refusal, not a canonical
-// position past its end.
-func TestImport_AKeyShorterThanTheImportingSchemasIsRefused(t *testing.T) {
-	t.Parallel()
-	a := loadEntry(t, "schema \"m\"\ntype T {\n id String primary\n}\n")
-	b := loadEntry(t, "schema \"m\"\ntype T {\n id String primary\n at Timestamp primary\n}\n")
-	g := graph.New(a)
-	mustOK(t, g.Add(t.Context(), rootInstance(t, a, "T", "x")))
-	if _, res := graph.NewFromSnapshot(b, g.Snapshot()); !res.HasCode(diag.E_GRAPH_INVALID_PK) {
-		t.Errorf("%s, want %s", res, diag.E_GRAPH_INVALID_PK)
-	}
-}
-
 // A component no constraint renders stays as written, and a component after it
 // is still held to the text its kind stores: the reader refuses another
 // spelling of it.
@@ -167,100 +148,5 @@ func TestLoad_JudgesTheKeyComponentsAfterOneItCannotRender(t *testing.T) {
 	}
 	if _, res := snapshot.Load(t.Context(), snappartstest.Document(t, s, parts(upper)), s); !res.HasCode(diag.E_SNAPSHOT_MALFORMED) {
 		t.Errorf("a second component in upper case: %s; want %s", res, diag.E_SNAPSHOT_MALFORMED)
-	}
-}
-
-// Each pair below reads one snapshot under another schema, and the structure rules
-// judge what that schema makes of it.
-func TestImport_StructureRulesJudgeTheImportingSchemasFacts(t *testing.T) {
-	t.Parallel()
-	const ts1, ts2, ts3 = "2020-01-02T03:04:05.000Z", "2020-01-02T03:04:05.00Z", "2020-01-02T03:04:05Z"
-	for name, c := range map[string]struct {
-		from, to string
-		rows     []map[string]any
-		root     string
-		want     []diag.Code
-		absent   []diag.Code
-	}{
-		"siblings of a type the slot does not hold are no duplicate": {
-			from:   "schema \"m\"\npart type P {\n k String primary\n}\ntype R {\n id String primary\n *-> K (_:many) P\n}\n",
-			to:     "schema \"m\"\npart type P {\n k Timestamp primary\n}\npart type Q {\n k Timestamp primary\n}\ntype R {\n id String primary\n *-> K (_:many) Q\n}\n",
-			root:   "R",
-			rows:   []map[string]any{{"id": "r", "k": []any{map[string]any{"k": ts1}, map[string]any{"k": ts3}}}},
-			absent: []diag.Code{diag.E_DUPLICATE_COMPOSED_PK},
-		},
-		"two sound roots after a refused one at their address are a duplicate": {
-			from: "schema \"m\"\ntype X {\n id String primary\n alt String\n}\n",
-			to:   "schema \"m\"\ntype X {\n id String\n alt Timestamp primary\n}\n",
-			root: "X",
-			rows: []map[string]any{{"id": ts1}, {"id": ts2, "alt": ts2}, {"id": ts3, "alt": ts3}},
-			want: []diag.Code{diag.E_GRAPH_INVALID_PK, diag.E_DUPLICATE_PK},
-		},
-		"a refused root's records are no count under a (one)": {
-			from:   "schema \"m\"\ntype T {\n id String primary\n}\ntype X {\n id String primary\n alt String\n --> M (_:many) T\n}\n",
-			to:     "schema \"m\"\ntype T {\n id String primary\n}\ntype X {\n id String\n alt String primary\n --> M (_:one) T\n}\n",
-			root:   "X",
-			rows:   []map[string]any{{"id": "x", "m": []any{map[string]any{"_target_id": "p"}, map[string]any{"_target_id": "q"}}}},
-			want:   []diag.Code{diag.E_GRAPH_INVALID_PK},
-			absent: []diag.Code{diag.E_GRAPH_CARDINALITY},
-		},
-		"an empty record under a name the schema makes a composition": {
-			from: "schema \"m\"\ntype T {\n id String primary\n}\npart type P {\n k String primary\n}\ntype X {\n id String primary\n --> M (one:many) T\n}\n",
-			to:   "schema \"m\"\ntype T {\n id String primary\n}\npart type P {\n k String primary\n}\ntype X {\n id String primary\n *-> M (_:many) P\n}\n",
-			root: "X",
-			rows: []map[string]any{{"id": "x", "m": []any{}}},
-			want: []diag.Code{diag.E_GRAPH_UNKNOWN_RELATION},
-		},
-	} {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-			ctx := t.Context()
-			from, to := loadEntry(t, c.from), loadEntry(t, c.to)
-			g := graph.New(from)
-			for _, row := range c.rows {
-				mustOK(t, g.Add(ctx, instancetest.Valid(t, from, c.root, row)))
-			}
-			_, res := graph.NewFromSnapshot(to, g.Snapshot())
-			if !res.HasErrors() {
-				t.Fatal("the import is accepted")
-			}
-			for _, code := range c.want {
-				if !res.HasCode(code) {
-					t.Errorf("%s, want %s", res, code)
-				}
-			}
-			for _, code := range c.absent {
-				if res.HasCode(code) {
-					t.Errorf("%s, want no %s", res, code)
-				}
-			}
-		})
-	}
-}
-
-// The import's cardinality refusal names the source's key, as the merge's does.
-func TestImport_ACardinalityRefusalNamesTheSourceKey(t *testing.T) {
-	t.Parallel()
-	ctx := t.Context()
-	from := loadEntry(t, "schema \"m\"\ntype T {\n id String primary\n}\ntype X {\n id String primary\n --> M (_:many) T\n}\n")
-	to := loadEntry(t, "schema \"m\"\ntype T {\n id String primary\n}\ntype X {\n id String primary\n --> M (_:one) T\n}\n")
-	g := graph.New(from)
-	mustOK(t, g.Add(ctx, instancetest.Valid(t, from, "X", map[string]any{
-		"id": "x", "m": []any{map[string]any{"_target_id": "p"}, map[string]any{"_target_id": "q"}},
-	})))
-	_, res := graph.NewFromSnapshot(to, g.Snapshot())
-	var keys []string
-	for issue := range res.Issues() {
-		if issue.Code() != diag.E_GRAPH_CARDINALITY {
-			continue
-		}
-		for _, d := range issue.Details() {
-			if d.Key == diag.DetailKeyPrimaryKey {
-				keys = append(keys, d.Value)
-			}
-		}
-	}
-	if !slices.Equal(keys, []string{`["x"]`}) {
-		t.Errorf("E_GRAPH_CARDINALITY primary keys %q, want [[\"x\"]]: %s", keys, res)
 	}
 }

@@ -75,7 +75,7 @@ func TestInvalidIdentifier_LabelSiteCarriesTheSameContract(t *testing.T) {
 	if s.IsZero() {
 		t.Fatalf("load: %s", lres)
 	}
-	_, res := New(WithLabelPrefix("9")).ShapeForSchema(ctx, s)
+	_, res := New(WithLabelPrefix("9")).shapeFor(ctx, s)
 
 	got := detailsOf(t, res, E_NEO4J_INVALID_IDENTIFIER)
 	if got == nil {

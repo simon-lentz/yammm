@@ -81,9 +81,12 @@
 //
 // # Alternative Constructors
 //
-// [NewFromSnapshot] creates a [Graph] pre-populated from a [Snapshot],
-// for incremental building on top of persisted or previously-constructed
-// state; new Add calls resolve against the imported instances.
+// [NewFromSnapshot] creates a [Graph] over a [Snapshot]'s own schema,
+// pre-populated from it, for incremental building on top of persisted or
+// previously-constructed state; new Add calls resolve against the imported
+// instances. Every constructor of a Snapshot holds it to the structural facts
+// below under its schema, so the import installs the records as they stand and
+// refuses nothing.
 //
 // [github.com/simon-lentz/yammm/snapshot.Load] constructs a [Snapshot] from a .ys
 // document. It holds the document to the structural facts below and refuses a
@@ -113,19 +116,18 @@
 // A schema where an imported type composes a part type from a further import
 // therefore loads, validates and builds.
 //
-// No lookup in this package takes a rendered type name. A diagnostic that compares two
-// identities prints each whole, so two that render alike never read "X does not
-// match X".
+// No lookup in this package takes a rendered type name.
 //
 // # Root type eligibility
 //
-// A root instance's type must satisfy three members. [NewFromSnapshot] for a
-// snapshot of another schema and the snapshot reader apply all three. [Graph.Add]
+// A root instance's type must satisfy three members. The snapshot reader applies
+// all three. [Graph.Add]
 // takes an instance a validator of its own load built, and that validator
 // refuses an abstract or a part type at a root, so Add checks the key and the
 // part rule, which a child read out of [instance.ValidInstance.Composed] can
-// still break. [Graph.AddOrMerge] runs the code [Graph.Add] runs, and a snapshot of
-// the importing schema was held to them where it was built. A type is
+// still break. [Graph.AddOrMerge] runs the code [Graph.Add] runs, and
+// [NewFromSnapshot] takes a snapshot that was held to them where it was built. A
+// type is
 // ineligible when it
 //
 //   - is abstract, because an abstract type has no instances;
@@ -154,12 +156,7 @@
 // # Structural facts
 //
 // [Graph.Add] never builds a snapshot that breaks the facts below, and the
-// snapshot package's reader refuses a document that does. [NewFromSnapshot],
-// over a snapshot bound to another schema, derives its records again, refusing
-// an "empty" record under a (one) association, and refuses one that breaks any
-// other fact, save an "absent" record under a relation that is no association of
-// that schema, which it drops, and a Timestamp, Date or UUID key component that
-// schema stores as other text, which it moves to that text.
+// snapshot package's reader refuses a document that does.
 // The facts are the whole promise: a shape they do not name, such as a
 // property value its constraint refuses, can pass the reader. A type that
 // cannot hold a root is one break, however many positions name it, and a root of
@@ -223,26 +220,8 @@
 // no spelling for some, and its doc names them.
 //
 // Whether an association is required is read from the schema, never taken from
-// a constructor's input:
-// [UnresolvedEdge.Required] is derived by every constructor, so a snapshot
-// imported under a schema that relaxes an association reports it under that
-// schema's rule.
-//
-// A snapshot bound to the importing schema already holds to every fact, so
-// the import walks only a snapshot built against another schema. That import
-// derives the records again, as [Graph.Add] derives them from the snapshot's
-// data under the importing schema. A "target_missing" record whose target the
-// snapshot holds becomes an edge. An "empty" record under a (one) association
-// is refused, as the validator refuses an empty list there. Any other "absent"
-// or "empty" record under an association the schema makes optional, and an
-// "absent" record under a relation that is no association of it, is dropped. A
-// root holding no edge and no record under an association the schema makes
-// required gains an "absent" record there. A snapshot records nothing for an
-// empty list under an optional association, so that gained record reads
-// "absent" where [Graph.Add], given the list, records "empty" under a (many)
-// association, and the validator refuses the list under a (one) one. A
-// "target_missing" record names a target as an edge does, so under an
-// association the schema retargets both are refused.
+// a constructor's input: [UnresolvedEdge.Required] is derived by every
+// constructor from the snapshot's schema.
 //
 // # Build Then Commit
 //
@@ -376,8 +355,7 @@
 // was at entry. One instant at two offsets is two addresses.
 //
 // A part type can declare a primary key, and a composed child carries it. A
-// validator, the snapshot package's reader and [NewFromSnapshot] over a snapshot of
-// another schema compare it to tell siblings apart. It is not an address: a
+// validator and the snapshot package's reader compare it to tell siblings apart. It is not an address: a
 // part instance is found through its parent composition, so
 // [Snapshot.InstanceByKey] never returns one and this package mints none; a
 // store that must give each part node an identity derives it, and
@@ -389,7 +367,7 @@
 //
 //   - [diag.Result.HasFatal]: context cancellation (E_CONTEXT_CANCELLED)
 //   - [diag.Result.HasErrors]: any Fatal or Error issue, so a semantic failure
-//     (duplicate PK, type not found) too
+//     (a duplicate PK) too
 //   - [diag.Result.OK]: success (may have warnings)
 //
 // Programmer errors panic: a nil receiver at a method that adds or checks, a
@@ -417,36 +395,9 @@
 //
 // [Graph.Check] emits E_UNRESOLVED_REQUIRED and E_CONTEXT_CANCELLED.
 //
-// The import judges what no validator of its schema judged. It reports each
-// broken structural fact at Error under one of these codes:
-//
-//   - E_GRAPH_TYPE_NOT_FOUND: a type identity the snapshot states does not resolve
-//   - E_GRAPH_MISSING_PK, E_GRAPH_INVALID_COMPOSITION, E_GRAPH_ABSTRACT_TYPE: a
-//     denoted type breaks the root rule, judged in that order
-//   - E_GRAPH_INVALID_COMPOSITION: a composed child is not an instance of its
-//     relation's target type
-//   - E_GRAPH_INVALID_PK: a keyed instance's stored key is empty or has the wrong
-//     arity, a key property is absent or null, a component disagrees with its key
-//     property, an association target key has the wrong arity, or a composed
-//     child whose type declares no primary key stores a key
-//   - E_DUPLICATE_PK: two roots of a type that can hold one, whose stored keys the
-//     key rule accepts, stand at one canonical address
-//   - E_GRAPH_CARDINALITY: a (one) association holds several records
-//   - E_DUPLICATE_EDGE: an edge and a "target_missing" record, or two such
-//     records, of one source under a (many) association name one canonical
-//     target key; two edges there would need two roots at one address
-//   - E_EDGE_SHAPE_MISMATCH: a (one) association holds an "empty" record
-//   - E_GRAPH_UNKNOWN_RELATION: an edge, a record or composed children stand under
-//     a name the type does not declare as that kind of relation, or an edge or a
-//     "target_missing" record targets another type than its association declares
-//   - E_UNKNOWN_FIELD, E_UNKNOWN_EDGE_FIELD: a property or edge property name
-//     the type or association does not declare
-//   - E_DUPLICATE_COMPOSED_PK: a (one) composition holds several children, or two
-//     children of one keyed (many) slot share a canonical key
-//
 // The snapshot package's reader reports a broken fact under its own codes, such as
-// E_SNAPSHOT_DANGLING_REFERENCE and E_SNAPSHOT_INVALID_ROOT, or under a code above,
-// such as E_GRAPH_CARDINALITY.
+// E_SNAPSHOT_DANGLING_REFERENCE and E_SNAPSHOT_INVALID_ROOT, or under a graph
+// code, such as E_GRAPH_CARDINALITY and E_GRAPH_UNKNOWN_RELATION.
 //
 // # Diagnostics Lifecycle
 //

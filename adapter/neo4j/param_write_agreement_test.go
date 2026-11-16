@@ -80,10 +80,6 @@ func TestCoerceParams_SendsWhatTheWritePathSendsForTheValidatedValue(t *testing.
 	typ, _ := s.Type("T")
 	validator := instance.NewValidator(s)
 	a := New()
-	shape, res := a.ShapeForSchema(t.Context(), s)
-	if res.Err() != nil {
-		t.Fatalf("ShapeForSchema: %v", res.Err())
-	}
 	types := ParamTypesForType(typ)
 
 	type (
@@ -149,7 +145,7 @@ func TestCoerceParams_SendsWhatTheWritePathSendsForTheValidatedValue(t *testing.
 			if res := g.Add(t.Context(), valid); res.Err() != nil {
 				t.Fatalf("%s = %#v: graph.Add: %v", prop, v, res.Err())
 			}
-			nodes, err := a.BatchNodeQueries(t.Context(), g.Snapshot(), shape)
+			nodes, err := a.BatchNodeQueries(t.Context(), g.Snapshot())
 			if err != nil {
 				t.Errorf("%s = %#v: the write path refuses the validated instance: %v", prop, v, err)
 				continue

@@ -189,10 +189,6 @@ part type Note {
 		t.Fatalf("load schema: %s", res)
 	}
 	a := newAdapter(t, ctx)
-	shape, sres := a.ShapeForSchema(ctx, s)
-	if sres.HasErrors() {
-		t.Fatalf("shape: %s", sres)
-	}
 	v := instance.NewValidator(s)
 
 	writeOrder := func(sections []any) {
@@ -208,7 +204,7 @@ part type Note {
 		if ares := g.Add(ctx, valid); ares.Err() != nil {
 			t.Fatalf("graph.Add: %v", ares.Err())
 		}
-		queries, err := a.BatchNodeQueries(ctx, g.Snapshot(), shape)
+		queries, err := a.BatchNodeQueries(ctx, g.Snapshot())
 		if err != nil {
 			t.Fatalf("BatchNodeQueries: %v", err)
 		}

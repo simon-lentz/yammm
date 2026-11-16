@@ -2,11 +2,11 @@ package neo4j
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"strings"
 
 	"github.com/simon-lentz/yammm/diag"
+	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -27,63 +27,21 @@ type nodeShape struct {
 	keyConstraints map[string]schema.Constraint
 }
 
-// GraphShape is the input [Adapter.BatchNodeQueries] and
-// [Adapter.BatchEdgeQueries] take for a schema: each non-abstract type's label,
-// primary keys and their constraints, and @writeOnce keys, with the schema object
-// they came from. [Adapter.ShapeForSchema] builds it. No field is exported,
-// so a caller passes it on and cannot change what it holds.
-type GraphShape struct {
-	// types is keyed by [schema.TypeID] rather than by rendered name: a name is a
-	// rendering under one schema, and a snapshot's instances carry the identity.
+// graphShape is each non-abstract closure type's [nodeShape], keyed by
+// [schema.TypeID]: a name is a rendering under one schema, and a snapshot's
+// instances carry the identity.
+type graphShape struct {
 	types map[schema.TypeID]nodeShape
-
-	// schema is the object [Adapter.ShapeForSchema] built this shape from. Its
-	// zero value means the shape came from somewhere else.
-	//
-	// The write path requires it to be the snapshot's own schema object, because
-	// another load, even of one source name, can declare a key another way. A
-	// merge key would then reach the driver as a string while the SAME property
-	// is coerced from the snapshot's schema to a native date. The MERGE matches its
-	// key against the stored property, so it matches nothing: each re-ingestion
-	// creates a duplicate node, or fails where a uniqueness constraint holds the
-	// key. So the object is compared, and not merely present.
-	schema schema.Schema
 }
 
-// requireShapeFor refuses a nil [GraphShape], one [Adapter.ShapeForSchema] did not
-// build, and one built from any object but the snapshot's schema. Another load of
-// one source is another object.
-func requireShapeFor(shapes *GraphShape, s schema.Schema) error {
-	switch {
-	case shapes == nil:
-		return errors.New("neo4j adapter: nil GraphShape; build one with Adapter.ShapeForSchema")
-	case shapes.schema.IsZero():
-		return errors.New("neo4j adapter: GraphShape was not built by Adapter.ShapeForSchema; build one with Adapter.ShapeForSchema")
-	case s.IsZero():
-		return errors.New("neo4j adapter: snapshot carries no schema to check the GraphShape against")
-	case shapes.schema != s:
-		return fmt.Errorf("neo4j adapter: GraphShape was built from schema %s but the snapshot carries schema %s, and another load of one source is another schema",
-			shapes.schema.SourceID(), s.SourceID())
-	}
-	return nil
-}
-
-// ShapeForSchema converts a yammm schema into a [GraphShape] describing
-// the Neo4j node structure for each non-abstract type across the WHOLE
-// import closure — [Adapter.Label] labels each member's types from that
-// member's own schema name, so an association or composition reaching an imported
-// type finds its shape without a hand-built merge.
-//
-// If validation errors are found, returns (nil, result) where result contains
-// [E_NEO4J_INVALID_IDENTIFIER] or [E_NEO4J_LABEL_COLLISION] issues. Two types of the
-// closure that render one label draw the collision when the label is valid, and the
-// identifier issue when it is not.
-func (a *Adapter) ShapeForSchema(ctx context.Context, s schema.Schema) (*GraphShape, diag.Result) {
+// shapeFor derives the [graphShape] of every non-abstract type across s's whole
+// import closure, each labeled from its own member's schema name by [Adapter.Label].
+// A result with errors holds [E_NEO4J_INVALID_IDENTIFIER] or
+// [E_NEO4J_LABEL_COLLISION] issues: two closure types that render one label draw
+// the collision when the label is valid, and the identifier issue when it is not.
+func (a *Adapter) shapeFor(ctx context.Context, s schema.Schema) (*graphShape, diag.Result) {
 	collector := diag.NewCollector(0)
-	shape := &GraphShape{
-		types:  make(map[schema.TypeID]nodeShape),
-		schema: s,
-	}
+	shape := &graphShape{types: make(map[schema.TypeID]nodeShape)}
 
 	// A load refuses a repeated schema name (E_DUPLICATE_SCHEMA), but a name
 	// holding the separator composes one label from two pairs, as schema "a"
@@ -105,8 +63,21 @@ func (a *Adapter) ShapeForSchema(ctx context.Context, s schema.Schema) (*GraphSh
 	return shape, result
 }
 
+// writeShape refuses a zero snapshot with [ErrZeroSnapshot], whose schema no
+// shape can be derived from, and otherwise returns its schema's shape under a.
+func (a *Adapter) writeShape(ctx context.Context, snap graph.Snapshot) (*graphShape, error) {
+	if snap.IsZero() {
+		return nil, ErrZeroSnapshot
+	}
+	shapes, res := a.shapeFor(ctx, snap.Schema())
+	if res.HasErrors() {
+		return nil, fmt.Errorf("label the schema's types: %w", res.Err())
+	}
+	return shapes, nil
+}
+
 // recordShape computes and stores one type's [nodeShape].
-func (a *Adapter) recordShape(shape *GraphShape, t schema.Type, label string) {
+func (a *Adapter) recordShape(shape *graphShape, t schema.Type, label string) {
 	// Extract primary keys, keeping each one's constraint so the write path
 	// can coerce the value the MERGE matches on.
 	var primary []string

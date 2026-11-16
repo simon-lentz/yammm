@@ -95,7 +95,7 @@ func TestHeldForm_ANilSliceOrMapHasTheFormNil(t *testing.T) {
 // of a value the property holds.
 func TestWrite_AValueThatHoldsNoneAtANestedCollectionIsNil(t *testing.T) {
 	t.Parallel()
-	_, s, _, _ := setupWrite(t, "nested_collection.yammm")
+	_, s, _ := setupWrite(t, "nested_collection.yammm")
 	typ, ok := s.Type("Grid")
 	if !ok {
 		t.Fatal("no type Grid")
@@ -168,18 +168,11 @@ func TestCoerceRelProps_AnUndeclaredValueThatHoldsNoneIsNil(t *testing.T) {
 	}
 }
 
-// A key that is a nil slice or a nil map holds none: it is a nil key, as a nil
-// one is. A pointer at a key is a value of no form, a nil one too, and the
-// key's constraint refuses it.
-func TestExtractKeyProps_AKeyThatHoldsNoneIsANilKey(t *testing.T) {
+// A pointer at a key is a value of no form, a nil one too, and the key's
+// constraint refuses it.
+func TestExtractKeyProps_APointerAtAKeyIsRefusedByItsConstraint(t *testing.T) {
 	t.Parallel()
 	shape := &nodeShape{label: "T", primaryKeys: []string{"id"}, keyConstraints: map[string]schema.Constraint{"id": schema.NewStringConstraint()}}
-	for name, none := range map[string]any{"nil": nil, "a nil slice": []any(nil), "a nil map": map[string]any(nil)} {
-		_, err := extractKeyProps(immutable.WrapProperties(map[string]any{"id": none}), shape)
-		if err == nil || !strings.Contains(err.Error(), "nil primary key(s): [id]") {
-			t.Errorf("%s: extractKeyProps error = %v; want a nil key", name, err)
-		}
-	}
 	var nilString *string
 	text := "x"
 	for name, p := range map[string]any{"a nil pointer": nilString, "a pointer to a nil pointer": &nilString, "a pointer to a string": &text} {

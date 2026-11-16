@@ -9,14 +9,14 @@ import (
 	"github.com/simon-lentz/yammm/schema"
 )
 
-func TestShapeForSchema_Basic(t *testing.T) {
+func TestShapeFor_Basic(t *testing.T) {
 	t.Parallel()
 	s := loadSchema(t, "basic.yammm")
 	a := New()
 
-	shape, result := a.ShapeForSchema(context.Background(), s)
+	shape, result := a.shapeFor(context.Background(), s)
 	if err := result.Err(); err != nil {
-		t.Fatalf("ShapeForSchema failed: %v", err)
+		t.Fatalf("shapeFor: %v", err)
 	}
 
 	ns, ok := shape.types[typeID(t, s, "Entity")]
@@ -31,14 +31,14 @@ func TestShapeForSchema_Basic(t *testing.T) {
 	}
 }
 
-func TestShapeForSchema_CompositePK(t *testing.T) {
+func TestShapeFor_CompositePK(t *testing.T) {
 	t.Parallel()
 	s := loadSchema(t, "composite_pk.yammm")
 	a := New()
 
-	shape, result := a.ShapeForSchema(context.Background(), s)
+	shape, result := a.shapeFor(context.Background(), s)
 	if err := result.Err(); err != nil {
-		t.Fatalf("ShapeForSchema failed: %v", err)
+		t.Fatalf("shapeFor: %v", err)
 	}
 
 	ns := shape.types[typeID(t, s, "Record")]
@@ -47,14 +47,14 @@ func TestShapeForSchema_CompositePK(t *testing.T) {
 	}
 }
 
-func TestShapeForSchema_SkipsAbstract(t *testing.T) {
+func TestShapeFor_SkipsAbstract(t *testing.T) {
 	t.Parallel()
 	s := loadSchema(t, "abstract_types.yammm")
 	a := New()
 
-	shape, result := a.ShapeForSchema(context.Background(), s)
+	shape, result := a.shapeFor(context.Background(), s)
 	if err := result.Err(); err != nil {
-		t.Fatalf("ShapeForSchema failed: %v", err)
+		t.Fatalf("shapeFor: %v", err)
 	}
 
 	if _, ok := shape.types[typeID(t, s, "Base")]; ok {
@@ -65,10 +65,10 @@ func TestShapeForSchema_SkipsAbstract(t *testing.T) {
 	}
 }
 
-// TestShapeForSchema_ImportedPartThroughClosure pins the closure walk: a part
+// TestShapeFor_ImportedPartThroughClosure pins the closure walk: a part
 // type declared by an imported schema gets a shape under the DECLARING
 // schema's label, so the composition phases can render it.
-func TestShapeForSchema_ImportedPartThroughClosure(t *testing.T) {
+func TestShapeFor_ImportedPartThroughClosure(t *testing.T) {
 	t.Parallel()
 	const entry = `schema "entry"
 
@@ -97,9 +97,9 @@ part type Item {
 		t.Fatal("base.Item did not resolve through the entry schema")
 	}
 
-	shape, result := New().ShapeForSchema(context.Background(), s)
+	shape, result := New().shapeFor(context.Background(), s)
 	if err := result.Err(); err != nil {
-		t.Fatalf("ShapeForSchema failed: %v", err)
+		t.Fatalf("shapeFor: %v", err)
 	}
 	ns, ok := shape.types[item.ID()]
 	if !ok {
@@ -110,14 +110,14 @@ part type Item {
 	}
 }
 
-func TestShapeForSchema_PartTypes(t *testing.T) {
+func TestShapeFor_PartTypes(t *testing.T) {
 	t.Parallel()
 	s := loadSchema(t, "part_types.yammm")
 	a := New()
 
-	shape, result := a.ShapeForSchema(context.Background(), s)
+	shape, result := a.shapeFor(context.Background(), s)
 	if err := result.Err(); err != nil {
-		t.Fatalf("ShapeForSchema failed: %v", err)
+		t.Fatalf("shapeFor: %v", err)
 	}
 
 	if _, ok := shape.types[typeID(t, s, "LineItem")]; !ok {
@@ -128,14 +128,14 @@ func TestShapeForSchema_PartTypes(t *testing.T) {
 	}
 }
 
-func TestShapeForSchema_Inheritance(t *testing.T) {
+func TestShapeFor_Inheritance(t *testing.T) {
 	t.Parallel()
 	s := loadSchema(t, "inheritance.yammm")
 	a := New()
 
-	shape, result := a.ShapeForSchema(context.Background(), s)
+	shape, result := a.shapeFor(context.Background(), s)
 	if err := result.Err(); err != nil {
-		t.Fatalf("ShapeForSchema failed: %v", err)
+		t.Fatalf("shapeFor: %v", err)
 	}
 
 	// Tracked is abstract — should not appear.
@@ -148,14 +148,14 @@ func TestShapeForSchema_Inheritance(t *testing.T) {
 	}
 }
 
-func TestShapeForSchema_MultipleTypes(t *testing.T) {
+func TestShapeFor_MultipleTypes(t *testing.T) {
 	t.Parallel()
 	s := loadSchema(t, "multiple_types.yammm")
 	a := New()
 
-	shape, result := a.ShapeForSchema(context.Background(), s)
+	shape, result := a.shapeFor(context.Background(), s)
 	if err := result.Err(); err != nil {
-		t.Fatalf("ShapeForSchema failed: %v", err)
+		t.Fatalf("shapeFor: %v", err)
 	}
 
 	widget, ok := shape.types[typeID(t, s, "Widget")]
@@ -175,14 +175,14 @@ func TestShapeForSchema_MultipleTypes(t *testing.T) {
 	}
 }
 
-func TestShapeForSchema_CustomSeparator(t *testing.T) {
+func TestShapeFor_CustomSeparator(t *testing.T) {
 	t.Parallel()
 	s := loadSchema(t, "basic.yammm")
 	a := New(WithLabelSeparator("_"))
 
-	shape, result := a.ShapeForSchema(context.Background(), s)
+	shape, result := a.shapeFor(context.Background(), s)
 	if err := result.Err(); err != nil {
-		t.Fatalf("ShapeForSchema failed: %v", err)
+		t.Fatalf("shapeFor: %v", err)
 	}
 
 	ns := shape.types[typeID(t, s, "Entity")]

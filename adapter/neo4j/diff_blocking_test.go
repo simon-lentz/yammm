@@ -87,7 +87,7 @@ func TestDiffConstraints_OnlyARangeNodeIndexBlocks(t *testing.T) {
 func TestDiffConstraints_FulltextOnASolePrimaryKeyConverges(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	a, s, _, _ := setupWrite(t, "fulltext_pk.yammm")
+	a, s, _ := setupWrite(t, "fulltext_pk.yammm")
 
 	indexes, ir := a.IndexesStructured(ctx, s)
 	if ir.HasErrors() {

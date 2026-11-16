@@ -72,8 +72,7 @@
 // [Read] applies Classify to every json.Number in a decoded value, at any depth
 // of its lists and string-keyed maps, and [ReadAt] does so at the position a
 // constraint describes: at a Float, and at a Vector element, a number literal is
-// its nearest float64. The .ys reader, graph.ParseKey and graph.NewFromSnapshot
-// under another schema read a number by them. The CLI's JSON reader,
+// its nearest float64. The .ys reader and graph.ParseKey read a number by them. The CLI's JSON reader,
 // cmd/yammm/internal/jsondata, reads a number by its own rule, which keeps -0 a
 // json.Number for the validator to read at the property's kind.
 //

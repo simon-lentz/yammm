@@ -138,7 +138,7 @@ func (v *Validator) validateComposition(
 
 	// A composition always arrives as an array, so its multiplicity is not
 	// settled by the shape the way a (one) association's object form is. A
-	// slot given more children than it holds draws the code the graph import
+	// slot given more children than it holds draws the code the .ys reader
 	// raises for the same fact.
 	if !rel.IsMany() && len(arr) > 1 {
 		issue := diag.NewIssue(

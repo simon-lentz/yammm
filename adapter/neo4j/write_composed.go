@@ -137,7 +137,7 @@ type createGroup struct {
 // children: every instance of a root type whose composition closure is
 // non-empty emits a replace row, so a write with zero children still
 // deletes stale ones. Create groups run parent-first (depth ascending).
-func composedQueries(ctx context.Context, result graph.Snapshot, shapes *GraphShape, cfg *writeConfig) ([]*BatchNodeQuery, error) {
+func composedQueries(ctx context.Context, result graph.Snapshot, shapes *graphShape, cfg *writeConfig) ([]*BatchNodeQuery, error) {
 	s := result.Schema()
 	var replace []*BatchNodeQuery
 
@@ -159,17 +159,10 @@ func composedQueries(ctx context.Context, result graph.Snapshot, shapes *GraphSh
 			continue
 		}
 
-		rootShape, ok := shapes.types[typeID]
-		if !ok {
-			return nil, fmt.Errorf("no shape for type %s", typeID)
-		}
+		rootShape := shapes.types[typeID]
 		partLabels := make([]string, len(partIDs))
 		for i, id := range partIDs {
-			partShape, ok := shapes.types[id]
-			if !ok {
-				return nil, fmt.Errorf("no shape for part type %s (composed under %s)", id, typeID)
-			}
-			partLabels[i] = partShape.label
+			partLabels[i] = shapes.types[id].label
 		}
 
 		instances := slices.Collect(result.InstancesOf(typeID))
@@ -255,7 +248,7 @@ func composedQueries(ctx context.Context, result graph.Snapshot, shapes *GraphSh
 // create row per child into its (depth, parent, relation, part) group.
 func collectCreateRows(
 	s schema.Schema,
-	shapes *GraphShape,
+	shapes *graphShape,
 	rootShape *nodeShape,
 	rootType schema.Type,
 	root graph.Instance,
@@ -286,10 +279,7 @@ func collectCreateRows(
 			if !ok {
 				return fmt.Errorf("composition %q: target %s not in schema", relName, rel.TargetID())
 			}
-			partShape, ok := shapes.types[rel.TargetID()]
-			if !ok {
-				return fmt.Errorf("no shape for part type %s", rel.TargetID())
-			}
+			partShape := shapes.types[rel.TargetID()]
 
 			i := -1
 			for child := range parent.Composed(relName) {
@@ -339,11 +329,7 @@ func collectCreateRows(
 					}
 					row["_parent_keys"] = rootShape.primaryKeys
 				} else {
-					parentShape, ok := shapes.types[parent.TypeID()]
-					if !ok {
-						return fmt.Errorf("no shape for composed parent type %s", parent.TypeID())
-					}
-					key.parentLabel = parentShape.label
+					key.parentLabel = shapes.types[parent.TypeID()].label
 					key.parentByCK = true
 					row["parent_ck"] = parentCK
 				}

@@ -358,47 +358,6 @@ func TestMarshal_WritesEverySpellingOfAKeyAsItsKindStoresIt(t *testing.T) {
 	}
 }
 
-// The import re-keys a String key under a schema that makes it a UUID, to the
-// text a UUID stores, so a document it writes is one the reader accepts.
-func TestNewFromSnapshot_RekeysAStringKeyToTheTextAUUIDStores(t *testing.T) {
-	t.Parallel()
-	load := func(kind string) schema.Schema {
-		s, res := schema.LoadString(t.Context(), "schema \"rekey\"\n\ntype R {\n\tid "+kind+" primary\n}\n", "rekey.yammm")
-		if res.HasErrors() {
-			t.Fatalf("load schema: %s", res)
-		}
-		return s
-	}
-	before, after := load("String"), load("UUID")
-	upper := strings.ToUpper(rootUUID)
-	g := graph.New(before)
-	if r := g.Add(t.Context(), instancetest.Valid(t, before, "R", map[string]any{"id": upper})); !r.OK() {
-		t.Fatalf("add: %s", r)
-	}
-	data, mr := snapshot.Marshal(t.Context(), g.Snapshot())
-	if mr.HasErrors() {
-		t.Fatalf("marshal: %s", mr)
-	}
-	snap, res := snapshot.Load(t.Context(), data, before)
-	if res.HasErrors() {
-		t.Fatalf("load: %s", res)
-	}
-	imported, ires := graph.NewFromSnapshot(after, snap)
-	if ires.HasErrors() {
-		t.Fatalf("import: %s", ires)
-	}
-	out, mr := snapshot.Marshal(t.Context(), imported.Snapshot())
-	if mr.HasErrors() {
-		t.Fatalf("marshal the import: %s", mr)
-	}
-	if !bytes.Contains(out, []byte(`"key":["`+rootUUID+`"]`)) {
-		t.Errorf("the import wrote no key in the text a UUID stores:\n%s", out)
-	}
-	if _, res := snapshot.Load(t.Context(), out, after); res.HasErrors() {
-		t.Errorf("the reader refuses what the import wrote: %s", res)
-	}
-}
-
 // A duplicate's conflict key is a key position of its own: a component its
 // kind stores as other text there is a malformation beside any other break of
 // the record, a parent the record states or another of its keys respelled.

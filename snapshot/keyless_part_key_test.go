@@ -228,11 +228,7 @@ func TestPartKey_EverySnapshotLoadsBack(t *testing.T) {
 					t.Errorf("%s: accepted a key its part cannot hold", at)
 				}
 				snaps := map[string]graph.Snapshot{name: b.snap}
-				if g, r := graph.NewFromSnapshot(s, b.snap); r.OK() {
-					snaps["NewFromSnapshot of "+name] = g.Snapshot()
-				} else {
-					t.Errorf("%s: NewFromSnapshot refused the snapshot: %s", at, r)
-				}
+				snaps["NewFromSnapshot of "+name] = graph.NewFromSnapshot(b.snap).Snapshot()
 				for from, snap := range snaps {
 					data, mr := snapshot.Marshal(ctx, snap)
 					if !mr.OK() {

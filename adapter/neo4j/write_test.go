@@ -10,17 +10,15 @@ import (
 	"testing"
 	"time"
 
-	"github.com/simon-lentz/yammm/internal/snapparts"
-
 	"github.com/neo4j/neo4j-go-driver/v6/neo4j/dbtype"
 	"github.com/simon-lentz/yammm/immutable"
-	"github.com/simon-lentz/yammm/internal/snappartstest"
 	"github.com/simon-lentz/yammm/schema"
 )
 
 func TestBatchNodeQueries_DerivedPerType(t *testing.T) {
 	t.Parallel()
-	a, s, v, shape := setupWrite(t, "writeonce.yammm")
+	a, s, v := setupWrite(t, "writeonce.yammm")
+	shape := mustShape(t, a, s)
 
 	graphResult := buildGraphResult(t, s, v, map[string][]map[string]any{
 		"Entity": {{"id": "e1", "name": "n", "origin": "src", "first_seen": "2024-01-01T00:00:00Z"}},
@@ -29,7 +27,7 @@ func TestBatchNodeQueries_DerivedPerType(t *testing.T) {
 
 	// No option: @writeOnce drives the shape per type. Entity → immutable split;
 	// Plain → mutable.
-	queries, err := a.BatchNodeQueries(context.Background(), graphResult, shape)
+	queries, err := a.BatchNodeQueries(context.Background(), graphResult)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -86,7 +84,8 @@ func TestBatchNodeQueries_DerivedPerType(t *testing.T) {
 
 func TestBatchNodeQueries_SingleType(t *testing.T) {
 	t.Parallel()
-	a, s, v, shape := setupWrite(t, "basic.yammm")
+	a, s, v := setupWrite(t, "basic.yammm")
+	shape := mustShape(t, a, s)
 
 	graphResult := buildGraphResult(t, s, v, map[string][]map[string]any{
 		"Entity": {
@@ -95,7 +94,7 @@ func TestBatchNodeQueries_SingleType(t *testing.T) {
 		},
 	})
 
-	queries, err := a.BatchNodeQueries(context.Background(), graphResult, shape)
+	queries, err := a.BatchNodeQueries(context.Background(), graphResult)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -120,7 +119,7 @@ func TestBatchNodeQueries_SingleType(t *testing.T) {
 
 func TestBatchNodeQueries_Chunking(t *testing.T) {
 	t.Parallel()
-	a, s, v, shape := setupWrite(t, "basic.yammm")
+	a, s, v := setupWrite(t, "basic.yammm")
 
 	// Create 5 instances.
 	var instances []map[string]any
@@ -135,7 +134,7 @@ func TestBatchNodeQueries_Chunking(t *testing.T) {
 		"Entity": instances,
 	})
 
-	queries, err := a.BatchNodeQueries(context.Background(), graphResult, shape, WithNodeChunkSize(2))
+	queries, err := a.BatchNodeQueries(context.Background(), graphResult, WithNodeChunkSize(2))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -148,7 +147,7 @@ func TestBatchNodeQueries_Chunking(t *testing.T) {
 
 func TestBatchEdgeQueries_GroupBySignature(t *testing.T) {
 	t.Parallel()
-	a, s, v, shape := setupWrite(t, "write_basic.yammm")
+	a, s, v := setupWrite(t, "write_basic.yammm")
 
 	graphResult := buildGraphResult(t, s, v, map[string][]map[string]any{
 		"Publisher": {
@@ -161,7 +160,7 @@ func TestBatchEdgeQueries_GroupBySignature(t *testing.T) {
 		},
 	})
 
-	queries, err := a.BatchEdgeQueries(context.Background(), graphResult, shape)
+	queries, err := a.BatchEdgeQueries(context.Background(), graphResult)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -186,7 +185,7 @@ func TestBatchEdgeQueries_GroupBySignature(t *testing.T) {
 
 func TestBatchEdgeQueries_Chunking(t *testing.T) {
 	t.Parallel()
-	a, s, v, shape := setupWrite(t, "write_basic.yammm")
+	a, s, v := setupWrite(t, "write_basic.yammm")
 
 	// Create enough edges to trigger chunking.
 	var publishers []map[string]any
@@ -210,7 +209,7 @@ func TestBatchEdgeQueries_Chunking(t *testing.T) {
 		t.Fatalf("fixture should produce 5 edges, got %d", totalEdges)
 	}
 
-	queries, err := a.BatchEdgeQueries(context.Background(), graphResult, shape, WithEdgeChunkSize(2))
+	queries, err := a.BatchEdgeQueries(context.Background(), graphResult, WithEdgeChunkSize(2))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -293,13 +292,13 @@ func TestBatchNodeQueries_PropertyCoercion(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			a, s, v, shape := setupWrite(t, tc.fixture)
+			a, s, v := setupWrite(t, tc.fixture)
 
 			graphResult := buildGraphResult(t, s, v, map[string][]map[string]any{
 				"Entity": {tc.instance},
 			})
 
-			queries, err := a.BatchNodeQueries(context.Background(), graphResult, shape)
+			queries, err := a.BatchNodeQueries(context.Background(), graphResult)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -595,98 +594,9 @@ func TestPropsToParamMap_TemporalErrorPropagates(t *testing.T) {
 	}
 }
 
-// builtShape returns a GraphShape the write path accepts — marked as built from
-// s, exactly as Adapter.ShapeForSchema marks one — carrying only the types
-// given. It exists so a test can reach the per-type "no shape for type" branch
-// without hand-building a shape, which the write path refuses.
-func builtShape(s schema.Schema, types map[schema.TypeID]nodeShape) *GraphShape {
-	if types == nil {
-		types = map[schema.TypeID]nodeShape{}
-	}
-	return &GraphShape{types: types, schema: s}
-}
-
-func TestBatchNodeQueries_MissingShape(t *testing.T) {
-	t.Parallel()
-	s, v := loadSchemaAndValidator(t, "basic.yammm")
-	a := New()
-
-	graphResult := buildGraphResult(t, s, v, map[string][]map[string]any{
-		"Entity": {{"id": "e1", "name": "test", "count": int64(1), "active": true, "created_at": "2024-01-01T00:00:00Z"}},
-	})
-
-	// A shape the adapter built, but with no entry for "Entity".
-	emptyShapes := builtShape(s, nil)
-	_, err := a.BatchNodeQueries(context.Background(), graphResult, emptyShapes)
-	if err == nil {
-		t.Error("expected error for missing shape")
-	}
-	if !strings.Contains(err.Error(), "no shape for type") {
-		t.Errorf("unexpected error message: %v", err)
-	}
-}
-
-// TestBatchNodeQueries_AShapeNamingAKeyTheInstanceLacks pins the route to the
-// missing and nil key refusals once every constructor of a snapshot holds a
-// key property present and non-null: a GraphShape entry whose key names were
-// changed after ShapeForSchema built it. The map is exported, so a caller can.
-func TestBatchNodeQueries_AShapeNamingAKeyTheInstanceLacks(t *testing.T) {
-	t.Parallel()
-	s, _ := loadSchemaAndValidator(t, "basic.yammm")
-	a := New()
-	entity, _ := s.Type("Entity")
-	// A validator never stores a null property value, so a document states it.
-	graphResult := snappartstest.Loaded(t, s, snapparts.Parts{
-		Types: []schema.TypeID{entity.ID()},
-		Instances: []snapparts.Instance{{
-			TypeID: entity.ID(), PrimaryKey: immutable.WrapKey([]any{"e1"}),
-			Properties: immutable.WrapProperties(map[string]any{"id": "e1", "score": nil}),
-		}},
-	})
-	for _, c := range []struct {
-		keys []string
-		want string
-	}{
-		{[]string{"id", "description"}, "missing required primary key(s): [description]"},
-		{[]string{"id", "score"}, "nil primary key(s): [score]"},
-	} {
-		shapes, res := a.ShapeForSchema(context.Background(), s)
-		if res.HasErrors() {
-			t.Fatalf("ShapeForSchema: %s", res)
-		}
-		sh := shapes.types[entity.ID()]
-		sh.primaryKeys = c.keys
-		shapes.types[entity.ID()] = sh
-		_, err := a.BatchNodeQueries(context.Background(), graphResult, shapes)
-		if err == nil || !strings.Contains(err.Error(), c.want) {
-			t.Errorf("keys %v: got %v, want %q", c.keys, err, c.want)
-		}
-	}
-}
-
-func TestBatchEdgeQueries_MissingShape(t *testing.T) {
-	t.Parallel()
-	s, v := loadSchemaAndValidator(t, "write_basic.yammm")
-	a := New()
-
-	graphResult := buildGraphResult(t, s, v, map[string][]map[string]any{
-		"Publisher": {{"publisher_id": "iss1", "name": "Test"}},
-		"Book":      {{"publisher_id": "iss1", "book_id": "i1", "title": "Test", "by_publisher": map[string]any{"_target_publisher_id": "iss1"}}},
-	})
-
-	emptyShapes := builtShape(s, nil)
-	_, err := a.BatchEdgeQueries(context.Background(), graphResult, emptyShapes)
-	if err == nil {
-		t.Error("expected error for missing shape")
-	}
-	if !strings.Contains(err.Error(), "no shape for") {
-		t.Errorf("unexpected error message: %v", err)
-	}
-}
-
 func TestBatchEdgeQueries_MixedProperties(t *testing.T) {
 	t.Parallel()
-	a, s, v, shape := setupWrite(t, "edge_mixed.yammm")
+	a, s, v := setupWrite(t, "edge_mixed.yammm")
 
 	// Employee e1 provides the optional edge property "note";
 	// Employee e2 does not. Both produce WORKS_AT edges with the
@@ -704,7 +614,7 @@ func TestBatchEdgeQueries_MixedProperties(t *testing.T) {
 		},
 	})
 
-	queries, err := a.BatchEdgeQueries(context.Background(), graphResult, shape)
+	queries, err := a.BatchEdgeQueries(context.Background(), graphResult)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -802,7 +712,7 @@ func TestCoerceRelProps(t *testing.T) {
 
 func TestBatchEdgeQueries_CoercesTypedRelProps(t *testing.T) {
 	t.Parallel()
-	a, s, v, shapes := setupWrite(t, "edge_typed_props.yammm")
+	a, s, v := setupWrite(t, "edge_typed_props.yammm")
 
 	graphResult := buildGraphResult(t, s, v, map[string][]map[string]any{
 		"Target": {{"target_id": "t1"}},
@@ -815,7 +725,7 @@ func TestBatchEdgeQueries_CoercesTypedRelProps(t *testing.T) {
 		}},
 	})
 
-	queries, err := a.BatchEdgeQueries(context.Background(), graphResult, shapes)
+	queries, err := a.BatchEdgeQueries(context.Background(), graphResult)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -887,9 +797,10 @@ type Doc extends Base { title String required }
 	}
 }
 
-func TestShapeForSchema_NoWriteOnceRecordsNoImmutableKeys(t *testing.T) {
+func TestShapeFor_NoWriteOnceRecordsNoImmutableKeys(t *testing.T) {
 	t.Parallel()
-	_, s, _, shape := setupWrite(t, "writeonce.yammm")
+	a, s, _ := setupWrite(t, "writeonce.yammm")
+	shape := mustShape(t, a, s)
 	plain := shape.types[typeID(t, s, "Plain")]
 	if len(plain.immutableKeys) != 0 {
 		t.Errorf("Plain's immutableKeys = %v; want none", plain.immutableKeys)
@@ -898,12 +809,13 @@ func TestShapeForSchema_NoWriteOnceRecordsNoImmutableKeys(t *testing.T) {
 
 func TestBatchNodeQueries_RowCarriesTheKeyTheTemplateReads(t *testing.T) {
 	t.Parallel()
-	a, s, v, shape := setupWrite(t, "writeonce.yammm")
+	a, s, v := setupWrite(t, "writeonce.yammm")
+	shape := mustShape(t, a, s)
 
 	graphResult := buildGraphResult(t, s, v, map[string][]map[string]any{
 		"Plain": {{"id": "p1", "name": "n"}},
 	})
-	queries, err := a.BatchNodeQueries(context.Background(), graphResult, shape)
+	queries, err := a.BatchNodeQueries(context.Background(), graphResult)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -941,12 +853,13 @@ func TestBatchNodeQueries_RowCarriesTheKeyTheTemplateReads(t *testing.T) {
 // the key out of the same instance, so both must coerce it.
 func TestBatchNodeQueries_CoercesMergeKey(t *testing.T) {
 	t.Parallel()
-	a, s, v, shape := setupWrite(t, "temporal_pk.yammm")
+	a, s, v := setupWrite(t, "temporal_pk.yammm")
+	shape := mustShape(t, a, s)
 
 	graphResult := buildGraphResult(t, s, v, map[string][]map[string]any{
 		"Doc": {{"created_on": "2024-01-02", "updated_on": "2024-03-04", "title": "t"}},
 	})
-	queries, err := a.BatchNodeQueries(context.Background(), graphResult, shape)
+	queries, err := a.BatchNodeQueries(context.Background(), graphResult)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -973,7 +886,7 @@ func TestBatchNodeQueries_CoercesMergeKey(t *testing.T) {
 // The batch edge path must coerce both endpoint keys.
 func TestEdgeQueries_CoerceEndpointKeysFromAGraph(t *testing.T) {
 	t.Parallel()
-	a, s, v, shapes := setupWrite(t, "temporal_pk.yammm")
+	a, s, v := setupWrite(t, "temporal_pk.yammm")
 
 	graphResult := buildGraphResult(t, s, v, map[string][]map[string]any{
 		"Doc":      {{"created_on": "2024-01-02", "updated_on": "2024-03-04", "title": "t"}},
@@ -984,7 +897,7 @@ func TestEdgeQueries_CoerceEndpointKeysFromAGraph(t *testing.T) {
 		t.Fatalf("got %d edges; want 1", len(edges))
 	}
 
-	batches, err := a.BatchEdgeQueries(context.Background(), graphResult, shapes)
+	batches, err := a.BatchEdgeQueries(context.Background(), graphResult)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1015,34 +928,26 @@ func TestParamTypesForType_NilTypeIsEmptyNotPanic(t *testing.T) {
 	}
 }
 
-// A key-coercion failure is reported beside the missing and nil keys the walk
-// already found, not instead of them. The function exists to report every bad
-// key in one pass.
+// Every key that fails coercion is reported in one error, not the first alone.
 //
-// Mutation: returning on the first coercion error turns this red — the report
-// then names whichever problem the loop met last.
+// Mutation: returning on the first coercion error turns this red.
 func TestExtractKeyProps_ReportsEveryProblemInOnePass(t *testing.T) {
 	t.Parallel()
-	// keyConstraints is set the way ShapeForSchema sets it, so "uncoercible"
-	// actually fails coercion — without a constraint the value passes through
-	// and the branch under test is never reached.
 	shape := &nodeShape{
 		label:       "T",
-		primaryKeys: []string{"uncoercible", "absent", "nilled"},
+		primaryKeys: []string{"first", "kept", "second"},
 		keyConstraints: map[string]schema.Constraint{
-			"uncoercible": schema.NewDateConstraint(),
+			"first":  schema.NewDateConstraint(),
+			"second": schema.NewDateConstraint(),
 		},
 	}
-	props := immutable.WrapProperties(map[string]any{
-		"uncoercible": "not-a-date",
-		"nilled":      nil,
-	})
+	props := immutable.WrapProperties(map[string]any{"first": "not-a-date", "kept": "k", "second": "not-a-date"})
 
 	_, err := extractKeyProps(props, shape)
 	if err == nil {
-		t.Fatal("a shape with a missing key, a nil key and an uncoercible key was accepted")
+		t.Fatal("two uncoercible keys were accepted")
 	}
-	for _, want := range []string{"absent", "nilled", "uncoercible"} {
+	for _, want := range []string{`"first"`, `"second"`} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("error %q does not name %q; every problem belongs in one report", err, want)
 		}

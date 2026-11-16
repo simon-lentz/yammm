@@ -74,15 +74,3 @@ func readFloat(v any) any {
 	}
 	return Read(v)
 }
-
-// ReadsAsFloat reports whether c describes a position at which [ReadAt] reads
-// a number as a float64: a Float, a Vector, or a List whose element is one.
-func ReadsAsFloat(c schema.Constraint) bool {
-	switch rc := schema.ResolveAlias(c).(type) {
-	case schema.FloatConstraint, schema.VectorConstraint:
-		return true
-	case schema.ListConstraint:
-		return ReadsAsFloat(rc.Element())
-	}
-	return false
-}

@@ -2,7 +2,6 @@ package graph
 
 import (
 	"fmt"
-	"slices"
 	"strings"
 	"testing"
 
@@ -317,15 +316,5 @@ func TestCompareDuplicates_ProvenanceOrdersByWhatADocumentWrites(t *testing.T) {
 				t.Errorf("compareDuplicates(after, before) = %d, want positive", got)
 			}
 		})
-	}
-}
-
-// TestUndeclaredNames_InSortedOrder holds the undeclared names to sorted order:
-// a caller that merges the issues into a collector with a limit keeps the first.
-func TestUndeclaredNames_InSortedOrder(t *testing.T) {
-	props := immutable.WrapProperties(map[string]any{"gamma": 1, "id": 2, "alpha": 3, "beta": 4})
-	got := undeclaredNames(props, func(n string) bool { return n == "id" })
-	if want := []string{"alpha", "beta", "gamma"}; !slices.Equal(got, want) {
-		t.Errorf("undeclaredNames = %v, want %v", got, want)
 	}
 }
