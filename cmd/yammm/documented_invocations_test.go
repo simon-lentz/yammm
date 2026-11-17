@@ -147,7 +147,7 @@ func TestCommandTable_HoldsWhatCobraAccepts(t *testing.T) {
 			}
 		}
 	}
-	if len(table) < 20 {
+	if len(table) < 18 {
 		t.Errorf("the table holds %d commands; the walk is not reaching the tree", len(table))
 	}
 

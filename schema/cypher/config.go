@@ -8,8 +8,7 @@ import "github.com/simon-lentz/yammm/internal/mapping"
 // each take a Config, so a caller that passes one value to each diffs a graph
 // under the mapping it was written with.
 type Config struct {
-	// LabelPrefix is prepended to every label of a type whose schema has a
-	// name. Default: "" (no prefix).
+	// LabelPrefix is prepended to every label. Default: "" (no prefix).
 	LabelPrefix string
 
 	// LabelSeparator joins the schema name and the type name in a label. ""

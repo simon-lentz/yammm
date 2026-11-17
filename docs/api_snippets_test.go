@@ -80,8 +80,7 @@ func TestDocumentedDiffCallShapes(t *testing.T) {
 	owned := c.OwnedLabels(s)
 
 	// Every bucket the documentation names, on both results.
-	cBuckets := len(cDiff.Match) + len(cDiff.Drift) + len(cDiff.Create) + len(cDiff.Drop) +
-		len(cDiff.Unverified) + cDiff.Excluded
+	cBuckets := len(cDiff.Match) + len(cDiff.Drift) + len(cDiff.Create) + len(cDiff.Drop) + cDiff.Excluded
 	iBuckets := len(iDiff.Match) + len(iDiff.Drift) + len(iDiff.Create) + len(iDiff.Drop) +
 		len(iDiff.Unverified) + iDiff.Excluded
 
@@ -127,8 +126,8 @@ func TestDocumentedRemoteIndexSurface(t *testing.T) {
 		OwningConstraint: "",
 	}
 
-	// An unreported state counts as online, so older servers and hand-built
-	// records do not read as drift.
+	// An unreported state counts as online, so a hand-built record does not
+	// read as drift.
 	if !ri.IsOnline() {
 		t.Error("IsOnline is false for an unreported state")
 	}
@@ -145,7 +144,7 @@ func TestDocumentedRemoteIndexSurface(t *testing.T) {
 // exact projection is documented because a caller running it against a server
 // that does not support a column fails, so the column list is a contract.
 func TestDocumentedIntrospectionQueries(t *testing.T) {
-	if got, want := neo4j.ShowConstraints, "SHOW CONSTRAINTS YIELD *"; got != want {
+	if got, want := neo4j.ShowConstraints, "SHOW CONSTRAINTS YIELD name, type, entityType, labelsOrTypes, properties, propertyType, createStatement"; got != want {
 		t.Errorf("ShowConstraints = %q, documented as %q", got, want)
 	}
 

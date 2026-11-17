@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/simon-lentz/yammm/diag"
+	"github.com/simon-lentz/yammm/internal/parse"
 	"github.com/simon-lentz/yammm/location"
 )
 
@@ -494,10 +495,10 @@ func validateVectorProperty(c *completer, _ Type, prop Property, a Annotation) {
 			prop.Name(), ResolveAlias(prop.Constraint()).Kind())
 		return
 	}
-	if v, ok := ResolveAlias(prop.Constraint()).(VectorConstraint); ok && v.Dimension() > maxIndexedVectorDimensions {
+	if v, ok := ResolveAlias(prop.Constraint()).(VectorConstraint); ok && v.Dimension() > parse.MaxIndexedVectorDimensions {
 		c.annotationErrorf(a, prop.Span(), diag.E_INVALID_ANNOTATION_TARGET,
 			"@vector indexes a Vector of at most %d dimensions; property %q has %d",
-			maxIndexedVectorDimensions, prop.Name(), v.Dimension())
+			parse.MaxIndexedVectorDimensions, prop.Name(), v.Dimension())
 		return
 	}
 	a.setArgKind(0, ArgKeyword)
@@ -691,10 +692,6 @@ func isFulltextEligible(constraint Constraint) bool {
 		return false
 	}
 }
-
-// maxIndexedVectorDimensions is the most dimensions a Neo4j vector index takes.
-// A Vector may hold more, up to parse.MaxVectorDimensions, but not under @vector.
-const maxIndexedVectorDimensions = 4096
 
 // vectorSimilarityFunctions is the blessed set of @vector similarity keywords —
 // the single source of truth consumed by isVectorSimilarity, the @vector

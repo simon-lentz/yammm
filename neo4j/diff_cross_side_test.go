@@ -76,7 +76,8 @@ func TestDiff_AnIndexRealisationAConstraintCreateNeedsDroppedIsDrift(t *testing.
 		t.Fatalf("Indexes.Match = %+v, Drift = %+v; want title_idx drifted", plan.Indexes.Match, plan.Indexes.Drift)
 	}
 	d := plan.Indexes.Drift[0]
-	if !slices.Equal(blockerNames(d.Blockers), []string{"i:px__Doc_title_not_null"}) || !strings.Contains(d.Reason, "realises this declaration") {
+	const reason = `index "px__Doc_title_not_null" realises this declaration and the plan drops it; this index is created again under its own name`
+	if !slices.Equal(blockerNames(d.Blockers), []string{"i:px__Doc_title_not_null"}) || d.Reason != reason {
 		t.Errorf("Indexes.Drift[0] = %+v; want its realisation named, and why", d)
 	}
 }

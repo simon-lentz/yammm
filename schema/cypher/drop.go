@@ -1,77 +1,44 @@
 package cypher
 
-import (
-	"fmt"
-	"strings"
-)
+import "strings"
 
-// DropConstraintStatement returns the Cypher that removes a constraint by name.
-//
-// The name comes from introspection or from a diff result, so a person or
-// another tool can have created it. Every name that holds a character other
-// than white space is backtick-quoted, so it cannot alter the statement's
-// shape and no such name is undroppable — including a Cypher reserved word,
-// where refusing would be the opposite of what a DROP builder is for. An empty
-// or all-white-space name is an error wrapping [ErrEmptyIdentifier] — there is
-// no object it could name.
-//
-// Quoting unconditionally rather than only when [ValidateIdentifier] objects
-// removes this path's dependence on that validator's reserved-word table: the
-// table does not match the Neo4j documentation it cites, and a DROP builder
-// that had to know which words are reserved would need it to.
+// DropConstraintStatement returns the Cypher that removes the constraint named
+// name, which introspection or a diff result reports. The name is always
+// backtick-quoted, a backtick in it doubled, so a name a person or another tool
+// chose cannot alter the statement's shape, and a reserved word or a name
+// [IsIdentifier] refuses is dropped like any other.
 //
 // The caller owns the choice of verb: a
 // [github.com/simon-lentz/yammm/neo4j.Blockers] lists constraints and
 // indexes apart, and an index with an OwningConstraint is dropped by dropping
-// that constraint.
-//
-// This builds a statement. It does not execute one.
-func DropConstraintStatement(name string) (string, error) {
+// that constraint. This builds a statement. It does not execute one.
+func DropConstraintStatement(name string) string {
 	return dropStatement("CONSTRAINT", name)
 }
 
-// DropIndexStatement returns the Cypher that removes an index by name.
-//
-// Quoting and error semantics match [DropConstraintStatement], and so does the
-// caller's ownership of the verb.
-//
-// This builds a statement. It does not execute one.
-func DropIndexStatement(name string) (string, error) {
+// DropIndexStatement returns the Cypher that removes the index named name,
+// quoted as [DropConstraintStatement] quotes. This builds a statement. It does
+// not execute one.
+func DropIndexStatement(name string) string {
 	return dropStatement("INDEX", name)
 }
 
 // DropStatement returns the Cypher that removes this constraint.
-//
-// It is an error when Name is empty, which [Config.Constraints] never emits:
-// an anonymous constraint has no portable name to drop it by.
-func (c Constraint) DropStatement() (string, error) {
+func (c Constraint) DropStatement() string {
 	return DropConstraintStatement(c.Name)
 }
 
 // DropStatement returns the Cypher that removes this index.
-//
-// [Config.Indexes] always emits a name, so this fails only on a
-// hand-built Index.
-func (i Index) DropStatement() (string, error) {
+func (i Index) DropStatement() string {
 	return DropIndexStatement(i.Name)
 }
 
-// dropStatement is the one DROP renderer, so the two verbs cannot drift on
-// quoting or on the empty-name rule.
-func dropStatement(kind, name string) (string, error) {
-	if strings.TrimSpace(name) == "" {
-		return "", fmt.Errorf("%w: drop %s name", ErrEmptyIdentifier, strings.ToLower(kind))
-	}
-	return "DROP " + kind + " " + quoteIdentifier(name) + " IF EXISTS", nil
+func dropStatement(kind, name string) string {
+	return "DROP " + kind + " " + quoteIdentifier(name) + " IF EXISTS"
 }
 
 // quoteIdentifier backtick-quotes a name for use in Cypher, doubling any
 // backtick it contains so the quoting cannot be escaped from.
-//
-// Nothing else in this package quotes: every identifier it generates is
-// validated at emission, so CREATE-side names never need it. Remote names are
-// the exception — they are arbitrary, and quoting every one of them is why this
-// path needs no opinion about which words Cypher reserves.
 func quoteIdentifier(name string) string {
 	return "`" + strings.ReplaceAll(name, "`", "``") + "`"
 }

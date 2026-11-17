@@ -40,7 +40,7 @@ func TestConfig_LabelOptionConsistency(t *testing.T) {
 		cfg       cypher.Config
 		wantLabel string
 	}{
-		{"custom separator", cypher.Config{LabelSeparator: "_"}, "basic_test_Entity"},
+		{"custom separator", cypher.Config{LabelSeparator: "Z"}, "basic_testZEntity"},
 		{"custom prefix", cypher.Config{LabelPrefix: "app_"}, "app_basic_test__Entity"},
 	}
 

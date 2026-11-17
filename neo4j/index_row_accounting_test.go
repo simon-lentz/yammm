@@ -71,28 +71,6 @@ func TestIndexDiff_EveryRemoteRowLandsInOneBucket(t *testing.T) {
 			want:   [6]int{0, 0, 0, 0, 0, 1},
 		},
 		{
-			name:   "two undeclarable rows with no name",
-			actual: []RemoteIndex{undeclarable("", "TEXT", "a"), undeclarable("", "POINT", "b")},
-			want:   [6]int{0, 0, 0, 0, 0, 2},
-		},
-		{
-			name:   "two undeclarable rows under one name",
-			actual: []RemoteIndex{undeclarable("same", "TEXT", "a"), undeclarable("same", "POINT", "b")},
-			want:   [6]int{0, 0, 0, 0, 0, 2},
-		},
-		{
-			name:    "a backing index with no name that serves, beside an undeclarable row with no name",
-			desired: []cypher.Index{declared("idx", "id")},
-			actual:  []RemoteIndex{backing("", "ONLINE", "id"), undeclarable("", "TEXT", "a")},
-			want:    [6]int{1, 0, 0, 0, 0, 1},
-		},
-		{
-			name:    "an undeclarable row with no name, ahead of the backing index with no name that serves",
-			desired: []cypher.Index{declared("idx", "id")},
-			actual:  []RemoteIndex{undeclarable("", "TEXT", "a"), backing("", "ONLINE", "id")},
-			want:    [6]int{1, 0, 0, 0, 0, 1},
-		},
-		{
 			name:    "two backing indexes of one definition: the first serves, the second is not compared",
 			desired: []cypher.Index{declared("idx", "id")},
 			actual:  []RemoteIndex{backing("pk", "ONLINE", "id"), backing("pk2", "ONLINE", "id")},
@@ -132,8 +110,8 @@ func TestIndexDiff_EveryRemoteRowLandsInOneBucket(t *testing.T) {
 				plain("mine", label, "x"),
 				plain("orphan", label, "z"),
 				plain("stale", "app__Gone", "id"),
-				undeclarable("", "TEXT", "a"),
-				undeclarable("", "POINT", "b"),
+				undeclarable("text", "TEXT", "a"),
+				undeclarable("point", "POINT", "b"),
 			},
 			want: [6]int{1, 0, 1, 1, 1, 3},
 		},
@@ -152,7 +130,7 @@ func TestIndexDiff_EveryRemoteRowLandsInOneBucket(t *testing.T) {
 			named := make(map[string]struct{})
 			for _, d := range got.Drift {
 				for _, b := range d.Blockers.Indexes {
-					named[remoteIndexRecordKey(b)] = struct{}{}
+					named[indexTarget(b)] = struct{}{}
 				}
 			}
 			if landed := counts[0] + counts[3] + counts[4] + counts[5] + len(named); landed != len(c.actual) {

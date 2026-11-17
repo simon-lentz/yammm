@@ -111,6 +111,10 @@ linters:
       - path: "^schema/cypher/errors\\.go"
         linters:
           - revive
+      - path: "^neo4j/errors\\.go"
+        text: "var-naming: don't use ALL_CAPS"
+        linters:
+          - revive
       # The package name parse is the standard library's text/template/parse.
       # The package is internal, so no caller imports both.
       - path: "^internal/parse/.*"

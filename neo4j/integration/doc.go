@@ -78,7 +78,7 @@
 // accepted, because Enterprise is the edition the library targets by default.
 // NOT NULL, TYPE, and NODE KEY constraints are Enterprise-only. On Community no
 // record carries the propertyType value that the constraint half of a plan
-// compares and its Unverified bucket turns on, the library emits UNIQUE alone,
+// compares, the library emits UNIQUE alone,
 // and three of its four constraint kinds would never execute here.
 //
 // YAMMM_NEO4J_TEST_IMAGE overrides the image. Pointing it at a Community image

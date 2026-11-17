@@ -7,14 +7,12 @@ import (
 
 // Diagnostic codes for Neo4j DDL generation errors.
 var (
-	// E_NEO4J_LABEL_COLLISION indicates two or more types produce the same
-	// Neo4j label after sanitization.
-	E_NEO4J_LABEL_COLLISION = mapping.LabelCollision
-
 	// E_NEO4J_INVALID_IDENTIFIER indicates a property name or a composed label
-	// is not a valid Neo4j identifier (fails regex or matches a Cypher reserved
-	// keyword). A label setting can make a label invalid whose type name is valid.
+	// is not a Neo4j identifier under [IsIdentifier], or a label breaks the
+	// label rule [Config.CheckLabels] judges. A label setting can break it for
+	// every type, and is then reported once.
 	E_NEO4J_INVALID_IDENTIFIER = mapping.InvalidIdentifier
+
 	// E_NEO4J_UNSUPPORTED_TYPE indicates a constraint kind cannot be mapped
 	// to a Neo4j property type expression.
 	E_NEO4J_UNSUPPORTED_TYPE = diag.NewCode("E_NEO4J_UNSUPPORTED_TYPE", diag.CategoryNeo4j)
@@ -29,7 +27,7 @@ var (
 	// property whose type cannot carry that index: @index or @@index on a
 	// non-scalar, @fulltext or @@fulltext on a non-text property, @vector on a
 	// property that is not a Vector, or @vector on a Vector whose dimension is
-	// not positive. Like [E_NEO4J_UNKNOWN_PROPERTY], this is the generator
+	// outside 1 to 4096. Like [E_NEO4J_UNKNOWN_PROPERTY], this is the generator
 	// re-checking what load-time validation refuses, so no schema a public entry
 	// point returns draws it.
 	E_NEO4J_INVALID_INDEX_TARGET = diag.NewCode("E_NEO4J_INVALID_INDEX_TARGET", diag.CategoryNeo4j)
@@ -53,11 +51,4 @@ var (
 	// warning, not an error: the UNIQUE constraints that survive are correct
 	// output for the edition.
 	W_NEO4J_EDITION_CONSTRAINT_OMITTED = diag.NewCode("W_NEO4J_EDITION_CONSTRAINT_OMITTED", diag.CategoryNeo4j)
-)
-
-// Sentinel errors for identifier validation failures.
-var (
-	ErrEmptyIdentifier   = mapping.ErrEmptyIdentifier
-	ErrReservedKeyword   = mapping.ErrReservedKeyword
-	ErrInvalidIdentifier = mapping.ErrInvalidIdentifier
 )

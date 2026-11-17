@@ -14,10 +14,9 @@ import (
 	"github.com/simon-lentz/yammm/schema/cypher"
 )
 
-// ConstraintDiff is the five-way classification of desired vs actual
-// constraints. Drift, Create and Drop are actionable; Unverified is neither
-// actionable nor a clean bill of health, so a caller deciding "is this database
-// in sync?" must consult it as well as Drift, Create, and Drop.
+// ConstraintDiff is the four-way classification of desired vs actual
+// constraints. Drift, Create and Drop are actionable, and a database is in sync
+// with the schema's constraints when all three are empty.
 type ConstraintDiff struct {
 	// Match contains constraints that exist in both schema and database with
 	// identical semantic definitions.
@@ -46,18 +45,12 @@ type ConstraintDiff struct {
 	// them before any create.
 	Drop []RemoteConstraint
 
-	// Unverified contains constraints that exist in both by identity but whose
-	// full definition could not be compared because the database did not report
-	// what was needed. They are neither confirmed in sync nor confirmed drifted;
-	// folding them into Match would report an unchecked constraint as verified.
-	Unverified []ConstraintUnverified
-
-	// Excluded counts the remote constraints the plan leaves alone: no Match or
-	// Unverified Actual, no Drop, and no row whose drop target a drift on either
+	// Excluded counts the remote constraints the plan leaves alone: no Match
+	// Actual, no Drop, and no row whose drop target a drift on either
 	// side names or a Drop removes. Each is on a label the schema does not own,
 	// or of a kind this configuration cannot declare.
 	//
-	// It exists because the five buckets are a statement about what WAS compared,
+	// It exists because the four buckets are a statement about what WAS compared,
 	// and their being empty is not the same as the database being accounted for.
 	// A type deleted or renamed since the last apply is the case that matters: its
 	// constraints keep enforcing on a label no type declares any more, so they
@@ -70,14 +63,6 @@ type ConstraintDiff struct {
 	// that claim. It is deliberately not drift: in a database shared with other
 	// applications a non-zero count is the normal state.
 	Excluded int
-}
-
-// ConstraintUnverified pairs a desired constraint with an actual constraint
-// whose definition could not be read, so no in-sync claim is made about it.
-type ConstraintUnverified struct {
-	Desired cypher.Constraint
-	Actual  RemoteConstraint
-	Reason  string // Human-readable description of what could not be verified
 }
 
 // ConstraintMatch pairs a desired constraint with its matching actual constraint.
@@ -123,24 +108,79 @@ type Plan struct {
 // CONSTRAINTS and SHOW INDEXES report them, against what s declares under c:
 // the desired constraints and indexes and the owned labels all derive from
 // (c, s). The plan converges in one apply; the package doc's Applying a Plan
-// section says how. The result holds the constraint generation's issues, and
-// the index generation's when the constraints' hold no error; the package doc's
-// Diff Scope section states the order. A plan is returned only when the result
+// section says how. The result holds an [E_NEO4J_INVALID_REMOTE_OBJECT] for each
+// break in the remote rows that Diff cannot plan from, the constraint
+// generation's issues, and the index generation's when the constraints' hold
+// no error; the package doc's Diff Scope section states the order. A plan is returned only when the result
 // holds no error.
 func Diff(c cypher.Config, s schema.Schema, constraints []RemoteConstraint, indexes []RemoteIndex) (Plan, diag.Result) {
+	collector := diag.NewCollector(0)
+	collector.Merge(checkRemote(constraints, indexes))
 	desired, result := c.Constraints(s)
+	collector.Merge(result)
 	if result.HasErrors() {
-		return Plan{}, result
+		return Plan{}, collector.Result()
 	}
 	desiredIndexes, indexResult := c.Indexes(s)
-	collector := diag.NewCollector(0)
-	collector.Merge(result)
 	collector.Merge(indexResult)
-	result = collector.Result()
-	if result.HasErrors() {
-		return Plan{}, result
+	if collector.HasErrors() {
+		return Plan{}, collector.Result()
 	}
-	return diff(c, desired, desiredIndexes, constraints, indexes, c.OwnedLabels(s)), result
+	return diff(c, desired, desiredIndexes, constraints, indexes, c.OwnedLabels(s)), collector.Result()
+}
+
+// checkRemote reports each remote row a plan cannot be made from, one
+// [E_NEO4J_INVALID_REMOTE_OBJECT] per break. A plan pairs, blocks and drops a
+// row by its name, so each name must pick out one row of its kind; a
+// constraint and the index backing it share theirs.
+func checkRemote(constraints []RemoteConstraint, indexes []RemoteIndex) diag.Result {
+	collector := diag.NewCollector(0)
+	checkNames(collector, "constraint", "constraints", constraints, func(rc RemoteConstraint) string { return rc.Name })
+	checkNames(collector, "index", "indexes", indexes, func(ri RemoteIndex) string { return ri.Name })
+	for i, rc := range constraints {
+		if reportsNoPropertyType(rc) {
+			collector.Collect(remoteIssue(fmt.Sprintf("remote constraint %d is a property type constraint that reports no property type", i)))
+		}
+	}
+	return collector.Result()
+}
+
+// checkNames reports each row with no name and each name two or more rows
+// share, by the rows' positions.
+func checkNames[R any](collector *diag.Collector, kind, kinds string, rows []R, name func(R) string) {
+	positions := make(map[string][]int, len(rows))
+	for i, r := range rows {
+		n := name(r)
+		if n == "" {
+			collector.Collect(remoteIssue(fmt.Sprintf("remote %s %d has no name", kind, i)))
+			continue
+		}
+		positions[n] = append(positions[n], i)
+	}
+	// Sorted, so the issues arrive in one order on every run.
+	for _, n := range slices.Sorted(maps.Keys(positions)) {
+		at := positions[n]
+		if len(at) < 2 {
+			continue
+		}
+		listed := make([]string, len(at))
+		for i, p := range at {
+			listed[i] = strconv.Itoa(p)
+		}
+		last := len(listed) - 1
+		collector.Collect(remoteIssue(fmt.Sprintf("remote %s %s and %s share the name %q",
+			kinds, strings.Join(listed[:last], ", "), listed[last], n)))
+	}
+}
+
+func remoteIssue(message string) diag.Issue {
+	return diag.NewIssue(diag.Error, E_NEO4J_INVALID_REMOTE_OBJECT, message).Build()
+}
+
+// reportsNoPropertyType reports whether rc is a property type constraint whose
+// record carries no property type, so the type it enforces cannot be compared.
+func reportsNoPropertyType(rc RemoteConstraint) bool {
+	return strings.HasSuffix(strings.ToUpper(rc.Type), "_PROPERTY_TYPE") && rc.PropertyType == ""
 }
 
 // owner resolves a remote object's labels to the one its schema owns;
@@ -161,21 +201,20 @@ func diff(
 	actualIndexes []RemoteIndex,
 	owned owner,
 ) Plan {
-	actualConstraints = slices.Clone(actualConstraints)
-	slices.SortFunc(actualConstraints, compareRemoteConstraints)
-	actualIndexes = slices.Clone(actualIndexes)
-	slices.SortFunc(actualIndexes, compareRemoteIndexes)
-	t := newTargets(actualConstraints)
+	// Names are unique within a kind, so ordering by name makes no result
+	// depend on the order the rows came in.
+	actualConstraints = slices.SortedFunc(slices.Values(actualConstraints), func(x, y RemoteConstraint) int { return cmp.Compare(x.Name, y.Name) })
+	actualIndexes = slices.SortedFunc(slices.Values(actualIndexes), func(x, y RemoteIndex) int { return cmp.Compare(x.Name, y.Name) })
 
-	cs := pairConstraints(c, desiredConstraints, actualConstraints, owned, t)
-	is := pairIndexes(desiredIndexes, actualIndexes, owned, t)
+	cs := pairConstraints(c, desiredConstraints, actualConstraints, owned)
+	is := pairIndexes(desiredIndexes, actualIndexes, owned)
 	claimed := make(map[string]struct{})
 	for _, name := range append(cs.claimed, is.claimed...) {
 		claimed[name] = struct{}{}
 	}
-	cf := newConstraintBlockerFinder(desiredConstraints, actualConstraints, actualIndexes, claimed, t)
-	xf := newIndexBlockerFinder(actualIndexes, actualConstraints, claimed, t)
-	is.serveFromBackingIndexes(xf, t)
+	cf := newConstraintBlockerFinder(desiredConstraints, actualConstraints, actualIndexes, claimed)
+	xf := newIndexBlockerFinder(actualIndexes, actualConstraints, claimed)
+	is.serveFromBackingIndexes(xf)
 
 	st := newSettlement()
 	enqueue(st, cs.plans, settleRules[cypher.Constraint, RemoteConstraint]{
@@ -188,21 +227,17 @@ func diff(
 	enqueue(st, is.plans, settleRules[cypher.Index, RemoteIndex]{
 		find: xf.blockers,
 		moved: func(ri RemoteIndex) string {
-			held := fmt.Sprintf("index %q", ri.Name)
-			if ri.Name == "" {
-				held = "the unnamed index"
-			}
-			return held + " realises this declaration and the plan drops it; this index is created again under its own name"
+			return fmt.Sprintf("index %q realises this declaration and the plan drops it; this index is created again under its own name", ri.Name)
 		},
 		own: func(ri *RemoteIndex) blocker { return blocker{index: ri} },
 	})
 	// A Drop removes its row too once applied, so an index served by the backing
 	// index of a constraint the plan drops is created again.
 	for _, o := range cs.orphans {
-		st.remove(t.constraint(o.obj))
+		st.remove(constraintTarget(o.obj))
 	}
 	for _, o := range is.orphans {
-		st.remove(t.index(o.obj))
+		st.remove(indexTarget(o.obj))
 	}
 	st.run()
 
@@ -211,9 +246,9 @@ func diff(
 	// an index Drop's target.
 	removed := maps.Clone(st.blocking)
 	for _, o := range cs.orphans {
-		removed[t.constraint(o.obj)] = struct{}{}
+		removed[constraintTarget(o.obj)] = struct{}{}
 	}
-	return Plan{Constraints: cs.result(st.blocking, removed, t), Indexes: is.result(st.blocking, removed, t)}
+	return Plan{Constraints: cs.result(st.blocking, removed), Indexes: is.result(st.blocking, removed)}
 }
 
 // constraintSide is the constraint half of a plan while [diff] settles
@@ -228,8 +263,7 @@ type constraintSide struct {
 
 // pairConstraints pairs desired constraints with the owned, declarable remote
 // ones in phases: name and identity together, then the exact definition, then
-// identity alone, then name alone; see [pairObjects]. A constraint whose name
-// is empty pairs by identity alone.
+// identity alone, then name alone; see [pairObjects].
 //
 // Property order is not significant for pairing by identity: a constraint's
 // members are a set, so desiredSemanticKey and remoteSemanticKey sort them,
@@ -237,7 +271,7 @@ type constraintSide struct {
 // constraintDefinitionKey states the measured server rule, that a plain RANGE
 // index, or a UNIQUE or NODE KEY constraint of the other kind, blocks a
 // key-backed constraint only in the same property order.
-func pairConstraints(c cypher.Config, desired []cypher.Constraint, actual []RemoteConstraint, owned owner, t targets) constraintSide {
+func pairConstraints(c cypher.Config, desired []cypher.Constraint, actual []RemoteConstraint, owned owner) constraintSide {
 	side := constraintSide{actual: actual}
 	var ownedRemotes []scoped[RemoteConstraint]
 	for at, rc := range actual {
@@ -266,11 +300,9 @@ func pairConstraints(c cypher.Config, desired []cypher.Constraint, actual []Remo
 	}
 	for _, p := range pairs {
 		d, rc := desired[p.Desired], p.Actual.obj
-		if rc.Name != "" {
-			side.claimed = append(side.claimed, rc.Name)
-		}
+		side.claimed = append(side.claimed, rc.Name)
 		cp := &side.plans[p.Desired]
-		cp.realisation, cp.at, cp.realised, cp.state = &rc, p.Actual.at, t.constraint(rc), planMatch
+		cp.realisation, cp.at, cp.realised, cp.state = &rc, p.Actual.at, constraintTarget(rc), planMatch
 		switch {
 		// Only a name-only pair can have disagreeing identities; the other phases
 		// match on identity by construction. The database already holds the name
@@ -282,17 +314,9 @@ func pairConstraints(c cypher.Config, desired []cypher.Constraint, actual []Remo
 				rc.Name, d.Kind, strings.Join(d.Properties, ", "),
 				rc.Type, strings.Join(rc.Properties, ", "))
 
-		// A TYPE constraint whose remote property type the server did not report
-		// cannot be compared; folding it into Match would report an unchecked
-		// constraint as verified. A caller's own query reaches this, never
-		// [ShowConstraints].
-		case d.Kind == cypher.ConstraintType && d.TypeExpr != "" && rc.PropertyType == "":
-			cp.state = planUnverified
-			cp.unverifiedReason = "database reported no property type; the type expression was not compared"
-
 		// EqualFold: the column and the emitted expression are canonically
 		// upper-case, and no two Neo4j type expressions differ only by case.
-		case d.Kind == cypher.ConstraintType && d.TypeExpr != "" && !strings.EqualFold(d.TypeExpr, rc.PropertyType):
+		case d.Kind == cypher.ConstraintType && !strings.EqualFold(d.TypeExpr, rc.PropertyType):
 			cp.state = planDrift
 			cp.ownCause = fmt.Sprintf("property type mismatch: schema %s, database %s", d.TypeExpr, rc.PropertyType)
 		}
@@ -301,18 +325,15 @@ func pairConstraints(c cypher.Config, desired []cypher.Constraint, actual []Remo
 }
 
 // result files every settled plan and accounts for every remote row: a row is a
-// Match or Unverified Actual, a Drop, a row whose target removed holds, or
+// Match Actual, a Drop, a row whose target removed holds, or
 // counted in Excluded. An orphan a drift names is no Drop.
-func (side constraintSide) result(blocking, removed map[string]struct{}, t targets) ConstraintDiff {
+func (side constraintSide) result(blocking, removed map[string]struct{}) ConstraintDiff {
 	var r ConstraintDiff
 	accounted := make([]bool, len(side.actual))
 	for _, cp := range side.plans {
 		switch cp.state {
 		case planMatch:
 			r.Match = append(r.Match, ConstraintMatch{Desired: cp.desired, Actual: *cp.realisation})
-			accounted[cp.at] = true
-		case planUnverified:
-			r.Unverified = append(r.Unverified, ConstraintUnverified{Desired: cp.desired, Actual: *cp.realisation, Reason: cp.unverifiedReason})
 			accounted[cp.at] = true
 		case planCreate:
 			r.Create = append(r.Create, cp.desired)
@@ -321,13 +342,13 @@ func (side constraintSide) result(blocking, removed map[string]struct{}, t targe
 		}
 	}
 	for _, o := range side.orphans {
-		if _, isBlocker := blocking[t.constraint(o.obj)]; !isBlocker {
+		if _, isBlocker := blocking[constraintTarget(o.obj)]; !isBlocker {
 			r.Drop = append(r.Drop, o.obj)
 			accounted[o.at] = true
 		}
 	}
 	for at, rc := range side.actual {
-		if _, gone := removed[t.constraint(rc)]; !accounted[at] && !gone {
+		if _, gone := removed[constraintTarget(rc)]; !accounted[at] && !gone {
 			r.Excluded++
 		}
 	}
@@ -354,24 +375,22 @@ func constraintDrift(cp constraintPlan) ConstraintDrift {
 // constraintBlockerFinder indexes every remote object that can block a desired
 // constraint's create, by the name or the definition it blocks.
 type constraintBlockerFinder struct {
-	byName       map[string][]RemoteConstraint
-	indexByName  map[string][]RemoteIndex
+	byName       map[string]RemoteConstraint
+	indexByName  map[string]RemoteIndex
 	rangeByDef   map[string][]RemoteIndex
 	keyKindByDef map[string][]RemoteConstraint
 	// claimed holds the names pairing gave a declaration; see
 	// [describeIndexBlocker] for why such a holder gets another message.
 	claimed map[string]struct{}
-	targets targets
 }
 
-func newConstraintBlockerFinder(desired []cypher.Constraint, actual []RemoteConstraint, indexes []RemoteIndex, claimed map[string]struct{}, t targets) constraintBlockerFinder {
+func newConstraintBlockerFinder(desired []cypher.Constraint, actual []RemoteConstraint, indexes []RemoteIndex, claimed map[string]struct{}) constraintBlockerFinder {
 	f := constraintBlockerFinder{
-		byName:       make(map[string][]RemoteConstraint),
-		indexByName:  make(map[string][]RemoteIndex),
+		byName:       make(map[string]RemoteConstraint, len(actual)),
+		indexByName:  make(map[string]RemoteIndex, len(indexes)),
 		rangeByDef:   make(map[string][]RemoteIndex),
 		keyKindByDef: make(map[string][]RemoteConstraint),
 		claimed:      claimed,
-		targets:      t,
 	}
 	// A key-kind holder blocks only a declaration on its own label, so a row is
 	// indexed as one only on a label a key-backed declaration names.
@@ -384,9 +403,7 @@ func newConstraintBlockerFinder(desired []cypher.Constraint, actual []RemoteCons
 	// Names are global, so a constraint on an unowned label, or of a kind this
 	// configuration cannot declare, still holds its name against every create.
 	for _, rc := range actual {
-		if rc.Name != "" {
-			f.byName[rc.Name] = append(f.byName[rc.Name], rc)
-		}
+		f.byName[rc.Name] = rc
 		// The server refuses a UNIQUE beside a NODE KEY, and the reverse, over the
 		// same label and properties in the same order, whether pairing gave the
 		// holder to a declaration, left it an orphan, or excluded it.
@@ -404,9 +421,7 @@ func newConstraintBlockerFinder(desired []cypher.Constraint, actual []RemoteCons
 	for _, ri := range indexes {
 		// A constraint's backing index carries the constraint's name, and its drop
 		// target is the constraint's, so the constraint named first stands for both.
-		if ri.Name != "" {
-			f.indexByName[ri.Name] = append(f.indexByName[ri.Name], ri)
-		}
+		f.indexByName[ri.Name] = ri
 		// Only a plain RANGE node index over the same single label blocks a
 		// key-backed constraint, by the server refusing a constraint whose backing
 		// index an equivalent index provides. Measured on 5.26 Enterprise, 2026.05
@@ -433,26 +448,24 @@ func newConstraintBlockerFinder(desired []cypher.Constraint, actual []RemoteCons
 // d's create from taking effect, each with the clause that explains it.
 func (f constraintBlockerFinder) blockers(d cypher.Constraint) []blocker {
 	var out []blocker
-	if d.Name != "" {
-		for _, rc := range f.byName[d.Name] {
-			suffix := "; drop it before this constraint can be created"
-			if _, isOurs := f.claimed[rc.Name]; isOurs {
-				suffix = " that realises another declaration in this schema; drop it, and that declaration is created again under its own name"
-			}
-			out = append(out, blocker{constraint: &rc, target: f.targets.constraint(rc), why: fmt.Sprintf("constraint name %q is already held by a %s constraint on %s%s",
-				rc.Name, rc.Type, describeLabels(rc.LabelsOrTypes), suffix)})
+	if rc, held := f.byName[d.Name]; held {
+		suffix := "; drop it before this constraint can be created"
+		if _, isOurs := f.claimed[rc.Name]; isOurs {
+			suffix = " that realises another declaration in this schema; drop it, and that declaration is created again under its own name"
 		}
-		for _, ri := range f.indexByName[d.Name] {
-			out = append(out, blocker{index: &ri, target: f.targets.index(ri), why: fmt.Sprintf("name %q is already held by a %s index on %s; index and constraint names share one namespace, so drop or rename it before this constraint can be created",
-				ri.Name, ri.Type, describeLabels(ri.LabelsOrTypes))})
-		}
+		out = append(out, blocker{constraint: &rc, target: constraintTarget(rc), why: fmt.Sprintf("constraint name %q is already held by a %s constraint on %s%s",
+			rc.Name, rc.Type, describeLabels(rc.LabelsOrTypes), suffix)})
+	}
+	if ri, held := f.indexByName[d.Name]; held {
+		out = append(out, blocker{index: &ri, target: indexTarget(ri), why: fmt.Sprintf("name %q is already held by a %s index on %s; index and constraint names share one namespace, so drop or rename it before this constraint can be created",
+			ri.Name, ri.Type, describeLabels(ri.LabelsOrTypes))})
 	}
 	if !constraintHasBackingIndex(d.Kind) {
 		return out
 	}
 	def := constraintDefinitionKey(d.Label, d.Properties)
 	for _, ri := range f.rangeByDef[def] {
-		out = append(out, blocker{index: &ri, target: f.targets.index(ri), why: fmt.Sprintf("a %s index %q already serves %s; the server refuses a constraint whose backing index an equivalent index provides, so drop that index before this constraint can be created",
+		out = append(out, blocker{index: &ri, target: indexTarget(ri), why: fmt.Sprintf("a %s index %q already serves %s; the server refuses a constraint whose backing index an equivalent index provides, so drop that index before this constraint can be created",
 			ri.Type, ri.Name, describeLabels(ri.LabelsOrTypes))})
 	}
 	want := d.Kind.String()
@@ -460,30 +473,10 @@ func (f constraintBlockerFinder) blockers(d cypher.Constraint) []blocker {
 		if canonicalRemoteConstraintType(rc.Type) == want {
 			continue
 		}
-		out = append(out, blocker{constraint: &rc, target: f.targets.constraint(rc), why: fmt.Sprintf("%s already holds %s(%s); the server refuses a UNIQUE and a NODE KEY constraint over the same label and properties in the same order, so drop it before this constraint can be created",
+		out = append(out, blocker{constraint: &rc, target: constraintTarget(rc), why: fmt.Sprintf("%s already holds %s(%s); the server refuses a UNIQUE and a NODE KEY constraint over the same label and properties in the same order, so drop it before this constraint can be created",
 			describeConstraint(rc), describeLabels(rc.LabelsOrTypes), strings.Join(rc.Properties, ", "))})
 	}
 	return out
-}
-
-// remoteConstraintKey identifies one remote constraint record.
-func remoteConstraintKey(rc RemoteConstraint) string {
-	return mapping.Key(append(append(
-		[]string{rc.Name, rc.Type, rc.EntityType, rc.PropertyType, strconv.Itoa(len(rc.LabelsOrTypes))},
-		rc.LabelsOrTypes...), rc.Properties...)...)
-}
-
-// compareRemoteConstraints is the order [diff] reads constraints in, so no result depends on the order the server returned rows in.
-func compareRemoteConstraints(x, y RemoteConstraint) int {
-	return cmp.Or(
-		cmp.Compare(x.Name, y.Name),
-		cmp.Compare(x.Type, y.Type),
-		cmp.Compare(x.EntityType, y.EntityType),
-		slices.Compare(x.LabelsOrTypes, y.LabelsOrTypes),
-		slices.Compare(x.Properties, y.Properties),
-		cmp.Compare(x.PropertyType, y.PropertyType),
-		cmp.Compare(x.CreateStatement, y.CreateStatement),
-	)
 }
 
 // desiredDefinitionKey is a desired constraint's identity with its properties
@@ -518,9 +511,6 @@ func nodeKeyExistence(d cypher.Constraint, actual RemoteConstraint) string {
 // describeConstraint names a remote constraint for a drift message, its kind as
 // the server reported it.
 func describeConstraint(rc RemoteConstraint) string {
-	if rc.Name == "" {
-		return fmt.Sprintf("an unnamed %s constraint", rc.Type)
-	}
 	return fmt.Sprintf("a %s constraint %q", rc.Type, rc.Name)
 }
 
@@ -555,9 +545,8 @@ func remoteSemanticKey(o scoped[RemoteConstraint]) string {
 // comparison against a remote type must accept either. Comparing raw strings
 // makes the uniqueness constraints a CYPHER 25 query reports undeclarable, and
 // the whole diff then misreports: the actual side excludes
-// them, so a named desired constraint finds its name taken and reports the
-// schema's OWN constraint as drift, and an unnamed one plans a create of a
-// constraint the database already holds.
+// them, so a desired constraint finds its name taken and reports the schema's
+// OWN constraint as drift.
 //
 // The fold is for COMPARISON only. [RemoteConstraint.Type] keeps exactly what
 // the server reported, because drift messages echo it — naming a constraint kind

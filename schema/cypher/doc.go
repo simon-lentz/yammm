@@ -1,6 +1,6 @@
 // Package cypher maps a yammm schema to a Neo4j 5 graph: the label each type is
 // written under, and the constraint and index DDL that holds the graph to the
-// schema. It also validates Neo4j identifiers and builds the DROP statements a
+// schema. It also judges Neo4j identifiers and builds the DROP statements a
 // diff's plan applies.
 //
 // # Architectural Position
@@ -16,7 +16,7 @@
 //
 // A [Config] is the storage mapping, and its zero value is the default mapping:
 //
-//   - [Config.LabelPrefix]: a prefix for every label composed with a schema name
+//   - [Config.LabelPrefix]: a prefix for every label
 //   - [Config.LabelSeparator]: the separator between the schema name and the
 //     type name in a label; "" means "__"
 //   - [Config.Edition]: the target Neo4j edition, [Enterprise] or [Community]
@@ -30,26 +30,30 @@
 //
 // # Labels
 //
-// [Config.Label] composes a type's label as LabelPrefix, the sanitized name of
-// the schema that declares the type, LabelSeparator and the sanitized type
-// name: "book_catalog__Publisher". An imported type keeps the label its own
-// schema gives it, which is the label its nodes are written under. A type whose
-// schema name is empty or white space is labelled with its sanitized name alone,
-// with no prefix and no separator. A type whose name is empty or white space has
-// no label.
+// [Config.Label] composes a type's label as LabelPrefix, the name of the
+// schema that declares the type, LabelSeparator and the type name, each as
+// written: "book_catalog__Publisher". An imported type keeps the label its own
+// schema gives it, which is the label its nodes are written under. Nothing is
+// rewritten; a label that breaks the rule below is refused, never repaired.
 //
-// Sanitizing trims the name, replaces a space, '-', '.', '/' and '\' with an
-// underscore, puts an underscore before a leading digit, and then drops every
-// character but an ASCII letter, a digit and an underscore. The prefix and the
-// separator are not sanitized; an empty separator means "__". A composed label is
-// then checked with [ValidateIdentifier]: [Config.Constraints], [Config.Indexes]
-// and the write path refuse a schema whose labels are not all valid identifiers
-// with [E_NEO4J_INVALID_IDENTIFIER].
+// [Config.CheckLabels] judges every label across the schema's import closure,
+// and every generator and the neo4j write path refuse the schema on its error,
+// each break one [E_NEO4J_INVALID_IDENTIFIER]. The rule:
 //
-// Two types can compose one label: schema "a" with type B__C and schema "a__B"
-// with type C both give "a__B__C". [Config.CheckLabels] reports each such label
-// across the schema's import closure with [E_NEO4J_LABEL_COLLISION], and every
-// generator and writer refuses the schema on it.
+//   - LabelPrefix is empty or starts an identifier, and LabelSeparator is ASCII
+//     letters, digits and underscores; a setting that breaks this is reported
+//     once.
+//   - The schema name and the type name are each an ASCII letter or
+//     underscore, then ASCII letters, digits and underscores; a load holds
+//     both to the stricter DSL rule.
+//   - The separator neither occurs in the schema name nor runs into it from
+//     its end, so a label decodes to one (schema, type) pair: schema "a" with
+//     type B__C writes a__B__C, so schema "a__B" is refused under "__", and so
+//     is "geo_". A schema name that breaks this is reported once.
+//   - The composed label passes [IsIdentifier].
+//
+// A load holds one schema per name and one type per name in a schema, so two
+// types whose labels keep the rule never share one.
 //
 // [Config.OwnedLabels] returns the set of labels a schema owns, which a diff
 // scopes itself by. Its doc states what the set covers and why ownership is set
@@ -69,22 +73,25 @@
 // one property that cannot be emitted withholds every statement. That is
 // deliberate — a partial script looks complete and silently drops the
 // guarantees it omits — but it means the diagnostic is all the user gets, so
-// each one names what it refuses and why: a property, or for a label collision
-// or an invalid label the type and the label.
+// each one names what it refuses and why: a property; for a label, the schema,
+// the type and the label; for a schema name, the schema; for a prefix or
+// separator, the setting, in its message.
 //
 // Beside a name Neo4j refuses as an identifier (Cypher Reserved Words, below)
-// and two types that compose one label, the one shape a valid schema can hit
+// and a label that breaks the label rule (Labels, above), the one shape a valid schema can hit
 // here is a list whose ELEMENT resolves to a collection: a List or a Vector,
 // written directly or through an alias. Those are legal yammm and validate
 // normally, but Neo4j has no nested collection property type, so the property is
-// refused with [E_NEO4J_UNSUPPORTED_TYPE] under every Config,
-// [NoProperties] included. The Config decides whether a property's name is
-// checked as an identifier, since a name is checked only where a returned
-// statement writes it. It never decides whether a nested collection is refused.
+// refused with [E_NEO4J_UNSUPPORTED_TYPE] under every Config whose labels keep
+// the label rule, [NoProperties] included. The Config decides whether a
+// property's name is checked as an identifier, since a name is checked only
+// where a returned statement writes it. Beyond its label settings, it never
+// decides whether a nested collection is refused.
 // The pass judges such a property on every type it emits constraints for, the
-// types and part types that inherit it included. It judges none on a type whose
-// label is invalid, which is refused with [E_NEO4J_INVALID_IDENTIFIER] instead,
-// or on an abstract type, which no node carries. A model that must export to Neo4j
+// types and part types that inherit it included. It judges none when a label
+// breaks the label rule, since the pass then returns the label rule's
+// [E_NEO4J_INVALID_IDENTIFIER] alone, and none on an abstract type, which no
+// node carries. A model that must export to Neo4j
 // represents the inner collection as a part type reached by a composition
 // instead. (A bare Vector is fine — it maps to LIST<FLOAT NOT NULL>; it is only
 // a Vector nested INSIDE a list that has no expression.)
@@ -168,14 +175,15 @@
 // "true" and "false"). A property named "match" or a type named "MATCH" is
 // valid yammm, but can fail Neo4j export. The names a schema writes into
 // generated DDL unquoted — property names, primary keys, and the assembled
-// labels — are checked with [ValidateIdentifier] during constraint and index
-// generation and rejected as [E_NEO4J_INVALID_IDENTIFIER], whose detail begins
-// with the refusing error's text, [ErrReservedKeyword]'s for a reserved word
-// (the check is case-insensitive); a constraint or index name is built from
-// those checked parts. Namespaced labels usually absorb reserved type names —
-// the label "app__MATCH" is not a keyword — but a reserved property name fails
-// wherever a generated constraint or index statement names it. No generated DDL
-// names an edge property, so no pass checks an edge property's name.
+// labels — are judged by [IsIdentifier] during constraint and index generation
+// and refused as [E_NEO4J_INVALID_IDENTIFIER], whose detail says why: "the name
+// is a Cypher reserved keyword" for a reserved property name and "the label is
+// a Cypher reserved keyword" for a reserved label (the check is
+// case-insensitive); a constraint or index name is built from those checked
+// parts. A label usually absorbs a reserved type name — the label "app__MATCH"
+// is not a keyword — but a reserved property name fails wherever a generated
+// constraint or index statement names it. No generated DDL names an edge
+// property, so no pass checks an edge property's name.
 //
 // Under the default Config the constraint pass already checks every node
 // property it emits a constraint for, which is each but an optional list whose
@@ -185,22 +193,21 @@
 // or [Community] it checks fewer, and the index pass then covers properties
 // named only by an index annotation. For export-compatibility feedback before
 // write time, run [Config.Constraints] AND [Config.Indexes], or call
-// [ValidateIdentifier] on names directly.
+// [IsIdentifier] on names directly.
 //
 // The DROP builders take the opposite path, because they take a name the
-// database already holds rather than one this package generated: a name that
-// fails validation, reserved word included, is backtick-quoted rather than
-// rejected, save a blank one, which is refused with [ErrEmptyIdentifier] — see
-// [DropConstraintStatement].
+// database already holds rather than one this package generated: every name,
+// a reserved word or one [IsIdentifier] refuses included, is backtick-quoted —
+// see [DropConstraintStatement].
 //
 // # Neo4j Version
 //
-// The default Config targets Neo4j 5.9+ Enterprise, and 5.10+ for a schema with
-// a List or Vector property: it emits PROPERTY_TYPE constraints, which Neo4j 5.9
-// added for scalar types and 5.10 for LIST types. Under [NoProperties] it
-// targets Neo4j 5.0+. [Config.NodeKeys] needs no newer release than the
-// default. The emitted CREATE VECTOR INDEX ... OPTIONS statement form (from
-// @vector annotations) requires Neo4j 5.15+.
+// The supported floor is Neo4j 5.26, the oldest server the integration suite
+// runs. Every statement a Config emits runs on it in the edition the Config
+// names: the PROPERTY_TYPE constraints for scalar, List and Vector properties,
+// NODE KEY, and the CREATE VECTOR INDEX ... OPTIONS form. A Community server
+// refuses the existence, type and NODE KEY constraints an Enterprise Config
+// emits; [Community] emits none of them.
 //
 // # Sealed Schemas
 //
@@ -212,5 +219,5 @@
 //
 // # Dependencies
 //
-//	schema/cypher  ──imports──▶  schema, diag, internal/mapping
+//	schema/cypher  ──imports──▶  schema, diag, internal/mapping, internal/parse
 package cypher

@@ -86,8 +86,29 @@ func TestGenHelp_NamesTheTargetsGenWrites(t *testing.T) {
 	t.Parallel()
 
 	line := strings.TrimSpace(lineContaining(t, helpText(t, "gen"), "--to string"))
-	if !strings.HasSuffix(line, "target: go or md (required)") {
-		t.Errorf("--to's help does not name go and md alone: %q", line)
+	if !strings.HasSuffix(line, "target: go, cypher or md (required)") {
+		t.Errorf("--to's help does not name go, cypher and md alone: %q", line)
+	}
+}
+
+// TestGenHelp_MarksEachCypherFlagAndItsDefault pins that each cypher flag's help
+// names the one target it applies to, and that --separator states its default.
+func TestGenHelp_MarksEachCypherFlagAndItsDefault(t *testing.T) {
+	t.Parallel()
+
+	rows := map[string]string{}
+	for line := range strings.SplitSeq(helpText(t, "gen"), "\n") {
+		if row := strings.TrimSpace(line); strings.HasPrefix(row, "--") {
+			rows[strings.Fields(row)[0]] = row
+		}
+	}
+	for _, flag := range []string{"--edition", "--node-keys", "--prefix", "--separator", "--type-constraints"} {
+		if !strings.Contains(rows[flag], "cypher target: ") {
+			t.Errorf("%s's help does not name the cypher target: %q", flag, rows[flag])
+		}
+	}
+	if !strings.HasSuffix(rows["--separator"], `(default "__")`) {
+		t.Errorf("--separator's help does not state its default: %q", rows["--separator"])
 	}
 }
 

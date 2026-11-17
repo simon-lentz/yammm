@@ -30,8 +30,7 @@ func TestLoadWarningsRenderedByEveryCommand(t *testing.T) {
 		args []string
 	}{
 		{"validate", []string{"validate", fixture}},
-		{"neo4j indexes", []string{"neo4j", "indexes", fixture}},
-		{"neo4j constraints", []string{"neo4j", "constraints", fixture}},
+		{"gen --to cypher", []string{"gen", "--to", "cypher", fixture}},
 		{"gen md", []string{"gen", "--to", "md", fixture}},
 	}
 

@@ -1,7 +1,6 @@
 package mapping
 
 import (
-	"errors"
 	"fmt"
 
 	"github.com/simon-lentz/yammm/schema"
@@ -13,12 +12,10 @@ import (
 // can begin with an underscore, so the name cannot collide.
 const ComposedKeyProp = "_composed_key"
 
-// ErrUnsupportedListElem is the error [ListElementType] wraps for an element
-// kind Neo4j cannot store in a list.
-var ErrUnsupportedListElem = errors.New("neo4j: unsupported list element type")
-
 // ListElementType maps a yammm list element constraint to a Neo4j type string.
 // Returns the element type name used inside LIST<...> syntax (e.g., "STRING NOT NULL").
+// For an element kind Neo4j cannot store in a list, the error names the kind
+// and no package: each caller reports it under its own.
 func ListElementType(c schema.Constraint) (string, error) {
 	c = schema.ResolveAlias(c)
 	//exhaustive:enforce
@@ -36,9 +33,9 @@ func ListElementType(c schema.Constraint) (string, error) {
 	case schema.KindDate:
 		return "DATE NOT NULL", nil
 	case schema.KindVector, schema.KindList, schema.KindAlias:
-		return "", fmt.Errorf("%w: list element kind %v", ErrUnsupportedListElem, c.Kind())
+		return "", fmt.Errorf("list element kind %v", c.Kind())
 	default:
-		return "", fmt.Errorf("%w: unknown list element kind %v", ErrUnsupportedListElem, c.Kind())
+		return "", fmt.Errorf("unknown list element kind %v", c.Kind())
 	}
 }
 

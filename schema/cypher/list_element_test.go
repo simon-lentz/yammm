@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -51,7 +52,7 @@ func TestConstraints_UnsupportedListElement(t *testing.T) {
 	}, {
 		// An alias resolves before the element kind is judged, so a
 		// list-typed alias reports the kind it resolves TO, not "Alias".
-		// The KindAlias arm of neo4jListElementType is unreachable for that
+		// The KindAlias arm of mapping.ListElementType is unreachable for that
 		// reason and exists only to satisfy the exhaustiveness guard.
 		name:     "list of a list-typed alias",
 		property: "codes List<Codes> required",
@@ -100,6 +101,36 @@ type A {
 				}
 			}
 		})
+	}
+}
+
+// The DDL's diagnostic states the element kind in its own words: the write
+// path's sentinel names the neo4j package, which this call never reaches.
+func TestConstraints_UnsupportedListElementNamesNoPackage(t *testing.T) {
+	t.Parallel()
+	s := loadInline(t, `schema "le"
+type A {
+    id     String primary
+    matrix List<List<Integer>> required
+}
+`)
+	_, result := Config{}.Constraints(s)
+	var issues []diag.Issue
+	for iss := range result.Errors() {
+		issues = append(issues, iss)
+	}
+	if len(issues) != 1 {
+		t.Fatalf("got %d issues, want 1: %v", len(issues), issues)
+	}
+	if got, want := issues[0].Message(), `unsupported list element type for property "matrix" on type "A": list element kind List`; got != want {
+		t.Errorf("message = %q; want %q", got, want)
+	}
+	i := slices.IndexFunc(issues[0].Details(), func(d diag.Detail) bool { return d.Key == diag.DetailKeyDetail })
+	if i < 0 {
+		t.Fatalf("no %s detail: %v", diag.DetailKeyDetail, issues[0].Details())
+	}
+	if got, want := issues[0].Details()[i].Value, "list element kind List"; got != want {
+		t.Errorf("detail = %q; want %q", got, want)
 	}
 }
 

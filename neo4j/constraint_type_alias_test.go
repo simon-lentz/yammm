@@ -96,7 +96,6 @@ func TestConstraintDiff_UniquenessSpellingsAllMatch(t *testing.T) {
 				{"Drift", len(result.Drift)},
 				{"Create", len(result.Create)},
 				{"Drop", len(result.Drop)},
-				{"Unverified", len(result.Unverified)},
 				{"Excluded", result.Excluded},
 			} {
 				if unwanted.n != 0 {

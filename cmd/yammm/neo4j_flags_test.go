@@ -1,22 +1,20 @@
 package main
 
 import (
-	"fmt"
 	"strings"
 	"testing"
 
 	"github.com/simon-lentz/yammm/cmd/yammm/internal/cli"
 )
 
-// TestRun_LabelFlagsAreRefusedBeforeWork: a --prefix or --separator whose
-// composed label is not a Neo4j identifier is a usage error every command taking the flags reports before it loads a schema or
-// opens a connection. The schema carries a load warning, so a load that ran
-// before the refusal shows on stderr.
-func TestRun_LabelFlagsAreRefusedBeforeWork(t *testing.T) {
+// TestRun_LabelFlagsAreJudgedOverTheLoadedSchema: a --prefix or --separator
+// whose labels break the label rule is refused by [cypher.Config.CheckLabels]
+// over the loaded schema, with E_NEO4J_INVALID_IDENTIFIER, before gen writes a
+// statement and before neo4j diff connects.
+func TestRun_LabelFlagsAreJudgedOverTheLoadedSchema(t *testing.T) {
 	commands := map[string][]string{
-		"neo4j constraints": {"neo4j", "constraints", shadowedSchema},
-		"neo4j indexes":     {"neo4j", "indexes", shadowedSchema},
-		"neo4j diff":        {"neo4j", "diff", "--uri", "bolt://127.0.0.1:1", shadowedSchema},
+		"gen --to cypher": {"gen", "--to", "cypher", "testdata/valid.yammm"},
+		"neo4j diff":      {"neo4j", "diff", "--uri", "bolt://127.0.0.1:1", "testdata/valid.yammm"},
 	}
 	flags := map[string][]string{
 		"a separator that is not identifier text": {"--separator", "::"},
@@ -27,16 +25,19 @@ func TestRun_LabelFlagsAreRefusedBeforeWork(t *testing.T) {
 		for flagName, flag := range flags {
 			t.Run(cmdName+", "+flagName, func(t *testing.T) {
 				code, stdout, stderr := runCLI(t, append(append([]string{}, base...), flag...)...)
-				var failure string
-				switch {
-				case code != cli.ExitUsage:
-					failure = fmt.Sprintf("exit code = %d, want %d; stderr:\n%s", code, cli.ExitUsage, stderr)
-				case stdout != "" || strings.Contains(stderr, "W_ANNOTATION_SHADOWED"):
-					failure = "work was done before the flags were refused; stdout:\n" + stdout + "\nstderr:\n" + stderr
-				case !strings.Contains(stderr, "--"+flag[0][2:]):
-					failure = "the refusal does not name the flag; stderr:\n" + stderr
+				if code != cli.ExitValidation {
+					t.Errorf("exit code = %d, want %d; stderr:\n%s", code, cli.ExitValidation, stderr)
 				}
-				checkRepairState(t, "label flags: "+cmdName+", "+flagName, failure)
+				// Both generators judge the labels; the setting is reported once.
+				if strings.Count(stderr, "E_NEO4J_INVALID_IDENTIFIER") != 1 || !strings.Contains(stderr, "compose no node label") {
+					t.Errorf("stderr does not report the label setting once:\n%s", stderr)
+				}
+				if strings.Contains(stderr, "connect") {
+					t.Errorf("neo4j diff connected before it judged the labels:\n%s", stderr)
+				}
+				if stdout != "" {
+					t.Errorf("stdout = %q, want nothing", stdout)
+				}
 			})
 		}
 	}
@@ -45,7 +46,7 @@ func TestRun_LabelFlagsAreRefusedBeforeWork(t *testing.T) {
 // An empty --separator is the default separator, as an empty
 // cypher.Config.LabelSeparator is.
 func TestRun_AnEmptySeparatorIsTheDefault(t *testing.T) {
-	code, stdout, stderr := runCLI(t, "neo4j", "constraints", "--separator", "", "testdata/valid.yammm")
+	code, stdout, stderr := runCLI(t, "gen", "--to", "cypher", "--separator", "", "testdata/valid.yammm")
 	if code != cli.ExitOK {
 		t.Fatalf("exit code = %d, want %d; stderr:\n%s", code, cli.ExitOK, stderr)
 	}
@@ -54,25 +55,23 @@ func TestRun_AnEmptySeparatorIsTheDefault(t *testing.T) {
 	}
 }
 
-// TestRun_OnlyDiffTakesTheConnectionFlags: `neo4j constraints` and `neo4j
-// indexes` open no connection, so each refuses a connection flag as unknown
-// rather than accepting a value it would ignore.
+// TestRun_OnlyDiffTakesTheConnectionFlags: gen opens no connection, so it
+// refuses a connection flag as unknown rather than accepting a value it would
+// ignore.
 func TestRun_OnlyDiffTakesTheConnectionFlags(t *testing.T) {
-	for _, command := range []string{"constraints", "indexes"} {
-		for _, flag := range []string{"--uri", "--username", "--password", "--database"} {
-			t.Run(command+" "+flag, func(t *testing.T) {
-				code, stdout, stderr := runCLI(t, "neo4j", command, flag, "x", "testdata/valid.yammm")
-				if code != cli.ExitUsage {
-					t.Errorf("exit code = %d, want %d; stderr:\n%s", code, cli.ExitUsage, stderr)
-				}
-				if !strings.Contains(stderr, "unknown flag: "+flag) {
-					t.Errorf("stderr does not refuse %s as unknown:\n%s", flag, stderr)
-				}
-				if stdout != "" {
-					t.Errorf("stdout = %q, want nothing", stdout)
-				}
-			})
-		}
+	for _, flag := range []string{"--uri", "--username", "--password", "--database"} {
+		t.Run(flag, func(t *testing.T) {
+			code, stdout, stderr := runCLI(t, "gen", "--to", "cypher", flag, "x", "testdata/valid.yammm")
+			if code != cli.ExitUsage {
+				t.Errorf("exit code = %d, want %d; stderr:\n%s", code, cli.ExitUsage, stderr)
+			}
+			if !strings.Contains(stderr, "unknown flag: "+flag) {
+				t.Errorf("stderr does not refuse %s as unknown:\n%s", flag, stderr)
+			}
+			if stdout != "" {
+				t.Errorf("stdout = %q, want nothing", stdout)
+			}
+		})
 	}
 }
 
@@ -97,7 +96,7 @@ func TestRun_DiffRefusesAMissingURIBeforeLoading(t *testing.T) {
 // generate and whose indexes do not is refused before `neo4j diff` connects, so
 // an unreachable server never decides the exit code.
 func TestRun_DiffJudgesTheIndexesBeforeConnecting(t *testing.T) {
-	code, stdout, stderr := runCLI(t, "neo4j", "diff", "--uri", "bolt://127.0.0.1:1", "--scalar-types=false", "testdata/reserved_index.yammm")
+	code, stdout, stderr := runCLI(t, "neo4j", "diff", "--uri", "bolt://127.0.0.1:1", "--type-constraints", "none", "testdata/reserved_index.yammm")
 	if code != cli.ExitValidation {
 		t.Errorf("exit code = %d, want %d; stderr:\n%s", code, cli.ExitValidation, stderr)
 	}
@@ -109,28 +108,30 @@ func TestRun_DiffJudgesTheIndexesBeforeConnecting(t *testing.T) {
 	}
 }
 
-// TestRun_ScalarTypesOffOutranksRequiredOnly: --scalar-types=false emits no
-// type constraint whatever --required-only-types says.
-func TestRun_ScalarTypesOffOutranksRequiredOnly(t *testing.T) {
-	code, stdout, stderr := runCLI(t, "neo4j", "constraints", "--scalar-types=false", "--required-only-types", "testdata/valid.yammm")
-	if code != cli.ExitOK {
-		t.Fatalf("exit code = %d, want %d; stderr:\n%s", code, cli.ExitOK, stderr)
-	}
-	if strings.Contains(stdout, "IS ::") {
-		t.Errorf("stdout holds a type constraint:\n%s", stdout)
-	}
-	if !strings.Contains(stdout, "CREATE CONSTRAINT") {
-		t.Errorf("stdout holds no constraint:\n%s", stdout)
+// TestRun_TypeConstraintsIsReadInAnyCase: --type-constraints none emits no
+// type constraint, in any case, and keeps every other constraint.
+func TestRun_TypeConstraintsIsReadInAnyCase(t *testing.T) {
+	for _, value := range []string{"none", "NONE"} {
+		code, stdout, stderr := runCLI(t, "gen", "--to", "cypher", "--type-constraints", value, "testdata/valid.yammm")
+		if code != cli.ExitOK {
+			t.Fatalf("%s: exit code = %d, want %d; stderr:\n%s", value, code, cli.ExitOK, stderr)
+		}
+		if strings.Contains(stdout, "IS ::") {
+			t.Errorf("%s: stdout holds a type constraint:\n%s", value, stdout)
+		}
+		if !strings.Contains(stdout, "CREATE CONSTRAINT") {
+			t.Errorf("%s: stdout holds no constraint:\n%s", value, stdout)
+		}
 	}
 }
 
 // TestRun_EditionIsReadInAnyCase: --edition takes its value in any case.
 func TestRun_EditionIsReadInAnyCase(t *testing.T) {
-	lower, wantOut, stderr := runCLI(t, "neo4j", "constraints", "--edition", "community", "testdata/valid.yammm")
+	lower, wantOut, stderr := runCLI(t, "gen", "--to", "cypher", "--edition", "community", "testdata/valid.yammm")
 	if lower != cli.ExitOK {
 		t.Fatalf("exit code = %d, want %d; stderr:\n%s", lower, cli.ExitOK, stderr)
 	}
-	code, stdout, stderr := runCLI(t, "neo4j", "constraints", "--edition", "Community", "testdata/valid.yammm")
+	code, stdout, stderr := runCLI(t, "gen", "--to", "cypher", "--edition", "Community", "testdata/valid.yammm")
 	if code != cli.ExitOK {
 		t.Fatalf("exit code = %d, want %d; stderr:\n%s", code, cli.ExitOK, stderr)
 	}

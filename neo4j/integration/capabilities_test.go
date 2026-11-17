@@ -167,9 +167,9 @@ func TestNodeKeyRequest_EnforcesPrimaryKeyOnEitherEdition(t *testing.T) {
 	}
 	cd := planAgainst(t, a, s, actual, readIndexes(t, ctx)).Constraints
 	if len(cd.Match) != len(constraints) {
-		t.Errorf("matched %d of %d emitted constraints; drift=%d create=%d drop=%d unverified=%d",
+		t.Errorf("matched %d of %d emitted constraints; drift=%d create=%d drop=%d",
 			len(cd.Match), len(constraints),
-			len(cd.Drift), len(cd.Create), len(cd.Drop), len(cd.Unverified))
+			len(cd.Drift), len(cd.Create), len(cd.Drop))
 		for _, d := range cd.Drift {
 			t.Logf("  drift: %s", d.Reason)
 		}
@@ -180,9 +180,9 @@ func TestNodeKeyRequest_EnforcesPrimaryKeyOnEitherEdition(t *testing.T) {
 }
 
 // A TYPE constraint's propertyType must be reported, and must match what the
-// library emitted — otherwise every TYPE constraint lands in Unverified and
-// `yammm neo4j diff` exits 3 forever. This is the column that does not exist
-// before Neo4j 5.9 and cannot be exercised on Community at all.
+// library emitted: ParseConstraints refuses a TYPE record without one, and
+// `yammm neo4j diff` would exit 3 on every run. Community holds no TYPE
+// constraint, so this runs on Enterprise alone.
 func TestTypeConstraint_PropertyTypeRoundTrips(t *testing.T) {
 	ctx := context.Background()
 	driver(t)
@@ -212,11 +212,7 @@ func TestTypeConstraint_PropertyTypeRoundTrips(t *testing.T) {
 	}
 	var withPropertyType int
 	for _, rc := range parsed {
-		if rc.Type == "NODE_PROPERTY_TYPE" {
-			if rc.PropertyType == "" {
-				t.Errorf("constraint %q is NODE_PROPERTY_TYPE but parsed PropertyType empty; it would be Unverified", rc.Name)
-				continue
-			}
+		if rc.Type == "NODE_PROPERTY_TYPE" && rc.PropertyType != "" {
 			withPropertyType++
 		}
 	}
@@ -226,11 +222,6 @@ func TestTypeConstraint_PropertyTypeRoundTrips(t *testing.T) {
 
 	// And they must compare equal, not drift.
 	diff := planAgainst(t, a, s, parsed, readIndexes(t, ctx)).Constraints
-	if len(diff.Unverified) != 0 {
-		for _, u := range diff.Unverified {
-			t.Errorf("unverified: %s (%s)", u.Desired.Name, u.Reason)
-		}
-	}
 	for _, d := range diff.Drift {
 		t.Errorf("drift on a constraint the library itself applied: %s (%s)", d.Desired.Name, d.Reason)
 	}
@@ -281,11 +272,10 @@ func TestTypeConstraint_DriftIsDetected(t *testing.T) {
 	}
 }
 
-// A caller whose own introspection omits propertyType gets Unverified, not a
-// false Match. This is the reachable trigger for the constraint Unverified
-// bucket: a server old enough to lack the column is also too old to hold the
-// constraint, so the bucket only ever fills from a caller's query.
-func TestTypeConstraint_MissingPropertyTypeIsUnverified(t *testing.T) {
+// A caller whose own introspection omits propertyType gets an error from
+// ParseConstraints, never a plan that reads an uncompared TYPE constraint as
+// matched.
+func TestParseConstraints_RefusesALiveTypeRecordWithNoPropertyType(t *testing.T) {
 	ctx := context.Background()
 	driver(t)
 	requireEnterprise(t, ctx)
@@ -311,19 +301,8 @@ func TestTypeConstraint_MissingPropertyTypeIsUnverified(t *testing.T) {
 	records := query(t, ctx,
 		"SHOW CONSTRAINTS YIELD name, type, entityType, labelsOrTypes, properties, createStatement")
 	parsed, err := n4j.ParseConstraints(records)
-	if err != nil {
-		t.Fatalf("ParseConstraints: %v", err)
-	}
-
-	diff := planAgainst(t, a, s, parsed, readIndexes(t, ctx)).Constraints
-	if len(diff.Unverified) != len(typeConstraints) {
-		t.Errorf("unverified = %d, want %d — an uncompared constraint must not read as matched",
-			len(diff.Unverified), len(typeConstraints))
-	}
-	for _, m := range diff.Match {
-		if m.Desired.Kind == cypher.ConstraintType {
-			t.Errorf("matched %s, whose type was never compared", m.Desired.Name)
-		}
+	if err == nil || !strings.Contains(err.Error(), "reports no propertyType") {
+		t.Fatalf("ParseConstraints = %d records, %v; want the TYPE record refused", len(parsed), err)
 	}
 }
 

@@ -6,26 +6,20 @@ import (
 	"testing"
 )
 
-// A valid separator still emits, so the gate above turns on the label actually
-// being illegal rather than on the separator being non-default.
-func TestEmittableTypes_ValidSeparatorStillEmits(t *testing.T) {
+// A separator the schema name keeps the rule under is used as configured.
+// "_" would be refused for schema "index_test", which holds it.
+func TestIndexes_AConfiguredSeparatorIsUsed(t *testing.T) {
 	t.Parallel()
 	s := loadSchema(t, "indexes.yammm")
-	got, result := Config{LabelSeparator: "_"}.Indexes(s)
+	got, result := Config{LabelSeparator: "Z"}.Indexes(s)
 	if result.HasErrors() {
-		t.Fatalf("an underscore separator is a legal identifier character: %v", result.Err())
+		t.Fatalf("separator Z keeps the label rule for schema index_test: %v", result.Err())
 	}
 	if len(got) == 0 {
 		t.Fatal("expected indexes to be emitted")
 	}
-	// The default separator is "__", which also satisfies a "index_test_" prefix
-	// test — so the assertion names the exact label. With the option dropped the
-	// label would be index_test__Document and this fails.
 	for _, idx := range got {
-		if strings.Contains(idx.Label, "__") {
-			t.Errorf("label %q still uses the default separator, not the configured %q", idx.Label, "_")
-		}
-		if !strings.HasPrefix(idx.Label, "index_test_") {
+		if !strings.HasPrefix(idx.Label, "index_testZ") {
 			t.Errorf("label %q does not use the configured separator", idx.Label)
 		}
 	}

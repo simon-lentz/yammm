@@ -53,7 +53,7 @@ func TestCoerceValue_TakesTheStoredFormAlone(t *testing.T) {
 		{"Pattern", schema.NewPatternConstraint(regexp.MustCompile("^a$")), []any{"a", "no match"}, []any{namedText("a"), 5}},
 		{"Boolean", schema.NewBooleanConstraint(), []any{true, false}, []any{"true", 1, namedFlag(true)}},
 		{"Timestamp", schema.NewTimestampConstraint(), []any{"2024-01-02T03:04:05Z"}, []any{at, &at, int64(123), true}},
-		{"Date", schema.NewDateConstraint(), []any{"2024-01-02", dbtype.Date(at)}, []any{at, int64(123), true}},
+		{"Date", schema.NewDateConstraint(), []any{"2024-01-02"}, []any{dbtype.Date(at), at, int64(123), true}},
 		{"UUID", schema.NewUUIDConstraint(), []any{id.String()}, []any{id, 5}},
 		{"Vector", schema.NewVectorConstraint(2), []any{[]float64{1, 2}, []float64{1}}, []any{[]float32{1, 2}, []int64{1, 2}, []string{"a"}, 1.5}},
 		{"List", schema.NewListConstraint(schema.NewStringConstraint()), nil, []any{[]string{"a"}, "a"}},
@@ -176,7 +176,7 @@ func TestCoerceValue_ARefusalNamesTheFormTheKindStores(t *testing.T) {
 		{schema.NewBooleanConstraint(), "x", "coerce Boolean: cannot use string (want bool)"},
 		{schema.NewUUIDConstraint(), 5, "coerce UUID: cannot use int (want string)"},
 		{schema.NewTimestampConstraint(), 5, "coerce Timestamp: cannot use int (want string)"},
-		{schema.NewDateConstraint(), 5, "coerce Date: cannot use int (want a YYYY-MM-DD string or dbtype.Date)"},
+		{schema.NewDateConstraint(), 5, "coerce Date: cannot use int (want a YYYY-MM-DD string)"},
 		{schema.NewVectorConstraint(2), "x", "coerce Vector: cannot use string (want a list of floats)"},
 		{list(schema.NewFloatConstraint()), []any{1.5, "x"}, "list element 1: coerce Float: cannot use string (want float64)"},
 		{list(schema.NewIntegerConstraint()), []any{1.5}, "list element 0: coerce Integer: cannot use float64 (want int64)"},
@@ -184,7 +184,7 @@ func TestCoerceValue_ARefusalNamesTheFormTheKindStores(t *testing.T) {
 		{list(schema.NewBooleanConstraint()), []any{"x"}, "list element 0: coerce Boolean: cannot use string (want bool)"},
 		{list(schema.NewUUIDConstraint()), []any{5}, "list element 0: coerce UUID: cannot use int (want string)"},
 		{list(schema.NewTimestampConstraint()), []any{nil}, "list element 0: coerce Timestamp: cannot use <nil> (want string)"},
-		{list(schema.NewDateConstraint()), []any{nil}, "list element 0: coerce Date: cannot use <nil> (want a YYYY-MM-DD string or dbtype.Date)"},
+		{list(schema.NewDateConstraint()), []any{nil}, "list element 0: coerce Date: cannot use <nil> (want a YYYY-MM-DD string)"},
 		{schema.NewVectorConstraint(1), []any{"x"}, "list element 0: coerce Float: cannot use string (want float64)"},
 	} {
 		if _, err := coerceValue(c.c, c.v); err == nil || err.Error() != c.want {
@@ -261,18 +261,19 @@ func TestCoerceParams_JudgesBoundsMembersAndPatterns(t *testing.T) {
 }
 
 // CoerceParams reads what it returned as it read what it was given, so a
-// second pass sends the same values: an instant, a date, a typed slice, and a
-// map or rows it passed as given.
+// second pass sends the same values: an instant, a typed slice, and a map or
+// rows it passed as given. A date returns as a dbtype.Date, which it refuses
+// as the validator does ([TestCoerceParams_RefusesADriverDate]).
 func TestCoerceParams_ReadsItsOwnOutput(t *testing.T) {
 	t.Parallel()
 	types := ParamTypes{
 		"f": schema.NewFloatConstraint(), "i": schema.NewIntegerConstraint(), "s": schema.NewStringConstraint(),
-		"ts": schema.NewTimestampConstraint(), "d": schema.NewDateConstraint(), "u": schema.NewUUIDConstraint(),
+		"ts": schema.NewTimestampConstraint(), "u": schema.NewUUIDConstraint(),
 		"v": schema.NewVectorConstraint(2), "ls": schema.NewListConstraint(schema.NewStringConstraint()),
 		"lf": schema.NewListConstraint(schema.NewFloatConstraint()), "lt": schema.NewListConstraint(schema.NewTimestampConstraint()),
 	}
 	first, err := CoerceParams(map[string]any{
-		"f": 3, "i": int32(4), "s": "x", "ts": "2024-01-02T03:04:05.5+02:00", "d": "2024-01-02",
+		"f": 3, "i": int32(4), "s": "x", "ts": "2024-01-02T03:04:05.5+02:00",
 		"u": "12345678-1234-1234-1234-123456789ABC", "v": []any{1, 2.5}, "ls": []any{"a"}, "lf": []any{1, 2.5},
 		"lt":   []any{"2024-01-02T03:04:05Z", "2024-01-02T03:04:05-07:00"},
 		"rows": []map[string]any{{"ts": "2024-01-02T03:04:05Z"}, nil}, "props": map[string]any{"ts": "2024-01-02T03:04:05Z"},

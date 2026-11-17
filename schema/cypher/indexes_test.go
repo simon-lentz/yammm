@@ -159,8 +159,8 @@ func TestIndexes_CollidingNamesAreDisambiguated(t *testing.T) {
 		if !strings.Contains(idx.Statement, idx.Name) {
 			t.Errorf("statement does not carry the disambiguated name %q: %s", idx.Name, idx.Statement)
 		}
-		if err := ValidateIdentifier(idx.Name, "index name"); err != nil {
-			t.Errorf("disambiguated name %q is not a valid Neo4j identifier: %v", idx.Name, err)
+		if !IsIdentifier(idx.Name) {
+			t.Errorf("disambiguated name %q is not a Neo4j identifier", idx.Name)
 		}
 	}
 }
@@ -213,14 +213,22 @@ func TestIndexes_NonCollidingNamesUnchanged(t *testing.T) {
 }
 
 // TestIndexes_InvalidPropertyIdentifier pins that a property whose name is a
-// Cypher reserved keyword is rejected at emission. Such a name is a valid DSL
-// property name but not a valid unquoted Neo4j identifier.
+// Cypher reserved keyword is rejected at emission, with the documented reason as
+// its detail. Such a name is a valid DSL property name but not a valid unquoted
+// Neo4j identifier.
 func TestIndexes_InvalidPropertyIdentifier(t *testing.T) {
 	t.Parallel()
 	s := loadSchema(t, "indexes_bad_ident.yammm")
 	_, result := Config{}.Indexes(s)
 	if !result.HasCode(E_NEO4J_INVALID_IDENTIFIER) {
 		t.Fatalf("expected E_NEO4J_INVALID_IDENTIFIER, got: %v", result.Err())
+	}
+	for issue := range result.Issues() {
+		for _, d := range issue.Details() {
+			if d.Key == diag.DetailKeyDetail && d.Value != "the name is a Cypher reserved keyword" {
+				t.Errorf("detail = %q, want the documented reason", d.Value)
+			}
+		}
 	}
 }
 
@@ -294,8 +302,8 @@ func TestIndexes_FulltextRangeNameCollisionDisambiguated(t *testing.T) {
 		if !strings.Contains(idx.Statement, idx.Name) {
 			t.Errorf("statement does not carry the disambiguated name %q: %s", idx.Name, idx.Statement)
 		}
-		if err := ValidateIdentifier(idx.Name, "index name"); err != nil {
-			t.Errorf("disambiguated name %q is not a valid Neo4j identifier: %v", idx.Name, err)
+		if !IsIdentifier(idx.Name) {
+			t.Errorf("disambiguated name %q is not a Neo4j identifier", idx.Name)
 		}
 	}
 }

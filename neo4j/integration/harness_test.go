@@ -15,18 +15,16 @@ import (
 	tcneo4j "github.com/testcontainers/testcontainers-go/modules/neo4j"
 )
 
-// defaultImage is a current calendar-versioned release, comfortably past the
-// 5.15 floor the emitted CREATE VECTOR INDEX ... OPTIONS form requires. Pinned
+// defaultImage is a current calendar-versioned release, past the supported
+// floor of Neo4j 5.26. Pinned
 // rather than floating on `latest` so a suite failure is attributable to a code
 // change and not to whatever the registry served that morning; the pin is
 // expected to be bumped deliberately.
 //
 // Enterprise, because Enterprise is what the library targets by default:
 // NOT NULL, TYPE, and NODE KEY constraints are Enterprise-only, and so is the
-// propertyType column the constraint diff compares and its Unverified bucket
-// turns on. On Community the library's edition gating emits UNIQUE alone, so
-// three of its four constraint kinds and an entire diff classification would
-// never execute. The container accepts the evaluation licence below.
+// propertyType value the constraint diff compares. On Community the library's edition gating emits UNIQUE alone, so
+// three of its four constraint kinds would never execute. The container accepts the evaluation licence below.
 const defaultImage = "neo4j:2026.05.0-enterprise"
 
 const adminPassword = "yammm-integration"

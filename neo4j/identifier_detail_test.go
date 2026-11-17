@@ -66,27 +66,83 @@ func TestInvalidIdentifier_ScopeSiteMatchesTheContract(t *testing.T) {
 }
 
 // Every site emitting the code carries the same detail contract: format and
-// detail always, and a type only when the subject really is a type.
-func TestInvalidIdentifier_LabelSiteCarriesTheSameContract(t *testing.T) {
+// detail always, and a schema, a type and a label only when the issue is about
+// one. A label setting names none of them; a type's label names all three.
+func TestInvalidIdentifier_LabelSitesCarryTheSameContract(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 
-	s, lres := schema.LoadString(ctx, "schema \"x\"\n\ntype Person {\n\tid String primary\n}\n", "x.yammm")
+	s, lres := schema.LoadString(ctx, "schema \"A\"\n\ntype C {\n\tid String primary\n}\n", "x.yammm")
 	if s.IsZero() {
 		t.Fatalf("load: %s", lres)
 	}
-	_, res := shapeFor(cypher.Config{LabelPrefix: "9"}, s)
-
-	got := detailsOf(t, res, cypher.E_NEO4J_INVALID_IDENTIFIER)
-	if got == nil {
-		t.Fatalf("no E_NEO4J_INVALID_IDENTIFIER for a label starting with a digit: %s", res)
-	}
-	for _, key := range []string{"format", "detail", "type", "label"} {
-		if got[key] == "" {
-			t.Errorf("label-site issue is missing the %q detail: %v", key, got)
+	for _, tc := range []struct {
+		name string
+		c    cypher.Config
+		want map[string]string
+	}{
+		{"a prefix starting with a digit", cypher.Config{LabelPrefix: "9"}, map[string]string{"schema_name": "", "type": "", "label": ""}},
+		{"a label that is a keyword", cypher.Config{LabelSeparator: "S"}, map[string]string{"schema_name": "A", "type": "C", "label": "ASC"}},
+	} {
+		_, res := shapeFor(tc.c, s)
+		got := detailsOf(t, res, cypher.E_NEO4J_INVALID_IDENTIFIER)
+		if got == nil {
+			t.Fatalf("%s: no E_NEO4J_INVALID_IDENTIFIER: %s", tc.name, res)
+		}
+		for _, key := range []string{"format", "detail"} {
+			if got[key] == "" {
+				t.Errorf("%s: the issue is missing the %q detail: %v", tc.name, key, got)
+			}
+		}
+		for key, want := range tc.want {
+			if got[key] != want {
+				t.Errorf("%s: %q detail = %q, want %q", tc.name, key, got[key], want)
+			}
 		}
 	}
-	if got["type"] != "Person" {
-		t.Errorf("type detail = %q, want the type name %q", got["type"], "Person")
+}
+
+// Each label break carries its reason as the detail, and the subject at its
+// grain: a schema break names the schema alone, a type's label all three.
+func TestInvalidIdentifier_EachLabelBreakCarriesItsReason(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name, src string
+		c         cypher.Config
+		want      map[string]string
+	}{
+		{
+			"a schema name holding the separator", "schema \"a__B\"\n\ntype C {\n\tid String primary\n}\n",
+			cypher.Config{},
+			map[string]string{
+				"schema_name": "a__B", "type": "", "label": "",
+				"detail": `the separator "__" occurs in the name or runs into it from the name's end, so the label reads two ways`,
+			},
+		},
+		{
+			"a label that is a keyword", "schema \"A\"\n\ntype C {\n\tid String primary\n}\n",
+			cypher.Config{LabelSeparator: "S"},
+			map[string]string{"schema_name": "A", "type": "C", "label": "ASC", "detail": "the label is a Cypher reserved keyword"},
+		},
+		{
+			"a separator that is no identifier text", "schema \"A\"\n\ntype C {\n\tid String primary\n}\n",
+			cypher.Config{LabelSeparator: "-"},
+			map[string]string{"schema_name": "", "detail": "the separator is not ASCII letters, digits and underscores"},
+		},
+	} {
+		s, lres := schema.LoadString(t.Context(), tc.src, "x.yammm")
+		if s.IsZero() {
+			t.Fatalf("%s: load: %s", tc.name, lres)
+		}
+		_, res := shapeFor(tc.c, s)
+		got := detailsOf(t, res, cypher.E_NEO4J_INVALID_IDENTIFIER)
+		if got == nil {
+			t.Fatalf("%s: no E_NEO4J_INVALID_IDENTIFIER: %s", tc.name, res)
+		}
+		for key, want := range tc.want {
+			if got[key] != want {
+				t.Errorf("%s: %q detail = %q, want %q", tc.name, key, got[key], want)
+			}
+		}
 	}
 }

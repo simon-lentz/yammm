@@ -67,18 +67,14 @@ func scalarForm(resolved schema.Constraint, raw any) (any, error) {
 		}
 		return raw, fmt.Errorf("coerce %s: cannot parse %s as an RFC3339 timestamp", kind, diag.QuoteValue(v))
 	case schema.KindDate:
-		switch v := raw.(type) {
-		case dbtype.Date:
-			// The driver's own date, which [CoerceParams] passes at a Date.
-			return dbtype.Date(calendarDate(time.Time(v))), nil
-		case string:
-			if t, err := time.Parse(time.DateOnly, v); err == nil {
-				return dbtype.Date(t), nil
-			}
-			return raw, fmt.Errorf("coerce %s: cannot parse %s as a YYYY-MM-DD date", kind, diag.QuoteValue(v))
-		default:
-			return raw, fmt.Errorf("coerce %s: cannot use %T (want a YYYY-MM-DD string or dbtype.Date)", kind, raw)
+		v, ok := raw.(string)
+		if !ok {
+			return raw, fmt.Errorf("coerce %s: cannot use %T (want a YYYY-MM-DD string)", kind, raw)
 		}
+		if t, err := time.Parse(time.DateOnly, v); err == nil {
+			return dbtype.Date(t), nil
+		}
+		return raw, fmt.Errorf("coerce %s: cannot parse %s as a YYYY-MM-DD date", kind, diag.QuoteValue(v))
 	case schema.KindInteger:
 		if _, ok := raw.(int64); !ok {
 			return raw, fmt.Errorf("coerce %s: cannot use %T (want int64)", kind, raw)
@@ -124,8 +120,7 @@ func scalarForm(resolved schema.Constraint, raw any) (any, error) {
 
 // directForm returns the value the validator stores for raw at c, the form the
 // write path reads, or the validator's refusal. c is one [CoerceParams] judged.
-// A dbtype.Date at a Date is the driver's own date and passes. It recovers no
-// panic.
+// It recovers no panic.
 func directForm(raw any, c schema.Constraint) (any, error) {
 	if c == nil {
 		return raw, nil
@@ -133,9 +128,6 @@ func directForm(raw any, c schema.Constraint) (any, error) {
 	// A property type Neo4j cannot store is refused before its value is read.
 	if err := nestedCollection(c); err != nil {
 		return nil, err
-	}
-	if _, ok := raw.(dbtype.Date); ok && schema.ResolveAlias(c).Kind() == schema.KindDate {
-		return raw, nil
 	}
 	if err := value.Check(raw, c); err != nil {
 		return nil, err //nolint:wrapcheck // the validator's message is the refusal, and the caller names the param
@@ -176,11 +168,11 @@ func coerceValue(constraint schema.Constraint, raw any) (any, error) {
 // [ParamTypesForType], or hand-list constraints via the schema constructors.
 type ParamTypes map[string]schema.Constraint
 
-// CoerceParams returns a new map with each value read at the constraint
-// declared for its key in types, as [github.com/simon-lentz/yammm/instance.Validator]
-// reads a property value, and returned as the write path sends the value the
-// validator stores. A value the validator refuses is an error, and a
-// dbtype.Date at a Date passes as the driver's own date. A value that holds
+// CoerceParams reads each value of params at the constraint declared for its
+// key in types, as [github.com/simon-lentz/yammm/instance.Validator] reads a
+// property value, and returns the values as the write path sends the value the
+// validator stores. A value the validator refuses is an error: a Date takes a
+// "YYYY-MM-DD" string or a time.Time, never a driver type. A value that holds
 // none is returned as nil at every key, since the driver packs a nil slice as
 // an empty list. Any other value under a key absent from types passes through
 // as given.
@@ -302,13 +294,6 @@ func ParamTypesForType(t schema.Type) ParamTypes {
 // location of this name, and so does the read path for every ZONED DATETIME
 // that holds an offset.
 const driverOffsetZoneName = "Offset"
-
-// calendarDate strips the time of day, keeping the wall-clock date the value
-// itself shows, so every Date arm hands the driver one form.
-func calendarDate(t time.Time) time.Time {
-	y, m, d := t.Date()
-	return time.Date(y, m, d, 0, 0, 0, 0, time.UTC)
-}
 
 // maxOffsetSeconds is the widest UTC offset the server holds in a ZONED
 // DATETIME, 18 hours either way. The server refuses a wider one with an error

@@ -41,7 +41,7 @@ func (q *queryLog) run(_ context.Context, database, query string) ([]map[string]
 	return reply.records, reply.err
 }
 
-// recordedConstraints is a SHOW CONSTRAINTS YIELD * reading of a database
+// recordedConstraints is a [neo4j.ShowConstraints] reading of a database
 // written under the default mapping: a primary key, a required property, a scalar type
 // constraint, and a relationship-scoped constraint.
 func recordedConstraints() []map[string]any {

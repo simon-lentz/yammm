@@ -107,7 +107,8 @@ func TestConstraintDiff_ARealisationAnotherCreateNeedsDroppedIsDrift(t *testing.
 	if len(plan.Match) != 0 || len(plan.Drift) != 2 {
 		t.Fatalf("Match = %+v, Drift = %+v; want both declarations drifted", plan.Match, plan.Drift)
 	}
-	if !slices.Equal(blockerNames(plan.Drift[0].Blockers), []string{"c:app__T_z_type"}) || !strings.Contains(plan.Drift[0].Reason, "realises this declaration") {
+	const reason = `a UNIQUENESS constraint "app__T_z_type" realises this declaration and the plan drops it; this constraint is created again under its own name`
+	if !slices.Equal(blockerNames(plan.Drift[0].Blockers), []string{"c:app__T_z_type"}) || plan.Drift[0].Reason != reason {
 		t.Errorf("Drift[0] = %+v; want the UNIQUE's own realisation named, and why", plan.Drift[0])
 	}
 	if !slices.Equal(blockerNames(plan.Drift[1].Blockers), []string{"c:a", "c:app__T_z_type"}) || !strings.Contains(plan.Drift[1].Reason, "realises another declaration") {
@@ -207,18 +208,6 @@ func TestConstraintDiff_TheDeclaredOrderWinsInEitherSpelling(t *testing.T) {
 	}
 }
 
-// TestIndexDiff_AMovedNamelessRealisationSaysSo names an unnamed realisation
-// another declaration of its definition needs dropped as "the unnamed index".
-func TestIndexDiff_AMovedNamelessRealisationSaysSo(t *testing.T) {
-	t.Parallel()
-	declared := cypher.Index{Kind: cypher.IndexRange, Label: "app__T", Properties: []string{"x"}}
-	actual := []RemoteIndex{{Type: "RANGE", EntityType: "NODE", State: "ONLINE", LabelsOrTypes: []string{"app__T"}, Properties: []string{"x"}}}
-	plan := diff(cypher.Config{}, nil, []cypher.Index{declared, declared}, nil, actual, ownedSet("app__T")).Indexes
-	if len(plan.Drift) != 2 || !strings.HasPrefix(plan.Drift[0].Reason, "the unnamed index realises this declaration") {
-		t.Errorf("Drift = %+v; want the first drift to name the unnamed index", plan.Drift)
-	}
-}
-
 // TestIndexDiff_ABackingIndexNeverBlocksADefinition names a name-only pair's
 // realisation alone beside a backing index over the declared definition.
 func TestIndexDiff_ABackingIndexNeverBlocksADefinition(t *testing.T) {
@@ -265,52 +254,18 @@ func TestIndexDiff_ClausesJoinInBlockerOrder(t *testing.T) {
 	}
 }
 
-// TestDiff_BlockersDifferingInOneRecordFieldAreBothNamed names two holders of
-// one name that differ in one field of their record, so dropping one leaves
+// TestIndexDiff_TwoHoldersOfADefinitionAreBothNamed names two indexes that
+// serve one declaration's definition under other names, so dropping one leaves
 // none standing.
-func TestDiff_BlockersDifferingInOneRecordFieldAreBothNamed(t *testing.T) {
+func TestIndexDiff_TwoHoldersOfADefinitionAreBothNamed(t *testing.T) {
 	t.Parallel()
-	declaredC := []cypher.Constraint{{Name: "k", Kind: cypher.ConstraintUnique, Label: "app__T", Properties: []string{"id"}}}
-	holderC := RemoteConstraint{Name: "k", Type: "UNIQUENESS", EntityType: "NODE", LabelsOrTypes: []string{"o__T"}, Properties: []string{"z"}}
-	for name, mod := range map[string]func(*RemoteConstraint){
-		"Type":          func(r *RemoteConstraint) { r.Type = "NODE_KEY" },
-		"EntityType":    func(r *RemoteConstraint) { r.EntityType = "RELATIONSHIP" },
-		"PropertyType":  func(r *RemoteConstraint) { r.PropertyType = "STRING" },
-		"LabelsOrTypes": func(r *RemoteConstraint) { r.LabelsOrTypes = []string{"o__U"} },
-		"Properties":    func(r *RemoteConstraint) { r.Properties = []string{"y"} },
-		"length":        func(r *RemoteConstraint) { r.LabelsOrTypes = []string{"o__T", "z"}; r.Properties = nil },
-	} {
-		other := holderC
-		mod(&other)
-		plan := diff(cypher.Config{}, declaredC, nil, []RemoteConstraint{holderC, other}, nil, ownedSet("app__T")).Constraints
-		if len(plan.Drift) != 1 || len(plan.Drift[0].Blockers.Constraints) != 2 {
-			t.Errorf("constraint %s: Drift = %+v; want both holders", name, plan.Drift)
-		}
-	}
 	declaredI := []cypher.Index{{Name: "k", Kind: cypher.IndexRange, Label: "app__T", Properties: []string{"id"}}}
-	holderI := RemoteIndex{Name: "k", Type: "TEXT", EntityType: "NODE", State: "ONLINE", LabelsOrTypes: []string{"o__T"}, Properties: []string{"z"}}
-	for name, mod := range map[string]func(*RemoteIndex){
-		"Type":             func(r *RemoteIndex) { r.Type = "POINT" },
-		"EntityType":       func(r *RemoteIndex) { r.EntityType = "RELATIONSHIP" },
-		"State":            func(r *RemoteIndex) { r.State = "FAILED" },
-		"OwningConstraint": func(r *RemoteIndex) { r.OwningConstraint = "c" },
-		"LabelsOrTypes":    func(r *RemoteIndex) { r.LabelsOrTypes = []string{"o__U"} },
-		"Properties":       func(r *RemoteIndex) { r.Properties = []string{"y"} },
-		"length":           func(r *RemoteIndex) { r.LabelsOrTypes = []string{"o__T", "z"}; r.Properties = nil },
-	} {
-		other := holderI
-		mod(&other)
-		plan := diff(cypher.Config{}, nil, declaredI, nil, []RemoteIndex{holderI, other}, ownedSet("app__T")).Indexes
-		if len(plan.Drift) != 1 || len(plan.Drift[0].Blockers.Indexes) != 2 {
-			t.Errorf("index %s: Drift = %+v; want both holders", name, plan.Drift)
-		}
-	}
 	served := RemoteIndex{Name: "a", Type: "RANGE", EntityType: "NODE", State: "ONLINE", LabelsOrTypes: []string{"app__T"}, Properties: []string{"id"}}
 	renamed := served
 	renamed.Name = "b"
 	plan := diff(cypher.Config{}, nil, declaredI, nil, []RemoteIndex{served, renamed}, ownedSet("o__T")).Indexes
 	if len(plan.Drift) != 1 || len(plan.Drift[0].Blockers.Indexes) != 2 {
-		t.Errorf("index Name: Drift = %+v; want both definition holders", plan.Drift)
+		t.Errorf("Drift = %+v; want both definition holders", plan.Drift)
 	}
 }
 

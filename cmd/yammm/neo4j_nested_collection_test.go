@@ -9,7 +9,7 @@ import (
 	"github.com/simon-lentz/yammm/cmd/yammm/internal/cli"
 )
 
-// docs/SPEC.md says `yammm neo4j constraints` rejects a list whose element is
+// docs/SPEC.md says `yammm gen --to cypher` rejects a list whose element is
 // itself a collection with E_NEO4J_UNSUPPORTED_TYPE and emits nothing for the
 // whole schema. No flag gives Neo4j a nested collection type, so the refusal
 // holds under each one, and `neo4j diff`, whose desired side is the same
@@ -32,14 +32,14 @@ func TestNeo4jCommands_RefuseANestedCollectionUnderEveryFlag(t *testing.T) {
 
 	flagSets := [][]string{
 		nil,
-		{"--scalar-types=false"},
-		{"--scalar-types=false", "--required-only-types"},
-		{"--scalar-types=false", "--edition", "community"},
-		{"--scalar-types=false", "--node-keys"},
+		{"--type-constraints", "none"},
+		{"--type-constraints", "required"},
+		{"--type-constraints", "none", "--edition", "community"},
+		{"--type-constraints", "none", "--node-keys"},
 	}
 	for _, flags := range flagSets {
 		for _, command := range [][]string{
-			{"neo4j", "constraints"},
+			{"gen", "--to", "cypher"},
 			{"neo4j", "diff", "--uri", "neo4j://127.0.0.1:1"},
 		} {
 			args := append(append(append([]string{}, command...), flags...), nested)
@@ -60,7 +60,7 @@ func TestNeo4jCommands_RefuseANestedCollectionUnderEveryFlag(t *testing.T) {
 		}
 
 		// A type with no label carries its properties to no node.
-		args := append(append([]string{"neo4j", "constraints"}, flags...), unlabelled)
+		args := append(append([]string{"gen", "--to", "cypher"}, flags...), unlabelled)
 		t.Run("no label: "+strings.Join(flags, " "), func(t *testing.T) {
 			code, stdout, stderr := runCLI(t, args...)
 			if code != cli.ExitOK || !strings.Contains(stdout, "ga__R") || strings.Contains(stderr, "E_NEO4J_UNSUPPORTED_TYPE") {

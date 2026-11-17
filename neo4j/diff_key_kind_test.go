@@ -81,11 +81,6 @@ func TestConstraintDiff_TheOtherKeyKindIsDrift(t *testing.T) {
 			wantBlocker: "constraint_a1",
 		},
 		{
-			name: "a remote constraint with no name", config: nodeKey(false), schema: one,
-			remote:      []RemoteConstraint{remote("", "UNIQUENESS", "id")},
-			wantBlocker: "", wantInReason: "an unnamed UNIQUENESS constraint already holds flip__Doc(id)",
-		},
-		{
 			name: "a composite in the same order", config: nodeKey(true), schema: two,
 			remote:      []RemoteConstraint{remote("c1", "UNIQUENESS", "a", "b")},
 			wantBlocker: "c1", wantInReason: "flip__Doc(a, b)",

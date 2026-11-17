@@ -19,6 +19,11 @@ const (
 	MaxVectorDimensions = 65536
 )
 
+// MaxIndexedVectorDimensions is the most dimensions a Neo4j vector index takes.
+// A Vector may hold more, up to MaxVectorDimensions, but no @vector names one:
+// the load refuses it, and schema/cypher's index target rule mirrors the load.
+const MaxIndexedVectorDimensions = 4096
+
 // unbounded is the spelling that leaves one side of a bound pair open.
 const unbounded = "_"
 

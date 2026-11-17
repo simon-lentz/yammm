@@ -9,6 +9,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/simon-lentz/yammm/cmd/yammm/internal/cli"
+	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/neo4j"
 	"github.com/simon-lentz/yammm/schema"
 	"github.com/simon-lentz/yammm/schema/cypher"
@@ -18,8 +19,8 @@ func newNeo4jDiffCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "diff <schema.yammm>",
 		Short: "Compare schema constraints and indexes against a live Neo4j database",
-		Long: "Performs a semantic five-way diff between desired schema constraints and indexes and their actual database state:\n" +
-			"matched, drifted, to-create, to-drop, and unverified (present, but the server did not report enough to compare it, or an index still populating).\n\n" +
+		Long: "Compares the constraints and indexes `yammm gen --to cypher` emits for the schema with a live database's:\n" +
+			"matched, drifted, to-create and to-drop, and for an index also unverified (present, but still populating or not reporting its vector configuration).\n\n" +
 			"A plan with any drift, create or drop, in either half, exits 1, and outranks an unverifiable definition, " +
 			"which exits 3; a database whose constraints or indexes cannot be read exits 3; nothing is applied. " +
 			"An undeclared index on a schema-owned label can be planned for a drop — declare it with @index/@@index/@vector/@fulltext/@@fulltext to keep it.",
@@ -27,13 +28,11 @@ func newNeo4jDiffCmd() *cobra.Command {
 		RunE: withDiagnostics(runNeo4jDiff),
 	}
 
-	// The desired side of the diff is exactly what `yammm neo4j constraints` and
-	// `yammm neo4j indexes` emit, so this command takes their whole flag set —
-	// see registerConstraintFlags. A flag one command has and another lacks is a
-	// plan reporting drift the operator never introduced.
+	// The desired side of the diff is exactly the script `yammm gen --to cypher`
+	// emits, so this command takes its whole flag set.
 	registerConnectionFlags(cmd)
-	registerLabelFlags(cmd)
-	registerConstraintFlags(cmd)
+	registerLabelFlags(cmd, "")
+	registerConstraintFlags(cmd, "")
 
 	registerModuleRootFlag(cmd)
 	return cmd
@@ -69,41 +68,66 @@ func runNeo4jDiff(cmd *cobra.Command, args []string, sink *cli.DiagnosticSink) e
 		return err
 	}
 
-	// The desired side is judged before any connection, so a schema the
-	// generators refuse is reported without a server.
-	if _, result := c.Constraints(s); result.HasErrors() {
-		sink.Add(result)
-		return cli.Exit(cli.ExitForResult(result))
+	connect := func(ctx context.Context) (cli.QueryRunner, func(context.Context) error, error) {
+		driver, err := cli.ConnectNeo4j(ctx, uri, username, password)
+		if err != nil {
+			return nil, nil, err
+		}
+		return cli.DriverQueries(driver), driver.Close, nil
 	}
-	if _, result := c.Indexes(s); result.HasErrors() {
-		sink.Add(result)
-		return cli.Exit(cli.ExitForResult(result))
-	}
+	return diffSchema(cmd.Context(), cmd.OutOrStdout(), sink, connect, database, c, s)
+}
 
-	// Connect to database
-	ctx := cmd.Context()
-	driver, err := cli.ConnectNeo4j(ctx, uri, username, password)
-	if err != nil {
-		return err
-	}
-	defer driver.Close(ctx)
-
-	state, err := fetchRemoteState(ctx, cli.DriverQueries(driver), database)
-	if err != nil {
-		return err
-	}
-	plan, result := neo4j.Diff(c, s, state.constraints, state.indexes)
-	if result.HasErrors() {
-		sink.Add(result)
-		return cli.Exit(cli.ExitForResult(result))
+// diffSchema generates the desired side of s under c and reports its result
+// to sink once, at every severity, as gen --to cypher does; then it connects,
+// reads the remote state, plans it and reports the plan to w. A schema the
+// generators refuse is reported without a connection.
+func diffSchema(ctx context.Context, w io.Writer, sink *cli.DiagnosticSink,
+	connect func(context.Context) (cli.QueryRunner, func(context.Context) error, error), database string,
+	c cypher.Config, s schema.Schema,
+) error {
+	_, _, generated := generateCypher(c, s)
+	sink.Add(generated)
+	if generated.HasErrors() {
+		return cli.Exit(cli.ExitForResult(generated))
 	}
 	sink.Flush()
+
+	run, connClose, err := connect(ctx)
+	if err != nil {
+		return err
+	}
+	defer connClose(ctx)
+
+	state, err := fetchRemoteState(ctx, run, database)
+	if err != nil {
+		return err
+	}
+	// Diff generates again from the same c and s, whose issues were added
+	// above, so its errors are the remote rows it cannot plan from: an answer
+	// no comparison can be built on, as an unreadable projection is.
+	plan, result := neo4j.Diff(c, s, state.constraints, state.indexes)
+	if result.HasErrors() {
+		sink.Add(remoteRowIssues(result))
+		return cli.Exit(cli.ExitForResult(result))
+	}
 
 	// Diff scopes the plan by its own owned set; this one names an index Drop's
 	// owned label in the report, by membership rather than a guess parsed back
 	// out of the remote object's label.
-	reportPlan(cmd.OutOrStdout(), plan, c.OwnedLabels(s))
+	reportPlan(w, plan, c.OwnedLabels(s))
 	return cli.Exit(neo4jDiffExit(plan))
+}
+
+// remoteRowIssues keeps the issues of result that judge a remote row.
+func remoteRowIssues(result diag.Result) diag.Result {
+	collector := diag.NewCollector(0)
+	for issue := range result.Issues() {
+		if issue.Code() == neo4j.E_NEO4J_INVALID_REMOTE_OBJECT {
+			collector.Collect(issue)
+		}
+	}
+	return collector.Result()
 }
 
 // reportPlan writes both halves of plan, the constraints' first.
@@ -204,17 +228,15 @@ func unreadableProjection(untyped, total int, object, query string) error {
 // neo4jDiffExit maps the plan onto an exit code, reading both halves.
 //
 // Drift wins: it is the actionable signal, and a caller that sees exit 1 goes
-// looking at the printed diff either way. An unverified object — one whose
-// definition the server would not disclose, such as a TYPE constraint on a
-// server too old to report its property type — must not exit 0: the caller
-// asked for drift and did not get it, so reporting success would let a drift
-// gate read "no drift" from a comparison that never ran.
+// looking at the printed diff either way. An unverified index must not exit 0:
+// the caller asked for drift and did not get it, so reporting success would let
+// a drift gate read "no drift" from a comparison that never ran.
 func neo4jDiffExit(plan neo4j.Plan) int {
 	cs, is := plan.Constraints, plan.Indexes
 	if len(cs.Drift)+len(cs.Create)+len(cs.Drop)+len(is.Drift)+len(is.Create)+len(is.Drop) > 0 {
 		return cli.ExitValidation
 	}
-	if len(cs.Unverified)+len(is.Unverified) > 0 {
+	if len(is.Unverified) > 0 {
 		return cli.ExitRuntime
 	}
 	return cli.ExitOK
@@ -228,35 +250,34 @@ func printMatchedLine(w io.Writer, noun string, matched int) {
 	}
 }
 
+// tally is one bucket of a summary line: its count and the words after it.
+type tally struct {
+	n    int
+	what string
+}
+
 // printDiffSummary writes the trailing tally line. prefix is "" for constraints
-// and "index " for indexes; the format is otherwise identical, so a layout
-// change lands in one place. Shared bookend of the constraint and index reports.
+// and "index " for indexes, and the buckets are each side's own; the layout is
+// shared, so a change to it lands in one place.
 //
 // excluded is reported on its own line rather than folded into the total: the
-// five buckets are what the diff compared, and objects it could not compare do
+// buckets are what the diff compared, and objects it could not compare do
 // not belong in that count. Naming them is what stops "0 to drop" from reading
 // as "the database is accounted for" — a type deleted since the last apply
 // leaves objects that land here, or on a blocker line where one holds a
 // declared name.
-func printDiffSummary(w io.Writer, prefix, noun string, match, drift, create, drop, unverified, excluded int) {
-	total := match + drift + create + drop + unverified
-	fmt.Fprintf(w, "\n%ssummary: %d matched, %d drifted, %d to create, %d to drop, %d unverified (total: %d)\n",
-		prefix, match, drift, create, drop, unverified, total)
+func printDiffSummary(w io.Writer, prefix, noun string, excluded int, buckets ...tally) {
+	total := 0
+	parts := make([]string, len(buckets))
+	for i, b := range buckets {
+		total += b.n
+		parts[i] = fmt.Sprintf("%d %s", b.n, b.what)
+	}
+	fmt.Fprintf(w, "\n%ssummary: %s (total: %d)\n", prefix, strings.Join(parts, ", "), total)
 	if excluded > 0 {
 		fmt.Fprintf(w, "%snote: %d database %s were not compared — on a label this schema does not declare, or of a kind it cannot express\n",
 			prefix, excluded, noun)
 	}
-}
-
-// constraintLabel identifies a constraint in report output. A hand-built
-// constraint can have no name, where printing Name alone yields a blank
-// identifier and a list of drift lines an operator cannot tell apart; the label
-// and members always identify it.
-func constraintLabel(c cypher.Constraint) string {
-	if c.Name != "" {
-		return c.Name
-	}
-	return c.Label + "(" + strings.Join(c.Properties, ", ") + ")"
 }
 
 // ownedLabelOf reports which of a remote object's labels the schema owns — the
@@ -271,6 +292,15 @@ func ownedLabelOf(owned *cypher.OwnedLabels, labels []string) string {
 	if l, ok := owned.LabelOf(labels); ok {
 		return l
 	}
+	return labelList(labels)
+}
+
+// labelList renders a remote object's labels in Neo4j's multi-label syntax,
+// and an empty list as "no label", as the plan's own reasons do.
+func labelList(labels []string) string {
+	if len(labels) == 0 {
+		return "no label"
+	}
 	return strings.Join(labels, "|")
 }
 
@@ -278,7 +308,7 @@ func printConstraintDiff(w io.Writer, diff *neo4j.ConstraintDiff) {
 	printMatchedLine(w, "constraints", len(diff.Match))
 
 	for _, d := range diff.Drift {
-		fmt.Fprintf(w, "drift: %s (%s)\n", constraintLabel(d.Desired), d.Reason)
+		fmt.Fprintf(w, "drift: %s (%s)\n", d.Desired.Name, d.Reason)
 		printBlockers(w, "  blocker: ", d.Blockers)
 	}
 
@@ -290,19 +320,9 @@ func printConstraintDiff(w io.Writer, diff *neo4j.ConstraintDiff) {
 		fmt.Fprintf(w, "drop: %s (name: %s)\n", d.CreateStatement, d.Name)
 	}
 
-	// Unverified constraints exist but could not be fully compared — listed
-	// separately from matches so an unchecked constraint is never read as in
-	// sync, and counted as their own bucket in the summary.
-	for _, u := range diff.Unverified {
-		fmt.Fprintf(w, "unverified: %s (%s)\n", constraintLabel(u.Desired), u.Reason)
-	}
-
-	printDiffSummary(w, "", "constraint(s)",
-		len(diff.Match), len(diff.Drift), len(diff.Create), len(diff.Drop), len(diff.Unverified), diff.Excluded)
-
-	if n := len(diff.Unverified); n > 0 {
-		fmt.Fprintf(w, "note: %d constraint(s) could not be fully verified\n", n)
-	}
+	printDiffSummary(w, "", "constraint(s)", diff.Excluded,
+		tally{len(diff.Match), "matched"}, tally{len(diff.Drift), "drifted"},
+		tally{len(diff.Create), "to create"}, tally{len(diff.Drop), "to drop"})
 }
 
 func printIndexDiff(w io.Writer, diff *neo4j.IndexDiff, owned *cypher.OwnedLabels) {
@@ -328,8 +348,10 @@ func printIndexDiff(w io.Writer, diff *neo4j.IndexDiff, owned *cypher.OwnedLabel
 		fmt.Fprintf(w, "index unverified: %s (%s)\n", u.Desired.Name, u.Reason)
 	}
 
-	printDiffSummary(w, "index ", "index(es)",
-		len(diff.Match), len(diff.Drift), len(diff.Create), len(diff.Drop), len(diff.Unverified), diff.Excluded)
+	printDiffSummary(w, "index ", "index(es)", diff.Excluded,
+		tally{len(diff.Match), "matched"}, tally{len(diff.Drift), "drifted"},
+		tally{len(diff.Create), "to create"}, tally{len(diff.Drop), "to drop"},
+		tally{len(diff.Unverified), "unverified"})
 
 	if n := len(diff.Unverified); n > 0 {
 		fmt.Fprintf(w, "index note: %d index(es) could not be fully verified\n", n)
@@ -343,11 +365,11 @@ func printIndexDiff(w io.Writer, diff *neo4j.IndexDiff, owned *cypher.OwnedLabel
 func printBlockers(w io.Writer, prefix string, b neo4j.Blockers) {
 	for _, c := range b.Constraints {
 		fmt.Fprintf(w, "%s%s %q on %s(%s)\n", prefix, blockerKind(c.Type, "constraint"), c.Name,
-			strings.Join(c.LabelsOrTypes, "|"), strings.Join(c.Properties, ", "))
+			labelList(c.LabelsOrTypes), strings.Join(c.Properties, ", "))
 	}
 	for _, i := range b.Indexes {
 		line := fmt.Sprintf("%s%s %q on %s(%s)", prefix, blockerKind(i.Type, "index"), i.Name,
-			strings.Join(i.LabelsOrTypes, "|"), strings.Join(i.Properties, ", "))
+			labelList(i.LabelsOrTypes), strings.Join(i.Properties, ", "))
 		if i.OwningConstraint != "" {
 			line += fmt.Sprintf(", which backs constraint %q: drop the constraint", i.OwningConstraint)
 		}

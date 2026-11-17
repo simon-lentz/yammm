@@ -248,7 +248,7 @@ func TestConstraintsForType_CommunityNodeKeyKeepsPrimaryKeyNotNull(t *testing.T)
 	collector := diag.NewCollector(0)
 	names := a.newPropertyNameCheck(collector)
 	var unfiltered []Constraint
-	for typ, label := range a.labels().EmittableTypes(s, collector) {
+	for typ, label := range a.labels().LabeledTypes(s) {
 		unfiltered = append(unfiltered, a.constraintsForType(typ, label, names, collector)...)
 	}
 	if unfiltered == nil {
@@ -358,9 +358,7 @@ func TestConstraints_RequiredOnlyTypes(t *testing.T) {
 //
 // They are one kind of statement. A Vector and a List<Float> emit the same
 // expression, so gating them apart meant the option suppressed the constraint
-// for one declaration and not for an identical one. It is also the only switch
-// that turns property-type constraints off, which a server older than Neo4j 5.9
-// needs because they do not exist there.
+// for one declaration and not for an identical one.
 //
 // Mutation: moving listTypeConstraints back outside the gate turns this red.
 func TestConstraints_TypeConstraintsDisabled(t *testing.T) {
@@ -589,7 +587,7 @@ func TestConstraints_EditionOmission_CoexistsWithNodeKeyWarning(t *testing.T) {
 // emitters, not only by the index ones. All four emitter sites raise the same
 // code, and none of them had a test.
 //
-// Mutation: dropping the ValidateIdentifier call in any emitter arm turns this
+// Mutation: dropping the property-name check in any emitter arm turns this
 // red for that arm's property.
 func TestConstraints_ReservedPropertyNameRefused(t *testing.T) {
 	t.Parallel()
@@ -605,6 +603,11 @@ func TestConstraints_ReservedPropertyNameRefused(t *testing.T) {
 			found = true
 			if !strings.Contains(issue.Message(), "match") {
 				t.Errorf("issue does not name the offending property: %s", issue.Message())
+			}
+			for _, d := range issue.Details() {
+				if d.Key == diag.DetailKeyDetail && d.Value != "the name is a Cypher reserved keyword" {
+					t.Errorf("detail = %q, want the documented reason", d.Value)
+				}
 			}
 		}
 	}

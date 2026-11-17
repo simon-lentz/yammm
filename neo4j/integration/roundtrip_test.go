@@ -198,7 +198,6 @@ func TestRoundTripDiffIsClean(t *testing.T) {
 		{"drift", len(cd.Drift)},
 		{"create", len(cd.Create)},
 		{"drop", len(cd.Drop)},
-		{"unverified", len(cd.Unverified)},
 	} {
 		if unwanted.n != 0 {
 			t.Errorf("constraints: %d %s, want 0", unwanted.n, unwanted.name)
@@ -444,9 +443,9 @@ func TestShowConstraints_ShapeIsAsParsed(t *testing.T) {
 		t.Fatal("no constraints were introspected")
 	}
 	for _, rec := range records {
-		for _, col := range []string{"name", "type", "entityType", "labelsOrTypes", "properties", "createStatement"} {
+		for _, col := range []string{"name", "type", "entityType", "labelsOrTypes", "properties", "propertyType", "createStatement"} {
 			if _, present := rec[col]; !present {
-				t.Errorf("column %q absent from SHOW CONSTRAINTS YIELD *; ParseConstraints reads it", col)
+				t.Errorf("column %q absent from ShowConstraints' record; ParseConstraints reads it", col)
 			}
 		}
 		// The parsers reach every field through a type assertion that yields the
@@ -461,11 +460,9 @@ func TestShowConstraints_ShapeIsAsParsed(t *testing.T) {
 		assertType[string](t, rec, "createStatement")
 		assertSliceOfString(t, rec, "labelsOrTypes")
 		assertSliceOfString(t, rec, "properties")
-		// propertyType is deliberately NOT required: it does not exist before
-		// Neo4j 5.9 and is null for every non-TYPE constraint. Where it is
-		// present it must still be a string, since that is what the parser
-		// asserts.
-		if v, present := rec["propertyType"]; present && v != nil {
+		// propertyType is null for every non-TYPE constraint. Where it is not, it
+		// must be a string, since that is what the parser asserts.
+		if v := rec["propertyType"]; v != nil {
 			assertType[string](t, rec, "propertyType")
 		}
 	}

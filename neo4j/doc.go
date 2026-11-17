@@ -32,11 +32,9 @@
 // @writeOnce keys from the snapshot's own schema under the [cypher.Config]'s
 // label settings, so a merge key and the property it names are coerced under one
 // schema. A type's entry is keyed by [schema.TypeID], so two closure types
-// sharing one bare name each get their own label. Two root types render one
-// label only where their schema and type names compose one label, as schema "a"
-// with type B__C and schema "a__B" with type C do; both calls refuse that
-// closure with [cypher.E_NEO4J_LABEL_COLLISION], and a zero snapshot with
-// [ErrZeroSnapshot].
+// sharing one bare name each get their own label. Both calls refuse a closure
+// [cypher.Config.CheckLabels] refuses, with its [cypher.E_NEO4J_INVALID_IDENTIFIER]
+// issues, and a zero snapshot with [ErrZeroSnapshot].
 //
 // An error marked [ErrUnrepresentable] refuses these values: one its constraint's coercion refuses, a nested collection's, a map at a
 // property the schema declares, a list or a map a document nests more than 256
@@ -50,8 +48,8 @@
 // refusals of a value so too. No other error
 // carries the class: a caller's own, such as a constraint
 // [schema.CheckConstraint] refuses, a zero snapshot, a closure whose labels
-// collide or are no valid identifiers, a relationship type that is no valid
-// identifier, and a cancelled context.
+// break the label rule, a relationship type that is no valid identifier, and a
+// cancelled context.
 //
 // A label that is no valid identifier is refused with
 // [cypher.E_NEO4J_INVALID_IDENTIFIER]. The write queries write relationship
@@ -99,8 +97,8 @@
 //   - Date: a "2006-01-02" string -> dbtype.Date (Neo4j DATE). A string that
 //     does not parse, or any other value, is a coercion failure. The date is
 //     midnight UTC on the day the text shows, since a date carries no time of
-//     day. [CoerceParams] also passes a dbtype.Date at a Date, read the same
-//     way; in a list it is refused, as the validator refuses it.
+//     day. [CoerceParams] reads a Date as the validator does: a "2006-01-02"
+//     string or a time.Time, and it refuses a dbtype.Date.
 //   - Vector: a []float64 passes through. At a List and at a Vector a []any is
 //     element-coerced by the rules above into a typed slice. A []any at any
 //     other kind is refused, since a scalar cannot hold a list.
@@ -188,8 +186,9 @@
 // because the depth-2 parent MATCH is scoped by the PART label and not by the
 // root, so two root types sharing a key value and a relation name would
 // otherwise mint one address for children under one part label —
-// the write path refuses a closure whose labels collide, which is what makes the
-// label exact. And it carries NO source path: a type identity
+// the write path refuses a closure whose labels break the label rule, and a
+// label that keeps it names one schema and type, which is what makes the label
+// exact. And it carries NO source path: a type identity
 // renders a file-backed schema's absolute path, which would put the writing
 // machine's directory layout on every part node and change every address when
 // the schema file moves.
@@ -245,9 +244,14 @@
 //
 //	plan, result := neo4j.Diff(c, s, constraints, indexes)
 //
-// The result holds the constraint generation's issues. When they hold no
-// error, the indexes are generated and the result holds their issues too,
-// sorted with the constraints' as [diag.Collector.Result] sorts. A constraint
+// The result holds one [E_NEO4J_INVALID_REMOTE_OBJECT] for each break in the
+// remote rows that [Diff] cannot plan from: each row with no name, each name
+// that two or more rows of one kind share, and each property type constraint
+// that reports no property type. A plan pairs, blocks and drops a row by its name, and one server read
+// holds none of these; a constraint and the index backing it share their name.
+// Beside them the result holds the constraint generation's issues. When those
+// hold no error, the indexes are generated and the result holds their issues
+// too, sorted with the rest as [diag.Collector.Result] sorts. A constraint
 // error therefore returns before the index generation runs. A plan is returned
 // only when the result holds no error.
 //
@@ -270,8 +274,8 @@
 // settles both sides in one fixed point, so its plan converges in one apply.
 //
 // Each remote row has a drop target, the object that one DROP removes. A
-// backing index's target is its constraint. A Match or Unverified declaration
-// whose realisation a drift names among its Blockers moves to Drift, with that
+// backing index's target is its constraint. A Match, or an index Unverified,
+// declaration whose realisation a drift names among its Blockers moves to Drift, with that
 // realisation first, and the apply creates it again under its own name. An
 // index that an online or POPULATING backing index serves becomes a Create
 // when the plan drops that constraint, as a blocker or as a Drop, unless
@@ -279,7 +283,7 @@
 // unapplied, the server takes the create as a no-op while the backing index
 // stands.
 //
-// A row is in one place only. It is a Match or Unverified Actual, a Drop, a row
+// A row is in one place only. It is a Match or an index Unverified Actual, a Drop, a row
 // whose drop target a drift names or a Drop removes, or it is counted in
 // Excluded. A row that a drift on either side names is never a Drop. Excluded
 // counts the rows the plan leaves alone: rows on a label the schema does not
@@ -290,17 +294,16 @@
 // No declaration pairs with it, and it is a blocker only where it holds a
 // declared name.
 //
-// The plan does not depend on the order of the rows passed in. [Diff]
-// sorts its own copies, and among equal candidates the first in that order
+// The plan does not depend on the order of the rows passed in. [Diff] sorts
+// its own copies by name, and among equal candidates the first in that order
 // wins. Match, Unverified, Create and Drift keep the declarations' order.
 //
 // # Constraint Diffing
 //
-// [Plan.Constraints] classifies the constraints into FIVE categories:
-// matched, drifted, to-create, to-drop, and unverified. An unverified constraint
-// is present, but the server did not report what the comparison needs. A caller
-// that decides "is this in sync?" must read Unverified too. To treat it as
-// matched reports an unchecked constraint as verified.
+// [Plan.Constraints] classifies the constraints into FOUR categories:
+// matched, drifted, to-create and to-drop. Every constraint row is compared
+// whole: [ParseConstraints] and [Diff] refuse a TYPE record that reports no
+// propertyType.
 //
 // A declaration drifts when a CREATE alone cannot realise it.
 // [ConstraintDrift.Blockers] names every database object that its create needs
@@ -324,18 +327,14 @@
 // Pairing goes in phases: name and identity together, then the definition with
 // its properties in the declared order, then identity alone, then name alone.
 //
-// Unverified is reachable when the records came from a query that does not
-// return propertyType, for example a caller's own Cypher in place of
-// [ShowConstraints]. A server too old to report that column is also
-// too old to hold a TYPE constraint. There, such a declaration is a to-create,
-// or a drift when an object that holds its name blocks the create.
-//
 // # Index Diffing
 //
 // [Plan.Indexes] classifies the indexes into FIVE categories: matched,
 // drifted, to-create, to-drop, and unverified. An unverified index is present,
-// but its configuration was not readable or it is still populating. As with
-// constraints, Unverified is neither in sync nor drifted.
+// but it reports no vector setting the declaration holds, as an index created
+// without vector.dimensions does, or it is still populating. Unverified is
+// neither in sync nor drifted, so a caller that decides "is this in sync?" must
+// read it too.
 //
 // A declaration drifts when a CREATE alone cannot realise it.
 // [IndexDrift.Blockers] names every database object that its create needs
@@ -401,9 +400,10 @@
 //
 // # Neo4j Version
 //
-// A schema with a composition needs Neo4j 5.9+, since its replace query uses a
-// quantified path pattern. [github.com/simon-lentz/yammm/schema/cypher] states
-// what its DDL needs.
+// The supported floor is Neo4j 5.26, the oldest server the integration suite
+// runs, for the writes, the introspection queries and the diff alike. A
+// composition's replace query uses a quantified path pattern, which every
+// supported server runs.
 //
 // # Sealed Schemas
 //

@@ -13,8 +13,7 @@ The `yammm` CLI provides schema validation, formatting, data checking, snapshot 
 | `yammm check <schema> <data>...` | Validate data files against a schema |
 | `yammm gen --to go <schema>` | Generate Go source from a schema |
 | `yammm gen --to md <schema>` | Generate Markdown docs with a Mermaid class diagram |
-| `yammm neo4j constraints <schema>` | Generate Neo4j constraint statements |
-| `yammm neo4j indexes <schema>` | Generate Neo4j index statements from annotations |
+| `yammm gen --to cypher <schema>` | Generate one Neo4j script: every constraint, then every index |
 | `yammm neo4j diff <schema>` | Diff schema constraints and indexes vs live database |
 | `yammm snapshot save <schema> <data>` | Save graph snapshot to `.ys` file |
 | `yammm snapshot info <snapshot>` | Display snapshot metadata |
@@ -201,27 +200,28 @@ yammm gen --to md schema.yammm
 yammm gen --to md --no-class-diagram --output SCHEMA.md schema.yammm
 ```
 
-`--to go` generates Go source via the `schema/gogen` package: one struct per type, named Enum/DataType types, a generated `Date` type, `EDGE_` association structs, a Graph aggregate, and the embedded schema source reachable through `SerializedSources()` / `SerializedEntry`. Output is stdlib-only (imports at most `time` and `encoding/json`), formatted and type-checked before being written; schemas with imports are flattened into one self-contained package.
+`--to go` generates Go source via the `schema/gogen` package: one struct per type, named Enum/DataType types and their value constants, a generated `Date` type when a position emits a date, `EDGE_` association structs, a Graph aggregate, the `SchemaHash` constant, and the embedded schema source reachable through `SerializedSources()` / `SerializedEntry`. Output is stdlib-only (imports at most `time` and `encoding/json`), formatted and type-checked before being written; schemas with imports are flattened into one self-contained package.
 
 `--to md` (alias `markdown`) generates a Markdown reference document via the `schema/markdown` package: a Mermaid class diagram of the whole import closure plus per-type sections (flattened property tables with `from <Owner>` inherited-row markers, relation bullets with edge-property sub-tables, invariant source fences) and data-type tables. Same closure flattening; output is deterministic and structurally self-checked before being written.
 
 | Flag | Description |
 | ---- | ----------- |
-| `--to` | Target: `go` or `md` (required) |
+| `--to` | Target: `go`, `cypher` or `md` (required) |
 | `--package` | go target: generated package name (default: derived from schema name). A value that is not a Go identifier, or is a keyword or `_`, an empty one included, is a usage error (exit 2), judged before the schema is loaded |
 | `--output` | Output file path (default: stdout) |
 | `--initialisms` | go target: extra acronyms to upper-case in generated names, e.g. `JWT,OIDC`. An acronym is one or more letters; any other, an empty one included, is a usage error (exit 2), judged before the schema is loaded |
-| `--module-root` | Root directory for module-style imports (default: the nearest ancestor holding a `yammm.mod` marker, else the schema's directory). Shared by every command that loads a schema: `validate`, `check`, `gen`, `snapshot save`, `snapshot verify`, `neo4j constraints`, `neo4j diff`, `neo4j indexes`. A root that is not a directory the loader can open exits 3 before the schema is parsed, whether or not the schema imports anything |
+| `--module-root` | Root directory for module-style imports (default: the nearest ancestor holding a `yammm.mod` marker, else the schema's directory). Shared by every command that loads a schema: `validate`, `check`, `gen`, `snapshot save`, `snapshot verify`, `neo4j diff`. A root that is not a directory the loader can open exits 3 before the schema is parsed, whether or not the schema imports anything |
 | `--no-class-diagram` | md target: omit the Mermaid class-diagram section |
 | `--no-class-members` | md target: keep the diagram and omit the member lines inside each class |
+| `--edition`, `--node-keys`, `--type-constraints`, `--separator`, `--prefix` | cypher target: see Neo4j Workflow below |
 
-Per-target flags are enforced with a usage error: `--package`/`--initialisms` apply only to `--to go`, `--no-class-diagram` and `--no-class-members` only to `--to md`.
+Per-target flags are enforced with a usage error: `--package`/`--initialisms` apply only to `--to go`, `--no-class-diagram` and `--no-class-members` only to `--to md`, and the five Neo4j flags only to `--to cypher`.
 
 ---
 
 ## Neo4j Workflow
 
-`neo4j diff`, the one `neo4j` command that connects, takes the connection flags (also available via environment variables); `constraints` and `indexes` take none:
+`neo4j diff`, the one command that connects, takes the connection flags (also available via environment variables); `gen --to cypher` takes none:
 
 | Flag | Env Var | Default | Description |
 | ---- | ------- | ------- | ----------- |
@@ -230,37 +230,29 @@ Per-target flags are enforced with a usage error: `--package`/`--initialisms` ap
 | `--password` | `$YAMMM_NEO4J_PASSWORD` | -- | Password |
 | `--database` | `$YAMMM_NEO4J_DATABASE` | `neo4j` | Database name |
 
-### neo4j constraints
+The supported floor is Neo4j 5.26: every statement the CLI emits runs on it in the edition `--edition` names.
+
+### gen --to cypher
 
 ```bash
-yammm neo4j constraints schema.yammm
-yammm neo4j constraints --edition community schema.yammm
-yammm neo4j constraints --node-keys schema.yammm
+yammm gen --to cypher schema.yammm > schema.cypher
+yammm gen --to cypher --edition community schema.yammm
+yammm gen --to cypher --node-keys schema.yammm
 ```
 
-Generates `CREATE CONSTRAINT IF NOT EXISTS` Cypher statements from a schema. Every constraint carries a name.
+Generates one Cypher script that provisions the schema: every `CREATE CONSTRAINT ... IF NOT EXISTS`, then every `CREATE INDEX` / `CREATE VECTOR INDEX` / `CREATE FULLTEXT INDEX ... IF NOT EXISTS` from the `@index` / `@@index` / `@vector` / `@fulltext` / `@@fulltext` annotations, one statement per line, each ended by `;`, for `cypher-shell` or a driver session. Constraints come first: a constraint's backing index serves a declared index over its key, and an index created first makes the server refuse the constraint. Every constraint and index carries a name.
+
+These flags shape the script, and `neo4j diff` takes the same five:
 
 | Flag | Default | Description |
 | ---- | ------- | ----------- |
-| `--edition` | `enterprise` | `enterprise` or `community` |
-| `--node-keys` | `false` | Emit NODE KEY instead of separate UNIQUE + NOT NULL for primary keys (Enterprise; under `--edition community` it degrades to UNIQUE with `W_NEO4J_NODE_KEY_UNSUPPORTED`) |
-| `--scalar-types` | `true` | Emit `IS :: <TYPE>` constraints for scalar, List and Vector properties |
-| `--required-only-types` | `false` | Restrict type constraints to required properties |
+| `--edition` | `enterprise` | `enterprise` or `community`, in any case. Community holds UNIQUE constraints only; the omitted kinds are reported with `W_NEO4J_EDITION_CONSTRAINT_OMITTED` |
+| `--node-keys` | `false` | One NODE KEY in place of UNIQUE + NOT NULL for a primary key (Enterprise; under `--edition community` it degrades to UNIQUE with `W_NEO4J_NODE_KEY_UNSUPPORTED`) |
+| `--type-constraints` | `all` | Which properties get an `IS :: <TYPE>` constraint: `all`, `required` or `none`, in any case |
 | `--separator` | `__` | Label separator (schema__Type); an empty value means `__` |
 | `--prefix` | *(none)* | Global label prefix, if the target graph was generated with one |
 
-### neo4j indexes
-
-```bash
-yammm neo4j indexes schema.yammm
-```
-
-Generates `CREATE INDEX` / `CREATE VECTOR INDEX` / `CREATE FULLTEXT INDEX ... IF NOT EXISTS` Cypher statements from a schema's `@index` / `@@index` / `@vector` / `@fulltext` / `@@fulltext` annotations. Index names are always emitted and indexes apply to every edition, so this command takes the label flags but none of the constraint-shape flags (`--edition`, `--node-keys`, `--scalar-types`, `--required-only-types`).
-
-| Flag | Default | Description |
-| ---- | ------- | ----------- |
-| `--separator` | `__` | Label separator (schema__Type); an empty value means `__` |
-| `--prefix` | *(none)* | Global label prefix, if the target graph was generated with one |
+A label is `<prefix><schema><separator><Type>`, as written. A prefix or separator that composes no Neo4j identifier, a schema name that holds the separator or runs into it, and a label that is a Cypher reserved keyword are each refused with `E_NEO4J_INVALID_IDENTIFIER`, at exit 1, before any statement is written and before `neo4j diff` connects.
 
 ### neo4j diff
 
@@ -269,29 +261,17 @@ yammm neo4j diff --uri bolt://localhost:7687 schema.yammm
 yammm neo4j diff --uri bolt://localhost:7687 --edition community --separator __ schema.yammm
 ```
 
-Compares desired schema constraints **and indexes** against the live database, in one plan: the indexes it reads block constraint creates, and the constraints it reads block index creates. Reports constraints and indexes to create, drop, and those already present. Each drift line is followed by one `blocker:` line (`index blocker:` for an index drift) per database object its create needs dropped first, the constraints first. A schema-owned remote index that the schema could declare, that no declaration takes and that no drift names surfaces as a drop until it is annotated.
+Compares the script `gen --to cypher` emits for the schema with the live database's constraints **and indexes**, in one plan: the indexes it reads block constraint creates, and the constraints it reads block index creates. Reports constraints and indexes to create, drop, and those already present. Each drift line is followed by one `blocker:` line (`index blocker:` for an index drift) per database object its create needs dropped first, the constraints first. A schema-owned remote index that the schema could declare, that no declaration takes and that no drift names surfaces as a drop until it is annotated.
 
-`diff` computes its desired side exactly as `constraints` and `indexes` emit it, so it takes **the same flags** — set every one of them to match how the target graph was generated. A flag left at its default when the graph was built with another value makes the desired side disagree with the database by construction, and the plan reports drift the operator never introduced.
+`diff` takes **the same five flags** as `gen --to cypher` — set every one of them to match how the target graph was generated. A flag left at its default when the graph was built with another value makes the desired side disagree with the database by construction, and the plan reports drift the operator never introduced.
 
-| Flag | Default | Description |
-| ---- | ------- | ----------- |
-| `--edition` | `enterprise` | `enterprise` or `community` (governs which constraints are diffed, on **both** sides) |
-| `--node-keys` | `false` | Compare against NODE KEY instead of separate UNIQUE + NOT NULL for primary keys (Enterprise; under `--edition community` the desired side degrades to UNIQUE, and `diff` prints `W_NEO4J_NODE_KEY_UNSUPPORTED` only beside a generation error) |
-| `--scalar-types` | `true` | Emit `IS :: <TYPE>` constraints for scalar, List and Vector properties |
-| `--required-only-types` | `false` | Restrict type constraints to required properties |
-| `--separator` | `__` | Label separator (schema__Type); an empty value means `__` |
-| `--prefix` | *(none)* | Global label prefix, if the target graph was generated with one |
-
-Exit codes: `0` only when everything compared came back in sync. Drift, creates, or drops (constraints or indexes) exit `1`. A definition that could **not** be verified exits `3` — an index whose configuration the server did not report, an index still populating, or a TYPE constraint whose enforced type it did not report — and so does a constraint or index introspection that failed or returned rows the diff cannot read. None is reported as success: a drift gate must not read "no drift" from a comparison that never ran. Drift outranks unverified, so a run with both exits `1`.
-
-Every command that takes the label flags — the three `neo4j` commands —
-refuses a `--prefix` or `--separator` whose composed label is not a Neo4j
-identifier, at exit 2 before it loads a schema or opens a connection.
+Exit codes: `0` only when everything compared came back in sync. Drift, creates, or drops (constraints or indexes) exit `1`. An index whose definition could **not** be verified exits `3` — one whose vector configuration the server did not report, or one still populating — and so does a constraint or index introspection that failed or returned rows the diff cannot read. So do two constraints, or two indexes, under one name, which the diff cannot plan from: each name is printed as an `E_NEO4J_INVALID_REMOTE_OBJECT` error. None is reported as success: a drift gate must not read "no drift" from a comparison that never ran. Drift outranks unverified, so a run with both exits `1`.
 
 ### Typical Neo4j workflow
 
 ```bash
-yammm neo4j constraints schema.yammm > constraints.cypher
+yammm gen --to cypher schema.yammm > schema.cypher
+cypher-shell -f schema.cypher
 yammm neo4j diff --uri bolt://localhost:7687 schema.yammm
 ```
 
@@ -326,13 +306,11 @@ command prints, and names what some commands find and do not print.
   result in its stdout report: in text a row's status with its first error or
   first warning and no other issue of that file, and under `--format json`
   each entry's `diagnostics`. The exit code is read from every file's result.
-- **`yammm neo4j diff` prints a generation warning only beside an error.** It
-  generates the constraints and the indexes it compares. It prints what a
-  generation reports only when that generation's own report holds an error. So for a schema whose constraints
-  generate with no error, `neo4j diff --edition community` prints no
-  `W_NEO4J_EDITION_CONSTRAINT_OMITTED` where
-  `yammm neo4j constraints --edition community` prints one. The diagnostics
-  of the schema load are printed at every severity.
+- **`yammm neo4j diff` prints what `gen --to cypher` prints.** It generates
+  the script it compares and prints that generation's diagnostics at every
+  severity, so `neo4j diff --edition community` prints the
+  `W_NEO4J_EDITION_CONSTRAINT_OMITTED` that
+  `yammm gen --to cypher --edition community` prints.
 - **`yammm fmt` judges the grammar alone.** For a file the grammar does not
   match, it reports the first place that does not match. A file the grammar
   matches is formatted, and `fmt` prints none of the diagnostics

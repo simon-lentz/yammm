@@ -601,33 +601,6 @@ func TestIndexDiff_BlockerMessageNamesEveryLabel(t *testing.T) {
 	}
 }
 
-// Diff is public API and a caller may build Index values with no name —
-// every fixture in this file does. A nameless desired index blocked by an
-// equally nameless remote is a DEFINITION block, and describing it as a name
-// collision tells the operator to drop an index called "".
-func TestIndexDiff_NamelessBlockerIsDescribedAsADefinition(t *testing.T) {
-	t.Parallel()
-	desired := []cypher.Index{{Kind: cypher.IndexRange, Label: "app__T", Properties: []string{"x"}}}
-	actual := []RemoteIndex{{
-		Type: "RANGE", EntityType: "NODE",
-		LabelsOrTypes: []string{"app__T"}, Properties: []string{"x"},
-	}}
-
-	// The remote is declarable and on an owned label, so pairing claims it by
-	// identity; a second nameless declaration of the same definition is the one
-	// that reaches the blocker path, and the first is created again.
-	got := diff(cypher.Config{}, nil, append(desired, desired[0]), nil, actual, ownedSet("app__T")).Indexes
-	if len(got.Drift) != 2 {
-		t.Fatalf("got %d drift entries; want 2: %+v", len(got.Drift), got)
-	}
-	if strings.Contains(got.Drift[1].Reason, `index name ""`) {
-		t.Errorf("Reason = %q; a nameless pair is a definition block, not a name collision", got.Drift[1].Reason)
-	}
-	if !strings.Contains(got.Drift[1].Reason, "definition is already served") {
-		t.Errorf("Reason = %q; want the definition-block message", got.Drift[1].Reason)
-	}
-}
-
 // Objects the diff could not compare must be counted, or an empty Drop reads as
 // "the database is accounted for".
 func TestIndexDiff_ExcludedCountsWhatWasNotCompared(t *testing.T) {

@@ -1,12 +1,7 @@
 package neo4j
 
 import (
-	"cmp"
 	"fmt"
-	"math"
-	"reflect"
-	"slices"
-	"strconv"
 	"strings"
 
 	"github.com/simon-lentz/yammm/internal/mapping"
@@ -106,7 +101,7 @@ type indexSide struct {
 // constraint side, which sorts properties to pair them: SHOW INDEXES reports
 // properties in index-definition order, so the order-sensitive identity is
 // sound. A same-set, different-order remote index is a distinct index.
-func pairIndexes(desired []cypher.Index, actual []RemoteIndex, owned owner, t targets) indexSide {
+func pairIndexes(desired []cypher.Index, actual []RemoteIndex, owned owner) indexSide {
 	side := indexSide{actual: actual}
 	var ownedRemotes []scoped[RemoteIndex]
 	for at, ri := range actual {
@@ -133,11 +128,9 @@ func pairIndexes(desired []cypher.Index, actual []RemoteIndex, owned owner, t ta
 	}
 	for _, p := range pairs {
 		d, ri := desired[p.Desired], p.Actual.obj
-		if ri.Name != "" {
-			side.claimed = append(side.claimed, ri.Name)
-		}
+		side.claimed = append(side.claimed, ri.Name)
 		cp := &side.plans[p.Desired]
-		cp.realisation, cp.at, cp.realised, cp.state = &ri, p.Actual.at, t.index(ri), planMatch
+		cp.realisation, cp.at, cp.realised, cp.state = &ri, p.Actual.at, indexTarget(ri), planMatch
 
 		// Only a name-only pair can have disagreeing identities; the other two
 		// phases match on identity by construction. The database already holds
@@ -174,12 +167,12 @@ func pairIndexes(desired []cypher.Index, actual []RemoteIndex, owned owner, t ta
 // satisfies the declaration rather than blocking it: the server accepts the
 // declaration's create beside it as a no-op. Its state is checked as a paired
 // index's is.
-func (side indexSide) serveFromBackingIndexes(f indexBlockerFinder, t targets) {
+func (side indexSide) serveFromBackingIndexes(f indexBlockerFinder) {
 	for _, i := range side.unmatched {
 		cp := &side.plans[i]
 		if at, served := f.backingFor(desiredIndexKey(cp.desired)); served {
 			ri := side.actual[at]
-			cp.realisation, cp.at, cp.realised, cp.served, cp.state = &ri, at, t.index(ri), true, planMatch
+			cp.realisation, cp.at, cp.realised, cp.served, cp.state = &ri, at, indexTarget(ri), true, planMatch
 			classifyIndexState(cp, ri)
 		}
 	}
@@ -188,7 +181,7 @@ func (side indexSide) serveFromBackingIndexes(f indexBlockerFinder, t targets) {
 // result files every settled plan and accounts for every remote row: a row is a
 // Match or Unverified Actual, a Drop, a row whose target removed holds, or
 // counted in Excluded. An orphan a drift names is no Drop.
-func (side indexSide) result(blocking, removed map[string]struct{}, t targets) IndexDiff {
+func (side indexSide) result(blocking, removed map[string]struct{}) IndexDiff {
 	var r IndexDiff
 	accounted := make([]bool, len(side.actual))
 	for _, cp := range side.plans {
@@ -213,13 +206,13 @@ func (side indexSide) result(blocking, removed map[string]struct{}, t targets) I
 		}
 	}
 	for _, o := range side.orphans {
-		if _, isBlocker := blocking[t.index(o.obj)]; !isBlocker {
+		if _, isBlocker := blocking[indexTarget(o.obj)]; !isBlocker {
 			r.Drop = append(r.Drop, o.obj)
 			accounted[o.at] = true
 		}
 	}
 	for at, ri := range side.actual {
-		if _, gone := removed[t.index(ri)]; !accounted[at] && !gone {
+		if _, gone := removed[indexTarget(ri)]; !accounted[at] && !gone {
 			r.Excluded++
 		}
 	}
@@ -369,9 +362,9 @@ func (ri RemoteIndex) Declarable() bool {
 }
 
 // vectorConfigUnreadable reports whether a matched VECTOR index cannot be
-// compared because the database reported no readable vector configuration — an
-// older server that omits options, or a driver shape the options parser does not
-// recognise.
+// compared because the database did not report a vector setting the
+// declaration holds: a VECTOR index created without vector.dimensions reports
+// no dimension, and a record with no readable options map reports neither.
 //
 // The semantic key matches on label, properties, and type alone, so a remote
 // index of the wrong dimension matches a desired one by key; without this the
@@ -473,32 +466,26 @@ func describeLabels(labels []string) string {
 // A definition served by a constraint's BACKING index satisfies the
 // declaration instead; see backingFor.
 type indexBlockerFinder struct {
-	actual []RemoteIndex
-	byName map[string][]int
-	// byDefinition holds positions in actual, since a name does not tell one
-	// row from another: a caller's rows may share one or have none.
+	actual       []RemoteIndex
+	byName       map[string]int
 	byDefinition map[string][]int
 	// constraintByName reaches a NOT NULL or TYPE constraint, which no SHOW
 	// INDEXES row carries; a key constraint's backing index row is named first
 	// and shares its drop target.
-	constraintByName map[string][]RemoteConstraint
+	constraintByName map[string]RemoteConstraint
 	claimed          map[string]struct{}
-	targets          targets
 }
 
-func newIndexBlockerFinder(actual []RemoteIndex, constraints []RemoteConstraint, claimed map[string]struct{}, t targets) indexBlockerFinder {
+func newIndexBlockerFinder(actual []RemoteIndex, constraints []RemoteConstraint, claimed map[string]struct{}) indexBlockerFinder {
 	f := indexBlockerFinder{
 		actual:           actual,
-		byName:           make(map[string][]int),
+		byName:           make(map[string]int, len(actual)),
 		byDefinition:     make(map[string][]int),
-		constraintByName: make(map[string][]RemoteConstraint),
+		constraintByName: make(map[string]RemoteConstraint, len(constraints)),
 		claimed:          claimed,
-		targets:          t,
 	}
 	for i, ri := range actual {
-		if ri.Name != "" {
-			f.byName[ri.Name] = append(f.byName[ri.Name], i)
-		}
+		f.byName[ri.Name] = i
 		// Node and relationship indexes occupy separate definition namespaces,
 		// and a multi-label node index serves no single-label declaration: the
 		// server creates the declaration beside either. Their NAMES still block.
@@ -514,9 +501,7 @@ func newIndexBlockerFinder(actual []RemoteIndex, constraints []RemoteConstraint,
 		f.byDefinition[def] = append(f.byDefinition[def], i)
 	}
 	for _, rc := range constraints {
-		if rc.Name != "" {
-			f.constraintByName[rc.Name] = append(f.constraintByName[rc.Name], rc)
-		}
+		f.constraintByName[rc.Name] = rc
 	}
 	return f
 }
@@ -537,146 +522,30 @@ func (f indexBlockerFinder) backingFor(key string) (int, bool) {
 // definition is no blocker; see backingFor.
 func (f indexBlockerFinder) blockers(d cypher.Index) []blocker {
 	var out []blocker
-	if d.Name != "" {
-		for _, at := range f.byName[d.Name] {
-			out = append(out, blocker{index: &f.actual[at], target: f.targets.index(f.actual[at]), why: describeIndexBlocker(d, f.actual[at], f.claimed)})
-		}
+	if at, held := f.byName[d.Name]; held {
+		out = append(out, blocker{index: &f.actual[at], target: indexTarget(f.actual[at]), why: describeIndexBlocker(d, f.actual[at], f.claimed)})
 	}
 	for _, at := range f.byDefinition[desiredIndexKey(d)] {
 		if ri := &f.actual[at]; ri.OwningConstraint == "" {
-			out = append(out, blocker{index: ri, target: f.targets.index(*ri), why: describeIndexBlocker(d, *ri, f.claimed)})
+			out = append(out, blocker{index: ri, target: indexTarget(*ri), why: describeIndexBlocker(d, *ri, f.claimed)})
 		}
 	}
-	if d.Name != "" {
-		for _, rc := range f.constraintByName[d.Name] {
-			out = append(out, blocker{
-				constraint: &rc,
-				target:     f.targets.constraint(rc),
-				why: fmt.Sprintf("name %q is already held by a %s constraint on %s; index and constraint names share one namespace, so drop or rename it before this index can be created",
-					rc.Name, rc.Type, describeLabels(rc.LabelsOrTypes)),
-			})
-		}
+	if rc, held := f.constraintByName[d.Name]; held {
+		out = append(out, blocker{
+			constraint: &rc,
+			target:     constraintTarget(rc),
+			why: fmt.Sprintf("name %q is already held by a %s constraint on %s; index and constraint names share one namespace, so drop or rename it before this index can be created",
+				rc.Name, rc.Type, describeLabels(rc.LabelsOrTypes)),
+		})
 	}
 	return out
-}
-
-// remoteIndexRecordKey identifies one remote index record.
-func remoteIndexRecordKey(ri RemoteIndex) string {
-	return mapping.Key(append(append(
-		[]string{ri.Name, ri.Type, ri.EntityType, ri.State, ri.OwningConstraint, strconv.Itoa(len(ri.LabelsOrTypes))},
-		ri.LabelsOrTypes...), ri.Properties...)...)
-}
-
-// compareRemoteIndexes is the order [Diff] reads indexes in, so no
-// result depends on the order the server returned rows in.
-func compareRemoteIndexes(x, y RemoteIndex) int {
-	return cmp.Or(
-		cmp.Compare(x.Name, y.Name),
-		cmp.Compare(x.Type, y.Type),
-		cmp.Compare(x.EntityType, y.EntityType),
-		slices.Compare(x.LabelsOrTypes, y.LabelsOrTypes),
-		slices.Compare(x.Properties, y.Properties),
-		cmp.Compare(x.State, y.State),
-		cmp.Compare(x.OwningConstraint, y.OwningConstraint),
-		compareValues(reflect.ValueOf(x.Options), reflect.ValueOf(y.Options)),
-	)
-}
-
-// compareValues orders two valid values totally: by type, then by value. The
-// printed form is not enough, since int64(3) and float64(3) both print as 3.
-// A nil map, slice, pointer or interface comes first, a map orders by its
-// entries in key order, a float by its bits after its value, and a func,
-// channel or unsafe pointer by its printed form. Two distinct types that print
-// one name and one package order by their values.
-func compareValues(x, y reflect.Value) int {
-	if c := cmp.Compare(x.Type().String(), y.Type().String()); c != 0 {
-		return c
-	}
-	if c := cmp.Compare(x.Type().PkgPath(), y.Type().PkgPath()); c != 0 {
-		return c
-	}
-	if c := cmp.Compare(x.Kind(), y.Kind()); c != 0 {
-		return c
-	}
-	switch x.Kind() {
-	case reflect.Map, reflect.Slice, reflect.Pointer, reflect.Interface:
-		if c := cmp.Compare(boolRank(!x.IsNil()), boolRank(!y.IsNil())); c != 0 || x.IsNil() {
-			return c
-		}
-	}
-	switch x.Kind() {
-	case reflect.Bool:
-		return cmp.Compare(boolRank(x.Bool()), boolRank(y.Bool()))
-	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
-		return cmp.Compare(x.Int(), y.Int())
-	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
-		return cmp.Compare(x.Uint(), y.Uint())
-	case reflect.Float32, reflect.Float64:
-		return compareFloats(x.Float(), y.Float())
-	case reflect.Complex64, reflect.Complex128:
-		return cmp.Or(compareFloats(real(x.Complex()), real(y.Complex())), compareFloats(imag(x.Complex()), imag(y.Complex())))
-	case reflect.String:
-		return cmp.Compare(x.String(), y.String())
-	case reflect.Pointer, reflect.Interface:
-		return compareValues(x.Elem(), y.Elem())
-	case reflect.Slice, reflect.Array:
-		for i := range min(x.Len(), y.Len()) {
-			if c := compareValues(x.Index(i), y.Index(i)); c != 0 {
-				return c
-			}
-		}
-		return cmp.Compare(x.Len(), y.Len())
-	case reflect.Map:
-		return slices.CompareFunc(sortedEntries(x), sortedEntries(y), compareEntries)
-	case reflect.Struct:
-		for i := range x.NumField() {
-			if c := compareValues(x.Field(i), y.Field(i)); c != 0 {
-				return c
-			}
-		}
-		return 0
-	}
-	return cmp.Compare(fmt.Sprint(x), fmt.Sprint(y))
-}
-
-// compareFloats orders NaN first, then by value, then by bits, so -0 and +0
-// and two NaN payloads are told apart.
-func compareFloats(x, y float64) int {
-	return cmp.Or(cmp.Compare(x, y), cmp.Compare(math.Float64bits(x), math.Float64bits(y)))
-}
-
-// entry is one map entry. A map can hold two NaN keys, so entries with equal
-// keys order by value.
-type entry struct{ key, value reflect.Value }
-
-func compareEntries(a, b entry) int {
-	return cmp.Or(compareValues(a.key, b.key), compareValues(a.value, b.value))
-}
-
-func sortedEntries(m reflect.Value) []entry {
-	entries := make([]entry, 0, m.Len())
-	for it := m.MapRange(); it.Next(); {
-		entries = append(entries, entry{it.Key(), it.Value()})
-	}
-	slices.SortFunc(entries, compareEntries)
-	return entries
-}
-
-func boolRank(b bool) int {
-	if b {
-		return 1
-	}
-	return 0
 }
 
 // describeIndexBlocker says why blocker keeps d's create from taking effect and
 // what to drop. A name in claimed is another declaration's realisation, whose
 // own drift creates it again under its own name.
 func describeIndexBlocker(d cypher.Index, blocker RemoteIndex, claimed map[string]struct{}) string {
-	// Guarded on a non-empty desired name: Diff is public API and a
-	// caller may build Index values with no name at all, in which case an
-	// equally nameless blocker is a DEFINITION block, not a name collision.
-	if d.Name != "" && blocker.Name == d.Name {
+	if blocker.Name == d.Name {
 		if blocker.OwningConstraint != "" {
 			return fmt.Sprintf("index name %q is held by the index backing constraint %q; drop that constraint or rename, or this index can never be created",
 				blocker.Name, blocker.OwningConstraint)

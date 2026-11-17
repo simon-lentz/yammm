@@ -63,27 +63,25 @@ type Constraint struct {
 // A part type is keyed on its composed path: it emits a UNIQUE and a NOT NULL
 // constraint on that path's property in place of its primary key's UNIQUE.
 // Abstract types are skipped: no node carries their label.
-// Types with empty names are skipped.
-// Label collisions are reported beside every other issue the walk finds.
-// Every label, and every declared property name a returned statement writes, is
-// validated against Neo4j rules: an invalid label draws one issue per type, and
-// an invalid property name one issue per declared property, naming the scope
-// that declares it.
+// The labels are judged first by [Config.CheckLabels], and on its error the
+// call returns its issues alone. Every declared property name a returned
+// statement writes is then judged by [IsIdentifier]: an invalid one draws one
+// issue per declared property, naming the scope that declares it.
 //
 // Returns the constraint statements in deterministic order: types in import
 // closure order, then schema declaration order; within each type: UNIQUE/NODE
 // KEY -> NOT NULL -> TYPE.
 //
 // If validation errors are found, returns (nil, result) where result contains
-// all issues: [E_NEO4J_LABEL_COLLISION], [E_NEO4J_INVALID_IDENTIFIER] and
-// [E_NEO4J_UNSUPPORTED_TYPE] at Error. The
+// all issues: [E_NEO4J_INVALID_IDENTIFIER] and [E_NEO4J_UNSUPPORTED_TYPE] at
+// Error. The
 // warnings [W_NEO4J_NODE_KEY_UNSUPPORTED] and [W_NEO4J_EDITION_CONSTRAINT_OMITTED]
 // report what the edition changed.
 func (c Config) Constraints(s schema.Schema) ([]Constraint, diag.Result) {
+	if labelResult := c.CheckLabels(s); labelResult.HasErrors() {
+		return nil, labelResult
+	}
 	collector := diag.NewCollector(0)
-
-	collisionResult := c.CheckLabels(s)
-	collector.Merge(collisionResult)
 
 	// Reported once per call, not per type: the substitution is a fact about the
 	// configuration, and repeating it for every type would scale the
@@ -92,7 +90,7 @@ func (c Config) Constraints(s schema.Schema) ([]Constraint, diag.Result) {
 
 	var constraints []Constraint
 	names := c.newPropertyNameCheck(collector)
-	for t, label := range c.labels().EmittableTypes(s, collector) {
+	for t, label := range c.labels().LabeledTypes(s) {
 		constraints = append(constraints, c.constraintsForType(t, label, names, collector)...)
 	}
 
@@ -148,10 +146,8 @@ func (c Config) constraintsForType(t schema.Type, label string, names *propertyN
 	// One gate because they are one kind of statement. A `Vector[4]` and a
 	// `List<Float>` emit the SAME expression, `IS :: LIST<FLOAT NOT NULL>`, and
 	// gating them differently meant an option suppressed the constraint for one
-	// declaration and not for the other. It is also the switch an operator on an
-	// Enterprise server older than Neo4j 5.9 needs, where property-type
-	// constraints do not exist, or older than 5.10, where a LIST type does not;
-	// only the Community edition's gating also drops them all.
+	// declaration and not for the other. The Community edition's gating also
+	// drops them all.
 	//
 	// The list walk runs under either setting: it is the pass that judges a
 	// list's element, and the gate is on emission, never on that judgement.
@@ -197,17 +193,18 @@ func (c *propertyNameCheck) writes(t schema.Type, prop schema.Property, what str
 	}
 	name := prop.Name()
 	scope := targetScope(t, prop)
-	err := ValidateIdentifier(name, scope.String()+" "+what)
-	c.valid[origin] = err == nil
-	if err != nil {
+	problem := mapping.IdentifierProblem(name)
+	c.valid[origin] = problem == ""
+	if problem != "" {
 		scope.Property = name
+		reason := "the name " + problem
 		c.collector.Collect(mapping.InvalidIdentifierIssue(
-			fmt.Sprintf("invalid %s %q declared in %s: %s", what, name, scope, err),
+			fmt.Sprintf("invalid %s %q declared in %s: %s", what, name, scope, reason),
 			scope,
-			err,
+			reason,
 		).Build())
 	}
-	return err == nil
+	return problem == ""
 }
 
 // useNodeKeyConstraints reports whether primary keys are encoded as NODE KEY.

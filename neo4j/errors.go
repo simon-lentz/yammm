@@ -3,14 +3,20 @@ package neo4j
 import (
 	"errors"
 
-	"github.com/simon-lentz/yammm/internal/mapping"
+	"github.com/simon-lentz/yammm/diag"
 )
+
+// E_NEO4J_INVALID_REMOTE_OBJECT indicates a remote row [Diff] cannot plan
+// from: a constraint or an index with no name, two rows of one kind under one
+// name, or a property type constraint that reports no property type. One
+// [ShowConstraints] and [ShowIndexes] read holds none of them.
+var E_NEO4J_INVALID_REMOTE_OBJECT = diag.NewCode("E_NEO4J_INVALID_REMOTE_OBJECT", diag.CategoryNeo4j)
 
 // Sentinel errors for write-path refusals.
 var (
 	// ErrUnsupportedListElem is the class of the refusal of a list whose
 	// element Neo4j cannot store in a list, such as a nested collection.
-	ErrUnsupportedListElem = mapping.ErrUnsupportedListElem
+	ErrUnsupportedListElem = errors.New("neo4j: unsupported list element type")
 
 	// ErrUnrepresentable marks a value [NodeQueries],
 	// [EdgeQueries] or [CoerceParams] refuses: one that is not in

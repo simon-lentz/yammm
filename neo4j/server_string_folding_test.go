@@ -57,8 +57,8 @@ func TestConstraintDiff_FoldsServerColumnCase(t *testing.T) {
 	if result.Excluded != 0 {
 		t.Errorf("Excluded = %d; want 0 — lower-cased entityType/type must not make a constraint undeclarable", result.Excluded)
 	}
-	if n := len(result.Create) + len(result.Drop) + len(result.Unverified); n != 0 {
-		t.Errorf("Create+Drop+Unverified = %d; want 0", n)
+	if n := len(result.Create) + len(result.Drop); n != 0 {
+		t.Errorf("Create+Drop = %d; want 0", n)
 	}
 }
 

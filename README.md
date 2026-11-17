@@ -214,7 +214,7 @@ Diagnostic-producing operations return `(T, diag.Result)`:
 - `result.HasErrors()`: Any Error or Fatal issue
 - `result.OK()`: Success (may have warnings). A validator's zero instance beside it held an `instance.Refused` value, which its producer reported
 
-The pure transformations of the `neo4j` write path and the generators (Cypher batch queries, Go source, and Markdown generation) return their output beside a Go `error`, as `(T, error)`, but for `neo4j`'s `BuildBatchRelationshipMergeQuery`, a query template that cannot fail; `schema/cypher`'s DDL builders and its label-collision check, and `neo4j.Diff`, report through a `diag.Result`, and the drop-statement builders return `(string, error)`. Snapshot serialization (`snapshot.Marshal`) is diagnostic-producing and returns `(T, diag.Result)`.
+The pure transformations of the `neo4j` write path and the generators (Cypher batch queries, Go source, and Markdown generation) return their output beside a Go `error`, as `(T, error)`, but for `neo4j`'s `BuildBatchRelationshipMergeQuery`, a query template that cannot fail; `schema/cypher`'s DDL builders and its label check, and `neo4j.Diff`, report through a `diag.Result`, and the drop-statement builders, which cannot fail, return a `string`. Snapshot serialization (`snapshot.Marshal`) is diagnostic-producing and returns `(T, diag.Result)`.
 
 ## Schema Language
 
@@ -307,7 +307,7 @@ type Document {
 | `@@fulltext(a, b, …)` | type | Fulltext index scored across the referenced text properties |
 | `@writeOnce` | property | Set on node creation, never rewritten |
 
-`yammm neo4j indexes <schema>` emits the index DDL; `yammm neo4j diff` compares it against a live database. See [SPEC.md](docs/SPEC.md#annotations) for eligibility rules and diagnostics.
+`yammm gen --to cypher <schema>` emits the constraint and index DDL; `yammm neo4j diff` compares it against a live database. See [SPEC.md](docs/SPEC.md#annotations) for eligibility rules and diagnostics.
 
 ### Data Types
 
@@ -364,13 +364,12 @@ yammm fmt <schema>... [-w|--check]                       # canonical formatting 
 yammm check <schema> <data...>                           # validate JSON data files, read as one document
 yammm gen --to go <schema>                               # generate Go source from a schema
 yammm gen --to md <schema>                               # generate Markdown docs with a Mermaid class diagram
+yammm gen --to cypher <schema>                           # generate one Neo4j script: constraints, then indexes
 yammm snapshot save <schema> <data...> -o <file.ys>      # build graph, persist
 yammm snapshot save <schema> <data...> --into <file.ys>  # merge into an existing snapshot
 yammm snapshot info <file.ys>                            # metadata + stats
 yammm snapshot verify <schema> <file.ys>                 # schema-compatibility check
 yammm snapshot update-metadata --set k=v <file.ys>       # rewrite metadata keys in place (--set/--unset)
-yammm neo4j constraints <schema>                         # generate Neo4j constraint statements
-yammm neo4j indexes <schema>                             # generate Neo4j index statements from annotations
 yammm neo4j diff <schema>                                # compare schema constraints and indexes against a live database
 ```
 

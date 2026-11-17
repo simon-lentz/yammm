@@ -6,7 +6,7 @@ import (
 	"strings"
 )
 
-// RemoteConstraint represents a constraint as reported by SHOW CONSTRAINTS YIELD *.
+// RemoteConstraint represents a constraint as reported by [ShowConstraints].
 //
 // Parse from database output via [ParseConstraints].
 type RemoteConstraint struct {
@@ -31,7 +31,7 @@ type RemoteConstraint struct {
 	EntityType      string   // "NODE" or "RELATIONSHIP"
 	LabelsOrTypes   []string // Labels or relationship types
 	Properties      []string // Constrained properties
-	PropertyType    string   // Enforced type (empty for non-type constraints or Neo4j < 5.9)
+	PropertyType    string   // Enforced type of a property type constraint; empty for every other kind
 	CreateStatement string   // Cypher to recreate the constraint
 }
 
@@ -77,17 +77,17 @@ type RemoteIndex struct {
 }
 
 // IsOnline reports whether the index is in a state that serves queries. An
-// unreported state is treated as online: older servers and hand-built records
-// omit the column, and inventing drift for every such row would make the diff
-// unusable against them.
+// unreported state is treated as online: [ShowIndexes] always reports it, so
+// only a hand-built record or a caller's own projection omits it.
 func (ri RemoteIndex) IsOnline() bool {
 	return ri.State == "" || strings.EqualFold(ri.State, "ONLINE")
 }
 
 // VectorDimensions returns the configured dimension of a VECTOR index and true,
-// or (0, false) when the index carries no readable vector configuration — a
-// non-vector index, an older server that does not report options, or a
-// malformed options map.
+// or (0, false) when the index reports none it can read: a non-vector index, a
+// VECTOR index created without vector.dimensions, which every supported server
+// accepts and reports with no dimension, a dimension that is no whole number in
+// int's range, or a record with no readable options map.
 func (ri RemoteIndex) VectorDimensions() (int, bool) {
 	cfg, ok := ri.indexConfig()
 	if !ok {
@@ -97,10 +97,11 @@ func (ri RemoteIndex) VectorDimensions() (int, bool) {
 }
 
 // VectorSimilarity returns the configured similarity function of a VECTOR index
-// and true, or ("", false) when the index carries no readable vector
-// configuration.
+// and true, or ("", false) when the index reports none: a record with no
+// readable options map, or one whose configuration holds no
+// vector.similarity_function string.
 //
-// The value is the server's, VERBATIM and in the server's casing: Neo4j 5.15+
+// The value is the server's, VERBATIM and in the server's casing: Neo4j
 // reports "COSINE" where the schema side is lowercase "cosine", because DSL
 // validation forces the keyword lowercase. Compare it case-insensitively —
 // [vectorDrift] uses strings.EqualFold for exactly this reason. A consumer that
@@ -133,28 +134,9 @@ func (ri RemoteIndex) indexConfig() (map[string]any, bool) {
 
 // ShowConstraints is the Cypher query for fetching all constraints.
 // Execute this query against a Neo4j database and pass the results to
-// [ParseConstraints].
-//
-// YIELD * is REQUIRED here and must not be narrowed to an explicit projection,
-// which is the obvious-looking hardening and would break this package's
-// supported server range.
-//
-// SHOW CONSTRAINTS rejects a YIELD naming a column the server does not have —
-// it is an error, not an empty column — and propertyType does not exist before
-// Neo4j 5.9. On 5.8 a projection listing propertyType fails outright, while
-// YIELD * returns no such key. Trading that for a hard failure on every 5.0-5.8 server
-// is a bad exchange. The diff reports a TYPE record with no propertyType that
-// pairs with a desired TYPE constraint by its definition in
-// [ConstraintDiff.Unverified]. One that holds the name of a desired
-// constraint no record realises is a blocker of that declaration's drift. One
-// that no desired constraint pairs with and no drift names is a Drop when it is
-// owned and declarable, and is counted in Excluded otherwise. A desired TYPE constraint with no record is a Create, or a Drift
-// where another constraint or an index holds its name.
-//
-// [ShowIndexes] names its columns instead: each server image the integration
-// suite runs reports every one, and a server that lacked one would fail the
-// query, as above, rather than report a row the diff misreads.
-const ShowConstraints = "SHOW CONSTRAINTS YIELD *"
+// [ParseConstraints]. It names every column the diff reads, as [ShowIndexes]
+// does; every server from the supported floor, Neo4j 5.26, reports each one.
+const ShowConstraints = "SHOW CONSTRAINTS YIELD name, type, entityType, labelsOrTypes, properties, propertyType, createStatement"
 
 // ShowIndexes is the Cypher query for fetching every index. Execute it against
 // a Neo4j database and pass the results to [ParseIndexes].
@@ -182,11 +164,11 @@ const ShowConstraints = "SHOW CONSTRAINTS YIELD *"
 // one.
 const ShowIndexes = "SHOW INDEXES YIELD name, type, entityType, labelsOrTypes, properties, options, state, owningConstraint"
 
-// ParseConstraints parses SHOW CONSTRAINTS YIELD * output into structured values.
-//
-// Input is []map[string]any from the driver's Record.AsMap() output.
-// Handles version-dependent columns gracefully: propertyType (added in Neo4j 5.9+)
-// produces an empty string when absent or null.
+// ParseConstraints parses [ShowConstraints] output, each record from the
+// driver's Record.AsMap(), into structured values. It refuses a record with no
+// name, and a property type constraint's record with no propertyType, which a
+// server returns only to a projection that does not yield it: the type it
+// enforces could not be compared.
 func ParseConstraints(records []map[string]any) ([]RemoteConstraint, error) {
 	result := make([]RemoteConstraint, 0, len(records))
 	for i, rec := range records {
@@ -194,8 +176,7 @@ func ParseConstraints(records []map[string]any) ([]RemoteConstraint, error) {
 		if name == "" {
 			return nil, fmt.Errorf("record %d: missing constraint name", i)
 		}
-
-		result = append(result, RemoteConstraint{
+		rc := RemoteConstraint{
 			Name:            name,
 			Type:            parseStringField(rec, "type"),
 			EntityType:      parseStringField(rec, "entityType"),
@@ -203,7 +184,11 @@ func ParseConstraints(records []map[string]any) ([]RemoteConstraint, error) {
 			Properties:      parseStringSliceField(rec, "properties"),
 			PropertyType:    parseStringField(rec, "propertyType"),
 			CreateStatement: parseStringField(rec, "createStatement"),
-		})
+		}
+		if reportsNoPropertyType(rc) {
+			return nil, fmt.Errorf("record %d: property type constraint %q reports no propertyType", i, name)
+		}
+		result = append(result, rc)
 	}
 	return result, nil
 }

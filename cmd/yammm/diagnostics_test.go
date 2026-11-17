@@ -84,15 +84,13 @@ func TestDiagnosticsSurviveEveryEarlyReturn(t *testing.T) {
 	}
 }
 
-// TestNeo4jConstraints_RefusesAnEditionBeforeWork: the whole flag set is
-// refused before any I/O, so an unrecognised --edition is a usage error that
-// loads no schema — its warning never appears — and writes nothing to stdout.
-func TestNeo4jConstraints_RefusesAnEditionBeforeWork(t *testing.T) {
-	t.Parallel()
-
-	code, stdout, stderr := executeCmdOutput(t, "neo4j", "constraints", "--edition", "bogus", shadowedSchema)
-	if code != cli.ExitUsage {
-		t.Errorf("exit code = %d, want %d", code, cli.ExitUsage)
+// TestGenCypher_RefusesAnEditionBeforeWork: --edition is judged when the flags
+// are read, before any I/O, so an unrecognised one is a usage error that loads
+// no schema — its warning never appears — and writes nothing to stdout.
+func TestGenCypher_RefusesAnEditionBeforeWork(t *testing.T) {
+	code, stdout, stderr := runCLI(t, "gen", "--to", "cypher", "--edition", "bogus", shadowedSchema)
+	if code != cli.ExitUsage || !strings.Contains(stderr, `invalid edition "bogus"`) {
+		t.Errorf("exit code = %d, want %d and the edition refused; stderr:\n%s", code, cli.ExitUsage, stderr)
 	}
 	if stdout != "" || strings.Contains(stderr, "W_ANNOTATION_SHADOWED") {
 		t.Errorf("work ran before the flag was refused; stdout %q, stderr:\n%s", stdout, stderr)
@@ -194,9 +192,9 @@ func TestSnapshotInfoDirMarksWarnings(t *testing.T) {
 func TestOwnPhaseDiagnosticsReachTheOperator(t *testing.T) {
 	t.Parallel()
 
-	t.Run("neo4j indexes refusing a reserved identifier", func(t *testing.T) {
+	t.Run("gen --to cypher refusing a reserved identifier", func(t *testing.T) {
 		t.Parallel()
-		code, _, stderr := executeCmdOutput(t, "neo4j", "indexes", "testdata/reserved_index.yammm")
+		code, _, stderr := executeCmdOutput(t, "gen", "--to", "cypher", "--type-constraints", "none", "testdata/reserved_index.yammm")
 		if code != cli.ExitValidation {
 			t.Errorf("exit code = %d, want %d", code, cli.ExitValidation)
 		}
@@ -277,16 +275,10 @@ func TestDiagnosticsPrecedeThePayload(t *testing.T) {
 			payload: "Snapshot: test",
 		},
 		{
-			name:    "neo4j constraints",
-			args:    []string{"neo4j", "constraints", shadowedSchema},
+			name:    "gen --to cypher",
+			args:    []string{"gen", "--to", "cypher", "testdata/annotation_shadowed_indexed.yammm"},
 			first:   "W_ANNOTATION_SHADOWED",
 			payload: "CREATE CONSTRAINT",
-		},
-		{
-			name:    "neo4j indexes",
-			args:    []string{"neo4j", "indexes", "testdata/annotation_shadowed_indexed.yammm"},
-			first:   "W_ANNOTATION_SHADOWED",
-			payload: "CREATE INDEX",
 		},
 		{
 			name: "snapshot save, whose payload is its status line",
@@ -383,9 +375,8 @@ func TestStderrIsOneJSONDocument(t *testing.T) {
 		{"snapshot update-metadata, unreadable file", "snapshot update-metadata -s a=b " + missing + ".ys"},
 		{"snapshot update-metadata, no operation", "snapshot update-metadata " + corrupt},
 		{"snapshot update-metadata, header warning", "snapshot update-metadata -s a=b " + hashAlgoFixture},
-		{"neo4j constraints, unreadable schema", "neo4j constraints " + missing},
-		{"neo4j constraints, unrecognized edition", "neo4j constraints --edition bogus " + shadowedSchema},
-		{"neo4j indexes, unreadable schema", "neo4j indexes " + missing},
+		{"gen --to cypher, unreadable schema", "gen --to cypher " + missing},
+		{"gen --to cypher, unrecognized edition", "gen --to cypher --edition bogus " + shadowedSchema},
 		{"neo4j diff, no --uri", "neo4j diff " + shadowedSchema},
 	}
 

@@ -1,0 +1,72 @@
+# gen --to cypher: one provisioning script, every constraint then every index,
+# each statement ended by ";".
+
+exec yammm gen --to cypher valid.yammm
+stdout 'CREATE CONSTRAINT test__Doc_id_unique IF NOT EXISTS FOR \(n:test__Doc\) REQUIRE n\.id IS UNIQUE;'
+stdout 'CREATE INDEX test__Doc_state_idx IF NOT EXISTS FOR \(n:test__Doc\) ON \(n\.state\);'
+stdout 'CREATE VECTOR INDEX test__Doc_vec_vector_idx'
+stdout 'CREATE INDEX test__Doc_id_state_idx IF NOT EXISTS FOR \(n:test__Doc\) ON \(n\.id, n\.state\);'
+# --type-constraints defaults to all: an optional property is typed too.
+stdout 'REQUIRE n\.state IS :: STRING;'
+! stdout 'CREATE INDEX(.|\n)*CREATE CONSTRAINT'
+! stderr .
+
+# --output writes the same script to a file.
+exec yammm gen --to cypher --output out.cypher valid.yammm
+! stdout .
+grep 'CREATE CONSTRAINT test__Doc_id_unique' out.cypher
+
+# Community edition emits only UNIQUE constraints.
+exec yammm gen --to cypher --edition community valid.yammm
+stdout 'UNIQUE'
+! stdout 'IS NOT NULL'
+! stdout 'IS :: STRING'
+
+# --node-keys asks for a kind Community cannot hold. The primary key is still
+# enforced as UNIQUE, the strongest kind the edition affords, the substitution
+# is reported, and the exit status stays 0.
+exec yammm gen --to cypher --edition community --node-keys valid.yammm
+stdout 'REQUIRE n\.id IS UNIQUE'
+! stdout 'IS NODE KEY'
+stderr 'W_NEO4J_NODE_KEY_UNSUPPORTED'
+
+# Enterprise honors the request, and stays silent about it.
+exec yammm gen --to cypher --edition enterprise --node-keys valid.yammm
+stdout 'IS NODE KEY'
+! stderr 'W_NEO4J_NODE_KEY_UNSUPPORTED'
+
+# --type-constraints picks the properties that get a type constraint.
+exec yammm gen --to cypher --type-constraints none valid.yammm
+! stdout 'IS ::'
+stdout 'IS NOT NULL'
+exec yammm gen --to cypher --type-constraints required valid.yammm
+stdout 'n\.id IS :: STRING'
+! stdout 'n\.state IS :: STRING'
+
+! exec yammm gen --to cypher --edition bogus valid.yammm
+stderr 'invalid edition "bogus"'
+! exec yammm gen --to cypher --type-constraints some valid.yammm
+stderr 'invalid type-constraints "some"'
+
+# Each cypher flag is refused for another target.
+! exec yammm gen --to go --edition community valid.yammm
+stderr 'flag --edition applies only to --to cypher'
+! exec yammm gen --to md --separator _ valid.yammm
+stderr 'flag --separator applies only to --to cypher'
+! exec yammm gen --to go --prefix x valid.yammm
+stderr 'flag --prefix applies only to --to cypher'
+! exec yammm gen --to go --node-keys valid.yammm
+stderr 'flag --node-keys applies only to --to cypher'
+! exec yammm gen --to md --type-constraints none valid.yammm
+stderr 'flag --type-constraints applies only to --to cypher'
+
+-- valid.yammm --
+schema "test"
+
+type Doc {
+	id    String    primary
+	state String    @index
+	vec   Vector[8] @vector(cosine)
+
+	@@index(id, state)
+}

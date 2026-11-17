@@ -7,8 +7,10 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/simon-lentz/yammm/cmd/yammm/internal/cli"
+	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/internal/ident"
 	"github.com/simon-lentz/yammm/schema"
+	"github.com/simon-lentz/yammm/schema/cypher"
 	"github.com/simon-lentz/yammm/schema/gogen"
 	"github.com/simon-lentz/yammm/schema/markdown"
 )
@@ -31,6 +33,13 @@ Targets:
                    the default golint acronym set, and each is one or more
                    letters.
 
+  --to cypher      One Cypher script that provisions the schema in Neo4j:
+                   every constraint, then every index, one statement per line,
+                   each ended by ";", for cypher-shell or a driver session.
+                   --edition, --node-keys and --type-constraints shape the
+                   constraints; --prefix and --separator compose the labels,
+                   and must match the graph's for neo4j diff to compare it.
+
   --to md          A self-contained Markdown reference document: a Mermaid
                    class diagram of every type in the import closure, per-type
                    sections (property tables, relations, invariants), and
@@ -45,13 +54,15 @@ source keys are relative to that root.`,
 		Args: cobra.ExactArgs(1),
 		RunE: withDiagnostics(runGen),
 	}
-	cmd.Flags().String("to", "", "target: go or md (required)")
+	cmd.Flags().String("to", "", "target: go, cypher or md (required)")
 	cmd.Flags().String("package", "", "go target: generated package name (default: derived from schema name)")
 	cmd.Flags().String("output", "", "output file path (default: stdout)")
 	cmd.Flags().Var(&acronymsValue{}, "initialisms", "go target: extra acronyms to upper-case in generated names, e.g. JWT,OIDC")
 	registerModuleRootFlag(cmd)
 	cmd.Flags().Bool("no-class-diagram", false, "md target: omit the Mermaid class-diagram section")
 	cmd.Flags().Bool("no-class-members", false, "md target: omit the member lines inside each diagram class")
+	registerLabelFlags(cmd, "cypher target: ")
+	registerConstraintFlags(cmd, "cypher target: ")
 	_ = cmd.MarkFlagRequired("to")
 	return cmd
 }
@@ -67,6 +78,11 @@ func rejectInapplicableFlags(cmd *cobra.Command, target string) error {
 		{"initialisms", "go"},
 		{"no-class-diagram", "md"},
 		{"no-class-members", "md"},
+		{"separator", "cypher"},
+		{"prefix", "cypher"},
+		{"edition", "cypher"},
+		{"node-keys", "cypher"},
+		{"type-constraints", "cypher"},
 	}
 	for _, pf := range perTarget {
 		if pf.target != target && cmd.Flags().Changed(pf.flag) {
@@ -118,11 +134,19 @@ func runGen(cmd *cobra.Command, args []string, sink *cli.DiagnosticSink) error {
 	if target == "markdown" {
 		target = "md"
 	}
-	if target != "go" && target != "md" {
-		return cli.Usagef("unsupported gen target %q: must be go or md", toFormat)
+	if target != "go" && target != "md" && target != "cypher" {
+		return cli.Usagef("unsupported gen target %q: must be go, cypher or md", toFormat)
 	}
 	if err := rejectInapplicableFlags(cmd, target); err != nil {
 		return err
+	}
+	var cypherConfig cypher.Config
+	if target == "cypher" {
+		c, err := constraintConfig(cmd)
+		if err != nil {
+			return err
+		}
+		cypherConfig = c
 	}
 	// A flag refused before any lookup is a usage error whatever the schema
 	// holds, so --package and --initialisms are judged before the load, and
@@ -152,11 +176,19 @@ func runGen(cmd *cobra.Command, args []string, sink *cli.DiagnosticSink) error {
 	if err := reportSchemaLoad(sink, s, moduleRootAbs, absSchemaPath, schemaResult); err != nil {
 		return err
 	}
-	// Nothing downstream reports through diag, so the load's residual warnings
-	// are all this command has and they precede the generated artifact.
+	var data []byte
+	if target == "cypher" {
+		var genResult diag.Result
+		data, genResult = cypherScript(cypherConfig, s)
+		sink.Add(genResult)
+		if genResult.HasErrors() {
+			return cli.Exit(cli.ExitForResult(sink.Result()))
+		}
+	}
+	// The load's residual warnings, and the cypher generators', precede the
+	// generated artifact.
 	sink.Flush()
 
-	var data []byte
 	switch target {
 	case "go":
 		pkgName, _ := cmd.Flags().GetString("package")
@@ -183,4 +215,39 @@ func runGen(cmd *cobra.Command, args []string, sink *cli.DiagnosticSink) error {
 		return cli.Runtimef("write output: %v", err)
 	}
 	return nil
+}
+
+// generateCypher runs both generators for s under c. A constraint error
+// returns the constraint result alone, so a break both generators judge is
+// reported once; otherwise the result holds both generators' issues.
+// [neo4j.Diff] returns these issues for the same c and s, beside its issues
+// for the remote rows it cannot plan from.
+func generateCypher(c cypher.Config, s schema.Schema) ([]cypher.Constraint, []cypher.Index, diag.Result) {
+	constraints, constraintResult := c.Constraints(s)
+	if constraintResult.HasErrors() {
+		return nil, nil, constraintResult
+	}
+	indexes, indexResult := c.Indexes(s)
+	collector := diag.NewCollector(0)
+	collector.Merge(constraintResult)
+	collector.Merge(indexResult)
+	return constraints, indexes, collector.Result()
+}
+
+// cypherScript renders the provisioning script for s under c: every
+// constraint, then every index, each statement on its own line and ended by
+// ";". The result is [generateCypher]'s; on an error the script is nil.
+func cypherScript(c cypher.Config, s schema.Schema) ([]byte, diag.Result) {
+	constraints, indexes, result := generateCypher(c, s)
+	if result.HasErrors() {
+		return nil, result
+	}
+	var b strings.Builder
+	for _, con := range constraints {
+		b.WriteString(con.Statement + ";\n")
+	}
+	for _, idx := range indexes {
+		b.WriteString(idx.Statement + ";\n")
+	}
+	return []byte(b.String()), result
 }

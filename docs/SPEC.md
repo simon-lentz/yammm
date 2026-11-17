@@ -950,7 +950,7 @@ A `List` nests at most 1,000 levels. A deeper one written in one type is a synta
 - List types cannot be used as primary keys (see [Primary Key Types](#primary-key-types)).
 - List types cannot be used in relationship (edge) properties.
 
-**Neo4j portability.** A list whose *element* is itself a collection — `List<List<T>>`, `List<Vector[N]>`, or a list of a list-typed alias — is valid yammm and validates normally, but has no equivalent in Neo4j, which has no nested collection property type. `yammm neo4j constraints` rejects such a property with `E_NEO4J_UNSUPPORTED_TYPE` under every flag, `--scalar-types=false` included, and because constraint generation is all-or-nothing it emits **nothing for the whole schema**, not just for that property. `yammm neo4j indexes` does not make the check, and prints the schema's index statements. The `neo4j` write path refuses a value of such a property, an empty list included, and not an absent one. `yammm neo4j constraints` judges a property on each concrete type and part type with a valid label that declares or inherits it. Two exceptions follow from that: it does not report a property of a type whose label is no valid identifier, which it reports with `E_NEO4J_INVALID_IDENTIFIER` instead, or a property declared on an abstract type that no such type extends. Model the inner collection as a `part type` reached by a composition if the model must be written to Neo4j.
+**Neo4j portability.** A list whose *element* is itself a collection — `List<List<T>>`, `List<Vector[N]>`, or a list of a list-typed alias — is valid yammm and validates normally, but has no equivalent in Neo4j, which has no nested collection property type. `yammm gen --to cypher` rejects such a property with `E_NEO4J_UNSUPPORTED_TYPE` under every flag, `--type-constraints none` included, and because generation is all-or-nothing it emits **nothing for the whole schema**, constraints and indexes alike, not just for that property. The `neo4j` write path refuses a value of such a property, an empty list included, and not an absent one. `yammm gen --to cypher` judges a property on each concrete type and part type that declares or inherits it. Two exceptions follow from that: it does not report a property of a schema whose labels break the label rule, which it reports with `E_NEO4J_INVALID_IDENTIFIER` instead, or a property declared on an abstract type that no such type extends. Model the inner collection as a `part type` reached by a composition if the model must be written to Neo4j.
 
 **Narrowing:**
 
@@ -1788,7 +1788,7 @@ YAMMM uses structured diagnostics with stable error codes. The Go programmatic i
 
 ### Diagnostic Codes
 
-Codes are stable identifiers for programmatic matching. `diag/code.go` holds the built-in codes, and the Neo4j mapping's codes, which `schema/cypher` declares, register when it is imported. Categories and their codes:
+Codes are stable identifiers for programmatic matching. `diag/code.go` holds the built-in codes. The Neo4j codes, which `schema/cypher` and `neo4j` declare, register when their package is linked. Categories and their codes:
 
 **Sentinel** — internal conditions:
 
@@ -1896,15 +1896,15 @@ Codes are stable identifiers for programmatic matching. `diag/code.go` holds the
 - `W_SNAPSHOT_UNRESOLVED_REQUIRED` — under `WithRevalidation`, a loaded document carries an unresolved record, one no structural check refused, for a required association
 - `W_SNAPSHOT_PATH_EXTENSION` (Warning) — a snapshot was written to a path that does not end in `.ys`. The write succeeded; a reader that discovers snapshots by extension will not find it
 
-**Neo4j** — Neo4j mapping and write errors. `schema/cypher` and `neo4j` register each code below when either is linked:
+**Neo4j** — Neo4j mapping, diff and write errors. `schema/cypher` registers each code below but `E_NEO4J_INVALID_REMOTE_OBJECT` when it is linked, and `neo4j`, which imports it, registers that one too:
 
-- `E_NEO4J_LABEL_COLLISION` — two types render the same Neo4j label
-- `E_NEO4J_INVALID_IDENTIFIER` — an identifier is not usable unquoted in generated Cypher
+- `E_NEO4J_INVALID_IDENTIFIER` — an identifier is not usable unquoted in generated Cypher, or a label breaks the label rule
 - `E_NEO4J_UNSUPPORTED_TYPE` — a property kind Neo4j cannot store
 - `E_NEO4J_UNKNOWN_PROPERTY` — an annotation names a property the type does not declare
 - `E_NEO4J_INVALID_INDEX_TARGET` — an index annotation targets an ineligible property
 - `W_NEO4J_NODE_KEY_UNSUPPORTED` (Warning) — NODE KEY is unavailable on this edition
 - `W_NEO4J_EDITION_CONSTRAINT_OMITTED` (Warning) — a constraint was omitted because the edition does not support it
+- `E_NEO4J_INVALID_REMOTE_OBJECT` — `neo4j.Diff` was given a remote row it cannot plan from: a constraint or an index with no name, two rows of one kind under one name, or a property type constraint that reports no property type
 
 ## File Extension and Conventions
 

@@ -1,6 +1,7 @@
 package neo4j
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/simon-lentz/yammm/internal/yammmtest"
@@ -56,21 +57,27 @@ func TestParseConstraints_TypeConstraint(t *testing.T) {
 	assert.Equal(t, "STRING", constraints[0].PropertyType)
 }
 
-func TestParseConstraints_MissingPropertyType(t *testing.T) {
+// A property type constraint's record with no propertyType is refused, in
+// either Cypher language's spelling of the kind, since the type it enforces
+// could not be compared; another kind's record needs none.
+func TestParseConstraints_APropertyTypeRecordWithNoPropertyTypeIsRefused(t *testing.T) {
 	t.Parallel()
-	// Simulates Neo4j < 5.9 where propertyType column is absent.
-	records := []map[string]any{
-		{
-			"name":          "some_constraint",
-			"type":          "NODE_PROPERTY_TYPE",
-			"entityType":    "NODE",
-			"labelsOrTypes": []any{"SomeLabel"},
-			"properties":    []any{"prop"},
-			// propertyType key absent entirely
-		},
+	for _, typ := range []string{"NODE_PROPERTY_TYPE", "RELATIONSHIP_PROPERTY_TYPE", "node_property_type"} {
+		for _, propertyType := range []any{nil, "", 5} {
+			rec := map[string]any{
+				"name": "some_constraint", "type": typ, "entityType": "NODE",
+				"labelsOrTypes": []any{"SomeLabel"}, "properties": []any{"prop"},
+			}
+			if propertyType != nil {
+				rec["propertyType"] = propertyType
+			}
+			_, err := ParseConstraints([]map[string]any{rec})
+			if err == nil || !strings.Contains(err.Error(), `property type constraint "some_constraint" reports no propertyType`) {
+				t.Errorf("type %q, propertyType %#v: error %v, want the refusal", typ, propertyType, err)
+			}
+		}
 	}
-
-	constraints, err := ParseConstraints(records)
+	constraints, err := ParseConstraints([]map[string]any{{"name": "u", "type": "UNIQUENESS"}})
 	require.NoError(t, err)
 	assert.Empty(t, constraints[0].PropertyType)
 }
@@ -173,5 +180,5 @@ func TestParseConstraints_ReadsAnUnexpectedShapeAsAbsent(t *testing.T) {
 
 func TestShowConstraints(t *testing.T) {
 	t.Parallel()
-	assert.Equal(t, "SHOW CONSTRAINTS YIELD *", ShowConstraints)
+	assert.Equal(t, "SHOW CONSTRAINTS YIELD name, type, entityType, labelsOrTypes, properties, propertyType, createStatement", ShowConstraints)
 }

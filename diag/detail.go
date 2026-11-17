@@ -124,7 +124,8 @@ const (
 	DetailKeyActualHash = "actual_hash"
 
 	// DetailKeySchemaName is a schema's declared name: the snapshot header's for
-	// E_SNAPSHOT_INCOMPATIBLE_SCHEMA, the colliding one for E_DUPLICATE_SCHEMA.
+	// E_SNAPSHOT_INCOMPATIBLE_SCHEMA, the colliding one for E_DUPLICATE_SCHEMA, and
+	// the one whose labels E_NEO4J_INVALID_IDENTIFIER refuses.
 	DetailKeySchemaName = "schema_name"
 
 	// DetailKeyVersion is the format version number.

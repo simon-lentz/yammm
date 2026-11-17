@@ -178,7 +178,7 @@ func TestShapeFor_MultipleTypes(t *testing.T) {
 func TestShapeFor_CustomSeparator(t *testing.T) {
 	t.Parallel()
 	s := loadSchema(t, "basic.yammm")
-	a := cypher.Config{LabelSeparator: "_"}
+	a := cypher.Config{LabelSeparator: "Z"}
 
 	shape, result := shapeFor(a, s)
 	if err := result.Err(); err != nil {
@@ -186,7 +186,7 @@ func TestShapeFor_CustomSeparator(t *testing.T) {
 	}
 
 	ns := shape.types[typeID(t, s, "Entity")]
-	if ns.label != "basic_test_Entity" {
-		t.Errorf("Label = %q; want %q", ns.label, "basic_test_Entity")
+	if ns.label != "basic_testZEntity" {
+		t.Errorf("Label = %q; want %q", ns.label, "basic_testZEntity")
 	}
 }

@@ -19,11 +19,8 @@ import (
 func applyPlan(t *testing.T, ctx context.Context, plan n4j.Plan) {
 	t.Helper()
 	dropped := make(map[string]struct{})
-	drop := func(stmt string, err error) {
+	drop := func(stmt string) {
 		t.Helper()
-		if err != nil {
-			t.Fatalf("the plan names nothing droppable: %v", err)
-		}
 		if _, done := dropped[stmt]; done {
 			return
 		}
@@ -112,9 +109,9 @@ func readIndexes(t *testing.T, ctx context.Context) []n4j.RemoteIndex {
 func requireCleanPlan(t *testing.T, plan n4j.Plan) {
 	t.Helper()
 	c, i := plan.Constraints, plan.Indexes
-	if len(c.Drift)+len(c.Create)+len(c.Drop)+len(c.Unverified) != 0 {
-		t.Errorf("the second diff's constraints are not clean: drift %+v, create %+v, drop %+v, unverified %+v",
-			c.Drift, c.Create, c.Drop, c.Unverified)
+	if len(c.Drift)+len(c.Create)+len(c.Drop) != 0 {
+		t.Errorf("the second diff's constraints are not clean: drift %+v, create %+v, drop %+v",
+			c.Drift, c.Create, c.Drop)
 	}
 	if len(i.Drift)+len(i.Create)+len(i.Drop)+len(i.Unverified) != 0 {
 		t.Errorf("the second diff's indexes are not clean: drift %+v, create %+v, drop %+v, unverified %+v",
@@ -281,6 +278,39 @@ func TestVectorDriftWithANameHolder_ConvergesInOneApply(t *testing.T) {
 	}
 	applyPlan(t, ctx, plan)
 	requireCleanPlan(t, liveDiff(t, ctx, a, s))
+}
+
+// A VECTOR index created without vector.dimensions is accepted and reported
+// with no dimension, so the declaration it realises is Unverified, never a
+// Match or a drift on a dimension nobody read.
+func TestVectorIndexWithoutADimension_IsUnverified(t *testing.T) {
+	ctx := context.Background()
+	driver(t)
+	t.Cleanup(func() { dropAll(t, ctx) })
+	dropAll(t, ctx)
+
+	a := newConfig(t, ctx, cypher.Config{})
+	s := loadBlockerSchema(t, ctx, vectorSchema4)
+	_, name := vectorIndexStatement(t, a, s)
+	run(t, ctx, "CREATE VECTOR INDEX "+name+" FOR (n:blk__Doc) ON (n.v) OPTIONS {indexConfig: {`vector.similarity_function`: 'cosine'}}")
+	awaitIndexes(t, ctx)
+
+	plan := liveDiff(t, ctx, a, s)
+	var got *n4j.IndexUnverified
+	for i, u := range plan.Indexes.Unverified {
+		if u.Desired.Name == name {
+			got = &plan.Indexes.Unverified[i]
+		}
+	}
+	if got == nil {
+		t.Fatalf("unverified = %+v, want %s unverified", plan.Indexes.Unverified, name)
+	}
+	if dim, ok := got.Actual.VectorDimensions(); ok {
+		t.Errorf("VectorDimensions() = %d, true; want the server to report none", dim)
+	}
+	if want := "database reported no vector dimension; it was not compared"; got.Reason != want {
+		t.Errorf("reason = %q, want %q", got.Reason, want)
+	}
 }
 
 // A TYPE drift whose name another object holds converges in one apply: the

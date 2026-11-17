@@ -44,7 +44,7 @@ constraints, result := c.Constraints(s)
 // Statement is CREATE CONSTRAINT <name> IF NOT EXISTS ...
 ```
 
-Every constraint carries a name. Generation is **all-or-nothing**: any validation error returns `(nil, result)`, so one unemittable property withholds every constraint of the schema rather than emitting a partial script that looks complete. Beside a name Neo4j refuses as an identifier (Cypher reserved words, below) and two types that compose one label (`E_NEO4J_LABEL_COLLISION`), the one shape a *valid* schema can hit is a list whose element resolves to a collection, a List or a Vector, the list and its element each written directly or through an alias — legal yammm, but Neo4j has no nested collection property type, so `Constraints` reports `E_NEO4J_UNSUPPORTED_TYPE` whatever the `Config` sets, `NoProperties` included. `Indexes` does not make that check. The write path does: `neo4j.NodeQueries` and `neo4j.CoerceParams` refuse a value of such a property with an error wrapping `neo4j.ErrUnsupportedListElem`, an empty list included, and read a value that holds none as nil, which `NodeQueries` writes as null. The property is judged on each concrete type and part type with a valid label that declares or inherits it, so one declared on an abstract type that no such type extends is not reported. Model the inner collection as a `part type` reached by a composition. A `Vector[N]` property is fine; it maps to `LIST<FLOAT NOT NULL>`.
+Every constraint carries a name. Generation is **all-or-nothing**: any validation error returns `(nil, result)`, so one unemittable property withholds every constraint of the schema rather than emitting a partial script that looks complete. Beside a name Neo4j refuses as an identifier (Cypher reserved words, below) and a label that breaks the label rule (Label Management, below), the one shape a *valid* schema can hit is a list whose element resolves to a collection, a List or a Vector, the list and its element each written directly or through an alias — legal yammm, but Neo4j has no nested collection property type, so `Constraints` reports `E_NEO4J_UNSUPPORTED_TYPE` whatever the `Config`'s other settings, `NoProperties` included, once its labels keep the label rule. `Indexes` does not make that check. The write path does: `neo4j.NodeQueries` and `neo4j.CoerceParams` refuse a value of such a property with an error wrapping `neo4j.ErrUnsupportedListElem`, an empty list included, and read a value that holds none as nil, which `NodeQueries` writes as null. The property is judged on each concrete type and part type that declares or inherits it, so one declared on an abstract type that no such type extends is not reported; a label that breaks the label rule withholds every such judgment, since `Constraints` then returns the label rule's issues alone. Model the inner collection as a `part type` reached by a composition. A `Vector[N]` property is fine; it maps to `LIST<FLOAT NOT NULL>`.
 
 ### Index Generation
 
@@ -55,9 +55,9 @@ indexes, result := c.Indexes(s)
 // VectorDimensions, VectorSimilarity, Statement
 ```
 
-Property-level `@index` emits a single-property range index; type-level `@@index(a, b)` a composite range index (declared order significant); property-level `@vector(cosine|euclidean)` a vector index (dimension from the `Vector[N]` constraint); property-level `@fulltext` and type-level `@@fulltext(a, b)` fulltext indexes (`CREATE FULLTEXT INDEX ... ON EACH [...]`). Index names are always emitted; two indexes whose readable names would collide are disambiguated with a short deterministic digest. A load refuses an index annotation with no eligible target (`E_UNKNOWN_ANNOTATION_TARGET`, `E_INVALID_ANNOTATION_TARGET`), so no schema it returns draws the generator's own codes for the two cases, `E_NEO4J_UNKNOWN_PROPERTY` and `E_NEO4J_INVALID_INDEX_TARGET`. Indexes emit for every edition (unlike constraints); the `CREATE VECTOR INDEX ... OPTIONS` form requires Neo4j 5.15+. Apply every constraint statement before every index statement: a range index over a primary key's properties in their order is the index a UNIQUE or NODE KEY constraint creates, so applied first it makes the server refuse the constraint with `IndexAlreadyExists`, and applied after it creates nothing.
+Property-level `@index` emits a single-property range index; type-level `@@index(a, b)` a composite range index (declared order significant); property-level `@vector(cosine|euclidean)` a vector index (dimension from the `Vector[N]` constraint); property-level `@fulltext` and type-level `@@fulltext(a, b)` fulltext indexes (`CREATE FULLTEXT INDEX ... ON EACH [...]`). Index names are always emitted; two indexes whose readable names would collide are disambiguated with a short deterministic digest. A load refuses an index annotation with no eligible target (`E_UNKNOWN_ANNOTATION_TARGET`, `E_INVALID_ANNOTATION_TARGET`), so no schema it returns draws the generator's own codes for the two cases, `E_NEO4J_UNKNOWN_PROPERTY` and `E_NEO4J_INVALID_INDEX_TARGET`. Indexes emit for every edition (unlike constraints); every statement runs on the supported floor, Neo4j 5.26. A `@vector` names a `Vector` of 1 to 4,096 dimensions. Apply every constraint statement before every index statement: a range index over a primary key's properties in their order is the index a UNIQUE or NODE KEY constraint creates, so applied first it makes the server refuse the constraint with `IndexAlreadyExists`, and applied after it creates nothing.
 
-`neo4j.Diff` returns a `Plan` whose `Indexes` has **five** sets: Match/Drift/Create/Drop plus **Unverified** — indexes present on both sides whose definition could not be compared (no readable vector configuration, or still `POPULATING`). Its `Constraints` has the same five sets, its `Unverified` covering a TYPE constraint whose remote record carries no `propertyType`, so its enforced type was not compared. A drift gate must count `Unverified` as an incomplete check, not a pass; summing only Drift+Create+Drop reports an unchecked index as in sync. Composite property order is significant. A schema-owned remote index that the schema could have declared, that no declaration takes and that no drift names reports as a drop. See [Diffing Against a Live Database](#diffing-against-a-live-database) for the call shape.
+`neo4j.Diff` returns a `Plan` whose `Indexes` has **five** sets: Match/Drift/Create/Drop plus **Unverified** — indexes present on both sides whose definition could not be compared (a vector dimension or similarity the database did not report, or still `POPULATING`). Its `Constraints` has the four sets Match/Drift/Create/Drop: `ParseConstraints` and `neo4j.Diff` refuse a TYPE record that reports no `propertyType`, so every constraint is compared whole. A drift gate must count `Unverified` as an incomplete check, not a pass; summing only Drift+Create+Drop reports an unchecked index as in sync. Composite property order is significant. A schema-owned remote index that the schema could have declared, that no declaration takes and that no drift names reports as a drop. See [Diffing Against a Live Database](#diffing-against-a-live-database) for the call shape.
 
 ### Query Generation
 
@@ -73,41 +73,43 @@ edgeQueries, err := neo4j.EdgeQueries(ctx, c, snapshot,
 )
 ```
 
-Each `NodeQuery` / `EdgeQuery` contains a Cypher statement and parameters map ready for driver execution. Each call derives every non-abstract closure type's label, primary keys and `@writeOnce` keys from the snapshot's own schema under `c`'s label settings, refuses a closure whose labels collide (`E_NEO4J_LABEL_COLLISION`) or are no valid identifiers (`E_NEO4J_INVALID_IDENTIFIER`), and refuses a zero snapshot with `ErrZeroSnapshot`.
+Each `NodeQuery` / `EdgeQuery` contains a Cypher statement and parameters map ready for driver execution. Each call derives every non-abstract closure type's label, primary keys and `@writeOnce` keys from the snapshot's own schema under `c`'s label settings, refuses a closure whose labels break the label rule with an error wrapping `c.CheckLabels`' result, and refuses a zero snapshot with `ErrZeroSnapshot`.
 
 A type's write-once properties come from its `@writeOnce` annotations, own and inherited; the derived set per type drives the ON CREATE / ON MATCH split, selected per type in a batch. Node merges only — relationship merges have no ON CREATE / ON MATCH split.
 
 ### Parameter Coercion (Direct-Cypher Path)
 
-Values passing through `NodeQueries` are coerced to driver-native types automatically, save two the validator takes: a value that holds one at a list whose element is a collection, which is refused by its type first, and a `Timestamp` at a UTC offset past 18 hours. Consumers hand-building Cypher parameters call `CoerceParams`. It reads each value at a declared key as the validator reads a property value, and sends it as the write path sends the value the validator stores. A value the validator refuses is an error, a pointer included, save a `dbtype.Date` at a `Date`, which passes. A value that holds none (`instance.IsAbsent`), nil, a nil slice, a nil map or a nil `immutable` container, it returns as nil, which the driver writes as null:
+Values passing through `NodeQueries` are coerced to driver-native types automatically, save two the validator takes: a value that holds one at a list whose element is a collection, which is refused by its type first, and a `Timestamp` at a UTC offset past 18 hours. Consumers hand-building Cypher parameters call `CoerceParams`. It reads each value at a declared key as the validator reads a property value, and sends it as the write path sends the value the validator stores. A value the validator refuses is an error, a pointer included: a `Date` takes a `"2006-01-02"` string or a `time.Time`, and a `dbtype.Date` is refused. A value that holds none (`instance.IsAbsent`), nil, a nil slice, a nil map or a nil `immutable` container, it returns as nil, which the driver writes as null:
 
 ```go
 types := neo4j.ParamTypesForType(t)   // property-name -> constraint map for a type
 params, err := neo4j.CoerceParams(params, types)  // one flat parameter map
 ```
 
-The coercion turns an integer a caller holds at a `Float` into a `float64`, and a `Date` or `Timestamp` string into a driver temporal value, so values satisfy Neo4j `IS ::` type constraints; a float at an Integer is an error, whole or not, and so is a value outside a bound, an `Enum` or a `Pattern`. `CoerceParams` reads one flat map and walks no value: a map or a list of maps at a declared key is judged as the value it is, and one that is not nil passes as given under an undeclared key. A nil map or a nil list is returned as nil at every key. To coerce the fields of a row of a hand-built `$rows` param, or of a `rel_props` map inside one, call `CoerceParams` on that map. A `time.Time` goes through the text the validator stores it as. At a declared key every instant is sent as an offset and none under a zone name, a location's included: a `Z` text goes as offset zero, which is the form Cypher's `datetime()` gives the same text. The offset is the one the text carries. An instant at an offset past 18 hours is refused with an error matching `ErrUnrepresentable`, on the write path too: the server holds no wider offset. A `dbtype.Date` passes at a `Date`.
+The coercion turns an integer a caller holds at a `Float` into a `float64`, and a `Date` or `Timestamp` string into a driver temporal value, so values satisfy Neo4j `IS ::` type constraints; a float at an Integer is an error, whole or not, and so is a value outside a bound, an `Enum` or a `Pattern`. `CoerceParams` reads one flat map and walks no value: a map or a list of maps at a declared key is judged as the value it is, and one that is not nil passes as given under an undeclared key. A nil map or a nil list is returned as nil at every key. To coerce the fields of a row of a hand-built `$rows` param, or of a `rel_props` map inside one, call `CoerceParams` on that map. A `time.Time` goes through the text the validator stores it as. At a declared key every instant is sent as an offset and none under a zone name, a location's included: a `Z` text goes as offset zero, which is the form Cypher's `datetime()` gives the same text. The offset is the one the text carries. An instant at an offset past 18 hours is refused with an error matching `ErrUnrepresentable`, on the write path too: the server holds no wider offset.
 
 ### Label Management
 
 ```go
 label := c.Label(t)  // "inventory__Product" for type Product of schema inventory
 
-// Every label two or more non-abstract types produce
+// Every break of the label rule across the import closure
 result := c.CheckLabels(s)
 ```
+
+A label is `LabelPrefix` + schema name + `LabelSeparator` + type name, as written; nothing is sanitized. `CheckLabels` reports each break with `E_NEO4J_INVALID_IDENTIFIER`: a prefix that does not start an identifier or a separator that is not ASCII letters, digits and underscores (once per call), a schema name that holds the separator or runs into it from its end, as `"a__B"` and `"geo_"` do under `__` (once per schema, and its types' labels are then not judged), and a label that is a Cypher reserved keyword (once per type). A label that keeps the rule decodes to one (schema, type) pair, so two types never share one. Every generator and both write calls run it first.
 
 **Cypher reserved words:** the DSL reserves none as one; of the six spellings
 its grammar refuses as a property name, four are Cypher keywords too (`as`,
 `in`, `true` and `false`). A property named
 `match` is valid yammm (and fine in a `.ys` snapshot) but is rejected with
-`E_NEO4J_INVALID_IDENTIFIER`, whose detail begins with `ErrReservedKeyword`'s text,
+`E_NEO4J_INVALID_IDENTIFIER`, whose detail reads "the name is a Cypher reserved keyword",
 wherever a generated constraint or index statement writes it, because property names appear unquoted in generated Cypher; the
 check is case-insensitive. Under `Community`, `NoProperties` or
 `RequiredProperties` fewer statements write a name, so fewer are checked, and
 the write path checks labels and each edge's relationship type only. Namespaced
 labels usually absorb reserved type names (`inventory__MATCH` is fine). Check
-early with `cypher.ValidateIdentifier(name, context)` or by running
+early with `cypher.IsIdentifier(name)` or by running
 `Constraints` and `Indexes` before write time.
 
 ### Diffing Against a Live Database
@@ -119,15 +121,19 @@ constraint names share one Neo4j namespace, every emitted statement carries
 `IF NOT EXISTS`, and a constraint's drop also removes its backing index. A drop
 that one side needs can therefore remove an object the other side matched, so
 one fixed point settles both sides. Pass every row `ShowConstraints` and
-`ShowIndexes` return, parsed with `ParseConstraints` and `ParseIndexes`.
+`ShowIndexes` return, parsed with `ParseConstraints` and `ParseIndexes`. A plan
+pairs, blocks and drops a row by its name, so `Diff` refuses, as
+`E_NEO4J_INVALID_REMOTE_OBJECT` and with no plan, a row with no name, two rows
+of one kind under one name, and a TYPE row with no `propertyType`; one read
+returns none of them.
 
 ```go
 plan, result := neo4j.Diff(c, s, actualConstraints, actualIndexes)
 cDiff, iDiff := plan.Constraints, plan.Indexes
 
-// Both halves carry: Match, Drift, Create, Drop, Unverified, Excluded
-inSync := len(cDiff.Drift)+len(cDiff.Create)+len(cDiff.Drop)+len(cDiff.Unverified) == 0 &&
-    len(iDiff.Drift)+len(iDiff.Create)+len(iDiff.Drop)+len(iDiff.Unverified) == 0 // omitting Unverified reports an unchecked object as verified
+// Both halves carry Match, Drift, Create, Drop and Excluded; Indexes adds Unverified
+inSync := len(cDiff.Drift)+len(cDiff.Create)+len(cDiff.Drop) == 0 &&
+    len(iDiff.Drift)+len(iDiff.Create)+len(iDiff.Drop)+len(iDiff.Unverified) == 0 // omitting Unverified reports an unchecked index as verified
 ```
 
 Each drift carries `Blockers`: every database object its create needs dropped,
@@ -159,9 +165,10 @@ index is dropped with its constraint; where a declaration realises that
 constraint, it drifts too, and the apply creates both again.
 
 Ownership is set membership (`c.OwnedLabels(s)`), not a prefix test on the
-remote object's label: `Label` composes a label from a caller-configurable prefix and separator around
-a schema name and a type name and is not invertible, so any rule that tries to
-read a schema back out of a label can be satisfied by a sibling schema's labels.
+remote object's label: a remote object can carry a label the label rule
+refuses, such as `app__legacy__Foo` written by another tool, and a prefix test
+would claim it for schema `app`; the set holds only the labels the schema
+composes.
 
 `Excluded` counts the remote objects the plan leaves alone: no `Actual`, no
 `Drop`, and no object whose drop target a drift on either side names or a
@@ -210,7 +217,7 @@ A write reports through an `error`, not a `diag.Result`, so `neo4j` carries sent
 
 | Sentinel | Meaning |
 | -------- | ------- |
-| `neo4j.ErrUnrepresentable` | `NodeQueries` and `EdgeQueries` refuse a value Neo4j would not store as held: one its constraint's coercion refuses, a nested collection's (matching `ErrUnsupportedListElem` too), a map at a property the schema declares, a list or a map a document nests more than 256 levels deep, a `json.Number` that is an integer literal past `int64` at any position but a `Float` or a `Vector` element, or that no finite `float64` holds; `CoerceParams` marks its refusals of a value so too. No other error carries the class: a caller's own, such as a constraint `schema.CheckConstraint` refuses, a zero snapshot, a closure whose labels collide or are no valid identifiers, a relationship type that is no valid identifier, and a cancelled context |
+| `neo4j.ErrUnrepresentable` | `NodeQueries` and `EdgeQueries` refuse a value Neo4j would not store as held: one its constraint's coercion refuses, a nested collection's (matching `ErrUnsupportedListElem` too), a map at a property the schema declares, a list or a map a document nests more than 256 levels deep, a `json.Number` that is an integer literal past `int64` at any position but a `Float` or a `Vector` element, or that no finite `float64` holds; `CoerceParams` marks its refusals of a value so too. No other error carries the class: a caller's own, such as a constraint `schema.CheckConstraint` refuses, a zero snapshot, a closure whose labels break the label rule, a relationship type that is no valid identifier, and a cancelled context |
 
 An I/O failure and a cancellation do not match it.
 
@@ -218,6 +225,5 @@ An I/O failure and a cancellation do not match it.
 
 | Code | Meaning |
 | ---- | ------- |
-| `E_NEO4J_LABEL_COLLISION` | Two types produce the same Neo4j label |
-| `E_NEO4J_INVALID_IDENTIFIER` | Name not valid as Neo4j identifier |
+| `E_NEO4J_INVALID_IDENTIFIER` | A label setting, schema name or label that breaks the label rule, or a property name that is no Neo4j identifier |
 | `E_NEO4J_UNSUPPORTED_TYPE` | Constraint kind has no Neo4j type mapping |

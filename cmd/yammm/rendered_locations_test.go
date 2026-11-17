@@ -193,9 +193,8 @@ func TestRenderedLocations_FailedLoadShowsItsExcerpt(t *testing.T) {
 	}{
 		{"check", func(s, d, _ string) []string { return []string{"check", s, d} }, runCheck},
 		{"gen", func(s, _, _ string) []string { return []string{"gen", "--to", "go", s} }, runGen},
-		{"neo4j constraints", func(s, _, _ string) []string { return []string{"neo4j", "constraints", s} }, runNeo4jConstraints},
+		{"gen --to cypher", func(s, _, _ string) []string { return []string{"gen", "--to", "cypher", s} }, runGen},
 		{"neo4j diff", func(s, _, _ string) []string { return []string{"neo4j", "diff", "--uri", "bolt://localhost:7687", s} }, runNeo4jDiff},
-		{"neo4j indexes", func(s, _, _ string) []string { return []string{"neo4j", "indexes", s} }, runNeo4jIndexes},
 		{"snapshot save", func(s, d, o string) []string { return []string{"snapshot", "save", "--output", o, s, d} }, runSnapshotSave},
 		{"snapshot verify", func(s, _, o string) []string { return []string{"snapshot", "verify", s, o} }, runSnapshotVerify},
 		{"validate", func(s, _, _ string) []string { return []string{"validate", s} }, runValidate},

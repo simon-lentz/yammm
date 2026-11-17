@@ -3,12 +3,12 @@ package cypher
 import (
 	"crypto/sha256"
 	"encoding/hex"
-	"errors"
 	"fmt"
 	"strings"
 
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/internal/mapping"
+	"github.com/simon-lentz/yammm/internal/parse"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -67,7 +67,7 @@ func (k IndexKind) String() string {
 //
 // Abstract types are skipped: no node carries their label. Part types are NOT
 // skipped: they receive a label and constraints today, so they receive index
-// DDL too. Types with empty names are skipped. Inherited annotations emit for
+// DDL too. Inherited annotations emit for
 // each concrete or part subtype's own label, matching how constraints treat
 // inherited properties.
 //
@@ -88,19 +88,23 @@ func (k IndexKind) String() string {
 // fulltext indexes (each in property order), then type-level composites —
 // @@index and @@fulltext interleaved, in annotation order.
 //
-// If validation errors are found, returns (nil, result) where result contains
-// all issues. Issues use [E_NEO4J_LABEL_COLLISION], [E_NEO4J_INVALID_IDENTIFIER],
-// [E_NEO4J_UNKNOWN_PROPERTY], or [E_NEO4J_INVALID_INDEX_TARGET] codes.
+// The labels are judged first by [Config.CheckLabels], and on its error the call
+// returns its issues alone. If validation errors are found, returns (nil,
+// result) where result contains all issues. Issues use
+// [E_NEO4J_INVALID_IDENTIFIER], [E_NEO4J_UNKNOWN_PROPERTY], or
+// [E_NEO4J_INVALID_INDEX_TARGET] codes.
 func (c Config) Indexes(s schema.Schema) ([]Index, diag.Result) {
+	if labelResult := c.CheckLabels(s); labelResult.HasErrors() {
+		return nil, labelResult
+	}
 	collector := diag.NewCollector(0)
-	collector.Merge(c.CheckLabels(s))
 
 	// Schema-scoped, so one bad annotation on an abstract mixin draws one
 	// diagnostic rather than one per concrete subtype that emits for it.
 	reported := make(reportedTargets)
 
 	var indexes []Index
-	for t, label := range c.labels().EmittableTypes(s, collector) {
+	for t, label := range c.labels().LabeledTypes(s) {
 		indexes = append(indexes, indexesForType(t, label, collector, reported)...)
 	}
 
@@ -281,7 +285,7 @@ func reportIndexTarget(
 	reported[ref] = true
 	subj.Property = ref.name
 	if code == E_NEO4J_INVALID_IDENTIFIER {
-		collector.Collect(mapping.InvalidIdentifierIssue(msg, subj, errors.New(detail)).
+		collector.Collect(mapping.InvalidIdentifierIssue(msg, subj, detail).
 			WithSpan(ann.Span()).Build())
 		return
 	}
@@ -332,19 +336,19 @@ func validIndexName(t schema.Type, prop schema.Property, ann schema.Annotation,
 ) bool {
 	name := prop.Name()
 	scope := targetScope(t, prop)
-	// The context names the DECLARING scope, matching the message and the detail:
-	// this diagnostic is deduped once per declared property for the whole schema,
-	// so embedding the emitting heir would make the error text disagree with its
-	// own span and change with source order.
-	err := ValidateIdentifier(name, scope.String()+" property")
-	if err == nil {
+	// The message names the DECLARING scope, matching the detail: this
+	// diagnostic is deduped once per declared property for the whole schema, so
+	// naming the emitting heir would disagree with its own span.
+	problem := mapping.IdentifierProblem(name)
+	if problem == "" {
 		return true
 	}
+	reason := "the name " + problem
 	reportIndexTarget(collector, reported,
 		indexTargetRef{prop: prop.Origin(), name: name, code: E_NEO4J_INVALID_IDENTIFIER},
 		ann, E_NEO4J_INVALID_IDENTIFIER, scope,
-		fmt.Sprintf("invalid property %q declared in %s: %s", name, scope, err),
-		err.Error())
+		fmt.Sprintf("invalid property %q declared in %s: %s", name, scope, reason),
+		reason)
 	return false
 }
 
@@ -381,8 +385,9 @@ func validScalarTarget(t schema.Type, prop schema.Property, ann schema.Annotatio
 // not a Vector drops the declared ANN index entirely — no DDL and no
 // diagnostic, so every vector query falls back to a brute-force scan and the
 // diff reports no problem because the index is missing from the desired set
-// too. A non-positive dimension is rejected for a related reason: Neo4j
-// refuses the statement at execution, aborting a DDL apply midway through.
+// too. A dimension outside 1 to [parse.MaxIndexedVectorDimensions], which the
+// load refuses too, is rejected for a related reason: Neo4j refuses the
+// statement at execution, aborting a DDL apply midway through.
 func validVectorTarget(t schema.Type, prop schema.Property, ann schema.Annotation,
 	vc schema.VectorConstraint, isVector bool,
 	collector *diag.Collector, reported reportedTargets,
@@ -402,10 +407,10 @@ func validVectorTarget(t schema.Type, prop schema.Property, ann schema.Annotatio
 			"a vector index requires a Vector property",
 		)
 	}
-	if vc.Dimension() <= 0 {
+	if d := vc.Dimension(); d <= 0 || d > parse.MaxIndexedVectorDimensions {
 		return report(
-			fmt.Sprintf("@vector names property %q with dimension %d", prop.Name(), vc.Dimension()),
-			"a vector index requires a positive dimension; Neo4j rejects the CREATE VECTOR INDEX statement otherwise",
+			fmt.Sprintf("@vector names property %q with dimension %d", prop.Name(), d),
+			fmt.Sprintf("a vector index takes a dimension from 1 to %d; Neo4j rejects the CREATE VECTOR INDEX statement otherwise", parse.MaxIndexedVectorDimensions),
 		)
 	}
 	return true
@@ -503,7 +508,7 @@ func fulltextIndex(label string, props []string) Index {
 }
 
 // vectorIndex builds a vector Index for one property with the given dimension
-// and similarity function. The OPTIONS statement form requires Neo4j 5.15+.
+// and similarity function.
 func vectorIndex(label, prop string, dimension int, similarity string) Index {
 	return Index{
 		Name:             indexName(label, []string{prop}, IndexVector),

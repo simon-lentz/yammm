@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/simon-lentz/yammm/diag"
+	"github.com/simon-lentz/yammm/neo4j"
 )
 
 // The yammm CLI's exit codes.
@@ -20,13 +21,14 @@ const (
 
 // runtimeCodes are the diagnostic codes that report a failure outside the
 // input: an I/O failure (a filesystem failure, or the reader a streamed snapshot
-// read reads from failing), an internal fault, or a cancelled context.
+// read reads from failing), a database answer [neo4j.Diff] cannot plan from, an
+// internal fault, or a cancelled context.
 //
 // diag/code.go introduces an I/O code within a category by a stated convention
 // rather than a CategoryIO constant, so membership is this list and not a
 // category test. A new I/O code belongs here.
 var runtimeCodes = [...]diag.Code{
-	diag.E_LOAD_IO_FAILURE, diag.E_SNAPSHOT_IO,
+	diag.E_LOAD_IO_FAILURE, diag.E_SNAPSHOT_IO, neo4j.E_NEO4J_INVALID_REMOTE_OBJECT,
 	diag.E_INTERNAL, diag.E_CONTEXT_CANCELLED,
 }
 

@@ -199,6 +199,7 @@ func TestExitForResult_RuntimeCodeOutranksValidation(t *testing.T) {
 	}{
 		{"a schema load I/O failure", diag.E_LOAD_IO_FAILURE, ExitRuntime},
 		{"a snapshot I/O failure", diag.E_SNAPSHOT_IO, ExitRuntime},
+		{"a database answer the diff cannot plan from", neo4j.E_NEO4J_INVALID_REMOTE_OBJECT, ExitRuntime},
 		{"an internal fault", diag.E_INTERNAL, ExitRuntime},
 		{"a cancelled context", diag.E_CONTEXT_CANCELLED, ExitRuntime},
 		{"an ordinary error", diag.E_MISSING_REQUIRED, ExitValidation},

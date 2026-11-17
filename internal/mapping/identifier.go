@@ -1,40 +1,10 @@
 package mapping
 
-import (
-	"errors"
-	"fmt"
-	"regexp"
-	"strings"
-)
+import "strings"
 
-// Sentinel errors for identifier validation failures.
-var (
-	ErrEmptyIdentifier   = errors.New("cypher: identifier is empty")
-	ErrReservedKeyword   = errors.New("cypher: identifier is a Cypher reserved keyword")
-	ErrInvalidIdentifier = errors.New("cypher: identifier contains invalid characters")
-)
-
-// neo4jIdentifierRE matches valid Neo4j identifiers (labels, property names, relationship types).
-var neo4jIdentifierRE = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
-
-// identifierReplacer maps the characters [sanitize] rewrites to
-// underscores. strings.Replacer compiles a lookup on construction and is safe
-// for concurrent use, so it is built once rather than per call — the diff calls
-// sanitize once per type per walk.
-//
-//nolint:gochecknoglobals // Intentional: immutable, concurrency-safe lookup.
-var identifierReplacer = strings.NewReplacer(
-	" ", "_",
-	"-", "_",
-	".", "_",
-	"/", "_",
-	"\\", "_",
-)
-
-// cypherReservedKeywords contains Cypher reserved keywords that cannot be used
-// as unquoted identifiers in Neo4j queries. Keys are uppercase.
-// List based on Neo4j 5.x documentation:
-// https://neo4j.com/docs/cypher-manual/current/syntax/reserved/
+// cypherReservedKeywords holds, upper-cased, the Cypher keywords the generated
+// Cypher never writes as an unquoted name, after
+// https://neo4j.com/docs/cypher-manual/current/syntax/reserved/.
 //
 //nolint:gochecknoglobals // Intentional: static lookup table for validation.
 var cypherReservedKeywords = map[string]struct{}{
@@ -61,71 +31,60 @@ var cypherReservedKeywords = map[string]struct{}{
 	"ADD": {}, "DROP": {},
 }
 
-// sanitize rewrites a string by Neo4j's identifier rules, in this order:
-//   - Trims white space at each end, and a blank input returns ""
-//   - Replaces space, hyphen, period, forward slash, backslash with underscore
-//   - Prepends underscore if the string now starts with a digit
-//   - Strips all characters except ASCII letters, digits, and underscores
-//
-// The order matters and the result is NOT guaranteed to be a valid identifier:
-// an input whose first invalid character precedes a digit ("«9x") has that
-// character stripped after the leading-digit test, so it returns "9x".
-// The write path judges the composed label, prefix and separator included, with
-// [ValidateIdentifier], and refuses a label that is not valid with
-// [InvalidIdentifier] naming it. A composed label can be valid over an
-// invalid result: "«9x" under a label prefix.
-//
-// [Labels.Label] applies it to the schema name and the type name; the prefix
-// and the separator stand as configured.
-func sanitize(s string) string {
-	trimmed := strings.TrimSpace(s)
-	if trimmed == "" {
-		return ""
-	}
+// The reasons [IdentifierProblem] gives, each completing "the name …".
+const (
+	reasonEmpty      = "is empty"
+	reasonCharacters = "is not an ASCII letter or underscore followed by ASCII letters, digits and underscores"
+	reasonReserved   = "is a Cypher reserved keyword"
+)
 
-	result := identifierReplacer.Replace(trimmed)
-
-	// Ensure first character is valid (ASCII letter or underscore).
-	if len(result) > 0 && isASCIIDigit(rune(result[0])) {
-		result = "_" + result
-	}
-
-	// Remove any remaining invalid characters (keep only ASCII letters, digits, underscore).
-	var clean strings.Builder
-	for _, r := range result {
-		if isASCIILetter(r) || isASCIIDigit(r) || r == '_' {
-			clean.WriteRune(r)
-		}
-	}
-
-	return clean.String()
+// IsIdentifier reports whether name is a Neo4j identifier the generated Cypher
+// can write unquoted: an ASCII letter or underscore, then ASCII letters, digits
+// and underscores, and no Cypher reserved keyword in any case.
+func IsIdentifier(name string) bool {
+	return IdentifierProblem(name) == ""
 }
 
-// ValidateIdentifier checks whether a name is a valid Neo4j identifier.
-// Returns an error if the name:
-//   - Is empty
-//   - Does not match ^[A-Za-z_][A-Za-z0-9_]*$
-//   - Matches a Cypher reserved keyword (case-insensitive)
-//
-// The context parameter is included in error messages for debugging
-// (e.g., "property 'run_id'", "type 'Issue'").
-func ValidateIdentifier(name, context string) error {
-	if name == "" {
-		return fmt.Errorf("%w: %s", ErrEmptyIdentifier, context)
-	}
-	if !neo4jIdentifierRE.MatchString(name) {
-		return fmt.Errorf("%w: %s %q", ErrInvalidIdentifier, context, name)
+// IdentifierProblem returns why name is not an identifier under [IsIdentifier],
+// as a phrase that completes "the name …", or "" when it is one.
+func IdentifierProblem(name string) string {
+	switch {
+	case name == "":
+		return reasonEmpty
+	case !hasIdentifierCharacters(name):
+		return reasonCharacters
 	}
 	if _, reserved := cypherReservedKeywords[strings.ToUpper(name)]; reserved {
-		return fmt.Errorf("%w: %s %q", ErrReservedKeyword, context, name)
+		return reasonReserved
 	}
-	return nil
+	return ""
 }
 
-func isASCIILetter(r rune) bool {
-	return (r >= 'A' && r <= 'Z') || (r >= 'a' && r <= 'z')
+// hasIdentifierCharacters reports whether name is non-empty, starts with an
+// ASCII letter or underscore, and holds only ASCII letters, digits and
+// underscores. It ignores the keyword table.
+func hasIdentifierCharacters(name string) bool {
+	if name == "" || isASCIIDigit(name[0]) {
+		return false
+	}
+	return hasIdentifierTail(name)
 }
 
-func isASCIIDigit(r rune) bool {
-	return r >= '0' && r <= '9'
+// hasIdentifierTail reports whether every byte of s is an ASCII letter, digit
+// or underscore. A multi-byte rune fails on its first byte.
+func hasIdentifierTail(s string) bool {
+	for i := range len(s) {
+		if b := s[i]; !isASCIILetter(b) && !isASCIIDigit(b) && b != '_' {
+			return false
+		}
+	}
+	return true
+}
+
+func isASCIILetter(b byte) bool {
+	return (b >= 'A' && b <= 'Z') || (b >= 'a' && b <= 'z')
+}
+
+func isASCIIDigit(b byte) bool {
+	return b >= '0' && b <= '9'
 }

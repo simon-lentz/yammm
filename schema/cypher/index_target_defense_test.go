@@ -6,6 +6,7 @@ import (
 
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/internal/mapping"
+	"github.com/simon-lentz/yammm/internal/parse"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -110,16 +111,18 @@ func TestIndexTargetDefense_RejectsTargetsTheLoaderWouldHaveRejected(t *testing.
 		}
 	})
 
-	t.Run("vector target rejects a non-positive dimension", func(t *testing.T) {
+	t.Run("vector target rejects a dimension outside 1 to the bound", func(t *testing.T) {
 		t.Parallel()
-		collector := diag.NewCollector(0)
-		ok := validVectorTarget(typ, propertyOn(t, typ, "flat"), vectorAnn,
-			schema.NewVectorConstraint(0), true, collector, reportedTargets{})
-		if ok {
-			t.Error("validVectorTarget accepted dimension 0 — Neo4j aborts the DDL apply on it")
-		}
-		if !collector.Result().HasCode(E_NEO4J_INVALID_INDEX_TARGET) {
-			t.Errorf("want %s, got: %v", E_NEO4J_INVALID_INDEX_TARGET, collector.Result())
+		for _, d := range []int{0, parse.MaxIndexedVectorDimensions + 1} {
+			collector := diag.NewCollector(0)
+			ok := validVectorTarget(typ, propertyOn(t, typ, "flat"), vectorAnn,
+				schema.NewVectorConstraint(d), true, collector, reportedTargets{})
+			if ok {
+				t.Errorf("validVectorTarget accepted dimension %d — Neo4j aborts the DDL apply on it", d)
+			}
+			if !collector.Result().HasCode(E_NEO4J_INVALID_INDEX_TARGET) {
+				t.Errorf("dimension %d: want %s, got: %v", d, E_NEO4J_INVALID_INDEX_TARGET, collector.Result())
+			}
 		}
 	})
 
@@ -135,6 +138,10 @@ func TestIndexTargetDefense_RejectsTargetsTheLoaderWouldHaveRejected(t *testing.
 		if !validVectorTarget(typ, propertyOn(t, typ, "embedding"), vectorAnn,
 			schema.NewVectorConstraint(3), true, collector, reportedTargets{}) {
 			t.Error("validVectorTarget rejected a 3-dimensional Vector")
+		}
+		if !validVectorTarget(typ, propertyOn(t, typ, "embedding"), vectorAnn,
+			schema.NewVectorConstraint(parse.MaxIndexedVectorDimensions), true, collector, reportedTargets{}) {
+			t.Errorf("validVectorTarget rejected a %d-dimensional Vector, the bound Neo4j accepts", parse.MaxIndexedVectorDimensions)
 		}
 		if collector.Result().HasErrors() {
 			t.Errorf("valid targets drew diagnostics: %v", collector.Result())

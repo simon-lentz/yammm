@@ -205,8 +205,8 @@ func NodeQueries(
 // Returns one [EdgeQuery] per signature per chunk. Each endpoint's label and
 // keys are derived as [NodeQueries] derives them, so a zero snapshot
 // and a schema whose labels that derivation refuses are refused here too. An edge
-// whose relationship type is no valid identifier, a reserved keyword included, is
-// refused with [cypher.ValidateIdentifier]'s error.
+// whose relationship type [cypher.IsIdentifier] refuses, a reserved keyword
+// included, is refused with an error that names it.
 func EdgeQueries(
 	ctx context.Context,
 	c cypher.Config,
@@ -227,8 +227,8 @@ func EdgeQueries(
 
 	// Validate all relationship types upfront (fail fast).
 	for _, edge := range edges {
-		if err := cypher.ValidateIdentifier(edge.Relation(), "relationship type"); err != nil {
-			return nil, err //nolint:wrapcheck // the identifier error names the relation and is the refusal
+		if problem := mapping.IdentifierProblem(edge.Relation()); problem != "" {
+			return nil, fmt.Errorf("relationship type %q is not a Neo4j identifier: the name %s", edge.Relation(), problem)
 		}
 	}
 
@@ -520,9 +520,9 @@ func renders(c schema.Constraint, kinds ...schema.ConstraintKind) bool {
 	return c != nil && slices.Contains(kinds, schema.ResolveAlias(c).Kind())
 }
 
-// nestedCollection returns the refusal [mapping.ListElementType] gives c's element
-// when c is a List whose element is itself a collection, and nil for any other
-// constraint. The write path refuses a value at such a constraint by it, so a
+// nestedCollection returns an error wrapping [ErrUnsupportedListElem] and the
+// refusal [mapping.ListElementType] gives c's element when c is a List whose
+// element is itself a collection, and nil for any other constraint. The write path refuses a value at such a constraint by it, so a
 // property the DDL refuses never reaches the driver.
 func nestedCollection(c schema.Constraint) error {
 	// A Vector's element is a Float, so only a List can nest; elementConstraint
@@ -531,8 +531,10 @@ func nestedCollection(c schema.Constraint) error {
 	if !ok {
 		return nil
 	}
-	_, err := mapping.ListElementType(l.Element())
-	return err //nolint:wrapcheck // the mapping's refusal is the DDL's, and the caller names the property
+	if _, err := mapping.ListElementType(l.Element()); err != nil {
+		return fmt.Errorf("%w: %w", ErrUnsupportedListElem, err)
+	}
+	return nil
 }
 
 // coerceSlice converts raw, a list in the form the validator stores, to the
@@ -572,7 +574,7 @@ func coerceSlice(raw []any, c schema.Constraint) (any, error) {
 		// KindAlias is unreachable here: elem is alias-resolved above, and a judged
 		// constraint's DataType reference holds a resolved constraint.
 		_, err := mapping.ListElementType(elem)
-		return nil, err //nolint:wrapcheck // as nestedCollection
+		return nil, fmt.Errorf("%w: %w", ErrUnsupportedListElem, err)
 	default:
 		// Unreachable: schema.Constraint is sealed, so elem.Kind() is always one of
 		// the cases above. The //exhaustive:enforce directive fails the lint if a

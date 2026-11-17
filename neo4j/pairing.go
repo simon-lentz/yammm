@@ -19,8 +19,8 @@ type pair[D, A any] struct {
 	byName  bool
 }
 
-// identityFuncs supplies pairObjects' projections. An empty name skips the name
-// phases, and nil exact projections skip the exact phase.
+// identityFuncs supplies pairObjects' projections. Nil exact projections skip
+// the exact phase.
 type identityFuncs[D, A any] struct {
 	desiredName  func(D) string
 	actualName   func(A) string
@@ -47,11 +47,8 @@ func pairObjects[D, A any](desired []D, actual []A, f identityFuncs[D, A]) (pair
 	index := func(key func(A) string) map[string][]int {
 		m := make(map[string][]int, len(actual))
 		for i, a := range actual {
-			if claimed[i] {
-				continue
-			}
-			if k := key(a); k != "" {
-				m[k] = append(m[k], i)
+			if !claimed[i] {
+				m[key(a)] = append(m[key(a)], i)
 			}
 		}
 		return m
@@ -70,11 +67,7 @@ func pairObjects[D, A any](desired []D, actual []A, f identityFuncs[D, A]) (pair
 			if matchedTo[di] >= 0 {
 				continue
 			}
-			k := key(desired[di])
-			if k == "" {
-				continue
-			}
-			for _, ai := range candidates[k] {
+			for _, ai := range candidates[key(desired[di])] {
 				if claimed[ai] || !accept(di, ai) {
 					continue
 				}
@@ -153,35 +146,18 @@ func (b blocker) addTo(bs *Blockers) {
 	bs.Indexes = append(bs.Indexes, *b.index)
 }
 
-// targets gives each remote row its drop target: the object one DROP removes. A
-// backing index's target is its constraint's, the first by that name in the
-// sorted rows, or the name alone when no row carries it.
-type targets struct {
-	constraintByName map[string]string
+// constraintTarget and indexTarget give a remote row its drop target, the
+// object one DROP removes, by its kind and its name, which [Diff] holds unique
+// within a kind. A backing index's target is its constraint's.
+func constraintTarget(rc RemoteConstraint) string {
+	return "c" + rc.Name
 }
 
-func newTargets(constraints []RemoteConstraint) targets {
-	t := targets{constraintByName: make(map[string]string)}
-	for _, rc := range constraints {
-		if _, seen := t.constraintByName[rc.Name]; rc.Name != "" && !seen {
-			t.constraintByName[rc.Name] = t.constraint(rc)
-		}
+func indexTarget(ri RemoteIndex) string {
+	if ri.OwningConstraint != "" {
+		return "c" + ri.OwningConstraint
 	}
-	return t
-}
-
-func (targets) constraint(rc RemoteConstraint) string {
-	return "c" + remoteConstraintKey(rc)
-}
-
-func (t targets) index(ri RemoteIndex) string {
-	if ri.OwningConstraint == "" {
-		return "i" + remoteIndexRecordKey(ri)
-	}
-	if target, ok := t.constraintByName[ri.OwningConstraint]; ok {
-		return target
-	}
-	return "n" + ri.OwningConstraint
+	return "i" + ri.Name
 }
 
 // settlement is the fixed point of one plan over both sides. A drop target names

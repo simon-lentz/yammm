@@ -6,13 +6,11 @@ import (
 	"github.com/simon-lentz/yammm/schema/cypher"
 )
 
-// The label-identifier gate in the emittable walk is the sole such gate for
-// constraints, indexes, AND shape, and it is live behavior rather than defence:
-// the CLI exposes --separator, and a separator that is not a legal Neo4j
-// identifier character makes every label invalid. Without the gate the emitters
-// produce Cypher the server rejects at apply time, with no yammm diagnostic at
-// all.
-func TestEmittableTypes_InvalidLabelIsGated(t *testing.T) {
+// [cypher.Config.CheckLabels] gates constraints, indexes and the write shape
+// alike. The CLI exposes --separator, and a separator that is no Neo4j
+// identifier text makes every label invalid; without the gate the emitters
+// produce Cypher the server refuses at apply time, with no yammm diagnostic.
+func TestCheckLabels_GatesEveryEmitter(t *testing.T) {
 	t.Parallel()
 	s := loadSchema(t, "indexes.yammm")
 	// "-" is legal in the CLI flag but not in an unquoted Neo4j identifier.

@@ -30,8 +30,8 @@ const (
 	// CategoryGraph is for graph-layer errors.
 	CategoryGraph
 
-	// CategoryNeo4j is for the Neo4j mapping's codes, which schema/cypher
-	// declares.
+	// CategoryNeo4j is for the Neo4j codes, which schema/cypher and neo4j
+	// declare.
 	CategoryNeo4j
 
 	// CategorySnapshot is for snapshot persistence errors.

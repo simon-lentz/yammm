@@ -54,8 +54,11 @@ func TestErrUnrepresentable_MarksEveryRefusalOfAValue(t *testing.T) {
 			t.Errorf("%s: error = %v; want ErrUnrepresentable", name, err)
 		}
 	}
-	if _, err := coerceValue(nested, [][]int64{{1}}); !errors.Is(err, ErrUnsupportedListElem) {
-		t.Errorf("a nested collection's refusal = %v; want ErrUnsupportedListElem beside the class", err)
+	// A typed slice and the []any the validator stores reach different arms.
+	for _, v := range []any{[][]int64{{1}}, []any{[]any{int64(1)}}} {
+		if _, err := coerceValue(nested, v); !errors.Is(err, ErrUnsupportedListElem) || !errors.Is(err, ErrUnrepresentable) {
+			t.Errorf("a nested collection %#v's refusal = %v; want ErrUnsupportedListElem beside the class", v, err)
+		}
 	}
 }
 

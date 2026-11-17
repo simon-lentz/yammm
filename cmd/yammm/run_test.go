@@ -116,8 +116,7 @@ func TestRun_MissingSchemaExitsRuntime(t *testing.T) {
 		{"gen", []string{"gen", "--to", "go", missing}},
 		{"snapshot save", []string{"snapshot", "save", "-o", filepath.Join(t.TempDir(), "o.ys"), missing, data}},
 		{"snapshot verify", []string{"snapshot", "verify", missing, "testdata/data.json"}},
-		{"neo4j constraints", []string{"neo4j", "constraints", missing}},
-		{"neo4j indexes", []string{"neo4j", "indexes", missing}},
+		{"gen --to cypher", []string{"gen", "--to", "cypher", missing}},
 	}
 
 	for _, tt := range tests {
@@ -326,7 +325,7 @@ func TestRun_AHelpFlagBeforeASubcommandHelpsIt(t *testing.T) {
 		usage string
 	}{
 		{[]string{"neo4j", "--help", "diff"}, "yammm neo4j diff <schema.yammm>"},
-		{[]string{"neo4j", "-h", "constraints"}, "yammm neo4j constraints <schema.yammm>"},
+		{[]string{"neo4j", "-h", "diff"}, "yammm neo4j diff <schema.yammm>"},
 		{[]string{"neo4j", "--help", "--format", "json", "diff"}, "yammm neo4j diff <schema.yammm>"},
 		{[]string{"--help", "neo4j"}, "yammm neo4j [flags]"},
 		{[]string{"--no-color", "-h", "validate"}, "yammm validate <schema.yammm>"},

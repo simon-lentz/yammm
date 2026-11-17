@@ -208,14 +208,14 @@ The all-or-nothing contract is unchanged: any error still yields a zero schema.
 
 ### Neo4j
 
-`schema/cypher` and `neo4j` register these codes when either is linked.
+`schema/cypher` registers these codes but `E_NEO4J_INVALID_REMOTE_OBJECT` when it is linked, and `neo4j`, which imports it, registers that one too.
 
 | Code | Meaning |
 | ---- | ------- |
-| `E_NEO4J_LABEL_COLLISION` | Two types produce the same Neo4j label |
-| `E_NEO4J_INVALID_IDENTIFIER` | Name not valid as Neo4j identifier |
+| `E_NEO4J_INVALID_IDENTIFIER` | A label setting, schema name or label that breaks the label rule, or a property name that is no Neo4j identifier |
 | `E_NEO4J_UNSUPPORTED_TYPE` | Constraint kind has no Neo4j type mapping |
 | `E_NEO4J_UNKNOWN_PROPERTY` | An index annotation names a property the type does not have |
-| `E_NEO4J_INVALID_INDEX_TARGET` | An index annotation names a property whose type cannot carry it (`@index` or `@@index` on a non-scalar, `@vector` on a non-Vector or a non-positive dimension, `@fulltext` or `@@fulltext` on a non-text property) |
+| `E_NEO4J_INVALID_INDEX_TARGET` | An index annotation names a property whose type cannot carry it (`@index` or `@@index` on a non-scalar, `@vector` on a non-Vector or a dimension outside 1 to 4096, `@fulltext` or `@@fulltext` on a non-text property) |
 | `W_NEO4J_NODE_KEY_UNSUPPORTED` | `cypher.Config{NodeKeys: true, Edition: cypher.Community}` (`--node-keys --edition community`); NODE KEY is Enterprise-only, so UNIQUE is emitted for primary keys instead (Warning, v0.9.1+) |
 | `W_NEO4J_EDITION_CONSTRAINT_OMITTED` | The Community edition dropped NOT NULL and PROPERTY_TYPE constraints the schema declares; reported once per call with a count per omitted kind (Warning, v0.14+) |
+| `E_NEO4J_INVALID_REMOTE_OBJECT` | `neo4j.Diff` was given a remote row it cannot plan from: a constraint or an index with no name, two rows of one kind under one name, or a property type constraint that reports no `propertyType` |

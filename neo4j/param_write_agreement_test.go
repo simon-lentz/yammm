@@ -158,32 +158,34 @@ func TestCoerceParams_SendsWhatTheWritePathSendsForTheValidatedValue(t *testing.
 	}
 }
 
-// A dbtype.Date is the driver's own date: CoerceParams passes one at a Date,
-// with no time of day, where the validator refuses it. It is refused at any
-// other kind and inside a list, as the validator refuses it there.
-func TestCoerceParams_ADriverDatePassesAtADateAlone(t *testing.T) {
+// CoerceParams reads a Date as the validator does, so a dbtype.Date, the
+// driver's own date, is refused at a Date, at any other kind and inside a
+// list, each with the validator's refusal.
+func TestCoerceParams_RefusesADriverDate(t *testing.T) {
 	t.Parallel()
 	s := loadInline(t, agreementSchema)
 	typ, _ := s.Type("T")
 	types := ParamTypesForType(typ)
 	day := dbtype.Date(time.Date(2024, 1, 2, 0, 0, 0, 0, time.UTC))
-	got, err := CoerceParams(map[string]any{"d": dbtype.Date(time.Date(2024, 1, 2, 23, 30, 0, 0, time.FixedZone("X", -3600)))}, types)
-	if err != nil || !sameSent(got["d"], day) {
-		t.Errorf("a dbtype.Date at a Date = %#v, %v; want %#v", got["d"], err, day)
-	}
 	if _, res := instance.NewValidator(s).ValidateOne(t.Context(), "T", instance.RawInstance{Properties: map[string]any{"id": "x", "d": day}}); res.Err() == nil {
 		t.Error("control: the validator accepts a dbtype.Date at a Date")
 	}
-	for prop, v := range map[string]any{"s": day, "ts": day, "ld": []any{day}, "lt": []dbtype.Date{day}} {
-		if got, err := CoerceParams(map[string]any{prop: v}, types); !errors.Is(err, ErrUnrepresentable) {
-			t.Errorf("%s = %#v: CoerceParams = %#v, %v; want a refusal that matches ErrUnrepresentable", prop, v, got[prop], err)
+	for _, tc := range []struct {
+		prop string
+		v    any
+	}{
+		{"d", day},
+		{"s", day},
+		{"ts", day},
+		{"ld", []any{day}},
+		{"ld", []dbtype.Date{day}},
+		{"lt", []dbtype.Date{day}},
+	} {
+		if got, err := CoerceParams(map[string]any{tc.prop: tc.v}, types); !errors.Is(err, ErrUnrepresentable) {
+			t.Errorf("%s = %#v: CoerceParams = %#v, %v; want a refusal that matches ErrUnrepresentable", tc.prop, tc.v, got[tc.prop], err)
 		}
 	}
-	if got, err := CoerceParams(map[string]any{"ld": []dbtype.Date{day}}, types); !errors.Is(err, ErrUnrepresentable) {
-		t.Errorf("a []dbtype.Date at a List<Date>: CoerceParams = %#v, %v; want a refusal", got["ld"], err)
-	}
-	// At another kind the refusal is the validator's own, as for any other value.
-	for _, prop := range []string{"s", "ts"} {
+	for _, prop := range []string{"d", "s", "ts"} {
 		want := value.Check(day, types[prop])
 		_, err := CoerceParams(map[string]any{prop: day}, types)
 		if want == nil || err == nil || !strings.Contains(err.Error(), want.Error()) {

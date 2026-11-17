@@ -57,11 +57,11 @@ func dc(name, label string, props ...string) cypher.Constraint {
 	return cypher.Constraint{Name: name, Kind: cypher.ConstraintUnique, Label: label, Properties: props}
 }
 
-func constraintCounts(t *testing.T, r ConstraintDiff, match, drift, create, drop, unverified int) {
+func constraintCounts(t *testing.T, r ConstraintDiff, match, drift, create, drop int) {
 	t.Helper()
 	assertCounts(t, "constraint",
-		len(r.Match), len(r.Drift), len(r.Create), len(r.Drop), len(r.Unverified),
-		match, drift, create, drop, unverified)
+		len(r.Match), len(r.Drift), len(r.Create), len(r.Drop), 0,
+		match, drift, create, drop, 0)
 }
 
 // A second remote constraint sharing one identity is the redundant, undeclared
@@ -75,7 +75,7 @@ func TestConstraintDiff_DuplicateOfMatchedStillDrops(t *testing.T) {
 		rc("hand_made_id_unique", "app__T", "id"),
 	}, nil, appOwned()).Constraints
 
-	constraintCounts(t, got, 1, 0, 0, 1, 0)
+	constraintCounts(t, got, 1, 0, 0, 1)
 	if len(got.Drop) == 1 && got.Drop[0].Name != "hand_made_id_unique" {
 		t.Errorf("Drop[0] = %q; the undeclared duplicate is the one to drop", got.Drop[0].Name)
 	}
@@ -103,7 +103,7 @@ func TestConstraintDiff_PairingIsOrderIndependent(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			got := diff(a, desired, nil, tc.actual, nil, ownedSet("app__T", "app__Foo")).Constraints
-			constraintCounts(t, got, 1, 0, 0, 1, 0)
+			constraintCounts(t, got, 1, 0, 0, 1)
 			if len(got.Match) == 1 && got.Match[0].Actual.Name != "app__T_id_unique" {
 				t.Errorf("Match = %q; the schema's own constraint must be the match", got.Match[0].Actual.Name)
 			}
@@ -119,16 +119,17 @@ func TestConstraintDiff_PairingIsOrderIndependent(t *testing.T) {
 func TestConstraintDiff_TwoDesiredShareIdentity(t *testing.T) {
 	t.Parallel()
 	got := diff(cypher.Config{}, []cypher.Constraint{dc("", "app__T", "id"), dc("", "app__T", "id")}, nil, []RemoteConstraint{rc("a", "app__T", "id"), rc("b", "app__T", "id")}, nil, appOwned()).Constraints
-	constraintCounts(t, got, 2, 0, 0, 0, 0)
+	constraintCounts(t, got, 2, 0, 0, 0)
 }
 
-// Ownership is anchored: a schema named "app" must not claim the objects of a
-// schema named "app__legacy", whose labels also start with "app__". Reporting
-// them as drops surfaced drift no edit to "app" could ever resolve.
+// Ownership is anchored: a schema named "app" must not claim an object labelled
+// app__legacy__Foo, which another writer can hold although the label rule
+// refuses the schema name "app__legacy". Reporting it as a drop surfaced drift
+// no edit to "app" could ever resolve.
 func TestConstraintDiff_SiblingSchemaNotClaimed(t *testing.T) {
 	t.Parallel()
 	got := diff(cypher.Config{}, nil, nil, []RemoteConstraint{rc("other", "app__legacy__Foo", "x")}, nil, ownedSet("app__T", "app__Foo")).Constraints
-	constraintCounts(t, got, 0, 0, 0, 0, 0)
+	constraintCounts(t, got, 0, 0, 0, 0)
 }
 
 // ...but the schema's own undeclared constraint still drops, so the anchoring
@@ -136,17 +137,15 @@ func TestConstraintDiff_SiblingSchemaNotClaimed(t *testing.T) {
 func TestConstraintDiff_OwnSchemaStillDrops(t *testing.T) {
 	t.Parallel()
 	got := diff(cypher.Config{}, nil, nil, []RemoteConstraint{rc("mine", "app__Foo", "x")}, nil, ownedSet("app__T", "app__Foo")).Constraints
-	constraintCounts(t, got, 0, 0, 0, 1, 0)
+	constraintCounts(t, got, 0, 0, 0, 1)
 }
 
-// A type with no schema name gets a bare label: Config.Label returns the
-// sanitized type name with no prefix and no separator. Those labels
-// carry no namespace, so nothing about them distinguishes this schema's objects
-// from any other application's — only the label SET can.
+// A bare label carries no namespace, so nothing about it distinguishes this
+// schema's objects from any other application's: only the label SET can.
 func TestConstraintDiff_UnscopedLabels(t *testing.T) {
 	t.Parallel()
 	got := diff(cypher.Config{}, []cypher.Constraint{dc("Person_id_unique", "Person", "id")}, nil, []RemoteConstraint{rc("Person_id_unique", "Person", "id")}, nil, ownedSet("Person")).Constraints
-	constraintCounts(t, got, 1, 0, 0, 0, 0)
+	constraintCounts(t, got, 1, 0, 0, 0)
 }
 
 // An unscoped schema owns the labels it emits and NOTHING ELSE. Sharing a
@@ -162,7 +161,7 @@ func TestDiff_UnscopedDoesNotClaimTheDatabase(t *testing.T) {
 		rc("theirs", "other__Foo", "x"),
 		rc("unrelated", "LegacyThing", "y"),
 	}, nil, owned).Constraints
-	constraintCounts(t, cons, 0, 0, 0, 0, 0)
+	constraintCounts(t, cons, 0, 0, 0, 0)
 
 	idx := diff(a, nil, nil, nil, []RemoteIndex{
 		{Name: "theirs", Type: "RANGE", EntityType: "NODE", LabelsOrTypes: []string{"other__Foo"}, Properties: []string{"x"}},
@@ -186,7 +185,7 @@ func TestConstraintDiff_SiblingSchemaNotClaimed_AnyCase(t *testing.T) {
 		t.Run(label, func(t *testing.T) {
 			t.Parallel()
 			got := diff(cypher.Config{}, nil, nil, []RemoteConstraint{rc("sib", label, "id")}, nil, owned).Constraints
-			constraintCounts(t, got, 0, 0, 0, 0, 0)
+			constraintCounts(t, got, 0, 0, 0, 0)
 		})
 	}
 }
@@ -202,10 +201,10 @@ func TestConstraintDiff_OwnershipIgnoresSeparatorConfig(t *testing.T) {
 			a := cypher.Config{LabelSeparator: sep}
 			// A label outside the set is never owned...
 			outside := diff(a, nil, nil, []RemoteConstraint{rc("sib", "appLegacyFoo", "id")}, nil, owned).Constraints
-			constraintCounts(t, outside, 0, 0, 0, 0, 0)
+			constraintCounts(t, outside, 0, 0, 0, 0)
 			// ...and one inside it always is.
 			inside := diff(a, nil, nil, []RemoteConstraint{rc("mine", "app__T", "id")}, nil, owned).Constraints
-			constraintCounts(t, inside, 0, 0, 0, 1, 0)
+			constraintCounts(t, inside, 0, 0, 0, 1)
 		})
 	}
 }
@@ -216,7 +215,7 @@ func TestConstraintDiff_OwnershipIgnoresSeparatorConfig(t *testing.T) {
 func TestConstraintDiff_MemberOrderInsensitive(t *testing.T) {
 	t.Parallel()
 	got := diff(cypher.Config{}, []cypher.Constraint{dc("", "app__T", "a", "b")}, nil, []RemoteConstraint{rc("r", "app__T", "b", "a")}, nil, appOwned()).Constraints
-	constraintCounts(t, got, 1, 0, 0, 0, 0)
+	constraintCounts(t, got, 1, 0, 0, 0)
 }
 
 // The identity encoding must be injective. Remote property names are
@@ -227,7 +226,7 @@ func TestConstraintDiff_MemberOrderInsensitive(t *testing.T) {
 func TestConstraintDiff_IdentityEncodingIsInjective(t *testing.T) {
 	t.Parallel()
 	got := diff(cypher.Config{}, []cypher.Constraint{dc("", "app__T", "a", "b")}, nil, []RemoteConstraint{rc("r", "app__T", "a,b")}, nil, appOwned()).Constraints
-	constraintCounts(t, got, 0, 0, 1, 1, 0)
+	constraintCounts(t, got, 0, 0, 1, 1)
 }
 
 // A remote constraint owned via a non-first label must be keyed by the label
@@ -241,7 +240,7 @@ func TestConstraintDiff_MultiLabelUsesOwnedLabel(t *testing.T) {
 		Name: "ml", Type: "UNIQUENESS", EntityType: "NODE",
 		LabelsOrTypes: []string{"other__Z", "app__T"}, Properties: []string{"x"},
 	}}, nil, appOwned()).Constraints
-	constraintCounts(t, got, 1, 0, 0, 0, 0)
+	constraintCounts(t, got, 1, 0, 0, 0)
 }
 
 // A TYPE constraint whose enforced type differs is drift, not a match.
@@ -255,26 +254,7 @@ func TestConstraintDiff_TypeExprDrift(t *testing.T) {
 		LabelsOrTypes: []string{"app__T"}, Properties: []string{"amount"},
 		PropertyType: "STRING",
 	}}, nil, appOwned()).Constraints
-	constraintCounts(t, got, 0, 1, 0, 0, 0)
-}
-
-// A TYPE constraint the server would not describe (PropertyType is empty on
-// Neo4j < 5.9, and on any driver path that omits the column) is unverified, not
-// matched: folding it into Match reported an unchecked constraint as verified,
-// and `yammm neo4j diff` then exited 0 on a genuinely drifted database.
-func TestConstraintDiff_UnreportedTypeExprIsUnverified(t *testing.T) {
-	t.Parallel()
-	got := diff(cypher.Config{}, []cypher.Constraint{{
-		Name: "c", Kind: cypher.ConstraintType, Label: "app__T",
-		Properties: []string{"amount"}, TypeExpr: "INTEGER",
-	}}, nil, []RemoteConstraint{{
-		Name: "c", Type: "NODE_PROPERTY_TYPE", EntityType: "NODE",
-		LabelsOrTypes: []string{"app__T"}, Properties: []string{"amount"},
-	}}, nil, appOwned()).Constraints
-	constraintCounts(t, got, 0, 0, 0, 0, 1)
-	if got.Unverified[0].Reason == "" {
-		t.Error("an unverified entry should carry a reason")
-	}
+	constraintCounts(t, got, 0, 1, 0, 0)
 }
 
 // A name match whose definitions disagree is drift, not Create + Drop: emitted
@@ -283,7 +263,7 @@ func TestConstraintDiff_UnreportedTypeExprIsUnverified(t *testing.T) {
 func TestConstraintDiff_SameNameDifferentDefinitionIsDrift(t *testing.T) {
 	t.Parallel()
 	got := diff(cypher.Config{}, []cypher.Constraint{dc("app__T_id_unique", "app__T", "id")}, nil, []RemoteConstraint{rc("app__T_id_unique", "app__T", "other_id")}, nil, appOwned()).Constraints
-	constraintCounts(t, got, 0, 1, 0, 0, 0)
+	constraintCounts(t, got, 0, 1, 0, 0)
 }
 
 // Create must keep desired order, and Drop the sorted order whatever order the
@@ -395,7 +375,7 @@ func TestConstraintDiff_IgnoresUndeclarableKinds(t *testing.T) {
 			LabelsOrTypes: []string{"app__T"}, Properties: []string{"x"},
 		},
 	}, nil, ownedSet("app__T")).Constraints
-	constraintCounts(t, got, 0, 0, 0, 0, 0)
+	constraintCounts(t, got, 0, 0, 0, 0)
 }
 
 // ...but a declarable node constraint on an owned label still drops, so the
@@ -403,7 +383,7 @@ func TestConstraintDiff_IgnoresUndeclarableKinds(t *testing.T) {
 func TestConstraintDiff_DeclarableKindStillDrops(t *testing.T) {
 	t.Parallel()
 	got := diff(cypher.Config{}, nil, nil, []RemoteConstraint{rc("mine", "app__T", "id")}, nil, ownedSet("app__T")).Constraints
-	constraintCounts(t, got, 0, 0, 0, 1, 0)
+	constraintCounts(t, got, 0, 0, 0, 1)
 }
 
 // A candidate one desired object rejects must stay available to a later one
@@ -459,7 +439,7 @@ func TestDeclarability_TypeComparisonIsCaseInsensitive(t *testing.T) {
 	cons := diff(cypher.Config{}, nil, nil, []RemoteConstraint{
 		{Name: "c", Type: "uniqueness", EntityType: "node", LabelsOrTypes: []string{"app__T"}, Properties: []string{"id"}},
 	}, nil, owned).Constraints
-	constraintCounts(t, cons, 0, 0, 0, 1, 0)
+	constraintCounts(t, cons, 0, 0, 0, 1)
 }
 
 // Neo4j keeps index and constraint names in ONE namespace, so an index holding
@@ -479,7 +459,7 @@ func TestConstraintDiff_IndexNameBlocksCreate(t *testing.T) {
 	}
 
 	got := diff(cypher.Config{}, desired, nil, nil, handMade("test__Entity_id_unique"), testOwned()).Constraints
-	constraintCounts(t, got, 0, 1, 0, 0, 0)
+	constraintCounts(t, got, 0, 1, 0, 0)
 	if len(got.Drift) == 1 {
 		// The holder is an index, so it is listed with the indexes and a
 		// consumer generating remediation DDL issues DROP INDEX.
@@ -494,7 +474,7 @@ func TestConstraintDiff_IndexNameBlocksCreate(t *testing.T) {
 	// Passing no indexes is the degraded contract, not a different classification
 	// rule: the same declaration is a Create because nothing told the diff the
 	// name was taken.
-	constraintCounts(t, diff(cypher.Config{}, desired, nil, nil, nil, testOwned()).Constraints, 0, 0, 1, 0, 0)
+	constraintCounts(t, diff(cypher.Config{}, desired, nil, nil, nil, testOwned()).Constraints, 0, 0, 1, 0)
 
 	// An index that collides on NEITHER name NOR definition leaves the create
 	// alone, so the branch turns on a blocker and not on any index being
@@ -504,7 +484,7 @@ func TestConstraintDiff_IndexNameBlocksCreate(t *testing.T) {
 		Name: "unrelated_idx", Type: "RANGE", EntityType: "NODE",
 		LabelsOrTypes: []string{"test__Entity"}, Properties: []string{"other_prop"},
 	}}
-	constraintCounts(t, diff(cypher.Config{}, desired, nil, nil, elsewhere, testOwned()).Constraints, 0, 0, 1, 0, 0)
+	constraintCounts(t, diff(cypher.Config{}, desired, nil, nil, elsewhere, testOwned()).Constraints, 0, 0, 1, 0)
 
 	// A plain index over the SAME label and properties blocks under any name:
 	// the server refuses a constraint whose backing index an equivalent index
@@ -518,7 +498,7 @@ func TestConstraintDiff_IndexNameBlocksCreate(t *testing.T) {
 		LabelsOrTypes: []string{"test__Entity"}, Properties: []string{"id"},
 	}}
 	byDef := diff(cypher.Config{}, desired, nil, nil, equivalent, testOwned()).Constraints
-	constraintCounts(t, byDef, 0, 1, 0, 0, 0)
+	constraintCounts(t, byDef, 0, 1, 0, 0)
 	if len(byDef.Drift) == 1 && !strings.Contains(byDef.Drift[0].Reason, "already serves") {
 		t.Errorf("Reason = %q; want it to say an equivalent index already serves the definition", byDef.Drift[0].Reason)
 	}
@@ -530,7 +510,7 @@ func TestConstraintDiff_IndexNameBlocksCreate(t *testing.T) {
 		LabelsOrTypes: []string{"test__Entity"}, Properties: []string{"id"},
 		OwningConstraint: "test__Entity_id_unique",
 	}}
-	constraintCounts(t, diff(cypher.Config{}, desired, nil, nil, backing, testOwned()).Constraints, 0, 0, 1, 0, 0)
+	constraintCounts(t, diff(cypher.Config{}, desired, nil, nil, backing, testOwned()).Constraints, 0, 0, 1, 0)
 }
 
 // A remote CONSTRAINT whose type the caller lower-cased must still pair with its
@@ -546,7 +526,7 @@ func TestConstraintDiff_LowercaseRemoteTypeStillPairs(t *testing.T) {
 		LabelsOrTypes: []string{"test__Entity"}, Properties: []string{"id"},
 	}}
 
-	constraintCounts(t, diff(cypher.Config{}, desired, nil, actual, nil, testOwned()).Constraints, 1, 0, 0, 0, 0)
+	constraintCounts(t, diff(cypher.Config{}, desired, nil, actual, nil, testOwned()).Constraints, 1, 0, 0, 0)
 }
 
 // Under the Community edition the generator produces UNIQUE alone, so a NOT NULL
@@ -566,7 +546,7 @@ func TestConstraintDiff_CommunityDoesNotDropEnterpriseKinds(t *testing.T) {
 	}
 
 	got := diff(cypher.Config{Edition: cypher.Community}, desired, nil, actual, nil, testOwned()).Constraints
-	constraintCounts(t, got, 1, 0, 0, 0, 0)
+	constraintCounts(t, got, 1, 0, 0, 0)
 	if got.Excluded != 2 {
 		t.Errorf("Excluded = %d; want the two Enterprise-only constraints counted as not compared", got.Excluded)
 	}
@@ -574,7 +554,7 @@ func TestConstraintDiff_CommunityDoesNotDropEnterpriseKinds(t *testing.T) {
 	// Control: the same database under the Enterprise default DOES own them, so
 	// the assertion above turns on the edition and not on the fixture.
 	enterprise := diff(cypher.Config{}, desired, nil, actual, nil, testOwned()).Constraints
-	constraintCounts(t, enterprise, 1, 0, 0, 2, 0)
+	constraintCounts(t, enterprise, 1, 0, 0, 2)
 	if enterprise.Excluded != 0 {
 		t.Errorf("Excluded = %d under Enterprise; want 0", enterprise.Excluded)
 	}
@@ -597,7 +577,7 @@ func TestConstraintDiff_ExcludedCountsWhatWasNotCompared(t *testing.T) {
 		},
 	}
 	got := diff(cypher.Config{}, []cypher.Constraint{dc("mine", "app__T", "x")}, nil, actual, nil, ownedSet("app__T")).Constraints
-	constraintCounts(t, got, 1, 0, 0, 0, 0)
+	constraintCounts(t, got, 1, 0, 0, 0)
 	if got.Excluded != 2 {
 		t.Errorf("Excluded = %d; want the stale-label and relationship constraints counted", got.Excluded)
 	}
@@ -623,7 +603,7 @@ func TestConstraintDiff_ConstraintNameBlocksCreate(t *testing.T) {
 	}}
 
 	got := diff(cypher.Config{}, desired, nil, remote, nil, appOwned()).Constraints
-	constraintCounts(t, got, 0, 1, 0, 0, 0)
+	constraintCounts(t, got, 0, 1, 0, 0)
 	if len(got.Drift) == 1 {
 		if !strings.Contains(got.Drift[0].Reason, "constraint name") {
 			t.Errorf("Reason = %q; want it to name the constraint-name collision", got.Drift[0].Reason)

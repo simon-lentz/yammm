@@ -114,8 +114,8 @@ func TestNodeQueries_WritesAnAbsentNestedCollection(t *testing.T) {
 
 // coerceScalar and CoerceParams refuse a present value at a nested collection
 // constraint whatever Go type carries it, a typed slice included, and a nil
-// inner list too, which the driver would pack as an empty one. The refusal is the
-// one neo4jListElementType gives, whatever Go type carries the value, and coerceScalar
+// inner list too, which the driver would pack as an empty one. The refusal wraps
+// mapping.ListElementType's reason, whatever Go type carries the value, and coerceScalar
 // returns the value with it, as its other refusals do.
 func TestCoerceScalar_RefusesANestedCollectionValue(t *testing.T) {
 	t.Parallel()

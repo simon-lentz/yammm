@@ -42,6 +42,6 @@ func TestModuleCitesRegisteredCodes(t *testing.T) {
 }
 
 const (
-	commentCitationFloor  = 617
+	commentCitationFloor  = 611
 	markdownCitationFloor = 470
 )

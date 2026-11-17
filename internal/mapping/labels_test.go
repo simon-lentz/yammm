@@ -1,6 +1,7 @@
 package mapping
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/simon-lentz/yammm/diag"
@@ -14,40 +15,6 @@ func loadInline(t *testing.T, src string) schema.Schema {
 		t.Fatalf("fixture does not load: %v", err)
 	}
 	return s
-}
-
-// The collision check must walk types whose label is an invalid identifier,
-// which is what LabeledTypes is split out from EmittableTypes to keep:
-// EmittableTypes skips such a type after reporting it, so a check built on that
-// walk would go silent for the labels most likely to collide.
-func TestLabeledTypes_IncludesInvalidLabels(t *testing.T) {
-	t.Parallel()
-	s := loadInline(t, "schema \"index_test\"\n\ntype Document {\n\tid String primary\n}\n\ntype Note {\n\tid String primary\n}\n")
-	// "-" makes every label an invalid Neo4j identifier.
-	l := Labels{Separator: "-"}
-
-	var seen int
-	for _, label := range l.LabeledTypes(s) {
-		seen++
-		if err := ValidateIdentifier(label, "label"); err == nil {
-			t.Errorf("label %q should be an invalid identifier under this separator", label)
-		}
-	}
-	if seen != 2 {
-		t.Fatalf("LabeledTypes yielded %d types, want 2", seen)
-	}
-
-	collector := diag.NewCollector(0)
-	emitted := 0
-	for range l.EmittableTypes(s, collector) {
-		emitted++
-	}
-	if emitted != 0 {
-		t.Errorf("EmittableTypes yielded %d types with invalid labels; it must skip them", emitted)
-	}
-	if !collector.Result().HasCode(InvalidIdentifier) {
-		t.Error("EmittableTypes should report each skipped invalid label")
-	}
 }
 
 // An empty Separator stands for the default, and a configured one replaces it.
@@ -65,6 +32,7 @@ func TestLabels_Label(t *testing.T) {
 		{Labels{}, "book_catalog__Publisher"},
 		{Labels{Separator: "_"}, "book_catalog_Publisher"},
 		{Labels{Prefix: "app_"}, "app_book_catalog__Publisher"},
+		{Labels{Prefix: "Tenant1_", Separator: "Z"}, "Tenant1_book_catalogZPublisher"},
 	} {
 		if got := tc.l.Label(ty); got != tc.want {
 			t.Errorf("%+v.Label(Publisher) = %q, want %q", tc.l, got, tc.want)
@@ -72,47 +40,107 @@ func TestLabels_Label(t *testing.T) {
 	}
 }
 
-// A prefix and a separator compose together, each as configured, and neither
-// reaches a label that has no schema. A name of spaces alone is no name, and
-// each name is sanitized.
-func TestLabels_Compose(t *testing.T) {
-	t.Parallel()
+// labelBreak is the label rule over raw parts, as Check applies it: the
+// setting, then the schema name, then the type and its label.
+func labelBreak(prefix, separator, schemaName, typeName string) string {
+	l := Labels{Prefix: prefix, Separator: separator}
+	sep := l.separator()
+	if p := settingProblem(prefix, sep); p != "" {
+		return p
+	}
+	if p := schemaNameProblem(schemaName, sep); p != "" {
+		return p
+	}
+	return IdentifierProblem(prefix + schemaName + sep + typeName)
+}
 
+// Each row is one part of the label rule. The decoding part looks at the schema
+// name and the separator alone: the type may hold the separator, since a label
+// decodes at the separator's first occurrence after the prefix.
+func TestLabels_Rule(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
-		prefix, separator, schema, typ, want string
+		name                         string
+		prefix, sep, schemaName, typ string
+		refused                      bool
 	}{
-		{"", "", "book_catalog", "Publisher", "book_catalog__Publisher"},
-		{"", "", "geo_regions", "District", "geo_regions__District"},
-		{"", "", "", "Person", "Person"},
-		{"", "", "book_catalog", "", ""},
-		{"", "_", "book_catalog", "Publisher", "book_catalog_Publisher"},
-		{"app_", "", "book_catalog", "Publisher", "app_book_catalog__Publisher"},
-		{"app_", "_x_", "book_catalog", "Publisher", "app_book_catalog_x_Publisher"},
-		{"Tenant1_", "Z", " geo ", "District", "Tenant1_geoZDistrict"},
-		{"app_", "_x_", "", "Person", "Person"},
-		{"app_", "_x_", "   ", "Person", "Person"},
-		{"app_", "_x_", "book_catalog", "   ", ""},
-		{"", "", "geo-regions", "District", "geo_regions__District"},
-		{"", "", "my.schema", "Foo", "my_schema__Foo"},
-		{"", "", "path/to", "Bar", "path_to__Bar"},
+		{"default", "", "", "book_catalog", "Publisher", false},
+		{"the type may hold the separator", "", "", "a", "B__C", false},
+		{"a prefix and a separator as configured", "app_", "_x_", "book_catalog", "Publisher", false},
+		{"a name ending in an underscore before a letter separator", "", "Z", "geo_", "T", false},
+		{"the separator inside the name", "", "", "a__B", "C", true},
+		{"a trailing underscore runs into the separator", "", "", "geo_", "T", true},
+		{"one underscore as the separator", "", "_", "book_catalog", "Publisher", true},
+		{"a name ending in the separator's start", "", "_x_", "a_x", "T", true},
+		{"a letter separator the name holds", "", "Z", "Zed", "T", true},
+		{"a separator that starts with a digit", "", "9", "app", "T", false},
+		{"a composed keyword", "", "S", "A", "C", true},
+		{"a prefix that starts with a digit", "9", "", "app", "T", true},
+		{"a separator that is no identifier tail", "", "-", "app", "T", true},
 	}
 	for _, tt := range tests {
-		l := Labels{Prefix: tt.prefix, Separator: tt.separator}
-		if got := l.Compose(tt.schema, tt.typ); got != tt.want {
-			t.Errorf("prefix %q, separator %q: Compose(%q, %q) = %q; want %q",
-				tt.prefix, tt.separator, tt.schema, tt.typ, got, tt.want)
+		got := labelBreak(tt.prefix, tt.sep, tt.schemaName, tt.typ)
+		if (got != "") != tt.refused {
+			t.Errorf("%s: labelBreak(%q, %q, %q, %q) = %q, want refused %v",
+				tt.name, tt.prefix, tt.sep, tt.schemaName, tt.typ, got, tt.refused)
 		}
 	}
 }
 
-// Distinct raw names whose sanitized forms coincide compose one label, which
-// is the collision the label check guards against. The DSL's name productions
-// keep such names out of a loaded schema, on which sanitize is the identity, so
-// the check's collision branch defends construction paths outside the parser.
-func TestLabels_SanitizationCollision(t *testing.T) {
+// Check reports each break once at its grain: a label setting once for the
+// call, a schema name once per schema whatever its type count, and a type's
+// label once per type. A schema with no labelled type composes no label, so
+// its name is not judged.
+func TestLabels_Check(t *testing.T) {
 	t.Parallel()
-	l := Labels{}
-	if got, want := l.Compose("collide", "Foo-Bar"), l.Compose("collide", "Foo_Bar"); got != want {
-		t.Fatalf("Compose(Foo-Bar) = %q, Compose(Foo_Bar) = %q; sanitization should map both to one label", got, want)
+	twoTypes := "type A {\n\tid String primary\n}\n\ntype B {\n\tid String primary\n}\n"
+	tests := []struct {
+		name   string
+		l      Labels
+		src    string
+		issues int
+		want   string
+	}{
+		{"a clean schema", Labels{}, "schema \"app\"\n\n" + twoTypes, 0, ""},
+		{"a schema name holding the separator", Labels{}, "schema \"a__B\"\n\n" + twoTypes, 1, `schema "a__B" composes no node label`},
+		{"a trailing underscore", Labels{}, "schema \"geo_\"\n\n" + twoTypes, 1, `schema "geo_" composes no node label`},
+		{"a separator", Labels{Separator: "-"}, "schema \"app\"\n\n" + twoTypes, 1, `separator "-" compose no node label: the separator is not`},
+		{"a prefix", Labels{Prefix: "9"}, "schema \"app\"\n\n" + twoTypes, 1, `label prefix "9" and separator "__" compose no node label: the prefix is not`},
+		{"a composed keyword", Labels{Separator: "S"}, "schema \"A\"\n\ntype C {\n\tid String primary\n}\n", 1, `type "C" of schema "A" has no node label "ASC"`},
+		{"an abstract type only", Labels{}, "schema \"geo_\"\n\nabstract type A {\n\tid String primary\n}\n", 0, ""},
+		{"a schema break is reported once, its keyword label too", Labels{Separator: "T"}, "schema \"STAR\"\n\ntype S {\n\tid String primary\n}\n", 1, `schema "STAR" composes no node label`},
+	}
+	for _, tt := range tests {
+		res := tt.l.Check(loadInline(t, tt.src))
+		issues := 0
+		for issue := range res.Issues() {
+			issues++
+			if issue.Code() != InvalidIdentifier || issue.Severity() != diag.Error {
+				t.Errorf("%s: issue %v, want an %s error", tt.name, issue, InvalidIdentifier)
+			}
+			if !strings.Contains(issue.Message(), tt.want) {
+				t.Errorf("%s: message %q, want it to hold %q", tt.name, issue.Message(), tt.want)
+			}
+		}
+		if issues != tt.issues {
+			t.Errorf("%s: %d issues, want %d: %v", tt.name, issues, tt.issues, res)
+		}
+	}
+}
+
+// An imported schema's labels are judged with the entry's.
+func TestLabels_CheckJudgesTheClosure(t *testing.T) {
+	t.Parallel()
+	sources := map[string][]byte{
+		"/virtual/main.yammm": []byte("schema \"main\"\n\nimport \"./geo\" as geo\n\ntype Site {\n\tid String primary\n\t--> AT (one) geo.Region\n}\n"),
+		"/virtual/geo.yammm":  []byte("schema \"geo_\"\n\ntype Region {\n\tid String primary\n}\n"),
+	}
+	s, result := schema.LoadSourcesWithEntry(t.Context(), sources, "/virtual/main.yammm", "/virtual")
+	if err := result.Err(); err != nil {
+		t.Fatalf("fixture does not load: %v", err)
+	}
+	res := Labels{}.Check(s)
+	if !res.HasCode(InvalidIdentifier) || !strings.Contains(res.String(), `schema "geo_"`) {
+		t.Fatalf("Check over a closure that imports schema geo_ = %v, want its refusal", res)
 	}
 }

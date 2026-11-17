@@ -6,44 +6,29 @@ import (
 	"github.com/simon-lentz/yammm/schema"
 )
 
-// ValidateIdentifier checks whether a name is a valid Neo4j identifier.
-// Returns an error wrapping [ErrEmptyIdentifier] if the name is empty,
-// [ErrInvalidIdentifier] if it does not match ^[A-Za-z_][A-Za-z0-9_]*$, and
-// [ErrReservedKeyword] if it is a Cypher reserved keyword (case-insensitive).
-// The context parameter is included in error messages (e.g., "property 'run_id'").
-func ValidateIdentifier(name, context string) error {
-	return mapping.ValidateIdentifier(name, context) //nolint:wrapcheck // the write path shares the rule through internal/mapping; its error is this function's
+// IsIdentifier reports whether name is a Neo4j identifier the generated Cypher
+// can write unquoted: an ASCII letter or underscore, then ASCII letters, digits
+// and underscores, and, in any letter case, none of the Cypher keywords the
+// module reserves (the package doc's Cypher Reserved Words section).
+func IsIdentifier(name string) bool {
+	return mapping.IsIdentifier(name)
 }
 
-// Label returns the Neo4j node label of t: LabelPrefix + the sanitized name of
-// the schema that declares t + LabelSeparator ("__" when empty) + t's sanitized
-// name, as in "book_catalog__Publisher". The package doc's Labels section states the
-// sanitizing rule and the cases that give another form. An abstract type gets
-// the string too, though no node carries it: the generators, the write path and
-// [Config.OwnedLabels] skip abstract types.
+// Label returns the Neo4j node label of t: LabelPrefix + the name of the
+// schema that declares t + LabelSeparator ("__" when empty) + t's name, each
+// as written, as in "book_catalog__Publisher". [Config.CheckLabels] judges the
+// result; an abstract type gets the string too, though no node carries it.
 func (c Config) Label(t schema.Type) string {
 	return c.labels().Label(t)
 }
 
-// CheckLabels reports every label two or more non-abstract types across s's
-// IMPORT CLOSURE share, one [E_NEO4J_LABEL_COLLISION] per label. Its type
-// detail carries full type IDENTITIES, not display names, because the names
-// are what collided:
-//
-//	types file:///a.yammm:B__C and file:///b.yammm:C all render label "a__B__C"
+// CheckLabels judges the label of every non-abstract type across s's IMPORT
+// CLOSURE under c, one [E_NEO4J_INVALID_IDENTIFIER] per break of the label
+// rule; a break of c's settings is reported alone, and a schema name's break
+// leaves its types' labels unjudged (the package doc's Labels section). A label
+// that keeps the rule decodes to one (schema, type) pair, so no two types share
+// one. Every generator and the neo4j write path call it and refuse the schema
+// on its error.
 func (c Config) CheckLabels(s schema.Schema) diag.Result {
-	collector := diag.NewCollector(0)
-	labelToTypes := make(map[string][]schema.TypeID)
-
-	for t, label := range c.labels().LabeledTypes(s) {
-		labelToTypes[label] = append(labelToTypes[label], t.ID())
-	}
-
-	for label, ids := range labelToTypes {
-		if len(ids) > 1 {
-			collector.Collect(mapping.LabelCollisionIssue(label, ids))
-		}
-	}
-
-	return collector.Result()
+	return c.labels().Check(s)
 }

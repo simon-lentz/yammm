@@ -396,7 +396,7 @@ jobs:
   # constraint type is reported as UNIQUENESS by 5.x and NODE_PROPERTY_UNIQUENESS
   # by 2026.x — and a stale comparison fails SILENTLY, reporting a correct
   # database as drifted. Running one server per supported generation is what
-  # turns "supports Neo4j 5.0+" from a claim in the docs into a tested one, and
+  # turns "supports Neo4j 5.26 and later" from a claim in the docs into a tested one, and
   # it is why accepting both spellings is required rather than renaming to the
   # newer one.
   #

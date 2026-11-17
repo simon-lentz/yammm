@@ -13,7 +13,7 @@ import (
 
 // nodeShape describes the Neo4j representation of a single yammm type.
 type nodeShape struct {
-	label       string   // Sanitized Neo4j label (namespace + separator + type)
+	label       string   // Neo4j label (prefix + schema name + separator + type name)
 	primaryKeys []string // Property names forming the uniqueness constraint
 
 	// immutableKeys are the type's @writeOnce properties (own and inherited),
@@ -36,33 +36,19 @@ type graphShape struct {
 }
 
 // shapeFor derives the [graphShape] of every non-abstract type across s's whole
-// import closure, each labeled from its own member's schema name by [cypher.Config.Label].
-// A result with errors holds [cypher.E_NEO4J_INVALID_IDENTIFIER] or
-// [cypher.E_NEO4J_LABEL_COLLISION] issues: two closure types that render one label draw
-// the collision when the label is valid, and the identifier issue when it is not.
+// import closure, each labeled from its own member's schema name by
+// [cypher.Config.Label]. A result with errors is [cypher.Config.CheckLabels]'
+// refusal, and then no shape is derived.
 func shapeFor(c cypher.Config, s schema.Schema) (*graphShape, diag.Result) {
-	collector := diag.NewCollector(0)
+	if res := c.CheckLabels(s); res.HasErrors() {
+		return nil, res
+	}
 	shape := &graphShape{types: make(map[schema.TypeID]nodeShape)}
-
-	// A load refuses a repeated schema name (E_DUPLICATE_SCHEMA), but a name
-	// holding the separator composes one label from two pairs, as schema "a"
-	// with B__C and schema "a__B" with C do, so a closure reaches this refusal.
-	seenLabels := make(map[string]schema.TypeID)
 	labels := mapping.Labels{Prefix: c.LabelPrefix, Separator: c.LabelSeparator}
-	for t, label := range labels.EmittableTypes(s, collector) {
-		if first, dup := seenLabels[label]; dup {
-			collector.Collect(mapping.LabelCollisionIssue(label, []schema.TypeID{first, t.ID()}))
-			continue
-		}
-		seenLabels[label] = t.ID()
+	for t, label := range labels.LabeledTypes(s) {
 		recordShape(shape, t, label)
 	}
-
-	result := collector.Result()
-	if !result.OK() {
-		return nil, result
-	}
-	return shape, result
+	return shape, diag.OK()
 }
 
 // writeShape refuses a zero snapshot with [ErrZeroSnapshot], whose schema no

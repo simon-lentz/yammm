@@ -1,7 +1,6 @@
 package cypher
 
 import (
-	"errors"
 	"strings"
 	"testing"
 )
@@ -45,6 +44,18 @@ func TestDropStatements_RenderByName(t *testing.T) {
 			index:      "DROP INDEX `my constraint` IF EXISTS",
 		},
 		{
+			name:       "an empty name renders as the empty quoted name",
+			identifier: "",
+			constraint: "DROP CONSTRAINT `` IF EXISTS",
+			index:      "DROP INDEX `` IF EXISTS",
+		},
+		{
+			name:       "surrounding spaces are kept",
+			identifier: " x ",
+			constraint: "DROP CONSTRAINT ` x ` IF EXISTS",
+			index:      "DROP INDEX ` x ` IF EXISTS",
+		},
+		{
 			name:       "leading digit fails validation and is quoted",
 			identifier: "1st_index",
 			constraint: "DROP CONSTRAINT `1st_index` IF EXISTS",
@@ -54,34 +65,11 @@ func TestDropStatements_RenderByName(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			got, err := DropConstraintStatement(tt.identifier)
-			if err != nil {
-				t.Fatalf("DropConstraintStatement(%q) error: %v", tt.identifier, err)
-			}
-			if got != tt.constraint {
+			if got := DropConstraintStatement(tt.identifier); got != tt.constraint {
 				t.Errorf("DropConstraintStatement(%q) = %q, want %q", tt.identifier, got, tt.constraint)
 			}
-			got, err = DropIndexStatement(tt.identifier)
-			if err != nil {
-				t.Fatalf("DropIndexStatement(%q) error: %v", tt.identifier, err)
-			}
-			if got != tt.index {
+			if got := DropIndexStatement(tt.identifier); got != tt.index {
 				t.Errorf("DropIndexStatement(%q) = %q, want %q", tt.identifier, got, tt.index)
-			}
-		})
-	}
-}
-
-func TestDropStatements_EmptyNameIsAnError(t *testing.T) {
-	t.Parallel()
-	for _, name := range []string{"", " ", "\t\n  "} {
-		t.Run(strings.ReplaceAll(name, "\t", "tab"), func(t *testing.T) {
-			t.Parallel()
-			if got, err := DropConstraintStatement(name); !errors.Is(err, ErrEmptyIdentifier) {
-				t.Errorf("DropConstraintStatement(%q) = %q, %v; want ErrEmptyIdentifier", name, got, err)
-			}
-			if got, err := DropIndexStatement(name); !errors.Is(err, ErrEmptyIdentifier) {
-				t.Errorf("DropIndexStatement(%q) = %q, %v; want ErrEmptyIdentifier", name, got, err)
 			}
 		})
 	}
@@ -90,10 +78,7 @@ func TestDropStatements_EmptyNameIsAnError(t *testing.T) {
 // A quoted name must not be able to close its own quoting and append Cypher.
 func TestDropStatements_QuotingContainsInjection(t *testing.T) {
 	t.Parallel()
-	got, err := DropConstraintStatement("x` IF EXISTS; DROP CONSTRAINT y")
-	if err != nil {
-		t.Fatalf("DropConstraintStatement error: %v", err)
-	}
+	got := DropConstraintStatement("x` IF EXISTS; DROP CONSTRAINT y")
 	want := "DROP CONSTRAINT `x`` IF EXISTS; DROP CONSTRAINT y` IF EXISTS"
 	if got != want {
 		t.Fatalf("DropConstraintStatement = %q, want %q", got, want)
@@ -108,33 +93,15 @@ func TestDropStatements_QuotingContainsInjection(t *testing.T) {
 func TestConstraintDropStatement(t *testing.T) {
 	t.Parallel()
 	c := Constraint{Name: "app__Person_id_unique"}
-	got, err := c.DropStatement()
-	if err != nil {
-		t.Fatalf("Constraint.DropStatement error: %v", err)
-	}
-	if want := "DROP CONSTRAINT `app__Person_id_unique` IF EXISTS"; got != want {
+	if got, want := c.DropStatement(), "DROP CONSTRAINT `app__Person_id_unique` IF EXISTS"; got != want {
 		t.Errorf("Constraint.DropStatement() = %q, want %q", got, want)
-	}
-}
-
-// A hand-built constraint can leave Name empty, and an anonymous constraint
-// has no portable name to drop it by.
-func TestConstraintDropStatement_AnonymousConstraintIsAnError(t *testing.T) {
-	t.Parallel()
-	c := Constraint{Kind: ConstraintUnique, Label: "app__Person", Properties: []string{"id"}}
-	if _, err := c.DropStatement(); !errors.Is(err, ErrEmptyIdentifier) {
-		t.Errorf("Constraint.DropStatement() error = %v; want ErrEmptyIdentifier", err)
 	}
 }
 
 func TestIndexDropStatement(t *testing.T) {
 	t.Parallel()
 	i := Index{Name: "app__Person_state_idx"}
-	got, err := i.DropStatement()
-	if err != nil {
-		t.Fatalf("Index.DropStatement error: %v", err)
-	}
-	if want := "DROP INDEX `app__Person_state_idx` IF EXISTS"; got != want {
+	if got, want := i.DropStatement(), "DROP INDEX `app__Person_state_idx` IF EXISTS"; got != want {
 		t.Errorf("Index.DropStatement() = %q, want %q", got, want)
 	}
 }
@@ -146,8 +113,8 @@ func TestConstraintName_IsAValidIdentifier(t *testing.T) {
 	t.Parallel()
 	for _, kind := range []ConstraintKind{ConstraintUnique, ConstraintNotNull, ConstraintType, ConstraintNodeKey} {
 		name := constraintName("app__Person", []string{"id", "region"}, kind)
-		if err := ValidateIdentifier(name, "constraint name"); err != nil {
-			t.Errorf("constraintName(...) = %q, which fails validation: %v", name, err)
+		if !IsIdentifier(name) {
+			t.Errorf("constraintName(...) = %q, which IsIdentifier refuses", name)
 		}
 	}
 }

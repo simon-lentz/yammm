@@ -13,7 +13,7 @@ import (
 // toward zero, so a pre-1970 instant with a time of day landed a day late —
 // measured against a live server as 1969-07-20T18:00:00Z stored as 1969-07-21.
 //
-// It drives [CoerceParams], not calendarDate, and covers all three forms a
+// It drives [CoerceParams], and covers both forms a
 // caller hands a Date in: the rule holds only where it is wired in.
 func TestCoerceDate_KeepsTheWallClockDate(t *testing.T) {
 	t.Parallel()
@@ -35,7 +35,6 @@ func TestCoerceDate_KeepsTheWallClockDate(t *testing.T) {
 		wrap func(time.Time) any
 	}{
 		{"time.Time", func(t time.Time) any { return t }},
-		{"dbtype.Date", func(t time.Time) any { return dbtype.Date(t) }},
 		{"string", func(t time.Time) any { return t.Format(time.DateOnly) }},
 	}
 
