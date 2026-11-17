@@ -45,7 +45,6 @@ func TestRun_StderrIsOneJSONDocument(t *testing.T) {
 		{"snapshot info, unreadable file", "snapshot info " + missing + ".ys"},
 		{"snapshot info, corrupt file", "snapshot info " + corrupt},
 		{"snapshot info, header-only warning", "snapshot info --header-only " + hashAlgoFixture},
-		{"snapshot info, body warning", "snapshot info " + provenanceFixture},
 		{"snapshot info, unreadable directory", "snapshot info --dir " + missing},
 		{"snapshot info, no argument", "snapshot info"},
 		{"snapshot verify, unreadable schema", "snapshot verify " + missing + " " + corrupt},

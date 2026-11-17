@@ -5,8 +5,6 @@ import (
 	"fmt"
 	"slices"
 	"sync"
-
-	"github.com/simon-lentz/yammm/location"
 )
 
 // Collector provides concurrent issue collection with precomputed severity counts.
@@ -358,7 +356,7 @@ func (c *Collector) evictionSlotLocked(sev Severity) (int, bool) {
 // through Collect, CollectAll, Merge, MergeFunc or MergeRetag.
 //
 // Issues are sorted by location, then by code, for deterministic output:
-// span-backed issues first, in [location.Compare] order, then path-only issues
+// span-backed issues first, in [location.Span.Compare] order, then path-only issues
 // by source name and path.
 func (c *Collector) Result() Result {
 	c.mu.Lock()
@@ -393,8 +391,8 @@ func (c *Collector) Result() Result {
 //
 // Ordering rules:
 //  1. Span-backed issues before path-only issues
-//  2. Span-backed: [location.Compare] — source, start and end position, start
-//     and end byte offset, then source kind
+//  2. Span-backed: [location.Span.Compare] — source, start and end position,
+//     then start and end byte offset
 //  3. Path-only: SourceName, Path
 //  4. Common tie-breakers: Code, Severity, Message, Hint
 //  5. Provenance tie-breakers: SourceName, Path (for hybrid issue total order)
@@ -417,7 +415,7 @@ func compareIssues(a, b Issue) int {
 
 	// 2. Both span-backed: compare by span geometry
 	if aHasSpan {
-		if c := location.Compare(a.span, b.span); c != 0 {
+		if c := a.span.Compare(b.span); c != 0 {
 			return c
 		}
 	} else {
@@ -480,9 +478,9 @@ func compareDetails(a, b []Detail) int {
 }
 
 // compareRelated compares two RelatedInfo slices lexicographically.
-func compareRelated(a, b []location.RelatedInfo) int {
+func compareRelated(a, b []RelatedInfo) int {
 	for i := range min(len(a), len(b)) {
-		if c := location.Compare(a[i].Span, b[i].Span); c != 0 {
+		if c := a[i].Span.Compare(b[i].Span); c != 0 {
 			return c
 		}
 		if c := cmp.Compare(a[i].Message, b[i].Message); c != 0 {

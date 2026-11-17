@@ -9,8 +9,9 @@ import (
 	"testing"
 	"unicode/utf8"
 
+	"github.com/simon-lentz/yammm/internal/yammmtest/sourcetest"
+
 	"github.com/simon-lentz/yammm/diag"
-	"github.com/simon-lentz/yammm/location"
 )
 
 // The diagnostic each kind of refused text draws at its own bytes.
@@ -111,7 +112,7 @@ func TestParse_ARefusedRegexIsJudgedAsWrittenOrNotAtAll(t *testing.T) {
 						}
 					}
 					slices.Sort(want)
-					f, issues := Parse([]byte(site.source(pattern)), location.NewSourceID("s.yammm"))
+					f, issues := Parse([]byte(site.source(pattern)), sourcetest.ID("s.yammm"))
 					if got := issueLines(issues); !slices.Equal(got, want) {
 						t.Errorf("issues:\n  %s\nwant:\n  %s", strings.Join(got, "\n  "), strings.Join(want, "\n  "))
 					}
@@ -171,7 +172,7 @@ func TestParse_APatternWithNoTextIsNotCompiled(t *testing.T) {
 			t.Parallel()
 			want := slices.Clone(row.want)
 			slices.Sort(want)
-			f, issues := Parse([]byte(checkSource("p Pattern["+row.pattern+"]")), location.NewSourceID("s.yammm"))
+			f, issues := Parse([]byte(checkSource("p Pattern["+row.pattern+"]")), sourcetest.ID("s.yammm"))
 			if got := issueLines(issues); !slices.Equal(got, want) {
 				t.Errorf("issues:\n  %s\nwant:\n  %s", strings.Join(got, "\n  "), strings.Join(want, "\n  "))
 			}

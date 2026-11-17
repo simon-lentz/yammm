@@ -121,7 +121,7 @@ func (r *Registry) Content(span location.Span) ([]byte, bool) {
 
 // PositionAt converts a byte offset in the specified source to a Position.
 //
-// Returns a zero Position (check with [location.Position.IsZero]) if:
+// Returns the zero Position, which is not valid ([location.Position.IsValid]), if:
 //   - The source is not registered
 //   - The byte offset is negative
 //   - The byte offset exceeds the content length
@@ -136,12 +136,12 @@ func (r *Registry) PositionAt(source location.SourceID, byteOffset int) location
 
 	entry, ok := r.entries[source]
 	if !ok {
-		return location.UnknownPosition()
+		return location.Position{}
 	}
 
 	// Validate byte offset range
 	if byteOffset < 0 || byteOffset > len(entry.content) {
-		return location.UnknownPosition()
+		return location.Position{}
 	}
 
 	// Find the line containing this byte offset using binary search
@@ -151,7 +151,7 @@ func (r *Registry) PositionAt(source location.SourceID, byteOffset int) location
 	// Compute column using O(log n) binary search over precomputed rune offsets
 	column := columnFromByteOffset(entry.runeOffsets, lineStart, byteOffset, len(entry.content))
 
-	return location.NewPosition(line, column, byteOffset)
+	return location.Position{Line: line, Column: column, Offset: byteOffset}
 }
 
 // LineStartByte returns the byte offset of the start of the given line.

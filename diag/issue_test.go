@@ -4,14 +4,16 @@ import (
 	"log/slog"
 	"testing"
 
+	"github.com/simon-lentz/yammm/internal/yammmtest/sourcetest"
+
 	"github.com/simon-lentz/yammm/location"
 )
 
 func TestIssue_Accessors(t *testing.T) {
-	source := location.NewSourceID("test://schema.yammm")
-	span := location.PointWithByte(source, 10, 5, -1)
-	related := []location.RelatedInfo{
-		{Span: location.PointWithByte(source, 5, 1, -1), Message: "previous definition here"},
+	source := sourcetest.ID("test://schema.yammm")
+	span := location.Span{Source: source, Start: location.Position{Line: 10, Column: 5}, End: location.Position{Line: 10, Column: 5}}
+	related := []RelatedInfo{
+		{Span: location.Span{Source: source, Start: location.Position{Line: 5, Column: 1}, End: location.Position{Line: 5, Column: 1}}, Message: "previous definition here"},
 	}
 	details := []Detail{
 		{Key: DetailKeyTypeName, Value: "Person"},
@@ -53,7 +55,7 @@ func TestIssue_Accessors(t *testing.T) {
 }
 
 func TestIssue_HasSpan(t *testing.T) {
-	source := location.NewSourceID("test://schema.yammm")
+	source := sourcetest.ID("test://schema.yammm")
 
 	tests := []struct {
 		name  string
@@ -68,7 +70,7 @@ func TestIssue_HasSpan(t *testing.T) {
 		{
 			name: "issue with span",
 			issue: Issue{
-				span:     location.PointWithByte(source, 1, 1, -1),
+				span:     location.Span{Source: source, Start: location.Position{Line: 1, Column: 1}, End: location.Position{Line: 1, Column: 1}},
 				severity: Error,
 				code:     E_SYNTAX,
 				message:  "test",
@@ -98,7 +100,7 @@ func TestIssue_HasSpan(t *testing.T) {
 }
 
 func TestIssue_IsZero(t *testing.T) {
-	source := location.NewSourceID("test://schema.yammm")
+	source := sourcetest.ID("test://schema.yammm")
 
 	tests := []struct {
 		name  string
@@ -127,7 +129,7 @@ func TestIssue_IsZero(t *testing.T) {
 		{
 			name: "only span set",
 			issue: Issue{
-				span: location.PointWithByte(source, 1, 1, -1),
+				span: location.Span{Source: source, Start: location.Position{Line: 1, Column: 1}, End: location.Position{Line: 1, Column: 1}},
 			},
 			want: false,
 		},
@@ -148,7 +150,7 @@ func TestIssue_IsZero(t *testing.T) {
 		{
 			name: "full issue",
 			issue: Issue{
-				span:     location.PointWithByte(source, 1, 1, -1),
+				span:     location.Span{Source: source, Start: location.Position{Line: 1, Column: 1}, End: location.Position{Line: 1, Column: 1}},
 				severity: Error,
 				code:     E_SYNTAX,
 				message:  "test",
@@ -247,9 +249,9 @@ func TestIssue_IsValid(t *testing.T) {
 }
 
 func TestIssue_Related_DefensiveCopy(t *testing.T) {
-	source := location.NewSourceID("test://schema.yammm")
-	original := []location.RelatedInfo{
-		{Span: location.PointWithByte(source, 5, 1, -1), Message: "original"},
+	source := sourcetest.ID("test://schema.yammm")
+	original := []RelatedInfo{
+		{Span: location.Span{Source: source, Start: location.Position{Line: 5, Column: 1}, End: location.Position{Line: 5, Column: 1}}, Message: "original"},
 	}
 
 	issue := Issue{
@@ -330,17 +332,17 @@ func TestIssue_Details_NilForEmpty(t *testing.T) {
 }
 
 func TestIssue_Clone(t *testing.T) {
-	source := location.NewSourceID("test://schema.yammm")
+	source := sourcetest.ID("test://schema.yammm")
 	original := Issue{
-		span:       location.PointWithByte(source, 10, 5, -1),
+		span:       location.Span{Source: source, Start: location.Position{Line: 10, Column: 5}, End: location.Position{Line: 10, Column: 5}},
 		sourceName: "data.json",
 		path:       "$.x",
 		severity:   Error,
 		code:       E_DUPLICATE_TYPE,
 		message:    "original message",
 		hint:       "original hint",
-		related: []location.RelatedInfo{
-			{Span: location.PointWithByte(source, 5, 1, -1), Message: "related"},
+		related: []RelatedInfo{
+			{Span: location.Span{Source: source, Start: location.Position{Line: 5, Column: 1}, End: location.Position{Line: 5, Column: 1}}, Message: "related"},
 		},
 		details: []Detail{
 			{Key: DetailKeyTypeName, Value: "Person"},
@@ -468,9 +470,9 @@ func TestIssue_LogValue_MinimalIssue(t *testing.T) {
 }
 
 func TestIssue_LogValue_FullIssue(t *testing.T) {
-	source := location.NewSourceID("test://schema.yammm")
+	source := sourcetest.ID("test://schema.yammm")
 	issue := NewIssue(Error, E_DUPLICATE_TYPE, "full issue").
-		WithSpan(location.PointWithByte(source, 7, 3, -1)).
+		WithSpan(location.Span{Source: source, Start: location.Position{Line: 7, Column: 3}, End: location.Position{Line: 7, Column: 3}}).
 		WithPath("data.json", "$.Widget[0].name").
 		WithHint("rename it").
 		WithDetails(
@@ -549,9 +551,9 @@ func TestIssue_LogValue_OmitsEmptyFields(t *testing.T) {
 }
 
 func TestIssue_LogValue_SchemaOnly_OmitsPath(t *testing.T) {
-	source := location.NewSourceID("test://schema.yammm")
+	source := sourcetest.ID("test://schema.yammm")
 	issue := NewIssue(Error, E_DUPLICATE_TYPE, "schema-only").
-		WithSpan(location.PointWithByte(source, 1, 1, -1)).
+		WithSpan(location.Span{Source: source, Start: location.Position{Line: 1, Column: 1}, End: location.Position{Line: 1, Column: 1}}).
 		Build()
 	val := issue.LogValue()
 	if _, ok := issueLogAttr(t, val, "location"); !ok {

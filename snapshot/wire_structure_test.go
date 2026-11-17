@@ -465,11 +465,10 @@ func TestWireProbe_DuplicateInstanceTypeDisagreesWithItsRecord(t *testing.T) {
 		"load["+loadSig+"] verify["+verifySig+"]")
 }
 
-// TestWireProbe_DuplicateInstanceUnparseableProvenance gives a duplicate's
-// instance a provenance path that cannot parse. The materializer falls back to
-// the root path for it exactly as it does for a root instance, so the warning
-// is owed at both positions.
-func TestWireProbe_DuplicateInstanceUnparseableProvenance(t *testing.T) {
+// TestWireProbe_DuplicateInstanceProvenancePathAsWritten gives a duplicate's
+// instance a provenance path the path methods would never write. A path is
+// held as text, so it reads clean at a duplicate as at a root instance.
+func TestWireProbe_DuplicateInstanceProvenancePathAsWritten(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	s := loadIdentitySchema(t)
@@ -486,8 +485,7 @@ func TestWireProbe_DuplicateInstanceUnparseableProvenance(t *testing.T) {
 	edited = append(edited, data[at+len(`"provenance":null`):]...)
 
 	loadSig, verifySig, _ := loadAndVerify(ctx, t, edited, s)
-	expectOutcome(t, "load[warning:W_SNAPSHOT_PATH_FALLBACK] verify[warning:W_SNAPSHOT_PATH_FALLBACK]",
-		"load["+loadSig+"] verify["+verifySig+"]")
+	expectOutcome(t, "load[ok] verify[ok]", "load["+loadSig+"] verify["+verifySig+"]")
 }
 
 // TestWireProbe_DuplicateIdentityRefusedWithoutASchema pins the table check on
@@ -740,9 +738,10 @@ func TestWireProbe_DanglingEdgeTargetKey(t *testing.T) {
 	expectOutcome(t, "load[error:E_SNAPSHOT_DANGLING_REFERENCE] verify[error:E_SNAPSHOT_DANGLING_REFERENCE]", "load["+loadSig+"] verify["+verifySig+"]")
 }
 
-// TestWireProbe_UnparseableProvenancePath replaces an instance's null
-// provenance with one whose path cannot parse.
-func TestWireProbe_UnparseableProvenancePath(t *testing.T) {
+// TestWireProbe_ProvenancePathAsWritten replaces an instance's null
+// provenance with one whose path the path methods would never write, which
+// reads clean.
+func TestWireProbe_ProvenancePathAsWritten(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	s := loadIdentitySchema(t)
@@ -761,7 +760,7 @@ func TestWireProbe_UnparseableProvenancePath(t *testing.T) {
 
 	edited := spliceOnce(t, data, `"provenance":null`, `"provenance":{"source_name":"probe","path":"not a path ["}`)
 	loadSig, verifySig, _ := loadAndVerify(ctx, t, edited, s)
-	expectOutcome(t, "load[warning:W_SNAPSHOT_PATH_FALLBACK] verify[warning:W_SNAPSHOT_PATH_FALLBACK]", "load["+loadSig+"] verify["+verifySig+"]")
+	expectOutcome(t, "load[ok] verify[ok]", "load["+loadSig+"] verify["+verifySig+"]")
 }
 
 // TestWireProbe_NonCanonicalProvenancePathSurvives replaces an instance's null

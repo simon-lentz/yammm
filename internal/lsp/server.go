@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"slices"
 	"sync"
 	"sync/atomic"
@@ -16,11 +17,11 @@ import (
 	"github.com/creachadair/jrpc2/channel"
 	"github.com/creachadair/jrpc2/handler"
 
+	"github.com/simon-lentz/yammm/internal/hostpath"
 	"github.com/simon-lentz/yammm/internal/lsp/internal/docstate"
 	"github.com/simon-lentz/yammm/internal/lsp/internal/lsputil"
 	"github.com/simon-lentz/yammm/internal/lsp/internal/protocol"
 	"github.com/simon-lentz/yammm/internal/lsp/internal/workspace"
-	"github.com/simon-lentz/yammm/location"
 )
 
 const serverName = "yammm-lsp"
@@ -54,7 +55,10 @@ func (c *Config) Validate(logger *slog.Logger) error {
 		c.Version = "dev"
 	}
 	if c.ModuleRoot != "" {
-		resolved, err := location.ResolveHostPath(c.ModuleRoot)
+		// A module root is a directory however it is spelled, and the Stat below
+		// warns when it is not one, so the resolver is not handed the directory
+		// form it would refuse for a file.
+		resolved, err := hostpath.Resolve(filepath.Clean(c.ModuleRoot))
 		if err != nil {
 			return fmt.Errorf("resolve module root: %w", err)
 		}

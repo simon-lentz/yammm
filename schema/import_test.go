@@ -3,6 +3,8 @@ package schema_test
 import (
 	"testing"
 
+	"github.com/simon-lentz/yammm/internal/yammmtest/sourcetest"
+
 	"github.com/stretchr/testify/assert"
 
 	"github.com/simon-lentz/yammm/location"
@@ -10,11 +12,11 @@ import (
 )
 
 func TestNewImport(t *testing.T) {
-	sourceID := location.NewSourceID("test://types")
+	sourceID := sourcetest.ID("test://types")
 	span := location.Span{
-		Source: location.NewSourceID("test://schema"),
-		Start:  location.Position{Line: 2, Column: 1, Byte: 10},
-		End:    location.Position{Line: 2, Column: 25, Byte: 35},
+		Source: sourcetest.ID("test://schema"),
+		Start:  location.Position{Line: 2, Column: 1, Offset: 10},
+		End:    location.Position{Line: 2, Column: 25, Offset: 35},
 	}
 
 	imp := schema.TestNewImport("./types.yammm", "types", sourceID, span)
@@ -65,7 +67,7 @@ func TestImport_Alias(t *testing.T) {
 }
 
 func TestImport_ResolvedSourceID(t *testing.T) {
-	sourceID := location.NewSourceID("file:///absolute/path/types.yammm")
+	sourceID := sourcetest.ID("file:///absolute/path/types.yammm")
 
 	imp := schema.TestNewImport("./types.yammm", "types", sourceID, location.Span{})
 
@@ -79,7 +81,7 @@ func TestImport_ResolvedSourceID_Zero(t *testing.T) {
 }
 
 func TestImport_ResolvedPath_WithSourceID(t *testing.T) {
-	sourceID := location.NewSourceID("test://resolved/path")
+	sourceID := sourcetest.ID("test://resolved/path")
 
 	imp := schema.TestNewImport("./types.yammm", "types", sourceID, location.Span{})
 
@@ -115,9 +117,9 @@ func TestImport_Schema_Resolved(t *testing.T) {
 
 func TestImport_Span(t *testing.T) {
 	span := location.Span{
-		Source: location.NewSourceID("test://span"),
-		Start:  location.Position{Line: 3, Column: 1, Byte: 20},
-		End:    location.Position{Line: 3, Column: 30, Byte: 50},
+		Source: sourcetest.ID("test://span"),
+		Start:  location.Position{Line: 3, Column: 1, Offset: 20},
+		End:    location.Position{Line: 3, Column: 30, Offset: 50},
 	}
 
 	imp := schema.TestNewImport("./file.yammm", "file", location.SourceID{}, span)
@@ -125,7 +127,7 @@ func TestImport_Span(t *testing.T) {
 	result := imp.Span()
 	assert.Equal(t, span.Source, result.Source)
 	assert.Equal(t, 3, result.Start.Line)
-	assert.Equal(t, 20, result.Start.Byte)
+	assert.Equal(t, 20, result.Start.Offset)
 }
 
 func TestImport_SetSchema_NamesOneRecord(t *testing.T) {

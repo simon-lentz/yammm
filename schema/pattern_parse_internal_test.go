@@ -4,17 +4,18 @@ import (
 	"regexp"
 	"testing"
 
+	"github.com/simon-lentz/yammm/internal/yammmtest/sourcetest"
+
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/internal/parse"
 	"github.com/simon-lentz/yammm/internal/raceskip"
-	"github.com/simon-lentz/yammm/location"
 )
 
 // The loader's Pattern holds the regexp the parser compiled, the same object,
 // so a source's pattern is compiled once a load.
 func TestSchemaParser_KeepsTheParsersRegexp(t *testing.T) {
 	src := "schema \"s\"\n\ntype Zip = Pattern[\"^[0-9]{5}$\"]\n\ntype T {\n\tid String primary\n\tone Pattern[\"^a\"]\n\tzips List<Pattern[\"^z\"]>\n}\n"
-	id := location.NewSourceID("test://s.yammm")
+	id := sourcetest.ID("test://s.yammm")
 	file, issues := parse.Parse([]byte(src), id)
 	if len(issues) != 0 {
 		t.Fatalf("parse: %v", issues)

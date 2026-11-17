@@ -2,8 +2,11 @@ package diag
 
 import (
 	"encoding/json"
+	"maps"
 	"strings"
 	"testing"
+
+	"github.com/simon-lentz/yammm/internal/yammmtest/sourcetest"
 
 	"github.com/simon-lentz/yammm/internal/yammmtest"
 	"github.com/simon-lentz/yammm/location"
@@ -85,19 +88,19 @@ func TestFormatIssueJSON_AllSeverities(t *testing.T) {
 }
 
 func TestFormatIssueJSON_WithSpan(t *testing.T) {
-	source := location.NewSourceID("test://schema.yammm")
+	source := sourcetest.ID("test://schema.yammm")
 	issue := NewIssue(Error, E_SYNTAX, "error").
 		WithSpan(location.Span{
 			Source: source,
-			Start:  location.NewPosition(10, 5, 150),
-			End:    location.NewPosition(10, 15, 160),
+			Start:  location.Position{Line: 10, Column: 5, Offset: 150},
+			End:    location.Position{Line: 10, Column: 15, Offset: 160},
 		}).
 		Build()
 
 	data := marshalIssueWire(issue)
 
 	// The golden pins the complete JSON wire format — the span object with
-	// line/column/byte for both endpoints is the behavior under test, and
+	// line/column/offset for both endpoints is the behavior under test, and
 	// the message field is part of this format's contract.
 	var parsed map[string]any
 	if err := json.Unmarshal(data, &parsed); err != nil {
@@ -106,197 +109,70 @@ func TestFormatIssueJSON_WithSpan(t *testing.T) {
 	yammmtest.GoldenJSON(t, "format_issue_json_with_span", parsed)
 }
 
-// TestFormatIssueJSON_ByteOffsetEncoding verifies the three-case byte-offset
-// encoding contract: unknown (-1) offsets are omitted from the JSON, while
-// zero and positive offsets are emitted as-is.
-//
-// Each test case uses consistent byte offsets for both start and end positions
-// to ensure clean test vectors. The end byte is computed to stay in the same
-// domain as start (unknown stays unknown, known stays known with offset).
-func TestFormatIssueJSON_ByteOffsetEncoding(t *testing.T) {
-	source := location.NewSourceID("test://file.yammm")
+// TestFormatIssueJSON_WritesTheOffsetOfAValidPosition holds the position
+// member to go/token's model: a position with a line is valid and writes its
+// offset, 0 included, and a position with no line writes line and column 0
+// and no offset, whatever its Offset field holds.
+func TestFormatIssueJSON_WritesTheOffsetOfAValidPosition(t *testing.T) {
+	source := sourcetest.ID("test://file.yammm")
 
 	tests := []struct {
-		name        string
-		startByte   int
-		endByte     int
-		wantByte    any // nil for omitted, float64 for present (start position)
-		wantEndByte any // nil for omitted, float64 for present (end position)
+		name string
+		pos  location.Position
+		want map[string]any
 	}{
 		{
-			name:        "unknown (-1) → omitted",
-			startByte:   -1,
-			endByte:     -1, // Both unknown for consistent test vector
-			wantByte:    nil,
-			wantEndByte: nil,
+			name: "the first byte",
+			pos:  location.Position{Line: 1, Column: 1, Offset: 0},
+			want: map[string]any{"line": float64(1), "column": float64(1), "offset": float64(0)},
 		},
 		{
-			name:        "zero (0) → present as 0",
-			startByte:   0,
-			endByte:     4, // Known offset from start
-			wantByte:    float64(0),
-			wantEndByte: float64(4),
+			name: "a later byte",
+			pos:  location.Position{Line: 3, Column: 5, Offset: 100},
+			want: map[string]any{"line": float64(3), "column": float64(5), "offset": float64(100)},
 		},
 		{
-			name:        "positive (100) → present as 100",
-			startByte:   100,
-			endByte:     104, // Known offset from start
-			wantByte:    float64(100),
-			wantEndByte: float64(104),
+			name: "the zero position",
+			pos:  location.Position{},
+			want: map[string]any{"line": float64(0), "column": float64(0)},
+		},
+		{
+			name: "a valid line with no column",
+			pos:  location.Position{Line: 2, Column: 0, Offset: 5},
+			want: map[string]any{"line": float64(2), "column": float64(0), "offset": float64(5)},
+		},
+		{
+			name: "an offset with no line",
+			pos:  location.Position{Offset: 7},
+			want: map[string]any{"line": float64(0), "column": float64(0)},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			issue := NewIssue(Error, E_SYNTAX, "msg").
-				WithSpan(location.Span{
-					Source: source,
-					Start:  location.NewPosition(1, 1, tt.startByte),
-					End:    location.NewPosition(1, 5, tt.endByte),
-				}).
+				WithSpan(location.Span{Source: source, Start: tt.pos, End: tt.pos}).
 				Build()
 
-			data := marshalIssueWire(issue)
-
-			var parsed map[string]any
-			if err := json.Unmarshal(data, &parsed); err != nil {
+			var parsed struct {
+				Span struct {
+					Source     string
+					Start, End map[string]any
+				}
+			}
+			if err := json.Unmarshal(marshalIssueWire(issue), &parsed); err != nil {
 				t.Fatalf("invalid JSON: %v", err)
 			}
-
-			span := parsed["span"].(map[string]any)
-
-			// Verify start position byte offset
-			start := span["start"].(map[string]any)
-			byteVal, exists := start["byte"]
-			if tt.wantByte == nil {
-				if exists {
-					t.Errorf("start.byte should be omitted, got %v", byteVal)
-				}
-			} else {
-				if !exists {
-					t.Error("start.byte should be present")
-				} else if byteVal != tt.wantByte {
-					t.Errorf("start.byte = %v; want %v", byteVal, tt.wantByte)
-				}
+			if parsed.Span.Source != "test://file.yammm" {
+				t.Errorf("source = %q; want test://file.yammm", parsed.Span.Source)
 			}
-
-			// Verify end position byte offset (same domain as start)
-			end := span["end"].(map[string]any)
-			endByteVal, endExists := end["byte"]
-			if tt.wantEndByte == nil {
-				if endExists {
-					t.Errorf("end.byte should be omitted, got %v", endByteVal)
-				}
-			} else {
-				if !endExists {
-					t.Error("end.byte should be present")
-				} else if endByteVal != tt.wantEndByte {
-					t.Errorf("end.byte = %v; want %v", endByteVal, tt.wantEndByte)
-				}
+			if !maps.Equal(parsed.Span.Start, tt.want) {
+				t.Errorf("start = %v; want %v", parsed.Span.Start, tt.want)
+			}
+			if !maps.Equal(parsed.Span.End, tt.want) {
+				t.Errorf("end = %v; want %v", parsed.Span.End, tt.want)
 			}
 		})
-	}
-}
-
-// TestFormatIssueJSON_UnknownPosition verifies behavior when a span
-// has a known source but unknown positions.
-//
-// A span that names its source but no position is built with
-// UnknownPosition, whose Byte is -1, so the byte field is omitted from JSON
-// output.
-func TestFormatIssueJSON_UnknownPosition(t *testing.T) {
-	source := location.NewSourceID("test://file.json")
-
-	// Span with known source but unknown positions.
-	// Use UnknownPosition() which sets Line=0, Column=0, Byte=-1.
-	issue := NewIssue(Error, E_TYPE_MISMATCH, "type mismatch").
-		WithSpan(location.Span{
-			Source: source,
-			Start:  location.UnknownPosition(),
-			End:    location.UnknownPosition(),
-		}).
-		Build()
-
-	data := marshalIssueWire(issue)
-
-	var parsed map[string]any
-	if err := json.Unmarshal(data, &parsed); err != nil {
-		t.Fatalf("invalid JSON: %v", err)
-	}
-
-	// Verify span is included (source is known, so span is not zero)
-	span := parsed["span"]
-	if span == nil {
-		t.Fatal("span should be present when source is known")
-	}
-
-	spanMap := span.(map[string]any)
-
-	// Verify source is present
-	if spanMap["source"] != "test://file.json" {
-		t.Errorf("source = %v; want 'test://file.json'", spanMap["source"])
-	}
-
-	// Unknown positions emit line=0, column=0
-	start := spanMap["start"].(map[string]any)
-	if start["line"] != float64(0) {
-		t.Errorf("start.line = %v; want 0 (unknown position)", start["line"])
-	}
-	if start["column"] != float64(0) {
-		t.Errorf("start.column = %v; want 0 (unknown position)", start["column"])
-	}
-
-	// Byte should be OMITTED for unknown positions
-	// UnknownPosition() sets Byte=-1, which correctly omits the byte field.
-	if _, exists := start["byte"]; exists {
-		t.Errorf("start.byte should be omitted for unknown position, got %v", start["byte"])
-	}
-
-	// Verify end position has same behavior
-	end := spanMap["end"].(map[string]any)
-	if end["line"] != float64(0) || end["column"] != float64(0) {
-		t.Errorf("end position = %v; want line=0, column=0", end)
-	}
-	if _, exists := end["byte"]; exists {
-		t.Errorf("end.byte should be omitted for unknown position, got %v", end["byte"])
-	}
-}
-
-// TestFormatIssueJSON_PositionZeroValueFootgun verifies that Position{} (Go zero
-// value with Byte=0) is safely handled by the wire conversion.
-//
-// This test documents that HasByte() correctly prevents Position{} from emitting
-// "byte": 0 even though Position{}.Byte == 0. The wire conversion checks
-// HasByte() which returns false when IsZero() is true, avoiding the footgun.
-func TestFormatIssueJSON_PositionZeroValueFootgun(t *testing.T) {
-	source := location.NewSourceID("test://file.json")
-
-	// Position{} has Byte=0 (Go zero value), but IsZero() returns true.
-	// The wire conversion uses HasByte() which returns false for zero positions,
-	// so the byte field should be omitted even though Byte==0.
-	issue := NewIssue(Error, E_TYPE_MISMATCH, "type mismatch").
-		WithSpan(location.Span{
-			Source: source,
-			Start:  location.Position{}, // Line=0, Column=0, Byte=0 (Go zero value)
-			End:    location.Position{},
-		}).
-		Build()
-
-	data := marshalIssueWire(issue)
-
-	var parsed map[string]any
-	if err := json.Unmarshal(data, &parsed); err != nil {
-		t.Fatalf("invalid JSON: %v", err)
-	}
-
-	spanMap := parsed["span"].(map[string]any)
-	start := spanMap["start"].(map[string]any)
-
-	// Despite Position{}.Byte == 0, the byte field should be OMITTED because
-	// HasByte() returns false when IsZero() is true. This prevents the footgun
-	// where accidental Position{} usage would emit "byte": 0.
-	if _, exists := start["byte"]; exists {
-		t.Errorf("start.byte should be omitted for zero Position (footgun prevention), got %v", start["byte"])
 	}
 }
 
@@ -318,16 +194,16 @@ func TestFormatIssueJSON_WithHint(t *testing.T) {
 }
 
 func TestFormatIssueJSON_WithRelated(t *testing.T) {
-	source := location.NewSourceID("test://file.yammm")
+	source := sourcetest.ID("test://file.yammm")
 	issue := NewIssue(Error, E_DUPLICATE_TYPE, "collision").
 		WithRelated(
-			location.RelatedInfo{
+			RelatedInfo{
 				Message: "first definition here",
-				Span:    location.PointWithByte(source, 5, 1, -1),
+				Span:    location.Span{Source: source, Start: location.Position{Line: 5, Column: 1}, End: location.Position{Line: 5, Column: 1}},
 			},
-			location.RelatedInfo{
+			RelatedInfo{
 				Message: "second definition here",
-				Span:    location.PointWithByte(source, 10, 1, -1),
+				Span:    location.Span{Source: source, Start: location.Position{Line: 10, Column: 1}, End: location.Position{Line: 10, Column: 1}},
 			},
 		).
 		Build()
@@ -507,17 +383,17 @@ func TestFormatResultJSON_WithLimit(t *testing.T) {
 }
 
 func TestFormatIssueJSON_CompleteIssue(t *testing.T) {
-	source := location.NewSourceID("test://complete.yammm")
+	source := sourcetest.ID("test://complete.yammm")
 	issue := NewIssue(Error, E_DUPLICATE_TYPE, "complete test").
 		WithSpan(location.Span{
 			Source: source,
-			Start:  location.NewPosition(10, 5, 100),
-			End:    location.NewPosition(10, 15, 110),
+			Start:  location.Position{Line: 10, Column: 5, Offset: 100},
+			End:    location.Position{Line: 10, Column: 15, Offset: 110},
 		}).
 		WithHint("try this").
-		WithRelated(location.RelatedInfo{
+		WithRelated(RelatedInfo{
 			Message: "related note",
-			Span:    location.PointWithByte(source, 5, 1, -1),
+			Span:    location.Span{Source: source, Start: location.Position{Line: 5, Column: 1}, End: location.Position{Line: 5, Column: 1}},
 		}).
 		WithDetails(Detail{Key: "key", Value: "value"}).
 		Build()
@@ -541,7 +417,7 @@ func TestFormatIssueJSON_CompleteIssue(t *testing.T) {
 
 func TestFormatIssueJSON_RelatedWithoutSpan(t *testing.T) {
 	issue := NewIssue(Error, E_SYNTAX, "error").
-		WithRelated(location.RelatedInfo{
+		WithRelated(RelatedInfo{
 			Message: "note without location",
 			// Span is zero
 		}).
@@ -567,12 +443,12 @@ func TestFormatIssueJSON_RelatedWithoutSpan(t *testing.T) {
 
 // TestJSON_RoundTrip verifies that the JSON structure is stable.
 func TestJSON_RoundTrip(t *testing.T) {
-	source := location.NewSourceID("test://roundtrip.yammm")
+	source := sourcetest.ID("test://roundtrip.yammm")
 	original := NewIssue(Error, E_SYNTAX, "test message").
 		WithSpan(location.Span{
 			Source: source,
-			Start:  location.NewPosition(1, 1, 0),
-			End:    location.NewPosition(1, 10, 9),
+			Start:  location.Position{Line: 1, Column: 1, Offset: 0},
+			End:    location.Position{Line: 1, Column: 10, Offset: 9},
 		}).
 		Build()
 
@@ -585,7 +461,7 @@ func TestJSON_RoundTrip(t *testing.T) {
 	}
 	// A wire that lost the span would still re-marshal to itself.
 	if s := parsed.Span; s == nil || s.Source != source.String() || s.Start.Line != 1 || s.Start.Column != 1 ||
-		s.End.Column != 10 || s.End.Byte == nil || *s.End.Byte != 9 {
+		s.End.Column != 10 || s.End.Offset == nil || *s.End.Offset != 9 {
 		t.Errorf("the wire does not carry the issue's span: %s", data)
 	}
 

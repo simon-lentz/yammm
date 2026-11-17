@@ -1,14 +1,17 @@
-// Package location provides source location tracking for diagnostics.
+// Package location identifies a source and a place in it: [SourceID], the
+// identity of a source; [Position], a point in its text; and [Span], a range of
+// its text. Diagnostics, schema records and the language server carry them.
 //
-// This package defines the core types used by the YAMMM diagnostic system
-// to track source locations. Besides the standard library it depends only on
-// its location/path sub-package, internal/hostpath, golang.org/x/text/unicode/norm
-// and, on Windows, golang.org/x/sys/windows (see Dependencies), so every package
-// but location/path and internal/hostpath can import it without an import cycle.
+// Besides the standard library it depends only on internal/hostpath and
+// golang.org/x/text/unicode/norm (see Dependencies), so every package but
+// internal/hostpath can import it without an import cycle.
 //
-// # CanonicalPath
+// # File-backed identities
 //
-// CanonicalPath represents a canonicalized file system path that is always:
+// A file-backed [SourceID] that [SourceIDFromPath] or [ResolveSourcePath] makes
+// is the answer to one question — what does the filesystem call this file —
+// written in NFC with forward slashes. [SourceID.Dir] cuts one to its
+// directory's, as a later paragraph states. Its text is:
 //   - Absolute (not relative)
 //   - Clean (no . or .. segments)
 //   - NFC-normalized (Unicode)
@@ -19,34 +22,24 @@
 //     path, is kept as typed (see the section on ".." below)
 //   - Valid UTF-8
 //
-// Canonicalization follows the host's own path rules. On Windows a backslash
-// is a separator and is written as "/", and a network share is canonicalized
-// like any other path; on Unix a backslash is a file-name character and is
-// kept, and a leading "//" names the root, as the kernel resolves it.
+// Resolution follows the host's own path rules. On Windows a backslash is a
+// separator and is written as "/", and a network share resolves like any other
+// path; on Unix a backslash is a file-name character and is kept, and a leading
+// "//" names the root, as the kernel resolves it.
 //
-// A CanonicalPath is an identity, not a path to open. NFC can change its bytes,
-// so on a filesystem that distinguishes normalization forms it may name no
-// file; read a file through the path as given or the host path it was derived
-// from, and through the path as given when a link may reach a descriptor (see
-// below).
+// An identity is not a path to open. NFC can change its bytes, so on a
+// filesystem that distinguishes normalization forms it may name no file; read a
+// file through the path as given or the host path [ResolveSourcePath] returns
+// beside the identity, and through the path as given when a link may reach a
+// descriptor (see below).
 //
-// Create via NewCanonicalPath. The type uses an unexported
-// field to enforce construction through validated constructors only.
-//
-// # Host paths and identities
-//
-// [ResolveHostPath] answers one question — what does the filesystem call this
-// file — and a file-backed identity is that answer in NFC with forward slashes,
-// save as this section states. A descriptor
-// path names a descriptor, not a file, and answers as typed, case included (see
-// below). The constructors [SourceIDFromPath], [ResolveSourcePath],
-// [NewCanonicalPath] and [CanonicalPath.Join] all resolve; [CanonicalPath.Dir]
-// cuts an identity's text, so a descriptor path's directory keeps its typed
-// spelling too. Two
-// spellings that resolve to one host path therefore give one identity: the
-// spelling the filesystem holds, written in NFC, with a missing tail, or a
-// descriptor path, as typed. A file that two host paths reach — a
-// hard link, a firmlink or a bind mount — keeps two identities.
+// Two spellings that resolve to one host path give one identity: the spelling
+// the filesystem holds, written in NFC, with a missing tail, or a descriptor
+// path, as typed. A file that two host paths reach — a hard link, a firmlink or
+// a bind mount — keeps two identities. [SourceID.Dir] cuts an identity's text,
+// so a descriptor path's directory keeps its typed spelling too, and
+// [SourceID.Rel] compares two identities segment by segment, never through the
+// host.
 //
 // # A ".." is evaluated on the text
 //
@@ -54,8 +47,13 @@
 // far as the path exists, the process can look and the path is not a descriptor
 // path. A ".." is not. It is evaluated
 // on the path's text before anything is looked up, so "dir/link/../x" names
-// "dir/x" whatever "dir/link" resolves to. A "." and a repeated or trailing
-// separator are cleaned on the text in the same step.
+// "dir/x" whatever "dir/link" resolves to. A "." and a repeated separator are
+// cleaned on the text in the same step. A path that ends in a separator or a
+// "." element names a directory, as the kernel reads it: one whose last element
+// exists and is not a directory is refused with an [fs.PathError] wrapping
+// syscall.ENOTDIR, and the identity of one that is a directory, or does not
+// exist yet, is written without the separator. On Windows syscall.ENOTDIR is
+// ERROR_PATH_NOT_FOUND, so errors.Is reports [fs.ErrNotExist] for it there.
 //
 // This is a decision, not an oversight, and for a ".." the path itself holds it
 // is the same decision on every host. A ".." inside a link's target is another
@@ -72,14 +70,13 @@
 // evaluates a ".." the same way in every path it reads or writes. One rule for
 // all of them lands them on one file, and a resolver that followed the kernel
 // here would send the editor to a file the loader does not compile.
-// [TestResolveHostPath_KeepsWhatTheLSPDependsOn] holds the rule.
+// The resolver's tests in internal/hostpath hold the rule.
 //
 // One consequence follows, and it is intended: the text decides before the disk
 // is read, whatever the component is. A ".." after a symbolic link does not follow
 // it. A ".." after a component that does not exist, a regular file or a directory
 // the process cannot enter cancels that component where the kernel would refuse
-// the path, and a "." or a trailing separator after a regular file is dropped
-// where the kernel would refuse it too.
+// the path. Only a ".." parts the text rule from the kernel.
 //
 // For a path that is not a descriptor path, the answer on darwin is realpath(3),
 // called through libSystem. It reads each
@@ -130,29 +127,35 @@
 //
 // # SourceID
 //
-// SourceID identifies a source within a build, up to NFC: on a host that keeps
-// both forms of a name, two files named in NFC and NFD take one SourceID. It
-// supports two modes:
-//   - File-backed: Created via SourceIDFromPath or ResolveSourcePath.
-//     Stores a CanonicalPath directly.
+// SourceID identifies a source within a build. A file-backed one is compared up
+// to NFC: on a host that keeps both forms of a name, two files named in NFC and
+// NFD take one SourceID. It supports two modes:
+//   - File-backed: Created via SourceIDFromPath or ResolveSourcePath, and cut to
+//     its directory's by SourceID.Dir.
 //   - Synthetic: Created via NewSourceID for non-file sources
-//     like "<stdin>", "inline:test", or "test://unit/person.yammm".
+//     like "<stdin>", "inline:test", or "test://unit/person.yammm". NewSourceID
+//     refuses a name that could not be told apart from another identity: an
+//     empty one, one that is not valid UTF-8 or holds a character that does not
+//     print, and one that starts as an absolute path does on some host: with a
+//     slash, two backslashes, or an ASCII letter, a colon and a separator.
 //
 // SourceID is comparable and safe for use as map keys. Case is not folded, it
-// is read from the filesystem as far as the path resolves (see CanonicalPath
-// above): where /Users/Simon/a.yammm and
-// /users/simon/a.yammm name one file, both give the identity of the spelling
-// the volume holds. A synthetic identifier is compared as written.
+// is read from the filesystem as far as the path resolves (see above): where
+// /Users/Simon/a.yammm and /users/simon/a.yammm name one file, both give the
+// identity of the spelling the volume holds. A synthetic identifier is compared
+// as written.
 //
 // # Position
 //
-// Position identifies a point in a UTF-8 encoded source file:
-//   - Line: 1-based line number (0 = unknown)
+// Position identifies a point in a UTF-8 encoded source file, in
+// [go/token.Position]'s model:
+//   - Line: 1-based line number
 //   - Column: 1-based column counting Unicode code points (runes), not bytes
-//   - Byte: 0-based byte offset (-1 = unknown)
+//   - Offset: 0-based byte offset
 //
-// Use IsZero() to check for unknown positions, IsKnown() to check for valid
-// line/column, and HasByte() to check for known byte offsets.
+// The zero Position is unknown, and [Position.IsValid] reports a known one: a
+// Line above zero. Every producer in this module sets all three fields, so a
+// valid position's Offset is known, and an Offset of 0 is the first byte.
 //
 // # Span
 //
@@ -161,44 +164,15 @@
 //   - Start: Inclusive start position
 //   - End: Exclusive end position (equals Start for point spans)
 //
-// Create spans via PointWithByte or RangeWithBytes. RangeWithBytes panics
-// if end is before start by an order both positions know: the byte offsets, or
-// the line and column. A position with
-// a zero line or column knows no line and column order, and one with both zero
-// knows no byte order ([Position.HasByte]). A span whose
-// two orders disagree is unsafe whichever one a reader takes, so RangeWithBytes
-// refuses it. A Span struct literal gets no such check.
-//
-// Use IsZero() to check for "no location" and IsValid() to check for LSP
-// compatibility.
-//
-// # RelatedInfo
-//
-// RelatedInfo provides supplementary location context for a diagnostic, such as
-// the declaration a case-colliding property collides with.
-//
-// # Provenance
-//
-// [Provenance] tracks the origin of a parsed data element through the
-// reader → validator → graph pipeline. It carries the source name,
-// a [github.com/simon-lentz/yammm/location/path] builder for JSONPath-like
-// instance paths, an optional raw path, and an optional [Span] for its source
-// location, which need not hold a byte offset.
-// Create via [NewProvenance], extending the path through its own
-// [github.com/simon-lentz/yammm/location/path.Builder] while parsing.
-//
-// Every method is safe on a zero Provenance: [Provenance.WithRawPath] turns it
-// into a new Provenance carrying that raw path and no source information, and
-// [Provenance.SourceName], [Provenance.Path] and [Provenance.Span] return zero
-// values. A zero Provenance therefore keeps a diagnostic's path without claiming a
-// source location it does not have.
+// A span is a struct literal; nothing checks that Start is not after End. The
+// zero Span is "no location", which [Span.IsZero] reports. [Span.Compare]
+// orders spans as [time.Time.Compare] orders times, so
+// slices.SortFunc(spans, location.Span.Compare) sorts them.
 //
 // # Dependencies
 //
-//	location  ──imports──▶  location/path, internal/hostpath, golang.org/x/text/unicode/norm,
-//	                        golang.org/x/sys/windows
+//	location  ──imports──▶  internal/hostpath, golang.org/x/text/unicode/norm
 //
-// The sub-package carries provenance paths, internal/hostpath judges a
-// descriptor path by its name, the x/text import is NFC normalization, and the
-// x/sys import, made on Windows alone, is the final-path call.
+// internal/hostpath resolves a host path, and the x/text import is NFC
+// normalization.
 package location

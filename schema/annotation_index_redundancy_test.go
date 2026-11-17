@@ -198,7 +198,7 @@ type T {
 		t.Errorf("the refusal does not name the @@index: %v", res)
 	}
 	for is := range res.Issues() {
-		if at := src[is.Span().Start.Byte:]; !strings.HasPrefix(at, "id)") {
+		if at := src[is.Span().Start.Offset:]; !strings.HasPrefix(at, "id)") {
 			t.Errorf("the refusal stands at %q, want its member", at)
 		}
 	}
@@ -225,7 +225,7 @@ type Concrete extends Base {
 		}
 		related := is.Related()
 		if len(related) != 1 || related[0].Message != "sole primary key emitted here" ||
-			!strings.HasPrefix(src[related[0].Span.Start.Byte:], "type Concrete") {
+			!strings.HasPrefix(src[related[0].Span.Start.Offset:], "type Concrete") {
 			t.Errorf("want one related span at Concrete, the emitter; got %v", related)
 		}
 	}

@@ -7,9 +7,9 @@ import (
 	"testing"
 
 	"github.com/simon-lentz/yammm/instance"
+	"github.com/simon-lentz/yammm/instance/path"
 	"github.com/simon-lentz/yammm/internal/instancetest"
 	"github.com/simon-lentz/yammm/location"
-	"github.com/simon-lentz/yammm/location/path"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -39,7 +39,7 @@ func TestValid_ReturnsTheValidatorsInstance(t *testing.T) {
 }
 
 func TestValidRaw_CarriesTheProvenance(t *testing.T) {
-	prov := location.NewProvenance("test.json", path.Root(), location.Span{})
+	prov := instance.NewProvenance("test.json", path.Root, location.Span{})
 	vi := instancetest.ValidRaw(t, loadPerson(t), "Person", instance.RawInstance{
 		Properties: map[string]any{"id": "p7", "name": "Alice"},
 		Provenance: prov,

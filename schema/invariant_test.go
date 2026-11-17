@@ -3,6 +3,8 @@ package schema_test
 import (
 	"testing"
 
+	"github.com/simon-lentz/yammm/internal/yammmtest/sourcetest"
+
 	"github.com/stretchr/testify/assert"
 
 	"github.com/simon-lentz/yammm/internal/expr"
@@ -12,9 +14,9 @@ import (
 
 func TestNewInvariant(t *testing.T) {
 	span := location.Span{
-		Source: location.NewSourceID("test://invariant"),
-		Start:  location.Position{Line: 10, Column: 1, Byte: 100},
-		End:    location.Position{Line: 10, Column: 50, Byte: 150},
+		Source: sourcetest.ID("test://invariant"),
+		Start:  location.Position{Line: 10, Column: 1, Offset: 100},
+		End:    location.Position{Line: 10, Column: 50, Offset: 150},
 	}
 	doc := "Age must be positive"
 	e := expr.NewLiteral(true) // use a real expression
@@ -67,9 +69,9 @@ func TestInvariant_Expression(t *testing.T) {
 
 func TestInvariant_Span(t *testing.T) {
 	span := location.Span{
-		Source: location.NewSourceID("test://span"),
-		Start:  location.Position{Line: 15, Column: 5, Byte: 200},
-		End:    location.Position{Line: 15, Column: 40, Byte: 235},
+		Source: sourcetest.ID("test://span"),
+		Start:  location.Position{Line: 15, Column: 5, Offset: 200},
+		End:    location.Position{Line: 15, Column: 40, Offset: 235},
 	}
 
 	inv := schema.TestNewInvariant("test", nil, span, "")
@@ -78,7 +80,7 @@ func TestInvariant_Span(t *testing.T) {
 	assert.Equal(t, span.Source, result.Source)
 	assert.Equal(t, 15, result.Start.Line)
 	assert.Equal(t, 5, result.Start.Column)
-	assert.Equal(t, 200, result.Start.Byte)
+	assert.Equal(t, 200, result.Start.Offset)
 }
 
 func TestInvariant_Documentation(t *testing.T) {

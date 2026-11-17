@@ -3,8 +3,9 @@ package parse
 import (
 	"testing"
 
+	"github.com/simon-lentz/yammm/internal/yammmtest/sourcetest"
+
 	"github.com/simon-lentz/yammm/diag"
-	"github.com/simon-lentz/yammm/location"
 )
 
 // syntaxIssue parses one invariant and returns the message and the covered
@@ -12,12 +13,12 @@ import (
 func syntaxIssue(t *testing.T, expression string) (message, covered string) {
 	t.Helper()
 	full := invariantSource(expression)
-	_, issues := Parse([]byte(full), location.NewSourceID("s.yammm"))
+	_, issues := Parse([]byte(full), sourcetest.ID("s.yammm"))
 	if len(issues) == 0 || issues[0].Code() != diag.E_SYNTAX {
 		t.Fatalf("%q: %s; want an E_SYNTAX first", expression, messages(issues))
 	}
 	sp := issues[0].Span()
-	return issues[0].Message(), full[sp.Start.Byte:sp.End.Byte]
+	return issues[0].Message(), full[sp.Start.Offset:sp.End.Offset]
 }
 
 // The expression language has no caret operator.
@@ -53,7 +54,7 @@ func TestParse_DatatypeKeywordIsNoOperand(t *testing.T) {
 			}
 		}
 	}
-	file, issues := Parse([]byte(invariantSource("n == Alias")), location.NewSourceID("s.yammm"))
+	file, issues := Parse([]byte(invariantSource("n == Alias")), sourcetest.ID("s.yammm"))
 	if len(issues) != 0 {
 		t.Fatalf("a name that is no keyword: %s", messages(issues))
 	}
@@ -83,7 +84,7 @@ func TestParse_BracketHoldsOneIndex(t *testing.T) {
 		"xs[[1] -> Len] == 1":  `(== (@ (p "xs") (Len ([] 1) args[] params[] <absent>)) 1)`,
 		"xs[f1 ? {0 : 1}] > 0": `(> (@ (p "xs") (? (p "f1") 0 1)) 0)`,
 	} {
-		file, issues := Parse([]byte(invariantSource(src)), location.NewSourceID("s.yammm"))
+		file, issues := Parse([]byte(invariantSource(src)), sourcetest.ID("s.yammm"))
 		if len(issues) != 0 {
 			t.Errorf("%q: %s", src, messages(issues))
 			continue
@@ -101,7 +102,7 @@ func TestParse_AnyWordNamesAFunction(t *testing.T) {
 	for _, name := range []string{
 		"Len", "len", "in", "p", "nil", "true", "false", "type", "part", "primary", "String", "List", "worksAt", "WORKS_AT",
 	} {
-		file, issues := Parse([]byte(invariantSource("n -> "+name+" == nil")), location.NewSourceID("s.yammm"))
+		file, issues := Parse([]byte(invariantSource("n -> "+name+" == nil")), sourcetest.ID("s.yammm"))
 		if len(issues) != 0 {
 			t.Errorf("n -> %s: %s", name, messages(issues))
 			continue

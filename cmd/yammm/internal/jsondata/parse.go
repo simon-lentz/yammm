@@ -13,9 +13,9 @@ import (
 
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/instance"
+	"github.com/simon-lentz/yammm/instance/path"
 	"github.com/simon-lentz/yammm/internal/value"
 	"github.com/simon-lentz/yammm/location"
-	"github.com/simon-lentz/yammm/location/path"
 )
 
 // byteOrderMark is the UTF-8 encoding of U+FEFF. One leading mark is skipped; a
@@ -182,10 +182,10 @@ type parseContext struct {
 func (pc *parseContext) spanAt(bufOffset int) location.Span {
 	byteOffset := bufOffset + pc.bomLen
 	pos := pc.positions.positionAt(byteOffset)
-	if !pos.IsKnown() {
+	if !pos.IsValid() {
 		return location.Span{}
 	}
-	return location.PointWithByte(pc.source, pos.Line, pos.Column, byteOffset)
+	return location.Span{Source: pc.source, Start: pos, End: pos}
 }
 
 // readStart returns the offset of the first byte a successful read from
@@ -324,9 +324,9 @@ func parseArray(dec *json.Decoder, pc *parseContext, typeName string, collector 
 
 		result = append(result, instance.RawInstance{
 			Properties: obj,
-			Provenance: location.NewProvenance(
+			Provenance: instance.NewProvenance(
 				pc.source.String(),
-				path.Root().Key(typeName).Index(index),
+				path.Root.Key(typeName).Index(index),
 				elemSpan,
 			),
 		})

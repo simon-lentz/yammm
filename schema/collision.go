@@ -6,7 +6,6 @@ import (
 	"strings"
 
 	"github.com/simon-lentz/yammm/diag"
-	"github.com/simon-lentz/yammm/location"
 )
 
 // detectCollisions checks for naming collisions in all types.
@@ -37,7 +36,7 @@ func (c *completer) checkEdgePropertyCaseCollisions(t Type) {
 			lower := strings.ToLower(p.Name())
 			if prior, seen := first[lower]; seen {
 				c.errorfRelated(p.Span(), diag.E_CASE_COLLISION,
-					[]location.RelatedInfo{{Span: prior.Span(), Message: "collides with this declaration"}},
+					[]diag.RelatedInfo{{Span: prior.Span(), Message: "collides with this declaration"}},
 					"edge property %q on relation %q in type %q collides with %q (case-insensitive)", p.Name(), r.Name(), t.Name(), prior.Name())
 				continue
 			}
@@ -78,11 +77,11 @@ func (c *completer) checkPropertyCaseCollisions(t Type) {
 			switch {
 			case own[p.Origin()]:
 				c.errorfRelated(p.Span(), diag.E_CASE_COLLISION,
-					[]location.RelatedInfo{{Span: first.Span(), Message: "collides with this declaration"}},
+					[]diag.RelatedInfo{{Span: first.Span(), Message: "collides with this declaration"}},
 					"property %q in type %q collides with %q (case-insensitive)", p.Name(), t.Name(), first.Name())
 			case own[first.Origin()]:
 				c.errorfRelated(first.Span(), diag.E_CASE_COLLISION,
-					[]location.RelatedInfo{{Span: p.Span(), Message: "collides with this declaration"}},
+					[]diag.RelatedInfo{{Span: p.Span(), Message: "collides with this declaration"}},
 					"property %q in type %q collides with %q (case-insensitive)", first.Name(), t.Name(), p.Name())
 			case c.aSuperCarries(t, func(s Type) bool {
 				_, a := s.Property(first.Name())
@@ -92,7 +91,7 @@ func (c *completer) checkPropertyCaseCollisions(t Type) {
 				// An ancestor already holds both, so the collision was reported there.
 			default:
 				c.errorfRelated(t.Span(), diag.E_CASE_COLLISION,
-					[]location.RelatedInfo{
+					[]diag.RelatedInfo{
 						{Span: first.Span(), Message: "declared here"},
 						{Span: p.Span(), Message: "and here"},
 					},
@@ -134,11 +133,11 @@ func (c *completer) checkPropertyRelationCollisions(t Type) {
 		switch {
 		case ownRels[r]:
 			c.errorfRelated(r.Span(), diag.E_PROPERTY_RELATION_COLLISION,
-				[]location.RelatedInfo{{Span: prop.Span(), Message: "property declared here"}},
+				[]diag.RelatedInfo{{Span: prop.Span(), Message: "property declared here"}},
 				msg, r.Name(), r.FieldName(), t.Name(), prop.Name())
 		case ownProps[prop.Origin()]:
 			c.errorfRelated(prop.Span(), diag.E_PROPERTY_RELATION_COLLISION,
-				[]location.RelatedInfo{{Span: r.Span(), Message: "relation declared here"}},
+				[]diag.RelatedInfo{{Span: r.Span(), Message: "relation declared here"}},
 				msg, r.Name(), r.FieldName(), t.Name(), prop.Name())
 		case c.aSuperCarries(t, func(s Type) bool {
 			_, a := s.Relation(r.Name())
@@ -148,7 +147,7 @@ func (c *completer) checkPropertyRelationCollisions(t Type) {
 			// An ancestor already holds both, so the collision was reported there.
 		default:
 			c.errorfRelated(t.Span(), diag.E_PROPERTY_RELATION_COLLISION,
-				[]location.RelatedInfo{
+				[]diag.RelatedInfo{
 					{Span: r.Span(), Message: "relation declared here"},
 					{Span: prop.Span(), Message: "property declared here"},
 				},
@@ -188,7 +187,7 @@ func (c *completer) checkRelationCollisions(t Type) {
 		if !found {
 			continue
 		}
-		related := []location.RelatedInfo{
+		related := []diag.RelatedInfo{
 			{Span: assoc.Span(), Message: "association declared here"},
 			{Span: comp.Span(), Message: "composition declared here"},
 		}
@@ -346,11 +345,11 @@ func (c *completer) reportCompositionCycle(group []Type, links map[Type][]Relati
 	slices.Reverse(names[1:])
 	names = append(names, anchor.Name())
 
-	var related []location.RelatedInfo
+	var related []diag.RelatedInfo
 	for _, t := range group {
 		for _, r := range links[t] {
 			if w := c.resolveTypeID(r.TargetID()); in[w] {
-				related = append(related, location.RelatedInfo{
+				related = append(related, diag.RelatedInfo{
 					Span:    r.Span(),
 					Message: fmt.Sprintf("%s requires %s through %s", t.Name(), w.Name(), r.Name()),
 				})
@@ -388,7 +387,7 @@ func (c *completer) validateAssociationTargets() {
 					continue
 				}
 				c.errorfRelated(t.Span(), diag.E_INVALID_ASSOCIATION_TARGET,
-					[]location.RelatedInfo{{Span: r.Span(), Message: "association declared here"}},
+					[]diag.RelatedInfo{{Span: r.Span(), Message: "association declared here"}},
 					"part type %q inherits association %q from %s; a part type cannot carry an association",
 					t.Name(), r.Name(), r.Owner())
 			}

@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/simon-lentz/yammm/location"
+	"github.com/simon-lentz/yammm/internal/yammmtest/sourcetest"
 )
 
 // A string value reads each byte of an invalid UTF-8 sequence as U+FFFD, as a
@@ -12,7 +12,7 @@ import (
 func TestParse_AStringValueReadsInvalidUTF8AsTheReplacement(t *testing.T) {
 	t.Parallel()
 	doc := []byte("{\"Test\": [{\"id\": \"a\xff\xfe\", \"tags\": [\"b\xff\"]}]}")
-	parsed, result := Parse(context.Background(), location.NewSourceID("data.json"), doc)
+	parsed, result := Parse(context.Background(), sourcetest.ID("data.json"), doc)
 	if result.HasErrors() || len(parsed["Test"]) != 1 {
 		t.Fatalf("parsed %d instances, issues: %s", len(parsed["Test"]), result.String())
 	}

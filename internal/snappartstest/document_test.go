@@ -10,11 +10,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/simon-lentz/yammm/instance"
+
 	"github.com/simon-lentz/yammm/immutable"
+	"github.com/simon-lentz/yammm/instance/path"
 	"github.com/simon-lentz/yammm/internal/snapparts"
 	"github.com/simon-lentz/yammm/internal/snappartstest"
 	"github.com/simon-lentz/yammm/location"
-	"github.com/simon-lentz/yammm/location/path"
 	"github.com/simon-lentz/yammm/schema"
 	"github.com/simon-lentz/yammm/snapshot"
 )
@@ -57,7 +59,7 @@ func documentShapes(t *testing.T) (schema.Schema, snapparts.Parts) {
 			{TypeID: company, PrimaryKey: key("c1"), Properties: props(map[string]any{"id": "c1"})},
 			{
 				TypeID: person, PrimaryKey: key("p1"), Properties: props(map[string]any{"id": "p1", "score": float64(2)}),
-				Provenance: location.NewProvenance("feed", path.Root().Key("rows"), location.Span{}),
+				Provenance: instance.NewProvenance("feed", path.Root.Key("rows"), location.Span{}),
 				Composed: map[string][]snapparts.Instance{"CARDS": {{
 					TypeID: card, PrimaryKey: key("4242"), Properties: props(map[string]any{"last4": "4242"}),
 				}}},
@@ -284,13 +286,13 @@ type Zeta {
 	}
 }
 
-func TestDocument_WritesAProvenanceRawPathAsHeld(t *testing.T) {
+func TestDocument_WritesAProvenancePathAsHeld(t *testing.T) {
 	t.Parallel()
 	s, parts := documentShapes(t)
-	parts.Instances[0].Provenance = location.NewProvenance("feed", path.Root().Key("rows"), location.Span{}).WithRawPath("not a path")
+	parts.Instances[0].Provenance = instance.NewProvenance("feed", "not a path", location.Span{})
 	doc := string(snappartstest.Document(t, s, parts))
 	if !strings.Contains(doc, `"source_name":"feed","path":"not a path"`) {
-		t.Errorf("no raw path in:\n%s", doc)
+		t.Errorf("no path as held in:\n%s", doc)
 	}
 }
 

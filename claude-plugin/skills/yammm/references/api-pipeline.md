@@ -139,7 +139,7 @@ valid, result := v.ValidateOne(ctx, "Product", instance.RawInstance{
 ```go
 type RawInstance struct {
     Properties map[string]any
-    Provenance location.Provenance   // optional source metadata
+    Provenance instance.Provenance   // optional source metadata
 }
 ```
 
@@ -169,7 +169,7 @@ valid.Property("name")             // (immutable.Value, bool)
 valid.Properties()                 // immutable.Properties
 valid.Edge("WORKS_AT")             // (ValidEdgeData, bool)
 valid.Composed("ITEMS")            // iter.Seq[ValidInstance]: the children under one composition, in input order
-valid.Provenance()                 // location.Provenance
+valid.Provenance()                 // instance.Provenance
 ```
 
 ---

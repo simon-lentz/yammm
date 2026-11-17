@@ -1,4 +1,4 @@
-package location
+package hostpath
 
 import (
 	"errors"
@@ -7,10 +7,9 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"syscall"
 	"unicode/utf8"
-
-	"github.com/simon-lentz/yammm/internal/hostpath"
 )
 
 // maxLinkHops bounds how many dangling links one resolution follows. The kernel
@@ -21,13 +20,26 @@ const maxLinkHops = 255
 // errTooManyLinks refuses a walk that followed more than maxLinkHops links.
 var errTooManyLinks = errors.New("too many levels of symbolic links")
 
-// ResolveHostPath returns p as the filesystem spells it: absolute, clean,
+// ErrEmptyPath refuses an empty path: a caller that never set the file name.
+// filepath.Abs("") names the working directory, so without it a directory
+// would get a valid-looking identity for a file that was never named. Its text
+// is location.ErrEmptyPath's, the public name it is returned under.
+var ErrEmptyPath = errors.New("location: path is empty")
+
+// ErrInvalidUTF8Path refuses a path that is not valid UTF-8, or that resolves to
+// one. Its text is location.ErrInvalidUTF8Path's, the public name it is
+// returned under.
+var ErrInvalidUTF8Path = errors.New("location: path is not valid UTF-8")
+
+// Resolve returns p as the filesystem spells it: absolute, clean,
 // symlink-resolved, each existing component in its on-disk spelling. The
-// result is a host path, not an identity; [SourceIDFromPath] turns p into one.
-// The package documentation states what it answers for a path that does not
-// exist, one the process cannot traverse, one that can never exist and a
-// descriptor path, which it returns as typed.
-func ResolveHostPath(p string) (string, error) {
+// result is a host path, not an identity. A path that does not exist resolves
+// as typed past its last existing component, as does one the process cannot
+// traverse past; a descriptor path is returned absolute and clean, its link not
+// followed. A path that ends in a separator or a "." element names a directory:
+// one whose last element exists and is not a directory is refused with ENOTDIR,
+// as the kernel refuses it.
+func Resolve(p string) (string, error) {
 	host, err := walkHostPath(p)
 	if err == nil && !utf8.ValidString(host) {
 		// The working directory, a name on disk or a dangling link's target
@@ -37,20 +49,7 @@ func ResolveHostPath(p string) (string, error) {
 	return host, err
 }
 
-// ResolveSourcePath returns the identity of p and the host path it was derived
-// from, out of one resolution, so the two cannot disagree. It is
-// [SourceIDFromPath] for a caller that also reads the file, and it fails where
-// [ResolveHostPath] does. A caller that may be given a link to a descriptor reads
-// through p instead, since the host path may reach no file or another file.
-func ResolveSourcePath(p string) (SourceID, string, error) {
-	host, err := ResolveHostPath(p)
-	if err != nil {
-		return SourceID{}, "", err
-	}
-	return SourceID{cp: identityOf(host)}, host, nil
-}
-
-// walkHostPath resolves p as [ResolveHostPath] describes, before the result is
+// walkHostPath resolves p as [Resolve] describes, before the result is
 // judged.
 func walkHostPath(p string) (string, error) {
 	if p == "" {
@@ -63,15 +62,22 @@ func walkHostPath(p string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("absolute path: %w", err)
 	}
+	wantDir := NamesDirectory(p)
 
 	var missing []string
 	hops := 0
 	current := abs
 	for {
-		if len(missing) == 0 && hostpath.Descriptor(current) {
+		if len(missing) == 0 && !wantDir && Descriptor(current) {
 			return current, nil
 		}
 		info, err := os.Stat(current)
+		if err == nil && len(missing) == 0 && wantDir && !info.IsDir() {
+			return "", fmt.Errorf("resolve %q: %w", p, &fs.PathError{Op: "stat", Path: current, Err: syscall.ENOTDIR})
+		}
+		if err == nil && len(missing) == 0 && Descriptor(current) {
+			return current, nil
+		}
 		if err == nil {
 			// Windows reports a path under a regular file absent rather than
 			// ENOTDIR, so this is where its half of that refusal lands, as the
@@ -171,4 +177,33 @@ func joinMissing(spelled string, missing []string) string {
 		parts = append(parts, m)
 	}
 	return filepath.Join(parts...)
+}
+
+// NamesDirectory reports whether p's spelling makes the kernel require its last
+// element to be a directory: p ends in a separator after its volume and root,
+// or its last element is ".". [filepath.Clean] and [filepath.Abs] drop both, so
+// a caller that cleans a path it hands on carries this answer with it. A root
+// alone, and "." alone, name a directory already.
+func NamesDirectory(p string) bool {
+	isSep := func(r rune) bool { return r == '/' || r == filepath.Separator }
+	rest := p[len(filepath.VolumeName(p)):]
+	trimmed := strings.TrimRightFunc(rest, isSep)
+	if trimmed == "" {
+		return false
+	}
+	if len(trimmed) < len(rest) {
+		return true
+	}
+	i := strings.LastIndexFunc(trimmed, isSep)
+	return i >= 0 && trimmed[i+1:] == "."
+}
+
+// DirectoryForm returns cleaned, a cleaned or absolute form of p, ending in a
+// separator when p names a directory, so [Resolve] reads cleaned's last element
+// as the kernel reads p's.
+func DirectoryForm(p, cleaned string) string {
+	if NamesDirectory(p) && !strings.HasSuffix(cleaned, string(filepath.Separator)) {
+		return cleaned + string(filepath.Separator)
+	}
+	return cleaned
 }

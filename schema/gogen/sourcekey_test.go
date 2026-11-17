@@ -4,6 +4,8 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/simon-lentz/yammm/internal/yammmtest/sourcetest"
+
 	"github.com/simon-lentz/yammm/location"
 )
 
@@ -31,7 +33,7 @@ func TestSourceKey_SyntheticRoot(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
-			got, err := keyRoot{synthetic: tc.root}.key(location.NewSourceID(tc.id))
+			got, err := keyRoot{synthetic: tc.root}.key(sourcetest.ID(tc.id))
 			if err != nil || got != tc.want {
 				t.Errorf("keyRoot{%q}.key(%q) = %q, want %q", tc.root, tc.id, got, tc.want)
 			}
@@ -50,11 +52,11 @@ func TestKeyRoot_NoRelativeFormIsAnError(t *testing.T) {
 		root keyRoot
 		id   location.SourceID
 	}{
-		"a synthetic source outside a synthetic root": {keyRoot{synthetic: "embedded://app"}, location.NewSourceID("embedded://other/a.yammm")},
+		"a synthetic source outside a synthetic root": {keyRoot{synthetic: "embedded://app"}, sourcetest.ID("embedded://other/a.yammm")},
 		"a file source under a synthetic root":        {keyRoot{synthetic: "embedded://app"}, sourceIDOf(t, filepath.Join(t.TempDir(), "a.yammm"))},
-		"a synthetic source under a file root":        {keyRoot{dir: canonicalOf(t, t.TempDir())}, location.NewSourceID("string://a.yammm")},
-		"the root directory itself":                   {keyRoot{dir: canonicalOf(t, dir)}, sourceIDOf(t, dir)},
-		"a zero source":                               {keyRoot{dir: canonicalOf(t, dir)}, location.SourceID{}},
+		"a synthetic source under a file root":        {keyRoot{dir: sourceIDOf(t, t.TempDir())}, sourcetest.ID("string://a.yammm")},
+		"the root directory itself":                   {keyRoot{dir: sourceIDOf(t, dir)}, sourceIDOf(t, dir)},
+		"a zero source":                               {keyRoot{dir: sourceIDOf(t, dir)}, location.SourceID{}},
 		"a file source with no root":                  {keyRoot{}, sourceIDOf(t, filepath.Join(dir, "a.yammm"))},
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -73,13 +75,4 @@ func sourceIDOf(t *testing.T, path string) location.SourceID {
 		t.Fatal(err)
 	}
 	return id
-}
-
-func canonicalOf(t *testing.T, path string) location.CanonicalPath {
-	t.Helper()
-	cp, err := location.NewCanonicalPath(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return cp
 }

@@ -7,6 +7,8 @@ import (
 	"maps"
 	"slices"
 	"strings"
+
+	"github.com/simon-lentz/yammm/internal/termtext"
 )
 
 // SeverityCounts provides counts by severity level without map allocation.
@@ -425,8 +427,9 @@ func (r Result) Err() error {
 // String returns "OK" only when the result holds no issue at all. Otherwise it
 // returns a summary line — "OK" or the error count, then the warning, info and
 // hint counts where non-zero, then the truncation note — followed by one line
-// per retained issue at every severity (code and message, no excerpts). For
-// formatted output with excerpts, use [Renderer.FormatResult].
+// per retained issue at every severity (code and message, no excerpts). A control
+// character other than a tab in a code or message is written as a visible glyph, as
+// [Renderer.FormatResult] writes it, so each issue keeps its one line.
 func (r Result) String() string {
 	if len(r.issues) == 0 && !r.limitReached {
 		return "OK"
@@ -454,7 +457,7 @@ func (r Result) String() string {
 		fmt.Fprintf(&sb, " [limit reached, %d dropped]", r.droppedCount)
 	}
 	for _, issue := range r.issues {
-		fmt.Fprintf(&sb, "\n  %s: %s", issue.Code(), issue.Message())
+		fmt.Fprintf(&sb, "\n  %s: %s", termtext.String(issue.Code().String()), termtext.String(issue.Message()))
 	}
 
 	return sb.String()

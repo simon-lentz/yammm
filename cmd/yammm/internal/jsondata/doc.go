@@ -72,7 +72,7 @@
 //
 // # Provenance
 //
-// Every instance carries a [location.Provenance]: the source the caller named,
+// Every instance carries a [instance.Provenance]: the source the caller named,
 // the instance's path in the document ($.Person[0]), and a point span at its
 // opening brace. A parse diagnostic carries a span in that source wherever its
 // offset lies in the data or at its end; the cancellation diagnostic carries none.
@@ -130,7 +130,7 @@
 //
 // # Dependencies
 //
-//	cmd/yammm/internal/jsondata  ──imports──▶  instance, diag, location, location/path,
+//	cmd/yammm/internal/jsondata  ──imports──▶  instance, diag, location, instance/path,
 //	                                           internal/value, github.com/tidwall/jsonc
 //
 // [tidwall/jsonc]: https://github.com/tidwall/jsonc

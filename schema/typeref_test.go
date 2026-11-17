@@ -3,6 +3,8 @@ package schema_test
 import (
 	"testing"
 
+	"github.com/simon-lentz/yammm/internal/yammmtest/sourcetest"
+
 	"github.com/stretchr/testify/assert"
 
 	"github.com/simon-lentz/yammm/location"
@@ -11,9 +13,9 @@ import (
 
 func TestNewTypeRef(t *testing.T) {
 	span := location.Span{
-		Source: location.NewSourceID("test://typeref"),
-		Start:  location.Position{Line: 5, Column: 10, Byte: 50},
-		End:    location.Position{Line: 5, Column: 20, Byte: 60},
+		Source: sourcetest.ID("test://typeref"),
+		Start:  location.Position{Line: 5, Column: 10, Offset: 50},
+		End:    location.Position{Line: 5, Column: 20, Offset: 60},
 	}
 
 	ref := schema.NewTypeRef("users", "Person", span)
@@ -26,9 +28,9 @@ func TestNewTypeRef(t *testing.T) {
 
 func TestLocalTypeRef(t *testing.T) {
 	span := location.Span{
-		Source: location.NewSourceID("test://local"),
-		Start:  location.Position{Line: 1, Column: 1, Byte: 0},
-		End:    location.Position{Line: 1, Column: 10, Byte: 10},
+		Source: sourcetest.ID("test://local"),
+		Start:  location.Position{Line: 1, Column: 1, Offset: 0},
+		End:    location.Position{Line: 1, Column: 10, Offset: 10},
 	}
 
 	ref := schema.LocalTypeRef("Customer", span)
@@ -65,9 +67,9 @@ func TestTypeRef_Name(t *testing.T) {
 
 func TestTypeRef_Span(t *testing.T) {
 	span := location.Span{
-		Source: location.NewSourceID("test://span"),
-		Start:  location.Position{Line: 10, Column: 5, Byte: 100},
-		End:    location.Position{Line: 10, Column: 15, Byte: 110},
+		Source: sourcetest.ID("test://span"),
+		Start:  location.Position{Line: 10, Column: 5, Offset: 100},
+		End:    location.Position{Line: 10, Column: 15, Offset: 110},
 	}
 
 	ref := schema.NewTypeRef("", "Type", span)
@@ -107,9 +109,9 @@ func TestTypeRef_String_Local(t *testing.T) {
 
 func TestNewDataTypeRef(t *testing.T) {
 	span := location.Span{
-		Source: location.NewSourceID("test://datatype"),
-		Start:  location.Position{Line: 3, Column: 5, Byte: 30},
-		End:    location.Position{Line: 3, Column: 15, Byte: 40},
+		Source: sourcetest.ID("test://datatype"),
+		Start:  location.Position{Line: 3, Column: 5, Offset: 30},
+		End:    location.Position{Line: 3, Column: 15, Offset: 40},
 	}
 
 	ref := schema.NewDataTypeRef("types", "Email", span)
@@ -122,9 +124,9 @@ func TestNewDataTypeRef(t *testing.T) {
 
 func TestDataTypeRef_Accessors(t *testing.T) {
 	span := location.Span{
-		Source: location.NewSourceID("test://dt-accessors"),
-		Start:  location.Position{Line: 5, Column: 1, Byte: 50},
-		End:    location.Position{Line: 5, Column: 20, Byte: 70},
+		Source: sourcetest.ID("test://dt-accessors"),
+		Start:  location.Position{Line: 5, Column: 1, Offset: 50},
+		End:    location.Position{Line: 5, Column: 20, Offset: 70},
 	}
 
 	ref := schema.NewDataTypeRef("common", "Currency", span)
@@ -155,7 +157,7 @@ func TestDataTypeRef_String_Local(t *testing.T) {
 }
 
 func TestNewResolvedTypeRef(t *testing.T) {
-	sourceID := location.NewSourceID("test://schema")
+	sourceID := sourcetest.ID("test://schema")
 	ref := schema.NewTypeRef("pkg", "Type", location.Span{})
 	id := schema.NewTypeID(sourceID, "Type")
 
@@ -167,7 +169,7 @@ func TestNewResolvedTypeRef(t *testing.T) {
 
 func TestResolvedTypeRef_Ref(t *testing.T) {
 	ref := schema.NewTypeRef("users", "Person", location.Span{})
-	id := schema.NewTypeID(location.NewSourceID("test://users"), "Person")
+	id := schema.NewTypeID(sourcetest.ID("test://users"), "Person")
 
 	resolved := schema.NewResolvedTypeRef(ref, id)
 
@@ -177,7 +179,7 @@ func TestResolvedTypeRef_Ref(t *testing.T) {
 }
 
 func TestResolvedTypeRef_ID(t *testing.T) {
-	sourceID := location.NewSourceID("test://schema")
+	sourceID := sourcetest.ID("test://schema")
 	ref := schema.NewTypeRef("", "Customer", location.Span{})
 	id := schema.NewTypeID(sourceID, "Customer")
 
@@ -208,9 +210,9 @@ func TestResolvedTypeRef_Qualifier(t *testing.T) {
 
 func TestResolvedTypeRef_Span(t *testing.T) {
 	span := location.Span{
-		Source: location.NewSourceID("test://span"),
-		Start:  location.Position{Line: 5, Column: 1, Byte: 50},
-		End:    location.Position{Line: 5, Column: 20, Byte: 70},
+		Source: sourcetest.ID("test://span"),
+		Start:  location.Position{Line: 5, Column: 1, Offset: 50},
+		End:    location.Position{Line: 5, Column: 20, Offset: 70},
 	}
 	ref := schema.NewTypeRef("", "Type", span)
 	id := schema.TypeID{}
@@ -257,7 +259,7 @@ func TestResolvedTypeRef_IsZero_NonZeroRef(t *testing.T) {
 
 func TestResolvedTypeRef_IsZero_NonZeroID(t *testing.T) {
 	ref := schema.TypeRef{}
-	id := schema.NewTypeID(location.NewSourceID("test://schema"), "Type")
+	id := schema.NewTypeID(sourcetest.ID("test://schema"), "Type")
 
 	resolved := schema.NewResolvedTypeRef(ref, id)
 
@@ -265,7 +267,7 @@ func TestResolvedTypeRef_IsZero_NonZeroID(t *testing.T) {
 }
 
 func TestResolvedTypeRef_Equal_SameTypeID(t *testing.T) {
-	sourceID := location.NewSourceID("test://schema")
+	sourceID := sourcetest.ID("test://schema")
 	id := schema.NewTypeID(sourceID, "Person")
 
 	// Same type resolved via different syntactic paths
@@ -280,8 +282,8 @@ func TestResolvedTypeRef_Equal_SameTypeID(t *testing.T) {
 }
 
 func TestResolvedTypeRef_Equal_DifferentTypeID(t *testing.T) {
-	sourceID1 := location.NewSourceID("test://schema1")
-	sourceID2 := location.NewSourceID("test://schema2")
+	sourceID1 := sourcetest.ID("test://schema1")
+	sourceID2 := sourcetest.ID("test://schema2")
 	id1 := schema.NewTypeID(sourceID1, "Person")
 	id2 := schema.NewTypeID(sourceID2, "Person")
 
@@ -296,7 +298,7 @@ func TestResolvedTypeRef_Equal_DifferentTypeID(t *testing.T) {
 }
 
 func TestResolvedTypeRef_Equal_DifferentNames(t *testing.T) {
-	sourceID := location.NewSourceID("test://schema")
+	sourceID := sourcetest.ID("test://schema")
 	id1 := schema.NewTypeID(sourceID, "Person")
 	id2 := schema.NewTypeID(sourceID, "Employee")
 
@@ -319,7 +321,7 @@ func TestResolvedTypeRef_Equal_ZeroValues(t *testing.T) {
 }
 
 func TestResolvedTypeRef_Equal_Reflexive(t *testing.T) {
-	sourceID := location.NewSourceID("test://schema")
+	sourceID := sourcetest.ID("test://schema")
 	id := schema.NewTypeID(sourceID, "Type")
 	ref := schema.NewTypeRef("", "Type", location.Span{})
 
@@ -331,19 +333,19 @@ func TestResolvedTypeRef_Equal_Reflexive(t *testing.T) {
 }
 
 func TestResolvedTypeRef_Equal_IgnoresSyntacticDifferences(t *testing.T) {
-	sourceID := location.NewSourceID("test://common")
+	sourceID := sourcetest.ID("test://common")
 	id := schema.NewTypeID(sourceID, "Entity")
 
 	// Different spans (different source locations)
 	span1 := location.Span{
-		Source: location.NewSourceID("test://file1"),
-		Start:  location.Position{Line: 1, Column: 1, Byte: 0},
-		End:    location.Position{Line: 1, Column: 10, Byte: 10},
+		Source: sourcetest.ID("test://file1"),
+		Start:  location.Position{Line: 1, Column: 1, Offset: 0},
+		End:    location.Position{Line: 1, Column: 10, Offset: 10},
 	}
 	span2 := location.Span{
-		Source: location.NewSourceID("test://file2"),
-		Start:  location.Position{Line: 5, Column: 5, Byte: 50},
-		End:    location.Position{Line: 5, Column: 15, Byte: 60},
+		Source: sourcetest.ID("test://file2"),
+		Start:  location.Position{Line: 5, Column: 5, Offset: 50},
+		End:    location.Position{Line: 5, Column: 15, Offset: 60},
 	}
 
 	// Different qualifiers (one local, one via import alias)
@@ -359,11 +361,11 @@ func TestResolvedTypeRef_Equal_IgnoresSyntacticDifferences(t *testing.T) {
 
 func TestResolvedTypeRefFromType_SameSchema(t *testing.T) {
 	// Type and viewing perspective are in the same schema → no qualifier
-	sourceID := location.NewSourceID("test://app")
+	sourceID := sourcetest.ID("test://app")
 	span := location.Span{
 		Source: sourceID,
-		Start:  location.Position{Line: 1, Column: 1, Byte: 0},
-		End:    location.Position{Line: 1, Column: 10, Byte: 10},
+		Start:  location.Position{Line: 1, Column: 1, Offset: 0},
+		End:    location.Position{Line: 1, Column: 10, Offset: 10},
 	}
 
 	typ := schema.TestNewType("User", sourceID, span, "", false, false)
@@ -378,11 +380,11 @@ func TestResolvedTypeRefFromType_SameSchema(t *testing.T) {
 
 func TestResolvedTypeRefFromType_DifferentSchema(t *testing.T) {
 	// Type is in app schema but viewing from common schema → uses schema name as qualifier
-	appSourceID := location.NewSourceID("test://app")
+	appSourceID := sourcetest.ID("test://app")
 	span := location.Span{
 		Source: appSourceID,
-		Start:  location.Position{Line: 1, Column: 1, Byte: 0},
-		End:    location.Position{Line: 1, Column: 10, Byte: 10},
+		Start:  location.Position{Line: 1, Column: 1, Offset: 0},
+		End:    location.Position{Line: 1, Column: 10, Offset: 10},
 	}
 
 	typ := schema.TestNewType("User", appSourceID, span, "", false, false)
@@ -396,11 +398,11 @@ func TestResolvedTypeRefFromType_DifferentSchema(t *testing.T) {
 }
 
 func TestResolvedTypeRefFromType_PreservesTypeID(t *testing.T) {
-	sourceID := location.NewSourceID("test://schema")
+	sourceID := sourcetest.ID("test://schema")
 	span := location.Span{
 		Source: sourceID,
-		Start:  location.Position{Line: 5, Column: 1, Byte: 40},
-		End:    location.Position{Line: 5, Column: 20, Byte: 60},
+		Start:  location.Position{Line: 5, Column: 1, Offset: 40},
+		End:    location.Position{Line: 5, Column: 20, Offset: 60},
 	}
 
 	typ := schema.TestNewType("Entity", sourceID, span, "", false, false)
@@ -414,11 +416,11 @@ func TestResolvedTypeRefFromType_PreservesTypeID(t *testing.T) {
 }
 
 func TestResolvedTypeRefFromType_PreservesSpan(t *testing.T) {
-	sourceID := location.NewSourceID("test://schema")
+	sourceID := sourcetest.ID("test://schema")
 	span := location.Span{
 		Source: sourceID,
-		Start:  location.Position{Line: 10, Column: 5, Byte: 100},
-		End:    location.Position{Line: 10, Column: 25, Byte: 120},
+		Start:  location.Position{Line: 10, Column: 5, Offset: 100},
+		End:    location.Position{Line: 10, Column: 25, Offset: 120},
 	}
 
 	typ := schema.TestNewType("Person", sourceID, span, "", false, false)

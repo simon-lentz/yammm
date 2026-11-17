@@ -4,10 +4,11 @@ import (
 	"slices"
 	"testing"
 
+	"github.com/simon-lentz/yammm/internal/yammmtest/sourcetest"
+
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/internal/parse"
 	"github.com/simon-lentz/yammm/internal/raceskip"
-	"github.com/simon-lentz/yammm/location"
 )
 
 // The loader's Enum holds the values the parser kept, with no fault, and is
@@ -15,7 +16,7 @@ import (
 // only the constraint it returns.
 func TestSchemaParser_TakesTheParsersEnumValues(t *testing.T) {
 	src := "schema \"s\"\n\ntype Kind = Enum[\"a\", \"b\", \"c\", \"d\", \"e\", \"f\", \"g\", \"h\", \"i\"]\n"
-	id := location.NewSourceID("test://s.yammm")
+	id := sourcetest.ID("test://s.yammm")
 	file, issues := parse.Parse([]byte(src), id)
 	if len(issues) != 0 {
 		t.Fatalf("parse: %v", issues)

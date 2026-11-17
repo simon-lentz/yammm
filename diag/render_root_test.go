@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/simon-lentz/yammm/internal/yammmtest/sourcetest"
+
 	"github.com/simon-lentz/yammm/location"
 )
 
@@ -98,6 +100,14 @@ func TestModuleRoot_TextLocations(t *testing.T) {
 			},
 		},
 		{
+			name: "a directory whose name starts with two dots",
+			setup: func(t *testing.T) (string, location.SourceID, string) {
+				t.Helper()
+				dir := mkdir(t, filepath.Join(base, "dots"))
+				return dir, fileID(t, filepath.Join(dir, "..x", "a.yammm")), "..x/a.yammm"
+			},
+		},
+		{
 			name: "a root reached through a symlink",
 			setup: func(t *testing.T) (string, location.SourceID, string) {
 				t.Helper()
@@ -152,7 +162,7 @@ func TestModuleRoot_TextLocations(t *testing.T) {
 		{
 			name: "a synthetic source",
 			setup: func(*testing.T) (string, location.SourceID, string) {
-				return base, location.NewSourceID("test://a.yammm"), "test://a.yammm"
+				return base, sourcetest.ID("test://a.yammm"), "test://a.yammm"
 			},
 		},
 		{
@@ -173,7 +183,7 @@ func TestModuleRoot_TextLocations(t *testing.T) {
 			}
 			root, src, want := row.setup(t)
 			out := formatIssue(NewRenderer(WithModuleRoot(root)),
-				NewIssue(Error, E_SYNTAX, "msg").WithSpan(location.PointWithByte(src, 1, 1, -1)).Build())
+				NewIssue(Error, E_SYNTAX, "msg").WithSpan(location.Span{Source: src, Start: location.Position{Line: 1, Column: 1}, End: location.Position{Line: 1, Column: 1}}).Build())
 			got, _, _ := strings.Cut(out, ": error[")
 			if want += ":1:1"; got != want {
 				t.Errorf("location under root %q\n got %q\nwant %q", root, got, want)
@@ -216,8 +226,8 @@ func TestRenderContracts(t *testing.T) {
 				}
 				c := NewCollector(0)
 				c.Collect(NewIssue(Error, E_SYNTAX, "msg").
-					WithSpan(location.PointWithByte(id, 1, 1, -1)).
-					WithRelated(location.RelatedInfo{Message: "here", Span: location.PointWithByte(id, 2, 1, -1)}).
+					WithSpan(location.Span{Source: id, Start: location.Position{Line: 1, Column: 1}, End: location.Position{Line: 1, Column: 1}}).
+					WithRelated(RelatedInfo{Message: "here", Span: location.Span{Source: id, Start: location.Position{Line: 2, Column: 1}, End: location.Position{Line: 2, Column: 1}}}).
 					Build())
 				type span struct {
 					Source string `json:"source"`

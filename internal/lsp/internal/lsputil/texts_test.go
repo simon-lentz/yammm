@@ -4,6 +4,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/simon-lentz/yammm/internal/yammmtest/sourcetest"
+
 	"github.com/simon-lentz/yammm/location"
 )
 
@@ -16,8 +18,8 @@ const markedLines = testSignature + "aé\U0001F600b\ncd\n"
 func byteSpan(id location.SourceID, line, startByte, endByte int) location.Span {
 	return location.Span{
 		Source: id,
-		Start:  location.NewPosition(line, 1, startByte),
-		End:    location.NewPosition(line, 1, endByte),
+		Start:  location.Position{Line: line, Column: 1, Offset: startByte},
+		End:    location.Position{Line: line, Column: 1, Offset: endByte},
 	}
 }
 
@@ -44,8 +46,8 @@ func characters(t *testing.T, texts *Texts, span location.Span) [2]int {
 func TestTexts_AFileIsCountedFromAfterItsMark(t *testing.T) {
 	t.Parallel()
 
-	sent := location.NewSourceID("test://sent.yammm")
-	file := location.NewSourceID("test://file.yammm")
+	sent := sourcetest.ID("test://sent.yammm")
+	file := sourcetest.ID("test://file.yammm")
 	texts := NewTexts()
 	mustRegister(t, texts.Register, sent, markedLines)
 	mustRegister(t, texts.RegisterFile, file, markedLines)
@@ -94,7 +96,7 @@ func TestTexts_AFileIsCountedFromAfterItsMark(t *testing.T) {
 func TestTexts_CharacterZeroOfAMarkedFileIsTheByteAfterTheMark(t *testing.T) {
 	t.Parallel()
 
-	file := location.NewSourceID("test://file.yammm")
+	file := sourcetest.ID("test://file.yammm")
 	texts := NewTexts()
 	mustRegister(t, texts.RegisterFile, file, markedLines)
 
@@ -102,7 +104,7 @@ func TestTexts_CharacterZeroOfAMarkedFileIsTheByteAfterTheMark(t *testing.T) {
 		t.Errorf("ByteOffsetFromLSP(0, 0) = %d, %v, want %d", got, ok, len(testSignature))
 	}
 	// The position's column is the schema's own: it counts the mark.
-	want := location.NewPosition(1, 2, len(testSignature))
+	want := location.Position{Line: 1, Column: 2, Offset: len(testSignature)}
 	if got, ok := PositionFromLSP(texts, file, 0, 0); !ok || got != want {
 		t.Errorf("PositionFromLSP(0, 0) = %v, %v, want %v", got, ok, want)
 	}
@@ -111,7 +113,7 @@ func TestTexts_CharacterZeroOfAMarkedFileIsTheByteAfterTheMark(t *testing.T) {
 func TestTexts_OnlyTheFirstMarkOfAFileIsDecodedAway(t *testing.T) {
 	t.Parallel()
 
-	file := location.NewSourceID("test://twice.yammm")
+	file := sourcetest.ID("test://twice.yammm")
 	texts := NewTexts()
 	mustRegister(t, texts.RegisterFile, file, testSignature+testSignature+"a\n")
 
@@ -129,7 +131,7 @@ func TestTexts_AFileThatDoesNotStartWithAMarkIsCountedFromItsFirstByte(t *testin
 		"a mark past the first byte":    "a" + testSignature + "b\n",
 		"a mark at the start of line 2": "a\n" + testSignature + "b\n",
 	} {
-		file := location.NewSourceID("test://" + strings.ReplaceAll(name, " ", "-") + ".yammm")
+		file := sourcetest.ID("test://" + strings.ReplaceAll(name, " ", "-") + ".yammm")
 		texts := NewTexts()
 		mustRegister(t, texts.RegisterFile, file, content)
 
@@ -142,8 +144,8 @@ func TestTexts_AFileThatDoesNotStartWithAMarkIsCountedFromItsFirstByte(t *testin
 func TestTexts_ASourceKeepsTheOriginItWasFirstRegisteredWith(t *testing.T) {
 	t.Parallel()
 
-	sentFirst := location.NewSourceID("test://sent-first.yammm")
-	fileFirst := location.NewSourceID("test://file-first.yammm")
+	sentFirst := sourcetest.ID("test://sent-first.yammm")
+	fileFirst := sourcetest.ID("test://file-first.yammm")
 	texts := NewTexts()
 	mustRegister(t, texts.Register, sentFirst, markedLines)
 	mustRegister(t, texts.RegisterFile, sentFirst, markedLines)
@@ -161,7 +163,7 @@ func TestTexts_ASourceKeepsTheOriginItWasFirstRegisteredWith(t *testing.T) {
 func TestTexts_RegisterFileRefusesOtherContentForARegisteredSource(t *testing.T) {
 	t.Parallel()
 
-	id := location.NewSourceID("test://changed.yammm")
+	id := sourcetest.ID("test://changed.yammm")
 	texts := NewTexts()
 	mustRegister(t, texts.Register, id, "a\n")
 
@@ -180,7 +182,7 @@ func TestTexts_RegisterFileRefusesOtherContentForARegisteredSource(t *testing.T)
 func TestTexts_ReadsAnswerFromTheRegisteredContent(t *testing.T) {
 	t.Parallel()
 
-	id := location.NewSourceID("test://reads.yammm")
+	id := sourcetest.ID("test://reads.yammm")
 	texts := NewTexts()
 	if texts.Has(id) || texts.Len() != 0 {
 		t.Fatalf("a new Texts holds a source: Has = %v, Len = %d", texts.Has(id), texts.Len())
@@ -197,7 +199,7 @@ func TestTexts_ReadsAnswerFromTheRegisteredContent(t *testing.T) {
 	if start, ok := texts.LineStartByte(id, 2); !ok || start != 12 {
 		t.Errorf("LineStartByte(2) = %d, %v, want 12", start, ok)
 	}
-	if got, want := texts.PositionAt(id, 12), location.NewPosition(2, 1, 12); got != want {
+	if got, want := texts.PositionAt(id, 12), (location.Position{Line: 2, Column: 1, Offset: 12}); got != want {
 		t.Errorf("PositionAt(12) = %v, want %v", got, want)
 	}
 }

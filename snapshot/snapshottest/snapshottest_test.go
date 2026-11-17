@@ -10,11 +10,11 @@ import (
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/instance"
+	"github.com/simon-lentz/yammm/instance/path"
 	"github.com/simon-lentz/yammm/internal/instancetest"
 	"github.com/simon-lentz/yammm/internal/snapparts"
 	"github.com/simon-lentz/yammm/internal/snappartstest"
 	"github.com/simon-lentz/yammm/location"
-	"github.com/simon-lentz/yammm/location/path"
 	"github.com/simon-lentz/yammm/schema"
 	"github.com/simon-lentz/yammm/snapshot/snapshottest"
 )
@@ -193,15 +193,15 @@ func TestDiffSnapshots_ComparesNumbersExactly(t *testing.T) {
 // is data loss even when the source name is empty.
 func TestDiffSnapshots_DistinguishesProvenancePresence(t *testing.T) {
 	s := testSchema(t)
-	person := func(prov location.Provenance) graph.Snapshot {
+	person := func(prov instance.Provenance) graph.Snapshot {
 		return buildSnapshot(t, s, instancetest.ValidRaw(t, s, "Person", instance.RawInstance{
 			Properties: map[string]any{"id": "p1", "name": "Alice"},
 			Provenance: prov,
 		}))
 	}
 
-	with := person(location.NewProvenance("", path.Root(), location.Span{}))
-	without := person(location.Provenance{})
+	with := person(instance.NewProvenance("", path.Root, location.Span{}))
+	without := person(instance.Provenance{})
 
 	probe := &testing.T{}
 	snapshottest.DiffSnapshots(probe, with, without)
@@ -253,19 +253,19 @@ func TestDiffSnapshots_SeparatesUnresolvedBySource(t *testing.T) {
 }
 
 // TestDiffSnapshots_ComparesProvenancePaths pins the path itself, not only
-// whether provenance is present. RawPath is populated only on a parse failure,
-// so a projection reading it alone reports every well-formed path as empty.
+// whether provenance is present: a projection that reads presence alone
+// reports two snapshots that differ only in a path as equal.
 func TestDiffSnapshots_ComparesProvenancePaths(t *testing.T) {
 	s := testSchema(t)
-	person := func(p path.Builder) graph.Snapshot {
+	person := func(p path.Path) graph.Snapshot {
 		return buildSnapshot(t, s, instancetest.ValidRaw(t, s, "Person", instance.RawInstance{
 			Properties: map[string]any{"id": "p1", "name": "Alice"},
-			Provenance: location.NewProvenance("feed", p, location.Span{}),
+			Provenance: instance.NewProvenance("feed", p, location.Span{}),
 		}))
 	}
 
 	probe := &testing.T{}
-	snapshottest.DiffSnapshots(probe, person(path.Root().Key("first")), person(path.Root().Key("second")))
+	snapshottest.DiffSnapshots(probe, person(path.Root.Key("first")), person(path.Root.Key("second")))
 	if !probe.Failed() {
 		t.Error("DiffSnapshots must detect two instances whose provenance paths differ")
 	}
@@ -279,7 +279,7 @@ func TestDiffSnapshots_ComparesComposedTreesRecursively(t *testing.T) {
 	s := compositionSchema(t)
 	// A validator gives a child its root's provenance, so a child that alone holds
 	// one comes from a document.
-	holder := func(withCard bool, accountProv location.Provenance) graph.Snapshot {
+	holder := func(withCard bool, accountProv instance.Provenance) graph.Snapshot {
 		account := snapparts.Instance{
 			TypeID: typeID(t, s, "Account"), PrimaryKey: immutable.WrapKey([]any{"a1"}),
 			Properties: immutable.WrapProperties(map[string]any{"number": "a1"}),
@@ -299,14 +299,14 @@ func TestDiffSnapshots_ComparesComposedTreesRecursively(t *testing.T) {
 	}
 
 	probe := &testing.T{}
-	snapshottest.DiffSnapshots(probe, holder(true, location.Provenance{}), holder(false, location.Provenance{}))
+	snapshottest.DiffSnapshots(probe, holder(true, instance.Provenance{}), holder(false, instance.Provenance{}))
 	if !probe.Failed() {
 		t.Error("DiffSnapshots must detect loss of a composed child's own children")
 	}
 
 	probe = &testing.T{}
-	prov := location.NewProvenance("feed", path.Root(), location.Span{})
-	snapshottest.DiffSnapshots(probe, holder(false, prov), holder(false, location.Provenance{}))
+	prov := instance.NewProvenance("feed", path.Root, location.Span{})
+	snapshottest.DiffSnapshots(probe, holder(false, prov), holder(false, instance.Provenance{}))
 	if !probe.Failed() {
 		t.Error("DiffSnapshots must detect loss of a composed child's provenance")
 	}

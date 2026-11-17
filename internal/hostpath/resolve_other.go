@@ -1,6 +1,6 @@
 //go:build !darwin && !windows
 
-package location
+package hostpath
 
 import (
 	"fmt"

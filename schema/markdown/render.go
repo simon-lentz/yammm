@@ -760,8 +760,8 @@ func (g *generator) writeInvariantList(t schema.Type, invs []schema.Invariant) {
 func (g *generator) invariantSource(inv schema.Invariant) string {
 	span := inv.Span()
 	content := g.sourceContent(span.Source)
-	end := span.End.Byte
-	text := withoutLeadingComments(string(content[span.Start.Byte:end]))
+	end := span.End.Offset
+	text := withoutLeadingComments(string(content[span.Start.Offset:end]))
 	at := end - len(text)
 	return dedent(lfLineEndings(text), lineIndent(content, at))
 }

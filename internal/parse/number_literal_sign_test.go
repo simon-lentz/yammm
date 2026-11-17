@@ -4,9 +4,10 @@ import (
 	"math"
 	"testing"
 
+	"github.com/simon-lentz/yammm/internal/yammmtest/sourcetest"
+
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/internal/expr"
-	"github.com/simon-lentz/yammm/location"
 )
 
 func invariantSource(expression string) string {
@@ -34,7 +35,7 @@ func TestParse_NumberLiteralCarriesItsSign(t *testing.T) {
 		"[-1, 1] -> Len == 2":      `(== (Len ([] -1 1) args[] params[] <absent>) 2)`,
 		"-5 -> Abs == 5":           `(== (Abs -5 args[] params[] <absent>) 5)`,
 	} {
-		file, issues := Parse([]byte(invariantSource(src)), location.NewSourceID("s.yammm"))
+		file, issues := Parse([]byte(invariantSource(src)), sourcetest.ID("s.yammm"))
 		if len(issues) != 0 {
 			t.Errorf("%q: %s", src, messages(issues))
 			continue
@@ -55,7 +56,7 @@ func TestParse_SignedLiteralHoldsTheValueItsTextNames(t *testing.T) {
 		"-1.5":                 -1.5,
 		"-0.0":                 math.Copysign(0, -1),
 	} {
-		file, issues := Parse([]byte(invariantSource("n == "+src)), location.NewSourceID("s.yammm"))
+		file, issues := Parse([]byte(invariantSource("n == "+src)), sourcetest.ID("s.yammm"))
 		if len(issues) != 0 {
 			t.Errorf("%q: %s", src, messages(issues))
 			continue
@@ -97,13 +98,13 @@ func TestParse_SignedLiteralOutOfRangeIsNamedFromItsSign(t *testing.T) {
 		},
 	} {
 		full := invariantSource(src)
-		file, issues := Parse([]byte(full), location.NewSourceID("s.yammm"))
+		file, issues := Parse([]byte(full), sourcetest.ID("s.yammm"))
 		if len(issues) != 1 || issues[0].Code() != diag.E_INVALID_INVARIANT || issues[0].Message() != want.message {
 			t.Errorf("%q: %s; want one E_INVALID_INVARIANT %q", src, messages(issues), want.message)
 			continue
 		}
 		sp := issues[0].Span()
-		if got := full[sp.Start.Byte:sp.End.Byte]; got != want.text {
+		if got := full[sp.Start.Offset:sp.End.Offset]; got != want.text {
 			t.Errorf("%q: the issue covers %q, want %q", src, got, want.text)
 		}
 		if bad := oneLiteralWithNoValue(file); bad != "" {

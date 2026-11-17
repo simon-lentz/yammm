@@ -27,6 +27,13 @@ The `yammm` CLI provides schema validation, formatting, data checking, snapshot 
 | `--format` | `text` | Diagnostic output format: `text` or `json` |
 | `--no-color` | `false` | Disable ANSI color in output |
 
+### Reading files
+
+A path that ends in a separator or a `.` element names a directory, as the
+kernel reads it: `yammm validate s.yammm/`, `gen --to cypher s.yammm/` and
+`check s.yammm d.json/` refuse a regular file so named at exit 3, naming the path
+and `not a directory`. v0.21.1's `validate s.yammm/` read the file.
+
 ### Writing files
 
 Every command that writes a file you name — `--output`, `-o`, `snapshot save
@@ -38,7 +45,8 @@ directory `link` reaches. The path's symlinks are then followed, each link's own
 as the kernel follows it, so a link survives and the file it names is written. A
 regular file, or one that does not exist yet, is replaced atomically: the
 content is staged beside it and renamed over it, so an interrupted write leaves
-the previous file. A new file is created at `0600` on Unix (Windows honours
+the previous file. A path that ends in a separator or a `.` element names a
+directory, so `-o snap.ys/` writes no file. A new file is created at `0600` on Unix (Windows honours
 only a mode's write bit); an existing one keeps its permission bits, and loses setuid, setgid and sticky. A FIFO, a device,
 `/dev/stdin`, `/dev/stdout`, `/dev/stderr` or `/dev/fd/N` is written through, continuing its
 stream, however the path reaches that directory: through a link to `/dev`, or
@@ -79,7 +87,10 @@ modify files in place.
 
 `--check` writes nothing. It prints the path of every unformatted file, one per
 line, as `gofmt -l` does, and exits 1 when the list is not empty, which `gofmt -l`
-does not. A pre-commit hook needs only that exit code. Every path is checked, so one
+does not. Where `gofmt -l` prints a path's bytes, `--check` writes a control
+character, DEL, a bidi control or a byte that is not valid UTF-8 in a path as
+the text renderer writes it in a diagnostic, so a file's name cannot act on the
+terminal. A pre-commit hook needs only that exit code. Every path is checked, so one
 run reports every offender. `--check` and `--write` together are a usage error
 (exit 2). A file the grammar does not match, or that holds an escape the
 language does not have outside an invariant expression or an annotation
@@ -321,12 +332,12 @@ command prints, and names what some commands find and do not print.
   root is.
 - **A schema that passes can still print.** The `-_`-in-a-constraint-bound
   warning (`E_INVALID_CONSTRAINT`, "minus sign before
-  '_' (unbounded) has no effect") is one. `yammm snapshot verify`,
-  `yammm snapshot info` without `--header-only` or `--dir`, and
-  `yammm snapshot save --into` print the
-  snapshot decoder's `W_SNAPSHOT_PATH_FALLBACK`.
-  `E_SNAPSHOT_UNSUPPORTED_HASH_ALGORITHM` is an Error on
-  these body-reading commands: the document is refused, not warned about.
+  '_' (unbounded) has no effect") is one. `yammm snapshot verify
+  --revalidate` reports what the revalidation finds as Warnings.
+  `E_SNAPSHOT_UNSUPPORTED_HASH_ALGORITHM` is an Error on `yammm snapshot
+  verify`, `yammm snapshot info` without `--header-only` or `--dir`, and
+  `yammm snapshot save --into`, which read the body: the document is refused,
+  not warned about.
   `yammm snapshot info --header-only` and `--dir` read the header and the types
   table alone and report it as a Warning. `yammm snapshot update-metadata` reports that Warning
   from its header read, then refuses the document with the Error.
@@ -342,4 +353,7 @@ a clean run included, so a consumer parses stderr unconditionally. A `help`,
 topic no command answers, and `completion` given no shell or one it does not
 know, exit 2 and write the refusal as any usage error. A failure that is not itself a diagnostic — a bad flag, an
 unreadable path, a lost connection — is inside that document as an
-`E_COMMAND_FAILED` error whose `exit_code` detail is the process exit code.
+`E_COMMAND_FAILED` error whose `exit_code` detail is the process exit code. A
+diagnostic's span is `{"source", "start", "end"}`, and each position is
+`{"line", "column", "offset"}`, `offset` being the 0-based byte offset; v0.21.1
+named it `"byte"`.

@@ -8,11 +8,11 @@ import (
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/instance"
+	"github.com/simon-lentz/yammm/instance/path"
 	"github.com/simon-lentz/yammm/internal/instancetest"
 	"github.com/simon-lentz/yammm/internal/snapparts"
 	"github.com/simon-lentz/yammm/internal/snappartstest"
 	"github.com/simon-lentz/yammm/location"
-	"github.com/simon-lentz/yammm/location/path"
 	"github.com/simon-lentz/yammm/schema"
 	"github.com/simon-lentz/yammm/snapshot"
 )
@@ -85,7 +85,7 @@ func TestLoad_ProvenanceSurvivesOnlyWhenTheDocumentHadOne(t *testing.T) {
 	s := dropReasonSchema(t)
 	targetType, _ := s.Type("Target")
 
-	build := func(prov location.Provenance) graph.Snapshot {
+	build := func(prov instance.Provenance) graph.Snapshot {
 		t.Helper()
 		snap := snappartstest.Loaded(t, s, snapparts.Parts{
 			Types: []schema.TypeID{targetType.ID()},
@@ -114,7 +114,7 @@ func TestLoad_ProvenanceSurvivesOnlyWhenTheDocumentHadOne(t *testing.T) {
 	}
 
 	// With a provenance in the document: one comes back, and its span is zero.
-	written := location.NewProvenance("a.json", path.Root(), location.Span{Start: location.Position{Line: 7, Column: 3}})
+	written := instance.NewProvenance("a.json", path.Root, location.Span{Start: location.Position{Line: 7, Column: 3}})
 	got := roundTrip(build(written)).Provenance()
 	if got.IsZero() {
 		t.Fatal("a document whose instance carried a provenance loaded without one")
@@ -127,7 +127,7 @@ func TestLoad_ProvenanceSurvivesOnlyWhenTheDocumentHadOne(t *testing.T) {
 	}
 
 	// With none: none comes back, which the unconditional claim denied.
-	if p := roundTrip(build(location.Provenance{})).Provenance(); !p.IsZero() {
+	if p := roundTrip(build(instance.Provenance{})).Provenance(); !p.IsZero() {
 		t.Errorf("a document whose instance carried no provenance loaded with %v", p)
 	}
 }

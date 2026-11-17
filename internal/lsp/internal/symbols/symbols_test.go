@@ -4,6 +4,8 @@ import (
 	"context"
 	"testing"
 
+	"github.com/simon-lentz/yammm/internal/yammmtest/sourcetest"
+
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -114,10 +116,9 @@ type Target {
 
 	idx := symbols.BuildSymbolIndex(s)
 
-	// Position on the type declaration line (line 3: "type Target {").
-	// Byte must be -1 (unknown) to force line/column comparison;
-	// a zero Byte would be interpreted as byte offset 0.
-	sym := idx.SymbolAtPosition(location.Position{Line: 3, Column: 5, Byte: -1})
+	// Position on the type declaration line (line 3: "type Target {"), which
+	// starts at byte 15; Contains compares offsets.
+	sym := idx.SymbolAtPosition(location.Position{Line: 3, Column: 5, Offset: 19})
 	require.NotNil(t, sym, "SymbolAtPosition() returned nil")
 	assert.Equal(t, "Target", sym.Name)
 }
@@ -133,7 +134,7 @@ func TestReferenceAtPosition_Empty(t *testing.T) {
 func TestSnapshot_SymbolIndexAt(t *testing.T) {
 	t.Parallel()
 
-	sourceID := location.NewSourceID("test://snap.yammm")
+	sourceID := sourcetest.ID("test://snap.yammm")
 	idx := &symbols.SymbolIndex{
 		Symbols:    []symbols.Symbol{{Name: "Test", Kind: symbols.SymbolType}},
 		References: []symbols.ReferenceSymbol{},
@@ -150,7 +151,7 @@ func TestSnapshot_SymbolIndexAt(t *testing.T) {
 	assert.Equal(t, idx, got, "SymbolIndexAt() returned wrong index")
 
 	// Should return nil for unknown source
-	unknownID := location.NewSourceID("test://unknown.yammm")
+	unknownID := sourcetest.ID("test://unknown.yammm")
 	got = snapshot.SymbolIndexAt(unknownID)
 	assert.Nil(t, got, "SymbolIndexAt(unknown) should return nil")
 
@@ -163,7 +164,7 @@ func TestSnapshot_SymbolIndexAt(t *testing.T) {
 func TestSnapshot_FindSymbolByName(t *testing.T) {
 	t.Parallel()
 
-	sourceID := location.NewSourceID("test://find.yammm")
+	sourceID := sourcetest.ID("test://find.yammm")
 	idx := &symbols.SymbolIndex{
 		Symbols: []symbols.Symbol{
 			{Name: "Person", Kind: symbols.SymbolType},
@@ -201,7 +202,7 @@ func TestSnapshot_ResolveTypeReference_Nil(t *testing.T) {
 	t.Parallel()
 
 	var snapshot *analysis.Snapshot
-	sourceID := location.NewSourceID("test://ref.yammm")
+	sourceID := sourcetest.ID("test://ref.yammm")
 
 	sym := snapshot.ResolveTypeReference(nil, sourceID)
 	assert.Nil(t, sym, "ResolveTypeReference(nil) should return nil")
@@ -210,8 +211,8 @@ func TestSnapshot_ResolveTypeReference_Nil(t *testing.T) {
 func TestSnapshot_ResolveTypeReference_Local(t *testing.T) {
 	t.Parallel()
 
-	sourceID := location.NewSourceID("test://local.yammm")
-	typeSpan := location.RangeWithBytes(sourceID, 5, 1, -1, 10, 1, -1)
+	sourceID := sourcetest.ID("test://local.yammm")
+	typeSpan := location.Span{Source: sourceID, Start: location.Position{Line: 5, Column: 1}, End: location.Position{Line: 10, Column: 1}}
 
 	idx := &symbols.SymbolIndex{
 		Symbols: []symbols.Symbol{
@@ -240,7 +241,7 @@ func TestSnapshot_ResolveTypeReference_Local(t *testing.T) {
 func TestIsSmaller(t *testing.T) {
 	t.Parallel()
 
-	sourceID := location.NewSourceID("test://smaller.yammm")
+	sourceID := sourcetest.ID("test://smaller.yammm")
 
 	tests := []struct {
 		name   string
@@ -249,20 +250,20 @@ func TestIsSmaller(t *testing.T) {
 	}{
 		{
 			name:   "fewer lines is smaller",
-			a:      location.RangeWithBytes(sourceID, 5, 1, -1, 6, 1, -1),  // 1 line
-			b:      location.RangeWithBytes(sourceID, 1, 1, -1, 10, 1, -1), // 9 lines
+			a:      location.Span{Source: sourceID, Start: location.Position{Line: 5, Column: 1}, End: location.Position{Line: 6, Column: 1}},
+			b:      location.Span{Source: sourceID, Start: location.Position{Line: 1, Column: 1}, End: location.Position{Line: 10, Column: 1}},
 			expect: true,
 		},
 		{
 			name:   "same lines, narrower columns is smaller",
-			a:      location.RangeWithBytes(sourceID, 5, 5, -1, 5, 15, -1),  // 10 cols
-			b:      location.RangeWithBytes(sourceID, 5, 1, -1, 5, 100, -1), // 99 cols
+			a:      location.Span{Source: sourceID, Start: location.Position{Line: 5, Column: 5}, End: location.Position{Line: 5, Column: 15}},
+			b:      location.Span{Source: sourceID, Start: location.Position{Line: 5, Column: 1}, End: location.Position{Line: 5, Column: 100}},
 			expect: true,
 		},
 		{
 			name:   "more lines is not smaller",
-			a:      location.RangeWithBytes(sourceID, 1, 1, -1, 20, 1, -1),
-			b:      location.RangeWithBytes(sourceID, 5, 1, -1, 6, 1, -1),
+			a:      location.Span{Source: sourceID, Start: location.Position{Line: 1, Column: 1}, End: location.Position{Line: 20, Column: 1}},
+			b:      location.Span{Source: sourceID, Start: location.Position{Line: 5, Column: 1}, End: location.Position{Line: 6, Column: 1}},
 			expect: false,
 		},
 	}
@@ -343,8 +344,8 @@ func TestSpanToLSPRange_Conversion(t *testing.T) {
 	t.Parallel()
 
 	sources := lsputil.NewTexts()
-	sourceID := location.NewSourceID("test://range.yammm")
-	span := location.RangeWithBytes(sourceID, 5, 10, -1, 7, 20, -1) // 1-based
+	sourceID := sourcetest.ID("test://range.yammm")
+	span := location.Span{Source: sourceID, Start: location.Position{Line: 5, Column: 10}, End: location.Position{Line: 7, Column: 20}} // 1-based
 
 	// SpanToLSPRange falls back to rune column conversion when source is not registered
 	start, end, ok := lsputil.SpanToLSPRange(sources, span)
@@ -469,8 +470,8 @@ type User {
 func TestSnapshot_ResolveTypeReference_DataType(t *testing.T) {
 	t.Parallel()
 
-	sourceID := location.NewSourceID("test://resolve.yammm")
-	dtSpan := location.RangeWithBytes(sourceID, 3, 1, -1, 3, 30, -1)
+	sourceID := sourcetest.ID("test://resolve.yammm")
+	dtSpan := location.Span{Source: sourceID, Start: location.Position{Line: 3, Column: 1}, End: location.Position{Line: 3, Column: 30}}
 
 	idx := &symbols.SymbolIndex{
 		Symbols: []symbols.Symbol{
@@ -503,7 +504,7 @@ func TestSnapshot_ResolveTypeReference_DataType_NotType(t *testing.T) {
 	// Verify that RefDataType does NOT resolve to SymbolType
 	t.Parallel()
 
-	sourceID := location.NewSourceID("test://nottype.yammm")
+	sourceID := sourcetest.ID("test://nottype.yammm")
 
 	idx := &symbols.SymbolIndex{
 		Symbols: []symbols.Symbol{

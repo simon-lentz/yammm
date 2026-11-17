@@ -8,8 +8,8 @@ import (
 
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/instance"
+	"github.com/simon-lentz/yammm/instance/path"
 	"github.com/simon-lentz/yammm/location"
-	"github.com/simon-lentz/yammm/location/path"
 	"github.com/simon-lentz/yammm/schema"
 	"github.com/simon-lentz/yammm/snapshot"
 )
@@ -25,11 +25,11 @@ func duplicateOrderSchema(t *testing.T) schema.Schema {
 
 // marshalDuplicates adds one root and then a rejected copy of it per provenance,
 // in the order given, and returns the document.
-func marshalDuplicates(t *testing.T, s schema.Schema, provs []location.Provenance) []byte {
+func marshalDuplicates(t *testing.T, s schema.Schema, provs []instance.Provenance) []byte {
 	t.Helper()
 	g := graph.New(s)
 	v := instance.NewValidator(s)
-	add := func(prov location.Provenance) {
+	add := func(prov instance.Provenance) {
 		t.Helper()
 		valid, res := v.ValidateOne(t.Context(), "T", instance.RawInstance{Properties: map[string]any{"id": "k"}, Provenance: prov})
 		if valid.IsZero() {
@@ -37,7 +37,7 @@ func marshalDuplicates(t *testing.T, s schema.Schema, provs []location.Provenanc
 		}
 		g.Add(t.Context(), valid)
 	}
-	add(location.NewProvenance("root.json", path.Root(), location.Span{}))
+	add(instance.NewProvenance("root.json", path.Root, location.Span{}))
 	for _, prov := range provs {
 		add(prov)
 	}
@@ -59,9 +59,9 @@ func TestMarshal_DuplicateOrderIgnoresAddOrder(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
-			var provs []location.Provenance
+			var provs []instance.Provenance
 			for i := range 30 {
-				provs = append(provs, location.NewProvenance("rows.json", path.Root().Index(i), span(i)))
+				provs = append(provs, instance.NewProvenance("rows.json", path.Root.Index(i), span(i)))
 			}
 			want := marshalDuplicates(t, s, provs)
 			slices.Reverse(provs)
@@ -76,9 +76,9 @@ func TestMarshal_DuplicateOrderIgnoresAddOrder(t *testing.T) {
 func TestMarshal_ALoadKeepsTheBytesOfManyDuplicates(t *testing.T) {
 	t.Parallel()
 	s := duplicateOrderSchema(t)
-	var provs []location.Provenance
+	var provs []instance.Provenance
 	for i := range 30 {
-		provs = append(provs, location.NewProvenance("rows.json", path.Root().Index(i),
+		provs = append(provs, instance.NewProvenance("rows.json", path.Root.Index(i),
 			location.Span{Start: location.Position{Line: i + 1, Column: 1}}))
 	}
 	want := marshalDuplicates(t, s, provs)

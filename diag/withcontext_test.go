@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/simon-lentz/yammm/internal/yammmtest/sourcetest"
+
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/internal/yammmtest"
 	"github.com/simon-lentz/yammm/location"
@@ -272,8 +274,8 @@ func TestContextualError_LogValue_IssuesArrayShape(t *testing.T) {
 func TestContextualError_LogValue_AttributeGolden(t *testing.T) {
 	t.Parallel()
 	// Build a full-shape issue: span, path, code, hint, details.
-	source := location.NewSourceID("test://schema.yammm")
-	span := location.PointWithByte(source, 10, 4, -1)
+	source := sourcetest.ID("test://schema.yammm")
+	span := location.Span{Source: source, Start: location.Position{Line: 10, Column: 4}, End: location.Position{Line: 10, Column: 4}}
 	issue := diag.NewIssue(diag.Error, testCodeError, "full-shape issue").
 		WithSpan(span).
 		WithPath("data.json", "$.Foo[0].bar").

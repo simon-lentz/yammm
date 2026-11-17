@@ -16,8 +16,9 @@ import (
 	"testing"
 	"unicode/utf8"
 
+	"github.com/simon-lentz/yammm/internal/yammmtest/sourcetest"
+
 	"github.com/simon-lentz/yammm/internal/parse"
-	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -59,17 +60,17 @@ func TestSpans_ByteOffsetsAreNotRuneIndices(t *testing.T) {
 
 func TestSpans_EndIsExclusive(t *testing.T) {
 	t.Parallel()
-	file, issues := parse.Parse([]byte(multibyteSource), location.NewSourceID("m.yammm"))
+	file, issues := parse.Parse([]byte(multibyteSource), sourcetest.ID("m.yammm"))
 	if len(issues) != 0 {
 		t.Fatalf("fixture does not parse cleanly: %v", issues)
 	}
 
 	span := file.Types[0].Properties[1].Constraint.EnumLits[0].Span
-	width := span.End.Byte - span.Start.Byte
+	width := span.End.Offset - span.Start.Offset
 	if want := len(`"日"`); width != want {
 		t.Errorf("enum-value span width = %d bytes, want %d — End must be exclusive", width, want)
 	}
-	if got := multibyteSource[span.Start.Byte:span.End.Byte]; got != `"日"` {
+	if got := multibyteSource[span.Start.Offset:span.End.Offset]; got != `"日"` {
 		t.Errorf("enum-value span slices to %q, want the quoted value", got)
 	}
 }
@@ -80,7 +81,7 @@ func TestSpans_EndIsExclusive(t *testing.T) {
 // its own line, which is the only shape where the two counts disagree.
 func TestSpans_ColumnsCountRunes(t *testing.T) {
 	t.Parallel()
-	file, issues := parse.Parse([]byte(multibyteSource), location.NewSourceID("m.yammm"))
+	file, issues := parse.Parse([]byte(multibyteSource), sourcetest.ID("m.yammm"))
 	if len(issues) != 0 {
 		t.Fatalf("fixture does not parse cleanly: %v", issues)
 	}
@@ -161,17 +162,17 @@ func TestSpans_DiagnosticSpansSliceBackToSource(t *testing.T) {
 		if span.IsZero() {
 			continue
 		}
-		if !span.Start.HasByte() {
+		if !span.Start.IsValid() {
 			t.Errorf("%s span has no byte offset: %v", iss.Code(), span)
 			continue
 		}
-		if span.Start.Byte < 0 || span.End.Byte > len(src) || span.End.Byte < span.Start.Byte {
+		if span.Start.Offset < 0 || span.End.Offset > len(src) || span.End.Offset < span.Start.Offset {
 			t.Errorf("%s span [%d,%d) is out of range for a %d-byte source",
-				iss.Code(), span.Start.Byte, span.End.Byte, len(src))
+				iss.Code(), span.Start.Offset, span.End.Offset, len(src))
 			continue
 		}
-		if !utf8.ValidString(src[span.Start.Byte:span.End.Byte]) {
-			t.Errorf("%s span [%d,%d) splits a rune", iss.Code(), span.Start.Byte, span.End.Byte)
+		if !utf8.ValidString(src[span.Start.Offset:span.End.Offset]) {
+			t.Errorf("%s span [%d,%d) splits a rune", iss.Code(), span.Start.Offset, span.End.Offset)
 		}
 		checked++
 	}

@@ -16,6 +16,8 @@ import (
 	"syscall"
 	"unicode/utf8"
 
+	"github.com/simon-lentz/yammm/internal/hostpath"
+
 	"golang.org/x/text/unicode/norm"
 
 	"github.com/simon-lentz/yammm/diag"
@@ -77,7 +79,7 @@ func newRootLoader(moduleRoot string) (*rootLoader, error) {
 		return nil, fmt.Errorf("open module root %q: %w", moduleRoot, err)
 	}
 	// Get the canonical path for consistent SourceID construction
-	canonicalRoot, err := location.ResolveHostPath(moduleRoot)
+	canonicalRoot, err := hostpath.Resolve(moduleRoot)
 	if err != nil {
 		_ = root.Close() // best-effort cleanup; primary error is canonicalization failure
 		return nil, fmt.Errorf("canonicalize module root %q: %w", moduleRoot, err)
@@ -297,7 +299,7 @@ func Load(ctx context.Context, path string, opts ...LoadOption) (Schema, diag.Re
 		}
 	} else {
 		var err error
-		moduleRoot, err = location.ResolveHostPath(moduleRoot)
+		moduleRoot, err = hostpath.Resolve(moduleRoot)
 		if err != nil {
 			return fatalResult(fmt.Errorf("invalid module root %q: %w", cfg.moduleRoot, err), diag.Result{})
 		}
@@ -358,12 +360,10 @@ func LoadString(ctx context.Context, sourceCode, sourceName string, opts ...Load
 	if !utf8.ValidString(sourceName) {
 		return fatalResult(fmt.Errorf("source name %q: %w", sourceName, location.ErrInvalidUTF8Path), diag.Result{})
 	}
-	if err := location.ValidateSyntheticSourceID("string://" + sourceName); err != nil {
+	sourceID, err := location.NewSourceID("string://" + sourceName)
+	if err != nil {
 		return fatalResult(fmt.Errorf("source name %q: %w", sourceName, err), diag.Result{})
 	}
-
-	// Create a synthetic source ID (NewSourceID returns just SourceID, no error)
-	sourceID := location.NewSourceID("string://" + sourceName)
 
 	// Create loader and load from string. A string source has no directory,
 	// so it has no root to default to — the origin is "none", not "default".
@@ -418,7 +418,7 @@ func LoadSourcesWithEntry(ctx context.Context, sources map[string][]byte, entryP
 	// Resolve moduleRoot, so a relative key joins the host path every identity
 	// under the root is resolved from.
 	if moduleRoot != "" {
-		canonical, err := location.ResolveHostPath(moduleRoot)
+		canonical, err := hostpath.Resolve(moduleRoot)
 		if err != nil {
 			return fatalResult(fmt.Errorf("invalid module root %q: %w", moduleRoot, err), diag.Result{})
 		}
@@ -755,7 +755,7 @@ func duplicateSchemaIssue(s, prior Schema) diag.Issue {
 			s.Name(), prior.SourceID())).
 		WithSpan(s.Span()).
 		WithDetail(diag.DetailKeySchemaName, s.Name()).
-		WithRelated(location.RelatedInfo{
+		WithRelated(diag.RelatedInfo{
 			Span:    prior.Span(),
 			Message: fmt.Sprintf("%q is declared here", prior.Name()),
 		}).Build()
@@ -910,7 +910,7 @@ func (l *loader) validateResolvedImports(imports []*importDecl) {
 				WithDetail(diag.DetailKeyFirstLine, strconv.Itoa(existing.decl.Span.Start.Line)).
 				WithDetail(diag.DetailKeyDuplicateAlias, binding.decl.Alias).
 				WithDetail(diag.DetailKeyDuplicateLine, strconv.Itoa(binding.decl.Span.Start.Line)).
-				WithRelated(location.RelatedInfo{
+				WithRelated(diag.RelatedInfo{
 					Span:    existing.decl.Span,
 					Message: fmt.Sprintf("first imported here as %q", existing.decl.Alias),
 				}).Build())
@@ -1119,18 +1119,17 @@ func (l *loader) resolveImportToRelative(sourceID location.SourceID, importPath 
 // from the root otherwise — with ".yammm" added when absent. A key climbing
 // above the root keeps its leading "..". It is the loader's own rule, so a
 // generator writing embedded sources keys each one exactly as the re-load
-// will ask for it. importerKey is read as the loader reads a key, through
-// [location.NormalizeSyntheticKey], and a key or an import path the loader
-// refuses is refused.
+// will ask for it. importerKey is read by the key rule [WithSyntheticRoot]
+// states, and a key or an import path the loader refuses is refused.
 func SyntheticImportKey(importerKey, importPath string) (string, error) {
 	if err := checkImportPath(importPath); err != nil {
 		return "", err
 	}
-	importer, err := location.NormalizeSyntheticKey(importerKey)
+	importer, err := source.NormalizeSyntheticKey(importerKey)
 	if err != nil {
 		return "", fmt.Errorf("importer: %w", err)
 	}
-	key, err := location.NormalizeSyntheticKey(importFileName(importKeyText(importer, importPath)))
+	key, err := source.NormalizeSyntheticKey(importFileName(importKeyText(importer, importPath)))
 	if err != nil {
 		return "", fmt.Errorf("import %q: %w", importPath, err)
 	}
@@ -1255,13 +1254,17 @@ func (l *loader) inMemorySourceID(key string) (location.SourceID, error) {
 func (l *loader) inMemorySource(key string) (location.SourceID, string, error) {
 	if l.syntheticRoot != "" {
 		// Every derivation site reaches this line, so one key gives one identity.
-		normalized, err := location.NormalizeSyntheticKey(key)
+		normalized, err := source.NormalizeSyntheticKey(key)
 		if err != nil {
 			return location.SourceID{}, "", fmt.Errorf("under synthetic root %s: %w", l.syntheticRoot, err)
 		}
 		// The joined string is never cleaned: path.Clean would collapse the
-		// root's "//". NewSourceID skips validation, and the root was validated.
-		return location.NewSourceID(l.syntheticRoot + "/" + normalized), "", nil
+		// root's "//".
+		id, err := location.NewSourceID(l.syntheticRoot + "/" + normalized)
+		if err != nil {
+			return location.SourceID{}, "", fmt.Errorf("under synthetic root %s: %w", l.syntheticRoot, err)
+		}
+		return id, "", nil
 	}
 
 	if key == "" {
@@ -1269,7 +1272,7 @@ func (l *loader) inMemorySource(key string) (location.SourceID, string, error) {
 	}
 	hostKey := key
 	if !filepath.IsAbs(key) && l.moduleRoot != "" {
-		hostKey = filepath.Join(l.moduleRoot, key)
+		hostKey = hostpath.DirectoryForm(key, filepath.Join(l.moduleRoot, key))
 	}
 	id, host, err := l.resolveSource(hostKey)
 	if err != nil {
@@ -1321,7 +1324,7 @@ func syntheticRootForm(root string) (string, error) {
 	if !utf8.ValidString(rest) {
 		return "", errors.New("the root is not valid UTF-8")
 	}
-	// NFC first, as location.NormalizeSyntheticKey applies it to a key: two
+	// NFC first, as source.NormalizeSyntheticKey applies it to a key: two
 	// spellings of one root mint one identity, and NFC can make a refused character.
 	rest = norm.NFC.String(rest)
 	authority, rootPath, _ := strings.Cut(rest, "/")

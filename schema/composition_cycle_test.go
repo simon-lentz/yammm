@@ -80,11 +80,11 @@ part type PA extends Base {
 			if got := len(issues[0].Related()); got != tc.links {
 				t.Errorf("%d related links, want %d", got, tc.links)
 			}
-			if at := src[issues[0].Span().Start.Byte:]; !strings.HasPrefix(at, "part type PA") {
+			if at := src[issues[0].Span().Start.Offset:]; !strings.HasPrefix(at, "part type PA") {
 				t.Errorf("the issue stands at %q, want the declaration of PA", firstLine(at))
 			}
 			for _, rel := range issues[0].Related() {
-				if at := src[rel.Span.Start.Byte:]; !strings.HasPrefix(at, "*->") {
+				if at := src[rel.Span.Start.Offset:]; !strings.HasPrefix(at, "*->") {
 					t.Errorf("related %q stands at %q, want its composition", rel.Message, firstLine(at))
 				}
 			}

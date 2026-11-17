@@ -7,10 +7,12 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/simon-lentz/yammm/internal/yammmtest/sourcetest"
+
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/instance"
+	"github.com/simon-lentz/yammm/instance/path"
 	"github.com/simon-lentz/yammm/location"
-	"github.com/simon-lentz/yammm/location/path"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -269,8 +271,8 @@ func TestValidate_AnAbstractOrPartNameFailsOnAnEmptyBatch(t *testing.T) {
 func TestValidate_AnAbstractRowRefusalCarriesItsSpan(t *testing.T) {
 	t.Parallel()
 	s := loadT(t, "schema \"a\"\n\nabstract type A {\n\tid String primary\n}\n")
-	span := location.PointWithByte(location.NewSourceID("rows.json"), 7, 3, -1)
-	raw := instance.RawInstance{Properties: map[string]any{"id": "x"}, Provenance: location.NewProvenance("rows.json", path.Root(), span)}
+	span := location.Span{Source: sourcetest.ID("rows.json"), Start: location.Position{Line: 7, Column: 3}, End: location.Position{Line: 7, Column: 3}}
+	raw := instance.RawInstance{Properties: map[string]any{"id": "x"}, Provenance: instance.NewProvenance("rows.json", path.Root, span)}
 	_, res := instance.NewValidator(s).Validate(t.Context(), "A", []instance.RawInstance{raw})
 	if !res.HasCode(diag.E_ABSTRACT_TYPE) {
 		t.Fatalf("Validate = %s, want E_ABSTRACT_TYPE", res)
@@ -288,7 +290,7 @@ func TestValidate_BatchWideErrorBlamesNoRow(t *testing.T) {
 	t.Parallel()
 	s := loadT(t, "schema \"p\"\n\ntype T {\n\tid String primary\n}\n")
 	v := instance.NewValidator(s)
-	prov := location.NewProvenance("rows.json", path.Root().Index(7), location.Span{})
+	prov := instance.NewProvenance("rows.json", path.Root.Index(7), location.Span{})
 	valids, res := v.Validate(t.Context(), "NoSuchType", []instance.RawInstance{{Properties: map[string]any{"id": "x"}, Provenance: prov}})
 	if !res.HasCode(instance.ErrTypeNotFound) {
 		t.Fatalf("want E_TYPE_NOT_FOUND, got %v", codes(res))

@@ -127,7 +127,10 @@ linters:
         text: "avoid package names that conflict"
         linters:
           - revive
-      - path: "location/path/.*"
+      # The package name path is the standard library's path. A caller that
+      # needs both imports one of them under another name.
+      - path: "^instance/path/.*"
+        text: "avoid package names that conflict"
         linters:
           - revive
       # gosec G115 (integer overflow) fires on the uintptr->int file-descriptor
@@ -181,12 +184,6 @@ linters:
         linters:
           - depguard
       - path: "^instance/internal/eval/(builtins|evaluator|scope)_test\\.go$"
-        linters:
-          - depguard
-      - path: "^location/(provenance)_test\\.go$"
-        linters:
-          - depguard
-      - path: "^location/path/(builder|parse)_test\\.go$"
         linters:
           - depguard
       - path: "^internal/lsp/(completion|definition|format|helpers|hover|server|symbols|sync_handlers)_test\\.go$"

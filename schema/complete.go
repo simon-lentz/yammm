@@ -305,7 +305,7 @@ func (c *completer) indexDeclarations() {
 	c.declared = make(map[string]declaration, len(c.model.Types)+len(c.model.DataTypes))
 	c.displaced = make(map[string]bool)
 	declare := func(kind, name string, index int, span location.Span) {
-		if first, ok := c.declared[name]; ok && location.Compare(first.span, span) <= 0 {
+		if first, ok := c.declared[name]; ok && first.span.Compare(span) <= 0 {
 			return
 		}
 		c.declared[name] = declaration{kind: kind, index: index, span: span}
@@ -330,7 +330,7 @@ func (c *completer) redeclared(kind, name string, index int, span location.Span)
 	if first.kind == kind && first.index == index {
 		return false
 	}
-	related := []location.RelatedInfo{{Span: first.span, Message: "first defined here"}}
+	related := []diag.RelatedInfo{{Span: first.span, Message: "first defined here"}}
 	if first.kind == kind {
 		c.errorfRelated(span, diag.E_DUPLICATE_TYPE, related,
 			"%s %q is defined multiple times", kind, name)
@@ -512,7 +512,7 @@ func (c *completer) convertProperties(decls []*propertyDecl, ownerType string) [
 			c.collector.Collect(diag.NewIssue(diag.Error, diag.E_DUPLICATE_PROPERTY,
 				fmt.Sprintf("property %q is defined multiple times in type %q", pd.Name, ownerType)).
 				WithSpan(pd.Span).
-				WithRelated(location.RelatedInfo{
+				WithRelated(diag.RelatedInfo{
 					Span:    existing.Span,
 					Message: "first defined here",
 				}).Build())
@@ -553,7 +553,7 @@ func (c *completer) convertRelations(decls []*relationDecl, ownerType string) (a
 			c.collector.Collect(diag.NewIssue(diag.Error, diag.E_DUPLICATE_RELATION,
 				fmt.Sprintf("relation %q is defined multiple times in type %q", rd.Name, ownerType)).
 				WithSpan(rd.Span).
-				WithRelated(location.RelatedInfo{
+				WithRelated(diag.RelatedInfo{
 					Span:    existing.Span,
 					Message: "first defined here",
 				}).Build())
@@ -582,7 +582,7 @@ func (c *completer) convertRelations(decls []*relationDecl, ownerType string) (a
 					c.collector.Collect(diag.NewIssue(diag.Error, diag.E_DUPLICATE_PROPERTY,
 						fmt.Sprintf("edge property %q is defined multiple times on relation %q in type %q", pd.Name, rd.Name, ownerType)).
 						WithSpan(pd.Span).
-						WithRelated(location.RelatedInfo{Span: existing.Span, Message: "first defined here"}).Build())
+						WithRelated(diag.RelatedInfo{Span: existing.Span, Message: "first defined here"}).Build())
 					continue
 				}
 				seenProp[pd.Name] = pd
@@ -662,7 +662,7 @@ func (c *completer) convertInvariants(typeName string, decls []*invariantDecl) [
 		}
 		if prior, dup := first[id.Name]; dup {
 			c.errorfRelated(id.Span, diag.E_DUPLICATE_INVARIANT,
-				[]location.RelatedInfo{{Span: prior.Span, Message: "first declared here"}},
+				[]diag.RelatedInfo{{Span: prior.Span, Message: "first declared here"}},
 				"type %q declares invariant %q twice", typeName, id.Name)
 			continue
 		}
@@ -1224,7 +1224,7 @@ func (c *completer) errorf(span location.Span, code diag.Code, format string, ar
 // errorfRelated is [completer.errorf] for a diagnostic that points at other
 // declarations as well as its own.
 func (c *completer) errorfRelated(
-	span location.Span, code diag.Code, related []location.RelatedInfo, format string, args ...any,
+	span location.Span, code diag.Code, related []diag.RelatedInfo, format string, args ...any,
 ) {
 	c.collector.Collect(diag.NewIssue(diag.Error, code, fmt.Sprintf(format, args...)).
 		WithSpan(span).WithRelated(related...).Build())

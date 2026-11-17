@@ -6,8 +6,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/simon-lentz/yammm/internal/yammmtest/sourcetest"
+
 	"github.com/simon-lentz/yammm/diag"
-	"github.com/simon-lentz/yammm/location"
 )
 
 // decoderFaults are the messages of the diagnostics a failed decoder read
@@ -42,7 +43,7 @@ func issueWithSpan(result diag.Result, msg string, byteOffset, line, column int)
 	for issue := range result.Issues() {
 		start := issue.Span().Start
 		if issue.Code() == diag.E_DATA_PARSE && issue.Message() == msg &&
-			start.Byte == byteOffset && start.Line == line && start.Column == column {
+			start.Offset == byteOffset && start.Line == line && start.Column == column {
 			return true
 		}
 	}
@@ -56,7 +57,7 @@ func issueWithSpan(result diag.Result, msg string, byteOffset, line, column int)
 // documents put that byte away from the start of the read that failed.
 func TestParse_PlacesAFaultAtTheOffendingByte(t *testing.T) {
 	t.Parallel()
-	id := location.NewSourceID("test://data/fault.json")
+	id := sourcetest.ID("test://data/fault.json")
 	cases := []struct {
 		name         string
 		doc          string
@@ -152,7 +153,7 @@ func TestParse_PlacesAFaultAtTheOffendingByte(t *testing.T) {
 			}
 			// The parse stops at the fault: no diagnostic names a later byte.
 			for issue := range result.Issues() {
-				if at := issue.Span().Start.Byte; issue.HasSpan() && at > c.byteOffset {
+				if at := issue.Span().Start.Offset; issue.HasSpan() && at > c.byteOffset {
 					t.Errorf("%q at byte %d, past the fault at %d", issue.Message(), at, c.byteOffset)
 				}
 			}
@@ -164,7 +165,7 @@ func TestParse_PlacesAFaultAtTheOffendingByte(t *testing.T) {
 // moves the span alone: the detail keeps the decoder's own words.
 func TestParse_AFaultStillNamesWhatTheDecoderSaid(t *testing.T) {
 	t.Parallel()
-	_, result := parseForProvenance(t, location.NewSourceID("test://data/detail.json"), `{"A": [{oops}]}`)
+	_, result := parseForProvenance(t, sourcetest.ID("test://data/detail.json"), `{"A": [{oops}]}`)
 	if got := detailAt(result, "error reading array element"); !strings.Contains(got, "invalid character 'o'") {
 		t.Errorf("detail %q, want the decoder's message", got)
 	}
@@ -174,7 +175,7 @@ func TestParse_AFaultStillNamesWhatTheDecoderSaid(t *testing.T) {
 // draws one diagnostic for it, whichever read site met it.
 func TestParse_AFaultIsReportedOnce(t *testing.T) {
 	t.Parallel()
-	id := location.NewSourceID("test://data/once.json")
+	id := sourcetest.ID("test://data/once.json")
 	for _, doc := range []string{
 		`{"A": [{oops}]}`,
 		`{"A": [{"x": 1}] "B": []}`,
@@ -199,7 +200,7 @@ func TestParse_AFaultIsReportedOnce(t *testing.T) {
 // JSON draws no decoder fault, and that faultOffset reads it whole.
 func TestParse_ReadsWhatJsoncAccepts(t *testing.T) {
 	t.Parallel()
-	id := location.NewSourceID("test://data/jsonc.json")
+	id := sourcetest.ID("test://data/jsonc.json")
 	for _, doc := range []string{
 		`{"A": [,]}`,
 		`{,}`,
@@ -240,7 +241,7 @@ func TestFaultOffset_ReadsATokenTheInputCutsShort(t *testing.T) {
 // comma or a colon skips a tab and a carriage return as it skips a space.
 func TestParse_ReadStartSkipsEveryBlank(t *testing.T) {
 	t.Parallel()
-	id := location.NewSourceID("test://data/blank.json")
+	id := sourcetest.ID("test://data/blank.json")
 	cases := []struct {
 		name, doc, msg string
 		byteOffset     int
@@ -252,7 +253,7 @@ func TestParse_ReadStartSkipsEveryBlank(t *testing.T) {
 		_, result := parseForProvenance(t, id, c.doc)
 		var found bool
 		for issue := range result.Issues() {
-			if strings.HasPrefix(issue.Message(), c.msg) && issue.Span().Start.Byte == c.byteOffset {
+			if strings.HasPrefix(issue.Message(), c.msg) && issue.Span().Start.Offset == c.byteOffset {
 				found = true
 			}
 		}
@@ -264,7 +265,7 @@ func TestParse_ReadStartSkipsEveryBlank(t *testing.T) {
 	if result.HasErrors() || len(parsed["A"]) != 2 {
 		t.Fatalf("parse:%s", describe(result))
 	}
-	if got := parsed["A"][1].Provenance.Span().Start.Byte; got != 12 {
+	if got := parsed["A"][1].Provenance.Span().Start.Offset; got != 12 {
 		t.Errorf("the second instance starts at byte %d, want 12", got)
 	}
 }
@@ -273,7 +274,7 @@ func TestParse_ReadStartSkipsEveryBlank(t *testing.T) {
 // document whose one element holds a long string and then a fault, beside the
 // same document with the fault removed.
 func BenchmarkParse_FaultPlacement(b *testing.B) {
-	id := location.NewSourceID("test://data/bench.json")
+	id := sourcetest.ID("test://data/bench.json")
 	for _, size := range []int{1 << 10, 1 << 16, 1 << 20} {
 		long := strings.Repeat("x", size)
 		for _, c := range []struct{ name, doc string }{

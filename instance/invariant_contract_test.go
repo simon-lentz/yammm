@@ -5,12 +5,13 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/simon-lentz/yammm/internal/yammmtest/sourcetest"
+
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/instance/internal/eval"
 	"github.com/simon-lentz/yammm/internal/expr"
 	"github.com/simon-lentz/yammm/internal/parse"
-	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -782,7 +783,7 @@ func TestInvariantContract_RefuseRows(t *testing.T) {
 
 			// The evaluator must error, fail, or hold without reading the
 			// instance at all, which an empty instance answering alike shows.
-			file, issues := parse.Parse([]byte(src), location.NewSourceID("s.yammm"))
+			file, issues := parse.Parse([]byte(src), sourcetest.ID("s.yammm"))
 			if len(issues) != 0 {
 				t.Fatalf("the row does not parse: %v", issues)
 			}

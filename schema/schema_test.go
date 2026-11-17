@@ -4,6 +4,8 @@ import (
 	"slices"
 	"testing"
 
+	"github.com/simon-lentz/yammm/internal/yammmtest/sourcetest"
+
 	"github.com/stretchr/testify/assert"
 
 	"github.com/simon-lentz/yammm/internal/yammmtest"
@@ -46,11 +48,11 @@ func TestSchema_SettersWorkBeforeSeal(t *testing.T) {
 }
 
 func TestNewSchema(t *testing.T) {
-	sourceID := location.NewSourceID("test://schema")
+	sourceID := sourcetest.ID("test://schema")
 	span := location.Span{
 		Source: sourceID,
-		Start:  location.Position{Line: 1, Column: 1, Byte: 0},
-		End:    location.Position{Line: 50, Column: 1, Byte: 500},
+		Start:  location.Position{Line: 1, Column: 1, Offset: 0},
+		End:    location.Position{Line: 50, Column: 1, Offset: 500},
 	}
 
 	s := schema.TestNewSchema("users", sourceID, span, "User management schema")
@@ -69,7 +71,7 @@ func TestSchema_Name(t *testing.T) {
 }
 
 func TestSchema_SourceID(t *testing.T) {
-	sourceID := location.NewSourceID("test://source")
+	sourceID := sourcetest.ID("test://source")
 
 	s := schema.TestNewSchema("test", sourceID, location.Span{}, "")
 
@@ -78,16 +80,16 @@ func TestSchema_SourceID(t *testing.T) {
 
 func TestSchema_Span(t *testing.T) {
 	span := location.Span{
-		Source: location.NewSourceID("test://span"),
-		Start:  location.Position{Line: 1, Column: 1, Byte: 0},
-		End:    location.Position{Line: 100, Column: 1, Byte: 1000},
+		Source: sourcetest.ID("test://span"),
+		Start:  location.Position{Line: 1, Column: 1, Offset: 0},
+		End:    location.Position{Line: 100, Column: 1, Offset: 1000},
 	}
 
 	s := schema.TestNewSchema("test", location.SourceID{}, span, "")
 
 	result := s.Span()
 	assert.Equal(t, span.Start.Line, result.Start.Line)
-	assert.Equal(t, span.End.Byte, result.End.Byte)
+	assert.Equal(t, span.End.Offset, result.End.Offset)
 }
 
 func TestSchema_Documentation(t *testing.T) {
@@ -319,7 +321,7 @@ func TestSchema_ImportByAlias_NotFound(t *testing.T) {
 
 func TestSchema_FindImportAlias_Found(t *testing.T) {
 	s := schema.TestNewSchema("test", location.SourceID{}, location.Span{}, "")
-	resolvedID := location.NewSourceID("test://types")
+	resolvedID := sourcetest.ID("test://types")
 	imp := schema.TestNewImport("./types.yammm", "types", resolvedID, location.Span{})
 	schema.TestSetSchemaImports(s, []schema.Import{imp})
 
@@ -332,14 +334,14 @@ func TestSchema_FindImportAlias_Found(t *testing.T) {
 func TestSchema_FindImportAlias_NotFound(t *testing.T) {
 	s := schema.TestNewSchema("test", location.SourceID{}, location.Span{}, "")
 
-	alias, ok := s.FindImportAlias(location.NewSourceID("test://unknown"))
+	alias, ok := s.FindImportAlias(sourcetest.ID("test://unknown"))
 
 	assert.False(t, ok)
 	assert.Empty(t, alias)
 }
 
 func TestSchema_FindImportAlias_OwnPath(t *testing.T) {
-	sourceID := location.NewSourceID("test://self")
+	sourceID := sourcetest.ID("test://self")
 	s := schema.TestNewSchema("test", sourceID, location.Span{}, "")
 
 	alias, ok := s.FindImportAlias(sourceID)

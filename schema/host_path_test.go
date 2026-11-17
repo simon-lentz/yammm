@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/simon-lentz/yammm/internal/hostpath"
+
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/internal/yammmtest"
 	"github.com/simon-lentz/yammm/location"
@@ -277,7 +279,7 @@ func writeHostPathFile(t *testing.T, p, content string) {
 // entry and its directory is the root, and the import is left on disk.
 func loadSourcesOutcome(t *testing.T, dir string) (bool, string) {
 	t.Helper()
-	entry, err := location.ResolveHostPath(writeHostPathModule(t, dir, "rel_main.yammm"))
+	entry, err := hostpath.Resolve(writeHostPathModule(t, dir, "rel_main.yammm"))
 	if err != nil {
 		t.Fatal(err)
 	}

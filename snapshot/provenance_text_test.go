@@ -3,12 +3,14 @@ package snapshot_test
 import (
 	"testing"
 
+	"github.com/simon-lentz/yammm/instance"
+
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/immutable"
+	"github.com/simon-lentz/yammm/instance/path"
 	"github.com/simon-lentz/yammm/internal/snapparts"
 	"github.com/simon-lentz/yammm/location"
-	"github.com/simon-lentz/yammm/location/path"
 	"github.com/simon-lentz/yammm/schema"
 	"github.com/simon-lentz/yammm/snapshot"
 )
@@ -37,26 +39,26 @@ func TestMarshal_RefusesProvenanceTextThatIsNotUTF8(t *testing.T) {
 	}
 	holder, item := mustTypeID(t, s, "Holder"), mustTypeID(t, s, "Item")
 	key := immutable.WrapKey([]any{"k"})
-	root := func(p location.Provenance) snapparts.Instance {
+	root := func(p instance.Provenance) snapparts.Instance {
 		return snapparts.Instance{
 			TypeID: holder, PrimaryKey: key, Properties: immutable.WrapProperties(map[string]any{"id": "k"}), Provenance: p,
 		}
 	}
-	child := func(p location.Provenance) map[string][]snapparts.Instance {
+	child := func(p instance.Provenance) map[string][]snapparts.Instance {
 		return map[string][]snapparts.Instance{"ITEMS": {{
 			TypeID: item, PrimaryKey: key, Properties: immutable.WrapProperties(map[string]any{"code": "k"}), Provenance: p,
 		}}}
 	}
-	badName := location.NewProvenance("feed\xff", path.Root(), location.Span{})
-	badPath := location.NewProvenance("feed", path.Root(), location.Span{}).WithRawPath("$.\xff")
+	badName := instance.NewProvenance("feed\xff", path.Root, location.Span{})
+	badPath := instance.NewProvenance("feed", "$.\xff", location.Span{})
 
-	withChild := root(location.Provenance{})
+	withChild := root(instance.Provenance{})
 	withChild.Composed = child(badName)
 	for name, parts := range map[string]snapparts.Parts{
 		"a root's source name":      {Instances: []snapparts.Instance{root(badName)}},
-		"a root's raw path":         {Instances: []snapparts.Instance{root(badPath)}},
+		"a root's path":             {Instances: []snapparts.Instance{root(badPath)}},
 		"a child's source name":     {Instances: []snapparts.Instance{withChild}},
-		"a duplicate's source name": {Instances: []snapparts.Instance{root(location.Provenance{})}, Duplicates: []snapparts.Instance{root(badName)}},
+		"a duplicate's source name": {Instances: []snapparts.Instance{root(instance.Provenance{})}, Duplicates: []snapparts.Instance{root(badName)}},
 	} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()

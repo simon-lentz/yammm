@@ -48,9 +48,6 @@ func (i Import) ResolvedSourceID() location.SourceID {
 
 // ResolvedPath returns the resolved path as a string.
 func (i Import) ResolvedPath() string {
-	if cp, ok := i.resolvedSourceID.CanonicalPath(); ok {
-		return cp.String()
-	}
 	return i.resolvedSourceID.String()
 }
 

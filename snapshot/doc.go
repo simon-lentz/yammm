@@ -151,9 +151,11 @@
 // loader evaluates it: the path is cleaned, so a ".." cancels the element before
 // it rather than following a symbolic link, and a relative path that climbs out
 // of the working directory is made absolute from it as [filepath.Abs] spells
-// it. A symbolic link at the path is then followed, as a chain, and the link
-// survives: the file it names is written, and a dangling link creates that
-// file. A link's target is read as the kernel reads it: on Unix a ".." in the
+// it. The cleaning keeps a path that ends in a separator or a "." element
+// naming a directory, as the kernel reads it, so such a path is refused and no
+// file is written. A symbolic link at the path is then followed, as a chain,
+// and the link survives: the file it names is written, and a dangling link
+// creates that file. A link's target is read as the kernel reads it: on Unix a ".." in the
 // target takes the parent of the directory reached on disk, and on Windows it
 // is evaluated on the text. The staging file is made in the directory of the
 // file the rename replaces.
@@ -232,7 +234,7 @@
 //   - Error: the input is refused. Among the causes are a schema hash
 //     mismatch, an integrity check failure, a structural break, and a
 //     version, feature or type this library does not read; at [Marshal], an
-//     indent that is not JSON whitespace, or a provenance source name or raw path
+//     indent that is not JSON whitespace, or a provenance source name or path
 //     that is not valid UTF-8; and at [Marshal] and the metadata update, a
 //     metadata key or value that is not valid UTF-8
 //   - Any severity: a [WithRevalidation] finding takes the severity the
@@ -285,7 +287,7 @@
 //
 // # Dependencies
 //
-//	snapshot  ──imports──▶  graph, instance, schema, diag, location, location/path, immutable, internal/value, internal/hostpath, internal/snapparts
+//	snapshot  ──imports──▶  graph, instance, schema, diag, location, instance/path, immutable, internal/value, internal/hostpath, internal/snapparts
 //
 // The instance edge exists for [WithRevalidation], whose re-validation runs
 // the real validator, so the option's fidelity is the validator's own, and for

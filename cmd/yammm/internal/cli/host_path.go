@@ -39,7 +39,7 @@ func CheckSourceOperand(what, path string) error {
 
 // HostPath returns the path the CLI reads and writes for a path the operator
 // named, by the module's one rule for a "..": it is evaluated on the text, as
-// the schema loader and [location.ResolveHostPath] evaluate it, and every other
+// the schema loader and [location.SourceIDFromPath] evaluate it, and every other
 // component, each symbolic link included, is left to the kernel. So every
 // command reaches the file `yammm check` reads for that spelling.
 func HostPath(p string) (string, error) {

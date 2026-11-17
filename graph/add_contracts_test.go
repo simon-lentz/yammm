@@ -8,9 +8,9 @@ import (
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/instance"
+	"github.com/simon-lentz/yammm/instance/path"
 	"github.com/simon-lentz/yammm/internal/instancetest"
 	"github.com/simon-lentz/yammm/location"
-	"github.com/simon-lentz/yammm/location/path"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -49,7 +49,7 @@ func TestAdd_DuplicatePK_CarriesTheProvenanceSpan(t *testing.T) {
 	withSpan := func() instance.ValidInstance {
 		return instancetest.ValidRaw(t, s, "Parent", instance.RawInstance{
 			Properties: map[string]any{"id": "p1", "name": "Parent 1"},
-			Provenance: location.NewProvenance("people.json", path.Root().Key("people").Index(0), span),
+			Provenance: instance.NewProvenance("people.json", path.Root.Key("people").Index(0), span),
 		})
 	}
 	if res := g.Add(ctx, withSpan()); !res.OK() {

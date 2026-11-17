@@ -731,7 +731,7 @@ func TestAnnotation_Vector_OverTheBoundIsRefusedAtItsProperty(t *testing.T) {
 		res := loadStringErr(t, src)
 		wantCounts(t, res, map[diag.Code]int{diag.E_INVALID_ANNOTATION_TARGET: 1})
 		for is := range res.Issues() {
-			if at := src[is.Span().Start.Byte:]; !strings.HasPrefix(at, "v ") {
+			if at := src[is.Span().Start.Offset:]; !strings.HasPrefix(at, "v ") {
 				t.Errorf("%q: the refusal stands at %q, want the property", src, at)
 			}
 		}

@@ -7,8 +7,9 @@ import (
 
 // Span represents a half-open range [Start, End) in a source file.
 //
-// Span is a value type with exported fields. Always pass by value.
-// The zero value represents "no location"; use IsZero() to check.
+// Span is a value type with exported fields, written as a literal; nothing
+// checks that Start is not after End. The zero value represents "no location";
+// use IsZero to check.
 type Span struct {
 	// Source is the identity key for this span.
 	Source SourceID
@@ -21,65 +22,9 @@ type Span struct {
 	End Position
 }
 
-// PointWithByte creates a single-point Span where Start == End. A byte offset of
-// -1 names an unknown one.
-func PointWithByte(source SourceID, line, column, byteOffset int) Span {
-	pos := Position{Line: line, Column: column, Byte: byteOffset}
-	return Span{Source: source, Start: pos, End: pos}
-}
-
-// RangeWithBytes creates a Span with known byte offsets.
-//
-// Panics if end is before start by either measure it has: the byte offsets, or
-// the line and column where both are known. A span whose two orders disagree is
-// unsafe whichever one a reader takes — an LSP range reads the line from one
-// and the character from the other — so it is a construction bug, not a span.
-func RangeWithBytes(source SourceID, startLine, startCol, startByte, endLine, endCol, endByte int) Span {
-	start := Position{Line: startLine, Column: startCol, Byte: startByte}
-	end := Position{Line: endLine, Column: endCol, Byte: endByte}
-
-	if start.HasByte() && end.HasByte() && end.Byte < start.Byte {
-		panic(fmt.Sprintf("location.RangeWithBytes: end byte %d before start byte %d", endByte, startByte))
-	}
-	if positionBefore(end, start) {
-		panic(fmt.Sprintf("location.RangeWithBytes: end %v before start %v", end, start))
-	}
-	return Span{Source: source, Start: start, End: end}
-}
-
 // IsZero reports whether the span is the zero value.
-// A zero span has zero Source and zero Start/End positions.
 func (s Span) IsZero() bool {
-	return s.Source.IsZero() && s.Start.IsZero() && s.End.IsZero()
-}
-
-// IsPoint reports whether the span represents a single point (Start == End).
-// Uses Go struct equality, comparing all Position fields.
-func (s Span) IsPoint() bool {
-	return s.Start == s.End
-}
-
-// IsValid reports whether the span has meaningful content for conversion to
-// LSP ranges.
-//
-// A valid span has:
-//   - Non-zero Source
-//   - Known Start position (Line > 0 && Column > 0)
-//   - Known End position OR is a point span
-//
-// IsValid checks "convertible to LSP", not Start <= End.
-func (s Span) IsValid() bool {
-	if s.Source.IsZero() {
-		return false
-	}
-	if !s.Start.IsKnown() {
-		return false
-	}
-	// For non-point spans, End must also be known
-	if !s.IsPoint() && !s.End.IsKnown() {
-		return false
-	}
-	return true
+	return s == Span{}
 }
 
 // String returns a human-readable representation of the span.
@@ -96,107 +41,47 @@ func (s Span) String() string {
 	}
 
 	src := s.Source.String()
-	if s.IsPoint() {
+	if s.Start == s.End {
 		return fmt.Sprintf("%s:%s", src, s.Start.String())
 	}
 	return fmt.Sprintf("%s:%s-%s", src, s.Start.String(), s.End.String())
 }
 
-// Contains reports whether position p is within this span.
-//
-// Uses byte-based comparison when available, falls back to line/column.
-// The span is half-open: Start is inclusive, End is exclusive.
-//
-// Note: Point spans (where Start == End) contain no positions by definition
-// of the half-open interval. An LSP-style operation that must match the exact
-// position of a point span compares the positions itself.
-//
-// Precondition: Start <= End.
+// Contains reports whether position p is within this span, by byte offset.
+// The span is half-open: Start is inclusive, End is exclusive, so a point span
+// contains no position. A span or a position that is not valid contains, and
+// is contained by, nothing.
 func (s Span) Contains(p Position) bool {
-	if s.IsZero() || p.IsZero() {
+	if !s.Start.IsValid() || !s.End.IsValid() || !p.IsValid() {
 		return false
 	}
-
-	// Use byte-based comparison if all three have known bytes
-	if s.Start.HasByte() && s.End.HasByte() && p.HasByte() {
-		return p.Byte >= s.Start.Byte && p.Byte < s.End.Byte
-	}
-
-	// Fall back to line/column comparison
-	// p must be >= Start (inclusive) and < End (exclusive)
-	if positionBefore(p, s.Start) {
-		return false
-	}
-	// p must be strictly before End (half-open interval)
-	if !positionBefore(p, s.End) {
-		return false
-	}
-	return true
+	return p.Offset >= s.Start.Offset && p.Offset < s.End.Offset
 }
 
-// Compare compares two spans for ordering.
+// Compare compares s with t for ordering, as [time.Time.Compare] does: -1 if
+// s sorts before t, +1 if after, and 0 exactly when s == t, so a sort by it
+// ties nothing distinct. Two sources are equal when their texts are: a
+// synthetic name never takes the form of a file-backed identity.
 //
 // Comparison order:
 //  1. Source (string comparison via [SourceID.String])
 //  2. Start position (line, then column)
 //  3. End position (line, then column)
-//  4. Start, then End, byte offset, an unknown offset (-1) first
-//  5. A synthetic source before a file-backed one spelled alike
-//
-// It returns 0 exactly when a == b, so a sort by it ties nothing distinct.
-//
-// Source comparison uses string ordering of SourceID.String(). This means
-// synthetic IDs that resemble file paths (e.g., "/absolute/path") will be
-// interleaved with file-backed spans in the ordering. [ValidateSyntheticSourceID]
-// refuses such an identifier.
-//
-// Returns:
-//
-//	-1 if a < b
-//	 0 if a == b
-//	+1 if a > b
-func Compare(a, b Span) int {
-	if c := cmp.Compare(a.Source.String(), b.Source.String()); c != 0 {
-		return c
-	}
-	if c := comparePositions(a.Start, b.Start); c != 0 {
-		return c
-	}
-	if c := comparePositions(a.End, b.End); c != 0 {
-		return c
-	}
-	if c := cmp.Compare(a.Start.Byte, b.Start.Byte); c != 0 {
-		return c
-	}
-	if c := cmp.Compare(a.End.Byte, b.End.Byte); c != 0 {
-		return c
-	}
-	switch af, bf := a.Source.IsFilePath(), b.Source.IsFilePath(); {
-	case af == bf:
-		return 0
-	case af:
-		return 1
-	default:
-		return -1
-	}
+//  4. Start, then End, byte offset
+func (s Span) Compare(t Span) int {
+	return cmp.Or(
+		cmp.Compare(s.Source.String(), t.Source.String()),
+		comparePositions(s.Start, t.Start),
+		comparePositions(s.End, t.End),
+		cmp.Compare(s.Start.Offset, t.Start.Offset),
+		cmp.Compare(s.End.Offset, t.End.Offset),
+	)
 }
 
-// comparePositions compares two positions for ordering.
+// comparePositions compares two positions by line, then column.
 func comparePositions(a, b Position) int {
 	if c := cmp.Compare(a.Line, b.Line); c != 0 {
 		return c
 	}
 	return cmp.Compare(a.Column, b.Column)
-}
-
-// positionBefore reports whether a is strictly before b using line/column.
-// Returns false if either position is not fully known (requires both Line > 0 and Column > 0).
-func positionBefore(a, b Position) bool {
-	if !a.IsKnown() || !b.IsKnown() {
-		return false
-	}
-	if a.Line != b.Line {
-		return a.Line < b.Line
-	}
-	return a.Column < b.Column
 }

@@ -184,7 +184,7 @@
 //
 // # Dependencies
 //
-//	schema  ──imports──▶  diag, internal/expr, location,
+//	schema  ──imports──▶  diag, internal/expr, internal/hostpath, location,
 //	                      internal/parse, internal/source,
 //	                      golang.org/x/text/unicode/norm
 package schema

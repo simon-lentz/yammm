@@ -12,9 +12,9 @@ import (
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/instance/internal/eval"
+	"github.com/simon-lentz/yammm/instance/path"
 	"github.com/simon-lentz/yammm/internal/expr"
 	"github.com/simon-lentz/yammm/location"
-	"github.com/simon-lentz/yammm/location/path"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -84,7 +84,7 @@ func (v *Validator) Validate(ctx context.Context, typeName string, raws []RawIns
 	if len(raws) == 0 {
 		// An empty batch names a type that must be able to hold a root, as a
 		// row of it must: an abstract or part type name is refused either way.
-		if res, refused := instantiationRefusal(typ, typeName, false, location.Provenance{}); refused {
+		if res, refused := instantiationRefusal(typ, typeName, false, Provenance{}); refused {
 			return nil, res
 		}
 		if raws == nil {
@@ -106,7 +106,7 @@ func (v *Validator) Validate(ctx context.Context, typeName string, raws []RawIns
 			batchCollector.MergeFunc(cancelledResult(err, raws[i].Provenance), stampIndex(i))
 			return nil, batchCollector.Result()
 		}
-		inst, result := v.validateComposedInstance(ctx, typeName, typ, raws[i], raws[i].Provenance.Path(), false, 0)
+		inst, result := v.validateComposedInstance(ctx, typeName, typ, raws[i], basePath(raws[i].Provenance), false, 0)
 		if err := ctx.Err(); err != nil {
 			batchCollector.MergeFunc(keepInternalErrors(result), stampIndex(i))
 			batchCollector.MergeFunc(cancelledResult(err, raws[i].Provenance), stampIndex(i))
@@ -145,7 +145,7 @@ func (v *Validator) ValidateOne(ctx context.Context, typeName string, raw RawIns
 	if err != nil {
 		return ValidInstance{}, createErrorResult(ErrTypeNotFound, err.Error(), raw.Provenance)
 	}
-	inst, res := v.validateComposedInstance(ctx, typeName, typ, raw, raw.Provenance.Path(), false, 0)
+	inst, res := v.validateComposedInstance(ctx, typeName, typ, raw, basePath(raw.Provenance), false, 0)
 	// The batch rule holds at this entry too, which the snapshot revalidator
 	// uses: a row the caller is told did not run reports the cancellation and no
 	// partial finding, so a timeout's leftovers are never read as findings about
@@ -168,15 +168,25 @@ func stampIndex(i int) func(diag.Issue) diag.Issue {
 	}
 }
 
+// basePath returns the path an instance's diagnostics start from: its
+// provenance's path, or [path.Root] when the provenance records none. A
+// provenance keeps an empty path as given, so a snapshot writes it back.
+func basePath(prov Provenance) path.Path {
+	if p := prov.Path(); p != "" {
+		return p
+	}
+	return path.Root
+}
+
 // cancelledResult is the Fatal E_CONTEXT_CANCELLED result, anchored on the
 // provenance in hand so a cancelled batch still names the row it stopped on.
-func cancelledResult(err error, prov location.Provenance) diag.Result {
+func cancelledResult(err error, prov Provenance) diag.Result {
 	c := diag.NewCollectorUnlimited()
-	c.Collect(cancelledIssue(err, prov, prov.Path()))
+	c.Collect(cancelledIssue(err, prov, basePath(prov)))
 	return c.Result()
 }
 
-func cancelledIssue(err error, prov location.Provenance, base path.Builder) diag.Issue {
+func cancelledIssue(err error, prov Provenance, base path.Path) diag.Issue {
 	issue := diag.NewIssue(diag.Fatal, diag.E_CONTEXT_CANCELLED, err.Error())
 	withProvenance(issue, prov, base.String())
 	return issue.Build()
@@ -192,7 +202,7 @@ func cancelledIssue(err error, prov location.Provenance, base path.Builder) diag
 // not run. Its Fatal E_INTERNAL stays ([keepInternalErrors]): a library defect
 // outranks a deadline on the same row, and reporting the defect as the deadline
 // hides it.
-func cancelled(ctx context.Context, collector *diag.Collector, prov location.Provenance, base path.Builder) bool {
+func cancelled(ctx context.Context, collector *diag.Collector, prov Provenance, base path.Path) bool {
 	err := ctx.Err()
 	if err == nil {
 		return false
@@ -215,18 +225,18 @@ func keepInternalErrors(res diag.Result) diag.Result {
 
 // internalIssue is the Fatal E_INTERNAL an InternalError becomes, carrying
 // its stack and the provenance in hand.
-func internalIssue(internalErr *InternalError, prov location.Provenance, base path.Builder) diag.Issue {
+func internalIssue(internalErr *InternalError, prov Provenance, base path.Path) diag.Issue {
 	issue := diag.NewIssue(diag.Fatal, diag.E_INTERNAL, internalErr.Error()).
 		WithDetail(diag.DetailKeyStackTrace, internalErr.Stack)
 	withProvenance(issue, prov, base.String())
 	return issue.Build()
 }
 
-func firstProvenance(raws []RawInstance) location.Provenance {
+func firstProvenance(raws []RawInstance) Provenance {
 	if len(raws) > 0 {
 		return raws[0].Provenance
 	}
-	return location.Provenance{}
+	return Provenance{}
 }
 
 // validateComposedBatch validates raw children of rel's target type at the
@@ -241,7 +251,7 @@ func (v *Validator) validateComposedBatch(
 	ctx context.Context,
 	rel schema.Relation,
 	raws []RawInstance,
-	bases []path.Builder,
+	bases []path.Path,
 	depth int,
 	collect func(res diag.Result),
 ) ([]ValidInstance, schema.Type) {
@@ -310,8 +320,8 @@ func (v *Validator) resolveType(typeName string) (schema.Type, error) {
 // batchProvenance is the provenance of a batch-wide failure — the type or
 // relation name, not any row: the source the rows came from, at its root,
 // with no span. Blaming raws[0] pointed the operator at a row that was fine.
-func batchProvenance(raws []RawInstance) location.Provenance {
-	return location.NewProvenance(firstProvenance(raws).SourceName(), path.Root(), location.Span{})
+func batchProvenance(raws []RawInstance) Provenance {
+	return NewProvenance(firstProvenance(raws).SourceName(), path.Root, location.Span{})
 }
 
 // typeResolutionResultForBatch creates a diagnostic result for type resolution errors in batch contexts.
@@ -324,7 +334,7 @@ func typeResolutionResultForBatch(err error, raws []RawInstance) diag.Result {
 // carried on its diagnostics; base is the instance's location in the input
 // document, which every diagnostic's path is built from; depth is its
 // composed depth, 0 for a root.
-func (v *Validator) validateComposedInstance(ctx context.Context, typeName string, typ schema.Type, raw RawInstance, base path.Builder, allowPartType bool, depth int) (ValidInstance, diag.Result) {
+func (v *Validator) validateComposedInstance(ctx context.Context, typeName string, typ schema.Type, raw RawInstance, base path.Path, allowPartType bool, depth int) (ValidInstance, diag.Result) {
 	if res, refused := instantiationRefusal(typ, typeName, allowPartType, raw.Provenance); refused {
 		return ValidInstance{}, res
 	}
@@ -337,7 +347,7 @@ func (v *Validator) validateComposedInstance(ctx context.Context, typeName strin
 // ([diag.E_NO_PRIMARY_KEY], unless an error about its key's type or a supertype
 // already refuses it), so with allowPartType false, a type it passes under a
 // resolved name can hold a root.
-func instantiationRefusal(typ schema.Type, typeName string, allowPartType bool, prov location.Provenance) (diag.Result, bool) {
+func instantiationRefusal(typ schema.Type, typeName string, allowPartType bool, prov Provenance) (diag.Result, bool) {
 	switch {
 	case typ.IsAbstract():
 		return createErrorResult(ErrAbstractType, fmt.Sprintf("cannot instantiate abstract type %q", typeName), prov), true
@@ -349,7 +359,7 @@ func instantiationRefusal(typ schema.Type, typeName string, allowPartType bool, 
 
 // validateProperties validates all members of an instance: properties, then
 // the primary key, edges, compositions, and invariants last.
-func (v *Validator) validateProperties(ctx context.Context, typ schema.Type, typeName string, raw RawInstance, base path.Builder, depth int) (ValidInstance, diag.Result) {
+func (v *Validator) validateProperties(ctx context.Context, typ schema.Type, typeName string, raw RawInstance, base path.Path, depth int) (ValidInstance, diag.Result) {
 	collector := diag.NewCollector(v.cfg.maxIssuesPerInstance)
 	prov := raw.Provenance
 	names := slices.Sorted(maps.Keys(raw.Properties))
@@ -599,7 +609,7 @@ type relationInput struct {
 // object before any pass runs, so both member kinds report from one site and no
 // pass's gate can swallow the report. A relation with no entry is absent: no key
 // claims it, or its key holds no value ([IsAbsent]), as a property's null is.
-func buildRelationMapping(claims objectClaims, props map[string]any, collector *diag.Collector, prov location.Provenance, base path.Builder) map[schema.Relation]relationInput {
+func buildRelationMapping(claims objectClaims, props map[string]any, collector *diag.Collector, prov Provenance, base path.Path) map[schema.Relation]relationInput {
 	rels := make(map[schema.Relation]relationInput, len(claims.rels)+len(claims.relCollisions))
 	for rel, key := range claims.rels {
 		if v := props[key]; !IsAbsent(v) {
@@ -616,7 +626,7 @@ func buildRelationMapping(claims objectClaims, props map[string]any, collector *
 
 // reportRelationCollision is the one E_CASE_FOLD_COLLISION a collided relation
 // entry draws, emitted by the member index that finds it.
-func reportRelationCollision(rel schema.Relation, in relationInput, collector *diag.Collector, prov location.Provenance, base path.Builder) {
+func reportRelationCollision(rel schema.Relation, in relationInput, collector *diag.Collector, prov Provenance, base path.Path) {
 	kind := "relation"
 	if rel.IsComposition() {
 		kind = "composition"
@@ -634,7 +644,7 @@ func reportRelationCollision(rel schema.Relation, in relationInput, collector *d
 // buildPropertyMapping reads each schema property's input key from the member
 // index, reporting each collision there as an E_CASE_FOLD_COLLISION at the
 // object, where neither key is mapped.
-func buildPropertyMapping(claims objectClaims, collector *diag.Collector, prov location.Provenance, base path.Builder) map[string]string {
+func buildPropertyMapping(claims objectClaims, collector *diag.Collector, prov Provenance, base path.Path) map[string]string {
 	for _, c := range claims.propCollisions {
 		issue := diag.NewIssue(
 			diag.Error,
@@ -650,7 +660,7 @@ func buildPropertyMapping(claims objectClaims, collector *diag.Collector, prov l
 // checkUnknownFields reports each input key no member claims and no collision
 // names, in sorted order so the set that survives a truncated collector is a
 // function of the input.
-func (v *Validator) checkUnknownFields(typ schema.Type, typeName string, names []string, claims objectClaims, collector *diag.Collector, prov location.Provenance, base path.Builder) {
+func (v *Validator) checkUnknownFields(typ schema.Type, typeName string, names []string, claims objectClaims, collector *diag.Collector, prov Provenance, base path.Path) {
 	for _, inputName := range names {
 		if claims.accounted[inputName] {
 			continue
@@ -823,8 +833,8 @@ func (v *Validator) evaluateInvariants(
 	typeName string,
 	inst ValidInstance,
 	collector *diag.Collector,
-	prov location.Provenance,
-	base path.Builder,
+	prov Provenance,
+	base path.Path,
 ) (err error) {
 	defer func() {
 		if r := recover(); r != nil {
@@ -903,7 +913,7 @@ func (v *Validator) PrimaryKeyOf(typeName string, raw RawInstance) (schema.TypeI
 	if err != nil {
 		return schema.TypeID{}, immutable.Key{}, false
 	}
-	if _, refused := instantiationRefusal(typ, typeName, false, location.Provenance{}); refused {
+	if _, refused := instantiationRefusal(typ, typeName, false, Provenance{}); refused {
 		return schema.TypeID{}, immutable.Key{}, false
 	}
 	claims := claimObject(typ, slices.Sorted(maps.Keys(raw.Properties)), v.cfg.strictPropertyNames)
@@ -932,7 +942,7 @@ func (v *Validator) PrimaryKeyOf(typeName string, raw RawInstance) (schema.TypeI
 // withProvenance sets an issue's path and source name, and its span when the
 // provenance carries one. pathStr is the issue's own location in the input
 // document; prov supplies the document's name and span.
-func withProvenance(b *diag.IssueBuilder, prov location.Provenance, pathStr string) *diag.IssueBuilder {
+func withProvenance(b *diag.IssueBuilder, prov Provenance, pathStr string) *diag.IssueBuilder {
 	b.WithPath(prov.SourceName(), pathStr)
 	if !prov.Span().IsZero() {
 		b.WithSpan(prov.Span())
@@ -942,14 +952,14 @@ func withProvenance(b *diag.IssueBuilder, prov location.Provenance, pathStr stri
 
 // createErrorResult creates a diag.Result with a single error issue at the
 // provenance's own location.
-func createErrorResult(code diag.Code, message string, prov location.Provenance) diag.Result {
+func createErrorResult(code diag.Code, message string, prov Provenance) diag.Result {
 	collector := diag.NewCollectorUnlimited()
 	issue := diag.NewIssue(
 		diag.Error,
 		code,
 		message,
 	)
-	withProvenance(issue, prov, prov.Path().String())
+	withProvenance(issue, prov, basePath(prov).String())
 	collector.Collect(issue.Build())
 	return collector.Result()
 }

@@ -3,6 +3,8 @@ package hover
 import (
 	"testing"
 
+	"github.com/simon-lentz/yammm/internal/yammmtest/sourcetest"
+
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -45,11 +47,11 @@ func TestBuildHoverForSymbolWithRange_AcceptsOverrideParameter(t *testing.T) {
 	// location instead of the target symbol's location.
 	t.Parallel()
 
-	sourceID := location.NewSourceID("test://main.yammm")
-	targetSourceID := location.NewSourceID("test://imported.yammm")
+	sourceID := sourcetest.ID("test://main.yammm")
+	targetSourceID := sourcetest.ID("test://imported.yammm")
 
 	// The symbol is from a different file with its own span
-	targetSymSpan := location.RangeWithBytes(targetSourceID, 10, 1, -1, 10, 20, -1)
+	targetSymSpan := location.Span{Source: targetSourceID, Start: location.Position{Line: 10, Column: 1}, End: location.Position{Line: 10, Column: 20}}
 	sym := &symbols.Symbol{
 		Name:      "TargetType",
 		Kind:      symbols.SymbolType,
@@ -59,7 +61,7 @@ func TestBuildHoverForSymbolWithRange_AcceptsOverrideParameter(t *testing.T) {
 	}
 
 	// The reference span is in the current document (different from target)
-	refSpan := location.RangeWithBytes(sourceID, 5, 10, -1, 5, 20, -1)
+	refSpan := location.Span{Source: sourceID, Start: location.Position{Line: 5, Column: 10}, End: location.Position{Line: 5, Column: 20}}
 
 	// Without override - returns nil because snapshot is nil
 	hoverWithoutOverride, err := BuildHoverForSymbolWithRange(sym, nil, nil)

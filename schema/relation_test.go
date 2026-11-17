@@ -4,6 +4,8 @@ import (
 	"slices"
 	"testing"
 
+	"github.com/simon-lentz/yammm/internal/yammmtest/sourcetest"
+
 	"github.com/stretchr/testify/assert"
 
 	"github.com/simon-lentz/yammm/location"
@@ -11,7 +13,7 @@ import (
 )
 
 func TestRelation_SetTargetID(t *testing.T) {
-	targetID := schema.NewTypeID(location.NewSourceID("test://schema"), "Target")
+	targetID := schema.NewTypeID(sourcetest.ID("test://schema"), "Target")
 
 	r := schema.TestNewRelation(
 		schema.RelationAssociation,
@@ -37,8 +39,8 @@ func TestRelation_SetTargetID(t *testing.T) {
 }
 
 func TestRelation_Equal_WithTargetID(t *testing.T) {
-	targetID1 := schema.NewTypeID(location.NewSourceID("test://a"), "Target")
-	targetID2 := schema.NewTypeID(location.NewSourceID("test://b"), "Target")
+	targetID1 := schema.NewTypeID(sourcetest.ID("test://a"), "Target")
+	targetID2 := schema.NewTypeID(sourcetest.ID("test://b"), "Target")
 
 	r1 := schema.TestNewRelation(
 		schema.RelationAssociation,
@@ -124,7 +126,7 @@ func TestRelation_Seal_PreventsSetTargetID(t *testing.T) {
 	)
 
 	// SetTargetID should work before sealing
-	targetID := schema.NewTypeID(location.NewSourceID("test://schema"), "Target")
+	targetID := schema.NewTypeID(sourcetest.ID("test://schema"), "Target")
 	schema.TestSetRelationTargetID(r, targetID)
 	assert.Equal(t, targetID, r.TargetID())
 
@@ -138,7 +140,7 @@ func TestRelation_Seal_PreventsSetTargetID(t *testing.T) {
 		}
 	}()
 
-	newTargetID := schema.NewTypeID(location.NewSourceID("test://other"), "Other")
+	newTargetID := schema.NewTypeID(sourcetest.ID("test://other"), "Other")
 	schema.TestSetRelationTargetID(r, newTargetID)
 }
 
@@ -157,23 +159,23 @@ func TestRelation_SetTargetID_WorksBeforeSeal(t *testing.T) {
 		nil,
 	)
 
-	targetID := schema.NewTypeID(location.NewSourceID("test://schema"), "Target")
+	targetID := schema.NewTypeID(sourcetest.ID("test://schema"), "Target")
 	schema.TestSetRelationTargetID(r, targetID)
 	assert.Equal(t, targetID, r.TargetID())
 
 	// Can set multiple times before sealing
-	newTargetID := schema.NewTypeID(location.NewSourceID("test://other"), "Other")
+	newTargetID := schema.NewTypeID(sourcetest.ID("test://other"), "Other")
 	schema.TestSetRelationTargetID(r, newTargetID)
 	assert.Equal(t, newTargetID, r.TargetID())
 }
 
 func TestNewRelation(t *testing.T) {
 	target := schema.NewTypeRef("users", "Person", location.Span{})
-	targetID := schema.NewTypeID(location.NewSourceID("test://users"), "Person")
+	targetID := schema.NewTypeID(sourcetest.ID("test://users"), "Person")
 	span := location.Span{
-		Source: location.NewSourceID("test://schema"),
-		Start:  location.Position{Line: 10, Column: 5, Byte: 100},
-		End:    location.Position{Line: 10, Column: 50, Byte: 150},
+		Source: sourcetest.ID("test://schema"),
+		Start:  location.Position{Line: 10, Column: 5, Offset: 100},
+		End:    location.Position{Line: 10, Column: 50, Offset: 150},
 	}
 	props := []schema.Property{
 		schema.TestNewProperty("since", location.Span{}, "", schema.NewTimestampConstraint(), schema.DataTypeRef{}, false, false, schema.DeclaringScope{}, nil),
@@ -319,9 +321,9 @@ func TestRelation_Target(t *testing.T) {
 
 func TestRelation_Span(t *testing.T) {
 	span := location.Span{
-		Source: location.NewSourceID("test://span"),
-		Start:  location.Position{Line: 15, Column: 3, Byte: 150},
-		End:    location.Position{Line: 15, Column: 40, Byte: 187},
+		Source: sourcetest.ID("test://span"),
+		Start:  location.Position{Line: 15, Column: 3, Offset: 150},
+		End:    location.Position{Line: 15, Column: 40, Offset: 187},
 	}
 
 	r := schema.TestNewRelation(
@@ -341,7 +343,7 @@ func TestRelation_Span(t *testing.T) {
 	result := r.Span()
 	assert.Equal(t, span.Source, result.Source)
 	assert.Equal(t, 15, result.Start.Line)
-	assert.Equal(t, 150, result.Start.Byte)
+	assert.Equal(t, 150, result.Start.Offset)
 }
 
 func TestRelation_Documentation(t *testing.T) {

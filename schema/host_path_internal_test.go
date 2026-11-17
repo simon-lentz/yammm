@@ -42,8 +42,8 @@ func TestLoadImport_UnrecordedImporterIsInternal(t *testing.T) {
 		Alias: "dep",
 		Span: location.Span{
 			Source: sid,
-			Start:  location.Position{Line: 3, Column: 1, Byte: 16},
-			End:    location.Position{Line: 3, Column: 22, Byte: 37},
+			Start:  location.Position{Line: 3, Column: 1, Offset: 16},
+			End:    location.Position{Line: 3, Column: 22, Offset: 37},
 		},
 	}
 	if err := l.loadImport(t.Context(), sid, imp); err != nil {

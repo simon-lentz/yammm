@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/simon-lentz/yammm/internal/yammmtest/sourcetest"
+
 	"github.com/simon-lentz/yammm/internal/yammmtest"
 	"github.com/simon-lentz/yammm/location"
 )
@@ -60,9 +62,9 @@ func TestRenderer_WithSourceProvider_Nil(t *testing.T) {
 	// WithSourceProvider(nil) should be safe
 	r := NewRenderer(WithSourceProvider(nil), WithExcerpts(true))
 
-	source := location.NewSourceID("test://file.yammm")
+	source := sourcetest.ID("test://file.yammm")
 	issue := NewIssue(Error, E_SYNTAX, "error").
-		WithSpan(location.PointWithByte(source, 1, 1, -1)).
+		WithSpan(location.Span{Source: source, Start: location.Position{Line: 1, Column: 1}, End: location.Position{Line: 1, Column: 1}}).
 		Build()
 
 	// Should not panic, just skip excerpts
@@ -74,7 +76,7 @@ func TestRenderer_WithSourceProvider_Nil(t *testing.T) {
 
 func TestRenderer_WithExcerpts(t *testing.T) {
 	provider := newMockSourceProvider()
-	source := location.NewSourceID("test://file.yammm")
+	source := sourcetest.ID("test://file.yammm")
 	provider.Add(source, "line one\nline two\nline three\n")
 
 	r := NewRenderer(
@@ -103,7 +105,7 @@ func TestRenderer_WithExcerpts(t *testing.T) {
 
 func TestRenderer_WithExcerpts_Disabled(t *testing.T) {
 	provider := newMockSourceProvider()
-	source := location.NewSourceID("test://file.yammm")
+	source := sourcetest.ID("test://file.yammm")
 	provider.Add(source, "source content\n")
 
 	r := NewRenderer(
@@ -112,7 +114,7 @@ func TestRenderer_WithExcerpts_Disabled(t *testing.T) {
 	)
 
 	issue := NewIssue(Error, E_SYNTAX, "error").
-		WithSpan(location.PointWithByte(source, 1, 1, -1)).
+		WithSpan(location.Span{Source: source, Start: location.Position{Line: 1, Column: 1}, End: location.Position{Line: 1, Column: 1}}).
 		Build()
 
 	output := formatIssue(r, issue)
@@ -190,7 +192,7 @@ func TestRenderer_FormatIssue_Location(t *testing.T) {
 		{
 			name: "with span",
 			issue: NewIssue(Error, E_SYNTAX, "msg").
-				WithSpan(location.PointWithByte(location.NewSourceID("test://a.yammm"), 10, 5, -1)).
+				WithSpan(location.Span{Source: sourcetest.ID("test://a.yammm"), Start: location.Position{Line: 10, Column: 5}, End: location.Position{Line: 10, Column: 5}}).
 				Build(),
 			contains: "test://a.yammm:10:5",
 		},
@@ -228,11 +230,11 @@ func TestRenderer_FormatIssue_Hint(t *testing.T) {
 }
 
 func TestRenderer_FormatIssue_Related(t *testing.T) {
-	source := location.NewSourceID("test://related.yammm")
+	source := sourcetest.ID("test://related.yammm")
 	issue := NewIssue(Error, E_DUPLICATE_TYPE, "type collision").
-		WithRelated(location.RelatedInfo{
+		WithRelated(RelatedInfo{
 			Message: "first definition here",
-			Span:    location.PointWithByte(source, 5, 1, -1),
+			Span:    location.Span{Source: source, Start: location.Position{Line: 5, Column: 1}, End: location.Position{Line: 5, Column: 1}},
 		}).
 		Build()
 
@@ -316,7 +318,7 @@ func TestRenderer_extractLine(t *testing.T) {
 
 func TestRenderer_Excerpt_PointSpan(t *testing.T) {
 	provider := newMockSourceProvider()
-	source := location.NewSourceID("test://file.yammm")
+	source := sourcetest.ID("test://file.yammm")
 	provider.Add(source, "  token here\n")
 
 	r := NewRenderer(
@@ -325,7 +327,7 @@ func TestRenderer_Excerpt_PointSpan(t *testing.T) {
 	)
 
 	issue := NewIssue(Error, E_SYNTAX, "error").
-		WithSpan(location.PointWithByte(source, 1, 3, -1)).
+		WithSpan(location.Span{Source: source, Start: location.Position{Line: 1, Column: 3}, End: location.Position{Line: 1, Column: 3}}).
 		Build()
 
 	output := formatIssue(r, issue)
@@ -338,7 +340,7 @@ func TestRenderer_Excerpt_PointSpan(t *testing.T) {
 
 func TestRenderer_Excerpt_RangeSpan(t *testing.T) {
 	provider := newMockSourceProvider()
-	source := location.NewSourceID("test://file.yammm")
+	source := sourcetest.ID("test://file.yammm")
 	provider.Add(source, "  token here\n")
 
 	r := NewRenderer(
@@ -365,7 +367,7 @@ func TestRenderer_Excerpt_RangeSpan(t *testing.T) {
 
 func TestRenderer_Excerpt_UnknownPosition(t *testing.T) {
 	provider := newMockSourceProvider()
-	source := location.NewSourceID("test://file.yammm")
+	source := sourcetest.ID("test://file.yammm")
 	provider.Add(source, "content\n")
 
 	r := NewRenderer(
@@ -395,9 +397,9 @@ func TestRenderer_Excerpt_SourceNotAvailable(t *testing.T) {
 		WithExcerpts(true),
 	)
 
-	source := location.NewSourceID("test://missing.yammm")
+	source := sourcetest.ID("test://missing.yammm")
 	issue := NewIssue(Error, E_SYNTAX, "error").
-		WithSpan(location.PointWithByte(source, 1, 1, -1)).
+		WithSpan(location.Span{Source: source, Start: location.Position{Line: 1, Column: 1}, End: location.Position{Line: 1, Column: 1}}).
 		Build()
 
 	output := formatIssue(r, issue)
@@ -433,9 +435,9 @@ func TestRenderer_CompleteOutput(t *testing.T) {
 			End:    location.Position{Line: 1, Column: 10},
 		}).
 		WithHint("consider renaming one of the types").
-		WithRelated(location.RelatedInfo{
+		WithRelated(RelatedInfo{
 			Message: "first definition here",
-			Span:    location.PointWithByte(source, 1, 6, -1),
+			Span:    location.Span{Source: source, Start: location.Position{Line: 1, Column: 6}, End: location.Position{Line: 1, Column: 6}},
 		}).
 		Build()
 
@@ -475,7 +477,7 @@ func TestRenderer_WriteLocation_SourceNameOnly(t *testing.T) {
 // source name, else nothing.
 func TestRenderer_WriteLocation_Precedence(t *testing.T) {
 	r := NewRenderer()
-	source := location.NewSourceID("test://schema.yammm")
+	source := sourcetest.ID("test://schema.yammm")
 
 	tests := []struct {
 		name     string
@@ -490,7 +492,7 @@ func TestRenderer_WriteLocation_Precedence(t *testing.T) {
 				severity:   Error,
 				code:       E_SYNTAX,
 				message:    "test",
-				span:       location.PointWithByte(source, 10, 5, -1),
+				span:       location.Span{Source: source, Start: location.Position{Line: 10, Column: 5}, End: location.Position{Line: 10, Column: 5}},
 				sourceName: "data.json",
 				path:       "$.foo",
 			},
@@ -502,7 +504,7 @@ func TestRenderer_WriteLocation_Precedence(t *testing.T) {
 				severity:   Error,
 				code:       E_SYNTAX,
 				message:    "test",
-				span:       location.PointWithByte(source, 10, 5, -1),
+				span:       location.Span{Source: source, Start: location.Position{Line: 10, Column: 5}, End: location.Position{Line: 10, Column: 5}},
 				sourceName: "data.json",
 			},
 			expected: "test://schema.yammm:10:5:",

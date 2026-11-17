@@ -5,8 +5,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/simon-lentz/yammm/internal/yammmtest/sourcetest"
+
 	"github.com/simon-lentz/yammm/diag"
-	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -39,7 +40,7 @@ func TestAdapter_DataTypeRefSpanCoversTheQualifier(t *testing.T) {
 	}
 
 	span := ref.Span()
-	got := src[span.Start.Byte:span.End.Byte]
+	got := src[span.Start.Offset:span.End.Offset]
 	if got != "Email" {
 		t.Errorf("DataTypeRef span slices to %q, want the whole reference %q", got, "Email")
 	}
@@ -58,7 +59,7 @@ func TestAdapter_DataTypeRefSpanCoversTheQualifier_Qualified(t *testing.T) {
 		"\taddress types.Email\n" +
 		"}\n"
 
-	parser := schema.TestNewParser(location.NewSourceID("test://ref.yammm"), diag.NewCollector(0))
+	parser := schema.TestNewParser(sourcetest.ID("test://ref.yammm"), diag.NewCollector(0))
 	model := parser.Parse([]byte(src))
 	if model == nil || len(model.Types) != 1 || len(model.Types[0].Properties) != 2 {
 		t.Fatalf("fixture did not parse into one type with two properties: %+v", model)
@@ -69,7 +70,7 @@ func TestAdapter_DataTypeRefSpanCoversTheQualifier_Qualified(t *testing.T) {
 		t.Fatal("the qualified reference recorded no DataTypeRef")
 	}
 	span := ref.Span()
-	if got := src[span.Start.Byte:span.End.Byte]; got != "types.Email" {
+	if got := src[span.Start.Offset:span.End.Offset]; got != "types.Email" {
 		t.Errorf("DataTypeRef span slices to %q, want the whole reference %q", got, "types.Email")
 	}
 }

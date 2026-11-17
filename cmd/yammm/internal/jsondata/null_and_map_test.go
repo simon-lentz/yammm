@@ -3,7 +3,7 @@ package jsondata
 import (
 	"testing"
 
-	"github.com/simon-lentz/yammm/location"
+	"github.com/simon-lentz/yammm/internal/yammmtest/sourcetest"
 )
 
 // A document that STATES a null states a key: `{"name": null}` and no "name"
@@ -13,7 +13,7 @@ import (
 // asks for the key.
 func TestParse_AnExplicitNullKeepsItsKey(t *testing.T) {
 	t.Parallel()
-	byType, result := Parse(t.Context(), location.NewSourceID("test://null.json"),
+	byType, result := Parse(t.Context(), sourcetest.ID("test://null.json"),
 		[]byte(`{"Person":[{"id":"p1","name":null,"tags":[null]}]}`))
 	if !result.OK() {
 		t.Fatalf("parse: %s", result)

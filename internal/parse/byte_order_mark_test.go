@@ -3,6 +3,8 @@ package parse
 import (
 	"testing"
 
+	"github.com/simon-lentz/yammm/internal/yammmtest/sourcetest"
+
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/location"
 )
@@ -15,7 +17,7 @@ const markedSource = "\uFEFFschema \"demo\"\n\ntype T {\n\tid String primary\n}\
 // column, and every later line by three bytes alone.
 func TestParse_SkipsOneLeadingByteOrderMark(t *testing.T) {
 	t.Parallel()
-	src := location.NewSourceID("demo.yammm")
+	src := sourcetest.ID("demo.yammm")
 	marked, markedIssues := Parse([]byte(markedSource), src)
 	plain, plainIssues := Parse([]byte(markedSource[len("\uFEFF"):]), src)
 	if len(markedIssues) != 0 || len(plainIssues) != 0 {
@@ -25,11 +27,11 @@ func TestParse_SkipsOneLeadingByteOrderMark(t *testing.T) {
 		t.Fatalf("marked file: name %q, %d types", marked.Name, len(marked.Types))
 	}
 	const mark = len("\uFEFF")
-	if got, want := marked.NameSpan.Start, plain.NameSpan.Start; got.Byte != want.Byte+mark || got.Line != 1 || got.Column != want.Column+1 {
-		t.Errorf("name span start = %+v, want byte %d line 1 column %d", got, want.Byte+mark, want.Column+1)
+	if got, want := marked.NameSpan.Start, plain.NameSpan.Start; got.Offset != want.Offset+mark || got.Line != 1 || got.Column != want.Column+1 {
+		t.Errorf("name span start = %+v, want byte %d line 1 column %d", got, want.Offset+mark, want.Column+1)
 	}
-	if got, want := marked.Types[0].Span.Start, plain.Types[0].Span.Start; got.Byte != want.Byte+mark || got.Line != want.Line || got.Column != want.Column {
-		t.Errorf("type span start = %+v, want byte %d line %d column %d", got, want.Byte+mark, want.Line, want.Column)
+	if got, want := marked.Types[0].Span.Start, plain.Types[0].Span.Start; got.Offset != want.Offset+mark || got.Line != want.Line || got.Column != want.Column {
+		t.Errorf("type span start = %+v, want byte %d line %d column %d", got, want.Offset+mark, want.Line, want.Column)
 	}
 }
 
@@ -48,9 +50,9 @@ func TestParse_RefusesAByteOrderMarkPastTheStart(t *testing.T) {
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
-			_, issues := Parse([]byte(tc.src), location.NewSourceID("demo.yammm"))
+			_, issues := Parse([]byte(tc.src), sourcetest.ID("demo.yammm"))
 			for _, iss := range issues {
-				if iss.Code() == diag.E_SYNTAX && iss.Span().Start.Byte == tc.wantByte {
+				if iss.Code() == diag.E_SYNTAX && iss.Span().Start.Offset == tc.wantByte {
 					return
 				}
 			}

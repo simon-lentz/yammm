@@ -2,6 +2,7 @@ package snapshot_test
 
 import (
 	"encoding/json"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -88,40 +89,32 @@ type Doc {
 	}
 }
 
-// TestWriter_PreservesAnEmptyProvenancePath pins that a value the document
-// carried is not replaced by one the writer mints. An empty path does not
-// parse, so the reader falls back to the root and warns — and writing "$" back
-// made the second read clean, losing both the value and the warning.
-func TestWriter_PreservesAnEmptyProvenancePath(t *testing.T) {
+// TestWriter_PreservesAProvenancePathAsWritten pins that a path the document
+// carried is not replaced by one the writer mints: a path is held as text, so
+// one the path methods would never write, the empty one among them, reads
+// clean and is written back byte for byte.
+func TestWriter_PreservesAProvenancePathAsWritten(t *testing.T) {
 	t.Parallel()
 	s, data := attWireFixture(t)
 
-	edited := strings.Replace(string(data), `"provenance":null`,
-		`"provenance":{"source_name":"s","path":""}`, 1)
-	if edited == string(data) {
-		t.Skipf("fixture carries no null provenance: %s", data)
-	}
+	for _, written := range []string{"", "not a path [", `$["Item"]`, "$[ 0 ]"} {
+		quoted := strconv.Quote(written)
+		edited := strings.Replace(string(data), `"provenance":null`,
+			`"provenance":{"source_name":"s","path":`+quoted+`}`, 1)
+		if edited == string(data) {
+			t.Skipf("fixture carries no null provenance: %s", data)
+		}
 
-	snap, res := snapshot.Load(t.Context(), []byte(edited), s, snapshot.WithIntegrityCheck(false))
-	if res.HasErrors() {
-		t.Fatalf("first load: %s", res)
-	}
-	if !res.HasCode(diag.W_SNAPSHOT_PATH_FALLBACK) {
-		t.Errorf("an unparseable path must warn on the first read: %s", res)
-	}
-
-	again, mres := snapshot.Marshal(t.Context(), snap)
-	if mres.HasErrors() {
-		t.Fatalf("marshal: %s", mres)
-	}
-	if !strings.Contains(string(again), `"path":""`) {
-		t.Errorf("the empty path was not written back:\n%s", again)
-	}
-
-	// The warning must survive too: a second read of a document still holding
-	// the unparseable path reports it again.
-	_, res2 := snapshot.Load(t.Context(), again, s)
-	if !res2.HasCode(diag.W_SNAPSHOT_PATH_FALLBACK) {
-		t.Errorf("the fallback warning vanished on the second read: %s", res2)
+		snap, res := snapshot.Load(t.Context(), []byte(edited), s, snapshot.WithIntegrityCheck(false))
+		if res.Len() != 0 {
+			t.Errorf("path %s: the read reported %s; a path as written is no finding", quoted, res)
+		}
+		again, mres := snapshot.Marshal(t.Context(), snap)
+		if mres.HasErrors() {
+			t.Fatalf("marshal: %s", mres)
+		}
+		if !strings.Contains(string(again), `"path":`+quoted) {
+			t.Errorf("the path %s was not written back:\n%s", quoted, again)
+		}
 	}
 }

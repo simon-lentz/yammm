@@ -8,6 +8,8 @@ import (
 	"testing"
 	"unicode"
 
+	"github.com/simon-lentz/yammm/internal/yammmtest/sourcetest"
+
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/internal/expr"
 	"github.com/simon-lentz/yammm/internal/source"
@@ -56,7 +58,7 @@ abstract type Vehicle {
 `
 
 func TestParse_Smoke(t *testing.T) {
-	file, issues := Parse([]byte(smokeSource), location.NewSourceID("demo.yammm"))
+	file, issues := Parse([]byte(smokeSource), sourcetest.ID("demo.yammm"))
 	if len(issues) != 0 {
 		for _, iss := range issues {
 			t.Errorf("unexpected %s at %s: %s", iss.Code(), iss.Span(), iss.Message())
@@ -170,7 +172,7 @@ func assertVehicle(t *testing.T, ty *TypeDecl) {
 // identifier and carries "" — which only the text assertion catches.
 func TestParse_AnnotationArgumentsKeepBothIdentifierSpellings(t *testing.T) {
 	src := "schema \"s\"\ntype T {\n\tid String primary @audit(Owner, owner)\n}\n"
-	file, issues := Parse([]byte(src), location.NewSourceID("s.yammm"))
+	file, issues := Parse([]byte(src), sourcetest.ID("s.yammm"))
 	if len(issues) != 0 {
 		t.Fatalf("unexpected issues: %v", issues)
 	}
@@ -182,7 +184,7 @@ func TestParse_AnnotationArgumentsKeepBothIdentifierSpellings(t *testing.T) {
 		if args[i].Kind != ArgIdentifier || args[i].Text != want {
 			t.Errorf("arg %d = %+v, want identifier %q", i, args[i], want)
 		}
-		if got := src[args[i].Span.Start.Byte:args[i].Span.End.Byte]; got != want {
+		if got := src[args[i].Span.Start.Offset:args[i].Span.End.Offset]; got != want {
 			t.Errorf("arg %d span covers %q, want %q", i, got, want)
 		}
 	}
@@ -194,7 +196,7 @@ func TestParse_AnnotationArgumentsKeepBothIdentifierSpellings(t *testing.T) {
 // construct that is being thrown away — a diagnostic the oracle never emits.
 func TestParse_DiscardedInvariantReportsOnlyItsMessage(t *testing.T) {
 	src := "schema \"s\"\ntype T {\n\tid String primary\n\t! \"m\\x\" id == 99999999999999999999999999\n}\n"
-	file, issues := Parse([]byte(src), location.NewSourceID("s.yammm"))
+	file, issues := Parse([]byte(src), sourcetest.ID("s.yammm"))
 	if len(issues) != 1 {
 		t.Fatalf("got %d diagnostics, want 1: %v", len(issues), issues)
 	}
@@ -222,7 +224,7 @@ func TestParse_CallArgumentsMatchTheGrammarsCommaRule(t *testing.T) {
 		{`f()`, false},
 	} {
 		src := "schema \"s\"\ntype T {\n\tid String primary\n\t! \"m\" id -> " + tc.call + "\n}\n"
-		_, issues := Parse([]byte(src), location.NewSourceID("s.yammm"))
+		_, issues := Parse([]byte(src), sourcetest.ID("s.yammm"))
 		if got := len(issues) > 0; got != tc.reject {
 			t.Errorf("%s: rejected=%v, want %v (%v)", tc.call, got, tc.reject, issues)
 		}
@@ -234,7 +236,7 @@ func TestParse_CallArgumentsMatchTheGrammarsCommaRule(t *testing.T) {
 // nil slice compares unequal to that, so the differential fails on the call.
 func TestParse_BareCommaCallHasNonNilArguments(t *testing.T) {
 	src := "schema \"s\"\ntype T {\n\tid String primary\n\t! \"m\" id -> lower(,)\n}\n"
-	file, issues := Parse([]byte(src), location.NewSourceID("s.yammm"))
+	file, issues := Parse([]byte(src), sourcetest.ID("s.yammm"))
 	if len(issues) != 0 {
 		t.Fatalf("got %v, want a clean parse", issues)
 	}
@@ -295,7 +297,7 @@ func TestParse_PostfixOperatorsChainLeftToRight(t *testing.T) {
 	}
 	for _, tc := range cases {
 		src := "schema \"s\"\ntype T {\n\tid String primary\n\t! \"m\" " + tc.src + "\n}\n"
-		file, issues := Parse([]byte(src), location.NewSourceID("s.yammm"))
+		file, issues := Parse([]byte(src), sourcetest.ID("s.yammm"))
 		if len(issues) != 0 {
 			t.Errorf("%s: unexpected issues %v", tc.src, issues)
 			continue
@@ -313,12 +315,12 @@ func TestParse_PostfixOperatorsChainLeftToRight(t *testing.T) {
 func TestParse_ASchemaNameIsAnIdentifier(t *testing.T) {
 	for _, name := range []string{"", " ", "\\t", "my-schema", "a.b", "3d", "my schema", "caf\u00e9", "_x"} {
 		src := "schema \"" + name + "\"\ntype T {\n\tid String primary\n}\n"
-		file, issues := Parse([]byte(src), location.NewSourceID("s.yammm"))
+		file, issues := Parse([]byte(src), sourcetest.ID("s.yammm"))
 		if len(issues) != 1 || issues[0].Code() != diag.E_INVALID_NAME {
 			t.Errorf("%q: got %v, want one E_INVALID_NAME", name, issues)
 			continue
 		}
-		if got := src[issues[0].Span().Start.Byte:issues[0].Span().End.Byte]; got != `"`+name+`"` {
+		if got := src[issues[0].Span().Start.Offset:issues[0].Span().End.Offset]; got != `"`+name+`"` {
 			t.Errorf("%q: diagnostic span covers %q, want the name literal", name, got)
 		}
 		if !file.SchemaNameFailed || file.Name != "" {
@@ -330,7 +332,7 @@ func TestParse_ASchemaNameIsAnIdentifier(t *testing.T) {
 	}
 	for _, name := range []string{"a", "Geo", "geo_regions", "a__b", "type", "v2"} {
 		src := "schema \"" + name + "\"\ntype T {\n\tid String primary\n}\n"
-		if file, issues := Parse([]byte(src), location.NewSourceID("s.yammm")); len(issues) != 0 || file.Name != name {
+		if file, issues := Parse([]byte(src), sourcetest.ID("s.yammm")); len(issues) != 0 || file.Name != name {
 			t.Errorf("%q: name %q, issues %v; want the name and none", name, file.Name, issues)
 		}
 	}
@@ -343,7 +345,7 @@ func TestParse_ASchemaNameIsAnIdentifier(t *testing.T) {
 func TestParse_MemberPositionHoldsOneName(t *testing.T) {
 	for _, src := range []string{"$self.", "$self.(name)", "$self.5", "$self.\"x\""} {
 		full := "schema \"s\"\ntype T {\n\tid String primary\n\t! \"m\" " + src + " == nil\n}\n"
-		_, issues := Parse([]byte(full), location.NewSourceID("s.yammm"))
+		_, issues := Parse([]byte(full), sourcetest.ID("s.yammm"))
 		if len(issues) == 0 {
 			t.Errorf("%s: parsed clean, want a syntax error at the member position", src)
 		}
@@ -361,7 +363,7 @@ func TestParse_MemberPositionTakesAnyWord(t *testing.T) {
 		"nil", "true", "false", "Integer", "String", "ITEM", "worksAt",
 	} {
 		full := "schema \"s\"\ntype T {\n\tid String primary\n\t! \"m\" $self." + name + " == nil\n}\n"
-		file, issues := Parse([]byte(full), location.NewSourceID("s.yammm"))
+		file, issues := Parse([]byte(full), sourcetest.ID("s.yammm"))
 		if len(issues) != 0 {
 			t.Errorf("$self.%s: %v, want a member access", name, issues)
 			continue
@@ -375,16 +377,16 @@ func TestParse_MemberPositionTakesAnyWord(t *testing.T) {
 
 func TestParse_SpansAreByteExact(t *testing.T) {
 	src := "schema \"s\"\ntype T {\n\tid String primary\n}\n"
-	file, issues := Parse([]byte(src), location.NewSourceID("s.yammm"))
+	file, issues := Parse([]byte(src), sourcetest.ID("s.yammm"))
 	if len(issues) != 0 {
 		t.Fatalf("unexpected issues: %v", issues)
 	}
 	ty := file.Types[0]
-	if got := src[ty.NameSpan.Start.Byte:ty.NameSpan.End.Byte]; got != "T" {
+	if got := src[ty.NameSpan.Start.Offset:ty.NameSpan.End.Offset]; got != "T" {
 		t.Errorf("type name span covers %q, want %q", got, "T")
 	}
 	prop := ty.Properties[0]
-	if got := src[prop.Span.Start.Byte:prop.Span.End.Byte]; got != "id String primary" {
+	if got := src[prop.Span.Start.Offset:prop.Span.End.Offset]; got != "id String primary" {
 		t.Errorf("property span covers %q", got)
 	}
 	if prop.NameSpan.Start.Line != 3 || prop.NameSpan.Start.Column != 2 {
@@ -414,7 +416,7 @@ func TestParse_ZeroSourceIDIsSupported(t *testing.T) {
 	if !span.Source.IsZero() {
 		t.Errorf("span source = %v, want zero", span.Source)
 	}
-	if span.Start.Byte < 0 || span.Start.Line == 0 {
+	if span.Start.Offset < 0 || span.Start.Line == 0 {
 		t.Errorf("span lost its offsets: %+v", span)
 	}
 }
@@ -473,7 +475,7 @@ func TestParse_DiagnosticsNameNoGrammarTypes(t *testing.T) {
 func TestParse_DataTypeConstraintIsForwarded(t *testing.T) {
 	src := "schema \"s\"\ntype Code = String[1, 8]\ntype Bad = Integer[9, 2]\n"
 
-	file, issues := Parse([]byte(src), location.NewSourceID("s.yammm"))
+	file, issues := Parse([]byte(src), sourcetest.ID("s.yammm"))
 
 	if len(file.DataTypes) != 2 {
 		t.Fatalf("DataTypes = %d, want 2", len(file.DataTypes))
@@ -497,7 +499,7 @@ func TestParse_DataTypeConstraintIsForwarded(t *testing.T) {
 // carries no claim that the layer above accepts it.
 func TestParse_AnnotationWithArgumentsRecordsItsParens(t *testing.T) {
 	src := "schema \"s\"\ntype T {\n\tid String primary @a(1)\n}\n"
-	file, issues := Parse([]byte(src), location.NewSourceID("s.yammm"))
+	file, issues := Parse([]byte(src), sourcetest.ID("s.yammm"))
 	if len(issues) != 0 {
 		t.Fatalf("unexpected issues: %v", issues)
 	}
@@ -524,7 +526,7 @@ func TestParse_AnnotationWithArgumentsRecordsItsParens(t *testing.T) {
 // would make an LSP rename replace the whole import statement.
 func TestParse_ImportAliasSpanCoversTheAlias(t *testing.T) {
 	src := "schema \"s\"\nimport \"x.yammm\" as alpha\n"
-	file, issues := Parse([]byte(src), location.NewSourceID("s.yammm"))
+	file, issues := Parse([]byte(src), sourcetest.ID("s.yammm"))
 	if len(issues) != 0 {
 		t.Fatalf("unexpected issues: %v", issues)
 	}
@@ -532,7 +534,7 @@ func TestParse_ImportAliasSpanCoversTheAlias(t *testing.T) {
 		t.Fatalf("Imports = %d, want 1", len(file.Imports))
 	}
 	sp := file.Imports[0].AliasSpan
-	if got := src[sp.Start.Byte:sp.End.Byte]; got != "alpha" {
+	if got := src[sp.Start.Offset:sp.End.Offset]; got != "alpha" {
 		t.Errorf("AliasSpan covers %q, want %q", got, "alpha")
 	}
 }
@@ -577,7 +579,7 @@ func TestParse_DetachedAnnotationRecordsItsPropertyLine(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			file, issues := Parse([]byte(tc.src), location.NewSourceID("s.yammm"))
+			file, issues := Parse([]byte(tc.src), sourcetest.ID("s.yammm"))
 			if len(issues) != 0 {
 				t.Fatalf("unexpected issues: %v", issues)
 			}
@@ -604,7 +606,7 @@ func TestParse_ExpressionsPairWithTheTreesInvariants(t *testing.T) {
 		"type U {\n\tid String primary\n\t/* why */\n\t! 'q' id =~ /a b/\n}\n"
 	want := []string{"n > 0", "n  <  9", "id =~ /a b/"}
 
-	file, issues := Parse([]byte(src), location.NewSourceID("s.yammm"))
+	file, issues := Parse([]byte(src), sourcetest.ID("s.yammm"))
 
 	if len(issues) != 0 {
 		t.Fatalf("unexpected issues: %v", issues)
@@ -617,13 +619,13 @@ func TestParse_ExpressionsPairWithTheTreesInvariants(t *testing.T) {
 		t.Fatalf("%d extents and %d invariants, want %d of each", len(file.Expressions), len(invariants), len(want))
 	}
 	for i, extent := range file.Expressions {
-		if got := src[extent.Start.Byte:extent.End.Byte]; got != want[i] {
+		if got := src[extent.Start.Offset:extent.End.Offset]; got != want[i] {
 			t.Errorf("Expressions[%d] covers %q, want %q", i, got, want[i])
 		}
 		inv := invariants[i]
-		if extent.Start.Byte < inv.MessageSpan.End.Byte || extent.End.Byte > inv.Span.End.Byte {
+		if extent.Start.Offset < inv.MessageSpan.End.Offset || extent.End.Offset > inv.Span.End.Offset {
 			t.Errorf("Expressions[%d] is [%d,%d), outside its invariant: the message ends at %d and the invariant at %d",
-				i, extent.Start.Byte, extent.End.Byte, inv.MessageSpan.End.Byte, inv.Span.End.Byte)
+				i, extent.Start.Offset, extent.End.Offset, inv.MessageSpan.End.Offset, inv.Span.End.Offset)
 		}
 	}
 }
@@ -645,7 +647,7 @@ func TestParse_EmptyCallArgumentsAreNonNil(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			src := "schema \"s\"\ntype T {\n\tid String primary\n\t! \"m\" " + tc.call + "\n}\n"
 
-			file, issues := Parse([]byte(src), location.NewSourceID("s.yammm"))
+			file, issues := Parse([]byte(src), sourcetest.ID("s.yammm"))
 
 			if len(issues) != 0 {
 				t.Fatalf("unexpected issues: %v", issues)
@@ -703,7 +705,7 @@ func TestParse_PositionsMatchTheSourceRegistry(t *testing.T) {
 	}
 	for _, tc := range sources {
 		t.Run(tc.name, func(t *testing.T) {
-			id := location.NewSourceID("s.yammm")
+			id := sourcetest.ID("s.yammm")
 			reg := source.NewRegistry()
 			if err := reg.Register(id, []byte(tc.src)); err != nil {
 				t.Fatal(err)
@@ -738,10 +740,10 @@ func TestParse_PositionsMatchTheSourceRegistry(t *testing.T) {
 					which string
 					pos   location.Position
 				}{{"start", s.span.Start}, {"end", s.span.End}} {
-					want := reg.PositionAt(id, end.pos.Byte)
+					want := reg.PositionAt(id, end.pos.Offset)
 					if end.pos.Line != want.Line || end.pos.Column != want.Column {
 						t.Errorf("%s %s at byte %d: parse says %d:%d, the registry says %d:%d",
-							s.what, end.which, end.pos.Byte,
+							s.what, end.which, end.pos.Offset,
 							end.pos.Line, end.pos.Column, want.Line, want.Column)
 					}
 				}
@@ -937,7 +939,7 @@ func TestParse_CallArgumentsAcceptOneBareComma(t *testing.T) {
 		return "schema \"s\"\ntype T {\n\tid String primary\n\t! \"m\" " + e + "\n}\n"
 	}
 	t.Run("accepted in a call", func(t *testing.T) {
-		_, issues := Parse([]byte(body("id -> f(,)")), location.NewSourceID("s.yammm"))
+		_, issues := Parse([]byte(body("id -> f(,)")), sourcetest.ID("s.yammm"))
 		if len(issues) != 0 {
 			t.Errorf("f(,) drew %v, want none", issues)
 		}
@@ -951,7 +953,7 @@ func TestParse_CallArgumentsAcceptOneBareComma(t *testing.T) {
 		{"a bare comma in an index", "id[,] != nil", ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			_, issues := Parse([]byte(body(tc.expr)), location.NewSourceID("s.yammm"))
+			_, issues := Parse([]byte(body(tc.expr)), sourcetest.ID("s.yammm"))
 			if len(issues) != 1 {
 				t.Fatalf("%s drew %d diagnostics, want 1: %v", tc.expr, len(issues), issues)
 			}
@@ -989,7 +991,7 @@ func TestLexAndParse_StreamEqualsLex(t *testing.T) {
 
 	check := func(label, src string) {
 		t.Helper()
-		_, stream, _ := LexAndParse(src, location.NewSourceID("s.yammm"))
+		_, stream, _ := LexAndParse(src, sourcetest.ID("s.yammm"))
 		want := Lex(src)
 		if !slices.Equal(stream, want) {
 			t.Errorf("%s: LexAndParse stream diverges from Lex (%d vs %d tokens)",
@@ -1004,7 +1006,7 @@ func TestLexAndParse_StreamEqualsLex(t *testing.T) {
 	var sawFailedParse bool
 	for i, src := range malformedStreamSources {
 		check(fmt.Sprintf("malformed[%d]", i), src)
-		if _, issues := Parse([]byte(src), location.NewSourceID("s.yammm")); len(issues) > 0 {
+		if _, issues := Parse([]byte(src), sourcetest.ID("s.yammm")); len(issues) > 0 {
 			sawFailedParse = true
 		}
 	}
@@ -1021,13 +1023,13 @@ func TestParse_ConditionalRequiresElse(t *testing.T) {
 		return "schema \"s\"\ntype T {\n\tid String primary\n\t! \"m\" " + e + "\n}\n"
 	}
 	t.Run("with else accepted", func(t *testing.T) {
-		_, issues := Parse([]byte(body("id != nil ? { true : false }")), location.NewSourceID("s.yammm"))
+		_, issues := Parse([]byte(body("id != nil ? { true : false }")), sourcetest.ID("s.yammm"))
 		if len(issues) != 0 {
 			t.Errorf("ternary with else drew %v, want none", issues)
 		}
 	})
 	t.Run("without else rejected", func(t *testing.T) {
-		_, issues := Parse([]byte(body("id != nil ? { true }")), location.NewSourceID("s.yammm"))
+		_, issues := Parse([]byte(body("id != nil ? { true }")), sourcetest.ID("s.yammm"))
 		if len(issues) != 1 {
 			t.Fatalf("else-less ternary drew %d diagnostics, want 1: %v", len(issues), issues)
 		}
@@ -1051,7 +1053,7 @@ func TestParse_IntegerBoundsRejectAFloat(t *testing.T) {
 		return "schema \"s\"\ntype T {\n\tid String primary\n\t" + p + "\n}\n"
 	}
 	t.Run("Integer rejects a float bound as syntax", func(t *testing.T) {
-		_, issues := Parse([]byte(prop("n Integer[1.5, 3]")), location.NewSourceID("s.yammm"))
+		_, issues := Parse([]byte(prop("n Integer[1.5, 3]")), sourcetest.ID("s.yammm"))
 		if len(issues) != 1 {
 			t.Fatalf("got %d issues, want 1: %v", len(issues), issues)
 		}
@@ -1066,7 +1068,7 @@ func TestParse_IntegerBoundsRejectAFloat(t *testing.T) {
 		{"Integer takes an integer bound", "n Integer[1, 3]"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			_, issues := Parse([]byte(prop(tc.prop)), location.NewSourceID("s.yammm"))
+			_, issues := Parse([]byte(prop(tc.prop)), sourcetest.ID("s.yammm"))
 			if len(issues) != 0 {
 				t.Errorf("%s drew %v, want none", tc.prop, issues)
 			}
@@ -1080,7 +1082,7 @@ func TestParse_IntegerBoundsRejectAFloat(t *testing.T) {
 // blank text in front of the user; production drops it here too.
 func TestParse_InvariantWithAnUnquotableMessageIsNotKept(t *testing.T) {
 	src := "schema \"s\"\ntype T {\n\tid String primary\n\t! \"m\\x\" id != nil\n}\n"
-	file, issues := Parse([]byte(src), location.NewSourceID("s.yammm"))
+	file, issues := Parse([]byte(src), sourcetest.ID("s.yammm"))
 	if len(issues) != 1 {
 		t.Fatalf("got %d issues, want 1: %v", len(issues), issues)
 	}
@@ -1103,18 +1105,18 @@ func TestParse_ExpressionFailuresCarryAnExtent(t *testing.T) {
 		{"a datatype declaration whose constraint is junk", "schema \"s\"\ntype A = ?\ntype B {\n\tid String primary\n}\n"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			_, issues := Parse([]byte(tc.src), location.NewSourceID("s.yammm"))
+			_, issues := Parse([]byte(tc.src), sourcetest.ID("s.yammm"))
 			if len(issues) == 0 {
 				t.Fatal("no diagnostic")
 			}
 			sp := issues[0].Span()
-			if sp.Start.Byte >= len(tc.src) {
+			if sp.Start.Offset >= len(tc.src) {
 				t.Fatalf("span starts at %d, past the end of a %d-byte source — the row asserts nothing",
-					sp.Start.Byte, len(tc.src))
+					sp.Start.Offset, len(tc.src))
 			}
-			if sp.End.Byte <= sp.Start.Byte {
+			if sp.End.Offset <= sp.Start.Offset {
 				t.Errorf("span [%d,%d) is zero-width inside the source — nothing is underlined",
-					sp.Start.Byte, sp.End.Byte)
+					sp.Start.Offset, sp.End.Offset)
 			}
 		})
 	}
@@ -1126,12 +1128,12 @@ func TestParse_ExpressionFailuresCarryAnExtent(t *testing.T) {
 func TestParse_ARelationTakesNoClauseAfterItsTarget(t *testing.T) {
 	for _, rel := range []string{"--> R (one) B / back", "--> R B / back (one)", "*-> R (one) B / back", "--> R B /"} {
 		src := "schema \"s\"\ntype A {\n\tid String primary\n\t" + rel + "\n}\n"
-		_, issues := Parse([]byte(src), location.NewSourceID("s.yammm"))
+		_, issues := Parse([]byte(src), sourcetest.ID("s.yammm"))
 		if len(issues) != 1 || issues[0].Code() != diag.E_SYNTAX {
 			t.Errorf("%s: got %v, want one E_SYNTAX", rel, issues)
 			continue
 		}
-		if got := src[issues[0].Span().Start.Byte:issues[0].Span().End.Byte]; got != "/" {
+		if got := src[issues[0].Span().Start.Offset:issues[0].Span().End.Offset]; got != "/" {
 			t.Errorf("%s: the error covers %q, want the \"/\"", rel, got)
 		}
 	}

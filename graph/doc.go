@@ -439,6 +439,6 @@
 //
 // # Dependencies
 //
-//	graph  ──imports──▶  schema, instance, diag, location, immutable
+//	graph  ──imports──▶  schema, instance, diag, immutable
 //	graph  ──imports──▶  internal/value, internal/snapparts
 package graph

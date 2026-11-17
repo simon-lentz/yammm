@@ -9,11 +9,12 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/simon-lentz/yammm/internal/yammmtest/sourcetest"
+
 	"github.com/simon-lentz/yammm/cmd/yammm/internal/jsondata"
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/instance"
-	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
 	"github.com/simon-lentz/yammm/snapshot"
 )
@@ -123,7 +124,7 @@ func jsonReader(ctx context.Context, t *testing.T, v *instance.Validator, prop, 
 		other = `"n":0`
 	}
 	doc := fmt.Sprintf(`{"T":[{"id":"a",%s,"%s":%s}]}`, other, prop, lit)
-	parsed, pres := jsondata.Parse(ctx, location.NewSourceID("agree.json"), []byte(doc))
+	parsed, pres := jsondata.Parse(ctx, sourcetest.ID("agree.json"), []byte(doc))
 	if err := pres.Err(); err != nil {
 		t.Fatalf("JSON parse %s: %v", doc, err)
 	}

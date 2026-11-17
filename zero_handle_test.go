@@ -8,7 +8,6 @@ import (
 
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/instance"
-	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -84,7 +83,7 @@ func TestZeroHandle_OtherRecordsAnswerAsHoldingNothing(t *testing.T) {
 		graph.UnresolvedEdge{},
 		instance.ValidInstance{},
 		instance.ValidEdgeData{},
-		location.Provenance{},
+		instance.Provenance{},
 	} {
 		for _, call := range callZero(t, zero) {
 			if call.panicked {

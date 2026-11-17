@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/simon-lentz/yammm/location"
+	"github.com/simon-lentz/yammm/internal/yammmtest/sourcetest"
 )
 
 // TestParse_SkipsOneLeadingByteOrderMark pins that a data file starting
@@ -12,7 +12,7 @@ import (
 // still a parse error.
 func TestParse_SkipsOneLeadingByteOrderMark(t *testing.T) {
 	t.Parallel()
-	src := location.NewSourceID("data.json")
+	src := sourcetest.ID("data.json")
 	parsed, result := Parse(context.Background(), src, []byte("\uFEFF{\"Test\": [{\"id\": \"a\"}]}"))
 	if result.HasErrors() {
 		t.Fatalf("issues: %s", result.String())

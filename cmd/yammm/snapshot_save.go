@@ -89,9 +89,8 @@ func runSnapshotSave(cmd *cobra.Command, args []string, sink *cli.DiagnosticSink
 		return err
 	}
 
-	// Load existing snapshot if --into is set. A warning the load raises (a
-	// provenance path that falls back, say) reaches the operator whether or not
-	// this command gets as far as writing anything.
+	// Load existing snapshot if --into is set. What the load reports reaches
+	// the operator whether or not this command gets as far as writing anything.
 	var g *graph.Graph
 	var imported *snapshot.HeaderInfo
 	if intoPath != "" {

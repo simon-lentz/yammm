@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/simon-lentz/yammm/internal/yammmtest/sourcetest"
+
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/location"
 )
@@ -296,7 +298,7 @@ func (f fixedSource) Content(location.Span) ([]byte, bool) { return f.content, t
 func TestDiagnosticSink_SourceReachesTheRenderer(t *testing.T) {
 	t.Parallel()
 
-	source := location.NewSourceID("thing.yammm")
+	source := sourcetest.ID("thing.yammm")
 	c := diag.NewCollectorUnlimited()
 	c.Collect(diag.NewIssue(diag.Error, diag.E_SYNTAX, "unexpected token").
 		WithSpan(location.Span{

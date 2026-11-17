@@ -8,8 +8,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/simon-lentz/yammm/internal/yammmtest/sourcetest"
+
 	"github.com/simon-lentz/yammm/diag"
-	"github.com/simon-lentz/yammm/location"
 )
 
 // A cancelled context stops the parse and says so, at Fatal: a caller testing
@@ -20,7 +21,7 @@ func TestParse_CancelledContextIsFatal(t *testing.T) {
 	cancel()
 
 	doc := []byte(`{"Alpha":[{"id":"k1"}],"Beta":[{"id":"k2"}]}`)
-	_, res := Parse(ctx, location.NewSourceID("c.json"), doc)
+	_, res := Parse(ctx, sourcetest.ID("c.json"), doc)
 
 	if !res.HasFatal() {
 		t.Fatalf("a cancelled parse reported no Fatal issue: %s", res.String())
@@ -83,7 +84,7 @@ func TestParse_CancelledParseKeepsWhatItRead(t *testing.T) {
 
 	// Live for the first three polls, so the parse reads keys before stopping.
 	ctx := &cancelAfterPolls{after: 4}
-	got, res := Parse(ctx, location.NewSourceID("c.json"), []byte(sb.String()))
+	got, res := Parse(ctx, sourcetest.ID("c.json"), []byte(sb.String()))
 
 	if !res.HasFatal() {
 		t.Fatalf("a cancelled parse reported no Fatal issue: %s", res.String())
@@ -103,7 +104,7 @@ func TestParse_CancelledParseCountsTheKeysItRead(t *testing.T) {
 	doc := []byte(`{"a b": [], "Person": 5, "Person": [], "Company": []}`)
 	// Live for three polls: the refused name, the value that is not an array
 	// and the repeated key are read; the fourth key is not.
-	_, res := Parse(&cancelAfterPolls{after: 4}, location.NewSourceID("c.json"), doc)
+	_, res := Parse(&cancelAfterPolls{after: 4}, sourcetest.ID("c.json"), doc)
 	var msg string
 	for iss := range res.Issues() {
 		if iss.Code() == diag.E_CONTEXT_CANCELLED {

@@ -42,7 +42,7 @@
 // that names a test somebody deleted.
 //
 // A qualified link resolves its package part against the referencing file's own
-// imports first. This module has a location/path package, so a bare
+// imports first. This module has an instance/path package, so a bare
 // package-name match for a path-qualified link would collide with the standard
 // library's path.
 // When the file does not import the name, a unique in-module package with that

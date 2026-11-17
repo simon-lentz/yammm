@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/simon-lentz/yammm/internal/yammmtest/sourcetest"
+
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -17,7 +19,7 @@ import (
 
 func sourceID(t *testing.T, name string) location.SourceID {
 	t.Helper()
-	return location.NewSourceID("test://" + name)
+	return sourcetest.ID("test://" + name)
 }
 
 // buildAndComplete runs TestCompleteModel with a fresh collector and a
@@ -26,7 +28,7 @@ func sourceID(t *testing.T, name string) location.SourceID {
 func buildAndComplete(t *testing.T, model *schema.TestModel) (schema.Schema, diag.Result) {
 	t.Helper()
 	collector := diag.NewCollector(0)
-	srcID := location.NewSourceID("test://" + strings.ReplaceAll(t.Name(), "/", "_") + ".yammm")
+	srcID := sourcetest.ID("test://" + strings.ReplaceAll(t.Name(), "/", "_") + ".yammm")
 	s := schema.TestCompleteModel(model, srcID, collector, nil, schema.TestResolvedImportMap{})
 	return s, collector.Result()
 }

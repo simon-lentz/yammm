@@ -6,8 +6,8 @@ import (
 	"slices"
 
 	"github.com/simon-lentz/yammm/immutable"
+	"github.com/simon-lentz/yammm/instance"
 	"github.com/simon-lentz/yammm/internal/snapparts"
-	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -239,34 +239,18 @@ func compareDuplicates(a, b Duplicate) int {
 // compareProvenance orders by what a document writes first, the source name and
 // the path, so a load derives the order Marshal wrote: a load's spans are zero. The
 // span then separates two records no document can tell apart. No provenance sorts first.
-func compareProvenance(a, b location.Provenance) int {
+func compareProvenance(a, b instance.Provenance) int {
 	if a.IsZero() != b.IsZero() {
 		if a.IsZero() {
 			return -1
 		}
 		return 1
 	}
-	as, bs := a.Span(), b.Span()
 	return cmp.Or(
 		cmp.Compare(a.SourceName(), b.SourceName()),
-		cmp.Compare(writtenPath(a), writtenPath(b)),
-		cmp.Compare(as.Source.String(), bs.Source.String()),
-		comparePosition(as.Start, bs.Start),
-		comparePosition(as.End, bs.End),
+		cmp.Compare(a.Path(), b.Path()),
+		a.Span().Compare(b.Span()),
 	)
-}
-
-func comparePosition(a, b location.Position) int {
-	return cmp.Or(cmp.Compare(a.Line, b.Line), cmp.Compare(a.Column, b.Column), cmp.Compare(a.Byte, b.Byte))
-}
-
-// writtenPath returns the path a document holds for p, the one snapshot's marshal
-// writes: a load keeps a raw path that its parsed path does not spell.
-func writtenPath(p location.Provenance) string {
-	if p.HasRawPath() {
-		return p.RawPath()
-	}
-	return p.Path().String()
 }
 
 // associationTarget returns the declared target of relation, an association of

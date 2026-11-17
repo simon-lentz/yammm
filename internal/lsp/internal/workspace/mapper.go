@@ -21,7 +21,7 @@ type uriMapper struct {
 	// Path normalization invariants:
 	//   - Keys use forward-slash normalized paths matching SourceID.String() format
 	//   - This enables cross-platform consistency (Windows paths converted to forward slashes)
-	//   - The location.CanonicalPath type guarantees: absolute, clean, NFC-normalized, forward slashes
+	//   - A file-backed location.SourceID is absolute, clean, NFC-normalized and written with forward slashes
 	//   - FindModuleRoot operates on OS-native paths separately (uses filepath.Separator)
 	//
 	// Nil when invalidated; lazily rebuilt on first access after mutation.
@@ -52,7 +52,7 @@ func (m *uriMapper) ensureCache(open map[string]*docstate.Document) map[string]s
 // buildCanonicalToURIMap builds a mapping from canonical (symlink-resolved)
 // paths to the URIs used by clients to open documents.
 //
-// This is needed because the schema loader resolves symlinks (through location.ResolveHostPath),
+// This is needed because the schema loader resolves symlinks (through hostpath.Resolve),
 // so diagnostics reference canonical paths. But clients identify documents by the
 // URI they used to open them, which may be a symlink path. This mapping allows
 // us to translate diagnostic URIs back to client-expected URIs.

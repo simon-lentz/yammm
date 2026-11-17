@@ -41,7 +41,7 @@ The validator reads a property value by the rules below. The graph, the `.ys` wr
 
 **Nested collections.** A List whose element is a List or a Vector is valid at the validator, and each writer writes it or refuses it. The `.ys` document writes it and reads it back, by the same rules as any list. The `neo4j` write path refuses a value of one with `ErrUnsupportedListElem`, as `schema/cypher`'s DDL refuses the property with `E_NEO4J_UNSUPPORTED_TYPE`: Neo4j has no nested collection property type.
 
-**Ownership.** Each root, each record that a `schema.Schema` or a `graph.Snapshot` holds, and `instance.ValidInstance` and `instance.ValidEdgeData`, which the validator hands out, is a handle: a struct with one unexported pointer. Other results include plain values, such as a constraint, `immutable.Properties` or `diag.Result`. `Snapshot.Attestation` returns a pointer to a copy of a plain struct, or nil. No exported method of a handle returns a pointer to its stored state or a slice of it. An invariant's compiled tree and a pattern's compiled form have no public read: `Invariant.Span` locates an invariant's source in `Sources.Content`, from its doc comment, if it has one, through its expression, and `regexp.Compile` compiles a loaded pattern from `PatternConstraint.Pattern`. A caller holds no address of a handle's record, so `*t = schema.Type{}` does not compile. Two handles are equal when they name one record, so a handle is a map key. The zero handle names no record, and `IsZero` reports it. On a zero `schema` record an accessor panics at the call, an iterator's included; a zero `schema.Sources`, and a zero record of `graph`, `instance` or `location`, answers as holding nothing, with no panic. A handle has no JSON form, and `encoding/json` writes one as `{}`. A lookup returns `(T, bool)`. A handle is a struct and no value of any form, so a handle at a property, the zero one among them, is not absent: the validator refuses it with `E_TYPE_MISMATCH`, where v0.21.1 read a nil pointer as absent.
+**Ownership.** Each root, each record that a `schema.Schema` or a `graph.Snapshot` holds, and `instance.ValidInstance` and `instance.ValidEdgeData`, which the validator hands out, is a handle: a struct with one unexported pointer. Other results include plain values, such as a constraint, `immutable.Properties` or `diag.Result`. `Snapshot.Attestation` returns a pointer to a copy of a plain struct, or nil. No exported method of a handle returns a pointer to its stored state or a slice of it. An invariant's compiled tree and a pattern's compiled form have no public read: `Invariant.Span` locates an invariant's source in `Sources.Content`, from its doc comment, if it has one, through its expression, and `regexp.Compile` compiles a loaded pattern from `PatternConstraint.Pattern`. A caller holds no address of a handle's record, so `*t = schema.Type{}` does not compile. Two handles are equal when they name one record, so a handle is a map key. The zero handle names no record, and `IsZero` reports it. On a zero `schema` record an accessor panics at the call, an iterator's included; a zero `schema.Sources`, and a zero record of `graph` or `instance`, answers as holding nothing, with no panic. A handle has no JSON form, and `encoding/json` writes one as `{}`. A lookup returns `(T, bool)`. A handle is a struct and no value of any form, so a handle at a property, the zero one among them, is not absent: the validator refuses it with `E_TYPE_MISMATCH`, where v0.21.1 read a nil pointer as absent.
 
 **Collections.** An accessor over records, or over the references that name them (`TypeRef`, `ResolvedTypeRef`), returns `iter.Seq` or `iter.Seq2`, and no slice form exists. A caller that needs a slice calls `slices.Collect` on an `iter.Seq`. A slice that an accessor returns is a fresh one, such as `Annotation.Args`, `EnumConstraint.Values`, `Snapshot.Types`, `Sources.SourceIDs` and `Instance.ComposedRelations`.
 
@@ -62,6 +62,8 @@ s, result := schema.LoadString(ctx, content, "source-name", opts...)
 // Useful in LSP scenarios where multiple documents are open but only one is being analyzed
 s, result := schema.LoadSourcesWithEntry(ctx, sources, entryPath, moduleRoot, opts...)
 ```
+
+A path `Load` reads, and a key `LoadSourcesWithEntry` registers under a module root on disk, names a directory when it ends in a separator or a `.` element, as the kernel reads it. So `s.yammm/` and `s.yammm/.` name no file: where `s.yammm` is a regular file the load is refused with a Fatal `E_LOAD_IO_FAILURE` whose message ends in the host's not-a-directory error, where v0.21.1 read the file. Under `WithSyntheticRoot` a key names no host path and is cleaned instead (see [Synthetic source identities](#synthetic-source-identities)).
 
 ### Load Options
 
@@ -91,7 +93,8 @@ is exactly what it was before — the entry schema's own directory.
 
 ```go
 // The nearest ancestor holding a yammm.mod, "" and false when none does, and
-// an error when a marker exists but is malformed or unreadable.
+// an error when the resolver refuses dir, a marker is malformed or unreadable,
+// or a look for one fails other than as absent.
 root, found, err := schema.FindModuleRoot(filepath.Dir(entryPath))
 
 var malformed *schema.MalformedModuleRootError
@@ -175,17 +178,16 @@ The option refuses rather than degrades. Each of these is an error:
 | The option passed to `Load` or `LoadString` | It could only ever be a silent no-op there |
 | An absolute source key — as given, or once cleaned and in NFC (`./C:/x.yammm`, or a key spelled with U+212A KELVIN SIGN, which NFC makes `K`) — or one naming the root itself or a directory above it (`..`) | An absolute key collides with file-backed identities, and neither the root nor a directory above it is a source. A key that spells a directory under the root is cleaned to a file key: `x.yammm/` and `x.yammm/.` are `x.yammm`. A key that escapes the root is allowed: it keeps its leading `..` and yields a stable, distinct identity |
 | A source key holding a backslash | Windows reads a backslash as a separator and every other host as part of a file name, so one store would name different sources on each |
-| A source key holding a character that does not print — a control character, a bidi or other format character, a space past ASCII, a private-use or unassigned code point | Such a character renders as nothing or reorders the text around it, so two identities could read alike. Every synthetic identity the library judges is held to this rule, a `LoadString` name among them; `location.NewSourceID` judges nothing. `location`'s functions, `schema.SyntheticImportKey` and `gogen.Marshal` return an error wrapping `location.ErrUnprintableSourceID`. A load reports its text, so `errors.Is` cannot match it there. The verdict follows the Unicode tables of the Go toolchain that builds yammm, so a character a later Unicode assigns is refused until that toolchain moves. The ASCII space stays legal in a key |
+| A source key holding a character that does not print — a control character, a bidi or other format character, a space past ASCII, a line or paragraph separator, a private-use or unassigned code point | Such a character renders as nothing or reorders the text around it, so two identities could read alike. Every synthetic identity the library judges is held to this rule, a `LoadString` name and `location.NewSourceID` among them. `location.NewSourceID`, `schema.SyntheticImportKey` and `gogen.Marshal` return an error wrapping `location.ErrUnprintableSourceID`. A load reports its text, so `errors.Is` cannot match it there. The verdict follows the Unicode tables of the Go toolchain that builds yammm, so a character a later Unicode assigns is refused until that toolchain moves. The ASCII space stays legal in a key |
 
 A relative import (`"./x"`, `"../x"`) resolves against the importing source's
 key, as text: `"../dep"` from `a/b/main.yammm` is `a/dep.yammm`, and one that
 climbs above the root keeps its leading `..`. `schema.SyntheticImportKey`
 returns the key any import resolves to, which is how `gogen.Marshal` keys each
 source it embeds through an import; the entry and a source nothing imports key
-from their identities. `location.NormalizeSyntheticKey` is the key rule itself:
-it returns a key cleaned, in NFC and with a leading `..` kept, or refuses it,
-and the loader, `SyntheticImportKey` and `gogen.Marshal` all read a key
-through it. A key it returns is a fixed point: the rule returns it unchanged. `Schema.ModuleRoot()` reports the synthetic root — it is the
+from their identities. One key rule serves all three: it returns a key cleaned,
+in NFC and with a leading `..` kept, or refuses it, and the loader,
+`SyntheticImportKey` and `gogen.Marshal` all read a key through it. A key it returns is a fixed point: the rule returns it unchanged. `Schema.ModuleRoot()` reports the synthetic root — it is the
 root the load resolved imports against — so a schema loaded this way is a
 supported input to `gogen.Marshal`, whose embedded keys are relative to it.
 
@@ -326,7 +328,7 @@ The `instance` package validates Go data against compiled schemas. Each instance
 ```go
 type RawInstance struct {
     Properties map[string]any         // raw property values keyed by name
-    Provenance location.Provenance   // optional source location metadata for error reporting
+    Provenance instance.Provenance   // optional source location metadata for error reporting
 }
 ```
 
@@ -678,7 +680,7 @@ The `snapshot` package serializes and deserializes `graph.Snapshot` values to an
 
 ### File Format
 
-The `.ys` format is JSON-based and preserves structural fidelity: instances with properties, primary keys, edges, compositions, provenance, duplicates, and unresolved edge records all survive a `Marshal`/`Load` round-trip, with two qualifications. Provenance survives as source name and path only: a loaded instance's `Provenance().Span()` is zero. `Marshal` refuses a source name or raw path that is not valid UTF-8 (`E_SNAPSHOT_MALFORMED`), and writes no bytes. It stops at its first refusal. The wire carries a number's value, not its width, for a value a validator admits. `Load` reads each number by the rule in [Values](#values) at the kind its position declares: at a `Float` or a `Vector` element a number literal is its nearest `float64`, an integer past `int64` included, and elsewhere an integer literal an `int64` holds is an `int64`, a float literal a `float64` and an integer literal past `int64` the `json.Number` its text spells. A literal no finite `float64` holds (`1e400`) is the `json.Number` at any position. `Marshal` writes each `json.Number` back unchanged. A snapshot holds what a validator stored or the reader read, and the wire carries each as itself, so `Marshal` refuses no value a snapshot holds. It returns nil bytes with Error `E_SNAPSHOT_MALFORMED` for an indent that is not JSON whitespace or a metadata key or value that is not valid UTF-8. Fatal `E_INTERNAL` marks only a broken invariant of the snapshot itself.
+The `.ys` format is JSON-based and preserves structural fidelity: instances with properties, primary keys, edges, compositions, provenance, duplicates, and unresolved edge records all survive a `Marshal`/`Load` round-trip, with two qualifications. Provenance survives as source name and path only: a loaded instance's `Provenance().Span()` is zero. `Marshal` refuses a source name or path that is not valid UTF-8 (`E_SNAPSHOT_MALFORMED`), and writes no bytes. It stops at its first refusal. The wire carries a number's value, not its width, for a value a validator admits. `Load` reads each number by the rule in [Values](#values) at the kind its position declares: at a `Float` or a `Vector` element a number literal is its nearest `float64`, an integer past `int64` included, and elsewhere an integer literal an `int64` holds is an `int64`, a float literal a `float64` and an integer literal past `int64` the `json.Number` its text spells. A literal no finite `float64` holds (`1e400`) is the `json.Number` at any position. `Marshal` writes each `json.Number` back unchanged. A snapshot holds what a validator stored or the reader read, and the wire carries each as itself, so `Marshal` refuses no value a snapshot holds. It returns nil bytes with Error `E_SNAPSHOT_MALFORMED` for an indent that is not JSON whitespace or a metadata key or value that is not valid UTF-8. Fatal `E_INTERNAL` marks only a broken invariant of the snapshot itself.
 
 The format includes:
 
@@ -843,7 +845,7 @@ const TmpSuffix = ".tmp"
 
 The payload is first written to a staging file of its own beside the file it replaces, `fsync`'d, closed, and then renamed into place. The staging name is the replaced file's stem, a random token, its extension and `snapshot.TmpSuffix` — `snap.12345.ys.tmp` for `snap.ys`, and through a symbolic link the replaced file is the one the link names — so concurrent writers of one path never share a staging file. The rename is the atomic commit point: either the new file takes over (rename succeeded) or the previous file is left untouched (any earlier step failed). With concurrent writers, each rename commits one writer's bytes whole and the last one wins. On any intermediate failure, `WriteFile` removes its own staging file and returns an error wrapped with the failing step (`create temp`, `write temp`, `sync temp`, `close temp`, or `rename temp to final`). It never removes a staging file it did not create.
 
-**Which file is written.** `WriteFile` evaluates a `..` in `path` on its text first, as the schema loader evaluates it: `path` is cleaned, so a `..` cancels the element before it rather than following a symbolic link, and `dir/link/../snap.ys` writes `dir/snap.ys`; a relative `path` that climbs out of the working directory is made absolute from it as `filepath.Abs` spells it, the directory the loader climbs from. A symbolic link at `path` is then followed, as a chain, and survives: the file it names is written, and a dangling link creates that file. A link's target is read as the kernel reads it — on Unix a `..` in the target takes the parent of the directory reached on disk, on Windows it is evaluated on the text — and the staging file is made beside the file the rename replaces. A cycle of links at `path` is refused with an error wrapping `syscall.ELOOP`, tagged `resolve target`; a cycle in a directory of the path fails when the staging file is created, tagged `create temp`.
+**Which file is written.** `WriteFile` evaluates a `..` in `path` on its text first, as the schema loader evaluates it: `path` is cleaned, so a `..` cancels the element before it rather than following a symbolic link, and `dir/link/../snap.ys` writes `dir/snap.ys`; a relative `path` that climbs out of the working directory is made absolute from it as `filepath.Abs` spells it, the directory the loader climbs from. The cleaning keeps a `path` that ends in a separator or a `.` element naming a directory, as the kernel reads it: `snap.ys/` is refused and no file is written. A symbolic link at `path` is then followed, as a chain, and survives: the file it names is written, and a dangling link creates that file. A link's target is read as the kernel reads it — on Unix a `..` in the target takes the parent of the directory reached on disk, on Windows it is evaluated on the text — and the staging file is made beside the file the rename replaces. A cycle of links at `path` is refused with an error wrapping `syscall.ELOOP`, tagged `resolve target`; a cycle in a directory of the path fails when the staging file is created, tagged `create temp`.
 
 `WriteFile` does not validate that `data` is a valid `.ys` document — it is a general-purpose atomic-write primitive, and callers are responsible for the payload (typically the output of `Marshal`).
 
@@ -1016,6 +1018,8 @@ raw := renderer.FormatResultJSON(result)
 ```
 
 `FormatResult` and `FormatResultJSON` are the whole rendering surface. The per-issue renderers (`FormatIssue`, `FormatIssues`, `FormatIssueJSON`) were removed in v0.12.0.
+
+`FormatResultJSON` writes each issue's span as `{"source", "start", "end"}`, and each position as `{"line", "column", "offset"}`: `offset` is `location.Position.Offset`, the 0-based byte offset, written whenever the position is valid, 0 included, and left out when it is not. v0.21.1 wrote the member as `"byte"`. The text renderer writes a control character other than a tab, a C1 control, a bidirectional control and a byte that is not valid UTF-8 as a visible glyph or U+FFFD (the `diag` package doc). The JSON output keeps every text's own bytes, but `encoding/json` writes a byte that is not valid UTF-8 as U+FFFD.
 
 All renderer options are optional. The zero-config `diag.NewRenderer()` produces plain-text output without excerpts or colors.
 

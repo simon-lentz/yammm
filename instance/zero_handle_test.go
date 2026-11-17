@@ -7,7 +7,6 @@ import (
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/instance"
-	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -57,7 +56,7 @@ type T {
 	for name, zero := range map[string]any{
 		"schema.Type":            schema.Type{},
 		"schema.Schema":          schema.Schema{},
-		"location.Provenance":    location.Provenance{},
+		"instance.Provenance":    instance.Provenance{},
 		"instance.ValidInstance": instance.ValidInstance{},
 		"graph.Instance":         graph.Instance{},
 	} {

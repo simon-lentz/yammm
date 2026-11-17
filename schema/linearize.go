@@ -424,9 +424,9 @@ func (c *completer) mergeProperties(t Type, supers []ResolvedTypeRef, direct []T
 			if unknown {
 				continue
 			}
-			related := []location.RelatedInfo{{Span: p.Span(), Message: "the type's own definition"}}
+			related := []diag.RelatedInfo{{Span: p.Span(), Message: "the type's own definition"}}
 			for _, d := range wider {
-				related = append(related, location.RelatedInfo{Span: d.Span(), Message: "inherited definition it does not narrow"})
+				related = append(related, diag.RelatedInfo{Span: d.Span(), Message: "inherited definition it does not narrow"})
 			}
 			c.errorfRelated(t.Span(), diag.E_PROPERTY_CONFLICT, related,
 				"type %q declares property %q, which does not narrow its definition from %s",
@@ -444,9 +444,9 @@ func (c *completer) mergeProperties(t Type, supers []ResolvedTypeRef, direct []T
 			result[i] = decls[slices.IndexFunc(decls, typeUnknown)]
 			continue
 		}
-		related := make([]location.RelatedInfo, len(decls))
+		related := make([]diag.RelatedInfo, len(decls))
 		for j, e := range decls {
-			related[j] = location.RelatedInfo{Span: e.Span(), Message: "definition declared here"}
+			related[j] = diag.RelatedInfo{Span: e.Span(), Message: "definition declared here"}
 		}
 		// d is minimal, so a declaration it does not narrow cannot narrow it.
 		c.errorfRelated(t.Span(), diag.E_PROPERTY_CONFLICT, related,
@@ -751,7 +751,7 @@ func (c *completer) reportAnnotationDisagreement(
 		return
 	}
 	reported[key] = true
-	c.errorfRelated(t.Span(), diag.E_INVALID_ANNOTATION, []location.RelatedInfo{
+	c.errorfRelated(t.Span(), diag.E_INVALID_ANNOTATION, []diag.RelatedInfo{
 		{Span: a.Span(), Message: "annotation declared here"},
 		{Span: otherSpan, Message: otherLabel},
 	}, "%s", msg)
@@ -915,10 +915,10 @@ func (c *completer) flushShadowedAnnotations() {
 
 	for _, g := range groups {
 		display := make([]string, len(g.anns))
-		related := make([]location.RelatedInfo, len(g.anns))
+		related := make([]diag.RelatedInfo, len(g.anns))
 		for i, a := range g.anns {
 			display[i] = "@" + a.name
-			related[i] = location.RelatedInfo{
+			related[i] = diag.RelatedInfo{
 				Span:    a.Span(),
 				Message: "inherited annotation declared here",
 			}
@@ -1002,9 +1002,9 @@ func (c *completer) mergeInvariants(t Type) []Invariant {
 
 	for _, name := range conflicted {
 		kept := inherited[name]
-		related := []location.RelatedInfo{{Span: kept.Span(), Message: "kept definition declared here"}}
+		related := []diag.RelatedInfo{{Span: kept.Span(), Message: "kept definition declared here"}}
 		for _, rival := range rivals[name] {
-			related = append(related, location.RelatedInfo{Span: rival.Span(), Message: "conflicting definition declared here"})
+			related = append(related, diag.RelatedInfo{Span: rival.Span(), Message: "conflicting definition declared here"})
 		}
 		c.errorfRelated(t.Span(), diag.E_INVARIANT_CONFLICT, related,
 			"type %q inherits definitions of invariant %q with different expressions "+
@@ -1246,13 +1246,13 @@ func (c *completer) mergeRelations(t Type, own []Relation, supers []ResolvedType
 		if unjudged[cl.survivor.FieldName()] {
 			continue
 		}
-		related := make([]location.RelatedInfo, 0, len(cl.rivals)+1)
-		related = append(related, location.RelatedInfo{
+		related := make([]diag.RelatedInfo, 0, len(cl.rivals)+1)
+		related = append(related, diag.RelatedInfo{
 			Span:    cl.survivor.Span(),
 			Message: "surviving definition declared here",
 		})
 		for _, rival := range cl.rivals {
-			related = append(related, location.RelatedInfo{
+			related = append(related, diag.RelatedInfo{
 				Span:    rival.Span(),
 				Message: "conflicting definition declared here",
 			})

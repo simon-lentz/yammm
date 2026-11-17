@@ -6,6 +6,8 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -59,6 +61,26 @@ func TestFmtCheck_UnformattedFileIsReported(t *testing.T) {
 	}
 	if out != path+"\n" {
 		t.Errorf("output = %q, want the path alone", out)
+	}
+}
+
+// TestFmtCheck_AnUnformattedFilesNameActsOnNoTerminal holds --check's path
+// line to the text output's escape: a name that holds an escape sequence and a
+// newline is written with both escaped, on one line.
+func TestFmtCheck_AnUnformattedFilesNameActsOnNoTerminal(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows refuses a control character in a file name")
+	}
+
+	path := writeFmtFixture(t, "d\x1b[2J\nx.yammm", fmtUnformatted)
+	code, out, _ := executeCmdOutput(t, "fmt", "--check", path)
+	if code != cli.ExitValidation {
+		t.Errorf("exit code = %d, want %d", code, cli.ExitValidation)
+	}
+	want := filepath.Dir(path) + string(filepath.Separator) + "d\u241b[2J\u240ax.yammm\n"
+	if out != want {
+		t.Errorf("output = %q, want %q", out, want)
 	}
 }
 
@@ -364,21 +386,27 @@ func TestFmt_ASyntaxDiagnosticNamesTheFilesByteOffset(t *testing.T) {
 	t.Parallel()
 	src := "schema \"s\"\r\n\r\ntype T {\r\n\tid String primary\r\n\te Enum[\"a\", \"\\xZZ\"]\r\n}\r\n"
 	path := writeFmtFixture(t, "crlf.yammm", src)
-	byteOf := regexp.MustCompile(`"byte":\s*(\d+)`)
-	first := func(args ...string) string {
+	byteOf := regexp.MustCompile(`"offset":\s*(\d+)`)
+	offsets := func(args ...string) []string {
 		t.Helper()
 		_, out, errOut := executeCmdOutput(t, args...)
-		m := byteOf.FindStringSubmatch(out + errOut)
-		if m == nil {
-			t.Fatalf("%v printed no byte offset:\n%s%s", args, out, errOut)
+		var got []string
+		for _, m := range byteOf.FindAllStringSubmatch(out+errOut, -1) {
+			got = append(got, m[1])
 		}
-		return m[1]
+		if len(got) < 2 {
+			t.Fatalf("%v printed no span's offsets:\n%s%s", args, out, errOut)
+		}
+		return got
 	}
 	want := strconv.Itoa(strings.Index(src, `"\xZZ"`))
-	if got := first("validate", "--format", "json", path); got != want {
-		t.Fatalf("validate places the escape at byte %s, want %s", got, want)
+	validated := offsets("validate", "--format", "json", path)
+	if validated[0] != want {
+		t.Fatalf("validate places the escape at byte %s, want %s", validated[0], want)
 	}
-	if got := first("fmt", "--format", "json", path); got != want {
-		t.Errorf("fmt places the escape at byte %s, want the file's offset %s", got, want)
+	// The end is placed by the same rule as the start, so fmt writes every
+	// offset validate writes.
+	if got := offsets("fmt", "--format", "json", path); !slices.Equal(got, validated) {
+		t.Errorf("fmt writes the offsets %v, want validate's %v", got, validated)
 	}
 }

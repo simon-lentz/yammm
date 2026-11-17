@@ -103,11 +103,15 @@ func TestCheck_AValueThatIsNoStringIsNamedByItsType(t *testing.T) {
 // A struct whose one field is an embedded time.Time, a generated Date or
 // Timestamp data type's shape, is refused at a Date or Timestamp position with
 // a message that says to pass its .Time. A struct that holds a time.Time under
-// a name or beside another field, and a nil pointer, are not told so.
+// a name (Time included), under an alias's name or beside another field, and a nil pointer,
+// are not told so: none of them has a .Time to pass.
 func TestCheck_AGeneratedTimeTypeIsToldToPassItsTime(t *testing.T) {
 	t.Parallel()
 	type generatedDate struct{ time.Time }
 	type namedTime struct{ At time.Time }
+	type timeNamedTime struct{ Time time.Time }
+	type timeAlias = time.Time
+	type aliasEmbed struct{ timeAlias }
 	type otherEmbed struct{ fmt.Stringer }
 	type timeAndMore struct {
 		time.Time
@@ -123,6 +127,8 @@ func TestCheck_AGeneratedTimeTypeIsToldToPassItsTime(t *testing.T) {
 		{&generatedDate{at}, schema.NewDateConstraint(), "expected date string or time.Time (pass a generated type's .Time), got *value_test.generatedDate"},
 		{generatedDate{at}, schema.NewTimestampConstraint(), "expected timestamp string or time.Time (pass a generated type's .Time), got value_test.generatedDate"},
 		{namedTime{at}, schema.NewDateConstraint(), "expected date string or time.Time, got value_test.namedTime"},
+		{timeNamedTime{at}, schema.NewDateConstraint(), "expected date string or time.Time, got value_test.timeNamedTime"},
+		{aliasEmbed{at}, schema.NewDateConstraint(), "expected date string or time.Time, got value_test.aliasEmbed"},
 		{otherEmbed{}, schema.NewDateConstraint(), "expected date string or time.Time, got value_test.otherEmbed"},
 		{timeAndMore{Time: at}, schema.NewDateConstraint(), "expected date string or time.Time, got value_test.timeAndMore"},
 		{&timeAndMore{Time: at}, schema.NewTimestampConstraint(), "expected timestamp string or time.Time, got *value_test.timeAndMore"},
@@ -195,7 +201,8 @@ func TestCoerce_ACutLiteralKeepsWholeCharacters(t *testing.T) {
 }
 
 // A checker that quotes the value it refuses quotes it as strconv.Quote does,
-// and cuts a long one to its head.
+// and cuts a long one to its head. An enum member and a pattern are schema
+// text, quoted whole.
 func TestCheck_ARefusedValueIsQuoted(t *testing.T) {
 	t.Parallel()
 	long := strings.Repeat("x", 100)
@@ -207,17 +214,27 @@ func TestCheck_ARefusedValueIsQuoted(t *testing.T) {
 		want string
 	}{
 		{"UUID", value.Check("xyz", schema.NewUUIDConstraint()), `invalid UUID: "xyz"`},
-		{"enum", value.Check("c", schema.NewEnumConstraint([]string{"a", "b"})), `value "c" not in enum [a b]`},
-		{"pattern", value.Check("b", schema.NewPatternConstraint(regexp.MustCompile("^a$"))), `value "b" does not match pattern ^a$`},
+		{"enum", value.Check("c", schema.NewEnumConstraint([]string{"a", "b"})), `value "c" not in enum ["a" "b"]`},
+		{"pattern", value.Check("b", schema.NewPatternConstraint(regexp.MustCompile("^a$"))), `value "b" does not match pattern "^a$"`},
+		{"an enum member holding a newline", value.Check("c", schema.NewEnumConstraint([]string{"a\nb", "d"})), `value "c" not in enum ["a\nb" "d"]`},
+		{"a pattern holding a newline", value.Check("b", schema.NewPatternConstraint(regexp.MustCompile("a\n\x1b"))), `value "b" does not match pattern "a\n\x1b"`},
 		{
 			"a literal that is no number", coerced(value.Coerce(json.Number(long), schema.NewFloatConstraint())),
 			`cannot coerce json.Number "` + long[:32] + `"… (100 bytes) to float64: no JSON number literal`,
 		},
 		{"a long UUID", value.Check(long, schema.NewUUIDConstraint()), `invalid UUID: ` + cut},
-		{"a long enum value", value.Check(long, schema.NewEnumConstraint([]string{"a", "b"})), `value ` + cut + ` not in enum [a b]`},
+		{"a long enum value", value.Check(long, schema.NewEnumConstraint([]string{"a", "b"})), `value ` + cut + ` not in enum ["a" "b"]`},
 		{
 			"a long pattern value", value.Check(long, schema.NewPatternConstraint(regexp.MustCompile("^a$"))),
-			`value ` + cut + ` does not match pattern ^a$`,
+			`value ` + cut + ` does not match pattern "^a$"`,
+		},
+		{
+			"a long enum member is shown whole", value.Check("c", schema.NewEnumConstraint([]string{long, "b"})),
+			`value "c" not in enum ["` + long + `" "b"]`,
+		},
+		{
+			"a long pattern is shown whole", value.Check("b", schema.NewPatternConstraint(regexp.MustCompile("^"+long+"$"))),
+			`value "b" does not match pattern "^` + long + `$"`,
 		},
 		{"a long date", value.Check(long, schema.NewDateConstraint()), `invalid date format: ` + cut + ` (expected YYYY-MM-DD)`},
 		{"a long timestamp", value.Check(long, schema.NewTimestampConstraint()), `invalid timestamp format: ` + cut},

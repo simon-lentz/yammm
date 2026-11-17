@@ -5,10 +5,8 @@ import (
 	"testing"
 )
 
-// FuzzParse verifies that Parse does not panic on arbitrary input.
-// The parser accepts user-provided path strings and must handle
-// malformed, malicious, or random input gracefully by returning
-// an error rather than panicking.
+// FuzzParse verifies that the grammar's reader does not panic on arbitrary
+// input and that a path it reads writes a form it reads back to itself.
 func FuzzParse(f *testing.F) {
 	// Seed corpus with valid path patterns
 	f.Add("$")
@@ -54,29 +52,29 @@ func FuzzParse(f *testing.F) {
 	f.Add("$.αβγ")
 
 	f.Fuzz(func(t *testing.T, input string) {
-		b, err := Parse(input)
+		b, err := parse(input)
 		if err != nil {
 			return
 		}
-		// A path Parse accepts writes a form Parse reads back to itself.
+		// A path parse accepts writes a form parse reads back to itself.
 		s := b.String()
-		again, err := Parse(s)
+		again, err := parse(s)
 		if err != nil {
-			t.Fatalf("Parse(%q) succeeded, but its String %q does not parse: %v", input, s, err)
+			t.Fatalf("parse(%q) succeeded, but its String %q does not parse: %v", input, s, err)
 		}
 		if again.String() != s {
-			t.Fatalf("Parse(%q).String() = %q, which reparses as %q", input, s, again.String())
+			t.Fatalf("parse(%q).String() = %q, which reparses as %q", input, s, again.String())
 		}
 	})
 }
 
-// FuzzBuilderRoundTrip builds a key, an index and a PK with a field of every
+// FuzzPathRoundTrip builds a key, an index and a PK with a field of every
 // kind formatPKValue writes: each integer width, float32, float64, a string, a
-// bool and a value of another type. A Builder the grammar spells must satisfy
-// Parse(b.String()).String() == b.String(). For a negative index, a PK name
-// that is not an identifier or a NaN or infinite float, the Builder must panic
+// bool and a value of another type. A path the grammar spells must satisfy
+// parse(p.String()).String() == p.String(). For a negative index, a PK name
+// that is not an identifier or a NaN or infinite float, the method must panic
 // with that refusal.
-func FuzzBuilderRoundTrip(f *testing.F) {
+func FuzzPathRoundTrip(f *testing.F) {
 	f.Add("name", 0, "id", "Alice",
 		int8(1), int16(2), int32(3), int64(42), uint8(4), uint16(5), uint32(6), uint64(7),
 		float32(0.1), 1.5, true)
@@ -97,8 +95,8 @@ func FuzzBuilderRoundTrip(f *testing.F) {
 		i8 int8, i16 int16, i32 int32, iv int64, u8 uint8, u16 uint16, u32 uint32, uv uint64,
 		f32 float32, fv float64, bv bool,
 	) {
-		build := func() Builder {
-			return Root().Key(key).Index(idx).PK(
+		build := func() Path {
+			return Root.Key(key).Index(idx).PK(
 				PKField{Name: name, Value: sv},
 				PKField{Name: name, Value: int(iv)},
 				PKField{Name: name, Value: i8},
@@ -135,9 +133,9 @@ func FuzzBuilderRoundTrip(f *testing.F) {
 
 		b := build()
 		s := b.String()
-		parsed, err := Parse(s)
+		parsed, err := parse(s)
 		if err != nil {
-			t.Fatalf("Parse(%q): %v", s, err)
+			t.Fatalf("parse(%q): %v", s, err)
 		}
 		if got := parsed.String(); got != s {
 			t.Fatalf("round trip changed %q to %q", s, got)

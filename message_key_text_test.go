@@ -219,7 +219,6 @@ func TestMessages_RepeatAKeyCutToItsHead(t *testing.T) {
 	renamed = strings.Replace(renamed, `"schema_hash":"sha256:`, `"schema_hash":"sha256:0`, 1)
 	load("Load a long schema name", docWith(renamed, ts(root("t"))+","+us("u"), "", ""))
 	load("Load a repeated member name", doc(ts(root("t"))+`,{"type":2,"items":[{"key":["u"],"properties":{"id":"u","`+Z+`":1,"`+Z+`":2},"provenance":null}]}`, "", ""))
-	load("Load a provenance path that does not parse", doc(ts(`{"key":["t"],"properties":{"id":"t"},"edges":{`+needsU+`},"provenance":{"source_name":"x","path":"`+Z+`["}}`)+","+us("u"), "", ""))
 
 	load("Load a root of another type row", doc(ts(`{"key":["`+Z+`"],"type":0,"properties":{"id":"`+Z+`"},"edges":{`+needsU+`},"provenance":null}`)+","+us("u"), "", ""))
 	load("Load two roots at one key", doc(ts(root(Z), root(Z))+","+us("u"), "", ""))

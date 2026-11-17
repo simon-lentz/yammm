@@ -16,10 +16,10 @@ import (
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/instance"
+	"github.com/simon-lentz/yammm/instance/path"
 	"github.com/simon-lentz/yammm/internal/snapparts"
 	"github.com/simon-lentz/yammm/internal/value"
 	"github.com/simon-lentz/yammm/location"
-	"github.com/simon-lentz/yammm/location/path"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -682,7 +682,6 @@ func (sd *streamDecoder) walkInstance(row int, inst instWire, depth int, eligibl
 			Build())
 	}
 
-	sd.checkProvenancePath(inst, row)
 	keyed := sd.checkStoredKey(row, inst)
 	if keyed && depth > 0 {
 		sd.checkKeylessPartKey(row, inst)
@@ -1409,7 +1408,7 @@ func withoutListings(t schema.Type, edges map[string][]edgeWire, drop map[string
 	out := make(map[string][]edgeWire, len(edges))
 	for relation, list := range edges {
 		rel, _ := t.Relation(relation)
-		field := path.Root().Key(rel.FieldName())
+		field := path.Root.Key(rel.FieldName())
 		kept := make([]edgeWire, 0, len(list))
 		for i, e := range list {
 			if !drop[field.Index(i).String()] {
@@ -1563,25 +1562,6 @@ func retagIssue(issue diag.Issue, sev diag.Severity, typeText, keyStr string) di
 	return b.Build()
 }
 
-// checkProvenancePath warns when a provenance path will not parse. The
-// materializer falls back to the root path silently, so the read surface is
-// where the loss becomes visible. The empty path is included deliberately:
-// path.Parse rejects it, so it is discarded like any other unparseable path
-// and must draw the same warning.
-func (sd *streamDecoder) checkProvenancePath(inst instWire, row int) {
-	if inst.Provenance == nil {
-		return
-	}
-	if _, err := path.Parse(inst.Provenance.Path); err == nil {
-		return
-	}
-	sd.collector.Collect(diag.NewIssue(diag.Warning, diag.W_SNAPSHOT_PATH_FALLBACK,
-		fmt.Sprintf("provenance path %s could not be parsed, falling back to root path", diag.QuoteValue(inst.Provenance.Path))).
-		WithDetail(diag.DetailKeyOriginalPath, inst.Provenance.Path).
-		WithDetail(diag.DetailKeyTypeName, sd.refAt(row)).
-		Build())
-}
-
 // checkDeclaredProperties refuses a stored property name the row's type does not
 // declare, own or inherited. The validator stores values under declared names
 // alone, so such a document describes a
@@ -1691,7 +1671,6 @@ func (sd *streamDecoder) validateDiagnostics(diags diagWire, idx *docIndex) {
 		// compared with; a key checkStoredKey refused has no conflict to resolve.
 		eligible, keyed := true, true
 		if rowOK {
-			sd.checkProvenancePath(dup.Instance, row)
 			sd.checkDeclaredProperties(row, dup.Instance.Key, dup.Instance.Properties)
 			keyed = sd.checkStoredKey(row, dup.Instance)
 			if !statesParent {
@@ -2400,17 +2379,7 @@ func (sd *streamDecoder) instanceParts(row int, inst instWire) snapparts.Instanc
 	}
 
 	if inst.Provenance != nil {
-		parsedPath, parseErr := path.Parse(inst.Provenance.Path)
-		if parseErr != nil {
-			parsedPath = path.Root()
-		}
-		prov := location.NewProvenance(inst.Provenance.SourceName, parsedPath, location.Span{})
-		// A path kept as stated, when it fails to parse or parses to another
-		// spelling, is what a marshal writes back: the document's own bytes.
-		if parseErr != nil || parsedPath.String() != inst.Provenance.Path {
-			prov = prov.WithRawPath(inst.Provenance.Path)
-		}
-		ip.Provenance = prov
+		ip.Provenance = instance.NewProvenance(inst.Provenance.SourceName, path.Path(inst.Provenance.Path), location.Span{})
 	}
 
 	return ip

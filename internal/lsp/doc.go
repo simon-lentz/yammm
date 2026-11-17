@@ -86,7 +86,8 @@
 // The server implements LSP 3.16, which does not support position encoding
 // negotiation (added in LSP 3.17). The server reads a client's character position
 // in UTF-16 code units, and writes one in those units when it holds the source's
-// text and a byte offset. Without them, a character position it writes counts runes.
+// text and that text reaches the position's line. Otherwise a character
+// position it writes counts runes.
 //
 // Documents must be opened (via textDocument/didOpen) before most LSP features
 // work for that document. Specifically, hover, definition, completion,
@@ -117,7 +118,7 @@
 //
 // # Dependencies
 //
-//	internal/lsp  ──imports──▶  internal/format, location,
+//	internal/lsp  ──imports──▶  internal/format, internal/hostpath,
 //	                            internal/lsp/internal/completion,
 //	                            internal/lsp/internal/definition,
 //	                            internal/lsp/internal/docstate,
@@ -131,6 +132,6 @@
 //	                            github.com/creachadair/jrpc2/handler
 //
 // The server package itself holds the transport and the handler wiring; it
-// imports location to resolve a configured module root, and reaches schema and
-// diag through the internal sub-packages.
+// imports internal/hostpath to resolve a configured module root, and reaches
+// schema and diag through the internal sub-packages.
 package lsp

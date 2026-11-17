@@ -3,6 +3,8 @@ package lsputil
 import (
 	"testing"
 
+	"github.com/simon-lentz/yammm/internal/yammmtest/sourcetest"
+
 	"github.com/simon-lentz/yammm/location"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -42,7 +44,7 @@ func TestByteOffsetFromLSP_UTF16_ASCII(t *testing.T) {
 	t.Parallel()
 
 	sources := NewTexts()
-	sourceID := location.NewSourceID("test://ascii.yammm")
+	sourceID := sourcetest.ID("test://ascii.yammm")
 	// Line 1: "hello\n" (bytes 0-5, 6 total including newline)
 	// Line 2: "world\n" (bytes 6-11)
 	content := []byte("hello\nworld\n")
@@ -76,7 +78,7 @@ func TestByteOffsetFromLSP_UTF16_BMP(t *testing.T) {
 	t.Parallel()
 
 	sources := NewTexts()
-	sourceID := location.NewSourceID("test://bmp.yammm")
+	sourceID := sourcetest.ID("test://bmp.yammm")
 	// "héllo" = h(1) + é(2) + l(1) + l(1) + o(1) = 6 bytes
 	// UTF-16: h(1) + é(1) + l(1) + l(1) + o(1) = 5 code units
 	content := []byte("héllo\n")
@@ -110,7 +112,7 @@ func TestByteOffsetFromLSP_UTF16_Surrogate(t *testing.T) {
 	t.Parallel()
 
 	sources := NewTexts()
-	sourceID := location.NewSourceID("test://emoji.yammm")
+	sourceID := sourcetest.ID("test://emoji.yammm")
 	// "a😀b" = a(1) + 😀(4) + b(1) = 6 bytes
 	// UTF-16: a(1) + 😀(2 surrogates) + b(1) = 4 code units
 	content := []byte("a😀b\n")
@@ -143,7 +145,7 @@ func TestByteOffsetFromLSP_UTF16_CJK(t *testing.T) {
 	t.Parallel()
 
 	sources := NewTexts()
-	sourceID := location.NewSourceID("test://cjk.yammm")
+	sourceID := sourcetest.ID("test://cjk.yammm")
 	// "日本語" = 9 bytes (3 per char), 3 UTF-16 code units (all BMP)
 	content := []byte("日本語\n")
 	require.NoError(t, sources.Register(sourceID, content), "Register()")
@@ -174,7 +176,7 @@ func TestByteOffsetFromLSP_MultiLine(t *testing.T) {
 	t.Parallel()
 
 	sources := NewTexts()
-	sourceID := location.NewSourceID("test://multiline.yammm")
+	sourceID := sourcetest.ID("test://multiline.yammm")
 	// Line 1: "type 日本 {\n" = 11 bytes (type=4, space=1, 日=3, 本=3, space=1, {=1, \n=1)
 	// Wait, let me recalculate:
 	// "type " = 5 bytes
@@ -217,7 +219,7 @@ func TestByteOffsetFromLSP_InvalidLine(t *testing.T) {
 	t.Parallel()
 
 	sources := NewTexts()
-	sourceID := location.NewSourceID("test://invalid.yammm")
+	sourceID := sourcetest.ID("test://invalid.yammm")
 	content := []byte("hello\n")
 	require.NoError(t, sources.Register(sourceID, content), "Register()")
 
@@ -230,7 +232,7 @@ func TestByteOffsetFromLSP_UnknownSource(t *testing.T) {
 	t.Parallel()
 
 	sources := NewTexts()
-	sourceID := location.NewSourceID("test://unknown.yammm")
+	sourceID := sourcetest.ID("test://unknown.yammm")
 
 	// Unknown source should return ok=false
 	_, ok := ByteOffsetFromLSP(sources, sourceID, 0, 5)
@@ -283,7 +285,7 @@ func TestSpanToLSPRange_UnknownStart(t *testing.T) {
 	t.Parallel()
 
 	sources := NewTexts()
-	sourceID := location.NewSourceID("test://file.yammm")
+	sourceID := sourcetest.ID("test://file.yammm")
 	span := location.Span{
 		Source: sourceID,
 		// Start is unknown (zero Position)
@@ -297,11 +299,11 @@ func TestSpanToLSPRange_Valid(t *testing.T) {
 	t.Parallel()
 
 	sources := NewTexts()
-	sourceID := location.NewSourceID("test://file.yammm")
+	sourceID := sourcetest.ID("test://file.yammm")
 	span := location.Span{
 		Source: sourceID,
-		Start:  location.Position{Line: 10, Column: 5, Byte: 100},
-		End:    location.Position{Line: 10, Column: 15, Byte: 110},
+		Start:  location.Position{Line: 10, Column: 5, Offset: 100},
+		End:    location.Position{Line: 10, Column: 15, Offset: 110},
 	}
 
 	// When content is not registered, falls back to rune column conversion
@@ -326,11 +328,11 @@ func TestSpanToLSPRange_PointSpan(t *testing.T) {
 	t.Parallel()
 
 	sources := NewTexts()
-	sourceID := location.NewSourceID("test://file.yammm")
+	sourceID := sourcetest.ID("test://file.yammm")
 	// Point span: only start is set
 	span := location.Span{
 		Source: sourceID,
-		Start:  location.Position{Line: 5, Column: 10, Byte: 50},
+		Start:  location.Position{Line: 5, Column: 10, Offset: 50},
 		// End is zero
 	}
 
@@ -354,11 +356,11 @@ func TestSpanToLSPRange_NegativeLine(t *testing.T) {
 	t.Parallel()
 
 	sources := NewTexts()
-	sourceID := location.NewSourceID("test://file.yammm")
+	sourceID := sourcetest.ID("test://file.yammm")
 	// Line 1 should become 0, not negative
 	span := location.Span{
 		Source: sourceID,
-		Start:  location.Position{Line: 1, Column: 1, Byte: 0},
+		Start:  location.Position{Line: 1, Column: 1, Offset: 0},
 	}
 
 	start, _, ok := SpanToLSPRange(sources, span)
@@ -369,68 +371,4 @@ func TestSpanToLSPRange_NegativeLine(t *testing.T) {
 
 	assert.Equal(t, 0, startLine, "start[0] for line 1")
 	assert.Equal(t, 0, startChar, "start[1] for column 1")
-}
-
-func TestSpanToLSPRange_UnknownByte(t *testing.T) {
-	t.Parallel()
-
-	sources := NewTexts()
-	sourceID := location.NewSourceID("test://file.yammm")
-	// Register content so hasContent is true
-	content := []byte("type MyType {\n  name String\n}\n")
-	require.NoError(t, sources.Register(sourceID, content), "Register()")
-
-	// Create span with Byte: -1 (unknown byte offset)
-	// Position represents "MyType" starting at column 6 on line 1
-	span := location.Span{
-		Source: sourceID,
-		Start:  location.Position{Line: 1, Column: 6, Byte: -1},
-		End:    location.Position{Line: 1, Column: 12, Byte: -1},
-	}
-
-	start, end, ok := SpanToLSPRange(sources, span)
-	require.True(t, ok, "SpanToLSPRange() = !ok; want ok")
-
-	startLine, startChar := start[0], start[1]
-	endLine, endChar := end[0], end[1]
-
-	// When Byte is -1, should fall back to Column-1 (rune column)
-	// Line: 1 (1-based) -> 0 (0-based)
-	assert.Equal(t, 0, startLine, "start line")
-	// Column: 6 (1-based) -> 5 (0-based)
-	assert.Equal(t, 5, startChar, "start char (Column-1 fallback)")
-	assert.Equal(t, 0, endLine, "end line")
-	// Column: 12 (1-based) -> 11 (0-based)
-	assert.Equal(t, 11, endChar, "end char (Column-1 fallback)")
-}
-
-func TestSpanToLSPRange_MixedByteKnowledge(t *testing.T) {
-	t.Parallel()
-
-	sources := NewTexts()
-	sourceID := location.NewSourceID("test://mixed.yammm")
-	content := []byte("héllo world\n")
-	require.NoError(t, sources.Register(sourceID, content), "Register()")
-
-	// Start has known byte, End has unknown byte
-	// "héllo" = h(1) + é(2) + l(1) + l(1) + o(1) = 6 bytes
-	span := location.Span{
-		Source: sourceID,
-		Start:  location.Position{Line: 1, Column: 1, Byte: 0},  // Known byte
-		End:    location.Position{Line: 1, Column: 6, Byte: -1}, // Unknown byte
-	}
-
-	start, end, ok := SpanToLSPRange(sources, span)
-	require.True(t, ok, "SpanToLSPRange() = !ok; want ok")
-
-	startLine, startChar := start[0], start[1]
-	endLine, endChar := end[0], end[1]
-
-	// Start should use UTF-16 conversion (byte 0 -> char 0)
-	assert.Equal(t, 0, startLine, "start line")
-	assert.Equal(t, 0, startChar, "start char")
-
-	// End should fall back to Column-1 (column 6 -> char 5)
-	assert.Equal(t, 0, endLine, "end line")
-	assert.Equal(t, 5, endChar, "end char (Column-1 fallback for unknown byte)")
 }

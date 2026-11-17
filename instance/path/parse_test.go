@@ -2,10 +2,8 @@ package path
 
 import (
 	"math"
+	"strings"
 	"testing"
-
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 )
 
 func TestParse_ValidPaths(t *testing.T) {
@@ -245,9 +243,13 @@ func TestParse_ValidPaths(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			b, err := Parse(tt.input)
-			require.NoError(t, err)
-			assert.Equal(t, tt.expected, b.String())
+			b, err := parse(tt.input)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if got, want := b.String(), tt.expected; got != want {
+				t.Errorf("got %v, want %v", got, want)
+			}
 		})
 	}
 }
@@ -467,40 +469,48 @@ func TestParse_InvalidPaths(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := Parse(tt.input)
-			require.Error(t, err)
-			assert.Contains(t, err.Error(), tt.errMsg)
+			_, err := parse(tt.input)
+			if err == nil {
+				t.Fatal("want an error, got none")
+			}
+			if !strings.Contains(err.Error(), tt.errMsg) {
+				t.Errorf("%q does not contain %q", err.Error(), tt.errMsg)
+			}
 		})
 	}
 }
 
 func TestParse_RoundTrip(t *testing.T) {
 	// Test that parsing the output of String() produces the same result
-	paths := []Builder{
-		Root(),
-		Root().Key("name"),
-		Root().Key("a").Key("b").Key("c"),
-		Root().Index(0),
-		Root().Index(0).Index(1),
-		Root().Key("items").Index(0),
-		Root().Key("Person").PK(PKField{Name: "id", Value: int64(42)}),
-		Root().Key("Person").PK(PKField{Name: "name", Value: "Alice"}),
-		Root().Key("Enrollment").PK(
+	paths := []Path{
+		Root,
+		Root.Key("name"),
+		Root.Key("a").Key("b").Key("c"),
+		Root.Index(0),
+		Root.Index(0).Index(1),
+		Root.Key("items").Index(0),
+		Root.Key("Person").PK(PKField{Name: "id", Value: int64(42)}),
+		Root.Key("Person").PK(PKField{Name: "name", Value: "Alice"}),
+		Root.Key("Enrollment").PK(
 			PKField{Name: "region", Value: "us"},
 			PKField{Name: "studentId", Value: int64(12345)},
 		),
-		Root().Key("data").Key("users").Index(0).Key("profile"),
-		Root().Key("Person").PK(PKField{Name: "id", Value: uint64(math.MaxUint64)}),
-		Root().Key("Person").PK(PKField{Name: "tags", Value: []string{`a"b\c`}}),
-		Root().Key("a\xffb"),
+		Root.Key("data").Key("users").Index(0).Key("profile"),
+		Root.Key("Person").PK(PKField{Name: "id", Value: uint64(math.MaxUint64)}),
+		Root.Key("Person").PK(PKField{Name: "tags", Value: []string{`a"b\c`}}),
+		Root.Key("a\xffb"),
 	}
 
 	for _, original := range paths {
 		t.Run(original.String(), func(t *testing.T) {
 			str := original.String()
-			parsed, err := Parse(str)
-			require.NoError(t, err)
-			assert.Equal(t, str, parsed.String())
+			parsed, err := parse(str)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if got, want := parsed.String(), str; got != want {
+				t.Errorf("got %v, want %v", got, want)
+			}
 		})
 	}
 }
@@ -560,12 +570,20 @@ func TestParseIdentifier(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			id, newPos, err := parseIdentifier(tt.input, tt.pos)
 			if tt.wantErr {
-				require.Error(t, err)
+				if err == nil {
+					t.Fatal("want an error, got none")
+				}
 				return
 			}
-			require.NoError(t, err)
-			assert.Equal(t, tt.expected, id)
-			assert.Equal(t, tt.newPos, newPos)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if got, want := id, tt.expected; got != want {
+				t.Errorf("got %v, want %v", got, want)
+			}
+			if got, want := newPos, tt.newPos; got != want {
+				t.Errorf("got %v, want %v", got, want)
+			}
 		})
 	}
 }
@@ -653,12 +671,20 @@ func TestParseQuotedString(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			str, newPos, err := parseQuotedString(tt.input, tt.pos)
 			if tt.wantErr {
-				require.Error(t, err)
+				if err == nil {
+					t.Fatal("want an error, got none")
+				}
 				return
 			}
-			require.NoError(t, err)
-			assert.Equal(t, tt.expected, str)
-			assert.Equal(t, tt.newPos, newPos)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if got, want := str, tt.expected; got != want {
+				t.Errorf("got %v, want %v", got, want)
+			}
+			if got, want := newPos, tt.newPos; got != want {
+				t.Errorf("got %v, want %v", got, want)
+			}
 		})
 	}
 }
@@ -739,12 +765,20 @@ func TestParseNumber(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			num, newPos, err := parseNumber(tt.input, tt.pos)
 			if tt.wantErr {
-				require.Error(t, err)
+				if err == nil {
+					t.Fatal("want an error, got none")
+				}
 				return
 			}
-			require.NoError(t, err)
-			assert.Equal(t, tt.expected, num)
-			assert.Equal(t, tt.newPos, newPos)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if got, want := num, tt.expected; got != want {
+				t.Errorf("got %v, want %v", got, want)
+			}
+			if got, want := newPos, tt.newPos; got != want {
+				t.Errorf("got %v, want %v", got, want)
+			}
 		})
 	}
 }

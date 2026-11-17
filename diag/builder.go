@@ -92,7 +92,7 @@ func FromIssue(issue Issue) *IssueBuilder {
 	}
 	// Deep copy slices to preserve original issue immutability
 	if len(issue.related) > 0 {
-		b.issue.related = make([]location.RelatedInfo, len(issue.related))
+		b.issue.related = make([]RelatedInfo, len(issue.related))
 		copy(b.issue.related, issue.related)
 	}
 	if len(issue.details) > 0 {
@@ -114,7 +114,7 @@ func (b *IssueBuilder) WithSpan(span location.Span) *IssueBuilder {
 // WithPath sets instance provenance.
 //
 // sourceName is the label for the instance data source (e.g., "data.json").
-// path is the canonical instance path (e.g., "$.Car[0].regNbr").
+// path is the instance path (e.g., "$.Car[0].regNbr").
 func (b *IssueBuilder) WithPath(sourceName, path string) *IssueBuilder {
 	b.issue.sourceName = sourceName
 	b.issue.path = path
@@ -142,7 +142,7 @@ func (b *IssueBuilder) WithHint(hint string) *IssueBuilder {
 // Ordering note: Related entries are compared lexicographically during issue
 // sorting (by span, then message). For deterministic output, add entries in
 // a consistent order.
-func (b *IssueBuilder) WithRelated(related ...location.RelatedInfo) *IssueBuilder {
+func (b *IssueBuilder) WithRelated(related ...RelatedInfo) *IssueBuilder {
 	b.issue.related = append(b.issue.related, related...)
 	return b
 }
@@ -214,7 +214,7 @@ func (b *IssueBuilder) Build() Issue {
 
 	// Deep copy slices to ensure immutability
 	if len(b.issue.related) > 0 {
-		result.related = make([]location.RelatedInfo, len(b.issue.related))
+		result.related = make([]RelatedInfo, len(b.issue.related))
 		copy(result.related, b.issue.related)
 	}
 	if len(b.issue.details) > 0 {

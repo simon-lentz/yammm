@@ -7,7 +7,6 @@ import (
 	"sync"
 
 	"github.com/simon-lentz/yammm/immutable"
-	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -29,7 +28,7 @@ type validInstanceState struct {
 	properties immutable.Properties
 	edges      map[string]ValidEdgeData
 	composed   map[string][]ValidInstance
-	provenance location.Provenance
+	provenance Provenance
 
 	// scope is the instance's invariant scope, built once by
 	// [Validator.scopeOf] and shared by the instance's own invariants and by
@@ -53,7 +52,7 @@ func newValidInstance(
 	props immutable.Properties,
 	edges map[string]ValidEdgeData,
 	composed map[string][]ValidInstance,
-	provenance location.Provenance,
+	provenance Provenance,
 ) ValidInstance {
 	return ValidInstance{&validInstanceState{
 		typeName:   typeName,
@@ -131,9 +130,9 @@ func (v ValidInstance) Edge(relationName string) (ValidEdgeData, bool) {
 
 // Provenance returns the source location metadata.
 // Returns the zero Provenance if none was provided.
-func (v ValidInstance) Provenance() location.Provenance {
+func (v ValidInstance) Provenance() Provenance {
 	if v.IsZero() {
-		return location.Provenance{}
+		return Provenance{}
 	}
 	return v.provenance
 }

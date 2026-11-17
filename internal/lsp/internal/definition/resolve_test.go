@@ -4,6 +4,8 @@ import (
 	"context"
 	"testing"
 
+	"github.com/simon-lentz/yammm/internal/yammmtest/sourcetest"
+
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -64,7 +66,7 @@ func TestResolveSymbol_LocalType(t *testing.T) {
 func TestResolveReference_NotFound(t *testing.T) {
 	t.Parallel()
 
-	sourceID := location.NewSourceID("test://schema.yammm")
+	sourceID := sourcetest.ID("test://schema.yammm")
 
 	// Create empty snapshot - ResolveTypeReference will return nil
 	snapshot := &analysis.Snapshot{
@@ -76,7 +78,7 @@ func TestResolveReference_NotFound(t *testing.T) {
 	ref := &symbols.ReferenceSymbol{
 		TargetName: "NonExistent",
 		Qualifier:  "",
-		Span:       location.RangeWithBytes(sourceID, 5, 10, -1, 5, 20, -1),
+		Span:       location.Span{Source: sourceID, Start: location.Position{Line: 5, Column: 10}, End: location.Position{Line: 5, Column: 20}},
 	}
 
 	loc := definition.ResolveReference(snapshot, ref, sourceID, identityURI)
@@ -126,7 +128,7 @@ func TestSymbolToLocation_NilSymbol(t *testing.T) {
 func TestSymbolToLocation_ZeroRange(t *testing.T) {
 	t.Parallel()
 
-	sourceID := location.NewSourceID("test://types.yammm")
+	sourceID := sourcetest.ID("test://types.yammm")
 
 	sym := &symbols.Symbol{
 		Name:     "NoRange",

@@ -29,7 +29,8 @@ const maxLinkHops = 40
 // it replaces, fsyncs and closes the staging file, then renames it into place.
 // A ".." in path is evaluated on its text first, as the schema loader evaluates
 // it, and a symbolic link at it is then followed, so the link survives and the
-// file it names is written. On an error, WriteFile removes its own staging file
+// file it names is written. A path that ends in a separator or a "." element
+// names a directory, so no file is written there. On an error, WriteFile removes its own staging file
 // and returns the error wrapped with the failing step. The package
 // documentation states the staging name, the file mode, the durability limits
 // and what a crash leaves behind.

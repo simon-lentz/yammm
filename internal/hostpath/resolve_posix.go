@@ -1,6 +1,6 @@
 //go:build !windows
 
-package location
+package hostpath
 
 import (
 	"fmt"

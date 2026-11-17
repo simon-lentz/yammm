@@ -3,6 +3,8 @@ package schema_test
 import (
 	"testing"
 
+	"github.com/simon-lentz/yammm/internal/yammmtest/sourcetest"
+
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -13,7 +15,7 @@ import (
 
 func registerTestSource(t *testing.T, reg *source.Registry, content, name string) location.SourceID {
 	t.Helper()
-	sourceID := location.NewSourceID("test://" + name)
+	sourceID := sourcetest.ID("test://" + name)
 	err := reg.Register(sourceID, []byte(content))
 	require.NoError(t, err)
 	return sourceID
@@ -56,8 +58,9 @@ func TestSources_PositionAt_ZeroHandle(t *testing.T) {
 
 	pos := s.PositionAt(location.SourceID{}, 0)
 
-	// An unknown byte offset is -1; the zero Position claims offset 0.
-	assert.Equal(t, location.UnknownPosition(), pos)
+	// The zero handle knows no source, so the position is the zero Position,
+	// which is unknown.
+	assert.Equal(t, location.Position{}, pos)
 }
 
 func TestSources_LineStartByte_ZeroHandle(t *testing.T) {
@@ -107,7 +110,7 @@ func TestSources_ContentBySource_Valid(t *testing.T) {
 func TestSources_ContentBySource_NotFound(t *testing.T) {
 	reg := source.NewRegistry()
 	s := schema.NewSources(reg)
-	unknownID := location.NewSourceID("test://unknown")
+	unknownID := sourcetest.ID("test://unknown")
 
 	content, ok := s.ContentBySource(unknownID)
 
@@ -137,7 +140,7 @@ func TestSources_PositionAt_Valid(t *testing.T) {
 
 	assert.Equal(t, 2, pos.Line)
 	assert.Equal(t, 1, pos.Column)
-	assert.Equal(t, 6, pos.Byte)
+	assert.Equal(t, 6, pos.Offset)
 }
 
 func TestSources_LineStartByte_Valid(t *testing.T) {
@@ -171,7 +174,7 @@ func TestSources_Has_Valid(t *testing.T) {
 	s := schema.NewSources(reg)
 
 	assert.True(t, s.Has(sourceID))
-	assert.False(t, s.Has(location.NewSourceID("test://unknown")))
+	assert.False(t, s.Has(sourcetest.ID("test://unknown")))
 }
 
 func TestSources_Len_Valid(t *testing.T) {

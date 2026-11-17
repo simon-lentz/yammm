@@ -4,8 +4,9 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/simon-lentz/yammm/internal/yammmtest/sourcetest"
+
 	"github.com/simon-lentz/yammm/diag"
-	"github.com/simon-lentz/yammm/location"
 )
 
 func relSource(members string) string {
@@ -38,7 +39,7 @@ func TestRelation_MultiplicityTable(t *testing.T) {
 		}
 		t.Run(name, func(t *testing.T) {
 			src := relSource(fmt.Sprintf("--> WHEELS %s Wheel", tc.spelling))
-			file, issues := Parse([]byte(src), location.NewSourceID("s.yammm"))
+			file, issues := Parse([]byte(src), sourcetest.ID("s.yammm"))
 			if len(issues) != 0 {
 				t.Fatalf("unexpected issues: %v", issues)
 			}
@@ -61,7 +62,7 @@ func TestRelation_MultiplicitySpellingsOutsideTheTableAreRejected(t *testing.T) 
 	for _, spelling := range []string{"(many:one)", "(many:many)", "(:one)", "(one:)", "(two)", "(_:two)"} {
 		t.Run(spelling, func(t *testing.T) {
 			src := relSource("--> WHEELS " + spelling + " Wheel")
-			_, issues := Parse([]byte(src), location.NewSourceID("s.yammm"))
+			_, issues := Parse([]byte(src), sourcetest.ID("s.yammm"))
 			if len(issues) == 0 {
 				t.Errorf("%q accepted, want rejected", spelling)
 			}
@@ -81,7 +82,7 @@ func TestRelation_AssociationShapes(t *testing.T) {
 	}
 	--> SPARE Wheel
 	--> TOOLS (many) Wheel {}`)
-	file, issues := Parse([]byte(src), location.NewSourceID("s.yammm"))
+	file, issues := Parse([]byte(src), sourcetest.ID("s.yammm"))
 	if len(issues) != 0 {
 		t.Fatalf("unexpected issues: %v", issues)
 	}
@@ -125,7 +126,7 @@ func TestRelation_AssociationShapes(t *testing.T) {
 // TestRelation_CompositionTakesNoBody pins the one structural difference
 // between the two forms.
 func TestRelation_CompositionTakesNoBody(t *testing.T) {
-	file, issues := Parse([]byte(relSource("*-> WHEELS (many) Wheel")), location.NewSourceID("s.yammm"))
+	file, issues := Parse([]byte(relSource("*-> WHEELS (many) Wheel")), sourcetest.ID("s.yammm"))
 	if len(issues) != 0 {
 		t.Fatalf("unexpected issues: %v", issues)
 	}
@@ -138,7 +139,7 @@ func TestRelation_CompositionTakesNoBody(t *testing.T) {
 	// satisfies, so it cannot tell a real read of c.Mult from a constant.
 	// An asymmetric spelling, so swapping the two fields is detectable: every
 	// symmetric pair survives a swap, and (many) is one.
-	asym, issues := Parse([]byte(relSource("*-> PARTS (one:many) Wheel")), location.NewSourceID("s.yammm"))
+	asym, issues := Parse([]byte(relSource("*-> PARTS (one:many) Wheel")), sourcetest.ID("s.yammm"))
 	if len(issues) != 0 {
 		t.Fatalf("unexpected issues: %v", issues)
 	}
@@ -152,7 +153,7 @@ func TestRelation_CompositionTakesNoBody(t *testing.T) {
 		t.Errorf("(many) → optional=%v many=%v, want both true", rels[0].Optional, rels[0].Many)
 	}
 
-	_, issues = Parse([]byte(relSource("*-> WHEELS (many) Wheel { note String }")), location.NewSourceID("s.yammm"))
+	_, issues = Parse([]byte(relSource("*-> WHEELS (many) Wheel { note String }")), sourcetest.ID("s.yammm"))
 	if len(issues) == 0 {
 		t.Error("a composition with a body was accepted, want rejected")
 	}
@@ -165,7 +166,7 @@ func TestRelation_CompositionTakesNoBody(t *testing.T) {
 func TestRelation_EdgePropertyConstraintIsForwarded(t *testing.T) {
 	src := "schema \"s\"\ntype T {\n\tid String primary\n\t--> R B { note String[2, _] }\n}\n"
 
-	file, issues := Parse([]byte(src), location.NewSourceID("s.yammm"))
+	file, issues := Parse([]byte(src), sourcetest.ID("s.yammm"))
 
 	if len(issues) != 0 {
 		t.Fatalf("unexpected issues: %v", issues)
@@ -186,7 +187,7 @@ func TestRelation_EdgePropertyConstraintIsForwarded(t *testing.T) {
 // TestRelation_EdgePropertiesRejectPrimary pins that an edge property admits
 // 'required' and nothing else.
 func TestRelation_EdgePropertiesRejectPrimary(t *testing.T) {
-	_, issues := Parse([]byte(relSource("--> WHEELS Wheel {\n\t\tnote String primary\n\t}")), location.NewSourceID("s.yammm"))
+	_, issues := Parse([]byte(relSource("--> WHEELS Wheel {\n\t\tnote String primary\n\t}")), sourcetest.ID("s.yammm"))
 	if len(issues) == 0 {
 		t.Error("an edge property marked primary was accepted, want rejected")
 	}
@@ -200,7 +201,7 @@ func TestRelation_NamesAreUpperSnake(t *testing.T) {
 	for _, name := range []string{"WHEELS", "W2", "HAS_2_PARTS", "X"} {
 		t.Run("accepts_"+name, func(t *testing.T) {
 			src := relSource("--> " + name + " Wheel")
-			file, issues := Parse([]byte(src), location.NewSourceID("s.yammm"))
+			file, issues := Parse([]byte(src), sourcetest.ID("s.yammm"))
 			if len(issues) != 0 {
 				t.Fatalf("relation name %q rejected: %v", name, issues)
 			}
@@ -212,11 +213,11 @@ func TestRelation_NamesAreUpperSnake(t *testing.T) {
 	for _, name := range []string{"wheels", "Wheels", "w2", "WHEELs"} {
 		t.Run("refuses_"+name, func(t *testing.T) {
 			src := relSource("--> " + name + " Wheel")
-			file, issues := Parse([]byte(src), location.NewSourceID("s.yammm"))
+			file, issues := Parse([]byte(src), sourcetest.ID("s.yammm"))
 			if len(issues) != 1 || issues[0].Code() != diag.E_INVALID_NAME {
 				t.Fatalf("relation name %q: got %v, want one E_INVALID_NAME", name, issues)
 			}
-			if got := src[issues[0].Span().Start.Byte:issues[0].Span().End.Byte]; got != name {
+			if got := src[issues[0].Span().Start.Offset:issues[0].Span().End.Offset]; got != name {
 				t.Errorf("diagnostic span covers %q, want the name %q", got, name)
 			}
 			if len(file.Types[0].Relations) != 1 {
@@ -230,7 +231,7 @@ func TestRelation_NamesAreUpperSnake(t *testing.T) {
 // before a relation does not swallow it.
 func TestRelation_RecoveryTreatsArrowsAsMemberStarts(t *testing.T) {
 	src := relSource("broken @\n\t--> WHEELS Wheel\n\t*-> PARTS Wheel")
-	file, issues := Parse([]byte(src), location.NewSourceID("s.yammm"))
+	file, issues := Parse([]byte(src), sourcetest.ID("s.yammm"))
 	if len(issues) != 1 || issues[0].Code() != diag.E_SYNTAX {
 		t.Fatalf("got %v, want one E_SYNTAX", issues)
 	}
@@ -247,7 +248,7 @@ func TestRelation_RecoveryTreatsArrowsAsMemberStarts(t *testing.T) {
 // body that mixes relations and properties.
 func TestRelation_BrokenRelationCostsOnlyItself(t *testing.T) {
 	src := relSource("--> \n\t--> WHEELS Wheel\n\tname String")
-	file, issues := Parse([]byte(src), location.NewSourceID("s.yammm"))
+	file, issues := Parse([]byte(src), sourcetest.ID("s.yammm"))
 	if len(issues) != 1 {
 		t.Fatalf("got %d issues, want 1: %v", len(issues), issues)
 	}
@@ -263,15 +264,15 @@ func TestRelation_BrokenRelationCostsOnlyItself(t *testing.T) {
 // TestRelation_SpansCoverTheWholeDeclaration pins the extents a consumer reads.
 func TestRelation_SpansCoverTheWholeDeclaration(t *testing.T) {
 	src := relSource("--> WHEELS (many) Wheel")
-	file, issues := Parse([]byte(src), location.NewSourceID("s.yammm"))
+	file, issues := Parse([]byte(src), sourcetest.ID("s.yammm"))
 	if len(issues) != 0 {
 		t.Fatalf("unexpected issues: %v", issues)
 	}
 	rel := file.Types[0].Relations[0]
-	if got := src[rel.Span.Start.Byte:rel.Span.End.Byte]; got != "--> WHEELS (many) Wheel" {
+	if got := src[rel.Span.Start.Offset:rel.Span.End.Offset]; got != "--> WHEELS (many) Wheel" {
 		t.Errorf("relation span covers %q", got)
 	}
-	if got := src[rel.NameSpan.Start.Byte:rel.NameSpan.End.Byte]; got != "WHEELS" {
+	if got := src[rel.NameSpan.Start.Offset:rel.NameSpan.End.Offset]; got != "WHEELS" {
 		t.Errorf("name span covers %q, want WHEELS", got)
 	}
 }

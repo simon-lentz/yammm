@@ -307,7 +307,7 @@ func relativeSourcePath(sourceID location.SourceID, moduleRoot string) string {
 		return sourceID.String()
 	}
 
-	// SourceID.String() always uses forward slashes (via CanonicalPath).
+	// SourceID.String() always uses forward slashes.
 	// moduleRoot uses OS-native separators. Normalize both to OS-native
 	// for filepath.Rel, then convert result to forward slashes for display.
 	path := filepath.FromSlash(sourceID.String())

@@ -4,8 +4,9 @@ import (
 	"slices"
 	"testing"
 
+	"github.com/simon-lentz/yammm/internal/yammmtest/sourcetest"
+
 	"github.com/simon-lentz/yammm/diag"
-	"github.com/simon-lentz/yammm/location"
 )
 
 // TestParse_UnparsedHoldsTheGrammarFailuresAlone pins File.Unparsed: an issue
@@ -47,7 +48,7 @@ func TestParse_UnparsedHoldsTheGrammarFailuresAlone(t *testing.T) {
 	for _, row := range rows {
 		t.Run(row.name, func(t *testing.T) {
 			t.Parallel()
-			f, issues := Parse([]byte(row.src), location.NewSourceID("s.yammm"))
+			f, issues := Parse([]byte(row.src), sourcetest.ID("s.yammm"))
 			var got []string
 			at := 0
 			for _, u := range f.Unparsed {
@@ -80,10 +81,10 @@ func TestParse_ExpressionsHoldsEveryInvariantExpression(t *testing.T) {
 		"\t! \"\\xff\" id  ==  \"b\"\n" +
 		"\t! \"c\xff\" id  =~  /d/\n" +
 		"\t! \"\\xZZ\" id  !=  \"e\"\n}\n"
-	f, _ := Parse([]byte(src), location.NewSourceID("s.yammm"))
+	f, _ := Parse([]byte(src), sourcetest.ID("s.yammm"))
 	var got []string
 	for _, span := range f.Expressions {
-		got = append(got, src[span.Start.Byte:span.End.Byte])
+		got = append(got, src[span.Start.Offset:span.End.Offset])
 	}
 	want := []string{`id != ""`, `id  ==  "b"`, `id  =~  /d/`, `id  !=  "e"`}
 	if !slices.Equal(got, want) {

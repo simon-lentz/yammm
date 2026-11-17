@@ -515,15 +515,15 @@ func convertSeverity(sev diag.Severity) *protocol.DiagnosticSeverity {
 	return &s
 }
 
-// ConvertRelatedInfo converts location.RelatedInfo to LSP DiagnosticRelatedInformation.
-func (a *Analyzer) ConvertRelatedInfo(related []location.RelatedInfo, sources *lsputil.Texts) []protocol.DiagnosticRelatedInformation {
+// ConvertRelatedInfo converts diag.RelatedInfo to LSP DiagnosticRelatedInformation.
+func (a *Analyzer) ConvertRelatedInfo(related []diag.RelatedInfo, sources *lsputil.Texts) []protocol.DiagnosticRelatedInformation {
 	if len(related) == 0 {
 		return nil
 	}
 
 	result := make([]protocol.DiagnosticRelatedInformation, 0, len(related))
 	for _, rel := range related {
-		if rel.Span.IsZero() || !rel.Span.Start.IsKnown() {
+		if rel.Span.IsZero() || !rel.Span.Start.IsValid() {
 			continue
 		}
 

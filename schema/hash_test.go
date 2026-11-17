@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/simon-lentz/yammm/internal/yammmtest/sourcetest"
+
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -18,7 +20,7 @@ import (
 var zeroSpan = location.Span{}
 
 func testSourceID(name string) location.SourceID {
-	return location.NewSourceID("test://" + name)
+	return sourcetest.ID("test://" + name)
 }
 
 // buildMinimalSchema creates a sealed schema with optional types and data types.

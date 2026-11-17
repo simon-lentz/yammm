@@ -10,9 +10,9 @@ import (
 
 	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/instance"
+	"github.com/simon-lentz/yammm/instance/path"
 	"github.com/simon-lentz/yammm/internal/instancetest"
 	"github.com/simon-lentz/yammm/location"
-	"github.com/simon-lentz/yammm/location/path"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -199,10 +199,10 @@ func TestValidInstance_Edge(t *testing.T) {
 func TestValidInstance_Provenance(t *testing.T) {
 	s := loadValidRecords(t)
 	t.Run("with_provenance", func(t *testing.T) {
-		prov := location.NewProvenance(
+		prov := instance.NewProvenance(
 			"test.json",
-			path.Root().Key("users").Index(0),
-			location.RangeWithBytes(location.SourceID{}, 10, 1, -1, 20, 100, -1),
+			path.Root.Key("users").Index(0),
+			location.Span{Source: location.SourceID{}, Start: location.Position{Line: 10, Column: 1}, End: location.Position{Line: 20, Column: 100}},
 		)
 		vi := instancetest.ValidRaw(t, s, "Person", instance.RawInstance{
 			Properties: map[string]any{"id": "1"},

@@ -4,8 +4,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/simon-lentz/yammm/internal/yammmtest/sourcetest"
+
 	"github.com/simon-lentz/yammm/diag"
-	"github.com/simon-lentz/yammm/location"
 )
 
 // These rows record what nine sites do today, so a replacement is scored against
@@ -100,7 +101,7 @@ var abandonedGroups = []struct {
 func TestAbandonment_GroupsReportAgainstTheEnclosingConstruct(t *testing.T) {
 	for _, tc := range abandonedGroups {
 		t.Run(tc.name, func(t *testing.T) {
-			f, issues := Parse([]byte(tc.src), location.NewSourceID("s.yammm"))
+			f, issues := Parse([]byte(tc.src), sourcetest.ID("s.yammm"))
 			if len(issues) != tc.count {
 				t.Fatalf("got %d diagnostics, want %d: %v", len(issues), tc.count, issues)
 			}
@@ -119,7 +120,7 @@ func TestAbandonment_GroupsReportAgainstTheEnclosingConstruct(t *testing.T) {
 				t.Errorf("message = %q, want %q", issues[0].Message(), tc.want)
 			}
 			sp := issues[0].Span()
-			if covered := tc.src[sp.Start.Byte:sp.End.Byte]; covered != tc.anchor {
+			if covered := tc.src[sp.Start.Offset:sp.End.Offset]; covered != tc.anchor {
 				t.Errorf("anchored on %q, want %q", covered, tc.anchor)
 			}
 			if len(f.Types) != tc.types {
@@ -135,7 +136,7 @@ func TestAbandonment_GroupsReportAgainstTheEnclosingConstruct(t *testing.T) {
 func TestAbandonment_RecoveryStaysInsideTheDeclaration(t *testing.T) {
 	t.Run("an unterminated bound list keeps later declarations", func(t *testing.T) {
 		src := "schema \"s\"\ntype Code = String [5, 5\ntype Alpha {\n\tid String primary\n}\ntype Beta {\n\tid String primary\n}\n"
-		f, _ := Parse([]byte(src), location.NewSourceID("s.yammm"))
+		f, _ := Parse([]byte(src), sourcetest.ID("s.yammm"))
 		var names []string
 		for _, ty := range f.Types {
 			names = append(names, ty.Name)
@@ -147,7 +148,7 @@ func TestAbandonment_RecoveryStaysInsideTheDeclaration(t *testing.T) {
 
 	t.Run("a slash after the target keeps the next association", func(t *testing.T) {
 		src := "schema \"s\"\ntype T {\n\t--> R B /\n\t--> Q C\n}\n"
-		f, _ := Parse([]byte(src), location.NewSourceID("s.yammm"))
+		f, _ := Parse([]byte(src), sourcetest.ID("s.yammm"))
 		if len(f.Types) != 1 {
 			t.Fatalf("got %d types, want 1", len(f.Types))
 		}
@@ -165,7 +166,7 @@ func TestAbandonment_RecoveryStaysInsideTheDeclaration(t *testing.T) {
 
 	t.Run("a rejected multiplicity records no relation", func(t *testing.T) {
 		src := "schema \"s\"\ntype T {\n\tid String primary\n\t--> R (many:one) B\n}\n"
-		f, _ := Parse([]byte(src), location.NewSourceID("s.yammm"))
+		f, _ := Parse([]byte(src), sourcetest.ID("s.yammm"))
 		if len(f.Types) != 1 {
 			t.Fatalf("got %d types, want 1", len(f.Types))
 		}

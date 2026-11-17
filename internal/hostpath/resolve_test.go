@@ -1,4 +1,4 @@
-package location
+package hostpath
 
 import (
 	"bytes"
@@ -17,13 +17,11 @@ import (
 	"syscall"
 	"testing"
 
-	"golang.org/x/text/unicode/norm"
-
 	"github.com/simon-lentz/yammm/internal/yammmtest"
 )
 
 // diskSpelling is [yammmtest.DiskSpelling], which reads directory listings and
-// shares no code with resolveHostPath, failing the test on error.
+// shares no code with walkHostPath, failing the test on error.
 func diskSpelling(t *testing.T, p string) string {
 	t.Helper()
 	spelled, err := yammmtest.DiskSpelling(p)
@@ -31,11 +29,6 @@ func diskSpelling(t *testing.T, p string) string {
 		t.Fatal(err)
 	}
 	return spelled
-}
-
-// identityForm writes a host path in the form an identity takes.
-func identityForm(host string) string {
-	return norm.NFC.String(filepath.ToSlash(host))
 }
 
 // hostPathTree writes root/Proj/Sub/File.yammm and returns the created path
@@ -56,85 +49,74 @@ func hostPathTree(t *testing.T) (created, typed string) {
 	return created, filepath.Join(root, "proj", "sub", "file.yammm")
 }
 
-// TestNewCanonicalPath_OneIdentityForTwoSpellingsOfOneFile holds a file-backed
-// identity to the file it names: where the filesystem finds one file by two
-// spellings, both spellings give one identity, and it is the one the
-// filesystem itself uses.
-func TestNewCanonicalPath_OneIdentityForTwoSpellingsOfOneFile(t *testing.T) {
+// TestResolve_OneAnswerForTwoSpellingsOfOneFile holds the resolver to the file
+// a path names: where the filesystem finds one file by two spellings, both
+// spellings resolve to one host path, and it is the one the filesystem itself
+// uses.
+func TestResolve_OneAnswerForTwoSpellingsOfOneFile(t *testing.T) {
 	t.Parallel()
 
 	created, typed := hostPathTree(t)
 
-	fromCreated, err := NewCanonicalPath(created)
+	fromCreated, err := Resolve(created)
 	if err != nil {
-		t.Fatalf("NewCanonicalPath(%q): %v", created, err)
+		t.Fatalf("Resolve(%q): %v", created, err)
 	}
-	fromTyped, err := NewCanonicalPath(typed)
+	fromTyped, err := Resolve(typed)
 	if err != nil {
-		t.Fatalf("NewCanonicalPath(%q): %v", typed, err)
+		t.Fatalf("Resolve(%q): %v", typed, err)
 	}
 	if fromTyped != fromCreated {
-		t.Errorf("two spellings of one file give two identities:\n  created %q\n  typed   %q",
-			fromCreated.String(), fromTyped.String())
+		t.Errorf("two spellings of one file resolve apart:\n  created %q\n  typed   %q", fromCreated, fromTyped)
 	}
-	if want := identityForm(created); fromTyped.String() != want {
-		t.Errorf("the identity is %q; want the filesystem's own spelling %q", fromTyped.String(), want)
+	if fromTyped != created {
+		t.Errorf("the resolution is %q; want the filesystem's own spelling %q", fromTyped, created)
 	}
 }
 
-// TestConstructors_AgreeOnTwoSpellingsOfOneFile holds every constructor that
-// touches the filesystem to the spelling [yammmtest.DiskSpelling] reads from
-// the directory listings for the typed path. That reading shares no code with
-// resolveHostPath, so a resolver that spells a component wrongly fails here.
-func TestConstructors_AgreeOnTwoSpellingsOfOneFile(t *testing.T) {
+// TestResolve_AgreesWithTheDirectoryListings holds the resolver to the
+// spelling [yammmtest.DiskSpelling] reads from the directory listings for the
+// typed path. That reading shares no code with walkHostPath, so a resolver that
+// spells a component wrongly fails here.
+func TestResolve_AgreesWithTheDirectoryListings(t *testing.T) {
 	t.Parallel()
 
 	_, typed := hostPathTree(t)
 	onDisk := diskSpelling(t, typed)
-	want := identityForm(onDisk)
 
-	resolved, err := ResolveHostPath(typed)
+	resolved, err := Resolve(typed)
 	if err != nil {
-		t.Fatalf("ResolveHostPath(%q): %v", typed, err)
+		t.Fatalf("Resolve(%q): %v", typed, err)
 	}
 	if resolved != onDisk {
-		t.Errorf("ResolveHostPath(%q) = %q; want %q", typed, resolved, onDisk)
-	}
-
-	id, err := SourceIDFromPath(typed)
-	if err != nil {
-		t.Fatalf("SourceIDFromPath(%q): %v", typed, err)
-	}
-	if id.String() != want {
-		t.Errorf("SourceIDFromPath(%q) = %q; want %q", typed, id.String(), want)
+		t.Errorf("Resolve(%q) = %q; want %q", typed, resolved, onDisk)
 	}
 }
 
-// TestNewCanonicalPath_IdentityDoesNotChangeWhenTheFileIsCreated holds an
-// identity minted for a path that does not exist yet to the one the file gets
-// once it is written. A load that names a file before it exists must not
+// TestResolve_AnswerDoesNotChangeWhenTheFileIsCreated holds the resolution
+// of a path that does not exist yet to the one the file gets once it is
+// written. A load that names a file before it exists must not
 // re-key it afterwards.
-func TestNewCanonicalPath_IdentityDoesNotChangeWhenTheFileIsCreated(t *testing.T) {
+func TestResolve_AnswerDoesNotChangeWhenTheFileIsCreated(t *testing.T) {
 	t.Parallel()
 
 	// t.TempDir is reached through a symlink on darwin (/var -> /private/var),
 	// which is what makes the two mints differ when only the second resolves.
 	p := filepath.Join(t.TempDir(), "later.yammm")
 
-	before, err := NewCanonicalPath(p)
+	before, err := Resolve(p)
 	if err != nil {
-		t.Fatalf("NewCanonicalPath(%q) before creation: %v", p, err)
+		t.Fatalf("Resolve(%q) before creation: %v", p, err)
 	}
 	if err := os.WriteFile(p, nil, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	after, err := NewCanonicalPath(p)
+	after, err := Resolve(p)
 	if err != nil {
-		t.Fatalf("NewCanonicalPath(%q) after creation: %v", p, err)
+		t.Fatalf("Resolve(%q) after creation: %v", p, err)
 	}
 	if before != after {
-		t.Errorf("the identity changed when the file was created:\n  before %q\n  after  %q",
-			before.String(), after.String())
+		t.Errorf("the resolution changed when the file was created:\n  before %q\n  after  %q", before, after)
 	}
 }
 
@@ -144,9 +126,9 @@ func TestNewCanonicalPath_IdentityDoesNotChangeWhenTheFileIsCreated(t *testing.T
 // spelling, before and after the write.
 func holdLinkIdentity(t *testing.T, typed string, content []byte) {
 	t.Helper()
-	before, err := ResolveHostPath(typed)
+	before, err := Resolve(typed)
 	if err != nil {
-		t.Fatalf("ResolveHostPath(%q) before the write: %v", typed, err)
+		t.Fatalf("Resolve(%q) before the write: %v", typed, err)
 	}
 	if err := os.WriteFile(before, content, 0o600); err != nil {
 		t.Fatalf("write the resolved path %q: %v", before, err)
@@ -155,23 +137,23 @@ func holdLinkIdentity(t *testing.T, typed string, content []byte) {
 		t.Fatalf("reading %q returns %q (err %v), not the file written at its resolved path %q: the host reaches another file through the link",
 			typed, got, err, before)
 	}
-	after, err := ResolveHostPath(typed)
+	after, err := Resolve(typed)
 	if err != nil {
-		t.Fatalf("ResolveHostPath(%q) after the write: %v", typed, err)
+		t.Fatalf("Resolve(%q) after the write: %v", typed, err)
 	}
 	if onDisk := diskSpelling(t, typed); after != before || onDisk != before {
-		t.Errorf("ResolveHostPath(%q):\n  before the write   %q\n  after              %q\n  on-disk spelling   %q",
+		t.Errorf("Resolve(%q):\n  before the write   %q\n  after              %q\n  on-disk spelling   %q",
 			typed, before, after, onDisk)
 	}
 }
 
-// TestResolveHostPath_DanglingLinkKeepsItsIdentityWhenItsTargetIsCreated holds a
-// dangling link's identity to the file the host reaches through it: a file
+// TestResolve_DanglingLinkKeepsItsAnswerWhenItsTargetIsCreated holds a
+// dangling link's resolution to the file the host reaches through it: a file
 // written at the path resolved before the target exists is the file a read
 // through the link returns, and resolving again gives that path. A ".." in a
 // target tells a parent taken on disk, as Unix takes it, from one taken from
 // the text, as Windows takes it; the read through the link is the judge.
-func TestResolveHostPath_DanglingLinkKeepsItsIdentityWhenItsTargetIsCreated(t *testing.T) {
+func TestResolve_DanglingLinkKeepsItsAnswerWhenItsTargetIsCreated(t *testing.T) {
 	t.Parallel()
 
 	rows := []struct {
@@ -257,7 +239,7 @@ func TestResolveHostPath_DanglingLinkKeepsItsIdentityWhenItsTargetIsCreated(t *t
 // On Unix a dangling link whose target takes a ".." past a component the
 // kernel cannot enter names no file: the kernel refuses the path, so the
 // resolver refuses it rather than cancel the component on the text.
-func TestResolveHostPath_RefusesALinkTargetThatClimbsPastWhatTheKernelCannotEnter(t *testing.T) {
+func TestResolve_RefusesALinkTargetThatClimbsPastWhatTheKernelCannotEnter(t *testing.T) {
 	t.Parallel()
 	if runtime.GOOS == "windows" {
 		t.Skip("Windows evaluates a target's .. on the text, so the text's answer is the kernel's")
@@ -283,20 +265,20 @@ func TestResolveHostPath_RefusesALinkTargetThatClimbsPastWhatTheKernelCannotEnte
 			if _, err := os.ReadFile(link); err == nil {
 				t.Fatalf("the kernel reads through %s -> %s", link, row.target)
 			}
-			if host, err := ResolveHostPath(link); !errors.Is(err, row.want) {
-				t.Errorf("ResolveHostPath(%s -> %s) = %q, %v; want an error wrapping %v", link, row.target, host, err, row.want)
+			if host, err := Resolve(link); !errors.Is(err, row.want) {
+				t.Errorf("Resolve(%s -> %s) = %q, %v; want an error wrapping %v", link, row.target, host, err, row.want)
 			}
 		})
 	}
 }
 
-// TestResolveHostPath_LinkNamesTheFileTheHostReaches holds a link whose target
+// TestResolve_LinkNamesTheFileTheHostReaches holds a link whose target
 // names a symlinked directory before a ".." to the file the host opens through
 // it. Unix follows that directory and takes its parent on disk; Windows
 // evaluates the ".." on the target's text and never follows it. A file at each
 // answer means a resolver with the other host's rule names a file the host
 // does not open.
-func TestResolveHostPath_LinkNamesTheFileTheHostReaches(t *testing.T) {
+func TestResolve_LinkNamesTheFileTheHostReaches(t *testing.T) {
 	t.Parallel()
 
 	rows := []struct {
@@ -355,7 +337,7 @@ func TestLexicalTarget_EvaluatesADotDotOnTheText(t *testing.T) {
 
 // A descriptor path reaches an open file that the host may give no name for, and
 // reading the path the resolver answers must read that file.
-func TestResolveHostPath_AnswersAPathThatReachesADescriptorsFile(t *testing.T) {
+func TestResolve_AnswersAPathThatReachesADescriptorsFile(t *testing.T) {
 	t.Parallel()
 	if runtime.GOOS == "windows" {
 		t.Skip("Windows has no descriptor paths")
@@ -417,8 +399,8 @@ func TestResolveHostPath_AnswersAPathThatReachesADescriptorsFile(t *testing.T) {
 			t.Fatal(err)
 		}
 		defer f.Close()
-		if host, err := ResolveHostPath(descriptorPath(f) + "/x"); err == nil {
-			t.Errorf("ResolveHostPath answered %q for a path under a regular file", host)
+		if host, err := Resolve(descriptorPath(f) + "/x"); err == nil {
+			t.Errorf("Resolve answered %q for a path under a regular file", host)
 		}
 	})
 	t.Run("an unlinked file", func(t *testing.T) {
@@ -441,14 +423,14 @@ func TestResolveHostPath_AnswersAPathThatReachesADescriptorsFile(t *testing.T) {
 
 // A file replaced during a resolve is spelled on disk at every instant, since the
 // kernel reaches it through its directory at every instant.
-func TestResolveHostPath_AFileReplacedDuringAResolveKeepsItsSpelling(t *testing.T) {
+func TestResolve_AFileReplacedDuringAResolveKeepsItsSpelling(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	mkdirAll(t, filepath.Join(dir, "real"))
 	symlink(t, "real", filepath.Join(dir, "lnk"))
 	target := filepath.Join(dir, "real", "a.json")
 	writeEmpty(t, target)
-	want, err := ResolveHostPath(target)
+	want, err := Resolve(target)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -481,9 +463,9 @@ func TestResolveHostPath_AFileReplacedDuringAResolveKeepsItsSpelling(t *testing.
 		}
 	})
 	for range 5000 {
-		got, err := ResolveHostPath(filepath.Join(dir, "lnk", "a.json"))
+		got, err := Resolve(filepath.Join(dir, "lnk", "a.json"))
 		if err != nil || got != want {
-			t.Errorf("ResolveHostPath = %q, %v; want %q", got, err, want)
+			t.Errorf("Resolve = %q, %v; want %q", got, err, want)
 			break
 		}
 	}
@@ -501,12 +483,12 @@ const heldByADescriptor = "held by a descriptor"
 // reading that answer to give [heldByADescriptor].
 func checkReadsThrough(t *testing.T, typed string) {
 	t.Helper()
-	host, err := ResolveHostPath(typed)
+	host, err := Resolve(typed)
 	if err != nil {
-		t.Fatalf("ResolveHostPath(%q): %v", typed, err)
+		t.Fatalf("Resolve(%q): %v", typed, err)
 	}
 	if host != typed {
-		t.Errorf("ResolveHostPath(%q) = %q, want itself", typed, host)
+		t.Errorf("Resolve(%q) = %q, want itself", typed, host)
 	}
 	got, err := os.ReadFile(host)
 	if err != nil {
@@ -580,16 +562,16 @@ func resolveInChild(t *testing.T, name, typed, want string) {
 	}
 }
 
-// TestResolveHostPath_SpellsALongPathInFull holds the resolver to the whole
+// TestResolve_SpellsALongPathInFull holds the resolver to the whole
 // answer for a path longer than a short buffer holds, up to the longest path
 // that PATH_MAX, 1024 bytes with its NUL on darwin, leaves room for. Each path
 // resolves in a child run of this test.
-func TestResolveHostPath_SpellsALongPathInFull(t *testing.T) {
+func TestResolve_SpellsALongPathInFull(t *testing.T) {
 	t.Parallel()
 	if typed, ok := os.LookupEnv(childResolveEnv); ok {
 		want := os.Getenv(childWantEnv)
-		if got, err := ResolveHostPath(typed); err != nil || got != want {
-			t.Errorf("ResolveHostPath(%q) = %q (%d bytes), %v; want %q (%d bytes)", typed, got, len(got), err, want, len(want))
+		if got, err := Resolve(typed); err != nil || got != want {
+			t.Errorf("Resolve(%q) = %q (%d bytes), %v; want %q (%d bytes)", typed, got, len(got), err, want, len(want))
 		}
 		return
 	}
@@ -608,24 +590,21 @@ func TestResolveHostPath_SpellsALongPathInFull(t *testing.T) {
 			if len(want) != n {
 				t.Fatalf("%q resolves to %d bytes on disk; the row needs %d", typed, len(want), n)
 			}
-			resolveInChild(t, "TestResolveHostPath_SpellsALongPathInFull", typed, want)
+			resolveInChild(t, "TestResolve_SpellsALongPathInFull", typed, want)
 		})
 	}
 }
 
-// TestResolveHostPath_RefusesAPathWhoseResolvedFormExceedsPathMax pins a
+// TestResolve_RefusesAPathWhoseResolvedFormExceedsPathMax pins a
 // refusal on darwin. stat follows links with no bound on the length of the path
 // they reach, but realpath(3) cannot write an answer of PATH_MAX bytes or more.
 // Such a path exists and has no spelling, so every door refuses it rather than
 // return part of one.
-func TestResolveHostPath_RefusesAPathWhoseResolvedFormExceedsPathMax(t *testing.T) {
+func TestResolve_RefusesAPathWhoseResolvedFormExceedsPathMax(t *testing.T) {
 	t.Parallel()
 	if typed, ok := os.LookupEnv(childResolveEnv); ok {
-		if got, err := ResolveHostPath(typed); !errors.Is(err, syscall.ENAMETOOLONG) {
-			t.Errorf("ResolveHostPath(%q) = %q, %v; want ENAMETOOLONG", typed, got, err)
-		}
-		if got, err := NewCanonicalPath(typed); !errors.Is(err, syscall.ENAMETOOLONG) {
-			t.Errorf("NewCanonicalPath(%q) = %q, %v; want ENAMETOOLONG", typed, got.String(), err)
+		if got, err := Resolve(typed); !errors.Is(err, syscall.ENAMETOOLONG) {
+			t.Errorf("Resolve(%q) = %q, %v; want ENAMETOOLONG", typed, got, err)
 		}
 		return
 	}
@@ -660,42 +639,27 @@ func TestResolveHostPath_RefusesAPathWhoseResolvedFormExceedsPathMax(t *testing.
 	if info, err := os.Stat(typed); err != nil || !info.IsDir() {
 		t.Fatalf("stat(%q) through the links = %v, %v; want a directory", typed, info, err)
 	}
-	resolveInChild(t, "TestResolveHostPath_RefusesAPathWhoseResolvedFormExceedsPathMax", typed, "")
+	resolveInChild(t, "TestResolve_RefusesAPathWhoseResolvedFormExceedsPathMax", typed, "")
 }
 
-// TestCanonicalize_RefusesAnEmptyPath holds every file-backed door to refusing
-// an unset file name, where filepath.Abs would make it the working directory.
-func TestCanonicalize_RefusesAnEmptyPath(t *testing.T) {
+// TestResolve_RefusesAnEmptyPath holds the resolver to refusing an unset file
+// name, where filepath.Abs would make it the working directory.
+func TestResolve_RefusesAnEmptyPath(t *testing.T) {
 	t.Parallel()
-
-	t.Run("ResolveHostPath", func(t *testing.T) {
-		t.Parallel()
-		if _, err := ResolveHostPath(""); !errors.Is(err, ErrEmptyPath) {
-			t.Errorf("ResolveHostPath(\"\") error = %v; want ErrEmptyPath", err)
-		}
-	})
-	t.Run("NewCanonicalPath", func(t *testing.T) {
-		t.Parallel()
-		if _, err := NewCanonicalPath(""); !errors.Is(err, ErrEmptyPath) {
-			t.Errorf("NewCanonicalPath(\"\") error = %v; want ErrEmptyPath", err)
-		}
-	})
-	t.Run("SourceIDFromPath", func(t *testing.T) {
-		t.Parallel()
-		if _, err := SourceIDFromPath(""); !errors.Is(err, ErrEmptyPath) {
-			t.Errorf("SourceIDFromPath(\"\") error = %v; want ErrEmptyPath", err)
-		}
-	})
+	if _, err := Resolve(""); !errors.Is(err, ErrEmptyPath) {
+		t.Errorf("Resolve(\"\") error = %v; want ErrEmptyPath", err)
+	}
 }
 
 // A typed path that is valid UTF-8 can resolve to one that is not: through a
 // dangling link's target, or through a directory named on disk in other bytes.
-// The identity would reach both JSON wires, so every constructor refuses it.
+// An identity derived from it would reach both JSON wires, so the resolver
+// refuses it.
 // Each fixture is made twice: with the byte 0xFF, and with a lone surrogate in
 // its WTF-8 form. On Windows Go writes U+FFFD for 0xFF, so that row runs only
 // where the fixture reads back in the bytes it was given. Go keeps the
 // surrogate on every host, so its row runs wherever the host makes the fixture.
-func TestResolveHostPath_RefusesAResolutionThatIsNotValidUTF8(t *testing.T) {
+func TestResolve_RefusesAResolutionThatIsNotValidUTF8(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	cases := map[string]string{}
@@ -736,14 +700,8 @@ func TestResolveHostPath_RefusesAResolutionThatIsNotValidUTF8(t *testing.T) {
 	for name, p := range cases {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
-			if host, err := ResolveHostPath(p); !errors.Is(err, ErrInvalidUTF8Path) {
-				t.Errorf("ResolveHostPath(%q) = %q, %v; want ErrInvalidUTF8Path", p, host, err)
-			}
-			if cp, err := NewCanonicalPath(p); !errors.Is(err, ErrInvalidUTF8Path) {
-				t.Errorf("NewCanonicalPath(%q) = %q, %v; want ErrInvalidUTF8Path", p, cp.String(), err)
-			}
-			if id, _, err := ResolveSourcePath(p); !errors.Is(err, ErrInvalidUTF8Path) {
-				t.Errorf("ResolveSourcePath(%q) = %v, %v; want ErrInvalidUTF8Path", p, id, err)
+			if host, err := Resolve(p); !errors.Is(err, ErrInvalidUTF8Path) {
+				t.Errorf("Resolve(%q) = %q, %v; want ErrInvalidUTF8Path", p, host, err)
 			}
 		})
 	}
@@ -759,44 +717,21 @@ func holdsName(t *testing.T, dir, name string) bool {
 	return slices.ContainsFunc(entries, func(e os.DirEntry) bool { return e.Name() == name })
 }
 
-// TestCanonicalize_RefusesAPathThatIsNotValidUTF8 holds every identity to text
-// both JSON wires can carry. The rows run on every host: the input is a string,
-// and no file is opened.
-func TestCanonicalize_RefusesAPathThatIsNotValidUTF8(t *testing.T) {
+// TestResolve_RefusesAPathThatIsNotValidUTF8 holds the resolver to text both
+// JSON wires can carry. It runs on every host: the input is a string, and no
+// file is opened.
+func TestResolve_RefusesAPathThatIsNotValidUTF8(t *testing.T) {
 	t.Parallel()
-
 	bad := filepath.Join(t.TempDir(), "caf\xff.yammm")
-
-	t.Run("ResolveHostPath", func(t *testing.T) {
-		t.Parallel()
-		if _, err := ResolveHostPath(bad); !errors.Is(err, ErrInvalidUTF8Path) {
-			t.Errorf("ResolveHostPath(%q) error = %v; want ErrInvalidUTF8Path", bad, err)
-		}
-	})
-	t.Run("SourceIDFromPath", func(t *testing.T) {
-		t.Parallel()
-		if _, err := SourceIDFromPath(bad); !errors.Is(err, ErrInvalidUTF8Path) {
-			t.Errorf("SourceIDFromPath(%q) error = %v; want ErrInvalidUTF8Path", bad, err)
-		}
-	})
-	t.Run("NewCanonicalPath", func(t *testing.T) {
-		t.Parallel()
-		if _, err := NewCanonicalPath(bad); !errors.Is(err, ErrInvalidUTF8Path) {
-			t.Errorf("NewCanonicalPath(%q) error = %v; want ErrInvalidUTF8Path", bad, err)
-		}
-	})
-	t.Run("ValidateSyntheticSourceID", func(t *testing.T) {
-		t.Parallel()
-		if err := ValidateSyntheticSourceID("inline:caf\xff"); !errors.Is(err, ErrInvalidUTF8Path) {
-			t.Errorf("ValidateSyntheticSourceID error = %v; want ErrInvalidUTF8Path", err)
-		}
-	})
+	if _, err := Resolve(bad); !errors.Is(err, ErrInvalidUTF8Path) {
+		t.Errorf("Resolve(%q) error = %v; want ErrInvalidUTF8Path", bad, err)
+	}
 }
 
-// TestResolveHostPath_RefusesAPathUnderARegularFile pins a refusal: a path can
-// never exist under a regular file, and every door says so rather than keeping
-// the path as typed.
-func TestResolveHostPath_RefusesAPathUnderARegularFile(t *testing.T) {
+// TestResolve_RefusesAPathUnderARegularFile pins a refusal: a path can
+// never exist under a regular file, and the resolver says so rather than
+// keeping the path as typed.
+func TestResolve_RefusesAPathUnderARegularFile(t *testing.T) {
 	t.Parallel()
 
 	file := filepath.Join(t.TempDir(), "regular.yammm")
@@ -807,18 +742,15 @@ func TestResolveHostPath_RefusesAPathUnderARegularFile(t *testing.T) {
 
 	// Every host reports it as the Unix kernel does, so a caller tells it from
 	// a missing path by errors.Is.
-	if _, err := ResolveHostPath(under); !errors.Is(err, syscall.ENOTDIR) {
-		t.Errorf("ResolveHostPath(%q) = %v; want an error wrapping ENOTDIR", under, err)
-	}
-	if _, err := NewCanonicalPath(under); !errors.Is(err, syscall.ENOTDIR) {
-		t.Errorf("NewCanonicalPath(%q) = %v; want an error wrapping ENOTDIR", under, err)
+	if _, err := Resolve(under); !errors.Is(err, syscall.ENOTDIR) {
+		t.Errorf("Resolve(%q) = %v; want an error wrapping ENOTDIR", under, err)
 	}
 }
 
-// TestResolveHostPath_SpellsAPathTheProcessCannotRead holds the resolver to
+// TestResolve_SpellsAPathTheProcessCannotRead holds the resolver to
 // looking a path up without reading it. A file with no permission bits and a
 // directory the process can traverse but not list are spelled on disk.
-func TestResolveHostPath_SpellsAPathTheProcessCannotRead(t *testing.T) {
+func TestResolve_SpellsAPathTheProcessCannotRead(t *testing.T) {
 	t.Parallel()
 	if runtime.GOOS == "windows" {
 		t.Skip("a Windows permission bit does not stop a read")
@@ -863,19 +795,19 @@ func TestResolveHostPath_SpellsAPathTheProcessCannotRead(t *testing.T) {
 		t.Run(row.name, func(t *testing.T) {
 			t.Parallel()
 			typed := retype(row.created)
-			if got, err := ResolveHostPath(typed); err != nil || got != row.created {
-				t.Errorf("ResolveHostPath(%q) = %q, %v; want %q", typed, got, err, row.created)
+			if got, err := Resolve(typed); err != nil || got != row.created {
+				t.Errorf("Resolve(%q) = %q, %v; want %q", typed, got, err, row.created)
 			}
 		})
 	}
 }
 
-// TestResolveHostPath_KeepsWhatTheLSPDependsOn pins the three rules the editor
+// TestResolve_KeepsWhatTheLSPDependsOn pins the three rules the editor
 // depends on: a relative path is made absolute from the working directory as
 // the filesystem spells it, cleaning runs before resolution so a ".." across a
 // symlink lands where the loader lands it, and a name no file answers to is
 // kept as typed.
-func TestResolveHostPath_KeepsWhatTheLSPDependsOn(t *testing.T) {
+func TestResolve_KeepsWhatTheLSPDependsOn(t *testing.T) {
 	t.Parallel()
 
 	base := diskSpelling(t, t.TempDir())
@@ -888,14 +820,14 @@ func TestResolveHostPath_KeepsWhatTheLSPDependsOn(t *testing.T) {
 			t.Fatal(err)
 		}
 		rel := filepath.Join("does-not-exist", "schema.yammm")
-		got, err := ResolveHostPath(rel)
+		got, err := Resolve(rel)
 		if err != nil {
-			t.Fatalf("ResolveHostPath(%q): %v", rel, err)
+			t.Fatalf("Resolve(%q): %v", rel, err)
 		}
 		// os.Getwd keeps a symlinked or differently cased $PWD; the resolver
 		// spells the working directory, the deepest part that exists, on disk.
 		if want := filepath.Join(diskSpelling(t, cwd), rel); got != want {
-			t.Errorf("ResolveHostPath(%q) = %q; want %q", rel, got, want)
+			t.Errorf("Resolve(%q) = %q; want %q", rel, got, want)
 		}
 	})
 
@@ -923,12 +855,12 @@ func TestResolveHostPath_KeepsWhatTheLSPDependsOn(t *testing.T) {
 		// Built by concatenation, not filepath.Join: Join cleans, which would
 		// collapse the ".." before the resolver ever saw it.
 		in := link + sep + ".." + sep + "target.yammm"
-		got, err := ResolveHostPath(in)
+		got, err := Resolve(in)
 		if err != nil {
-			t.Fatalf("ResolveHostPath(%q): %v", in, err)
+			t.Fatalf("Resolve(%q): %v", in, err)
 		}
 		if got != cleanedFirst {
-			t.Errorf("ResolveHostPath(%q) = %q; want %q, where cleaning removes the \"..\" before the link is followed to %q",
+			t.Errorf("Resolve(%q) = %q; want %q, where cleaning removes the \"..\" before the link is followed to %q",
 				in, got, cleanedFirst, resolvedFirst)
 		}
 	})
@@ -936,24 +868,80 @@ func TestResolveHostPath_KeepsWhatTheLSPDependsOn(t *testing.T) {
 	t.Run("a virtual name is kept", func(t *testing.T) {
 		t.Parallel()
 		virtual := filepath.Join(base, "notes.md") + "#block-0"
-		got, err := ResolveHostPath(virtual)
+		got, err := Resolve(virtual)
 		if err != nil {
-			t.Fatalf("ResolveHostPath(%q): %v", virtual, err)
+			t.Fatalf("Resolve(%q): %v", virtual, err)
 		}
 		if got != virtual {
-			t.Errorf("ResolveHostPath(%q) = %q; want it unchanged", virtual, got)
+			t.Errorf("Resolve(%q) = %q; want it unchanged", virtual, got)
 		}
 	})
 }
 
-// TestResolveHostPath_InvalidUTF8UnderAFileIsRefusedAsText holds that the path's
+// TestResolve_InvalidUTF8UnderAFileIsRefusedAsText holds that the path's
 // text is judged before the walk, which would answer ENOTDIR under a regular file.
-func TestResolveHostPath_InvalidUTF8UnderAFileIsRefusedAsText(t *testing.T) {
+func TestResolve_InvalidUTF8UnderAFileIsRefusedAsText(t *testing.T) {
 	file := filepath.Join(t.TempDir(), "file")
 	if err := os.WriteFile(file, nil, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := ResolveHostPath(file + "/\xff"); !errors.Is(err, ErrInvalidUTF8Path) {
-		t.Errorf("ResolveHostPath = %v, want ErrInvalidUTF8Path", err)
+	if _, err := Resolve(file + "/\xff"); !errors.Is(err, ErrInvalidUTF8Path) {
+		t.Errorf("Resolve = %v, want ErrInvalidUTF8Path", err)
+	}
+}
+
+// TestResolve_ATrailingSeparatorNamesADirectory holds the resolver to the
+// kernel's reading of a trailing separator or "." element: the last element
+// must be a directory. A file so named is refused with ENOTDIR; a directory,
+// and a path that does not exist yet, resolve without the separator.
+func TestResolve_ATrailingSeparatorNamesADirectory(t *testing.T) {
+	t.Parallel()
+	base := diskSpelling(t, t.TempDir())
+	file := filepath.Join(base, "b.json")
+	writeEmpty(t, file)
+	dir := filepath.Join(base, "sub")
+	mkdirAll(t, dir)
+	sep := string(filepath.Separator)
+
+	for _, typed := range []string{file + sep, file + sep + sep, file + "/", file + sep + ".", file + sep + "." + sep} {
+		if got, err := Resolve(typed); !errors.Is(err, syscall.ENOTDIR) {
+			t.Errorf("Resolve(%q) = %q, %v; want ENOTDIR", typed, got, err)
+		}
+	}
+	for typed, want := range map[string]string{
+		dir + sep:                        dir,
+		dir + sep + ".":                  dir,
+		filepath.Join(base, "new") + sep: filepath.Join(base, "new"),
+		file:                             file,
+	} {
+		if got, err := Resolve(typed); err != nil || got != want {
+			t.Errorf("Resolve(%q) = %q, %v; want %q", typed, got, err, want)
+		}
+	}
+	if runtime.GOOS != "windows" {
+		link := filepath.Join(base, "to-file")
+		symlink(t, file, link)
+		if got, err := Resolve(link + sep); !errors.Is(err, syscall.ENOTDIR) {
+			t.Errorf("Resolve(%q) through a link to a file = %q, %v; want ENOTDIR", link+sep, got, err)
+		}
+
+		f, err := os.Open(file)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer f.Close()
+		typed := fmt.Sprintf("/dev/fd/%d/", f.Fd())
+		if got, err := Resolve(typed); !errors.Is(err, syscall.ENOTDIR) {
+			t.Errorf("Resolve(%q) for a file's descriptor = %q, %v; want ENOTDIR", typed, got, err)
+		}
+		d, err := os.Open(dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer d.Close()
+		typed = fmt.Sprintf("/dev/fd/%d/", d.Fd())
+		if got, err := Resolve(typed); err != nil || got != strings.TrimSuffix(typed, "/") {
+			t.Errorf("Resolve(%q) for a directory's descriptor = %q, %v; want the descriptor's own path", typed, got, err)
+		}
 	}
 }

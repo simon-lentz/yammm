@@ -199,7 +199,7 @@ Internal                 : internal/* (no compatibility guarantees), the formatt
 | `graph` | Instance graph construction and integrity checking |
 | `snapshot` | Graph persistence as `.ys` files; its package doc lists what it does |
 | `diag` | Structured diagnostics with stable error codes |
-| `location` | Source positions, spans, and canonical paths |
+| `location` | Source identities, positions and spans |
 | `immutable` | Immutable data structures for validated output |
 | `schema/cypher` | The Neo4j mapping of a schema: labels, constraint and index DDL |
 | `neo4j` | Neo4j write queries, parameter coercion, introspection and the drift diff |

@@ -136,10 +136,6 @@ const (
 	// Used with E_SNAPSHOT_UNSUPPORTED_FEATURE.
 	DetailKeyFeature = "feature"
 
-	// DetailKeyOriginalPath is the original provenance path string before fallback.
-	// Used with W_SNAPSHOT_PATH_FALLBACK.
-	DetailKeyOriginalPath = "original_path"
-
 	// DetailKeyDepth is the actual nesting depth that exceeded the limit.
 	// Used with E_SNAPSHOT_DEPTH_EXCEEDED and E_COMPOSITION_DEPTH_EXCEEDED.
 	DetailKeyDepth = "depth"

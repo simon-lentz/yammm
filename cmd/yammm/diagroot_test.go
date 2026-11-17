@@ -192,3 +192,25 @@ func TestDiagRootFor_ResolvesAnExplicitRootOnTheFailurePath(t *testing.T) {
 		})
 	}
 }
+
+// TestDiagRootFor_ASchemaPathInDirectoryFormStartsFromTheFilesDirectory holds
+// a failed load of "s.yammm/" to the directory holding s.yammm: the resolver
+// refuses the directory form, and the fallback cleans it before taking the
+// parent, so the root is not the file itself.
+func TestDiagRootFor_ASchemaPathInDirectoryFormStartsFromTheFilesDirectory(t *testing.T) {
+	t.Parallel()
+	yammmtest.RequireNoModuleRoot(t, schema.FindModuleRoot)
+
+	dir := t.TempDir()
+	file := filepath.Join(dir, "s.yammm")
+	if err := os.WriteFile(file, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	want, err := yammmtest.DiskSpelling(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := diagRootFor(schema.Schema{}, "", file+string(filepath.Separator)); got != want {
+		t.Errorf("diagRootFor = %q, want %q", got, want)
+	}
+}

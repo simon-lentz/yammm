@@ -10,12 +10,13 @@ import (
 	"github.com/simon-lentz/yammm/location"
 )
 
-// AnnotationPlacement identifies where an annotation may appear.
+// AnnotationPlacement identifies where an annotation may appear. The zero
+// value names no placement.
 type AnnotationPlacement uint8
 
 const (
 	// PlacementProperty is a property-trailing @name annotation.
-	PlacementProperty AnnotationPlacement = iota
+	PlacementProperty AnnotationPlacement = iota + 1
 	// PlacementType is a type-body @@name member.
 	PlacementType
 )
@@ -202,7 +203,7 @@ func (c *completer) validateInheritedHolderRules(t Type) {
 			continue
 		}
 		c.errorfRelated(t.NameSpan(), diag.E_INVALID_ANNOTATION_TARGET,
-			[]location.RelatedInfo{{Span: a.Span(), Message: "@writeOnce declared here"}},
+			[]diag.RelatedInfo{{Span: a.Span(), Message: "@writeOnce declared here"}},
 			"@writeOnce cannot annotate property %q inherited by part type %q; a part is replaced on every parent write",
 			p.Name(), t.Name())
 	}
@@ -293,7 +294,7 @@ func (c *completer) annotationErrorf(a Annotation, span location.Span, code diag
 // related span, recording the annotation exactly as [completer.annotationErrorf]
 // does. Used where completer.errorf's single span is not enough: a duplicate
 // (pointing at the first occurrence) and a redundancy (pointing at the emitter).
-func (c *completer) annotationErrorWithRelated(a Annotation, span location.Span, code diag.Code, related []location.RelatedInfo, format string, args ...any) {
+func (c *completer) annotationErrorWithRelated(a Annotation, span location.Span, code diag.Code, related []diag.RelatedInfo, format string, args ...any) {
 	c.diagnosedAnnotations[a] = true
 	c.errorfRelated(span, code, related, format, args...)
 }
@@ -320,7 +321,7 @@ func (c *completer) reportUnknownOrMisplaced(a Annotation, place AnnotationPlace
 // a related span at the first, matching the duplicate-property diagnostic shape.
 func (c *completer) duplicateAnnotation(dup, first Annotation, format string, args ...any) {
 	c.annotationErrorWithRelated(dup, dup.Span(), diag.E_INVALID_ANNOTATION,
-		[]location.RelatedInfo{{Span: first.Span(), Message: "first declared here"}},
+		[]diag.RelatedInfo{{Span: first.Span(), Message: "first declared here"}},
 		format, args...)
 }
 
@@ -361,9 +362,9 @@ func validateIndexProperty(c *completer, t Type, prop Property, a Annotation) {
 // the annotated type t — t may be an abstract mixin that emits nothing — a
 // related span points at the emitter.
 func (c *completer) reportIndexRedundancy(a Annotation, span location.Span, t, emitter Type, format string, args ...any) {
-	var related []location.RelatedInfo
+	var related []diag.RelatedInfo
 	if emitter != t {
-		related = []location.RelatedInfo{{
+		related = []diag.RelatedInfo{{
 			Span:    emitter.Span(),
 			Message: "sole primary key emitted here",
 		}}

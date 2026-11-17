@@ -7,6 +7,8 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/simon-lentz/yammm/internal/yammmtest/sourcetest"
+
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/internal/expr"
 	"github.com/simon-lentz/yammm/location"
@@ -149,7 +151,7 @@ type projDiag struct {
 // its own, so a golden difference is a difference in the parser. The issues
 // come back alongside because the projection flattens severity to a label.
 func project(name, src string) (*projSchema, []diag.Issue) {
-	file, issues := Parse([]byte(src), location.NewSourceID(name))
+	file, issues := Parse([]byte(src), sourcetest.ID(name))
 
 	p := projector{src: src}
 	out := &projSchema{
@@ -387,14 +389,14 @@ func (p projector) diag(iss diag.Issue) projDiag {
 		Code:     iss.Code().String(),
 		Severity: iss.Severity().String(),
 		Msg:      iss.Message(),
-		Span:     projSpan{Start: sp.Start.Byte, End: sp.End.Byte},
-		Line:     lineOf(p.src, sp.Start.Byte),
-		EndLine:  lineOf(p.src, sp.End.Byte),
+		Span:     projSpan{Start: sp.Start.Offset, End: sp.End.Offset},
+		Line:     lineOf(p.src, sp.Start.Offset),
+		EndLine:  lineOf(p.src, sp.End.Offset),
 	}
 }
 
 func (p projector) span(s location.Span) projSpan {
-	return projSpan{Start: s.Start.Byte, End: s.End.Byte}
+	return projSpan{Start: s.Start.Offset, End: s.End.Offset}
 }
 
 // lineOf returns the 1-based line of a byte offset in src.

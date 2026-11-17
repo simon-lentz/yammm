@@ -14,9 +14,8 @@ import (
 
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/immutable"
+	"github.com/simon-lentz/yammm/instance/path"
 	"github.com/simon-lentz/yammm/internal/value"
-	"github.com/simon-lentz/yammm/location"
-	"github.com/simon-lentz/yammm/location/path"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -32,8 +31,8 @@ func (v *Validator) validateEdges(
 	typ schema.Type,
 	rels map[schema.Relation]relationInput,
 	collector *diag.Collector,
-	prov location.Provenance,
-	base path.Builder,
+	prov Provenance,
+	base path.Path,
 ) (map[string]ValidEdgeData, bool) {
 	var edges map[string]ValidEdgeData
 	refused := false
@@ -72,8 +71,8 @@ func (v *Validator) validateEdgeData(
 	rel schema.Relation,
 	rawValue any,
 	collector *diag.Collector,
-	prov location.Provenance,
-	relPath path.Builder,
+	prov Provenance,
+	relPath path.Path,
 ) (ValidEdgeData, bool) {
 	if rel.IsMany() {
 		arr, ok := toSliceOfAny(rawValue)
@@ -137,7 +136,7 @@ func (v *Validator) validateEdgeData(
 // shapeMismatch builds an E_EDGE_SHAPE_MISMATCH carrying the expected and got
 // shapes as details on every arm, so a structured consumer reads them the
 // same way whichever arm fired.
-func shapeMismatch(rel schema.Relation, message, expected, got string, prov location.Provenance, at path.Builder) diag.Issue {
+func shapeMismatch(rel schema.Relation, message, expected, got string, prov Provenance, at path.Path) diag.Issue {
 	issue := diag.NewIssue(diag.Error, ErrEdgeShapeMismatch, message).
 		WithExpectedGot(expected, got)
 	withProvenance(issue, prov, at.String()).
@@ -198,7 +197,7 @@ type edgeObject struct {
 	collidedProps map[schema.Property]bool
 }
 
-func (v *Validator) resolveEdgeObject(rel schema.Relation, targetType schema.Type, obj map[string]any, collector *diag.Collector, prov location.Provenance, targetPath path.Builder) edgeObject {
+func (v *Validator) resolveEdgeObject(rel schema.Relation, targetType schema.Type, obj map[string]any, collector *diag.Collector, prov Provenance, targetPath path.Path) edgeObject {
 	claims := claimEdgeObject(rel, targetType, slices.Sorted(maps.Keys(obj)), v.cfg.strictPropertyNames)
 	eo := edgeObject{obj: obj, fk: claims.fk, props: claims.props, unknown: claims.unknown, shadowed: claims.shadowed}
 	for _, c := range claims.collisions {
@@ -247,8 +246,8 @@ func (v *Validator) validateEdgeTarget(
 	rel schema.Relation,
 	elem any,
 	collector *diag.Collector,
-	prov location.Provenance,
-	targetPath path.Builder,
+	prov Provenance,
+	targetPath path.Path,
 ) (*ValidEdgeTarget, bool) {
 	// A per-target collector keeps one target's issues from coupling to
 	// another's; unlimited, because the parent applies the cap on merge.

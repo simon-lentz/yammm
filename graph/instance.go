@@ -4,8 +4,9 @@ import (
 	"iter"
 	"slices"
 
+	"github.com/simon-lentz/yammm/instance"
+
 	"github.com/simon-lentz/yammm/immutable"
-	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -48,7 +49,7 @@ type instanceState struct {
 
 	// provenance holds source location metadata for the instance.
 	// Zero if the validated instance carried none.
-	provenance location.Provenance
+	provenance instance.Provenance
 
 	// validated records whether this instance entered through a
 	// validator-built ValidInstance. Rebuilt instances are always false:
@@ -122,9 +123,9 @@ func (i Instance) Properties() immutable.Properties {
 // validated instance [Graph.Add] or [Graph.AddOrMerge] took, or the document
 // snapshot.Load read.
 // Provenance includes SourceName, Path, and Span for diagnostic reporting.
-func (i Instance) Provenance() location.Provenance {
+func (i Instance) Provenance() instance.Provenance {
 	if i.IsZero() {
-		return location.Provenance{}
+		return instance.Provenance{}
 	}
 	return i.provenance
 }
@@ -180,7 +181,7 @@ func newInstance(
 	typeID schema.TypeID,
 	primaryKey immutable.Key,
 	properties immutable.Properties,
-	provenance location.Provenance,
+	provenance instance.Provenance,
 	validated bool,
 ) Instance {
 	return Instance{&instanceState{
@@ -208,7 +209,7 @@ func (i Instance) addComposed(relationName string, child Instance) {
 // and no record is cloned twice: a composition tree shares no child.
 //
 // dependency: This function shares primaryKey (immutable.Key),
-// properties (immutable.Properties), and provenance (location.Provenance)
+// properties (immutable.Properties), and provenance (instance.Provenance)
 // by direct assignment rather than deep-copying.
 // This is safe because these types guarantee structural immutability:
 // all internal maps and slices are unexported and never modified after construction.

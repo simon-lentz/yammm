@@ -2,8 +2,8 @@
 //
 // This package provides the single diagnostic infrastructure used across schema
 // loading, parsing, compilation, and instance validation. It depends only on
-// [github.com/simon-lentz/yammm/location], golang.org/x/text/width and the
-// standard library.
+// [github.com/simon-lentz/yammm/location], internal/termtext,
+// golang.org/x/text/width and the standard library.
 //
 // # Design Principles
 //
@@ -20,7 +20,7 @@
 //     match on, even when message text changes. The code set is open: the Neo4j
 //     mapping and consumers register codes through [NewCode].
 //   - Deterministic ordering: [Collector.Result] sorts issues by location, a span
-//     in [location.Compare] order, then by code, so output is stable across runs.
+//     in [location.Span.Compare] order, then by code, so output is stable across runs.
 //   - Builder pattern: [IssueBuilder] is the only valid construction path for
 //     [Issue] values, eliminating common construction mistakes.
 //   - Precomputed counts: [Collector] maintains O(1) severity queries via
@@ -66,7 +66,7 @@
 //	issue := diag.NewIssue(diag.Error, diag.E_DUPLICATE_TYPE, `type "Person" already defined`).
 //	    WithSpan(span).
 //	    WithHint("rename one of the types").
-//	    WithRelated(location.RelatedInfo{Span: previousSpan, Message: "previous definition here"}).
+//	    WithRelated(diag.RelatedInfo{Span: previousSpan, Message: "previous definition here"}).
 //	    Build()
 //
 // An Issue's fields are unexported, so diag.Issue{} is the one literal another
@@ -103,6 +103,15 @@
 //
 //   - Text output with optional source excerpts and ANSI colors
 //   - JSON output with stable wire format
+//
+// Text output, and [Result.String], write a C0 control other than a tab, DEL,
+// a C1 control or a bidirectional control in any text (a location, a code, a
+// message, a hint, a note or an excerpt) as a visible glyph: a C0 control as
+// its Control Pictures glyph, DEL as U+2421, the rest as U+FFFD. A byte that is
+// not valid UTF-8 shows as U+FFFD. A tab is kept. So schema or document text
+// cannot forge a second diagnostic line or act on the terminal.
+// [Issue.Message] keeps the text's own bytes, and so does the JSON output, but
+// encoding/json writes a byte that is not valid UTF-8 as U+FFFD.
 //
 // Example:
 //
@@ -145,7 +154,7 @@
 //
 // # Dependencies
 //
-//	diag  ──imports──▶  location, golang.org/x/text/width
+//	diag  ──imports──▶  location, internal/termtext, golang.org/x/text/width
 //
 // It must not import schema, instance, graph, schema/cypher, or neo4j.
 //

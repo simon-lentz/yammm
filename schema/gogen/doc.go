@@ -286,8 +286,7 @@
 // A source with no path relative to the root, such as one on another drive, is
 // refused too, because a key is never a generation-machine path, and so is a
 // LoadString name with no base, which names no file. So is a key the re-load's
-// key rule, [github.com/simon-lentz/yammm/location.NormalizeSyntheticKey],
-// refuses: one holding a backslash, which a Unix file name may hold and another
+// key rule, the one [schema.WithSyntheticRoot] states, refuses: one holding a backslash, which a Unix file name may hold and another
 // host reads as a separator, one holding a character that does not print, and
 // one that looks absolute, such as the key of a
 // source in a directory named "C:" directly under the root. The entry and a
@@ -392,10 +391,11 @@
 //
 // # Dependencies
 //
-//	schema/gogen  ──imports──▶  schema, location, internal/ident
+//	schema/gogen  ──imports──▶  schema, location, internal/ident, internal/source
 //
-// gogen imports one core internal package, internal/ident, for the
-// identifier-casing transform that turns schema names into Go identifiers.
+// gogen imports two core internal packages: internal/ident, for the
+// identifier-casing transform that turns schema names into Go identifiers, and
+// internal/source, for the rule that cleans an embedded source key.
 // It does not import instance and, unlike neo4j, imports neither graph
 // nor diag. The
 // generated output depends only on the standard library, importing at most

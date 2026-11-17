@@ -9,12 +9,12 @@ import (
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/instance"
+	"github.com/simon-lentz/yammm/instance/path"
 	"github.com/simon-lentz/yammm/internal/recordtest"
 	"github.com/simon-lentz/yammm/internal/snapparts"
 	"github.com/simon-lentz/yammm/internal/snappartstest"
 	"github.com/simon-lentz/yammm/internal/yammmtest"
 	"github.com/simon-lentz/yammm/location"
-	"github.com/simon-lentz/yammm/location/path"
 	"github.com/simon-lentz/yammm/schema"
 	"github.com/simon-lentz/yammm/snapshot"
 )
@@ -310,11 +310,11 @@ func TestLoad_ADuplicateWithNoProvenanceSortsBeforeAnEmptySourceName(t *testing.
 	}
 	key := immutable.WrapKey([]any{"c1"})
 	props := immutable.WrapProperties(map[string]any{"id": "c1", "note": "x"})
-	part := func(p location.Provenance) snapparts.Instance {
+	part := func(p instance.Provenance) snapparts.Instance {
 		return snapparts.Instance{TypeID: co.ID(), PrimaryKey: key, Properties: props, Provenance: p}
 	}
-	none, empty := location.Provenance{}, location.NewProvenance("", path.Root(), location.Span{})
-	for _, order := range [][]location.Provenance{{none, empty}, {empty, none}} {
+	none, empty := instance.Provenance{}, instance.NewProvenance("", path.Root, location.Span{})
+	for _, order := range [][]instance.Provenance{{none, empty}, {empty, none}} {
 		snap := snappartstest.Loaded(t, s, snapparts.Parts{
 			Instances: []snapparts.Instance{part(none)},
 			Duplicates: []snapparts.Instance{

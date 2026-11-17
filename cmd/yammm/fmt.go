@@ -11,6 +11,7 @@ import (
 	"github.com/simon-lentz/yammm/cmd/yammm/internal/cli"
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/internal/format"
+	"github.com/simon-lentz/yammm/internal/termtext"
 	"github.com/simon-lentz/yammm/location"
 )
 
@@ -95,7 +96,7 @@ func fmtPath(cmd *cobra.Command, sink *cli.DiagnosticSink, path string, write, c
 		}
 		// gofmt -l: the path alone, nothing else — so the failure carries the
 		// code and no message.
-		fmt.Fprintln(cmd.OutOrStdout(), path)
+		fmt.Fprintln(cmd.OutOrStdout(), termtext.String(path))
 		return cli.Exit(cli.ExitValidation)
 
 	case write:
@@ -128,8 +129,8 @@ func syntaxResult(path string, content []byte, iss diag.Issue) (diag.Result, boo
 	}
 	span := iss.Span()
 	span.Source = source
-	span.Start.Byte = fileOffset(content, span.Start.Byte)
-	span.End.Byte = fileOffset(content, span.End.Byte)
+	span.Start.Offset = fileOffset(content, span.Start.Offset)
+	span.End.Offset = fileOffset(content, span.End.Offset)
 	c := diag.NewCollectorUnlimited()
 	c.Collect(diag.FromIssue(iss).WithSpan(span).Build())
 	return c.Result(), true
@@ -137,11 +138,8 @@ func syntaxResult(path string, content []byte, iss diag.Issue) (diag.Result, boo
 
 // fileOffset returns the offset in content of the byte at offset in the text
 // the formatter parsed, in which each CR LF of content is one LF; a lone CR
-// keeps its one byte. An unknown offset, -1, is returned as it is.
+// keeps its one byte.
 func fileOffset(content []byte, offset int) int {
-	if offset < 0 {
-		return offset
-	}
 	at := 0
 	for range offset {
 		if at+1 < len(content) && content[at] == '\r' && content[at+1] == '\n' {

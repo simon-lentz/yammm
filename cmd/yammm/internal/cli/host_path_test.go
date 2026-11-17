@@ -12,7 +12,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/simon-lentz/yammm/location"
+	"github.com/simon-lentz/yammm/internal/hostpath"
+
 	"github.com/simon-lentz/yammm/snapshot"
 )
 
@@ -325,7 +326,7 @@ func hostPathSpellings(prefix string, depth int) []string {
 // made relative to it.
 func diskRoot(t *testing.T, root string) string {
 	t.Helper()
-	r, err := location.ResolveHostPath(root)
+	r, err := hostpath.Resolve(root)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -356,14 +357,14 @@ func (f *hostPathFailures) report(t *testing.T) {
 }
 
 // checkWriteLandsWhereTheLoaderReads writes to typed on site with write and
-// holds the outcome to location.ResolveHostPath, the loader's own resolver: the
+// holds the outcome to hostpath.Resolve, the loader's own resolver: the
 // write succeeds exactly when the file the resolver names sits in a directory
 // that exists, and then that file, and nothing else in the tree, changes. The
 // site is restored before it returns.
 func checkWriteLandsWhereTheLoaderReads(t *testing.T, f *hostPathFailures, write func(string, []byte) error, site *hostPathSite, typed, shown string) {
 	t.Helper()
 	f.cases++
-	want, rerr := location.ResolveHostPath(typed)
+	want, rerr := hostpath.Resolve(typed)
 	parentIsDir := false
 	if rerr == nil {
 		info, err := os.Stat(filepath.Dir(want))

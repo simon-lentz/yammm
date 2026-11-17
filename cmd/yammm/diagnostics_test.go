@@ -21,9 +21,6 @@ const (
 	// hashAlgoFixture states an unrecognized hash algorithm, which a
 	// header-only read reports as a Warning and a body read as an Error.
 	hashAlgoFixture = "testdata/hash_algo_unsupported.ys"
-	// provenanceFixture is the only input that makes snapshot.Info return
-	// warnings and no errors: an instance provenance path that will not parse.
-	provenanceFixture = "testdata/provenance_unparseable.ys"
 	// shadowedSchema loads clean with W_ANNOTATION_SHADOWED, so it is the
 	// load-warning probe for every command that loads a schema.
 	shadowedSchema = "testdata/annotation_shadowed.yammm"
@@ -97,8 +94,8 @@ func TestGenCypher_RefusesAnEditionBeforeWork(t *testing.T) {
 	}
 }
 
-// TestSnapshotInfoSurfacesWarnings pins both sites where a warning is
-// reachable. A render gated on HasErrors prints the summary, exits 0 and writes
+// TestSnapshotInfoSurfacesWarnings pins the header-only read, the one site
+// where a warning is reachable. A render gated on HasErrors prints the summary, exits 0 and writes
 // nothing to stderr for a result that carries only warnings, so the operator
 // is not told that the document's identity could not be checked.
 func TestSnapshotInfoSurfacesWarnings(t *testing.T) {
@@ -113,11 +110,6 @@ func TestSnapshotInfoSurfacesWarnings(t *testing.T) {
 			name: "header-only, unrecognized hash algorithm",
 			args: []string{"snapshot", "info", "--header-only", hashAlgoFixture},
 			code: "E_SNAPSHOT_UNSUPPORTED_HASH_ALGORITHM",
-		},
-		{
-			name: "full read, unparseable provenance path",
-			args: []string{"snapshot", "info", provenanceFixture},
-			code: "W_SNAPSHOT_PATH_FALLBACK",
 		},
 	}
 
@@ -204,27 +196,6 @@ func TestOwnPhaseDiagnosticsReachTheOperator(t *testing.T) {
 	})
 }
 
-// TestSnapshotSaveSurfacesImportedWarning pins the imported snapshot's own
-// diagnostics on the path that succeeds: a merge whose source could not be
-// fully verified still says so, and a warning does not fail the save.
-func TestSnapshotSaveSurfacesImportedWarning(t *testing.T) {
-	t.Parallel()
-
-	dir := t.TempDir()
-	into := filepath.Join(dir, "into.ys")
-	copyFile(t, provenanceFixture, into)
-
-	code, _, stderr := executeCmdOutput(t, "snapshot", "save",
-		"--into", into, "-o", filepath.Join(dir, "merged.ys"),
-		"testdata/valid.yammm", "testdata/data_carol.json")
-	if code != cli.ExitOK {
-		t.Errorf("exit code = %d, want %d: a warning is not a failure", code, cli.ExitOK)
-	}
-	if !strings.Contains(stderr, "W_SNAPSHOT_PATH_FALLBACK") {
-		t.Errorf("the imported snapshot's warning was discarded; stderr:\n%s", stderr)
-	}
-}
-
 // TestUpdateMetadataSurfacesHeaderWarning pins that the header read's result
 // renders when it carries only a warning. Otherwise the one warning HeaderOnly
 // can produce is dropped, and the operator sees the later error alone, with no
@@ -266,12 +237,6 @@ func TestDiagnosticsPrecedeThePayload(t *testing.T) {
 			name:    "snapshot info --header-only",
 			args:    []string{"snapshot", "info", "--header-only", hashAlgoFixture},
 			first:   "E_SNAPSHOT_UNSUPPORTED_HASH_ALGORITHM",
-			payload: "Snapshot: test",
-		},
-		{
-			name:    "snapshot info",
-			args:    []string{"snapshot", "info", provenanceFixture},
-			first:   "W_SNAPSHOT_PATH_FALLBACK",
 			payload: "Snapshot: test",
 		},
 		{
@@ -367,7 +332,6 @@ func TestStderrIsOneJSONDocument(t *testing.T) {
 		{"snapshot info, unreadable file", "snapshot info " + missing + ".ys"},
 		{"snapshot info, corrupt file", "snapshot info " + corrupt},
 		{"snapshot info, header-only warning", "snapshot info --header-only " + hashAlgoFixture},
-		{"snapshot info, body warning", "snapshot info " + provenanceFixture},
 		{"snapshot info, unreadable directory", "snapshot info --dir " + missing},
 		{"snapshot info, no argument", "snapshot info"},
 		{"snapshot verify, unreadable schema", "snapshot verify " + missing + " " + corrupt},

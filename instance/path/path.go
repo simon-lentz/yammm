@@ -8,31 +8,26 @@ import (
 	"unicode/utf8"
 )
 
-// Builder constructs canonical instance paths for diagnostics.
+// Path is an instance path's text, such as "$.Person[id=42]". A Path is kept
+// as written: a path read from a document is that document's text, whether or
+// not this package would spell it so, and [Path.Key], [Path.Index] and
+// [Path.PK] append to the text as it is.
 //
-// A Builder is immutable; each method returns a new Builder with the
-// appended segment. This enables safe concurrent use and simple sharing
-// of path prefixes across validation branches.
-//
-// The zero value represents the root path ($); use [Root] for clarity and convention.
-type Builder struct {
-	segments []string
-}
+// The zero Path is the empty text, not the root; start a path from [Root].
+type Path string
 
-// Root returns a new Builder representing the root of an instance path ("$").
-func Root() Builder {
-	return Builder{}
-}
+// Root is the path of an instance itself.
+const Root Path = "$"
 
 // Index appends an array index segment to the path. It panics on a negative
-// index, which [Parse] refuses to read back.
+// index, which the grammar does not spell.
 //
-//	path.Root().Index(0).String() // returns "$[0]"
-func (b Builder) Index(i int) Builder {
+//	path.Root.Index(0).String() // returns "$[0]"
+func (p Path) Index(i int) Path {
 	if i < 0 {
-		panic(fmt.Sprintf("path.Builder.Index: negative index %d; Parse reads no such path", i))
+		panic(fmt.Sprintf("path.Path.Index: negative index %d; the grammar spells none", i))
 	}
-	return b.append("[" + strconv.Itoa(i) + "]")
+	return p + Path("["+strconv.Itoa(i)+"]")
 }
 
 // Key appends an object key segment to the path.
@@ -42,32 +37,34 @@ func (b Builder) Index(i int) Builder {
 //
 // Example:
 //
-//	path.Root().Key("person").String()       // returns "$.person"
-//	path.Root().Key("with spaces").String()  // returns `$["with spaces"]`
-func (b Builder) Key(key string) Builder {
-	return b.append(formatKey(key))
+//	path.Root.Key("person").String()       // returns "$.person"
+//	path.Root.Key("with spaces").String()  // returns `$["with spaces"]`
+func (p Path) Key(key string) Path {
+	return p + Path(formatKey(key))
 }
 
-// PK appends a primary key-based index segment, one [field=value] per field in
-// the order given; the package documentation states how each value is written.
+// PK appends a primary key-based index segment: one bracket pair holding a
+// field=value entry per field, comma-separated, in the order given, such as
+// [region="us",studentId=12345]. With no fields it appends nothing. The package
+// documentation states how each value is written.
 // The fields are not checked against a schema. It panics on a field name that
-// is not an identifier, and on a NaN or infinite float value: [Parse] reads
-// back neither.
+// is not an identifier, and on a NaN or infinite float value: the grammar
+// spells neither.
 //
-//	path.Root().Key("Person").PK(path.PKField{Name: "id", Value: 42}) // $.Person[id=42]
-func (b Builder) PK(fields ...PKField) Builder {
+//	path.Root.Key("Person").PK(path.PKField{Name: "id", Value: 42}) // $.Person[id=42]
+func (p Path) PK(fields ...PKField) Path {
 	if len(fields) == 0 {
-		return b
+		return p
 	}
 
 	var sb strings.Builder
 	sb.WriteByte('[')
 	for i, f := range fields {
 		if !isIdentifierSafe(f.Name) {
-			panic(fmt.Sprintf("path.Builder.PK: field name %q is not an identifier; Parse reads no such path", f.Name))
+			panic(fmt.Sprintf("path.Path.PK: field name %q is not an identifier; the grammar spells none", f.Name))
 		}
 		if !isSpellableFloat(f.Value) {
-			panic(fmt.Sprintf("path.Builder.PK: field %q holds %v, which the grammar does not spell", f.Name, f.Value))
+			panic(fmt.Sprintf("path.Path.PK: field %q holds %v, which the grammar does not spell", f.Name, f.Value))
 		}
 		if i > 0 {
 			sb.WriteByte(',')
@@ -77,61 +74,12 @@ func (b Builder) PK(fields ...PKField) Builder {
 		sb.WriteString(formatPKValue(f.Value))
 	}
 	sb.WriteByte(']')
-	return b.append(sb.String())
+	return p + Path(sb.String())
 }
 
-// String returns the canonical path string.
-//
-// The path always starts with "$" (the root symbol), followed by all segments.
-func (b Builder) String() string {
-	if len(b.segments) == 0 {
-		return "$"
-	}
-	var sb strings.Builder
-	sb.WriteByte('$')
-	for _, seg := range b.segments {
-		sb.WriteString(seg)
-	}
-	return sb.String()
-}
-
-// IsRoot reports whether this builder represents the root path ("$").
-func (b Builder) IsRoot() bool {
-	return len(b.segments) == 0
-}
-
-// Len returns the number of segments in the path.
-// The root path has length 0.
-func (b Builder) Len() int {
-	return len(b.segments)
-}
-
-// Parent returns a new Builder representing the parent path.
-// If the builder is at the root, it returns the root.
-func (b Builder) Parent() Builder {
-	if len(b.segments) == 0 {
-		return b
-	}
-	child := Builder{segments: make([]string, len(b.segments)-1)}
-	copy(child.segments, b.segments[:len(b.segments)-1])
-	return child
-}
-
-// Last returns the last segment of the path as a string.
-// Returns an empty string if the builder is at the root.
-func (b Builder) Last() string {
-	if len(b.segments) == 0 {
-		return ""
-	}
-	return b.segments[len(b.segments)-1]
-}
-
-// append is an internal helper that creates a new Builder with an added segment.
-func (b Builder) append(segment string) Builder {
-	child := Builder{segments: make([]string, len(b.segments), len(b.segments)+1)}
-	copy(child.segments, b.segments)
-	child.segments = append(child.segments, segment)
-	return child
+// String returns the path's text as it is held.
+func (p Path) String() string {
+	return string(p)
 }
 
 // formatKey returns the appropriate segment format for a key.
@@ -145,9 +93,9 @@ func formatKey(key string) string {
 
 // formatPKValue formats a primary key value for path output. Strings are
 // quoted; integers and booleans are unquoted; a float is unquoted, with ".0"
-// appended when it has no fraction, and Parse reads it back as a float64; any
+// appended when it has no fraction, which the grammar reads as a float64; any
 // other value is written as the quoted, escaped text of its fmt.Sprint form,
-// which Parse reads as a string.
+// which the grammar reads as a string.
 func formatPKValue(v any) string {
 	switch val := v.(type) {
 	case string:
@@ -195,8 +143,8 @@ func formatPKValue(v any) string {
 }
 
 // isSpellableFloat reports whether v is a value the grammar spells. A NaN or an
-// infinity is written "NaN.0" or "+Inf.0", which Parse refuses; every other
-// value formatPKValue writes reads back.
+// infinity would be written "NaN.0" or "+Inf.0", which the grammar does not
+// spell; every other value formatPKValue writes does.
 func isSpellableFloat(v any) bool {
 	switch f := v.(type) {
 	case float32:
@@ -245,7 +193,7 @@ func isDigit(r rune) bool {
 
 // escapeString returns s with JSON escape sequences applied per RFC 8259.
 // Escapes: \\ \" \n \r \t \b \f and control characters. Invalid UTF-8 is
-// written as U+FFFD, the rune Parse reads it as.
+// written as U+FFFD, the rune a JSON string decoder reads it as.
 func escapeString(s string) string {
 	if utf8.ValidString(s) && !strings.ContainsFunc(s, func(r rune) bool {
 		return r == '\\' || r == '"' || r < 0x20

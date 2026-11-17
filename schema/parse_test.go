@@ -3,6 +3,8 @@ package schema_test
 import (
 	"testing"
 
+	"github.com/simon-lentz/yammm/internal/yammmtest/sourcetest"
+
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -15,7 +17,7 @@ import (
 // registerSource is a helper to register a schema source for testing.
 func registerSource(t *testing.T, reg *source.Registry, content, name string) location.SourceID {
 	t.Helper()
-	sourceID := location.NewSourceID("test://" + name)
+	sourceID := sourcetest.ID("test://" + name)
 	err := reg.Register(sourceID, []byte(content))
 	require.NoError(t, err)
 	return sourceID
@@ -489,10 +491,10 @@ type Person {
 
 	// Verify span has byte offset (not -1)
 	span := syntaxErr.Span()
-	assert.True(t, span.Start.HasByte(),
-		"syntax error span should have byte offset, got Byte=%d", span.Start.Byte)
-	assert.GreaterOrEqual(t, span.Start.Byte, 0,
-		"syntax error span byte offset should be >= 0, got %d", span.Start.Byte)
+	assert.True(t, span.Start.IsValid(),
+		"syntax error span should have byte offset, got Byte=%d", span.Start.Offset)
+	assert.GreaterOrEqual(t, span.Start.Offset, 0,
+		"syntax error span byte offset should be >= 0, got %d", span.Start.Offset)
 }
 
 func TestTypeRef_String(t *testing.T) {

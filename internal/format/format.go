@@ -245,27 +245,27 @@ func lexicalLines(text string) ([]line, []parse.Token, error) {
 func lineStarts(file *parse.File) map[int]bool {
 	starts := map[int]bool{}
 	for _, d := range file.Imports {
-		starts[d.Span.Start.Byte] = true
+		starts[d.Span.Start.Offset] = true
 	}
 	for _, d := range file.DataTypes {
-		starts[d.Span.Start.Byte] = true
+		starts[d.Span.Start.Offset] = true
 	}
 	for _, t := range file.Types {
-		starts[t.Span.Start.Byte] = true
+		starts[t.Span.Start.Offset] = true
 		for _, p := range t.Properties {
-			starts[p.Span.Start.Byte] = true
+			starts[p.Span.Start.Offset] = true
 		}
 		for _, r := range t.Relations {
-			starts[r.Span.Start.Byte] = true
+			starts[r.Span.Start.Offset] = true
 			for _, p := range r.Properties {
-				starts[p.Span.Start.Byte] = true
+				starts[p.Span.Start.Offset] = true
 			}
 		}
 		for _, inv := range t.Invariants {
-			starts[inv.Span.Start.Byte] = true
+			starts[inv.Span.Start.Offset] = true
 		}
 		for _, a := range t.Annotations {
-			starts[a.Span.Start.Byte] = true
+			starts[a.Span.Start.Offset] = true
 		}
 	}
 	return starts
@@ -277,10 +277,10 @@ func lineStarts(file *parse.File) map[int]bool {
 func invariantExpressionRanges(file *parse.File) []tokenRange {
 	var ranges []tokenRange
 	for _, span := range file.Expressions {
-		if span.End.Byte <= span.Start.Byte {
+		if span.End.Offset <= span.Start.Offset {
 			continue
 		}
-		ranges = append(ranges, tokenRange{start: span.Start.Byte, end: span.End.Byte})
+		ranges = append(ranges, tokenRange{start: span.Start.Offset, end: span.End.Offset})
 	}
 	if len(ranges) == 0 {
 		return nil

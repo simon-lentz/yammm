@@ -75,7 +75,7 @@
 //
 //	// For position conversion:
 //	pos := reg.PositionAt(sourceID, byteOffset)
-//	if !pos.IsZero() {
-//	    // pos.Line, pos.Column, pos.Byte are populated
+//	if pos.IsValid() {
+//	    // pos.Line, pos.Column, pos.Offset are populated
 //	}
 package source

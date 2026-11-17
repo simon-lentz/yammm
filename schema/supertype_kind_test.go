@@ -43,7 +43,7 @@ func TestExtends_ASupertypeIsAbstractOrOfTheSubtypesKind(t *testing.T) {
 				}
 				wantCounts(t, res, map[diag.Code]int{diag.E_INVALID_SUPERTYPE: 1})
 				for i := range res.Issues() {
-					if got := src[i.Span().Start.Byte:i.Span().End.Byte]; got != "Base" {
+					if got := src[i.Span().Start.Offset:i.Span().End.Offset]; got != "Base" {
 						t.Errorf("the issue covers %q, want the supertype's name", got)
 					}
 					want := fmt.Sprintf("%s type %q extends %s type %q: a supertype is abstract or of the subtype's own kind", sub, "Sub", super, "Base")
@@ -86,7 +86,7 @@ type Car extends lib.Wheel {
 	})
 	wantCounts(t, res, map[diag.Code]int{diag.E_INVALID_SUPERTYPE: 1})
 	for i := range res.Issues() {
-		if got := main[i.Span().Start.Byte:i.Span().End.Byte]; got != "lib.Wheel" {
+		if got := main[i.Span().Start.Offset:i.Span().End.Offset]; got != "lib.Wheel" {
 			t.Errorf("the issue covers %q, want the qualified name", got)
 		}
 		if want := `concrete type "Car" extends part type "lib.Wheel": a supertype is abstract or of the subtype's own kind`; i.Message() != want {
@@ -115,7 +115,7 @@ abstract type X extends D, C {
 	wantCounts(t, res, map[diag.Code]int{diag.E_INVALID_SUPERTYPE: 2})
 	var names []string
 	for i := range res.Issues() {
-		names = append(names, src[i.Span().Start.Byte:i.Span().End.Byte])
+		names = append(names, src[i.Span().Start.Offset:i.Span().End.Offset])
 	}
 	if !slices.Equal(names, []string{"D", "C"}) {
 		t.Errorf("the issues cover %q, want D then C", names)

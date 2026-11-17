@@ -3,6 +3,8 @@ package schema_test
 import (
 	"testing"
 
+	"github.com/simon-lentz/yammm/internal/yammmtest/sourcetest"
+
 	"github.com/stretchr/testify/assert"
 
 	"github.com/simon-lentz/yammm/location"
@@ -152,9 +154,9 @@ func TestDeclaringScope_String_Unknown(t *testing.T) {
 func TestNewProperty(t *testing.T) {
 	constraint := schema.NewStringConstraint()
 	span := location.Span{
-		Source: location.NewSourceID("test://property"),
-		Start:  location.Position{Line: 5, Column: 3, Byte: 50},
-		End:    location.Position{Line: 5, Column: 20, Byte: 67},
+		Source: sourcetest.ID("test://property"),
+		Start:  location.Position{Line: 5, Column: 3, Offset: 50},
+		End:    location.Position{Line: 5, Column: 20, Offset: 67},
 	}
 	doc := "The user's name"
 	scope := schema.TypeScope(schema.NewTypeRef("", "User", location.Span{}))
@@ -175,9 +177,9 @@ func TestNewProperty(t *testing.T) {
 func TestProperty_Accessors(t *testing.T) {
 	constraint := schema.NewIntegerConstraint()
 	span := location.Span{
-		Source: location.NewSourceID("test://accessors"),
-		Start:  location.Position{Line: 10, Column: 1, Byte: 100},
-		End:    location.Position{Line: 10, Column: 15, Byte: 115},
+		Source: sourcetest.ID("test://accessors"),
+		Start:  location.Position{Line: 10, Column: 1, Offset: 100},
+		End:    location.Position{Line: 10, Column: 15, Offset: 115},
 	}
 	scope := schema.RelationScope("OWNS")
 

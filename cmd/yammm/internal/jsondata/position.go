@@ -62,7 +62,7 @@ func newPositionTable(content []byte) *positionTable {
 
 // positionAt returns the 1-based line and rune column of byteOffset.
 //
-// An offset outside [0, len(content)] gives [location.UnknownPosition]. An
+// An offset outside [0, len(content)] gives the zero, unknown, Position. An
 // offset inside a rune reports that rune's column, and len(content) is the
 // end-of-input position.
 //
@@ -73,7 +73,7 @@ func newPositionTable(content []byte) *positionTable {
 // through.
 func (t *positionTable) positionAt(byteOffset int) location.Position {
 	if byteOffset < 0 || byteOffset > len(t.content) {
-		return location.UnknownPosition()
+		return location.Position{}
 	}
 	line := t.lineAt(byteOffset)
 	i, column := t.lineOffsets[line-1], 1
@@ -97,7 +97,7 @@ func (t *positionTable) positionAt(byteOffset int) location.Position {
 		i = next
 		column++
 	}
-	return location.NewPosition(line, column, byteOffset)
+	return location.Position{Line: line, Column: column, Offset: byteOffset}
 }
 
 // marksFor returns the checkpoints of a 0-based line: the first rune start at

@@ -1,9 +1,5 @@
 package instance
 
-import (
-	"github.com/simon-lentz/yammm/location"
-)
-
 // RawInstance represents unvalidated instance data.
 //
 // RawInstance is the input to the validation pipeline. It contains the raw
@@ -21,7 +17,7 @@ type RawInstance struct {
 
 	// Provenance optionally captures source location metadata.
 	// If zero, error messages will not include source locations.
-	Provenance location.Provenance
+	Provenance Provenance
 }
 
 // Refused is a member value its producer refused: a parser that cannot read

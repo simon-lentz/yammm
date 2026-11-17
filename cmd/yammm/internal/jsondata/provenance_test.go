@@ -3,6 +3,8 @@ package jsondata
 import (
 	"testing"
 
+	"github.com/simon-lentz/yammm/internal/yammmtest/sourcetest"
+
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/instance"
 	"github.com/simon-lentz/yammm/location"
@@ -25,7 +27,7 @@ func firstIssue(result diag.Result) (diag.Issue, bool) {
 // instance's provenance: the document's identity, its path inside that
 // document, and the span of its opening brace.
 func TestParse_RecordsProvenancePerInstance(t *testing.T) {
-	id := location.NewSourceID("test://data/people.json")
+	id := sourcetest.ID("test://data/people.json")
 	doc := "{\n  \"Person\": [\n    {\"name\": \"ada\"},\n    {\"name\": \"grace\"}\n  ],\n  \"Company\": [\n    {\"name\": \"acme\"}\n  ]\n}\n"
 
 	parsed, result := parseForProvenance(t, id, doc)
@@ -63,7 +65,7 @@ func TestParse_RecordsProvenancePerInstance(t *testing.T) {
 			t.Errorf("%s[%d]: span at %d:%d, want %d:%d",
 				c.typeName, c.index, span.Start.Line, span.Start.Column, c.line, c.column)
 		}
-		if !span.IsPoint() {
+		if span.Start != span.End {
 			t.Errorf("%s[%d]: span is not a point: %+v", c.typeName, c.index, span)
 		}
 	}
@@ -73,7 +75,7 @@ func TestParse_RecordsProvenancePerInstance(t *testing.T) {
 // every element after the first needs: the decoder reports the comma, not the
 // element.
 func TestParse_ProvenanceStartsPastTheSeparator(t *testing.T) {
-	id := location.NewSourceID("test://data/sep.json")
+	id := sourcetest.ID("test://data/sep.json")
 	doc := `{"Person": [{"a": 1}, {"b": 2}]}`
 
 	parsed, _ := parseForProvenance(t, id, doc)
@@ -92,7 +94,7 @@ func TestParse_ProvenanceStartsPastTheSeparator(t *testing.T) {
 // later line the two measurements agree — jsonc preserves line breaks — and the
 // test cannot fail for the property it names.
 func TestParse_ProvenanceCountsColumnsOverTheOriginalBytes(t *testing.T) {
-	id := location.NewSourceID("test://data/comment.json")
+	id := sourcetest.ID("test://data/comment.json")
 	doc := `{"Person": [/* naïve */ {"a": 1}]}`
 
 	parsed, result := parseForProvenance(t, id, doc)
@@ -111,7 +113,7 @@ func TestParse_ProvenanceCountsColumnsOverTheOriginalBytes(t *testing.T) {
 // shifts no position: it is trimmed before the decoder runs and its length is
 // added back to every offset.
 func TestParse_ProvenanceSkipsTheByteOrderMark(t *testing.T) {
-	id := location.NewSourceID("test://data/bom.json")
+	id := sourcetest.ID("test://data/bom.json")
 	doc := string(rune(0xFEFF)) + `{"Person": [{"a": 1}]}`
 
 	parsed, result := parseForProvenance(t, id, doc)
@@ -128,7 +130,7 @@ func TestParse_ProvenanceSkipsTheByteOrderMark(t *testing.T) {
 // TestParse_DiagnosticsCarryASpan pins that every parse diagnostic
 // locates itself in the document the caller handed in.
 func TestParse_DiagnosticsCarryASpan(t *testing.T) {
-	id := location.NewSourceID("test://data/bad.json")
+	id := sourcetest.ID("test://data/bad.json")
 	cases := []struct {
 		name string
 		doc  string
@@ -163,7 +165,7 @@ func TestParse_DiagnosticsCarryASpan(t *testing.T) {
 // TestParse_DiagnosticCodesAreStable pins the code each parse refusal
 // reports, which no test asserted before.
 func TestParse_DiagnosticCodesAreStable(t *testing.T) {
-	id := location.NewSourceID("test://data/codes.json")
+	id := sourcetest.ID("test://data/codes.json")
 	cases := []struct {
 		name string
 		doc  string
@@ -194,7 +196,7 @@ func TestParse_DiagnosticCodesAreStable(t *testing.T) {
 // doc states: a failed element consumes its index, so the path keeps addressing
 // the document.
 func TestParse_PathIndexesTheDocumentNotTheResult(t *testing.T) {
-	id := location.NewSourceID("test://data/gap.json")
+	id := sourcetest.ID("test://data/gap.json")
 	// The middle element is a number, which fails to decode into a map without
 	// a syntax error, so the parser reports it and reads on.
 	doc := `{"Person": [{"a": 1}, 42, {"b": 2}]}`
@@ -220,7 +222,7 @@ func TestParse_PathIndexesTheDocumentNotTheResult(t *testing.T) {
 // plausible wrong one on DIFFERENT lines or columns, which a line-only
 // assertion cannot separate.
 func TestParse_DiagnosticSpansPinTheColumn(t *testing.T) {
-	id := location.NewSourceID("test://data/columns.json")
+	id := sourcetest.ID("test://data/columns.json")
 	cases := []struct {
 		name   string
 		doc    string

@@ -5,7 +5,7 @@ import (
 	"testing"
 	"unicode/utf8"
 
-	"github.com/simon-lentz/yammm/location"
+	"github.com/simon-lentz/yammm/internal/yammmtest/sourcetest"
 )
 
 // A message about a name the document writes repeats the name's head alone, as
@@ -19,7 +19,7 @@ func TestParse_RepeatsANameCutToItsHead(t *testing.T) {
 		`{"T": [], "` + long + `": [], "` + long + `": []}`,
 		`{"` + long + `!": []}`,
 	} {
-		_, r := Parse(t.Context(), location.NewSourceID("test://names.json"), []byte(doc))
+		_, r := Parse(t.Context(), sourcetest.ID("test://names.json"), []byte(doc))
 		if r.OK() {
 			t.Errorf("Parse accepted %.40s", doc)
 		}

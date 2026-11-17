@@ -3,7 +3,7 @@ nil
 	CoerceParams: map[v:x], ok
 enum accepted
 	CheckConstraint: ok
-	CoerceParams: map[], param "v": value "x" not in enum [a b]
+	CoerceParams: map[], param "v": value "x" not in enum ["a" "b"]
 enum zero value
 	CheckConstraint: schema: enum must have at least two values (got 0)
 	CoerceParams: map[], param type "v": schema: enum must have at least two values (got 0)
@@ -60,7 +60,7 @@ enum empty before not UTF-8
 	CoerceParams: map[], param type "v": schema: enum value cannot be empty
 enum values changed after construction
 	CheckConstraint: ok
-	CoerceParams: map[], param "v": value "x" not in enum [a b]
+	CoerceParams: map[], param "v": value "x" not in enum ["a" "b"]
 enum pointer
 	CheckConstraint: schema: a constraint of Go type *schema.EnumConstraint is none this package constructs
 	CoerceParams: map[], param type "v": schema: a constraint of Go type *schema.EnumConstraint is none this package constructs
@@ -78,7 +78,7 @@ enum fault behind a reference
 	CoerceParams: map[], param type "v": schema: enum must have at least two values (got 1)
 enum accepted behind a reference
 	CheckConstraint: ok
-	CoerceParams: map[], param "v": value "x" not in enum [a b]
+	CoerceParams: map[], param "v": value "x" not in enum ["a" "b"]
 boolean accepted
 	CheckConstraint: ok
 	CoerceParams: map[], param "v": expected boolean, got string
@@ -177,7 +177,7 @@ list pointer
 	CoerceParams: map[], param type "v": schema: a constraint of Go type *schema.ListConstraint is none this package constructs
 pattern accepted
 	CheckConstraint: ok
-	CoerceParams: map[], param "v": value "x" does not match pattern ^a
+	CoerceParams: map[], param "v": value "x" does not match pattern "^a"
 pattern zero value
 	CheckConstraint: schema: pattern constraint needs a pattern
 	CoerceParams: map[], param type "v": schema: pattern constraint needs a pattern
@@ -189,7 +189,7 @@ pattern Perl syntax refuses
 	CoerceParams: map[], param type "v": schema: invalid regex pattern "a**": error parsing regexp: invalid nested repetition operator: `**`
 pattern surrogate escape accepted
 	CheckConstraint: ok
-	CoerceParams: map[], param "v": value "x" does not match pattern \x{D800}
+	CoerceParams: map[], param "v": value "x" does not match pattern "\\x{D800}"
 vector accepted
 	CheckConstraint: ok
 	CoerceParams: map[], param "v": expected array for vector, got string

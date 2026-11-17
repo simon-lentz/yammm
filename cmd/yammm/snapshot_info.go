@@ -13,6 +13,7 @@ import (
 	"github.com/simon-lentz/yammm/cmd/yammm/internal/cli"
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/graph"
+	"github.com/simon-lentz/yammm/internal/termtext"
 	"github.com/simon-lentz/yammm/snapshot"
 )
 
@@ -121,29 +122,31 @@ func statSize(f *os.File, fallback int64) int64 {
 }
 
 // printSnapshotInfo and printHeaderInfo read the DTO the JSON mode marshals, so
-// a field one mode reports the other reports too.
+// a field one mode reports the other reports too. Every text read from the
+// document is written through [termtext.String], so no byte of a .ys acts on
+// the terminal.
 func printSnapshotInfo(w interface{ Write([]byte) (int, error) }, info *snapshotInfoDTO) {
-	fmt.Fprintf(w, "Snapshot: %s\n", info.SchemaName)
+	fmt.Fprintf(w, "Snapshot: %s\n", termtext.String(info.SchemaName))
 	fmt.Fprintf(w, "  Version:    %d\n", info.Version)
 
 	if len(info.Features) > 0 {
-		fmt.Fprintf(w, "  Features:   [%s]\n", strings.Join(info.Features, ", "))
+		fmt.Fprintf(w, "  Features:   [%s]\n", termtext.String(strings.Join(info.Features, ", ")))
 	} else {
 		fmt.Fprintf(w, "  Features:   none\n")
 	}
 
-	fmt.Fprintf(w, "  Schema:     %s (%s)\n", info.SchemaName, info.SchemaSource)
-	fmt.Fprintf(w, "  Hash:       %s (algorithm v%d)\n", info.SchemaHash, info.SchemaHashAlgorithm)
-	fmt.Fprintf(w, "  Integrity:  %s (%s)\n", info.IntegrityStatus, info.IntegrityHash)
+	fmt.Fprintf(w, "  Schema:     %s (%s)\n", termtext.String(info.SchemaName), termtext.String(info.SchemaSource))
+	fmt.Fprintf(w, "  Hash:       %s (algorithm v%d)\n", termtext.String(info.SchemaHash), info.SchemaHashAlgorithm)
+	fmt.Fprintf(w, "  Integrity:  %s (%s)\n", info.IntegrityStatus, termtext.String(info.IntegrityHash))
 
 	if info.CreatedAt != "" {
-		fmt.Fprintf(w, "  Created:    %s\n", info.CreatedAt)
+		fmt.Fprintf(w, "  Created:    %s\n", termtext.String(info.CreatedAt))
 	} else {
 		fmt.Fprintf(w, "  Created:    not set\n")
 	}
 
 	if len(info.Metadata) > 0 {
-		fmt.Fprintf(w, "  Metadata:   %s\n", formatMetadata(info.Metadata))
+		fmt.Fprintf(w, "  Metadata:   %s\n", termtext.String(formatMetadata(info.Metadata)))
 	} else {
 		fmt.Fprintf(w, "  Metadata:   none\n")
 	}
@@ -152,7 +155,7 @@ func printSnapshotInfo(w interface{ Write([]byte) (int, error) }, info *snapshot
 
 	fmt.Fprintf(w, "\nTypes: %d\n", len(info.Types))
 	for _, typeName := range info.Types {
-		fmt.Fprintf(w, "  %s: %d instances\n", typeName, info.InstanceCounts[typeName])
+		fmt.Fprintf(w, "  %s: %d instances\n", termtext.String(typeName.String()), info.InstanceCounts[typeName])
 	}
 
 	fmt.Fprintf(w, "\nSummary:\n")
@@ -164,27 +167,27 @@ func printSnapshotInfo(w interface{ Write([]byte) (int, error) }, info *snapshot
 }
 
 func printHeaderInfo(w interface{ Write([]byte) (int, error) }, header *headerInfoDTO) {
-	fmt.Fprintf(w, "Snapshot: %s\n", header.SchemaName)
+	fmt.Fprintf(w, "Snapshot: %s\n", termtext.String(header.SchemaName))
 	fmt.Fprintf(w, "  Version:    %d\n", header.Version)
 
 	if len(header.Features) > 0 {
-		fmt.Fprintf(w, "  Features:   [%s]\n", strings.Join(header.Features, ", "))
+		fmt.Fprintf(w, "  Features:   [%s]\n", termtext.String(strings.Join(header.Features, ", ")))
 	} else {
 		fmt.Fprintf(w, "  Features:   none\n")
 	}
 
-	fmt.Fprintf(w, "  Schema:     %s (%s)\n", header.SchemaName, header.SchemaSource)
-	fmt.Fprintf(w, "  Hash:       %s (algorithm v%d)\n", header.SchemaHash, header.SchemaHashAlgorithm)
-	fmt.Fprintf(w, "  Integrity:  %s (stored; not verified)\n", header.IntegrityHash)
+	fmt.Fprintf(w, "  Schema:     %s (%s)\n", termtext.String(header.SchemaName), termtext.String(header.SchemaSource))
+	fmt.Fprintf(w, "  Hash:       %s (algorithm v%d)\n", termtext.String(header.SchemaHash), header.SchemaHashAlgorithm)
+	fmt.Fprintf(w, "  Integrity:  %s (stored; not verified)\n", termtext.String(header.IntegrityHash))
 
 	if header.CreatedAt != "" {
-		fmt.Fprintf(w, "  Created:    %s\n", header.CreatedAt)
+		fmt.Fprintf(w, "  Created:    %s\n", termtext.String(header.CreatedAt))
 	} else {
 		fmt.Fprintf(w, "  Created:    not set\n")
 	}
 
 	if len(header.Metadata) > 0 {
-		fmt.Fprintf(w, "  Metadata:   %s\n", formatMetadata(header.Metadata))
+		fmt.Fprintf(w, "  Metadata:   %s\n", termtext.String(formatMetadata(header.Metadata)))
 	} else {
 		fmt.Fprintf(w, "  Metadata:   none\n")
 	}
@@ -193,7 +196,7 @@ func printHeaderInfo(w interface{ Write([]byte) (int, error) }, header *headerIn
 
 	fmt.Fprintf(w, "\nTypes: %d\n", len(header.Types))
 	for _, typeName := range header.Types {
-		fmt.Fprintf(w, "  %s\n", typeName)
+		fmt.Fprintf(w, "  %s\n", termtext.String(typeName.String()))
 	}
 	fmt.Fprintf(w, "\nFile size: %d bytes\n", header.FileSize)
 }
@@ -431,7 +434,7 @@ func scanEntryToDTO(entry snapshot.ScanEntry) dirEntryDTO {
 func firstWarning(result diag.Result) string {
 	for iss := range result.Issues() {
 		if iss.Severity() == diag.Warning {
-			return fmt.Sprintf("  %s: %s", iss.Code(), iss.Message())
+			return fmt.Sprintf("  %s: %s", iss.Code(), termtext.String(iss.Message()))
 		}
 	}
 	return ""
@@ -444,7 +447,7 @@ func firstWarning(result diag.Result) string {
 // schema identity could not be checked healthy is the one place a dispatch
 // workload would never look again.
 func printDirEntries(w interface{ Write([]byte) (int, error) }, dirPath string, entries []snapshot.ScanEntry) {
-	fmt.Fprintf(w, "Directory: %s\n", dirPath)
+	fmt.Fprintf(w, "Directory: %s\n", termtext.String(dirPath))
 	if len(entries) == 0 {
 		fmt.Fprintf(w, "  (no .ys files)\n")
 		return
@@ -463,7 +466,8 @@ func printDirEntries(w interface{ Write([]byte) (int, error) }, dirPath string, 
 				created = "not set"
 			}
 			fmt.Fprintf(w, "  %-40s  %-12sschema=%s  v%d  created=%s%s\n",
-				entry.Name, status, entry.Header.SchemaName, entry.Header.Version, created, firstWarning(entry.Result))
+				termtext.String(entry.Name), status, termtext.String(entry.Header.SchemaName), entry.Header.Version,
+				termtext.String(created), firstWarning(entry.Result))
 			continue
 		}
 		// Surface the first error code and message.
@@ -471,19 +475,19 @@ func printDirEntries(w interface{ Write([]byte) (int, error) }, dirPath string, 
 		var msg string
 		for iss := range entry.Result.Errors() {
 			code = iss.Code()
-			msg = iss.Message()
+			msg = termtext.String(iss.Message())
 			break
 		}
 		switch code {
 		case diag.E_SNAPSHOT_MALFORMED:
 			malformedCount++
-			fmt.Fprintf(w, "  %-40s  %-12s%s: %s\n", entry.Name, "malformed", code, msg)
+			fmt.Fprintf(w, "  %-40s  %-12s%s: %s\n", termtext.String(entry.Name), "malformed", code, msg)
 		case diag.E_SNAPSHOT_IO:
 			ioCount++
-			fmt.Fprintf(w, "  %-40s  %-12s%s: %s\n", entry.Name, "io-error", code, msg)
+			fmt.Fprintf(w, "  %-40s  %-12s%s: %s\n", termtext.String(entry.Name), "io-error", code, msg)
 		default:
 			otherCount++
-			fmt.Fprintf(w, "  %-40s  %-12s%s: %s\n", entry.Name, "error", code, msg)
+			fmt.Fprintf(w, "  %-40s  %-12s%s: %s\n", termtext.String(entry.Name), "error", code, msg)
 		}
 	}
 	fmt.Fprintf(w, "\nSummary: %d ok", okCount)

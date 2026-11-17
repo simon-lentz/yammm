@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/simon-lentz/yammm/internal/yammmtest/sourcetest"
+
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/location"
 )
@@ -175,7 +177,7 @@ func TestChecks_ConstraintDiagnostics(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			src := checkSource(tc.decl)
-			_, issues := Parse([]byte(src), location.NewSourceID("s.yammm"))
+			_, issues := Parse([]byte(src), sourcetest.ID("s.yammm"))
 			assertIssues(t, src, len(checkPrelude), issues, tc.want)
 		})
 	}
@@ -196,7 +198,7 @@ func TestChecks_VectorDimensionBoundariesAreAccepted(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.dims, func(t *testing.T) {
 			src := checkSource("v Vector[" + tc.dims + "]")
-			file, issues := Parse([]byte(src), location.NewSourceID("s.yammm"))
+			file, issues := Parse([]byte(src), sourcetest.ID("s.yammm"))
 			if len(issues) != 0 {
 				t.Fatalf("Vector[%s] reported %v, want nothing", tc.dims, issues)
 			}
@@ -258,7 +260,7 @@ func TestChecks_UnquoteFailuresAreSyntaxErrors(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			_, issues := Parse([]byte(tc.src), location.NewSourceID("s.yammm"))
+			_, issues := Parse([]byte(tc.src), sourcetest.ID("s.yammm"))
 			assertIssues(t, tc.src, tc.base, issues, tc.want)
 		})
 	}
@@ -349,7 +351,7 @@ func TestChecks_SingleQuotedLiteralsLoadAtEveryUnquoteSite(t *testing.T) {
 		"\tcode Pattern['^x\"?$']\n" +
 		"\t! 'it\\'s \"set\"' id != \"\"\n" +
 		"}\n"
-	_, issues := Parse([]byte(src), location.NewSourceID("s.yammm"))
+	_, issues := Parse([]byte(src), sourcetest.ID("s.yammm"))
 	if len(issues) != 0 {
 		t.Fatalf("single-quoted spellings drew %d diagnostics, want none: %v", len(issues), issues)
 	}
@@ -380,7 +382,7 @@ func TestChecks_SchemaNameUnquoteFailureMarksTheFileFailed(t *testing.T) {
 func TestChecks_CarriedValuesNeedNoReparse(t *testing.T) {
 	src := checkSource("n Integer[-3, 7]") +
 		"type U {\n\tid String primary\n\tf Float[-1.5, _]\n\ts String[2, _]\n}\n"
-	file, issues := Parse([]byte(src), location.NewSourceID("s.yammm"))
+	file, issues := Parse([]byte(src), sourcetest.ID("s.yammm"))
 	if len(issues) != 0 {
 		t.Fatalf("unexpected issues: %v", issues)
 	}
@@ -409,15 +411,15 @@ func TestChecks_CarriedValuesNeedNoReparse(t *testing.T) {
 // the whole thing.
 func TestChecks_MinusBoundSpanCoversTheSign(t *testing.T) {
 	src := checkSource("n Integer[-9, -2]")
-	file, issues := Parse([]byte(src), location.NewSourceID("s.yammm"))
+	file, issues := Parse([]byte(src), sourcetest.ID("s.yammm"))
 	if len(issues) != 0 {
 		t.Fatalf("unexpected issues: %v", issues)
 	}
 	b := file.Types[0].Properties[1].Constraint.Bounds
-	if got := src[b.Min.Span.Start.Byte:b.Min.Span.End.Byte]; got != "-9" {
+	if got := src[b.Min.Span.Start.Offset:b.Min.Span.End.Offset]; got != "-9" {
 		t.Errorf("min bound span covers %q, want %q", got, "-9")
 	}
-	if got := src[b.Max.Span.Start.Byte:b.Max.Span.End.Byte]; got != "-2" {
+	if got := src[b.Max.Span.Start.Offset:b.Max.Span.End.Offset]; got != "-2" {
 		t.Errorf("max bound span covers %q, want %q", got, "-2")
 	}
 }
@@ -431,7 +433,7 @@ func assertIssues(t *testing.T, src string, base int, got []diag.Issue, want []w
 		t.Errorf("got %d issues, want %d", len(got), len(want))
 		for _, iss := range got {
 			t.Logf("  got: %s %s [%d,%d) %s", iss.Code(), iss.Severity(),
-				iss.Span().Start.Byte-base, iss.Span().End.Byte-base, iss.Message())
+				iss.Span().Start.Offset-base, iss.Span().End.Offset-base, iss.Message())
 		}
 		return
 	}
@@ -446,9 +448,9 @@ func assertIssues(t *testing.T, src string, base int, got []diag.Issue, want []w
 		if g.Message() != w.message {
 			t.Errorf("issue %d message = %q, want %q", i, g.Message(), w.message)
 		}
-		if g.Span().Start.Byte != wantStart || g.Span().End.Byte != wantEnd {
+		if g.Span().Start.Offset != wantStart || g.Span().End.Offset != wantEnd {
 			t.Errorf("issue %d span = [%d,%d), want [%d,%d) — offsets relative to base %d",
-				i, g.Span().Start.Byte-base, g.Span().End.Byte-base, w.start, w.end, base)
+				i, g.Span().Start.Offset-base, g.Span().End.Offset-base, w.start, w.end, base)
 			continue
 		}
 		if covered := src[wantStart:wantEnd]; covered != w.covers {
@@ -468,7 +470,7 @@ func TestChecks_ArityRulesAreChecksNotGrammar(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			src := "schema \"s\"\ntype T {\n\tid String primary\n\t" + tc.prop + "\n}\n"
-			_, issues := Parse([]byte(src), location.NewSourceID("s.yammm"))
+			_, issues := Parse([]byte(src), sourcetest.ID("s.yammm"))
 			if len(issues) != 1 {
 				t.Fatalf("got %d issues, want 1: %v", len(issues), issues)
 			}
@@ -479,7 +481,7 @@ func TestChecks_ArityRulesAreChecksNotGrammar(t *testing.T) {
 			// The oracle anchors both rules on the whole constraint; an anchor
 			// on one value underlines a region the rule is not about.
 			want := tc.prop[strings.Index(tc.prop, " ")+1:]
-			if got := src[issues[0].Span().Start.Byte:issues[0].Span().End.Byte]; got != want {
+			if got := src[issues[0].Span().Start.Offset:issues[0].Span().End.Offset]; got != want {
 				t.Errorf("anchored on %q, want the whole constraint %q", got, want)
 			}
 		})
@@ -492,7 +494,7 @@ func TestChecks_ArityRulesAreChecksNotGrammar(t *testing.T) {
 // gets nil — or a swapped pair — with every other assertion green.
 func TestChecks_FloatBoundsCarryTheWrittenSpelling(t *testing.T) {
 	src := checkSource("f Float[-1.5, 2.5]")
-	file, issues := Parse([]byte(src), location.NewSourceID("s.yammm"))
+	file, issues := Parse([]byte(src), sourcetest.ID("s.yammm"))
 	if len(issues) != 0 {
 		t.Fatalf("unexpected issues: %v", issues)
 	}
@@ -506,7 +508,7 @@ func TestChecks_FloatBoundsCarryTheWrittenSpelling(t *testing.T) {
 	if bounds.Max.Text != "2.5" || bounds.Max.Neg {
 		t.Errorf("max = %+v, want the written 2.5 unsigned", bounds.Max)
 	}
-	if got := src[bounds.Min.Span.Start.Byte:bounds.Min.Span.End.Byte]; got != "-1.5" {
+	if got := src[bounds.Min.Span.Start.Offset:bounds.Min.Span.End.Offset]; got != "-1.5" {
 		t.Errorf("min span covers %q, want the sign too", got)
 	}
 }
@@ -516,7 +518,7 @@ func TestChecks_FloatBoundsCarryTheWrittenSpelling(t *testing.T) {
 func TestChecks_PatternTakesOnePattern(t *testing.T) {
 	for _, prop := range []string{`p Pattern["a", "b"]`, `p Pattern["a", "b", "c"]`, `p Pattern["a",]`, `p Pattern[]`} {
 		src := "schema \"s\"\ntype T {\n\tid String primary\n\t" + prop + "\n}\n"
-		_, issues := Parse([]byte(src), location.NewSourceID("s.yammm"))
+		_, issues := Parse([]byte(src), sourcetest.ID("s.yammm"))
 		if len(issues) != 1 || issues[0].Code() != diag.E_SYNTAX {
 			t.Errorf("%s: got %v, want one E_SYNTAX", prop, issues)
 		}
@@ -536,7 +538,7 @@ func TestChecks_APatternKeepsItsLiteral(t *testing.T) {
 		{`\x4g`, false, []diag.Code{diag.E_SYNTAX}},
 	} {
 		src := "schema \"s\"\ntype T {\n\tid String primary\n\tp Pattern[\"" + tc.text + "\"]\n}\n"
-		file, issues := Parse([]byte(src), location.NewSourceID("s.yammm"))
+		file, issues := Parse([]byte(src), sourcetest.ID("s.yammm"))
 		var codes []diag.Code
 		for _, iss := range issues {
 			codes = append(codes, iss.Code())
@@ -567,13 +569,13 @@ func TestChecks_APatternKeepsItsLiteral(t *testing.T) {
 func TestChecks_UnquoteFailureTextIsStableAtBothSites(t *testing.T) {
 	t.Parallel()
 
-	_, issues := Parse([]byte("schema \"\\x\"\ntype T {\n\tid String primary\n}\n"), location.NewSourceID("s.yammm"))
+	_, issues := Parse([]byte("schema \"\\x\"\ntype T {\n\tid String primary\n}\n"), sourcetest.ID("s.yammm"))
 	if !hasMessage(issues, "invalid schema name: unquote string: invalid syntax") {
 		t.Errorf("schema-name site text moved; got %s", messages(issues))
 	}
 
 	src := "schema \"s\"\n\ntype T {\n\tid String primary\n\t! \"m\" id == \"\\x\"\n}\n"
-	_, issues = Parse([]byte(src), location.NewSourceID("s.yammm"))
+	_, issues = Parse([]byte(src), sourcetest.ID("s.yammm"))
 	if !hasMessage(issues, "invalid string literal: invalid syntax") {
 		t.Errorf("expression site text moved; got %s", messages(issues))
 	}

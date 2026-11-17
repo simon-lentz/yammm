@@ -3,12 +3,13 @@ package schema_test
 import (
 	"testing"
 
+	"github.com/simon-lentz/yammm/internal/yammmtest/sourcetest"
+
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/internal/source"
-	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -16,7 +17,7 @@ import (
 func parseSchema(t *testing.T, schemaSource string) (*schema.TestModel, diag.Result) {
 	t.Helper()
 	reg := source.NewRegistry()
-	sourceID := location.NewSourceID("test://coverage.yammm")
+	sourceID := sourcetest.ID("test://coverage.yammm")
 	err := reg.Register(sourceID, []byte(schemaSource))
 	require.NoError(t, err)
 

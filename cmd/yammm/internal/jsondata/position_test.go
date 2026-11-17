@@ -4,8 +4,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/simon-lentz/yammm/internal/yammmtest/sourcetest"
+
 	"github.com/simon-lentz/yammm/internal/source"
-	"github.com/simon-lentz/yammm/location"
 )
 
 // positionCorpus holds every shape the two converters must agree on: an empty
@@ -39,7 +40,7 @@ func TestPositionTable_AgreesWithSourceRegistry(t *testing.T) {
 	for name, text := range positionCorpus {
 		t.Run(name, func(t *testing.T) {
 			content := []byte(text)
-			id := location.NewSourceID("test://position/" + name)
+			id := sourcetest.ID("test://position/" + name)
 			reg := source.NewRegistry()
 			if err := reg.Register(id, content); err != nil {
 				t.Fatalf("register: %v", err)
@@ -125,14 +126,14 @@ func TestParse_PositionsOnOneLineCostTheDocumentLinearly(t *testing.T) {
 		b.WriteString(`}]}`)
 		doc := b.String()
 		table := newPositionTable([]byte(doc))
-		_, result := parse(t.Context(), location.NewSourceID("test://data/minified.json"), []byte(doc), table)
+		_, result := parse(t.Context(), sourcetest.ID("test://data/minified.json"), []byte(doc), table)
 		decoded := table.counted
 		fresh := newPositionTable([]byte(doc))
 		issues := 0
 		for issue := range result.Issues() {
 			issues++
 			start := issue.Span().Start
-			if got := fresh.positionAt(start.Byte); got != start {
+			if got := fresh.positionAt(start.Offset); got != start {
 				t.Fatalf("%d repeats: issue %d at %v, a fresh table gives %v", repeats, issues, start, got)
 			}
 		}

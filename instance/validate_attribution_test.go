@@ -9,8 +9,8 @@ import (
 
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/instance"
+	"github.com/simon-lentz/yammm/instance/path"
 	"github.com/simon-lentz/yammm/location"
-	"github.com/simon-lentz/yammm/location/path"
 )
 
 func detail(is diag.Issue, key string) (string, bool) {
@@ -107,7 +107,7 @@ func TestValidate_CancellationBeforeTheFirstRowIsBatchWide(t *testing.T) {
 	t.Parallel()
 	s := loadT(t, "schema \"p\"\n\ntype T {\n\tid String primary\n}\n")
 	v := instance.NewValidator(s)
-	prov := location.NewProvenance("rows.json", path.Root().Index(0), location.Span{})
+	prov := instance.NewProvenance("rows.json", path.Root.Index(0), location.Span{})
 	raws := []instance.RawInstance{{Properties: map[string]any{"id": "a"}, Provenance: prov}}
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()

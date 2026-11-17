@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/simon-lentz/yammm/location"
+	"github.com/simon-lentz/yammm/internal/hostpath"
 )
 
 // linkedDirFixture makes dir/real/deep/x and a relative link dir/link to it,
@@ -75,7 +75,7 @@ func TestWrite_DotDotAfterASymlinkLandsWhereTheLoaderReads(t *testing.T) {
 			if after := readOrAbsent(t, out); after == nil || bytes.Equal(after, before) {
 				t.Errorf("%s, the file the loader reads, was not written", out)
 			}
-			if want, err := location.ResolveHostPath(spelled); err != nil || !sameFile(t, want, out) {
+			if want, err := hostpath.Resolve(spelled); err != nil || !sameFile(t, want, out) {
 				t.Errorf("the loader reads %s (%v) for %s, not the file written", want, err, spelled)
 			}
 		})
@@ -115,7 +115,7 @@ func TestWrite_ALinkTargetClimbsFromTheDirectoryItsLinkReached(t *testing.T) {
 			if err := os.Symlink("link"+sep+".."+sep+name, out); err != nil {
 				t.Fatal(err)
 			}
-			if want, err := location.ResolveHostPath(out); err != nil || !sameFile(t, want, kernelFile) {
+			if want, err := hostpath.Resolve(out); err != nil || !sameFile(t, want, kernelFile) {
 				t.Fatalf("the loader reads %s (%v), want %s", want, err, kernelFile)
 			}
 

@@ -9,8 +9,8 @@
 //
 // Foundation:
 //
-//   - [github.com/simon-lentz/yammm/location]: Source positions, spans, and canonical paths
-//   - [github.com/simon-lentz/yammm/location/path]: Instance path parsing and formatting
+//   - [github.com/simon-lentz/yammm/location]: Source identities, positions and spans
+//   - [github.com/simon-lentz/yammm/instance/path]: Instance path formatting
 //   - [github.com/simon-lentz/yammm/diag]: Structured diagnostics with stable error codes
 //   - [github.com/simon-lentz/yammm/immutable]: Immutable collection primitives
 //

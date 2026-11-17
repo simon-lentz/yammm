@@ -3989,7 +3989,7 @@ func TestPreCommitHooks_RunTheGateScripts(t *testing.T) {
 	}
 	for pattern, fires := range map[string][]string{
 		lintConfigFiles: {".golangci.yml", "go.mod", "go.sum"},
-		goFiles:         {"schema/load.go", "location/host_path_windows.go"},
+		goFiles:         {"schema/load.go", "internal/hostpath/resolve_windows.go"},
 		goBuildFiles:    {"schema/load.go", "go.mod", "go.sum"},
 	} {
 		files := regexp.MustCompile(pattern)

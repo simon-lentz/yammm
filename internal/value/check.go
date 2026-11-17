@@ -511,9 +511,10 @@ func wrappedTimeRefusal(kind string, val any) *CheckError {
 }
 
 // wrapsTime reports whether val is a struct whose one field is an embedded
-// time.Time, the shape of a generated Date or Timestamp data type, or a non-nil
-// pointer to one; a nil pointer is not, since none is passed as nil. It reads
-// one field at most and allocates nothing.
+// time.Time named Time, the shape of a generated Date or Timestamp data type, or
+// a non-nil pointer to one; a nil pointer is not, since none is passed as nil.
+// A time.Time embedded through an alias has the alias's name and no .Time.
+// It reads one field at most and allocates nothing.
 func wrapsTime(val any) bool {
 	t := reflect.TypeOf(val)
 	if t == nil {
@@ -529,7 +530,7 @@ func wrapsTime(val any) bool {
 		return false
 	}
 	f := t.Field(0)
-	return f.Anonymous && f.Type == reflect.TypeFor[time.Time]()
+	return f.Anonymous && f.Name == "Time" && f.Type == reflect.TypeFor[time.Time]()
 }
 
 // checkDate validates that val is a valid date.
@@ -580,7 +581,9 @@ func checkUUID(val any) error {
 	return nil
 }
 
-// checkEnum validates that val is one of the allowed enum values.
+// checkEnum validates that val is one of the allowed enum values. The refusal
+// quotes each member whole: a member is schema text, which a message shows
+// uncut, where the refused value is data and is cut.
 func checkEnum(val any, c schema.Constraint) error {
 	s, refused := textOf(val, "string for enum")
 	if refused != nil {
@@ -596,7 +599,11 @@ func checkEnum(val any, c schema.Constraint) error {
 	if slices.Contains(allowed, s) {
 		return nil
 	}
-	return constraintFail("value %s not in enum %v", diag.QuoteValue(s), allowed)
+	members := make([]string, len(allowed))
+	for i, m := range allowed {
+		members[i] = strconv.Quote(m)
+	}
+	return constraintFail("value %s not in enum [%s]", diag.QuoteValue(s), strings.Join(members, " "))
 }
 
 // checkPattern validates that the constraint's pattern matches val. A
@@ -618,7 +625,8 @@ func checkPattern(val any, c schema.Constraint) error {
 		return constraintFail("value %s is judged by a pattern constraint that holds no pattern", diag.QuoteValue(s))
 	}
 	if !pattern.MatchString(s) {
-		return constraintFail("value %s does not match pattern %s", diag.QuoteValue(s), pattern.String())
+		// The pattern is schema text, so it is quoted whole, not cut as the value is.
+		return constraintFail("value %s does not match pattern %s", diag.QuoteValue(s), strconv.Quote(pattern.String()))
 	}
 	return nil
 }

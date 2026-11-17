@@ -8,6 +8,8 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/simon-lentz/yammm/internal/source"
+
 	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
 )
@@ -495,7 +497,7 @@ func (g *generator) embeddedKeys(ids []location.SourceID) (map[location.SourceID
 // a directory identity. Both are zero for a synthetic source loaded with no root.
 type keyRoot struct {
 	synthetic string
-	dir       location.CanonicalPath
+	dir       location.SourceID
 }
 
 // resolveKeyRoot reads the root from s, or takes a file entry's directory when
@@ -503,32 +505,28 @@ type keyRoot struct {
 // re-derived as an identity, since a host path's bytes can differ from it.
 func resolveKeyRoot(s schema.Schema) (keyRoot, error) {
 	root := s.ModuleRoot()
-	switch {
-	case root != "" && location.ValidateSyntheticSourceID(root) == nil:
+	if root == "" {
+		return keyRoot{dir: s.SourceID().Dir()}, nil
+	}
+	if _, err := location.NewSourceID(root); err == nil {
 		return keyRoot{synthetic: root}, nil
-	case root != "":
-		cp, err := location.NewCanonicalPath(root)
-		if err != nil {
-			return keyRoot{}, fmt.Errorf("gogen: module root %q: %w", root, err)
-		}
-		return keyRoot{dir: cp}, nil
 	}
-	if cp, ok := s.SourceID().CanonicalPath(); ok {
-		return keyRoot{dir: cp.Dir()}, nil
+	dir, err := location.SourceIDFromPath(root)
+	if err != nil {
+		return keyRoot{}, fmt.Errorf("gogen: module root %q: %w", root, err)
 	}
-	return keyRoot{}, nil
+	return keyRoot{dir: dir}, nil
 }
 
 // key returns id's key under the root, or its base name for a synthetic source
-// loaded with no root, judged by [location.NormalizeSyntheticKey], the rule the
-// re-load reads a key by. A key with no relative form or one that rule refuses
+// loaded with no root, judged by the key rule the re-load reads a key by. A key with no relative form or one that rule refuses
 // is an error naming its source, since a key is never a machine path.
 func (k keyRoot) key(id location.SourceID) (string, error) {
 	candidate, err := k.candidate(id)
 	if err != nil {
 		return "", err
 	}
-	key, err := location.NormalizeSyntheticKey(candidate)
+	key, err := source.NormalizeSyntheticKey(candidate)
 	if err != nil {
 		return "", fmt.Errorf("gogen: source %q has no key the re-load can read: %w", id, err)
 	}

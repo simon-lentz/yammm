@@ -4,6 +4,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/simon-lentz/yammm/internal/yammmtest/sourcetest"
+
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -52,8 +54,8 @@ func TestBuildDocumentSymbols_Golden(t *testing.T) {
 		{
 			name: "schema only",
 			idx: func() *SymbolIndex {
-				sourceID := location.NewSourceID("test://schema.yammm")
-				span := location.RangeWithBytes(sourceID, 1, 1, -1, 1, 20, -1)
+				sourceID := sourcetest.ID("test://schema.yammm")
+				span := location.Span{Source: sourceID, Start: location.Position{Line: 1, Column: 1}, End: location.Position{Line: 1, Column: 20}}
 				return &SymbolIndex{
 					Symbols: []Symbol{
 						{
@@ -71,9 +73,9 @@ func TestBuildDocumentSymbols_Golden(t *testing.T) {
 		{
 			name: "type with members",
 			idx: func() *SymbolIndex {
-				sourceID := location.NewSourceID("test://types.yammm")
-				typeSpan := location.RangeWithBytes(sourceID, 1, 1, -1, 5, 1, -1)
-				propSpan := location.RangeWithBytes(sourceID, 2, 5, -1, 2, 20, -1)
+				sourceID := sourcetest.ID("test://types.yammm")
+				typeSpan := location.Span{Source: sourceID, Start: location.Position{Line: 1, Column: 1}, End: location.Position{Line: 5, Column: 1}}
+				propSpan := location.Span{Source: sourceID, Start: location.Position{Line: 2, Column: 5}, End: location.Position{Line: 2, Column: 20}}
 				return &SymbolIndex{
 					Symbols: []Symbol{
 						{
@@ -100,10 +102,10 @@ func TestBuildDocumentSymbols_Golden(t *testing.T) {
 		{
 			name: "schema with imports and types",
 			idx: func() *SymbolIndex {
-				sourceID := location.NewSourceID("test://full.yammm")
-				schemaSpan := location.RangeWithBytes(sourceID, 1, 1, -1, 1, 20, -1)
-				importSpan := location.RangeWithBytes(sourceID, 2, 1, -1, 2, 30, -1)
-				typeSpan := location.RangeWithBytes(sourceID, 4, 1, -1, 10, 1, -1)
+				sourceID := sourcetest.ID("test://full.yammm")
+				schemaSpan := location.Span{Source: sourceID, Start: location.Position{Line: 1, Column: 1}, End: location.Position{Line: 1, Column: 20}}
+				importSpan := location.Span{Source: sourceID, Start: location.Position{Line: 2, Column: 1}, End: location.Position{Line: 2, Column: 30}}
+				typeSpan := location.Span{Source: sourceID, Start: location.Position{Line: 4, Column: 1}, End: location.Position{Line: 10, Column: 1}}
 				return &SymbolIndex{
 					Symbols: []Symbol{
 						{
@@ -138,37 +140,37 @@ func TestBuildDocumentSymbols_Golden(t *testing.T) {
 		{
 			name: "multiple types",
 			idx: func() *SymbolIndex {
-				sourceID := location.NewSourceID("test://multi.yammm")
+				sourceID := sourcetest.ID("test://multi.yammm")
 				return &SymbolIndex{
 					Symbols: []Symbol{
 						{
 							Name:      "Person",
 							Kind:      SymbolType,
 							SourceID:  sourceID,
-							Range:     location.RangeWithBytes(sourceID, 1, 1, -1, 5, 1, -1),
-							Selection: location.RangeWithBytes(sourceID, 1, 6, -1, 1, 12, -1),
+							Range:     location.Span{Source: sourceID, Start: location.Position{Line: 1, Column: 1}, End: location.Position{Line: 5, Column: 1}},
+							Selection: location.Span{Source: sourceID, Start: location.Position{Line: 1, Column: 6}, End: location.Position{Line: 1, Column: 12}},
 						},
 						{
 							Name:       "name",
 							Kind:       SymbolProperty,
 							SourceID:   sourceID,
-							Range:      location.RangeWithBytes(sourceID, 2, 5, -1, 2, 20, -1),
-							Selection:  location.RangeWithBytes(sourceID, 2, 5, -1, 2, 9, -1),
+							Range:      location.Span{Source: sourceID, Start: location.Position{Line: 2, Column: 5}, End: location.Position{Line: 2, Column: 20}},
+							Selection:  location.Span{Source: sourceID, Start: location.Position{Line: 2, Column: 5}, End: location.Position{Line: 2, Column: 9}},
 							ParentName: "Person",
 						},
 						{
 							Name:      "Company",
 							Kind:      SymbolType,
 							SourceID:  sourceID,
-							Range:     location.RangeWithBytes(sourceID, 7, 1, -1, 11, 1, -1),
-							Selection: location.RangeWithBytes(sourceID, 7, 6, -1, 7, 13, -1),
+							Range:     location.Span{Source: sourceID, Start: location.Position{Line: 7, Column: 1}, End: location.Position{Line: 11, Column: 1}},
+							Selection: location.Span{Source: sourceID, Start: location.Position{Line: 7, Column: 6}, End: location.Position{Line: 7, Column: 13}},
 						},
 						{
 							Name:       "title",
 							Kind:       SymbolProperty,
 							SourceID:   sourceID,
-							Range:      location.RangeWithBytes(sourceID, 8, 5, -1, 8, 20, -1),
-							Selection:  location.RangeWithBytes(sourceID, 8, 5, -1, 8, 10, -1),
+							Range:      location.Span{Source: sourceID, Start: location.Position{Line: 8, Column: 5}, End: location.Position{Line: 8, Column: 20}},
+							Selection:  location.Span{Source: sourceID, Start: location.Position{Line: 8, Column: 5}, End: location.Position{Line: 8, Column: 10}},
 							ParentName: "Company",
 						},
 					},
@@ -178,22 +180,22 @@ func TestBuildDocumentSymbols_Golden(t *testing.T) {
 		{
 			name: "relations",
 			idx: func() *SymbolIndex {
-				sourceID := location.NewSourceID("test://relations.yammm")
+				sourceID := sourcetest.ID("test://relations.yammm")
 				return &SymbolIndex{
 					Symbols: []Symbol{
 						{
 							Name:      "Person",
 							Kind:      SymbolType,
 							SourceID:  sourceID,
-							Range:     location.RangeWithBytes(sourceID, 1, 1, -1, 10, 1, -1),
-							Selection: location.RangeWithBytes(sourceID, 1, 6, -1, 1, 12, -1),
+							Range:     location.Span{Source: sourceID, Start: location.Position{Line: 1, Column: 1}, End: location.Position{Line: 10, Column: 1}},
+							Selection: location.Span{Source: sourceID, Start: location.Position{Line: 1, Column: 6}, End: location.Position{Line: 1, Column: 12}},
 						},
 						{
 							Name:       "EMPLOYER",
 							Kind:       SymbolAssociation,
 							SourceID:   sourceID,
-							Range:      location.RangeWithBytes(sourceID, 2, 5, -1, 2, 30, -1),
-							Selection:  location.RangeWithBytes(sourceID, 2, 9, -1, 2, 17, -1),
+							Range:      location.Span{Source: sourceID, Start: location.Position{Line: 2, Column: 5}, End: location.Position{Line: 2, Column: 30}},
+							Selection:  location.Span{Source: sourceID, Start: location.Position{Line: 2, Column: 9}, End: location.Position{Line: 2, Column: 17}},
 							ParentName: "Person",
 							Detail:     "--> EMPLOYER (one) Company",
 						},
@@ -201,8 +203,8 @@ func TestBuildDocumentSymbols_Golden(t *testing.T) {
 							Name:       "DOCUMENTS",
 							Kind:       SymbolComposition,
 							SourceID:   sourceID,
-							Range:      location.RangeWithBytes(sourceID, 3, 5, -1, 3, 30, -1),
-							Selection:  location.RangeWithBytes(sourceID, 3, 9, -1, 3, 18, -1),
+							Range:      location.Span{Source: sourceID, Start: location.Position{Line: 3, Column: 5}, End: location.Position{Line: 3, Column: 30}},
+							Selection:  location.Span{Source: sourceID, Start: location.Position{Line: 3, Column: 9}, End: location.Position{Line: 3, Column: 18}},
 							ParentName: "Person",
 							Detail:     "*-> DOCUMENTS (many) Document",
 						},
@@ -213,22 +215,22 @@ func TestBuildDocumentSymbols_Golden(t *testing.T) {
 		{
 			name: "invariants",
 			idx: func() *SymbolIndex {
-				sourceID := location.NewSourceID("test://invariants.yammm")
+				sourceID := sourcetest.ID("test://invariants.yammm")
 				return &SymbolIndex{
 					Symbols: []Symbol{
 						{
 							Name:      "Person",
 							Kind:      SymbolType,
 							SourceID:  sourceID,
-							Range:     location.RangeWithBytes(sourceID, 1, 1, -1, 5, 1, -1),
-							Selection: location.RangeWithBytes(sourceID, 1, 6, -1, 1, 12, -1),
+							Range:     location.Span{Source: sourceID, Start: location.Position{Line: 1, Column: 1}, End: location.Position{Line: 5, Column: 1}},
+							Selection: location.Span{Source: sourceID, Start: location.Position{Line: 1, Column: 6}, End: location.Position{Line: 1, Column: 12}},
 						},
 						{
 							Name:       "age must be positive",
 							Kind:       SymbolInvariant,
 							SourceID:   sourceID,
-							Range:      location.RangeWithBytes(sourceID, 3, 5, -1, 3, 40, -1),
-							Selection:  location.RangeWithBytes(sourceID, 3, 7, -1, 3, 27, -1),
+							Range:      location.Span{Source: sourceID, Start: location.Position{Line: 3, Column: 5}, End: location.Position{Line: 3, Column: 40}},
+							Selection:  location.Span{Source: sourceID, Start: location.Position{Line: 3, Column: 7}, End: location.Position{Line: 3, Column: 27}},
 							ParentName: "Person",
 						},
 					},
@@ -238,15 +240,15 @@ func TestBuildDocumentSymbols_Golden(t *testing.T) {
 		{
 			name: "datatype",
 			idx: func() *SymbolIndex {
-				sourceID := location.NewSourceID("test://datatypes.yammm")
+				sourceID := sourcetest.ID("test://datatypes.yammm")
 				return &SymbolIndex{
 					Symbols: []Symbol{
 						{
 							Name:      "ShortName",
 							Kind:      SymbolDataType,
 							SourceID:  sourceID,
-							Range:     location.RangeWithBytes(sourceID, 1, 1, -1, 1, 30, -1),
-							Selection: location.RangeWithBytes(sourceID, 1, 6, -1, 1, 15, -1),
+							Range:     location.Span{Source: sourceID, Start: location.Position{Line: 1, Column: 1}, End: location.Position{Line: 1, Column: 30}},
+							Selection: location.Span{Source: sourceID, Start: location.Position{Line: 1, Column: 6}, End: location.Position{Line: 1, Column: 15}},
 							Detail:    "type ShortName = String[1, 50]",
 						},
 					},
@@ -256,15 +258,15 @@ func TestBuildDocumentSymbols_Golden(t *testing.T) {
 		{
 			name: "orphan imports synthetic schema",
 			idx: func() *SymbolIndex {
-				sourceID := location.NewSourceID("test://orphan.yammm")
+				sourceID := sourcetest.ID("test://orphan.yammm")
 				return &SymbolIndex{
 					Symbols: []Symbol{
 						{
 							Name:      "parts",
 							Kind:      SymbolImport,
 							SourceID:  sourceID,
-							Range:     location.RangeWithBytes(sourceID, 1, 1, -1, 1, 30, -1),
-							Selection: location.RangeWithBytes(sourceID, 1, 20, -1, 1, 25, -1),
+							Range:     location.Span{Source: sourceID, Start: location.Position{Line: 1, Column: 1}, End: location.Position{Line: 1, Column: 30}},
+							Selection: location.Span{Source: sourceID, Start: location.Position{Line: 1, Column: 20}, End: location.Position{Line: 1, Column: 25}},
 							Detail:    "import \"./parts\" as parts",
 						},
 					},
@@ -274,23 +276,23 @@ func TestBuildDocumentSymbols_Golden(t *testing.T) {
 		{
 			name: "orphan imports and types synthetic schema",
 			idx: func() *SymbolIndex {
-				sourceID := location.NewSourceID("test://orphan-mixed.yammm")
+				sourceID := sourcetest.ID("test://orphan-mixed.yammm")
 				return &SymbolIndex{
 					Symbols: []Symbol{
 						{
 							Name:      "parts",
 							Kind:      SymbolImport,
 							SourceID:  sourceID,
-							Range:     location.RangeWithBytes(sourceID, 1, 1, -1, 1, 30, -1),
-							Selection: location.RangeWithBytes(sourceID, 1, 20, -1, 1, 25, -1),
+							Range:     location.Span{Source: sourceID, Start: location.Position{Line: 1, Column: 1}, End: location.Position{Line: 1, Column: 30}},
+							Selection: location.Span{Source: sourceID, Start: location.Position{Line: 1, Column: 20}, End: location.Position{Line: 1, Column: 25}},
 							Detail:    "import \"./parts\" as parts",
 						},
 						{
 							Name:      "Car",
 							Kind:      SymbolType,
 							SourceID:  sourceID,
-							Range:     location.RangeWithBytes(sourceID, 3, 1, -1, 6, 2, -1),
-							Selection: location.RangeWithBytes(sourceID, 3, 6, -1, 3, 9, -1),
+							Range:     location.Span{Source: sourceID, Start: location.Position{Line: 3, Column: 1}, End: location.Position{Line: 6, Column: 2}},
+							Selection: location.Span{Source: sourceID, Start: location.Position{Line: 3, Column: 6}, End: location.Position{Line: 3, Column: 9}},
 							Detail:    "type Car",
 						},
 					},
@@ -300,23 +302,23 @@ func TestBuildDocumentSymbols_Golden(t *testing.T) {
 		{
 			name: "schema name equals type name",
 			idx: func() *SymbolIndex {
-				sourceID := location.NewSourceID("test://collision.yammm")
+				sourceID := sourcetest.ID("test://collision.yammm")
 				return &SymbolIndex{
 					Symbols: []Symbol{
 						{
 							Name:      "Person",
 							Kind:      SymbolSchema,
 							SourceID:  sourceID,
-							Range:     location.RangeWithBytes(sourceID, 1, 1, -1, 6, 1, -1),
-							Selection: location.RangeWithBytes(sourceID, 1, 8, -1, 1, 14, -1),
+							Range:     location.Span{Source: sourceID, Start: location.Position{Line: 1, Column: 1}, End: location.Position{Line: 6, Column: 1}},
+							Selection: location.Span{Source: sourceID, Start: location.Position{Line: 1, Column: 8}, End: location.Position{Line: 1, Column: 14}},
 							Detail:    "schema \"Person\"",
 						},
 						{
 							Name:       "Person",
 							Kind:       SymbolType,
 							SourceID:   sourceID,
-							Range:      location.RangeWithBytes(sourceID, 2, 1, -1, 5, 1, -1),
-							Selection:  location.RangeWithBytes(sourceID, 2, 6, -1, 2, 12, -1),
+							Range:      location.Span{Source: sourceID, Start: location.Position{Line: 2, Column: 1}, End: location.Position{Line: 5, Column: 1}},
+							Selection:  location.Span{Source: sourceID, Start: location.Position{Line: 2, Column: 6}, End: location.Position{Line: 2, Column: 12}},
 							ParentName: "Person", // Parent is the schema
 							Detail:     "type Person",
 						},
@@ -324,8 +326,8 @@ func TestBuildDocumentSymbols_Golden(t *testing.T) {
 							Name:       "name",
 							Kind:       SymbolProperty,
 							SourceID:   sourceID,
-							Range:      location.RangeWithBytes(sourceID, 3, 5, -1, 3, 20, -1),
-							Selection:  location.RangeWithBytes(sourceID, 3, 5, -1, 3, 9, -1),
+							Range:      location.Span{Source: sourceID, Start: location.Position{Line: 3, Column: 5}, End: location.Position{Line: 3, Column: 20}},
+							Selection:  location.Span{Source: sourceID, Start: location.Position{Line: 3, Column: 5}, End: location.Position{Line: 3, Column: 9}},
 							ParentName: "Person", // Parent is the type Person
 							Detail:     "name String required",
 						},
@@ -376,9 +378,9 @@ func TestSymbolToDocumentSymbol(t *testing.T) {
 
 	sources := testSources()
 
-	sourceID := location.NewSourceID("test://sym.yammm")
-	fullSpan := location.RangeWithBytes(sourceID, 1, 1, -1, 5, 1, -1)
-	nameSpan := location.RangeWithBytes(sourceID, 1, 6, -1, 1, 12, -1)
+	sourceID := sourcetest.ID("test://sym.yammm")
+	fullSpan := location.Span{Source: sourceID, Start: location.Position{Line: 1, Column: 1}, End: location.Position{Line: 5, Column: 1}}
+	nameSpan := location.Span{Source: sourceID, Start: location.Position{Line: 1, Column: 6}, End: location.Position{Line: 1, Column: 12}}
 
 	sym := &Symbol{
 		Name:      "Person",
@@ -411,8 +413,8 @@ func TestSymbolToDocumentSymbol_NoDetail(t *testing.T) {
 
 	sources := testSources()
 
-	sourceID := location.NewSourceID("test://sym.yammm")
-	span := location.RangeWithBytes(sourceID, 1, 1, -1, 1, 10, -1)
+	sourceID := sourcetest.ID("test://sym.yammm")
+	span := location.Span{Source: sourceID, Start: location.Position{Line: 1, Column: 1}, End: location.Position{Line: 1, Column: 10}}
 
 	sym := &Symbol{
 		Name:      "Test",

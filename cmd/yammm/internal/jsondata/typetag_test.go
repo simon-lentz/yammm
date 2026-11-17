@@ -7,8 +7,9 @@ import (
 	"testing"
 	"unicode/utf8"
 
+	"github.com/simon-lentz/yammm/internal/yammmtest/sourcetest"
+
 	"github.com/simon-lentz/yammm/diag"
-	"github.com/simon-lentz/yammm/location"
 )
 
 // grammarVocabulary reads the parser's vocabulary from the names file its own
@@ -258,7 +259,7 @@ func TestIsDatatypeKeyword(t *testing.T) {
 // A refused tag's issue states the reason in its message and its detail, and the
 // tag as what the parser got.
 func TestParse_RefusedTagIssueStatesTheReason(t *testing.T) {
-	_, result := Parse(t.Context(), location.NewSourceID("test://tag.json"), []byte(`{"person": []}`))
+	_, result := Parse(t.Context(), sourcetest.ID("test://tag.json"), []byte(`{"person": []}`))
 	var issue diag.Issue
 	for found := range result.Errors() {
 		issue = found

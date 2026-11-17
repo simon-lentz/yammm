@@ -7,12 +7,13 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/simon-lentz/yammm/instance"
+
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/internal/snapparts"
 	"github.com/simon-lentz/yammm/internal/snappartstest"
 	"github.com/simon-lentz/yammm/location"
-	"github.com/simon-lentz/yammm/location/path"
 	"github.com/simon-lentz/yammm/schema"
 	"github.com/simon-lentz/yammm/snapshot"
 )
@@ -61,15 +62,6 @@ type Basin {
 }
 `
 
-func mustProvenance(t *testing.T, name, p string) location.Provenance {
-	t.Helper()
-	parsed, err := path.Parse(p)
-	if err != nil {
-		t.Fatalf("parse provenance path %q: %v", p, err)
-	}
-	return location.NewProvenance(name, parsed, location.Span{})
-}
-
 // Provenance must survive the round trip at every instance position. Stated in a
 // document because that is the only entry point that sets each position's
 // provenance directly.
@@ -89,13 +81,13 @@ func TestMarshal_ProvenanceSurvivesTheRoundTrip(t *testing.T) {
 				TypeID:     parentID,
 				PrimaryKey: immutable.WrapKey([]any{"p1"}),
 				Properties: immutable.WrapProperties(map[string]any{"id": "p1", "name": "root"}),
-				Provenance: mustProvenance(t, "parents.json", "$.rows[0]"),
+				Provenance: instance.NewProvenance("parents.json", "$.rows[0]", location.Span{}),
 				Composed: map[string][]snapparts.Instance{
 					"CHILDREN": {{
 						TypeID:     childID,
 						PrimaryKey: immutable.WrapKey([]any{"c1"}),
 						Properties: immutable.WrapProperties(map[string]any{"id": "c1", "value": "v"}),
-						Provenance: mustProvenance(t, "children.json", "$.rows[1]"),
+						Provenance: instance.NewProvenance("children.json", "$.rows[1]", location.Span{}),
 					}},
 				},
 			},

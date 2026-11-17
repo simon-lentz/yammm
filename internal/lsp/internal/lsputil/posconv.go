@@ -168,13 +168,13 @@ func ByteToUTF16Offset(content []byte, lineStart, targetByte int) int {
 // SpanToLSPRange converts a location.Span to an LSP Range. For a source that
 // sources holds, it converts each byte offset to UTF-16 units and counts each
 // character in the text the client holds of the source, which [Texts] defines.
-// For a source that sources does not hold, for a position with no byte offset,
-// and for a line the held text does not reach, it returns the rune column less
-// one; an end that is not known takes the start's position.
+// For a source that sources does not hold, and for a line the held text does
+// not reach, it returns the rune column less one; an end that is not known
+// takes the start's position.
 // It returns zero positions and false for a nil sources, a zero span and a
 // span whose start is not known.
 func SpanToLSPRange(sources *Texts, span location.Span) (start, end [2]int, ok bool) {
-	if span.IsZero() || !span.Start.IsKnown() {
+	if span.IsZero() || !span.Start.IsValid() {
 		return [2]int{}, [2]int{}, false
 	}
 
@@ -189,32 +189,30 @@ func SpanToLSPRange(sources *Texts, span location.Span) (start, end [2]int, ok b
 	// Convert start position
 	startLine := max(span.Start.Line-1, 0)
 	var startChar int
-	if hasContent && span.Start.Byte >= 0 {
+	if hasContent {
 		lineStartByte, lineOk := sources.characterOrigin(span.Source, span.Start.Line)
 		if lineOk {
-			startChar = ByteToUTF16Offset(content, lineStartByte, span.Start.Byte)
+			startChar = ByteToUTF16Offset(content, lineStartByte, span.Start.Offset)
 		} else {
 			startChar = span.Start.Column - 1 // fallback to rune column
 		}
 	} else {
-		// No content or unknown byte offset: use rune column as-is
 		startChar = span.Start.Column - 1
 	}
 
 	// Convert end position
 	endLine := startLine
 	endChar := startChar
-	if span.End.IsKnown() {
+	if span.End.IsValid() {
 		endLine = max(span.End.Line-1, 0)
-		if hasContent && span.End.Byte >= 0 {
+		if hasContent {
 			lineStartByte, lineOk := sources.characterOrigin(span.Source, span.End.Line)
 			if lineOk {
-				endChar = ByteToUTF16Offset(content, lineStartByte, span.End.Byte)
+				endChar = ByteToUTF16Offset(content, lineStartByte, span.End.Offset)
 			} else {
 				endChar = span.End.Column - 1 // fallback to rune column
 			}
 		} else {
-			// No content or unknown byte offset: use rune column
 			endChar = span.End.Column - 1
 		}
 	}

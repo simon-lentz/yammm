@@ -8,9 +8,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/simon-lentz/yammm/internal/yammmtest/sourcetest"
+
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/internal/yammmtest"
 	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
@@ -34,7 +37,7 @@ func TestSnapshot_Fields(t *testing.T) {
 	// Test that Snapshot fields are properly initialized
 	snapshot := &Snapshot{
 		CreatedAt:       time.Now(),
-		EntrySourceID:   location.NewSourceID("test://file.yammm"),
+		EntrySourceID:   sourcetest.ID("test://file.yammm"),
 		EntryVersion:    5,
 		Root:            "/project",
 		SymbolsBySource: make(map[location.SourceID]*symbols.SymbolIndex),
@@ -86,8 +89,8 @@ func TestSymbolKind_String(t *testing.T) {
 func TestSymbol_Fields(t *testing.T) {
 	t.Parallel()
 
-	sourceID := location.NewSourceID("test://file.yammm")
-	span := location.PointWithByte(sourceID, 10, 5, -1)
+	sourceID := sourcetest.ID("test://file.yammm")
+	span := location.Span{Source: sourceID, Start: location.Position{Line: 10, Column: 5}, End: location.Position{Line: 10, Column: 5}}
 
 	symbol := symbols.Symbol{
 		Name:       "Person",
@@ -575,9 +578,9 @@ func TestConvertRelatedInfo_URIEncodingWithSpaces(t *testing.T) {
 				t.Fatalf("SourceIDFromPath(%q): %v", yammmtest.HostAbs(tt.path), err)
 			}
 
-			related := []location.RelatedInfo{
+			related := []diag.RelatedInfo{
 				{
-					Span:    location.PointWithByte(sourceID, 6, 1, -1),
+					Span:    location.Span{Source: sourceID, Start: location.Position{Line: 6, Column: 1}, End: location.Position{Line: 6, Column: 1}},
 					Message: "related info message",
 				},
 			}

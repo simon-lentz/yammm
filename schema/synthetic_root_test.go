@@ -376,7 +376,7 @@ func TestWithSyntheticRoot_BackslashKeyIsRefusedOnEveryHost(t *testing.T) {
 }
 
 // TestWithSyntheticRoot_InvalidRoot covers the two shapes
-// location.ValidateSyntheticSourceID refuses. An absolute-looking root would
+// location.NewSourceID refuses. An absolute-looking root would
 // collide with file-backed identities and break wire dedup silently.
 func TestWithSyntheticRoot_InvalidRoot(t *testing.T) {
 	t.Parallel()

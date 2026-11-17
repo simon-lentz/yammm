@@ -3,6 +3,8 @@ package schema_test
 import (
 	"testing"
 
+	"github.com/simon-lentz/yammm/internal/yammmtest/sourcetest"
+
 	"github.com/stretchr/testify/assert"
 
 	"github.com/simon-lentz/yammm/location"
@@ -12,8 +14,8 @@ import (
 func TestTypeID_Contract5_Equality(t *testing.T) {
 	// TypeID is (SourceID, name) tuple for semantic equality
 
-	path1 := location.NewSourceID("schema1.yammm")
-	path2 := location.NewSourceID("schema2.yammm")
+	path1 := sourcetest.ID("schema1.yammm")
+	path2 := sourcetest.ID("schema2.yammm")
 
 	t.Run("same path and name are equal", func(t *testing.T) {
 		id1 := schema.NewTypeID(path1, "User")
@@ -43,7 +45,7 @@ func TestTypeID_Contract5_Equality(t *testing.T) {
 }
 
 func TestTypeID_String(t *testing.T) {
-	path := location.NewSourceID("schema.yammm")
+	path := sourcetest.ID("schema.yammm")
 
 	id := schema.NewTypeID(path, "User")
 	s := id.String()

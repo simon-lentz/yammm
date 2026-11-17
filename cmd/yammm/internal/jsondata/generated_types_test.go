@@ -9,11 +9,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/simon-lentz/yammm/internal/yammmtest/sourcetest"
+
 	"github.com/simon-lentz/yammm/cmd/yammm/internal/jsondata"
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/instance"
 	"github.com/simon-lentz/yammm/internal/temporal"
-	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
 	"github.com/simon-lentz/yammm/snapshot"
 )
@@ -44,7 +45,7 @@ const temporalDocument = `{"Sensor": [
 func readSnapshot(t *testing.T, s schema.Schema, doc []byte) []byte {
 	t.Helper()
 	ctx := t.Context()
-	parsed, res := jsondata.Parse(ctx, location.NewSourceID("test://temporal.json"), doc)
+	parsed, res := jsondata.Parse(ctx, sourcetest.ID("test://temporal.json"), doc)
 	if !res.OK() {
 		t.Fatalf("parse: %s\n%s", res, doc)
 	}
@@ -220,7 +221,7 @@ func TestGeneratedTemporal_WritesNoDateItCannotRead(t *testing.T) {
 // included.
 func compositionsOf(t *testing.T, s schema.Schema, doc []byte) [][]string {
 	t.Helper()
-	parsed, res := jsondata.Parse(t.Context(), location.NewSourceID("test://temporal.json"), doc)
+	parsed, res := jsondata.Parse(t.Context(), sourcetest.ID("test://temporal.json"), doc)
 	if !res.OK() {
 		t.Fatalf("parse: %s\n%s", res, doc)
 	}

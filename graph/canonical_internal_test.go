@@ -5,10 +5,12 @@ import (
 	"slices"
 	"testing"
 
+	"github.com/simon-lentz/yammm/instance"
+
 	"github.com/simon-lentz/yammm/immutable"
+	"github.com/simon-lentz/yammm/instance/path"
 	"github.com/simon-lentz/yammm/internal/instancetest"
 	"github.com/simon-lentz/yammm/location"
-	"github.com/simon-lentz/yammm/location/path"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -114,12 +116,12 @@ func TestAdd_IndexKeyIsTheCanonicalKey(t *testing.T) {
 func TestCompareDuplicates_LoadedRecordsOrderBySourceName(t *testing.T) {
 	id := instancetest.TypeID(t, "dup.yammm", "T")
 	key := immutable.WrapKey([]any{"k"})
-	conflict := newInstance("T", id, key, immutable.WrapProperties(nil), location.Provenance{}, false)
+	conflict := newInstance("T", id, key, immutable.WrapProperties(nil), instance.Provenance{}, false)
 	// The shape the decoder produces, built here because graph cannot import
 	// snapshot. That a LOADED instance actually has this shape is pinned on the
 	// snapshot side, by TestLoad_ProvenanceSurvivesOnlyWhenTheDocumentHadOne.
 	loaded := func(source string) Duplicate {
-		prov := location.NewProvenance(source, path.Root(), location.Span{})
+		prov := instance.NewProvenance(source, path.Root, location.Span{})
 		inst := newInstance("T", id, key, immutable.WrapProperties(nil), prov, false)
 		return newDuplicate(inst, conflict)
 	}

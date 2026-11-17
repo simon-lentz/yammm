@@ -6,7 +6,6 @@ import (
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/instance"
-	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -37,7 +36,7 @@ type heldKey struct {
 type holder struct {
 	at       heldKey
 	typeName string
-	prov     location.Provenance
+	prov     instance.Provenance
 	// installed reports that Add put the instance in the graph; graphDuplicate
 	// that Add refused it as a duplicate and said so.
 	installed      bool

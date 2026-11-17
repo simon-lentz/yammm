@@ -6,6 +6,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/simon-lentz/yammm/cmd/yammm/internal/cli"
+	"github.com/simon-lentz/yammm/internal/hostpath"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -41,7 +42,8 @@ func moduleRootOptions(cmd *cobra.Command, sink *cli.DiagnosticSink) (string, []
 
 // schemaOperand returns the absolute path of a schema operand, refusing one
 // [cli.CheckSourceOperand] refuses. A working directory that cannot be read is a
-// filesystem answer, so it exits 3.
+// filesystem answer, so it exits 3. An operand that names a directory keeps a
+// trailing separator, so the loader refuses a regular file spelled that way.
 func schemaOperand(path string) (string, error) {
 	if err := cli.CheckSourceOperand("schema file", path); err != nil {
 		return "", err
@@ -50,5 +52,5 @@ func schemaOperand(path string) (string, error) {
 	if err != nil {
 		return "", cli.Runtimef("resolve schema file %q: %v", path, err)
 	}
-	return abs, nil
+	return hostpath.DirectoryForm(path, abs), nil
 }

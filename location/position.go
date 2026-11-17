@@ -2,11 +2,15 @@ package location
 
 import "fmt"
 
-// Position identifies a point in a UTF-8 encoded source file.
+// Position identifies a point in a UTF-8 encoded source file, as
+// [go/token.Position] does: the zero value is an unknown position, and
+// [Position.IsValid] reports a known one.
 //
 // Line and Column are 1-based. Column counts Unicode code points (runes),
-// not bytes or grapheme clusters. Byte is a 0-based byte offset in the
-// UTF-8 source content; -1 means the byte offset is unknown.
+// not bytes or grapheme clusters. Offset is the 0-based byte offset in the
+// UTF-8 source content; every producer in this module sets it beside the line
+// and column, so a valid position's Offset is known, and an Offset of 0 is the
+// first byte.
 //
 // Position is a value type and should be passed by value.
 type Position struct {
@@ -14,67 +18,20 @@ type Position struct {
 	Line int
 
 	// Column is the 1-based column number, counting runes from line start.
-	// Zero means unknown.
 	Column int
 
-	// Byte is the 0-based byte offset in the source content.
-	// A value of -1 indicates the byte offset is unknown.
-	Byte int
+	// Offset is the 0-based byte offset in the source content.
+	Offset int
 }
 
-// NewPosition creates a Position with the specified line, column, and byte offset.
-// Use -1 for byte to indicate an unknown byte offset.
-//
-// Values are stored as-is without validation or clamping. Negative values are
-// permitted but may produce unexpected results with [Position.IsZero] and
-// [Position.IsKnown]:
-//   - Negative line/column: IsZero returns false (not 0,0), IsKnown returns false (not > 0)
-//   - Zero line or column: the position is considered partial/incomplete
-//
-// For explicit unknown position construction, use [UnknownPosition] instead.
-func NewPosition(line, column, byteOffset int) Position {
-	return Position{Line: line, Column: column, Byte: byteOffset}
+// IsValid reports whether the position is known: Line > 0.
+func (p Position) IsValid() bool {
+	return p.Line > 0
 }
 
-// UnknownPosition returns a Position representing an unknown location.
-// This is the canonical way to construct a position when location is not available.
-// The returned position has Line=0, Column=0, Byte=-1, for which IsZero() returns true.
-func UnknownPosition() Position {
-	return Position{Line: 0, Column: 0, Byte: -1}
-}
-
-// IsZero reports whether the position represents an unknown location.
-// A position is zero/unknown when Line == 0 && Column == 0.
-// The byte offset is ignored for this determination.
-func (p Position) IsZero() bool {
-	return p.Line == 0 && p.Column == 0
-}
-
-// IsKnown reports whether line and column are known (both > 0).
-// This is distinct from !IsZero(): a position with Line=1, Column=1, Byte=0
-// is both "not zero" and "known".
-func (p Position) IsKnown() bool {
-	return p.Line > 0 && p.Column > 0
-}
-
-// HasByte reports whether the byte offset is known and meaningful.
-// Returns true only when Byte >= 0 AND the position is not zero/unknown.
-//
-// This prevents Contains() from accidentally treating an unknown end position
-// (with Byte=0 from Go's zero value) as having a meaningful byte offset of 0.
-//
-// Note: Byte-only positions (where byte offset is known but line/column are zero)
-// return false. This is intentional: the package design requires line/column for
-// geometric operations like [Span.Contains], so every producer of a Position
-// sets line and column beside the byte offset.
-func (p Position) HasByte() bool {
-	return p.Byte >= 0 && !p.IsZero()
-}
-
-// String returns a human-readable representation of the position.
-// Returns "line:column" for known positions, or "<unknown>" for zero positions.
+// String returns "line:column" for a valid position, or "<unknown>".
 func (p Position) String() string {
-	if p.IsZero() {
+	if !p.IsValid() {
 		return "<unknown>"
 	}
 	return fmt.Sprintf("%d:%d", p.Line, p.Column)

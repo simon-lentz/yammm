@@ -15,9 +15,10 @@ import (
 	"testing"
 	"unicode/utf8"
 
+	"github.com/simon-lentz/yammm/instance"
+
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/internal/snapparts"
-	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
 	"github.com/simon-lentz/yammm/snapshot"
 )
@@ -332,15 +333,11 @@ func (w *documentWriter) instance(ip snapparts.Instance, edges []snapparts.Edge,
 	return rec
 }
 
-func provenanceOf(p location.Provenance) *provenance {
+func provenanceOf(p instance.Provenance) *provenance {
 	if p.IsZero() {
 		return nil
 	}
-	text := p.Path().String()
-	if p.HasRawPath() {
-		text = p.RawPath()
-	}
-	return &provenance{SourceName: p.SourceName(), Path: text}
+	return &provenance{SourceName: p.SourceName(), Path: p.Path().String()}
 }
 
 func (w *documentWriter) values(vs []any) []any {

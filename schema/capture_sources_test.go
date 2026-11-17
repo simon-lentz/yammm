@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/simon-lentz/yammm/internal/yammmtest/sourcetest"
+
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
@@ -122,7 +124,7 @@ func TestCaptureSources_LoadStringCapturesTheString(t *testing.T) {
 		{"a string that loads", "schema \"main\"\n\ntype T {\n\tid String primary\n}\n", true},
 		{"a string that fails to parse", "schema \"main\"\n\ntype T {\n", false},
 	}
-	want := location.NewSourceID("string://main.yammm")
+	want := sourcetest.ID("string://main.yammm")
 
 	for _, row := range rows {
 		t.Run(row.name, func(t *testing.T) {

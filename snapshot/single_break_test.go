@@ -268,10 +268,6 @@ func sbRows() []sbRow {
 			want: one(diag.E_SNAPSHOT_INVALID_COMPOSED, "composed children must not carry edges"), schemaless: true,
 		},
 		{
-			name: "unparseable provenance path", edits: edit(sbP2, `{"key":["p2"],"properties":{"id":"p2"},"provenance":{"source_name":"f","path":""}}`),
-			want: []sbWant{{code: diag.W_SNAPSHOT_PATH_FALLBACK, sev: diag.Warning, phrase: "could not be parsed"}}, schemaless: true,
-		},
-		{
 			name: "stored key component not a scalar", edits: edit(sbP1, `{"key":[["p1"]],"properties":{"age":30,"id":"p1"},"edges":{`),
 			want: malformed("whose component 0 is not a scalar"), schemaless: true,
 		},
@@ -386,10 +382,6 @@ func sbRows() []sbRow {
 		{
 			name: "duplicate stating another key than its instance", edits: edit(`{"type":1,"key":["c1"],"instance"`, `{"type":1,"key":["cx"],"instance"`),
 			want: malformed("states key"), schemaless: true,
-		},
-		{
-			name: "duplicate instance with an unparseable provenance path", edits: edit(sbDupInstance, `"instance":{"key":["c1"],"properties":{"id":"c1"},"provenance":{"source_name":"f","path":""}}`),
-			want: []sbWant{{code: diag.W_SNAPSHOT_PATH_FALLBACK, sev: diag.Warning, phrase: "could not be parsed"}}, schemaless: true,
 		},
 		{
 			name: "duplicate instance with an undeclared property", edits: edit(sbDupInstance, `"instance":{"key":["c1"],"properties":{"ghost":1,"id":"c1"},"provenance":null}`),

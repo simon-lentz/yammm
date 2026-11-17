@@ -9,30 +9,32 @@ import (
 	"unicode/utf8"
 )
 
-// Parse parses a path string into a Builder.
+// parse reads a path's text by the grammar the package documentation states and
+// returns the path the package's own methods write for it, so a test can check
+// that every path the methods write reads back as itself.
 //
 // The path must start with "$" and may contain:
 //   - Property keys: $.name or $["complex key"]
 //   - Array indices: $[0], $[42] (zero-based, non-negative)
 //   - PK-based indices: $[id=123], $[name="Alice"], $[a="x",b=1]
 //
-// Parse does not validate PK field names or value types against a schema.
+// parse does not validate PK field names or value types against a schema.
 //
 // Returns an error if the path syntax is invalid.
-func Parse(s string) (Builder, error) {
+func parse(s string) (Path, error) {
 	if s == "" {
-		return Builder{}, errors.New("empty path")
+		return "", errors.New("empty path")
 	}
 	if s[0] != '$' {
-		return Builder{}, errors.New("path must start with '$'")
+		return "", errors.New("path must start with '$'")
 	}
 
 	// Root path
 	if s == "$" {
-		return Root(), nil
+		return Root, nil
 	}
 
-	b := Root()
+	b := Root
 	pos := 1 // Skip the '$'
 
 	for pos < len(s) {
@@ -41,11 +43,11 @@ func Parse(s string) (Builder, error) {
 			// Dot notation: .key
 			pos++
 			if pos >= len(s) {
-				return Builder{}, errors.New("unexpected end after '.'")
+				return "", errors.New("unexpected end after '.'")
 			}
 			key, newPos, err := parseIdentifier(s, pos)
 			if err != nil {
-				return Builder{}, err
+				return "", err
 			}
 			b = b.Key(key)
 			pos = newPos
@@ -54,7 +56,7 @@ func Parse(s string) (Builder, error) {
 			// Bracket notation: ["key"], [0], [id=123], [a="x",b=1]
 			pos++
 			if pos >= len(s) {
-				return Builder{}, errors.New("unexpected end after '['")
+				return "", errors.New("unexpected end after '['")
 			}
 
 			// Check what kind of bracket content
@@ -63,11 +65,11 @@ func Parse(s string) (Builder, error) {
 				// String key: ["key"]
 				str, newPos, err := parseQuotedString(s, pos)
 				if err != nil {
-					return Builder{}, err
+					return "", err
 				}
 				pos = newPos
 				if pos >= len(s) || s[pos] != ']' {
-					return Builder{}, errors.New("expected ']' after string key")
+					return "", errors.New("expected ']' after string key")
 				}
 				pos++
 				b = b.Key(str)
@@ -76,14 +78,14 @@ func Parse(s string) (Builder, error) {
 				// digit or '-' can start nothing else.
 				idx, newPos, err := parseInteger(s, pos)
 				if err != nil {
-					return Builder{}, err
+					return "", err
 				}
 				if idx < 0 {
-					return Builder{}, fmt.Errorf("negative array index %d not allowed", idx)
+					return "", fmt.Errorf("negative array index %d not allowed", idx)
 				}
 				pos = newPos
 				if pos >= len(s) || s[pos] != ']' {
-					return Builder{}, errors.New("expected ']' after array index")
+					return "", errors.New("expected ']' after array index")
 				}
 				pos++
 				b = b.Index(idx)
@@ -91,16 +93,16 @@ func Parse(s string) (Builder, error) {
 				// PK-based index: [id=123] or [name="Alice"]
 				fields, newPos, err := parsePKFields(s, pos)
 				if err != nil {
-					return Builder{}, err
+					return "", err
 				}
 				b = b.PK(fields...)
 				pos = newPos
 			default:
-				return Builder{}, fmt.Errorf("unexpected character %s in bracket", charAt(s, pos))
+				return "", fmt.Errorf("unexpected character %s in bracket", charAt(s, pos))
 			}
 
 		default:
-			return Builder{}, fmt.Errorf("unexpected character %s at position %d", charAt(s, pos), pos)
+			return "", fmt.Errorf("unexpected character %s at position %d", charAt(s, pos), pos)
 		}
 	}
 
@@ -348,7 +350,7 @@ func parsePKFields(s string, pos int) ([]PKField, int, error) {
 }
 
 // parsePKInteger reads an integer PK value as an int64, or as a uint64 when it
-// is above int64's range, which is how Builder writes a uint64.
+// is above int64's range, which is how Path.PK writes a uint64.
 func parsePKInteger(numStr string) (any, error) {
 	i, err := strconv.ParseInt(numStr, 10, 64)
 	if err == nil {

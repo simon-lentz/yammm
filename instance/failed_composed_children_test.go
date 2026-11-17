@@ -5,8 +5,8 @@ import (
 
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/instance"
+	"github.com/simon-lentz/yammm/instance/path"
 	"github.com/simon-lentz/yammm/location"
-	"github.com/simon-lentz/yammm/location/path"
 )
 
 func TestValidate_TwoFailedComposedChildrenAreNoDuplicateKey(t *testing.T) {
@@ -41,7 +41,7 @@ func TestValidate_AnEmptyBatchsRefusalNamesNoSource(t *testing.T) {
 	}
 	_, res = instance.NewValidator(s).Validate(t.Context(), "A", []instance.RawInstance{{
 		Properties: map[string]any{"id": "a"},
-		Provenance: location.NewProvenance("rows.json", path.Root(), location.Span{}),
+		Provenance: instance.NewProvenance("rows.json", path.Root, location.Span{}),
 	}})
 	for issue := range res.Issues() {
 		if issue.SourceName() != "rows.json" {

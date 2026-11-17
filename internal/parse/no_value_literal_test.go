@@ -5,8 +5,9 @@ import (
 	"slices"
 	"testing"
 
+	"github.com/simon-lentz/yammm/internal/yammmtest/sourcetest"
+
 	"github.com/simon-lentz/yammm/internal/expr"
-	"github.com/simon-lentz/yammm/location"
 )
 
 // TestParse_AnInvariantNamesEachLiteralWithNoValue pins that an invariant
@@ -34,7 +35,7 @@ func TestParse_AnInvariantNamesEachLiteralWithNoValue(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 			src := "schema \"s\"\ntype T {\n\tid String primary\n\tn Integer\n\tf Float\n\t! \"m\" " + row.expr + "\n}\n"
-			f, _ := Parse([]byte(src), location.NewSourceID("s.yammm"))
+			f, _ := Parse([]byte(src), sourcetest.ID("s.yammm"))
 			if bad := oneLiteralWithNoValue(f); bad != "" {
 				t.Fatal(bad)
 			}
@@ -46,7 +47,7 @@ func TestParse_AnInvariantNamesEachLiteralWithNoValue(t *testing.T) {
 	t.Run("a nil the source wrote", func(t *testing.T) {
 		t.Parallel()
 		src := "schema \"s\"\ntype T {\n\tid String primary\n\t! \"m\" id != nil && id =~ /a/ && 1 + 2.5 > 0\n}\n"
-		f, issues := Parse([]byte(src), location.NewSourceID("s.yammm"))
+		f, issues := Parse([]byte(src), sourcetest.ID("s.yammm"))
 		if len(issues) != 0 || len(f.Types[0].Invariants) != 1 {
 			t.Fatalf("a clean invariant: %d issues, %d invariants; want none and one: %s", len(issues), len(f.Types[0].Invariants), messages(issues))
 		}
@@ -117,7 +118,7 @@ func TestParse_AnAnnotationArgumentHoldingRefusedTextKeepsItsSpelling(t *testing
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 			src := "schema \"s\"\ntype T {\n\tid String primary @a(" + lit + ")\n}\n"
-			f, issues := Parse([]byte(src), location.NewSourceID("s.yammm"))
+			f, issues := Parse([]byte(src), sourcetest.ID("s.yammm"))
 			if len(issues) != 1 {
 				t.Errorf("%d issues, want the source rules' one: %s", len(issues), messages(issues))
 			}

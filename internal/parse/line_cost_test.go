@@ -7,6 +7,8 @@ import (
 	"testing"
 	"unicode/utf8"
 
+	"github.com/simon-lentz/yammm/internal/yammmtest/sourcetest"
+
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/location"
 )
@@ -33,13 +35,13 @@ func TestParse_ARunOfRefusedTextIsOneIssue(t *testing.T) {
 		t.Run(row.name, func(t *testing.T) {
 			t.Parallel()
 			src := head + row.text + tail
-			_, issues := Parse([]byte(src), location.NewSourceID("s.yammm"))
+			_, issues := Parse([]byte(src), sourcetest.ID("s.yammm"))
 			var got []string
 			for _, iss := range issues {
 				if iss.Code() != diag.E_SYNTAX {
 					t.Errorf("unexpected %s", iss.Code())
 				}
-				got = append(got, src[iss.Span().Start.Byte:iss.Span().End.Byte])
+				got = append(got, src[iss.Span().Start.Offset:iss.Span().End.Offset])
 			}
 			if len(got) != len(row.want) {
 				t.Fatalf("%d diagnostics, want %d", len(got), len(row.want))
@@ -96,15 +98,15 @@ func TestParse_EveryPositionAgreesWithAScanFromTheStart(t *testing.T) {
 	for name, src := range sources {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
-			f, issues := Parse([]byte(src), location.NewSourceID("s.yammm"))
+			f, issues := Parse([]byte(src), sourcetest.ID("s.yammm"))
 			checked := 0
 			check := func(what string, span location.Span) {
 				t.Helper()
 				checked++
 				for _, end := range []location.Position{span.Start, span.End} {
-					line, column := linePosition(src, end.Byte)
+					line, column := linePosition(src, end.Offset)
 					if end.Line != line || end.Column != column {
-						t.Errorf("%s: byte %d is at %d:%d, want %d:%d", what, end.Byte, end.Line, end.Column, line, column)
+						t.Errorf("%s: byte %d is at %d:%d, want %d:%d", what, end.Offset, end.Line, end.Column, line, column)
 					}
 				}
 			}
@@ -174,7 +176,7 @@ func TestParse_PositionsCostALinesLengthOnce(t *testing.T) {
 			t.Run(name+"/"+strconv.Itoa(n), func(t *testing.T) {
 				t.Parallel()
 				src := source(n)
-				b := parsed(src, location.NewSourceID("s.yammm"))
+				b := parsed(src, sourcetest.ID("s.yammm"))
 				if len(b.issues) < n && !strings.Contains(name, "enum") {
 					t.Fatalf("%d issues, want one a unit", len(b.issues))
 				}
@@ -214,7 +216,7 @@ func TestParse_NestedPositionsCostTheSourceOnce(t *testing.T) {
 			t.Parallel()
 			counted := func(n int) (src string, bytes int) {
 				src = source(n)
-				b := parsed(src, location.NewSourceID("s.yammm"))
+				b := parsed(src, sourcetest.ID("s.yammm"))
 				if len(b.issues) > 0 {
 					t.Fatalf("depth %d: %s", n, b.issues[0].Message())
 				}
@@ -248,7 +250,7 @@ func TestParse_AnnotationsCostTheirLineOnce(t *testing.T) {
 	}
 	counted := func(n int) (src string, bytes int) {
 		src = source(n)
-		b := parsed(src, location.NewSourceID("s.yammm"))
+		b := parsed(src, sourcetest.ID("s.yammm"))
 		if len(b.issues) > 0 {
 			t.Fatalf("%d annotations: %s", n, b.issues[0].Message())
 		}

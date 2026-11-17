@@ -3,7 +3,7 @@ package parse
 import (
 	"testing"
 
-	"github.com/simon-lentz/yammm/location"
+	"github.com/simon-lentz/yammm/internal/yammmtest/sourcetest"
 )
 
 // TestParse_AnImportWithNoPathValueKeepsItsAlias pins that an import whose
@@ -18,7 +18,7 @@ func TestParse_AnImportWithNoPathValueKeepsItsAlias(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
-			f, _ := Parse([]byte("schema \"s\"\nimport "+path+" as a\nimport \"./b\" as b\ntype T {\n\tid String primary\n}\n"), location.NewSourceID("s.yammm"))
+			f, _ := Parse([]byte("schema \"s\"\nimport "+path+" as a\nimport \"./b\" as b\ntype T {\n\tid String primary\n}\n"), sourcetest.ID("s.yammm"))
 			if len(f.Imports) != 2 {
 				t.Fatalf("the tree holds %d imports, want 2", len(f.Imports))
 			}

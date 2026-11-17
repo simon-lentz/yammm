@@ -3,8 +3,9 @@ package parse
 import (
 	"testing"
 
+	"github.com/simon-lentz/yammm/internal/yammmtest/sourcetest"
+
 	"github.com/simon-lentz/yammm/diag"
-	"github.com/simon-lentz/yammm/location"
 )
 
 // A bracket after Timestamp is no production, at a property, an alias, a List
@@ -30,7 +31,7 @@ func TestParse_TimestampTakesNoFormat(t *testing.T) {
 	for _, row := range rows {
 		t.Run(row.name, func(t *testing.T) {
 			t.Parallel()
-			_, issues := Parse([]byte(row.src), location.NewSourceID("s.yammm"))
+			_, issues := Parse([]byte(row.src), sourcetest.ID("s.yammm"))
 			if len(issues) != 1 {
 				t.Fatalf("got %d diagnostics, want 1: %v", len(issues), issues)
 			}
@@ -42,7 +43,7 @@ func TestParse_TimestampTakesNoFormat(t *testing.T) {
 				t.Errorf("message = %q, want %q", iss.Message(), row.want)
 			}
 			sp := iss.Span()
-			if covered := row.src[sp.Start.Byte:sp.End.Byte]; covered != "[" {
+			if covered := row.src[sp.Start.Offset:sp.End.Offset]; covered != "[" {
 				t.Errorf("anchored on %q, want the bracket", covered)
 			}
 		})
@@ -53,7 +54,7 @@ func TestParse_TimestampTakesNoFormat(t *testing.T) {
 func TestParse_TimestampIsBare(t *testing.T) {
 	t.Parallel()
 	src := "schema \"s\"\ntype T {\n\tid String primary\n\tt Timestamp required\n}\n"
-	file, issues := Parse([]byte(src), location.NewSourceID("s.yammm"))
+	file, issues := Parse([]byte(src), sourcetest.ID("s.yammm"))
 	if len(issues) != 0 {
 		t.Fatalf("unexpected issues: %v", issues)
 	}
@@ -61,7 +62,7 @@ func TestParse_TimestampIsBare(t *testing.T) {
 	if c == nil || c.Kind != ConstraintTimestamp {
 		t.Fatalf("constraint = %+v, want a Timestamp", c)
 	}
-	if got := src[c.Span.Start.Byte:c.Span.End.Byte]; got != "Timestamp" {
+	if got := src[c.Span.Start.Offset:c.Span.End.Offset]; got != "Timestamp" {
 		t.Errorf("span covers %q, want the keyword", got)
 	}
 }

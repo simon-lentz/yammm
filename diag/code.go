@@ -255,7 +255,8 @@ var (
 	E_UNKNOWN_ANNOTATION_TARGET = NewCode("E_UNKNOWN_ANNOTATION_TARGET", CategorySchema)
 
 	// E_INVALID_ANNOTATION indicates a structural annotation violation: wrong
-	// placement, wrong arity, a bad argument kind or keyword, or a duplicate.
+	// placement, wrong arity, a bad argument kind or keyword, a duplicate, or
+	// two supertypes whose annotations on one inherited property disagree.
 	E_INVALID_ANNOTATION = NewCode("E_INVALID_ANNOTATION", CategorySchema)
 
 	// E_INVALID_ANNOTATION_TARGET indicates an annotation attached to an
@@ -444,7 +445,7 @@ var (
 	// a string holding invalid UTF-8 or half a surrogate pair, which
 	// encoding/json would silently read as U+FFFD.
 	// snapshot.Marshal raises it for input it refuses to write: an indent that is
-	// not JSON whitespace, or a metadata key or value, a source name or a raw path
+	// not JSON whitespace, or a metadata key or value, a source name or a path
 	// that is not valid UTF-8; snapshot.UpdateMetadata raises it for such metadata too.
 	E_SNAPSHOT_MALFORMED = NewCode("E_SNAPSHOT_MALFORMED", CategorySnapshot)
 
@@ -524,11 +525,6 @@ var (
 	// body-reading surfaces (Load, Verify, Info, UpdateMetadata); Warning
 	// on the header-only surfaces, which stay classifiable for dispatch.
 	E_SNAPSHOT_UNSUPPORTED_HASH_ALGORITHM = NewCode("E_SNAPSHOT_UNSUPPORTED_HASH_ALGORITHM", CategorySnapshot)
-
-	// W_SNAPSHOT_PATH_FALLBACK (Warning) indicates a provenance path string could
-	// not be parsed and fell back to the root path. The original path string is
-	// preserved for round-trip fidelity via Provenance.RawPath().
-	W_SNAPSHOT_PATH_FALLBACK = NewCode("W_SNAPSHOT_PATH_FALLBACK", CategorySnapshot)
 
 	// --- v0.3.0 additions ---
 

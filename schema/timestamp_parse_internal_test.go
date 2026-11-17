@@ -3,16 +3,17 @@ package schema
 import (
 	"testing"
 
+	"github.com/simon-lentz/yammm/internal/yammmtest/sourcetest"
+
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/internal/parse"
 	"github.com/simon-lentz/yammm/internal/raceskip"
-	"github.com/simon-lentz/yammm/location"
 )
 
 // The loader builds a Timestamp with no allocation, as the zero value it is.
 func TestSchemaParser_BuildsATimestampWithoutAllocating(t *testing.T) {
 	src := "schema \"s\"\n\ntype At = Timestamp\n"
-	id := location.NewSourceID("test://s.yammm")
+	id := sourcetest.ID("test://s.yammm")
 	file, issues := parse.Parse([]byte(src), id)
 	if len(issues) != 0 {
 		t.Fatalf("parse: %v", issues)

@@ -489,31 +489,6 @@ func TestWireV3_UnresolvedReasonBindsItsPayload(t *testing.T) {
 	}
 }
 
-// TestWireV3_EmptyProvenancePathWarns pins the one path the materializer
-// discards without saying so. path.Parse rejects "", so the empty path falls
-// back to root exactly like any other unparseable path and owes the same
-// warning.
-func TestWireV3_EmptyProvenancePathWarns(t *testing.T) {
-	ctx := context.Background()
-	s := testSchema(t)
-
-	data, res := snapshot.Marshal(ctx, buildSnapshot(t, s,
-		mustValidInstance(t, s, "Person", []any{"p1"}, map[string]any{"name": "Alice"})))
-	if res.HasErrors() {
-		t.Fatalf("marshal: %v", res)
-	}
-	edited := bytes.Replace(data, []byte(`"provenance":null`),
-		[]byte(`"provenance":{"source_name":"s","path":""}`), 1)
-	if bytes.Equal(edited, data) {
-		t.Fatalf("fixture shape changed; no provenance field in:\n%s", data)
-	}
-
-	_, loadRes := snapshot.Load(ctx, edited, s, snapshot.WithIntegrityCheck(false))
-	if !hasCode(loadRes, diag.W_SNAPSHOT_PATH_FALLBACK) {
-		t.Errorf("an empty provenance path drew no %s: %v", diag.W_SNAPSHOT_PATH_FALLBACK, loadRes)
-	}
-}
-
 // rootDuplicateDoc marshals a snapshot holding a root primary-key collision,
 // so the duplicate record states no relation and carries no parent
 // coordinates.
@@ -585,46 +560,6 @@ func TestWireV3_AnEmptyParentCoordinateStatesNone(t *testing.T) {
 				t.Errorf("the next Marshal wrote\n%s\nwant\n%s", again, data)
 			}
 		})
-	}
-}
-
-// TestWireV3_RejectedRowDoesNotAttributeAWarning pins that a duplicate record
-// whose type row is rejected draws no provenance warning at all. The row a
-// failed lookup returns is 0, so a warning raised past that point would name
-// whatever type occupies the first table row.
-func TestWireV3_RejectedRowDoesNotAttributeAWarning(t *testing.T) {
-	ctx := context.Background()
-	data, s := rootDuplicateDoc(t)
-
-	// The duplicates section is last, so the final provenance field is the
-	// rejected instance's.
-	provIdx := bytes.LastIndex(data, []byte(`"provenance":null`))
-	if provIdx < 0 {
-		t.Fatalf("fixture shape changed; no provenance field in:\n%s", data)
-	}
-	edited := append([]byte{}, data[:provIdx]...)
-	edited = append(edited, []byte(`"provenance":{"source_name":"s","path":"bogus"}`)...)
-	edited = append(edited, data[provIdx+len(`"provenance":null`):]...)
-
-	dupIdx := bytes.Index(edited, []byte(`"duplicates":[{"type":`))
-	if dupIdx < 0 {
-		t.Fatalf("fixture shape changed; no duplicate type row in:\n%s", edited)
-	}
-	cut := dupIdx + len(`"duplicates":[{"type":`)
-	end := bytes.IndexByte(edited[cut:], ',')
-	if end < 0 {
-		t.Fatalf("fixture shape changed; no terminator after the duplicate type row")
-	}
-	broken := append([]byte{}, edited[:cut]...)
-	broken = append(broken, []byte("99")...)
-	broken = append(broken, edited[cut+end:]...)
-
-	_, res := snapshot.Load(ctx, broken, s, snapshot.WithIntegrityCheck(false))
-	if !hasCode(res, diag.E_SNAPSHOT_MALFORMED) {
-		t.Fatalf("fixture is vacuous: the out-of-range row was accepted: %v", res)
-	}
-	if hasCode(res, diag.W_SNAPSHOT_PATH_FALLBACK) {
-		t.Errorf("a rejected type row still drew a provenance warning, which can only name row 0's type: %v", res)
 	}
 }
 

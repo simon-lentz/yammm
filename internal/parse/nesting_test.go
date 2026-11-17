@@ -7,11 +7,12 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/simon-lentz/yammm/internal/yammmtest/sourcetest"
+
 	"github.com/alecthomas/participle/v2/lexer"
 
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/internal/raceskip"
-	"github.com/simon-lentz/yammm/location"
 )
 
 // nestingSchema is a schema with one property of the given type and one
@@ -53,7 +54,7 @@ var expressionOfHeight = map[string]func(n int) string{
 
 func syntaxIssues(t *testing.T, text string) []diag.Issue {
 	t.Helper()
-	_, issues := Parse([]byte(text), location.NewSourceID("nesting.yammm"))
+	_, issues := Parse([]byte(text), sourcetest.ID("nesting.yammm"))
 	var out []diag.Issue
 	for _, issue := range issues {
 		if issue.Code() == diag.E_SYNTAX {
@@ -130,7 +131,7 @@ func TestParse_ExpressionHeightCountsEachLevelOnce(t *testing.T) {
 			if len(got) != 1 || got[0].Message() != refusal {
 				t.Fatalf("height %d: got %v, want one %q", MaxNesting+1, got, refusal)
 			}
-			if at, want := got[0].Span().Start.Byte-strings.Index(text, e), anchor(e); at != want {
+			if at, want := got[0].Span().Start.Offset-strings.Index(text, e), anchor(e); at != want {
 				t.Errorf("the refusal stands at byte %d of the expression, want %d", at, want)
 			}
 		})
@@ -232,7 +233,7 @@ func TestParse_ATooDeepExpressionIsOneIssueAndTheNextMemberIsRead(t *testing.T) 
 			t.Parallel()
 			text := "schema \"s\"\n\ntype T {\n\tid String primary\n\tv String\n\t! \"m\" " + e +
 				"\n\t! \"kept\" !v\n\tw String\n\t! \"broken\" v == String\n}\n"
-			file, issues := Parse([]byte(text), location.NewSourceID("nesting.yammm"))
+			file, issues := Parse([]byte(text), sourcetest.ID("nesting.yammm"))
 			if len(issues) != 2 || issues[0].Message() != refusal || issues[1].Message() != `unexpected keyword "String" in an expression` {
 				t.Fatalf("got %v, want one %q and the last member's issue", issues, refusal)
 			}
@@ -267,7 +268,7 @@ func TestParse_AMemberOnTheLineOfATooDeepExpressionIsRead(t *testing.T) {
 			t.Parallel()
 			text := "schema \"s\"\n\ntype T {\n\tid String primary\n\tv String\n\t! \"m\" " + e +
 				" w String x Integer\n\t! \"kept\" w == \"a\" && x > 0\n}\n"
-			file, issues := Parse([]byte(text), location.NewSourceID("nesting.yammm"))
+			file, issues := Parse([]byte(text), sourcetest.ID("nesting.yammm"))
 			if len(issues) != 1 || issues[0].Message() != refusal {
 				t.Fatalf("got %v, want one %q", issues, refusal)
 			}
@@ -292,7 +293,7 @@ func TestParse_WhatFollowsAWholeTooDeepExpressionIsReadAsItStands(t *testing.T) 
 	parse := func(e, follower string) ([]string, []string) {
 		text := "schema \"s\"\n\ntype T {\n\tid String primary\n\tv String\n\t! \"m\" " + e + follower +
 			"\n\ty Integer\n\t! \"kept\" y > 0\n}\n\ntype U {\n\tid String primary\n}\n"
-		file, issues := Parse([]byte(text), location.NewSourceID("nesting.yammm"))
+		file, issues := Parse([]byte(text), sourcetest.ID("nesting.yammm"))
 		var messages, members []string
 		for _, issue := range issues {
 			messages = append(messages, issue.Message())
@@ -343,7 +344,7 @@ func TestParse_ATooDeepExpressionWithAnOpenBracketRecoversAsAShallowOne(t *testi
 	parse := func(e string) (*File, []string) {
 		text := "schema \"s\"\n\ntype T {\n\tv String\n\t! \"m\" " + e +
 			"\n\tid String primary\n\tw String\n\t! \"kept\" !v\n}\n\ntype U {\n\tid String primary\n}\n"
-		file, issues := Parse([]byte(text), location.NewSourceID("nesting.yammm"))
+		file, issues := Parse([]byte(text), sourcetest.ID("nesting.yammm"))
 		var messages []string
 		for _, issue := range issues {
 			messages = append(messages, issue.Message())
@@ -430,7 +431,7 @@ func listRefusedAtTheBound(t *testing.T, n int) {
 		t.Fatalf("%d levels: got %v, want one %q", n, got, refusal)
 	}
 	want := strings.Index(text, "List<") + MaxNesting*len("List<")
-	if start := got[0].Span().Start.Byte; start != want {
+	if start := got[0].Span().Start.Offset; start != want {
 		t.Errorf("%d levels: issue at byte %d, want %d", n, start, want)
 	}
 }
@@ -607,7 +608,7 @@ func TestParse_ListLevelReadsThroughSpaceAndComments(t *testing.T) {
 				t.Fatalf("%d levels: got %v, want one %q", MaxNesting+1, got, refusal)
 			}
 			want := strings.Index(text, open) + MaxNesting*len(open)
-			if start := got[0].Span().Start.Byte; start != want {
+			if start := got[0].Span().Start.Offset; start != want {
 				t.Errorf("issue at byte %d, want %d", start, want)
 			}
 		})

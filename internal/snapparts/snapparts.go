@@ -5,12 +5,12 @@
 //
 // # Dependencies
 //
-//	snapparts  ──imports──▶  immutable, location, schema
+//	snapparts  ──imports──▶  immutable, instance, schema
 package snapparts
 
 import (
 	"github.com/simon-lentz/yammm/immutable"
-	"github.com/simon-lentz/yammm/location"
+	"github.com/simon-lentz/yammm/instance"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -43,7 +43,7 @@ type Instance struct {
 	PrimaryKey immutable.Key
 	Properties immutable.Properties
 	Composed   map[string][]Instance
-	Provenance location.Provenance
+	Provenance instance.Provenance
 }
 
 // Edge holds the data of one resolved edge. The target's type is the

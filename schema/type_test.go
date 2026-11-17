@@ -4,6 +4,8 @@ import (
 	"slices"
 	"testing"
 
+	"github.com/simon-lentz/yammm/internal/yammmtest/sourcetest"
+
 	"github.com/stretchr/testify/assert"
 
 	"github.com/simon-lentz/yammm/internal/yammmtest"
@@ -63,11 +65,11 @@ func TestType_SettersWorkBeforeSeal(t *testing.T) {
 }
 
 func TestNewType(t *testing.T) {
-	sourceID := location.NewSourceID("test://type")
+	sourceID := sourcetest.ID("test://type")
 	span := location.Span{
 		Source: sourceID,
-		Start:  location.Position{Line: 5, Column: 1, Byte: 50},
-		End:    location.Position{Line: 20, Column: 1, Byte: 200},
+		Start:  location.Position{Line: 5, Column: 1, Offset: 50},
+		End:    location.Position{Line: 20, Column: 1, Offset: 200},
 	}
 
 	typ := schema.TestNewType("Person", sourceID, span, "A person type", true, false)
@@ -82,7 +84,7 @@ func TestNewType(t *testing.T) {
 }
 
 func TestType_SourceID(t *testing.T) {
-	sourceID := location.NewSourceID("test://source")
+	sourceID := sourcetest.ID("test://source")
 	typ := schema.TestNewType("Test", sourceID, location.Span{}, "", false, false)
 
 	assert.Equal(t, sourceID, typ.SourceID())
@@ -107,15 +109,15 @@ func TestType_SetSchemaName_PanicsWhenSealed(t *testing.T) {
 
 func TestType_Span(t *testing.T) {
 	span := location.Span{
-		Source: location.NewSourceID("test://span"),
-		Start:  location.Position{Line: 10, Column: 1, Byte: 100},
-		End:    location.Position{Line: 15, Column: 1, Byte: 150},
+		Source: sourcetest.ID("test://span"),
+		Start:  location.Position{Line: 10, Column: 1, Offset: 100},
+		End:    location.Position{Line: 15, Column: 1, Offset: 150},
 	}
 	typ := schema.TestNewType("Test", location.SourceID{}, span, "", false, false)
 
 	result := typ.Span()
 	assert.Equal(t, 10, result.Start.Line)
-	assert.Equal(t, 150, result.End.Byte)
+	assert.Equal(t, 150, result.End.Offset)
 }
 
 func TestType_Documentation(t *testing.T) {
@@ -141,7 +143,7 @@ func TestType_IsPart(t *testing.T) {
 }
 
 func TestType_ID(t *testing.T) {
-	sourceID := location.NewSourceID("test://schema")
+	sourceID := sourcetest.ID("test://schema")
 	typ := schema.TestNewType("Person", sourceID, location.Span{}, "", false, false)
 
 	id := typ.ID()
@@ -533,7 +535,7 @@ func TestType_Inherits(t *testing.T) {
 
 func TestType_SuperTypes_Iterator(t *testing.T) {
 	typ := schema.TestNewType("Employee", location.SourceID{}, location.Span{}, "", false, false)
-	sourceID := location.NewSourceID("test://schema")
+	sourceID := sourcetest.ID("test://schema")
 	resolved := schema.NewResolvedTypeRef(
 		schema.NewTypeRef("", "Person", location.Span{}),
 		schema.NewTypeID(sourceID, "Person"),
@@ -550,7 +552,7 @@ func TestType_SuperTypes_Iterator(t *testing.T) {
 
 func TestType_SuperTypes(t *testing.T) {
 	typ := schema.TestNewType("Employee", location.SourceID{}, location.Span{}, "", false, false)
-	sourceID := location.NewSourceID("test://schema")
+	sourceID := sourcetest.ID("test://schema")
 	resolved := schema.NewResolvedTypeRef(
 		schema.NewTypeRef("", "Person", location.Span{}),
 		schema.NewTypeID(sourceID, "Person"),
@@ -564,7 +566,7 @@ func TestType_SuperTypes(t *testing.T) {
 
 func TestType_SubTypes_Iterator(t *testing.T) {
 	typ := schema.TestNewType("Person", location.SourceID{}, location.Span{}, "", false, false)
-	sourceID := location.NewSourceID("test://schema")
+	sourceID := sourcetest.ID("test://schema")
 	resolved := schema.NewResolvedTypeRef(
 		schema.NewTypeRef("", "Employee", location.Span{}),
 		schema.NewTypeID(sourceID, "Employee"),
@@ -581,7 +583,7 @@ func TestType_SubTypes_Iterator(t *testing.T) {
 
 func TestType_SubTypes(t *testing.T) {
 	typ := schema.TestNewType("Person", location.SourceID{}, location.Span{}, "", false, false)
-	sourceID := location.NewSourceID("test://schema")
+	sourceID := sourcetest.ID("test://schema")
 	resolved := schema.NewResolvedTypeRef(
 		schema.NewTypeRef("", "Employee", location.Span{}),
 		schema.NewTypeID(sourceID, "Employee"),
@@ -594,7 +596,7 @@ func TestType_SubTypes(t *testing.T) {
 }
 
 func TestType_IsSubTypeOf(t *testing.T) {
-	sourceID := location.NewSourceID("test://schema")
+	sourceID := sourcetest.ID("test://schema")
 	employeeType := schema.TestNewType("Employee", sourceID, location.Span{}, "", false, false)
 	personID := schema.NewTypeID(sourceID, "Person")
 	resolved := schema.NewResolvedTypeRef(

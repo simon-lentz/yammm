@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/simon-lentz/yammm/internal/yammmtest/sourcetest"
+
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -27,7 +29,7 @@ func parseOne(t *testing.T, source location.SourceID, data []byte) (instance.Raw
 }
 
 func TestParse(t *testing.T) {
-	source := location.NewSourceID("test://object")
+	source := sourcetest.ID("test://object")
 
 	t.Run("single type with multiple instances", func(t *testing.T) {
 		data := []byte(`{
@@ -93,7 +95,7 @@ func TestParse(t *testing.T) {
 // must still be parsed after an invalid entry, and the decoder must stay
 // synchronized after skipping a non-array value.
 func TestParse_Errors(t *testing.T) {
-	source := location.NewSourceID("test://object-errors")
+	source := sourcetest.ID("test://object-errors")
 
 	tests := []struct {
 		name      string
@@ -131,7 +133,7 @@ func TestParse_Errors(t *testing.T) {
 // the decoder must skip the entire value to stay synchronized for subsequent
 // type names.
 func TestParse_NonArrayValues(t *testing.T) {
-	source := location.NewSourceID("test://non-array")
+	source := sourcetest.ID("test://non-array")
 
 	tests := []struct {
 		name  string
@@ -158,7 +160,7 @@ func TestParse_NonArrayValues(t *testing.T) {
 // Regression test: null array elements must be rejected as invalid objects
 // while sibling valid elements still parse.
 func TestNullRejection(t *testing.T) {
-	source := location.NewSourceID("test://null")
+	source := sourcetest.ID("test://null")
 
 	t.Run("Parse array with null elements", func(t *testing.T) {
 		data := []byte(`{"Person": [null, {"name": "Alice"}, null]}`)
@@ -171,7 +173,7 @@ func TestNullRejection(t *testing.T) {
 
 // Regression tests: trailing content after the root value must be rejected.
 func TestTrailingContent(t *testing.T) {
-	source := location.NewSourceID("test://trailing")
+	source := sourcetest.ID("test://trailing")
 
 	cases := []struct {
 		name  string
@@ -205,7 +207,7 @@ func TestTrailingContent(t *testing.T) {
 }
 
 func TestNumericConversion(t *testing.T) {
-	source := location.NewSourceID("test://numbers")
+	source := sourcetest.ID("test://numbers")
 
 	t.Run("integers preserved as int64", func(t *testing.T) {
 		data := []byte(`{"value": 42}`)
@@ -254,7 +256,7 @@ func TestNumericConversion(t *testing.T) {
 }
 
 func TestEdgeCases(t *testing.T) {
-	source := location.NewSourceID("test://edge")
+	source := sourcetest.ID("test://edge")
 
 	t.Run("unicode in values", func(t *testing.T) {
 		data := []byte(`{"name": "日本語", "emoji": "🎉"}`)

@@ -4,8 +4,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/simon-lentz/yammm/internal/yammmtest/sourcetest"
+
 	"github.com/simon-lentz/yammm/diag"
-	"github.com/simon-lentz/yammm/location"
 )
 
 // TestParse_SourceRulesHoldInEveryToken pins that a byte that is not valid
@@ -36,7 +37,7 @@ func TestParse_SourceRulesHoldInEveryToken(t *testing.T) {
 				t.Parallel()
 				at := strings.Index(place, "@#")
 				src := strings.Replace(place, "@#", run.bytes, 1)
-				_, issues := Parse([]byte(src), location.NewSourceID("s.yammm"))
+				_, issues := Parse([]byte(src), sourcetest.ID("s.yammm"))
 				var found []diag.Issue
 				for _, iss := range issues {
 					if iss.Code() == diag.E_SYNTAX && iss.Message() == run.why {
@@ -47,8 +48,8 @@ func TestParse_SourceRulesHoldInEveryToken(t *testing.T) {
 					t.Fatalf("want one E_SYNTAX %q, got %d in %v", run.why, len(found), issues)
 				}
 				span := found[0].Span()
-				if span.Start.Byte != at || span.End.Byte != at+len(run.bytes) {
-					t.Errorf("span = [%d, %d), want [%d, %d)", span.Start.Byte, span.End.Byte, at, at+len(run.bytes))
+				if span.Start.Offset != at || span.End.Offset != at+len(run.bytes) {
+					t.Errorf("span = [%d, %d), want [%d, %d)", span.Start.Offset, span.End.Offset, at, at+len(run.bytes))
 				}
 				if found[0].Severity() != diag.Error {
 					t.Errorf("severity = %v, want Error", found[0].Severity())
@@ -64,7 +65,7 @@ func TestParse_SourceRulesHoldInEveryToken(t *testing.T) {
 func TestParse_SourceRulesReportEachRun(t *testing.T) {
 	t.Parallel()
 	src := "schema \"s\"\n// a \xff b \x00 c \xfe d\ntype T {\n\tid String primary\n\tk Enum[\"\\0\", \"\\uFEFF\"]\n}\n"
-	_, issues := Parse([]byte(src), location.NewSourceID("s.yammm"))
+	_, issues := Parse([]byte(src), sourcetest.ID("s.yammm"))
 	var got []string
 	for _, iss := range issues {
 		got = append(got, iss.Code().String()+" "+iss.Message())
@@ -100,7 +101,7 @@ func TestParse_AStringValueIsValidUTF8(t *testing.T) {
 	for _, tc := range refused {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			_, issues := Parse([]byte(tc.src), location.NewSourceID("s.yammm"))
+			_, issues := Parse([]byte(tc.src), sourcetest.ID("s.yammm"))
 			for _, iss := range issues {
 				if iss.Code() == tc.code && iss.Message() == tc.message {
 					return
@@ -110,7 +111,7 @@ func TestParse_AStringValueIsValidUTF8(t *testing.T) {
 		})
 	}
 
-	f, issues := Parse([]byte(checkSource(`e Enum["caf\xc3\xa9", "b"]`)), location.NewSourceID("s.yammm"))
+	f, issues := Parse([]byte(checkSource(`e Enum["caf\xc3\xa9", "b"]`)), sourcetest.ID("s.yammm"))
 	if got := f.Types[0].Properties[1].Constraint.EnumLits[0].Text; len(issues) != 0 || got != "café" {
 		t.Errorf("escapes forming UTF-8: value %q, issues %v; want café and none", got, issues)
 	}
@@ -132,7 +133,7 @@ func TestParse_APatternNamingASurrogateIsKept(t *testing.T) {
 	} {
 		t.Run(pattern, func(t *testing.T) {
 			t.Parallel()
-			f, issues := Parse([]byte(checkSource(`p Pattern["`+pattern+`"]`)), location.NewSourceID("s.yammm"))
+			f, issues := Parse([]byte(checkSource(`p Pattern["`+pattern+`"]`)), sourcetest.ID("s.yammm"))
 			if len(issues) != 0 {
 				t.Errorf("issues: %s", messages(issues))
 			}
@@ -147,11 +148,11 @@ func TestParse_APatternNamingASurrogateIsKept(t *testing.T) {
 // as itself is legal text, and that a run of invalid bytes stops before one.
 func TestParse_SourceRulesAcceptTheReplacementCharacter(t *testing.T) {
 	t.Parallel()
-	if _, issues := Parse([]byte("schema \"s\"\n// \uFFFD\ntype T {\n\tid String primary\n\te Enum[\"s\uFFFD\", \"b\"]\n}\n"), location.NewSourceID("s.yammm")); len(issues) != 0 {
+	if _, issues := Parse([]byte("schema \"s\"\n// \uFFFD\ntype T {\n\tid String primary\n\te Enum[\"s\uFFFD\", \"b\"]\n}\n"), sourcetest.ID("s.yammm")); len(issues) != 0 {
 		t.Errorf("issues: %s", messages(issues))
 	}
-	_, issues := Parse([]byte("schema \"s\"\n// \xff\uFFFD\ntype T {\n\tid String primary\n}\n"), location.NewSourceID("s.yammm"))
-	if len(issues) != 1 || issues[0].Span().End.Byte-issues[0].Span().Start.Byte != 1 {
+	_, issues := Parse([]byte("schema \"s\"\n// \xff\uFFFD\ntype T {\n\tid String primary\n}\n"), sourcetest.ID("s.yammm"))
+	if len(issues) != 1 || issues[0].Span().End.Offset-issues[0].Span().Start.Offset != 1 {
 		t.Errorf("want one fault one byte wide before U+FFFD, got %v", issues)
 	}
 }
@@ -172,7 +173,7 @@ func TestNextTextFault_JudgesTheFirstByte(t *testing.T) {
 // at the byte alone, as a string literal is.
 func TestParse_ARegexLiteralHoldingARefusedByteDrawsOneDiagnostic(t *testing.T) {
 	t.Parallel()
-	_, issues := Parse([]byte("schema \"s\"\ntype T {\n\tid String primary\n\t! \"m\" id =~ /a\xffb/\n}\n"), location.NewSourceID("s.yammm"))
+	_, issues := Parse([]byte("schema \"s\"\ntype T {\n\tid String primary\n\t! \"m\" id =~ /a\xffb/\n}\n"), sourcetest.ID("s.yammm"))
 	if len(issues) != 1 || issues[0].Code() != diag.E_SYNTAX || issues[0].Message() != "invalid UTF-8 encoding" {
 		t.Errorf("want one E_SYNTAX at the byte, got %s", messages(issues))
 	}

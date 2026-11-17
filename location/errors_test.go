@@ -16,11 +16,7 @@ func TestSentinels_ReturnedByTheirConstructors(t *testing.T) {
 		ErrAbsolutePathSourceID,
 		ErrEmptyPath,
 		ErrInvalidUTF8Path,
-		ErrAbsoluteJoinElement,
-	}
-	base, err := NewCanonicalPath(t.TempDir())
-	if err != nil {
-		t.Fatal(err)
+		ErrUnprintableSourceID,
 	}
 	const bad = "caf\xff.yammm"
 
@@ -40,9 +36,24 @@ func TestSentinels_ReturnedByTheirConstructors(t *testing.T) {
 			want: ErrEmptyPath,
 		},
 		{
-			name: "CanonicalPath.Join refuses an element that is not valid UTF-8",
-			call: func() error { _, err := base.Join("sub", bad); return err },
+			name: "SourceIDFromPath refuses an empty path",
+			call: func() error { _, err := SourceIDFromPath(""); return err },
+			want: ErrEmptyPath,
+		},
+		{
+			name: "SourceIDFromPath refuses invalid UTF-8",
+			call: func() error { _, err := SourceIDFromPath(bad); return err },
 			want: ErrInvalidUTF8Path,
+		},
+		{
+			name: "NewSourceID refuses invalid UTF-8",
+			call: func() error { _, err := NewSourceID("inline:" + bad); return err },
+			want: ErrInvalidUTF8Path,
+		},
+		{
+			name: "NewSourceID refuses an empty name",
+			call: func() error { _, err := NewSourceID(""); return err },
+			want: ErrEmptySourceID,
 		},
 	}
 

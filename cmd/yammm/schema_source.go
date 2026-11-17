@@ -3,9 +3,10 @@ package main
 import (
 	"path/filepath"
 
+	"github.com/simon-lentz/yammm/internal/hostpath"
+
 	"github.com/simon-lentz/yammm/cmd/yammm/internal/cli"
 	"github.com/simon-lentz/yammm/diag"
-	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -57,8 +58,8 @@ func diagRootFor(s schema.Schema, explicitRoot, absSchemaPath string) string {
 	}
 	base := explicitRoot
 	if base == "" {
-		file := absSchemaPath
-		if resolved, err := location.ResolveHostPath(absSchemaPath); err == nil {
+		file := filepath.Clean(absSchemaPath)
+		if resolved, err := hostpath.Resolve(absSchemaPath); err == nil {
 			file = resolved
 		}
 		base = filepath.Dir(file)
@@ -68,7 +69,7 @@ func diagRootFor(s schema.Schema, explicitRoot, absSchemaPath string) string {
 			return root
 		}
 	}
-	if resolved, err := location.ResolveHostPath(base); err == nil {
+	if resolved, err := hostpath.Resolve(base); err == nil {
 		return resolved
 	}
 	return filepath.Clean(base)

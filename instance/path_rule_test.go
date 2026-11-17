@@ -5,10 +5,12 @@ import (
 	"slices"
 	"testing"
 
+	"github.com/simon-lentz/yammm/internal/yammmtest/sourcetest"
+
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/instance"
+	"github.com/simon-lentz/yammm/instance/path"
 	"github.com/simon-lentz/yammm/location"
-	"github.com/simon-lentz/yammm/location/path"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -106,7 +108,12 @@ func TestComposedChildProvenance_FollowsTheParent(t *testing.T) {
 		return map[string]any{"id": "d", "lines": []any{map[string]any{"n": "a", "qty": 1}}}
 	}
 
-	prov := location.NewProvenance("data.json", path.Root().Key("Doc").Index(0), location.Span{})
+	span := location.Span{
+		Source: sourcetest.ID("test://data.json"),
+		Start:  location.Position{Line: 3, Column: 5, Offset: 20},
+		End:    location.Position{Line: 3, Column: 9, Offset: 24},
+	}
+	prov := instance.NewProvenance("data.json", path.Root.Key("Doc").Index(0), span)
 	inst, res := v.ValidateOne(t.Context(), "Doc", instance.RawInstance{Properties: props(), Provenance: prov})
 	if !res.OK() {
 		t.Fatal(res)
@@ -120,6 +127,9 @@ func TestComposedChildProvenance_FollowsTheParent(t *testing.T) {
 		}
 		if got := c.Provenance().Path().String(); got != "$.Doc[0].lines[0]" {
 			t.Errorf("path = %q, want $.Doc[0].lines[0]", got)
+		}
+		if got := c.Provenance().Span(); got != span {
+			t.Errorf("span = %v, want the parent's %v", got, span)
 		}
 	}
 
@@ -149,7 +159,7 @@ func TestFatal_CarriesProvenance(t *testing.T) {
 	v := instance.NewValidator(loadSrc(t, docSrc))
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
-	prov := location.NewProvenance("data.json", path.Root().Key("Doc").Index(3), location.Span{})
+	prov := instance.NewProvenance("data.json", path.Root.Key("Doc").Index(3), location.Span{})
 	_, res := v.ValidateOne(ctx, "Doc", instance.RawInstance{Properties: map[string]any{"id": "d"}, Provenance: prov})
 	is := mustIssue(t, res, diag.E_CONTEXT_CANCELLED)
 	if is.SourceName() != "data.json" || is.Path() != "$.Doc[3]" {
@@ -160,9 +170,9 @@ func TestFatal_CarriesProvenance(t *testing.T) {
 // The provenance a caller supplies reaches every diagnostic about the
 // instance: the object-level ones at the object, the span where one exists.
 func TestProvenance_ReachesEveryDiagnostic(t *testing.T) {
-	src := location.NewSourceID("data.json")
-	span := location.Span{Source: src, Start: location.Position{Line: 7, Column: 3, Byte: 40}, End: location.Position{Line: 7, Column: 9, Byte: 46}}
-	prov := location.NewProvenance("data.json", path.Root().Key("Doc").Index(2), span)
+	src := sourcetest.ID("data.json")
+	span := location.Span{Source: src, Start: location.Position{Line: 7, Column: 3, Offset: 40}, End: location.Position{Line: 7, Column: 9, Offset: 46}}
+	prov := instance.NewProvenance("data.json", path.Root.Key("Doc").Index(2), span)
 	v := instance.NewValidator(loadSrc(t, docSrc))
 
 	t.Run("missing_required_property", func(t *testing.T) {

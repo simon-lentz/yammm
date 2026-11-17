@@ -5,11 +5,15 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/simon-lentz/yammm/internal/yammmtest/sourcetest"
+
+	"github.com/simon-lentz/yammm/instance"
+
 	"github.com/simon-lentz/yammm/immutable"
+	"github.com/simon-lentz/yammm/instance/path"
 	"github.com/simon-lentz/yammm/internal/instancetest"
 	"github.com/simon-lentz/yammm/internal/snapparts"
 	"github.com/simon-lentz/yammm/location"
-	"github.com/simon-lentz/yammm/location/path"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -200,7 +204,7 @@ func TestCompareDuplicates_ProvenanceDiscriminates(t *testing.T) {
 		return newInstance("Person", orderingTypeID(t, "Person"),
 			immutable.WrapKey([]any{"p1"}),
 			immutable.WrapProperties(map[string]any{"id": "p1"}),
-			location.NewProvenance("people.json", path.Root().Index(line),
+			instance.NewProvenance("people.json", path.Root.Index(line),
 				location.Span{Start: location.Position{Line: line, Column: 1}}),
 			false)
 	}
@@ -284,28 +288,28 @@ func TestRenderValue_SeparatorAppearsOnceForEveryStoredType(t *testing.T) {
 // document's source name and path before any span, since a load's spans are zero.
 func TestCompareDuplicates_ProvenanceOrdersByWhatADocumentWrites(t *testing.T) {
 	t.Parallel()
-	dup := func(prov location.Provenance) Duplicate {
-		inst := func(p location.Provenance) Instance {
+	dup := func(prov instance.Provenance) Duplicate {
+		inst := func(p instance.Provenance) Instance {
 			return newInstance("Person", orderingTypeID(t, "Person"),
 				immutable.WrapKey([]any{"p1"}),
 				immutable.WrapProperties(map[string]any{"id": "p1"}), p, false)
 		}
-		return newDuplicate(inst(prov), inst(location.Provenance{}))
+		return newDuplicate(inst(prov), inst(instance.Provenance{}))
 	}
 	at := func(line int) location.Span { return location.Span{Start: location.Position{Line: line}} }
-	root := path.Root()
+	root := path.Root
 	for _, c := range []struct {
 		name          string
-		before, after location.Provenance
+		before, after instance.Provenance
 	}{
-		{"no provenance before one", location.Provenance{}, location.NewProvenance("", root, location.Span{})},
-		{"source name before path", location.NewProvenance("a", root.Index(2), at(0)), location.NewProvenance("b", root.Index(1), at(0))},
-		{"path before span", location.NewProvenance("a", root.Index(1), at(9)), location.NewProvenance("a", root.Index(2), at(1))},
-		{"raw path over the parsed path", location.NewProvenance("a", root, at(0)).WithRawPath("x"), location.NewProvenance("a", root, at(0)).WithRawPath("y")},
-		{"span start", location.NewProvenance("a", root, at(1)), location.NewProvenance("a", root, at(2))},
-		{"span end", location.NewProvenance("a", root, location.Span{End: location.Position{Column: 1}}), location.NewProvenance("a", root, location.Span{End: location.Position{Column: 2}})},
-		{"span start byte", location.NewProvenance("a", root, location.Span{Start: location.Position{Byte: 1}}), location.NewProvenance("a", root, location.Span{Start: location.Position{Byte: 2}})},
-		{"span source", location.NewProvenance("a", root, location.Span{Source: location.NewSourceID("test://a")}), location.NewProvenance("a", root, location.Span{Source: location.NewSourceID("test://b")})},
+		{"no provenance before one", instance.Provenance{}, instance.NewProvenance("", root, location.Span{})},
+		{"source name before path", instance.NewProvenance("a", root.Index(2), at(0)), instance.NewProvenance("b", root.Index(1), at(0))},
+		{"path before span", instance.NewProvenance("a", root.Index(1), at(9)), instance.NewProvenance("a", root.Index(2), at(1))},
+		{"a path as written", instance.NewProvenance("a", "x", at(0)), instance.NewProvenance("a", "y", at(0))},
+		{"span start", instance.NewProvenance("a", root, at(1)), instance.NewProvenance("a", root, at(2))},
+		{"span end", instance.NewProvenance("a", root, location.Span{End: location.Position{Column: 1}}), instance.NewProvenance("a", root, location.Span{End: location.Position{Column: 2}})},
+		{"span start byte", instance.NewProvenance("a", root, location.Span{Start: location.Position{Offset: 1}}), instance.NewProvenance("a", root, location.Span{Start: location.Position{Offset: 2}})},
+		{"span source", instance.NewProvenance("a", root, location.Span{Source: sourcetest.ID("test://a")}), instance.NewProvenance("a", root, location.Span{Source: sourcetest.ID("test://b")})},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()

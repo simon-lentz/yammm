@@ -7,8 +7,7 @@ import (
 	"strconv"
 
 	"github.com/simon-lentz/yammm/diag"
-	"github.com/simon-lentz/yammm/location"
-	"github.com/simon-lentz/yammm/location/path"
+	"github.com/simon-lentz/yammm/instance/path"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -22,7 +21,7 @@ const MaxComposedDepth = 32
 // pkPathFromInstance builds a PK-based path segment for a validated instance.
 // Returns basePath.PK(...) if the child type has a primary key, otherwise basePath.Index(i).
 // This is used for post-validation diagnostic paths where PK data is available.
-func pkPathFromInstance(basePath path.Builder, child ValidInstance, childType schema.Type, index int) path.Builder {
+func pkPathFromInstance(basePath path.Path, child ValidInstance, childType schema.Type, index int) path.Path {
 	if !childType.HasPrimaryKey() {
 		return basePath.Index(index)
 	}
@@ -56,8 +55,8 @@ func (v *Validator) validateCompositions(
 	typ schema.Type,
 	rels map[schema.Relation]relationInput,
 	collector *diag.Collector,
-	prov location.Provenance,
-	base path.Builder,
+	prov Provenance,
+	base path.Path,
 	depth int,
 ) (map[string][]ValidInstance, bool) {
 	var composed map[string][]ValidInstance
@@ -107,8 +106,8 @@ func (v *Validator) validateComposition(
 	rel schema.Relation,
 	rawValue any,
 	collector *diag.Collector,
-	prov location.Provenance,
-	relPath path.Builder,
+	prov Provenance,
+	relPath path.Path,
 	depth int,
 ) ([]ValidInstance, bool) {
 	// Compositions always expect an array (accept typed slices via reflection)
@@ -171,7 +170,7 @@ func (v *Validator) validateComposition(
 	// the caller's array so a later diagnostic names that position and not
 	// its position among the survivors of the shape filter.
 	childRaws := make([]RawInstance, 0, len(arr))
-	childBases := make([]path.Builder, 0, len(arr))
+	childBases := make([]path.Path, 0, len(arr))
 	inputIndex := make([]int, 0, len(arr))
 	for i, elem := range arr {
 		childObj, ok := toMapOfAny(elem)
@@ -182,9 +181,9 @@ func (v *Validator) validateComposition(
 		}
 
 		childBase := relPath.Index(i)
-		var childProv location.Provenance
+		var childProv Provenance
 		if !prov.IsZero() {
-			childProv = location.NewProvenance(prov.SourceName(), childBase, prov.Span())
+			childProv = NewProvenance(prov.SourceName(), childBase, prov.Span())
 		}
 		childRaws = append(childRaws, RawInstance{Properties: childObj, Provenance: childProv})
 		childBases = append(childBases, childBase)

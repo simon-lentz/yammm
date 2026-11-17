@@ -929,7 +929,7 @@ func (b *builder) reportf(code diag.Code, span location.Span, format string, arg
 // compareIssues orders diagnostics by position, then by code, so a parse of
 // the same source always reports them in the same order.
 func compareIssues(a, c diag.Issue) int {
-	if d := location.Compare(a.Span(), c.Span()); d != 0 {
+	if d := a.Span().Compare(c.Span()); d != 0 {
 		return d
 	}
 	return strings.Compare(a.Code().String(), c.Code().String())
@@ -945,17 +945,18 @@ func (b *builder) spanOf(start, end lexer.Position) location.Span {
 }
 
 // spanFromOffsets builds a span from byte offsets, deriving line and column
-// from the source text. It forces start before end because
-// location.RangeWithBytes panics on an inverted range and recovery can leave an
-// end behind its start.
+// from the source text. It forces start before end: recovery can leave an end
+// behind its start, and no span of this package ends before it starts.
 func (b *builder) spanFromOffsets(start, end int) location.Span {
 	s, e := b.positionAt(start), b.positionAt(end)
 	if e.Offset < s.Offset {
 		e = s
 	}
-	return location.RangeWithBytes(b.sourceID,
-		s.Line, s.Column, s.Offset,
-		e.Line, e.Column, e.Offset)
+	return location.Span{
+		Source: b.sourceID,
+		Start:  location.Position{Line: s.Line, Column: s.Column, Offset: s.Offset},
+		End:    location.Position{Line: e.Line, Column: e.Column, Offset: e.Offset},
+	}
 }
 
 func (b *builder) pointAt(pos lexer.Position) location.Span {

@@ -1,6 +1,6 @@
 //go:build windows
 
-package location
+package hostpath
 
 import (
 	"os"
@@ -32,10 +32,10 @@ func TestDropExtendedPrefix_WritesTheFormEveryAPIReads(t *testing.T) {
 	}
 }
 
-// TestResolveHostPath_ResolvesAJunction holds a path through a junction to the
-// identity of the junction's target: the kernel opens the file there, and one
-// file has one identity.
-func TestResolveHostPath_ResolvesAJunction(t *testing.T) {
+// TestResolve_ResolvesAJunction holds a path through a junction to the
+// junction's target: the kernel opens the file there, and one file has one
+// resolution.
+func TestResolve_ResolvesAJunction(t *testing.T) {
 	t.Parallel()
 
 	base := diskSpelling(t, t.TempDir())
@@ -50,19 +50,19 @@ func TestResolveHostPath_ResolvesAJunction(t *testing.T) {
 
 	typed := filepath.Join(junction, "x")
 	want := filepath.Join(target, "x")
-	if got, err := ResolveHostPath(typed); err != nil || got != want {
-		t.Errorf("ResolveHostPath(%q) = %q, %v; want %q", typed, got, err, want)
+	if got, err := Resolve(typed); err != nil || got != want {
+		t.Errorf("Resolve(%q) = %q, %v; want %q", typed, got, err, want)
 	}
-	throughJunction, err := NewCanonicalPath(typed)
+	throughJunction, err := Resolve(typed)
 	if err != nil {
-		t.Fatalf("NewCanonicalPath(%q): %v", typed, err)
+		t.Fatalf("Resolve(%q): %v", typed, err)
 	}
-	direct, err := NewCanonicalPath(want)
+	direct, err := Resolve(want)
 	if err != nil {
-		t.Fatalf("NewCanonicalPath(%q): %v", want, err)
+		t.Fatalf("Resolve(%q): %v", want, err)
 	}
 	if throughJunction != direct {
-		t.Errorf("two spellings of one file give two identities:\n  through the junction %q\n  direct               %q",
-			throughJunction.String(), direct.String())
+		t.Errorf("two spellings of one file resolve apart:\n  through the junction %q\n  direct               %q",
+			throughJunction, direct)
 	}
 }

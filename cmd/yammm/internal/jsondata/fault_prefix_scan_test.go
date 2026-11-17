@@ -10,9 +10,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/tidwall/jsonc"
+	"github.com/simon-lentz/yammm/internal/yammmtest/sourcetest"
 
-	"github.com/simon-lentz/yammm/location"
+	"github.com/tidwall/jsonc"
 )
 
 // prefixVerdict is what a fresh decoder makes of a prefix of a document when
@@ -196,14 +196,14 @@ func rewriteIsExact(data []byte) bool {
 func assertPlacementAgrees(t *testing.T, doc []byte, from int, judge func([]byte) prefixVerdict) {
 	t.Helper()
 	want, faulty := prefixFault(t, doc, from, judge)
-	_, result := Parse(t.Context(), location.NewSourceID("test://data/scan.json"), doc)
+	_, result := Parse(t.Context(), sourcetest.ID("test://data/scan.json"), doc)
 	var faults []int
 	for issue := range result.Issues() {
 		if isDecoderFault(issue) {
-			faults = append(faults, issue.Span().Start.Byte)
+			faults = append(faults, issue.Span().Start.Offset)
 		}
-		if faulty && issue.HasSpan() && issue.Span().Start.Byte > want {
-			t.Errorf("%q: %q at byte %d, past the fault at %d", doc, issue.Message(), issue.Span().Start.Byte, want)
+		if faulty && issue.HasSpan() && issue.Span().Start.Offset > want {
+			t.Errorf("%q: %q at byte %d, past the fault at %d", doc, issue.Message(), issue.Span().Start.Offset, want)
 		}
 	}
 	switch {

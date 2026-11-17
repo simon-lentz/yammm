@@ -7,9 +7,10 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/simon-lentz/yammm/internal/yammmtest/sourcetest"
+
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/instance"
-	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -17,7 +18,7 @@ import (
 // reaches the caller as the parser normalized it.
 func numberSchemaless(t *testing.T, doc string) map[string]any {
 	t.Helper()
-	parsed, res := Parse(context.Background(), location.NewSourceID("numbers.json"), []byte(doc))
+	parsed, res := Parse(context.Background(), sourcetest.ID("numbers.json"), []byte(doc))
 	if err := res.Err(); err != nil {
 		t.Fatalf("parse %s: %v", doc, err)
 	}
@@ -109,7 +110,7 @@ func TestParse_RefusesWhatTheDecoderWillNotNest(t *testing.T) {
 	const depth = 10000
 	doc := `{"T":[{"v":` + strings.Repeat("[", depth) + "1" + strings.Repeat("]", depth) + `}]}`
 
-	_, res := Parse(context.Background(), location.NewSourceID("deep.json"), []byte(doc))
+	_, res := Parse(context.Background(), sourcetest.ID("deep.json"), []byte(doc))
 
 	if res.Err() == nil {
 		t.Fatal("a document nested 10,000 levels parsed; want a diagnostic")
@@ -145,7 +146,7 @@ func TestParse_IntegerLiteralOutsideInt64IsRefusedAtAnInteger(t *testing.T) {
 		t.Run(literal, func(t *testing.T) {
 			t.Parallel()
 			doc := fmt.Sprintf(`{"T":[{"id":"a","n":%s,"f":1.5}]}`, literal)
-			parsed, pres := Parse(ctx, location.NewSourceID("r.json"), []byte(doc))
+			parsed, pres := Parse(ctx, sourcetest.ID("r.json"), []byte(doc))
 			if err := pres.Err(); err != nil {
 				t.Fatalf("parse: %v", err)
 			}
@@ -182,7 +183,7 @@ func TestParse_AFloatLiteralIsRefusedAtAnInteger(t *testing.T) {
 		t.Run(literal, func(t *testing.T) {
 			t.Parallel()
 			doc := fmt.Sprintf(`{"T":[{"id":"a","n":%s,"f":1.5}]}`, literal)
-			parsed, pres := Parse(ctx, location.NewSourceID("r.json"), []byte(doc))
+			parsed, pres := Parse(ctx, sourcetest.ID("r.json"), []byte(doc))
 			if err := pres.Err(); err != nil {
 				t.Fatalf("parse: %v", err)
 			}
@@ -204,7 +205,7 @@ func TestParse_IntegerLiteralOutsideInt64IsAFloatAtAFloat(t *testing.T) {
 	if err := res.Err(); err != nil {
 		t.Fatalf("load: %v", err)
 	}
-	parsed, pres := Parse(ctx, location.NewSourceID("r.json"),
+	parsed, pres := Parse(ctx, sourcetest.ID("r.json"),
 		[]byte(`{"T":[{"id":"a","n":1,"f":99999999999999999999}]}`))
 	if err := pres.Err(); err != nil {
 		t.Fatalf("parse: %v", err)

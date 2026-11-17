@@ -126,10 +126,9 @@
 // spanOf's comment states, and on line 1 after a leading byte order mark,
 // which a span counts as a column and the lexer does not. Span ends are exclusive.
 //
-// [location.RangeWithBytes] panics when the end precedes the start, so every
-// span this package builds — for nodes and for diagnostics, in the recovery
-// paths above all — is constructed start-before-end by force rather than by
-// assumption. See spanOf.
+// No span this package builds ends before it starts: every span, for nodes and
+// for diagnostics, in the recovery paths above all, is constructed
+// start-before-end by force rather than by assumption. See spanOf.
 //
 // The location.SourceID passed to Parse names the source spans belong to.
 // Passing the zero SourceID is supported: spans still carry byte offsets and

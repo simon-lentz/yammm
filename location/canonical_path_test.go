@@ -8,11 +8,9 @@ import (
 	"runtime"
 	"strings"
 	"testing"
-
-	"github.com/simon-lentz/yammm/internal/yammmtest"
 )
 
-func TestNewCanonicalPath_Absolute(t *testing.T) {
+func TestSourceIDFromPath_Absolute(t *testing.T) {
 	// Get current working directory to construct absolute path
 	cwd, err := os.Getwd()
 	if err != nil {
@@ -20,9 +18,9 @@ func TestNewCanonicalPath_Absolute(t *testing.T) {
 	}
 
 	// Relative path should become absolute
-	cp, err := NewCanonicalPath("testfile.go")
+	cp, err := SourceIDFromPath("testfile.go")
 	if err != nil {
-		t.Fatalf("NewCanonicalPath failed: %v", err)
+		t.Fatalf("SourceIDFromPath failed: %v", err)
 	}
 
 	// Result should start with / (Unix) or contain :/ (Windows)
@@ -43,7 +41,7 @@ func TestNewCanonicalPath_Absolute(t *testing.T) {
 	}
 }
 
-func TestNewCanonicalPath_Clean(t *testing.T) {
+func TestSourceIDFromPath_Clean(t *testing.T) {
 	// Paths with . and .. should be cleaned
 	tests := []struct {
 		input    string
@@ -62,9 +60,9 @@ func TestNewCanonicalPath_Clean(t *testing.T) {
 		}
 
 		t.Run(tt.input, func(t *testing.T) {
-			cp, err := NewCanonicalPath(tt.input)
+			cp, err := SourceIDFromPath(tt.input)
 			if err != nil {
-				t.Fatalf("NewCanonicalPath failed: %v", err)
+				t.Fatalf("SourceIDFromPath failed: %v", err)
 			}
 
 			s := cp.String()
@@ -80,16 +78,16 @@ func TestNewCanonicalPath_Clean(t *testing.T) {
 	}
 }
 
-func TestNewCanonicalPath_ForwardSlashes(t *testing.T) {
+func TestSourceIDFromPath_ForwardSlashes(t *testing.T) {
 	// Result should use forward slashes on all platforms
 	cwd, err := os.Getwd()
 	if err != nil {
 		t.Fatalf("failed to get cwd: %v", err)
 	}
 
-	cp, err := NewCanonicalPath(cwd)
+	cp, err := SourceIDFromPath(cwd)
 	if err != nil {
-		t.Fatalf("NewCanonicalPath failed: %v", err)
+		t.Fatalf("SourceIDFromPath failed: %v", err)
 	}
 
 	s := cp.String()
@@ -98,15 +96,15 @@ func TestNewCanonicalPath_ForwardSlashes(t *testing.T) {
 	}
 }
 
-func TestNewCanonicalPath_NonExistentPath(t *testing.T) {
+func TestSourceIDFromPath_NonExistentPath(t *testing.T) {
 	// Non-existent paths should not error (supports new file creation)
-	cp, err := NewCanonicalPath("/nonexistent/path/to/file.yammm")
+	cp, err := SourceIDFromPath("/nonexistent/path/to/file.yammm")
 	if runtime.GOOS == "windows" {
-		cp, err = NewCanonicalPath("C:/nonexistent/path/to/file.yammm")
+		cp, err = SourceIDFromPath("C:/nonexistent/path/to/file.yammm")
 	}
 
 	if err != nil {
-		t.Fatalf("NewCanonicalPath should accept non-existent paths, got: %v", err)
+		t.Fatalf("SourceIDFromPath should accept non-existent paths, got: %v", err)
 	}
 
 	if cp.IsZero() {
@@ -114,7 +112,7 @@ func TestNewCanonicalPath_NonExistentPath(t *testing.T) {
 	}
 }
 
-func TestNewCanonicalPath_Symlink(t *testing.T) {
+func TestSourceIDFromPath_Symlink(t *testing.T) {
 	skipOnWindows(t, "symlink test not reliable on Windows")
 
 	// Create a temp directory with a symlink
@@ -138,19 +136,19 @@ func TestNewCanonicalPath_Symlink(t *testing.T) {
 	linkedFile := filepath.Join(linkDir, "file.txt")
 
 	// Canonicalize the symlinked path
-	cp, err := NewCanonicalPath(linkedFile)
+	cp, err := SourceIDFromPath(linkedFile)
 	if err != nil {
-		t.Fatalf("NewCanonicalPath failed: %v", err)
+		t.Fatalf("SourceIDFromPath failed: %v", err)
 	}
 
 	// An existing path's canonical form resolves every link, the temporary
 	// directory's ancestors included (/var -> /private/var on macOS).
 	if s, want := cp.String(), identityForm(diskSpelling(t, linkedFile)); s != want {
-		t.Errorf("NewCanonicalPath(%q) = %q, want fully resolved %q", linkedFile, s, want)
+		t.Errorf("SourceIDFromPath(%q) = %q, want fully resolved %q", linkedFile, s, want)
 	}
 }
 
-func TestNewCanonicalPath_ErrorHandling(t *testing.T) {
+func TestSourceIDFromPath_ErrorHandling(t *testing.T) {
 	skipOnWindows(t, "symlink/permission tests not reliable on Windows")
 
 	tmpDir := t.TempDir()
@@ -176,12 +174,12 @@ func TestNewCanonicalPath_ErrorHandling(t *testing.T) {
 		}
 		defer os.Chmod(unreadableDir, 0o700) //nolint:gosec // Restore for cleanup
 
-		cp, err := NewCanonicalPath(fileInDir)
+		cp, err := SourceIDFromPath(fileInDir)
 		if err != nil {
-			t.Fatalf("NewCanonicalPath under an untraversable directory: %v", err)
+			t.Fatalf("SourceIDFromPath under an untraversable directory: %v", err)
 		}
 		if want := identityForm(diskSpelling(t, unreadableDir)) + "/file.txt"; cp.String() != want {
-			t.Errorf("NewCanonicalPath = %q, want %q", cp.String(), want)
+			t.Errorf("SourceIDFromPath = %q, want %q", cp.String(), want)
 		}
 	})
 
@@ -196,7 +194,7 @@ func TestNewCanonicalPath_ErrorHandling(t *testing.T) {
 			t.Skipf("cannot create symlink: %v", err)
 		}
 
-		_, err := NewCanonicalPath(linkA)
+		_, err := SourceIDFromPath(linkA)
 		if err == nil {
 			t.Error("expected error for symlink loop, got nil")
 		}
@@ -220,41 +218,41 @@ func TestNewCanonicalPath_ErrorHandling(t *testing.T) {
 			t.Skipf("cannot create symlink: %v", err)
 		}
 
-		cp, err := NewCanonicalPath(brokenLink)
+		cp, err := SourceIDFromPath(brokenLink)
 		if err != nil {
 			t.Errorf("broken symlink should fall back (IsNotExist), got error: %v", err)
 		}
 		if cp.IsZero() {
 			t.Error("result should not be zero")
 		}
-		want, err := NewCanonicalPath("/nonexistent/target/12345")
+		want, err := SourceIDFromPath("/nonexistent/target/12345")
 		if err != nil {
 			t.Fatal(err)
 		}
 		if cp.String() != want.String() {
-			t.Errorf("NewCanonicalPath(dangling link) = %q, want its target %q", cp.String(), want.String())
+			t.Errorf("SourceIDFromPath(dangling link) = %q, want its target %q", cp.String(), want.String())
 		}
 	})
 }
 
 func TestCanonicalPath_IsZero(t *testing.T) {
-	var zeroCP CanonicalPath
+	var zeroCP canonicalPath
 	if !zeroCP.IsZero() {
 		t.Error("zero value should report IsZero() == true")
 	}
 
-	cp, _ := NewCanonicalPath(".")
+	cp, _ := SourceIDFromPath(".")
 	if cp.IsZero() {
 		t.Error("valid path should not be zero")
 	}
 }
 
-func TestCanonicalPath_Dir(t *testing.T) {
+func TestSourceIDFromPath_Dir(t *testing.T) {
 	skipOnWindows(t, "Unix path test")
 
-	cp, err := NewCanonicalPath("/a/b/c.txt")
+	cp, err := SourceIDFromPath("/a/b/c.txt")
 	if err != nil {
-		t.Fatalf("NewCanonicalPath failed: %v", err)
+		t.Fatalf("SourceIDFromPath failed: %v", err)
 	}
 
 	dir := cp.Dir()
@@ -267,347 +265,19 @@ func TestCanonicalPath_Dir(t *testing.T) {
 	}
 }
 
-func TestCanonicalPath_Join(t *testing.T) {
-	skipOnWindows(t, "Unix path test")
-
-	cp, err := NewCanonicalPath("/a/b")
-	if err != nil {
-		t.Fatalf("NewCanonicalPath failed: %v", err)
-	}
-
-	joined, err := cp.Join("c", "d.txt")
-	if err != nil {
-		t.Fatalf("Join failed: %v", err)
-	}
-
-	if !strings.HasSuffix(joined.String(), "/a/b/c/d.txt") {
-		t.Errorf("Join() = %q; want suffix /a/b/c/d.txt", joined.String())
-	}
-}
-
-func TestCanonicalPath_Join_WithDotDot(t *testing.T) {
-	skipOnWindows(t, "Unix path test")
-
-	cp, err := NewCanonicalPath("/a/b/c")
-	if err != nil {
-		t.Fatalf("NewCanonicalPath failed: %v", err)
-	}
-
-	joined, err := cp.Join("..", "d.txt")
-	if err != nil {
-		t.Fatalf("Join failed: %v", err)
-	}
-
-	// Should clean the .. segment
-	s := joined.String()
-	if strings.Contains(s, "..") {
-		t.Errorf("Join should clean .. segments, got %q", s)
-	}
-	if !strings.HasSuffix(s, "/a/b/d.txt") {
-		t.Errorf("Join() = %q; want suffix /a/b/d.txt", s)
-	}
-}
-
-func TestCanonicalPath_Join_ZeroValue(t *testing.T) {
-	var zeroCP CanonicalPath
-	joined, err := zeroCP.Join("a", "b")
-	if err != nil {
-		t.Fatalf("Join on zero value should not error: %v", err)
-	}
-	if !joined.IsZero() {
-		t.Error("Join on zero value should return zero value")
-	}
-}
-
-// TestCanonicalPath_Join_Backslash holds Join to the host's reading of a
-// backslash: a file-name character on Unix, a separator on Windows.
-func TestCanonicalPath_Join_Backslash(t *testing.T) {
-	elements := map[string][]string{
-		"single backslash element":       {"sub\\dir"},
-		"backslash before dot-dot":       {"..\\sibling"},
-		"mixed forward and backslash":    {"sub/a\\b"},
-		"backslash in multiple elements": {"a\\b", "c\\d"},
-	}
-	base, want := CanonicalPath{path: "/base/path"}, map[string]string{
-		"single backslash element":       "/base/path/sub\\dir",
-		"backslash before dot-dot":       "/base/path/..\\sibling",
-		"mixed forward and backslash":    "/base/path/sub/a\\b",
-		"backslash in multiple elements": "/base/path/a\\b/c\\d",
-	}
-	if runtime.GOOS == "windows" {
-		base, want = CanonicalPath{path: "C:/base/path"}, map[string]string{
-			"single backslash element":       "C:/base/path/sub/dir",
-			"backslash before dot-dot":       "C:/base/sibling",
-			"mixed forward and backslash":    "C:/base/path/sub/a/b",
-			"backslash in multiple elements": "C:/base/path/a/b/c/d",
-		}
-	}
-
-	for name, elems := range elements {
-		t.Run(name, func(t *testing.T) {
-			joined, err := base.Join(elems...)
-			if err != nil {
-				t.Fatalf("Join(%q): %v", elems, err)
-			}
-			if got := joined.String(); got != want[name] {
-				t.Errorf("Join(%q) = %q; want %q", elems, got, want[name])
-			}
-		})
-	}
-}
-
-// TestCanonicalPath_Join_RejectsAbsoluteElements verifies that Join returns
-// an error when any element looks like an absolute path.
-func TestCanonicalPath_Join_RejectsAbsoluteElements(t *testing.T) {
-	base := CanonicalPath{path: "/base/path"}
-	if runtime.GOOS == "windows" {
-		base = CanonicalPath{path: "C:/base/path"}
-	}
-
-	tests := []struct {
-		name    string
-		element string
-	}{
-		{"unix absolute", "/etc/passwd"},
-		{"unix root", "/"},
-		{"unc forward", "//server/share"},
-	}
-	if runtime.GOOS == "windows" {
-		tests = append(tests,
-			struct {
-				name    string
-				element string
-			}{"windows volume forward", "C:/Windows"},
-			struct {
-				name    string
-				element string
-			}{"windows volume back", "C:\\Windows"},
-			struct {
-				name    string
-				element string
-			}{"windows other volume", "D:/other"},
-			struct {
-				name    string
-				element string
-			}{"unc back", "\\\\server\\share"},
-		)
-		// Windows roots a leading backslash at the current drive, and a volume
-		// with no separator names that drive's current directory.
-		tests = append(tests,
-			struct {
-				name    string
-				element string
-			}{"windows rooted", `\Windows`},
-			struct {
-				name    string
-				element string
-			}{"windows drive-relative", "C:Windows"},
-			struct {
-				name    string
-				element string
-			}{"windows bare volume", "C:"},
-		)
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			_, err := base.Join(tt.element)
-			if err == nil {
-				t.Errorf("Join(%q) should return error for absolute element", tt.element)
-				return
-			}
-			// Verify error type
-			if !errors.Is(err, ErrAbsoluteJoinElement) {
-				t.Errorf("expected ErrAbsoluteJoinElement, got: %v", err)
-			}
-			// Verify error mentions the problematic element (for context)
-			if !strings.Contains(err.Error(), tt.element) {
-				t.Errorf("error should mention element %q, got: %v", tt.element, err)
-			}
-		})
-	}
-}
-
-// TestCanonicalPath_Join_AcceptsRelativeElements verifies that Join still
-// works correctly with relative paths after adding absolute element rejection.
-func TestCanonicalPath_Join_AcceptsRelativeElements(t *testing.T) {
-	base := CanonicalPath{path: "/base/path"}
-	if runtime.GOOS == "windows" {
-		base = CanonicalPath{path: "C:/base/path"}
-	}
-
-	tests := []struct {
-		name     string
-		elements []string
-	}{
-		{"simple file", []string{"file.txt"}},
-		{"subdirectory", []string{"sub", "dir", "file.txt"}},
-		{"dotdot", []string{"..", "sibling"}},
-		{"dot", []string{".", "same"}},
-		{"backslash relative", []string{"sub\\dir"}}, // Backslash but not absolute
-		{"empty element", []string{"", "file.txt"}},
-	}
-	if runtime.GOOS != "windows" {
-		// On Unix a colon and a leading backslash are file-name characters; Windows
-		// refuses both, as TestCanonicalPath_Join_RejectsAbsoluteElements pins.
-		tests = append(tests, struct {
-			name     string
-			elements []string
-		}{"volume-like name", []string{"C:", "notapath"}}, struct {
-			name     string
-			elements []string
-		}{"leading backslash", []string{`\notes.yammm`}})
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result, err := base.Join(tt.elements...)
-			if err != nil {
-				t.Errorf("Join(%v) returned unexpected error: %v", tt.elements, err)
-				return
-			}
-			if result.IsZero() {
-				t.Error("Join should return non-zero result")
-			}
-		})
-	}
-}
-
-// TestCanonicalPath_Join_TakesWindowsAbsoluteShapesAsNamesOnUnix holds Join to
-// the Unix reading of an element that only Windows roots: a colon and a
-// backslash are file-name characters, so the element names a child of the base.
-func TestCanonicalPath_Join_TakesWindowsAbsoluteShapesAsNamesOnUnix(t *testing.T) {
-	t.Parallel()
-	skipOnWindows(t, "Windows reads these elements as absolute")
-
-	base := CanonicalPath{path: "/base/path"}
-	rows := []struct{ name, elem, want string }{
-		{"a volume and a slash", "C:/x", "/base/path/C:/x"},
-		{"a volume and a backslash", `C:\x`, `/base/path/C:\x`},
-		{"a backslash share prefix", `\\srv`, `/base/path/\\srv`},
-	}
-	for _, row := range rows {
-		t.Run(row.name, func(t *testing.T) {
-			t.Parallel()
-			joined, err := base.Join(row.elem)
-			if err != nil {
-				t.Fatalf("Join(%q): %v", row.elem, err)
-			}
-			if got := joined.String(); got != row.want {
-				t.Errorf("Join(%q) = %q; want %q", row.elem, got, row.want)
-			}
-		})
-	}
-}
-
-// TestCanonicalPath_Join_RefusesAnElementThatIsNotValidUTF8 holds Join to
-// checking each element as typed. Cleaning can remove the invalid bytes from the
-// joined path, which then passes the resolver's own check.
-func TestCanonicalPath_Join_RefusesAnElementThatIsNotValidUTF8(t *testing.T) {
-	t.Parallel()
-
-	base := CanonicalPath{path: "/base/path"}
-	if runtime.GOOS == "windows" {
-		base = CanonicalPath{path: "C:/base/path"}
-	}
-	rows := []struct {
-		name  string
-		elems []string
-	}{
-		{"invalid bytes in the leaf", []string{"caf\xff.yammm"}},
-		{"invalid bytes a .. in the same element cleans away", []string{"caf\xff/.."}},
-		{"invalid bytes a later .. element cleans away", []string{"caf\xff", "..", "x.yammm"}},
-	}
-	for _, row := range rows {
-		t.Run(row.name, func(t *testing.T) {
-			t.Parallel()
-			joined, err := base.Join(row.elems...)
-			if !errors.Is(err, ErrInvalidUTF8Path) {
-				t.Errorf("Join(%q) = %q, %v; want ErrInvalidUTF8Path", row.elems, joined.String(), err)
-			}
-		})
-	}
-}
-
-// TestCanonicalPath_Join_SpellsTheJoinedPathOnDisk holds Join to resolving the
-// elements it joins: an element typed through a symbolic link or in another case
-// gives the identity of the path the filesystem holds.
-func TestCanonicalPath_Join_SpellsTheJoinedPathOnDisk(t *testing.T) {
-	t.Parallel()
-
-	rows := []struct {
-		name string
-		// setup builds the tree under base and returns the elements to join and
-		// the host path their join names on disk.
-		setup func(t *testing.T, base string) (elems []string, onDisk string)
-	}{
-		{
-			name: "an existing file through a symbolic link",
-			setup: func(t *testing.T, base string) ([]string, string) {
-				t.Helper()
-				mkdirAll(t, filepath.Join(base, "real"))
-				writeEmpty(t, filepath.Join(base, "real", "File.yammm"))
-				symlink(t, "real", filepath.Join(base, "link"))
-				return []string{"link", "File.yammm"}, diskSpelling(t, filepath.Join(base, "link", "File.yammm"))
-			},
-		},
-		{
-			name: "a missing file under a symbolic link",
-			setup: func(t *testing.T, base string) ([]string, string) {
-				t.Helper()
-				mkdirAll(t, filepath.Join(base, "real"))
-				symlink(t, "real", filepath.Join(base, "link"))
-				return []string{"link/later.yammm"}, filepath.Join(diskSpelling(t, filepath.Join(base, "link")), "later.yammm")
-			},
-		},
-		{
-			name: "an existing file typed in another case",
-			setup: func(t *testing.T, base string) ([]string, string) {
-				t.Helper()
-				if !yammmtest.CaseFoldingFilesystem(t, base) {
-					t.Skip("the filesystem is case-sensitive, so two spellings name two files")
-				}
-				mkdirAll(t, filepath.Join(base, "Proj"))
-				writeEmpty(t, filepath.Join(base, "Proj", "File.yammm"))
-				return []string{"proj", "file.yammm"}, diskSpelling(t, filepath.Join(base, "proj", "file.yammm"))
-			},
-		},
-	}
-
-	for _, row := range rows {
-		t.Run(row.name, func(t *testing.T) {
-			t.Parallel()
-			base := diskSpelling(t, t.TempDir())
-			elems, onDisk := row.setup(t, base)
-
-			cp, err := NewCanonicalPath(base)
-			if err != nil {
-				t.Fatalf("NewCanonicalPath(%q): %v", base, err)
-			}
-			joined, err := cp.Join(elems...)
-			if err != nil {
-				t.Fatalf("Join(%q): %v", elems, err)
-			}
-			if want := identityForm(onDisk); joined.String() != want {
-				t.Errorf("CanonicalPath{%q}.Join(%q) = %q; want %q", cp.String(), elems, joined.String(), want)
-			}
-		})
-	}
-}
-
 func TestCanonicalPath_String_Empty(t *testing.T) {
-	var cp CanonicalPath
+	var cp canonicalPath
 	if cp.String() != "" {
 		t.Errorf("zero value String() = %q; want empty", cp.String())
 	}
 }
 
-func TestCanonicalPath_Equality(t *testing.T) {
+func TestSourceIDFromPath_Equality(t *testing.T) {
 	skipOnWindows(t, "Unix path test")
 
-	cp1, _ := NewCanonicalPath("/a/b/c")
-	cp2, _ := NewCanonicalPath("/a/b/c")
-	cp3, _ := NewCanonicalPath("/a/b/d")
+	cp1, _ := SourceIDFromPath("/a/b/c")
+	cp2, _ := SourceIDFromPath("/a/b/c")
+	cp3, _ := SourceIDFromPath("/a/b/d")
 
 	if cp1 != cp2 {
 		t.Error("equal paths should be equal")
@@ -617,24 +287,22 @@ func TestCanonicalPath_Equality(t *testing.T) {
 	}
 }
 
-func TestCanonicalPath_MapKey(t *testing.T) {
-	// CanonicalPath should work as map key
+func TestSourceIDFromPath_MapKey(t *testing.T) {
 	skipOnWindows(t, "Unix path test")
 
-	cp1, _ := NewCanonicalPath("/a/b/c")
-	cp2, _ := NewCanonicalPath("/a/b/c")
+	cp1, _ := SourceIDFromPath("/a/b/c")
+	cp2, _ := SourceIDFromPath("/a/b/c")
 
-	m := make(map[CanonicalPath]int)
+	m := make(map[SourceID]int)
 	m[cp1] = 42
 
 	if m[cp2] != 42 {
-		t.Error("equal CanonicalPaths should work as map keys")
+		t.Error("equal identities should work as map keys")
 	}
 }
 
-// TestLooksLikeAbsolute drives the shared absolute-path predicate behind
-// Join's element guard and ValidateSyntheticSourceID's collision check
-// through every path family it distinguishes.
+// TestLooksLikeAbsolute drives the absolute-path predicate behind
+// NewSourceID's collision check through every path family it distinguishes.
 func TestLooksLikeAbsolute(t *testing.T) {
 	tests := []struct {
 		input string
@@ -650,6 +318,9 @@ func TestLooksLikeAbsolute(t *testing.T) {
 		{"C:\\path", true},
 		{"C:/Windows", true},
 		{"D:/file.txt", true},
+		{"A:/x", true},
+		{"z:\\x", true},
+		{"1:/x", false},
 
 		// Windows UNC paths
 		{"\\\\server\\share", true},
@@ -716,7 +387,7 @@ func TestCanonicalPath_Dir_NFCNormalization(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Direct construction to test with non-NFC input
-			cp := CanonicalPath{path: tt.nfdPath}
+			cp := canonicalPath{path: tt.nfdPath}
 			got := cp.Dir()
 
 			if got.String() != tt.wantDir {
@@ -758,7 +429,7 @@ func TestCanonicalPath_Dir_CleansInput(t *testing.T) {
 				t.Skip("the path is written for the other host")
 			}
 			// Direct construction with non-canonical path
-			cp := CanonicalPath{path: tt.input}
+			cp := canonicalPath{path: tt.input}
 			got := cp.Dir()
 			if got.String() != tt.want {
 				t.Errorf("CanonicalPath{%q}.Dir() = %q; want %q", tt.input, got.String(), tt.want)
@@ -770,46 +441,9 @@ func TestCanonicalPath_Dir_CleansInput(t *testing.T) {
 	}
 }
 
-// TestCanonicalPath_Join_RootEscape holds Join's ".." to the volume root: it
-// never climbs above it, and the elements after it are kept.
-func TestCanonicalPath_Join_RootEscape(t *testing.T) {
-	root := "/"
-	if runtime.GOOS == "windows" {
-		root = "C:/"
-	}
-	tests := []struct {
-		name string
-		base string
-		elem []string
-		want string
-	}{
-		{"single dotdot", root + "a", []string{".."}, root},
-		{"at root", root, []string{".."}, root},
-		{"multiple dotdot escape", root + "a/b", []string{"..", "..", ".."}, root},
-		{"escape then descend", root + "a", []string{"..", "..", "x"}, root + "x"},
-		{"normal join", root + "a", []string{"b", "c"}, root + "a/b/c"},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			cp := CanonicalPath{path: tt.base}
-			got, err := cp.Join(tt.elem...)
-			if err != nil {
-				t.Fatalf("Join() error = %v", err)
-			}
-			if got.String() != tt.want {
-				t.Errorf("CanonicalPath{%q}.Join(%v) = %q; want %q", tt.base, tt.elem, got.String(), tt.want)
-			}
-			if !isHostAbsolute(got.String()) {
-				t.Errorf("Join() result %q is not absolute", got.String())
-			}
-		})
-	}
-}
-
 // TestCanonicalPath_ZeroValue_Methods tests zero-value behavior for Dir().
 func TestCanonicalPath_ZeroValue_Methods(t *testing.T) {
-	var zero CanonicalPath
+	var zero canonicalPath
 
 	// Dir() should return zero value for zero value
 	if got := zero.Dir(); !got.IsZero() {
@@ -817,12 +451,12 @@ func TestCanonicalPath_ZeroValue_Methods(t *testing.T) {
 	}
 }
 
-// TestCanonicalPath_CrossPlatformInvariants validates the core invariants
+// TestSourceIDFromPath_CrossPlatformInvariants validates the core invariants
 // against a real filesystem path so they run on every platform (the
 // Unix-literal tests above skip on Windows): forward-slash-only output,
-// absoluteness, Base/Dir/Join behavior and their round-trip, cleaning of
-// dirty inputs, and value-equality/map-key semantics across constructions.
-func TestCanonicalPath_CrossPlatformInvariants(t *testing.T) {
+// absoluteness, Dir, cleaning of dirty inputs, and value-equality/map-key
+// semantics across constructions.
+func TestSourceIDFromPath_CrossPlatformInvariants(t *testing.T) {
 	tmpDir := t.TempDir()
 	subDir := filepath.Join(tmpDir, "sub", "dir")
 	if err := os.MkdirAll(subDir, 0o750); err != nil {
@@ -833,13 +467,13 @@ func TestCanonicalPath_CrossPlatformInvariants(t *testing.T) {
 		t.Fatalf("WriteFile: %v", err)
 	}
 
-	cp, err := NewCanonicalPath(testFile)
+	cp, err := SourceIDFromPath(testFile)
 	if err != nil {
-		t.Fatalf("NewCanonicalPath(%q): %v", testFile, err)
+		t.Fatalf("SourceIDFromPath(%q): %v", testFile, err)
 	}
 
 	// requireInvariants asserts the two representation invariants every
-	// CanonicalPath operation must preserve.
+	// identity operation must preserve.
 	requireInvariants := func(label, s string) {
 		t.Helper()
 		if containsHostSeparator(s) {
@@ -858,110 +492,32 @@ func TestCanonicalPath_CrossPlatformInvariants(t *testing.T) {
 		t.Errorf("Dir() = %q; want suffix /dir", dir.String())
 	}
 
-	// Dir + Base must round-trip to the original.
-	rejoined, err := dir.Join(filepath.Base(cp.String()))
-	if err != nil {
-		t.Fatalf("Join: %v", err)
-	}
-	if rejoined != cp {
-		t.Errorf("Dir+Base roundtrip: got %q, want %q", rejoined.String(), cp.String())
-	}
-
-	// Join preserves the invariants and cleans relative segments.
-	joined, err := dir.Join("extra", "path")
-	if err != nil {
-		t.Fatalf("Join: %v", err)
-	}
-	requireInvariants("Join()", joined.String())
-	if !strings.HasSuffix(joined.String(), "/dir/extra/path") {
-		t.Errorf("Join() = %q; want suffix /dir/extra/path", joined.String())
-	}
-
-	up, err := cp.Join("..")
-	if err != nil {
-		t.Fatalf("Join(..): %v", err)
-	}
-	if up != dir {
-		t.Errorf("Join(..) = %q; want Dir() = %q", up.String(), dir.String())
-	}
-
 	// Dirty construction (./..-laden) resolves to the same canonical value,
 	// so equality and map-key semantics hold across constructions.
-	cpDirty, err := NewCanonicalPath(filepath.Join(subDir, "..", "dir", ".", "file.txt"))
+	cpDirty, err := SourceIDFromPath(filepath.Join(subDir, "..", "dir", ".", "file.txt"))
 	if err != nil {
-		t.Fatalf("NewCanonicalPath(dirty): %v", err)
+		t.Fatalf("SourceIDFromPath(dirty): %v", err)
 	}
 	if cpDirty != cp {
 		t.Errorf("dirty and clean constructions differ: %q vs %q", cpDirty.String(), cp.String())
 	}
-	m := map[CanonicalPath]int{cp: 42}
+	m := map[SourceID]int{cp: 42}
 	if v, ok := m[cpDirty]; !ok || v != 42 {
 		t.Errorf("map lookup via equal path failed: ok=%v, v=%d", ok, v)
 	}
 }
 
-// TestCanonicalPath_JoinNFCNormalization verifies that Join normalizes NFD elements to NFC.
-func TestCanonicalPath_JoinNFCNormalization(t *testing.T) {
-	tmpDir := t.TempDir()
-	cp, err := NewCanonicalPath(tmpDir)
-	if err != nil {
-		t.Fatalf("NewCanonicalPath: %v", err)
-	}
-
-	// NFD and NFC versions of the same string
-	nfdElement := "cafe\u0301" // NFD é (e + combining acute)
-	nfcElement := "caf\u00e9"  // NFC é (precomposed)
-
-	joinedNFD, err := cp.Join(nfdElement)
-	if err != nil {
-		t.Fatalf("Join(NFD): %v", err)
-	}
-
-	joinedNFC, err := cp.Join(nfcElement)
-	if err != nil {
-		t.Fatalf("Join(NFC): %v", err)
-	}
-
-	// Both should produce the same result after NFC normalization
-	if joinedNFD.String() != joinedNFC.String() {
-		t.Errorf("NFD and NFC joins should be equal:\n  NFD input: %q → %q\n  NFC input: %q → %q",
-			nfdElement, joinedNFD.String(), nfcElement, joinedNFC.String())
-	}
-
-	// Result should be in NFC form (contain the precomposed character)
-	if !strings.Contains(joinedNFD.String(), "\u00e9") {
-		t.Errorf("result should contain NFC é (U+00E9), got: %q (bytes: %x)",
-			joinedNFD.String(), []byte(joinedNFD.String()))
-	}
-
-	// Result should NOT contain the combining acute accent
-	if strings.Contains(joinedNFD.String(), "\u0301") {
-		t.Errorf("result should not contain combining accent (U+0301), got: %q",
-			joinedNFD.String())
-	}
-}
-
-// TestNewCanonicalPath_BackslashInvariant verifies that the host's separator is
+// TestSourceIDFromPath_BackslashInvariant verifies that the host's separator is
 // always written as "/": on Windows no backslash survives canonicalization.
-func TestNewCanonicalPath_BackslashInvariant(t *testing.T) {
+func TestSourceIDFromPath_BackslashInvariant(t *testing.T) {
 	// Test with current working directory (which should exist)
-	cp, err := NewCanonicalPath(".")
+	cp, err := SourceIDFromPath(".")
 	if err != nil {
-		t.Fatalf("NewCanonicalPath(\".\") error: %v", err)
+		t.Fatalf("SourceIDFromPath(\".\") error: %v", err)
 	}
 
 	if containsHostSeparator(cp.String()) {
-		t.Errorf("CanonicalPath should not contain the host separator: %q", cp.String())
-	}
-
-	// Test Join also maintains the invariant
-	joined, err := cp.Join("sub", "dir", "file.txt")
-	if err != nil {
-		t.Fatalf("Join error: %v", err)
-	}
-
-	if containsHostSeparator(joined.String()) {
-		t.Errorf("Joined path should not contain the host separator: %q", joined.String())
+		t.Errorf("the identity holds the host separator: %q", cp.String())
 	}
 }
 
@@ -983,4 +539,25 @@ func isHostAbsolute(s string) bool {
 // is not "/": a canonical path writes every separator as "/".
 func containsHostSeparator(s string) bool {
 	return filepath.Separator != '/' && strings.ContainsRune(s, filepath.Separator)
+}
+
+// TestSourceIDFromPath_NFCNormalization holds a decomposed name to its
+// composed identity: NFD and NFC spellings of one name give one identity, in
+// NFC.
+func TestSourceIDFromPath_NFCNormalization(t *testing.T) {
+	tmpDir := t.TempDir()
+	nfd, err := SourceIDFromPath(filepath.Join(tmpDir, "cafe\u0301"))
+	if err != nil {
+		t.Fatalf("SourceIDFromPath(NFD): %v", err)
+	}
+	nfc, err := SourceIDFromPath(filepath.Join(tmpDir, "caf\u00e9"))
+	if err != nil {
+		t.Fatalf("SourceIDFromPath(NFC): %v", err)
+	}
+	if nfd != nfc {
+		t.Errorf("NFD and NFC spellings give two identities: %q and %q", nfd, nfc)
+	}
+	if strings.Contains(nfd.String(), "\u0301") || !strings.Contains(nfd.String(), "\u00e9") {
+		t.Errorf("the identity %q is not in NFC", nfd)
+	}
 }

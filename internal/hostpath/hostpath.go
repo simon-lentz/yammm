@@ -2,7 +2,7 @@
 // into the path the process hands the kernel.
 //
 // A ".." the path itself holds is evaluated on the text first, as the schema
-// loader and location.ResolveHostPath evaluate it. [Text] applies that step to
+// loader and [Resolve] evaluate it. [Text] applies that step to
 // every path the command-line tool reads or writes but a schema, and to the path
 // snapshot.WriteFile writes; the tool's schema paths, and the identity of each
 // path it reads, take the same step through location and filepath.Abs. So each
@@ -36,16 +36,25 @@ import (
 // directory as [filepath.Abs] spells it when it climbs out of that directory,
 // which is where the loader climbs from. Any other relative path stays
 // relative, naming the same file in its typed spelling, and the empty path is
-// returned unchanged, so it fails where the kernel refuses it.
+// returned unchanged, so it fails where the kernel refuses it. A path that ends
+// in a separator or a "." element returns ending in a separator, so the kernel
+// still requires a directory there.
 func Text(p string) (string, error) {
 	if p == "" {
 		return p, nil
 	}
 	c := filepath.Clean(p)
-	if filepath.IsAbs(c) || (c != ".." && !strings.HasPrefix(c, ".."+string(filepath.Separator))) {
-		return c, nil
+	if !filepath.IsAbs(c) && (c == ".." || strings.HasPrefix(c, ".."+string(filepath.Separator))) {
+		abs, err := filepath.Abs(c)
+		if err != nil {
+			return "", err //nolint:wrapcheck // the caller names the path it was given
+		}
+		c = abs
 	}
-	return filepath.Abs(c) //nolint:wrapcheck // the caller names the path it was given
+	if NamesDirectory(p) && !os.IsPathSeparator(c[len(c)-1]) {
+		c += string(filepath.Separator)
+	}
+	return c, nil
 }
 
 // Parent returns the directory that holds p's last element, as the kernel

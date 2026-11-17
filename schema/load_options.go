@@ -114,8 +114,8 @@ func WithSourcesOnly(only bool) LoadOption {
 // where it can only ever be a no-op. A key the key rule below refuses is
 // rejected outright too.
 //
-// A key is read by [github.com/simon-lentz/yammm/location.NormalizeSyntheticKey]:
-// it holds no backslash and no character that does not print, and once cleaned
+// A key is read by one rule:
+// it is valid UTF-8, holds no backslash and no character that does not print, and once cleaned
 // and in NFC it is relative and names a file, not the root or a directory above it. A key that escapes the root is
 // permitted and yields a ".."-bearing identity, which stays stable and
 // distinct. A relative import ("./x", "../x") resolves

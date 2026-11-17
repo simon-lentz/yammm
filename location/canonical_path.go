@@ -1,101 +1,53 @@
 package location
 
 import (
-	"fmt"
 	"path/filepath"
-	"unicode/utf8"
 
 	"golang.org/x/text/unicode/norm"
 )
 
-// CanonicalPath is a file-backed source identity: an absolute path in NFC,
+// canonicalPath is a file-backed source identity: an absolute path in NFC,
 // written with forward slashes. It is an identity, not a path to open; the
-// package documentation states the rules it follows. The zero value is invalid;
-// use IsZero to check.
-type CanonicalPath struct {
+// package documentation states the rules it follows. The zero value is no
+// identity.
+type canonicalPath struct {
 	path string
 }
 
-// NewCanonicalPath is the identity of the host path [ResolveHostPath] returns
-// for p, in NFC with forward slashes. It fails where ResolveHostPath does.
-func NewCanonicalPath(p string) (CanonicalPath, error) {
-	host, err := ResolveHostPath(p)
-	if err != nil {
-		return CanonicalPath{}, fmt.Errorf("canonicalize path %q: %w", p, err)
-	}
-	return identityOf(host), nil
-}
-
-// String returns the canonical path string.
-// This is the only way to extract the path value.
-func (c CanonicalPath) String() string {
+// String returns the identity's text.
+func (c canonicalPath) String() string {
 	return c.path
 }
 
-// IsZero reports whether this is a zero-value CanonicalPath (empty path).
-// The zero value is invalid and should not be used.
-func (c CanonicalPath) IsZero() bool {
+// IsZero reports whether c is the zero value.
+func (c canonicalPath) IsZero() bool {
 	return c.path == ""
 }
 
-// Dir returns the directory of c as a CanonicalPath, cleaning c first. At a
+// Dir returns the identity of c's directory, cleaning c first. At a
 // volume root it returns the root, and for the zero value the zero value.
-func (c CanonicalPath) Dir() CanonicalPath {
+func (c canonicalPath) Dir() canonicalPath {
 	if c.IsZero() {
-		return CanonicalPath{}
+		return canonicalPath{}
 	}
 	return identityOf(filepath.Dir(filepath.Clean(filepath.FromSlash(c.path))))
-}
-
-// Join appends path elements to c and returns the identity of the result,
-// resolved as [NewCanonicalPath] resolves a path. An element that is not
-// relative on the host returns [ErrAbsoluteJoinElement]; on Windows that
-// includes a rooted `\x` or `/x` and a drive-relative `C:x`, and on Unix a
-// backslash is part of a file name. An element that is not valid UTF-8 returns
-// [ErrInvalidUTF8Path]. For the zero value it returns the zero value.
-func (c CanonicalPath) Join(elem ...string) (CanonicalPath, error) {
-	if c.IsZero() {
-		return CanonicalPath{}, nil
-	}
-	parts := make([]string, 0, len(elem)+1)
-	parts = append(parts, filepath.FromSlash(c.path))
-	for _, e := range elem {
-		if !utf8.ValidString(e) {
-			return CanonicalPath{}, fmt.Errorf("%w: %q", ErrInvalidUTF8Path, e)
-		}
-		if filepath.IsAbs(e) || hostRootsElement(e) {
-			return CanonicalPath{}, fmt.Errorf("%w: %s; use relative path or NewCanonicalPath for absolute paths", ErrAbsoluteJoinElement, e)
-		}
-		parts = append(parts, filepath.FromSlash(e))
-	}
-	return NewCanonicalPath(filepath.Join(parts...))
-}
-
-// hostRootsElement reports whether the host resolves e against something other
-// than the path it is joined to: on Windows a leading separator roots e at the
-// current drive, and a volume name selects a drive. Unix has no such element.
-func hostRootsElement(e string) bool {
-	if filepath.Separator != '\\' || e == "" {
-		return false
-	}
-	return e[0] == '\\' || e[0] == '/' || filepath.VolumeName(e) != ""
 }
 
 // identityOf writes a resolved host path as an identity: NFC, with forward
 // slashes, and a network share's root with its trailing separator as a drive's
 // root has one, because filepath.Clean keeps `\\server\share\` and
 // `\\server\share` as two spellings of one directory.
-func identityOf(host string) CanonicalPath {
+func identityOf(host string) canonicalPath {
 	if vol := filepath.VolumeName(host); len(vol) > 2 && host == vol {
 		host += string(filepath.Separator)
 	}
-	return CanonicalPath{path: filepath.ToSlash(norm.NFC.String(host))}
+	return canonicalPath{path: filepath.ToSlash(norm.NFC.String(host))}
 }
 
-// looksLikeAbsolute reports whether s looks like an absolute path on any host:
-// a leading '/', a backslash UNC prefix, or a Windows volume root. It is the
-// shape [ValidateSyntheticSourceID] refuses everywhere, so a synthetic
-// identifier cannot collide with a file-backed one minted on another host.
+// looksLikeAbsolute reports whether s starts as an absolute path does on some
+// host: a '/', two backslashes, or an ASCII letter, a colon and a separator.
+// [NewSourceID] refuses it on every host, so a synthetic identifier cannot
+// collide with a file-backed one or read as a host path.
 func looksLikeAbsolute(s string) bool {
 	if len(s) == 0 {
 		return false

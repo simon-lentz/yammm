@@ -379,9 +379,8 @@ func UpdateMetadataOrReMarshal(
 		"snapshot.UpdateMetadataOrReMarshal: fell back to Load + Marshal after UpdateMetadata refused input").
 		WithDetail(diag.DetailKeyTriggeringCodes, strings.Join(triggeringCodes, ",")).
 		Build()
-	// The legs' own warnings travel with it. A fresh collector holding only
-	// this warning discarded everything Load and Marshal reported — a
-	// provenance-path fallback on the way in vanished from the caller's view.
+	// The legs' own warnings travel with it, so every warning Load and Marshal
+	// report reaches the caller.
 	c := diag.NewCollector(0)
 	c.Collect(warn)
 	for _, iss := range fallbackWarnings {

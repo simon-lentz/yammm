@@ -30,7 +30,7 @@ import (
 //
 // Three further refusals, each Error [diag.E_SNAPSHOT_MALFORMED]: an indent that is
 // not JSON whitespace, which would produce bytes that are not JSON, and a metadata
-// key or value, or an instance provenance's source name or raw path, that is not
+// key or value, or an instance provenance's source name or path, that is not
 // valid UTF-8, which encoding/json would write as U+FFFD.
 func Marshal(ctx context.Context, snap graph.Snapshot, opts ...Option) ([]byte, diag.Result) {
 	if snap.IsZero() {
@@ -382,23 +382,15 @@ func marshalDiagnostics(view *writerView, s schema.Schema, tt *typeTable) (diagW
 // [Marshal] refuses as it refuses such metadata.
 var errInvalidProvenance = errors.New("provenance text is not valid UTF-8")
 
-// marshalProvenance converts an instance's provenance to its wire form,
-// preferring the raw path a load kept, for a path that failed to parse or
-// parsed to another spelling.
+// marshalProvenance converts an instance's provenance to its wire form. The
+// path is written as it is held, so a document's own path comes back as its
+// bytes.
 func marshalProvenance(inst graph.Instance) (*provenanceWire, error) {
 	prov := inst.Provenance()
 	if prov.IsZero() {
 		return nil, nil //nolint:nilnil // an instance with no provenance writes none, which is no failure
 	}
-	// A recorded raw path is written back verbatim, INCLUDING an empty one.
-	// Reading RawPath() alone could not tell a recorded "" from no record, so
-	// a document that carried an empty path came back carrying "$" — and the
-	// W_SNAPSHOT_PATH_FALLBACK warning that named the substitution was gone by
-	// the second read.
 	pathStr := prov.Path().String()
-	if prov.HasRawPath() {
-		pathStr = prov.RawPath()
-	}
 	if !utf8.ValidString(prov.SourceName()) || !utf8.ValidString(pathStr) {
 		return nil, fmt.Errorf("%w: source name %s, path %s of %s[%s]", errInvalidProvenance,
 			diag.QuoteValue(prov.SourceName()), diag.QuoteValue(pathStr), inst.TypeName(), diag.CutValue(inst.PrimaryKey().String()))
