@@ -4,7 +4,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"syscall"
 	"testing"
 
 	"github.com/simon-lentz/yammm/diag"
@@ -42,9 +41,9 @@ func TestLoadSources_AKeyThatNamesADirectoryRefusesAFile(t *testing.T) {
 			t.Errorf("key %q loaded", key)
 			continue
 		}
-		// A load reports the refusal as text, so its message names the host's
-		// ENOTDIR, which on Windows is ERROR_PATH_NOT_FOUND's text.
-		if msg := firstError(res); !strings.Contains(msg, syscall.ENOTDIR.Error()) {
+		// A load reports the refusal as text, which reads as Unix's ENOTDIR on
+		// every host.
+		if msg := firstError(res); !strings.Contains(msg, "not a directory") {
 			t.Errorf("key %q: %s, want the not-a-directory refusal", key, msg)
 		}
 	}

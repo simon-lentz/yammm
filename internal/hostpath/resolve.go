@@ -8,7 +8,6 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
-	"syscall"
 	"unicode/utf8"
 )
 
@@ -37,8 +36,8 @@ var ErrInvalidUTF8Path = errors.New("location: path is not valid UTF-8")
 // as typed past its last existing component, as does one the process cannot
 // traverse past; a descriptor path is returned absolute and clean, its link not
 // followed. A path that ends in a separator or a "." element names a directory:
-// one whose last element exists and is not a directory is refused with ENOTDIR,
-// as the kernel refuses it.
+// one whose last element exists and is not a directory is refused with
+// [ErrNotDirectory], as the kernel refuses it.
 func Resolve(p string) (string, error) {
 	host, err := walkHostPath(p)
 	if err == nil && !utf8.ValidString(host) {
@@ -73,17 +72,18 @@ func walkHostPath(p string) (string, error) {
 		}
 		info, err := os.Stat(current)
 		if err == nil && len(missing) == 0 && wantDir && !info.IsDir() {
-			return "", fmt.Errorf("resolve %q: %w", p, &fs.PathError{Op: "stat", Path: current, Err: syscall.ENOTDIR})
+			return "", fmt.Errorf("resolve %q: %w", p, &fs.PathError{Op: "stat", Path: current, Err: ErrNotDirectory})
 		}
 		if err == nil && len(missing) == 0 && Descriptor(current) {
 			return current, nil
 		}
 		if err == nil {
 			// Windows reports a path under a regular file absent rather than
-			// ENOTDIR, so this is where its half of that refusal lands, as the
-			// same path error the Unix kernel returns.
+			// ENOTDIR, so this is where its half of that refusal lands: an error
+			// that reads and matches as the Unix kernel's ENOTDIR, naming the
+			// regular file.
 			if len(missing) > 0 && !info.IsDir() {
-				return "", fmt.Errorf("resolve %q: %w", p, &fs.PathError{Op: "stat", Path: current, Err: syscall.ENOTDIR})
+				return "", fmt.Errorf("resolve %q: %w", p, &fs.PathError{Op: "stat", Path: current, Err: ErrNotDirectory})
 			}
 			spelled, serr := spellOnDisk(current)
 			if serr == nil {

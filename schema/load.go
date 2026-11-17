@@ -69,7 +69,7 @@ type rootLoader struct {
 func newRootLoader(moduleRoot string) (*rootLoader, error) {
 	info, err := os.Stat(moduleRoot)
 	if err == nil && !info.IsDir() {
-		err = syscall.ENOTDIR
+		err = hostpath.ErrNotDirectory
 	}
 	if err != nil {
 		return nil, fmt.Errorf("open module root %q: %w", moduleRoot, err)

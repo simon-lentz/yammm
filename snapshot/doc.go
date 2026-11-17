@@ -152,12 +152,17 @@
 // it rather than following a symbolic link, and a relative path that climbs out
 // of the working directory is made absolute from it as [filepath.Abs] spells
 // it. The cleaning keeps a path that ends in a separator or a "." element
-// naming a directory, as the kernel reads it, so such a path is refused and no
-// file is written. A symbolic link at the path is then followed, as a chain,
+// naming a directory, as a Unix kernel reads it, so no file is written there.
+// When its last element is a file, sits under one, or does not exist in an
+// existing directory, WriteFile refuses it before staging, on every host, with
+// an error matching syscall.ENOTDIR. Under a directory that does not exist, or
+// when its stat fails otherwise, it is refused with the host's own error, and an
+// existing directory is refused as one spelled without the separator is. A symbolic link at the path is then followed, as a chain,
 // and the link survives: the file it names is written, and a dangling link
 // creates that file. A link's target is read as the kernel reads it: on Unix a ".." in the
 // target takes the parent of the directory reached on disk, and on Windows it
-// is evaluated on the text. The staging file is made in the directory of the
+// is evaluated on the text. The same rule judges each link target in
+// directory form, at the file the kernel reaches through it. The staging file is made in the directory of the
 // file the rename replaces.
 //
 // On an error during the write, WriteFile removes its own staging file and

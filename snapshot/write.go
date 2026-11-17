@@ -30,14 +30,20 @@ const maxLinkHops = 40
 // A ".." in path is evaluated on its text first, as the schema loader evaluates
 // it, and a symbolic link at it is then followed, so the link survives and the
 // file it names is written. A path that ends in a separator or a "." element
-// names a directory, so no file is written there. On an error, WriteFile removes its own staging file
-// and returns the error wrapped with the failing step. The package
+// names a directory: when its last element is a file, sits under one, or does
+// not exist in an existing directory, WriteFile refuses it before staging with
+// an error matching syscall.ENOTDIR. On an error, WriteFile
+// removes its own staging file and returns the error wrapped with the failing
+// step. The package
 // documentation states the staging name, the file mode, the durability limits
 // and what a crash leaves behind.
 func WriteFile(path string, data []byte) error {
 	text, err := hostpath.Text(path)
 	if err != nil {
 		return fmt.Errorf("resolve target: %w", err)
+	}
+	if err := hostpath.RefusedWrite(text); err != nil {
+		return fmt.Errorf("resolve target: %w", &fs.PathError{Op: "stat", Path: path, Err: err})
 	}
 	target, err := followFinalLinks(text)
 	if err != nil {
@@ -71,8 +77,9 @@ func WriteFile(path string, data []byte) error {
 
 // followFinalLinks returns the path the kernel reaches through the chain of
 // symbolic links at path, each target read uncleaned so the staging file and the
-// rename name one directory. A path that is not a link, or cannot be examined,
-// is returned as it is, and staging reports why.
+// rename name one directory. A target in directory form is judged as the path
+// itself is ([hostpath.RefusedWrite]). A path that is not a link, or cannot be
+// examined, is returned as it is, and staging reports why.
 func followFinalLinks(path string) (string, error) {
 	for hops := 0; ; hops++ {
 		info, err := os.Lstat(path)
@@ -87,6 +94,9 @@ func followFinalLinks(path string) (string, error) {
 			return "", err //nolint:wrapcheck // WriteFile wraps the error with the failing step
 		}
 		path = hostpath.FollowLink(path, dest)
+		if err := hostpath.RefusedWrite(path); err != nil {
+			return "", &fs.PathError{Op: "stat", Path: path, Err: err}
+		}
 	}
 }
 

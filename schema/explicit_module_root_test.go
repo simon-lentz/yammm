@@ -6,7 +6,6 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"syscall"
 	"testing"
 
 	"github.com/simon-lentz/yammm/diag"
@@ -44,6 +43,8 @@ func TestLoad_RefusesAnExplicitModuleRootThatIsNotADirectory(t *testing.T) {
 		}
 	}
 	plain := filepath.Join(dir, "plain")
+	// The refusal reads as Unix's ENOTDIR on every host, Windows included.
+	const notDirectory = "not a directory"
 	type refusal struct {
 		name  string
 		root  string
@@ -51,13 +52,13 @@ func TestLoad_RefusesAnExplicitModuleRootThatIsNotADirectory(t *testing.T) {
 	}
 	refusals := []refusal{
 		{"a missing path", filepath.Join(dir, "missing"), ""},
-		{"a regular file", plain, syscall.ENOTDIR.Error()},
-		{"a path under a regular file", filepath.Join(plain, "sub"), syscall.ENOTDIR.Error()},
+		{"a regular file", plain, notDirectory},
+		{"a path under a regular file", filepath.Join(plain, "sub"), notDirectory},
 	}
 	// The message opens with the root as given; its cause names where the link
 	// resolves it.
 	if err := os.Symlink(dir, filepath.Join(dir, "via")); err == nil {
-		refusals = append(refusals, refusal{"a regular file through a linked directory", filepath.Join(dir, "via", "plain"), syscall.ENOTDIR.Error()})
+		refusals = append(refusals, refusal{"a regular file through a linked directory", filepath.Join(dir, "via", "plain"), notDirectory})
 	}
 	for _, entry := range []string{"solo.yammm", "main.yammm"} {
 		for _, c := range refusals {

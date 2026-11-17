@@ -29,8 +29,8 @@ The `yammm` CLI provides schema validation, formatting, data checking, snapshot 
 
 ### Reading files
 
-A path that ends in a separator or a `.` element names a directory, as the
-kernel reads it: `yammm validate s.yammm/`, `gen --to cypher s.yammm/` and
+A path that ends in a separator or a `.` element names a directory, as a Unix
+kernel reads it, on every host: `yammm validate s.yammm/`, `gen --to cypher s.yammm/` and
 `check s.yammm d.json/` refuse a regular file so named at exit 3, naming the path
 and `not a directory`. v0.21.1's `validate s.yammm/` read the file.
 
@@ -42,11 +42,13 @@ path is evaluated on its text first, as for every path yammm reads, so
 `link/../f` is the `f` beside `link` and the file `yammm check` reads for that
 spelling, where on Unix the shell's `cat link/../f` reads the one beside the
 directory `link` reaches. The path's symlinks are then followed, each link's own target
-as the kernel follows it, so a link survives and the file it names is written. A
+as the kernel follows it, so a link survives and the file it names is written; the same
+rule judges each link target in directory form, at the file the kernel reaches. A
 regular file, or one that does not exist yet, is replaced atomically: the
 content is staged beside it and renamed over it, so an interrupted write leaves
 the previous file. A path that ends in a separator or a `.` element names a
-directory, so `-o snap.ys/` writes no file. A new file is created at `0600` on Unix (Windows honours
+directory, so `-o snap.ys/` writes no file: when `snap.ys` is a file, sits under one, or does not
+exist in an existing directory, it is refused at exit 3, naming `not a directory`. A new file is created at `0600` on Unix (Windows honours
 only a mode's write bit); an existing one keeps its permission bits, and loses setuid, setgid and sticky. A FIFO, a device,
 `/dev/stdin`, `/dev/stdout`, `/dev/stderr` or `/dev/fd/N` is written through, continuing its
 stream, however the path reaches that directory: through a link to `/dev`, or

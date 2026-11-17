@@ -39,7 +39,8 @@ type writeTarget struct {
 // descriptor path, or any file that is neither regular nor a directory, such as
 // a FIFO or a device, is written through; a directory, a loop of links, a
 // regular file it cannot open for writing and a path it cannot stat or read as
-// a link are refused. A descriptor path is decided by its name, because
+// a link are refused, as is a link target in directory form that
+// [hostpath.RefusedWrite] refuses. A descriptor path is decided by its name, because
 // /dev/stdout stats as whatever its descriptor holds; every other path by the
 // file it reaches.
 func resolveWriteTarget(path string) (writeTarget, error) {
@@ -63,6 +64,9 @@ func resolveWriteTarget(path string) (writeTarget, error) {
 				return writeTarget{}, bare(err)
 			}
 			resolved = hostpath.FollowLink(resolved, dest)
+			if err := hostpath.RefusedWrite(resolved); err != nil {
+				return writeTarget{}, err
+			}
 		case info.IsDir():
 			return writeTarget{}, syscall.EISDIR
 		case !info.Mode().IsRegular():
@@ -90,8 +94,13 @@ func resolveWriteTarget(path string) (writeTarget, error) {
 // payload is staged beside it, synced, given its mode and renamed over it. A
 // FIFO, a device, /dev/stdin, /dev/stdout, /dev/stderr or /dev/fd/N is written through,
 // since no rename can stand in for one. Anything else is refused, and every error names path.
+// A path that ends in a separator or a "." element names a directory, so it is
+// refused whatever its last element is, before anything is staged.
 func WriteFile(path string, data []byte) error {
 	host, err := HostPath(path)
+	if err == nil {
+		err = hostpath.RefusedWrite(host)
+	}
 	var t writeTarget
 	if err == nil {
 		t, err = resolveWriteTarget(host)

@@ -49,11 +49,12 @@
 // on the path's text before anything is looked up, so "dir/link/../x" names
 // "dir/x" whatever "dir/link" resolves to. A "." and a repeated separator are
 // cleaned on the text in the same step. A path that ends in a separator or a
-// "." element names a directory, as the kernel reads it: one whose last element
-// exists and is not a directory is refused with an [fs.PathError] wrapping
-// syscall.ENOTDIR, and the identity of one that is a directory, or does not
-// exist yet, is written without the separator. On Windows syscall.ENOTDIR is
-// ERROR_PATH_NOT_FOUND, so errors.Is reports [fs.ErrNotExist] for it there.
+// "." element names a directory, as a Unix kernel reads it, on every host: one whose last element
+// exists and is not a directory is refused with an [fs.PathError] whose error
+// matches syscall.ENOTDIR under errors.Is, is not itself a syscall.Errno, and
+// reads "not a directory" on every host, and the identity of one that is a directory, or does not exist yet, is
+// written without the separator. The refusal never matches [fs.ErrNotExist],
+// though Windows' own ENOTDIR, ERROR_PATH_NOT_FOUND, does.
 //
 // This is a decision, not an oversight, and for a ".." the path itself holds it
 // is the same decision on every host. A ".." inside a link's target is another

@@ -50,6 +50,9 @@ func HostPath(p string) (string, error) {
 // the operator spelled it.
 func ReadFile(path string) ([]byte, error) {
 	host, err := HostPath(path)
+	if err == nil {
+		err = hostpath.RefusedRead(host)
+	}
 	if err != nil {
 		return nil, &fs.PathError{Op: "open", Path: path, Err: err}
 	}
@@ -61,6 +64,9 @@ func ReadFile(path string) ([]byte, error) {
 // path as the operator spelled it.
 func Open(path string) (*os.File, error) {
 	host, err := HostPath(path)
+	if err == nil {
+		err = hostpath.RefusedRead(host)
+	}
 	if err != nil {
 		return nil, &fs.PathError{Op: "open", Path: path, Err: err}
 	}

@@ -8,7 +8,6 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
-	"syscall"
 )
 
 // linkTarget is walkedTarget: a Unix kernel takes a target's ".." on disk.
@@ -56,7 +55,7 @@ func walkTarget(start, target string) (string, error) {
 		rest := components[i+1:]
 		if slices.Contains(rest, "..") {
 			if err == nil {
-				err = syscall.ENOTDIR
+				err = ErrNotDirectory
 			}
 			return "", fmt.Errorf("link target %q takes a \"..\" past %q: %w", target, next, err)
 		}
