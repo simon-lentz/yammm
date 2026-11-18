@@ -17,7 +17,7 @@ stderr E_DATA_PARSE
 
 # Invalid data fails and the JSON diagnostics format emits structured fields
 # on stderr.
-! exec yammm check --format json valid.yammm bad.json
+! exec yammm check --json valid.yammm bad.json
 stderr '"severity"'
 stderr '"error"'
 

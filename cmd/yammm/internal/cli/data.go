@@ -7,6 +7,7 @@ import (
 	"io"
 	"maps"
 	"slices"
+	"strconv"
 
 	"github.com/simon-lentz/yammm/cmd/yammm/internal/jsondata"
 	"github.com/simon-lentz/yammm/diag"
@@ -17,7 +18,7 @@ import (
 	"github.com/simon-lentz/yammm/snapshot"
 )
 
-// LoadAndParseJSON reads a JSON file and parses it into raw instances.
+// LoadAndParseJSON reads a JSON file and parses it into its elements.
 //
 // The bytes come through the path the kernel reaches for path ([ReadFile]), and
 // the identity, the one the schema loader derives, only names them, so a data
@@ -29,7 +30,7 @@ import (
 // diag.Result carries the parse's diagnostics. The caller refuses an empty path
 // or one that is not valid UTF-8 first ([CheckSourceOperand], exit 2), so every
 // error this returns is a path the filesystem answered, and exits 3.
-func LoadAndParseJSON(ctx context.Context, path string) (map[string][]instance.RawInstance, diag.Result, error) {
+func LoadAndParseJSON(ctx context.Context, path string) (map[string][]jsondata.Element, diag.Result, error) {
 	data, err := ReadFile(path)
 	if err != nil {
 		return nil, diag.Result{}, fmt.Errorf("read data file: %w", err)
@@ -59,18 +60,69 @@ type validatedBatch struct {
 	valids   []instance.ValidInstance
 }
 
-// ValidateInstances validates parsed instances against the schema and returns
-// them with the merged diagnostics.
-func ValidateInstances(ctx context.Context, s schema.Schema, parsed map[string][]instance.RawInstance) (Validated, diag.Result) {
+// ValidateInstances validates parsed elements against the schema and returns
+// them with the merged diagnostics. An element the parser refused is not
+// validated, and its entry is zero, as a refused instance's is. A diagnostic's
+// instance index names its element among the type's elements, refused or not.
+func ValidateInstances(ctx context.Context, s schema.Schema, parsed map[string][]jsondata.Element) (Validated, diag.Result) {
 	doc := Validated{validator: instance.NewValidator(s)}
 	collector := diag.NewCollectorUnlimited()
 	for _, typeName := range slices.Sorted(maps.Keys(parsed)) {
-		raws := parsed[typeName]
-		valids, result := doc.validator.Validate(ctx, typeName, raws)
-		collector.Merge(result)
+		elements := parsed[typeName]
+		raws := make([]instance.RawInstance, len(elements))
+		judged := []instance.RawInstance{}
+		var at []int // at[j] is the index in elements of judged[j]
+		for i, e := range elements {
+			raws[i] = e.RawInstance
+			if !e.Refused {
+				judged = append(judged, e.RawInstance)
+				at = append(at, i)
+			}
+		}
+		judgedValids, result := doc.validator.Validate(ctx, typeName, judged)
+		var valids []instance.ValidInstance
+		if judgedValids != nil {
+			valids = make([]instance.ValidInstance, len(elements))
+			for j, valid := range judgedValids {
+				valids[at[j]] = valid
+			}
+		}
+		if len(judged) == len(elements) {
+			collector.Merge(result)
+		} else {
+			collector.MergeFunc(result, restampIndex(at))
+		}
 		doc.batches = append(doc.batches, validatedBatch{typeName: typeName, raws: raws, valids: valids})
 	}
 	return doc, collector.Result()
+}
+
+// restampIndex returns the transform that rewrites an issue's instance index
+// j, an index into the batch the validator judged, as at[j].
+func restampIndex(at []int) func(diag.Issue) diag.Issue {
+	return func(issue diag.Issue) diag.Issue {
+		details := issue.Details()
+		changed := false
+		for k, d := range details {
+			if d.Key != diag.DetailKeyInstanceIndex {
+				continue
+			}
+			if j, err := strconv.Atoi(d.Value); err == nil && j >= 0 && j < len(at) && at[j] != j {
+				details[k].Value = strconv.Itoa(at[j])
+				changed = true
+			}
+		}
+		if !changed {
+			return issue
+		}
+		return diag.NewIssue(issue.Severity(), issue.Code(), issue.Message()).
+			WithSpan(issue.Span()).
+			WithPath(issue.SourceName(), issue.Path()).
+			WithHint(issue.Hint()).
+			WithRelated(issue.Related()...).
+			WithDetails(details...).
+			Build()
+	}
 }
 
 // Valids returns the instances the validator accepted, in validation order.

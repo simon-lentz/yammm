@@ -12,7 +12,9 @@ import (
 	"github.com/simon-lentz/yammm/schema"
 	"github.com/simon-lentz/yammm/schema/cypher"
 
+	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/simon-lentz/yammm/cmd/yammm/internal/cli"
 )
@@ -588,4 +590,105 @@ func TestDiffSchema_ReportsARemoteRowDiffRefusesAtExitThree(t *testing.T) {
 	if stdout.Len() != 0 {
 		t.Errorf("a plan was printed:\n%s", stdout.String())
 	}
+}
+
+// TestBindNeo4jFlags_TheCommandLineThenANonEmptyVariable pins the order a
+// connection flag is read in: the command line, then its variable, then the
+// default. A variable set to the empty string is unset.
+func TestBindNeo4jFlags_TheCommandLineThenANonEmptyVariable(t *testing.T) {
+	bound := func(t *testing.T, args ...string) map[string]string {
+		t.Helper()
+		cmd := &cobra.Command{Use: "x"}
+		registerConnectionFlags(cmd)
+		require.NoError(t, cmd.Flags().Parse(args))
+		require.NoError(t, bindNeo4jFlags(cmd))
+		got := make(map[string]string)
+		for _, name := range []string{"uri", "username", "password", "database"} {
+			v, err := cmd.Flags().GetString(name)
+			require.NoError(t, err)
+			got[name] = v
+		}
+		return got
+	}
+
+	t.Setenv("YAMMM_NEO4J_URI", "bolt://env")
+	t.Setenv("YAMMM_NEO4J_USERNAME", "env-user")
+	t.Setenv("YAMMM_NEO4J_PASSWORD", "env-pass")
+	t.Setenv("YAMMM_NEO4J_DATABASE", "envdb")
+	assert.Equal(t, map[string]string{"uri": "bolt://env", "username": "env-user", "password": "env-pass", "database": "envdb"},
+		bound(t), "each variable sets the flag the command line left")
+	assert.Equal(t, map[string]string{"uri": "bolt://env", "username": "env-user", "password": "from-flag", "database": "envdb"},
+		bound(t, "--password", "from-flag"), "the command line wins")
+
+	t.Setenv("YAMMM_NEO4J_URI", "")
+	t.Setenv("YAMMM_NEO4J_USERNAME", "")
+	assert.Equal(t, map[string]string{"uri": "", "username": "neo4j", "password": "env-pass", "database": "envdb"},
+		bound(t), "an empty variable is unset, so the default stands")
+}
+
+// TestPrintConstraintDiff_RemoteTextCannotActOnTheTerminal pins that a name,
+// a label and a reason the database states are written as the text renderer
+// writes a diagnostic: a control character neither reaches the terminal nor
+// starts a line.
+func TestPrintConstraintDiff_RemoteTextCannotActOnTheTerminal(t *testing.T) {
+	t.Parallel()
+
+	hostile := "x\x1b[2J\nforged: line"
+	diff := &neo4j.ConstraintDiff{
+		Drift: []neo4j.ConstraintDrift{{
+			Desired: cypher.Constraint{Name: "c1"},
+			Blockers: neo4j.Blockers{
+				Constraints: []neo4j.RemoteConstraint{{Name: hostile, Type: "UNIQUENESS", LabelsOrTypes: []string{hostile}, Properties: []string{"id"}}},
+			},
+			Reason: hostile,
+		}},
+		Drop: []neo4j.RemoteConstraint{{Name: hostile, CreateStatement: hostile}},
+	}
+
+	var buf bytes.Buffer
+	printConstraintDiff(&buf, diff)
+	out := buf.String()
+	assert.NotContains(t, out, "\x1b")
+	for line := range strings.Lines(out) {
+		assert.False(t, strings.HasPrefix(line, "forged"), "a remote newline started the line %q", line)
+	}
+}
+
+// TestPrintIndexDiff_RemoteTextCannotActOnTheTerminal is the index half of
+// [TestPrintConstraintDiff_RemoteTextCannotActOnTheTerminal]: a drift's reason,
+// a drop's name, type and labels, an unverified index's reason and a blocker's
+// type, labels and properties.
+func TestPrintIndexDiff_RemoteTextCannotActOnTheTerminal(t *testing.T) {
+	t.Parallel()
+
+	hostile := "x\x1b[2J\nforged: line"
+	diff := &neo4j.IndexDiff{
+		Drift: []neo4j.IndexDrift{{
+			Desired: cypher.Index{Name: "i1"},
+			Blockers: neo4j.Blockers{
+				Indexes: []neo4j.RemoteIndex{{Name: "b", Type: hostile, LabelsOrTypes: []string{hostile}, Properties: []string{hostile}}},
+			},
+			Reason: hostile,
+		}},
+		Drop:       []neo4j.RemoteIndex{{Name: hostile, Type: hostile, LabelsOrTypes: []string{hostile}}},
+		Unverified: []neo4j.IndexUnverified{{Desired: cypher.Index{Name: "i2"}, Reason: hostile}},
+	}
+
+	var buf bytes.Buffer
+	printIndexDiff(&buf, diff, nil)
+	out := buf.String()
+	assert.NotContains(t, out, "\x1b")
+	for line := range strings.Lines(out) {
+		assert.False(t, strings.HasPrefix(line, "forged"), "a remote newline started the line %q", line)
+	}
+}
+
+// TestPrintDiffSummary_ABlankLineSetsTheSummaryOff pins the blank line above
+// each half's summary.
+func TestPrintDiffSummary_ABlankLineSetsTheSummaryOff(t *testing.T) {
+	t.Parallel()
+
+	var buf bytes.Buffer
+	printConstraintDiff(&buf, &neo4j.ConstraintDiff{})
+	assert.True(t, strings.HasPrefix(buf.String(), "\nsummary: "), "got %q", buf.String())
 }

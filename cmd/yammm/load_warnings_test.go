@@ -52,7 +52,7 @@ func TestLoadWarningsRenderedByEveryCommand(t *testing.T) {
 // command writes AT MOST ONE JSON document to stderr, whatever phases it runs.
 //
 // Two-phase commands rendered the schema load's diagnostics and then their own,
-// which in --format json wrote two complete JSON objects back to back. Once load
+// which in --json wrote two complete JSON objects back to back. Once load
 // warnings became reachable, any schema carrying one plus a data phase that
 // reported anything produced output that json.Unmarshal, json.loads, and
 // JSON.parse all reject with a trailing-data error.
@@ -67,8 +67,8 @@ func TestJSONDiagnosticsAreOneDocumentPerInvocation(t *testing.T) {
 		name string
 		args []string
 	}{
-		{"check", []string{"check", "--format", "json", schemaPath, dataPath}},
-		{"snapshot save", []string{"snapshot", "save", "--format", "json", "-o", filepath.Join(t.TempDir(), "out.ys"), schemaPath, dataPath}},
+		{"check", []string{"check", "--json", schemaPath, dataPath}},
+		{"snapshot save", []string{"snapshot", "save", "--json", "-o", filepath.Join(t.TempDir(), "out.ys"), schemaPath, dataPath}},
 	}
 
 	for _, tt := range tests {

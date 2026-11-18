@@ -20,7 +20,7 @@ func main() {
 }
 
 // run executes the CLI and is the one write site for a failure a command
-// returned rather than diagnosed. Under --format json a command's sink has
+// returned rather than diagnosed. Under --json a command's sink has
 // already folded its failure into the document, so a message reaching here is
 // one cobra raised before any command ran, and it becomes a document.
 func run() int {
@@ -48,15 +48,15 @@ func execute(cmd *cobra.Command) error {
 	return cli.Usage(helpRefusal())
 }
 
-// jsonRequested reports whether args ask for --format json. It reads the flag
+// jsonRequested reports whether args ask for --json. It reads the flag
 // itself, because cobra parses no flag at all before it fails to find a
 // command, and an unknown command is still owed a document.
 func jsonRequested(args []string) bool {
 	probe := &cobra.Command{FParseErrWhitelist: cobra.FParseErrWhitelist{UnknownFlags: true}}
-	format := probe.Flags().String("format", string(cli.FormatText), "")
+	asJSON := probe.Flags().Bool("json", false, "")
 	// pflag stops at an undefined -h or --help, even with unknown flags
-	// allowed, so without it a --format after either is never read.
+	// allowed, so without it a --json after either is never read.
 	probe.Flags().BoolP("help", "h", false, "")
 	_ = probe.ParseFlags(args)
-	return *format == string(cli.FormatJSON)
+	return *asJSON
 }

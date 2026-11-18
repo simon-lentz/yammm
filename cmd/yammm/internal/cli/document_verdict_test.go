@@ -8,6 +8,7 @@ import (
 	"slices"
 	"testing"
 
+	"github.com/simon-lentz/yammm/cmd/yammm/internal/jsondata"
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/instance"
@@ -104,10 +105,10 @@ func model(base, doc []person) expectedVerdict {
 	return want
 }
 
-func raws(people []person) map[string][]instance.RawInstance {
-	out := map[string][]instance.RawInstance{}
+func raws(people []person) map[string][]jsondata.Element {
+	out := map[string][]jsondata.Element{}
 	for _, p := range people {
-		out["Person"] = append(out["Person"], p.raw())
+		out["Person"] = append(out["Person"], jsondata.Element{RawInstance: p.raw()})
 	}
 	return out
 }
@@ -199,13 +200,13 @@ type Person {
 }
 `
 
-func teamRaws(team, people []map[string]any) map[string][]instance.RawInstance {
-	out := map[string][]instance.RawInstance{}
+func teamRaws(team, people []map[string]any) map[string][]jsondata.Element {
+	out := map[string][]jsondata.Element{}
 	for _, p := range team {
-		out["Team"] = append(out["Team"], instance.RawInstance{Properties: p})
+		out["Team"] = append(out["Team"], jsondata.Element{RawInstance: instance.RawInstance{Properties: p}})
 	}
 	for _, p := range people {
-		out["Person"] = append(out["Person"], instance.RawInstance{Properties: p})
+		out["Person"] = append(out["Person"], jsondata.Element{RawInstance: instance.RawInstance{Properties: p}})
 	}
 	return out
 }
@@ -233,7 +234,7 @@ func TestBuildGraph_TypesAMissingTargetByItsRelation(t *testing.T) {
 	member := map[string]any{"id": "p", "name": "P", "team": map[string]any{"_target_id": "t"}}
 	for _, tc := range []struct {
 		name        string
-		raws        map[string][]instance.RawInstance
+		raws        map[string][]jsondata.Element
 		wantMissing int
 	}{
 		{"a refused Team", teamRaws([]map[string]any{{"id": "t"}}, []map[string]any{member}), 0},

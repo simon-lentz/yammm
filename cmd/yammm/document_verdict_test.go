@@ -42,13 +42,13 @@ func verdictFixture(t *testing.T, docs map[string]string) (dir, schemaPath strin
 }
 
 // dataCommands returns, for each command the one data pipeline serves, its
-// argument list over schemaPath and dataPath under --format json.
+// argument list over schemaPath and dataPath under --json.
 func dataCommands(t *testing.T, schemaPath, dataPath string) map[string][]string {
 	t.Helper()
 	out := filepath.Join(t.TempDir(), "out.ys")
 	return map[string][]string{
-		"check":         {"check", "--format", "json", schemaPath, dataPath},
-		"snapshot save": {"snapshot", "save", "--format", "json", "-o", out, schemaPath, dataPath},
+		"check":         {"check", "--json", schemaPath, dataPath},
+		"snapshot save": {"snapshot", "save", "--json", "-o", out, schemaPath, dataPath},
 	}
 }
 
@@ -204,7 +204,7 @@ func TestSnapshotSave_TheDataFilesAreOneDocument(t *testing.T) {
 {"id": "boss", "name": "B", "manager": {"_target_id": "boss"}}
 ]}`,
 	})
-	code, _, errOut := executeCmdOutput(t, "snapshot", "save", "--format", "json", "-o", filepath.Join(dir, "out.ys"),
+	code, _, errOut := executeCmdOutput(t, "snapshot", "save", "--json", "-o", filepath.Join(dir, "out.ys"),
 		schemaPath, filepath.Join(dir, "first.json"), filepath.Join(dir, "second.json"))
 	if code != cli.ExitValidation {
 		t.Fatalf("exit code = %d, want %d", code, cli.ExitValidation)
@@ -239,7 +239,7 @@ func TestSnapshotSaveInto_TheMergedFileHoldsItsKeys(t *testing.T) {
 	if code, _, errOut := executeCmdOutput(t, "snapshot", "save", "-o", base, schemaPath, filepath.Join(dir, "base.json")); code != cli.ExitOK {
 		t.Fatalf("save the base: exit %d\n%s", code, errOut)
 	}
-	code, _, errOut := executeCmdOutput(t, "snapshot", "save", "--format", "json", "-o", filepath.Join(dir, "out.ys"),
+	code, _, errOut := executeCmdOutput(t, "snapshot", "save", "--json", "-o", filepath.Join(dir, "out.ys"),
 		"--into", base, schemaPath, filepath.Join(dir, "more.json"))
 	if code != cli.ExitValidation {
 		t.Fatalf("exit code = %d, want %d", code, cli.ExitValidation)
@@ -262,7 +262,7 @@ func TestSnapshotSave_KeepsEarlierFilesFindingsWhenALaterFileCannotBeRead(t *tes
 	dir, schemaPath := verdictFixture(t, map[string]string{
 		"first.json": `{"Person": [{"id": "a", "id": "b", "name": "A", "manager": {"_target_id": "a"}}]}`,
 	})
-	code, _, errOut := executeCmdOutput(t, "snapshot", "save", "--format", "json", "-o", filepath.Join(dir, "out.ys"),
+	code, _, errOut := executeCmdOutput(t, "snapshot", "save", "--json", "-o", filepath.Join(dir, "out.ys"),
 		schemaPath, filepath.Join(dir, "first.json"), filepath.Join(dir, "missing.json"))
 	if code != cli.ExitRuntime {
 		t.Fatalf("exit code = %d, want %d", code, cli.ExitRuntime)
@@ -288,7 +288,7 @@ func TestSnapshotSave_RefusesAUsageErrorBeforeReadingAnyFile(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
-			argv := append([]string{"snapshot", "save", "--format", "json", "-o", filepath.Join(t.TempDir(), "out.ys"), schemaPath}, args...)
+			argv := append([]string{"snapshot", "save", "--json", "-o", filepath.Join(t.TempDir(), "out.ys"), schemaPath}, args...)
 			code, _, errOut := executeCmdOutput(t, argv...)
 			if code != cli.ExitUsage {
 				t.Fatalf("exit code = %d, want %d", code, cli.ExitUsage)
@@ -315,9 +315,9 @@ func TestDataCommands_RefuseAUsageErrorBeforeAnyRead(t *testing.T) {
 	const data = "bad\xff.json"
 	out := filepath.Join(dir, "out.ys")
 	for name, argv := range map[string][]string{
-		"check":                {"check", "--format", "json", broken, data},
-		"snapshot save":        {"snapshot", "save", "--format", "json", "-o", out, broken, data},
-		"snapshot save --into": {"snapshot", "save", "--format", "json", "--into", filepath.Join(dir, "missing.ys"), broken, data},
+		"check":                {"check", "--json", broken, data},
+		"snapshot save":        {"snapshot", "save", "--json", "-o", out, broken, data},
+		"snapshot save --into": {"snapshot", "save", "--json", "--into", filepath.Join(dir, "missing.ys"), broken, data},
 	} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
@@ -410,7 +410,7 @@ type Target {
 		t.Fatal(err)
 	}
 
-	code, _, errOut := executeCmdOutput(t, "snapshot", "save", "--format", "json", "--into", base,
+	code, _, errOut := executeCmdOutput(t, "snapshot", "save", "--json", "--into", base,
 		"-o", filepath.Join(dir, "out.ys"), entryPath, filepath.Join(dir, "refused.json"))
 	if code != cli.ExitValidation {
 		t.Fatalf("exit code = %d, want %d\nstderr:\n%s", code, cli.ExitValidation, errOut)

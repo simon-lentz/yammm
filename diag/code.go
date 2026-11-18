@@ -127,7 +127,7 @@ var (
 
 	// E_COMMAND_FAILED carries a command-line failure that is not itself a
 	// diagnostic — a bad flag, an unreadable path, a lost connection — into a
-	// --format json document, so a machine consumer reads it by code rather
+	// --json document, so a machine consumer reads it by code rather
 	// than as prose beside the document. Its exit_code detail is the code the
 	// process exits with.
 	E_COMMAND_FAILED = NewCode("E_COMMAND_FAILED", CategorySentinel)
@@ -367,8 +367,9 @@ var (
 
 	// E_DATA_PARSE indicates an instance document that is not well formed, is
 	// not one object, holds a type name whose value is not an array of objects,
-	// states one member name twice in one object, or nests deeper than the
-	// decoder's 10,000-level limit.
+	// states one member name twice in one object, holds a string that is not
+	// valid UTF-8 or a \u escape that is half of no surrogate pair, or nests
+	// deeper than the decoder's 10,000-level limit.
 	E_DATA_PARSE = NewCode("E_DATA_PARSE", CategoryInstance)
 
 	// E_CASE_FOLD_COLLISION indicates multiple input fields collide after case-folding.

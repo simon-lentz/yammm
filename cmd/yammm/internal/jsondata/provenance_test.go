@@ -6,11 +6,10 @@ import (
 	"github.com/simon-lentz/yammm/internal/yammmtest/sourcetest"
 
 	"github.com/simon-lentz/yammm/diag"
-	"github.com/simon-lentz/yammm/instance"
 	"github.com/simon-lentz/yammm/location"
 )
 
-func parseForProvenance(t *testing.T, id location.SourceID, doc string) (map[string][]instance.RawInstance, diag.Result) {
+func parseForProvenance(t *testing.T, id location.SourceID, doc string) (map[string][]Element, diag.Result) {
 	t.Helper()
 	return Parse(t.Context(), id, []byte(doc))
 }

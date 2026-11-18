@@ -10,35 +10,6 @@ import (
 	"github.com/simon-lentz/yammm/diag"
 )
 
-func TestParseOutputFormat(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		input   string
-		want    OutputFormat
-		wantErr bool
-	}{
-		{"text", FormatText, false},
-		{"json", FormatJSON, false},
-		{"yaml", "", true},
-		{"", "", true},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.input, func(t *testing.T) {
-			t.Parallel()
-			got, err := ParseOutputFormat(tt.input)
-			if tt.wantErr {
-				require.Error(t, err)
-				assert.Equal(t, ExitUsage, ExitForError(err), "an unknown format is the invocation's mistake")
-				return
-			}
-			require.NoError(t, err)
-			assert.Equal(t, tt.want, got)
-		})
-	}
-}
-
 func TestExitForResult(t *testing.T) {
 	t.Parallel()
 

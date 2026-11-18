@@ -51,9 +51,11 @@ stdout 'class County'
 ! stdout 'fips String'
 stdout '### County'
 
-# "markdown" is accepted as an alias for md.
-exec yammm gen --to markdown county.yammm
-stdout '# Schema geo'
+# --to takes md alone: no alias, and no other case.
+! exec yammm gen --to markdown county.yammm
+stderr 'unsupported gen target "markdown"'
+! exec yammm gen --to MD county.yammm
+stderr 'unsupported gen target "MD"'
 
 # --output writes the document to a file and keeps stdout free of it.
 exec yammm gen --to md --output county.md county.yammm

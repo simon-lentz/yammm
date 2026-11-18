@@ -63,7 +63,7 @@ stdout 'Person'
 stdout 'Total instances:'
 stdout 'ok'
 
-exec yammm snapshot info --format json out.ys
+exec yammm snapshot info --json out.ys
 stdout '"schema_name"'
 stdout '"total_instances"'
 stdout '"integrity_status"'
@@ -75,7 +75,7 @@ stdout 'Integrity:'
 ! stdout 'Total instances:'
 ! stdout 'Summary:'
 
-exec yammm snapshot info --header-only --format json out.ys
+exec yammm snapshot info --header-only --json out.ys
 stdout '"schema_name"'
 stdout '"integrity_hash"'
 ! stdout '"total_instances"'
@@ -91,7 +91,7 @@ stdout '0\.ys'
 stdout '1\.ys'
 stdout 'Summary: 2 ok'
 
-exec yammm snapshot info --dir snaps --format json
+exec yammm snapshot info --dir snaps --json
 stdout '"name"'
 stdout '"header"'
 stdout '"mod_time": "[0-9]{4}-[0-9]{2}-[0-9]{2}T'
@@ -115,10 +115,9 @@ stderr 'E_SNAPSHOT_INCOMPATIBLE_SCHEMA'
 # --- update-metadata ---
 exec yammm snapshot save valid.yammm data.json -o um.ys -m phase=extract
 exec yammm snapshot update-metadata -s phase=link um.ys
-# The summary is progress, so it goes to stderr where every other command's
-# does; stdout carries payloads and nothing else.
-stderr 'updated metadata'
-! stdout 'updated metadata'
+# A success prints nothing.
+! stdout .
+! stderr .
 grep '"phase":"link"' um.ys
 
 exec yammm snapshot update-metadata -s phase=transform -s pipeline_completed=true um.ys

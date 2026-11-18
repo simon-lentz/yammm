@@ -292,7 +292,7 @@
 //
 // # Dependencies
 //
-//	snapshot  ──imports──▶  graph, instance, schema, diag, location, instance/path, immutable, internal/value, internal/hostpath, internal/snapparts
+//	snapshot  ──imports──▶  graph, instance, schema, diag, location, instance/path, immutable, internal/value, internal/hostpath, internal/snapparts, internal/jsonstring
 //
 // The instance edge exists for [WithRevalidation], whose re-validation runs
 // the real validator, so the option's fidelity is the validator's own, and for

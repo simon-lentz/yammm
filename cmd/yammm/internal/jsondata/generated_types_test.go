@@ -53,7 +53,7 @@ func readSnapshot(t *testing.T, s schema.Schema, doc []byte) []byte {
 	g := graph.New(s)
 	for _, typeName := range slices.Sorted(maps.Keys(parsed)) {
 		for _, raw := range parsed[typeName] {
-			valid, res := v.ValidateOne(ctx, typeName, raw)
+			valid, res := v.ValidateOne(ctx, typeName, raw.RawInstance)
 			if !res.OK() {
 				t.Fatalf("validate: %s\n%s", res, doc)
 			}
@@ -232,7 +232,7 @@ func compositionsOf(t *testing.T, s schema.Schema, doc []byte) [][]string {
 	}
 	var out [][]string
 	for _, raw := range parsed["Sensor"] {
-		if _, res := v.ValidateOne(t.Context(), "Sensor", raw); !res.OK() {
+		if _, res := v.ValidateOne(t.Context(), "Sensor", raw.RawInstance); !res.OK() {
 			t.Fatalf("validate: %s\n%s", res, doc)
 		}
 		var names []string

@@ -190,51 +190,10 @@ func mustAbs(t *testing.T, path string) string {
 	return abs
 }
 
-// TestSnapshotSave_SummaryCountsTheArtefact pins that the summary counts the
-// document it wrote, not the instances this invocation parsed, so a merge
-// reports a number a reader of the file can reproduce.
-func TestSnapshotSave_SummaryCountsTheArtefact(t *testing.T) {
-	t.Parallel()
-
-	base, more := saveInto(t)
-
-	_, _, errOut := executeCmdOutput(t, "snapshot", "save",
-		"testdata/valid.yammm", more, "--into", base)
-
-	// testdata/data.json holds two instances and more.json holds one.
-	const want = "saved snapshot: 3 instances of 1 types"
-	if !strings.Contains(errOut, want) {
-		t.Errorf("stderr does not contain %q — the summary describes the artefact, not the input:\n%s", want, errOut)
-	}
-}
-
-// TestSnapshotSave_SummaryAgreesWithSnapshotInfo is the second implementation
-// of the count above: whatever route the summary takes, it must land on the
-// number the reader of the same file reports.
-func TestSnapshotSave_SummaryAgreesWithSnapshotInfo(t *testing.T) {
-	t.Parallel()
-
-	base, more := saveInto(t)
-	_, _, errOut := executeCmdOutput(t, "snapshot", "save",
-		"testdata/valid.yammm", more, "--into", base)
-
-	_, out, _ := executeCmdOutput(t, "snapshot", "info", base)
-
-	summary := strings.TrimSpace(lineContaining(t, errOut, "saved snapshot:"))
-	reported := strings.TrimSpace(lineContaining(t, out, "Total instances:"))
-	summaryCount := strings.Fields(summary)[2]
-	reportedCount := strings.Fields(reported)[2]
-	if summaryCount != reportedCount {
-		t.Errorf("save reported %s instances and snapshot info reports %s — one file, two counts",
-			summaryCount, reportedCount)
-	}
-}
-
-// TestSnapshotSave_SummaryCountsEveryType covers the other half of the count.
-// A single-type fixture cannot tell a real type count from a hard-coded 1, so
-// this one merges a second type in and asserts both numbers against the reader
-// of the same file.
-func TestSnapshotSave_SummaryCountsEveryType(t *testing.T) {
+// TestSnapshotSave_IntoMergesEveryType pins that a merge writes the merged
+// file's instances and the new file's, of every type, and prints nothing: the
+// reader of the file reports both counts.
+func TestSnapshotSave_IntoMergesEveryType(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
@@ -257,19 +216,17 @@ func TestSnapshotSave_SummaryCountsEveryType(t *testing.T) {
 	if code != cli.ExitOK {
 		t.Fatalf("base save exit code = %d, want %d\nstderr:\n%s", code, cli.ExitOK, errOut)
 	}
-
-	_, _, errOut = executeCmdOutput(t, "snapshot", "save", schemaPath, companies, "--into", base)
-	summary := strings.TrimSpace(lineContaining(t, errOut, "saved snapshot:"))
-
-	const want = "saved snapshot: 3 instances of 2 types"
-	if !strings.Contains(summary, want) {
-		t.Errorf("summary is %q, want %q", summary, want)
+	code, out, errOut := executeCmdOutput(t, "snapshot", "save", schemaPath, companies, "--into", base)
+	if code != cli.ExitOK || out != "" || errOut != "" {
+		t.Fatalf("merge: exit %d with %q and %q, want %d and nothing printed", code, out, errOut, cli.ExitOK)
 	}
 
-	_, out, _ := executeCmdOutput(t, "snapshot", "info", base)
-	reportedTypes := strings.Fields(strings.TrimSpace(lineContaining(t, out, "Types:")))[1]
-	if got := strings.Fields(summary)[5]; got != reportedTypes {
-		t.Errorf("save reported %s types and snapshot info reports %s — one file, two counts", got, reportedTypes)
+	_, info, _ := executeCmdOutput(t, "snapshot", "info", base)
+	if got := strings.Fields(lineContaining(t, info, "Total instances:"))[2]; got != "3" {
+		t.Errorf("the merged file holds %s instances, want 3", got)
+	}
+	if got := strings.Fields(lineContaining(t, info, "Types:"))[1]; got != "2" {
+		t.Errorf("the merged file holds %s types, want 2", got)
 	}
 }
 

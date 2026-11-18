@@ -104,15 +104,15 @@ func TestCommandTable_HoldsWhatCobraAccepts(t *testing.T) {
 		if f, ok := flags["help"]; !ok || f.Shorthand != "h" || !f.NoValue {
 			t.Errorf("%q: help flag = %+v, %v; want -h taking no value", path, f, ok)
 		}
-		if f, ok := flags["format"]; !ok || f.NoValue {
-			t.Errorf("%q: format flag = %+v, %v; want it inherited, taking a value", path, f, ok)
+		if f, ok := flags["json"]; !ok || !f.NoValue {
+			t.Errorf("%q: json flag = %+v, %v; want it inherited, taking no value", path, f, ok)
 		}
 		if f := flags["no-color"]; !f.NoValue {
 			t.Errorf("%q: no-color flag = %+v; want it inherited, taking no value", path, f)
 		}
 	}
-	if f, ok := byPath[""]["version"]; !ok || f.Shorthand != "v" || !f.NoValue {
-		t.Errorf("the program's version flag = %+v, %v; want -v taking no value", f, ok)
+	if f, ok := byPath[""]["version"]; !ok || f.Shorthand != "" || !f.NoValue {
+		t.Errorf("the program's version flag = %+v, %v; want --version alone, taking no value", f, ok)
 	}
 	if _, ok := byPath["check"]["version"]; ok {
 		t.Error("check inherits --version, which cobra defines on the program alone")
@@ -141,7 +141,7 @@ func TestCommandTable_HoldsWhatCobraAccepts(t *testing.T) {
 				t.Errorf("%q: --%s NoValue = %v, but its value type is %s", c.Path, f.Name, f.NoValue, pf.Value.Type())
 			}
 		}
-		for _, want := range []string{"help", "format", "no-color"} {
+		for _, want := range []string{"help", "json", "no-color"} {
 			if !names[want] {
 				t.Errorf("%q: the table has no --%s", c.Path, want)
 			}

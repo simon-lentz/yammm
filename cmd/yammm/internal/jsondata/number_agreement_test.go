@@ -128,7 +128,7 @@ func jsonReader(ctx context.Context, t *testing.T, v *instance.Validator, prop, 
 	if err := pres.Err(); err != nil {
 		t.Fatalf("JSON parse %s: %v", doc, err)
 	}
-	return validated(ctx, v, parsed["T"][0], prop)
+	return validated(ctx, v, parsed["T"][0].RawInstance, prop)
 }
 
 func validated(ctx context.Context, v *instance.Validator, raw instance.RawInstance, prop string) (any, bool) {

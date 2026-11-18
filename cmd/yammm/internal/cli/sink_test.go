@@ -88,7 +88,7 @@ func TestDiagnosticSink_RendersOneJSONDocument(t *testing.T) {
 }
 
 // An empty sink writes nothing as text, and exactly one JSON document holding
-// no issue under --format json, so a JSON consumer parses stderr whatever the
+// no issue under --json, so a JSON consumer parses stderr whatever the
 // run found.
 func TestDiagnosticSink_EmptyRendersNothingAsTextAndOneDocumentAsJSON(t *testing.T) {
 	t.Parallel()

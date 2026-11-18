@@ -1,8 +1,6 @@
 package main
 
 import (
-	"bytes"
-	"context"
 	"fmt"
 	"maps"
 	"strings"
@@ -48,7 +46,18 @@ func runSnapshotSave(cmd *cobra.Command, args []string, sink *cli.DiagnosticSink
 	indent, _ := cmd.Flags().GetBool("indent")
 	intoPath, _ := cmd.Flags().GetString("into")
 
-	// Validate output destination: either --output or --into must be set.
+	// A path flag given empty names no file, so it is refused rather than read
+	// as absent: -o "" with --into would otherwise overwrite the --into file.
+	if cmd.Flags().Changed("output") {
+		if err := cli.CheckOperand("output file", outputPath); err != nil {
+			return err
+		}
+	}
+	if cmd.Flags().Changed("into") {
+		if err := cli.CheckOperand("snapshot file", intoPath); err != nil {
+			return err
+		}
+	}
 	if outputPath == "" && intoPath == "" {
 		return cli.Usagef("either --output or --into is required")
 	}
@@ -72,13 +81,6 @@ func runSnapshotSave(cmd *cobra.Command, args []string, sink *cli.DiagnosticSink
 	if err != nil {
 		return err
 	}
-	// Judged when given, as an empty value is: it names no file either.
-	if cmd.Flags().Changed("into") {
-		if err := cli.CheckOperand("snapshot file", intoPath); err != nil {
-			return err
-		}
-	}
-
 	// Load schema.
 	moduleRoot, loadOpts, err := moduleRootOptions(cmd, sink)
 	if err != nil {
@@ -156,29 +158,7 @@ func runSnapshotSave(cmd *cobra.Command, args []string, sink *cli.DiagnosticSink
 			WithPath(outputPath, "").Build())
 		sink.Add(c.Result())
 	}
-
-	// Every diagnostic this invocation can produce is in the sink by now, so
-	// flushing here keeps them above the line that says the work finished.
-	sink.Flush()
-	instanceCount, typeCount := countSnapshot(cmd.Context(), snap, data)
-	sink.Statusf("saved snapshot: %d instances of %d types\n", instanceCount, typeCount)
-
 	return nil
-}
-
-// countSnapshot counts what the written document holds: its root instances
-// from the graph, and its types from the type table the bytes carry, which
-// lists a composed child's type and is the set `snapshot info` reports.
-func countSnapshot(ctx context.Context, snap graph.Snapshot, data []byte) (instances, types int) {
-	for _, id := range snap.Types() {
-		for range snap.InstancesOf(id) {
-			instances++
-		}
-	}
-	if header, _ := snapshot.HeaderOnlyRead(ctx, bytes.NewReader(data)); header != nil {
-		types = len(header.Types)
-	}
-	return instances, types
 }
 
 // mergeMetadata overlays flag pairs onto the imported header's. The header's

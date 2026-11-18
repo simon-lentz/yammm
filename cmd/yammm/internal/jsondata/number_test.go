@@ -150,7 +150,7 @@ func TestParse_IntegerLiteralOutsideInt64IsRefusedAtAnInteger(t *testing.T) {
 			if err := pres.Err(); err != nil {
 				t.Fatalf("parse: %v", err)
 			}
-			_, vres := instance.NewValidator(s).Validate(ctx, "T", parsed["T"])
+			_, vres := instance.NewValidator(s).Validate(ctx, "T", rawsOf(parsed["T"]))
 			if !vres.HasErrors() {
 				t.Fatalf("%s validated at an Integer property", literal)
 			}
@@ -187,7 +187,7 @@ func TestParse_AFloatLiteralIsRefusedAtAnInteger(t *testing.T) {
 			if err := pres.Err(); err != nil {
 				t.Fatalf("parse: %v", err)
 			}
-			_, vres := instance.NewValidator(s).Validate(ctx, "T", parsed["T"])
+			_, vres := instance.NewValidator(s).Validate(ctx, "T", rawsOf(parsed["T"]))
 			if !vres.HasCode(diag.E_TYPE_MISMATCH) || !strings.Contains(vres.String(), "got float") ||
 				strings.Contains(vres.String(), "int64 range") {
 				t.Errorf("%s drew %s, want E_TYPE_MISMATCH naming a float", literal, vres.String())
@@ -210,7 +210,7 @@ func TestParse_IntegerLiteralOutsideInt64IsAFloatAtAFloat(t *testing.T) {
 	if err := pres.Err(); err != nil {
 		t.Fatalf("parse: %v", err)
 	}
-	valid, vres := instance.NewValidator(s).Validate(ctx, "T", parsed["T"])
+	valid, vres := instance.NewValidator(s).Validate(ctx, "T", rawsOf(parsed["T"]))
 	if vres.HasErrors() {
 		t.Fatalf("validate: %s", vres.String())
 	}
@@ -218,4 +218,13 @@ func TestParse_IntegerLiteralOutsideInt64IsAFloatAtAFloat(t *testing.T) {
 	if f, ok := got.Any().(float64); !ok || f != 1e20 {
 		t.Errorf("f = %#v, want float64(1e20)", got.Any())
 	}
+}
+
+// rawsOf returns the raw instances of elements, in order.
+func rawsOf(elements []Element) []instance.RawInstance {
+	raws := make([]instance.RawInstance, len(elements))
+	for i, e := range elements {
+		raws[i] = e.RawInstance
+	}
+	return raws
 }

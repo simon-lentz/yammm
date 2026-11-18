@@ -227,7 +227,7 @@ func (j joined) Unwrap() []error { return j }
 // code as its exit_code detail — and false when err is nil or a bare exit
 // signal.
 //
-// It is how a failure reaches a --format json consumer: inside the one
+// It is how a failure reaches a --json consumer: inside the one
 // document, as an issue matched by code, rather than as prose beside it.
 func FailureResult(err error) (diag.Result, bool) {
 	msgs := failureMessages(err)

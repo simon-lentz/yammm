@@ -70,3 +70,36 @@ func TestSnapshotSave_Into_CorruptedFile(t *testing.T) {
 	code := executeCmd(t, "snapshot", "save", "testdata/valid.yammm", newData, "--into", ysPath)
 	assert.Equal(t, cli.ExitValidation, code)
 }
+
+// TestSnapshotSave_AnEmptyOutputIsRefused pins that -o "" names no file, with
+// --into too, where an omitted -o under --into writes the merged file. It is
+// refused before the schema, the data or the merged file is read.
+func TestSnapshotSave_AnEmptyOutputIsRefused(t *testing.T) {
+	base := createYSFixture(t, t.TempDir())
+	before, err := os.ReadFile(base)
+	require.NoError(t, err)
+	for _, args := range [][]string{
+		{"snapshot", "save", "-o", "", "testdata/valid.yammm", "testdata/data.json"},
+		{"snapshot", "save", "--into", base, "-o", "", "testdata/valid.yammm", "testdata/data_carol.json"},
+		// Nothing named exists, so a refusal judged after any read would exit 3.
+		{"snapshot", "save", "--into", base + ".missing", "-o", "", base + ".yammm", base + ".json"},
+	} {
+		code, stdout, stderr := runCLI(t, args...)
+		assert.Equal(t, cli.ExitUsage, code, "stderr:\n%s", stderr)
+		assert.Empty(t, stdout)
+		assert.Contains(t, stderr, "output file")
+	}
+	after, err := os.ReadFile(base)
+	require.NoError(t, err)
+	assert.Equal(t, before, after, "a refused save leaves the merged file as it was")
+}
+
+// TestSnapshotSave_AnEmptyIntoIsRefusedAsAnEmptyPath pins that --into "" is
+// refused as the path it fails to name, not read as an absent flag.
+func TestSnapshotSave_AnEmptyIntoIsRefusedAsAnEmptyPath(t *testing.T) {
+	code, stdout, stderr := runCLI(t, "snapshot", "save", "--into", "", "testdata/valid.yammm", "testdata/data.json")
+	assert.Equal(t, cli.ExitUsage, code, "stderr:\n%s", stderr)
+	assert.Empty(t, stdout)
+	assert.Contains(t, stderr, "snapshot file")
+	assert.NotContains(t, stderr, "either --output or --into")
+}

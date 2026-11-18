@@ -1,5 +1,6 @@
 // Package jsondata reads the JSON instance documents the yammm CLI checks into
-// [instance.RawInstance] values. A document is a JSON object keyed by type
+// [Element] values, each an [instance.RawInstance] and whether the parser
+// refused it. A document is a JSON object keyed by type
 // name, each key holding an array of instances:
 //
 //	{
@@ -9,7 +10,8 @@
 //
 // # Parsing
 //
-// [Parse] reads a document and returns its instances by type name.
+// [Parse] reads a document and returns its elements by type name, each an
+// [instance.RawInstance] and whether the parser refused it ([Element]).
 // Input is preprocessed with [tidwall/jsonc], so comments and trailing commas
 // are tolerated.
 //
@@ -24,11 +26,13 @@
 //     key and both arrays' instances are in the entry, each indexing its own
 //     array.
 //   - A member name repeated inside one object, at any depth of an instance.
-//     Names compare as the decoder reads them: escapes are resolved, and each
-//     byte of an invalid UTF-8 sequence reads as U+FFFD, which is the key the
-//     decoder keeps. Each repeat is reported where it stands, and the instance
-//     is produced holding the value the decoder kept, the last one the object
-//     states.
+//     Names compare as the decoder reads them, escapes resolved; a name the
+//     Text section below refuses is compared with none. Each repeat is
+//     reported where it stands, and the instance is produced holding the value
+//     the decoder kept, the last one the object states, unless the Text
+//     section removes it.
+//   - A string whose text the decoder reads as other text, at a type name or
+//     at any depth of an instance; the Text section below states it.
 //   - A null at a type name, which a decoder reads as a nil slice with no error.
 //   - A null element of an instance array, which a decoder reads as a nil map
 //     with no error.
@@ -50,7 +54,8 @@
 //
 // The bytes are read as jsonc and the decoder read them together: JSON as
 // encoding/json reads it, where a string may hold any byte of an invalid UTF-8
-// sequence, and jsonc's comments wherever white space may stand. jsonc blanks
+// sequence (the Text section refuses one without stopping the parse), and
+// jsonc's comments wherever white space may stand. jsonc blanks
 // a comma that a closing delimiter follows, so "[," can still close and
 // "[1,,]" is refused at its second comma. At a blank position, a "/" that no "/" or "*"
 // follows is refused at the byte after it; inside a literal or a number, or
@@ -123,15 +128,30 @@
 //
 // # Text
 //
-// A string value is read as encoding/json reads it: each byte of an invalid
-// UTF-8 sequence reads as U+FFFD, as it does in a member name. So no string
-// Parse returns is invalid UTF-8, and the validator's refusal of such a string
-// (E_TYPE_MISMATCH) answers no document Parse read.
+// encoding/json reads each byte of an invalid UTF-8 sequence, and each \u
+// escape that is half of no surrogate pair, as U+FFFD, so two strings that
+// differ only there read as one. Parse refuses such a string, a member name
+// and a value alike, with E_DATA_PARSE at its opening quote. A type name that
+// is one has its value skipped, as a refused type name does.
+//
+// An element that holds one is produced refused ([Element].Refused): it is an
+// instance the document states, so a referrer to its key and a second instance
+// with its key read it as they read an instance the validator refuses. A caller
+// validates none of it, so its one issue is the parse's: its other breaks are
+// reported once its text is the document's, as a schema's are once it parses.
+// A member whose name is one is removed. A member whose value holds one at any
+// depth keeps its name and has an [instance.Refused] in place of its value, so
+// the case-fold rule claims the same members it would without the fault, and a
+// key component that holds one reads as no key. Of a repeated name, the member
+// is edited only when the occurrence the decoder keeps, the last, holds one. So
+// every string Parse returns outside an [instance.Refused] is the text the
+// document states.
 //
 // # Dependencies
 //
 //	cmd/yammm/internal/jsondata  ──imports──▶  instance, diag, location, instance/path,
-//	                                           internal/value, github.com/tidwall/jsonc
+//	                                           internal/value, internal/jsonstring,
+//	                                           github.com/tidwall/jsonc
 //
 // [tidwall/jsonc]: https://github.com/tidwall/jsonc
 package jsondata

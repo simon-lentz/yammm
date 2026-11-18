@@ -11,7 +11,7 @@ import (
 )
 
 // TestRun_StderrIsOneJSONDocument reads the byte stream a shell redirect
-// captures: under --format json a failing invocation's stderr is exactly one
+// captures: under --json a failing invocation's stderr is exactly one
 // JSON document or nothing, with the failure inside the document rather than
 // printed beside it. It drives run(), so what run() itself writes is in scope.
 func TestRun_StderrIsOneJSONDocument(t *testing.T) {
@@ -30,7 +30,7 @@ func TestRun_StderrIsOneJSONDocument(t *testing.T) {
 		{"validate, unreadable schema", "validate " + missing},
 		{"validate, invalid schema", "validate testdata/invalid.yammm"},
 		{"fmt, unreadable path", "fmt " + missing},
-		{"fmt, syntax error", "fmt --check " + broken},
+		{"fmt, syntax error", "fmt -l " + broken},
 		{"check, unreadable schema", "check " + missing + " testdata/data.json"},
 		{"check, unreadable data", "check " + shadowedSchema + " " + missing + ".json"},
 		{"check, validation errors", "check " + shadowedSchema + " testdata/annotation_shadowed_bad.json"},
@@ -60,7 +60,7 @@ func TestRun_StderrIsOneJSONDocument(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			args := append([]string{"--format", "json"}, strings.Fields(tt.cmd)...)
+			args := append([]string{"--json"}, strings.Fields(tt.cmd)...)
 			_, _, stderr := runCLI(t, args...)
 			checkRepairState(t, "one JSON document: "+tt.name, oneJSONDocumentOutcome(stderr))
 		})

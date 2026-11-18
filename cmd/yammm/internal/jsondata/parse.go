@@ -14,6 +14,7 @@ import (
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/instance"
 	"github.com/simon-lentz/yammm/instance/path"
+	"github.com/simon-lentz/yammm/internal/jsonstring"
 	"github.com/simon-lentz/yammm/internal/value"
 	"github.com/simon-lentz/yammm/location"
 )
@@ -22,20 +23,30 @@ import (
 // second is a parse error.
 var byteOrderMark = []byte("\uFEFF")
 
+// Element is one object of a type's instance array. Refused reports that it
+// holds a string the Text section of the package doc refuses: it is an instance
+// the document states and the parser refused, so a caller validates none of it.
+// A caller reads its key from its Properties, edited as that section states, so
+// a key component that holds such a string reads as no key.
+type Element struct {
+	instance.RawInstance
+	Refused bool
+}
+
 // Parse reads data as one top-level key per type name, each holding an array
-// of instances, and returns the instances by type name. Every valid type name
+// of instances, and returns the elements by type name. Every valid type name
 // whose value is an array has an entry, an empty array included, unless a fault
 // or a cancellation stops the parse first. The package doc states the
 // diagnostics, the positions they carry, and what a cancellation returns.
-func Parse(ctx context.Context, source location.SourceID, data []byte) (map[string][]instance.RawInstance, diag.Result) {
+func Parse(ctx context.Context, source location.SourceID, data []byte) (map[string][]Element, diag.Result) {
 	return parse(ctx, source, data, newPositionTable(data))
 }
 
 // parse is [Parse] locating every diagnostic through positions, a table over
 // data, so a test reads what the positions cost from the table afterwards.
-func parse(ctx context.Context, source location.SourceID, data []byte, positions *positionTable) (map[string][]instance.RawInstance, diag.Result) {
+func parse(ctx context.Context, source location.SourceID, data []byte, positions *positionTable) (map[string][]Element, diag.Result) {
 	collector := diag.NewCollectorUnlimited()
-	result := make(map[string][]instance.RawInstance)
+	result := make(map[string][]Element)
 
 	// jsonc tolerates comments and trailing commas, writing one byte per
 	// comment byte, so an offset into the rewritten buffer is an offset into
@@ -85,7 +96,8 @@ func parse(ctx context.Context, source location.SourceID, data []byte, positions
 			return result, collector.Result()
 		}
 
-		keySpan := pc.spanAt(pc.readStart(int(dec.InputOffset())))
+		keyAt := pc.readStart(int(dec.InputOffset()))
+		keySpan := pc.spanAt(keyAt)
 
 		// Read type name
 		keyTok, err := dec.Token()
@@ -102,6 +114,13 @@ func parse(ctx context.Context, source location.SourceID, data []byte, positions
 			return result, collector.Result()
 		}
 
+		if fault, ok := pc.textFault(keyAt, stringEnd(pc.buf, keyAt)); ok {
+			collector.Collect(fault)
+			if !pc.skipMember(dec, collector) {
+				return result, collector.Result()
+			}
+			continue
+		}
 		if fault := typeTagFault(typeName); fault != "" {
 			collector.Collect(typeTagError(keySpan, typeName, fault))
 			if !pc.skipMember(dec, collector) {
@@ -173,7 +192,7 @@ type parseContext struct {
 	bomLen    int
 	positions *positionTable
 
-	// frames is repeatedMembers' stack, kept between elements so a scan
+	// frames is scanElement's stack, kept between elements so a scan
 	// reuses what the last one grew.
 	frames []nameFrame
 }
@@ -260,13 +279,13 @@ func describeByte(b []byte) string {
 }
 
 // parseArray reads the array of instances under typeName, collecting every
-// fault it can read past. It returns the instances read, non-nil when the value
+// fault it can read past. It returns the elements read, non-nil when the value
 // opened as an array, and false when the decoder cannot read on.
 //
 // An instance's path indexes the array as the document writes it, so an element
 // that failed to decode still consumes its index and the path agrees with the
 // span beside it.
-func parseArray(dec *json.Decoder, pc *parseContext, typeName string, collector *diag.Collector) ([]instance.RawInstance, bool) {
+func parseArray(dec *json.Decoder, pc *parseContext, typeName string, collector *diag.Collector) ([]Element, bool) {
 	// Read opening bracket
 	valueStart := int(dec.InputOffset())
 	tok, err := dec.Token()
@@ -284,7 +303,7 @@ func parseArray(dec *json.Decoder, pc *parseContext, typeName string, collector 
 		return nil, true
 	}
 
-	result := []instance.RawInstance{}
+	result := []Element{}
 
 	for index := 0; dec.More(); index++ {
 		elemStart := pc.readStart(int(dec.InputOffset()))
@@ -313,22 +332,43 @@ func parseArray(dec *json.Decoder, pc *parseContext, typeName string, collector 
 		// holds the value encoding/json keeps, the last, and a parser that
 		// dropped it would lose data the document states over a fault the
 		// diagnostic already names.
-		for _, r := range pc.repeatedMembers(elemStart, int(dec.InputOffset())) {
+		repeats, textFaults := pc.scanElement(elemStart, int(dec.InputOffset()))
+		for _, r := range repeats {
 			first := pc.spanAt(r.first).Start
 			collector.Collect(pc.parseError(pc.spanAt(r.at), "repeated member "+diag.QuoteValue(r.name),
 				fmt.Sprintf("first at %d:%d; a member name is used once per object", first.Line, first.Column)))
 		}
-
+		// A string that is not the text it reads as is reported and the element
+		// is refused: the decoder read it as U+FFFD, a value the document does
+		// not state. The element stays a stated instance, whose key a referrer
+		// or a repeat still finds.
+		for _, fault := range textFaults {
+			collector.Collect(fault)
+		}
 		// Normalize json.Number to numeric types
 		normalizeNumbers(obj)
 
-		result = append(result, instance.RawInstance{
-			Properties: obj,
-			Provenance: instance.NewProvenance(
-				pc.source.String(),
-				path.Root.Key(typeName).Index(index),
-				elemSpan,
-			),
+		refused := len(textFaults) > 0
+		if refused {
+			for name, inName := range pc.faultedMembers(elemStart, int(dec.InputOffset())) {
+				if inName {
+					delete(obj, name)
+				} else {
+					obj[name] = instance.Refused{Value: obj[name]}
+				}
+			}
+		}
+
+		result = append(result, Element{
+			RawInstance: instance.RawInstance{
+				Properties: obj,
+				Provenance: instance.NewProvenance(
+					pc.source.String(),
+					path.Root.Key(typeName).Index(index),
+					elemSpan,
+				),
+			},
+			Refused: refused,
 		})
 	}
 
@@ -348,7 +388,7 @@ type repeatedMember struct {
 	at, first int
 }
 
-// nameFrame is one open object or array of the value repeatedMembers scans.
+// nameFrame is one open object or array of the value scanElement scans.
 // An object's names are compared in place while it has few, and through an
 // index once it has more, so a small object makes no map and a large one is
 // not scanned quadratically.
@@ -368,13 +408,13 @@ type memberName struct {
 // indexedAbove is the name count past which a frame looks names up in a map.
 const indexedAbove = 16
 
-// repeatedMembers returns every member name in buf[start:end] that repeats an
-// earlier name of the same object, at any depth. Decoding into a map keeps the
-// last value of a repeated name, so the repeat is found on the bytes the value
-// was decoded from, which the decoder has already checked are one JSON value.
-// Names compare as the decoder decodes them, escapes resolved.
-func (pc *parseContext) repeatedMembers(start, end int) []repeatedMember {
-	var repeats []repeatedMember
+// scanElement reads the bytes of buf[start:end], which the decoder has already
+// read as one JSON value, at every depth. It returns each member name that
+// repeats an earlier name of the same object, since decoding into a map keeps
+// the last value of a repeated name, and the [parseContext.textFault] of each
+// string that has one. Names compare as the decoder decodes them, escapes
+// resolved; a name with a text fault is compared with none.
+func (pc *parseContext) scanElement(start, end int) (repeats []repeatedMember, textFaults []diag.Issue) {
 	depth := 0
 	for i := start; i < end; i++ {
 		switch pc.buf[i] {
@@ -395,19 +435,87 @@ func (pc *parseContext) repeatedMembers(start, end int) []repeatedMember {
 			}
 		case '"':
 			closing := stringEnd(pc.buf, i)
+			fault, faulted := pc.textFault(i, closing)
+			if faulted {
+				textFaults = append(textFaults, fault)
+			}
 			if f := &pc.frames[depth-1]; f.object && f.expectKey {
 				f.expectKey = false
-				name := decodeName(pc.buf[i : closing+1])
-				if first, ok := f.lookup(name); ok {
-					repeats = append(repeats, repeatedMember{name: string(name), at: i, first: first})
-				} else {
-					f.add(name, i)
+				if !faulted {
+					pc.compareName(f, i, closing, &repeats)
 				}
 			}
 			i = closing
 		}
 	}
-	return repeats
+	return repeats, textFaults
+}
+
+// faultedMembers maps the name, as the decoder keys the object, of each member
+// of the element at buf[start:end] whose last occurrence, the one the decoder
+// keeps, holds a [parseContext.textFault] to whether the fault is in its name;
+// otherwise it is at some depth of its value. It reads each byte once, and
+// only an element with a fault is read again.
+func (pc *parseContext) faultedMembers(start, end int) map[string]bool {
+	// fault is 0 for none, 1 in the value, 2 in the name.
+	fault := make(map[string]int)
+	name := ""
+	depth := 0
+	expectKey := false
+	for i := start; i < end; i++ {
+		switch pc.buf[i] {
+		case '{', '[':
+			depth++
+			expectKey = depth == 1
+		case '}', ']':
+			depth--
+		case ',':
+			expectKey = depth == 1
+		case '"':
+			closing := stringEnd(pc.buf, i)
+			_, faulted := pc.textFault(i, closing)
+			switch {
+			case expectKey:
+				expectKey = false
+				name = keyedName(pc.buf[i : closing+1])
+				fault[name] = 0
+				if faulted {
+					fault[name] = 2
+				}
+			case faulted && fault[name] == 0:
+				fault[name] = 1
+			}
+			i = closing
+		}
+	}
+	inName := make(map[string]bool)
+	for n, f := range fault {
+		if f > 0 {
+			inName[n] = f == 2
+		}
+	}
+	return inName
+}
+
+// keyedName returns the quoted member name as the decoder keys a map with it,
+// U+FFFD in place of each sequence a text fault names.
+func keyedName(quoted []byte) string {
+	var name string
+	if err := json.Unmarshal(quoted, &name); err != nil {
+		return string(quoted)
+	}
+	return name
+}
+
+// compareName records the name quoted at buf[open:closing+1] in f, or as a
+// repeat when f already holds it.
+func (pc *parseContext) compareName(f *nameFrame, open, closing int, repeats *[]repeatedMember) {
+	name := decodeName(pc.buf[open : closing+1])
+	if first, ok := f.lookup(name); ok {
+		*repeats = append(*repeats, repeatedMember{name: string(name), at: open, first: first})
+		return
+	}
+	f.add(name, open)
 }
 
 func (f *nameFrame) lookup(name []byte) (int, bool) {
@@ -452,12 +560,11 @@ func stringEnd(buf []byte, open int) int {
 	return len(buf) - 1
 }
 
-// decodeName returns the text of a quoted member name as the decoder reads it.
-// A name holding no escape and only valid UTF-8 is the buffer's own bytes; the
-// decoder replaces each byte of an invalid sequence with U+FFFD, so such a name
-// is decoded as the decoder decodes it.
+// decodeName returns the text of a quoted member name that has no
+// [parseContext.textFault] as the decoder reads it: a name holding no escape is
+// the buffer's own bytes.
 func decodeName(quoted []byte) []byte {
-	if bytes.IndexByte(quoted, '\\') < 0 && utf8.Valid(quoted) {
+	if bytes.IndexByte(quoted, '\\') < 0 {
 		return quoted[1 : len(quoted)-1]
 	}
 	var name string
@@ -465,6 +572,26 @@ func decodeName(quoted []byte) []byte {
 		return quoted
 	}
 	return []byte(name)
+}
+
+// textFault returns an E_DATA_PARSE issue at the string buf[open:closing+1]
+// when the decoder reads its text as other text: a byte that is not valid
+// UTF-8, or a \u escape that is half of no surrogate pair, each of which
+// encoding/json reads as U+FFFD.
+func (pc *parseContext) textFault(open, closing int) (diag.Issue, bool) {
+	body := pc.buf[open+1 : closing]
+	if at := jsonstring.InvalidUTF8(body); at >= 0 {
+		return pc.parseError(pc.spanAt(open), "string is not valid UTF-8",
+			fmt.Sprintf("byte 0x%02x is not valid UTF-8; encoding/json would read it as U+FFFD", body[at])), true
+	}
+	if bytes.IndexByte(body, '\\') < 0 {
+		return diag.Issue{}, false
+	}
+	if at := jsonstring.LoneSurrogate(body); at >= 0 {
+		return pc.parseError(pc.spanAt(open), "string holds a lone surrogate escape",
+			fmt.Sprintf("the escape %s is half of no surrogate pair; encoding/json would read it as U+FFFD", body[at:at+6])), true
+	}
+	return diag.Issue{}, false
 }
 
 // parseError creates an E_DATA_PARSE issue at span.

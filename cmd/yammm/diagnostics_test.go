@@ -171,7 +171,7 @@ func TestSnapshotInfoDirMarksWarnings(t *testing.T) {
 
 	t.Run("json still carries the issue", func(t *testing.T) {
 		t.Parallel()
-		_, stdout, _ := executeCmdOutput(t, "snapshot", "info", "--dir", dir, "--format", "json")
+		_, stdout, _ := executeCmdOutput(t, "snapshot", "info", "--dir", dir, "--json")
 		if !strings.Contains(stdout, "E_SNAPSHOT_UNSUPPORTED_HASH_ALGORITHM") {
 			t.Errorf("the JSON entry must carry the warning; stdout:\n%s", stdout)
 		}
@@ -246,15 +246,6 @@ func TestDiagnosticsPrecedeThePayload(t *testing.T) {
 			payload: "CREATE CONSTRAINT",
 		},
 		{
-			name: "snapshot save, whose payload is its status line",
-			args: []string{
-				"snapshot", "save", "-o", filepath.Join(t.TempDir(), "made.snap"),
-				shadowedSchema, "testdata/annotation_shadowed_good.json",
-			},
-			first:   "W_SNAPSHOT_PATH_EXTENSION",
-			payload: "saved snapshot:",
-		},
-		{
 			name:    "gen",
 			args:    []string{"gen", "--to", "md", shadowedSchema},
 			first:   "W_ANNOTATION_SHADOWED",
@@ -299,7 +290,7 @@ func executeCmdCombined(t *testing.T, args ...string) string {
 }
 
 // TestStderrIsOneJSONDocument pins the rule DiagnosticSink.Close states: under
-// --format json stderr carries exactly one complete JSON document. Two
+// --json stderr carries exactly one complete JSON document. Two
 // documents concatenated fail a reader that parses one document, and an empty
 // stream reads the same for a clean run and a process that died before it
 // rendered.
@@ -347,7 +338,7 @@ func TestStderrIsOneJSONDocument(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			args := append([]string{"--format", "json"}, strings.Fields(tt.cmd)...)
+			args := append([]string{"--json"}, strings.Fields(tt.cmd)...)
 			_, _, stderr := executeCmdOutput(t, args...)
 			assertOneJSONDocument(t, stderr)
 		})
@@ -355,8 +346,8 @@ func TestStderrIsOneJSONDocument(t *testing.T) {
 }
 
 // TestStderrIsOneJSONDocumentOnSuccess is the invariant's other half, and the
-// one the command-writer harness cannot see: a status summary written straight
-// to the process stream sits beside the document and stops it parsing.
+// one the command-writer harness cannot see: a line written straight to the
+// process stream sits beside the document and stops it parsing.
 //
 // It drives run(), so what it reads is the byte stream a shell redirect would
 // capture. Success paths only — a failure adds run()'s own "error: " line,
@@ -372,19 +363,19 @@ func TestStderrIsOneJSONDocumentOnSuccess(t *testing.T) {
 		name string
 		args []string
 	}{
-		{"validate, clean", []string{"validate", "--format", "json", "testdata/valid.yammm"}},
-		{"check, clean", []string{"check", "--format", "json", "testdata/valid.yammm", "testdata/data.json"}},
-		{"fmt --check, clean", []string{"fmt", "--format", "json", "--check", "testdata/valid.yammm"}},
-		{"snapshot save, whose summary follows the document", []string{
-			"snapshot", "save", "--format", "json", "-o", snap,
+		{"validate, clean", []string{"validate", "--json", "testdata/valid.yammm"}},
+		{"check, clean", []string{"check", "--json", "testdata/valid.yammm", "testdata/data.json"}},
+		{"fmt -l, clean", []string{"fmt", "--json", "-l", "testdata/valid.yammm"}},
+		{"snapshot save", []string{
+			"snapshot", "save", "--json", "-o", snap,
 			shadowedSchema, "testdata/annotation_shadowed_good.json",
 		}},
 		{"snapshot save onto a path that is not .ys", []string{
-			"snapshot", "save", "--format", "json", "-o", notYS,
+			"snapshot", "save", "--json", "-o", notYS,
 			shadowedSchema, "testdata/annotation_shadowed_good.json",
 		}},
-		{"snapshot update-metadata, whose summary is a status line", []string{
-			"snapshot", "update-metadata", "--format", "json", "-s", "a=b", meta,
+		{"snapshot update-metadata", []string{
+			"snapshot", "update-metadata", "--json", "-s", "a=b", meta,
 		}},
 	}
 
@@ -399,23 +390,39 @@ func TestStderrIsOneJSONDocumentOnSuccess(t *testing.T) {
 	}
 }
 
-// TestStatusSummariesShareOneStream pins that update-metadata reports its
-// result on stderr, where every other command reports progress. A summary on
-// stdout reaches the payload channel of a caller that redirects the two apart.
-func TestStatusSummariesShareOneStream(t *testing.T) {
+// TestCommands_PrintNothingOnSuccess pins that a command that succeeds and
+// owes no payload writes nothing on either stream, as go build does, so a
+// hook that reads any output as a finding stays quiet.
+func TestCommands_PrintNothingOnSuccess(t *testing.T) {
 	dir := t.TempDir()
 	meta := filepath.Join(dir, "meta.ys")
 	copyFile(t, "testdata/valid_snapshot.ys", meta)
+	formatted := filepath.Join(dir, "formatted.yammm")
+	copyFile(t, "testdata/valid.yammm", formatted)
 
-	code, stdout, stderr := runCLI(t, "snapshot", "update-metadata", "-s", "env=prod", meta)
-	if code != cli.ExitOK {
-		t.Fatalf("exit code = %d, want %d; stderr:\n%s", code, cli.ExitOK, stderr)
-	}
-	if !strings.Contains(stderr, "updated metadata") {
-		t.Errorf("the summary must reach stderr, where every other command reports progress; stderr:\n%s", stderr)
-	}
-	if strings.Contains(stdout, "updated metadata") {
-		t.Errorf("stdout is the payload channel and carries no summary; stdout:\n%s", stdout)
+	made := filepath.Join(dir, "made.ys")
+	// In order: the merge reads the file the save before it writes.
+	for _, tt := range []struct {
+		name string
+		args []string
+	}{
+		{"validate", []string{"validate", "testdata/valid.yammm"}},
+		{"check", []string{"check", "testdata/valid.yammm", "testdata/data.json"}},
+		{"fmt -l -w", []string{"fmt", "-l", "-w", formatted}},
+		{"snapshot save", []string{"snapshot", "save", "-o", made, "testdata/valid.yammm", "testdata/data.json"}},
+		{"snapshot save --into", []string{"snapshot", "save", "--into", made, "testdata/valid.yammm", "testdata/data_carol.json"}},
+		{"snapshot update-metadata", []string{"snapshot", "update-metadata", "-s", "a=b", meta}},
+		{"gen -o", []string{"gen", "--to", "md", "-o", filepath.Join(dir, "doc.md"), "testdata/valid.yammm"}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			code, stdout, stderr := runCLI(t, tt.args...)
+			if code != cli.ExitOK {
+				t.Fatalf("exit code = %d, want %d; stderr:\n%s", code, cli.ExitOK, stderr)
+			}
+			if stdout != "" || stderr != "" {
+				t.Errorf("a success printed stdout %q and stderr %q", stdout, stderr)
+			}
+		})
 	}
 }
 

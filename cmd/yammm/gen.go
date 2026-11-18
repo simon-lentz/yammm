@@ -43,10 +43,9 @@ Targets:
   --to md          A self-contained Markdown reference document: a Mermaid
                    class diagram of every type in the import closure, per-type
                    sections (property tables, relations, invariants), and
-                   data-type tables. "markdown" is accepted as an alias. Use
-                   --no-class-diagram to omit the diagram section, or
-                   --no-class-members to keep the diagram and drop the
-                   member lines inside each class.
+                   data-type tables. Use --no-class-diagram to omit the
+                   diagram section, or --no-class-members to keep the
+                   diagram and drop the member lines inside each class.
 
 Use --module-root to resolve module-style imports against a root directory other
 than the schema's own (e.g. a repository root); for the go target the embedded
@@ -56,7 +55,7 @@ source keys are relative to that root.`,
 	}
 	cmd.Flags().String("to", "", "target: go, cypher or md (required)")
 	cmd.Flags().String("package", "", "go target: generated package name (default: derived from schema name)")
-	cmd.Flags().String("output", "", "output file path (default: stdout)")
+	cmd.Flags().StringP("output", "o", "", "output file path (default: stdout)")
 	cmd.Flags().Var(&acronymsValue{}, "initialisms", "go target: extra acronyms to upper-case in generated names, e.g. JWT,OIDC")
 	registerModuleRootFlag(cmd)
 	cmd.Flags().Bool("no-class-diagram", false, "md target: omit the Mermaid class-diagram section")
@@ -127,18 +126,21 @@ func (a *acronymsValue) Set(s string) error {
 func (a *acronymsValue) GetSlice() []string { return a.vals }
 
 func runGen(cmd *cobra.Command, args []string, sink *cli.DiagnosticSink) error {
-	toFormat, _ := cmd.Flags().GetString("to")
+	target, _ := cmd.Flags().GetString("to")
 	outputPath, _ := cmd.Flags().GetString("output")
 
-	target := strings.ToLower(toFormat)
-	if target == "markdown" {
-		target = "md"
-	}
 	if target != "go" && target != "md" && target != "cypher" {
-		return cli.Usagef("unsupported gen target %q: must be go, cypher or md", toFormat)
+		return cli.Usagef("unsupported gen target %q: must be go, cypher or md", target)
 	}
 	if err := rejectInapplicableFlags(cmd, target); err != nil {
 		return err
+	}
+	// Given empty, -o names no file, so it is refused rather than read as
+	// stdout.
+	if cmd.Flags().Changed("output") {
+		if err := cli.CheckOperand("output file", outputPath); err != nil {
+			return err
+		}
 	}
 	var cypherConfig cypher.Config
 	if target == "cypher" {

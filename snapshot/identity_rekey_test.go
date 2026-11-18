@@ -325,7 +325,7 @@ func TestTypeRef_RendersPathHashName(t *testing.T) {
 
 // TestTypeRef_SerializesAsAStringKey pins what MarshalText is for. A
 // map[TypeRef]int has no JSON encoding without a TextMarshaler key, so
-// deleting the method takes `yammm snapshot info --format json` with it.
+// deleting the method takes `yammm snapshot info --json` with it.
 func TestTypeRef_SerializesAsAStringKey(t *testing.T) {
 	t.Parallel()
 

@@ -82,9 +82,9 @@ func TestSnapshotInfo_JSONKeysAreSnakeCase(t *testing.T) {
 		name string
 		args []string
 	}{
-		{"single file", []string{"snapshot", "info", "--format", "json", file}},
-		{"header only", []string{"snapshot", "info", "--header-only", "--format", "json", file}},
-		{"directory", []string{"snapshot", "info", "--dir", dir, "--format", "json"}},
+		{"single file", []string{"snapshot", "info", "--json", file}},
+		{"header only", []string{"snapshot", "info", "--header-only", "--json", file}},
+		{"directory", []string{"snapshot", "info", "--dir", dir, "--json"}},
 	}
 
 	for _, tt := range tests {
@@ -121,7 +121,7 @@ func TestSnapshotInfo_HeaderOnlyReportsFileSize(t *testing.T) {
 		t.Fatalf("stat fixture: %v", err)
 	}
 
-	doc, ok := decodeStdout(t, "snapshot", "info", "--header-only", "--format", "json", file).(map[string]any)
+	doc, ok := decodeStdout(t, "snapshot", "info", "--header-only", "--json", file).(map[string]any)
 	if !ok {
 		t.Fatal("header-only JSON is not an object")
 	}
@@ -148,7 +148,7 @@ func TestSnapshotInfo_DirDiagnosticsIsAlwaysTheWire(t *testing.T) {
 
 	// A corrupt entry makes the scan exit non-zero, so this mode is driven
 	// directly rather than through decodeStdout's exit-code check.
-	code, out, errOut := executeCmdOutput(t, "snapshot", "info", "--dir", dir, "--format", "json")
+	code, out, errOut := executeCmdOutput(t, "snapshot", "info", "--dir", dir, "--json")
 	if code != cli.ExitValidation {
 		t.Fatalf("exit code = %d, want %d\nstderr:\n%s", code, cli.ExitValidation, errOut)
 	}
@@ -218,7 +218,7 @@ func TestSnapshotInfo_AbsentAttestationRenders(t *testing.T) {
 	t.Run("json renders null, not a claim", func(t *testing.T) {
 		t.Parallel()
 
-		doc, ok := decodeStdout(t, "snapshot", "info", "--header-only", "--format", "json", file).(map[string]any)
+		doc, ok := decodeStdout(t, "snapshot", "info", "--header-only", "--json", file).(map[string]any)
 		if !ok {
 			t.Fatal("header-only JSON is not an object")
 		}
@@ -234,7 +234,7 @@ func TestSnapshotInfo_AbsentAttestationRenders(t *testing.T) {
 
 // TestSnapshotInfo_DirExitCodeIsFormatIndependent pins one exit code for a
 // malformed directory in text and in JSON. dirEntriesExit reaches both returns,
-// because a machine consumer, the one --format json exists for, reads the code.
+// because a machine consumer, the one --json exists for, reads the code.
 func TestSnapshotInfo_DirExitCodeIsFormatIndependent(t *testing.T) {
 	t.Parallel()
 
@@ -245,7 +245,7 @@ func TestSnapshotInfo_DirExitCodeIsFormatIndependent(t *testing.T) {
 	}
 
 	text, _, _ := executeCmdOutput(t, "snapshot", "info", "--dir", dir)
-	jsonCode, _, _ := executeCmdOutput(t, "snapshot", "info", "--dir", dir, "--format", "json")
+	jsonCode, _, _ := executeCmdOutput(t, "snapshot", "info", "--dir", dir, "--json")
 
 	if text != cli.ExitValidation {
 		t.Errorf("text exit code = %d, want %d", text, cli.ExitValidation)
@@ -273,7 +273,7 @@ func TestSnapshotInfo_DirHeaderStatesPresenceAndSize(t *testing.T) {
 	}
 
 	var entries []map[string]any
-	_, out, _ := executeCmdOutput(t, "snapshot", "info", "--dir", dir, "--format", "json")
+	_, out, _ := executeCmdOutput(t, "snapshot", "info", "--dir", dir, "--json")
 	if err := json.Unmarshal([]byte(out), &entries); err != nil {
 		t.Fatalf("stdout is not a JSON array: %v\nstdout:\n%s", err, out)
 	}
@@ -339,7 +339,7 @@ func TestSnapshotInfo_DirModTimeSortsAsText(t *testing.T) {
 		Name    string `json:"name"`
 		ModTime string `json:"mod_time"`
 	}
-	code, out, errOut := executeCmdOutput(t, "snapshot", "info", "--dir", dir, "--format", "json")
+	code, out, errOut := executeCmdOutput(t, "snapshot", "info", "--dir", dir, "--json")
 	if code != cli.ExitOK {
 		t.Fatalf("exit code = %d, want %d\nstderr:\n%s", code, cli.ExitOK, errOut)
 	}
@@ -426,20 +426,20 @@ func TestSnapshotInfo_MetadataSortIsTheKeyOrder(t *testing.T) {
 	}
 }
 
-// TestRoot_FormatFlagDocumentsPayloadShaping pins the root's description of
-// --format. snapshot info shapes its whole stdout payload with the flag, so the
+// TestRoot_JSONFlagDocumentsPayloadShaping pins the root's description of
+// --json. snapshot info shapes its whole stdout payload with the flag, so the
 // flag is more than a diagnostic output format.
-func TestRoot_FormatFlagDocumentsPayloadShaping(t *testing.T) {
+func TestRoot_JSONFlagDocumentsPayloadShaping(t *testing.T) {
 	t.Parallel()
 
 	code, out, errOut := executeCmdOutput(t, "--help")
 	if code != cli.ExitOK {
 		t.Fatalf("exit code = %d, want %d\nstderr:\n%s", code, cli.ExitOK, errOut)
 	}
-	if !strings.Contains(out, "snapshot info") {
-		t.Errorf("--format's help does not name the command whose stdout payload it shapes:\n%s", out)
+	if !strings.Contains(out, "--json ") || !strings.Contains(out, "snapshot info") {
+		t.Errorf("the help names no --json, or not the command whose stdout payload it shapes:\n%s", out)
 	}
 	if strings.Contains(out, "Applies to all commands that produce diagnostics.") {
-		t.Errorf("--format is still described as reaching diagnostics alone:\n%s", out)
+		t.Errorf("--json is described as reaching diagnostics alone:\n%s", out)
 	}
 }

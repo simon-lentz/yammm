@@ -10,11 +10,10 @@ import (
 	"reflect"
 	"slices"
 	"strings"
-	"unicode"
-	"unicode/utf16"
 	"unicode/utf8"
 
 	"github.com/simon-lentz/yammm/diag"
+	"github.com/simon-lentz/yammm/internal/jsonstring"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -403,54 +402,11 @@ func readString(data []byte, i int) (int, bool, error) {
 		return 0, false, fmt.Errorf("the string at byte %d is not valid UTF-8; encoding/json would read each invalid byte as U+FFFD", i)
 	}
 	if escaped {
-		if at := loneSurrogate(body); at >= 0 {
+		if at := jsonstring.LoneSurrogate(body); at >= 0 {
 			return 0, false, fmt.Errorf("the string at byte %d holds the surrogate escape %s, which is half of no pair; encoding/json would read it as U+FFFD", i, body[at:at+6])
 		}
 	}
 	return end, escaped, nil
-}
-
-// loneSurrogate returns the index in body of the first \uXXXX escape naming a
-// UTF-16 surrogate that is not half of a pair, or -1. body is the text of a JSON
-// string encoding/json has read, so each \u holds four hex digits.
-func loneSurrogate(body []byte) int {
-	for i := 0; i < len(body); i++ {
-		if body[i] != '\\' {
-			continue
-		}
-		i++
-		if body[i] != 'u' {
-			continue
-		}
-		r := escapedRune(body[i+1:])
-		start := i - 1
-		i += 4
-		if !utf16.IsSurrogate(r) {
-			continue
-		}
-		if i+6 < len(body) && body[i+1] == '\\' && body[i+2] == 'u' && utf16.DecodeRune(r, escapedRune(body[i+3:])) != unicode.ReplacementChar {
-			i += 6
-			continue
-		}
-		return start
-	}
-	return -1
-}
-
-// escapedRune reads the four hex digits a \u escape holds.
-func escapedRune(digits []byte) rune {
-	var r rune
-	for _, d := range digits[:4] {
-		switch {
-		case d <= '9':
-			r = r<<4 | rune(d-'0')
-		case d <= 'F':
-			r = r<<4 | rune(d-'A'+10)
-		default:
-			r = r<<4 | rune(d-'a'+10)
-		}
-	}
-	return r
 }
 
 // checkText returns an error for the first string of data that [readString]

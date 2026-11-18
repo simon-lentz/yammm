@@ -64,8 +64,8 @@ var ErrEmptyPath = hostpath.ErrEmptyPath
 // resolves to one through the working directory, a name on disk or a dangling
 // link's target.
 //
-// An identity is text that reaches JSON wires — a diagnostic under --format
-// json, and a .ys document's schema_source and each instance's provenance
+// An identity is text that reaches JSON wires — a diagnostic under --json,
+// and a .ys document's schema_source and each instance's provenance
 // source_name — and encoding/json writes
 // an invalid byte as U+FFFD, which merges two names into one.
 //

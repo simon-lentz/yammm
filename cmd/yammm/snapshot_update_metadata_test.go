@@ -1,14 +1,17 @@
 package main
 
 import (
+	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/simon-lentz/yammm/cmd/yammm/internal/cli"
+	"github.com/simon-lentz/yammm/snapshot"
 )
 
 // createYSFixtureWithMetadata builds a .ys file pre-populated with one
@@ -51,23 +54,39 @@ func TestSnapshotUpdateMetadata_MalformedInput(t *testing.T) {
 	assert.Equal(t, cli.ExitValidation, code)
 }
 
-// TestSnapshotUpdateMetadata_SummaryCountsTheKeys pins the summary's key count.
-// It is the operator's one confirmation that a --set landed and an --unset
-// removed its key.
-func TestSnapshotUpdateMetadata_SummaryCountsTheKeys(t *testing.T) {
+// TestSnapshotUpdateMetadata_SetAndUnsetLandInTheHeader pins what the header
+// holds after a --set and after an --unset, and that the command prints
+// nothing on success.
+func TestSnapshotUpdateMetadata_SetAndUnsetLandInTheHeader(t *testing.T) {
 	t.Parallel()
 
 	ysPath := createYSFixtureWithMetadata(t, t.TempDir())
+	keys := func() []string {
+		t.Helper()
+		data, err := os.ReadFile(ysPath)
+		require.NoError(t, err)
+		header, result := snapshot.HeaderOnly(t.Context(), data)
+		require.False(t, result.HasErrors(), "header: %s", result.String())
+		return slices.Sorted(maps.Keys(header.Metadata))
+	}
+	before := keys()
 
-	// The fixture carries one key; --set adds two more.
-	code, _, errOut := executeCmdOutput(t, "snapshot", "update-metadata",
+	code, out, errOut := executeCmdOutput(t, "snapshot", "update-metadata",
 		"-s", "env=prod", "-s", "owner=simon", ysPath)
 	require.Equal(t, cli.ExitOK, code, "stderr:\n%s", errOut)
-	assert.Contains(t, errOut, "(3 keys)", "the summary counts what the header now holds")
+	assert.Empty(t, out+errOut, "a command that succeeds prints nothing")
+	assert.Equal(t, sortedWith(before, "env", "owner"), keys())
 
-	// Removing two leaves one, so a hard-coded count cannot satisfy both.
-	code, _, errOut = executeCmdOutput(t, "snapshot", "update-metadata",
+	code, out, errOut = executeCmdOutput(t, "snapshot", "update-metadata",
 		"--unset", "env", "--unset", "owner", ysPath)
 	require.Equal(t, cli.ExitOK, code, "stderr:\n%s", errOut)
-	assert.Contains(t, errOut, "(1 keys)", "the summary counts what remains after an unset")
+	assert.Empty(t, out+errOut, "a command that succeeds prints nothing")
+	assert.Equal(t, before, keys())
+}
+
+// sortedWith returns keys and more, sorted.
+func sortedWith(keys []string, more ...string) []string {
+	all := append(slices.Clone(keys), more...)
+	slices.Sort(all)
+	return all
 }

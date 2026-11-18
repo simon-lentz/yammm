@@ -21,6 +21,9 @@ import (
 // It swaps process-global state and therefore must not run in parallel.
 func runCLI(t *testing.T, args ...string) (code int, stdout, stderr string) {
 	t.Helper()
+	// t.Setenv panics in a parallel test, so a parallel caller fails at once
+	// rather than as a race only -race and some shuffle orders see.
+	t.Setenv("YAMMM_RUNCLI_SERIAL", "1")
 
 	outR, outW, err := os.Pipe()
 	if err != nil {
@@ -145,7 +148,7 @@ func TestRun_EveryFailurePrints(t *testing.T) {
 		{"unknown flag", []string{"validate", "--nosuchflag", "testdata/valid.yammm"}, cli.ExitUsage},
 		{"too few args", []string{"validate"}, cli.ExitUsage},
 		{"too many args", []string{"validate", "a.yammm", "b.yammm"}, cli.ExitUsage},
-		{"bad --format", []string{"validate", "--format", "bogus", "testdata/valid.yammm"}, cli.ExitUsage},
+		{"bad --json value", []string{"validate", "--json=bogus", "testdata/valid.yammm"}, cli.ExitUsage},
 		{"missing required flag", []string{"gen", "testdata/valid.yammm"}, cli.ExitUsage},
 	}
 
@@ -162,15 +165,30 @@ func TestRun_EveryFailurePrints(t *testing.T) {
 	}
 }
 
-// TestRun_ABadFormatFlagExitsUsage pins that a --format value the CLI does not
-// know is refused as a usage error, through run(), naming the flag's value.
-func TestRun_ABadFormatFlagExitsUsage(t *testing.T) {
-	code, _, errOut := runCLI(t, "validate", "--format", "bogus", "testdata/valid.yammm")
-	if code != cli.ExitUsage {
-		t.Errorf("exit code = %d, want %d", code, cli.ExitUsage)
-	}
-	if !strings.Contains(errOut, `invalid output format "bogus"`) {
-		t.Errorf("stderr does not name the value:\n%s", errOut)
+// TestRun_ABadJSONValueExitsUsage pins that a --json value that is not a
+// boolean is a usage error naming the flag and the value, on every command:
+// help and completion, which withDiagnostics does not wrap, and neo4j diff
+// before its --uri guard. pflag refuses it as it parses the flags.
+func TestRun_ABadJSONValueExitsUsage(t *testing.T) {
+	for _, args := range [][]string{
+		{"validate", "--json=bogus", "testdata/valid.yammm"},
+		{"fmt", "--json=bogus", "testdata/valid.yammm"},
+		{"neo4j", "diff", "--json=bogus", shadowedSchema},
+		{"help", "--json=bogus"},
+		{"completion", "bash", "--json=bogus"},
+	} {
+		t.Run(strings.Join(args, " "), func(t *testing.T) {
+			code, out, errOut := runCLI(t, args...)
+			if code != cli.ExitUsage {
+				t.Errorf("exit code = %d, want %d", code, cli.ExitUsage)
+			}
+			if !strings.Contains(errOut, `"bogus"`) || !strings.Contains(errOut, "--json") {
+				t.Errorf("stderr does not name the flag and its value:\n%s", errOut)
+			}
+			if out != "" {
+				t.Errorf("a refusal wrote %q to stdout", out)
+			}
+		})
 	}
 }
 
@@ -242,31 +260,6 @@ func TestRun_FmtReportsEveryPath(t *testing.T) {
 	}
 }
 
-// TestRun_FmtValidatesFormat pins that fmt refuses `--format bogus`: fmt calls
-// ParseOutputFormat like every other command that takes the flag.
-func TestRun_FmtValidatesFormat(t *testing.T) {
-	code, _, errOut := runCLI(t, "fmt", "--format", "bogus", "testdata/valid.yammm")
-	if code != cli.ExitUsage {
-		t.Errorf("exit code = %d, want %d", code, cli.ExitUsage)
-	}
-	if !strings.Contains(errOut, "invalid output format") {
-		t.Errorf("stderr does not mention %q:\n%s", "invalid output format", errOut)
-	}
-}
-
-// TestRun_DiffValidatesFormatBeforeURI pins that neo4j diff refuses a bad
-// --format before its --uri guard runs. Otherwise the command exits 2 for a
-// reason other than the flag under test, and the check reads as covered.
-func TestRun_DiffValidatesFormatBeforeURI(t *testing.T) {
-	code, _, errOut := runCLI(t, "neo4j", "diff", "--format", "bogus", shadowedSchema)
-	if code != cli.ExitUsage {
-		t.Errorf("exit code = %d, want %d", code, cli.ExitUsage)
-	}
-	if !strings.Contains(errOut, "invalid output format") {
-		t.Errorf("stderr does not mention %q:\n%s", "invalid output format", errOut)
-	}
-}
-
 // TestRun_Neo4jHasNoIntrospectCommand pins that `neo4j introspect` is an
 // unknown command: a script that still calls it fails as a usage error naming
 // the word, before any connection is opened, whatever flags follow it.
@@ -326,7 +319,7 @@ func TestRun_AHelpFlagBeforeASubcommandHelpsIt(t *testing.T) {
 	}{
 		{[]string{"neo4j", "--help", "diff"}, "yammm neo4j diff <schema.yammm>"},
 		{[]string{"neo4j", "-h", "diff"}, "yammm neo4j diff <schema.yammm>"},
-		{[]string{"neo4j", "--help", "--format", "json", "diff"}, "yammm neo4j diff <schema.yammm>"},
+		{[]string{"neo4j", "--help", "--json", "diff"}, "yammm neo4j diff <schema.yammm>"},
 		{[]string{"--help", "neo4j"}, "yammm neo4j [flags]"},
 		{[]string{"--no-color", "-h", "validate"}, "yammm validate <schema.yammm>"},
 		{[]string{"snapshot", "-h", "info"}, "yammm snapshot info"},
@@ -356,13 +349,13 @@ func TestRun_AHelpFlagBeforeASubcommandHelpsIt(t *testing.T) {
 	}
 }
 
-// A --format json after a help flag still asks for one document, so a refused
+// A --json after a help flag still asks for one document, so a refused
 // word under --help is inside it.
 func TestRun_AHelpRefusalAfterAHelpFlagIsOneJSONDocument(t *testing.T) {
 	for _, args := range [][]string{
-		{"neo4j", "bogus", "--help", "--format", "json"},
-		{"neo4j", "bogus", "-h", "--format=json"},
-		{"bogus", "--help", "--format", "json"},
+		{"neo4j", "bogus", "--help", "--json"},
+		{"neo4j", "bogus", "-h", "--json"},
+		{"bogus", "--help", "--json"},
 	} {
 		t.Run(strings.Join(args, " "), func(t *testing.T) {
 			code, _, stderr := runCLI(t, args...)
@@ -387,5 +380,17 @@ func TestRun_UpdateMetadataRefusesContradictoryKeys(t *testing.T) {
 	}
 	if !strings.Contains(errOut, "env") {
 		t.Errorf("stderr does not mention %q:\n%s", "env", errOut)
+	}
+}
+
+// TestRun_VersionHasNoShortForm pins that --version prints the version and -v
+// is refused, so -v stays free for a verbose flag.
+func TestRun_VersionHasNoShortForm(t *testing.T) {
+	if code, stdout, stderr := runCLI(t, "--version"); code != cli.ExitOK || !strings.Contains(stdout, "yammm version") {
+		t.Errorf("--version: exit code = %d, stdout %q, want %d and the version; stderr:\n%s", code, stdout, cli.ExitOK, stderr)
+	}
+	code, stdout, stderr := runCLI(t, "-v")
+	if code != cli.ExitUsage || stdout != "" || !strings.Contains(stderr, "unknown shorthand flag: 'v'") {
+		t.Errorf("-v: exit code = %d, stdout %q, want %d and the refusal; stderr:\n%s", code, stdout, cli.ExitUsage, stderr)
 	}
 }

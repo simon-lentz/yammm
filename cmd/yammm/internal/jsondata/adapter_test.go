@@ -25,7 +25,7 @@ func parseOne(t *testing.T, source location.SourceID, data []byte) (instance.Raw
 	if len(insts) == 0 {
 		return instance.RawInstance{}, diags
 	}
-	return insts[0], diags
+	return insts[0].RawInstance, diags
 }
 
 func TestParse(t *testing.T) {

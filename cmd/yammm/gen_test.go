@@ -141,3 +141,22 @@ func TestGen_GeneratorFailureExitsRuntime(t *testing.T) {
 		t.Errorf("stderr does not report a generation failure:\n%s", errOut)
 	}
 }
+
+// TestGen_AnEmptyOutputIsRefused pins that -o "" names no file: it is a usage
+// error, where an omitted -o writes to stdout.
+func TestGen_AnEmptyOutputIsRefused(t *testing.T) {
+	// The schema does not exist, so a refusal judged after the read would exit 3.
+	missing := filepath.Join(t.TempDir(), "missing.yammm")
+	for _, args := range [][]string{
+		{"gen", "--to", "md", "-o", "", missing},
+		{"gen", "--to", "md", "--output=", missing},
+	} {
+		t.Run(strings.Join(args, " "), func(t *testing.T) {
+			code, stdout, stderr := runCLI(t, args...)
+			if code != cli.ExitUsage || stdout != "" || !strings.Contains(stderr, "output file") {
+				t.Errorf("exit code = %d with stdout %q, want %d, no stdout and a refusal naming the output file; stderr:\n%s",
+					code, stdout, cli.ExitUsage, stderr)
+			}
+		})
+	}
+}

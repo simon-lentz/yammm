@@ -4,8 +4,8 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/simon-lentz/yammm/cmd/yammm/internal/cli"
+	"github.com/simon-lentz/yammm/cmd/yammm/internal/jsondata"
 	"github.com/simon-lentz/yammm/graph"
-	"github.com/simon-lentz/yammm/instance"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -25,7 +25,7 @@ func checkDataOperands(paths ...string) error {
 // valid instances go into base or a new graph ([cli.BuildGraph]). Each file's parse
 // diagnostics reach sink as it is read.
 func assembleGraph(cmd *cobra.Command, sink *cli.DiagnosticSink, s schema.Schema, paths []string, base *graph.Graph) (*graph.Graph, error) {
-	parsed := make(map[string][]instance.RawInstance)
+	parsed := make(map[string][]jsondata.Element)
 	for _, path := range paths {
 		fileParsed, parseResult, err := cli.LoadAndParseJSON(cmd.Context(), path)
 		if err != nil {

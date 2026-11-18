@@ -15,22 +15,25 @@ func newRootCmd(version string) *cobra.Command {
 		Short: "Schema validation DSL for graph-based data infrastructure",
 		Long: `yammm is a schema validation DSL for graph-based data infrastructure.
 
+A command that succeeds prints its payload and its diagnostics, and nothing else.
+
 Global flags:
-  --format    Output format: "text" (default) or "json". It shapes the
-              diagnostics every command writes, and the stdout payload of
-              "snapshot info". Under "json" a command writes exactly one JSON
-              document to stderr, a clean run included, and suppresses its
-              status summary; "snapshot info" writes its payload to stdout.
-              A "help", "completion" or --version that succeeds writes
-              no document.
-  --no-color  Disable ANSI color in diagnostic output.`,
+  --json      Write diagnostics as one JSON document on stderr, a clean run
+              included, and write "snapshot info"'s payload as JSON on
+              stdout. A "help", "completion" or --version that succeeds
+              writes no document.
+  --no-color  Disable ANSI color in diagnostic output.
+
+yammm --version prints the version; the flag is the program's alone.`,
 		Version:       version,
 		SilenceErrors: true,
 		SilenceUsage:  true,
 	}
 
-	cmd.PersistentFlags().String("format", "text", "output format for diagnostics and for snapshot info's payload: text or json")
+	cmd.PersistentFlags().Bool("json", false, "write diagnostics, and snapshot info's payload, as JSON")
 	cmd.PersistentFlags().Bool("no-color", false, "disable ANSI color output")
+	// Defined here so cobra's version flag takes no -v shorthand.
+	cmd.Flags().Bool("version", false, "print the version")
 
 	cmd.AddCommand(
 		newValidateCmd(),
@@ -122,21 +125,19 @@ func unknownSubcommand(c *cobra.Command) error {
 	return cobra.NoArgs(c, c.Flags().Args())
 }
 
-// withDiagnostics adapts a command that diagnoses to cobra's RunE. It admits
-// the output-shaping flags before the command runs and closes the sink with the
-// command's error after it returns, so no command works under a format the CLI
-// does not know, no return path leaves a diagnostic unwritten, and under
-// --format json the failure is inside the one document.
+// withDiagnostics adapts a command that diagnoses to cobra's RunE. It closes
+// the sink with the command's error after the command returns, so no return
+// path leaves a diagnostic unwritten, and under --json the failure is inside
+// the one document.
 //
 // Every error it returns carries an exit code: one the command did not classify
 // is a runtime failure here ([cli.Runtime]), so [run] can tell a command's
 // failure from one cobra raised before any command ran.
 func withDiagnostics(run func(*cobra.Command, []string, *cli.DiagnosticSink) error) func(*cobra.Command, []string) error {
 	return func(cmd *cobra.Command, args []string) error {
-		formatStr, _ := cmd.Flags().GetString("format")
-		format, err := cli.ParseOutputFormat(formatStr)
-		if err != nil {
-			return err
+		format := cli.FormatText
+		if asJSON, _ := cmd.Flags().GetBool("json"); asJSON {
+			format = cli.FormatJSON
 		}
 		noColor, _ := cmd.Flags().GetBool("no-color")
 		// The terminal test reads the process stream while the writer is

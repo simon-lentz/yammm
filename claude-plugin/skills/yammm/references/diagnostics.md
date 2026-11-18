@@ -86,7 +86,7 @@ The all-or-nothing contract is unchanged: any error still yields a zero schema.
 | Code | Meaning |
 | ---- | ------- |
 | `E_INTERNAL` | Unexpected internal failure (likely a bug) |
-| `E_COMMAND_FAILED` | A command-line failure that is not itself a diagnostic, carried into a `--format json` document; its `exit_code` detail is the process exit code |
+| `E_COMMAND_FAILED` | A command-line failure that is not itself a diagnostic, carried into a `--json` document; its `exit_code` detail is the process exit code |
 | `E_CONTEXT_CANCELLED` | Operation cancelled via context |
 
 ### Syntax
@@ -164,7 +164,7 @@ The all-or-nothing contract is unchanged: any error still yields a zero schema.
 | `E_UNRESOLVED_REQUIRED_COMPOSITION` | Required composition is unresolved |
 | `E_COMPOSITION_DEPTH_EXCEEDED` | Composed nesting deeper than the bound (32) |
 | `E_INVALID_TYPE_TAG` | A JSON top-level key is not a type name |
-| `E_DATA_PARSE` | A data file `yammm check` or `yammm snapshot save` reads is not well formed, is not one object, holds a type name whose value is not an array of objects, states one member name twice in one object, or nests deeper than the decoder's 10,000-level limit |
+| `E_DATA_PARSE` | A data file `yammm check` or `yammm snapshot save` reads is not well formed, is not one object, holds a type name whose value is not an array of objects, states one member name twice in one object, holds a string that is not valid UTF-8 or holds a `\u` escape that is half of no surrogate pair, or nests deeper than the decoder's 10,000-level limit |
 | `E_CASE_FOLD_COLLISION` | Input fields collide after case-folding |
 
 ### Graph

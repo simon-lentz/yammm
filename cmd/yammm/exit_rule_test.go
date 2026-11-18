@@ -69,11 +69,10 @@ func isSelector(n ast.Node, pkg, name string) bool {
 // ExitValidation after a failed result exits 1 on an I/O code the exit contract
 // answers with 3, and a hard-coded ExitRuntime exits 3 on a refusal of the
 // input. cli.Exit takes no other code. The sites below answer an outcome that
-// is not a result: fmt --check finding an unformatted file, and neo4j diff
-// finding drift or a comparison that could not run.
+// is not a result: neo4j diff finding drift or a comparison that could not run.
 func TestExitCodes_NamedOnlyWhereNoResultDecides(t *testing.T) {
 	allowed := map[string]map[string]int{
-		"ExitValidation": {"fmtPath": 1, "neo4jDiffExit": 1},
+		"ExitValidation": {"neo4jDiffExit": 1},
 		"ExitRuntime":    {"neo4jDiffExit": 1},
 	}
 	got := map[string]map[string]int{"ExitValidation": {}, "ExitRuntime": {}}
@@ -185,11 +184,12 @@ func TestExitCodes_CobraRefusalsAreUsage(t *testing.T) {
 }
 
 // TestExitCodes_AnUnclassifiedCommandFailureIsRuntime pins that a failure a
-// command returns without a code exits 3 under each format: withDiagnostics
-// classifies it before execute would read it as cobra's own refusal.
+// command returns without a code exits 3 in text and under --json:
+// withDiagnostics classifies it before execute would read it as cobra's own
+// refusal.
 func TestExitCodes_AnUnclassifiedCommandFailureIsRuntime(t *testing.T) {
 	t.Parallel()
-	for _, format := range []string{"text", "json"} {
+	for _, flags := range [][]string{nil, {"--json"}} {
 		root := newRootCmd("test")
 		root.AddCommand(&cobra.Command{
 			Use: "fail",
@@ -200,9 +200,9 @@ func TestExitCodes_AnUnclassifiedCommandFailureIsRuntime(t *testing.T) {
 		var stdout, stderr bytes.Buffer
 		root.SetOut(&stdout)
 		root.SetErr(&stderr)
-		root.SetArgs([]string{"fail", "--format", format})
+		root.SetArgs(append([]string{"fail"}, flags...))
 		if code := cli.ExitForError(execute(root)); code != cli.ExitRuntime {
-			t.Errorf("--format %s: exit %d, want %d", format, code, cli.ExitRuntime)
+			t.Errorf("flags %v: exit %d, want %d", flags, code, cli.ExitRuntime)
 		}
 	}
 }

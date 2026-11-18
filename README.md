@@ -360,7 +360,7 @@ The `yammm` binary ([`cmd/yammm/`](cmd/yammm/)) provides commands for working wi
 
 ```bash
 yammm validate <schema>                                  # validate a schema, report diagnostics
-yammm fmt <schema>... [-w|--check]                       # canonical formatting (stdout; -w rewrites, --check lists unformatted)
+yammm fmt [-l] [-w] <schema>...                          # canonical formatting (stdout; -l lists files that differ, -w rewrites)
 yammm check <schema> <data...>                           # validate JSON data files, read as one document
 yammm gen --to go <schema>                               # generate Go source from a schema
 yammm gen --to md <schema>                               # generate Markdown docs with a Mermaid class diagram
@@ -376,12 +376,13 @@ yammm neo4j diff <schema>                                # compare schema constr
 A command writes the diagnostics it prints to **stderr**, at every severity,
 and stdout holds a command's own output. One report differs:
 `yammm snapshot info --dir` states each file's result in its stdout report —
-in text the file's first error or first warning, under `--format json` its
+in text the file's first error or first warning, under `--json` its
 diagnostics — and prints on stderr the diagnostics of the directory read
-alone. Stderr is not diagnostics alone: in text output `yammm snapshot save`
-and `yammm snapshot update-metadata` end a successful run with a one-line
-status there. `yammm validate` exits `0` for a schema that draws warnings and
-no error, so do not read a zero exit code as "no diagnostics."
+alone. A command that succeeds prints nothing but its own output and its
+diagnostics, so `yammm snapshot save` and `yammm snapshot update-metadata` print
+nothing else.
+`yammm validate` exits `0` for a schema that draws warnings and no error, so
+do not read a zero exit code as "no diagnostics."
 
 ## IDE Support
 

@@ -17,17 +17,21 @@ import (
 
 func newFmtCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "fmt <schema.yammm>...",
+		Use:   "fmt [-l] [-w] <schema.yammm>...",
 		Short: "Format schema files",
-		Long:  "Format .yammm schema files using canonical formatting (like gofmt).",
-		Args:  cobra.MinimumNArgs(1),
-		RunE:  withDiagnostics(runFmt),
+		Long: "Format .yammm schema files in canonical form, as gofmt formats Go.\n\n" +
+			"With neither flag, fmt prints each formatted file to stdout. -l prints the path of each file whose " +
+			"formatting differs and exits 0, as gofmt -l does, so a check reads the list and the exit code: " +
+			"out=$(yammm fmt -l <schema.yammm>...) && test -z \"$out\". -w writes the formatted text back to each file that differs; " +
+			"with -l it also prints that file's path. A file that does not parse exits 1.",
+		Args: cobra.MinimumNArgs(1),
+		RunE: withDiagnostics(runFmt),
 	}
 
-	cmd.Flags().BoolP("write", "w", false, "write result to source file instead of stdout")
-	cmd.Flags().Bool("check", false,
-		"print the path of every unformatted file and exit non-zero; prints nothing when all are formatted. "+
-			"Line endings normalize to LF before formatting, so a CRLF file reports as unformatted")
+	cmd.Flags().BoolP("list", "l", false,
+		"print the path of each file whose formatting differs instead of the formatted text. "+
+			"Line endings normalize to LF before formatting, so a CRLF file is listed")
+	cmd.Flags().BoolP("write", "w", false, "write the formatted text back to each file that differs, instead of to stdout")
 
 	return cmd
 }
@@ -37,16 +41,8 @@ func newFmtCmd() *cobra.Command {
 // hook over a file list needs — and the exit code is the most severe any path
 // produced rather than the last or the numerically largest.
 func runFmt(cmd *cobra.Command, args []string, sink *cli.DiagnosticSink) error {
+	list, _ := cmd.Flags().GetBool("list")
 	write, _ := cmd.Flags().GetBool("write")
-	check, _ := cmd.Flags().GetBool("check")
-
-	// Hand-rolled rather than cobra's MarkFlagsMutuallyExclusive: the root sets
-	// SilenceErrors and SilenceUsage, so cobra's own flag validation exits 2
-	// printing nothing at all, and a hook misconfigured with both flags would
-	// fail with no diagnosis.
-	if check && write {
-		return cli.Usagef("--check and --write are mutually exclusive")
-	}
 
 	// A syntax diagnostic names its file relative to where fmt was run.
 	if wd, err := os.Getwd(); err == nil {
@@ -65,14 +61,16 @@ func runFmt(cmd *cobra.Command, args []string, sink *cli.DiagnosticSink) error {
 
 	errs := make([]error, 0, len(args))
 	for _, path := range args {
-		errs = append(errs, fmtPath(cmd, sink, path, write, check))
+		errs = append(errs, fmtPath(cmd, sink, path, list, write))
+		// A file's diagnostics reach a terminal before the next file's output.
+		sink.Flush()
 	}
 	return cli.JoinExitErrors(errs...)
 }
 
 // fmtPath formats one path and reports what went wrong with it, or nil. A
 // syntax error is a diagnostic, added to sink, as validate reports it.
-func fmtPath(cmd *cobra.Command, sink *cli.DiagnosticSink, path string, write, check bool) error {
+func fmtPath(cmd *cobra.Command, sink *cli.DiagnosticSink, path string, list, write bool) error {
 	content, err := cli.ReadFile(path)
 	if err != nil {
 		return err
@@ -89,30 +87,20 @@ func fmtPath(cmd *cobra.Command, sink *cli.DiagnosticSink, path string, write, c
 		return formatFailure(path, err)
 	}
 
-	switch {
-	case check:
-		if bytes.Equal(formatted, content) {
-			return nil
-		}
-		// gofmt -l: the path alone, nothing else — so the failure carries the
-		// code and no message.
-		fmt.Fprintln(cmd.OutOrStdout(), termtext.String(path))
-		return cli.Exit(cli.ExitValidation)
-
-	case write:
-		if bytes.Equal(formatted, content) {
-			return nil // already formatted
-		}
-
-		if err := cli.WriteFile(path, formatted); err != nil {
-			return err
-		}
-		return nil
-
-	default:
+	if !list && !write {
 		fmt.Fprintf(cmd.OutOrStdout(), "%s", formatted)
 		return nil
 	}
+	if bytes.Equal(formatted, content) {
+		return nil
+	}
+	if list {
+		fmt.Fprintln(cmd.OutOrStdout(), termtext.String(path))
+	}
+	if write {
+		return cli.WriteFile(path, formatted)
+	}
+	return nil
 }
 
 // syntaxResult places the formatter's syntax diagnostic in the file at path,

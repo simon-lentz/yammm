@@ -781,7 +781,7 @@ type SnapshotInfo struct {
 
 `snapshot.TypeRef{Schema, Name string}` is the schema-less display surface: `Info`, `HeaderOnly` and `HeaderOnlyRead` run without an import closure to resolve against, so each type is reported as the identity the document states, and two same-named types in different schemas stay distinct — both in `Types` and as `InstanceCounts` keys. `TypeRef` is comparable, and its `String()` and `MarshalText()` render `schema#name`. The `#` separator is deliberate beside `schema.TypeID.String()`'s `path:name` form: TypeID's rendering is byte-order-bearing (the wire's diagnostics records sort by it), so the display form stays visibly distinct rather than moving wire bytes to unify the two.
 
-`TypeRef` renders and does not parse. It carries no `UnmarshalText`, so `SnapshotInfo` and `HeaderInfo` serialize one way, and nothing reads them back. `yammm snapshot info --format json` does not write these structs: it owns its wire shape and emits snake_case keys, carrying each `TypeRef` through as the same `schema#name` string. This is a decision, not a gap — the surfaces are a report projection, the in-process way to scan many documents is `ScanDir` / `ScanDirSlice`, which hands back `HeaderInfo` values directly, and `path#name` is injective over the values yammm produces but not over an arbitrary `TypeRef`. Adding `UnmarshalText` is additive and stays available if a consumer needs it.
+`TypeRef` renders and does not parse. It carries no `UnmarshalText`, so `SnapshotInfo` and `HeaderInfo` serialize one way, and nothing reads them back. `yammm snapshot info --json` does not write these structs: it owns its wire shape and emits snake_case keys, carrying each `TypeRef` through as the same `schema#name` string. This is a decision, not a gap — the surfaces are a report projection, the in-process way to scan many documents is `ScanDir` / `ScanDirSlice`, which hands back `HeaderInfo` values directly, and `schema#name` is injective over the values yammm produces but not over an arbitrary `TypeRef`. Adding `UnmarshalText` is additive and stays available if a consumer needs it.
 
 ### Header-Only Reads
 
@@ -1549,7 +1549,7 @@ Output is deterministic: the same schema, the same `Marshal` options, the same y
 yammm gen --to md <schema.yammm> [--no-class-diagram] [--no-class-members] [--output <path>] [--module-root <dir>]
 ```
 
-`markdown` is accepted as an alias for `md`. Per-target flag enforcement extends to the md target: `--no-class-diagram` and `--no-class-members` are rejected for other targets, and go-only flags are rejected for md.
+`--to` takes `md` spelled so: `markdown` and `MD` are usage errors. Per-target flag enforcement extends to the md target: `--no-class-diagram` and `--no-class-members` are rejected for other targets, and go-only flags are rejected for md.
 
 ## Formatting
 
@@ -1562,7 +1562,7 @@ The formatter returns no output in two cases.
 
 The CLI reports a parse failure as the positioned `E_SYNTAX` diagnostic and exits with `ExitValidation`. It maps a refusal to `ExitRuntime`, leaving the file unchanged. The LSP returns no edits for either, and logs a refusal as a warning.
 
-Before phase 1, line endings normalize to LF: CRLF and a lone CR both become LF, so a CRLF file always reports as unformatted under `yammm fmt --check`. A leading UTF-8 byte order mark is no token, so the output never carries a leading one and a marked file reports as unformatted the same way; a mark inside a comment or a literal is written back where it stands.
+Before phase 1, line endings normalize to LF: CRLF and a lone CR both become LF, so `yammm fmt -l` lists every CRLF file it formats. A leading UTF-8 byte order mark is no token, so the output never carries a leading one and `-l` lists a marked file the same way; a mark inside a comment or a literal is written back where it stands.
 
 The formatter then applies a five-phase pipeline:
 

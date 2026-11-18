@@ -1,8 +1,10 @@
 package main
 
 import (
+	"os"
+	"strings"
+
 	"github.com/spf13/cobra"
-	"github.com/spf13/viper"
 )
 
 func newNeo4jCmd() *cobra.Command {
@@ -33,23 +35,16 @@ func registerConnectionFlags(cmd *cobra.Command) {
 	cmd.PreRunE = func(cmd *cobra.Command, _ []string) error { return bindNeo4jFlags(cmd) }
 }
 
-// bindNeo4jFlags binds the connection flags to environment variables.
-// When a flag is not set on the command line but the corresponding env var
-// is present, the env value is written back into the cobra flag so that
-// subcommands can continue using cmd.Flags().GetString() unchanged.
+// bindNeo4jFlags sets each connection flag the command line did not set from
+// its YAMMM_NEO4J_* variable, YAMMM_NEO4J_URI for --uri. A variable set to
+// the empty string is read as unset, so it keeps the flag's default.
 func bindNeo4jFlags(cmd *cobra.Command) error {
-	v := viper.New()
-	v.SetEnvPrefix("YAMMM_NEO4J")
-	v.AutomaticEnv()
-
-	flags := []string{"uri", "username", "password", "database"}
-	for _, name := range flags {
-		if err := v.BindPFlag(name, cmd.Flags().Lookup(name)); err != nil {
-			return err
+	for _, name := range []string{"uri", "username", "password", "database"} {
+		if cmd.Flags().Changed(name) {
+			continue
 		}
-
-		if !cmd.Flags().Changed(name) && v.IsSet(name) {
-			if err := cmd.Flags().Set(name, v.GetString(name)); err != nil {
+		if v := os.Getenv("YAMMM_NEO4J_" + strings.ToUpper(name)); v != "" {
+			if err := cmd.Flags().Set(name, v); err != nil {
 				return err
 			}
 		}

@@ -218,10 +218,6 @@ func TestParse_ARepeatedMemberIsReported(t *testing.T) {
 		{"inside an edge object", `{"id": "a", "boss": {"_target_id": "x", "_target_id": "y"}}`, "_target_id", 42},
 		{"spelled with an escape", `{"id": "a", "i\u0064": "b"}`, "id", 14},
 		{"with equal values", `{"id": "a", "id": "a"}`, "id", 14},
-		// The decoder reads each byte of an invalid sequence as U+FFFD.
-		{"differing only in invalid UTF-8", "{\"x\xff\": 1, \"x\xfe\": 2}", "x\uFFFD", 12},
-		{"invalid UTF-8 inside a composed child", "{\"id\": \"a\", \"kids\": [{\"n\xff\": 1, \"n\xfe\": 2}]}", "n\uFFFD", 33},
-		{"invalid UTF-8 and the replacement it reads as", "{\"x\uFFFD\": 1, \"x\xff\": 2}", "x\uFFFD", 12},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -436,7 +432,7 @@ type Person {
 		if !ok {
 			t.Fatalf("no entry for %q", name)
 		}
-		_, vr := v.Validate(t.Context(), name, raws)
+		_, vr := v.Validate(t.Context(), name, rawsOf(raws))
 		for issue := range vr.Issues() {
 			codes = append(codes, issue.Code())
 		}

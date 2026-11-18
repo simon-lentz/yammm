@@ -9,7 +9,7 @@ The `yammm` CLI provides schema validation, formatting, data checking, snapshot 
 | Command | Description |
 | ------- | ----------- |
 | `yammm validate <schema>` | Validate a schema file |
-| `yammm fmt <schema>...` | Format schema files, or check them with `--check` |
+| `yammm fmt [-l] [-w] <schema>...` | Format schema files; `-l` lists the files that differ, `-w` rewrites them |
 | `yammm check <schema> <data>...` | Validate data files against a schema |
 | `yammm gen --to go <schema>` | Generate Go source from a schema |
 | `yammm gen --to md <schema>` | Generate Markdown docs with a Mermaid class diagram |
@@ -24,8 +24,14 @@ The `yammm` CLI provides schema validation, formatting, data checking, snapshot 
 
 | Flag | Default | Description |
 | ---- | ------- | ----------- |
-| `--format` | `text` | Diagnostic output format: `text` or `json` |
+| `--json` | `false` | Write diagnostics as one JSON document on stderr, and `snapshot info`'s report as JSON on stdout |
 | `--no-color` | `false` | Disable ANSI color in output |
+
+`yammm --version` prints the version. The flag is the program's alone, so a
+command given it exits 2, and it has no short form.
+
+A command that succeeds prints nothing but its own output and its diagnostics:
+`snapshot save`, `snapshot update-metadata` and `fmt -w` print nothing else.
 
 ### Reading files
 
@@ -60,8 +66,9 @@ it reaches. Anything else is refused at exit 3, naming the path: a
 read-only file, a directory, a looping link, or a file whose directory cannot
 hold the staging file, which `gofmt -w` refuses too. A path the process cannot
 stat, a refused rename and a write-through target that will not open exit 3 the
-same way. `gen` writes to stdout when `--output` is omitted; `snapshot save`
-needs `-o` or `--into`.
+same way. `gen` writes to stdout when `-o` is omitted; `snapshot save`
+needs `-o` or `--into`. A path flag given empty, such as `-o ""`, names no file
+and is a usage error (exit 2).
 
 ---
 
@@ -81,23 +88,32 @@ Compiles a schema file and reports diagnostics. Exit code 0 on success, non-zero
 ```bash
 yammm fmt schema.yammm                 # print formatted output to stdout
 yammm fmt -w schema.yammm              # write back to source file
-yammm fmt --check schema.yammm a.yammm # list unformatted files, exit 1 if any
+yammm fmt -l schema.yammm a.yammm      # list the files whose formatting differs
+yammm fmt -l -w schema.yammm a.yammm   # rewrite those files and list each one
 ```
 
-Formats `.yammm` files (consistent indentation, ordering). Use `-w` / `--write` to
-modify files in place.
+Formats `.yammm` files in canonical form, as `gofmt` formats Go: indentation,
+spacing, blank lines, line wrapping and column alignment. It reorders nothing, and a change of token order is
+refused (below). Use `-w` / `--write` to modify files in place.
 
-`--check` writes nothing. It prints the path of every unformatted file, one per
-line, as `gofmt -l` does, and exits 1 when the list is not empty, which `gofmt -l`
-does not. Where `gofmt -l` prints a path's bytes, `--check` writes a control
+`-l` / `--list` prints the path of each file whose formatting differs, one per
+line, in place of the formatted text, and exits 0, as `gofmt -l` does. A check
+reads the list and the exit code: `out=$(yammm fmt -l schema.yammm) && test -z "$out"`.
+`test -z "$(yammm fmt -l schema.yammm)"` alone passes a file that does not parse,
+whose exit 1 the substitution drops. With `-w`, `-l` lists
+each file it rewrites. v0.21.1's `--check` exited 1 when it listed a file; `-l`
+replaces it. Where `gofmt -l` prints a path's bytes, `-l` writes a control
 character, DEL, a bidi control or a byte that is not valid UTF-8 in a path as
 the text renderer writes it in a diagnostic, so a file's name cannot act on the
-terminal. A pre-commit hook needs only that exit code. Every path is checked, so one
-run reports every offender. `--check` and `--write` together are a usage error
-(exit 2). A file the grammar does not match, or that holds an escape the
+terminal. An empty operand is a usage error before any path is read; otherwise every
+path is read, so one run lists every file that differs, and a
+file's diagnostics are written, in text output, before the next file is formatted; under
+`--json` every file's diagnostics are in the one document written last. A file the grammar does not match, or that holds an escape the
 language does not have outside an invariant expression or an annotation
 argument, is reported as the positioned `E_SYNTAX` diagnostic `validate`
-reports, naming the file, and exits 1. Any other diagnostic `validate` reports
+reports, naming the file, and exits 1; a path that is not valid UTF-8 names no
+source, so there the failure is reported without a position, as a command
+failure, and still exits 1. Any other diagnostic `validate` reports
 does not stop `fmt`.
 
 When formatting would change a schema's tokens or comments, `fmt` refuses. The
@@ -105,8 +121,8 @@ defect is the formatter's, never the schema's: it writes nothing, leaves the
 file unchanged, names the file on stderr and exits 3. A pre-commit hook running
 `fmt --write` therefore blocks the commit rather than committing the rewrite.
 
-The check normalizes line endings before formatting, so a CRLF file is reported
-as unformatted even when nothing else differs. That is what `-w` already does to
+`fmt` normalizes line endings before formatting, so `-l` lists a CRLF file
+even when nothing else differs. That is what `-w` already does to
 the same file. A file that starts with a UTF-8 byte order mark is reported the
 same way, and `-w` removes the mark.
 
@@ -114,7 +130,7 @@ same way, and `-w` removes the mark.
 
 ```bash
 yammm validate schema.yammm      # compile-check
-yammm fmt --check schema.yammm   # gate: is it already canonical?
+yammm fmt -l schema.yammm        # list it if it is not canonical
 yammm fmt -w schema.yammm        # format
 yammm check schema.yammm data.json  # validate data
 ```
@@ -130,7 +146,7 @@ yammm check schema.yammm data.json
 yammm check schema.yammm people.json cars.json
 ```
 
-Validates data against a schema and writes nothing. Several data files are one document, as `snapshot save` reads them. It checks every instance, primary-key uniqueness, and every required association's target. Reports instance and graph diagnostics, the validator's at most 100 for one instance, among them constraint violations, missing and unknown fields, invariant failures, duplicate primary keys and unresolved required associations. The verdict is about the document the data files form: a target the document holds but the validator refuses is reported by that refusal and not as a missing target, and a key two instances state is a duplicate even where one of them is refused. Every command that reads data reads each data file as JSON or JSONC, whatever its name, so `/dev/stdin` serves on Linux and macOS, on a pipe or a redirected file. A file that is not well formed, is not one object, holds a type name whose value is not an array of objects, states one member name twice in one object, or nests deeper than the decoder's 10,000-level limit draws `E_DATA_PARSE`. A JSON object is read as that document, so a `.ys` snapshot draws `E_INVALID_TYPE_TAG` for each of its top-level keys, here and at `snapshot save`.
+Validates data against a schema and writes nothing. Several data files are one document, as `snapshot save` reads them. It checks every instance, primary-key uniqueness, and every required association's target. Reports instance and graph diagnostics, the validator's at most 100 for one instance, among them constraint violations, missing and unknown fields, invariant failures, duplicate primary keys and unresolved required associations. The verdict is about the document the data files form: a target the document holds but the validator refuses, or that holds a string `E_DATA_PARSE` refuses, is reported by that refusal and not as a missing target, and a key two instances state is a duplicate even where one of them is refused. Every command that reads data reads each data file as JSON or JSONC, whatever its name, so `/dev/stdin` serves on Linux and macOS, on a pipe or a redirected file. A file that is not well formed, is not one object, holds a type name whose value is not an array of objects, states one member name twice in one object, holds a string that is not valid UTF-8 or holds a `\u` escape that is half of no surrogate pair, or nests deeper than the decoder's 10,000-level limit draws `E_DATA_PARSE`. An instance that holds such a string is refused and not validated, so its other breaks are reported once its strings are the text the file states, and a key that holds one is no key. A JSON object is read as that document, so a `.ys` snapshot draws `E_INVALID_TYPE_TAG` for each of its top-level keys, here and at `snapshot save`.
 
 ---
 
@@ -155,7 +171,7 @@ Builds a graph snapshot from one or more data files and persists it as a `.ys` f
 | `--indent` | Produce indented output |
 | `--into` | Existing `.ys` file to merge new data into. Its `created_at` and metadata are carried forward: `--timestamp` replaces the first, and `-m` overlays the second key by key |
 
-Output is byte-for-byte deterministic unless a `created_at` is written, which happens only through `--timestamp` or `--into`. The summary line's type count is the written document's type table, the count `snapshot info` reports. `W_SNAPSHOT_PATH_EXTENSION` is raised only after the file is written, located at the output path.
+Output is byte-for-byte deterministic unless a `created_at` is written, which happens only through `--timestamp` or `--into`. `W_SNAPSHOT_PATH_EXTENSION` is raised only after the file is written, located at the output path.
 
 ### snapshot verify
 
@@ -178,7 +194,7 @@ yammm snapshot info output.ys
 
 Displays metadata about a `.ys` file: schema name, version, instance counts, integrity status, timestamps, custom metadata, and the header's attestation (the writer's validity claim, v0.15+).
 
-`--header-only` reads the header and the types table alone and reports the file's size. `--dir <path>` scans the `.ys` files of a directory that `snapshot.ScanDir`'s filtering admits, header-only. For one file, the text and `--format json` modes render one structure, so a field one reports the other reports too, and absent `metadata` reads `none` in text and `{}` in JSON; under `--dir` a JSON entry carries the name, path, size, modification time and the header, `null` where it did not parse, where a text row names the file and its status, then the schema, version and `created_at` of a file that read or the first error of one that did not. Under `--format json`, each `--dir` entry carries its result under `diagnostics` in the wire the diagnostic stream uses: `issues`, plus `limitReached` and `droppedCount` when the entry's issues were truncated. In text, a `warn` row names its first warning.
+`--header-only` reads the header and the types table alone and reports the file's size. `--dir <path>` scans the `.ys` files of a directory that `snapshot.ScanDir`'s filtering admits, header-only. For one file, the text and `--json` modes render one structure, so a field one reports the other reports too, and absent `metadata` reads `none` in text and `{}` in JSON; under `--dir` a JSON entry carries the name, path, size, modification time and the header, `null` where it did not parse, where a text row names the file and its status, then the schema, version and `created_at` of a file that read or the first error of one that did not. Under `--json`, each `--dir` entry carries its result under `diagnostics` in the wire the diagnostic stream uses: `issues`, plus `limitReached` and `droppedCount` when the entry's issues were truncated. In text, a `warn` row names its first warning. A document that decodes and fails a structural check, such as an integrity mismatch, still has a summary: it prints beside the errors, in both modes, and the command exits 1.
 
 ### snapshot update-metadata
 
@@ -210,18 +226,18 @@ yammm gen --to go schema.yammm
 yammm gen --to go --package models --output models_gen.go schema.yammm
 yammm gen --to go --initialisms JWT,OIDC --module-root . schema.yammm
 yammm gen --to md schema.yammm
-yammm gen --to md --no-class-diagram --output SCHEMA.md schema.yammm
+yammm gen --to md --no-class-diagram -o SCHEMA.md schema.yammm
 ```
 
 `--to go` generates Go source via the `schema/gogen` package: one struct per type, named Enum/DataType types and their value constants, a generated `Date` type when a position emits a date, `EDGE_` association structs, a Graph aggregate, the `SchemaHash` constant, and the embedded schema source reachable through `SerializedSources()` / `SerializedEntry`. Output is stdlib-only (imports at most `time` and `encoding/json`), formatted and type-checked before being written; schemas with imports are flattened into one self-contained package.
 
-`--to md` (alias `markdown`) generates a Markdown reference document via the `schema/markdown` package: a Mermaid class diagram of the whole import closure plus per-type sections (flattened property tables with `from <Owner>` inherited-row markers, relation bullets with edge-property sub-tables, invariant source fences) and data-type tables. Same closure flattening; output is deterministic and structurally self-checked before being written.
+`--to md` generates a Markdown reference document via the `schema/markdown` package: a Mermaid class diagram of the whole import closure plus per-type sections (flattened property tables with `from <Owner>` inherited-row markers, relation bullets with edge-property sub-tables, invariant source fences) and data-type tables. Same closure flattening; output is deterministic and structurally self-checked before being written.
 
 | Flag | Description |
 | ---- | ----------- |
-| `--to` | Target: `go`, `cypher` or `md` (required) |
+| `--to` | Target: `go`, `cypher` or `md`, spelled so (required) |
 | `--package` | go target: generated package name (default: derived from schema name). A value that is not a Go identifier, or is a keyword or `_`, an empty one included, is a usage error (exit 2), judged before the schema is loaded |
-| `--output` | Output file path (default: stdout) |
+| `-o, --output` | Output file path (default: stdout) |
 | `--initialisms` | go target: extra acronyms to upper-case in generated names, e.g. `JWT,OIDC`. An acronym is one or more letters; any other, an empty one included, is a usage error (exit 2), judged before the schema is loaded |
 | `--module-root` | Root directory for module-style imports (default: the nearest ancestor holding a `yammm.mod` marker, else the schema's directory). Shared by every command that loads a schema: `validate`, `check`, `gen`, `snapshot save`, `snapshot verify`, `neo4j diff`. A root that is not a directory the loader can open exits 3 before the schema is parsed, whether or not the schema imports anything |
 | `--no-class-diagram` | md target: omit the Mermaid class-diagram section |
@@ -295,8 +311,8 @@ yammm neo4j diff --uri bolt://localhost:7687 schema.yammm
 | Code | Meaning |
 | ---- | ------- |
 | 0 | Success (no errors) |
-| 1 | An error in the input (a validation failure, a constraint violation), drift `neo4j diff` finds, or a file `fmt --check` would reformat |
-| 2 | Usage error (bad flags, missing or extra arguments, an unknown command or help topic, an empty path operand, a schema, data or module-root path that is not valid UTF-8) |
+| 1 | An error in the input (a validation failure, a constraint violation, a schema `fmt` cannot parse), or drift `neo4j diff` finds |
+| 2 | Usage error (bad flags, missing or extra arguments, an unknown command or help topic, an empty path operand or path flag, a schema, data or module-root path that is not valid UTF-8 given to a command that loads the schema; `fmt` opens its operand as given, so such a path it cannot open exits 3) |
 | 3 | Runtime error (connection failure, I/O error, a path the filesystem refuses, a `neo4j diff` comparison that could not be verified, a database object `neo4j diff` cannot classify, an internal fault, a failure the command did not classify) |
 
 ---
@@ -312,12 +328,12 @@ command prints, and names what some commands find and do not print.
   prints. Scripting that gates on the exit code sees no warning; scripting
   that gates on "did it print anything" does.
 - **stdout holds each command's own output**: generated Cypher, Go source,
-  Markdown, formatted schema text and `fmt --check`'s path list, a report, a
+  Markdown, formatted schema text and `fmt -l`'s path list, a report, a
   shell completion script, help text, `--version`'s line.
 - **One report carries diagnostics on stdout.** `yammm snapshot info --dir`
   sends the diagnostics of the directory read to stderr, and puts each file's
   result in its stdout report: in text a row's status with its first error or
-  first warning and no other issue of that file, and under `--format json`
+  first warning and no other issue of that file, and under `--json`
   each entry's `diagnostics`. The exit code is read from every file's result.
 - **`yammm neo4j diff` prints what `gen --to cypher` prints.** It generates
   the script it compares and prints that generation's diagnostics at every
@@ -349,7 +365,7 @@ subtype's property re-declaration dropped an inherited property annotation.
 **Do not read a zero exit code as "no diagnostics."** Read the
 output.
 
-With `--format json`, each command writes exactly one JSON document to stderr,
+With `--json`, each command writes exactly one JSON document to stderr,
 a clean run included, so a consumer parses stderr unconditionally. A `help`,
 `completion` or `--version` that succeeds writes no document; `help` given a
 topic no command answers, and `completion` given no shell or one it does not

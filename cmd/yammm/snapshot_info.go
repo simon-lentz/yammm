@@ -87,10 +87,13 @@ func runSnapshotInfo(cmd *cobra.Command, args []string, sink *cli.DiagnosticSink
 		return cli.Runtimef("read file: %v", err)
 	}
 
+	// A document that decodes and fails a structural check has a summary
+	// beside its errors: the summary prints, and the result decides the exit.
 	info, result := snapshot.Info(cmd.Context(), data)
 	sink.Add(result)
-	if result.HasErrors() {
-		return cli.Exit(cli.ExitForResult(result))
+	exit := cli.Exit(cli.ExitForResult(result))
+	if info == nil {
+		return exit
 	}
 
 	sink.Flush()
@@ -103,11 +106,11 @@ func runSnapshotInfo(cmd *cobra.Command, args []string, sink *cli.DiagnosticSink
 			return cli.Runtimef("encode JSON: %v", err)
 		}
 		fmt.Fprintln(w, string(enc))
-		return nil
+		return exit
 	}
 
 	printSnapshotInfo(w, dto)
-	return nil
+	return exit
 }
 
 // statSize reports the open file's size, keeping fallback when the handle
@@ -351,7 +354,7 @@ type dirEntryDTO struct {
 	// be stat'd — a zero time would sort first and corrupt orderings.
 	ModTime string         `json:"mod_time"`
 	Header  *headerInfoDTO `json:"header"`
-	// Diagnostics is the entry's result in the wire every --format json
+	// Diagnostics is the entry's result in the wire every --json
 	// diagnostic document uses: every detail, and the truncation state.
 	Diagnostics json.RawMessage `json:"diagnostics"`
 }

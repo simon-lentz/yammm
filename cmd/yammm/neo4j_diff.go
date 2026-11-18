@@ -10,6 +10,7 @@ import (
 
 	"github.com/simon-lentz/yammm/cmd/yammm/internal/cli"
 	"github.com/simon-lentz/yammm/diag"
+	"github.com/simon-lentz/yammm/internal/termtext"
 	"github.com/simon-lentz/yammm/neo4j"
 	"github.com/simon-lentz/yammm/schema"
 	"github.com/simon-lentz/yammm/schema/cypher"
@@ -246,7 +247,7 @@ func neo4jDiffExit(plan neo4j.Plan) int {
 // matches. Shared bookend of the constraint and index diff reports.
 func printMatchedLine(w io.Writer, noun string, matched int) {
 	if matched > 0 {
-		fmt.Fprintf(w, "matched: %d %s\n", matched, noun)
+		reportLine(w, "matched: %d %s", matched, noun)
 	}
 }
 
@@ -273,9 +274,10 @@ func printDiffSummary(w io.Writer, prefix, noun string, excluded int, buckets ..
 		total += b.n
 		parts[i] = fmt.Sprintf("%d %s", b.n, b.what)
 	}
-	fmt.Fprintf(w, "\n%ssummary: %s (total: %d)\n", prefix, strings.Join(parts, ", "), total)
+	fmt.Fprintln(w)
+	reportLine(w, "%ssummary: %s (total: %d)", prefix, strings.Join(parts, ", "), total)
 	if excluded > 0 {
-		fmt.Fprintf(w, "%snote: %d database %s were not compared — on a label this schema does not declare, or of a kind it cannot express\n",
+		reportLine(w, "%snote: %d database %s were not compared — on a label this schema does not declare, or of a kind it cannot express",
 			prefix, excluded, noun)
 	}
 }
@@ -308,16 +310,16 @@ func printConstraintDiff(w io.Writer, diff *neo4j.ConstraintDiff) {
 	printMatchedLine(w, "constraints", len(diff.Match))
 
 	for _, d := range diff.Drift {
-		fmt.Fprintf(w, "drift: %s (%s)\n", d.Desired.Name, d.Reason)
+		reportLine(w, "drift: %s (%s)", d.Desired.Name, d.Reason)
 		printBlockers(w, "  blocker: ", d.Blockers)
 	}
 
 	for _, c := range diff.Create {
-		fmt.Fprintf(w, "create: %s\n", c.Statement)
+		reportLine(w, "create: %s", c.Statement)
 	}
 
 	for _, d := range diff.Drop {
-		fmt.Fprintf(w, "drop: %s (name: %s)\n", d.CreateStatement, d.Name)
+		reportLine(w, "drop: %s (name: %s)", d.CreateStatement, d.Name)
 	}
 
 	printDiffSummary(w, "", "constraint(s)", diff.Excluded,
@@ -329,23 +331,23 @@ func printIndexDiff(w io.Writer, diff *neo4j.IndexDiff, owned *cypher.OwnedLabel
 	printMatchedLine(w, "indexes", len(diff.Match))
 
 	for _, d := range diff.Drift {
-		fmt.Fprintf(w, "index drift: %s (%s)\n", d.Desired.Name, d.Reason)
+		reportLine(w, "index drift: %s (%s)", d.Desired.Name, d.Reason)
 		printBlockers(w, "  index blocker: ", d.Blockers)
 	}
 
 	for _, c := range diff.Create {
-		fmt.Fprintf(w, "index create: %s\n", c.Statement)
+		reportLine(w, "index create: %s", c.Statement)
 	}
 
 	for _, d := range diff.Drop {
-		fmt.Fprintf(w, "index drop: %s (%s on %s)\n", d.Name, d.Type, ownedLabelOf(owned, d.LabelsOrTypes))
+		reportLine(w, "index drop: %s (%s on %s)", d.Name, d.Type, ownedLabelOf(owned, d.LabelsOrTypes))
 	}
 
 	// Unverified indexes exist but could not be fully compared. They are listed
 	// separately from matches so an unchecked index is never read as in sync, and
 	// counted as their own bucket in the summary.
 	for _, u := range diff.Unverified {
-		fmt.Fprintf(w, "index unverified: %s (%s)\n", u.Desired.Name, u.Reason)
+		reportLine(w, "index unverified: %s (%s)", u.Desired.Name, u.Reason)
 	}
 
 	printDiffSummary(w, "index ", "index(es)", diff.Excluded,
@@ -354,7 +356,7 @@ func printIndexDiff(w io.Writer, diff *neo4j.IndexDiff, owned *cypher.OwnedLabel
 		tally{len(diff.Unverified), "unverified"})
 
 	if n := len(diff.Unverified); n > 0 {
-		fmt.Fprintf(w, "index note: %d index(es) could not be fully verified\n", n)
+		reportLine(w, "index note: %d index(es) could not be fully verified", n)
 	}
 }
 
@@ -364,7 +366,7 @@ func printIndexDiff(w io.Writer, diff *neo4j.IndexDiff, owned *cypher.OwnedLabel
 // operator's own name and appears in no other line of the report.
 func printBlockers(w io.Writer, prefix string, b neo4j.Blockers) {
 	for _, c := range b.Constraints {
-		fmt.Fprintf(w, "%s%s %q on %s(%s)\n", prefix, blockerKind(c.Type, "constraint"), c.Name,
+		reportLine(w, "%s%s %q on %s(%s)", prefix, blockerKind(c.Type, "constraint"), c.Name,
 			labelList(c.LabelsOrTypes), strings.Join(c.Properties, ", "))
 	}
 	for _, i := range b.Indexes {
@@ -373,8 +375,16 @@ func printBlockers(w io.Writer, prefix string, b neo4j.Blockers) {
 		if i.OwningConstraint != "" {
 			line += fmt.Sprintf(", which backs constraint %q: drop the constraint", i.OwningConstraint)
 		}
-		fmt.Fprintln(w, line)
+		reportLine(w, "%s", line)
 	}
+}
+
+// reportLine writes one line of the report through [termtext.String]. A
+// remote object's name, type, labels, properties and state, and the reasons
+// built from them, are the server's text, which could otherwise start a line
+// or act on the terminal.
+func reportLine(w io.Writer, format string, args ...any) {
+	fmt.Fprintln(w, termtext.String(fmt.Sprintf(format, args...)))
 }
 
 func blockerKind(typ, noun string) string {
