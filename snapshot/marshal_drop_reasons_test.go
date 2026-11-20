@@ -68,7 +68,7 @@ func TestMarshal_ADuplicateDrawsNoDropWarning(t *testing.T) {
 	if mres.HasCode(diag.W_SNAPSHOT_VALUE_DROPPED) {
 		t.Errorf("the deliberate silent drop was marked: %s", mres)
 	}
-	loaded, lres := snapshot.Load(t.Context(), data, s)
+	loaded, lres := snapshot.Unmarshal(t.Context(), data, s)
 	if lres.HasErrors() {
 		t.Fatalf("load: %s", lres)
 	}
@@ -106,7 +106,7 @@ func TestLoad_ProvenanceSurvivesOnlyWhenTheDocumentHadOne(t *testing.T) {
 		if mres.HasErrors() {
 			t.Fatalf("marshal: %s", mres)
 		}
-		loaded, lres := snapshot.Load(t.Context(), data, s)
+		loaded, lres := snapshot.Unmarshal(t.Context(), data, s)
 		if lres.HasErrors() {
 			t.Fatalf("load: %s", lres)
 		}

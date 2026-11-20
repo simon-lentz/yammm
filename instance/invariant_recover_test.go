@@ -31,7 +31,7 @@ type Doc {
 	}
 	typ, _ := s.Type("Doc")
 	v := NewValidator(s)
-	collector := diag.NewCollectorUnlimited()
+	collector := diag.NewCollector(diag.NoLimit)
 
 	inst := newValidInstance("Doc", typ, immutable.Key{}, immutable.WrapProperties(map[string]any{"id": "d"}), nil, nil, Provenance{})
 	err := v.evaluateInvariants(panicContext{t.Context()}, typ, "Doc", inst, collector, Provenance{}, path.Root)

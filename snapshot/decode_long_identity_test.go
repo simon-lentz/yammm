@@ -30,7 +30,7 @@ func lidCut(s string) string {
 func lidInfoDoc(instances, duplicates, unresolved string) []byte {
 	return fmt.Appendf(nil,
 		`{"yammm_snapshot":{"version":%d,"schema_name":"lid","schema_source":"test://lid.yammm","schema_hash":"sha256:00","schema_hash_algorithm":%d,"integrity_hash":"","features":[]},"types":[{"schema":%q,"name":%q},{"schema":%q,"name":%q}],"instances":[%s],"diagnostics":{"duplicates":[%s],"unresolved":[%s]}}`,
-		snapshot.MinReadableVersion, schema.StructuralHashVersion,
+		snapshot.TestMinReadableVersion, schema.StructuralHashVersion,
 		lidSchemaName, lidOwnerName, lidSchemaName, lidPartName, instances, duplicates, unresolved)
 }
 
@@ -117,7 +117,7 @@ func TestInfo_AWrittenTypeIdentityIsCutByItsParts(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, res := snapshot.Info(t.Context(), lidInfoDoc(tt.instances, tt.duplicates, tt.unresolved))
+			_, res := snapshot.Stat(t.Context(), lidInfoDoc(tt.instances, tt.duplicates, tt.unresolved))
 			lidRequire(t, res, tt.code, tt.want)
 		})
 	}
@@ -143,7 +143,7 @@ func TestLoad_ANameTheDocumentWritesIsCut(t *testing.T) {
 	doc := func(duplicates, unresolved string) []byte {
 		return fmt.Appendf(nil,
 			`{"yammm_snapshot":{"version":%d,"schema_name":"lid","schema_source":"test://lid.yammm","schema_hash":%q,"schema_hash_algorithm":%d,"integrity_hash":"","features":[]},"types":[{"schema":"lid","name":"Company"},{"schema":"lid","name":"Person"}],"instances":[{"type":0,"items":[{"key":["c1"],"properties":{"id":"c1"},"provenance":null}]},{"type":1,"items":[{"key":["p1"],"properties":{"id":"p1"},"edges":{"EMPLOYER":[{"target_type":0,"target_key":["c1"],"properties":{}}]},"provenance":null}]}],"diagnostics":{"duplicates":[%s],"unresolved":[%s]}}`,
-			snapshot.MinReadableVersion, schema.StructuralHash(s), schema.StructuralHashVersion, duplicates, unresolved)
+			snapshot.TestMinReadableVersion, schema.StructuralHash(s), schema.StructuralHashVersion, duplicates, unresolved)
 	}
 	tests := []struct {
 		name                   string
@@ -160,7 +160,7 @@ func TestLoad_ANameTheDocumentWritesIsCut(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, res := snapshot.Load(t.Context(), doc(tt.duplicates, tt.unresolved), s, snapshot.WithRevalidation(diag.Warning))
+			_, res := snapshot.Unmarshal(t.Context(), doc(tt.duplicates, tt.unresolved), s, snapshot.WithRevalidation(diag.Warning))
 			lidRequire(t, res, tt.code, tt.want)
 		})
 	}
@@ -177,7 +177,7 @@ func TestLoad_ADeclaredAssociationNameIsWhole(t *testing.T) {
 	doc := func(targetKey string) []byte {
 		return fmt.Appendf(nil,
 			`{"yammm_snapshot":{"version":%d,"schema_name":"lid","schema_source":"test://lid.yammm","schema_hash":%q,"schema_hash_algorithm":%d,"integrity_hash":"","features":[]},"types":[{"schema":"lid","name":"Company"},{"schema":"lid","name":"Person"}],"instances":[{"type":0,"items":[{"key":["c1"],"properties":{"id":"c1"},"provenance":null}]},{"type":1,"items":[{"key":["p1"],"properties":{"id":"p1"},"edges":{%q:[{"target_type":0,"target_key":%s,"properties":{}}]},"provenance":null}]}],"diagnostics":{"duplicates":[],"unresolved":[]}}`,
-			snapshot.MinReadableVersion, schema.StructuralHash(s), schema.StructuralHashVersion, declared, targetKey)
+			snapshot.TestMinReadableVersion, schema.StructuralHash(s), schema.StructuralHashVersion, declared, targetKey)
 	}
 	for _, tt := range []struct {
 		name, targetKey, want string
@@ -186,7 +186,7 @@ func TestLoad_ADeclaredAssociationNameIsWhole(t *testing.T) {
 		{"a target key component that is not a scalar", `[["c1"]]`, `edge 0 of ["p1"] under "` + declared + `" carries target key [["c1"]], whose component 0 is not a scalar graph.ParseKey reads back`},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			_, res := snapshot.Load(t.Context(), doc(tt.targetKey), s)
+			_, res := snapshot.Unmarshal(t.Context(), doc(tt.targetKey), s)
 			for issue := range res.Issues() {
 				if issue.Code() == diag.E_SNAPSHOT_MALFORMED && issue.Message() == tt.want {
 					return

@@ -156,12 +156,12 @@ func hashType(h io.Writer, typ Type, owners map[location.SourceID]string) {
 
 	// Super types (sorted by ID name).
 	supers := slices.Collect(typ.SuperTypes())
-	slices.SortFunc(supers, func(a, b ResolvedTypeRef) int {
-		return compareName(a.ID().Name(), b.ID().Name())
+	slices.SortFunc(supers, func(a, b TypeID) int {
+		return compareName(a.Name(), b.Name())
 	})
-	for _, ref := range supers {
+	for _, id := range supers {
 		writeTag(h, "extends")
-		writeStr(h, ref.ID().Name())
+		writeStr(h, id.Name())
 	}
 
 	// Invariants: order-independent, because two schemas differing only in
@@ -416,7 +416,7 @@ func writeInt64(h io.Writer, v int64) {
 // writeFloat64 writes a float64 as 8 bytes IEEE 754 big-endian
 // (via [math.Float64bits]), the two zeros as one.
 func writeFloat64(h io.Writer, v float64) {
-	// FloatConstraint.Equal compares with ==, which calls the two zeros equal.
+	// FloatConstraint.equal compares with ==, which calls the two zeros equal.
 	if v == 0 {
 		v = 0
 	}

@@ -35,9 +35,6 @@ func TestScanDir_PopulatesFileSize(t *testing.T) {
 		if entry.Header == nil {
 			t.Fatalf("%s: header is nil on a valid fixture", entry.Name)
 		}
-		if entry.Header.FileSize != info.Size() {
-			t.Errorf("%s: HeaderInfo.FileSize = %d, want %d", entry.Name, entry.Header.FileSize, info.Size())
-		}
 	}
 	if seen != 2 {
 		t.Errorf("scanned %d entries, want 2", seen)
@@ -73,27 +70,6 @@ func TestScanDir_PopulatesFileSizeForACorruptEntry(t *testing.T) {
 	}
 	if seen != 1 {
 		t.Errorf("scanned %d entries, want 1", seen)
-	}
-}
-
-// A size is not knowable from an io.Reader, and the reader form still says so.
-func TestHeaderOnlyRead_LeavesFileSizeZero(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "a.ys")
-	seedValidYS(t, path)
-
-	f, err := os.Open(path)
-	if err != nil {
-		t.Fatalf("open: %v", err)
-	}
-	defer f.Close()
-
-	header, result := snapshot.HeaderOnlyRead(t.Context(), f)
-	if err := result.Err(); err != nil {
-		t.Fatalf("HeaderOnlyRead: %v", err)
-	}
-	if header.FileSize != 0 {
-		t.Errorf("HeaderOnlyRead FileSize = %d, want 0", header.FileSize)
 	}
 }
 

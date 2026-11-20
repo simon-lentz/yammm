@@ -116,11 +116,11 @@ func TestLoad_RefusesASecondOccupantInAOneSlot(t *testing.T) {
 
 	// The control runs first: a sole occupant must still load, or the guard
 	// would pass by refusing everything.
-	if _, res := snapshot.Load(t.Context(), sole, s); res.HasErrors() {
+	if _, res := snapshot.Unmarshal(t.Context(), sole, s); res.HasErrors() {
 		t.Fatalf("a sole occupant of a (one) composition was refused: %s", res)
 	}
 
-	_, res := snapshot.Load(t.Context(), twoOccupants, s)
+	_, res := snapshot.Unmarshal(t.Context(), twoOccupants, s)
 	if !res.HasErrors() {
 		t.Fatal("two occupants of a (one) composition loaded clean")
 	}

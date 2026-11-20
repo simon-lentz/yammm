@@ -52,7 +52,7 @@ func TestRead_ARootWhoseKeyIsRefusedHoldsNoAddress(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
-			_, l := snapshot.Load(ctx, rehashDocument(t, []byte(c.doc)), s)
+			_, l := snapshot.Unmarshal(ctx, rehashDocument(t, []byte(c.doc)), s)
 			for surface, res := range map[string]diag.Result{"Load": l, "Verify": snapshot.Verify(ctx, rehashDocument(t, []byte(c.doc)), s)} {
 				var got []diag.Code
 				for issue := range res.Issues() {
@@ -88,7 +88,7 @@ func TestRead_ARootOfAKeylessTypeHoldsNoAddress(t *testing.T) {
 	doc = editOnce(t, doc, `"provenance":null}]}]`, `"provenance":null}]},{"type":1,"items":[`+
 		`{"key":null,"properties":{"label":"a"},"provenance":null},{"key":null,"properties":{"label":"b"},"provenance":null},`+
 		`{"key":null,"properties":{"label":"c"},"provenance":null}]}]`)
-	_, l := snapshot.Load(ctx, rehashDocument(t, []byte(doc)), s)
+	_, l := snapshot.Unmarshal(ctx, rehashDocument(t, []byte(doc)), s)
 	for surface, res := range map[string]diag.Result{"Load": l, "Verify": snapshot.Verify(ctx, rehashDocument(t, []byte(doc)), s)} {
 		if res.Len() != 1 || !hasCode(res, diag.E_SNAPSHOT_INVALID_ROOT) {
 			t.Errorf("%s: %s, want one %s", surface, res, diag.E_SNAPSHOT_INVALID_ROOT)
@@ -105,8 +105,8 @@ func TestRead_RootsWithUnreadableKeysAreNoDuplicates(t *testing.T) {
 	doc := readerDoc(t, s, map[string]any{"$type": "Company", "id": "c1"})
 	bad := `{"key":[["x"]],"properties":{"id":"c1"},"provenance":null}`
 	doc = editOnce(t, doc, `{"key":["c1"],"properties":{"id":"c1"},"provenance":null}`, bad+`,`+bad)
-	_, l := snapshot.Load(ctx, rehashDocument(t, []byte(doc)), s)
-	_, i := snapshot.Info(ctx, rehashDocument(t, []byte(doc)))
+	_, l := snapshot.Unmarshal(ctx, rehashDocument(t, []byte(doc)), s)
+	_, i := snapshot.Stat(ctx, rehashDocument(t, []byte(doc)))
 	for surface, res := range map[string]diag.Result{"Load": l, "Verify": snapshot.Verify(ctx, rehashDocument(t, []byte(doc)), s), "Info": i} {
 		if res.Len() != 2 || hasCode(res, diag.E_DUPLICATE_PK) || !strings.Contains(res.String(), "is not a scalar graph.ParseKey reads back") {
 			t.Errorf("%s: %s, want two refusals of the key and no %s", surface, res, diag.E_DUPLICATE_PK)
@@ -130,7 +130,7 @@ func TestRead_ASoundRootHoldsTheAddressARefusedRootStoodAt(t *testing.T) {
 		twin = `{"key":["p1"],"properties":{"id":"p9"},"provenance":null},`
 	)
 	refusedThenSound := editOnce(t, doc, root, twin+root)
-	if _, res := snapshot.Load(ctx, rehashDocument(t, []byte(doc)), s); res.HasErrors() {
+	if _, res := snapshot.Unmarshal(ctx, rehashDocument(t, []byte(doc)), s); res.HasErrors() {
 		t.Fatalf("control: %s", res)
 	}
 	for name, c := range map[string]struct {
@@ -148,7 +148,7 @@ func TestRead_ASoundRootHoldsTheAddressARefusedRootStoodAt(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
-			_, l := snapshot.Load(ctx, rehashDocument(t, []byte(c.doc)), s)
+			_, l := snapshot.Unmarshal(ctx, rehashDocument(t, []byte(c.doc)), s)
 			for surface, res := range map[string]diag.Result{"Load": l, "Verify": snapshot.Verify(ctx, rehashDocument(t, []byte(c.doc)), s)} {
 				got := map[diag.Code]int{}
 				for issue := range res.Issues() {

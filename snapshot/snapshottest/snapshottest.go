@@ -28,7 +28,7 @@ func BuildSnapshot(tb testing.TB, s schema.Schema, instances ...instance.ValidIn
 	for i, inst := range instances {
 		res := g.Add(context.Background(), inst)
 		for issue := range res.Issues() {
-			if issue.Severity().IsFailure() && issue.Code() != diag.E_DUPLICATE_PK {
+			if (issue.Severity() == diag.Fatal || issue.Severity() == diag.Error) && issue.Code() != diag.E_DUPLICATE_PK {
 				tb.Fatalf("BuildSnapshot: instance %d was refused: %s", i, res)
 			}
 		}
@@ -36,10 +36,10 @@ func BuildSnapshot(tb testing.TB, s schema.Schema, instances ...instance.ValidIn
 	return g.Snapshot()
 }
 
-// AssertRoundTrip marshals a snapshot, loads it back, and verifies
-// structural equivalence via [DiffSnapshots]. Fails the test with a
-// (-want +got) diff on mismatch.
-func AssertRoundTrip(tb testing.TB, snap graph.Snapshot, s schema.Schema, opts ...snapshot.Option) {
+// AssertRoundTrip marshals a snapshot, unmarshals it against the snapshot's
+// own schema, and verifies structural equivalence via [DiffSnapshots]. Fails
+// the test with a (-want +got) diff on mismatch.
+func AssertRoundTrip(tb testing.TB, snap graph.Snapshot, opts ...snapshot.Option) {
 	tb.Helper()
 	ctx := context.Background()
 
@@ -48,9 +48,9 @@ func AssertRoundTrip(tb testing.TB, snap graph.Snapshot, s schema.Schema, opts .
 		tb.Fatalf("AssertRoundTrip: Marshal failed: %v", err)
 	}
 
-	loaded, result := snapshot.Load(ctx, data, s)
+	loaded, result := snapshot.Unmarshal(ctx, data, snap.Schema())
 	if err := result.Err(); err != nil {
-		tb.Fatalf("AssertRoundTrip: Load failed: %v", err)
+		tb.Fatalf("AssertRoundTrip: Unmarshal failed: %v", err)
 	}
 
 	DiffSnapshots(tb, snap, loaded)
@@ -185,7 +185,7 @@ func project(s graph.Snapshot) snapProjection {
 			TargetType: u.TargetType().String(),
 			TargetKey:  u.TargetKey(),
 			Required:   u.Required(),
-			Reason:     u.Reason(),
+			Reason:     u.Reason().String(),
 			Properties: u.Properties().Clone(),
 		})
 	}

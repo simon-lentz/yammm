@@ -62,7 +62,7 @@ func TestLoad_ARefusedRecordDrawsNoRequiredWarning(t *testing.T) {
 		for _, sev := range []diag.Severity{diag.Warning, diag.Error} {
 			t.Run(name+"/"+sev.String(), func(t *testing.T) {
 				t.Parallel()
-				_, res := snapshot.Load(t.Context(), rehashDocument(t, []byte(c.edit(doc))), s,
+				_, res := snapshot.Unmarshal(t.Context(), rehashDocument(t, []byte(c.edit(doc))), s,
 					snapshot.WithIssueLimit(0), snapshot.WithRevalidation(sev))
 				client, employ := 0, 0
 				for issue := range res.Issues() {
@@ -93,7 +93,7 @@ func TestLoad_RequiredWarningsPrecedeARootsFindings(t *testing.T) {
 	if bad == doc {
 		t.Fatal("the edit did not apply")
 	}
-	_, res := snapshot.Load(t.Context(), rehashDocument(t, []byte(bad)), s, snapshot.WithIssueLimit(2), snapshot.WithRevalidation(diag.Warning))
+	_, res := snapshot.Unmarshal(t.Context(), rehashDocument(t, []byte(bad)), s, snapshot.WithIssueLimit(2), snapshot.WithRevalidation(diag.Warning))
 	warned := 0
 	for issue := range res.Issues() {
 		if issue.Code() == diag.W_SNAPSHOT_UNRESOLVED_REQUIRED {
@@ -103,7 +103,7 @@ func TestLoad_RequiredWarningsPrecedeARootsFindings(t *testing.T) {
 	if warned != 2 {
 		t.Errorf("%d warnings kept under a cap of 2, want 2:\n%s", warned, res)
 	}
-	_, whole := snapshot.Load(t.Context(), rehashDocument(t, []byte(bad)), s, snapshot.WithIssueLimit(0), snapshot.WithRevalidation(diag.Warning))
+	_, whole := snapshot.Unmarshal(t.Context(), rehashDocument(t, []byte(bad)), s, snapshot.WithIssueLimit(0), snapshot.WithRevalidation(diag.Warning))
 	if !whole.HasCode(diag.E_CONSTRAINT_FAIL) {
 		t.Errorf("no finding for the value the cap dropped:\n%s", whole)
 	}
@@ -115,7 +115,7 @@ func TestLoad_RequiredWarningCutsASourceKeyAndNamesItsRelation(t *testing.T) {
 	t.Parallel()
 	s, doc := singleBreakDoc(t)
 	long := strings.Repeat("k", 80)
-	_, res := snapshot.Load(t.Context(), rehashDocument(t, []byte(strings.ReplaceAll(doc, `"p2"`, `"`+long+`"`))), s, snapshot.WithIssueLimit(0), snapshot.WithRevalidation(diag.Warning))
+	_, res := snapshot.Unmarshal(t.Context(), rehashDocument(t, []byte(strings.ReplaceAll(doc, `"p2"`, `"`+long+`"`))), s, snapshot.WithIssueLimit(0), snapshot.WithRevalidation(diag.Warning))
 	relations := map[string]bool{}
 	for issue := range res.Issues() {
 		if issue.Code() != diag.W_SNAPSHOT_UNRESOLVED_REQUIRED {
@@ -183,7 +183,7 @@ func TestLoad_RevalidationJudgesARecordAsTheValidatorJudgesItsEdge(t *testing.T)
 			edited := []byte(editOnce(t, doc, c.from, c.to))
 			prefix := `revalidation of sb#Person[["` + c.root + `"]]: `
 			for _, sev := range []diag.Severity{diag.Warning, diag.Error} {
-				_, res := snapshot.Load(t.Context(), rehashDocument(t, edited), s, snapshot.WithIssueLimit(0), snapshot.WithRevalidation(sev))
+				_, res := snapshot.Unmarshal(t.Context(), rehashDocument(t, edited), s, snapshot.WithIssueLimit(0), snapshot.WithRevalidation(sev))
 				got := revalidationFindings(res, prefix)
 				if len(got) != 1 || got[0] != want[0] {
 					t.Errorf("revalidation at %s reports %q, the validator %q:\n%s", sev, got, want, res)
@@ -192,7 +192,7 @@ func TestLoad_RevalidationJudgesARecordAsTheValidatorJudgesItsEdge(t *testing.T)
 					t.Errorf("revalidation at %s: HasErrors = %v:\n%s", sev, res.HasErrors(), res)
 				}
 			}
-			if _, res := snapshot.Load(t.Context(), rehashDocument(t, edited), s, snapshot.WithIssueLimit(0)); !res.OK() {
+			if _, res := snapshot.Unmarshal(t.Context(), rehashDocument(t, edited), s, snapshot.WithIssueLimit(0)); !res.OK() {
 				t.Errorf("a load without revalidation judges no value: %s", res)
 			}
 		})
@@ -215,7 +215,7 @@ func TestLoad_RevalidationJudgesNoRecordACheckRefuses(t *testing.T) {
 			t.Parallel()
 			edited := []byte(editOnce(t, doc, c.from, c.to))
 			for _, sev := range []diag.Severity{diag.Warning, diag.Error} {
-				_, res := snapshot.Load(t.Context(), rehashDocument(t, edited), s, snapshot.WithIssueLimit(0), snapshot.WithRevalidation(sev))
+				_, res := snapshot.Unmarshal(t.Context(), rehashDocument(t, edited), s, snapshot.WithIssueLimit(0), snapshot.WithRevalidation(sev))
 				if got := revalidationFindings(res, `revalidation of sb#Person[["p2"]]: `); len(got) != 0 {
 					t.Errorf("revalidation at %s judged a refused record: %q:\n%s", sev, got, res)
 				}
@@ -340,7 +340,7 @@ func TestLoad_RevalidationRunsNoRootACheckRefusedAUnitOf(t *testing.T) {
 					res  func() diag.Result
 				}{
 					{"Load", func() diag.Result {
-						_, res := snapshot.Load(t.Context(), rehashDocument(t, edited), s, snapshot.WithIssueLimit(0), snapshot.WithRevalidation(sev))
+						_, res := snapshot.Unmarshal(t.Context(), rehashDocument(t, edited), s, snapshot.WithIssueLimit(0), snapshot.WithRevalidation(sev))
 						return res
 					}},
 					{"Verify", func() diag.Result {
@@ -392,7 +392,7 @@ func TestLoad_RevalidationRunsNoRootAtAnAddressAnotherRootStandsAt(t *testing.T)
 				edited = editOnce(t, edited, e[0], e[1])
 			}
 			for _, sev := range []diag.Severity{diag.Warning, diag.Error} {
-				_, res := snapshot.Load(t.Context(), rehashDocument(t, []byte(edited)), s, snapshot.WithIssueLimit(0), snapshot.WithRevalidation(sev))
+				_, res := snapshot.Unmarshal(t.Context(), rehashDocument(t, []byte(edited)), s, snapshot.WithIssueLimit(0), snapshot.WithRevalidation(sev))
 				if got := revalidationFindings(res, `revalidation of gr#A[["a1"]]: `); len(got) != 0 {
 					t.Errorf("revalidation at %s ran a root at a shared address: %q:\n%s", sev, got, res)
 				}
@@ -417,7 +417,7 @@ func TestLoad_RevalidationFindingsFollowTheIntegrityCheck(t *testing.T) {
 	knows := `"relation":"KNOWS","target_type":1,"target_key":["b9"],"required":true,"reason":"target_missing","properties":{"since":1}`
 	edited := []byte(editOnce(t, doc, knows, strings.Replace(knows, `{"since":1}`, `{"since":500}`, 1)))
 	for _, sev := range []diag.Severity{diag.Warning, diag.Error} {
-		_, res := snapshot.Load(t.Context(), edited, s, snapshot.WithIssueLimit(1), snapshot.WithRevalidation(sev))
+		_, res := snapshot.Unmarshal(t.Context(), edited, s, snapshot.WithIssueLimit(1), snapshot.WithRevalidation(sev))
 		var got []diag.Code
 		for issue := range res.Issues() {
 			got = append(got, issue.Code())
@@ -436,7 +436,7 @@ func TestLoad_RevalidationFindingsFollowEveryStructuralIssue(t *testing.T) {
 	knows := `"relation":"KNOWS","target_type":1,"target_key":["b9"]`
 	edited := []byte(editOnce(t, doc, knows, strings.Replace(knows, `["b9"]`, `["b1"]`, 1)))
 	for _, sev := range []diag.Severity{diag.Warning, diag.Error} {
-		_, res := snapshot.Load(t.Context(), rehashDocument(t, edited), s, snapshot.WithIssueLimit(1), snapshot.WithRevalidation(sev))
+		_, res := snapshot.Unmarshal(t.Context(), rehashDocument(t, edited), s, snapshot.WithIssueLimit(1), snapshot.WithRevalidation(sev))
 		var got []string
 		for issue := range res.Issues() {
 			got = append(got, issue.Code().String()+": "+issue.Message())
@@ -482,10 +482,10 @@ func TestLoad_RevalidationFindsARecordAtItsSourceKey(t *testing.T) {
 	}
 	doc := editOnce(t, string(data), `"weight":5`, `"weight":50`)
 	opts := []snapshot.LoadOption{snapshot.WithIntegrityCheck(false), snapshot.WithIssueLimit(0)}
-	if _, res := snapshot.Load(t.Context(), rehashDocument(t, []byte(doc)), s, opts...); !res.OK() {
+	if _, res := snapshot.Unmarshal(t.Context(), rehashDocument(t, []byte(doc)), s, opts...); !res.OK() {
 		t.Fatalf("the document is structurally sound, and a load without revalidation reports: %s", res)
 	}
-	_, res = snapshot.Load(t.Context(), rehashDocument(t, []byte(doc)), s, append(opts, snapshot.WithRevalidation(diag.Error))...)
+	_, res = snapshot.Unmarshal(t.Context(), rehashDocument(t, []byte(doc)), s, append(opts, snapshot.WithRevalidation(diag.Error))...)
 	got := revalidationFindings(res, "revalidation of rs#Event[[")
 	if len(got) != 1 || !strings.Contains(got[0], "E_CONSTRAINT_FAIL: ") || res.Len() != 1 {
 		t.Errorf("revalidation reports %q, want one E_CONSTRAINT_FAIL for the record's weight:\n%s", got, res)
@@ -498,10 +498,10 @@ func TestLoad_RevalidationJudgesAGrandchildsValues(t *testing.T) {
 	t.Parallel()
 	s, doc := singleBreakDoc(t)
 	edited := []byte(editOnce(t, doc, sbInnerBox, strings.Replace(sbInnerBox, `"n":2`, `"n":"x"`, 1)))
-	if _, res := snapshot.Load(t.Context(), rehashDocument(t, edited), s, snapshot.WithIssueLimit(0)); !res.OK() {
+	if _, res := snapshot.Unmarshal(t.Context(), rehashDocument(t, edited), s, snapshot.WithIssueLimit(0)); !res.OK() {
 		t.Fatalf("a load without revalidation judges no value: %s", res)
 	}
-	_, res := snapshot.Load(t.Context(), rehashDocument(t, edited), s, snapshot.WithIssueLimit(0), snapshot.WithRevalidation(diag.Error))
+	_, res := snapshot.Unmarshal(t.Context(), rehashDocument(t, edited), s, snapshot.WithIssueLimit(0), snapshot.WithRevalidation(diag.Error))
 	got := revalidationFindings(res, `revalidation of sb#Order[["o1"]]: `)
 	if len(got) != 1 || !strings.HasPrefix(got[0], "E_TYPE_MISMATCH: ") || !strings.Contains(got[0], `"n"`) {
 		t.Errorf("revalidation reports %q, want one E_TYPE_MISMATCH for the inner Box's n:\n%s", got, res)

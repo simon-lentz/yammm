@@ -561,6 +561,7 @@ func (b *builder) addInvariant(nt *TypeDecl, inv *invNode) {
 		MessageRaw:  inv.Msg.Raw,
 		MessageSpan: b.spanOf(inv.Msg.Pos, inv.Msg.EndPos),
 		Expr:        res.E,
+		Text:        res.Text,
 		NoValue:     res.NoValue,
 		Doc:         stripDoc(inv.Doc),
 		Span:        b.spanOf(inv.Pos, inv.EndPos),

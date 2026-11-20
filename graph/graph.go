@@ -64,7 +64,7 @@ type pendingEdge struct {
 	targetKey    string
 	properties   immutable.Properties
 	isRequired   bool
-	reasonDetail string // "absent", "empty", or ""
+	reasonDetail UnresolvedReason
 }
 
 // New creates a new Graph bound to the given schema.
@@ -210,7 +210,7 @@ func (g *Graph) add(ctx context.Context, inst instance.ValidInstance, name strin
 			targetKey:    se.targetKey,
 			properties:   se.properties,
 			isRequired:   se.isRequired,
-			reasonDetail: se.reason, // Check renders the empty form as "target_missing".
+			reasonDetail: se.reason,
 		})
 	}
 
@@ -258,17 +258,13 @@ func (g *Graph) Check(ctx context.Context) diag.Result {
 				continue
 			}
 			var reason string
-			var reasonToken string
 			switch pend.reasonDetail {
-			case "absent":
+			case ReasonAbsent:
 				reason = "association field is absent"
-				reasonToken = "absent"
-			case "empty":
+			case ReasonEmpty:
 				reason = "association array is empty"
-				reasonToken = "empty"
 			default:
 				reason = "target instance not found"
-				reasonToken = "target_missing"
 			}
 
 			builder := diag.NewIssue(diag.Error, diag.E_UNRESOLVED_REQUIRED,
@@ -277,10 +273,10 @@ func (g *Graph) Check(ctx context.Context) diag.Result {
 				WithDetail(diag.DetailKeyPrimaryKey, pend.source.PrimaryKey().String()).
 				WithDetail(diag.DetailKeyRelationName, pend.relation).
 				WithDetail(diag.DetailKeyJSONField, pend.jsonField).
-				WithDetail(diag.DetailKeyReason, reasonToken)
+				WithDetail(diag.DetailKeyReason, pend.reasonDetail.String())
 
-			// The "absent" and "empty" reasons carry no target to name.
-			if reasonToken == "target_missing" {
+			// The absent and empty reasons carry no target to name.
+			if pend.reasonDetail == ReasonTargetMissing {
 				builder = builder.WithDetail(diag.DetailKeyTargetType, schema.TagForm(g.schema, pend.targetType)).
 					WithDetail(diag.DetailKeyTargetPK, pend.targetKey)
 			}
@@ -361,14 +357,9 @@ func (g *Graph) Snapshot() Snapshot {
 	unresolved := make([]UnresolvedEdge, 0, totalPending)
 	for _, set := range g.pending {
 		for pend := range set {
-			// Determine reason token
-			reason := pend.reasonDetail
-			if reason == "" {
-				reason = "target_missing"
-			}
 			unresolved = append(unresolved, newUnresolvedEdge(
 				cloneMap[pend.source], pend.relation, pend.targetType, pend.targetKey,
-				pend.isRequired, reason, pend.properties,
+				pend.isRequired, pend.reasonDetail, pend.properties,
 			))
 		}
 	}

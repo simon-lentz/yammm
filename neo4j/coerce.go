@@ -165,7 +165,8 @@ func coerceValue(constraint schema.Constraint, raw any) (any, error) {
 // The value is the full [schema.Constraint], not just its
 // [schema.ConstraintKind]: element coercion of List properties needs the
 // element type, which a bare kind discards. Derive one from a schema type with
-// [ParamTypesForType], or hand-list constraints via the schema constructors.
+// [ParamTypesForType], or hand-list the constraints a loaded schema's
+// properties hold.
 type ParamTypes map[string]schema.Constraint
 
 // CoerceParams reads each value of params at the constraint declared for its

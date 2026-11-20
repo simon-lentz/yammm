@@ -393,9 +393,9 @@ func (fp fingerprint) constraint(c *Constraint) {
 }
 
 // expr renders an expression tree. An argument list is handled before the
-// generic branch because its Literal is a slice of Expression pointers, whose
+// literal branch because its value is a slice of Expression pointers, whose
 // addresses differ between parses and would make every fingerprint unique.
-// Lambda parameters need no such case: their Literal is a []string.
+// Lambda parameters need no such case: their value is a []string.
 func (fp fingerprint) expr(e expr.Expression) {
 	if e == nil {
 		fp.out.WriteString("<nil>")
@@ -410,14 +410,23 @@ func (fp fingerprint) expr(e expr.Expression) {
 		fp.out.WriteByte(')')
 		return
 	}
-	fmt.Fprintf(fp.out, "%s|%v", e.Op(), e.Literal())
-	if kids := e.Children(); len(kids) > 0 {
-		fp.out.WriteByte('(')
-		for _, c := range kids {
-			fp.expr(c)
-			fp.out.WriteByte(' ')
+	switch n := e.(type) {
+	case expr.SExpr:
+		fmt.Fprintf(fp.out, "%s|%s", n.Op(), n.Op())
+		if kids := n.Children(); len(kids) > 0 {
+			fp.out.WriteByte('(')
+			for _, c := range kids {
+				fp.expr(c)
+				fp.out.WriteByte(' ')
+			}
+			fp.out.WriteByte(')')
 		}
-		fp.out.WriteByte(')')
+	case expr.Op:
+		fmt.Fprintf(fp.out, "%s|%s", n, n)
+	case *expr.Literal:
+		fmt.Fprintf(fp.out, "lit|%v", n.Val)
+	default:
+		fmt.Fprintf(fp.out, "%T", n)
 	}
 }
 

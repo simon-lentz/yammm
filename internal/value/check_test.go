@@ -6,10 +6,11 @@ import (
 	"fmt"
 	"math"
 	"reflect"
-	"regexp"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/simon-lentz/yammm/internal/schematest"
 
 	"github.com/google/uuid"
 	"github.com/simon-lentz/yammm/internal/raceskip"
@@ -19,7 +20,7 @@ import (
 
 func TestCheck_Nil(t *testing.T) {
 	// nil is always valid (required check is done separately)
-	err := value.Check(nil, schema.NewStringConstraint())
+	err := value.Check(nil, schematest.Constraint(t, "String"))
 	if err != nil {
 		t.Errorf("unexpected error: %v", err)
 	}
@@ -32,13 +33,13 @@ func TestCheck_String(t *testing.T) {
 		constraint schema.Constraint
 		wantErr    bool
 	}{
-		{"valid_string", "hello", schema.NewStringConstraint(), false},
-		{"empty_string", "", schema.NewStringConstraint(), false},
-		{"wrong_type", 42, schema.NewStringConstraint(), true},
-		{"min_length_ok", "abc", schema.StringLenBetween(3, 10), false},
-		{"min_length_fail", "ab", schema.StringLenBetween(3, 10), true},
-		{"max_length_ok", "abcdefghij", schema.StringLenBetween(1, 10), false},
-		{"max_length_fail", "abcdefghijk", schema.StringLenBetween(1, 10), true},
+		{"valid_string", "hello", schematest.Constraint(t, "String"), false},
+		{"empty_string", "", schematest.Constraint(t, "String"), false},
+		{"wrong_type", 42, schematest.Constraint(t, "String"), true},
+		{"min_length_ok", "abc", schematest.Constraint(t, "String[3, 10]"), false},
+		{"min_length_fail", "ab", schematest.Constraint(t, "String[3, 10]"), true},
+		{"max_length_ok", "abcdefghij", schematest.Constraint(t, "String[1, 10]"), false},
+		{"max_length_fail", "abcdefghijk", schematest.Constraint(t, "String[1, 10]"), true},
 	}
 
 	for _, tt := range tests {
@@ -71,35 +72,35 @@ func TestCheckCoerce_Integer(t *testing.T) {
 		wantCoerced   any
 		wantCoerceErr bool
 	}{
-		{"valid_int", int64(42), schema.NewIntegerConstraint(), false, int64(42), false},
-		{"valid_int32", int32(42), schema.NewIntegerConstraint(), false, int64(42), false},
-		{"valid_uint", uint(42), schema.NewIntegerConstraint(), false, int64(42), false},
-		{"uint8", uint8(255), schema.NewIntegerConstraint(), false, int64(255), false},
-		{"int16", int16(-32768), schema.NewIntegerConstraint(), false, int64(-32768), false},
-		{"wrong_type_string", "42", schema.NewIntegerConstraint(), true, nil, true},
-		{"wrong_type_float", 3.14, schema.NewIntegerConstraint(), true, nil, true},
-		{"min_ok", int64(10), schema.IntegerBetween(10, 100), false, int64(10), false},
-		{"min_fail", int64(9), schema.IntegerBetween(10, 100), true, int64(9), false},
-		{"max_ok", int64(100), schema.IntegerBetween(10, 100), false, int64(100), false},
-		{"max_fail", int64(101), schema.IntegerBetween(10, 100), true, int64(101), false},
-		{"no_min", int64(-1000), schema.IntegerMax(100), false, int64(-1000), false},
-		{"no_max", int64(1000), schema.IntegerMin(0), false, int64(1000), false},
+		{"valid_int", int64(42), schematest.Constraint(t, "Integer"), false, int64(42), false},
+		{"valid_int32", int32(42), schematest.Constraint(t, "Integer"), false, int64(42), false},
+		{"valid_uint", uint(42), schematest.Constraint(t, "Integer"), false, int64(42), false},
+		{"uint8", uint8(255), schematest.Constraint(t, "Integer"), false, int64(255), false},
+		{"int16", int16(-32768), schematest.Constraint(t, "Integer"), false, int64(-32768), false},
+		{"wrong_type_string", "42", schematest.Constraint(t, "Integer"), true, nil, true},
+		{"wrong_type_float", 3.14, schematest.Constraint(t, "Integer"), true, nil, true},
+		{"min_ok", int64(10), schematest.Constraint(t, "Integer[10, 100]"), false, int64(10), false},
+		{"min_fail", int64(9), schematest.Constraint(t, "Integer[10, 100]"), true, int64(9), false},
+		{"max_ok", int64(100), schematest.Constraint(t, "Integer[10, 100]"), false, int64(100), false},
+		{"max_fail", int64(101), schematest.Constraint(t, "Integer[10, 100]"), true, int64(101), false},
+		{"no_min", int64(-1000), schematest.Constraint(t, "Integer[_, 100]"), false, int64(-1000), false},
+		{"no_max", int64(1000), schematest.Constraint(t, "Integer[0, _]"), false, int64(1000), false},
 
 		// A float fails both checking and coercion, whole or not and in bounds
 		// or not: a float is never an integer.
-		{"float64_whole_zero", float64(0.0), schema.NewIntegerConstraint(), true, nil, true},
-		{"float64_whole_positive", float64(42.0), schema.NewIntegerConstraint(), true, nil, true},
-		{"float64_whole_negative", float64(-42.0), schema.NewIntegerConstraint(), true, nil, true},
-		{"float64_whole_large", float64(1000000.0), schema.NewIntegerConstraint(), true, nil, true},
-		{"float64_fraction", float64(3.14), schema.NewIntegerConstraint(), true, nil, true},
-		{"float64_fraction_half", float64(0.5), schema.NewIntegerConstraint(), true, nil, true},
-		{"float64_in_bounds", float64(10.0), schema.IntegerBetween(10, 100), true, nil, true},
-		{"float32_whole", float32(42), schema.NewIntegerConstraint(), true, nil, true},
-		{"json_number_whole_decimal", json.Number("42.0"), schema.NewIntegerConstraint(), true, nil, true},
-		{"json_number_whole_exponent", json.Number("1e2"), schema.NewIntegerConstraint(), true, nil, true},
-		{"json_number_integer", json.Number("42"), schema.NewIntegerConstraint(), false, int64(42), false},
-		{"float64_nan", math.NaN(), schema.NewIntegerConstraint(), true, nil, true},
-		{"float64_inf", math.Inf(1), schema.NewIntegerConstraint(), true, nil, true},
+		{"float64_whole_zero", float64(0.0), schematest.Constraint(t, "Integer"), true, nil, true},
+		{"float64_whole_positive", float64(42.0), schematest.Constraint(t, "Integer"), true, nil, true},
+		{"float64_whole_negative", float64(-42.0), schematest.Constraint(t, "Integer"), true, nil, true},
+		{"float64_whole_large", float64(1000000.0), schematest.Constraint(t, "Integer"), true, nil, true},
+		{"float64_fraction", float64(3.14), schematest.Constraint(t, "Integer"), true, nil, true},
+		{"float64_fraction_half", float64(0.5), schematest.Constraint(t, "Integer"), true, nil, true},
+		{"float64_in_bounds", float64(10.0), schematest.Constraint(t, "Integer[10, 100]"), true, nil, true},
+		{"float32_whole", float32(42), schematest.Constraint(t, "Integer"), true, nil, true},
+		{"json_number_whole_decimal", json.Number("42.0"), schematest.Constraint(t, "Integer"), true, nil, true},
+		{"json_number_whole_exponent", json.Number("1e2"), schematest.Constraint(t, "Integer"), true, nil, true},
+		{"json_number_integer", json.Number("42"), schematest.Constraint(t, "Integer"), false, int64(42), false},
+		{"float64_nan", math.NaN(), schematest.Constraint(t, "Integer"), true, nil, true},
+		{"float64_inf", math.Inf(1), schematest.Constraint(t, "Integer"), true, nil, true},
 	}
 
 	for _, tt := range tests {
@@ -145,26 +146,26 @@ func TestCheckCoerce_Float(t *testing.T) {
 		wantCoerced   any
 		wantCoerceErr bool
 	}{
-		{"valid_float", 3.14, schema.NewFloatConstraint(), false, "", float64(3.14), false},
-		{"valid_int_as_float", int64(42), schema.NewFloatConstraint(), false, "", float64(42), false},
-		{"float32_to_float64", float32(1.5), schema.NewFloatConstraint(), false, "", float64(1.5), false},
-		{"float32_imprecise", float32(3.14), schema.NewFloatConstraint(), false, "", float64(float32(3.14)), false},
-		{"uint64_to_float64", uint64(100), schema.NewFloatConstraint(), false, "", float64(100), false},
-		{"wrong_type_string", "3.14", schema.NewFloatConstraint(), true, "", nil, true},
-		{"wrong_type_bool", true, schema.NewFloatConstraint(), true, "", nil, true},
-		{"min_ok", 0.0, schema.FloatBetween(0.0, 1.0), false, "", float64(0), false},
-		{"min_fail", -0.1, schema.FloatBetween(0.0, 1.0), true, "", float64(-0.1), false},
-		{"max_ok", 1.0, schema.FloatBetween(0.0, 1.0), false, "", float64(1), false},
-		{"max_fail", 1.1, schema.FloatBetween(0.0, 1.0), true, "", float64(1.1), false},
+		{"valid_float", 3.14, schematest.Constraint(t, "Float"), false, "", float64(3.14), false},
+		{"valid_int_as_float", int64(42), schematest.Constraint(t, "Float"), false, "", float64(42), false},
+		{"float32_to_float64", float32(1.5), schematest.Constraint(t, "Float"), false, "", float64(1.5), false},
+		{"float32_imprecise", float32(3.14), schematest.Constraint(t, "Float"), false, "", float64(float32(3.14)), false},
+		{"uint64_to_float64", uint64(100), schematest.Constraint(t, "Float"), false, "", float64(100), false},
+		{"wrong_type_string", "3.14", schematest.Constraint(t, "Float"), true, "", nil, true},
+		{"wrong_type_bool", true, schematest.Constraint(t, "Float"), true, "", nil, true},
+		{"min_ok", 0.0, schematest.Constraint(t, "Float[0.0, 1.0]"), false, "", float64(0), false},
+		{"min_fail", -0.1, schematest.Constraint(t, "Float[0.0, 1.0]"), true, "", float64(-0.1), false},
+		{"max_ok", 1.0, schematest.Constraint(t, "Float[0.0, 1.0]"), false, "", float64(1), false},
+		{"max_fail", 1.1, schematest.Constraint(t, "Float[0.0, 1.0]"), true, "", float64(1.1), false},
 
 		// Non-finite floats are rejected before bounds by both paths.
-		{"reject_nan", math.NaN(), schema.NewFloatConstraint(), true, "not finite", nil, true},
-		{"reject_pos_inf", math.Inf(1), schema.NewFloatConstraint(), true, "not finite", nil, true},
-		{"reject_neg_inf", math.Inf(-1), schema.NewFloatConstraint(), true, "not finite", nil, true},
-		{"nan_with_bounds", math.NaN(), schema.FloatBetween(0, 100), true, "not finite", nil, true},
-		{"inf_with_bounds", math.Inf(1), schema.FloatBetween(0, 100), true, "not finite", nil, true},
-		{"accept_large", 1e308, schema.NewFloatConstraint(), false, "", float64(1e308), false},
-		{"accept_small", 1e-308, schema.NewFloatConstraint(), false, "", float64(1e-308), false},
+		{"reject_nan", math.NaN(), schematest.Constraint(t, "Float"), true, "not finite", nil, true},
+		{"reject_pos_inf", math.Inf(1), schematest.Constraint(t, "Float"), true, "not finite", nil, true},
+		{"reject_neg_inf", math.Inf(-1), schematest.Constraint(t, "Float"), true, "not finite", nil, true},
+		{"nan_with_bounds", math.NaN(), schematest.Constraint(t, "Float[0, 100]"), true, "not finite", nil, true},
+		{"inf_with_bounds", math.Inf(1), schematest.Constraint(t, "Float[0, 100]"), true, "not finite", nil, true},
+		{"accept_large", 1e308, schematest.Constraint(t, "Float"), false, "", float64(1e308), false},
+		{"accept_small", 1e-308, schematest.Constraint(t, "Float"), false, "", float64(1e-308), false},
 	}
 
 	for _, tt := range tests {
@@ -216,7 +217,7 @@ func TestCheck_Boolean(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := value.Check(tt.val, schema.NewBooleanConstraint())
+			err := value.Check(tt.val, schematest.Constraint(t, "Boolean"))
 			if tt.wantErr {
 				if err == nil {
 					t.Errorf("want an error, got nil")
@@ -234,7 +235,7 @@ func TestCheck_Boolean(t *testing.T) {
 // renders both forms to the one stored spelling through value.Canonical, and
 // rejects what Check rejects.
 func TestCheckCoerce_Timestamp(t *testing.T) {
-	defaultC := schema.NewTimestampConstraint()
+	defaultC := schematest.Constraint(t, "Timestamp")
 
 	tests := []struct {
 		name       string
@@ -310,7 +311,7 @@ func TestCheck_Date(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := value.Check(tt.val, schema.NewDateConstraint())
+			err := value.Check(tt.val, schematest.Constraint(t, "Date"))
 			if tt.wantErr {
 				if err == nil {
 					t.Errorf("want an error, got nil")
@@ -328,7 +329,7 @@ func TestCheck_Date(t *testing.T) {
 // both to the one lowercase spelling through value.Canonical, and rejects
 // what Check rejects.
 func TestCheckCoerce_UUID(t *testing.T) {
-	constraint := schema.NewUUIDConstraint()
+	constraint := schematest.Constraint(t, "UUID")
 
 	tests := []struct {
 		name    string
@@ -399,7 +400,7 @@ func canonicalUUIDText(t *testing.T, val any) string {
 }
 
 func TestCheck_Enum(t *testing.T) {
-	constraint := schema.NewEnumConstraint([]string{"red", "green", "blue"})
+	constraint := schematest.Constraint(t, `Enum["red", "green", "blue"]`)
 
 	tests := []struct {
 		name    string
@@ -430,8 +431,7 @@ func TestCheck_Enum(t *testing.T) {
 }
 
 func TestCheck_Pattern(t *testing.T) {
-	pattern := regexp.MustCompile(`^[A-Z]{2}-\d{4}$`)
-	constraint := schema.NewPatternConstraint(pattern)
+	constraint := schematest.Constraint(t, `Pattern["^[A-Z]{2}-\\d{4}$"]`)
 
 	tests := []struct {
 		name    string
@@ -465,7 +465,7 @@ func TestCheck_Pattern(t *testing.T) {
 // error anchors), non-finite element rejection, and coercion of every
 // accepted representation to []float64.
 func TestCheckCoerce_Vector(t *testing.T) {
-	constraint := schema.NewVectorConstraint(3)
+	constraint := schematest.Constraint(t, "Vector[3]")
 
 	tests := []struct {
 		name          string
@@ -529,7 +529,7 @@ func TestCheckCoerce_Vector(t *testing.T) {
 
 func TestCheck_Alias(t *testing.T) {
 	// Alias that resolves to integer
-	constraint := schema.NewAliasConstraint("PositiveInt", schema.IntegerMin(1))
+	constraint := schematest.Constraint(t, "PositiveInt", "type PositiveInt = Integer[1, _]")
 
 	tests := []struct {
 		name    string
@@ -558,8 +558,7 @@ func TestCheck_Alias(t *testing.T) {
 }
 
 func TestCheck_UnresolvedAlias(t *testing.T) {
-	// Alias without resolved constraint
-	constraint := schema.NewAliasConstraint("UnresolvedType", nil)
+	constraint := schema.AliasConstraint{}
 
 	err := value.Check(int64(10), constraint)
 	if err == nil {
@@ -572,7 +571,7 @@ func TestCheck_UnresolvedAlias(t *testing.T) {
 
 func TestCoerce_AliasConstraint(t *testing.T) {
 	// Test alias that resolves to integer
-	intAlias := schema.NewAliasConstraint("MyInt", schema.NewIntegerConstraint())
+	intAlias := schematest.Constraint(t, "MyInt", "type MyInt = Integer")
 
 	t.Run("alias_to_integer_coerce_int32", func(t *testing.T) {
 		result, err := value.Coerce(int32(42), intAlias)
@@ -595,7 +594,7 @@ func TestCoerce_AliasConstraint(t *testing.T) {
 	})
 
 	// Test alias that resolves to float
-	floatAlias := schema.NewAliasConstraint("MyFloat", schema.NewFloatConstraint())
+	floatAlias := schematest.Constraint(t, "MyFloat", "type MyFloat = Float")
 
 	t.Run("alias_to_float_coerce_int", func(t *testing.T) {
 		result, err := value.Coerce(int64(42), floatAlias)
@@ -618,7 +617,7 @@ func TestCoerce_AliasConstraint(t *testing.T) {
 	})
 
 	// Test alias that resolves to string (no coercion needed)
-	stringAlias := schema.NewAliasConstraint("MyString", schema.NewStringConstraint())
+	stringAlias := schematest.Constraint(t, "MyString", "type MyString = String")
 
 	t.Run("alias_to_string_passthrough", func(t *testing.T) {
 		result, err := value.Coerce("hello", stringAlias)
@@ -644,8 +643,8 @@ func TestCoerce_AliasConstraint(t *testing.T) {
 
 func TestCheck_List(t *testing.T) {
 	t.Parallel()
-	stringList := schema.NewListConstraint(schema.NewStringConstraint())
-	boundedList := schema.ListLenBetween(schema.NewStringConstraint(), 1, 3)
+	stringList := schematest.Constraint(t, "List<String>")
+	boundedList := schematest.Constraint(t, "List<String>[1, 3]")
 
 	tests := []struct {
 		name       string
@@ -694,7 +693,7 @@ func TestCheck_List(t *testing.T) {
 func TestCheck_List_ElementConstraintViolation(t *testing.T) {
 	t.Parallel()
 	// String with max length 3
-	constraint := schema.NewListConstraint(schema.StringMaxLen(3))
+	constraint := schematest.Constraint(t, "List<String[_, 3]>")
 
 	t.Run("element within constraint", func(t *testing.T) {
 		t.Parallel()
@@ -718,7 +717,7 @@ func TestCheck_List_ElementConstraintViolation(t *testing.T) {
 
 func TestCheck_List_Nested(t *testing.T) {
 	t.Parallel()
-	nested := schema.NewListConstraint(schema.NewListConstraint(schema.NewIntegerConstraint()))
+	nested := schematest.Constraint(t, "List<List<Integer>>")
 
 	t.Run("valid nested", func(t *testing.T) {
 		t.Parallel()
@@ -749,7 +748,7 @@ func TestCoerce_List(t *testing.T) {
 	t.Parallel()
 	t.Run("coerce integer elements", func(t *testing.T) {
 		t.Parallel()
-		constraint := schema.NewListConstraint(schema.NewIntegerConstraint())
+		constraint := schematest.Constraint(t, "List<Integer>")
 		// Integer literals from a JSON document coerce to int64; a float
 		// element is refused, whole or not.
 		result, err := value.Coerce([]any{json.Number("1"), int32(2), int64(3)}, constraint)
@@ -786,7 +785,7 @@ func TestCoerce_List(t *testing.T) {
 	// returned slice holds a nil at index 1.
 	t.Run("nil element is refused", func(t *testing.T) {
 		t.Parallel()
-		constraint := schema.NewListConstraint(schema.NewStringConstraint())
+		constraint := schematest.Constraint(t, "List<String>")
 		result, err := value.Coerce([]any{"a", nil}, constraint)
 		if err == nil {
 			t.Fatalf("want an error, got nil")
@@ -801,7 +800,7 @@ func TestCoerce_List(t *testing.T) {
 
 	t.Run("coerce float elements", func(t *testing.T) {
 		t.Parallel()
-		constraint := schema.NewListConstraint(schema.NewFloatConstraint())
+		constraint := schematest.Constraint(t, "List<Float>")
 		result, err := value.Coerce([]any{float32(1.5), int(2)}, constraint)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
@@ -823,7 +822,7 @@ func TestCoerce_List(t *testing.T) {
 
 	t.Run("coerce string elements passthrough", func(t *testing.T) {
 		t.Parallel()
-		constraint := schema.NewListConstraint(schema.NewStringConstraint())
+		constraint := schematest.Constraint(t, "List<String>")
 		result, err := value.Coerce([]any{"hello", "world"}, constraint)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
@@ -839,7 +838,7 @@ func TestCoerce_List(t *testing.T) {
 
 	t.Run("coerce empty list", func(t *testing.T) {
 		t.Parallel()
-		constraint := schema.NewListConstraint(schema.NewStringConstraint())
+		constraint := schematest.Constraint(t, "List<String>")
 		result, err := value.Coerce([]any{}, constraint)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
@@ -855,7 +854,7 @@ func TestCoerce_List(t *testing.T) {
 
 	t.Run("not a slice", func(t *testing.T) {
 		t.Parallel()
-		constraint := schema.NewListConstraint(schema.NewStringConstraint())
+		constraint := schematest.Constraint(t, "List<String>")
 		_, err := value.Coerce("not_a_slice", constraint)
 		if err == nil {
 			t.Errorf("want an error, got nil")
@@ -864,7 +863,7 @@ func TestCoerce_List(t *testing.T) {
 
 	t.Run("element coercion fails", func(t *testing.T) {
 		t.Parallel()
-		constraint := schema.NewListConstraint(schema.NewIntegerConstraint())
+		constraint := schematest.Constraint(t, "List<Integer>")
 		_, err := value.Coerce([]any{"not_an_int"}, constraint)
 		if err == nil {
 			t.Fatalf("want an error, got nil")
@@ -891,13 +890,13 @@ func TestCoerce_CanonicalFormsAreStable(t *testing.T) {
 		c    schema.Constraint
 		val  any
 	}{
-		{"String", schema.NewStringConstraint(), "x"},
-		{"Boolean", schema.NewBooleanConstraint(), true},
-		{"Enum", schema.NewEnumConstraint([]string{"a"}), "a"},
-		{"Pattern", schema.NewPatternConstraint(nil), "p"},
-		{"Timestamp", schema.NewTimestampConstraint(), "2020-01-01T00:00:00Z"},
-		{"Date", schema.NewDateConstraint(), "2020-01-01"},
-		{"UUID", schema.NewUUIDConstraint(), "550e8400-e29b-41d4-a716-446655440000"},
+		{"String", schematest.Constraint(t, "String"), "x"},
+		{"Boolean", schematest.Constraint(t, "Boolean"), true},
+		{"Enum", schematest.Constraint(t, `Enum["a", "z"]`), "a"},
+		{"Pattern", schema.PatternConstraint{}, "p"},
+		{"Timestamp", schematest.Constraint(t, "Timestamp"), "2020-01-01T00:00:00Z"},
+		{"Date", schematest.Constraint(t, "Date"), "2020-01-01"},
+		{"UUID", schematest.Constraint(t, "UUID"), "550e8400-e29b-41d4-a716-446655440000"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -917,7 +916,7 @@ func TestCoerce_CanonicalFormsAreStable(t *testing.T) {
 // holds no pattern refuses every value.
 func TestCheck_APatternSearchesAndAMissNamesIt(t *testing.T) {
 	t.Parallel()
-	c := schema.NewPatternConstraint(regexp.MustCompile("b+"))
+	c := schematest.Constraint(t, `Pattern["b+"]`)
 	for _, text := range []string{"b", "abc", "xxbb"} {
 		if err := value.Check(text, c); err != nil {
 			t.Errorf("%s: %v, want nil", text, err)
@@ -926,10 +925,8 @@ func TestCheck_APatternSearchesAndAMissNamesIt(t *testing.T) {
 	if err := value.Check("ac", c); err == nil || !strings.Contains(err.Error(), "b+") {
 		t.Errorf("ac: %v, want a miss naming b+", err)
 	}
-	for _, none := range []schema.PatternConstraint{{}, schema.NewPatternConstraint(nil)} {
-		if err := value.Check("b", none); err == nil || !strings.Contains(err.Error(), "holds no pattern") {
-			t.Errorf("a constraint with no pattern: %v, want a refusal", err)
-		}
+	if err := value.Check("b", schema.PatternConstraint{}); err == nil || !strings.Contains(err.Error(), "holds no pattern") {
+		t.Errorf("a constraint with no pattern: %v, want a refusal", err)
 	}
 }
 
@@ -937,7 +934,7 @@ func TestCheck_APatternSearchesAndAMissNamesIt(t *testing.T) {
 // drop what it holds, so a match allocates under -race alone.
 func TestCheck_APatternAllocatesNothing(t *testing.T) {
 	raceskip.Skip(t)
-	var c schema.Constraint = schema.NewPatternConstraint(regexp.MustCompile("^a"))
+	c := schematest.Constraint(t, `Pattern["^a"]`)
 	var text any = "ab"
 	var err error
 	if allocs := testing.AllocsPerRun(100, func() { err = value.Check(text, c) }); allocs != 0 {
@@ -953,7 +950,7 @@ func TestCheck_APatternAllocatesNothing(t *testing.T) {
 // answers the same elements in a []any.
 func TestCheckAndCoerce_AStoredVectorCostsOneCopy(t *testing.T) {
 	raceskip.Skip(t)
-	var c schema.Constraint = schema.NewVectorConstraint(1536)
+	c := schematest.Constraint(t, "Vector[1536]")
 	stored := make([]float64, 1536)
 	for i := range stored {
 		stored[i] = float64(i) + 0.5
@@ -986,7 +983,7 @@ func TestCheckAndCoerce_AStoredVectorCostsOneCopy(t *testing.T) {
 // are refused in the same words.
 func TestCheckAndCoerce_AStoredVectorIsJudgedAsAList(t *testing.T) {
 	t.Parallel()
-	c := schema.NewVectorConstraint(3)
+	c := schematest.Constraint(t, "Vector[3]")
 	for name, stored := range map[string][]float64{
 		"a short vector":    {1, 2},
 		"a long vector":     {1, 2, 3, 4},
@@ -1018,45 +1015,47 @@ func TestCheckAndCoerce_AStoredVectorIsJudgedAsAList(t *testing.T) {
 // of another kind is a type mismatch.
 func TestCheck_ARefusalCarriesItsKind(t *testing.T) {
 	t.Parallel()
-	list := schema.NewListConstraint
+	list := func(element string, decls ...string) schema.Constraint {
+		return schematest.Constraint(t, "List<"+element+">", decls...)
+	}
 	for name, c := range map[string]struct {
 		v    any
 		c    schema.Constraint
 		kind value.CheckErrorKind
 		want string
 	}{
-		"a string below its minimum":   {"a", schema.StringLenBetween(2, 3), value.KindConstraintFail, "string length 1 is less than minimum 2"},
-		"a string above its maximum":   {"abcd", schema.StringLenBetween(2, 3), value.KindConstraintFail, "string length 4 exceeds maximum 3"},
-		"an integer below its minimum": {int64(-1), schema.IntegerBetween(0, 10), value.KindConstraintFail, "integer -1 is less than minimum 0"},
-		"an integer above its maximum": {int64(11), schema.IntegerBetween(0, 10), value.KindConstraintFail, "integer 11 exceeds maximum 10"},
-		"a float below its minimum":    {-0.5, schema.FloatBetween(0, 1), value.KindConstraintFail, "float -0.5 is less than minimum 0"},
-		"a float above its maximum":    {1.5, schema.FloatBetween(0, 1), value.KindConstraintFail, "float 1.5 exceeds maximum 1"},
+		"a string below its minimum":   {"a", schematest.Constraint(t, "String[2, 3]"), value.KindConstraintFail, "string length 1 is less than minimum 2"},
+		"a string above its maximum":   {"abcd", schematest.Constraint(t, "String[2, 3]"), value.KindConstraintFail, "string length 4 exceeds maximum 3"},
+		"an integer below its minimum": {int64(-1), schematest.Constraint(t, "Integer[0, 10]"), value.KindConstraintFail, "integer -1 is less than minimum 0"},
+		"an integer above its maximum": {int64(11), schematest.Constraint(t, "Integer[0, 10]"), value.KindConstraintFail, "integer 11 exceeds maximum 10"},
+		"a float below its minimum":    {-0.5, schematest.Constraint(t, "Float[0, 1]"), value.KindConstraintFail, "float -0.5 is less than minimum 0"},
+		"a float above its maximum":    {1.5, schematest.Constraint(t, "Float[0, 1]"), value.KindConstraintFail, "float 1.5 exceeds maximum 1"},
 		"an int64 above a Float's maximum": {
-			int64(5), schema.FloatBetween(0, 1), value.KindConstraintFail, "float 5 exceeds maximum 1",
+			int64(5), schematest.Constraint(t, "Float[0, 1]"), value.KindConstraintFail, "float 5 exceeds maximum 1",
 		},
 		"a uint64 above a Float's maximum": {
-			uint64(math.MaxUint64), schema.FloatBetween(0, 1), value.KindConstraintFail, "float 1.8446744073709552e+19 exceeds maximum 1",
+			uint64(math.MaxUint64), schematest.Constraint(t, "Float[0, 1]"), value.KindConstraintFail, "float 1.8446744073709552e+19 exceeds maximum 1",
 		},
-		"a NaN":                 {math.NaN(), schema.NewFloatConstraint(), value.KindConstraintFail, "float value is not finite (NaN or Inf)"},
-		"an infinity":           {math.Inf(1), schema.NewFloatConstraint(), value.KindConstraintFail, "float value is not finite (NaN or Inf)"},
-		"no member of an Enum":  {"b", schema.NewEnumConstraint([]string{"a"}), value.KindConstraintFail, ""},
-		"no match of a Pattern": {"b", schema.NewPatternConstraint(regexp.MustCompile("^a$")), value.KindConstraintFail, ""},
+		"a NaN":                 {math.NaN(), schematest.Constraint(t, "Float"), value.KindConstraintFail, "float value is not finite (NaN or Inf)"},
+		"an infinity":           {math.Inf(1), schematest.Constraint(t, "Float"), value.KindConstraintFail, "float value is not finite (NaN or Inf)"},
+		"no member of an Enum":  {"b", schematest.Constraint(t, `Enum["a", "z"]`), value.KindConstraintFail, ""},
+		"no match of a Pattern": {"b", schematest.Constraint(t, `Pattern["^a$"]`), value.KindConstraintFail, ""},
 		"a Pattern that holds none": {
 			"b", schema.PatternConstraint{}, value.KindConstraintFail, `value "b" is judged by a pattern constraint that holds no pattern`,
 		},
-		"a short vector":              {[]any{1.0}, schema.NewVectorConstraint(2), value.KindConstraintFail, "vector has 1 elements, expected 2"},
-		"a long vector":               {[]any{1.0, 2.0}, schema.NewVectorConstraint(1), value.KindConstraintFail, "vector has 2 elements, expected 1"},
-		"a long stored vector":        {[]float64{1, 2}, schema.NewVectorConstraint(1), value.KindConstraintFail, "vector has 2 elements, expected 1"},
-		"a NaN in a vector":           {[]any{math.NaN()}, schema.NewVectorConstraint(1), value.KindConstraintFail, "vector element [0]: float value is not finite (NaN or Inf)"},
-		"a string in a vector":        {[]any{"x"}, schema.NewVectorConstraint(1), value.KindTypeMismatch, "vector element [0]: expected float, got string"},
-		"a short list":                {[]any{}, schema.ListLenBetween(schema.NewStringConstraint(), 1, 2), value.KindConstraintFail, "list length 0 is less than minimum 1"},
-		"a long list":                 {[]any{"a", "b", "c"}, schema.ListLenBetween(schema.NewStringConstraint(), 1, 2), value.KindConstraintFail, "list length 3 exceeds maximum 2"},
-		"an element above its bound":  {[]any{"abc"}, list(schema.StringLenBetween(0, 2)), value.KindConstraintFail, "element [0]: string length 3 exceeds maximum 2"},
-		"an element of another kind":  {[]any{5}, list(schema.NewStringConstraint()), value.KindTypeMismatch, "element [0]: expected string, got int"},
-		"a null element at an alias":  {[]any{"a", nil}, list(schema.NewAliasConstraint("Name", schema.NewStringConstraint())), value.KindTypeMismatch, "element [1]: expected string, got null"},
-		"a number at a String":        {5, schema.NewStringConstraint(), value.KindTypeMismatch, "expected string, got int"},
-		"a string at an Integer":      {"5", schema.NewIntegerConstraint(), value.KindTypeMismatch, "expected integer, got string"},
-		"a string at a bounded Float": {"5", schema.FloatBetween(0, 1), value.KindTypeMismatch, "expected float, got string"},
+		"a short vector":              {[]any{1.0}, schematest.Constraint(t, "Vector[2]"), value.KindConstraintFail, "vector has 1 elements, expected 2"},
+		"a long vector":               {[]any{1.0, 2.0}, schematest.Constraint(t, "Vector[1]"), value.KindConstraintFail, "vector has 2 elements, expected 1"},
+		"a long stored vector":        {[]float64{1, 2}, schematest.Constraint(t, "Vector[1]"), value.KindConstraintFail, "vector has 2 elements, expected 1"},
+		"a NaN in a vector":           {[]any{math.NaN()}, schematest.Constraint(t, "Vector[1]"), value.KindConstraintFail, "vector element [0]: float value is not finite (NaN or Inf)"},
+		"a string in a vector":        {[]any{"x"}, schematest.Constraint(t, "Vector[1]"), value.KindTypeMismatch, "vector element [0]: expected float, got string"},
+		"a short list":                {[]any{}, schematest.Constraint(t, "List<String>[1, 2]"), value.KindConstraintFail, "list length 0 is less than minimum 1"},
+		"a long list":                 {[]any{"a", "b", "c"}, schematest.Constraint(t, "List<String>[1, 2]"), value.KindConstraintFail, "list length 3 exceeds maximum 2"},
+		"an element above its bound":  {[]any{"abc"}, list("String[0, 2]"), value.KindConstraintFail, "element [0]: string length 3 exceeds maximum 2"},
+		"an element of another kind":  {[]any{5}, list("String"), value.KindTypeMismatch, "element [0]: expected string, got int"},
+		"a null element at an alias":  {[]any{"a", nil}, list("Name", "type Name = String"), value.KindTypeMismatch, "element [1]: expected string, got null"},
+		"a number at a String":        {5, schematest.Constraint(t, "String"), value.KindTypeMismatch, "expected string, got int"},
+		"a string at an Integer":      {"5", schematest.Constraint(t, "Integer"), value.KindTypeMismatch, "expected integer, got string"},
+		"a string at a bounded Float": {"5", schematest.Constraint(t, "Float[0, 1]"), value.KindTypeMismatch, "expected float, got string"},
 	} {
 		err := value.Check(c.v, c.c)
 		ce, ok := errors.AsType[*value.CheckError](err)
@@ -1066,23 +1065,17 @@ func TestCheck_ARefusalCarriesItsKind(t *testing.T) {
 	}
 }
 
-// An alias that resolves to nothing is refused by the check and by the
-// coercion, alone and as a list's element.
+// An alias that resolves to nothing, the zero AliasConstraint, is refused by
+// the check and by the coercion.
 func TestCheckAndCoerce_RefuseWhatHasNoRule(t *testing.T) {
 	t.Parallel()
-	gone := schema.NewAliasConstraint("Gone", nil)
-	const want = "unresolved alias constraint: Gone"
+	gone := schema.AliasConstraint{}
+	const want = "unresolved alias constraint: "
 	if err := value.Check("x", gone); err == nil || err.Error() != want {
 		t.Errorf("Check at an unresolved alias = %v; want %q", err, want)
 	}
 	if got, err := value.Coerce("x", gone); got != nil || err == nil || err.Error() != want {
 		t.Errorf("Coerce at an unresolved alias = %#v, %v; want nil and %q", got, err, want)
-	}
-	if err := value.Check([]any{"x"}, schema.NewListConstraint(gone)); err == nil || err.Error() != "element [0]: "+want {
-		t.Errorf("Check of an element at an unresolved alias = %v; want the element named", err)
-	}
-	if got, err := value.Coerce([]any{"x"}, schema.NewListConstraint(gone)); got != nil || err == nil || err.Error() != "element [0]: "+want {
-		t.Errorf("Coerce of an element at an unresolved alias = %#v, %v; want nil and the element named", got, err)
 	}
 }
 
@@ -1090,7 +1083,7 @@ func TestCheckAndCoerce_RefuseWhatHasNoRule(t *testing.T) {
 // and an element that holds none as a null.
 func TestCoerce_AVectorNamesTheElementItRefuses(t *testing.T) {
 	t.Parallel()
-	c := schema.NewVectorConstraint(2)
+	c := schematest.Constraint(t, "Vector[2]")
 	for name, tc := range map[string]struct {
 		v    any
 		want string
@@ -1111,11 +1104,13 @@ func TestCoerce_AVectorNamesTheElementItRefuses(t *testing.T) {
 // no value passes it with its bounds unread. A pointer to a constraint is one.
 func TestCheck_AConstraintOfAnotherTypeIsRefused(t *testing.T) {
 	t.Parallel()
-	str, integer, float := schema.StringLenBetween(1, 2), schema.IntegerBetween(1, 2), schema.FloatBetween(1, 2)
-	enum := schema.NewEnumConstraint([]string{"a"})
-	pattern := schema.NewPatternConstraint(regexp.MustCompile("a"))
-	vector := schema.NewVectorConstraint(1)
-	list := schema.NewListConstraint(schema.NewStringConstraint())
+	str := schematest.Constraint(t, "String[1, 2]").(schema.StringConstraint)
+	integer := schematest.Constraint(t, "Integer[1, 2]").(schema.IntegerConstraint)
+	float := schematest.Constraint(t, "Float[1, 2]").(schema.FloatConstraint)
+	enum := schematest.Constraint(t, `Enum["a", "b"]`).(schema.EnumConstraint)
+	pattern := schematest.Constraint(t, `Pattern["a"]`).(schema.PatternConstraint)
+	vector := schematest.Constraint(t, "Vector[1]").(schema.VectorConstraint)
+	list := schematest.Constraint(t, "List<String>").(schema.ListConstraint)
 	for _, tc := range []struct {
 		val  any
 		c    schema.Constraint

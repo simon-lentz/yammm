@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/simon-lentz/yammm/internal/schematest"
+
 	"github.com/simon-lentz/yammm/schema"
 	"github.com/simon-lentz/yammm/schema/cypher"
 )
@@ -119,14 +121,13 @@ func TestNodeQueries_WritesAnAbsentNestedCollection(t *testing.T) {
 // returns the value with it, as its other refusals do.
 func TestCoerceScalar_RefusesANestedCollectionValue(t *testing.T) {
 	t.Parallel()
-	codes := schema.NewAliasConstraint("Codes", schema.NewListConstraint(schema.NewStringConstraint()))
 	for name, tc := range map[string]struct {
 		c      schema.Constraint
 		kind   string
 		values map[string]any
 	}{
 		"List<List<Integer>>": {
-			schema.NewListConstraint(schema.NewListConstraint(schema.NewIntegerConstraint())), "List",
+			schematest.Constraint(t, "List<List<Integer>>"), "List",
 			map[string]any{
 				"a []any of []any":   []any{[]any{int64(1)}},
 				"a [][]int64":        [][]int64{{1}},
@@ -136,14 +137,14 @@ func TestCoerceScalar_RefusesANestedCollectionValue(t *testing.T) {
 			},
 		},
 		"List<Vector[3]>": {
-			schema.NewListConstraint(schema.NewVectorConstraint(3)), "Vector",
+			schematest.Constraint(t, "List<Vector[3]>"), "Vector",
 			map[string]any{
 				"a []any of []any": []any{[]any{1.0, 2.0, 3.0}},
 				"a [][]float64":    [][]float64{{1, 2, 3}},
 			},
 		},
 		"List<Codes>": {
-			schema.NewListConstraint(codes), "List",
+			schematest.Constraint(t, "List<Codes>", "type Codes = List<String>"), "List",
 			map[string]any{
 				"a []any of []any": []any{[]any{"a"}},
 				"a [][]string":     [][]string{{"a"}},

@@ -95,7 +95,7 @@ func loadedRecordsOptions() recordtest.Options {
 func composedWalk(t *testing.T, snap graph.Snapshot) [][]string {
 	t.Helper()
 	var walks [][]string
-	for inst := range snap.AllInstances() {
+	for inst := range snap.Instances() {
 		for _, relation := range inst.ComposedRelations() {
 			for child := range inst.Composed(relation) {
 				walks = append(walks, recordtest.Walk(child, loadedRecordsOptions()))
@@ -120,7 +120,7 @@ func TestLoad_EveryRecordAccessorAnswersAsTheBuiltSnapshot(t *testing.T) {
 	if res.HasErrors() {
 		t.Fatal(res)
 	}
-	loaded, res := snapshot.Load(ctx, data, built.Schema())
+	loaded, res := snapshot.Unmarshal(ctx, data, built.Schema())
 	if res.HasErrors() {
 		t.Fatal(res)
 	}
@@ -257,7 +257,7 @@ func TestLoad_TypedValuesAnswerAsTheBuiltSnapshot(t *testing.T) {
 	if res.HasErrors() {
 		t.Fatal(res)
 	}
-	loaded, res := snapshot.Load(ctx, data, s)
+	loaded, res := snapshot.Unmarshal(ctx, data, s)
 	if res.HasErrors() {
 		t.Fatal(res)
 	}
@@ -273,9 +273,9 @@ func TestSnapshot_AnEarlyBreakStopsEachIterator(t *testing.T) {
 	first := slices.Collect(snap.InstancesOf(order.ID()))[0]
 
 	for name, seq := range map[string]iter.Seq[graph.Instance]{
-		"Composed":     first.Composed("LINES"),
-		"InstancesOf":  snap.InstancesOf(order.ID()),
-		"AllInstances": snap.AllInstances(),
+		"Composed":    first.Composed("LINES"),
+		"InstancesOf": snap.InstancesOf(order.ID()),
+		"Instances":   snap.Instances(),
 	} {
 		n := 0
 		for range seq {

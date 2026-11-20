@@ -92,7 +92,7 @@ func copiesGraph(t *testing.T) (schema.Schema, *graph.Graph) {
 func checkCopyIdentity(t *testing.T, label string, snap graph.Snapshot) {
 	t.Helper()
 	roots := map[graph.Instance]bool{}
-	for inst := range snap.AllInstances() {
+	for inst := range snap.Instances() {
 		roots[inst] = true
 	}
 	for e := range snap.Edges() {
@@ -128,7 +128,7 @@ func TestCopies_EveryRecordNamesTheRecordsOfItsOwnSnapshot(t *testing.T) {
 	if res.HasErrors() {
 		t.Fatal(res)
 	}
-	loaded, res := snapshot.Load(ctx, data, s)
+	loaded, res := snapshot.Unmarshal(ctx, data, s)
 	if res.HasErrors() {
 		t.Fatal(res)
 	}
@@ -170,7 +170,7 @@ func TestCopies_ADuplicateWalksTheSameBuiltAndLoaded(t *testing.T) {
 	if res.HasErrors() {
 		t.Fatal(res)
 	}
-	loaded, res := snapshot.Load(ctx, data, s)
+	loaded, res := snapshot.Unmarshal(ctx, data, s)
 	if res.HasErrors() {
 		t.Fatal(res)
 	}
@@ -193,7 +193,7 @@ func TestSnapshot_EachIteratorRangesAgainAndStopsAtABreak(t *testing.T) {
 		t.Fatal("no type Order")
 	}
 	first := slices.Collect(snap.InstancesOf(order.ID()))[0]
-	checkIterator(t, "AllInstances", snap.AllInstances())
+	checkIterator(t, "Instances", snap.Instances())
 	checkIterator(t, "InstancesOf", snap.InstancesOf(order.ID()))
 	checkIterator(t, "Composed", first.Composed("LINES"))
 	checkIterator(t, "Edges", snap.Edges())
@@ -229,9 +229,9 @@ func TestSnapshot_CollectionsHoldTheirDocumentedOrder(t *testing.T) {
 	for _, id := range snap.Types() {
 		fromTypes = slices.AppendSeq(fromTypes, snap.InstancesOf(id))
 	}
-	all := slices.Collect(snap.AllInstances())
+	all := slices.Collect(snap.Instances())
 	if !slices.Equal(all, fromTypes) {
-		t.Error("AllInstances must hold Types' order, each type's instances in InstancesOf's order")
+		t.Error("Instances must hold Types' order, each type's instances in InstancesOf's order")
 	}
 	var typeNames []string
 	for _, inst := range all {
@@ -272,7 +272,7 @@ func TestZeroRoots_EachPanicNamesTheCallAndWhatIsZero(t *testing.T) {
 		"graph.Add: zero ValidInstance":                   func() { g.Add(ctx, instance.ValidInstance{}) },
 		"graph.AddOrMerge: zero ValidInstance":            func() { _, _ = g.AddOrMerge(ctx, instance.ValidInstance{}) },
 		"snapshot.Marshal: zero Snapshot":                 func() { _, _ = snapshot.Marshal(ctx, graph.Snapshot{}) },
-		"snapshot.Load: zero Schema":                      func() { _, _ = snapshot.Load(ctx, data, schema.Schema{}) },
+		"snapshot.Unmarshal: zero Schema":                 func() { _, _ = snapshot.Unmarshal(ctx, data, schema.Schema{}) },
 		"snapshot.Verify: zero Schema":                    func() { snapshot.Verify(ctx, data, schema.Schema{}) },
 		"snapshot.UpdateMetadataOrReMarshal: zero Schema": func() { _, _ = snapshot.UpdateMetadataOrReMarshal(ctx, data, nil, schema.Schema{}) },
 	} {
@@ -294,7 +294,7 @@ func TestInfo_AnEdgeListUnderAnUndeclaredRelationDoesNotPanic(t *testing.T) {
 		t.Fatalf("no %s in the document", anchor)
 	}
 	edited := strings.Replace(string(data), anchor, anchor+`"edges":{"NOPE":[]},`, 1)
-	if info, res := snapshot.Info(ctx, []byte(edited)); info == nil && !res.HasErrors() {
+	if info, res := snapshot.Stat(ctx, []byte(edited)); info == nil && !res.HasErrors() {
 		t.Error("Info returned no record and no error")
 	}
 }

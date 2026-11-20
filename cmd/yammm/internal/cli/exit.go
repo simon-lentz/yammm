@@ -24,9 +24,8 @@ const (
 // read reads from failing), a database answer [neo4j.Diff] cannot plan from, an
 // internal fault, or a cancelled context.
 //
-// diag/code.go introduces an I/O code within a category by a stated convention
-// rather than a CategoryIO constant, so membership is this list and not a
-// category test. A new I/O code belongs here.
+// No property of a code marks it an I/O code, so membership is this list. A new
+// I/O code belongs here.
 var runtimeCodes = [...]diag.Code{
 	diag.E_LOAD_IO_FAILURE, diag.E_SNAPSHOT_IO, neo4j.E_NEO4J_INVALID_REMOTE_OBJECT,
 	diag.E_INTERNAL, diag.E_CONTEXT_CANCELLED,
@@ -235,7 +234,7 @@ func FailureResult(err error) (diag.Result, bool) {
 		return diag.Result{}, false
 	}
 	code := strconv.Itoa(ExitForError(err))
-	c := diag.NewCollectorUnlimited()
+	c := diag.NewCollector(diag.NoLimit)
 	for _, msg := range msgs {
 		c.Collect(diag.NewIssue(diag.Error, diag.E_COMMAND_FAILED, msg).WithDetail(diag.DetailKeyExitCode, code).Build())
 	}

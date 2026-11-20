@@ -44,7 +44,7 @@ func TestZeroHandles_ReportZeroAndAnswerAsHoldingNothing(t *testing.T) {
 		}
 	}
 
-	wantNone(t, "AllInstances", snap.AllInstances())
+	wantNone(t, "Instances", snap.Instances())
 	wantNone(t, "InstancesOf", snap.InstancesOf(schema.TypeID{}))
 	wantNone(t, "Edges", snap.Edges())
 	wantNone(t, "EdgesFrom", snap.EdgesFrom(inst))

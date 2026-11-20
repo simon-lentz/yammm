@@ -7,6 +7,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/simon-lentz/yammm/internal/schematest"
+
 	"github.com/google/uuid"
 	"github.com/simon-lentz/yammm/internal/value"
 	"github.com/simon-lentz/yammm/schema"
@@ -34,7 +36,7 @@ func TestCanonical_StoredTextIsAFixedPoint(t *testing.T) {
 			t.Fatalf("Canonical(%q) = %#v, %v; want it unchanged", text, twice, err)
 		}
 	}
-	ts, ud, dt := schema.NewTimestampConstraint(), schema.NewUUIDConstraint(), schema.NewDateConstraint()
+	ts, ud, dt := schematest.Constraint(t, "Timestamp"), schematest.Constraint(t, "UUID"), schematest.Constraint(t, "Date")
 	for range 20000 {
 		// An offset under 24 hours, in whole minutes, and an instant in years 1
 		// to 9998 at every offset.

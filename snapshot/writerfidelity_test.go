@@ -22,7 +22,7 @@ import (
 func TestWriter_RefusesNonWhitespaceIndent(t *testing.T) {
 	t.Parallel()
 	s, data := attWireFixture(t)
-	snap, res := snapshot.Load(t.Context(), data, s)
+	snap, res := snapshot.Unmarshal(t.Context(), data, s)
 	if res.HasErrors() {
 		t.Fatalf("load fixture: %s", res)
 	}
@@ -105,7 +105,7 @@ func TestWriter_PreservesAProvenancePathAsWritten(t *testing.T) {
 			t.Skipf("fixture carries no null provenance: %s", data)
 		}
 
-		snap, res := snapshot.Load(t.Context(), []byte(edited), s, snapshot.WithIntegrityCheck(false))
+		snap, res := snapshot.Unmarshal(t.Context(), []byte(edited), s, snapshot.WithIntegrityCheck(false))
 		if res.Len() != 0 {
 			t.Errorf("path %s: the read reported %s; a path as written is no finding", quoted, res)
 		}

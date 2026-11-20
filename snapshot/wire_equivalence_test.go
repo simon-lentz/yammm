@@ -35,7 +35,7 @@ func TestWireContract_UpdateMetadataMatchesReMarshal(t *testing.T) {
 			t.Fatalf("UpdateMetadata: %v", err)
 		}
 
-		loaded, result := snapshot.Load(ctx, data, s)
+		loaded, result := snapshot.Unmarshal(ctx, data, s)
 		if err := result.Err(); err != nil {
 			t.Fatalf("load: %v", err)
 		}
@@ -63,7 +63,7 @@ func TestWireContract_UpdateMetadataMatchesReMarshal(t *testing.T) {
 			t.Fatalf("UpdateMetadata: %v", err)
 		}
 
-		loaded, result := snapshot.Load(ctx, stamped, s)
+		loaded, result := snapshot.Unmarshal(ctx, stamped, s)
 		if err := result.Err(); err != nil {
 			t.Fatalf("load: %v", err)
 		}
@@ -102,7 +102,7 @@ func TestWireContract_UpdateMetadataMatchesReMarshal(t *testing.T) {
 			t.Error("UpdateMetadata kept the input's metadata; it replaces the map wholesale")
 		}
 
-		loaded, result := snapshot.Load(ctx, withMeta, s)
+		loaded, result := snapshot.Unmarshal(ctx, withMeta, s)
 		if err := result.Err(); err != nil {
 			t.Fatalf("load: %v", err)
 		}
@@ -130,7 +130,7 @@ func TestWireContract_UpdateMetadataMatchesReMarshal(t *testing.T) {
 			if err := result.Err(); err != nil {
 				t.Fatalf("UpdateMetadata at indent %q: %v", indent, err)
 			}
-			loaded, result := snapshot.Load(ctx, data, s)
+			loaded, result := snapshot.Unmarshal(ctx, data, s)
 			if err := result.Err(); err != nil {
 				t.Fatalf("load at indent %q: %v", indent, err)
 			}
@@ -162,7 +162,7 @@ func TestWireContract_UpdateMetadataMatchesReMarshal(t *testing.T) {
 			t.Error("UpdateMetadata did not write newMeta")
 		}
 
-		loaded, result := snapshot.Load(ctx, data, s)
+		loaded, result := snapshot.Unmarshal(ctx, data, s)
 		if err := result.Err(); err != nil {
 			t.Fatalf("load: %v", err)
 		}

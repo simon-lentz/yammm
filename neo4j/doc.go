@@ -41,7 +41,7 @@
 // levels deep, or a [encoding/json.Number] no driver number holds. An integer literal a finite float64 holds
 // passes them at a Float position and rounds to its nearest float64. No snapshot these writers accept holds a property the schema does not
 // declare: the validator keeps one out of a graph, and
-// [github.com/simon-lentz/yammm/snapshot.Load] refuses one. Of the values the mark refuses, a validated snapshot holds two, which
+// [github.com/simon-lentz/yammm/snapshot.Unmarshal] refuses one. Of the values the mark refuses, a validated snapshot holds two, which
 // the validator accepts: a nested collection's, and an instant at a UTC offset
 // past 18 hours. Any other is held only by a snapshot whose values no
 // validator refused at Error. [CoerceParams] marks its
@@ -121,7 +121,7 @@
 // nil one too.
 //
 // On the write path the rule refuses those two values, and beside them only a
-// value no validator refused at Error: one snapshot.Load read without
+// value no validator refused at Error: one snapshot.Unmarshal read without
 // revalidating at Error. There it judges a value's
 // form and never its bounds, members or pattern, nor a Vector's dimension. A
 // Timestamp, a Date and a UUID are forms, so their text is parsed.
@@ -137,8 +137,8 @@
 // Vector element, where the .ys reader left it a json.Number, is refused before
 // the rule.
 //
-// A value that holds none ([github.com/simon-lentz/yammm/instance.IsAbsent]),
-// nil, a nil slice, a nil map or a nil immutable container, is returned as nil,
+// A value that holds none, nil, a nil slice, a nil map or a nil immutable
+// container, is returned as nil,
 // which the driver writes as null, and a nil constraint ("no type to coerce against") passes any other
 // value through unchanged. A kind added to [schema.ConstraintKind] after the rule's switch was
 // written surfaces as a lint failure via its //exhaustive:enforce directive, rather

@@ -19,7 +19,7 @@ func TestValidate_StampsInstanceIndexOnce(t *testing.T) {
 		{Properties: map[string]any{"id": "d1", "lines": []any{map[string]any{"n": "b", "qty": "x"}}}},
 	}
 	_, res := v.Validate(t.Context(), "Doc", raws)
-	yammmtest.Diff(t, []string{"1"}, detailValues(mustIssue(t, res, instance.ErrTypeMismatch), diag.DetailKeyInstanceIndex))
+	yammmtest.Diff(t, []string{"1"}, detailValues(mustIssue(t, res, diag.E_TYPE_MISMATCH), diag.DetailKeyInstanceIndex))
 }
 
 func manyUnknownFields(n int) map[string]any {
@@ -81,7 +81,7 @@ func TestComposition_DuplicateKeyIndicesAreInputIndices(t *testing.T) {
 	_, res := v.ValidateOne(t.Context(), "Doc", instance.RawInstance{Properties: map[string]any{
 		"id": "d", "lines": []any{map[string]any{"n": "a", "qty": 1}, "not-an-object", map[string]any{"n": "a", "qty": 1}},
 	}})
-	is := mustIssue(t, res, instance.ErrDuplicateComposedPK)
+	is := mustIssue(t, res, diag.E_DUPLICATE_COMPOSED_PK)
 	if !strings.Contains(is.Message(), "indices 0 and 2") {
 		t.Errorf("message = %q", is.Message())
 	}
@@ -105,6 +105,6 @@ type Person extends Base {
 }
 `))
 	_, res := v.ValidateOne(t.Context(), "Person", instance.RawInstance{Properties: map[string]any{"id": "p", "age": 3}})
-	is := mustIssue(t, res, instance.ErrMissingRequired)
+	is := mustIssue(t, res, diag.E_MISSING_REQUIRED)
 	yammmtest.Diff(t, []string{"name"}, detailValues(is, diag.DetailKeyPropertyName))
 }

@@ -14,6 +14,7 @@ import (
 	"github.com/simon-lentz/yammm/instance/internal/eval"
 	"github.com/simon-lentz/yammm/instance/path"
 	"github.com/simon-lentz/yammm/internal/expr"
+	"github.com/simon-lentz/yammm/internal/value"
 	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
 )
@@ -53,10 +54,7 @@ func NewValidator(s schema.Schema, opts ...Option) *Validator {
 //     and not zero for successes; a nil slice when it did not
 //   - result: merged diagnostics for the entire batch (OK when all instances pass)
 //
-// An instance that holds a [Refused] value where the validator reads one (see
-// [RawInstance].Properties) fails and draws no issue for it, since its
-// producer reported it: its entry is zero, and the result can hold no
-// error for it. A diagnostic about one element of raws carries one
+// A diagnostic about one element of raws carries one
 // [diag.DetailKeyInstanceIndex] detail naming it; one about typeName itself —
 // a name that does not resolve, or an abstract or part type named by an empty
 // batch — carries none. The batch result carries each instance's truncation
@@ -77,9 +75,9 @@ func (v *Validator) Validate(ctx context.Context, typeName string, raws []RawIns
 
 	// The type resolves before the empty-batch answer: an unknown name is a
 	// failure whatever the batch.
-	typ, err := v.resolveType(typeName)
-	if err != nil {
-		return nil, typeResolutionResultForBatch(err, raws)
+	typ, found := v.schema.ResolveTypeName(typeName)
+	if !found {
+		return nil, typeResolutionResultForBatch(typeName, raws)
 	}
 	if len(raws) == 0 {
 		// An empty batch names a type that must be able to hold a root, as a
@@ -93,7 +91,7 @@ func (v *Validator) Validate(ctx context.Context, typeName string, raws []RawIns
 		return []ValidInstance{}, diag.OK()
 	}
 
-	batchCollector := diag.NewCollectorUnlimited()
+	batchCollector := diag.NewCollector(diag.NoLimit)
 	valids := make([]ValidInstance, 0, len(raws))
 
 	for i := range raws {
@@ -125,10 +123,6 @@ func (v *Validator) Validate(ctx context.Context, typeName string, raws []RawIns
 //   - valid: the validated instance, or the zero instance on failure
 //   - result: diagnostics for this instance (OK on success)
 //
-// An instance that holds a [Refused] value where the validator reads one is
-// zero with a result that holds no error for it, as [Validator.Validate] states;
-// [ErrRefusedValue] names that case.
-//
 // Panics if the receiver is nil or if ctx is nil.
 func (v *Validator) ValidateOne(ctx context.Context, typeName string, raw RawInstance) (ValidInstance, diag.Result) {
 	if v == nil {
@@ -141,9 +135,9 @@ func (v *Validator) ValidateOne(ctx context.Context, typeName string, raw RawIns
 		return ValidInstance{}, cancelledResult(err, raw.Provenance)
 	}
 
-	typ, err := v.resolveType(typeName)
-	if err != nil {
-		return ValidInstance{}, createErrorResult(ErrTypeNotFound, err.Error(), raw.Provenance)
+	typ, found := v.schema.ResolveTypeName(typeName)
+	if !found {
+		return ValidInstance{}, createErrorResult(diag.E_INSTANCE_TYPE_NOT_FOUND, typeNotFound(typeName), raw.Provenance)
 	}
 	inst, res := v.validateComposedInstance(ctx, typeName, typ, raw, basePath(raw.Provenance), false, 0)
 	// The batch rule holds at this entry too, which the snapshot revalidator
@@ -151,7 +145,7 @@ func (v *Validator) ValidateOne(ctx context.Context, typeName string, raw RawIns
 	// partial finding, so a timeout's leftovers are never read as findings about
 	// the data.
 	if err := ctx.Err(); err != nil {
-		out := diag.NewCollectorUnlimited()
+		out := diag.NewCollector(diag.NoLimit)
 		out.Merge(keepInternalErrors(res))
 		out.Merge(cancelledResult(err, raw.Provenance))
 		return ValidInstance{}, out.Result()
@@ -181,7 +175,7 @@ func basePath(prov Provenance) path.Path {
 // cancelledResult is the Fatal E_CONTEXT_CANCELLED result, anchored on the
 // provenance in hand so a cancelled batch still names the row it stopped on.
 func cancelledResult(err error, prov Provenance) diag.Result {
-	c := diag.NewCollectorUnlimited()
+	c := diag.NewCollector(diag.NoLimit)
 	c.Collect(cancelledIssue(err, prov, basePath(prov)))
 	return c.Result()
 }
@@ -216,7 +210,7 @@ func cancelled(ctx context.Context, collector *diag.Collector, prov Provenance, 
 // defect and a deadline can land on one row, and reporting the defect as the
 // deadline hides a class of bug behind a timeout.
 func keepInternalErrors(res diag.Result) diag.Result {
-	c := diag.NewCollectorUnlimited()
+	c := diag.NewCollector(diag.NoLimit)
 	c.MergeRetag(res,
 		func(sev diag.Severity, code diag.Code) (diag.Severity, bool) { return sev, code == diag.E_INTERNAL },
 		func(issue diag.Issue) diag.Issue { return issue })
@@ -273,16 +267,6 @@ func (v *Validator) validateComposedBatch(
 	return valids, targetType
 }
 
-// ValidationError represents a system-level validation error.
-type ValidationError struct {
-	Code    diag.Code
-	Message string
-}
-
-func (e *ValidationError) Error() string {
-	return e.Message
-}
-
 // resolveRelationTarget resolves a relation's target type by the absolute
 // identity recorded at completion ([schema.Relation.TargetID]), searched
 // across the schema's import closure. The syntactic target ref is
@@ -304,17 +288,10 @@ func relationByEitherName(t schema.Type, name string) (schema.Relation, bool) {
 	return t.RelationByField(name)
 }
 
-// resolveType resolves an entry-relative type name by the one rule
-// [schema.Schema.ResolveTypeName] states.
-func (v *Validator) resolveType(typeName string) (schema.Type, error) {
-	typ, found := v.schema.ResolveTypeName(typeName)
-	if !found {
-		return schema.Type{}, &ValidationError{
-			Code:    ErrTypeNotFound,
-			Message: fmt.Sprintf("type %s not found", diag.QuoteValue(typeName)),
-		}
-	}
-	return typ, nil
+// typeNotFound is the message for a type name [schema.Schema.ResolveTypeName]
+// does not resolve.
+func typeNotFound(typeName string) string {
+	return fmt.Sprintf("type %s not found", diag.QuoteValue(typeName))
 }
 
 // batchProvenance is the provenance of a batch-wide failure — the type or
@@ -325,8 +302,8 @@ func batchProvenance(raws []RawInstance) Provenance {
 }
 
 // typeResolutionResultForBatch creates a diagnostic result for type resolution errors in batch contexts.
-func typeResolutionResultForBatch(err error, raws []RawInstance) diag.Result {
-	return createErrorResult(ErrTypeNotFound, err.Error(), batchProvenance(raws))
+func typeResolutionResultForBatch(typeName string, raws []RawInstance) diag.Result {
+	return createErrorResult(diag.E_INSTANCE_TYPE_NOT_FOUND, typeNotFound(typeName), batchProvenance(raws))
 }
 
 // validateComposedInstance validates an instance, optionally allowing part
@@ -350,9 +327,9 @@ func (v *Validator) validateComposedInstance(ctx context.Context, typeName strin
 func instantiationRefusal(typ schema.Type, typeName string, allowPartType bool, prov Provenance) (diag.Result, bool) {
 	switch {
 	case typ.IsAbstract():
-		return createErrorResult(ErrAbstractType, fmt.Sprintf("cannot instantiate abstract type %q", typeName), prov), true
+		return createErrorResult(diag.E_ABSTRACT_TYPE, fmt.Sprintf("cannot instantiate abstract type %q", typeName), prov), true
 	case !allowPartType && typ.IsPart():
-		return createErrorResult(ErrPartTypeDirect, fmt.Sprintf("part type %q cannot be instantiated directly", typeName), prov), true
+		return createErrorResult(diag.E_PART_TYPE_DIRECT, fmt.Sprintf("part type %q cannot be instantiated directly", typeName), prov), true
 	}
 	return diag.Result{}, false
 }
@@ -383,10 +360,6 @@ func (v *Validator) validateProperties(ctx context.Context, typ schema.Type, typ
 	// reported one defect per round trip.
 	beforeProperties := collector.ErrorCount()
 
-	// refused holds that a member value is a Refused or a pass met a refused
-	// child: the instance fails as a member error fails it, with no issue of
-	// its own, since the value's producer reported it.
-	refused := false
 	collided := claims.collidedProperties()
 
 	// Validate each property and build the validated properties map
@@ -405,16 +378,11 @@ func (v *Validator) validateProperties(ctx context.Context, typ schema.Type, typ
 		if hasInput {
 			rawValue = raw.Properties[inputName]
 		}
-		if isRefused(rawValue) {
-			refused = true
-			continue
-		}
-
 		// Check required properties
-		if IsAbsent(rawValue) && prop.IsRequired() {
+		if value.Absent(rawValue) && prop.IsRequired() {
 			issue := diag.NewIssue(
 				diag.Error,
-				ErrMissingRequired,
+				diag.E_MISSING_REQUIRED,
 				fmt.Sprintf("missing required property %q", prop.Name()),
 			).WithDetails(diag.TypeProp(typeName, prop.Name())...)
 			withProvenance(issue, prov, base.String())
@@ -422,14 +390,14 @@ func (v *Validator) validateProperties(ctx context.Context, typ schema.Type, typ
 			continue
 		}
 
-		if IsAbsent(rawValue) {
+		if value.Absent(rawValue) {
 			continue
 		}
 
 		propPath := base.Key(inputName).String()
 
 		// Validate property type
-		if err := v.checkValueWithRecovery(rawValue, prop.Constraint()); err != nil {
+		if err := checkValueRecovering(rawValue, prop.Constraint()); err != nil {
 			issue := checkIssue(err, fmt.Sprintf("property %q", prop.Name())).
 				WithDetails(diag.TypeProp(typeName, prop.Name())...)
 			if inputName != prop.Name() {
@@ -446,7 +414,7 @@ func (v *Validator) validateProperties(ctx context.Context, typ schema.Type, typ
 		}
 
 		// Coerce to canonical type (int64, float64, []float64)
-		coercedValue, err := v.coerceValueWithRecovery(rawValue, prop.Constraint())
+		coercedValue, err := coerceValueRecovering(rawValue, prop.Constraint())
 		if err != nil {
 			if internalErr, ok := errors.AsType[*InternalError](err); ok {
 				collector.Collect(internalIssue(internalErr, prov, base))
@@ -456,7 +424,7 @@ func (v *Validator) validateProperties(ctx context.Context, typ schema.Type, typ
 			// This should not happen after the value check above passed
 			issue := diag.NewIssue(
 				diag.Error,
-				ErrTypeMismatch,
+				diag.E_TYPE_MISMATCH,
 				fmt.Sprintf("property %q: coercion error: %s", prop.Name(), err.Error()),
 			).WithDetails(diag.TypeProp(typeName, prop.Name())...)
 			if inputName != prop.Name() {
@@ -477,7 +445,7 @@ func (v *Validator) validateProperties(ctx context.Context, typ schema.Type, typ
 	if cancelled(ctx, collector, prov, base) {
 		return ValidInstance{}, collector.Result()
 	}
-	if refused || collector.ErrorCount() > beforeProperties {
+	if collector.ErrorCount() > beforeProperties {
 		return ValidInstance{}, collector.Result()
 	}
 
@@ -485,20 +453,20 @@ func (v *Validator) validateProperties(ctx context.Context, typ schema.Type, typ
 	pkComponents := v.extractPrimaryKey(typ, validatedProps)
 
 	beforeEdges := collector.ErrorCount()
-	edges, refused := v.validateEdges(ctx, typ, relInputs, collector, prov, base)
+	edges := v.validateEdges(ctx, typ, relInputs, collector, prov, base)
 	if cancelled(ctx, collector, prov, base) {
 		return ValidInstance{}, collector.Result()
 	}
-	if refused || collector.ErrorCount() > beforeEdges {
+	if collector.ErrorCount() > beforeEdges {
 		return ValidInstance{}, collector.Result()
 	}
 
 	beforeCompositions := collector.ErrorCount()
-	composed, refused := v.validateCompositions(ctx, typ, relInputs, collector, prov, base, depth)
+	composed := v.validateCompositions(ctx, typ, relInputs, collector, prov, base, depth)
 	if cancelled(ctx, collector, prov, base) {
 		return ValidInstance{}, collector.Result()
 	}
-	if refused || collector.ErrorCount() > beforeCompositions {
+	if collector.ErrorCount() > beforeCompositions {
 		return ValidInstance{}, collector.Result()
 	}
 
@@ -608,11 +576,11 @@ type relationInput struct {
 // present under the key that claims it, or collided, reported here once at the
 // object before any pass runs, so both member kinds report from one site and no
 // pass's gate can swallow the report. A relation with no entry is absent: no key
-// claims it, or its key holds no value ([IsAbsent]), as a property's null is.
+// claims it, or its key holds no value ([value.Absent]), as a property's null is.
 func buildRelationMapping(claims objectClaims, props map[string]any, collector *diag.Collector, prov Provenance, base path.Path) map[schema.Relation]relationInput {
 	rels := make(map[schema.Relation]relationInput, len(claims.rels)+len(claims.relCollisions))
 	for rel, key := range claims.rels {
-		if v := props[key]; !IsAbsent(v) {
+		if v := props[key]; !value.Absent(v) {
 			rels[rel] = relationInput{state: relationPresent, key: key, value: v}
 		}
 	}
@@ -633,7 +601,7 @@ func reportRelationCollision(rel schema.Relation, in relationInput, collector *d
 	}
 	issue := diag.NewIssue(
 		diag.Error,
-		ErrCaseFoldCollision,
+		diag.E_CASE_FOLD_COLLISION,
 		fmt.Sprintf("multiple input fields %s fold to %s field %q", nameList(in.candidates), kind, rel.FieldName()),
 	).WithDetail(diag.DetailKeyRelationName, rel.Name()).
 		WithDetail(diag.DetailKeyJSONField, rel.FieldName())
@@ -648,7 +616,7 @@ func buildPropertyMapping(claims objectClaims, collector *diag.Collector, prov P
 	for _, c := range claims.propCollisions {
 		issue := diag.NewIssue(
 			diag.Error,
-			ErrCaseFoldCollision,
+			diag.E_CASE_FOLD_COLLISION,
 			fmt.Sprintf("multiple input fields %s fold to schema property %q", nameList(c.keys), c.prop),
 		).WithDetail(diag.DetailKeyPropertyName, c.prop)
 		withProvenance(issue, prov, base.String())
@@ -667,7 +635,7 @@ func (v *Validator) checkUnknownFields(typ schema.Type, typeName string, names [
 		}
 		issue := diag.NewIssue(
 			diag.Error,
-			ErrUnknownField,
+			diag.E_UNKNOWN_FIELD,
 			"unknown field "+diag.QuoteValue(inputName),
 		).WithDetails(diag.TypeField(typeName, inputName)...)
 		if shadowed, ok := v.exactMatchShadowing(typ, inputName, claims.props); ok {
@@ -857,7 +825,7 @@ func (v *Validator) evaluateInvariants(
 		if err != nil {
 			issue := diag.NewIssue(
 				diag.Error,
-				ErrEvalError,
+				diag.E_EVAL_ERROR,
 				fmt.Sprintf("invariant %q: %v", inv.Name(), err),
 			).WithDetail(diag.DetailKeyTypeName, typeName).
 				WithDetail(diag.DetailKeyInvariantName, inv.Name())
@@ -869,7 +837,7 @@ func (v *Validator) evaluateInvariants(
 		if !result {
 			issue := diag.NewIssue(
 				diag.Error,
-				ErrInvariantFail,
+				diag.E_INVARIANT_FAIL,
 				inv.Name(),
 			).WithDetail(diag.DetailKeyTypeName, typeName).
 				WithDetail(diag.DetailKeyInvariantName, inv.Name())
@@ -909,8 +877,8 @@ func (v *Validator) PrimaryKeyOf(typeName string, raw RawInstance) (schema.TypeI
 	if v == nil {
 		panic("instance.PrimaryKeyOf: nil validator receiver")
 	}
-	typ, err := v.resolveType(typeName)
-	if err != nil {
+	typ, found := v.schema.ResolveTypeName(typeName)
+	if !found {
 		return schema.TypeID{}, immutable.Key{}, false
 	}
 	if _, refused := instantiationRefusal(typ, typeName, false, Provenance{}); refused {
@@ -924,10 +892,10 @@ func (v *Validator) PrimaryKeyOf(typeName string, raw RawInstance) (schema.TypeI
 			return schema.TypeID{}, immutable.Key{}, false
 		}
 		val := raw.Properties[inputName]
-		if IsAbsent(val) || v.checkValueWithRecovery(val, pk.Constraint()) != nil {
+		if value.Absent(val) || checkValueRecovering(val, pk.Constraint()) != nil {
 			return schema.TypeID{}, immutable.Key{}, false
 		}
-		coerced, err := v.coerceValueWithRecovery(val, pk.Constraint())
+		coerced, err := coerceValueRecovering(val, pk.Constraint())
 		if err != nil {
 			return schema.TypeID{}, immutable.Key{}, false
 		}
@@ -953,7 +921,7 @@ func withProvenance(b *diag.IssueBuilder, prov Provenance, pathStr string) *diag
 // createErrorResult creates a diag.Result with a single error issue at the
 // provenance's own location.
 func createErrorResult(code diag.Code, message string, prov Provenance) diag.Result {
-	collector := diag.NewCollectorUnlimited()
+	collector := diag.NewCollector(diag.NoLimit)
 	issue := diag.NewIssue(
 		diag.Error,
 		code,
@@ -962,16 +930,4 @@ func createErrorResult(code diag.Code, message string, prov Provenance) diag.Res
 	withProvenance(issue, prov, basePath(prov).String())
 	collector.Collect(issue.Build())
 	return collector.Result()
-}
-
-// checkValueWithRecovery runs the value check with panic recovery, the rule
-// CheckValue shares.
-func (v *Validator) checkValueWithRecovery(val any, c schema.Constraint) error {
-	return checkValueRecovering(val, c)
-}
-
-// coerceValueWithRecovery runs value.Coerce with panic recovery, as
-// checkValueWithRecovery runs value.Check.
-func (v *Validator) coerceValueWithRecovery(val any, c schema.Constraint) (any, error) {
-	return coerceValueRecovering(val, c)
 }

@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -107,9 +108,8 @@ func TestSnapshotInfo_JSONKeysAreSnakeCase(t *testing.T) {
 }
 
 // TestSnapshotInfo_HeaderOnlyReportsFileSize pins the file size in header-only
-// mode. HeaderOnlyRead reports zero by contract — a size is not knowable from an
-// io.Reader — but the command opened the file and holds the handle, so it stats
-// the handle rather than publishing zero.
+// mode. [snapshot.ReadHeader] reads a size from no io.Reader, but the command
+// opened the file and holds the handle, so it stats the handle.
 func TestSnapshotInfo_HeaderOnlyReportsFileSize(t *testing.T) {
 	t.Parallel()
 
@@ -131,6 +131,51 @@ func TestSnapshotInfo_HeaderOnlyReportsFileSize(t *testing.T) {
 	}
 	if int64(size) != stat.Size() {
 		t.Errorf("file_size = %d, want %d — the command holds the open handle", int64(size), stat.Size())
+	}
+}
+
+// The full mode counts the bytes it read, in both renderings.
+func TestSnapshotInfo_FullModeReportsFileSize(t *testing.T) {
+	t.Parallel()
+
+	file := filepath.Join(t.TempDir(), "a.ys")
+	saveFixture(t, file)
+	stat, err := os.Stat(file)
+	if err != nil {
+		t.Fatalf("stat fixture: %v", err)
+	}
+
+	doc, ok := decodeStdout(t, "snapshot", "info", "--json", file).(map[string]any)
+	if !ok {
+		t.Fatal("info JSON is not an object")
+	}
+	if size, _ := doc["file_size"].(float64); int64(size) != stat.Size() {
+		t.Errorf("file_size = %v, want %d", doc["file_size"], stat.Size())
+	}
+	code, out, errOut := executeCmdOutput(t, "snapshot", "info", file)
+	if code != cli.ExitOK {
+		t.Fatalf("exit code = %d\nstderr:\n%s", code, errOut)
+	}
+	if want := fmt.Sprintf("File size:       %d bytes", stat.Size()); !strings.Contains(out, want) {
+		t.Errorf("text output lacks %q:\n%s", want, out)
+	}
+}
+
+// A pipe's Size is the count of its unread bytes, so statSize reports none.
+func TestStatSize_ReportsNoSizeForAPipe(t *testing.T) {
+	t.Parallel()
+
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("pipe: %v", err)
+	}
+	defer r.Close()
+	defer w.Close()
+	if _, err := w.Write([]byte("unread bytes")); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	if got := statSize(r); got != 0 {
+		t.Errorf("statSize(pipe) = %d, want 0", got)
 	}
 }
 
@@ -286,6 +331,12 @@ func TestSnapshotInfo_DirHeaderStatesPresenceAndSize(t *testing.T) {
 
 	if header := byName["corrupt.ys"]["header"]; header != nil {
 		t.Errorf("corrupt entry header = %#v, want null — a file that did not parse states no header", header)
+	}
+	if size, _ := byName["corrupt.ys"]["file_size"].(float64); size != float64(len("not json")) {
+		t.Errorf("corrupt entry file_size = %v, want %d — a file that did not parse still has a size", size, len("not json"))
+	}
+	if size, _ := byName["clean.ys"]["file_size"].(float64); int64(size) != stat.Size() {
+		t.Errorf("clean entry file_size = %v, want %d", size, stat.Size())
 	}
 
 	header, ok := byName["clean.ys"]["header"].(map[string]any)

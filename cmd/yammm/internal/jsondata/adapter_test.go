@@ -22,10 +22,10 @@ func parseOne(t *testing.T, source location.SourceID, data []byte) (instance.Raw
 	wrapped := fmt.Appendf(nil, `{%q: [%s]}`, typeName, data)
 	result, diags := Parse(context.Background(), source, wrapped)
 	insts := result[typeName]
-	if len(insts) == 0 {
+	if len(insts.Elements) == 0 {
 		return instance.RawInstance{}, diags
 	}
-	return insts[0].RawInstance, diags
+	return insts.Elements[0].RawInstance, diags
 }
 
 func TestParse(t *testing.T) {
@@ -42,11 +42,11 @@ func TestParse(t *testing.T) {
 		result, diags := Parse(context.Background(), source, data)
 		require.True(t, diags.OK(), "expected no errors: %v", diags)
 		require.Len(t, result, 1)
-		require.Len(t, result["Person"], 2)
+		require.Len(t, result["Person"].Elements, 2)
 
-		assert.Equal(t, "Alice", result["Person"][0].Properties["name"])
-		assert.Equal(t, int64(30), result["Person"][0].Properties["age"])
-		assert.Equal(t, "Bob", result["Person"][1].Properties["name"])
+		assert.Equal(t, "Alice", result["Person"].Elements[0].Properties["name"])
+		assert.Equal(t, int64(30), result["Person"].Elements[0].Properties["age"])
+		assert.Equal(t, "Bob", result["Person"].Elements[1].Properties["name"])
 	})
 
 	t.Run("multiple types", func(t *testing.T) {
@@ -58,8 +58,8 @@ func TestParse(t *testing.T) {
 		result, diags := Parse(context.Background(), source, data)
 		require.True(t, diags.OK())
 		require.Len(t, result, 2)
-		require.Len(t, result["Person"], 1)
-		require.Len(t, result["Company"], 1)
+		require.Len(t, result["Person"].Elements, 1)
+		require.Len(t, result["Company"].Elements, 1)
 	})
 
 	t.Run("empty object", func(t *testing.T) {
@@ -73,7 +73,7 @@ func TestParse(t *testing.T) {
 
 		result, diags := Parse(context.Background(), source, data)
 		require.True(t, diags.OK())
-		require.Len(t, result["common.Person"], 1)
+		require.Len(t, result["common.Person"].Elements, 1)
 	})
 
 	t.Run("with jsonc comments", func(t *testing.T) {
@@ -86,7 +86,7 @@ func TestParse(t *testing.T) {
 
 		result, diags := Parse(context.Background(), source, data)
 		require.True(t, diags.OK())
-		require.Len(t, result["Person"], 1)
+		require.Len(t, result["Person"].Elements, 1)
 	})
 }
 
@@ -120,7 +120,7 @@ func TestParse_Errors(t *testing.T) {
 			result, diags := Parse(context.Background(), source, []byte(tt.data))
 			require.False(t, diags.OK(), "expected parse errors")
 			for typeName, count := range tt.wantTypes {
-				require.Len(t, result[typeName], count, "type %q", typeName)
+				require.Len(t, result[typeName].Elements, count, "type %q", typeName)
 			}
 			if tt.wantTypes != nil && len(tt.wantTypes) == 0 {
 				assert.Empty(t, result)
@@ -151,7 +151,7 @@ func TestParse_NonArrayValues(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			result, diags := Parse(context.Background(), source, []byte(tt.input))
 			require.False(t, diags.OK(), "expected error for non-array value")
-			require.Len(t, result["Company"], 1,
+			require.Len(t, result["Company"].Elements, 1,
 				"should have parsed valid type after skipping invalid value")
 		})
 	}
@@ -167,7 +167,7 @@ func TestNullRejection(t *testing.T) {
 		result, diags := Parse(context.Background(), source, data)
 
 		require.False(t, diags.OK(), "null elements in type array should be rejected")
-		require.Len(t, result["Person"], 1)
+		require.Len(t, result["Person"].Elements, 1)
 	})
 }
 

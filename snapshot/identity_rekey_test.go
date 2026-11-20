@@ -162,7 +162,7 @@ func TestGraphSnapshot_SeparatesOneNameTwoSchemasDeclare(t *testing.T) {
 	after := graph.NewFromSnapshot(built).Snapshot()
 
 	var count int
-	for range after.AllInstances() {
+	for range after.Instances() {
 		count++
 	}
 	if count != 2 {
@@ -183,7 +183,7 @@ func TestRoundTrip_SeparatesOneNameTwoSchemasDeclare(t *testing.T) {
 	if err := result.Err(); err != nil {
 		t.Fatalf("marshal: %v", err)
 	}
-	loaded, result := snapshot.Load(ctx, data, s)
+	loaded, result := snapshot.Unmarshal(ctx, data, s)
 	if err := result.Err(); err != nil {
 		t.Fatalf("load rejected a document Marshal produced: %v\n%s", err, data)
 	}
@@ -264,7 +264,7 @@ func TestInfo_InstanceCountsKeyedByIdentity(t *testing.T) {
 	if res.HasErrors() {
 		t.Fatalf("marshal: %v", res)
 	}
-	info, infoRes := snapshot.Info(ctx, data)
+	info, infoRes := snapshot.Stat(ctx, data)
 	if err := infoRes.Err(); err != nil {
 		t.Fatalf("info: %v", err)
 	}
@@ -360,9 +360,9 @@ func TestTypeRef_IsWriteOnly(t *testing.T) {
 		t.Error("TypeRef decoded from its rendered form: it gained UnmarshalText, so its godoc and the write-only statement in docs/API.md need updating with it")
 	}
 
-	var info snapshot.HeaderInfo
+	var info snapshot.Header
 	if err := json.Unmarshal([]byte(`{"Types":["`+typeRefRendered+`"]}`), &info); err == nil {
-		t.Error("HeaderInfo decoded from the form yammm snapshot info writes; the surfaces are documented as one-way")
+		t.Error("Header decoded from the form yammm snapshot info writes; the surfaces are documented as one-way")
 	}
 }
 

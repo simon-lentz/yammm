@@ -43,7 +43,7 @@ func TestUnknownField_FoldingOntoAClaimedRelationFieldIsUnknown(t *testing.T) {
 		"works_at": map[string]any{"_target_id": "c1", "note": "n"},
 		"Works_At": map[string]any{"_target_id": "c2", "note": "n"},
 	}})
-	is := mustIssue(t, res, instance.ErrUnknownField)
+	is := mustIssue(t, res, diag.E_UNKNOWN_FIELD)
 	if reason, _ := detail(is, diag.DetailKeyReason); reason != "case_fold_shadowed" {
 		t.Errorf("reason = %q, want case_fold_shadowed", reason)
 	}
@@ -61,10 +61,10 @@ func TestComposition_AbsentRequiredIsReportedBesideASiblingsError(t *testing.T) 
 	_, res := v.ValidateOne(t.Context(), "Doc", instance.RawInstance{Properties: map[string]any{
 		"id": "d", "lines": []any{map[string]any{"id": 5}}, // a child with a type error; NOTES absent
 	}})
-	if !res.HasCode(instance.ErrTypeMismatch) {
+	if !res.HasCode(diag.E_TYPE_MISMATCH) {
 		t.Fatalf("control: want the child's E_TYPE_MISMATCH, got %v", codes(res))
 	}
-	if !res.HasCode(instance.ErrUnresolvedRequiredComposition) {
+	if !res.HasCode(diag.E_UNRESOLVED_REQUIRED_COMPOSITION) {
 		t.Errorf("the absent required NOTES was suppressed by LINES' error: %v", codes(res))
 	}
 }
@@ -134,7 +134,7 @@ func TestComposition_ShapeMismatchCarriesTheRelationPairOnce(t *testing.T) {
 	_, res := v.ValidateOne(t.Context(), "Doc", instance.RawInstance{Properties: map[string]any{
 		"id": "d", "lines": []any{map[string]any{"id": "l", "item": 5}},
 	}})
-	is := mustIssue(t, res, instance.ErrEdgeShapeMismatch)
+	is := mustIssue(t, res, diag.E_EDGE_SHAPE_MISMATCH)
 	if rel, _ := detail(is, diag.DetailKeyRelationName); rel != "ITEM" {
 		t.Errorf("relation = %q, want the innermost ITEM", rel)
 	}
@@ -176,7 +176,7 @@ func TestDiagnosticOrder_IsSortedAndStable(t *testing.T) {
 		_, res := v.ValidateOne(t.Context(), "Person", instance.RawInstance{Properties: map[string]any{
 			"id": "p", "nAme": "x", "NAME": "y", "Name": "z",
 		}})
-		if msg := mustIssue(t, res, instance.ErrCaseFoldCollision).Message(); !strings.Contains(msg, "[NAME Name nAme]") {
+		if msg := mustIssue(t, res, diag.E_CASE_FOLD_COLLISION).Message(); !strings.Contains(msg, "[NAME Name nAme]") {
 			t.Errorf("collision candidates not sorted: %s", msg)
 		}
 		// A property collision ends the instance before its edges are read,
@@ -187,7 +187,7 @@ func TestDiagnosticOrder_IsSortedAndStable(t *testing.T) {
 		}})
 		var unknown []string
 		for is := range res.Issues() {
-			if is.Code() == instance.ErrUnknownEdgeField {
+			if is.Code() == diag.E_UNKNOWN_EDGE_FIELD {
 				unknown = append(unknown, is.Path())
 			}
 		}
@@ -205,7 +205,7 @@ func TestEdgeTarget_NullFKCarriesGotNull(t *testing.T) {
 	_, res := v.ValidateOne(t.Context(), "Person", instance.RawInstance{Properties: map[string]any{
 		"id": "p", "name": "n", "works_at": map[string]any{"_target_id": nil, "note": "n"},
 	}})
-	is := mustIssue(t, res, instance.ErrTypeMismatch)
+	is := mustIssue(t, res, diag.E_TYPE_MISMATCH)
 	if got, _ := detail(is, diag.DetailKeyGot); got != "null" {
 		t.Errorf("got detail = %q, want null", got)
 	}

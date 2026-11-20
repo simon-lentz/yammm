@@ -32,14 +32,3 @@ func TestReferenceParts_SplitsOnlyWhatASourceWrites(t *testing.T) {
 		}
 	}
 }
-
-// The judge reads the fault NewAliasConstraint recorded and parses no name
-// again, so judging a reference reads two fields at each call.
-func TestConstraintFault_ReadsTheRecordedReferenceFault(t *testing.T) {
-	if _, found := constraintFault(AliasConstraint{dataTypeName: "T1", badName: true}); !found {
-		t.Error("the judge accepts a reference whose recorded fault is set")
-	}
-	if fault, found := constraintFault(NewAliasConstraint("T1", nil)); found {
-		t.Errorf("the judge refuses the reference T1: %s", fault)
-	}
-}

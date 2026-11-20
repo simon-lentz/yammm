@@ -519,7 +519,9 @@ type Item {
 	require.NotNil(t, e, "invariant expression should survive load pipeline")
 
 	// Verify the expression operator (the hook returns expr.Expression directly)
-	assert.Equal(t, ">=", e.Op(), "expression should be a >= comparison")
+	sexpr, ok := e.(expr.SExpr)
+	require.True(t, ok, "the expression is %T; want an expr.SExpr", e)
+	assert.Equal(t, ">=", sexpr.Op(), "expression should be a >= comparison")
 }
 
 func TestString_RelationTargetIDResolved(t *testing.T) {

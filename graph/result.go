@@ -65,7 +65,7 @@ type Attestation struct {
 // zero and an empty Properties.
 //
 // No instance map is exposed, so there is no iteration order to be surprised
-// by: [Snapshot.AllInstances] yields every root instance in the order above,
+// by: [Snapshot.Instances] yields every root instance in the order above,
 // and [Snapshot.Types] with [Snapshot.InstancesOf] walks the same order a
 // type at a time.
 type Snapshot struct{ *snapshotState }
@@ -116,7 +116,7 @@ type snapshotState struct {
 // whether a relation is one-to-one or one-to-many).
 //
 // For snapshots loaded from persisted .ys files, this returns the schema
-// provided to snapshot.Load, not the schema used at original construction
+// provided to snapshot.Unmarshal, not the schema used at original construction
 // time. The loaded schema is verified for structural compatibility via
 // schema.StructuralHash.
 func (r Snapshot) Schema() schema.Schema {
@@ -154,13 +154,13 @@ func (r Snapshot) InstancesOf(id schema.TypeID) iter.Seq[Instance] {
 	return slices.Values(instances)
 }
 
-// AllInstances returns an iterator over every root instance in the graph, in
+// Instances returns an iterator over every root instance in the graph, in
 // deterministic order: types by identity, instances within each type by
 // primary key. The order is stable across calls.
 //
 // Composed children are not yielded. For the subtree beneath a root, walk
 // [Instance.ComposedRelations] and [Instance.Composed].
-func (r Snapshot) AllInstances() iter.Seq[Instance] {
+func (r Snapshot) Instances() iter.Seq[Instance] {
 	return func(yield func(Instance) bool) {
 		if r.IsZero() {
 			return
@@ -300,7 +300,7 @@ func newSnapshot(
 	attestation *Attestation,
 ) Snapshot {
 	// A repeated identity would make every instance of that type appear twice
-	// in AllInstances and twice in the persisted document.
+	// in Instances and twice in the persisted document.
 	slices.SortFunc(types, func(a, b schema.TypeID) int {
 		return cmp.Compare(a.String(), b.String())
 	})

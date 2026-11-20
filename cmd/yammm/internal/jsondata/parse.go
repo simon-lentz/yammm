@@ -33,20 +33,29 @@ type Element struct {
 	Refused bool
 }
 
+// Batch is the elements stated under one type name, and Source, the first
+// document that holds the name's array; a caller that merges documents' batches
+// keeps the first Source. A caller anchors a diagnostic about the type name,
+// which names no element, at Source.
+type Batch struct {
+	Source   location.SourceID
+	Elements []Element
+}
+
 // Parse reads data as one top-level key per type name, each holding an array
-// of instances, and returns the elements by type name. Every valid type name
+// of instances, and returns the batches by type name. Every valid type name
 // whose value is an array has an entry, an empty array included, unless a fault
 // or a cancellation stops the parse first. The package doc states the
 // diagnostics, the positions they carry, and what a cancellation returns.
-func Parse(ctx context.Context, source location.SourceID, data []byte) (map[string][]Element, diag.Result) {
+func Parse(ctx context.Context, source location.SourceID, data []byte) (map[string]Batch, diag.Result) {
 	return parse(ctx, source, data, newPositionTable(data))
 }
 
 // parse is [Parse] locating every diagnostic through positions, a table over
 // data, so a test reads what the positions cost from the table afterwards.
-func parse(ctx context.Context, source location.SourceID, data []byte, positions *positionTable) (map[string][]Element, diag.Result) {
-	collector := diag.NewCollectorUnlimited()
-	result := make(map[string][]Element)
+func parse(ctx context.Context, source location.SourceID, data []byte, positions *positionTable) (map[string]Batch, diag.Result) {
+	collector := diag.NewCollector(diag.NoLimit)
+	result := make(map[string]Batch)
 
 	// jsonc tolerates comments and trailing commas, writing one byte per
 	// comment byte, so an offset into the rewritten buffer is an offset into
@@ -141,9 +150,9 @@ func parse(ctx context.Context, source location.SourceID, data []byte, positions
 		instances, readable := parseArray(dec, pc, typeName, collector)
 		if instances != nil {
 			if earlier, ok := result[typeName]; ok {
-				instances = append(earlier, instances...)
+				instances = append(earlier.Elements, instances...)
 			}
-			result[typeName] = instances
+			result[typeName] = Batch{Source: source, Elements: instances}
 		}
 		if !readable {
 			return result, collector.Result()
@@ -354,7 +363,7 @@ func parseArray(dec *json.Decoder, pc *parseContext, typeName string, collector 
 				if inName {
 					delete(obj, name)
 				} else {
-					obj[name] = instance.Refused{Value: obj[name]}
+					obj[name] = nil
 				}
 			}
 		}

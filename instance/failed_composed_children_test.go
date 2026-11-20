@@ -22,7 +22,7 @@ func TestValidate_TwoFailedComposedChildrenAreNoDuplicateKey(t *testing.T) {
 	if res.OK() {
 		t.Fatal("two children that fail must fail the root")
 	}
-	if res.HasCode(instance.ErrDuplicateComposedPK) {
+	if res.HasCode(diag.E_DUPLICATE_COMPOSED_PK) {
 		t.Errorf("two failed children read as a duplicate key: %s", res)
 	}
 }

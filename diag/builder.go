@@ -38,8 +38,8 @@ type IssueBuilder struct {
 // deferring failure to [Collector.Collect]. This fulfills the builder's
 // guarantee that issues constructed via IssueBuilder are always valid.
 func NewIssue(severity Severity, code Code, message string) *IssueBuilder {
-	if severity > Hint {
-		panic(fmt.Sprintf("diag.NewIssue: invalid severity %d (must be 0-%d)", severity, Hint))
+	if severity < Fatal || severity > Hint {
+		panic(fmt.Sprintf("diag.NewIssue: invalid severity %d (must be %d-%d)", severity, Fatal, Hint))
 	}
 	if code.IsZero() {
 		panic("diag.NewIssue: zero code (use package-defined codes like E_SYNTAX)")
@@ -192,9 +192,9 @@ func detailText(value string) string {
 
 // WithExpectedGot is a convenience for type mismatch issues.
 //
-// This is equivalent to calling WithDetails(ExpectedGot(expected, got)...).
+// It adds the [DetailKeyExpected] and [DetailKeyGot] details.
 func (b *IssueBuilder) WithExpectedGot(expected, got string) *IssueBuilder {
-	return b.WithDetails(ExpectedGot(expected, got)...)
+	return b.WithDetails(expectedGot(expected, got)...)
 }
 
 // Build returns the constructed issue.

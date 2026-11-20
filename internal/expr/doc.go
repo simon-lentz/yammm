@@ -48,8 +48,8 @@
 // # Thread Safety
 //
 // An expression tree is safe for concurrent reads while no caller writes to it.
-// A [Literal]'s Val and an [SExpr]'s elements are writable, and [Literal.Literal]
-// returns Val uncopied, so a holder must not write through them.
+// A [Literal]'s Val and an [SExpr]'s elements are writable fields, so a holder
+// must not write through them.
 //
 // # Dependencies
 //

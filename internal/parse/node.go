@@ -154,6 +154,9 @@ type Invariant struct {
 	MessageSpan location.Span
 
 	Expr expr.Expression // never nil: no Invariant is built without one
+	// Text is the expression as written, with comments removed. A gap between
+	// two tokens is one line break when it holds one, else one space.
+	Text string
 	// NoValue holds each literal in Expr that has no value. Each is a nil
 	// literal the source did not write, and its own diagnostic is reported
 	// where it stands.

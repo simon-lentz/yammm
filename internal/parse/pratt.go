@@ -78,6 +78,10 @@ type exprParser struct {
 	diags   *[]exprDiag
 	tok     tokenTypes
 	lastEnd int
+	// text is the expression's tokens as written. A gap of white space and
+	// comments between two of them is one line break when it holds one, else
+	// one space: REGEXP cannot cross a line, so a joined line can lex otherwise.
+	text strings.Builder
 	// depth is the number of parse calls in progress. Each one's result sits a
 	// level below its caller's, so depth never exceeds the tree's height.
 	depth int
@@ -91,11 +95,31 @@ func newExprParser(lx *lexer.PeekingLexer, diags *[]exprDiag, tok tokenTypes) *e
 	return &exprParser{lx: lx, diags: diags, tok: tok}
 }
 
-// next consumes one token and records its end offset, so the caller can
-// recover the expression's exact byte extent after parsing.
+// next consumes one token and records its text and end offset, so the caller
+// can recover the expression's text and exact byte extent after parsing.
 func (p *exprParser) next() {
+	gap := byte(' ')
+	if p.text.Len() > 0 && p.gapHoldsLineBreak() {
+		gap = '\n'
+	}
 	t := p.lx.Next()
+	if p.text.Len() > 0 && t.Pos.Offset > p.lastEnd {
+		p.text.WriteByte(gap)
+	}
+	p.text.WriteString(t.Value)
 	p.lastEnd = t.Pos.Offset + len(t.Value)
+}
+
+// gapHoldsLineBreak reports whether the elided tokens before the next token
+// hold a line break. The lexer counts lines on "\n" alone, so it reads bytes.
+func (p *exprParser) gapHoldsLineBreak() bool {
+	_, at := p.lx.PeekAny(func(lexer.Token) bool { return false })
+	for _, t := range p.lx.Range(p.lx.RawCursor(), at) {
+		if strings.ContainsAny(t.Value, "\r\n") {
+			return true
+		}
+	}
+	return false
 }
 
 func (p *exprParser) errf(t *lexer.Token, format string, args ...any) error {

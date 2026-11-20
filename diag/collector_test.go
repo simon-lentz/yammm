@@ -157,7 +157,7 @@ func TestCollector_MergeTruncatedResult_PreservesCountsAndTruncation(t *testing.
 			srcRes.LimitReached(), srcRes.Len(), srcRes.DroppedCount(), srcRes.OK())
 	}
 
-	dst := NewCollectorUnlimited()
+	dst := NewCollector(NoLimit)
 	dst.Merge(srcRes)
 	res := dst.Result()
 
@@ -190,7 +190,7 @@ func TestCollector_Merge_AddsEachTruncatedResultsDrops(t *testing.T) {
 		t.Fatalf("source setup: Dropped=%d; want 1", srcRes.DroppedCount())
 	}
 
-	dst := NewCollectorUnlimited()
+	dst := NewCollector(NoLimit)
 	dst.Merge(srcRes)
 	dst.Merge(srcRes)
 	res := dst.Result()

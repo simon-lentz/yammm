@@ -31,7 +31,7 @@ func hasCode(res diag.Result, code diag.Code) bool {
 // singleIssueResult wraps one issue as a diag.Result, the shape the workspace
 // hands SnapshotForResult when discovery fails before any load.
 func singleIssueResult(issue diag.Issue) diag.Result {
-	c := diag.NewCollectorUnlimited()
+	c := diag.NewCollector(diag.NoLimit)
 	c.Collect(issue)
 	return c.Result()
 }

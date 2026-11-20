@@ -34,9 +34,8 @@ var ErrEmptySourceID = errors.New("location: synthetic source ID cannot be empty
 // as "<stdin>" keeps a synthetic source ID clear of them; a source key under a
 // synthetic root is a relative path.
 //
-// Returned by: NewSourceID. schema.SyntheticImportKey returns it wrapped, for
-// an importer key or an import that looks absolute as given or once cleaned and
-// in NFC, and schema/gogen.Marshal does for a source whose embedded key does. A load under schema.WithSyntheticRoot reports such
+// Returned by: NewSourceID. schema/gogen.Marshal returns it wrapped for a
+// source whose embedded key looks absolute as given or once cleaned and in NFC. A load under schema.WithSyntheticRoot reports such
 // a source key as a Fatal E_LOAD_IO_FAILURE carrying the error's text, so
 // errors.Is cannot match it there.
 var ErrAbsolutePathSourceID = errors.New("location: synthetic source ID looks like absolute file path")
@@ -46,8 +45,7 @@ var ErrAbsolutePathSourceID = errors.New("location: synthetic source ID looks li
 // character, a bidi or other format character, a space past ASCII, a line or
 // paragraph separator, a private-use or unassigned code point. Such a character would let two identities read alike.
 //
-// Returned by: NewSourceID. schema.SyntheticImportKey and schema/gogen.Marshal
-// return it wrapped.
+// Returned by: NewSourceID. schema/gogen.Marshal returns it wrapped.
 var ErrUnprintableSourceID = errors.New("location: synthetic source ID holds a character that does not print")
 
 // ErrEmptyPath is returned when a file-backed path is empty.
@@ -70,7 +68,7 @@ var ErrEmptyPath = hostpath.ErrEmptyPath
 // an invalid byte as U+FFFD, which merges two names into one.
 //
 // Returned by: SourceIDFromPath, ResolveSourcePath and NewSourceID. A caller
-// that returns it wraps it, as schema.SyntheticImportKey, schema.FindModuleRoot
+// that returns it wraps it, as schema.FindModuleRoot
 // and the language server's configuration check do, and the CLI's source
 // operand check wraps it in its own refusal. A schema load reports it as a Fatal
 // E_LOAD_IO_FAILURE for the entry path, an explicit module root, a LoadString

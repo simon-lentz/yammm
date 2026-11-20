@@ -7,12 +7,13 @@ import (
 	"github.com/simon-lentz/yammm/location"
 )
 
-// DeclaringScopeKind identifies where a property was declared.
+// DeclaringScopeKind identifies where a property was declared. The zero
+// DeclaringScopeKind names no scope.
 type DeclaringScopeKind uint8
 
 const (
 	// ScopeType indicates the property was declared in a type body.
-	ScopeType DeclaringScopeKind = iota
+	ScopeType DeclaringScopeKind = iota + 1
 	// ScopeRelation indicates the property was declared on a relation edge.
 	ScopeRelation
 )
@@ -37,29 +38,19 @@ type DeclaringScope struct {
 	relName string  // for ScopeRelation: relation name
 }
 
-// TypeScope creates a DeclaringScope for a property declared in a type body.
-func TypeScope(typeRef TypeRef) DeclaringScope {
+// typeScope creates a DeclaringScope for a property declared in a type body.
+func typeScope(typeRef TypeRef) DeclaringScope {
 	return DeclaringScope{kind: ScopeType, typeRef: typeRef}
 }
 
-// RelationScope creates a DeclaringScope for an edge property on a relation.
-func RelationScope(relationName string) DeclaringScope {
+// relationScope creates a DeclaringScope for an edge property on a relation.
+func relationScope(relationName string) DeclaringScope {
 	return DeclaringScope{kind: ScopeRelation, relName: relationName}
 }
 
 // Kind returns the scope kind.
 func (s DeclaringScope) Kind() DeclaringScopeKind {
 	return s.kind
-}
-
-// IsType reports whether this is a type-declared property.
-func (s DeclaringScope) IsType() bool {
-	return s.kind == ScopeType
-}
-
-// IsRelation reports whether this is a relation edge property.
-func (s DeclaringScope) IsRelation() bool {
-	return s.kind == ScopeRelation
 }
 
 // TypeRef returns the type reference for ScopeType declarations.
@@ -72,15 +63,6 @@ func (s DeclaringScope) TypeRef() TypeRef {
 // Returns empty string for ScopeType.
 func (s DeclaringScope) RelationName() string {
 	return s.relName
-}
-
-// TypeName returns the type name for ScopeType declarations.
-// Panics if Kind() != ScopeType.
-func (s DeclaringScope) TypeName() string {
-	if s.kind != ScopeType {
-		panic("DeclaringScope.TypeName called on non-type scope")
-	}
-	return s.typeRef.Name()
 }
 
 // String returns a human-readable representation.
@@ -261,15 +243,15 @@ func (p Property) cloneWithAnnotations(anns []Annotation) Property {
 	return Property{&clone}
 }
 
-// CanNarrowFrom reports whether this (child) property is a valid narrowing of
+// canNarrowFrom reports whether this (child) property is a valid narrowing of
 // the parent property. A child narrows its parent when:
 //   - Names match (case-sensitive)
 //   - PK status is identical (structural, cannot change)
 //   - Optionality narrows: optional->required is allowed, required->optional is NOT
-//   - Constraint narrows: child's valid set is a subset of parent's (via NarrowsTo)
+//   - Constraint narrows: child's valid set is a subset of parent's (via narrowsTo)
 //
 // Both zero returns true. One zero returns false.
-func (p Property) CanNarrowFrom(parent Property) bool {
+func (p Property) canNarrowFrom(parent Property) bool {
 	if p.IsZero() || parent.IsZero() {
 		return p == parent
 	}
@@ -291,10 +273,10 @@ func (p Property) CanNarrowFrom(parent Property) bool {
 	if p.constraint == nil || parent.constraint == nil {
 		return false
 	}
-	return parent.constraint.NarrowsTo(p.constraint)
+	return parent.constraint.narrowsTo(p.constraint)
 }
 
-// Equal reports whether two properties are structurally equal.
+// equal reports whether two properties are structurally equal.
 // Compares: name (case-sensitive), optionality, PK status, constraint.
 // It does not compare span, docs, scope, annotations, the data type reference or
 // the origin. Scope is excluded because
@@ -302,11 +284,11 @@ func (p Property) CanNarrowFrom(parent Property) bool {
 // deduplication purposes during type completion—two ancestors may define
 // identical properties, and we want to merge them rather than flag a conflict.
 // Annotations are excluded so a child re-declaration that drops an inherited
-// annotation is still Equal rather than a structural conflict. The drop is
+// annotation is still equal rather than a structural conflict. The drop is
 // surfaced separately, by W_ANNOTATION_SHADOWED — queued during linearization
 // and emitted after annotation validation, and suppressed when the annotation or
 // the re-declaration was itself rejected.
-func (p Property) Equal(other Property) bool {
+func (p Property) equal(other Property) bool {
 	if p.IsZero() || other.IsZero() {
 		return p == other
 	}
@@ -322,5 +304,5 @@ func (p Property) Equal(other Property) bool {
 	if p.constraint == nil {
 		return other.constraint == nil
 	}
-	return p.constraint.Equal(other.constraint)
+	return p.constraint.equal(other.constraint)
 }

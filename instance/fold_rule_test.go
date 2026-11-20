@@ -3,6 +3,7 @@ package instance_test
 import (
 	"testing"
 
+	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/instance"
 	"github.com/simon-lentz/yammm/internal/yammmtest"
 )
@@ -33,7 +34,7 @@ func TestCaseFoldCollision_IsOneDiagnostic(t *testing.T) {
 	if res.Len() != 1 {
 		t.Errorf("want one diagnostic, got %s", res)
 	}
-	if got := mustIssue(t, res, instance.ErrCaseFoldCollision).Path(); got != "$" {
+	if got := mustIssue(t, res, diag.E_CASE_FOLD_COLLISION).Path(); got != "$" {
 		t.Errorf("path = %q, want $", got)
 	}
 }
@@ -46,10 +47,10 @@ func TestEdgeProperty_ExactMatchIsNeverACollision(t *testing.T) {
 	_, res := v.ValidateOne(t.Context(), "Person", instance.RawInstance{Properties: map[string]any{
 		"id": "p", "works_at": map[string]any{"_target_id": "c1", "note": "n", "title": "eng", "TITLE": "eng2"},
 	}})
-	if res.HasCode(instance.ErrCaseFoldCollision) {
+	if res.HasCode(diag.E_CASE_FOLD_COLLISION) {
 		t.Errorf("an exact match collided: %s", res)
 	}
-	is := mustIssue(t, res, instance.ErrUnknownEdgeField)
+	is := mustIssue(t, res, diag.E_UNKNOWN_EDGE_FIELD)
 	yammmtest.Diff(t, []string{"case_fold_shadowed"}, detailValues(is, "reason"))
 	if is.Path() != "$.works_at.TITLE" {
 		t.Errorf("path = %q", is.Path())
@@ -63,7 +64,7 @@ func TestEdgeProperty_PresentButInvalidIsNotMissing(t *testing.T) {
 	_, res := v.ValidateOne(t.Context(), "Person", instance.RawInstance{Properties: map[string]any{
 		"id": "p", "works_at": map[string]any{"_target_id": "c1", "note": 42},
 	}})
-	if !res.HasCode(instance.ErrTypeMismatch) || res.HasCode(instance.ErrMissingRequired) {
+	if !res.HasCode(diag.E_TYPE_MISMATCH) || res.HasCode(diag.E_MISSING_REQUIRED) {
 		t.Errorf("want E_TYPE_MISMATCH alone, got %s", res)
 	}
 }
@@ -75,7 +76,7 @@ func TestEdgeTarget_TypoedFKFieldIsUnknown(t *testing.T) {
 	_, res := v.ValidateOne(t.Context(), "Person", instance.RawInstance{Properties: map[string]any{
 		"id": "p", "works_at": map[string]any{"_target_id": "c1", "_target_bogus": "z", "note": "n"},
 	}})
-	if got := mustIssue(t, res, instance.ErrUnknownEdgeField).Path(); got != "$.works_at._target_bogus" {
+	if got := mustIssue(t, res, diag.E_UNKNOWN_EDGE_FIELD).Path(); got != "$.works_at._target_bogus" {
 		t.Errorf("path = %q", got)
 	}
 	// A typo'd key with no correct key beside it is still unknown, reported
@@ -83,7 +84,7 @@ func TestEdgeTarget_TypoedFKFieldIsUnknown(t *testing.T) {
 	_, res = v.ValidateOne(t.Context(), "Person", instance.RawInstance{Properties: map[string]any{
 		"id": "p", "works_at": map[string]any{"_target_di": "c1", "note": "n"},
 	}})
-	if !res.HasCode(instance.ErrMissingFKTarget) || !res.HasCode(instance.ErrUnknownEdgeField) {
+	if !res.HasCode(diag.E_MISSING_FK_TARGET) || !res.HasCode(diag.E_UNKNOWN_EDGE_FIELD) {
 		t.Errorf("want E_MISSING_FK_TARGET beside E_UNKNOWN_EDGE_FIELD, got %s", res)
 	}
 }
@@ -100,7 +101,7 @@ func TestEdgeTarget_FKFieldFoldsUnderNonStrict(t *testing.T) {
 	if _, res := instance.NewValidator(s).ValidateOne(t.Context(), "Person", raw()); !res.OK() {
 		t.Errorf("non-strict: %s", res)
 	}
-	if _, res := instance.NewValidator(s, instance.WithStrictPropertyNames(true)).ValidateOne(t.Context(), "Person", raw()); !res.HasCode(instance.ErrMissingFKTarget) {
+	if _, res := instance.NewValidator(s, instance.WithStrictPropertyNames(true)).ValidateOne(t.Context(), "Person", raw()); !res.HasCode(diag.E_MISSING_FK_TARGET) {
 		t.Errorf("strict: want E_MISSING_FK_TARGET, got %s", res)
 	}
 }
@@ -112,7 +113,7 @@ func TestCompositionCollision_IsOneDiagnostic(t *testing.T) {
 	_, res := v.ValidateOne(t.Context(), "Doc", instance.RawInstance{Properties: map[string]any{
 		"id": "d", "Lines": []any{map[string]any{"n": "a"}}, "LINES": []any{map[string]any{"n": "b"}},
 	}})
-	if !res.HasCode(instance.ErrCaseFoldCollision) || res.HasCode(instance.ErrUnresolvedRequiredComposition) {
+	if !res.HasCode(diag.E_CASE_FOLD_COLLISION) || res.HasCode(diag.E_UNRESOLVED_REQUIRED_COMPOSITION) {
 		t.Errorf("want the collision alone, got %s", res)
 	}
 }
@@ -130,7 +131,7 @@ type T {
 	_, res := v.ValidateOne(t.Context(), "T", instance.RawInstance{Properties: map[string]any{
 		"id": "t", "\u212Aey": "v", // KELVIN SIGN + "ey"; strings.ToLower gives "key"
 	}})
-	if !res.HasCode(instance.ErrUnknownField) {
+	if !res.HasCode(diag.E_UNKNOWN_FIELD) {
 		t.Errorf("want E_UNKNOWN_FIELD, got %s", res)
 	}
 }
@@ -165,7 +166,7 @@ func TestEdgePropertyCollision_PathIsTheTargetObject(t *testing.T) {
 		_, res := v.ValidateOne(t.Context(), "Person", instance.RawInstance{Properties: map[string]any{
 			"id": "p", "works_at": map[string]any{"_target_id": "c1", "note": "n", "Title": "a", "TITLE": "b"},
 		}})
-		if got := mustIssue(t, res, instance.ErrCaseFoldCollision).Path(); got != "$.works_at" {
+		if got := mustIssue(t, res, diag.E_CASE_FOLD_COLLISION).Path(); got != "$.works_at" {
 			t.Fatalf("path = %q, want $.works_at", got)
 		}
 	}
@@ -190,7 +191,7 @@ type Person {
 	_, res := v.ValidateOne(t.Context(), "Person", instance.RawInstance{Properties: map[string]any{
 		"id": "p", "works_at": map[string]any{"_target_id": nil},
 	}})
-	is := mustIssue(t, res, instance.ErrTypeMismatch)
+	is := mustIssue(t, res, diag.E_TYPE_MISMATCH)
 	yammmtest.Diff(t, []string{"string"}, detailValues(is, "expected"))
 }
 
@@ -223,7 +224,7 @@ func TestCaseFoldCollision_ListsItsFirstKeysAndCountsTheRest(t *testing.T) {
 	_, res := v.ValidateOne(t.Context(), "Person", instance.RawInstance{Properties: props})
 	var got []string
 	for issue := range res.Issues() {
-		if issue.Code() == instance.ErrCaseFoldCollision {
+		if issue.Code() == diag.E_CASE_FOLD_COLLISION {
 			got = append(got, issue.Message())
 		}
 	}

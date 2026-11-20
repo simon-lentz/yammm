@@ -6,8 +6,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/simon-lentz/yammm/internal/schematest"
+
 	"github.com/simon-lentz/yammm/internal/value"
-	"github.com/simon-lentz/yammm/schema"
 )
 
 // A literal no finite float64 holds is no number of either numeric kind, and
@@ -20,13 +21,13 @@ func TestCheck_ALiteralNoFloat64HoldsReadsAlikeAtAnIntegerAndAFloat(t *testing.T
 		strings.Repeat("9", 40) + ".5e400",
 	} {
 		val := json.Number(lit)
-		atFloat := value.Check(val, schema.NewFloatConstraint())
+		atFloat := value.Check(val, schematest.Constraint(t, "Float"))
 		if atFloat == nil || !strings.Contains(atFloat.Error(), "a number no float64 holds") {
 			t.Fatalf("%s at a Float: %v, want a refusal naming a number no float64 holds", lit, atFloat)
 		}
 		want := strings.Replace(atFloat.Error(), "expected float", "expected integer", 1)
 
-		atInteger := value.Check(val, schema.NewIntegerConstraint())
+		atInteger := value.Check(val, schematest.Constraint(t, "Integer"))
 		if atInteger == nil || atInteger.Error() != want {
 			t.Errorf("%s at an Integer: %v, want %q", lit, atInteger, want)
 		}
@@ -41,12 +42,12 @@ func TestCheck_ALiteralNoFloat64HoldsReadsAlikeAtAnIntegerAndAFloat(t *testing.T
 func TestCoerce_ALiteralNoFloat64HoldsReadsAlikeAtAnIntegerAndAFloat(t *testing.T) {
 	t.Parallel()
 	for _, lit := range []string{"1e400", "-1.5e999", strings.Repeat("9", 40) + ".5e400"} {
-		_, atFloat := value.Coerce(json.Number(lit), schema.NewFloatConstraint())
+		_, atFloat := value.Coerce(json.Number(lit), schematest.Constraint(t, "Float"))
 		if atFloat == nil || !strings.Contains(atFloat.Error(), "no finite float64 holds it") {
 			t.Fatalf("%s at a Float: %v, want a refusal naming that no finite float64 holds it", lit, atFloat)
 		}
 		want := strings.Replace(atFloat.Error(), "to float64", "to int64", 1)
-		if _, atInteger := value.Coerce(json.Number(lit), schema.NewIntegerConstraint()); atInteger == nil || atInteger.Error() != want {
+		if _, atInteger := value.Coerce(json.Number(lit), schematest.Constraint(t, "Integer")); atInteger == nil || atInteger.Error() != want {
 			t.Errorf("%s at an Integer: %v, want %q", lit, atInteger, want)
 		}
 	}
@@ -67,7 +68,7 @@ func TestCheck_AnIntegerRefusalNamesWhatTheLiteralIs(t *testing.T) {
 		{"99999999999999999999\x1b[2J", `expected integer, got a json.Number that is no JSON number literal: "99999999999999999999\x1b[2J"`},
 		{"", `expected integer, got a json.Number that is no JSON number literal: ""`},
 	} {
-		if err := value.Check(json.Number(c.lit), schema.NewIntegerConstraint()); err == nil || err.Error() != c.want {
+		if err := value.Check(json.Number(c.lit), schematest.Constraint(t, "Integer")); err == nil || err.Error() != c.want {
 			t.Errorf("%q at an Integer: %v, want %q", c.lit, err, c.want)
 		}
 	}

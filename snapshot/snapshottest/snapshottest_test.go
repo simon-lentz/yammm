@@ -110,7 +110,7 @@ func TestRoundTripHelpers(t *testing.T) {
 		person(t, s, "p2", "Bob", "c-missing"),
 	)
 
-	snapshottest.AssertRoundTrip(t, snap, s)
+	snapshottest.AssertRoundTrip(t, snap)
 	snapshottest.AssertDeterministic(t, snap)
 	snapshottest.DiffSnapshots(t, snap, snap)
 }
@@ -249,6 +249,41 @@ func TestDiffSnapshots_SeparatesUnresolvedBySource(t *testing.T) {
 	snapshottest.DiffSnapshots(probe, withSource("p1", "p2"), withSource("p2", "p1"))
 	if !probe.Failed() {
 		t.Error("DiffSnapshots must detect an unresolved edge that moved to a different source instance")
+	}
+}
+
+// An unresolved record's reason is part of what DiffSnapshots compares.
+func TestDiffSnapshots_SeesAReasonDifference(t *testing.T) {
+	s, res := schema.LoadString(t.Context(), "schema \"reasons\"\ntype Person {\n\tid String primary\n\t--> CLIENTS (one:many) Company\n}\ntype Company {\n\tid String primary\n}\n", "reasons.yammm")
+	if res.HasErrors() {
+		t.Fatalf("schema: %s", res)
+	}
+	withReason := func(reason string) graph.Snapshot {
+		return snappartstest.Loaded(t, s, snapparts.Parts{
+			Types: []schema.TypeID{typeID(t, s, "Person")},
+			Instances: []snapparts.Instance{{
+				TypeID:     typeID(t, s, "Person"),
+				PrimaryKey: immutable.WrapKey([]any{"p1"}),
+				Properties: immutable.WrapProperties(map[string]any{"id": "p1"}),
+			}},
+			Unresolved: []snapparts.Unresolved{{
+				SourceType: typeID(t, s, "Person"),
+				SourceKey:  immutable.WrapKey([]any{"p1"}),
+				Relation:   "CLIENTS",
+				Reason:     reason,
+			}},
+		})
+	}
+
+	probe := &testing.T{}
+	snapshottest.DiffSnapshots(probe, withReason("absent"), withReason("empty"))
+	if !probe.Failed() {
+		t.Error("DiffSnapshots passed two snapshots whose one record differs in its reason")
+	}
+	probe = &testing.T{}
+	snapshottest.DiffSnapshots(probe, withReason("absent"), withReason("absent"))
+	if probe.Failed() {
+		t.Error("DiffSnapshots reported a difference between identical snapshots")
 	}
 }
 

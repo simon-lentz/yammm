@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/simon-lentz/yammm/internal/schematest"
+
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/instance"
 	"github.com/simon-lentz/yammm/internal/instancetest"
@@ -80,7 +82,7 @@ func TestMessages_RepeatANameCutToItsHead(t *testing.T) {
 		bytes.Replace(data, []byte(`"types"`), long, 1),
 		append(bytes.TrimSuffix(bytes.TrimSpace(data), []byte("}")), []byte(`, `+string(long)+`: 1}`)...),
 	} {
-		_, r := snapshot.Load(ctx, doc, s)
+		_, r := snapshot.Unmarshal(ctx, doc, s)
 		if r.OK() {
 			t.Errorf("snapshot.Load accepted %.200s", doc)
 		}
@@ -119,9 +121,9 @@ func TestMessages_RepeatANameCutToItsHead(t *testing.T) {
 	_, err = b.Property("id", "a").EdgeTo(longText, "u").Build()
 	c.err("instance.SchemaBuilder", err)
 
-	_, err = neo4j.CoerceParams(map[string]any{longText: "x"}, neo4j.ParamTypes{longText: schema.NewFloatConstraint()})
+	_, err = neo4j.CoerceParams(map[string]any{longText: "x"}, neo4j.ParamTypes{longText: schematest.Constraint(t, "Float")})
 	c.err("neo4j.CoerceParams", err)
-	_, err = neo4j.CoerceParams(nil, neo4j.ParamTypes{longText: schema.NewListConstraint(nil)})
+	_, err = neo4j.CoerceParams(nil, neo4j.ParamTypes{longText: schema.ListConstraint{}})
 	c.err("neo4j.CoerceParams", err)
 
 	_, mr = snapshot.Marshal(ctx, held.Snapshot(), snapshot.WithMetadata(map[string]string{longText + "\xff": "v"}))
@@ -129,9 +131,9 @@ func TestMessages_RepeatANameCutToItsHead(t *testing.T) {
 	_, mr = snapshot.Marshal(ctx, held.Snapshot(), snapshot.WithMetadata(map[string]string{longText: "\xff"}))
 	c.result("snapshot.Marshal", mr)
 	unknown := bytes.Replace(data, []byte(`"U"`), long, 1)
-	_, r = snapshot.Load(ctx, unknown, s)
+	_, r = snapshot.Unmarshal(ctx, unknown, s)
 	c.result("snapshot.Load", r)
-	_, r = snapshot.Info(ctx, bytes.Replace(unknown, []byte(`"T"`), long, 1))
+	_, r = snapshot.Stat(ctx, bytes.Replace(unknown, []byte(`"T"`), long, 1))
 	c.result("snapshot.Info", r)
 
 	for _, where := range []string{

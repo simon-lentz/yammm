@@ -73,7 +73,7 @@ func projectSchema(s schema.Schema) map[string]any {
 	for typ := range s.Types() {
 		var supers []string
 		for ref := range typ.SuperTypes() {
-			supers = append(supers, ref.Ref().Name())
+			supers = append(supers, ref.Name())
 		}
 		// AllInvariants, not Invariants: every sibling field here
 		// projects the MERGED view, and projecting own-only invariants beside
@@ -145,7 +145,7 @@ func TestComplete_SingleType(t *testing.T) {
 				Properties: []*schema.TestPropertyDecl{
 					{
 						Name:         "name",
-						Constraint:   schema.NewStringConstraint(),
+						Constraint:   schema.TestNewStringConstraint(),
 						IsPrimaryKey: true,
 					},
 				},
@@ -165,7 +165,7 @@ func TestComplete_SimpleInheritance(t *testing.T) {
 				Properties: []*schema.TestPropertyDecl{
 					{
 						Name:         "id",
-						Constraint:   schema.NewStringConstraint(),
+						Constraint:   schema.TestNewStringConstraint(),
 						IsPrimaryKey: true,
 					},
 				},
@@ -178,7 +178,7 @@ func TestComplete_SimpleInheritance(t *testing.T) {
 				Properties: []*schema.TestPropertyDecl{
 					{
 						Name:       "name",
-						Constraint: schema.NewStringConstraint(),
+						Constraint: schema.TestNewStringConstraint(),
 					},
 				},
 			},
@@ -239,7 +239,7 @@ func TestComplete_Errors(t *testing.T) {
 						Properties: []*schema.TestPropertyDecl{
 							{
 								Name:       "name",
-								Constraint: schema.NewStringConstraint(),
+								Constraint: schema.TestNewStringConstraint(),
 							},
 						},
 					},
@@ -251,7 +251,7 @@ func TestComplete_Errors(t *testing.T) {
 						Properties: []*schema.TestPropertyDecl{
 							{
 								Name:       "Name", // Case collision with inherited "name"
-								Constraint: schema.NewStringConstraint(),
+								Constraint: schema.TestNewStringConstraint(),
 							},
 						},
 					},
@@ -308,8 +308,8 @@ func TestComplete_Errors(t *testing.T) {
 			model: &schema.TestModel{
 				Name: "test",
 				DataTypes: []*schema.TestDataTypeDecl{
-					{Name: "Email", Constraint: schema.NewStringConstraint()},
-					{Name: "Email", Constraint: schema.NewStringConstraint()},
+					{Name: "Email", Constraint: schema.TestNewStringConstraint()},
+					{Name: "Email", Constraint: schema.TestNewStringConstraint()},
 				},
 			},
 		},
@@ -359,7 +359,7 @@ func TestComplete_Errors(t *testing.T) {
 					{
 						Name: "Person",
 						Properties: []*schema.TestPropertyDecl{
-							{Name: "friend", Constraint: schema.NewStringConstraint()},
+							{Name: "friend", Constraint: schema.TestNewStringConstraint()},
 						},
 						Relations: []*schema.TestRelationDecl{
 							{
@@ -382,7 +382,7 @@ func TestComplete_Errors(t *testing.T) {
 					{
 						Name: "Container",
 						Properties: []*schema.TestPropertyDecl{
-							{Name: "items", Constraint: schema.NewStringConstraint()},
+							{Name: "items", Constraint: schema.TestNewStringConstraint()},
 						},
 						Relations: []*schema.TestRelationDecl{
 							{
@@ -545,13 +545,13 @@ func TestComplete_Errors(t *testing.T) {
 						Name:       "Base",
 						IsAbstract: true,
 						Properties: []*schema.TestPropertyDecl{
-							{Name: "id", Constraint: schema.NewStringConstraint(), IsPrimaryKey: true},
+							{Name: "id", Constraint: schema.TestNewStringConstraint(), IsPrimaryKey: true},
 						},
 					},
 					{
 						Name: "Container",
 						Properties: []*schema.TestPropertyDecl{
-							{Name: "id", Constraint: schema.NewStringConstraint(), IsPrimaryKey: true},
+							{Name: "id", Constraint: schema.TestNewStringConstraint(), IsPrimaryKey: true},
 						},
 						Relations: []*schema.TestRelationDecl{
 							{
@@ -577,12 +577,12 @@ func TestComplete_Errors(t *testing.T) {
 						Properties: []*schema.TestPropertyDecl{
 							{
 								Name:         "id",
-								Constraint:   schema.NewStringConstraint(),
+								Constraint:   schema.TestNewStringConstraint(),
 								IsPrimaryKey: true,
 							},
 							{
 								Name:       "age",
-								Constraint: schema.IntegerBetween(0, 150),
+								Constraint: schema.TestIntegerBetween(0, 150),
 								Optional:   true,
 							},
 						},
@@ -595,7 +595,7 @@ func TestComplete_Errors(t *testing.T) {
 						Properties: []*schema.TestPropertyDecl{
 							{
 								Name:       "age",
-								Constraint: schema.IntegerBetween(0, 200),
+								Constraint: schema.TestIntegerBetween(0, 200),
 								Optional:   true,
 							},
 						},
@@ -615,12 +615,12 @@ func TestComplete_Errors(t *testing.T) {
 						Properties: []*schema.TestPropertyDecl{
 							{
 								Name:         "id",
-								Constraint:   schema.NewStringConstraint(),
+								Constraint:   schema.TestNewStringConstraint(),
 								IsPrimaryKey: true,
 							},
 							{
 								Name:       "field",
-								Constraint: schema.NewStringConstraint(),
+								Constraint: schema.TestNewStringConstraint(),
 								Optional:   false, // required
 							},
 						},
@@ -633,7 +633,7 @@ func TestComplete_Errors(t *testing.T) {
 						Properties: []*schema.TestPropertyDecl{
 							{
 								Name:       "field",
-								Constraint: schema.NewStringConstraint(),
+								Constraint: schema.TestNewStringConstraint(),
 								Optional:   true, // optional (widens)
 							},
 						},
@@ -683,7 +683,7 @@ func TestComplete_DiamondInheritance(t *testing.T) {
 				Properties: []*schema.TestPropertyDecl{
 					{
 						Name:         "id",
-						Constraint:   schema.NewStringConstraint(),
+						Constraint:   schema.TestNewStringConstraint(),
 						IsPrimaryKey: true,
 					},
 				},
@@ -726,7 +726,7 @@ func TestComplete_ForwardReferenceInheritance(t *testing.T) {
 				Properties: []*schema.TestPropertyDecl{
 					{
 						Name:       "name",
-						Constraint: schema.NewStringConstraint(),
+						Constraint: schema.TestNewStringConstraint(),
 					},
 				},
 			},
@@ -735,7 +735,7 @@ func TestComplete_ForwardReferenceInheritance(t *testing.T) {
 				Properties: []*schema.TestPropertyDecl{
 					{
 						Name:         "id",
-						Constraint:   schema.NewStringConstraint(),
+						Constraint:   schema.TestNewStringConstraint(),
 						IsPrimaryKey: true,
 					},
 				},
@@ -760,7 +760,7 @@ func TestComplete_DeepChainForwardReference(t *testing.T) {
 				Properties: []*schema.TestPropertyDecl{
 					{
 						Name:       "d_prop",
-						Constraint: schema.NewStringConstraint(),
+						Constraint: schema.TestNewStringConstraint(),
 					},
 				},
 			},
@@ -772,7 +772,7 @@ func TestComplete_DeepChainForwardReference(t *testing.T) {
 				Properties: []*schema.TestPropertyDecl{
 					{
 						Name:       "c_prop",
-						Constraint: schema.NewStringConstraint(),
+						Constraint: schema.TestNewStringConstraint(),
 					},
 				},
 			},
@@ -784,7 +784,7 @@ func TestComplete_DeepChainForwardReference(t *testing.T) {
 				Properties: []*schema.TestPropertyDecl{
 					{
 						Name:       "b_prop",
-						Constraint: schema.NewStringConstraint(),
+						Constraint: schema.TestNewStringConstraint(),
 					},
 				},
 			},
@@ -793,7 +793,7 @@ func TestComplete_DeepChainForwardReference(t *testing.T) {
 				Properties: []*schema.TestPropertyDecl{
 					{
 						Name:         "a_prop",
-						Constraint:   schema.NewStringConstraint(),
+						Constraint:   schema.TestNewStringConstraint(),
 						IsPrimaryKey: true,
 					},
 				},
@@ -818,7 +818,7 @@ func TestComplete_CompositionTarget_Valid(t *testing.T) {
 				Properties: []*schema.TestPropertyDecl{
 					{
 						Name:         "id",
-						Constraint:   schema.NewStringConstraint(),
+						Constraint:   schema.TestNewStringConstraint(),
 						IsPrimaryKey: true,
 					},
 				},
@@ -847,7 +847,7 @@ func TestComplete_CrossSchemaInheritance_ThroughTheLoadedSchemas(t *testing.T) {
 				Properties: []*schema.TestPropertyDecl{
 					{
 						Name:         "id",
-						Constraint:   schema.NewStringConstraint(),
+						Constraint:   schema.TestNewStringConstraint(),
 						IsPrimaryKey: true,
 					},
 				},
@@ -880,7 +880,7 @@ func TestComplete_CrossSchemaInheritance_ThroughTheLoadedSchemas(t *testing.T) {
 				Properties: []*schema.TestPropertyDecl{
 					{
 						Name:       "name",
-						Constraint: schema.NewStringConstraint(),
+						Constraint: schema.TestNewStringConstraint(),
 					},
 				},
 			},
@@ -923,7 +923,7 @@ func TestComplete_DataType_Simple(t *testing.T) {
 		DataTypes: []*schema.TestDataTypeDecl{
 			{
 				Name:       "Email",
-				Constraint: schema.NewStringConstraint(),
+				Constraint: schema.TestNewStringConstraint(),
 			},
 		},
 	}
@@ -935,9 +935,9 @@ func TestComplete_DataType_Multiple(t *testing.T) {
 	model := &schema.TestModel{
 		Name: "test",
 		DataTypes: []*schema.TestDataTypeDecl{
-			{Name: "Email", Constraint: schema.NewStringConstraint()},
-			{Name: "Phone", Constraint: schema.NewStringConstraint()},
-			{Name: "Age", Constraint: schema.NewIntegerConstraint()},
+			{Name: "Email", Constraint: schema.TestNewStringConstraint()},
+			{Name: "Phone", Constraint: schema.TestNewStringConstraint()},
+			{Name: "Age", Constraint: schema.TestNewIntegerConstraint()},
 		},
 	}
 
@@ -949,7 +949,7 @@ func TestComplete_DataType_NilSkipped(t *testing.T) {
 		Name: "test",
 		DataTypes: []*schema.TestDataTypeDecl{
 			nil, // nil entry should be skipped
-			{Name: "Email", Constraint: schema.NewStringConstraint()},
+			{Name: "Email", Constraint: schema.TestNewStringConstraint()},
 		},
 	}
 
@@ -963,8 +963,8 @@ func TestComplete_Invariant_Single(t *testing.T) {
 			{
 				Name: "Person",
 				Properties: []*schema.TestPropertyDecl{
-					{Name: "id", Constraint: schema.NewStringConstraint(), IsPrimaryKey: true},
-					{Name: "age", Constraint: schema.NewIntegerConstraint()},
+					{Name: "id", Constraint: schema.TestNewStringConstraint(), IsPrimaryKey: true},
+					{Name: "age", Constraint: schema.TestNewIntegerConstraint()},
 				},
 				Invariants: []*schema.TestInvariantDecl{
 					{Name: "valid_age", Expr: expr.NewLiteral(true)},
@@ -990,8 +990,8 @@ func TestComplete_InvariantInheritanceChain(t *testing.T) {
 				Name:       "A",
 				IsAbstract: true,
 				Properties: []*schema.TestPropertyDecl{
-					{Name: "id", Constraint: schema.NewStringConstraint(), IsPrimaryKey: true},
-					{Name: "n", Constraint: schema.NewIntegerConstraint()},
+					{Name: "id", Constraint: schema.TestNewStringConstraint(), IsPrimaryKey: true},
+					{Name: "n", Constraint: schema.TestNewIntegerConstraint()},
 				},
 				Invariants: []*schema.TestInvariantDecl{{Name: "a_rule", Expr: expr.NewLiteral(true)}},
 			},
@@ -1018,9 +1018,9 @@ func TestComplete_Invariant_Multiple(t *testing.T) {
 			{
 				Name: "Person",
 				Properties: []*schema.TestPropertyDecl{
-					{Name: "id", Constraint: schema.NewStringConstraint(), IsPrimaryKey: true},
-					{Name: "min", Constraint: schema.NewIntegerConstraint()},
-					{Name: "max", Constraint: schema.NewIntegerConstraint()},
+					{Name: "id", Constraint: schema.TestNewStringConstraint(), IsPrimaryKey: true},
+					{Name: "min", Constraint: schema.TestNewIntegerConstraint()},
+					{Name: "max", Constraint: schema.TestNewIntegerConstraint()},
 				},
 				Invariants: []*schema.TestInvariantDecl{
 					{Name: "min_valid", Expr: expr.NewLiteral(true)},
@@ -1040,7 +1040,7 @@ func TestComplete_Invariant_NilSkipped(t *testing.T) {
 			{
 				Name: "Person",
 				Properties: []*schema.TestPropertyDecl{
-					{Name: "id", Constraint: schema.NewStringConstraint(), IsPrimaryKey: true},
+					{Name: "id", Constraint: schema.TestNewStringConstraint(), IsPrimaryKey: true},
 				},
 				Invariants: []*schema.TestInvariantDecl{
 					nil, // nil entry should be skipped
@@ -1062,7 +1062,7 @@ func TestComplete_Invariant_NilExpressionRefused(t *testing.T) {
 			{
 				Name: "Person",
 				Properties: []*schema.TestPropertyDecl{
-					{Name: "id", Constraint: schema.NewStringConstraint(), IsPrimaryKey: true},
+					{Name: "id", Constraint: schema.TestNewStringConstraint(), IsPrimaryKey: true},
 				},
 				Invariants: []*schema.TestInvariantDecl{{Name: "check", Expr: nil}},
 			},
@@ -1086,13 +1086,13 @@ func TestComplete_Association_ValidTarget(t *testing.T) {
 			{
 				Name: "Target",
 				Properties: []*schema.TestPropertyDecl{
-					{Name: "id", Constraint: schema.NewStringConstraint(), IsPrimaryKey: true},
+					{Name: "id", Constraint: schema.TestNewStringConstraint(), IsPrimaryKey: true},
 				},
 			},
 			{
 				Name: "Person",
 				Properties: []*schema.TestPropertyDecl{
-					{Name: "id", Constraint: schema.NewStringConstraint(), IsPrimaryKey: true},
+					{Name: "id", Constraint: schema.TestNewStringConstraint(), IsPrimaryKey: true},
 				},
 				Relations: []*schema.TestRelationDecl{
 					{
@@ -1117,7 +1117,7 @@ func TestComplete_Composition_ValidTarget(t *testing.T) {
 			{
 				Name: "Container",
 				Properties: []*schema.TestPropertyDecl{
-					{Name: "id", Constraint: schema.NewStringConstraint(), IsPrimaryKey: true},
+					{Name: "id", Constraint: schema.TestNewStringConstraint(), IsPrimaryKey: true},
 				},
 				Relations: []*schema.TestRelationDecl{
 					{
@@ -1140,19 +1140,19 @@ func TestComplete_AssociationTarget_Valid(t *testing.T) {
 			{
 				Name: "Person",
 				Properties: []*schema.TestPropertyDecl{
-					{Name: "id", Constraint: schema.NewStringConstraint(), IsPrimaryKey: true},
+					{Name: "id", Constraint: schema.TestNewStringConstraint(), IsPrimaryKey: true},
 				},
 			},
 			{
 				Name: "Company",
 				Properties: []*schema.TestPropertyDecl{
-					{Name: "id", Constraint: schema.NewStringConstraint(), IsPrimaryKey: true},
+					{Name: "id", Constraint: schema.TestNewStringConstraint(), IsPrimaryKey: true},
 				},
 			},
 			{
 				Name: "Employee",
 				Properties: []*schema.TestPropertyDecl{
-					{Name: "id", Constraint: schema.NewStringConstraint(), IsPrimaryKey: true},
+					{Name: "id", Constraint: schema.TestNewStringConstraint(), IsPrimaryKey: true},
 				},
 				Relations: []*schema.TestRelationDecl{
 					{
@@ -1207,13 +1207,13 @@ func TestComplete_RelationInheritance_Associations(t *testing.T) {
 			{
 				Name: "Target",
 				Properties: []*schema.TestPropertyDecl{
-					{Name: "id", Constraint: schema.NewStringConstraint(), IsPrimaryKey: true},
+					{Name: "id", Constraint: schema.TestNewStringConstraint(), IsPrimaryKey: true},
 				},
 			},
 			{
 				Name: "Base",
 				Properties: []*schema.TestPropertyDecl{
-					{Name: "id", Constraint: schema.NewStringConstraint(), IsPrimaryKey: true},
+					{Name: "id", Constraint: schema.TestNewStringConstraint(), IsPrimaryKey: true},
 				},
 				Relations: []*schema.TestRelationDecl{
 					{
@@ -1251,7 +1251,7 @@ func TestComplete_RelationInheritance_Compositions(t *testing.T) {
 			{
 				Name: "Base",
 				Properties: []*schema.TestPropertyDecl{
-					{Name: "id", Constraint: schema.NewStringConstraint(), IsPrimaryKey: true},
+					{Name: "id", Constraint: schema.TestNewStringConstraint(), IsPrimaryKey: true},
 				},
 				Relations: []*schema.TestRelationDecl{
 					{
@@ -1324,13 +1324,13 @@ func TestComplete_Association_WithEdgeProperties(t *testing.T) {
 			{
 				Name: "Target",
 				Properties: []*schema.TestPropertyDecl{
-					{Name: "id", Constraint: schema.NewStringConstraint(), IsPrimaryKey: true},
+					{Name: "id", Constraint: schema.TestNewStringConstraint(), IsPrimaryKey: true},
 				},
 			},
 			{
 				Name: "Person",
 				Properties: []*schema.TestPropertyDecl{
-					{Name: "id", Constraint: schema.NewStringConstraint(), IsPrimaryKey: true},
+					{Name: "id", Constraint: schema.TestNewStringConstraint(), IsPrimaryKey: true},
 				},
 				Relations: []*schema.TestRelationDecl{
 					{
@@ -1338,8 +1338,8 @@ func TestComplete_Association_WithEdgeProperties(t *testing.T) {
 						Name:   "friend",
 						Target: &schema.TestASTTypeRef{Name: "Target"},
 						Properties: []*schema.TestPropertyDecl{
-							{Name: "since", Constraint: schema.NewDateConstraint()},
-							{Name: "closeness", Constraint: schema.NewIntegerConstraint()},
+							{Name: "since", Constraint: schema.TestNewDateConstraint()},
+							{Name: "closeness", Constraint: schema.TestNewIntegerConstraint()},
 						},
 					},
 				},
@@ -1357,13 +1357,13 @@ func TestComplete_Association_EdgePropertyNilSkipped(t *testing.T) {
 			{
 				Name: "Target",
 				Properties: []*schema.TestPropertyDecl{
-					{Name: "id", Constraint: schema.NewStringConstraint(), IsPrimaryKey: true},
+					{Name: "id", Constraint: schema.TestNewStringConstraint(), IsPrimaryKey: true},
 				},
 			},
 			{
 				Name: "Person",
 				Properties: []*schema.TestPropertyDecl{
-					{Name: "id", Constraint: schema.NewStringConstraint(), IsPrimaryKey: true},
+					{Name: "id", Constraint: schema.TestNewStringConstraint(), IsPrimaryKey: true},
 				},
 				Relations: []*schema.TestRelationDecl{
 					{
@@ -1372,7 +1372,7 @@ func TestComplete_Association_EdgePropertyNilSkipped(t *testing.T) {
 						Target: &schema.TestASTTypeRef{Name: "Target"},
 						Properties: []*schema.TestPropertyDecl{
 							nil, // nil should be skipped
-							{Name: "since", Constraint: schema.NewDateConstraint()},
+							{Name: "since", Constraint: schema.TestNewDateConstraint()},
 						},
 					},
 				},
@@ -1391,7 +1391,7 @@ func TestComplete_NilTypeDecl_Skipped(t *testing.T) {
 			{
 				Name: "Valid",
 				Properties: []*schema.TestPropertyDecl{
-					{Name: "id", Constraint: schema.NewStringConstraint(), IsPrimaryKey: true},
+					{Name: "id", Constraint: schema.TestNewStringConstraint(), IsPrimaryKey: true},
 				},
 			},
 		},
@@ -1408,7 +1408,7 @@ func TestComplete_NilPropertyDecl_Skipped(t *testing.T) {
 				Name: "Person",
 				Properties: []*schema.TestPropertyDecl{
 					nil, // nil should be skipped
-					{Name: "name", Constraint: schema.NewStringConstraint(), IsPrimaryKey: true},
+					{Name: "name", Constraint: schema.TestNewStringConstraint(), IsPrimaryKey: true},
 				},
 			},
 		},
@@ -1424,13 +1424,13 @@ func TestComplete_NilRelationDecl_Skipped(t *testing.T) {
 			{
 				Name: "Target",
 				Properties: []*schema.TestPropertyDecl{
-					{Name: "id", Constraint: schema.NewStringConstraint(), IsPrimaryKey: true},
+					{Name: "id", Constraint: schema.TestNewStringConstraint(), IsPrimaryKey: true},
 				},
 			},
 			{
 				Name: "Person",
 				Properties: []*schema.TestPropertyDecl{
-					{Name: "id", Constraint: schema.NewStringConstraint(), IsPrimaryKey: true},
+					{Name: "id", Constraint: schema.TestNewStringConstraint(), IsPrimaryKey: true},
 				},
 				Relations: []*schema.TestRelationDecl{
 					nil, // nil should be skipped
@@ -1454,7 +1454,7 @@ func TestComplete_NilInheritsRef_Skipped(t *testing.T) {
 			{
 				Name: "Base",
 				Properties: []*schema.TestPropertyDecl{
-					{Name: "id", Constraint: schema.NewStringConstraint(), IsPrimaryKey: true},
+					{Name: "id", Constraint: schema.TestNewStringConstraint(), IsPrimaryKey: true},
 				},
 			},
 			{
@@ -1483,12 +1483,12 @@ func TestNarrowing_ValidConstraintNarrowing(t *testing.T) {
 				Properties: []*schema.TestPropertyDecl{
 					{
 						Name:         "id",
-						Constraint:   schema.NewStringConstraint(),
+						Constraint:   schema.TestNewStringConstraint(),
 						IsPrimaryKey: true,
 					},
 					{
 						Name:       "age",
-						Constraint: schema.IntegerBetween(0, 150),
+						Constraint: schema.TestIntegerBetween(0, 150),
 						Optional:   true,
 					},
 				},
@@ -1501,7 +1501,7 @@ func TestNarrowing_ValidConstraintNarrowing(t *testing.T) {
 				Properties: []*schema.TestPropertyDecl{
 					{
 						Name:       "age",
-						Constraint: schema.IntegerBetween(18, 150),
+						Constraint: schema.TestIntegerBetween(18, 150),
 						Optional:   true,
 					},
 				},
@@ -1525,12 +1525,12 @@ func TestNarrowing_ValidModifierOverride(t *testing.T) {
 				Properties: []*schema.TestPropertyDecl{
 					{
 						Name:         "id",
-						Constraint:   schema.NewStringConstraint(),
+						Constraint:   schema.TestNewStringConstraint(),
 						IsPrimaryKey: true,
 					},
 					{
 						Name:       "name",
-						Constraint: schema.StringLenBetween(1, 100),
+						Constraint: schema.TestStringLenBetween(1, 100),
 						Optional:   true,
 					},
 				},
@@ -1543,7 +1543,7 @@ func TestNarrowing_ValidModifierOverride(t *testing.T) {
 				Properties: []*schema.TestPropertyDecl{
 					{
 						Name:       "name",
-						Constraint: schema.StringLenBetween(1, 100),
+						Constraint: schema.TestStringLenBetween(1, 100),
 						Optional:   false, // required overrides optional
 					},
 				},
@@ -1567,12 +1567,12 @@ func TestNarrowing_EnumSubset(t *testing.T) {
 				Properties: []*schema.TestPropertyDecl{
 					{
 						Name:         "id",
-						Constraint:   schema.NewStringConstraint(),
+						Constraint:   schema.TestNewStringConstraint(),
 						IsPrimaryKey: true,
 					},
 					{
 						Name:       "status",
-						Constraint: schema.NewEnumConstraint([]string{"a", "b", "c"}),
+						Constraint: schema.TestParsedEnumConstraint([]string{"a", "b", "c"}),
 						Optional:   true,
 					},
 				},
@@ -1585,7 +1585,7 @@ func TestNarrowing_EnumSubset(t *testing.T) {
 				Properties: []*schema.TestPropertyDecl{
 					{
 						Name:       "status",
-						Constraint: schema.NewEnumConstraint([]string{"a", "b"}),
+						Constraint: schema.TestParsedEnumConstraint([]string{"a", "b"}),
 						Optional:   true,
 					},
 				},

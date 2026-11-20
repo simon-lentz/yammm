@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/simon-lentz/yammm/instance"
-	"github.com/simon-lentz/yammm/schema"
+	"github.com/simon-lentz/yammm/internal/schematest"
+	"github.com/simon-lentz/yammm/internal/value"
 )
 
 // The UTF-8 rule reads every byte of every string a row holds, once at the
@@ -16,20 +16,20 @@ import (
 
 func benchCheckString(b *testing.B, s string) {
 	b.Helper()
-	c := schema.NewStringConstraint()
+	c := schematest.Constraint(b, "String")
 	b.SetBytes(int64(len(s)))
 	for b.Loop() {
-		if err := instance.CheckValue(s, c); err != nil {
+		if err := value.Check(s, c); err != nil {
 			b.Fatal(err)
 		}
 	}
 }
 
-func BenchmarkCheckValue_String1KiBASCII(b *testing.B) {
+func BenchmarkCheck_String1KiBASCII(b *testing.B) {
 	benchCheckString(b, strings.Repeat("abcdefgh", 128))
 }
 
-func BenchmarkCheckValue_String1KiBMultibyte(b *testing.B) {
+func BenchmarkCheck_String1KiBMultibyte(b *testing.B) {
 	benchCheckString(b, strings.Repeat("éé", 256))
 }
 

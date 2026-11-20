@@ -69,6 +69,8 @@ func TestPrimaryKeyOf_ReadsTheKeyOfARefusedInstance(t *testing.T) {
 		{"an inherited key", "Site", map[string]any{"id": "s1"}, `["s1"]`},
 		{"an absent component", "Account", map[string]any{"region": "eu", "owner": owner}, ""},
 		{"a null component", "Account", map[string]any{"region": "eu", "opened": nil, "owner": owner}, ""},
+		{"a nil list at a component", "Account", map[string]any{"region": []any(nil), "opened": "2024-01-05", "owner": owner}, ""},
+		{"a nil map at a component", "Account", map[string]any{"region": map[string]any(nil), "opened": "2024-01-05", "owner": owner}, ""},
 		{"a component its constraint refuses", "Account", map[string]any{"region": "eu", "opened": "seven", "owner": owner}, ""},
 		{"a number at a Date component", "Account", map[string]any{"region": "eu", "opened": 7.0, "owner": owner}, ""},
 		{"two keys folding onto one component", "Account", map[string]any{"region": "eu", "Opened": "2024-01-05", "OPENED": "2024-01-06", "owner": owner}, ""},

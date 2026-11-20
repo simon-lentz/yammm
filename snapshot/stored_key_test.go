@@ -292,7 +292,7 @@ func TestStoredKey_TheReadersAcceptExactlyTheLegalShapes(t *testing.T) {
 					t.Error("Graph.Add refused a legal shape")
 				}
 				data := c.wire(t, head, tail, rows)
-				_, lres := snapshot.Load(context.Background(), data, s, snapshot.WithIntegrityCheck(false))
+				_, lres := snapshot.Unmarshal(context.Background(), data, s, snapshot.WithIntegrityCheck(false))
 				if got := !lres.HasErrors(); got != legal {
 					t.Errorf("Load accepted=%v, want %v: %s", got, legal, lres)
 				}

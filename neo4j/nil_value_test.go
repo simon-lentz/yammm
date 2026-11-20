@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/simon-lentz/yammm/internal/schematest"
+
 	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/schema"
 )
@@ -40,10 +42,10 @@ func TestWrite_AValueThatHoldsNoneReachesTheDriverAsNil(t *testing.T) {
 		c   schema.Constraint
 		raw any
 	}{
-		"a nil slice at a Float":          {schema.NewFloatConstraint(), []float64(nil)},
-		"a nil slice at a String":         {schema.NewStringConstraint(), []string(nil)},
-		"a nil map at a String":           {schema.NewStringConstraint(), map[string]any(nil)},
-		"a nil slice at a List<String>":   {schema.NewListConstraint(schema.NewStringConstraint()), []any(nil)},
+		"a nil slice at a Float":          {schematest.Constraint(t, "Float"), []float64(nil)},
+		"a nil slice at a String":         {schematest.Constraint(t, "String"), []string(nil)},
+		"a nil map at a String":           {schematest.Constraint(t, "String"), map[string]any(nil)},
+		"a nil slice at a List<String>":   {schematest.Constraint(t, "List<String>"), []any(nil)},
 		"a nil slice under no constraint": {nil, []any(nil)},
 	} {
 		if got, err := coerceScalar(tc.c, tc.raw); err != nil || got != nil {
@@ -68,7 +70,7 @@ func TestWrite_AValueThatHoldsNoneReachesTheDriverAsNil(t *testing.T) {
 // not, and CoerceParams returns nil at a declared key and at an undeclared one.
 func TestHeldForm_ANilSliceOrMapHasTheFormNil(t *testing.T) {
 	t.Parallel()
-	list := schema.NewListConstraint(schema.NewStringConstraint())
+	list := schematest.Constraint(t, "List<String>")
 	for name, v := range map[string]any{"a nil []any": []any(nil), "a nil map[string]any": map[string]any(nil)} {
 		for _, c := range []schema.Constraint{nil, list} {
 			if got, err := heldForm(v, c); err != nil || got != nil {
@@ -172,7 +174,7 @@ func TestCoerceRelProps_AnUndeclaredValueThatHoldsNoneIsNil(t *testing.T) {
 // constraint refuses it.
 func TestExtractKeyProps_APointerAtAKeyIsRefusedByItsConstraint(t *testing.T) {
 	t.Parallel()
-	shape := &nodeShape{label: "T", primaryKeys: []string{"id"}, keyConstraints: map[string]schema.Constraint{"id": schema.NewStringConstraint()}}
+	shape := &nodeShape{label: "T", primaryKeys: []string{"id"}, keyConstraints: map[string]schema.Constraint{"id": schematest.Constraint(t, "String")}}
 	var nilString *string
 	text := "x"
 	for name, p := range map[string]any{"a nil pointer": nilString, "a pointer to a nil pointer": &nilString, "a pointer to a string": &text} {
@@ -188,7 +190,7 @@ func TestExtractKeyProps_APointerAtAKeyIsRefusedByItsConstraint(t *testing.T) {
 // kept as given.
 func TestCoerceParams_ReadsAListAsAList(t *testing.T) {
 	t.Parallel()
-	list := ParamTypes{"xs": schema.NewListConstraint(schema.NewStringConstraint())}
+	list := ParamTypes{"xs": schematest.Constraint(t, "List<String>")}
 	if out, err := CoerceParams(map[string]any{"xs": []any{nil}}, list); err == nil || err.Error() != `param "xs": element [0]: expected string, got null` {
 		t.Errorf("a []any of nils under a List<String> = %#v, %v; want the nil element refused", out["xs"], err)
 	}

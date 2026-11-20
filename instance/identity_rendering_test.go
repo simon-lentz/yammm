@@ -67,5 +67,5 @@ func TestComposedChild_TypeNameIsTheEntryRelativeForm(t *testing.T) {
 func TestDiagnosticTypeName_IsTheEntryRelativeForm(t *testing.T) {
 	s := loadClosure(t)
 	_, res := instance.NewValidator(s).ValidateOne(t.Context(), "common.Region", instance.RawInstance{Properties: map[string]any{"id": "r"}})
-	yammmtest.Diff(t, []string{"common.Region"}, detailValues(mustIssue(t, res, instance.ErrMissingRequired), diag.DetailKeyTypeName))
+	yammmtest.Diff(t, []string{"common.Region"}, detailValues(mustIssue(t, res, diag.E_MISSING_REQUIRED), diag.DetailKeyTypeName))
 }

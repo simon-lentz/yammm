@@ -106,7 +106,7 @@ func TestLoad_RefusesAnUndeclaredNameAtEveryPosition(t *testing.T) {
 				want++
 			}
 		}
-		loaded, lres := snapshot.Load(t.Context(), []byte(doc), s, snapshot.WithIntegrityCheck(false))
+		loaded, lres := snapshot.Unmarshal(t.Context(), []byte(doc), s, snapshot.WithIntegrityCheck(false))
 		vres := snapshot.Verify(t.Context(), []byte(doc), s, snapshot.WithIntegrityCheck(false))
 		for label, r := range map[string]diag.Result{"Load": lres, "Verify": vres} {
 			got := 0

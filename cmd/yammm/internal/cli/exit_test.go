@@ -12,9 +12,9 @@ import (
 	"testing"
 
 	"github.com/simon-lentz/yammm/diag"
+	"github.com/simon-lentz/yammm/internal/schematest"
 	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/neo4j"
-	"github.com/simon-lentz/yammm/schema"
 )
 
 func TestExitError_MessageWithoutAWrappedError(t *testing.T) {
@@ -207,7 +207,7 @@ func TestExitForResult_RuntimeCodeOutranksValidation(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			c := diag.NewCollectorUnlimited()
+			c := diag.NewCollector(diag.NoLimit)
 			c.Collect(diag.NewIssue(diag.Error, tt.code, "boom").Build())
 			if got := ExitForResult(c.Result()); got != tt.want {
 				t.Errorf("ExitForResult = %d, want %d", got, tt.want)
@@ -239,7 +239,7 @@ func TestExitForResult_RuntimeCodeOutranksValidation(t *testing.T) {
 
 	t.Run("an I/O code at Warning severity is still a runtime failure", func(t *testing.T) {
 		t.Parallel()
-		c := diag.NewCollectorUnlimited()
+		c := diag.NewCollector(diag.NoLimit)
 		c.Collect(diag.NewIssue(diag.Warning, diag.E_LOAD_IO_FAILURE, "boom").Build())
 		if got := ExitForResult(c.Result()); got != ExitRuntime {
 			t.Errorf("ExitForResult = %d, want %d — an I/O code counts at whatever severity the loader chose", got, ExitRuntime)
@@ -337,7 +337,7 @@ func TestReportError(t *testing.T) {
 		},
 		{
 			"a marked refusal is the one failure it marks",
-			Validationf("generate node queries: %w", markedRefusal()),
+			Validationf("generate node queries: %w", markedRefusal(t)),
 			"error: generate node queries: param \"v\": expected integer, got float 2.5\n",
 		},
 	}
@@ -481,7 +481,8 @@ func TestJoinExitErrors(t *testing.T) {
 
 // markedRefusal returns the neo4j package's refusal of a float at an Integer,
 // which wraps the coercion error and the package's class.
-func markedRefusal() error {
-	_, err := neo4j.CoerceParams(map[string]any{"v": 2.5}, neo4j.ParamTypes{"v": schema.NewIntegerConstraint()})
+func markedRefusal(tb testing.TB) error {
+	tb.Helper()
+	_, err := neo4j.CoerceParams(map[string]any{"v": 2.5}, neo4j.ParamTypes{"v": schematest.Constraint(tb, "Integer")})
 	return err
 }

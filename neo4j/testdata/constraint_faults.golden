@@ -7,75 +7,9 @@ enum accepted
 enum zero value
 	CheckConstraint: schema: enum must have at least two values (got 0)
 	CoerceParams: map[], param type "v": schema: enum must have at least two values (got 0)
-enum nil values
-	CheckConstraint: schema: enum must have at least two values (got 0)
-	CoerceParams: map[], param type "v": schema: enum must have at least two values (got 0)
-enum no values
-	CheckConstraint: schema: enum must have at least two values (got 0)
-	CoerceParams: map[], param type "v": schema: enum must have at least two values (got 0)
-enum one value
-	CheckConstraint: schema: enum must have at least two values (got 1)
-	CoerceParams: map[], param type "v": schema: enum must have at least two values (got 1)
-enum one empty value
-	CheckConstraint: schema: enum value cannot be empty
-	CoerceParams: map[], param type "v": schema: enum value cannot be empty
-enum one value not UTF-8
-	CheckConstraint: schema: enum value "\xff" is not valid UTF-8
-	CoerceParams: map[], param type "v": schema: enum value "\xff" is not valid UTF-8
-enum empty first
-	CheckConstraint: schema: enum value cannot be empty
-	CoerceParams: map[], param type "v": schema: enum value cannot be empty
-enum empty last
-	CheckConstraint: schema: enum value cannot be empty
-	CoerceParams: map[], param type "v": schema: enum value cannot be empty
-enum two empty
-	CheckConstraint: schema: enum value cannot be empty
-	CoerceParams: map[], param type "v": schema: enum value cannot be empty
-enum not UTF-8
-	CheckConstraint: schema: enum value "\xff" is not valid UTF-8
-	CoerceParams: map[], param type "v": schema: enum value "\xff" is not valid UTF-8
-enum duplicate
-	CheckConstraint: schema: duplicate enum value "a"
-	CoerceParams: map[], param type "v": schema: duplicate enum value "a"
-enum duplicate pair
-	CheckConstraint: schema: duplicate enum value "a"
-	CoerceParams: map[], param type "v": schema: duplicate enum value "a"
-enum duplicate before empty
-	CheckConstraint: schema: duplicate enum value "a"
-	CoerceParams: map[], param type "v": schema: duplicate enum value "a"
-enum empty before duplicate
-	CheckConstraint: schema: enum value cannot be empty
-	CoerceParams: map[], param type "v": schema: enum value cannot be empty
-enum not UTF-8 twice
-	CheckConstraint: schema: enum value "\xff" is not valid UTF-8
-	CoerceParams: map[], param type "v": schema: enum value "\xff" is not valid UTF-8
-enum duplicate before not UTF-8
-	CheckConstraint: schema: duplicate enum value "a"
-	CoerceParams: map[], param type "v": schema: duplicate enum value "a"
-enum not UTF-8 before empty
-	CheckConstraint: schema: enum value "\xff" is not valid UTF-8
-	CoerceParams: map[], param type "v": schema: enum value "\xff" is not valid UTF-8
-enum empty before not UTF-8
-	CheckConstraint: schema: enum value cannot be empty
-	CoerceParams: map[], param type "v": schema: enum value cannot be empty
-enum values changed after construction
-	CheckConstraint: ok
-	CoerceParams: map[], param "v": value "x" not in enum ["a" "b"]
 enum pointer
 	CheckConstraint: schema: a constraint of Go type *schema.EnumConstraint is none this package constructs
 	CoerceParams: map[], param type "v": schema: a constraint of Go type *schema.EnumConstraint is none this package constructs
-enum fault in a List
-	CheckConstraint: schema: enum must have at least two values (got 1)
-	CoerceParams: map[], param type "v": schema: enum must have at least two values (got 1)
-enum fault in a List of a List
-	CheckConstraint: schema: duplicate enum value "a"
-	CoerceParams: map[], param type "v": schema: duplicate enum value "a"
-enum fault behind a List length fault
-	CheckConstraint: schema: list length bounds inverted: min 5 > max 1
-	CoerceParams: map[], param type "v": schema: list length bounds inverted: min 5 > max 1
-enum fault behind a reference
-	CheckConstraint: schema: enum must have at least two values (got 1)
-	CoerceParams: map[], param type "v": schema: enum must have at least two values (got 1)
 enum accepted behind a reference
 	CheckConstraint: ok
 	CoerceParams: map[], param "v": value "x" not in enum ["a" "b"]
@@ -91,9 +25,6 @@ uuid accepted
 timestamp accepted
 	CheckConstraint: ok
 	CoerceParams: map[], param "v": invalid timestamp format: "x"
-timestamp zero value
-	CheckConstraint: ok
-	CoerceParams: map[], param "v": invalid timestamp format: "x"
 timestamp in a List
 	CheckConstraint: ok
 	CoerceParams: map[], param "v": expected array for list, got string
@@ -103,75 +34,18 @@ timestamp pointer
 integer accepted
 	CheckConstraint: ok
 	CoerceParams: map[], param "v": expected integer, got string
-integer inverted
-	CheckConstraint: schema: integer bounds inverted: min 5 > max 1
-	CoerceParams: map[], param type "v": schema: integer bounds inverted: min 5 > max 1
 float accepted
 	CheckConstraint: ok
 	CoerceParams: map[], param "v": expected float, got string
-float infinite max
-	CheckConstraint: schema: non-finite float bound +Inf; a Float bound is a finite number
-	CoerceParams: map[], param type "v": schema: non-finite float bound +Inf; a Float bound is a finite number
-float infinite min
-	CheckConstraint: schema: non-finite float bound -Inf; a Float bound is a finite number
-	CoerceParams: map[], param type "v": schema: non-finite float bound -Inf; a Float bound is a finite number
-float NaN min
-	CheckConstraint: schema: non-finite float bound NaN; a Float bound is a finite number
-	CoerceParams: map[], param type "v": schema: non-finite float bound NaN; a Float bound is a finite number
-float NaN max
-	CheckConstraint: schema: non-finite float bound NaN; a Float bound is a finite number
-	CoerceParams: map[], param type "v": schema: non-finite float bound NaN; a Float bound is a finite number
-float inverted
-	CheckConstraint: schema: float bounds inverted: min 2.5 > max 1
-	CoerceParams: map[], param type "v": schema: float bounds inverted: min 2.5 > max 1
-float infinite min before infinite max
-	CheckConstraint: schema: non-finite float bound +Inf; a Float bound is a finite number
-	CoerceParams: map[], param type "v": schema: non-finite float bound +Inf; a Float bound is a finite number
 string accepted
 	CheckConstraint: ok
 	CoerceParams: map[v:x], ok
-string negative min
-	CheckConstraint: schema: string minimum length cannot be negative: -1
-	CoerceParams: map[], param type "v": schema: string minimum length cannot be negative: -1
-string negative max
-	CheckConstraint: schema: string maximum length cannot be negative: -1
-	CoerceParams: map[], param type "v": schema: string maximum length cannot be negative: -1
-string inverted
-	CheckConstraint: schema: string length bounds inverted: min 5 > max 1
-	CoerceParams: map[], param type "v": schema: string length bounds inverted: min 5 > max 1
-string negative min before negative max
-	CheckConstraint: schema: string minimum length cannot be negative: -1
-	CoerceParams: map[], param type "v": schema: string minimum length cannot be negative: -1
 list accepted
 	CheckConstraint: ok
 	CoerceParams: map[], param "v": expected array for list, got string
 list zero value
 	CheckConstraint: schema: list has no element constraint
 	CoerceParams: map[], param type "v": schema: list has no element constraint
-list no element
-	CheckConstraint: schema: list has no element constraint
-	CoerceParams: map[], param type "v": schema: list has no element constraint
-list negative min
-	CheckConstraint: schema: list minimum length cannot be negative: -1
-	CoerceParams: map[], param type "v": schema: list minimum length cannot be negative: -1
-list negative max
-	CheckConstraint: schema: list maximum length cannot be negative: -1
-	CoerceParams: map[], param type "v": schema: list maximum length cannot be negative: -1
-list inverted
-	CheckConstraint: schema: list length bounds inverted: min 5 > max 1
-	CoerceParams: map[], param type "v": schema: list length bounds inverted: min 5 > max 1
-list inverted before no element
-	CheckConstraint: schema: list length bounds inverted: min 5 > max 1
-	CoerceParams: map[], param type "v": schema: list length bounds inverted: min 5 > max 1
-list negative min before negative max
-	CheckConstraint: schema: list minimum length cannot be negative: -1
-	CoerceParams: map[], param type "v": schema: list minimum length cannot be negative: -1
-list element fault
-	CheckConstraint: schema: integer bounds inverted: min 5 > max 1
-	CoerceParams: map[], param type "v": schema: integer bounds inverted: min 5 > max 1
-list element fault at depth two
-	CheckConstraint: schema: string minimum length cannot be negative: -1
-	CoerceParams: map[], param type "v": schema: string minimum length cannot be negative: -1
 list pointer
 	CheckConstraint: schema: a constraint of Go type *schema.ListConstraint is none this package constructs
 	CoerceParams: map[], param type "v": schema: a constraint of Go type *schema.ListConstraint is none this package constructs
@@ -181,69 +55,24 @@ pattern accepted
 pattern zero value
 	CheckConstraint: schema: pattern constraint needs a pattern
 	CoerceParams: map[], param type "v": schema: pattern constraint needs a pattern
-pattern none
-	CheckConstraint: schema: pattern constraint needs a pattern
-	CoerceParams: map[], param type "v": schema: pattern constraint needs a pattern
-pattern Perl syntax refuses
-	CheckConstraint: schema: invalid regex pattern "a**": error parsing regexp: invalid nested repetition operator: `**`
-	CoerceParams: map[], param type "v": schema: invalid regex pattern "a**": error parsing regexp: invalid nested repetition operator: `**`
 pattern surrogate escape accepted
 	CheckConstraint: ok
 	CoerceParams: map[], param "v": value "x" does not match pattern "\\x{D800}"
 vector accepted
 	CheckConstraint: ok
 	CoerceParams: map[], param "v": expected array for vector, got string
-vector zero
+vector zero value
 	CheckConstraint: schema: vector dimensions must be between 1 and 65536 (got 0)
 	CoerceParams: map[], param type "v": schema: vector dimensions must be between 1 and 65536 (got 0)
-vector negative
-	CheckConstraint: schema: vector dimensions must be between 1 and 65536 (got -1)
-	CoerceParams: map[], param type "v": schema: vector dimensions must be between 1 and 65536 (got -1)
-vector past the maximum
-	CheckConstraint: schema: vector dimensions must be between 1 and 65536 (got 65537)
-	CoerceParams: map[], param type "v": schema: vector dimensions must be between 1 and 65536 (got 65537)
 pointer to a string
 	CheckConstraint: schema: a constraint of Go type *schema.StringConstraint is none this package constructs
 	CoerceParams: map[], param type "v": schema: a constraint of Go type *schema.StringConstraint is none this package constructs
 reference accepted
 	CheckConstraint: ok
 	CoerceParams: map[], param "v": expected integer, got string
-reference unresolved
-	CheckConstraint: schema: datatype "Code" resolves to no constraint
-	CoerceParams: map[], param type "v": schema: datatype "Code" resolves to no constraint
-reference unresolved in a List
-	CheckConstraint: schema: datatype "Code" resolves to no constraint
-	CoerceParams: map[], param type "v": schema: datatype "Code" resolves to no constraint
-reference resolved to a fault
-	CheckConstraint: schema: integer bounds inverted: min 5 > max 1
-	CoerceParams: map[], param type "v": schema: integer bounds inverted: min 5 > max 1
-reference resolved to an unresolved reference
-	CheckConstraint: schema: datatype "Code" resolves to datatype "Inner" alone; a datatype declares a built-in type or a List
-	CoerceParams: map[], param type "v": schema: datatype "Code" resolves to datatype "Inner" alone; a datatype declares a built-in type or a List
 reference zero value
 	CheckConstraint: schema: datatype reference "" is not one a .yammm source can write; a reference is a datatype name, or an import alias, a dot and a datatype name
 	CoerceParams: map[], param type "v": schema: datatype reference "" is not one a .yammm source can write; a reference is a datatype name, or an import alias, a dot and a datatype name
-reference name no source writes
-	CheckConstraint: schema: datatype reference "lower" is not one a .yammm source can write; a reference is a datatype name, or an import alias, a dot and a datatype name
-	CoerceParams: map[], param type "v": schema: datatype reference "lower" is not one a .yammm source can write; a reference is a datatype name, or an import alias, a dot and a datatype name
-reference name no source writes, unresolved
-	CheckConstraint: schema: datatype reference "a.b.C" is not one a .yammm source can write; a reference is a datatype name, or an import alias, a dot and a datatype name
-	CoerceParams: map[], param type "v": schema: datatype reference "a.b.C" is not one a .yammm source can write; a reference is a datatype name, or an import alias, a dot and a datatype name
-reference name no source writes in a List
-	CheckConstraint: schema: datatype reference "type.Code" is not one a .yammm source can write; a reference is a datatype name, or an import alias, a dot and a datatype name
-	CoerceParams: map[], param type "v": schema: datatype reference "type.Code" is not one a .yammm source can write; a reference is a datatype name, or an import alias, a dot and a datatype name
-reference resolved through a name no source writes
-	CheckConstraint: schema: datatype "Code" resolves to datatype "lower" alone; a datatype declares a built-in type or a List
-	CoerceParams: map[], param type "v": schema: datatype "Code" resolves to datatype "lower" alone; a datatype declares a built-in type or a List
-reference resolved through a fault behind a name no source writes
-	CheckConstraint: schema: datatype "Code" resolves to datatype "lower" alone; a datatype declares a built-in type or a List
-	CoerceParams: map[], param type "v": schema: datatype "Code" resolves to datatype "lower" alone; a datatype declares a built-in type or a List
-reference resolved to a well-formed reference
-	CheckConstraint: schema: datatype "Code" resolves to datatype "Inner" alone; a datatype declares a built-in type or a List
-	CoerceParams: map[], param type "v": schema: datatype "Code" resolves to datatype "Inner" alone; a datatype declares a built-in type or a List
-reference resolved to a reference of its own name
-	CheckConstraint: schema: datatype "Code" resolves to datatype "Code" alone; a datatype declares a built-in type or a List
-	CoerceParams: map[], param type "v": schema: datatype "Code" resolves to datatype "Code" alone; a datatype declares a built-in type or a List
-reference resolved to a reference in a List
-	CheckConstraint: schema: datatype "Code" resolves to datatype "Inner" alone; a datatype declares a built-in type or a List
-	CoerceParams: map[], param type "v": schema: datatype "Code" resolves to datatype "Inner" alone; a datatype declares a built-in type or a List
+reference in a List
+	CheckConstraint: ok
+	CoerceParams: map[], param "v": expected array for list, got string

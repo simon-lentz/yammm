@@ -55,7 +55,7 @@ func TestMarshal_AStringReadsBackAsTheBytesHeld(t *testing.T) {
 		if res.HasErrors() {
 			t.Fatalf("Marshal(%q) refused valid text: %s", text, res)
 		}
-		loaded, lres := snapshot.Load(t.Context(), data, s)
+		loaded, lres := snapshot.Unmarshal(t.Context(), data, s)
 		if loaded.IsZero() {
 			t.Fatalf("Load(%q): %s", text, lres)
 		}

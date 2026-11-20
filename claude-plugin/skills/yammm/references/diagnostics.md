@@ -23,7 +23,7 @@ result.TruncationNote() // dropped-issues one-liner when the limit was hit
 
 ### Contextual Wrap (ContextualError)
 
-`result.WithContext(tag)` converts a failed Result into an `error` — a `*diag.ContextualError` carrying the tag plus the full Result — and returns `nil` when the Result is OK, so it slots directly into `return result.WithContext("load users")`. Recover the diagnostics downstream with `errors.As` or `diag.AsContextualError(err, fallbackTag)`. `diag.IsImportDeclarationCode(code)` classifies import-*declaration* codes (the import line itself is wrong) apart from import-*resolution* codes.
+`result.WithContext(tag)` converts a failed Result into an `error` — a `*diag.ContextualError` carrying the tag plus the full Result — and returns `nil` when the Result is OK, so it slots directly into `return result.WithContext("load users")`. Recover the diagnostics downstream with `errors.As` or `diag.AsContextualError(err, fallbackTag)`.
 
 ### diag.Issue
 
@@ -56,7 +56,7 @@ One load pass reports every *independent* error in a schema and its import closu
 
 - **All import failures are reported**, each at its own declaration, save `E_IMPORT_NOT_ALLOWED`, one issue at the first import the parser keeps; a broken import does not hide its siblings, and the schema's own types and datatypes are still judged: a check of one is withheld only when it reads a reference through the failed import, whether the declaration's own, one in a member or a datatype it reads, or one in a type's `extends` chain. A shared broken import (diamond graphs) is compiled once: its own errors appear once, plus one `E_UPSTREAM_FAIL` per import declaration that names it.
 - **References through a failed import are deferred, not re-blamed.** The import failure is the single root-cause diagnostic; `extends`, relation targets, property datatypes, and a datatype's own `List` element (`type Codes = List<lib.Code>`) reached through that alias stay silent until the import is fixed. A qualifier that names no declared import at all is a genuine `E_UNKNOWN_TYPE`.
-- **An alias binds once (keep-first).** A repeated alias is reported once (`E_DUPLICATE_IMPORT`) and the later declaration is inert; references resolve against the first binding.
+- **An alias binds once (keep-first).** Each later declaration of an alias is reported (`E_DUPLICATE_IMPORT`) and is inert; references resolve against the first binding.
 - **A name binds once (keep-first).** Types and datatypes share one namespace. Each later declaration of a name draws `E_DUPLICATE_TYPE` and is not completed: until the duplicate is gone its body draws no issue but the parser's. A reference that reads a declaration refused because the other kind holds the name stays silent.
 - **The inheritance merge reports no conflict on a member of unknown type.** A property or edge property has an unknown type when the parser could not build the type or when the type reads a name that did not resolve; that cause is already reported, once. On each type a property reaches with such a definition, the property's definitions draw no `E_PROPERTY_CONFLICT`. On each type a relation reaches with an unresolved target or such an edge property, the definitions of that relation kind draw no `E_RELATION_COLLISION`. The answer is the same in any order of the `extends` clause.
 - **`LoadString` / markdown blocks**: the imports-not-allowed rejection (`E_IMPORT_NOT_ALLOWED`) does not end the analysis. The rejected aliases are deferred as a failed import's is, and the source's other diagnostics are reported by the same rule.
@@ -173,7 +173,7 @@ The all-or-nothing contract is unchanged: any error still yields a zero schema.
 | ---- | ------- |
 | `E_DUPLICATE_PK` | Duplicate primary key: two instances added to a graph, two roots whose stored keys the key rule both accepts, in a `.ys` document, or two roots of a data command's input, one of them refused. A read under a schema counts only roots of a type that can hold one |
 | `E_DUPLICATE_COMPOSED_PK` | Two children of one `(many)` composition share a primary key, or a `(one)` composition holds several |
-| `E_DUPLICATE_EDGE` | A `(many)` association lists one target key twice for one source, where no other check refused either listing; the `.ys` reader refuses an edge and a `target_missing` record, or two such records, of one source that name one target, and two such edges, as `E_SNAPSHOT_MALFORMED` where no other check refused the repeating listing, one sound root (of a type that can hold a root, its stored key admitted by the key rule) holds the source's address alone, and an edge's target's, and no root stands at a record's target and no refused unit states it; elsewhere the issue at the listing, the source or the target stands for the repeat |
+| `E_DUPLICATE_EDGE` | A `(many)` association lists one target key twice for one source, where no other check refused either listing; `snapshot.Unmarshal` and `snapshot.Verify` refuse two edges, or two `target_missing` records, of one source that name one target as `E_SNAPSHOT_MALFORMED` where no other check refused the repeating listing, one sound root (of a type that can hold a root, its stored key admitted by the key rule) holds the source's address alone, and an edge's target's, and no root stands at a record's target and no refused unit states it; elsewhere the issue at the listing, the source or the target stands for the repeat. `snapshot.Stat` reads no schema and does not judge it |
 | `E_UNRESOLVED_REQUIRED` | Required association is unresolved |
 | `E_GRAPH_INVALID_COMPOSITION` | Invalid composition in graph operations |
 | `E_GRAPH_MISSING_PK` | An instance added at a root whose type declares no primary key |
@@ -198,10 +198,10 @@ The all-or-nothing contract is unchanged: any error still yields a zero schema.
 | `E_SNAPSHOT_EDGES_ON_DUPLICATE` | Duplicate record has edges |
 | `E_SNAPSHOT_DEPTH_EXCEEDED` | Composed nesting exceeds depth limit (32) |
 | `E_SNAPSHOT_INTEGRITY_MISMATCH` | Integrity hash doesn't match content, or is empty, null or absent |
-| `E_SNAPSHOT_UNSUPPORTED_HASH_ALGORITHM` | Schema hash algorithm not recognized — Warning from `HeaderOnly` and `HeaderOnlyRead` (so `ScanDir` and `ScanDirSlice`), Error from every other surface (v0.15+) |
-| `E_SNAPSHOT_IO` | A file that fails to open during `snapshot.ScanDir`, a directory `ScanDirSlice` fails to read (v0.3+), or a reader `snapshot.HeaderOnlyRead` reads failing with an error that is not a truncation, Fatal (unreleased; on the line after v0.21.0, not in v0.21.1) |
+| `E_SNAPSHOT_UNSUPPORTED_HASH_ALGORITHM` | Schema hash algorithm not recognized — Warning from `ReadHeader` (so `ScanDir`), Error from every other surface (v0.15+) |
+| `E_SNAPSHOT_IO` | A file that fails to open during `snapshot.ScanDir`, a directory `yammm snapshot info --dir` fails to read (v0.3+), or a reader `snapshot.ReadHeader` reads failing with an error that is not a truncation, Fatal (unreleased; on the line after v0.21.0, not in v0.21.1) |
 | `E_UPDATE_METADATA_BODY_OFFSET` | `snapshot.UpdateMetadata` body-offset tracker could not resolve the reused-body byte range (v0.3+) |
-| `W_UPDATE_METADATA_FALLBACK` | `snapshot.UpdateMetadataOrReMarshal` fell back from the fast path to `Load + Marshal` (Warning, v0.3+) |
+| `W_UPDATE_METADATA_FALLBACK` | `snapshot.UpdateMetadataOrReMarshal` fell back from the fast path to `Unmarshal + Marshal` (Warning, v0.3+) |
 | `W_SNAPSHOT_UNRESOLVED_REQUIRED` | A loaded document carries an unresolved record, one no structural check refused, for an association the schema declares required (read from the schema, never the record); reported only under `snapshot.WithRevalidation`, at that option's severity (v0.15+) |
 | `W_SNAPSHOT_PATH_EXTENSION` | A snapshot was written to a path that does not end in `.ys`; the write succeeded, and a reader that discovers snapshots by extension will not find it |
 

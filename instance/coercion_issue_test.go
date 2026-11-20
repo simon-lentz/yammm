@@ -48,8 +48,8 @@ func TestCoercionIssue_ClassifiesAPanicApartFromAConversionFailure(t *testing.T)
 		if issue.Severity() != diag.Error {
 			t.Errorf("severity = %v, want Error", issue.Severity())
 		}
-		if issue.Code() != ErrTypeMismatch {
-			t.Errorf("code = %s, want %s", issue.Code(), ErrTypeMismatch)
+		if issue.Code() != diag.E_TYPE_MISMATCH {
+			t.Errorf("code = %s, want %s", issue.Code(), diag.E_TYPE_MISMATCH)
 		}
 		if !strings.Contains(issue.Message(), `FK field "_target_id"`) {
 			t.Errorf("message does not name the slot: %s", issue.Message())

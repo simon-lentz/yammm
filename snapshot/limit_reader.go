@@ -8,13 +8,13 @@ import (
 // limitReader wraps an io.Reader with a byte-count cap. When the cap is
 // reached, Read returns (0, errHeaderLimitExceeded) and sets exceeded to
 // true. The sentinel error distinguishes "input exceeded the cap" (the
-// malformed-or-malicious case HeaderOnlyRead needs to surface) from "input
+// malformed-or-malicious case ReadHeader needs to surface) from "input
 // legitimately ended" (io.EOF from the underlying reader), which standard
 // io.LimitReader cannot express.
 //
 // readErr keeps the first error the underlying reader returned that is not
 // and does not wrap a truncation (io.EOF, io.ErrUnexpectedEOF), so
-// HeaderOnlyRead tells a document that ends early from a reader that failed
+// ReadHeader tells a document that ends early from a reader that failed
 // without naming the reader's errors. The JSON decoder drops an error the
 // reader returns beside data, so only readErr keeps that one.
 type limitReader struct {

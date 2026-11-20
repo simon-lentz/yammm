@@ -192,7 +192,7 @@ func TestMessages_RepeatAKeyCutToItsHead(t *testing.T) {
 	}
 	load := func(where string, data []byte, opts ...snapshot.LoadOption) diag.Result {
 		t.Helper()
-		_, r := snapshot.Load(ctx, data, s, opts...)
+		_, r := snapshot.Unmarshal(ctx, data, s, opts...)
 		if r.Len() == 0 {
 			t.Errorf("%s: Load reported nothing", where)
 		}
@@ -200,16 +200,16 @@ func TestMessages_RepeatAKeyCutToItsHead(t *testing.T) {
 		return r
 	}
 
-	if _, r := snapshot.Load(ctx, doc(ts(root("t"))+","+us("u"), "", ""), s); !r.OK() {
+	if _, r := snapshot.Unmarshal(ctx, doc(ts(root("t"))+","+us("u"), "", ""), s); !r.OK() {
 		t.Fatalf("the clean document draws issues:\n%s", r)
 	}
 
-	_, r = snapshot.HeaderOnlyRead(ctx, strings.NewReader(`"`+Z+`"`))
-	result("HeaderOnlyRead a string document", r)
-	_, r = snapshot.HeaderOnlyRead(ctx, strings.NewReader(`{"`+Z+`": 1}`))
-	result("HeaderOnlyRead a long first key", r)
-	_, r = snapshot.HeaderOnlyRead(ctx, strings.NewReader(`{"yammm_snapshot":`+header+`,"`+Z+`": }`))
-	result("HeaderOnlyRead a key whose value does not decode", r)
+	_, r = snapshot.ReadHeader(ctx, strings.NewReader(`"`+Z+`"`))
+	result("ReadHeader a string document", r)
+	_, r = snapshot.ReadHeader(ctx, strings.NewReader(`{"`+Z+`": 1}`))
+	result("ReadHeader a long first key", r)
+	_, r = snapshot.ReadHeader(ctx, strings.NewReader(`{"yammm_snapshot":`+header+`,"`+Z+`": }`))
+	result("ReadHeader a key whose value does not decode", r)
 
 	load("Load a string document", []byte(`"`+Z+`"`))
 	load("Load a long feature", docWith(headerWith(`"features":[]`, `"features":["`+Z+`"]`), ts(root("t"))+","+us("u"), "", ""))

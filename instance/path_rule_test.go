@@ -70,7 +70,7 @@ type Person {
 }
 `))
 	_, res := v.ValidateOne(t.Context(), "Person", instance.RawInstance{Properties: map[string]any{"id": "p", "Age": "x"}})
-	if got := mustIssue(t, res, instance.ErrTypeMismatch).Path(); got != "$.Age" {
+	if got := mustIssue(t, res, diag.E_TYPE_MISMATCH).Path(); got != "$.Age" {
 		t.Errorf("path = %q, want $.Age", got)
 	}
 }
@@ -95,7 +95,7 @@ func TestComposedChildDiagnosticPath_NamesTheInputKey(t *testing.T) {
 	_, res := v.ValidateOne(t.Context(), "Doc", instance.RawInstance{Properties: map[string]any{
 		"id": "d", "Lines": []any{map[string]any{"n": "a", "qty": "x"}},
 	}})
-	if got := mustIssue(t, res, instance.ErrTypeMismatch).Path(); got != "$.Lines[0].qty" {
+	if got := mustIssue(t, res, diag.E_TYPE_MISMATCH).Path(); got != "$.Lines[0].qty" {
 		t.Errorf("path = %q, want $.Lines[0].qty", got)
 	}
 }
@@ -148,7 +148,7 @@ func TestComposedChildProvenance_FollowsTheParent(t *testing.T) {
 func TestAbsentComposition_PathIsTheParentObject(t *testing.T) {
 	v := instance.NewValidator(loadSrc(t, docSrc))
 	_, res := v.ValidateOne(t.Context(), "Doc", instance.RawInstance{Properties: map[string]any{"id": "d"}})
-	if got := mustIssue(t, res, instance.ErrUnresolvedRequiredComposition).Path(); got != "$" {
+	if got := mustIssue(t, res, diag.E_UNRESOLVED_REQUIRED_COMPOSITION).Path(); got != "$" {
 		t.Errorf("path = %q, want $", got)
 	}
 }
@@ -179,7 +179,7 @@ func TestProvenance_ReachesEveryDiagnostic(t *testing.T) {
 		_, res := v.ValidateOne(t.Context(), "Doc", instance.RawInstance{Properties: map[string]any{
 			"lines": []any{map[string]any{"n": "a", "qty": 1}},
 		}, Provenance: prov})
-		is := mustIssue(t, res, instance.ErrMissingRequired)
+		is := mustIssue(t, res, diag.E_MISSING_REQUIRED)
 		if is.Path() != "$.Doc[2]" || is.SourceName() != "data.json" || is.Span() != span {
 			t.Errorf("path=%q source=%q span=%v", is.Path(), is.SourceName(), is.Span())
 		}
@@ -190,14 +190,14 @@ func TestProvenance_ReachesEveryDiagnostic(t *testing.T) {
 		_, res := v.ValidateOne(t.Context(), "Doc", instance.RawInstance{Properties: map[string]any{
 			"id": nil, "lines": []any{map[string]any{"n": "a", "qty": 1}},
 		}, Provenance: prov})
-		is := mustIssue(t, res, instance.ErrMissingRequired)
+		is := mustIssue(t, res, diag.E_MISSING_REQUIRED)
 		if is.Path() != "$.Doc[2]" || is.Span() != span {
 			t.Errorf("path=%q span=%v", is.Path(), is.Span())
 		}
 	})
 	t.Run("type_not_found", func(t *testing.T) {
 		_, res := v.ValidateOne(t.Context(), "Nope", instance.RawInstance{Properties: map[string]any{"id": "d"}, Provenance: prov})
-		is := mustIssue(t, res, instance.ErrTypeNotFound)
+		is := mustIssue(t, res, diag.E_INSTANCE_TYPE_NOT_FOUND)
 		if is.Path() != "$.Doc[2]" || is.SourceName() != "data.json" || is.Span() != span {
 			t.Errorf("path=%q source=%q span=%v", is.Path(), is.SourceName(), is.Span())
 		}
@@ -209,7 +209,7 @@ func TestProvenance_ReachesEveryDiagnostic(t *testing.T) {
 func TestValidateOne_LeadingDotIsNotAnAlias(t *testing.T) {
 	v := instance.NewValidator(loadSrc(t, docSrc))
 	_, res := v.ValidateOne(t.Context(), ".Doc", instance.RawInstance{Properties: map[string]any{"id": "d"}})
-	is := mustIssue(t, res, instance.ErrTypeNotFound)
+	is := mustIssue(t, res, diag.E_INSTANCE_TYPE_NOT_FOUND)
 	if want := `type ".Doc" not found`; is.Message() != want {
 		t.Errorf("message = %q, want %q", is.Message(), want)
 	}

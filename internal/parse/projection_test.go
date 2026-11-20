@@ -437,8 +437,10 @@ func renderExpr(e expr.Expression) string {
 		return "(" + strings.Join(parts, " ") + ")"
 	case expr.Op:
 		return string(v)
+	case *expr.Literal:
+		return renderLiteral(v.Val)
 	default:
-		return renderLiteral(e.Literal())
+		return fmt.Sprintf("<%T>", v)
 	}
 }
 

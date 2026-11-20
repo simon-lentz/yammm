@@ -1,7 +1,9 @@
 package graph_test
 
 import (
+	"fmt"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/simon-lentz/yammm/diag"
@@ -215,7 +217,7 @@ func TestUnresolvedEdge_RequiredAndReasonFields(t *testing.T) {
 	if !ur.Required() {
 		t.Error("Expected Required=true for required association")
 	}
-	if ur.Reason() != "target_missing" {
+	if ur.Reason() != graph.ReasonTargetMissing {
 		t.Errorf("Expected Reason='target_missing', got %q", ur.Reason())
 	}
 }
@@ -244,7 +246,7 @@ func TestUnresolvedEdge_OptionalAssociation(t *testing.T) {
 	if ur.Required() {
 		t.Error("Expected Required=false for optional association")
 	}
-	if ur.Reason() != "target_missing" {
+	if ur.Reason() != graph.ReasonTargetMissing {
 		t.Errorf("Expected Reason='target_missing', got %q", ur.Reason())
 	}
 }
@@ -272,7 +274,7 @@ func TestUnresolvedEdge_AbsentReason(t *testing.T) {
 	if !ur.Required() {
 		t.Error("Expected Required=true for required association")
 	}
-	if ur.Reason() != "absent" {
+	if ur.Reason() != graph.ReasonAbsent {
 		t.Errorf("Expected Reason='absent', got %q", ur.Reason())
 	}
 	if ur.TargetKey() != "" {
@@ -304,7 +306,7 @@ func TestUnresolvedEdge_EmptyReason(t *testing.T) {
 	if !ur.Required() {
 		t.Error("Expected Required=true for required association")
 	}
-	if ur.Reason() != "empty" {
+	if ur.Reason() != graph.ReasonEmpty {
 		t.Errorf("Expected Reason='empty', got %q", ur.Reason())
 	}
 	if ur.TargetKey() != "" {
@@ -397,6 +399,26 @@ func TestGraph_Check_RequiredEmpty(t *testing.T) {
 	}
 
 	assertHasCode(t, result, diag.E_UNRESOLVED_REQUIRED)
+	assertUnresolvedNamesNoTarget(t, result, "association array is empty")
+}
+
+// assertUnresolvedNamesNoTarget holds Check's one E_UNRESOLVED_REQUIRED issue to
+// the message for its reason and to no target detail: the record names no target.
+func assertUnresolvedNamesNoTarget(t *testing.T, result diag.Result, why string) {
+	t.Helper()
+	for issue := range result.Issues() {
+		if issue.Code() != diag.E_UNRESOLVED_REQUIRED {
+			continue
+		}
+		if !strings.HasSuffix(issue.Message(), ": "+why) {
+			t.Errorf("message = %q, want it to end %q", issue.Message(), why)
+		}
+		for _, d := range issue.Details() {
+			if d.Key == diag.DetailKeyTargetType || d.Key == diag.DetailKeyTargetPK {
+				t.Errorf("detail %s=%q on a record that names no target", d.Key, d.Value)
+			}
+		}
+	}
 }
 
 func TestGraph_Check_OptionalMissing(t *testing.T) {
@@ -570,7 +592,7 @@ func TestGraph_UnresolvedEdge_Properties(t *testing.T) {
 	}
 
 	u := unres[0]
-	if u.Reason() != "target_missing" {
+	if u.Reason() != graph.ReasonTargetMissing {
 		t.Errorf("Reason: got %q, want %q", u.Reason(), "target_missing")
 	}
 
@@ -605,8 +627,21 @@ func TestUnresolvedEdge_NilReceiver(t *testing.T) {
 	if u.Properties().Len() != 0 {
 		t.Error("nil receiver Properties should return empty")
 	}
-	if !u.Source().IsZero() || u.Relation() != "" || !u.TargetType().IsZero() || u.TargetKey() != "" || u.Required() || u.Reason() != "" {
+	if !u.Source().IsZero() || u.Relation() != "" || !u.TargetType().IsZero() || u.TargetKey() != "" || u.Required() || u.Reason() != 0 {
 		t.Error("a nil UnresolvedEdge's accessors should return zero values")
+	}
+}
+
+// The zero UnresolvedReason names no reason, so it is none of the three and its
+// text is no wire text; neither is an out-of-range value's.
+func TestUnresolvedReason_TheZeroNamesNoReason(t *testing.T) {
+	for _, r := range []graph.UnresolvedReason{0, graph.ReasonEmpty + 1} {
+		if r == graph.ReasonTargetMissing || r == graph.ReasonAbsent || r == graph.ReasonEmpty {
+			t.Errorf("UnresolvedReason(%d) is a named reason", uint8(r))
+		}
+		if got, want := r.String(), fmt.Sprintf("UnresolvedReason(%d)", uint8(r)); got != want {
+			t.Errorf("String() = %q, want %q", got, want)
+		}
 	}
 }
 
@@ -737,6 +772,7 @@ func TestGraph_Check_RequiredAbsent(t *testing.T) {
 	if !foundAbsent {
 		t.Error("Expected E_UNRESOLVED_REQUIRED with reason='absent'")
 	}
+	assertUnresolvedNamesNoTarget(t, result, "association field is absent")
 }
 
 func TestGraph_Check_UnresolvedRequired_HasProvenanceSpan(t *testing.T) {

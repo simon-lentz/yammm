@@ -174,6 +174,19 @@ func TestAssertParses_ReportsAndSkipsInvalidBlocks(t *testing.T) {
 	}
 }
 
+// A block is held to parse, not to be valid: a constraint finding the parse
+// also reports is no parse error.
+func TestParseErrors_ReportsNoConstraintFinding(t *testing.T) {
+	t.Parallel()
+
+	for _, decl := range []string{"n Integer[5, 1]", `e Enum["a"]`} {
+		src := "schema \"s\"\ntype T {\n\tid String primary\n\t" + decl + "\n}\n"
+		if got := ParseErrors(src); len(got) != 0 {
+			t.Errorf("ParseErrors(%q) = %q, want none", decl, got)
+		}
+	}
+}
+
 func TestAssertInvalid_ReportsABlockThatLoadsClean(t *testing.T) {
 	t.Parallel()
 

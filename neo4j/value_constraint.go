@@ -26,7 +26,7 @@ func elementConstraint(c schema.Constraint) schema.Constraint {
 	case schema.ListConstraint:
 		return rc.Element()
 	case schema.VectorConstraint:
-		return schema.NewFloatConstraint()
+		return schema.FloatConstraint{}
 	}
 	return nil
 }

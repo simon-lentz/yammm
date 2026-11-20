@@ -4,8 +4,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/simon-lentz/yammm/internal/schematest"
+
 	"github.com/neo4j/neo4j-go-driver/v6/neo4j/dbtype"
-	"github.com/simon-lentz/yammm/schema"
 )
 
 // A Date carries no time of day. dbtype.Date holds a whole time.Time, and a
@@ -38,7 +39,7 @@ func TestCoerceDate_KeepsTheWallClockDate(t *testing.T) {
 		{"string", func(t time.Time) any { return t.Format(time.DateOnly) }},
 	}
 
-	types := ParamTypes{"d": schema.NewDateConstraint()}
+	types := ParamTypes{"d": schematest.Constraint(t, "Date")}
 	for _, form := range forms {
 		for _, tc := range instants {
 			out, err := CoerceParams(map[string]any{"d": form.wrap(tc.in)}, types)

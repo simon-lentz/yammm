@@ -25,7 +25,7 @@ func TestValidateInvariant_ValidProperty(t *testing.T) {
 				Properties: []*schema.TestPropertyDecl{
 					{
 						Name:         "name",
-						Constraint:   schema.NewStringConstraint(),
+						Constraint:   schema.TestNewStringConstraint(),
 						IsPrimaryKey: true,
 					},
 				},
@@ -66,7 +66,7 @@ func TestValidateInvariant_UnknownProperty(t *testing.T) {
 				Properties: []*schema.TestPropertyDecl{
 					{
 						Name:       "name",
-						Constraint: schema.NewStringConstraint(),
+						Constraint: schema.TestNewStringConstraint(),
 					},
 				},
 				Invariants: []*schema.TestInvariantDecl{
@@ -123,7 +123,7 @@ func TestValidateInvariant_LambdaValidProperty(t *testing.T) {
 				Properties: []*schema.TestPropertyDecl{
 					{
 						Name:       "quantity",
-						Constraint: schema.NewIntegerConstraint(),
+						Constraint: schema.TestNewIntegerConstraint(),
 					},
 				},
 			},
@@ -132,7 +132,7 @@ func TestValidateInvariant_LambdaValidProperty(t *testing.T) {
 				Properties: []*schema.TestPropertyDecl{
 					{
 						Name:         "id",
-						Constraint:   schema.NewStringConstraint(),
+						Constraint:   schema.TestNewStringConstraint(),
 						IsPrimaryKey: true,
 					},
 				},
@@ -191,7 +191,7 @@ func TestValidateInvariant_LambdaUnknownProperty(t *testing.T) {
 				Properties: []*schema.TestPropertyDecl{
 					{
 						Name:       "quantity",
-						Constraint: schema.NewIntegerConstraint(),
+						Constraint: schema.TestNewIntegerConstraint(),
 					},
 				},
 			},
@@ -200,7 +200,7 @@ func TestValidateInvariant_LambdaUnknownProperty(t *testing.T) {
 				Properties: []*schema.TestPropertyDecl{
 					{
 						Name:         "id",
-						Constraint:   schema.NewStringConstraint(),
+						Constraint:   schema.TestNewStringConstraint(),
 						IsPrimaryKey: true,
 					},
 				},
@@ -268,7 +268,7 @@ func TestValidateInvariant_SelfDotProperty(t *testing.T) {
 				Properties: []*schema.TestPropertyDecl{
 					{
 						Name:         "name",
-						Constraint:   schema.NewStringConstraint(),
+						Constraint:   schema.TestNewStringConstraint(),
 						IsPrimaryKey: true,
 					},
 				},
@@ -313,7 +313,7 @@ func TestValidateInvariant_SelfDotUnknownProperty(t *testing.T) {
 				Properties: []*schema.TestPropertyDecl{
 					{
 						Name:       "name",
-						Constraint: schema.NewStringConstraint(),
+						Constraint: schema.TestNewStringConstraint(),
 					},
 				},
 				Invariants: []*schema.TestInvariantDecl{
@@ -367,7 +367,7 @@ func TestValidateInvariant_InheritedProperty(t *testing.T) {
 				Properties: []*schema.TestPropertyDecl{
 					{
 						Name:       "created_at",
-						Constraint: schema.NewTimestampConstraint(),
+						Constraint: schema.TestNewTimestampConstraint(),
 					},
 				},
 			},
@@ -377,7 +377,7 @@ func TestValidateInvariant_InheritedProperty(t *testing.T) {
 				Properties: []*schema.TestPropertyDecl{
 					{
 						Name:         "id",
-						Constraint:   schema.NewStringConstraint(),
+						Constraint:   schema.TestNewStringConstraint(),
 						IsPrimaryKey: true,
 					},
 				},
@@ -418,7 +418,7 @@ func TestValidateInvariant_CaseInsensitive(t *testing.T) {
 				Properties: []*schema.TestPropertyDecl{
 					{
 						Name:         "name",
-						Constraint:   schema.NewStringConstraint(),
+						Constraint:   schema.TestNewStringConstraint(),
 						IsPrimaryKey: true,
 					},
 				},
@@ -460,7 +460,7 @@ func TestValidateInvariant_RelationNameValid(t *testing.T) {
 				Properties: []*schema.TestPropertyDecl{
 					{
 						Name:       "quantity",
-						Constraint: schema.NewIntegerConstraint(),
+						Constraint: schema.TestNewIntegerConstraint(),
 					},
 				},
 			},
@@ -469,7 +469,7 @@ func TestValidateInvariant_RelationNameValid(t *testing.T) {
 				Properties: []*schema.TestPropertyDecl{
 					{
 						Name:         "id",
-						Constraint:   schema.NewStringConstraint(),
+						Constraint:   schema.TestNewStringConstraint(),
 						IsPrimaryKey: true,
 					},
 				},
@@ -525,7 +525,7 @@ func TestValidateInvariant_ReduceBuiltin(t *testing.T) {
 				Properties: []*schema.TestPropertyDecl{
 					{
 						Name:       "quantity",
-						Constraint: schema.NewIntegerConstraint(),
+						Constraint: schema.TestNewIntegerConstraint(),
 					},
 				},
 			},
@@ -534,7 +534,7 @@ func TestValidateInvariant_ReduceBuiltin(t *testing.T) {
 				Properties: []*schema.TestPropertyDecl{
 					{
 						Name:         "id",
-						Constraint:   schema.NewStringConstraint(),
+						Constraint:   schema.TestNewStringConstraint(),
 						IsPrimaryKey: true,
 					},
 				},
@@ -593,7 +593,7 @@ func TestValidateInvariant_ReduceUnknownProperty(t *testing.T) {
 				Properties: []*schema.TestPropertyDecl{
 					{
 						Name:       "quantity",
-						Constraint: schema.NewIntegerConstraint(),
+						Constraint: schema.TestNewIntegerConstraint(),
 					},
 				},
 			},
@@ -602,7 +602,7 @@ func TestValidateInvariant_ReduceUnknownProperty(t *testing.T) {
 				Properties: []*schema.TestPropertyDecl{
 					{
 						Name:         "id",
-						Constraint:   schema.NewStringConstraint(),
+						Constraint:   schema.TestNewStringConstraint(),
 						IsPrimaryKey: true,
 					},
 				},
@@ -673,7 +673,7 @@ func TestValidateInvariant_ThenBuiltin(t *testing.T) {
 				Properties: []*schema.TestPropertyDecl{
 					{
 						Name:         "name",
-						Constraint:   schema.NewStringConstraint(),
+						Constraint:   schema.TestNewStringConstraint(),
 						IsPrimaryKey: true,
 					},
 				},
@@ -727,11 +727,11 @@ func TestValidateInvariant_NestedCollectionBuiltins(t *testing.T) {
 				Properties: []*schema.TestPropertyDecl{
 					{
 						Name:       "quantity",
-						Constraint: schema.NewIntegerConstraint(),
+						Constraint: schema.TestNewIntegerConstraint(),
 					},
 					{
 						Name:       "active",
-						Constraint: schema.NewBooleanConstraint(),
+						Constraint: schema.TestNewBooleanConstraint(),
 					},
 				},
 			},
@@ -740,7 +740,7 @@ func TestValidateInvariant_NestedCollectionBuiltins(t *testing.T) {
 				Properties: []*schema.TestPropertyDecl{
 					{
 						Name:         "id",
-						Constraint:   schema.NewStringConstraint(),
+						Constraint:   schema.TestNewStringConstraint(),
 						IsPrimaryKey: true,
 					},
 				},
@@ -810,7 +810,7 @@ func TestInvariantInheritance_SingleParent(t *testing.T) {
 				Properties: []*schema.TestPropertyDecl{
 					{
 						Name:       "is_active",
-						Constraint: schema.NewBooleanConstraint(),
+						Constraint: schema.TestNewBooleanConstraint(),
 					},
 				},
 				Invariants: []*schema.TestInvariantDecl{
@@ -828,7 +828,7 @@ func TestInvariantInheritance_SingleParent(t *testing.T) {
 				Properties: []*schema.TestPropertyDecl{
 					{
 						Name:         "account_id",
-						Constraint:   schema.NewStringConstraint(),
+						Constraint:   schema.TestNewStringConstraint(),
 						IsPrimaryKey: true,
 					},
 				},
@@ -872,7 +872,7 @@ func TestInvariantInheritance_ChildOverride(t *testing.T) {
 				Properties: []*schema.TestPropertyDecl{
 					{
 						Name:       "value",
-						Constraint: schema.NewIntegerConstraint(),
+						Constraint: schema.TestNewIntegerConstraint(),
 					},
 				},
 				Invariants: []*schema.TestInvariantDecl{
@@ -890,7 +890,7 @@ func TestInvariantInheritance_ChildOverride(t *testing.T) {
 				Properties: []*schema.TestPropertyDecl{
 					{
 						Name:         "child_id",
-						Constraint:   schema.NewStringConstraint(),
+						Constraint:   schema.TestNewStringConstraint(),
 						IsPrimaryKey: true,
 					},
 				},
@@ -948,7 +948,7 @@ func TestInvariantInheritance_Diamond(t *testing.T) {
 				Properties: []*schema.TestPropertyDecl{
 					{
 						Name:         "id",
-						Constraint:   schema.NewStringConstraint(),
+						Constraint:   schema.TestNewStringConstraint(),
 						IsPrimaryKey: true,
 					},
 				},
@@ -994,7 +994,7 @@ func TestInvariantInheritance_Diamond(t *testing.T) {
 				Properties: []*schema.TestPropertyDecl{
 					{
 						Name:       "bottom_field",
-						Constraint: schema.NewStringConstraint(),
+						Constraint: schema.TestNewStringConstraint(),
 					},
 				},
 			},

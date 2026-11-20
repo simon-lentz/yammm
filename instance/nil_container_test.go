@@ -12,6 +12,7 @@ import (
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/instance"
+	"github.com/simon-lentz/yammm/internal/value"
 )
 
 const nilContainerSchema = `schema "p"
@@ -96,9 +97,9 @@ func TestValidate_ANilContainerAgreesWithItsJSONForm(t *testing.T) {
 	}
 }
 
-// CheckValue accepts a nil slice under a List as a value that holds none, and
+// value.Check accepts a nil slice under a List as a value that holds none, and
 // the validator stores no value for it, never an empty list.
-func TestCheckValue_ANilSliceAtAListHoldsNoValue(t *testing.T) {
+func TestCheck_ANilSliceAtAListHoldsNoValue(t *testing.T) {
 	t.Parallel()
 	s := loadT(t, nilContainerSchema)
 	typ, _ := s.Type("T")
@@ -106,8 +107,8 @@ func TestCheckValue_ANilSliceAtAListHoldsNoValue(t *testing.T) {
 	for _, prop := range []string{"stamps", "optTags"} {
 		p, _ := typ.Property(prop)
 		for _, nilSlice := range []any{[]any(nil), []string(nil)} {
-			if err := instance.CheckValue(nilSlice, p.Constraint()); err != nil {
-				t.Errorf("CheckValue(%#v, %s) = %v, want nil", nilSlice, p.Constraint(), err)
+			if err := value.Check(nilSlice, p.Constraint()); err != nil {
+				t.Errorf("value.Check(%#v, %s) = %v, want nil", nilSlice, p.Constraint(), err)
 			}
 			inst, res := v.ValidateOne(t.Context(), "T", instance.RawInstance{Properties: map[string]any{
 				"id": "x", "reqTags": []any{"a"}, "reqVec": []float64{1, 2}, prop: nilSlice,
@@ -189,7 +190,7 @@ func TestValidate_ANilContainerAtARelationAgreesWithItsJSONForm(t *testing.T) {
 }
 
 // A nil immutable container holds no value, as immutable.IsNilContainer reads it:
-// at a property it is the absent case, and IsAbsent reports it.
+// at a property it is the absent case, and value.Absent reports it.
 func TestValidate_ANilImmutableContainerIsNull(t *testing.T) {
 	t.Parallel()
 	v := instance.NewValidator(loadT(t, nilContainerSchema))
@@ -199,8 +200,8 @@ func TestValidate_ANilImmutableContainerIsNull(t *testing.T) {
 		"a nil Key":        immutable.WrapKey(nil),
 		"a nil Slice":      immutable.WrapSlice(nil),
 	} {
-		if !instance.IsAbsent(none) {
-			t.Errorf("IsAbsent(%s) = false", name)
+		if !value.Absent(none) {
+			t.Errorf("value.Absent(%s) = false", name)
 		}
 		for _, prop := range []string{"optTags", "name"} {
 			props := maps.Clone(base)
@@ -226,8 +227,8 @@ func TestValidate_AStructEmbeddingANilContainerIsAStruct(t *testing.T) {
 		"a nil Slice":      struct{ immutable.Slice }{},
 		"a nil Properties": struct{ immutable.Properties }{},
 	} {
-		if instance.IsAbsent(embedding) {
-			t.Errorf("IsAbsent(a struct embedding %s) = true", name)
+		if value.Absent(embedding) {
+			t.Errorf("value.Absent(a struct embedding %s) = true", name)
 		}
 		for _, prop := range []string{"optTags", "name"} {
 			props := maps.Clone(base)

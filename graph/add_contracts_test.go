@@ -29,7 +29,7 @@ func TestAdd_ACancelledContextInstallsNothing(t *testing.T) {
 	if !res.HasFatal() || !res.HasCode(diag.E_CONTEXT_CANCELLED) {
 		t.Fatalf("a cancelled Add returned %s", res.String())
 	}
-	if n := len(slices.Collect(g.Snapshot().AllInstances())); n != 0 {
+	if n := len(slices.Collect(g.Snapshot().Instances())); n != 0 {
 		t.Errorf("a cancelled Add installed %d instances", n)
 	}
 }

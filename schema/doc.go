@@ -72,10 +72,10 @@
 // [UUIDConstraint], [EnumConstraint], [PatternConstraint],
 // [VectorConstraint], [ListConstraint], and [AliasConstraint].
 //
-// The String, Integer, Float and List constraints have constructors for bounded
-// and unbounded variants (e.g., [NewStringConstraint], [StringLenBetween]); the
-// other kinds take no bounds. Use [ResolveAlias] to
-// unwrap alias chains.
+// A load builds every constraint from its DSL form; a caller reads one through
+// its accessors and the Constraint interface. The zero value of a bounded
+// kind, such as FloatConstraint{}, is that kind with no bounds. Use
+// [ResolveAlias] to unwrap alias chains.
 //
 // # Structural Hash
 //

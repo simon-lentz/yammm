@@ -46,7 +46,7 @@ type edgeKey struct {
 
 // newCanonicalizer walks every type in s's closure once. An entry is written
 // for every type and relation, empty where nothing canonicalizes, so a later
-// read never misses and never writes. s is not zero: [New] and snapshot.Load
+// read never misses and never writes. s is not zero: [New] and snapshot.Unmarshal
 // refuse a zero schema first.
 func newCanonicalizer(s schema.Schema) *canonicalizer {
 	c := &canonicalizer{

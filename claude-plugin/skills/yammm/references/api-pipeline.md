@@ -143,8 +143,6 @@ type RawInstance struct {
 }
 ```
 
-A parser that cannot read an input as its member's type reports that issue and writes `instance.Refused{Value: <the input>}` in the value's place. At a property, a foreign-key field or an edge property, the validator reports nothing for a `Refused` and refuses the instance: `ValidateOne` returns a zero `ValidInstance` with no error for it, and `instance.ErrRefusedValue` names the case for a caller that must return an error. Anywhere else a `Refused` is a value of no form and draws the issue any such value draws (`E_TYPE_MISMATCH` as a list element, for one). One break draws one issue.
-
 ### Build RawInstances with SchemaBuilder
 
 `instance.BuilderFor(s, typeName)` returns a `*SchemaBuilder` that constructs `RawInstance` values while enforcing schema shape at build time — unknown properties, unknown relations, cardinality mismatches, and edge-shape mismatches surface from `Build()` with the offending call site's file:line. Errors on a zero schema, an unknown type, or an abstract type. The builder covers properties and property-less association edges; instances carrying edge properties or composed children are constructed from raw data instead.
@@ -185,12 +183,8 @@ import "github.com/simon-lentz/yammm/graph"
 
 g := graph.New(s)
 
-// Add validated instances: Validate's result was checked, so a zero entry
-// held a refused value its producer reported
+// Add validated instances: Validate's result was checked, so no entry is zero
 for _, valid := range validInstances {
-    if valid.IsZero() {
-        continue
-    }
     result := g.Add(ctx, valid)
     if result.HasErrors() {
         // handle a duplicate primary key, a keyless or part type, etc.
@@ -260,10 +254,10 @@ data, result := snapshot.Marshal(ctx, snap,
 )
 ```
 
-### Load (Deserialize)
+### Unmarshal (Deserialize)
 
 ```go
-snap, result := snapshot.Load(ctx, data, s,
+snap, result := snapshot.Unmarshal(ctx, data, s,
     snapshot.WithIntegrityCheck(false),
 )
 ```
@@ -277,19 +271,19 @@ if result.HasErrors() {
 }
 ```
 
-### Info (Inspect Without Loading)
+### Stat (Inspect Without Loading)
 
 ```go
-info, result := snapshot.Info(ctx, data)
+info, result := snapshot.Stat(ctx, data)
 // info.SchemaName, info.TotalInstances, info.IntegrityStatus, etc.
 ```
 
-`SnapshotInfo` fields: `Version`, `Features`, `SchemaName`, `SchemaHash`, `IntegrityHash`, `CreatedAt`, `Metadata`, `Types`, `InstanceCounts`, `TotalInstances`, `TotalEdges`, `IntegrityStatus`.
+`Info` embeds `Header` (`Version`, `SchemaName`, `SchemaSource`, `SchemaHash`, `SchemaHashAlgorithm`, `IntegrityHash`, `CreatedAt`, `Metadata`, `Types`, `Attestation`) and adds `InstanceCounts`, `TotalInstances`, `TotalEdges`, `DuplicateCount`, `UnresolvedCount` and `IntegrityStatus` (`snapshot.IntegrityOK` or `snapshot.IntegrityMismatch`). `snapshot.ReadHeader(ctx, r)` reads the `Header` alone from an `io.Reader`.
 
 ### Update Metadata In Place
 
 ```go
-header, res := snapshot.HeaderOnly(ctx, data)   // read existing metadata
+header, res := snapshot.ReadHeader(ctx, bytes.NewReader(data)) // read existing metadata
 newMeta := maps.Clone(header.Metadata)          // replace-not-merge contract
 if newMeta == nil {                             // a document that states no metadata
     newMeta = map[string]string{}
@@ -298,7 +292,7 @@ newMeta["pipeline_completed"] = "true"
 updated, result := snapshot.UpdateMetadataOrReMarshal(ctx, data, newMeta, s)
 ```
 
-`UpdateMetadataOrReMarshal(ctx, data, newMeta, s)` is the default entry point: it rewrites the header's metadata map (a full replace — clone the old map and mutate) while reusing the body bytes verbatim (fast path), and transparently falls back to `Load + Marshal` on any Error or Fatal but a cancellation and metadata that is not valid UTF-8, emitting `W_UPDATE_METADATA_FALLBACK` when the fallback succeeds so the transition is observable. `UpdateMetadata(ctx, data, newMeta)` is the strict fast path alone, for a consumer that cannot accept a round-trip. CLI form: `yammm snapshot update-metadata --set k=v`.
+`UpdateMetadataOrReMarshal(ctx, data, newMeta, s)` is the default entry point: it rewrites the header's metadata map (a full replace — clone the old map and mutate) while reusing the body bytes verbatim (fast path), and transparently falls back to `Unmarshal + Marshal` on any Error or Fatal but a cancellation and metadata that is not valid UTF-8, emitting `W_UPDATE_METADATA_FALLBACK` when the fallback succeeds so the transition is observable. `UpdateMetadata(ctx, data, newMeta)` is the strict fast path alone, for a consumer that cannot accept a round-trip. CLI form: `yammm snapshot update-metadata --set k=v`.
 
 ---
 
@@ -308,7 +302,7 @@ updated, result := snapshot.UpdateMetadataOrReMarshal(ctx, data, newMeta, s)
 - **Validated instances** (`instance.ValidInstance`) are immutable
 - **Graph snapshots** (`graph.Snapshot`) have no method that changes them, and a record is a handle, so no caller holds its address
 - **The `Graph` type** (`*graph.Graph`) is concurrent-safe for `Add` and `AddOrMerge` calls — multiple goroutines may add instances in parallel; the graph handles forward references, duplicate detection and merges atomically. `Snapshot()` acquires a read lock, briefly blocking concurrent adds, and returns a snapshot later Adds do not change
-- **The validate→add pipeline** shares one `Validator` and one `Graph` across its workers: each worker validates a record with `ValidateOne`, checks `IsZero`, and adds it with `Add`, or with `AddOrMerge` for a source that lists one record under several parents. The caller waits for its workers, then checks the graph and takes its snapshot. Each call returns its own result, and a snapshot holds no diagnostics. To resume, seed the graph with `graph.NewFromSnapshot(snap)` (new adds resolve against, and may complete, the seeded state; it binds the graph to the snapshot's own schema, installs its records as they stand, and panics on a zero snapshot). See the Batch Assembly section of `docs/API.md`
+- **The validate→add pipeline** shares one `Validator` and one `Graph` across its workers: each worker validates a record with `ValidateOne`, returns on its result's `HasErrors`, and adds it with `Add`, or with `AddOrMerge` for a source that lists one record under several parents. The caller waits for its workers, then checks the graph and takes its snapshot. Each call returns its own result, and a snapshot holds no diagnostics. To resume, seed the graph with `graph.NewFromSnapshot(snap)` (new adds resolve against, and may complete, the seeded state; it binds the graph to the snapshot's own schema, installs its records as they stand, and panics on a zero snapshot). See the Batch Assembly section of `docs/API.md`
 - **Validators** (`*instance.Validator`) are safe for concurrent use (stateless after construction)
 
 ---
@@ -317,7 +311,7 @@ updated, result := snapshot.UpdateMetadataOrReMarshal(ctx, data, newMeta, s)
 
 One package provides shared vocabulary for consumer test suites:
 
-- **`snapshot/snapshottest`** — `BuildSnapshot(tb, s, instances...)` constructs a snapshot from pre-validated instances; `AssertRoundTrip(tb, snap, s, opts...)` pins Marshal→Load structural equivalence; `AssertDeterministic(tb, snap, opts...)` pins byte-stable marshaling; `DiffSnapshots(tb, want, got)` is the underlying go-cmp comparison.
+- **`snapshot/snapshottest`** — `BuildSnapshot(tb, s, instances...)` constructs a snapshot from pre-validated instances; `AssertRoundTrip(tb, snap, opts...)` pins Marshal→Unmarshal structural equivalence against the snapshot's own schema; `AssertDeterministic(tb, snap, opts...)` pins byte-stable marshaling; `DiffSnapshots(tb, want, got)` is the underlying go-cmp comparison.
 
 Build its instances through `instance.Validator`. `internal/instancetest` is this module's own test support: Go refuses an import of an `internal/` package from another module.
 
@@ -354,9 +348,6 @@ for typeName, objects := range doc {
         return result.Err()
     }
     for _, valid := range valids {
-        if valid.IsZero() {
-            continue // its producer refused a value and reported it
-        }
         if res := g.Add(ctx, valid); res.HasErrors() {
             return res.Err()
         }

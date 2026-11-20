@@ -17,7 +17,7 @@ const forged = "x\nfile.yammm:1:1: error[E_SYNTAX]: forged\x1b[31m"
 // forgedCode is a code as a consumer can register it, with the forged text:
 // NewCode takes any non-empty identifier. It is built unregistered so the
 // registry's own tests do not see it.
-var forgedCode = Code{value: forged, cat: CategorySyntax}
+var forgedCode = Code{value: forged}
 
 // TestRenderer_WritesNoControlCharacter holds every text the text renderer
 // writes to one rule: no byte of it reaches the terminal as a control.

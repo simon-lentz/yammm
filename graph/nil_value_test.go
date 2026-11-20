@@ -35,7 +35,7 @@ type T {
 	snap := rebuild(s, snapparts.Parts{Instances: []snapparts.Instance{{
 		TypeID: typ.ID(), PrimaryKey: immutable.WrapKey([]any{"x"}), Properties: props,
 	}}})
-	for inst := range snap.AllInstances() {
+	for inst := range snap.Instances() {
 		for _, name := range lists {
 			val, ok := inst.Property(name)
 			if !ok || val.Any() != nil {

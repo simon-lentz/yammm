@@ -55,13 +55,13 @@ type D {
 		r, _ := typ.Relation("R")
 		return r
 	}
-	if !rel("A").Equal(rel("B")) {
+	if !schema.TestRelationEqual(rel("A"), rel("B")) {
 		t.Error("relations alike in every field, edge properties included, must be equal")
 	}
-	if rel("A").Equal(rel("C")) {
+	if schema.TestRelationEqual(rel("A"), rel("C")) {
 		t.Error("relations whose edge properties differ by name must not be equal")
 	}
-	if rel("A").Equal(rel("D")) {
+	if schema.TestRelationEqual(rel("A"), rel("D")) {
 		t.Error("relations whose edge property differs in constraint must not be equal")
 	}
 }

@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/instance"
 	"github.com/simon-lentz/yammm/schema"
 )
@@ -55,6 +56,17 @@ func TestEdgeNullProperty_ExplicitNullDoesNotSatisfyRequired(t *testing.T) {
 	}
 	if !strings.Contains(detail, "missing required edge property") {
 		t.Errorf("wrong diagnostic: %s", detail)
+	}
+}
+
+// A required edge property the object leaves out is E_MISSING_REQUIRED, the
+// code a missing required property of the instance itself draws.
+func TestEdgeNullProperty_AMissingRequiredPropertyIsMissingRequired(t *testing.T) {
+	_, res := instance.NewValidator(nullEdgePropSchema(t)).ValidateOne(t.Context(), "Person", instance.RawInstance{
+		Properties: map[string]any{"id": "1", "employer": map[string]any{"_target_id": "42"}},
+	})
+	if got := res.CodeCounts(diag.Error); len(got) != 1 || got[diag.E_MISSING_REQUIRED] != 1 {
+		t.Errorf("error codes = %v, want one E_MISSING_REQUIRED: %s", got, res)
 	}
 }
 

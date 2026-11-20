@@ -28,17 +28,17 @@ func TestLoad_ResolvesDataTypesInAnyDeclarationOrder(t *testing.T) {
 			t.Fatalf("%s: load: %v", name, res.Err())
 		}
 		for dt := range s.DataTypes() {
-			if !dt.Constraint().IsResolved() {
+			if !schema.TestConstraintIsResolved(dt.Constraint()) {
 				t.Errorf("%s: datatype %s is not resolved: %v", name, dt.Name(), dt.Constraint())
 			}
 		}
 		tt, _ := s.Type("T")
 		for _, field := range []string{"v", "w"} {
 			p, _ := tt.Property(field)
-			if !p.Constraint().IsResolved() {
+			if !schema.TestConstraintIsResolved(p.Constraint()) {
 				t.Errorf("%s: property %s is not resolved: %v", name, field, p.Constraint())
 			}
-			if got := innermost(p.Constraint()); !got.Equal(schema.IntegerBetween(0, 9)) {
+			if got := innermost(p.Constraint()); !schema.TestConstraintEqual(got, schema.TestIntegerBetween(0, 9)) {
 				t.Errorf("%s: property %s's innermost element is %v; want Integer[0, 9]", name, field, got)
 			}
 		}

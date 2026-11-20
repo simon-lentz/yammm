@@ -5,8 +5,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/simon-lentz/yammm/internal/schematest"
+
 	"github.com/simon-lentz/yammm/internal/value"
-	"github.com/simon-lentz/yammm/schema"
 )
 
 // A UUID's text of 38 bytes is a UUID between braces and nothing else.
@@ -16,7 +17,7 @@ import (
 func TestCheck_AUUIDOf38BytesIsOneBetweenBraces(t *testing.T) {
 	t.Parallel()
 	const id = "0a35ef0f-9d40-4b6b-a0a1-0d1a5a0e1f2b"
-	c := schema.NewUUIDConstraint()
+	c := schematest.Constraint(t, "UUID")
 	for _, text := range []string{
 		"x" + id + "y", "{" + id + "x", "x" + id + "}", "}" + id + "{",
 		"[" + id + "]", "(" + id + ")", " " + id + " ", `"` + id + `"`,

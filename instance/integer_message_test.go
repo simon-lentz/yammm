@@ -5,14 +5,14 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/simon-lentz/yammm/instance"
+	"github.com/simon-lentz/yammm/internal/value"
 	"github.com/simon-lentz/yammm/schema"
 )
 
 // An Integer refuses every float, whole or not, in range or not, and the check
 // and the coercion say so alike: the message names a float and writes it with
 // its indicator, so a whole 3.0 does not read as the integer 3.
-func TestCheckValue_IntegerRefusesEveryFloat(t *testing.T) {
+func TestCheck_IntegerRefusesEveryFloat(t *testing.T) {
 	t.Parallel()
 	s, res := schema.LoadString(t.Context(), "schema \"p\"\n\ntype T {\n    id String primary\n    n Integer\n}\n", "p.yammm")
 	if res.Err() != nil {
@@ -32,12 +32,12 @@ func TestCheckValue_IntegerRefusesEveryFloat(t *testing.T) {
 		{3.5, "float 3.5"},
 		{math.NaN(), "float NaN"},
 	} {
-		err := instance.CheckValue(tc.v, cons)
+		err := value.Check(tc.v, cons)
 		if err == nil || !strings.Contains(err.Error(), tc.want) {
-			t.Errorf("CheckValue(%v) = %v; want a refusal naming %q", tc.v, err, tc.want)
+			t.Errorf("value.Check(%v) = %v; want a refusal naming %q", tc.v, err, tc.want)
 		}
 	}
-	if err := instance.CheckValue(int64(3), cons); err != nil {
-		t.Errorf("CheckValue(int64(3)) refused an integer: %v", err)
+	if err := value.Check(int64(3), cons); err != nil {
+		t.Errorf("value.Check(int64(3)) refused an integer: %v", err)
 	}
 }

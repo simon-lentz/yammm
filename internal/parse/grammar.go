@@ -257,8 +257,8 @@ type numBoundsC struct {
 // fltBoundsC is Float's bound pair. It exists apart from numBoundsC because the
 // two admit different tokens: an Integer bound is INTEGER or '_', and a Float
 // bound also takes FLOAT. Sharing one token set let Integer[1.5, 3] parse and
-// then fail a constraint check, which moves the diagnostic out of the syntax
-// category callers are told to filter on.
+// then fail a constraint check, where every other malformed bound is a syntax
+// error.
 type fltBoundsC struct {
 	Pos    lexer.Position
 	EndPos lexer.Position
@@ -390,6 +390,7 @@ type exprCapture interface{ exprCapture() }
 
 type exprResult struct {
 	E          expr.Expression
+	Text       string
 	Diags      []exprDiag
 	Start, End int
 	// NoValue holds each literal in E that has no value: E holds a nil
@@ -471,7 +472,7 @@ func buildParsers() {
 			}
 			return nil, err
 		}
-		return exprResult{E: e, Diags: diags, Start: start, End: p.lastEnd, NoValue: p.noValue}, nil
+		return exprResult{E: e, Text: p.text.String(), Diags: diags, Start: start, End: p.lastEnd, NoValue: p.noValue}, nil
 	})
 	listOpt := participle.ParseTypeWith(func(lx *lexer.PeekingLexer) (listLevel, error) {
 		return checkListLevel(lx, tok)

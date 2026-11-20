@@ -15,13 +15,13 @@ var (
 
 	// E_NEO4J_UNSUPPORTED_TYPE indicates a constraint kind cannot be mapped
 	// to a Neo4j property type expression.
-	E_NEO4J_UNSUPPORTED_TYPE = diag.NewCode("E_NEO4J_UNSUPPORTED_TYPE", diag.CategoryNeo4j)
+	E_NEO4J_UNSUPPORTED_TYPE = diag.NewCode("E_NEO4J_UNSUPPORTED_TYPE")
 
 	// E_NEO4J_UNKNOWN_PROPERTY indicates an index annotation names a property
 	// the type does not have. Load-time validation refuses this on every schema
 	// a public entry point returns, so the generator's re-check draws this code
 	// on none of them.
-	E_NEO4J_UNKNOWN_PROPERTY = diag.NewCode("E_NEO4J_UNKNOWN_PROPERTY", diag.CategoryNeo4j)
+	E_NEO4J_UNKNOWN_PROPERTY = diag.NewCode("E_NEO4J_UNKNOWN_PROPERTY")
 
 	// E_NEO4J_INVALID_INDEX_TARGET indicates an index annotation names a
 	// property whose type cannot carry that index: @index or @@index on a
@@ -30,7 +30,7 @@ var (
 	// outside 1 to 4096. Like [E_NEO4J_UNKNOWN_PROPERTY], this is the generator
 	// re-checking what load-time validation refuses, so no schema a public entry
 	// point returns draws it.
-	E_NEO4J_INVALID_INDEX_TARGET = diag.NewCode("E_NEO4J_INVALID_INDEX_TARGET", diag.CategoryNeo4j)
+	E_NEO4J_INVALID_INDEX_TARGET = diag.NewCode("E_NEO4J_INVALID_INDEX_TARGET")
 )
 
 // Warning-severity diagnostic codes for edition degradations.
@@ -41,7 +41,7 @@ var (
 	// primary-key enforcement Community affords — and reports this warning so the
 	// substitution is visible. A warning, not an error: the fallback is correct
 	// output, so failing the call would withhold a usable answer.
-	W_NEO4J_NODE_KEY_UNSUPPORTED = diag.NewCode("W_NEO4J_NODE_KEY_UNSUPPORTED", diag.CategoryNeo4j)
+	W_NEO4J_NODE_KEY_UNSUPPORTED = diag.NewCode("W_NEO4J_NODE_KEY_UNSUPPORTED")
 
 	// W_NEO4J_EDITION_CONSTRAINT_OMITTED indicates [Community] dropped
 	// constraints the schema declares because the edition cannot hold
@@ -50,5 +50,5 @@ var (
 	// reader knows which declared guarantees the database will not enforce. A
 	// warning, not an error: the UNIQUE constraints that survive are correct
 	// output for the edition.
-	W_NEO4J_EDITION_CONSTRAINT_OMITTED = diag.NewCode("W_NEO4J_EDITION_CONSTRAINT_OMITTED", diag.CategoryNeo4j)
+	W_NEO4J_EDITION_CONSTRAINT_OMITTED = diag.NewCode("W_NEO4J_EDITION_CONSTRAINT_OMITTED")
 )

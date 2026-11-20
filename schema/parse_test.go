@@ -9,6 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/simon-lentz/yammm/diag"
+	"github.com/simon-lentz/yammm/internal/expr"
 	"github.com/simon-lentz/yammm/internal/source"
 	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
@@ -408,7 +409,9 @@ type Person {
 
 	// Verify expression is compiled
 	require.NotNil(t, inv.Expr, "invariant expression should be compiled")
-	assert.Equal(t, ">", inv.Expr.Op(), "expression should be a > comparison")
+	sexpr, ok := inv.Expr.(expr.SExpr)
+	require.True(t, ok, "the expression is %T; want an expr.SExpr", inv.Expr)
+	assert.Equal(t, ">", sexpr.Op(), "expression should be a > comparison")
 
 	result := collector.Result()
 	assert.True(t, result.OK(), "expected no errors, got: %v", result)

@@ -1,9 +1,9 @@
 package markdown
 
 import (
+	"slices"
 	"testing"
 
-	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -62,19 +62,13 @@ type Unrelated {
 		t.Errorf("relationTarget = %q, want the reference spelling %q", got, want)
 	}
 
-	ref := schema.NewTypeRef("", "Root", location.Span{})
+	ref := onlyInherited(t, thing)
 	if got, want := g.superLink(thing, ref), "Root"; got != want {
 		t.Errorf("superLink = %q, want the reference spelling %q", got, want)
 	}
-	// The spelling is schema text: an alias www would otherwise autolink.
-	www := schema.NewTypeRef("www", "Root", location.Span{})
-	if got, want := g.superLink(thing, www), "www<!---->.Root"; got != want {
-		t.Errorf("superLink = %q, want the escaped reference spelling %q", got, want)
-	}
-
 	aliased := loadSources(t, map[string][]byte{
-		"entry.yammm": []byte("schema \"e\"\nimport \"x.yammm\" as www\ntype T {\n  id String primary\n  --> AT (one) www.Other\n}\n"),
-		"x.yammm":     []byte("schema \"x\"\ntype Other {\n  id String primary\n}\n"),
+		"entry.yammm": []byte("schema \"e\"\nimport \"x.yammm\" as www\ntype T extends www.Root {\n  id String primary\n  --> AT (one) www.Other\n}\n"),
+		"x.yammm":     []byte("schema \"x\"\nabstract type Root {\n  id String primary\n}\ntype Other {\n  id String primary\n}\n"),
 	})
 	tt, ok := aliased.Type("T")
 	if !ok {
@@ -87,6 +81,10 @@ type Unrelated {
 	if got, want := g.relationTarget(at), "www<!---->.Other"; got != want {
 		t.Errorf("relationTarget = %q, want the escaped reference spelling %q", got, want)
 	}
+	// The spelling is schema text: an alias www would otherwise autolink.
+	if got, want := g.superLink(tt, onlyInherited(t, tt)), "www<!---->.Root"; got != want {
+		t.Errorf("superLink = %q, want the escaped reference spelling %q", got, want)
+	}
 
 	// The control: over its own document both resolve to links, so the
 	// assertions above pin the fallback and not a renderer that never links.
@@ -97,4 +95,14 @@ type Unrelated {
 	if got := gOwn.superLink(thing, ref); got == "Root" {
 		t.Error("superLink did not link a supertype its own document contains")
 	}
+}
+
+// onlyInherited returns the one extends reference typ declares.
+func onlyInherited(tb testing.TB, typ schema.Type) schema.TypeRef {
+	tb.Helper()
+	refs := slices.Collect(typ.Inherits())
+	if len(refs) != 1 {
+		tb.Fatalf("%s declares %d extends references, want 1", typ.Name(), len(refs))
+	}
+	return refs[0]
 }

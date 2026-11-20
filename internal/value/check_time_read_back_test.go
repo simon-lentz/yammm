@@ -6,6 +6,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/simon-lentz/yammm/internal/schematest"
+
 	"github.com/simon-lentz/yammm/internal/raceskip"
 	"github.com/simon-lentz/yammm/internal/value"
 	"github.com/simon-lentz/yammm/schema"
@@ -27,15 +29,15 @@ func TestCheck_ATimeWhoseTextIsNotStoredIsRefused(t *testing.T) {
 		c    schema.Constraint
 		want string
 	}{
-		{"past year 9999 at a Timestamp", far, schema.NewTimestampConstraint(), `invalid timestamp format: "10000-01-01T00:00:00Z"`},
-		{"before year 0 at a Timestamp", before, schema.NewTimestampConstraint(), `invalid timestamp format: "-0001-01-01T00:00:00Z"`},
-		{"before year 0 with a fraction at a Timestamp", before.Add(-time.Nanosecond), schema.NewTimestampConstraint(), `invalid timestamp format: "-0002-12-31T23:59:59.999999999Z"`},
-		{"past year 9999 at a Date", far, schema.NewDateConstraint(), `invalid date format: "10000-01-01" (expected YYYY-MM-DD)`},
-		{"an offset of 25 hours at a Timestamp", at(25 * 3600), schema.NewTimestampConstraint(), `invalid timestamp format: "2024-01-02T03:04:05+25:00"`},
-		{"an offset of 25 hours west at a Timestamp", at(-25 * 3600), schema.NewTimestampConstraint(), `invalid timestamp format: "2024-01-02T03:04:05-25:00"`},
-		{"an offset of 24 hours at a Timestamp", at(24 * 3600), schema.NewTimestampConstraint(), `invalid timestamp format: "2024-01-02T03:04:05+24:00"`},
-		{"an offset of 24 hours west at a Timestamp", at(-24 * 3600), schema.NewTimestampConstraint(), `invalid timestamp format: "2024-01-02T03:04:05-24:00"`},
-		{"an offset of 24:59 at a Timestamp", at(24*3600 + 59*60), schema.NewTimestampConstraint(), `invalid timestamp format: "2024-01-02T03:04:05+24:59"`},
+		{"past year 9999 at a Timestamp", far, schematest.Constraint(t, "Timestamp"), `invalid timestamp format: "10000-01-01T00:00:00Z"`},
+		{"before year 0 at a Timestamp", before, schematest.Constraint(t, "Timestamp"), `invalid timestamp format: "-0001-01-01T00:00:00Z"`},
+		{"before year 0 with a fraction at a Timestamp", before.Add(-time.Nanosecond), schematest.Constraint(t, "Timestamp"), `invalid timestamp format: "-0002-12-31T23:59:59.999999999Z"`},
+		{"past year 9999 at a Date", far, schematest.Constraint(t, "Date"), `invalid date format: "10000-01-01" (expected YYYY-MM-DD)`},
+		{"an offset of 25 hours at a Timestamp", at(25 * 3600), schematest.Constraint(t, "Timestamp"), `invalid timestamp format: "2024-01-02T03:04:05+25:00"`},
+		{"an offset of 25 hours west at a Timestamp", at(-25 * 3600), schematest.Constraint(t, "Timestamp"), `invalid timestamp format: "2024-01-02T03:04:05-25:00"`},
+		{"an offset of 24 hours at a Timestamp", at(24 * 3600), schematest.Constraint(t, "Timestamp"), `invalid timestamp format: "2024-01-02T03:04:05+24:00"`},
+		{"an offset of 24 hours west at a Timestamp", at(-24 * 3600), schematest.Constraint(t, "Timestamp"), `invalid timestamp format: "2024-01-02T03:04:05-24:00"`},
+		{"an offset of 24:59 at a Timestamp", at(24*3600 + 59*60), schematest.Constraint(t, "Timestamp"), `invalid timestamp format: "2024-01-02T03:04:05+24:59"`},
 	} {
 		err := value.Check(c.val, c.c)
 		var checkErr *value.CheckError
@@ -54,15 +56,15 @@ func TestCheck_ATimeWhoseTextIsNotStoredIsRefused(t *testing.T) {
 		val  time.Time
 		c    schema.Constraint
 	}{
-		{"year 9999 at a Timestamp", time.Date(9999, 12, 31, 23, 59, 59, 0, time.UTC), schema.NewTimestampConstraint()},
-		{"year 0 at a Timestamp", time.Date(0, 1, 1, 0, 0, 0, 0, time.UTC), schema.NewTimestampConstraint()},
-		{"year 0 at a Date", time.Date(0, 1, 1, 0, 0, 0, 0, time.UTC), schema.NewDateConstraint()},
-		{"two seconds east", at(2), schema.NewTimestampConstraint()},
-		{"two seconds west", at(-2), schema.NewTimestampConstraint()},
-		{"a minute and two seconds west", at(-62), schema.NewTimestampConstraint()},
-		{"an unnamed zone", at(10800), schema.NewTimestampConstraint()},
-		{"an offset of 23:59", at(23*3600 + 59*60), schema.NewTimestampConstraint()},
-		{"an offset of 23:59 and 59 seconds west", at(-(24*3600 - 1)), schema.NewTimestampConstraint()},
+		{"year 9999 at a Timestamp", time.Date(9999, 12, 31, 23, 59, 59, 0, time.UTC), schematest.Constraint(t, "Timestamp")},
+		{"year 0 at a Timestamp", time.Date(0, 1, 1, 0, 0, 0, 0, time.UTC), schematest.Constraint(t, "Timestamp")},
+		{"year 0 at a Date", time.Date(0, 1, 1, 0, 0, 0, 0, time.UTC), schematest.Constraint(t, "Date")},
+		{"two seconds east", at(2), schematest.Constraint(t, "Timestamp")},
+		{"two seconds west", at(-2), schematest.Constraint(t, "Timestamp")},
+		{"a minute and two seconds west", at(-62), schematest.Constraint(t, "Timestamp")},
+		{"an unnamed zone", at(10800), schematest.Constraint(t, "Timestamp")},
+		{"an offset of 23:59", at(23*3600 + 59*60), schematest.Constraint(t, "Timestamp")},
+		{"an offset of 23:59 and 59 seconds west", at(-(24*3600 - 1)), schematest.Constraint(t, "Timestamp")},
 	} {
 		if err := value.Check(c.val, c.c); err != nil {
 			t.Errorf("%s: Check = %v; want nil", c.name, err)
@@ -79,7 +81,7 @@ func TestCheck_ATimeWhoseTextIsNotStoredIsRefused(t *testing.T) {
 func TestCheck_TextAtAnOffsetHourOfTwentyFourIsRefused(t *testing.T) {
 	t.Parallel()
 	type carrier string
-	c := schema.NewTimestampConstraint()
+	c := schematest.Constraint(t, "Timestamp")
 	for _, row := range []struct {
 		given any
 		shown string
@@ -132,7 +134,7 @@ func TestCheck_TextAtAnOffsetHourOfTwentyFourIsRefused(t *testing.T) {
 // and in the offset.
 func TestCanonical_StoredTextIsStoredAsItself(t *testing.T) {
 	t.Parallel()
-	c := schema.NewTimestampConstraint()
+	c := schematest.Constraint(t, "Timestamp")
 	r := rand.New(rand.NewPCG(3, 9)) //nolint:gosec // a fixed seed makes the times reproducible
 	stored, refused := 0, 0
 	for range 20000 {
@@ -176,7 +178,7 @@ func TestCanonical_StoredTextIsStoredAsItself(t *testing.T) {
 // as +00:00, which is stored as Z.
 func TestCheck_ATimeIsStoredAsItsRenderedTextIs(t *testing.T) {
 	t.Parallel()
-	c := schema.NewTimestampConstraint()
+	c := schematest.Constraint(t, "Timestamp")
 	for _, row := range []struct {
 		name     string
 		val      time.Time
@@ -209,7 +211,7 @@ func TestCheck_ATimeIsStoredAsItsRenderedTextIs(t *testing.T) {
 // adds the rendering. The stored text is built on the stack.
 func TestCheck_TextInItsStoredFormAllocatesWhatOneReadDoes(t *testing.T) {
 	raceskip.Skip(t)
-	c := schema.NewTimestampConstraint()
+	c := schematest.Constraint(t, "Timestamp")
 	for _, text := range []string{
 		"2024-01-02T03:04:05.12Z",
 		"2024-01-02T03:04:05.12+05:30",

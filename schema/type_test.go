@@ -31,8 +31,8 @@ func TestType_Seal_PreventsMutation(t *testing.T) {
 		{"SetPrimaryKeys", func(s schema.Type) { schema.TestSetTypePrimaryKeys(s, []schema.Property{}) }},
 		{"SetAllAssociations", func(s schema.Type) { schema.TestSetTypeAllAssociations(s, []schema.Relation{}) }},
 		{"SetAllCompositions", func(s schema.Type) { schema.TestSetTypeAllCompositions(s, []schema.Relation{}) }},
-		{"SetSuperTypes", func(s schema.Type) { schema.TestSetTypeSuperTypes(s, []schema.ResolvedTypeRef{}) }},
-		{"SetSubTypes", func(s schema.Type) { schema.TestSetTypeSubTypes(s, []schema.ResolvedTypeRef{}) }},
+		{"SetSuperTypes", func(s schema.Type) { schema.TestSetTypeSuperTypes(s, []schema.TypeID{}) }},
+		{"SetSubTypes", func(s schema.Type) { schema.TestSetTypeSubTypes(s, []schema.TypeID{}) }},
 		{"SetSuppressedAnnotations", func(s schema.Type) { schema.TestSetTypeSuppressedAnnotations(s, nil) }},
 	}
 
@@ -58,8 +58,8 @@ func TestType_SettersWorkBeforeSeal(t *testing.T) {
 	schema.TestSetTypePrimaryKeys(typ, []schema.Property{})
 	schema.TestSetTypeAllAssociations(typ, []schema.Relation{})
 	schema.TestSetTypeAllCompositions(typ, []schema.Relation{})
-	schema.TestSetTypeSuperTypes(typ, []schema.ResolvedTypeRef{})
-	schema.TestSetTypeSubTypes(typ, []schema.ResolvedTypeRef{})
+	schema.TestSetTypeSuperTypes(typ, []schema.TypeID{})
+	schema.TestSetTypeSubTypes(typ, []schema.TypeID{})
 
 	// Verify no panic occurred by reaching this point
 }
@@ -153,7 +153,7 @@ func TestType_ID(t *testing.T) {
 
 func TestType_Property_Found(t *testing.T) {
 	typ := schema.TestNewType("Person", location.SourceID{}, location.Span{}, "", false, false)
-	prop := schema.TestNewProperty("name", location.Span{}, "", schema.NewStringConstraint(), schema.DataTypeRef{}, false, false, schema.DeclaringScope{}, nil)
+	prop := schema.TestNewProperty("name", location.Span{}, "", schema.TestNewStringConstraint(), schema.DataTypeRef{}, false, false, schema.DeclaringScope{}, nil)
 	schema.TestSetTypeProperties(typ, []schema.Property{prop})
 
 	result, ok := typ.Property("name")
@@ -268,7 +268,7 @@ func TestType_Relation_Found(t *testing.T) {
 		schema.RelationAssociation,
 		"WORKS_AT",
 		"worksAt",
-		schema.NewTypeRef("", "Company", location.Span{}),
+		schema.TestNewTypeRef("", "Company", location.Span{}),
 		schema.TypeID{},
 		location.Span{},
 		"",
@@ -302,7 +302,7 @@ func TestType_Associations_Iterator(t *testing.T) {
 		schema.RelationAssociation,
 		"WORKS_AT",
 		"worksAt",
-		schema.NewTypeRef("", "Company", location.Span{}),
+		schema.TestNewTypeRef("", "Company", location.Span{}),
 		schema.TypeID{},
 		location.Span{},
 		"",
@@ -328,7 +328,7 @@ func TestType_Associations(t *testing.T) {
 		schema.RelationAssociation,
 		"WORKS_AT",
 		"worksAt",
-		schema.NewTypeRef("", "Company", location.Span{}),
+		schema.TestNewTypeRef("", "Company", location.Span{}),
 		schema.TypeID{},
 		location.Span{},
 		"",
@@ -350,7 +350,7 @@ func TestType_AllAssociations_Iterator(t *testing.T) {
 		schema.RelationAssociation,
 		"WORKS_AT",
 		"worksAt",
-		schema.NewTypeRef("", "Company", location.Span{}),
+		schema.TestNewTypeRef("", "Company", location.Span{}),
 		schema.TypeID{},
 		location.Span{},
 		"",
@@ -375,7 +375,7 @@ func TestType_AllAssociations(t *testing.T) {
 		schema.RelationAssociation,
 		"WORKS_AT",
 		"worksAt",
-		schema.NewTypeRef("", "Company", location.Span{}),
+		schema.TestNewTypeRef("", "Company", location.Span{}),
 		schema.TypeID{},
 		location.Span{},
 		"",
@@ -397,7 +397,7 @@ func TestType_Compositions_Iterator(t *testing.T) {
 		schema.RelationComposition,
 		"HAS_ADDRESS",
 		"addresses",
-		schema.NewTypeRef("", "Address", location.Span{}),
+		schema.TestNewTypeRef("", "Address", location.Span{}),
 		schema.TypeID{},
 		location.Span{},
 		"",
@@ -423,7 +423,7 @@ func TestType_Compositions(t *testing.T) {
 		schema.RelationComposition,
 		"HAS_ADDRESS",
 		"addresses",
-		schema.NewTypeRef("", "Address", location.Span{}),
+		schema.TestNewTypeRef("", "Address", location.Span{}),
 		schema.TypeID{},
 		location.Span{},
 		"",
@@ -445,7 +445,7 @@ func TestType_AllCompositions_Iterator(t *testing.T) {
 		schema.RelationComposition,
 		"HAS_ADDRESS",
 		"addresses",
-		schema.NewTypeRef("", "Address", location.Span{}),
+		schema.TestNewTypeRef("", "Address", location.Span{}),
 		schema.TypeID{},
 		location.Span{},
 		"",
@@ -470,7 +470,7 @@ func TestType_AllCompositions(t *testing.T) {
 		schema.RelationComposition,
 		"HAS_ADDRESS",
 		"addresses",
-		schema.NewTypeRef("", "Address", location.Span{}),
+		schema.TestNewTypeRef("", "Address", location.Span{}),
 		schema.TypeID{},
 		location.Span{},
 		"",
@@ -488,7 +488,7 @@ func TestType_AllCompositions(t *testing.T) {
 
 func TestType_Invariants_Iterator(t *testing.T) {
 	typ := schema.TestNewType("Person", location.SourceID{}, location.Span{}, "", false, false)
-	inv := schema.TestNewInvariant("age > 0", nil, location.Span{}, "Age must be positive")
+	inv := schema.TestNewInvariant("age > 0", "age > 0", nil, location.Span{}, "Age must be positive")
 	schema.TestSetTypeInvariants(typ, []schema.Invariant{inv})
 
 	count := 0
@@ -501,7 +501,7 @@ func TestType_Invariants_Iterator(t *testing.T) {
 
 func TestType_Invariants(t *testing.T) {
 	typ := schema.TestNewType("Person", location.SourceID{}, location.Span{}, "", false, false)
-	inv := schema.TestNewInvariant("age > 0", nil, location.Span{}, "")
+	inv := schema.TestNewInvariant("age > 0", "age > 0", nil, location.Span{}, "")
 	schema.TestSetTypeInvariants(typ, []schema.Invariant{inv})
 
 	result := slices.Collect(typ.Invariants())
@@ -511,7 +511,7 @@ func TestType_Invariants(t *testing.T) {
 
 func TestType_Inherits_Iterator(t *testing.T) {
 	typ := schema.TestNewType("Employee", location.SourceID{}, location.Span{}, "", false, false)
-	parentRef := schema.NewTypeRef("", "Person", location.Span{})
+	parentRef := schema.TestNewTypeRef("", "Person", location.Span{})
 	schema.TestSetTypeInherits(typ, []schema.TypeRef{parentRef})
 
 	count := 0
@@ -524,7 +524,7 @@ func TestType_Inherits_Iterator(t *testing.T) {
 
 func TestType_Inherits(t *testing.T) {
 	typ := schema.TestNewType("Employee", location.SourceID{}, location.Span{}, "", false, false)
-	parentRef := schema.NewTypeRef("", "Person", location.Span{})
+	parentRef := schema.TestNewTypeRef("", "Person", location.Span{})
 	schema.TestSetTypeInherits(typ, []schema.TypeRef{parentRef})
 
 	result := slices.Collect(typ.Inherits())
@@ -536,11 +536,8 @@ func TestType_Inherits(t *testing.T) {
 func TestType_SuperTypes_Iterator(t *testing.T) {
 	typ := schema.TestNewType("Employee", location.SourceID{}, location.Span{}, "", false, false)
 	sourceID := sourcetest.ID("test://schema")
-	resolved := schema.NewResolvedTypeRef(
-		schema.NewTypeRef("", "Person", location.Span{}),
-		schema.NewTypeID(sourceID, "Person"),
-	)
-	schema.TestSetTypeSuperTypes(typ, []schema.ResolvedTypeRef{resolved})
+	resolved := schema.NewTypeID(sourceID, "Person")
+	schema.TestSetTypeSuperTypes(typ, []schema.TypeID{resolved})
 
 	count := 0
 	for ref := range typ.SuperTypes() {
@@ -553,11 +550,8 @@ func TestType_SuperTypes_Iterator(t *testing.T) {
 func TestType_SuperTypes(t *testing.T) {
 	typ := schema.TestNewType("Employee", location.SourceID{}, location.Span{}, "", false, false)
 	sourceID := sourcetest.ID("test://schema")
-	resolved := schema.NewResolvedTypeRef(
-		schema.NewTypeRef("", "Person", location.Span{}),
-		schema.NewTypeID(sourceID, "Person"),
-	)
-	schema.TestSetTypeSuperTypes(typ, []schema.ResolvedTypeRef{resolved})
+	resolved := schema.NewTypeID(sourceID, "Person")
+	schema.TestSetTypeSuperTypes(typ, []schema.TypeID{resolved})
 
 	result := slices.Collect(typ.SuperTypes())
 
@@ -567,11 +561,8 @@ func TestType_SuperTypes(t *testing.T) {
 func TestType_SubTypes_Iterator(t *testing.T) {
 	typ := schema.TestNewType("Person", location.SourceID{}, location.Span{}, "", false, false)
 	sourceID := sourcetest.ID("test://schema")
-	resolved := schema.NewResolvedTypeRef(
-		schema.NewTypeRef("", "Employee", location.Span{}),
-		schema.NewTypeID(sourceID, "Employee"),
-	)
-	schema.TestSetTypeSubTypes(typ, []schema.ResolvedTypeRef{resolved})
+	resolved := schema.NewTypeID(sourceID, "Employee")
+	schema.TestSetTypeSubTypes(typ, []schema.TypeID{resolved})
 
 	count := 0
 	for ref := range typ.SubTypes() {
@@ -584,29 +575,12 @@ func TestType_SubTypes_Iterator(t *testing.T) {
 func TestType_SubTypes(t *testing.T) {
 	typ := schema.TestNewType("Person", location.SourceID{}, location.Span{}, "", false, false)
 	sourceID := sourcetest.ID("test://schema")
-	resolved := schema.NewResolvedTypeRef(
-		schema.NewTypeRef("", "Employee", location.Span{}),
-		schema.NewTypeID(sourceID, "Employee"),
-	)
-	schema.TestSetTypeSubTypes(typ, []schema.ResolvedTypeRef{resolved})
+	resolved := schema.NewTypeID(sourceID, "Employee")
+	schema.TestSetTypeSubTypes(typ, []schema.TypeID{resolved})
 
 	result := slices.Collect(typ.SubTypes())
 
 	assert.Len(t, result, 1)
-}
-
-func TestType_IsSubTypeOf(t *testing.T) {
-	sourceID := sourcetest.ID("test://schema")
-	employeeType := schema.TestNewType("Employee", sourceID, location.Span{}, "", false, false)
-	personID := schema.NewTypeID(sourceID, "Person")
-	resolved := schema.NewResolvedTypeRef(
-		schema.NewTypeRef("", "Person", location.Span{}),
-		personID,
-	)
-	schema.TestSetTypeSuperTypes(employeeType, []schema.ResolvedTypeRef{resolved})
-
-	assert.True(t, employeeType.IsSubTypeOf(personID))
-	assert.False(t, employeeType.IsSubTypeOf(schema.NewTypeID(sourceID, "Unknown")))
 }
 
 func TestType_IsSealed(t *testing.T) {

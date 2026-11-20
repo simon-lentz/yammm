@@ -61,7 +61,7 @@ func TestSchema_EveryLookupNamesOneRecord(t *testing.T) {
 		if !ok {
 			t.Fatalf("no property %s", name)
 		}
-		dt, ok := s.ResolveDataType(prop.DataTypeRef())
+		dt, ok := s.ResolveDataType(prop.DataTypeRef().String())
 		if !ok || dt.Name() != "Word" {
 			t.Errorf("%s: DataTypeRef resolves to %v, %v, want Word", name, dt, ok)
 		}
@@ -140,7 +140,7 @@ type Doc {
 		if !ok {
 			t.Fatalf("no property %s", name)
 		}
-		if dt, ok := s.ResolveDataType(prop.DataTypeRef()); !ok || dt.Name() != "Code" {
+		if dt, ok := s.ResolveDataType(prop.DataTypeRef().String()); !ok || dt.Name() != "Code" {
 			t.Errorf("%s: DataTypeRef resolves to %v, %v, want Code", name, dt, ok)
 		}
 	}

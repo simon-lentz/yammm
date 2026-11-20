@@ -33,8 +33,8 @@ func TestSchemaParser_KeepsTheParsersRegexp(t *testing.T) {
 			t.Fatalf("constraint = %T; want a PatternConstraint", c)
 		}
 		want := node.PatternRegexp()
-		if want == nil || held.compiled != want || held.invalid != "" {
-			t.Fatalf("%s holds %p and the fault %q; want the parser's regexp %p and none", held, held.compiled, held.invalid, want)
+		if want == nil || held.compiled != want {
+			t.Fatalf("%s holds %p; want the parser's regexp %p", held, held.compiled, want)
 		}
 		if held.pattern != want.String() {
 			t.Errorf("%s: source = %q; want %q", held, held.pattern, want)

@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/simon-lentz/yammm/diag"
+	"github.com/simon-lentz/yammm/internal/source"
 	"github.com/simon-lentz/yammm/internal/yammmtest"
 	"github.com/simon-lentz/yammm/schema"
 )
@@ -247,7 +248,7 @@ func TestLoadSources_APathOfSeparatorsBindsNoSourceKey(t *testing.T) {
 func TestSyntheticImportKey_TrailingSeparatorsAreReadPast(t *testing.T) {
 	t.Parallel()
 	for _, importPath := range []string{"sub/b/", "sub/b//", "sub/b.yammm/", "./sub/b/"} {
-		key, err := schema.SyntheticImportKey("m.yammm", importPath)
+		key, err := source.SyntheticImportKey("m.yammm", importPath)
 		if err != nil {
 			t.Errorf("SyntheticImportKey(%q) = %v", importPath, err)
 			continue
@@ -293,7 +294,7 @@ func TestSyntheticImportPath_APathNamingNoFileIsRefused(t *testing.T) {
 	for _, importPath := range []string{"", "./", "../", ".", "..", "./a/..", "/", "//"} {
 		t.Run(importPath, func(t *testing.T) {
 			t.Parallel()
-			if key, err := schema.SyntheticImportKey("sub/m.yammm", importPath); err == nil {
+			if key, err := source.SyntheticImportKey("sub/m.yammm", importPath); err == nil {
 				t.Errorf("SyntheticImportKey = %q, want a refusal", key)
 			}
 			sources := map[string][]byte{

@@ -588,7 +588,7 @@ func (g *generator) emitTypeSection(t schema.Type) {
 func inheritedOwners[T comparable](g *generator, t schema.Type, own func(schema.Type) iter.Seq[T]) map[T]string {
 	owners := make(map[T]string)
 	for super := range t.SuperTypes() {
-		se, ok := g.types[super.ID()]
+		se, ok := g.types[super]
 		if !ok {
 			continue
 		}

@@ -230,7 +230,7 @@ func sbUnderCause(a, b string) (string, bool) {
 func sbJudged(res diag.Result) int {
 	n := 0
 	for issue := range res.Issues() {
-		if issue.Severity().IsFailure() && issue.Code() != diag.W_SNAPSHOT_UNRESOLVED_REQUIRED {
+		if (issue.Severity() == diag.Fatal || issue.Severity() == diag.Error) && issue.Code() != diag.W_SNAPSHOT_UNRESOLVED_REQUIRED {
 			n++
 		}
 	}

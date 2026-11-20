@@ -225,7 +225,7 @@ func loadClaimingSchema(t *testing.T, s schema.Schema, snap graph.Snapshot) diag
 		t.Fatalf("schema_hash appears %d times", n)
 	}
 	data = schemaHashField.ReplaceAll(data, fmt.Appendf(nil, `"schema_hash":%q`, schema.StructuralHash(s)))
-	_, res := snapshot.Load(t.Context(), data, s, snapshot.WithIntegrityCheck(false))
+	_, res := snapshot.Unmarshal(t.Context(), data, s, snapshot.WithIntegrityCheck(false))
 	if res.HasCode(diag.E_SNAPSHOT_INCOMPATIBLE_SCHEMA) || res.HasCode(diag.E_SNAPSHOT_INTEGRITY_MISMATCH) {
 		t.Fatalf("Load refused the header, not the contents: %s", res)
 	}

@@ -42,7 +42,7 @@ func TestAdd_InstanceOfAnotherLoadPanics(t *testing.T) {
 			g := graph.New(s)
 			assertAnotherLoadPanic(t, func() { g.Add(t.Context(), inst) })
 			assertAnotherLoadPanic(t, func() { _, _ = g.AddOrMerge(t.Context(), inst) })
-			if n := len(slices.Collect(g.Snapshot().AllInstances())); n != 0 {
+			if n := len(slices.Collect(g.Snapshot().Instances())); n != 0 {
 				t.Errorf("the graph holds %d instances after the panic, want 0", n)
 			}
 		})
@@ -142,7 +142,7 @@ func TestAdd_TakesAValidatorOfAnyMemberOfOneLoad(t *testing.T) {
 			if r := g.Add(t.Context(), inst); !r.OK() {
 				t.Fatalf("Add: %s", r)
 			}
-			if n := len(slices.Collect(g.Snapshot().AllInstances())); n != 1 {
+			if n := len(slices.Collect(g.Snapshot().Instances())); n != 1 {
 				t.Errorf("the graph holds %d roots, want 1", n)
 			}
 		})

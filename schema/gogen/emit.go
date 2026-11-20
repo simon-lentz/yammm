@@ -165,11 +165,7 @@ func (g *generator) dataTypeBase(sc schema.Schema, dt schema.DataType) (string, 
 // dataTypeTarget returns the DataType ac names, resolved in sc, the schema
 // whose declaration holds the reference.
 func dataTypeTarget(sc schema.Schema, ac schema.AliasConstraint) (schema.DataType, error) {
-	qualifier, name, qualified := strings.Cut(ac.DataTypeName(), ".")
-	if !qualified {
-		qualifier, name = "", qualifier
-	}
-	target, ok := sc.ResolveDataType(schema.NewDataTypeRef(qualifier, name, location.Span{}))
+	target, ok := sc.ResolveDataType(ac.DataTypeName())
 	if !ok {
 		return schema.DataType{}, fmt.Errorf("gogen: reference to unresolved datatype %q", ac.DataTypeName())
 	}
@@ -460,7 +456,7 @@ func (g *generator) embeddedKeys(ids []location.SourceID) (map[location.SourceID
 		sch := queue[0]
 		for imp := range sch.Imports() {
 			target := imp.ResolvedSourceID()
-			ik, err := schema.SyntheticImportKey(keys[sch.SourceID()], imp.Path())
+			ik, err := source.SyntheticImportKey(keys[sch.SourceID()], imp.Path())
 			if err != nil {
 				return nil, fmt.Errorf("gogen: import %q in %q: %w", imp.Path(), sch.SourceID(), err)
 			}

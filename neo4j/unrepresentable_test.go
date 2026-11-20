@@ -5,6 +5,8 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/simon-lentz/yammm/internal/schematest"
+
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/schema"
@@ -36,19 +38,19 @@ func TestErrUnrepresentable_MarksEveryRefusalOfAValue(t *testing.T) {
 		}
 	}
 
-	nested := schema.NewListConstraint(schema.NewListConstraint(schema.NewIntegerConstraint()))
+	nested := schematest.Constraint(t, "List<List<Integer>>")
 	for name, err := range map[string]error{
-		"a value, an Integer holding a float": second(coerceValue(schema.NewIntegerConstraint(), 2.5)),
+		"a value, an Integer holding a float": second(coerceValue(schematest.Constraint(t, "Integer"), 2.5)),
 		"a value, a nested collection":        second(coerceValue(nested, [][]int64{{1}})),
-		"a value, a map":                      second(coerceValue(schema.NewStringConstraint(), map[string]string{"a": "b"})),
+		"a value, a map":                      second(coerceValue(schematest.Constraint(t, "String"), map[string]string{"a": "b"})),
 		"CoerceParams, a Date that does not parse": second(CoerceParams(
-			map[string]any{"d": "x"}, ParamTypes{"d": schema.NewDateConstraint()})),
+			map[string]any{"d": "x"}, ParamTypes{"d": schematest.Constraint(t, "Date")})),
 		"CoerceParams, a map at a declared key": second(CoerceParams(
-			map[string]any{"p": map[string]any{"x": 1}}, ParamTypes{"p": schema.NewStringConstraint()})),
+			map[string]any{"p": map[string]any{"x": 1}}, ParamTypes{"p": schematest.Constraint(t, "String")})),
 		"CoerceParams, rows at a declared key": second(CoerceParams(
-			map[string]any{"rows": []map[string]any{{"x": 1}}}, ParamTypes{"rows": schema.NewStringConstraint()})),
+			map[string]any{"rows": []map[string]any{{"x": 1}}}, ParamTypes{"rows": schematest.Constraint(t, "String")})),
 		"a primary key its constraint refuses": second(extractKeyProps(immutable.WrapProperties(map[string]any{"id": "x"}),
-			&nodeShape{label: "Holder", primaryKeys: []string{"id"}, keyConstraints: map[string]schema.Constraint{"id": schema.NewDateConstraint()}})),
+			&nodeShape{label: "Holder", primaryKeys: []string{"id"}, keyConstraints: map[string]schema.Constraint{"id": schematest.Constraint(t, "Date")}})),
 	} {
 		if !errors.Is(err, ErrUnrepresentable) {
 			t.Errorf("%s: error = %v; want ErrUnrepresentable", name, err)

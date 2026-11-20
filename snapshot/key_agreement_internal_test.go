@@ -4,13 +4,14 @@ import (
 	"encoding/json"
 	"testing"
 
+	"github.com/simon-lentz/yammm/internal/schematest"
 	"github.com/simon-lentz/yammm/schema"
 )
 
 // A string, int64 or bool pair is decided without rendering either side, so the
 // check every keyed instance runs allocates nothing for the common key kinds.
 func TestWireComponentAgrees_DecidesAStringIntOrBoolPairWithoutAllocating(t *testing.T) {
-	str := schema.NewStringConstraint()
+	str := schematest.Constraint(t, "String")
 	for _, c := range []struct {
 		name      string
 		x, y      any

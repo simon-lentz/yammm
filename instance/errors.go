@@ -4,66 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"runtime/debug"
-
-	"github.com/simon-lentz/yammm/diag"
-)
-
-// Validation failure codes, aliased to the canonical ones in the diag package.
-// A caller matches on these rather than on message text.
-var (
-	// ErrTypeNotFound indicates the type name was not found in the schema.
-	ErrTypeNotFound = diag.E_INSTANCE_TYPE_NOT_FOUND
-
-	// ErrAbstractType indicates an attempt to instantiate an abstract type.
-	ErrAbstractType = diag.E_ABSTRACT_TYPE
-
-	// ErrPartTypeDirect indicates a part type was instantiated outside composition.
-	ErrPartTypeDirect = diag.E_PART_TYPE_DIRECT
-
-	// ErrMissingRequired indicates a required property was absent.
-	ErrMissingRequired = diag.E_MISSING_REQUIRED
-
-	// ErrUnknownField indicates an undeclared property was present.
-	ErrUnknownField = diag.E_UNKNOWN_FIELD
-
-	// ErrTypeMismatch indicates a property value failed type validation.
-	ErrTypeMismatch = diag.E_TYPE_MISMATCH
-
-	// ErrConstraintFail indicates a property constraint was not satisfied.
-	ErrConstraintFail = diag.E_CONSTRAINT_FAIL
-
-	// ErrInvariantFail indicates a type invariant expression failed.
-	ErrInvariantFail = diag.E_INVARIANT_FAIL
-
-	// ErrEdgeShapeMismatch indicates an edge object has an invalid shape.
-	ErrEdgeShapeMismatch = diag.E_EDGE_SHAPE_MISMATCH
-
-	// ErrMissingFKTarget indicates a _target_* field is missing from an edge.
-	ErrMissingFKTarget = diag.E_MISSING_FK_TARGET
-
-	// ErrPartialCompositeFK indicates an incomplete composite foreign key.
-	ErrPartialCompositeFK = diag.E_PARTIAL_COMPOSITE_FK
-
-	// ErrUnknownEdgeField indicates an unknown field in an edge object.
-	ErrUnknownEdgeField = diag.E_UNKNOWN_EDGE_FIELD
-
-	// ErrUnresolvedRequiredComposition indicates a required composition is absent/empty.
-	ErrUnresolvedRequiredComposition = diag.E_UNRESOLVED_REQUIRED_COMPOSITION
-
-	// ErrCompositionDepthExceeded indicates composed nesting deeper than [MaxComposedDepth].
-	ErrCompositionDepthExceeded = diag.E_COMPOSITION_DEPTH_EXCEEDED
-
-	// ErrDuplicateComposedPK indicates duplicate primary keys in composed children.
-	ErrDuplicateComposedPK = diag.E_DUPLICATE_COMPOSED_PK
-
-	// ErrEvalError indicates an error during expression evaluation.
-	ErrEvalError = diag.E_EVAL_ERROR
-
-	// ErrCaseFoldCollision indicates two or more input keys fold onto one member
-	// no key names exactly: a property, a relation's field, an edge property or a
-	// foreign-key field. It occurs only without strict property names, for keys
-	// that differ only in case (e.g., "Name" and "NAME").
-	ErrCaseFoldCollision = diag.E_CASE_FOLD_COLLISION
 )
 
 // Internal error sentinels for programmatic detection via errors.Is().
@@ -74,18 +14,13 @@ var (
 	ErrInternalFailure = errors.New("instance: internal validation failure")
 )
 
-// ErrRefusedValue reports an instance the validator refused because it holds
-// a [Refused] value. The value's producer reported that issue, so the
-// validator's result holds none for it. A caller that must return an error for
-// such an instance returns this one.
-var ErrRefusedValue = errors.New("instance: the instance holds a refused value")
-
-// InternalErrorKind classifies internal errors for programmatic handling.
+// InternalErrorKind classifies internal errors for programmatic handling. The
+// zero InternalErrorKind names no kind.
 type InternalErrorKind int
 
 const (
 	// KindInvariantPanic indicates a panic during invariant evaluation.
-	KindInvariantPanic InternalErrorKind = iota
+	KindInvariantPanic InternalErrorKind = iota + 1
 	// KindConstraintPanic indicates a panic during constraint checking.
 	KindConstraintPanic
 )

@@ -22,7 +22,7 @@ func TestCollector_MergeFunc_TransformsEachIssueAndCarriesTruncation(t *testing.
 		t.Fatalf("the source result is not truncated as expected: %s", res)
 	}
 
-	batch := diag.NewCollectorUnlimited()
+	batch := diag.NewCollector(diag.NoLimit)
 	batch.MergeFunc(res, func(is diag.Issue) diag.Issue {
 		return diag.FromIssue(is).WithDetail(diag.DetailKeyInstanceIndex, "7").Build()
 	})
@@ -45,9 +45,9 @@ func TestCollector_MergeFunc_TransformsEachIssueAndCarriesTruncation(t *testing.
 // receiver — the collector it is merging into — must not deadlock. Every
 // transformed issue is built into a local slice first and stored after.
 func TestCollector_MergeFunc_AppliesTheTransformOutsideTheLock(t *testing.T) {
-	src := diag.NewCollectorUnlimited()
+	src := diag.NewCollector(diag.NoLimit)
 	src.Collect(diag.NewIssue(diag.Error, diag.E_UNKNOWN_FIELD, "a").Build())
-	batch := diag.NewCollectorUnlimited()
+	batch := diag.NewCollector(diag.NoLimit)
 
 	done := make(chan struct{})
 	var wg sync.WaitGroup
@@ -74,14 +74,14 @@ func TestCollector_MergeFunc_AppliesTheTransformOutsideTheLock(t *testing.T) {
 // them — the builder has no setter for either — and doing so panics, naming
 // MergeFunc.
 func TestCollector_MergeFunc_PanicsWhenTheTransformChangesSeverityOrCode(t *testing.T) {
-	src := diag.NewCollectorUnlimited()
+	src := diag.NewCollector(diag.NoLimit)
 	src.Collect(diag.NewIssue(diag.Error, diag.E_UNKNOWN_FIELD, "a").Build())
 	for name, fn := range map[string]func(diag.Issue) diag.Issue{
 		"severity": func(diag.Issue) diag.Issue { return diag.NewIssue(diag.Warning, diag.E_UNKNOWN_FIELD, "a").Build() },
 		"code":     func(diag.Issue) diag.Issue { return diag.NewIssue(diag.Error, diag.E_TYPE_MISMATCH, "a").Build() },
 	} {
 		t.Run(name, func(t *testing.T) {
-			batch := diag.NewCollectorUnlimited()
+			batch := diag.NewCollector(diag.NoLimit)
 			defer func() {
 				r := recover()
 				if r == nil {

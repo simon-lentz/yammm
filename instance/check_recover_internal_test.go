@@ -8,10 +8,9 @@ import (
 )
 
 // TestCheckValueRecovering_RecoversAPanicIntoAnInternalError pins the recovery
-// the validator and CheckValue share. CheckValue judges a constraint first, so
-// no constraint it passes on makes the checker panic; the lever is a List with
-// no element handed to the shared recovery directly, whose element check
-// dereferences it.
+// the validator runs the checker under. A loaded schema holds no constraint
+// that makes the checker panic; the lever is a List with no element handed to
+// the recovery directly, whose element check dereferences it.
 func TestCheckValueRecovering_RecoversAPanicIntoAnInternalError(t *testing.T) {
 	t.Parallel()
 	for name, run := range map[string]func() error{

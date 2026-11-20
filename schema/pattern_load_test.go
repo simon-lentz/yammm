@@ -67,9 +67,9 @@ func TestLoad_HoldsThePatternItsSourceStates(t *testing.T) {
 	record := func(name string, c schema.Constraint) {
 		p := patternOf(t, c)
 		compiled := regexp.MustCompile(p.Pattern())
-		built := schema.NewPatternConstraint(compiled)
+		built := schema.TestParsedPatternConstraint(compiled)
 		fmt.Fprintf(&b, "%s: %s as %s\n", name, c, p)
-		fmt.Fprintf(&b, "\tequal to the constructor's: %t, %t\n", p.Equal(built), built.Equal(p))
+		fmt.Fprintf(&b, "\tequal to the constructor's: %t, %t\n", schema.TestConstraintEqual(p, built), schema.TestConstraintEqual(built, p))
 		fmt.Fprintf(&b, "\tCheckConstraint: %v\n", schema.CheckConstraint(c))
 		re := expr.PatternRegexp(p)
 		if re.String() != p.Pattern() {

@@ -109,7 +109,7 @@ func TestContextualErrorLogValue_CarriesTruncation(t *testing.T) {
 
 	t.Run("not truncated", func(t *testing.T) {
 		t.Parallel()
-		c := NewCollectorUnlimited()
+		c := NewCollector(NoLimit)
 		c.Collect(NewIssue(Error, E_INTERNAL, "only").Build())
 
 		attrs := attrsOf(t, (&ContextualError{Result: c.Result(), Tag: "validation"}).LogValue())

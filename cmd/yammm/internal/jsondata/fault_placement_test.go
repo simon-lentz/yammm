@@ -262,10 +262,10 @@ func TestParse_ReadStartSkipsEveryBlank(t *testing.T) {
 		}
 	}
 	parsed, result := parseForProvenance(t, id, "{\"A\": [{},\r\n{}]}")
-	if result.HasErrors() || len(parsed["A"]) != 2 {
+	if result.HasErrors() || len(parsed["A"].Elements) != 2 {
 		t.Fatalf("parse:%s", describe(result))
 	}
-	if got := parsed["A"][1].Provenance.Span().Start.Offset; got != 12 {
+	if got := parsed["A"].Elements[1].Provenance.Span().Start.Offset; got != 12 {
 		t.Errorf("the second instance starts at byte %d, want 12", got)
 	}
 }

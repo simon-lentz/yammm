@@ -80,14 +80,6 @@ func NewCollector(limit int) *Collector {
 	}
 }
 
-// NewCollectorUnlimited creates a collector with no issue limit.
-//
-// This is equivalent to NewCollector(NoLimit) but provides clearer intent
-// at call sites where unlimited collection is deliberate.
-func NewCollectorUnlimited() *Collector {
-	return NewCollector(NoLimit)
-}
-
 // Collect adds an issue to the collector.
 //
 // This method is thread-safe. Once the limit is reached, the issue takes the
@@ -188,8 +180,8 @@ func (c *Collector) MergeFunc(res Result, fn func(Issue) Issue) {
 // and whether it is kept, and fn builds each kept issue at that severity. The
 // counts and truncation facts are derived from res's per-code counts through
 // retag, so they stay exact when res was truncated, and the survivors are stored
-// in arrival order. It panics when fn's issue differs from the declaration in
-// severity or code.
+// in arrival order. It panics when retag declares a severity outside Fatal to
+// Hint for a kept code, or fn's issue differs from the declaration.
 func (c *Collector) MergeRetag(res Result, retag func(Severity, Code) (Severity, bool), fn func(Issue) Issue) {
 	var counts SeverityCounts
 	var codes codeCounts
@@ -199,6 +191,11 @@ func (c *Collector) MergeRetag(res Result, retag func(Severity, Code) (Severity,
 			to, keep := retag(sev, code)
 			if !keep {
 				continue
+			}
+			// A code res only counted reaches no issue's checks, so its
+			// severity is checked here.
+			if to < Fatal || to > Hint {
+				panic(fmt.Sprintf("diag.Collector.MergeRetag: retag declared invalid severity %d for %s", to, code))
 			}
 			counts.addN(to, n)
 			codes.addN(to, code, n)
@@ -337,7 +334,7 @@ func (c *Collector) storeLocked(issue Issue) {
 // reused in place. Caller must hold c.mu.
 func (c *Collector) evictionSlotLocked(sev Severity) (int, bool) {
 	victim, ok := c.storedCounts.leastSevere()
-	if !ok || !sev.IsMoreSevereThan(victim) {
+	if !ok || !sev.isMoreSevereThan(victim) {
 		return 0, false
 	}
 	idx, found := 0, false

@@ -1,7 +1,10 @@
 package neo4j
 
 import (
+	"fmt"
 	"testing"
+
+	"github.com/simon-lentz/yammm/internal/schematest"
 
 	"github.com/simon-lentz/yammm/internal/raceskip"
 	"github.com/simon-lentz/yammm/internal/value"
@@ -71,7 +74,7 @@ func TestCoerceParams_JudgingALoadedSchemasTypesAllocatesNothing(t *testing.T) {
 // never judged for it.
 func TestCoerceValue_ATypedVectorCostsOnlyItsForm(t *testing.T) {
 	raceskip.Skip(t)
-	c, raw := schema.NewVectorConstraint(3), any([]float64{1, 2, 3})
+	c, raw := schematest.Constraint(t, "Vector[3]"), any([]float64{1, 2, 3})
 	form := testing.AllocsPerRun(100, func() { _ = value.Absent(raw) })
 	if allocs := testing.AllocsPerRun(100, func() {
 		if _, err := coerceValue(c, raw); err != nil {
@@ -86,7 +89,7 @@ func TestCoerceValue_ATypedVectorCostsOnlyItsForm(t *testing.T) {
 // costs no more than reading its form.
 func TestCoerceValue_AStoredUUIDCostsNoCopy(t *testing.T) {
 	raceskip.Skip(t)
-	c, raw := schema.NewUUIDConstraint(), any("12345678-1234-1234-1234-123456789abc")
+	c, raw := schematest.Constraint(t, "UUID"), any("12345678-1234-1234-1234-123456789abc")
 	form := testing.AllocsPerRun(100, func() { _ = value.Absent(raw) })
 	if allocs := testing.AllocsPerRun(100, func() {
 		if _, err := coerceValue(c, raw); err != nil {
@@ -102,7 +105,7 @@ func TestCoerceValue_AStoredUUIDCostsNoCopy(t *testing.T) {
 func TestCoerceParams_AFloat64VectorCostsNothingPerElement(t *testing.T) {
 	raceskip.Skip(t)
 	cost := func(n int) float64 {
-		types := ParamTypes{"v": schema.NewVectorConstraint(n)}
+		types := ParamTypes{"v": schematest.Constraint(t, fmt.Sprintf("Vector[%d]", n))}
 		params := map[string]any{"v": make([]float64, n)}
 		return testing.AllocsPerRun(100, func() {
 			if _, err := CoerceParams(params, types); err != nil {

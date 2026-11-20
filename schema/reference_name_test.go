@@ -61,31 +61,24 @@ var referenceSpellings = []struct {
 
 const referenceLibSource = "schema \"lib\"\n\ntype Zip = Pattern[\"^[0-9]{5}$\"]\n"
 
-// referencePositions holds each place a source writes a datatype reference: the
-// DSL text around the name, and the constraint that holds the same reference
-// where a Go caller can state one.
+// referencePositions holds each place a source writes a datatype reference, as
+// the DSL text around the name.
 var referencePositions = []struct {
 	name string
 	dsl  func(ref string) string
-	wrap func(c schema.Constraint) schema.Constraint
 }{
 	{
 		name: "a property",
 		dsl:  func(ref string) string { return "type Car {\n\tvin String primary\n\tx " + ref + "\n}\n" },
-		wrap: func(c schema.Constraint) schema.Constraint { return c },
 	},
 	{
 		name: "a List element",
 		dsl:  func(ref string) string { return "type Car {\n\tvin String primary\n\tx List<" + ref + ">\n}\n" },
-		wrap: func(c schema.Constraint) schema.Constraint { return schema.NewListConstraint(c) },
 	},
 	{
 		name: "a List element at depth two",
 		dsl: func(ref string) string {
 			return "type Car {\n\tvin String primary\n\tx List<List<" + ref + ">>[1, 3]\n}\n"
-		},
-		wrap: func(c schema.Constraint) schema.Constraint {
-			return schema.ListLenBetween(schema.NewListConstraint(c), 1, 3)
 		},
 	},
 	{
@@ -93,7 +86,6 @@ var referencePositions = []struct {
 		dsl: func(ref string) string {
 			return "type X = List<" + ref + ">\n\ntype Car {\n\tvin String primary\n}\n"
 		},
-		wrap: func(c schema.Constraint) schema.Constraint { return schema.NewListConstraint(c) },
 	},
 	{
 		name: "an edge property",
@@ -153,22 +145,14 @@ func statedReference(t *testing.T, s schema.Schema) string {
 	return held(p.Constraint())
 }
 
-// A datatype reference name is read alike by the DSL and CheckConstraint: what a
-// .yammm source cannot state, CheckConstraint refuses as a constraint fault.
-func TestReferenceName_CheckConstraintGivesTheDSLsAnswer(t *testing.T) {
+// Each reference spelling draws the DSL's recorded answer at every position a
+// source writes a reference.
+func TestReferenceName_TheDSLGivesTheRecordedAnswer(t *testing.T) {
 	for _, sp := range referenceSpellings {
 		for _, pos := range referencePositions {
 			t.Run(fmt.Sprintf("%q as %s", sp.name, pos.name), func(t *testing.T) {
 				if got := dslStates(t, sp.name, pos.dsl(sp.name)); got != sp.want {
-					t.Fatalf("the DSL answers %d for the nearest source; the table says %d", got, sp.want)
-				}
-				if pos.wrap == nil {
-					return
-				}
-				raw := pos.wrap(schema.NewAliasConstraint(sp.name, schema.NewStringConstraint()))
-				err := schema.CheckConstraint(raw)
-				if refused := sp.want == refNotAName; (err != nil) != refused {
-					t.Errorf("CheckConstraint = %v; want a refusal: %t", err, refused)
+					t.Errorf("the DSL answers %d for the nearest source; the table says %d", got, sp.want)
 				}
 			})
 		}
@@ -180,7 +164,7 @@ func TestReferenceName_CheckConstraintGivesTheDSLsAnswer(t *testing.T) {
 func TestReferenceName_TheZeroReferenceIsRefusedAsAnEmptyName(t *testing.T) {
 	for name, c := range map[string]schema.Constraint{
 		"the zero value": schema.AliasConstraint{},
-		"an empty name":  schema.NewAliasConstraint("", schema.NewStringConstraint()),
+		"an empty name":  schema.TestNewAliasConstraint("", schema.TestNewStringConstraint()),
 	} {
 		const want = `datatype reference "" is not one a .yammm source can write`
 		if err := schema.CheckConstraint(c); err == nil || !strings.Contains(err.Error(), want) {

@@ -128,7 +128,7 @@ func TestLoad_RevalidationMatrix(t *testing.T) {
 			data := revalDocument(t, s, revalThing(), tc.edit)
 
 			// Silent without the option.
-			_, plain := snapshot.Load(t.Context(), data, s)
+			_, plain := snapshot.Unmarshal(t.Context(), data, s)
 			if plain.HasErrors() {
 				t.Fatalf("plain Load refused the document: %s", plain.String())
 			}
@@ -137,7 +137,7 @@ func TestLoad_RevalidationMatrix(t *testing.T) {
 			}
 
 			// Reported under the option, still loading at Warning severity.
-			snap, res := snapshot.Load(t.Context(), data, s, snapshot.WithRevalidation(diag.Warning))
+			snap, res := snapshot.Unmarshal(t.Context(), data, s, snapshot.WithRevalidation(diag.Warning))
 			if res.HasErrors() || snap.IsZero() {
 				t.Fatalf("Warning-severity revalidation refused the load: %s", res.String())
 			}
@@ -146,7 +146,7 @@ func TestLoad_RevalidationMatrix(t *testing.T) {
 			}
 
 			// Error severity refuses the document.
-			snap, res = snapshot.Load(t.Context(), data, s, snapshot.WithRevalidation(diag.Error))
+			snap, res = snapshot.Unmarshal(t.Context(), data, s, snapshot.WithRevalidation(diag.Error))
 			if !snap.IsZero() || !res.HasErrors() {
 				t.Error("Error-severity revalidation returned a snapshot for a failing document")
 			}
@@ -194,7 +194,7 @@ func TestLoad_RevalidationCleanDataSilent(t *testing.T) {
 	s := revalLoadSchema(t)
 	data := revalCleanDocument(t, s)
 
-	snap, lres := snapshot.Load(t.Context(), data, s, snapshot.WithRevalidation(diag.Error))
+	snap, lres := snapshot.Unmarshal(t.Context(), data, s, snapshot.WithRevalidation(diag.Error))
 	if snap.IsZero() || lres.HasErrors() {
 		t.Fatalf("clean validator-built data failed revalidation: %s", lres.String())
 	}
@@ -246,7 +246,7 @@ func TestLoad_RevalidationReportsACancelledRowAtItsOwnSeverity(t *testing.T) {
 	sawRow := false
 	for after := 1; ; after++ {
 		ctx := &cancelAfterPolls{after: after}
-		snap, res := snapshot.Load(ctx, data, s, snapshot.WithRevalidation(diag.Warning))
+		snap, res := snapshot.Unmarshal(ctx, data, s, snapshot.WithRevalidation(diag.Warning))
 		if ctx.polled() < after {
 			if snap.IsZero() {
 				t.Fatalf("an uncancelled load failed: %s", res)
@@ -297,7 +297,7 @@ func TestLoad_RefusesAnEdgeUnderAnUndeclaredRelation(t *testing.T) {
 	if bytes.Equal(edited, data) {
 		t.Fatalf("no LINKS edge to rename in %s", data)
 	}
-	if _, lres := snapshot.Load(t.Context(), edited, s, snapshot.WithIntegrityCheck(false)); !lres.HasCode(diag.E_GRAPH_UNKNOWN_RELATION) {
+	if _, lres := snapshot.Unmarshal(t.Context(), edited, s, snapshot.WithIntegrityCheck(false)); !lres.HasCode(diag.E_GRAPH_UNKNOWN_RELATION) {
 		t.Errorf("Load did not refuse an edge under an undeclared relation: %s", lres)
 	}
 	if vres := snapshot.Verify(t.Context(), edited, s, snapshot.WithIntegrityCheck(false)); !vres.HasCode(diag.E_GRAPH_UNKNOWN_RELATION) {
@@ -315,12 +315,12 @@ func TestLoad_RevalidationUnresolvedRequired(t *testing.T) {
 	owned["owner"] = map[string]any{"_target_id": "missing"}
 	data := revalDocument(t, s, owned)
 
-	_, plain := snapshot.Load(t.Context(), data, s)
+	_, plain := snapshot.Unmarshal(t.Context(), data, s)
 	if plain.HasCode(diag.W_SNAPSHOT_UNRESOLVED_REQUIRED) {
 		t.Fatal("the unresolved-required warning fired without the option")
 	}
 
-	_, res := snapshot.Load(t.Context(), data, s, snapshot.WithRevalidation(diag.Warning))
+	_, res := snapshot.Unmarshal(t.Context(), data, s, snapshot.WithRevalidation(diag.Warning))
 	if !res.HasCode(diag.W_SNAPSHOT_UNRESOLVED_REQUIRED) {
 		t.Errorf("a Required unresolved record was not reported: %s", res.String())
 	}
@@ -385,7 +385,7 @@ type T {
 				}
 				data = bytes.Replace(clean, []byte(c.from), []byte(c.to), 1)
 			}
-			_, res := snapshot.Load(ctx, data, s,
+			_, res := snapshot.Unmarshal(ctx, data, s,
 				snapshot.WithIntegrityCheck(false), snapshot.WithRevalidation(diag.Error))
 			var got []string
 			for issue := range res.Issues() {
@@ -469,7 +469,7 @@ type T {
 				}
 				data = bytes.Replace(clean, []byte(c.from), []byte(c.to), 1)
 			}
-			_, res := snapshot.Load(ctx, data, s,
+			_, res := snapshot.Unmarshal(ctx, data, s,
 				snapshot.WithIntegrityCheck(false), snapshot.WithRevalidation(diag.Error))
 			var got []string
 			for issue := range res.Issues() {
@@ -485,5 +485,21 @@ type T {
 				t.Fatalf("issues = %v; want one %s holding %q", got, c.code, c.message)
 			}
 		})
+	}
+}
+
+// WithRevalidation refuses a severity outside Fatal to Hint when it is called,
+// so a clean document cannot hide the bug until a row fails.
+func TestWithRevalidation_PanicsOnAnInvalidSeverity(t *testing.T) {
+	t.Parallel()
+	for _, sev := range []diag.Severity{0, diag.Hint + 1} {
+		func() {
+			defer func() {
+				if r := recover(); r == nil || !strings.Contains(r.(string), "snapshot.WithRevalidation: invalid severity") {
+					t.Errorf("WithRevalidation(%d): recovered %v, want the option's panic", sev, r)
+				}
+			}()
+			snapshot.WithRevalidation(sev)
+		}()
 	}
 }

@@ -80,24 +80,6 @@ func TestImport_ResolvedSourceID_Zero(t *testing.T) {
 	assert.True(t, imp.ResolvedSourceID().IsZero())
 }
 
-func TestImport_ResolvedPath_WithSourceID(t *testing.T) {
-	sourceID := sourcetest.ID("test://resolved/path")
-
-	imp := schema.TestNewImport("./types.yammm", "types", sourceID, location.Span{})
-
-	// ResolvedPath returns the string representation of the resolved source ID
-	result := imp.ResolvedPath()
-	assert.Contains(t, result, "resolved/path")
-}
-
-func TestImport_ResolvedPath_ZeroSourceID(t *testing.T) {
-	imp := schema.TestNewImport("./types.yammm", "types", location.SourceID{}, location.Span{})
-
-	// Returns empty string for zero SourceID
-	result := imp.ResolvedPath()
-	assert.Empty(t, result)
-}
-
 func TestImport_Schema_Zero(t *testing.T) {
 	imp := schema.TestNewImport("./types.yammm", "types", location.SourceID{}, location.Span{})
 

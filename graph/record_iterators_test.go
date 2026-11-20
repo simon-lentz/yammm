@@ -104,7 +104,7 @@ func TestRecordIterators_RestartStopAtABreakAndYieldInKeyOrder(t *testing.T) {
 
 	persons := mustTypeID(t, s, "Person")
 	wantAscending(t, "InstancesOf", snap.InstancesOf(persons), instanceKey, 2)
-	wantAscending(t, "AllInstances", snap.AllInstances(), instanceKey, 4)
+	wantAscending(t, "Instances", snap.Instances(), instanceKey, 4)
 	wantAscending(t, "Edges", snap.Edges(), edgeKey, 2)
 	p1 := slices.Collect(snap.InstancesOf(persons))[0]
 	wantAscending(t, "EdgesFrom", snap.EdgesFrom(p1), edgeKey, 2)

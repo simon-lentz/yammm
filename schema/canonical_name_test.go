@@ -14,7 +14,7 @@ func TestType_CanonicalPropertyName_AgreesBeforeAndAfterSealing(t *testing.T) {
 	t.Parallel()
 
 	prop := func(name string) schema.Property {
-		return schema.TestNewProperty(name, location.Span{}, "", schema.NewStringConstraint(),
+		return schema.TestNewProperty(name, location.Span{}, "", schema.TestNewStringConstraint(),
 			schema.DataTypeRef{}, true, false, schema.DeclaringScope{}, nil)
 	}
 	typ := schema.TestNewType("T", location.SourceID{}, location.Span{}, "", false, false)

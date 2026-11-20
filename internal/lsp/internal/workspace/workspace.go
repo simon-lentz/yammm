@@ -387,7 +387,7 @@ func (w *Workspace) analyzeDocument(analyzeCtx context.Context, uri string) (doc
 		moduleRoot, rootErr = w.FindModuleRoot(canonicalPath)
 	}
 	if rootErr != nil {
-		result := diag.NewCollectorUnlimited()
+		result := diag.NewCollector(diag.NoLimit)
 		result.Collect(schema.ModuleRootIssue(rootErr))
 		snapshot, err = w.sched.analyzer.SnapshotForResult(canonicalPath, result.Result())
 	} else {

@@ -80,3 +80,20 @@ func TestExtendsClause_ARepeatedNameLeavesTheStructuralHash(t *testing.T) {
 		t.Errorf("B hashes %s and B, B hashes %s, want one hash", once, twice)
 	}
 }
+
+// The supertypes are a set to the digest: listing them in another order leaves
+// the structural hash.
+func TestExtendsClause_TheOrderLeavesTheStructuralHash(t *testing.T) {
+	t.Parallel()
+
+	hash := func(clause string) string {
+		s, res := schema.LoadString(t.Context(), "schema \"m\"\nabstract type A {\n\ta Integer\n}\nabstract type B {\n\tb Integer\n}\ntype T extends "+clause+" {\n\tid String primary\n}\n", "m.yammm")
+		if !res.OK() {
+			t.Fatal(res)
+		}
+		return schema.StructuralHash(s)
+	}
+	if ab, ba := hash("A, B"), hash("B, A"); ab != ba {
+		t.Errorf("A, B hashes %s and B, A hashes %s, want one hash", ab, ba)
+	}
+}

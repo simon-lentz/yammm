@@ -5,11 +5,12 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
-	"regexp"
 	"strings"
 	"testing"
 	"time"
 	"unicode/utf8"
+
+	"github.com/simon-lentz/yammm/internal/schematest"
 
 	"github.com/simon-lentz/yammm/internal/raceskip"
 	"github.com/simon-lentz/yammm/internal/value"
@@ -39,12 +40,12 @@ func TestCheck_ARefusedStringIsQuotedCutToItsHead(t *testing.T) {
 			want string
 			c    schema.Constraint
 		}{
-			{"string", schema.NewStringConstraint()},
-			{"string for pattern", schema.NewPatternConstraint(regexp.MustCompile("a"))},
-			{"string for enum", schema.NewEnumConstraint([]string{"a", "b"})},
-			{"date string or time.Time", schema.NewDateConstraint()},
-			{"timestamp string or time.Time", schema.NewTimestampConstraint()},
-			{"UUID string or uuid.UUID", schema.NewUUIDConstraint()},
+			{"string", schematest.Constraint(t, "String")},
+			{"string for pattern", schematest.Constraint(t, `Pattern["a"]`)},
+			{"string for enum", schematest.Constraint(t, `Enum["a", "b"]`)},
+			{"date string or time.Time", schematest.Constraint(t, "Date")},
+			{"timestamp string or time.Time", schematest.Constraint(t, "Timestamp")},
+			{"UUID string or uuid.UUID", schematest.Constraint(t, "UUID")},
 		} {
 			check := value.Check(c.text, k.c)
 			if want := "expected " + k.want + ", got a string that is not valid UTF-8: " + c.quoted; check == nil || check.Error() != want {
@@ -72,7 +73,7 @@ func TestCheck_ARefusedStringsMessageIsBounded(t *testing.T) {
 		strings.Repeat("\xff", 1<<20),
 		strings.Repeat("\x00", 1<<20) + "\xff",
 	} {
-		err := value.Check(text, schema.NewStringConstraint())
+		err := value.Check(text, schematest.Constraint(t, "String"))
 		if err == nil {
 			t.Fatal("the string was accepted")
 		}
@@ -89,10 +90,10 @@ func TestCheck_AValueThatIsNoStringIsNamedByItsType(t *testing.T) {
 		want string
 		c    schema.Constraint
 	}{
-		{"expected string, got int", schema.NewStringConstraint()},
-		{"expected string for enum, got int", schema.NewEnumConstraint([]string{"a", "b"})},
-		{"expected date string or time.Time, got int", schema.NewDateConstraint()},
-		{"expected UUID string or uuid.UUID, got int", schema.NewUUIDConstraint()},
+		{"expected string, got int", schematest.Constraint(t, "String")},
+		{"expected string for enum, got int", schematest.Constraint(t, `Enum["a", "b"]`)},
+		{"expected date string or time.Time, got int", schematest.Constraint(t, "Date")},
+		{"expected UUID string or uuid.UUID, got int", schematest.Constraint(t, "UUID")},
 	} {
 		if err := value.Check(5, k.c); err == nil || err.Error() != k.want {
 			t.Errorf("5 at %s: %v, want %q", k.c.Kind(), err, k.want)
@@ -123,23 +124,23 @@ func TestCheck_AGeneratedTimeTypeIsToldToPassItsTime(t *testing.T) {
 		c    schema.Constraint
 		want string
 	}{
-		{generatedDate{at}, schema.NewDateConstraint(), "expected date string or time.Time (pass a generated type's .Time), got value_test.generatedDate"},
-		{&generatedDate{at}, schema.NewDateConstraint(), "expected date string or time.Time (pass a generated type's .Time), got *value_test.generatedDate"},
-		{generatedDate{at}, schema.NewTimestampConstraint(), "expected timestamp string or time.Time (pass a generated type's .Time), got value_test.generatedDate"},
-		{namedTime{at}, schema.NewDateConstraint(), "expected date string or time.Time, got value_test.namedTime"},
-		{timeNamedTime{at}, schema.NewDateConstraint(), "expected date string or time.Time, got value_test.timeNamedTime"},
-		{aliasEmbed{at}, schema.NewDateConstraint(), "expected date string or time.Time, got value_test.aliasEmbed"},
-		{otherEmbed{}, schema.NewDateConstraint(), "expected date string or time.Time, got value_test.otherEmbed"},
-		{timeAndMore{Time: at}, schema.NewDateConstraint(), "expected date string or time.Time, got value_test.timeAndMore"},
-		{&timeAndMore{Time: at}, schema.NewTimestampConstraint(), "expected timestamp string or time.Time, got *value_test.timeAndMore"},
-		{(*generatedDate)(nil), schema.NewDateConstraint(), "expected date string or time.Time, got *value_test.generatedDate"},
+		{generatedDate{at}, schematest.Constraint(t, "Date"), "expected date string or time.Time (pass a generated type's .Time), got value_test.generatedDate"},
+		{&generatedDate{at}, schematest.Constraint(t, "Date"), "expected date string or time.Time (pass a generated type's .Time), got *value_test.generatedDate"},
+		{generatedDate{at}, schematest.Constraint(t, "Timestamp"), "expected timestamp string or time.Time (pass a generated type's .Time), got value_test.generatedDate"},
+		{namedTime{at}, schematest.Constraint(t, "Date"), "expected date string or time.Time, got value_test.namedTime"},
+		{timeNamedTime{at}, schematest.Constraint(t, "Date"), "expected date string or time.Time, got value_test.timeNamedTime"},
+		{aliasEmbed{at}, schematest.Constraint(t, "Date"), "expected date string or time.Time, got value_test.aliasEmbed"},
+		{otherEmbed{}, schematest.Constraint(t, "Date"), "expected date string or time.Time, got value_test.otherEmbed"},
+		{timeAndMore{Time: at}, schematest.Constraint(t, "Date"), "expected date string or time.Time, got value_test.timeAndMore"},
+		{&timeAndMore{Time: at}, schematest.Constraint(t, "Timestamp"), "expected timestamp string or time.Time, got *value_test.timeAndMore"},
+		{(*generatedDate)(nil), schematest.Constraint(t, "Date"), "expected date string or time.Time, got *value_test.generatedDate"},
 	} {
 		var ce *value.CheckError
 		if err := value.Check(c.val, c.c); !errors.As(err, &ce) || ce.Kind != value.KindTypeMismatch || err.Error() != c.want {
 			t.Errorf("%T at %s: %v, want a type mismatch %q", c.val, c.c.Kind(), err, c.want)
 		}
 	}
-	if err := value.Check(generatedDate{at}.Time, schema.NewDateConstraint()); err != nil {
+	if err := value.Check(generatedDate{at}.Time, schematest.Constraint(t, "Date")); err != nil {
 		t.Errorf("the struct's .Time is refused: %v", err)
 	}
 }
@@ -160,8 +161,8 @@ func TestCheck_ATimeRefusalAllocatesNoMoreThanAUUIDRefusal(t *testing.T) {
 		fields = append(fields, reflect.StructField{Name: fmt.Sprintf("F%d", i), Type: reflect.TypeFor[int]()})
 	}
 	widest := reflect.New(reflect.StructOf(fields))
-	uuid := schema.NewUUIDConstraint()
-	for _, c := range []schema.Constraint{schema.NewDateConstraint(), schema.NewTimestampConstraint()} {
+	uuid := schematest.Constraint(t, "UUID")
+	for _, c := range []schema.Constraint{schematest.Constraint(t, "Date"), schematest.Constraint(t, "Timestamp")} {
 		for _, r := range []struct {
 			name string
 			v    any
@@ -191,7 +192,7 @@ func TestCheck_ATimeRefusalAllocatesNoMoreThanAUUIDRefusal(t *testing.T) {
 func TestCoerce_ACutLiteralKeepsWholeCharacters(t *testing.T) {
 	t.Parallel()
 	lit := json.Number("a" + strings.Repeat("é", 20))
-	_, err := value.Coerce(lit, schema.NewFloatConstraint())
+	_, err := value.Coerce(lit, schematest.Constraint(t, "Float"))
 	if err == nil {
 		t.Fatal("the literal was coerced")
 	}
@@ -213,31 +214,31 @@ func TestCheck_ARefusedValueIsQuoted(t *testing.T) {
 		err  error
 		want string
 	}{
-		{"UUID", value.Check("xyz", schema.NewUUIDConstraint()), `invalid UUID: "xyz"`},
-		{"enum", value.Check("c", schema.NewEnumConstraint([]string{"a", "b"})), `value "c" not in enum ["a" "b"]`},
-		{"pattern", value.Check("b", schema.NewPatternConstraint(regexp.MustCompile("^a$"))), `value "b" does not match pattern "^a$"`},
-		{"an enum member holding a newline", value.Check("c", schema.NewEnumConstraint([]string{"a\nb", "d"})), `value "c" not in enum ["a\nb" "d"]`},
-		{"a pattern holding a newline", value.Check("b", schema.NewPatternConstraint(regexp.MustCompile("a\n\x1b"))), `value "b" does not match pattern "a\n\x1b"`},
+		{"UUID", value.Check("xyz", schematest.Constraint(t, "UUID")), `invalid UUID: "xyz"`},
+		{"enum", value.Check("c", schematest.Constraint(t, `Enum["a", "b"]`)), `value "c" not in enum ["a" "b"]`},
+		{"pattern", value.Check("b", schematest.Constraint(t, `Pattern["^a$"]`)), `value "b" does not match pattern "^a$"`},
+		{"an enum member holding a newline", value.Check("c", schematest.Constraint(t, `Enum["a\nb", "d"]`)), `value "c" not in enum ["a\nb" "d"]`},
+		{"a pattern holding a newline", value.Check("b", schematest.Constraint(t, `Pattern["a\n\x1b"]`)), `value "b" does not match pattern "a\n\x1b"`},
 		{
-			"a literal that is no number", coerced(value.Coerce(json.Number(long), schema.NewFloatConstraint())),
+			"a literal that is no number", coerced(value.Coerce(json.Number(long), schematest.Constraint(t, "Float"))),
 			`cannot coerce json.Number "` + long[:32] + `"… (100 bytes) to float64: no JSON number literal`,
 		},
-		{"a long UUID", value.Check(long, schema.NewUUIDConstraint()), `invalid UUID: ` + cut},
-		{"a long enum value", value.Check(long, schema.NewEnumConstraint([]string{"a", "b"})), `value ` + cut + ` not in enum ["a" "b"]`},
+		{"a long UUID", value.Check(long, schematest.Constraint(t, "UUID")), `invalid UUID: ` + cut},
+		{"a long enum value", value.Check(long, schematest.Constraint(t, `Enum["a", "b"]`)), `value ` + cut + ` not in enum ["a" "b"]`},
 		{
-			"a long pattern value", value.Check(long, schema.NewPatternConstraint(regexp.MustCompile("^a$"))),
+			"a long pattern value", value.Check(long, schematest.Constraint(t, `Pattern["^a$"]`)),
 			`value ` + cut + ` does not match pattern "^a$"`,
 		},
 		{
-			"a long enum member is shown whole", value.Check("c", schema.NewEnumConstraint([]string{long, "b"})),
+			"a long enum member is shown whole", value.Check("c", schematest.Constraint(t, `Enum["`+long+`", "b"]`)),
 			`value "c" not in enum ["` + long + `" "b"]`,
 		},
 		{
-			"a long pattern is shown whole", value.Check("b", schema.NewPatternConstraint(regexp.MustCompile("^"+long+"$"))),
+			"a long pattern is shown whole", value.Check("b", schematest.Constraint(t, `Pattern["^`+long+`$"]`)),
 			`value "b" does not match pattern "^` + long + `$"`,
 		},
-		{"a long date", value.Check(long, schema.NewDateConstraint()), `invalid date format: ` + cut + ` (expected YYYY-MM-DD)`},
-		{"a long timestamp", value.Check(long, schema.NewTimestampConstraint()), `invalid timestamp format: ` + cut},
+		{"a long date", value.Check(long, schematest.Constraint(t, "Date")), `invalid date format: ` + cut + ` (expected YYYY-MM-DD)`},
+		{"a long timestamp", value.Check(long, schematest.Constraint(t, "Timestamp")), `invalid timestamp format: ` + cut},
 	} {
 		if c.err == nil || c.err.Error() != c.want {
 			t.Errorf("%s: %v, want %q", c.name, c.err, c.want)

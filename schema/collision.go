@@ -101,7 +101,6 @@ func (c *completer) checkPropertyCaseCollisions(t Type) {
 	}
 }
 
-// checkPropertyRelationCollisions detects collisions between property names and relation field names.
 // checkPropertyRelationCollisions reports a property and a relation whose
 // field name share one lower-case spelling. The own declaration is where the
 // diagnostic anchors; two inherited members anchor once on the combining type.
@@ -467,7 +466,7 @@ func (c *completer) validateCompositionTarget(t Type, r Relation) {
 // ancestry already carries r, and so has already drawn the refusal.
 func (c *completer) aPartAncestorCarries(t Type, r Relation) bool {
 	for ref := range t.SuperTypes() {
-		s := c.resolveTypeID(ref.ID())
+		s := c.resolveTypeID(ref)
 		if !s.IsZero() && s.IsPart() && slices.Contains(slices.Collect(s.AllAssociations()), r) {
 			return true
 		}

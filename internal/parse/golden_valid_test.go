@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/internal/yammmtest"
 )
 
@@ -119,7 +120,7 @@ func walkCorpus(tb testing.TB) []corpusEntry {
 		e := corpusEntry{Path: rel, Src: string(b), Clean: true}
 		_, issues := project(rel, e.Src)
 		for _, iss := range issues {
-			if iss.Severity().IsFailure() {
+			if iss.Severity() == diag.Fatal || iss.Severity() == diag.Error {
 				e.Clean = false
 				e.Codes = append(e.Codes, iss.Code().String())
 			}

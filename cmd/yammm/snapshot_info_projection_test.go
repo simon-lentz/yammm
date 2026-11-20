@@ -36,7 +36,7 @@ func TestSnapshotInfo_TextAndJSONRenderOneProjection(t *testing.T) {
 		checkRepairState(t, "snapshot info: header-only text reports the file size", failure)
 	})
 
-	t.Run("an absent map or list is empty, never null", func(t *testing.T) {
+	t.Run("an absent map is empty, never null", func(t *testing.T) {
 		t.Parallel()
 		plain := filepath.Join(t.TempDir(), "plain.ys")
 		code, _, stderr := executeCmdOutput(t, "snapshot", "save", "testdata/valid.yammm", "testdata/data.json", "-o", plain)
@@ -51,9 +51,6 @@ func TestSnapshotInfo_TextAndJSONRenderOneProjection(t *testing.T) {
 			var failure string
 			if _, ok := doc["metadata"].(map[string]any); !ok {
 				failure = fmt.Sprintf("metadata = %#v, want an object; types renders [] for the same absence", doc["metadata"])
-			}
-			if _, ok := doc["features"].([]any); !ok {
-				failure += fmt.Sprintf(" features = %#v, want an array", doc["features"])
 			}
 			checkRepairState(t, "snapshot info: absent metadata renders as an object, "+strings.Join(mode[2:len(mode)-1], " "), failure)
 		}

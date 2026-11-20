@@ -46,9 +46,9 @@ func TestReaders_AFifthTopLevelKeyIsCut(t *testing.T) {
 		name string
 		read func() diag.Result
 	}{
-		{"Load", func() diag.Result { _, r := snapshot.Load(ctx, doc, s); return r }},
+		{"Load", func() diag.Result { _, r := snapshot.Unmarshal(ctx, doc, s); return r }},
 		{"Verify", func() diag.Result { return snapshot.Verify(ctx, doc, s) }},
-		{"Info", func() diag.Result { _, r := snapshot.Info(ctx, doc); return r }},
+		{"Info", func() diag.Result { _, r := snapshot.Stat(ctx, doc); return r }},
 	}
 	for _, rd := range readers {
 		t.Run(rd.name, func(t *testing.T) {
@@ -118,7 +118,7 @@ func TestLoad_ARepeatedTypesRowIsShownWholeOnlyWhereTheSchemaDeclaresIt(t *testi
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			doc := bytes.Replace(data, []byte(`"types":[`+row+`]`), []byte(`"types":[`+tc.types+`]`), 1)
-			_, result := snapshot.Load(ctx, doc, s, snapshot.WithIntegrityCheck(false))
+			_, result := snapshot.Unmarshal(ctx, doc, s, snapshot.WithIntegrityCheck(false))
 			msgs := malformedMessages(result)
 			if !slices.Contains(msgs, tc.want) {
 				t.Fatalf("E_SNAPSHOT_MALFORMED messages = %q, want one %q", msgs, tc.want)
@@ -151,9 +151,8 @@ func TestSchemalessReaders_ARepeatedTypesRowIsCut(t *testing.T) {
 		name string
 		read func() diag.Result
 	}{
-		{"Info", func() diag.Result { _, r := snapshot.Info(ctx, doc); return r }},
-		{"HeaderOnly", func() diag.Result { _, r := snapshot.HeaderOnly(ctx, doc); return r }},
-		{"HeaderOnlyRead", func() diag.Result { _, r := snapshot.HeaderOnlyRead(ctx, bytes.NewReader(doc)); return r }},
+		{"Info", func() diag.Result { _, r := snapshot.Stat(ctx, doc); return r }},
+		{"ReadHeader", func() diag.Result { _, r := snapshot.ReadHeader(ctx, bytes.NewReader(doc)); return r }},
 		{"UpdateMetadata", func() diag.Result { _, r := snapshot.UpdateMetadata(ctx, doc, map[string]string{"k": "v"}); return r }},
 	}
 	for _, reader := range readers {

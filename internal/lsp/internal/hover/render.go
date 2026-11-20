@@ -7,6 +7,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/simon-lentz/yammm/internal/parse"
 	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
 
@@ -61,7 +62,7 @@ func renderImport(sym *symbols.Symbol) string {
 	b.WriteString("`\n")
 	b.WriteString("\n")
 	b.WriteString("Resolved to: `")
-	b.WriteString(imp.ResolvedPath())
+	b.WriteString(imp.ResolvedSourceID().String())
 	b.WriteString("`")
 
 	return b.String()
@@ -286,10 +287,11 @@ func renderInvariant(sym *symbols.Symbol) string {
 	b.WriteString(inv.Name())
 	b.WriteString("`\n\n")
 
-	b.WriteString("```yammm\n")
-	b.WriteString("! \"")
-	b.WriteString(inv.Name())
-	b.WriteString("\" <expr>\n```\n")
+	decl := "! " + parse.Quote(inv.Name()) + " " + inv.Expression()
+	fence := codeFence(decl)
+	b.WriteString(fence + "yammm\n")
+	b.WriteString(decl)
+	b.WriteString("\n" + fence + "\n")
 
 	if doc := inv.Documentation(); doc != "" {
 		b.WriteString("\n")
@@ -324,4 +326,19 @@ func relativeSourcePath(sourceID location.SourceID, moduleRoot string) string {
 
 	// Use forward slashes for consistent display across platforms
 	return "./" + filepath.ToSlash(rel)
+}
+
+// codeFence returns a backtick fence longer than every backtick run in body,
+// so a string literal holding backticks cannot close the block.
+func codeFence(body string) string {
+	longest, run := 0, 0
+	for i := range len(body) {
+		if body[i] == '`' {
+			run++
+			longest = max(longest, run)
+		} else {
+			run = 0
+		}
+	}
+	return strings.Repeat("`", max(3, longest+1))
 }

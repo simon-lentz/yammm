@@ -12,6 +12,7 @@ func TestSeverity_String(t *testing.T) {
 		{Warning, "warning"},
 		{Info, "info"},
 		{Hint, "hint"},
+		{Severity(0), "unknown"},   // the zero Severity names none
 		{Severity(255), "unknown"}, // Invalid severity
 	}
 
@@ -24,7 +25,7 @@ func TestSeverity_String(t *testing.T) {
 	}
 }
 
-func TestSeverity_IsFailure(t *testing.T) {
+func TestSeverity_isFailure(t *testing.T) {
 	tests := []struct {
 		severity Severity
 		want     bool
@@ -34,18 +35,19 @@ func TestSeverity_IsFailure(t *testing.T) {
 		{Warning, false},
 		{Info, false},
 		{Hint, false},
+		{Severity(0), false},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.severity.String(), func(t *testing.T) {
-			if got := tt.severity.IsFailure(); got != tt.want {
-				t.Errorf("%s.IsFailure() = %v; want %v", tt.severity, got, tt.want)
+			if got := tt.severity.isFailure(); got != tt.want {
+				t.Errorf("%s.isFailure() = %v; want %v", tt.severity, got, tt.want)
 			}
 		})
 	}
 }
 
-func TestSeverity_IsMoreSevereThan(t *testing.T) {
+func TestSeverity_isMoreSevereThan(t *testing.T) {
 	tests := []struct {
 		name  string
 		s     Severity
@@ -76,8 +78,8 @@ func TestSeverity_IsMoreSevereThan(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := tt.s.IsMoreSevereThan(tt.other); got != tt.want {
-				t.Errorf("%s.IsMoreSevereThan(%s) = %v; want %v", tt.s, tt.other, got, tt.want)
+			if got := tt.s.isMoreSevereThan(tt.other); got != tt.want {
+				t.Errorf("%s.isMoreSevereThan(%s) = %v; want %v", tt.s, tt.other, got, tt.want)
 			}
 		})
 	}

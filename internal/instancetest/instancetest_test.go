@@ -58,16 +58,6 @@ func TestValid_FailsTheTestOnARefusal(t *testing.T) {
 	}
 }
 
-// A Refused member draws no issue of its own, and the validator returns no instance.
-func TestValid_FailsTheTestOnARefusalWithNoIssue(t *testing.T) {
-	s := loadPerson(t)
-	if !fatalOf(t, func(tb *recordingTB) {
-		instancetest.Valid(tb, s, "Person", map[string]any{"id": "p7", "name": instance.Refused{Value: "x"}})
-	}).fatal {
-		t.Error("a fixture holding a Refused member did not fail the test")
-	}
-}
-
 func TestTypeID_NamesTheTypeOfTheSourceItWasGiven(t *testing.T) {
 	first := instancetest.TypeID(t, "a.yammm", "T")
 	if first.IsZero() {

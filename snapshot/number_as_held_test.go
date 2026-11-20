@@ -50,7 +50,7 @@ func TestMarshal_AFloatHeldUnderAnIntegerIsWrittenAsHeld(t *testing.T) {
 		}
 	}
 
-	loaded, lres := snapshot.Load(ctx, data, s)
+	loaded, lres := snapshot.Unmarshal(ctx, data, s)
 	if lres.HasErrors() {
 		t.Fatalf("load: %s", lres)
 	}
@@ -62,7 +62,7 @@ func TestMarshal_AFloatHeldUnderAnIntegerIsWrittenAsHeld(t *testing.T) {
 		t.Errorf("n loaded as %#v, want float64(6)", n.Any())
 	}
 
-	_, rres := snapshot.Load(ctx, data, s, snapshot.WithRevalidation(diag.Error))
+	_, rres := snapshot.Unmarshal(ctx, data, s, snapshot.WithRevalidation(diag.Error))
 	if !rres.HasCode(diag.E_TYPE_MISMATCH) {
 		t.Errorf("revalidation of a held float at an Integer drew %s, want E_TYPE_MISMATCH", rres)
 	}
@@ -86,7 +86,7 @@ func TestMarshal_ANumberNoFloatHoldsReadsBackAsTheLiteral(t *testing.T) {
 	if mres.HasErrors() {
 		t.Fatalf("marshal: %s", mres)
 	}
-	back, lres := snapshot.Load(ctx, data, s)
+	back, lres := snapshot.Unmarshal(ctx, data, s)
 	if lres.HasErrors() {
 		t.Fatalf("load: %s", lres)
 	}

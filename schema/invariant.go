@@ -32,15 +32,17 @@ func (i Invariant) IsZero() bool { return i.invariantState == nil }
 // invariantState is the record an [Invariant] names.
 type invariantState struct {
 	name string          // user-facing message shown when invariant fails
+	text string          // the expression as written; see [Invariant.Expression]
 	expr expr.Expression // compiled expression
 	span location.Span   // source location
 	doc  string          // documentation comment
 }
 
 // newInvariant creates a new Invariant.
-func newInvariant(name string, e expr.Expression, span location.Span, doc string) Invariant {
+func newInvariant(name, text string, e expr.Expression, span location.Span, doc string) Invariant {
 	return Invariant{&invariantState{
 		name: name,
+		text: text,
 		expr: e,
 		span: span,
 		doc:  doc,
@@ -51,6 +53,14 @@ func newInvariant(name string, e expr.Expression, span location.Span, doc string
 // This is displayed when the invariant evaluates to false.
 func (i Invariant) Name() string {
 	return i.name
+}
+
+// Expression returns the invariant's expression as its author wrote it, with
+// comments removed. A gap between two tokens is one line break when it holds
+// one, else one space, since a regexp literal cannot cross a line. Parsing the
+// text again gives the same expression.
+func (i Invariant) Expression() string {
+	return i.text
 }
 
 // Span returns the source location of this invariant declaration.

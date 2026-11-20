@@ -8,6 +8,8 @@ import (
 	"testing"
 	"unicode/utf8"
 
+	"github.com/simon-lentz/yammm/internal/schematest"
+
 	"github.com/simon-lentz/yammm/internal/snapparts"
 
 	"github.com/simon-lentz/yammm/diag"
@@ -148,7 +150,7 @@ func TestMessages_RepeatAValueCutToItsHead(t *testing.T) {
 		Instances: []snapparts.Instance{root("h1", map[string]any{"id": "h1", "s": marker})},
 	})
 	for _, spelled := range []string{longText + "\xff", `\ud800` + longText} {
-		_, r = snapshot.Load(ctx, bytes.Replace(clean, []byte(marker), []byte(spelled), 1), s)
+		_, r = snapshot.Unmarshal(ctx, bytes.Replace(clean, []byte(marker), []byte(spelled), 1), s)
 		refused := false
 		for issue := range r.Issues() {
 			refused = refused || issue.Code() == diag.E_SNAPSHOT_MALFORMED
@@ -170,10 +172,10 @@ func TestMessages_RepeatAValueCutToItsHead(t *testing.T) {
 		},
 		Duplicates: []snapparts.Instance{second},
 	})
-	_, r = snapshot.Load(ctx, data, s, snapshot.WithRevalidation(diag.Warning))
+	_, r = snapshot.Unmarshal(ctx, data, s, snapshot.WithRevalidation(diag.Warning))
 	c.result("snapshot.Load", r)
 
-	for _, k := range []schema.Constraint{schema.NewTimestampConstraint(), schema.NewDateConstraint()} {
+	for _, k := range []schema.Constraint{schematest.Constraint(t, "Timestamp"), schematest.Constraint(t, "Date")} {
 		_, err := neo4j.CoerceParams(map[string]any{"v": longText}, neo4j.ParamTypes{"v": k})
 		c.err("neo4j.CoerceParams", err)
 	}

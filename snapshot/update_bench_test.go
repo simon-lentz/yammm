@@ -110,7 +110,7 @@ func BenchmarkLoadMarshalRoundTrip(b *testing.B) {
 	b.SetBytes(int64(len(in.data)))
 	b.ResetTimer()
 	for b.Loop() {
-		loaded, loadRes := snapshot.Load(ctx, in.data, in.schema)
+		loaded, loadRes := snapshot.Unmarshal(ctx, in.data, in.schema)
 		if loadRes.HasErrors() {
 			b.Fatalf("Load: %v", loadRes.Err())
 		}
@@ -169,7 +169,7 @@ func TestUpdateMetadataRatioFloor(t *testing.T) {
 		slow := testing.Benchmark(func(b *testing.B) {
 			b.Helper()
 			for b.Loop() {
-				loaded, loadRes := snapshot.Load(ctx, in.data, in.schema)
+				loaded, loadRes := snapshot.Unmarshal(ctx, in.data, in.schema)
 				if loadRes.HasErrors() {
 					b.Fatalf("Load: %v", loadRes.Err())
 				}

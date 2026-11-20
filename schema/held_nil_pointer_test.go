@@ -17,10 +17,10 @@ func TestConstraint_ANilPointerHeldIsNoConstraint(t *testing.T) {
 	nilString := (*schema.StringConstraint)(nil)
 	nilEnum := (*schema.EnumConstraint)(nil)
 	for name, c := range map[string]schema.ListConstraint{
-		"NewListConstraint": schema.NewListConstraint(nilString),
-		"ListMinLen":        schema.ListMinLen(nilEnum, 1),
-		"ListMaxLen":        schema.ListMaxLen(nilString, 2),
-		"ListLenBetween":    schema.ListLenBetween(nilEnum, 1, 2),
+		"NewListConstraint": schema.TestNewListConstraint(nilString),
+		"ListMinLen":        schema.TestListMinLen(nilEnum, 1),
+		"ListMaxLen":        schema.TestListMaxLen(nilString, 2),
+		"ListLenBetween":    schema.TestListLenBetween(nilEnum, 1, 2),
 	} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
@@ -32,20 +32,20 @@ func TestConstraint_ANilPointerHeldIsNoConstraint(t *testing.T) {
 				t.Errorf("String() = %q, want it to open %q", got, want)
 			}
 			twin := c
-			if !c.Equal(twin) || c.NarrowsTo(twin) || c.IsResolved() {
-				t.Errorf("Equal %v, NarrowsTo %v, IsResolved %v; want true, false, false", c.Equal(twin), c.NarrowsTo(twin), c.IsResolved())
+			if !schema.TestConstraintEqual(c, twin) || schema.TestConstraintNarrowsTo(c, twin) || schema.TestConstraintIsResolved(c) {
+				t.Errorf("Equal %v, NarrowsTo %v, IsResolved %v; want true, false, false", schema.TestConstraintEqual(c, twin), schema.TestConstraintNarrowsTo(c, twin), schema.TestConstraintIsResolved(c))
 			}
 		})
 	}
 	t.Run("NewAliasConstraint", func(t *testing.T) {
 		t.Parallel()
-		ref := schema.NewAliasConstraint("A", nilString)
+		ref := schema.TestNewAliasConstraint("A", nilString)
 		if ref.Resolved() != nil {
 			t.Errorf("Resolved() = %#v, want nil", ref.Resolved())
 		}
-		if ref.Equal(schema.NewStringConstraint()) || ref.NarrowsTo(ref) || ref.IsResolved() {
+		if schema.TestConstraintEqual(ref, schema.TestNewStringConstraint()) || schema.TestConstraintNarrowsTo(ref, ref) || schema.TestConstraintIsResolved(ref) {
 			t.Errorf("Equal to a String %v, NarrowsTo itself %v, IsResolved %v; want all false",
-				ref.Equal(schema.NewStringConstraint()), ref.NarrowsTo(ref), ref.IsResolved())
+				schema.TestConstraintEqual(ref, schema.TestNewStringConstraint()), schema.TestConstraintNarrowsTo(ref, ref), schema.TestConstraintIsResolved(ref))
 		}
 		if err := schema.CheckConstraint(ref); err == nil || err.Error() != `schema: datatype "A" resolves to no constraint` {
 			t.Errorf("CheckConstraint = %v, want the reference to no constraint", err)

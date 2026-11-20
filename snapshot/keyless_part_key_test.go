@@ -155,7 +155,7 @@ func partKeyStoredKeys(snap graph.Snapshot) []immutable.Key {
 			}
 		}
 	}
-	for inst := range snap.AllInstances() {
+	for inst := range snap.Instances() {
 		walk(inst)
 	}
 	return keys
@@ -192,7 +192,7 @@ func TestPartKey_EverySnapshotLoadsBack(t *testing.T) {
 			return built{g.Snapshot(), r}
 		},
 		"snapshot.Load": func(shape partKeyShape, key []any) built {
-			snap, r := snapshot.Load(ctx, snappartstest.Document(t, s, snapparts.Parts{
+			snap, r := snapshot.Unmarshal(ctx, snappartstest.Document(t, s, snapparts.Parts{
 				Types: []schema.TypeID{docT.ID()},
 				Instances: []snapparts.Instance{{
 					TypeID: docT.ID(), PrimaryKey: docKey, Properties: docProps,
@@ -235,7 +235,7 @@ func TestPartKey_EverySnapshotLoadsBack(t *testing.T) {
 						t.Errorf("%s: Marshal of the %s snapshot: %s", at, from, mr)
 						continue
 					}
-					loaded, lr := snapshot.Load(ctx, data, s)
+					loaded, lr := snapshot.Unmarshal(ctx, data, s)
 					if !lr.OK() {
 						t.Errorf("%s: Load refused what Marshal wrote from the %s snapshot: %s", at, from, lr)
 						continue

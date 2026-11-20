@@ -4,9 +4,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"regexp"
 	"testing"
 	"time"
+
+	"github.com/simon-lentz/yammm/internal/schematest"
 
 	"github.com/google/uuid"
 
@@ -33,12 +34,12 @@ func TestCheck_APointerIsNoValueOfAnyKind(t *testing.T) {
 	var nilTime *time.Time
 	pointers := []any{&text, &n, &f, &b, &number, &at, &id, &list, &vector, &held, nilText, nilTime, self}
 	for _, c := range []schema.Constraint{
-		schema.NewStringConstraint(), schema.NewIntegerConstraint(), schema.NewFloatConstraint(),
-		schema.NewBooleanConstraint(), schema.NewTimestampConstraint(), schema.NewDateConstraint(),
-		schema.NewUUIDConstraint(), schema.NewEnumConstraint([]string{"a"}),
-		schema.NewPatternConstraint(regexp.MustCompile("a")),
-		schema.NewVectorConstraint(2), schema.NewListConstraint(schema.NewStringConstraint()),
-		schema.NewAliasConstraint("Name", schema.NewStringConstraint()),
+		schematest.Constraint(t, "String"), schematest.Constraint(t, "Integer"), schematest.Constraint(t, "Float"),
+		schematest.Constraint(t, "Boolean"), schematest.Constraint(t, "Timestamp"), schematest.Constraint(t, "Date"),
+		schematest.Constraint(t, "UUID"), schematest.Constraint(t, `Enum["a", "z"]`),
+		schematest.Constraint(t, `Pattern["a"]`),
+		schematest.Constraint(t, "Vector[2]"), schematest.Constraint(t, "List<String>"),
+		schematest.Constraint(t, "Name", "type Name = String"),
 	} {
 		for _, p := range pointers {
 			err := value.Check(p, c)
@@ -68,11 +69,11 @@ func TestCheck_APointerElementIsRefusedAtItsIndex(t *testing.T) {
 		c    schema.Constraint
 		want string
 	}{
-		{"a pointer in a list", []any{"a", &text}, schema.NewListConstraint(schema.NewStringConstraint()), "element [1]: expected string, got *string"},
-		{"a nil pointer in a list", []any{"a", nilText}, schema.NewListConstraint(schema.NewStringConstraint()), "element [1]: expected string, got *string"},
-		{"a list of pointers", []*string{&text}, schema.NewListConstraint(schema.NewStringConstraint()), "element [0]: expected string, got *string"},
-		{"a pointer in a vector", []any{1.5, &f}, schema.NewVectorConstraint(2), "vector element [1]: expected float, got *float64"},
-		{"a nil pointer in a vector", []any{1.5, nilFloat}, schema.NewVectorConstraint(2), "vector element [1]: expected float, got *float64"},
+		{"a pointer in a list", []any{"a", &text}, schematest.Constraint(t, "List<String>"), "element [1]: expected string, got *string"},
+		{"a nil pointer in a list", []any{"a", nilText}, schematest.Constraint(t, "List<String>"), "element [1]: expected string, got *string"},
+		{"a list of pointers", []*string{&text}, schematest.Constraint(t, "List<String>"), "element [0]: expected string, got *string"},
+		{"a pointer in a vector", []any{1.5, &f}, schematest.Constraint(t, "Vector[2]"), "vector element [1]: expected float, got *float64"},
+		{"a nil pointer in a vector", []any{1.5, nilFloat}, schematest.Constraint(t, "Vector[2]"), "vector element [1]: expected float, got *float64"},
 	} {
 		err := value.Check(c.val, c.c)
 		var ce *value.CheckError

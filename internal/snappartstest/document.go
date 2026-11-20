@@ -27,7 +27,7 @@ import (
 // reader refuses it.
 func Loaded(tb testing.TB, s schema.Schema, parts snapparts.Parts) graph.Snapshot {
 	tb.Helper()
-	snap, res := snapshot.Load(tb.Context(), Document(tb, s, parts), s)
+	snap, res := snapshot.Unmarshal(tb.Context(), Document(tb, s, parts), s)
 	if res.HasErrors() {
 		tb.Fatalf("snappartstest.Loaded: %s", res)
 	}
@@ -58,7 +58,7 @@ func Document(tb testing.TB, s schema.Schema, parts snapparts.Parts) []byte {
 	}
 	doc := document{
 		Header: header{
-			Version:             snapshot.MinReadableVersion,
+			Version:             WrittenVersion(tb, s),
 			SchemaName:          s.Name(),
 			SchemaSource:        s.SourceID().String(),
 			SchemaHash:          schema.StructuralHash(s),
@@ -387,4 +387,19 @@ func (w *documentWriter) value(v any) any {
 	}
 	w.tb.Fatalf("snappartstest.Document: no document holds a value of type %T", v)
 	return nil
+}
+
+// WrittenVersion returns the wire-format version [snapshot.Marshal] writes, the
+// one version the reader accepts.
+func WrittenVersion(tb testing.TB, s schema.Schema) int {
+	tb.Helper()
+	data, res := snapshot.Marshal(tb.Context(), graph.New(s).Snapshot())
+	if res.HasErrors() {
+		tb.Fatalf("snappartstest: marshal an empty snapshot: %s", res)
+	}
+	h, res := snapshot.ReadHeader(tb.Context(), bytes.NewReader(data))
+	if res.HasErrors() {
+		tb.Fatalf("snappartstest: read the header an empty snapshot writes: %s", res)
+	}
+	return h.Version
 }

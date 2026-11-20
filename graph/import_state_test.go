@@ -146,7 +146,7 @@ func TestLoad_JudgesTheKeyComponentsAfterOneItCannotRender(t *testing.T) {
 	if got := roots[0].PrimaryKey().String(); got != graph.FormatKey("not a time", lower) {
 		t.Errorf("key %s, want the first component as written and the second as stored", got)
 	}
-	if _, res := snapshot.Load(t.Context(), snappartstest.Document(t, s, parts(upper)), s); !res.HasCode(diag.E_SNAPSHOT_MALFORMED) {
+	if _, res := snapshot.Unmarshal(t.Context(), snappartstest.Document(t, s, parts(upper)), s); !res.HasCode(diag.E_SNAPSHOT_MALFORMED) {
 		t.Errorf("a second component in upper case: %s; want %s", res, diag.E_SNAPSHOT_MALFORMED)
 	}
 }

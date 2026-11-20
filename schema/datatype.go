@@ -69,8 +69,3 @@ func (d DataType) seal() {
 	}
 	d.sealed = true
 }
-
-// isSealed reports whether the data type has been sealed.
-func (d DataType) isSealed() bool {
-	return d.sealed
-}

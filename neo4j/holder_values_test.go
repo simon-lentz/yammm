@@ -9,6 +9,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/simon-lentz/yammm/internal/schematest"
+
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/internal/snapparts"
@@ -284,7 +286,7 @@ func TestExtractKeyProps_AKeyNoDriverNumberHoldsIsRefusedBesideTheOthers(t *test
 	t.Parallel()
 	shape := &nodeShape{
 		label: "Holder", primaryKeys: []string{"id", "region", "code"},
-		keyConstraints: map[string]schema.Constraint{"region": schema.NewDateConstraint()},
+		keyConstraints: map[string]schema.Constraint{"region": schematest.Constraint(t, "Date")},
 	}
 	_, err := extractKeyProps(immutable.WrapProperties(map[string]any{"id": json.Number("1e400"), "region": "not-a-date", "code": "c"}), shape)
 	if !errors.Is(err, errUnheldNumber) {

@@ -341,20 +341,14 @@ func (r Result) CodeCounts(sev Severity) map[Code]int {
 // The yielded issues must not be mutated. Collect a mutable copy with
 // slices.Collect(r.Issues()) if needed.
 func (r Result) Issues() iter.Seq[Issue] {
-	return func(yield func(Issue) bool) {
-		for _, issue := range r.issues {
-			if !yield(issue) {
-				return
-			}
-		}
-	}
+	return slices.Values(r.issues)
 }
 
 // Errors returns an iterator over Fatal and Error issues.
 func (r Result) Errors() iter.Seq[Issue] {
 	return func(yield func(Issue) bool) {
 		for _, issue := range r.issues {
-			if issue.Severity().IsFailure() {
+			if issue.Severity().isFailure() {
 				if !yield(issue) {
 					return
 				}

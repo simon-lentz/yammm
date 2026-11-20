@@ -55,7 +55,7 @@ func TestTypeID_String(t *testing.T) {
 
 func TestTypeRef_Syntactic(t *testing.T) {
 	t.Run("local type ref", func(t *testing.T) {
-		ref := schema.LocalTypeRef("User", location.Span{})
+		ref := schema.TestLocalTypeRef("User", location.Span{})
 		assert.Equal(t, "User", ref.Name())
 		assert.Empty(t, ref.Qualifier())
 		assert.Empty(t, ref.Qualifier())
@@ -63,7 +63,7 @@ func TestTypeRef_Syntactic(t *testing.T) {
 	})
 
 	t.Run("qualified type ref", func(t *testing.T) {
-		ref := schema.NewTypeRef("parts", "Wheel", location.Span{})
+		ref := schema.TestNewTypeRef("parts", "Wheel", location.Span{})
 		assert.Equal(t, "Wheel", ref.Name())
 		assert.Equal(t, "parts", ref.Qualifier())
 		assert.NotEmpty(t, ref.Qualifier())

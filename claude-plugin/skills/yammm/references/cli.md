@@ -194,7 +194,7 @@ yammm snapshot info output.ys
 
 Displays metadata about a `.ys` file: schema name, version, instance counts, integrity status, timestamps, custom metadata, and the header's attestation (the writer's validity claim, v0.15+).
 
-`--header-only` reads the header and the types table alone and reports the file's size. `--dir <path>` scans the `.ys` files of a directory that `snapshot.ScanDir`'s filtering admits, header-only. For one file, the text and `--json` modes render one structure, so a field one reports the other reports too, and absent `metadata` reads `none` in text and `{}` in JSON; under `--dir` a JSON entry carries the name, path, size, modification time and the header, `null` where it did not parse, where a text row names the file and its status, then the schema, version and `created_at` of a file that read or the first error of one that did not. Under `--json`, each `--dir` entry carries its result under `diagnostics` in the wire the diagnostic stream uses: `issues`, plus `limitReached` and `droppedCount` when the entry's issues were truncated. In text, a `warn` row names its first warning. A document that decodes and fails a structural check, such as an integrity mismatch, still has a summary: it prints beside the errors, in both modes, and the command exits 1.
+`--header-only` reads the header and the types table alone and reports the file's size, 0 when the argument is not a regular file. `--dir <path>` scans the `.ys` files of a directory that `snapshot.ScanDir`'s filtering admits, header-only. For one file, the text and `--json` modes render one structure, so a field one reports the other reports too, and absent `metadata` reads `none` in text and `{}` in JSON; under `--dir` a JSON entry carries the name, path, size, modification time and the header, `null` where it did not parse, where a text row names the file and its status, then the schema, version and `created_at` of a file that read or the first error of one that did not. Under `--json`, each `--dir` entry carries its result under `diagnostics` in the wire the diagnostic stream uses: `issues`, plus `limitReached` and `droppedCount` when the entry's issues were truncated. In text, a `warn` row names its first warning. A document that decodes and fails a structural check, such as an integrity mismatch, still has a summary: it prints beside the errors, in both modes, and the command exits 1.
 
 ### snapshot update-metadata
 
@@ -203,7 +203,7 @@ yammm snapshot update-metadata --set env=prod --set version=3 output.ys
 yammm snapshot update-metadata --unset env output.ys
 ```
 
-Rewrites metadata on an existing `.ys` file. It reuses the snapshot body verbatim and recomputes only the integrity hash. There is no fallback: the command calls the strict primitive, so a document the fast path cannot rewrite is reported and the command exits non-zero rather than re-serializing. `created_at` keeps its text, and its JSON escapes are written anew.
+Rewrites metadata on an existing `.ys` file. It reuses the snapshot body verbatim and recomputes only the integrity hash. It first reads the file whole, as `snapshot info` does, and refuses a document whose integrity hash or structure fails rather than sealing it under a fresh hash. There is no fallback: the command calls the strict primitive, so a document the fast path cannot rewrite is reported and the command exits non-zero rather than re-serializing. `created_at` keeps its text, and its JSON escapes are written anew.
 
 | Flag | Description |
 | ---- | ----------- |
@@ -353,12 +353,11 @@ command prints, and names what some commands find and do not print.
   '_' (unbounded) has no effect") is one. `yammm snapshot verify
   --revalidate` reports what the revalidation finds as Warnings.
   `E_SNAPSHOT_UNSUPPORTED_HASH_ALGORITHM` is an Error on `yammm snapshot
-  verify`, `yammm snapshot info` without `--header-only` or `--dir`, and
-  `yammm snapshot save --into`, which read the body: the document is refused,
-  not warned about.
+  verify`, `yammm snapshot info` without `--header-only` or `--dir`, `yammm
+  snapshot save --into` and `yammm snapshot update-metadata`, which read the
+  body: the document is refused, not warned about.
   `yammm snapshot info --header-only` and `--dir` read the header and the types
-  table alone and report it as a Warning. `yammm snapshot update-metadata` reports that Warning
-  from its header read, then refuses the document with the Error.
+  table alone and report it as a Warning.
 
 `W_ANNOTATION_SHADOWED` is a warning, and it is the only signal that a
 subtype's property re-declaration dropped an inherited property annotation.

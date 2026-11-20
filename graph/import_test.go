@@ -142,7 +142,7 @@ func TestNewFromSnapshot_UnresolvedTargetMissing(t *testing.T) {
 	person := mustValidInstanceWithEdge(t, s, "Person", []any{"p1"}, map[string]any{"id": "p1", "name": "Alice"}, "EMPLOYER", [][]any{{"c1"}})
 	snap := buildSnapshot(t, s, person)
 	require.Len(t, slices.Collect(snap.Unresolved()), 1)
-	assert.Equal(t, "target_missing", slices.Collect(snap.Unresolved())[0].Reason())
+	assert.Equal(t, graph.ReasonTargetMissing, slices.Collect(snap.Unresolved())[0].Reason())
 
 	// Import, then add the missing Company.
 	g := graph.NewFromSnapshot(snap)
@@ -170,7 +170,7 @@ func TestNewFromSnapshot_UnresolvedAbsentEmpty(t *testing.T) {
 	// Find the absent/empty unresolved edge.
 	var absentFound bool
 	for u := range snap.Unresolved() {
-		if u.Reason() == "absent" || u.Reason() == "empty" {
+		if u.Reason() == graph.ReasonAbsent || u.Reason() == graph.ReasonEmpty {
 			absentFound = true
 		}
 	}
@@ -182,7 +182,7 @@ func TestNewFromSnapshot_UnresolvedAbsentEmpty(t *testing.T) {
 
 	var reAbsentFound bool
 	for u := range reSnap.Unresolved() {
-		if u.Reason() == "absent" || u.Reason() == "empty" {
+		if u.Reason() == graph.ReasonAbsent || u.Reason() == graph.ReasonEmpty {
 			reAbsentFound = true
 		}
 	}

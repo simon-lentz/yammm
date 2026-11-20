@@ -59,10 +59,6 @@
 //	    if res.HasErrors() {
 //	        return fmt.Errorf("record %d: %w", i, res.WithContext("validate"))
 //	    }
-//	    if valid.IsZero() {
-//	        // The record holds an instance.Refused value, which its parser reported.
-//	        return fmt.Errorf("record %d: %w", i, instance.ErrRefusedValue)
-//	    }
 //	    if res := g.Add(ctx, valid); res.HasErrors() {
 //	        return fmt.Errorf("record %d: %w", i, res.WithContext("add"))
 //	    }
@@ -88,7 +84,7 @@
 // below under its schema, so the import installs the records as they stand and
 // refuses nothing.
 //
-// [github.com/simon-lentz/yammm/snapshot.Load] constructs a [Snapshot] from a .ys
+// [github.com/simon-lentz/yammm/snapshot.Unmarshal] constructs a [Snapshot] from a .ys
 // document. It holds the document to the structural facts below and refuses a
 // string of invalid UTF-8 anywhere in it, and it judges values against their
 // constraints only under a load option that asks for it. Its instances report
@@ -302,7 +298,7 @@
 // [UnresolvedEdge] records an association the graph could not resolve at
 // construction time: a target it holds no root for (target_missing), or a
 // required one the data left absent or empty. Edge
-// properties declared on the forward reference survive Marshal/Load
+// properties declared on the forward reference survive Marshal/Unmarshal
 // symmetric with [Edge.Properties] and are accessed via
 // [UnresolvedEdge.Property] and [UnresolvedEdge.Properties]. The .ys
 // wire format carries these in the "properties" field of each
@@ -415,7 +411,7 @@
 //
 //   - [Snapshot.Types]: lexicographic by the TypeID's String
 //   - [Snapshot.InstancesOf]: lexicographic by primary key string
-//   - [Snapshot.AllInstances]: types by identity, then each type's primary keys
+//   - [Snapshot.Instances]: types by identity, then each type's primary keys
 //   - [Snapshot.Edges]: (sourceType, sourceKey, relation, targetType,
 //     targetKey)
 //   - [Snapshot.EdgesFrom]: the order of [Snapshot.Edges], over one source

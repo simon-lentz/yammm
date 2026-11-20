@@ -4,8 +4,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/simon-lentz/yammm/internal/schematest"
+
 	"github.com/simon-lentz/yammm/internal/value"
-	"github.com/simon-lentz/yammm/schema"
 )
 
 // One Timestamp text reads as one instant in one location, and stores as one
@@ -17,7 +18,7 @@ func TestParseTimestamp_TheHostsZoneDecidesNothing(t *testing.T) {
 	restore := time.Local
 	t.Cleanup(func() { time.Local = restore })
 
-	c := schema.NewTimestampConstraint()
+	c := schematest.Constraint(t, "Timestamp")
 	hosts := []*time.Location{
 		time.UTC,
 		time.FixedZone("EDT", -4*60*60),

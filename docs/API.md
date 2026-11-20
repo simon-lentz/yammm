@@ -6,16 +6,16 @@ The YAMMM language itself — grammar, types, expressions, constraints, and diag
 
 ## Error Handling Conventions
 
-Most load and validation functions return a `(T, diag.Result)` pair. The value half is whatever the call produces, such as a `schema.Schema`, a `[]byte`, a `[]instance.ValidInstance` or a `[]snapshot.ScanEntry`.
+Most load and validation functions return a `(T, diag.Result)` pair. The value half is whatever the call produces, such as a `schema.Schema`, a `[]byte` or a `[]instance.ValidInstance`.
 
 Some validation surfaces have no value to return and produce a bare `diag.Result`: `snapshot.Verify`, `graph.Graph.Add`, `graph.Graph.Check`, and `cypher.Config.CheckLabels`. For these, `result.OK()` is the whole answer.
 
 **Read the result first, then the value.** The two are independent, and all four combinations occur:
 
-- A value and `result.OK()` — success. Where the value is a slice, success covers each entry that is not zero, and a `snapshot.ScanEntry` holds its own file's failure in its own `Result`. A record is a handle (see [Values](#values)), so `IsZero` reports that it holds none. The result may still carry warnings. A `Validate` slice beside an OK result may still hold a zero entry, an input that held an `instance.Refused` value (see [Instance Validation](#instance-validation)): check each entry.
+- A value and `result.OK()` — success. Where the value is a slice, success covers each entry. `snapshot.ScanDir` yields one `snapshot.ScanEntry` per file, and the entry holds that file's failure in its own `Result`. A record is a handle (see [Values](#values)), so `IsZero` reports that it holds none. The result may still carry warnings.
 - No value and `!result.OK()` — failure.
-- A value and `!result.OK()` — a partial or unvalidated answer, and a documented contract on several surfaces. `snapshot.Info` returns a populated summary beside an Error-severity `E_SNAPSHOT_INTEGRITY_MISMATCH`; `snapshot.ScanDirSlice` returns the entries collected before cancellation beside a Fatal `E_CONTEXT_CANCELLED`; `instance.Validator.Validate` returns one slot per input, a zero `ValidInstance` for each failure, beside a merged result that is non-OK when any failure drew an issue. Discarding the value here loses real data.
-- No value and `result.OK()` — nothing to do, or a refused record. `instance.Validator.Validate` returns `nil, diag.OK()` for nil input and the empty slice for a non-nil empty input, once the type name resolves to a type that is neither abstract nor a part type; an unknown name returns `nil` beside a non-OK result, and so does a nil or empty batch of an abstract or part type. `ValidateOne` returns a zero `ValidInstance` and `diag.OK()` for a raw instance whose one fault is an `instance.Refused` value: its producer's result holds the issue.
+- A value and `!result.OK()` — a partial or unvalidated answer, and a documented contract on two surfaces. `snapshot.Stat` returns a populated summary beside an Error-severity `E_SNAPSHOT_INTEGRITY_MISMATCH`; `instance.Validator.Validate` returns one slot per input, a zero `ValidInstance` for each failure, beside a merged result that holds an Error or Fatal issue for each failure. Discarding the value here loses real data.
+- No value and `result.OK()` — nothing to do. `instance.Validator.Validate` returns `nil, diag.OK()` for nil input and the empty slice for a non-nil empty input, once the type name resolves to a type that is neither abstract nor a part type; an unknown name returns `nil` beside a non-OK result, and so does a nil or empty batch of an abstract or part type.
 
 Use `result.Err()` to convert to a standard Go `error` when `!result.OK()`.
 
@@ -23,7 +23,7 @@ Pure transformations take the shape their failures need. Some return `(T, diag.R
 
 ## Values
 
-The validator reads a property value by the rules below. The graph, the `.ys` writer, and the write path of `neo4j` hold and write each value as a validator stored it or the `.ys` reader read it, by these rules. `neo4j.CoerceParams`, which takes a value from a caller that writes its own Cypher, reads a value at a declared key as the validator reads it and sends it as the write path sends the value the validator stores. [Value Functions](#value-functions) lists the `instance` functions that apply the rules.
+The validator reads a property value by the rules below. The graph, the `.ys` writer, and the write path of `neo4j` hold and write each value as a validator stored it or the `.ys` reader read it, by these rules. `neo4j.CoerceParams`, which takes a value from a caller that writes its own Cypher, reads a value at a declared key as the validator reads it and sends it as the write path sends the value the validator stores.
 
 **The one form.** A scalar value is nil, a `bool`, a `string`, an `int64`, a `uint64`, a `float32`, a `float64`, a `json.Number` whose text is a JSON number literal, a `time.Time` or a `uuid.UUID`. A value of another signed integer kind is read as an `int64`, and one of another unsigned kind as a `uint64`. A list or a map is read element by element, and each element by these rules.
 
@@ -41,9 +41,9 @@ The validator reads a property value by the rules below. The graph, the `.ys` wr
 
 **Nested collections.** A List whose element is a List or a Vector is valid at the validator, and each writer writes it or refuses it. The `.ys` document writes it and reads it back, by the same rules as any list. The `neo4j` write path refuses a value of one with `ErrUnsupportedListElem`, as `schema/cypher`'s DDL refuses the property with `E_NEO4J_UNSUPPORTED_TYPE`: Neo4j has no nested collection property type.
 
-**Ownership.** Each root, each record that a `schema.Schema` or a `graph.Snapshot` holds, and `instance.ValidInstance` and `instance.ValidEdgeData`, which the validator hands out, is a handle: a struct with one unexported pointer. Other results include plain values, such as a constraint, `immutable.Properties` or `diag.Result`. `Snapshot.Attestation` returns a pointer to a copy of a plain struct, or nil. No exported method of a handle returns a pointer to its stored state or a slice of it. An invariant's compiled tree and a pattern's compiled form have no public read: `Invariant.Span` locates an invariant's source in `Sources.Content`, from its doc comment, if it has one, through its expression, and `regexp.Compile` compiles a loaded pattern from `PatternConstraint.Pattern`. A caller holds no address of a handle's record, so `*t = schema.Type{}` does not compile. Two handles are equal when they name one record, so a handle is a map key. The zero handle names no record, and `IsZero` reports it. On a zero `schema` record an accessor panics at the call, an iterator's included; a zero `schema.Sources`, and a zero record of `graph` or `instance`, answers as holding nothing, with no panic. A handle has no JSON form, and `encoding/json` writes one as `{}`. A lookup returns `(T, bool)`. A handle is a struct and no value of any form, so a handle at a property, the zero one among them, is not absent: the validator refuses it with `E_TYPE_MISMATCH`, where v0.21.1 read a nil pointer as absent.
+**Ownership.** Each root, each record that a `schema.Schema` or a `graph.Snapshot` holds, and `instance.ValidInstance` and `instance.ValidEdgeData`, which the validator hands out, is a handle: a struct with one unexported pointer. Other results include plain values, such as a constraint, `immutable.Properties` or `diag.Result`. `Snapshot.Attestation` returns a pointer to a copy of a plain struct, or nil. No exported method of a handle returns a pointer to its stored state or a slice of it. An invariant's compiled tree and a pattern's compiled form have no public read: `Invariant.Expression` returns an invariant's expression as text that parses to the same tree, `Invariant.Span` locates its source in `Sources.Content`, from its doc comment, if it has one, through its expression, and `regexp.Compile` compiles a loaded pattern from `PatternConstraint.Pattern`. The text is the expression's tokens as the author wrote them, with comments removed: a gap between two tokens is one line break when it holds one, else one space, since a regexp literal cannot cross a line. A caller holds no address of a handle's record, so `*t = schema.Type{}` does not compile. Two handles are equal when they name one record, so a handle is a map key. The zero handle names no record, and `IsZero` reports it. On a zero `schema` record an accessor panics at the call, an iterator's included; a zero `schema.Sources`, and a zero record of `graph` or `instance`, answers as holding nothing, with no panic. A handle has no JSON form, and `encoding/json` writes one as `{}`. A lookup returns `(T, bool)`. A handle is a struct and no value of any form, so a handle at a property, the zero one among them, is not absent: the validator refuses it with `E_TYPE_MISMATCH`, where v0.21.1 read a nil pointer as absent.
 
-**Collections.** An accessor over records, or over the references that name them (`TypeRef`, `ResolvedTypeRef`), returns `iter.Seq` or `iter.Seq2`, and no slice form exists. A caller that needs a slice calls `slices.Collect` on an `iter.Seq`. A slice that an accessor returns is a fresh one, such as `Annotation.Args`, `EnumConstraint.Values`, `Snapshot.Types`, `Sources.SourceIDs` and `Instance.ComposedRelations`.
+**Collections.** An accessor over records, or over a type's references to other types (`TypeRef`, `TypeID`), returns `iter.Seq` or `iter.Seq2`, and no slice form exists. A caller that needs a slice calls `slices.Collect` on an `iter.Seq`. A slice that an accessor returns is a fresh one, such as `Annotation.Args`, `EnumConstraint.Values`, `Snapshot.Types`, `Sources.SourceIDs` and `Instance.ComposedRelations`.
 
 ## Loading Schemas
 
@@ -178,16 +178,16 @@ The option refuses rather than degrades. Each of these is an error:
 | The option passed to `Load` or `LoadString` | It could only ever be a silent no-op there |
 | An absolute source key — as given, or once cleaned and in NFC (`./C:/x.yammm`, or a key spelled with U+212A KELVIN SIGN, which NFC makes `K`) — or one naming the root itself or a directory above it (`..`) | An absolute key collides with file-backed identities, and neither the root nor a directory above it is a source. A key that spells a directory under the root is cleaned to a file key: `x.yammm/` and `x.yammm/.` are `x.yammm`. A key that escapes the root is allowed: it keeps its leading `..` and yields a stable, distinct identity |
 | A source key holding a backslash | Windows reads a backslash as a separator and every other host as part of a file name, so one store would name different sources on each |
-| A source key holding a character that does not print — a control character, a bidi or other format character, a space past ASCII, a line or paragraph separator, a private-use or unassigned code point | Such a character renders as nothing or reorders the text around it, so two identities could read alike. Every synthetic identity the library judges is held to this rule, a `LoadString` name and `location.NewSourceID` among them. `location.NewSourceID`, `schema.SyntheticImportKey` and `gogen.Marshal` return an error wrapping `location.ErrUnprintableSourceID`. A load reports its text, so `errors.Is` cannot match it there. The verdict follows the Unicode tables of the Go toolchain that builds yammm, so a character a later Unicode assigns is refused until that toolchain moves. The ASCII space stays legal in a key |
+| A source key holding a character that does not print — a control character, a bidi or other format character, a space past ASCII, a line or paragraph separator, a private-use or unassigned code point | Such a character renders as nothing or reorders the text around it, so two identities could read alike. Every synthetic identity the library judges is held to this rule, a `LoadString` name and `location.NewSourceID` among them. `location.NewSourceID` and `gogen.Marshal` return an error wrapping `location.ErrUnprintableSourceID`. A load reports its text, so `errors.Is` cannot match it there. The verdict follows the Unicode tables of the Go toolchain that builds yammm, so a character a later Unicode assigns is refused until that toolchain moves. The ASCII space stays legal in a key |
 
 A relative import (`"./x"`, `"../x"`) resolves against the importing source's
 key, as text: `"../dep"` from `a/b/main.yammm` is `a/dep.yammm`, and one that
-climbs above the root keeps its leading `..`. `schema.SyntheticImportKey`
-returns the key any import resolves to, which is how `gogen.Marshal` keys each
-source it embeds through an import; the entry and a source nothing imports key
-from their identities. One key rule serves all three: it returns a key cleaned,
-in NFC and with a leading `..` kept, or refuses it, and the loader,
-`SyntheticImportKey` and `gogen.Marshal` all read a key through it. A key it returns is a fixed point: the rule returns it unchanged. `Schema.ModuleRoot()` reports the synthetic root — it is the
+climbs above the root keeps its leading `..`. `gogen.Marshal` keys each source
+it embeds through an import by the loader's own rule, so the re-load asks for
+the key it wrote; the entry and a source nothing imports key from their
+identities. One key rule serves both: it returns a key cleaned, in NFC and with
+a leading `..` kept, or refuses it, and the loader and `gogen.Marshal` both read
+a key through it. A key it returns is a fixed point: the rule returns it unchanged. `Schema.ModuleRoot()` reports the synthetic root — it is the
 root the load resolved imports against — so a schema loaded this way is a
 supported input to `gogen.Marshal`, whose embedded keys are relative to it.
 
@@ -285,7 +285,7 @@ Dropped issues still count toward `Result.OK()` / `HasErrors()` /
 stored), so truncation never flips a failing result to OK and the
 all-or-nothing contract holds regardless of the limit.
 Under `snapshot.WithRevalidation` the revalidator caps each row at the
-`snapshot.Load` limit (`snapshot.WithIssueLimit`), so that load has one cap and
+`snapshot.Unmarshal` limit (`snapshot.WithIssueLimit`), so that load has one cap and
 an unlimited one stores every finding a row draws. When the cap was hit,
 the JSON output format carries `limitReached` and `droppedCount`. A
 truncated result merged with `Collector.Merge` or `MergeFunc` keeps both, and
@@ -301,11 +301,9 @@ Each `Load` call compiles its own schemas and shares nothing with another, so `=
 
 ## Constraint Values
 
-The `schema` package constructs constraint values directly, for a caller that judges or coerces a value at a boundary a loaded schema does not reach.
+The `schema` package exports no constraint constructor, so a caller holds a constraint a loaded schema gives, a property's or a datatype's, or the zero value of a kind.
 
-`schema.CheckConstraint(c) error` returns why `c` cannot judge a value, or `nil` when it can. It refuses a nil constraint. It refuses what the DSL refuses in a constraint: an argument no `.yammm` source can state — inverted bounds, a non-finite `Float` bound, a negative length, an enum with an empty or repeated value or fewer than two values, an enum value that is not valid UTF-8, a `Pattern` with no pattern or one `regexp.Compile` refuses, a `Vector` dimension outside 1 to 65536 — a `List` with no element constraint, and a constraint of a Go type the `schema` package does not construct, such as a pointer to one, each at any `List` depth. It refuses a reference under a name no `.yammm` source writes — anything but a datatype name, or an import alias, a dot and a datatype name, so `.T1`, `lib.`, `a.b.c`, a lower-case `t1` and a built-in type name such as `String`. A hand-built constraint meets no completion, so it also refuses a DataType reference that resolves to no constraint or to another reference alone, at any `List` depth. `neo4j.CoerceParams` and `instance.CheckValue` call it before they read a value.
-
-`schema.NewPatternConstraint` takes one regexp and compiles it again with `regexp.Compile` from its source text, as a `.yammm` source compiles it; a nil regexp gives a constraint that holds no pattern, which `schema.CheckConstraint` refuses and which matches no value. A pattern therefore matches by its source's Perl reading however its regexp was built: under `regexp.CompilePOSIX`, `^b$` matches `"a\nb"`, and in a `PatternConstraint` it does not. A source that reading refuses, which POSIX syntax can accept (`a**`), is kept as given, and `schema.CheckConstraint` refuses the constraint, as the DSL refuses `Pattern["a**"]`.
+`schema.CheckConstraint(c) error` returns why `c` cannot judge a value, or `nil` when it can. Every constraint a loaded schema holds passes. It refuses a nil constraint, the zero value of a kind that needs an argument — an `EnumConstraint` (fewer than two values), a `PatternConstraint` (no pattern), a `VectorConstraint` (a dimension outside 1 to 65536), a `ListConstraint` (no element constraint) and an `AliasConstraint` (a name no `.yammm` source writes) — and a constraint of a Go type the `schema` package does not construct, such as a pointer to one, each at any `List` depth. `neo4j.CoerceParams` calls it before it reads a value.
 
 ### Annotations
 
@@ -334,8 +332,6 @@ type RawInstance struct {
 
 `Properties` is a `map[string]any` of native Go values. The checkers accept them directly — `time.Time` for a `Timestamp` or `Date` (one outside years 0 to 9999 is refused, as is one at a `Timestamp` whose UTC offset is 24 hours or more), any Go integer width for an `Integer` — so marshaling a struct through JSON is one convenient way to build the map, not a requirement. `instance.BuilderFor` is another.
 
-**A refused value draws its producer's issue alone.** A parser that cannot read an input as its member's type reports that issue and writes `instance.Refused{Value: <the input>}` in the value's place. The validator judges a `Refused` no further: it reports nothing for it and refuses the instance, which fails as a member error at that position fails it: no pass after the one that met it runs, and in an edge target a refused foreign-key field leaves the edge properties unjudged, as a bad one does. `ValidateOne` returns a zero `ValidInstance` with a result that holds no error for the value, a batch entry is zero, and `instance.ErrRefusedValue` (*"instance: the instance holds a refused value"*) names the case for a caller that must return an error. A `Refused` is read as a property's value and, in an edge object, as a foreign-key field's or an edge property's value. Anywhere else it is a value of no form (see [Values](#values)), refused as that position refuses a value of the wrong form: `E_TYPE_MISMATCH` as a list element or behind a pointer, `E_EDGE_SHAPE_MISMATCH` as a relation's value. Under a key that names no member it is an unknown field, as any value there is.
-
 ### Validator Creation
 
 ```go
@@ -361,7 +357,7 @@ if !result.OK() {
     // Use diag.Renderer to format issues
     return fmt.Errorf("validation errors: %v", result)
 }
-// Process each entry that is not zero: a zero one held a refused value its producer reported
+// Each entry is a validated instance
 
 // Validate a single instance
 one, result := validator.ValidateOne(ctx, "Person", rawInstance)
@@ -373,7 +369,7 @@ A batch call returns one entry per input instance when the batch ran — a recor
 
 **Composed nesting is bounded.** A root is depth 0 and its composed children depth 1; a child deeper than `instance.MaxComposedDepth` (32) draws `E_COMPOSITION_DEPTH_EXCEEDED`. The `.ys` reader refuses a document nested past the same number with `E_SNAPSHOT_DEPTH_EXCEEDED`, so a snapshot can carry every nesting the validator accepts.
 
-**A refused instance's key.** `validator.PrimaryKeyOf(typeName, raw) (schema.TypeID, immutable.Key, bool)` returns the type and primary key `raw` would carry as a valid root instance, whether or not the validator accepts the rest of it: each key property is read, checked and coerced as `Validate` reads it, so the key equals the one `Validate` stores for an instance it accepts. It reports false when `typeName` names no type that can hold a root, or a key component is absent, collided, an `instance.Refused`, or refused by its constraint. The CLI's data commands read it to judge a document as a whole: an association whose target the document states but the validator refused is not reported as a missing target, and a key a refused instance shares with another is a duplicate.
+**A refused instance's key.** `validator.PrimaryKeyOf(typeName, raw) (schema.TypeID, immutable.Key, bool)` returns the type and primary key `raw` would carry as a valid root instance, whether or not the validator accepts the rest of it: each key property is read, checked and coerced as `Validate` reads it, so the key equals the one `Validate` stores for an instance it accepts. It reports false when `typeName` names no type that can hold a root, or a key component is absent, collided or refused by its constraint. The CLI's data commands read it to judge a document as a whole: an association whose target the document states but the validator refused is not reported as a missing target, and a key a refused instance shares with another is a duplicate.
 
 > **Note:** Passing an unknown type name to `Validate` or `ValidateOne` produces a validation failure (via `diag.Result`), not a panic or unexpected state — for `Validate`, whatever the batch, a nil or empty one included.
 
@@ -441,30 +437,6 @@ Build errors include the bound type's name, the offending property/relation, and
 
 The shape portion of `ValidateOne` — property and relation names, and association cardinality — is guaranteed to pass on the output of a successful `Build`. Compositions are not covered: the builder cannot produce one. Every check outside that shape portion still runs at `ValidateOne` time, value-level validation and a target key a `(many)` relation names twice among them. Whether an association's target exists is the graph's question, never the validator's: `graph.Check` reports a missing target under a required association, and `Snapshot.Unresolved` holds the record of one under any association.
 
-### Value Functions
-
-The validator's per-value check and its absence rule, exported for a caller that admits schema-typed values without a `Validator` — a direct-Cypher parameter map, a pre-filter in front of a write the validator never sees. Values that reach a graph through `Validator` have already passed the check.
-
-```go
-// CheckValue reports whether val conforms to c by the rule the validator applies
-// to every property value: Go kind and form, bounds, enum membership, pattern,
-// list length and element rule and a Vector's dimension, with an alias resolved
-// to its DataType. A nil constraint is valid, and so is a value that holds none
-// (IsAbsent) under a constraint schema.CheckConstraint accepts —
-// presence is the caller's rule, as it is the validator's. A non-nil constraint is judged first by
-// schema.CheckConstraint, and one it refuses is an error whatever the value.
-func CheckValue(val any, c schema.Constraint) error
-
-// IsAbsent reports whether v holds no value: nil, a nil map, a nil slice or a
-// nil immutable container. Validator reads such a value at a property or a
-// relation as the value left out, though its key still names its member, and
-// the neo4j package writes it as null. A pointer is not absent, a nil one too: it
-// is a value of no form, which the validator refuses.
-func IsAbsent(v any) bool
-```
-
-`CheckValue`'s error is the checker's message and is meant for reading, not matching, with two exceptions: a constraint `schema.CheckConstraint` refuses returns that refusal, and a panic inside the check is recovered into an `*InternalError` that matches `errors.Is(err, instance.ErrInternalFailure)`, as the validator recovers one. `CheckValue` judges a constraint as `neo4j.CoerceParams` does, so a hand-built constraint `schema.CheckConstraint` refuses, or a DataType reference that resolves to no constraint or to another reference alone, is an error with no value checked. `IsAbsent` is the rule `neo4j` reads a value that holds none by. `CheckValue` and the validator read every value by the rules of [Values](#values): a `json.Number` is a number, which every kind that reads text refuses, a pointer to one is no value of any kind, and a value that holds none is absent. A `json.Number` whose text is no JSON number literal (RFC 8259, section 6), such as `+5`, `007`, `1_000`, `0x1p4` or `.5`, is no value of any kind: an `Integer` or a `Float` refuses it as one (*`expected integer, got a json.Number that is no JSON number literal: "+5"`*), and no snapshot holds one.
-
 ## Graph Construction
 
 The `graph` package builds an in-memory graph from validated instances.
@@ -492,7 +464,7 @@ for _, typeID := range snap.Types() {
 }
 ```
 
-**Type resolution.** No lookup in this package takes a rendered type name: a lookup takes the identity, and a name is its rendering for output. `Add` judges an instance by the schema object that validated it: the instance holds its `schema.Type` (`ValidInstance.Type()`), and `Add` compares that handle with the one `Schema.TypeByID` returns for its identity. A mismatch panics, as every other programmer error in this package does: the type is outside the graph's import closure, or another load validated the instance. One text loaded twice is two loads, so an instance crossed between them panics whether or not the texts differ. A load holds one handle per type however many import paths reach it, so a validator over any member of a closure serves a graph over any schema of that load whose own closure holds the type. Past that check, a root's type is any type of the closure that can hold a root — concrete, not a part, and keyed — one the schema reaches only through an intermediate import included. The graph holds it by identity, so it stays apart from an entry type of its name. `snapshot.Load` and `snapshot.Verify` apply the same root rule to every type a snapshot *denotes* — `Snapshot.Types`, whether or not the type holds instances. A composed child reaches the whole import closure too: its type comes from a relation the schema already resolved, so a schema where an imported type composes a part type from a further import loads, validates and builds.
+**Type resolution.** No lookup in this package takes a rendered type name: a lookup takes the identity, and a name is its rendering for output. `Add` judges an instance by the schema object that validated it: the instance holds its `schema.Type` (`ValidInstance.Type()`), and `Add` compares that handle with the one `Schema.TypeByID` returns for its identity. A mismatch panics, as every other programmer error in this package does: the type is outside the graph's import closure, or another load validated the instance. One text loaded twice is two loads, so an instance crossed between them panics whether or not the texts differ. A load holds one handle per type however many import paths reach it, so a validator over any member of a closure serves a graph over any schema of that load whose own closure holds the type. Past that check, a root's type is any type of the closure that can hold a root — concrete, not a part, and keyed — one the schema reaches only through an intermediate import included. The graph holds it by identity, so it stays apart from an entry type of its name. `snapshot.Unmarshal` and `snapshot.Verify` apply the same root rule to every type a snapshot *denotes* — `Snapshot.Types`, whether or not the type holds instances. A composed child reaches the whole import closure too: its type comes from a relation the schema already resolved, so a schema where an imported type composes a part type from a further import loads, validates and builds.
 
 **What `Add` checks.** `Add` checks the instance's load and its root type, then assembles the tree to install and commits it under the graph's lock. It checks no structure below the root type: the validator of the same load already judged the property names, the names, property names, multiplicities and target keys of a root's edges, and every slot and child of its composition tree at any depth. A refused record installs nothing: no instance, no child and no edge, and the call's result holds its issue. A key a held instance states is such a refusal, and the graph keeps a duplicate record of it.
 
@@ -511,9 +483,6 @@ for i, rec := range records {
     if res.HasErrors() {
         return fmt.Errorf("record %d: %w", i, res.WithContext("validate"))
     }
-    if valid.IsZero() { // the record holds an instance.Refused value
-        return fmt.Errorf("record %d: %w", i, instance.ErrRefusedValue)
-    }
     if res := g.Add(ctx, valid); res.HasErrors() {
         return fmt.Errorf("record %d: %w", i, res.WithContext("add"))
     }
@@ -526,7 +495,7 @@ snap := g.Snapshot()
 // snapshot.Marshal(ctx, snap) gives the bytes snapshot.WriteFile writes.
 ```
 
-**Error shapes.** Each call returns its own `diag.Result`. `Result.WithContext(tag)` turns a failed one into a `*diag.ContextualError` that carries the caller's tag (see [Contextual Diagnostic Wrap](#contextual-diagnostic-wrap)), so the caller names its own record. A raw instance whose one fault is an `instance.Refused` value (see [Instance Validation](#instance-validation)) validates to a zero `ValidInstance` with a result that holds no error for it: the value's producer reported it, and `instance.ErrRefusedValue` names the case for a caller that must return an error. `Add` and `AddOrMerge` panic on a zero instance, so a caller checks `IsZero` before it adds.
+**Error shapes.** Each call returns its own `diag.Result`. `Result.WithContext(tag)` turns a failed one into a `*diag.ContextualError` that carries the caller's tag (see [Contextual Diagnostic Wrap](#contextual-diagnostic-wrap)), so the caller names its own record. `Add` and `AddOrMerge` panic on a zero instance, which a validation with no error never returns.
 
 **What `Check` and the snapshot report.** `Check` reports each required association left unresolved and a cancelled context, and nothing else. It accumulates nothing, which is what makes it idempotent. The graph keeps no diagnostics and a `Snapshot` holds none: each refusal is in the result of the `Add` or `AddOrMerge` that drew it, so a caller that needs a record of every refusal keeps those results. A clean `Check` means the completeness check passed, not that every record was added. `Duplicates` and `Unresolved` are the persistent structural records.
 
@@ -535,7 +504,7 @@ snap := g.Snapshot()
 **Resuming from a prior snapshot.** Consumers that persist a batch and continue it on a later run seed a graph from the loaded snapshot with `graph.NewFromSnapshot` (see [Seeding from a Snapshot](#seeding-from-a-snapshot)) and add only the outstanding records:
 
 ```go
-snap, res := snapshot.Load(ctx, data, s) // prior batch's .ys
+snap, res := snapshot.Unmarshal(ctx, data, s) // prior batch's .ys
 if res.HasErrors() { /* handle */ }
 
 g := graph.NewFromSnapshot(snap)
@@ -547,7 +516,7 @@ result := g.Check(ctx)
 
 New adds interact with the seeded state as if it had been assembled in the same batch: they resolve previously-unresolved edges imported from the seed, forward references resolve against seeded instances, a `(type, primary key)` collision with a seeded instance is rejected as `E_DUPLICATE_PK` by `Add`, and merged or refused by `AddOrMerge`, and `Check` covers the union — a required association imported from the seed and still unresolved draws `E_UNRESOLVED_REQUIRED` in its result.
 
-**Test fixtures.** `snapshot/snapshottest` is the shared round-trip vocabulary for snapshot tests: `BuildSnapshot(tb, s, instances...)` constructs a snapshot from instances an `instance.Validator` validated over `s` itself, `AssertRoundTrip(tb, snap, s, opts...)` pins Marshal→Load structural equivalence, `AssertDeterministic(tb, snap, opts...)` pins byte-stable marshaling, and `DiffSnapshots(tb, want, got)` is the underlying go-cmp comparison — recursive over composition trees (duplicates included, with each record's conflict), provenance-presence-aware, and exact on every numeric property's dynamic type: every constructor stores a number a finite `float64` holds at a Float as a `float64` ([Values](#values)), so an `int64`/`float64` mismatch is a real defect, not a wire artifact.
+**Test fixtures.** `snapshot/snapshottest` is the shared round-trip vocabulary for snapshot tests: `BuildSnapshot(tb, s, instances...)` constructs a snapshot from instances an `instance.Validator` validated over `s` itself, `AssertRoundTrip(tb, snap, opts...)` pins Marshal→Unmarshal structural equivalence against the snapshot's own schema, `AssertDeterministic(tb, snap, opts...)` pins byte-stable marshaling, and `DiffSnapshots(tb, want, got)` is the underlying go-cmp comparison — recursive over composition trees (duplicates included, with each record's conflict), provenance-presence-aware, and exact on every numeric property's dynamic type: every constructor stores a number a finite `float64` holds at a Float as a `float64` ([Values](#values)), so an `int64`/`float64` mismatch is a real defect, not a wire artifact.
 
 ### Seeding from a Snapshot
 
@@ -577,7 +546,7 @@ The `Snapshot` type provides read access to graph state, and no method of it cha
 | `Schema()` | The schema used for validation |
 | `Types()` | The type identities the snapshot denotes (`[]schema.TypeID`, sorted by TypeID) |
 | `InstancesOf(typeID)` | Iterator over the instances of a type (sorted by primary key) |
-| `AllInstances()` | Iterator over all **root** instances in deterministic order. Composed children are not yielded — walk `Instance.ComposedRelations` and `Instance.Composed` for the subtree |
+| `Instances()` | Iterator over all **root** instances in deterministic order. Composed children are not yielded — walk `Instance.ComposedRelations` and `Instance.Composed` for the subtree |
 | `InstanceByKey(typeID, key)` | O(1) lookup by type identity and primary key. The key is a `FormatKey` string, tried as spelled, then with each Timestamp, Date or UUID component canonicalized under the type's key constraints. One instant at two offsets is two addresses |
 | `Edges()` | Iterator over all resolved edges (sorted) |
 | `EdgesFrom(inst)` | Iterator over the outgoing edges of a specific instance |
@@ -680,7 +649,7 @@ The `snapshot` package serializes and deserializes `graph.Snapshot` values to an
 
 ### File Format
 
-The `.ys` format is JSON-based and preserves structural fidelity: instances with properties, primary keys, edges, compositions, provenance, duplicates, and unresolved edge records all survive a `Marshal`/`Load` round-trip, with two qualifications. Provenance survives as source name and path only: a loaded instance's `Provenance().Span()` is zero. `Marshal` refuses a source name or path that is not valid UTF-8 (`E_SNAPSHOT_MALFORMED`), and writes no bytes. It stops at its first refusal. The wire carries a number's value, not its width, for a value a validator admits. `Load` reads each number by the rule in [Values](#values) at the kind its position declares: at a `Float` or a `Vector` element a number literal is its nearest `float64`, an integer past `int64` included, and elsewhere an integer literal an `int64` holds is an `int64`, a float literal a `float64` and an integer literal past `int64` the `json.Number` its text spells. A literal no finite `float64` holds (`1e400`) is the `json.Number` at any position. `Marshal` writes each `json.Number` back unchanged. A snapshot holds what a validator stored or the reader read, and the wire carries each as itself, so `Marshal` refuses no value a snapshot holds. It returns nil bytes with Error `E_SNAPSHOT_MALFORMED` for an indent that is not JSON whitespace or a metadata key or value that is not valid UTF-8. Fatal `E_INTERNAL` marks only a broken invariant of the snapshot itself.
+The `.ys` format is JSON-based and preserves structural fidelity: instances with properties, primary keys, edges, compositions, provenance, duplicates, and unresolved edge records all survive a `Marshal`/`Unmarshal` round-trip, with two qualifications. Provenance survives as source name and path only: a loaded instance's `Provenance().Span()` is zero. `Marshal` refuses a source name or path that is not valid UTF-8 (`E_SNAPSHOT_MALFORMED`), and writes no bytes. It stops at its first refusal. The wire carries a number's value, not its width, for a value a validator admits. `Unmarshal` reads each number by the rule in [Values](#values) at the kind its position declares: at a `Float` or a `Vector` element a number literal is its nearest `float64`, an integer past `int64` included, and elsewhere an integer literal an `int64` holds is an `int64`, a float literal a `float64` and an integer literal past `int64` the `json.Number` its text spells. A literal no finite `float64` holds (`1e400`) is the `json.Number` at any position. `Marshal` writes each `json.Number` back unchanged. A snapshot holds what a validator stored or the reader read, and the wire carries each as itself, so `Marshal` refuses no value a snapshot holds. It returns nil bytes with Error `E_SNAPSHOT_MALFORMED` for an indent that is not JSON whitespace or a metadata key or value that is not valid UTF-8. Fatal `E_INTERNAL` marks only a broken invariant of the snapshot itself.
 
 The format includes:
 
@@ -696,36 +665,31 @@ The format includes:
 data, result := snapshot.Marshal(ctx, snap, opts...)
 
 // Deserialize .ys bytes back to a snapshot (verifies schema compatibility)
-snap, result := snapshot.Load(ctx, data, schema, loadOpts...)
+snap, result := snapshot.Unmarshal(ctx, data, schema, loadOpts...)
 
 // Validate a .ys file without materializing a snapshot
 // Peak memory scales with document size: the instances section is decoded first
 result := snapshot.Verify(ctx, data, schema, loadOpts...)
 
-// Read summary metadata and statistics without full deserialization
+// Read the header and a summary of the body without full deserialization
 // Cost and peak memory scale with file size: the instance sections are decoded
-info, result := snapshot.Info(ctx, data)
+info, result := snapshot.Stat(ctx, data)
 
-// Read the header and the types table only, from []byte — skips instance body and
-// integrity check. A scan of the whole document still checks its shape, member names and text,
-// so cost scales with file size; HeaderOnlyRead is the sibling whose cost is the members up to the types table and that table.
-header, result := snapshot.HeaderOnly(ctx, data)
-
-// Streaming sibling: read those two from any io.Reader without
-// materializing the full document into memory. Reads at most
-// snapshot.MaxHeaderSize (16 MiB) bytes from the reader.
-header, result := snapshot.HeaderOnlyRead(ctx, r)
+// Read the header and the types table only, from any io.Reader — skips the
+// instance body and the integrity check. Reads at most snapshot.MaxHeaderSize
+// (16 MiB) bytes from the reader.
+header, result := snapshot.ReadHeader(ctx, r)
 
 // Write .ys bytes atomically to disk — tmp+fsync+rename. Consumers
 // needing crash-safe persistence should use this instead of os.WriteFile.
 if err := snapshot.WriteFile(path, data); err != nil { /* ... */ }
 ```
 
-`Load`, `Verify`, `Info`, `HeaderOnly` and `UpdateMetadata` refuse with `E_SNAPSHOT_MALFORMED` a document holding a string of invalid UTF-8 or a surrogate escape that is half of no pair (`\ud800`), raw or escaped, at any position: `encoding/json` would silently read either as U+FFFD. `HeaderOnlyRead` and `ScanDir` read up to the end of the `types` table and hold what they read to the same rule. The five whole-document surfaces hold a document to this rule, and to its outer shape and member names, before they read its header, so such a document draws `E_SNAPSHOT_MALFORMED` whatever version it states. `HeaderOnlyRead` and `ScanDir` judge the version first.
+`Unmarshal`, `Verify`, `Stat` and `UpdateMetadata` refuse with `E_SNAPSHOT_MALFORMED` a document holding a string of invalid UTF-8 or a surrogate escape that is half of no pair (`\ud800`), raw or escaped, at any position: `encoding/json` would silently read either as U+FFFD. `ReadHeader` and `ScanDir` read up to the end of the `types` table and hold what they read to the same rule. The four whole-document surfaces hold a document to this rule, and to its outer shape and member names, before they read its header, so such a document draws `E_SNAPSHOT_MALFORMED` whatever version it states. `ReadHeader` and `ScanDir` judge the version first.
 
-`Load` refuses a document that breaks a fact of the graph package doc's "Structural facts", whatever the options say; `Verify` runs the same checks, and `Info`, which reads no schema, runs those that need none. It does not re-validate instance data by default. The header's attestation is the writer's claim, not a proof — anyone can recompute the integrity hash, so any process can write a document whose instances never earned it, and a `.ys` can hold values outside their constraints and invariant violations. Pass `WithRevalidation` to run each root the reader walks and the structural checks left whole — no check refused its type, its tree, its edges, its unresolved records, or its required and `(one)` associations, no record whose types-table row the reader refused could be its, and no other root the reader walks stands at its address, the reader walking no root of an instances entry that repeats a types-table row or names none; an edge that names no root does not stop it, unless it stands beside another record under a `(one)` association, and the validator judges no edge's target key, which the root at that address, the refusal of a unit there or the edge's reference issue judges, nor the target key of a `target_missing` record whose target a refused unit stands at or states, the unit's refusal standing for it; a listing that repeats a target no sound root holds alone is left out of the run, the target's own issue standing for the repeat — with its composed children, edges and `target_missing` records, back through the real validator. `Load` always performs structural validation of the `.ys` format itself and verifies schema compatibility using `schema.StructuralHash`.
+`Unmarshal` refuses a document that breaks a fact of the graph package doc's "Structural facts", whatever the options say; `Verify` runs the same checks, and `Stat`, which reads no schema, runs those that need none. It does not re-validate instance data by default. The header's attestation is the writer's claim, not a proof — anyone can recompute the integrity hash, so any process can write a document whose instances never earned it, and a `.ys` can hold values outside their constraints and invariant violations. Pass `WithRevalidation` to run each root the reader walks and the structural checks left whole — no check refused its type, its tree, its edges, its unresolved records, or its required and `(one)` associations, no record whose types-table row the reader refused could be its, and no other root the reader walks stands at its address, the reader walking no root of an instances entry that repeats a types-table row or names none; an edge that names no root does not stop it, unless it stands beside another record under a `(one)` association, and the validator judges no edge's target key, which the root at that address, the refusal of a unit there or the edge's reference issue judges, nor the target key of a `target_missing` record whose target a refused unit stands at or states, the unit's refusal standing for it; a listing that repeats a target no sound root holds alone is left out of the run, the target's own issue standing for the repeat — with its composed children, edges and `target_missing` records, back through the real validator. `Unmarshal` always performs structural validation of the `.ys` format itself and verifies schema compatibility using `schema.StructuralHash`.
 
-`HeaderOnly` and `HeaderOnlyRead` intentionally skip integrity verification — the returned `HeaderInfo.IntegrityHash` is the stored value, not a verification result. Use `Verify` when the document's hash must be confirmed. Neither function consults a schema; dispatch callers use the `HeaderInfo.SchemaHashMatches(s)` helper (see [SchemaHashMatches — dispatch-site cross-check](#schemahashmatches--dispatch-site-cross-check) below) to compare the stored schema hash against a loaded `schema.Schema`.
+`ReadHeader` intentionally skips integrity verification — the returned `Header.IntegrityHash` is the stored value, not a verification result. Use `Verify` when the document's hash must be confirmed. It consults no schema; dispatch callers use the `Header.SchemaHashMatches(s)` helper (see [SchemaHashMatches — dispatch-site cross-check](#schemahashmatches--dispatch-site-cross-check) below) to compare the stored schema hash against a loaded `schema.Schema`.
 
 ### Marshal Options
 
@@ -733,94 +697,72 @@ if err := snapshot.WriteFile(path, data); err != nil { /* ... */ }
 | ------ | ----------- |
 | `WithIndent` | Indentation string (`""` for compact, `"\t"` for tabs) |
 | `WithCreatedAt` | Set `created_at` timestamp (omitted by default for determinism) |
+| `WithCreatedAtFrom` | Set `created_at` to a header's text as it was written (`*Header`, from `ReadHeader` or `Stat`); a nil header sets nothing, and the text wins over `WithCreatedAt` unless it is empty |
 | `WithMetadata` | User-provided key-value annotations; `Marshal` refuses a key or value that is not valid UTF-8 (`E_SNAPSHOT_MALFORMED`) |
 
 ### Load Options
 
 | Option | Description |
 | ------ | ----------- |
-| `WithIssueLimit` | Maximum issues `Load` and `Verify` store (default 100, the cap `schema.Load` holds; 0 for unlimited). The walk completes unless the context is cancelled, so a completed walk's `DroppedCount` is exact |
+| `WithIssueLimit` | Maximum issues `Unmarshal` and `Verify` store (default 100, the cap `schema.Load` holds; 0 for unlimited). The walk completes unless the context is cancelled, so a completed walk's `DroppedCount` is exact |
 | `WithIntegrityCheck` | Whether the integrity hash is verified (default `true`); `false` skips it for debugging hand-edited files |
-| `WithRevalidation` | Run each root the reader walks and the structural checks left whole (no check refused its type, its tree, its edges, its unresolved records, or its required and `(one)` associations, no record whose types-table row the reader refused could be its, and no other root the reader walks stands at its address; an edge that names no root does not stop it, unless it stands beside another record under a `(one)` association; no edge draws an issue for its target key, which the root at that address, the refusal of a unit there or the edge's reference issue judges, nor does a `target_missing` record whose target a refused unit stands at or states; a listing that repeats a target no sound root holds alone is left out of the run, the target's own issue standing for the repeat) — composed children, edges, `target_missing` records and invariants included — back through `instance.Validator`, reporting its findings about the data at the given severity (a cancellation or an `E_INTERNAL` keeps its own); `Error` refuses the load. An unresolved record no check refused, under an association the schema declares required, draws `W_SNAPSHOT_UNRESOLVED_REQUIRED` |
+| `WithRevalidation` | Run each root the reader walks and the structural checks left whole (no check refused its type, its tree, its edges, its unresolved records, or its required and `(one)` associations, no record whose types-table row the reader refused could be its, and no other root the reader walks stands at its address; an edge that names no root does not stop it, unless it stands beside another record under a `(one)` association; no edge draws an issue for its target key, which the root at that address, the refusal of a unit there or the edge's reference issue judges, nor does a `target_missing` record whose target a refused unit stands at or states; a listing that repeats a target no sound root holds alone is left out of the run, the target's own issue standing for the repeat) — composed children, edges, `target_missing` records and invariants included — back through `instance.Validator`, reporting its findings about the data at the given severity (a cancellation or an `E_INTERNAL` keeps its own); `Error` refuses the load, and a severity outside `diag.Fatal` to `diag.Hint` panics at the call. An unresolved record no check refused, under an association the schema declares required, draws `W_SNAPSHOT_UNRESOLVED_REQUIRED` |
 
 ### Snapshot Info
 
-`Info` returns a `SnapshotInfo` struct:
+`Stat` returns an `Info`, which embeds the `Header` that `ReadHeader` returns:
 
 ```go
-type SnapshotInfo struct {
-    // Header fields.
+type Header struct {
     Version             int
-    Features            []string
     SchemaName          string
     SchemaSource        string
     SchemaHash          string
     SchemaHashAlgorithm int
-    IntegrityHash       string
+    IntegrityHash       string            // as stored, not a verification result
     CreatedAt           string            // as the header states it: RFC 3339 as yammm writes it, or empty
     Metadata            map[string]string // user-provided annotations, nil if absent
 
-    // Content summary. Types holds one entry per types-table row;
+    // Types holds one entry per types-table row.
+    Types []TypeRef
+
+    // The header's validity claim, nil for a document that states none, as Marshal writes one of a snapshot that holds none.
+    Attestation *graph.Attestation
+}
+
+type Info struct {
+    Header
+
     // InstanceCounts holds one entry per type an instances group names whose
     // row resolves, the number of its root instances. No count holds a composed child.
-    Types           []TypeRef
     InstanceCounts  map[TypeRef]int
     TotalInstances  int
     TotalEdges      int
     DuplicateCount  int
     UnresolvedCount int
 
-    // The header's validity claim, nil for a document that states none, as Marshal writes one of a snapshot that holds none.
-    Attestation *graph.Attestation
-
-    // File metadata.
-    FileSize        int64  // len(data)
-    IntegrityStatus string // "ok" or "mismatch"
+    IntegrityStatus IntegrityStatus // IntegrityOK or IntegrityMismatch
 }
 ```
 
-`snapshot.TypeRef{Schema, Name string}` is the schema-less display surface: `Info`, `HeaderOnly` and `HeaderOnlyRead` run without an import closure to resolve against, so each type is reported as the identity the document states, and two same-named types in different schemas stay distinct — both in `Types` and as `InstanceCounts` keys. `TypeRef` is comparable, and its `String()` and `MarshalText()` render `schema#name`. The `#` separator is deliberate beside `schema.TypeID.String()`'s `path:name` form: TypeID's rendering is byte-order-bearing (the wire's diagnostics records sort by it), so the display form stays visibly distinct rather than moving wire bytes to unify the two.
+`IntegrityStatus` is a `uint8` kind whose zero value names no status; `String` returns `"ok"` or `"mismatch"`, and `IntegrityStatus(n)` for any other value, the zero among them. A header that holds no hash is a mismatch. Neither struct carries a file size: a size is not knowable from the reader `ReadHeader` takes, and `ScanEntry.FileSize` carries the size on disk for a scanned file.
 
-`TypeRef` renders and does not parse. It carries no `UnmarshalText`, so `SnapshotInfo` and `HeaderInfo` serialize one way, and nothing reads them back. `yammm snapshot info --json` does not write these structs: it owns its wire shape and emits snake_case keys, carrying each `TypeRef` through as the same `schema#name` string. This is a decision, not a gap — the surfaces are a report projection, the in-process way to scan many documents is `ScanDir` / `ScanDirSlice`, which hands back `HeaderInfo` values directly, and `schema#name` is injective over the values yammm produces but not over an arbitrary `TypeRef`. Adding `UnmarshalText` is additive and stays available if a consumer needs it.
+`snapshot.TypeRef{Schema, Name string}` is the schema-less display surface: `Stat` and `ReadHeader` run without an import closure to resolve against, so each type is reported as the identity the document states, and two same-named types in different schemas stay distinct — both in `Types` and as `InstanceCounts` keys. `TypeRef` is comparable, and its `String()` and `MarshalText()` render `schema#name`. The `#` separator is deliberate beside `schema.TypeID.String()`'s `path:name` form: TypeID's rendering is byte-order-bearing (the wire's diagnostics records sort by it), so the display form stays visibly distinct rather than moving wire bytes to unify the two.
 
-### Header-Only Reads
+`TypeRef` renders and does not parse. It carries no `UnmarshalText`, so `Info` and `Header` serialize one way, and nothing reads them back. `yammm snapshot info --json` does not write these structs: it owns its wire shape and emits snake_case keys, carrying each `TypeRef` through as the same `schema#name` string. This is a decision, not a gap — the surfaces are a report projection, the in-process way to scan many documents is `ScanDir`, which hands back `Header` values directly, and `schema#name` is injective over the values yammm produces but not over an arbitrary `TypeRef`. Adding `UnmarshalText` is additive and stays available if a consumer needs it.
 
-For dispatch-style workloads that classify many `.ys` files by header metadata alone — lifecycle state, schema-hash comparison, `CreatedAt` inspection — `HeaderOnly` (byte-slice variant) and `HeaderOnlyRead` (streaming io.Reader variant) return a compact `HeaderInfo`:
+### Header Reads
 
-```go
-type HeaderInfo struct {
-    // Header fields (identical to the SnapshotInfo header block).
-    Version             int
-    Features            []string
-    SchemaName          string
-    SchemaSource        string
-    SchemaHash          string
-    SchemaHashAlgorithm int
-    IntegrityHash       string
-    CreatedAt           string // as the header states it: RFC 3339 as yammm writes it, or empty
-    Metadata            map[string]string
+For dispatch-style workloads that classify many `.ys` files by header metadata alone — lifecycle state, schema-hash comparison, `CreatedAt` inspection — `ReadHeader` reads the `Header` from any `io.Reader`.
 
-    // Types table (adjacent to the header; read in the same streaming pass).
-    Types []TypeRef
-
-    // The header's validity claim, nil for a document that states none, as Marshal writes one of a snapshot that holds none.
-    Attestation *graph.Attestation
-
-    // File metadata. HeaderOnly reports len(data); ScanDir reports the
-    // file's size on disk; a bare HeaderOnlyRead reports zero, because a
-    // size is not knowable from an io.Reader.
-    FileSize int64
-}
-```
-
-`HeaderOnlyRead` accepts any `io.Reader` and reads at most `snapshot.MaxHeaderSize = 16 * 1024 * 1024` bytes (16 MiB — headroom for consumers that carry large work-set arrays in header metadata). Larger headers are rejected with an Error-severity `E_SNAPSHOT_MALFORMED` issue whose message begins `header exceeded MaxHeaderSize` — distinguished from generic JSON-parse failures so operators can diagnose the cause. A header cut short (`io.EOF` or `io.ErrUnexpectedEOF` from the reader, or an error wrapping either) surfaces as `E_SNAPSHOT_MALFORMED`, and another reader error that stops the header's decode as a Fatal `E_SNAPSHOT_IO` carrying the first such error as a detail, rather than as a bare error return. A reader error after the types table decodes is not read. Context cancellation is checked once at function entry; individual `Read` calls on the passed reader are not cancellable mid-read.
+`ReadHeader` reads at most `snapshot.MaxHeaderSize = 16 * 1024 * 1024` bytes (16 MiB — headroom for consumers that carry large work-set arrays in header metadata). Larger headers are rejected with an Error-severity `E_SNAPSHOT_MALFORMED` issue whose message begins `header exceeded MaxHeaderSize` — distinguished from generic JSON-parse failures so operators can diagnose the cause. A header cut short (`io.EOF` or `io.ErrUnexpectedEOF` from the reader, or an error wrapping either) surfaces as `E_SNAPSHOT_MALFORMED`, and another reader error that stops the header's decode as a Fatal `E_SNAPSHOT_IO` carrying the first such error as a detail, rather than as a bare error return. A reader error after the types table decodes is not read. Context cancellation is checked once at function entry; individual `Read` calls on the passed reader are not cancellable mid-read. `ReadHeader` stops at the `types` table, so it checks neither the document's outer shape nor its member names beyond refusing a top level that is no JSON object, a first section other than the header and a missing types section; `Unmarshal` and `Verify` hold a whole document to both.
 
 #### SchemaHashMatches — dispatch-site cross-check
 
-Neither `HeaderOnly` nor `HeaderOnlyRead` consults a schema, so neither verifies that the stored schema hash matches the caller's loaded schema. `HeaderInfo.SchemaHashMatches(s schema.Schema) bool` performs that comparison at the dispatch site:
+`ReadHeader` consults no schema, so it does not verify that the stored schema hash matches the caller's loaded schema. `Header.SchemaHashMatches(s schema.Schema) bool` performs that comparison at the dispatch site:
 
 ```go
-header, result := snapshot.HeaderOnlyRead(ctx, r)
+header, result := snapshot.ReadHeader(ctx, r)
 if result.HasErrors() {
     return result.Err()
 }
@@ -855,25 +797,21 @@ The payload is first written to a staging file of its own beside the file it rep
 
 ### Directory Iteration
 
-For dispatch-style workloads that enumerate the `.ys` files of a directory — retention sweeps, link-engine discovery, operator "what's in this dir" inspection — `snapshot.ScanDir` exposes a lazy iterator over one `ScanEntry` per file, with the header parsed on-demand via `HeaderOnlyRead`:
+For dispatch-style workloads that enumerate the `.ys` files of a directory — retention sweeps, link-engine discovery, operator "what's in this dir" inspection — `snapshot.ScanDir` exposes a lazy iterator over one `ScanEntry` per file, with the header parsed on-demand via `ReadHeader`:
 
 ```go
 type ScanEntry struct {
     Name     string               // basename, e.g., "CA.ys"
     Path     string               // full path, filepath.Join(dir, Name)
-    Header   *snapshot.HeaderInfo // nil when Result has error-severity issues
-    Result   diag.Result          // OK on the happy path; carries errors per-file
-    FileSize int64                // zero if the file could not be opened or stat'd, else its size on disk
-    ModTime  time.Time            // modification time, or the zero Time if unknown
+    Header   *snapshot.Header // nil when Result has error-severity issues
+    Result   diag.Result      // OK on the happy path; carries errors per-file
+    FileSize int64            // zero if the file could not be opened or stat'd, else its size on disk
+    ModTime  time.Time        // modification time, or the zero Time if unknown
 }
 
 // Lazy iterator — headers are parsed on demand; callers can break early
 // without paying the parse cost for remaining files.
 func ScanDir(ctx context.Context, dir string) iter.Seq2[ScanEntry, error]
-
-// Materializing convenience wrapper.
-func ScanDirSlice(ctx context.Context, dir string) ([]ScanEntry, diag.Result)
-
 ```
 
 Typical call pattern:
@@ -893,12 +831,12 @@ for entry, err := range snapshot.ScanDir(ctx, dir) {
 
 yammm writes UTC at second precision, so a time given to `WithCreatedAt` does not round-trip its sub-second part. `UpdateMetadata` keeps a foreign header's `created_at` text, fractional seconds and non-UTC offset included, and writes its JSON escapes anew.
 
-`FileSize` and `ModTime` are populated whenever the file was opened, **including when its header then failed to parse** — a corrupt file still occupies disk and still has a modification time, and a caller accounting for either needs it before it branches on `Header`. When the header did parse, `Header.FileSize` repeats the size; there is no `Header.ModTime`, because a modification time is filesystem metadata about the container rather than a property of the document, and neither `HeaderOnly` nor `HeaderOnlyRead` could answer it. Both come from a stat of the **opened handle**, so for a symlinked `.ys` they describe the target rather than the link. A stat failure leaves both zero and raises no diagnostic. Neither case needs a compensating `os.Stat` per entry.
+`FileSize` and `ModTime` are populated whenever the file was opened, **including when its header then failed to parse** — a corrupt file still occupies disk and still has a modification time, and a caller accounting for either needs it before it branches on `Header`. Neither is a field of `Header`: each is filesystem metadata about the container rather than a property of the document, and `ReadHeader` cannot answer either. Both come from a stat of the **opened handle**, so for a symlinked `.ys` they describe the target rather than the link. A stat failure leaves both zero and raises no diagnostic. Neither case needs a compensating `os.Stat` per entry.
 
 **Error surface, in two categories:**
 
-- The iterator's second yielded value (the `error`) is non-nil ONLY for operation-level failures that end iteration: a dir-open error (`ENOENT`, `EACCES`, `ENOTDIR`, ...) is yielded as a single `(ScanEntry{}, err)` pair wrapping the underlying `os` error; a context cancelled at entry, or cancellation observed between files, is yielded as `(ScanEntry{}, ctx.Err())`. The zero-value `ScanEntry` signals "no file was reached." Cancellation observed between files takes precedence over any concurrent per-file failure.
-- Per-file failures (corrupt header, per-file `os.Open` / `Read` failure) live on `ScanEntry.Result`; the iterator's error is `nil` for those and iteration continues. A failed `os.Open` surfaces as a Fatal `E_SNAPSHOT_IO`, synthesized by the scan. Everything after the handle exists comes from `HeaderOnlyRead`: a corrupt or truncated header is an Error-severity `E_SNAPSHOT_MALFORMED`, and a reader error that stops the header's decode, and that is not and does not wrap `io.EOF` or `io.ErrUnexpectedEOF`, is a Fatal `E_SNAPSHOT_IO` carrying the reader's error as a detail.
+- The iterator's second yielded value (the `error`) is non-nil ONLY for operation-level failures that end iteration: a dir-open error (`ENOENT`, `EACCES`, ...) is yielded as a single `(ScanEntry{}, err)` pair wrapping the underlying `os` error, and a `dir` whose element is a file, or sits under one, wraps an error matching `syscall.ENOTDIR` on every host, Windows included; a context cancelled at entry, or cancellation observed between files, is yielded as `(ScanEntry{}, ctx.Err())`. The zero-value `ScanEntry` signals "no file was reached." Cancellation observed between files takes precedence over any concurrent per-file failure.
+- Per-file failures (corrupt header, per-file `os.Open` / `Read` failure) live on `ScanEntry.Result`; the iterator's error is `nil` for those and iteration continues. A failed `os.Open` surfaces as a Fatal `E_SNAPSHOT_IO`, synthesized by the scan. Everything after the handle exists comes from `ReadHeader`: a corrupt or truncated header is an Error-severity `E_SNAPSHOT_MALFORMED`, and a reader error that stops the header's decode, and that is not and does not wrap `io.EOF` or `io.ErrUnexpectedEOF`, is a Fatal `E_SNAPSHOT_IO` carrying the reader's error as a detail.
 
 **Filtering:**
 
@@ -907,11 +845,7 @@ yammm writes UTC at second precision, so a time given to `WithCreatedAt` does no
 - Symlinks are followed: one is included when its target is a regular file or cannot be stat'd, and skipped otherwise. A broken symlink is included and yields a per-file Fatal `E_SNAPSHOT_IO` entry with the underlying `os.Open` error surfaced as a detail.
 - Entries are yielded in the order returned by `os.ReadDir`, which sorts by filename. `dir` is cleaned before it is read, so a `..` cancels the element before it rather than following a symbolic link, and each entry's `Path` names a file of the directory listed. An empty `dir` names no directory: it fails as a missing one does, and never lists the working directory.
 
-**`ScanDirSlice` semantics:**
-
-`ScanDirSlice` materializes the full iteration into a slice plus an outer `diag.Result`. The outer Result surfaces operation-level errors only (dir does not exist → Fatal `E_SNAPSHOT_IO`; context cancellation → Fatal `E_CONTEXT_CANCELLED`); per-file errors remain on each `ScanEntry.Result`. Context cancellation returns *partial* results — the returned slice contains entries processed before cancellation, and callers who want fail-fast-on-cancel check `result.HasFatal()` before consuming the slice.
-
-**CLI integration.** `yammm snapshot info --dir <path>` wraps `ScanDirSlice` to produce a tabular per-file summary (text) or a `[]{name, path, file_size, mod_time, header, diagnostics}` JSON array (`diagnostics` is the entry's result on the diagnostic stream's wire) (`mod_time` is RFC 3339 in UTC, empty when the file could not be stat'd). The flag is mutually exclusive with the positional file argument; single-file mode continues to work unchanged.
+**CLI integration.** `yammm snapshot info --dir <path>` collects the iteration to produce a tabular per-file summary (text) or a `[]{name, path, file_size, mod_time, header, diagnostics}` JSON array (`diagnostics` is the entry's result on the diagnostic stream's wire) (`mod_time` is RFC 3339 in UTC, empty when the file could not be stat'd). The flag is mutually exclusive with the positional file argument; single-file mode continues to work unchanged.
 
 ### Metadata Updates
 
@@ -932,24 +866,24 @@ func UpdateMetadataOrReMarshal(
 ) ([]byte, diag.Result)
 ```
 
-**When to use which.** `UpdateMetadataOrReMarshal` is the default entry point for most consumers: it runs the fast path, and when that reports an Error or a Fatal — a body-offset failure, a malformed header, an unsupported version, feature or hash algorithm — it transparently falls back to `Load + Marshal`, unless the context was cancelled or `newMeta` holds a key or value that is not valid UTF-8, which no path can write; a fallback that succeeds emits a Warning-severity `W_UPDATE_METADATA_FALLBACK` on the returned `diag.Result` so operators can observe the transition. When the fallback's `Load` fails too, the returned result is `Load`'s alone, so no break draws two issues. A cancelled `Load` may not have reached the break, so it keeps the fast path's refusal beside its own result. When its `Marshal` fails, the result is the fast path's refusal and `Marshal`'s issues. The primitive `UpdateMetadata` stays exported for consumers who genuinely need the strict fast path — benchmarks isolating the fast-path cost, or workflows where any Load + Marshal round-trip is operationally unacceptable.
+**When to use which.** `UpdateMetadataOrReMarshal` is the default entry point for most consumers: it runs the fast path, and when that reports any Error or Fatal (a malformed document, header or types table, a body-offset failure, or an unsupported version, feature or hash algorithm among them), it transparently falls back to `Unmarshal + Marshal`, unless the context was cancelled or `newMeta` holds a key or value that is not valid UTF-8, which no path can write; a fallback that succeeds emits a Warning-severity `W_UPDATE_METADATA_FALLBACK` on the returned `diag.Result` so operators can observe the transition. When the fallback's `Unmarshal` fails too, the returned result is `Unmarshal`'s alone, so no break draws two issues. A cancelled `Unmarshal` may not have reached the break, so it keeps the fast path's refusal beside its own result. When its `Marshal` fails, the result is the fast path's refusal and `Marshal`'s issues. The primitive `UpdateMetadata` stays exported for consumers who genuinely need the strict fast path — benchmarks isolating the fast-path cost, or workflows where any Unmarshal + Marshal round-trip is operationally unacceptable.
 
-**Speedup.** On a 14.7 MB `.ys` input the fast path is several times faster than the equivalent `Load + Marshal` round trip. **The enforced lower bound is 3×**: `TestUpdateMetadataRatioFloor` in the `snapshot` package measures both paths over a median of five samples and fails below that ratio. This document states the floor rather than an absolute timing, because the measured ratio varies with hardware and falls as `UpdateMetadata` gains header checks before the body splice.
+**Speedup.** On a 14.7 MB `.ys` input the fast path is several times faster than the equivalent `Unmarshal + Marshal` round trip. **The enforced lower bound is 3×**: `TestUpdateMetadataRatioFloor` in the `snapshot` package measures both paths over a median of five samples and fails below that ratio. This document states the floor rather than an absolute timing, because the measured ratio varies with hardware and falls as `UpdateMetadata` gains header checks before the body splice.
 
-**`created_at`.** `UpdateMetadata` keeps the existing `created_at` text, and writes its JSON escapes anew. To change it, re-marshal with `WithCreatedAt`. `metadata` itself is replaced entirely — there is no merge. Callers retrieve the current metadata via `HeaderOnly`, copy it, apply their changes, and pass the result.
+**`created_at`.** `UpdateMetadata` keeps the existing `created_at` text, and writes its JSON escapes anew. To change it, re-marshal with `WithCreatedAt`. `metadata` itself is replaced entirely — there is no merge. Callers retrieve the current metadata via `ReadHeader`, or via `Stat` for a header past `MaxHeaderSize`, copy it, apply their changes, and pass the result.
 
 **Failure modes.** The primitive returns structured diagnostics with stable codes:
 
-- `E_SNAPSHOT_MALFORMED` — the document or the new metadata is malformed: a first byte other than `{`, whitespace included; the four top-level keys absent, repeated, out of order, `null`, joined by a fifth key or followed by bytes other than whitespace; a top-level value that is not valid JSON, or a document that ends before its top-level object closes; a header or a `types` table that does not decode, or a header that states a null or absent `features`; a `types` table stating one identity on two rows; any object of the document that repeats a member name, or spells a member the format declares in another case; a string holding invalid UTF-8 or a surrogate escape that is half of no pair; or a `newMeta` key or value that is not valid UTF-8. `HeaderOnly` refuses each such document with that code, save one with whitespace before its `{`, which it reads. `HeaderOnlyRead` stops once the `types` table decodes and holds to these rules what it read: that the document is a JSON object whose first section is the header and that holds a `types` section, the header and the table, the value of each section before `types`, and each string up to the end of the table. It checks neither the rest of the outer shape nor the member names.
-- `E_SNAPSHOT_UNSUPPORTED_VERSION` — the header states a version no read path accepts (v1, v2 and v3 included; v4 is the only readable version). The document is refused rather than relabelled — `UpdateMetadata` is a header rewrite, never a migration — and `UpdateMetadataOrReMarshal`'s `Load` fallback refuses it the same way.
-- `E_UPDATE_METADATA_BODY_OFFSET` — the header parsed cleanly but the body-boundary tracking resolved to an unexpected byte pattern, indicating the input does not match the shape `Marshal` produces. Byte-identical recovery via the fast path is not possible; `UpdateMetadataOrReMarshal` falls back to `Load + Marshal` automatically, unless `newMeta` holds a key or value that is not valid UTF-8.
+- `E_SNAPSHOT_MALFORMED` — the document or the new metadata is malformed: a first byte other than `{`, whitespace included; the four top-level keys absent, repeated, out of order, `null`, joined by a fifth key or followed by bytes other than whitespace; a top-level value that is not valid JSON, or a document that ends before its top-level object closes; a header or a `types` table that does not decode, or a header that states a null or absent `features`; a `types` table stating one identity on two rows; any object of the document that repeats a member name, or spells a member the format declares in another case; a string holding invalid UTF-8 or a surrogate escape that is half of no pair; or a `newMeta` key or value that is not valid UTF-8. `ReadHeader` stops once the `types` table decodes and holds to these rules what it read: that the document is a JSON object whose first section is the header and that holds a `types` section, the header and the table, the value of each section before `types`, and each string up to the end of the table. It checks neither the rest of the outer shape nor the member names.
+- `E_SNAPSHOT_UNSUPPORTED_VERSION` — the header states a version no read path accepts (v1, v2 and v3 included; v4 is the only readable version). The document is refused rather than relabelled — `UpdateMetadata` is a header rewrite, never a migration — and `UpdateMetadataOrReMarshal`'s `Unmarshal` fallback refuses it the same way.
+- `E_UPDATE_METADATA_BODY_OFFSET` — the header parsed cleanly but the body-boundary tracking resolved to an unexpected byte pattern, indicating the input does not match the shape `Marshal` produces. Byte-identical recovery via the fast path is not possible; `UpdateMetadataOrReMarshal` falls back to `Unmarshal + Marshal` automatically, unless `newMeta` holds a key or value that is not valid UTF-8.
 - `E_SNAPSHOT_UNSUPPORTED_FEATURE` — the header's `features` array holds an entry this version does not recognize. One issue per unrecognized entry.
-- `E_SNAPSHOT_UNSUPPORTED_HASH_ALGORITHM` — the header's `schema_hash_algorithm` is not `schema.StructuralHashVersion`. Error-severity here; the Warning downgrade applies only to header-only reads.
+- `E_SNAPSHOT_UNSUPPORTED_HASH_ALGORITHM` — the header's `schema_hash_algorithm` is not `schema.StructuralHashVersion`. Error-severity here; the Warning downgrade applies only to `ReadHeader` and `ScanDir`.
 - `E_CONTEXT_CANCELLED` — ctx was cancelled at entry. Propagates as cancellation without re-attempting via the slow path.
 
 **Wire-format contracts.** The primitive depends on two contracts documented in `snapshot/wire.go`'s package Godoc: the field-order contract (top-level keys are `{yammm_snapshot, types, instances, diagnostics}` in that order) and the body-byte-range stability contract (the byte range from the `,` after the header value through the document's closing `}` is reused verbatim). Both are pinned by `TestWireFormat_TopLevelKeyOrder` and `TestWireFormat_BodySuffixContract` in `snapshot/wire_test.go`, so a future Marshal-side shape change that would silently break the primitive fails at the wire-format test level.
 
-**CLI integration.** `yammm snapshot update-metadata --set key=value [--unset key] <file>` wraps the primitive for operator tooling. `--set` and `--unset` are both repeatable; at least one is required. The command uses the strict fast path (not the fallback wrapper) — a body-offset failure surfaces as `ExitValidation` (1) with `E_UPDATE_METADATA_BODY_OFFSET` in the diagnostic output; the recovery path is a fresh `yammm snapshot save`. The write is atomic (tmp+fsync+rename) and preserves the file's mode: the CLI evaluates a `..` in the path on its text, as it does for every path it reads or writes, then follows the path's symlinks, stages every write it makes on a sibling of the file they resolve to, sets the mode before the rename rather than after it, and creates a file that did not exist at `0600` on Unix (Windows honours only a mode's write bit). A FIFO, a device or a descriptor path such as `/dev/stdout` is written through instead, and anything else — a read-only file, a directory, a looping link, a directory that cannot hold the staging file — is refused naming the path. It does not call `snapshot.WriteFile`, whose documented mode policy — `0o666` subject to umask, with callers told to chmod afterwards — is a library contract for consumers rather than the CLI's.
+**CLI integration.** `yammm snapshot update-metadata --set key=value [--unset key] <file>` wraps the primitive for operator tooling. `--set` and `--unset` are both repeatable; at least one is required. It first reads the file whole with `snapshot.Stat` and refuses a document that draws an Error there, an integrity mismatch included, rather than sealing those bytes under a fresh hash. The command uses the strict fast path (not the fallback wrapper) — a body-offset failure surfaces as `ExitValidation` (1) with `E_UPDATE_METADATA_BODY_OFFSET` in the diagnostic output; the recovery path is a fresh `yammm snapshot save`. The write is atomic (tmp+fsync+rename) and preserves the file's mode: the CLI evaluates a `..` in the path on its text, as it does for every path it reads or writes, then follows the path's symlinks, stages every write it makes on a sibling of the file they resolve to, sets the mode before the rename rather than after it, and creates a file that did not exist at `0600` on Unix (Windows honours only a mode's write bit). A FIFO, a device or a descriptor path such as `/dev/stdout` is written through instead, and anything else — a read-only file, a directory, a looping link, a directory that cannot hold the staging file — is refused naming the path. It does not call `snapshot.WriteFile`, whose documented mode policy — `0o666` subject to umask, with callers told to chmod afterwards — is a library contract for consumers rather than the CLI's.
 
 ### Wire Format Versions
 
@@ -957,7 +891,7 @@ The `.ys` wire format uses an integer version field in the header for forward ev
 
 v4 keys each table row as `{schema, name}` — the declaring schema's **name**, not its source path. A name travels between machines and a path does not: under v3, one schema text loaded from two directories produced documents carrying an identical `schema_hash` (`StructuralHash` excludes source paths by design) and mutually unreadable type tables, so a snapshot written on a build machine failed to load on a runner with one `E_SNAPSHOT_UNKNOWN_TYPE` per row and nothing to do but regenerate it. Schema names are unique across an import closure — a load refuses a second schema with an existing name (`E_DUPLICATE_SCHEMA`) — which is what makes them sufficient to denote a type. `snapshot.TypeRef` carries the same pair and renders it as `schema#name`.
 
-`snapshot.MinReadableVersion` (exported constant, value `4`) names the lowest version this package accepts on read paths. The `currentVersion` (unexported, value `4`) is the version emitted on every write, and `MinReadableVersion` is **derived from it** rather than written as a second literal — this package reads only the version it writes, so widening the accept range is a deliberate change rather than a bump that forgets its other half. The accept range on read is the closed interval `[MinReadableVersion, currentVersion]`; documents outside the range surface Error-severity `E_SNAPSHOT_UNSUPPORTED_VERSION` with the observed version and the supported version named in the message, once the surface has read the header. A whole-document surface first holds the document to its outer shape, its member names and the text rule, and refuses a break of any with `E_SNAPSHOT_MALFORMED`. **v1, v2 and v3 documents are no longer read** — v4 is the only readable version, and a v3 document is refused rather than migrated. An older reader rejects a v4 document the same way, so an operator running an older binary sees a structured diagnostic rather than a misread types section.
+This package reads only the version it writes, value `4`: the lowest readable version is **derived from** the written one rather than written as a second literal, so widening the accept range is a deliberate change rather than a bump that forgets its other half; documents outside the range surface Error-severity `E_SNAPSHOT_UNSUPPORTED_VERSION` with the observed version and the supported version named in the message, once the surface has read the header. A whole-document surface first holds the document to its outer shape, its member names and the text rule, and refuses a break of any with `E_SNAPSHOT_MALFORMED`. **v1, v2 and v3 documents are no longer read** — v4 is the only readable version, and a v3 document is refused rather than migrated. An older reader rejects a v4 document the same way, so an operator running an older binary sees a structured diagnostic rather than a misread types section.
 
 See the [Versioning Policy](#versioning-policy) for the full pre-1.0 / post-1.0 wire-format policy.
 
@@ -1282,7 +1216,7 @@ func ParamTypesForType(t schema.Type) ParamTypes
 
 **Zone handling, for `Timestamp`.** The driver sends an instant either as an offset or as a time-zone identifier the server must resolve. The server reads an instant under a zone identifier and under that zone's offset as two values that are not equal, and a `MERGE` on each makes two nodes. So the coercion sends every instant as its offset, under the driver's `Offset` zone name, and none as an identifier. A UTC instant goes as offset zero, which the server shows as `Z`: the form Cypher's `datetime()` gives RFC 3339 text that ends in `Z` or in `+00:00`. The coercion reads the instant from its stored text, in UTC, so the host's zone and its tz database decide nothing, and one text gives one coerced value on every host. The offset in the text is the instant's offset, and RFC 3339 text holds no zone abbreviation. The name of a `time.Time`'s location, such as `Europe/Berlin` or `Local`, does not reach the server, since the coercion re-expresses every instant in the driver's `Offset` location. Both paths so send one instant in one form, and re-expression never moves an instant. The server holds an offset of 18 hours at most, either side of UTC, and refuses a wider one with an error that names no property. The validator takes a wider one, any offset under 24 hours, so the coercion refuses an instant at an offset past 18 hours on both paths, with an error that matches `ErrUnrepresentable` and names the offset.
 
-The rule is **strict** at every kind, scalar and list element alike: a value that is not in the stored form of its kind returns an error rather than reaching the driver wrong-typed. On the write path only a snapshot whose values no validator refused at Error holds such a value: one `snapshot.Load` read without revalidating at Error. There the rule judges a value's form and never its bounds, members or pattern, nor a `Vector`'s dimension. A `Timestamp`, a `Date` and a `UUID` are forms, so their text is parsed. `CoerceParams` judges all of them, as the validator does. A map is refused under every kind, whatever its key and element types: Neo4j stores no map as a property value. A value that holds none (`instance.IsAbsent`), nil, a nil slice, a nil map or a nil `immutable` container, is returned as nil wherever the coercion reads it — a param and, on the write path, a node or relation property — and the driver writes it as null. A nil element of a list is refused. A constraint `schema.CheckConstraint` refuses is an error whatever the value, a nil included. Under a key `types` does not declare, `CoerceParams` returns a value as given, a pointer included, save a value that holds none, which it returns as nil. Every refusal of a value matches `ErrUnrepresentable`. A caller's own error carries no class: a constraint `schema.CheckConstraint` refuses. An unhandled kind also returns an error (a new `schema.ConstraintKind` is caught at build time by an exhaustiveness lint).
+The rule is **strict** at every kind, scalar and list element alike: a value that is not in the stored form of its kind returns an error rather than reaching the driver wrong-typed. On the write path only a snapshot whose values no validator refused at Error holds such a value: one `snapshot.Unmarshal` read without revalidating at Error. There the rule judges a value's form and never its bounds, members or pattern, nor a `Vector`'s dimension. A `Timestamp`, a `Date` and a `UUID` are forms, so their text is parsed. `CoerceParams` judges all of them, as the validator does. A map is refused under every kind, whatever its key and element types: Neo4j stores no map as a property value. A value that holds none, nil, a nil slice, a nil map or a nil `immutable` container, is returned as nil wherever the coercion reads it — a param and, on the write path, a node or relation property — and the driver writes it as null. A nil element of a list is refused. A non-nil constraint `schema.CheckConstraint` refuses is an error whatever the value, a nil value included; a nil constraint declares nothing. Under a key `types` does not declare, or declares nil, `CoerceParams` returns a value as given, a pointer included, save a value that holds none, which it returns as nil. Every refusal of a value matches `ErrUnrepresentable`. A caller's own error carries no class: a constraint `schema.CheckConstraint` refuses. An unhandled kind also returns an error (a new `schema.ConstraintKind` is caught at build time by an exhaustiveness lint).
 
 The string form the library stores for a `Timestamp`, `Date` or `UUID` is the validator's, under [Values](#values).
 
@@ -1480,7 +1414,7 @@ Two schemas' `Region` are `Type_geo__Region` and `Type_common__Region`; `Url` an
 
 ### Imports
 
-gogen handles schemas with `import`s too: the full import closure is flattened into one self-contained package, named by the rule [Names](#names) states. Embedded source keys are the names the re-load registers each source under, never absolute generation-machine paths, so the output of a generator one Go toolchain builds is byte-reproducible across checkouts and CI runners. The entry keys by its path under the load's recorded module root (`Schema.ModuleRoot()` — for a plain `Load` the `WithModuleRoot` value when given, then the directory of the nearest ancestor holding a `yammm.mod` and failing that the entry file's own directory, the canonicalized root argument for `LoadSourcesWithEntry`, and the synthetic root under `WithSyntheticRoot`), compared as an identity, so a root spelled with a decomposed character keys as its sources do, and an entry outside the root keys with leading `..` segments. A file entry loaded with no root keys against its own directory. A `LoadString` source has no root and keys by the base name it was loaded under, split at either separator and written in NFC; a name with no base, such as `.`, names no file and is refused. Every imported source keys by the text that imports it, resolved against its importer's key by `schema.SyntheticImportKey`, the loader's own rule — so an import through a symlinked directory (`lib -> real`, `import "lib/dep"`) keys as `lib/dep.yammm`, not by where the link resolves. The module root is therefore an input to the generated bytes alongside the schema, the options, the yammm version and the Go toolchain that builds the generator: committing a `yammm.mod` above a schema moves the keys for an otherwise unchanged generation, and a generator that passes the root explicitly sees no change. `Marshal` refuses two layouts a load accepts, naming the paths, because no store re-loads them: one source imported by two paths under two keys, and two sources taking one key (a relative import through a symlink reads the link target's neighbour on load and the key's text on re-load). It also refuses a key the re-load's rule refuses, a source with no path relative to the root, such as one on another drive, because a key is never a generation-machine path, and a `LoadString` name with no base, which names no file. Before returning, it verifies the store re-loads hermetically through the recipe the generated file prints, under the synthetic root named there.
+gogen handles schemas with `import`s too: the full import closure is flattened into one self-contained package, named by the rule [Names](#names) states. Embedded source keys are the names the re-load registers each source under, never absolute generation-machine paths, so the output of a generator one Go toolchain builds is byte-reproducible across checkouts and CI runners. The entry keys by its path under the load's recorded module root (`Schema.ModuleRoot()` — for a plain `Load` the `WithModuleRoot` value when given, then the directory of the nearest ancestor holding a `yammm.mod` and failing that the entry file's own directory, the canonicalized root argument for `LoadSourcesWithEntry`, and the synthetic root under `WithSyntheticRoot`), compared as an identity, so a root spelled with a decomposed character keys as its sources do, and an entry outside the root keys with leading `..` segments. A file entry loaded with no root keys against its own directory. A `LoadString` source has no root and keys by the base name it was loaded under, split at either separator and written in NFC; a name with no base, such as `.`, names no file and is refused. Every imported source keys by the text that imports it, resolved against its importer's key by the loader's own rule — so an import through a symlinked directory (`lib -> real`, `import "lib/dep"`) keys as `lib/dep.yammm`, not by where the link resolves. The module root is therefore an input to the generated bytes alongside the schema, the options, the yammm version and the Go toolchain that builds the generator: committing a `yammm.mod` above a schema moves the keys for an otherwise unchanged generation, and a generator that passes the root explicitly sees no change. `Marshal` refuses two layouts a load accepts, naming the paths, because no store re-loads them: one source imported by two paths under two keys, and two sources taking one key (a relative import through a symlink reads the link target's neighbour on load and the key's text on re-load). It also refuses a key the re-load's rule refuses, a source with no path relative to the root, such as one on another drive, because a key is never a generation-machine path, and a `LoadString` name with no base, which names no file. Before returning, it verifies the store re-loads hermetically through the recipe the generated file prints, under the synthetic root named there.
 
 Re-load under a synthetic root:
 
@@ -1594,7 +1528,7 @@ This section states yammm's versioning commitments, so consumers and contributor
 yammm's versioning covers four surfaces that evolve on related but distinct cadences:
 
 1. **Go API surface** — exported types, functions, methods, constants, variables, struct fields, options, and their documented behavior in every package of the `github.com/simon-lentz/yammm` module outside `internal/`, which Go keeps other modules from importing.
-2. **`.ys` wire format** — the on-disk shape of snapshots produced by `snapshot.Marshal` and the metadata updates (`snapshot.UpdateMetadata`, `snapshot.UpdateMetadataOrReMarshal`) and consumed by every read path of the `snapshot` package (`snapshot.Load`, `snapshot.Verify`, `snapshot.Info`, `snapshot.HeaderOnly`, `snapshot.HeaderOnlyRead`, the `ScanDir` family and the metadata updates). The wire format carries its own `version` field in the header (currently `4`, first tagged by v0.19.0; `3` from v0.12.0 through v0.18.0).
+2. **`.ys` wire format** — the on-disk shape of snapshots produced by `snapshot.Marshal` and the metadata updates (`snapshot.UpdateMetadata`, `snapshot.UpdateMetadataOrReMarshal`) and consumed by every read path of the `snapshot` package (`snapshot.Unmarshal`, `snapshot.Verify`, `snapshot.Stat`, `snapshot.ReadHeader`, `snapshot.ScanDir` and the metadata updates). The wire format carries its own `version` field in the header (currently `4`, first tagged by v0.19.0; `3` from v0.12.0 through v0.18.0).
 3. **Generated Go output (`schema/gogen`)** — the shape of the Go source `gogen.Marshal` emits for a given schema and options. A committed surface since v0.6.0: a downstream consumer byte-pins committed generated packages against it. Its tier rules are in "Generated-output surface" below.
 4. **Emitted Markdown (`schema/markdown`)** — the shape of the reference document `markdown.Marshal` emits for a given schema and options. A versioned surface from the release after `v0.21.1`: a downstream consumer commits a generated document and drift-checks it in CI. Its tier rules are in "Emitted-Markdown surface" below.
 

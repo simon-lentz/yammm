@@ -56,12 +56,10 @@
 // language does not have outside an invariant expression among them, and
 // leaves out the source rules' and an escape whose value is not UTF-8. A \u
 // escape naming a surrogate is one the language does not have.
-// Callers that want syntax errors alone must filter on the code category
-// (diag.CategorySyntax), not on the presence of any diagnostic at all.
-// Only E_SYNTAX is diag.CategorySyntax: the other three are
-// diag.CategorySchema, so that filter keeps one code of the four and drops
-// every constraint, invariant and name defect — consume the
-// whole slice unless a narrower set is what you mean. And callers must not
+// Callers that want syntax errors alone must keep the issues whose code is
+// E_SYNTAX, not test for the presence of any diagnostic at all. That filter
+// keeps one code of the four and drops every constraint, invariant and name
+// defect — consume the whole slice unless a narrower set is what you mean. And callers must not
 // assume a diagnostic-free parse means a valid schema; it means a well-formed
 // one.
 //

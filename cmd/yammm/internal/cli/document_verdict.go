@@ -96,7 +96,7 @@ func documentVerdict(s schema.Schema, g *graph.Graph, fromBase bool, doc Validat
 		snap = g.Snapshot()
 	}
 	seen := make(map[heldKey]bool, len(holders))
-	collector := diag.NewCollectorUnlimited()
+	collector := diag.NewCollector(diag.NoLimit)
 	for _, h := range holders {
 		earlier, known := seen[h.at]
 		if !known && !fromDocument[h.at] {
@@ -136,7 +136,7 @@ func (v verdict) explain(check diag.Result) diag.Result {
 			v.rendered[schema.TagForm(v.s, t.ID())] = t.ID()
 		}
 	}
-	collector := diag.NewCollectorUnlimited()
+	collector := diag.NewCollector(diag.NoLimit)
 	for issue := range check.Issues() {
 		if issue.Code() == diag.E_UNRESOLVED_REQUIRED && v.refused[v.missingTarget(issue)] {
 			continue

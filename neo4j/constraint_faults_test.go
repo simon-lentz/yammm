@@ -3,11 +3,11 @@ package neo4j
 import (
 	"errors"
 	"fmt"
-	"math"
 	"reflect"
-	"regexp"
 	"strings"
 	"testing"
+
+	"github.com/simon-lentz/yammm/internal/schematest"
 
 	"github.com/simon-lentz/yammm/internal/yammmtest"
 	"github.com/simon-lentz/yammm/schema"
@@ -18,114 +18,53 @@ type faultRow struct {
 	c    schema.Constraint
 }
 
-// faultRows holds, for every constraint kind, each fault the judge reports,
-// orders in which two faults of one constraint meet, and one accepted
-// constraint of the kind.
-func faultRows() []faultRow {
-	enum := func(values ...string) schema.Constraint { return schema.NewEnumConstraint(values) }
-	str := schema.NewStringConstraint()
-	two := schema.NewEnumConstraint([]string{"a", "b"})
-	list := schema.NewListConstraint(str)
-	stamp := schema.NewTimestampConstraint()
-	later := []string{"a", "b"}
-	changedLater := schema.NewEnumConstraint(later)
-	later[1] = "a"
+// faultRows holds, for every constraint kind, one accepted constraint of the
+// kind and each fault a caller can hold: the zero value of a kind that needs an
+// argument, and a pointer to a constraint. The DSL refuses every other fault,
+// so no loaded schema holds one.
+func faultRows(tb testing.TB) []faultRow {
+	tb.Helper()
+	str := schematest.Constraint(tb, "String").(schema.StringConstraint)
+	two := schematest.Constraint(tb, `Enum["a", "b"]`).(schema.EnumConstraint)
+	list := schematest.Constraint(tb, "List<String>").(schema.ListConstraint)
+	stamp := schematest.Constraint(tb, "Timestamp").(schema.TimestampConstraint)
 
 	return []faultRow{
 		{"nil", nil},
 
-		{"enum accepted", enum("a", "b")},
+		{"enum accepted", two},
 		{"enum zero value", schema.EnumConstraint{}},
-		{"enum nil values", schema.NewEnumConstraint(nil)},
-		{"enum no values", enum()},
-		{"enum one value", enum("a")},
-		{"enum one empty value", enum("")},
-		{"enum one value not UTF-8", enum("\xff")},
-		{"enum empty first", enum("", "a")},
-		{"enum empty last", enum("a", "")},
-		{"enum two empty", enum("", "")},
-		{"enum not UTF-8", enum("a", "\xff")},
-		{"enum duplicate", enum("a", "b", "a")},
-		{"enum duplicate pair", enum("a", "a")},
-		{"enum duplicate before empty", enum("a", "a", "")},
-		{"enum empty before duplicate", enum("a", "", "a")},
-		{"enum not UTF-8 twice", enum("\xff", "\xff")},
-		{"enum duplicate before not UTF-8", enum("a", "a", "\xff")},
-		{"enum not UTF-8 before empty", enum("\xff", "")},
-		{"enum empty before not UTF-8", enum("", "\xff")},
-		{"enum values changed after construction", changedLater},
 		{"enum pointer", &two},
-		{"enum fault in a List", schema.NewListConstraint(enum("a"))},
-		{"enum fault in a List of a List", schema.NewListConstraint(schema.NewListConstraint(enum("a", "a")))},
-		{"enum fault behind a List length fault", schema.ListLenBetween(enum("a"), 5, 1)},
-		{"enum fault behind a reference", schema.NewAliasConstraint("Kind", enum("a"))},
-		{"enum accepted behind a reference", schema.NewAliasConstraint("Kind", enum("a", "b"))},
+		{"enum accepted behind a reference", schematest.Constraint(tb, "Kind", `type Kind = Enum["a", "b"]`)},
 
-		{"boolean accepted", schema.NewBooleanConstraint()},
-		{"date accepted", schema.NewDateConstraint()},
-		{"uuid accepted", schema.NewUUIDConstraint()},
+		{"boolean accepted", schematest.Constraint(tb, "Boolean")},
+		{"date accepted", schematest.Constraint(tb, "Date")},
+		{"uuid accepted", schematest.Constraint(tb, "UUID")},
 
-		{"timestamp accepted", schema.NewTimestampConstraint()},
-		{"timestamp zero value", schema.TimestampConstraint{}},
-		{"timestamp in a List", schema.NewListConstraint(schema.NewTimestampConstraint())},
+		{"timestamp accepted", stamp},
+		{"timestamp in a List", schematest.Constraint(tb, "List<Timestamp>")},
 		{"timestamp pointer", &stamp},
 
-		{"integer accepted", schema.IntegerBetween(1, 5)},
-		{"integer inverted", schema.IntegerBetween(5, 1)},
+		{"integer accepted", schematest.Constraint(tb, "Integer[1, 5]")},
+		{"float accepted", schematest.Constraint(tb, "Float[0.5, 2.5]")},
+		{"string accepted", schematest.Constraint(tb, "String[1, 5]")},
 
-		{"float accepted", schema.FloatBetween(0.5, 2.5)},
-		{"float infinite max", schema.FloatMax(math.Inf(1))},
-		{"float infinite min", schema.FloatMin(math.Inf(-1))},
-		{"float NaN min", schema.FloatBetween(math.NaN(), 1)},
-		{"float NaN max", schema.FloatBetween(0, math.NaN())},
-		{"float inverted", schema.FloatBetween(2.5, 1)},
-		{"float infinite min before infinite max", schema.FloatBetween(math.Inf(1), math.Inf(-1))},
-
-		{"string accepted", schema.StringLenBetween(1, 5)},
-		{"string negative min", schema.StringMinLen(-1)},
-		{"string negative max", schema.StringMaxLen(-1)},
-		{"string inverted", schema.StringLenBetween(5, 1)},
-		{"string negative min before negative max", schema.StringLenBetween(-1, -2)},
-
-		{"list accepted", schema.ListLenBetween(str, 1, 5)},
+		{"list accepted", schematest.Constraint(tb, "List<String>[1, 5]")},
 		{"list zero value", schema.ListConstraint{}},
-		{"list no element", schema.NewListConstraint(nil)},
-		{"list negative min", schema.ListMinLen(str, -1)},
-		{"list negative max", schema.ListMaxLen(str, -1)},
-		{"list inverted", schema.ListLenBetween(str, 5, 1)},
-		{"list inverted before no element", schema.ListLenBetween(nil, 5, 1)},
-		{"list negative min before negative max", schema.ListLenBetween(str, -1, -2)},
-		{"list element fault", schema.NewListConstraint(schema.IntegerBetween(5, 1))},
-		{"list element fault at depth two", schema.NewListConstraint(schema.NewListConstraint(schema.StringMinLen(-1)))},
 		{"list pointer", &list},
 
-		{"pattern accepted", schema.NewPatternConstraint(regexp.MustCompile("^a"))},
+		{"pattern accepted", schematest.Constraint(tb, `Pattern["^a"]`)},
 		{"pattern zero value", schema.PatternConstraint{}},
-		{"pattern none", schema.NewPatternConstraint(nil)},
-		{"pattern Perl syntax refuses", schema.NewPatternConstraint(regexp.MustCompilePOSIX("a**"))},
-		{"pattern surrogate escape accepted", schema.NewPatternConstraint(regexp.MustCompile(`\x{D800}`))},
+		{"pattern surrogate escape accepted", schematest.Constraint(tb, `Pattern["\\x{D800}"]`)},
 
-		{"vector accepted", schema.NewVectorConstraint(3)},
-		{"vector zero", schema.NewVectorConstraint(0)},
-		{"vector negative", schema.NewVectorConstraint(-1)},
-		{"vector past the maximum", schema.NewVectorConstraint(65537)},
+		{"vector accepted", schematest.Constraint(tb, "Vector[3]")},
+		{"vector zero value", schema.VectorConstraint{}},
 
 		{"pointer to a string", &str},
 
-		{"reference accepted", schema.NewAliasConstraint("Code", schema.IntegerBetween(1, 5))},
-		{"reference unresolved", schema.NewAliasConstraint("Code", nil)},
-		{"reference unresolved in a List", schema.NewListConstraint(schema.NewAliasConstraint("Code", nil))},
-		{"reference resolved to a fault", schema.NewAliasConstraint("Code", schema.IntegerBetween(5, 1))},
-		{"reference resolved to an unresolved reference", schema.NewAliasConstraint("Code", schema.NewAliasConstraint("Inner", nil))},
+		{"reference accepted", schematest.Constraint(tb, "Code", "type Code = Integer[1, 5]")},
 		{"reference zero value", schema.AliasConstraint{}},
-		{"reference name no source writes", schema.NewAliasConstraint("lower", schema.NewStringConstraint())},
-		{"reference name no source writes, unresolved", schema.NewAliasConstraint("a.b.C", nil)},
-		{"reference name no source writes in a List", schema.NewListConstraint(schema.NewAliasConstraint("type.Code", schema.NewStringConstraint()))},
-		{"reference resolved through a name no source writes", schema.NewAliasConstraint("Code", schema.NewAliasConstraint("lower", schema.NewStringConstraint()))},
-		{"reference resolved through a fault behind a name no source writes", schema.NewAliasConstraint("Code", schema.NewAliasConstraint("lower", schema.IntegerBetween(5, 1)))},
-		{"reference resolved to a well-formed reference", schema.NewAliasConstraint("Code", schema.NewAliasConstraint("Inner", schema.NewStringConstraint()))},
-		{"reference resolved to a reference of its own name", schema.NewAliasConstraint("Code", schema.NewAliasConstraint("Code", schema.NewStringConstraint()))},
-		{"reference resolved to a reference in a List", schema.NewListConstraint(schema.NewAliasConstraint("Code", schema.NewAliasConstraint("Inner", schema.NewStringConstraint())))},
+		{"reference in a List", schematest.Constraint(tb, "List<Code>", "type Code = String")},
 	}
 }
 
@@ -140,7 +79,7 @@ func errAnswer(err error) string {
 // each fault, and which fault it reports first where a constraint holds two.
 func TestConstraintFaults_EveryDoorGivesTheRecordedAnswer(t *testing.T) {
 	var b strings.Builder
-	for _, row := range faultRows() {
+	for _, row := range faultRows(t) {
 		fmt.Fprintf(&b, "%s\n", row.name)
 		fmt.Fprintf(&b, "\tCheckConstraint: %s\n", errAnswer(schema.CheckConstraint(row.c)))
 		params, err := CoerceParams(map[string]any{"v": "x"}, ParamTypes{"v": row.c})
@@ -154,14 +93,14 @@ func TestConstraintFaults_EveryDoorGivesTheRecordedAnswer(t *testing.T) {
 // params holds.
 func TestCoerceParams_NamesTheFirstRefusedKeyWithItsOwnFault(t *testing.T) {
 	types := ParamTypes{
-		"a0": schema.NewStringConstraint(),
+		"a0": schematest.Constraint(t, "String"),
 		"b1": nil,
-		"c2": schema.NewEnumConstraint([]string{"x", "x"}),
-		"c3": schema.IntegerBetween(5, 1),
-		"d4": schema.NewListConstraint(nil),
-		"e5": schema.NewEnumConstraint([]string{"x", "y"}),
+		"c2": schema.EnumConstraint{},
+		"c3": schema.PatternConstraint{},
+		"d4": schema.ListConstraint{},
+		"e5": schematest.Constraint(t, `Enum["x", "y"]`),
 	}
-	const want = `param type "c2": schema: duplicate enum value "x"`
+	const want = `param type "c2": schema: enum must have at least two values (got 0)`
 	for range 50 {
 		for _, params := range []map[string]any{nil, {}, {"a0": "s"}, {"d4": []any{"s"}, "zz": 1}} {
 			got, err := CoerceParams(params, types)
@@ -185,11 +124,11 @@ func TestCoerceParams_NamesTheFirstRefusedKeyWithItsOwnFault(t *testing.T) {
 // map, and a refusal wraps the judge's error, so errors.Unwrap reaches it.
 func TestCoerceParams_ReturnsAnEmptyParamsAsGivenAndWrapsTheJudgesError(t *testing.T) {
 	empty := map[string]any{}
-	got, err := CoerceParams(empty, ParamTypes{"a": schema.NewStringConstraint()})
+	got, err := CoerceParams(empty, ParamTypes{"a": schematest.Constraint(t, "String")})
 	if err != nil || got == nil || reflect.ValueOf(got).UnsafePointer() != reflect.ValueOf(empty).UnsafePointer() {
 		t.Errorf("CoerceParams(empty map) = %#v, %v; want the same map and no error", got, err)
 	}
-	refused := schema.IntegerBetween(5, 1)
+	refused := schema.ListConstraint{}
 	_, err = CoerceParams(nil, ParamTypes{"a": refused})
 	judge := schema.CheckConstraint(refused)
 	if err == nil || errors.Unwrap(err) == nil || errors.Unwrap(err).Error() != judge.Error() {

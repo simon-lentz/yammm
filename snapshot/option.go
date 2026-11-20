@@ -1,6 +1,7 @@
 package snapshot
 
 import (
+	"fmt"
 	"maps"
 	"time"
 
@@ -39,7 +40,7 @@ func applyOptions(opts []Option) config {
 // return. [Marshal] refuses anything else with an
 // Error-severity [diag.E_SNAPSHOT_MALFORMED] rather than emitting it: the
 // string is written between JSON tokens, so a non-whitespace one produces a
-// document that is not JSON at all — which this package's own [Load] refuses
+// document that is not JSON at all — which this package's own [Unmarshal] refuses
 // and [WriteFile] would put on disk unreadable.
 func WithIndent(indent string) Option {
 	return func(c *config) {
@@ -75,7 +76,7 @@ func withCreatedAtText(text string) Option {
 // a parsed header rather than a string because an Option cannot report an
 // error. A nil header sets nothing; otherwise the last WithCreatedAtFrom sets
 // the text, which wins over [WithCreatedAt] unless it is empty.
-func WithCreatedAtFrom(header *HeaderInfo) Option {
+func WithCreatedAtFrom(header *Header) Option {
 	return func(c *config) {
 		if header == nil {
 			return
@@ -106,7 +107,7 @@ func WithMetadata(m map[string]string) Option {
 }
 
 // LoadOption configures snapshot deserialization and validation behavior.
-// Both [Load] and [Verify] accept LoadOption values — they share the same
+// Both [Unmarshal] and [Verify] accept LoadOption values — they share the same
 // streamDecoder infrastructure and validation logic.
 type LoadOption func(*loadConfig)
 
@@ -129,9 +130,9 @@ const defaultIssueLimit = 100
 
 // defaultLoadConfig is the state every read surface starts from. The surfaces
 // that take no options build their config directly, and a zero value there
-// means issueLimit 0 — unlimited — so Info, HeaderOnly and HeaderOnlyRead ran
-// with an unbounded collector that no option could bound, while Load and
-// Verify defaulted to 100.
+// means issueLimit 0 — unlimited — so Stat and ReadHeader would run with an
+// unbounded collector that no option could bound, while Unmarshal and Verify
+// default to 100.
 func defaultLoadConfig() loadConfig {
 	return loadConfig{issueLimit: defaultIssueLimit}
 }
@@ -144,7 +145,7 @@ func applyLoadOptions(opts []LoadOption) loadConfig {
 	return cfg
 }
 
-// WithIssueLimit sets the maximum number of issues [Load] and [Verify] store.
+// WithIssueLimit sets the maximum number of issues [Unmarshal] and [Verify] store.
 // The walk completes unless the context is cancelled: past the limit the
 // collector keeps the most severe issues seen, and [github.com/simon-lentz/yammm/diag.Result.DroppedCount],
 // [github.com/simon-lentz/yammm/diag.Result.LimitReached] and
@@ -158,16 +159,17 @@ func WithIssueLimit(limit int) LoadOption {
 	}
 }
 
-// WithRevalidation makes [Load] and [Verify] run root instances, their
+// WithRevalidation makes [Unmarshal] and [Verify] run root instances, their
 // composed children, edges, target_missing records and invariants included,
 // back through the real validator
 // ([github.com/simon-lentz/yammm/instance.Validator]) and report its findings
 // about the data at the given severity, after every structural issue (a
 // cancellation or an E_INTERNAL keeps its own); at Error a document that fails
-// refuses to load. A root is run only when the structural checks
-// left it whole: no check refused its type, a unit of its tree, one of its
-// edges, one of its unresolved records, or one of its required or (one) associations, no record
-// whose types-table row the reader refused could be its, and no other root the
+// refuses to load. A root is run only when the structural checks left it
+// whole: no check refused its type, a unit of its tree, one of its edges (an
+// edge that names no root is the exception below), one of its unresolved
+// records, or one of its required or (one) associations, no record whose
+// types-table row the reader refused could be its, and no other root the
 // reader walks stands at its address. The reader walks no root of an instances
 // entry that repeats a types-table row or names none. An edge that names no root
 // does not stop it, since the validator does not judge whether a target exists, unless it stands beside
@@ -183,15 +185,19 @@ func WithIssueLimit(limit int) LoadOption {
 // required association as
 // [github.com/simon-lentz/yammm/diag.W_SNAPSHOT_UNRESOLVED_REQUIRED].
 // [WithIssueLimit] bounds what a systematic defect stores (default 100), and
-// the counts stay exact past it.
+// the counts stay exact past it. It panics when severity is not one of Fatal to
+// Hint (programming error).
 func WithRevalidation(severity diag.Severity) LoadOption {
+	if severity < diag.Fatal || severity > diag.Hint {
+		panic(fmt.Sprintf("snapshot.WithRevalidation: invalid severity %d", severity))
+	}
 	return func(c *loadConfig) {
 		c.revalidate = true
 		c.revalidateSeverity = severity
 	}
 }
 
-// WithIntegrityCheck selects whether [Load] and [Verify] verify the
+// WithIntegrityCheck selects whether [Unmarshal] and [Verify] verify the
 // integrity hash. With false, the hash is not checked; all other structural
 // validation still runs and produces diagnostics with the standard snapshot
 // codes. This follows etcd's SkipHashCheck pattern and supports debugging

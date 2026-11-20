@@ -1,9 +1,12 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -38,17 +41,100 @@ func saveInto(t *testing.T) (base, more string) {
 
 // readHeader reads a .ys header without verifying the body, so a test can
 // assert on what a merge wrote.
-func readHeader(t *testing.T, path string) *snapshot.HeaderInfo {
+func readHeader(t *testing.T, path string) *snapshot.Header {
 	t.Helper()
 	data, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("read snapshot: %v", err)
 	}
-	header, result := snapshot.HeaderOnly(context.Background(), data)
+	header, result := snapshot.ReadHeader(context.Background(), bytes.NewReader(data))
 	if err := result.Err(); err != nil {
 		t.Fatalf("read header: %v", err)
 	}
 	return header
+}
+
+// The merged file's header is the one the load accepted, so a header past
+// snapshot.MaxHeaderSize, which a header read refuses, still carries forward.
+func TestSnapshotSave_IntoCarriesAHeaderPastTheHeaderCap(t *testing.T) {
+	t.Parallel()
+
+	_, more := saveInto(t)
+	base := filepath.Join(t.TempDir(), "big.ys")
+	big := strings.Repeat("x", snapshot.MaxHeaderSize)
+	code, _, errOut := executeCmdOutput(t, "snapshot", "save", "--timestamp",
+		"-m", "big="+big, "-m", "env=prod",
+		"testdata/valid.yammm", "testdata/data.json", "-o", base)
+	if code != cli.ExitOK {
+		t.Fatalf("base save exit code = %d, want %d\nstderr:\n%s", code, cli.ExitOK, errOut)
+	}
+	before := statHeader(t, base)
+	if before.CreatedAt == "" {
+		t.Fatal("the base snapshot has no created_at, so the assertion below is vacuous")
+	}
+
+	code, _, errOut = executeCmdOutput(t, "snapshot", "save",
+		"testdata/valid.yammm", more, "--into", base)
+	if code != cli.ExitOK {
+		t.Fatalf("merge exit code = %d, want %d\nstderr:\n%s", code, cli.ExitOK, errOut)
+	}
+
+	after := statHeader(t, base)
+	if after.CreatedAt != before.CreatedAt {
+		t.Errorf("created_at = %q, want %q", after.CreatedAt, before.CreatedAt)
+	}
+	if after.Metadata["env"] != "prod" || after.Metadata["big"] != big {
+		t.Errorf("metadata keys after the merge = %v, want big and env carried forward", slices.Sorted(maps.Keys(after.Metadata)))
+	}
+}
+
+// A document the load refuses comes back with no header, so a merge carries
+// nothing forward from bytes it did not accept.
+func TestLoadSnapshotFile_ARefusedDocumentHasNoHeader(t *testing.T) {
+	t.Parallel()
+
+	base, _ := saveInto(t)
+	data, err := os.ReadFile(base)
+	if err != nil {
+		t.Fatalf("read snapshot: %v", err)
+	}
+	tampered := bytes.Replace(data, []byte(`"name":"Bob"`), []byte(`"name":"Rob"`), 1)
+	if bytes.Equal(tampered, data) {
+		t.Fatal("fixture shape changed; Bob not found")
+	}
+	if err := os.WriteFile(base, tampered, 0o600); err != nil {
+		t.Fatalf("write snapshot: %v", err)
+	}
+
+	s, schemaResult := schema.Load(t.Context(), mustAbs(t, "testdata/valid.yammm"))
+	if err := schemaResult.Err(); err != nil {
+		t.Fatalf("load schema: %v", err)
+	}
+	_, header, result, err := cli.LoadSnapshotFile(t.Context(), base, s)
+	if err != nil {
+		t.Fatalf("load snapshot: %v", err)
+	}
+	if !result.HasErrors() {
+		t.Fatal("the tampered document loaded; the test asserts nothing")
+	}
+	if header != nil {
+		t.Errorf("header = %+v, want nil beside a refused load", header)
+	}
+}
+
+// statHeader reads a .ys header with [snapshot.Stat], which reads a header of
+// any size.
+func statHeader(t *testing.T, path string) snapshot.Header {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read snapshot: %v", err)
+	}
+	info, result := snapshot.Stat(t.Context(), data)
+	if err := result.Err(); err != nil {
+		t.Fatalf("stat: %v", err)
+	}
+	return info.Header
 }
 
 // TestSnapshotSave_IntoCarriesTheHeaderForward pins that a merge keeps the
@@ -167,7 +253,7 @@ func writeForeignSnapshot(t *testing.T, path, createdAt string) {
 
 	// The metadata is carried too: a fixture that quietly dropped it would
 	// make the overlay assertions pass or fail for the wrong reason.
-	opts := []snapshot.Option{snapshot.WithCreatedAtFrom(&snapshot.HeaderInfo{CreatedAt: createdAt})}
+	opts := []snapshot.Option{snapshot.WithCreatedAtFrom(&snapshot.Header{CreatedAt: createdAt})}
 	if len(header.Metadata) > 0 {
 		opts = append(opts, snapshot.WithMetadata(header.Metadata))
 	}

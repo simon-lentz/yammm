@@ -55,7 +55,7 @@ func TestRoundTrip_ComposedChildKeepsTypeIdentity(t *testing.T) {
 	if err := result.Err(); err != nil {
 		t.Fatalf("marshal: %v", err)
 	}
-	loaded, result := snapshot.Load(ctx, data, s)
+	loaded, result := snapshot.Unmarshal(ctx, data, s)
 	if err := result.Err(); err != nil {
 		t.Fatalf("load: %v", err)
 	}
@@ -86,13 +86,13 @@ func TestDiffSnapshots_SeesComposedChildType(t *testing.T) {
 	ctx := context.Background()
 	s := loadWireTestSchema(t)
 	snap := buildWireTestSnapshot(t, s, float64(2), []any{float64(1)})
-	snapshottest.AssertRoundTrip(t, snap, s)
+	snapshottest.AssertRoundTrip(t, snap)
 
 	data, result := snapshot.Marshal(ctx, snap)
 	if err := result.Err(); err != nil {
 		t.Fatalf("marshal: %v", err)
 	}
-	loaded, result := snapshot.Load(ctx, data, s)
+	loaded, result := snapshot.Unmarshal(ctx, data, s)
 	if err := result.Err(); err != nil {
 		t.Fatalf("load: %v", err)
 	}
@@ -119,12 +119,12 @@ func TestRoundTrip_CrossSchemaInstance(t *testing.T) {
 		t.Fatalf("marshalled types table does not carry the imported identity:\n%s", data)
 	}
 
-	loaded, result := snapshot.Load(ctx, data, s)
+	loaded, result := snapshot.Unmarshal(ctx, data, s)
 	if err := result.Err(); err != nil {
 		t.Fatalf("load rejected a document Marshal produced: %v", err)
 	}
 	if _, ok := loaded.InstanceByKey(tidOf(t, s, "base.Basin"), graph.FormatKey("b1")); !ok {
 		t.Error("imported-type instance missing after round trip")
 	}
-	snapshottest.AssertRoundTrip(t, snap, s)
+	snapshottest.AssertRoundTrip(t, snap)
 }

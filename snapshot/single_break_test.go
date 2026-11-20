@@ -933,7 +933,7 @@ func sbCheck(t *testing.T, res diag.Result, want []sbWant, mode sbMode, required
 func sbFailures(res diag.Result) int {
 	n := 0
 	for issue := range res.Issues() {
-		if issue.Severity().IsFailure() {
+		if issue.Severity() == diag.Fatal || issue.Severity() == diag.Error {
 			n++
 		}
 	}
@@ -945,10 +945,10 @@ func TestRead_TheFixtureIsClean(t *testing.T) {
 	s, doc := singleBreakDoc(t)
 	for _, mode := range sbModes() {
 		sbCheck(t, snapshot.Verify(t.Context(), rehashDocument(t, []byte(doc)), s, mode.opts...), nil, mode, 2)
-		_, res := snapshot.Load(t.Context(), rehashDocument(t, []byte(doc)), s, mode.opts...)
+		_, res := snapshot.Unmarshal(t.Context(), rehashDocument(t, []byte(doc)), s, mode.opts...)
 		sbCheck(t, res, nil, mode, 2)
 	}
-	_, res := snapshot.Info(t.Context(), rehashDocument(t, []byte(doc)))
+	_, res := snapshot.Stat(t.Context(), rehashDocument(t, []byte(doc)))
 	sbCheck(t, res, nil, sbMode{}, 0)
 }
 
@@ -971,13 +971,13 @@ func TestRead_OneBreakDrawsOneIssue(t *testing.T) {
 			})
 			t.Run(row.name+"/Load/"+mode.name, func(t *testing.T) {
 				t.Parallel()
-				_, res := snapshot.Load(t.Context(), rehashDocument(t, []byte(edited)), s, mode.opts...)
+				_, res := snapshot.Unmarshal(t.Context(), rehashDocument(t, []byte(edited)), s, mode.opts...)
 				sbCheck(t, res, row.want, mode, required)
 			})
 		}
 		t.Run(row.name+"/Info", func(t *testing.T) {
 			t.Parallel()
-			_, res := snapshot.Info(t.Context(), rehashDocument(t, []byte(edited)))
+			_, res := snapshot.Stat(t.Context(), rehashDocument(t, []byte(edited)))
 			if row.schemaless {
 				sbCheck(t, res, row.want, sbMode{}, 0)
 				return
@@ -1276,7 +1276,7 @@ func TestRead_AnEdgeWithNoTargetRowIsOneBreak(t *testing.T) {
 		"a row out of range": `{"target_type":99,"target_key":["p0"],"properties":{}}`,
 	} {
 		edited := []byte(known.ReplaceAllLiteralString(doc, `"KNOWS":[`+edge+`]`))
-		_, l := snapshot.Load(ctx, rehashDocument(t, edited), s)
+		_, l := snapshot.Unmarshal(ctx, rehashDocument(t, edited), s)
 		for surface, res := range map[string]diag.Result{"Load": l, "Verify": snapshot.Verify(ctx, rehashDocument(t, edited), s)} {
 			if res.Len() != 1 || !res.HasCode(diag.E_SNAPSHOT_MALFORMED) {
 				t.Errorf("%s, %s: %s, want one %s", name, surface, res, diag.E_SNAPSHOT_MALFORMED)
@@ -1317,7 +1317,7 @@ func TestRead_AnEdgeWithNoTargetRowStillAnswersForItsOtherBreaks(t *testing.T) {
 		},
 	} {
 		edited := []byte(known.ReplaceAllLiteralString(doc, row.edit))
-		_, l := snapshot.Load(ctx, rehashDocument(t, edited), s)
+		_, l := snapshot.Unmarshal(ctx, rehashDocument(t, edited), s)
 		for surface, res := range map[string]diag.Result{"Load": l, "Verify": snapshot.Verify(ctx, rehashDocument(t, edited), s)} {
 			if res.Len() != sbTotal(row.want) {
 				t.Errorf("%s, %s: %s, want %v", name, surface, res, row.want)

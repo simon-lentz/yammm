@@ -178,7 +178,7 @@ func TestCompositionSlot_LoadHoldsTheRuleOverTheClass(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.String(), func(t *testing.T) {
 			t.Parallel()
-			_, lres := snapshot.Load(context.Background(), slotWire(t, data, rows, c), s, snapshot.WithIntegrityCheck(false))
+			_, lres := snapshot.Unmarshal(context.Background(), slotWire(t, data, rows, c), s, snapshot.WithIntegrityCheck(false))
 			if got := !lres.HasErrors(); got != c.legal {
 				t.Errorf("Load accepted=%v, want %v: %s", got, c.legal, lres)
 			}
@@ -211,7 +211,7 @@ func TestLoad_RefusesTwoSiblingsAtOneKey(t *testing.T) {
 		}
 		for surface, got := range map[string]diag.Result{
 			"Load": func() diag.Result {
-				_, r := snapshot.Load(t.Context(), []byte(doc), s, snapshot.WithIntegrityCheck(false))
+				_, r := snapshot.Unmarshal(t.Context(), []byte(doc), s, snapshot.WithIntegrityCheck(false))
 				return r
 			}(),
 			"Verify": snapshot.Verify(t.Context(), []byte(doc), s, snapshot.WithIntegrityCheck(false)),
@@ -238,7 +238,7 @@ func TestRead_RefusesAChildUnderAnAssociationName(t *testing.T) {
 			Properties: immutable.WrapProperties(map[string]any{"id": "c1"}),
 		}}},
 	}}})
-	_, l := snapshot.Load(ctx, doc, s)
+	_, l := snapshot.Unmarshal(ctx, doc, s)
 	for surface, res := range map[string]diag.Result{"Load": l, "Verify": snapshot.Verify(ctx, doc, s)} {
 		if res.Len() != 1 || !res.HasCode(diag.E_SNAPSHOT_INVALID_COMPOSED) {
 			t.Errorf("%s: %s, want one %s", surface, res, diag.E_SNAPSHOT_INVALID_COMPOSED)

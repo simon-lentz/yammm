@@ -177,7 +177,7 @@ func TestCollector_MergeRetainsMostSevere(t *testing.T) {
 	full.Collect(NewIssue(Warning, E_SYNTAX, "w1").Build())
 	full.Collect(NewIssue(Warning, E_SYNTAX, "w2").Build())
 
-	errs := NewCollectorUnlimited()
+	errs := NewCollector(NoLimit)
 	errs.Collect(NewIssue(Error, E_INTERNAL, "the real failure").Build())
 
 	full.Merge(errs.Result())
@@ -319,7 +319,7 @@ func TestResult_Errors(t *testing.T) {
 
 	var count int
 	for issue := range r.Errors() {
-		if !issue.Severity().IsFailure() {
+		if !issue.Severity().isFailure() {
 			t.Errorf("Errors() yielded %s issue", issue.Severity())
 		}
 		count++
@@ -367,7 +367,7 @@ func TestResult_String_OK(t *testing.T) {
 // warnings renders them: a caller on a HasWarnings branch that reaches for
 // String must not log a bare "OK".
 func TestResult_String_WarningsOnlyRendersThem(t *testing.T) {
-	c := NewCollectorUnlimited()
+	c := NewCollector(NoLimit)
 	c.Collect(NewIssue(Warning, W_ANNOTATION_SHADOWED, "shadowed").Build())
 	c.Collect(NewIssue(Info, E_INTERNAL, "for the record").Build())
 	r := c.Result()
@@ -386,7 +386,7 @@ func TestResult_String_WarningsOnlyRendersThem(t *testing.T) {
 // TestResult_String_ErrorsAndWarningsRenderBoth pins the other branch: the
 // non-OK rendering lists every issue, not only the failures.
 func TestResult_String_ErrorsAndWarningsRenderBoth(t *testing.T) {
-	c := NewCollectorUnlimited()
+	c := NewCollector(NoLimit)
 	c.Collect(NewIssue(Error, E_SYNTAX, "syntax error").Build())
 	c.Collect(NewIssue(Warning, W_ANNOTATION_SHADOWED, "first shadow").Build())
 	c.Collect(NewIssue(Warning, W_ANNOTATION_SHADOWED, "second shadow").Build())
@@ -613,12 +613,12 @@ func TestCollector_MergeEvictsLatestAcrossRepeatedEvictions(t *testing.T) {
 	c.Collect(NewIssue(Warning, E_SYNTAX, "W1").Build())
 	c.Collect(NewIssue(Warning, E_SYNTAX, "W2").Build())
 
-	errs := NewCollectorUnlimited()
+	errs := NewCollector(NoLimit)
 	errs.Collect(NewIssue(Error, E_INTERNAL, "E1").Build())
 	errs.Collect(NewIssue(Error, E_INTERNAL, "E2").Build())
 	c.Merge(errs.Result())
 
-	fatal := NewCollectorUnlimited()
+	fatal := NewCollector(NoLimit)
 	fatal.Collect(NewIssue(Fatal, E_INTERNAL, "F1").Build())
 	c.Merge(fatal.Result())
 

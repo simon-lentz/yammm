@@ -9,17 +9,15 @@ import (
 	"github.com/simon-lentz/yammm/internal/expr"
 )
 
-func TestExpression_Op(t *testing.T) {
+func TestSExpr_Op(t *testing.T) {
 	tests := []struct {
 		name     string
-		expr     expr.Expression
+		expr     expr.SExpr
 		expected string
 	}{
 		{"SExpr with add", expr.SExpr{expr.Op("+"), expr.NewLiteral(1), expr.NewLiteral(2)}, "+"},
 		{"SExpr with and", expr.SExpr{expr.Op("&&"), expr.NewLiteral(true), expr.NewLiteral(false)}, "&&"},
 		{"Empty SExpr", expr.SExpr{}, ""},
-		{"Literal", expr.NewLiteral("hello"), "lit"},
-		{"Op", expr.Op("test"), "test"},
 	}
 
 	for _, tt := range tests {
@@ -29,7 +27,7 @@ func TestExpression_Op(t *testing.T) {
 	}
 }
 
-func TestExpression_Children(t *testing.T) {
+func TestSExpr_Children(t *testing.T) {
 	lit1 := expr.NewLiteral(1)
 	lit2 := expr.NewLiteral(2)
 	sexpr := expr.SExpr{expr.Op("+"), lit1, lit2}
@@ -38,25 +36,14 @@ func TestExpression_Children(t *testing.T) {
 	require.Len(t, children, 2)
 	assert.Same(t, lit1, children[0])
 	assert.Same(t, lit2, children[1])
-
-	// Literals have no children
-	assert.Nil(t, lit1.Children())
-
-	// Op has no children
-	assert.Nil(t, expr.Op("+").Children())
 }
 
-func TestExpression_Literal(t *testing.T) {
-	assert.Equal(t, "hello", expr.NewLiteral("hello").Literal())
-	assert.Equal(t, int64(42), expr.NewLiteral(int64(42)).Literal())
-	assert.Equal(t, true, expr.NewLiteral(true).Literal())
-	assert.Nil(t, expr.NewLiteral(nil).Literal())
-
-	// Op.Literal returns the op string
-	assert.Equal(t, "+", expr.Op("+").Literal())
-
-	// SExpr.Literal returns the op
-	assert.Equal(t, "+", expr.SExpr{expr.Op("+"), expr.NewLiteral(1)}.Literal())
+func TestNewLiteral_HoldsTheValue(t *testing.T) {
+	for _, v := range []any{"hello", int64(42), true, nil} {
+		lit, ok := expr.NewLiteral(v).(*expr.Literal)
+		require.True(t, ok)
+		assert.Equal(t, v, lit.Val)
+	}
 }
 
 func TestNewLiteral_Unwrap(t *testing.T) {
@@ -197,21 +184,9 @@ func TestSExpr_Children_Immutability(t *testing.T) {
 	assert.Same(t, lit2, originalChildren[1], "original second child should be unchanged")
 }
 
-func TestExpression_Children_EdgeCases(t *testing.T) {
-	// Test nil expression children
-	var nilExpr expr.Expression
-	assert.Nil(t, nilExpr)
-
-	// Test Op children
-	op := expr.Op("+")
-	assert.Nil(t, op.Children())
-}
-
 func TestSExpr_Empty(t *testing.T) {
 	empty := expr.SExpr{}
 
 	assert.Empty(t, empty.Op())
-	// Empty SExpr's Literal returns the op string which is ""
-	assert.Empty(t, empty.Literal())
 	assert.Nil(t, empty.Children())
 }

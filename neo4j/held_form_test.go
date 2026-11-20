@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/simon-lentz/yammm/internal/schematest"
+
 	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/internal/raceskip"
 	"github.com/simon-lentz/yammm/schema"
@@ -69,7 +71,7 @@ func TestHeldForm_AValueNestedPastTheDepthIsRefused(t *testing.T) {
 func TestHeldForm_ANumberLiteralIsTheDriversNumber(t *testing.T) {
 	t.Parallel()
 	negZero := math.Copysign(0, -1)
-	integer, float, text := schema.NewIntegerConstraint(), schema.NewFloatConstraint(), schema.NewStringConstraint()
+	integer, float, text := schematest.Constraint(t, "Integer"), schematest.Constraint(t, "Float"), schematest.Constraint(t, "String")
 	for _, c := range []struct {
 		name    string
 		in      any
@@ -84,8 +86,8 @@ func TestHeldForm_ANumberLiteralIsTheDriversNumber(t *testing.T) {
 		{"a wide integer literal at a Float", json.Number("99999999999999999999"), float, 1e20, false},
 		{"an integer literal at a String", json.Number("5"), text, int64(5), true},
 		{"an integer literal undeclared", json.Number("5"), nil, int64(5), false},
-		{"-0 in a Vector", []any{json.Number("-0"), json.Number("1")}, schema.NewVectorConstraint(2), []any{negZero, 1.0}, false},
-		{"an integer literal in a List<Integer>", []any{json.Number("3")}, schema.NewListConstraint(integer), []any{int64(3)}, false},
+		{"-0 in a Vector", []any{json.Number("-0"), json.Number("1")}, schematest.Constraint(t, "Vector[2]"), []any{negZero, 1.0}, false},
+		{"an integer literal in a List<Integer>", []any{json.Number("3")}, schematest.Constraint(t, "List<Integer>"), []any{int64(3)}, false},
 	} {
 		got, err := heldForm(c.in, c.c)
 		if err != nil || !reflect.DeepEqual(got, c.want) || (c.want == negZero && !math.Signbit(got.(float64))) {
@@ -168,8 +170,8 @@ func TestExtractKeyProps_AKeyIsCoercedInItsForm(t *testing.T) {
 	t.Parallel()
 	at := time.Date(2024, 1, 2, 3, 4, 5, 0, time.UTC)
 	shape := &nodeShape{label: "Holder", primaryKeys: []string{"n", "at"}, keyConstraints: map[string]schema.Constraint{
-		"n":  schema.NewIntegerConstraint(),
-		"at": schema.NewTimestampConstraint(),
+		"n":  schematest.Constraint(t, "Integer"),
+		"at": schematest.Constraint(t, "Timestamp"),
 	}}
 	keys, err := extractKeyProps(immutable.WrapProperties(map[string]any{"n": json.Number("7"), "at": "2024-01-02T03:04:05Z"}), shape)
 	if err != nil {

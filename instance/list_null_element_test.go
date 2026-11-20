@@ -29,7 +29,7 @@ func validateT(t *testing.T, s schema.Schema, props map[string]any) (instance.Va
 	return valid, result.String()
 }
 
-// A null list element is rejected. CheckValue short-circuits nil before any
+// A null list element is rejected. The checker short-circuits nil before any
 // constraint runs, which is correct for an optional property and wrong for an
 // element: no element position is optional, so ["a", null] validated and the
 // resulting instance held a nil inside its list.

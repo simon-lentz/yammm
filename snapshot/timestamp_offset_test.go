@@ -34,7 +34,7 @@ func TestLoad_ATimestampAtAnOffsetHourOfTwentyFourIsReported(t *testing.T) {
 		t.Fatalf("marshal: %s", mr)
 	}
 	revalidate := snapshot.WithRevalidation(diag.Error)
-	if _, res := snapshot.Load(t.Context(), data, s, revalidate); res.HasCode(diag.E_CONSTRAINT_FAIL) {
+	if _, res := snapshot.Unmarshal(t.Context(), data, s, revalidate); res.HasCode(diag.E_CONSTRAINT_FAIL) {
 		t.Fatalf("control: revalidation reports the widest offset: %s", res)
 	}
 	for position, stamp := range map[string]string{"a key": key, "a property": property} {
@@ -43,7 +43,7 @@ func TestLoad_ATimestampAtAnOffsetHourOfTwentyFourIsReported(t *testing.T) {
 		}
 		wide := stamp[:len(stamp)-len("+23:59")] + "+24:00"
 		doc := rehashDocument(t, bytes.ReplaceAll(data, []byte(stamp), []byte(wide)))
-		if _, res := snapshot.Load(t.Context(), doc, s, revalidate); !res.HasCode(diag.E_CONSTRAINT_FAIL) {
+		if _, res := snapshot.Unmarshal(t.Context(), doc, s, revalidate); !res.HasCode(diag.E_CONSTRAINT_FAIL) {
 			t.Errorf("Load of %s at %s: %s; want E_CONSTRAINT_FAIL", wide, position, res)
 		}
 		if res := snapshot.Verify(t.Context(), doc, s, revalidate); !res.HasCode(diag.E_CONSTRAINT_FAIL) {

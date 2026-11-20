@@ -3,7 +3,7 @@
 //
 // The .ys format is a JSON-based persistence format that preserves structural
 // fidelity: instances with properties, primary keys, edges, compositions, provenance,
-// duplicates, and unresolved edge records all survive a Marshal/Load round-trip.
+// duplicates, and unresolved edge records all survive a Marshal/Unmarshal round-trip.
 // Provenance survives as source name and path, with a zero span.
 //
 // The format includes a schema structural hash for compatibility verification, an
@@ -24,17 +24,17 @@
 //
 // Every reader of a document refuses, in the text it reads, what encoding/json
 // would silently rewrite to U+FFFD: a string holding invalid UTF-8 or a surrogate
-// escape that is half of no pair. [Load], [Verify], [Info], [HeaderOnly] and [UpdateMetadata] judge the text
+// escape that is half of no pair. [Unmarshal], [Verify], [Stat] and [UpdateMetadata] judge the text
 // of the whole document before its header, with [diag.E_SNAPSHOT_MALFORMED].
-// [HeaderOnlyRead] and [ScanDir] read up to the end of the types table and judge
+// [ReadHeader] and [ScanDir] read up to the end of the types table and judge
 // that text last, with the same code. A fault they find first, such as an
 // unsupported version, is the one they report.
 //
-// [Load] refuses a document whose structure no caller of [graph.Graph.Add]
+// [Unmarshal] refuses a document whose structure no caller of [graph.Graph.Add]
 // could have built: one that breaks a fact of the graph package doc's
 // "Structural facts", or holds two roots of a type that can hold one, whose
 // stored keys the key rule both accepts at one address ([diag.E_DUPLICATE_PK]).
-// No option excuses them, and [Verify] and [Info] run the same checks; a
+// No option excuses them, and [Verify] and [Stat] run the same checks; a
 // schema-less read judges none that needs a schema.
 //
 // What a .ys can still hold is data a validated graph would not: an instance
@@ -62,19 +62,16 @@
 //	data, result := snapshot.Marshal(ctx, snap)
 //
 //	// Deserialize
-//	snap, result := snapshot.Load(ctx, data, s)
+//	snap, result := snapshot.Unmarshal(ctx, data, s)
 //
 //	// Validate without loading
 //	result := snapshot.Verify(ctx, data, s)
 //
-//	// Read summary metadata and statistics, without the schema
-//	info, result := snapshot.Info(ctx, data)
+//	// Read the header and a summary of the body, without the schema
+//	info, result := snapshot.Stat(ctx, data)
 //
-//	// Read the header and the types table (dispatch-style workloads)
-//	header, result := snapshot.HeaderOnly(ctx, data)
-//
-//	// Read the header and the types table from an io.Reader (no pre-materialized bytes)
-//	header, result := snapshot.HeaderOnlyRead(ctx, file)
+//	// Read the header and the types table from an io.Reader (dispatch-style workloads)
+//	header, result := snapshot.ReadHeader(ctx, file)
 //
 //	// Compare the header's schema hash against a loaded schema
 //	if !header.SchemaHashMatches(s) { /* stale-schema path */ }
@@ -93,7 +90,7 @@
 //	// (fast path — reuses body bytes verbatim)
 //	out, result := snapshot.UpdateMetadata(ctx, data, newMeta)
 //
-//	// Same, with automatic Load+Marshal fallback on non-Marshal-shaped inputs
+//	// Same, with automatic Unmarshal+Marshal fallback on non-Marshal-shaped inputs
 //	out, result := snapshot.UpdateMetadataOrReMarshal(ctx, data, newMeta, s)
 //
 // # Functions
@@ -102,42 +99,22 @@
 // by default (no timestamp unless [WithCreatedAt] or [WithCreatedAtFrom] is
 // used).
 //
-// [Load] deserializes .ys bytes back to a graph.Snapshot, verifying structural
+// [Unmarshal] deserializes .ys bytes back to a graph.Snapshot, verifying structural
 // integrity and schema compatibility.
 //
 // [Verify] validates a .ys file without materializing a Snapshot — useful for
 // CI pipelines and pre-flight checks.
 //
-// [Info] reads summary metadata and statistics from a .ys file without loading
-// the schema or materializing instance objects. Returns a [SnapshotInfo], which
-// holds the schema name, hash, instance counts per type, totals, and integrity
-// status among its fields.
-// Cost scales with file size (the instance body is scanned to populate counts).
+// [Stat] reads a .ys document's header and summarizes its body without loading
+// the schema or materializing instance objects. It returns an [Info], which
+// embeds the [Header] and holds instance counts per type, totals and the
+// integrity status. Its cost scales with the document's size.
 //
-// [HeaderOnly] reads header metadata from a .ys file without decoding the
-// instance body or verifying the integrity hash. Returns a [HeaderInfo] with
-// the header fields, the types array and the file size. It decodes only the header
-// and the types table, and its scan of the whole document checks the top-level
-// shape, the member names of every object and the text of every string.
-// [HeaderOnlyRead] decodes the members up to the types table and that table,
-// and no further, though its decoder's buffer can read past them. Either suits dispatch-style
-// workloads that scan many .ys files to classify state or compare schema
-// hashes. When counts, diagnostics, or verified integrity are required, use
-// [Info] instead.
-//
-// [HeaderOnlyRead] is the streaming sibling of [HeaderOnly]: it accepts an
-// io.Reader and parses the header without requiring the caller to
-// pre-materialize the full document into memory. Intended for dispatch
-// callers that open each .ys file with os.Open (rather than os.ReadFile)
-// and only need header metadata. Reads at most [MaxHeaderSize] bytes
-// from the reader; larger headers are rejected with a distinguished
-// E_SNAPSHOT_MALFORMED message.
-//
-// [HeaderInfo.SchemaHashMatches] is the nil-safe dispatch-site helper
-// for comparing a header's schema hash against a loaded schema.Schema.
-// Use it after [HeaderOnly] or [HeaderOnlyRead] when the dispatch
-// decision depends on whether the snapshot was produced under a
-// matching schema version.
+// [ReadHeader] reads a document's header and types table from an io.Reader,
+// at most [MaxHeaderSize] bytes, without decoding the body or verifying the
+// integrity hash. It suits dispatch-style workloads that open many .ys files to
+// classify state or compare schema hashes; [Header.SchemaHashMatches] is the
+// nil-safe comparison of a header's schema hash with a loaded schema.Schema.
 //
 // [WriteFile] writes bytes to a path atomically. It stages the bytes in a
 // file of its own beside the file it replaces, fsyncs and closes it, then
@@ -179,7 +156,7 @@
 //
 // [ScanDir] iterates the .ys files in a directory that its filtering rule
 // admits and yields one [ScanEntry] per file, with the header parsed lazily via
-// [HeaderOnlyRead] on demand. The iterator's second yielded value is
+// [ReadHeader] on demand. The iterator's second yielded value is
 // non-nil only for operation-level failures (dir-open, context
 // cancellation); per-file failures (corrupt header, a failed open or read)
 // surface on [ScanEntry.Result] and iteration continues. A failed stat raises
@@ -187,13 +164,15 @@
 // basename ends with [TmpSuffix] are skipped so crash-residual
 // staging files are not confused for complete snapshots. A directory name that is
 // not empty is cleaned before the read, so each [ScanEntry.Path] names an entry of
-// the listed directory. An empty name fails as a missing directory does.
-// [ScanDirSlice] is the materializing convenience wrapper.
+// the listed directory. An empty name fails as a missing directory does, and a
+// cleaned name whose element is not a directory, or sits under one that is not,
+// fails with an error matching [syscall.ENOTDIR] on every host; an element a
+// ".." cancels is never read.
 //
 // [UpdateMetadata] rewrites the header of an existing .ys document
 // with a new metadata map, reusing the body bytes verbatim and
 // recomputing only the SHA-256 integrity hash. The fast path is
-// several times faster than the equivalent Load + Marshal round trip;
+// several times faster than the equivalent Unmarshal + Marshal round trip;
 // [TestUpdateMetadataRatioFloor] enforces a floor of 3×. Depends
 // on the field-order and body-suffix stability contracts documented
 // in wire.go; future Marshal-side shape changes must respect those
@@ -201,7 +180,7 @@
 //
 // [UpdateMetadataOrReMarshal] is the default consumer entry point:
 // it runs [UpdateMetadata] on the happy path and transparently falls
-// back to [Load] + [Marshal] on any Error or Fatal (a body-offset failure
+// back to [Unmarshal] + [Marshal] on any Error or Fatal (a body-offset failure
 // or a malformed header among them) but a cancellation or metadata that is
 // not valid UTF-8, which no path can write. A fallback that succeeds
 // surfaces a Warning-severity [diag.W_UPDATE_METADATA_FALLBACK] on the
@@ -222,11 +201,56 @@
 //
 // # Load Options
 //
-// [Load] and [Verify] accept [LoadOption] values:
+// [Unmarshal] and [Verify] accept [LoadOption] values:
 //
 //   - [WithIssueLimit]: maximum issues stored (default 100; 0 for unlimited); the walk completes unless the context is cancelled
 //   - [WithIntegrityCheck]: with false, skip SHA-256 integrity verification (useful for debugging)
 //   - [WithRevalidation]: run each root the structural checks left whole, with its composed children, edges and target_missing records, back through the real validator, reported at the given severity
+//
+// # Reading Without a Schema
+//
+// [Stat] returns (nil, result) when the header or the types table breaks a
+// rule — an unreadable or malformed header, an unsupported version, an
+// unrecognized feature, an unrecognized schema hash algorithm, a types table
+// that states one identity twice — when the document's top level is not the
+// format's four keys, in order, each once and none null, with nothing after
+// them, when an object repeats a member name or spells one the format declares
+// in another case, when a string is not valid UTF-8 or holds a surrogate escape
+// that is half of no pair, when a section does not decode, or when the context
+// is cancelled. A document that decodes but fails a structural check returns an
+// [Info] beside Error-severity diagnostics: an integrity mismatch, a header that
+// holds no hash among them, reports [IntegrityMismatch], an instances group whose
+// row names no table entry is reported and left out of the instance counts, and
+// an edge or a record naming no row is reported and still counted. Read the
+// result before the Info.
+//
+// Stat resolves no schema, so a document it summarizes cleanly can still fail
+// [Unmarshal] or [Verify] on the schema hash, on schema resolution, on each check
+// of the graph package doc's "Structural facts" that needs a schema, on a
+// Timestamp, Date or UUID key component its kind stores as other text, and under
+// [WithRevalidation] on the values. Stat compares keys as written, so it reports
+// such a component only where it parts two keys that name one address: a
+// reference and the root it names as a dangling reference, a duplicate's key and
+// the key its instance carries as malformed, and a duplicate's conflict and the
+// key the duplicate carries as malformed. Stat runs the checks that need none,
+// such as a key component [graph.ParseKey] cannot read back, an undocumented
+// reason and two roots whose stored keys it accepts at one address, comparing
+// keys as the reader's number rule renders them.
+//
+// [ReadHeader] refuses a header longer than [MaxHeaderSize] with
+// E_SNAPSHOT_MALFORMED and a message naming the limit. It stops at the types
+// table: a document whose sections are absent, repeated, out of order, or
+// followed by trailing bytes, or whose objects repeat a member name, reads its
+// header without complaint, save that a first section other than the header and
+// a missing types section are refused. Once the header and the table read
+// without a fault, E_SNAPSHOT_MALFORMED refuses a string up to the end of the
+// table that is not valid UTF-8 or that holds a surrogate escape that is half of
+// no pair. A reader that returns io.EOF or io.ErrUnexpectedEOF, or an error
+// wrapping either, partway through the header draws Error-severity
+// E_SNAPSHOT_MALFORMED, since a truncated header is a malformed document.
+// Another reader error that stops the decode draws Fatal E_SNAPSHOT_IO, the
+// first such error as a detail, and a reader error after the types table is not
+// read. ctx is checked at entry; a Read call on the reader is not cancellable.
 //
 // # Error Handling
 //
@@ -270,16 +294,13 @@
 // Schema names are unique across an import closure, which is what makes
 // them sufficient to denote a type.
 //
-// [MinReadableVersion] names the lowest version this package accepts on
-// read paths; the accept range is the closed interval
-// [[MinReadableVersion], currentVersion]. The two constants are ONE
-// value — this package reads only the version it writes — so widening
-// the range is a deliberate act rather than an edit that forgets to.
-// A document of the expected shape outside the range draws an Error-severity
+// This package reads only the version it writes: the accept range is that one
+// version, and widening it is a deliberate act rather than an edit that forgets
+// to. A document of the expected shape at another version draws an Error-severity
 // [diag.E_SNAPSHOT_UNSUPPORTED_VERSION], whose message names the observed
 // version and the supported range. Every function that reads a document, save
-// [HeaderOnlyRead] and the scans built on it ([ScanDir], [ScanDirSlice]),
-// reports one that also breaks the shape or the text rule as
+// [ReadHeader] and [ScanDir], which is built on it, reports one that also breaks
+// the shape or the text rule as
 // [diag.E_SNAPSHOT_MALFORMED] instead. A v3 document is refused,
 // not migrated; an older reader rejects a v4 document the same way, so
 // an operator running an older binary sees a structured diagnostic
@@ -292,9 +313,12 @@
 //
 // # Dependencies
 //
-//	snapshot  ──imports──▶  graph, instance, schema, diag, location, instance/path, immutable, internal/value, internal/hostpath, internal/snapparts, internal/jsonstring
+//	snapshot  ──imports──▶  graph, instance, schema, diag, location, instance/path, immutable, internal/value, internal/hostpath, internal/snapparts, internal/snapread, internal/jsonstring
 //
 // The instance edge exists for [WithRevalidation], whose re-validation runs
-// the real validator, so the option's fidelity is the validator's own, and for
-// [instance.MaxComposedDepth], the depth bound the reader shares with it.
+// the real validator, so the option's fidelity is the validator's own, for
+// [instance.NewProvenance], which gives each instance the reader loads its
+// provenance, and for [instance.MaxComposedDepth], the depth bound the reader
+// shares with it. The internal/snapread edge hands the module's CLI the header
+// of the decode that accepted a document.
 package snapshot

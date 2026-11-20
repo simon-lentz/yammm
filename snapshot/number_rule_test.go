@@ -125,7 +125,7 @@ func TestLoad_ReadsANumberAtTheKindItsPositionDeclares(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
 			doc := numberRuleDoc(t, s, gauge, c.prop, c.spelled)
-			snap, res := snapshot.Load(t.Context(), rehashDocument(t, doc), s)
+			snap, res := snapshot.Unmarshal(t.Context(), rehashDocument(t, doc), s)
 			if !res.OK() {
 				t.Fatalf("Load: %s", res)
 			}
@@ -151,7 +151,7 @@ func TestLoad_ReadsANumberAtTheKindItsPositionDeclares(t *testing.T) {
 			if !strings.Contains(string(data), c.written) {
 				t.Errorf("the document does not state %s:\n%s", c.written, data)
 			}
-			again, lres := snapshot.Load(t.Context(), rehashDocument(t, data), s)
+			again, lres := snapshot.Unmarshal(t.Context(), rehashDocument(t, data), s)
 			if !lres.OK() {
 				t.Fatalf("second Load: %s", lres)
 			}
@@ -173,7 +173,7 @@ func TestLoad_RevalidationRefusesAnIntegerPastInt64AtAnInteger(t *testing.T) {
 	s, gauge := loadNumberRuleSchema(t)
 	for prop, refused := range map[string]bool{"count": true, "level": false} {
 		doc := numberRuleDoc(t, s, gauge, prop, json.Number("9223372036854775808"))
-		_, res := snapshot.Load(t.Context(), rehashDocument(t, doc), s, snapshot.WithRevalidation(diag.Error))
+		_, res := snapshot.Unmarshal(t.Context(), rehashDocument(t, doc), s, snapshot.WithRevalidation(diag.Error))
 		if got := res.HasCode(diag.E_TYPE_MISMATCH); got != refused {
 			t.Errorf("%s: revalidation refused = %v, want %v: %s", prop, got, refused, res)
 		}
@@ -333,7 +333,7 @@ func TestLoad_ReadsAnUnresolvedRecordsNumberAtItsRelationsKind(t *testing.T) {
 			Properties: immutable.WrapProperties(map[string]any{"weight": json.Number("2")}),
 		}},
 	})
-	snap, res := snapshot.Load(t.Context(), rehashDocument(t, doc), s)
+	snap, res := snapshot.Unmarshal(t.Context(), rehashDocument(t, doc), s)
 	if !res.OK() {
 		t.Fatalf("Load: %s", res)
 	}

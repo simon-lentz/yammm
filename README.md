@@ -102,9 +102,6 @@ func main() {
     if !result.OK() {
         log.Fatal("validation failed:", result)
     }
-    if person.IsZero() {
-        log.Fatal("refused: its producer reported the value") // an instance.Refused
-    }
 
     // Add to graph
     result = g.Add(ctx, person)
@@ -141,9 +138,6 @@ for i, rec := range records { // rec is an instance.RawInstance
     valid, result := v.ValidateOne(ctx, "Person", rec)
     if result.HasErrors() {
         log.Fatalf("record %d: %s", i, result)
-    }
-    if valid.IsZero() { // the record holds an instance.Refused value
-        log.Fatalf("record %d: %v", i, instance.ErrRefusedValue)
     }
     if result := g.Add(ctx, valid); result.HasErrors() {
         log.Fatalf("record %d: %s", i, result)
@@ -212,7 +206,7 @@ Diagnostic-producing operations return `(T, diag.Result)`:
 
 - `result.HasFatal()`: Any Fatal issue (such as an I/O failure, a cancellation, an internal fault, input a reader cannot go past, or an argument or option a loader refuses)
 - `result.HasErrors()`: Any Error or Fatal issue
-- `result.OK()`: Success (may have warnings). A validator's zero instance beside it held an `instance.Refused` value, which its producer reported
+- `result.OK()`: Success (may have warnings)
 
 The pure transformations of the `neo4j` write path and the generators (Cypher batch queries, Go source, and Markdown generation) return their output beside a Go `error`, as `(T, error)`, but for `neo4j`'s `BuildBatchRelationshipMergeQuery`, a query template that cannot fail; `schema/cypher`'s DDL builders and its label check, and `neo4j.Diff`, report through a `diag.Result`, and the drop-statement builders, which cannot fail, return a `string`. Snapshot serialization (`snapshot.Marshal`) is diagnostic-producing and returns `(T, diag.Result)`.
 

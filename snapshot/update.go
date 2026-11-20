@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 	"maps"
-	"sort"
+	"slices"
 	"strings"
 	"time"
 
@@ -32,7 +32,7 @@ import (
 //     responsible for including pass-through fields in newMeta. There
 //     is no merge — intentionally. A merge would require a diff
 //     vocabulary, and the caller already has the old metadata via
-//     [HeaderOnly].
+//     [ReadHeader].
 //   - Indentation is preserved from the input. UpdateMetadata does not
 //     re-indent, because re-indenting would require re-serializing the
 //     body and defeat the performance premise. Byte-identical round-trip
@@ -43,7 +43,7 @@ import (
 //     key, or compact otherwise. Whitespace before the opening brace draws
 //     Error E_SNAPSHOT_MALFORMED, and whitespace between the header's closing
 //     brace and the comma after it Fatal E_UPDATE_METADATA_BODY_OFFSET;
-//     [UpdateMetadataOrReMarshal] falls back to [Load] and [Marshal] for
+//     [UpdateMetadataOrReMarshal] falls back to [Unmarshal] and [Marshal] for
 //     either input, unless newMeta holds a key or value that is not valid
 //     UTF-8.
 //
@@ -56,7 +56,7 @@ import (
 //
 //	data, err := os.ReadFile(ysPath)
 //	if err != nil { return err }
-//	header, res := snapshot.HeaderOnly(ctx, data)
+//	header, res := snapshot.ReadHeader(ctx, bytes.NewReader(data))
 //	if res.HasErrors() { return res.Err() }
 //	newMeta := maps.Clone(header.Metadata)
 //	if newMeta == nil { newMeta = map[string]string{} }
@@ -69,9 +69,9 @@ import (
 // below name, because the output carries a freshly computed integrity hash, and a
 // document those modes name must not come back with a hash that matches. Callers needing
 // more than that pair UpdateMetadata with a prior [Verify] on the same bytes;
-// [HeaderOnly] is not that check, because it decodes no instance either.
+// [ReadHeader] is not that check, because it decodes no instance either.
 //
-// Diagnostics are capped at the same default [Load] uses (100); this surface
+// Diagnostics are capped at the same default [Unmarshal] uses (100); this surface
 // takes no option that raises it.
 //
 // Failure modes and error codes:
@@ -100,7 +100,7 @@ import (
 //     range for the body. This indicates the input does not match the
 //     shape Marshal produces. Byte-identical recovery is not possible;
 //     consumers using [UpdateMetadataOrReMarshal] get automatic
-//     Load + Marshal fallback, save for newMeta that is not valid UTF-8,
+//     Unmarshal + Marshal fallback, save for newMeta that is not valid UTF-8,
 //     and a W_UPDATE_METADATA_FALLBACK warning when the fallback succeeds.
 //   - [diag.E_CONTEXT_CANCELLED] — ctx was cancelled at entry.
 //
@@ -249,7 +249,7 @@ func UpdateMetadata(
 // UpdateMetadataOrReMarshal runs [UpdateMetadata] on data; when the fast path
 // reports an Error or a Fatal (E_SNAPSHOT_MALFORMED at Error,
 // E_UPDATE_METADATA_BODY_OFFSET at Fatal, or another), it transparently falls
-// back to [Load] + [Marshal] using s for the Load, unless ctx was cancelled or
+// back to [Unmarshal] + [Marshal] using s for the Unmarshal, unless ctx was cancelled or
 // newMeta holds a key or value that is not valid UTF-8 (both below). The
 // fallback carries the indent that follows a line feed directly after an opening
 // brace at the input's first byte, and any other input comes back compact. When the
@@ -261,10 +261,10 @@ func UpdateMetadata(
 // s, and a panic on that path alone hides the bug until a document is malformed.
 //
 // When the fallback path succeeds, the returned [diag.Result] carries a
-// Warning-severity [diag.W_UPDATE_METADATA_FALLBACK], the warnings the Load
+// Warning-severity [diag.W_UPDATE_METADATA_FALLBACK], the warnings the Unmarshal
 // and Marshal legs stored, and one further Warning if the input stated a
-// created_at this path could not parse. When its Load fails, the result is Load's alone,
-// so no break draws two issues. A cancelled Load may not have reached the break, so it keeps
+// created_at this path could not parse. When its Unmarshal fails, the result is Unmarshal's alone,
+// so no break draws two issues. A cancelled Unmarshal may not have reached the break, so it keeps
 // the refusal beside its own result. When its Marshal fails, the result is
 // the refusal and Marshal's issues. Neither carries a W_UPDATE_METADATA_FALLBACK. The warning's details
 // include the distinct Error and Fatal codes that triggered it via
@@ -277,11 +277,11 @@ func UpdateMetadata(
 // Prefer this helper for most consumers. The primitive [UpdateMetadata]
 // remains available for consumers who genuinely need the strict fast
 // path — e.g., benchmarks isolating the fast-path cost, or workflows
-// where any Load + Marshal round-trip is operationally unacceptable and
+// where any Unmarshal + Marshal round-trip is operationally unacceptable and
 // the caller would rather surface the failure than silently recover.
 //
 // Cost on the happy path matches [UpdateMetadata]. On the fallback path it
-// adds the refused UpdateMetadata and a HeaderOnly to Load + Marshal, which [TestUpdateMetadataRatioFloor] holds at least
+// adds the refused UpdateMetadata to Unmarshal + Marshal, which [TestUpdateMetadataRatioFloor] holds at least
 // three times slower on a 14.7 MB .ys; the W_UPDATE_METADATA_FALLBACK warning
 // makes the transition visible in consumer logs and dashboards.
 //
@@ -302,7 +302,7 @@ func UpdateMetadataOrReMarshal(
 ) ([]byte, diag.Result) {
 	// Checked before the fast path, not inside the fallback that dereferences
 	// it: a zero schema is a caller's bug on every input, and only some inputs
-	// reach Load. Deferring the panic let a caller run for months and crash on
+	// reach Unmarshal. Deferring the panic let a caller run for months and crash on
 	// the first document the fast path refused.
 	if s.IsZero() {
 		panic("snapshot.UpdateMetadataOrReMarshal: zero Schema")
@@ -318,7 +318,7 @@ func UpdateMetadataOrReMarshal(
 		return nil, res
 	}
 	// Metadata no path can write takes no fallback: Marshal would refuse it
-	// again after a whole Load. UpdateMetadata names it unless it stopped at
+	// again after a whole Unmarshal. UpdateMetadata names it unless it stopped at
 	// the document first.
 	if err := invalidMetadata(newMeta); err != nil {
 		if strings.Contains(res.String(), err.Error()) {
@@ -333,39 +333,41 @@ func UpdateMetadataOrReMarshal(
 
 	triggeringCodes := distinctTriggeringCodes(res)
 
-	// Fall back to Load + Marshal.
-	// Load's result stands alone, so no break draws two issues. A cancelled Load
+	// Fall back to Unmarshal + Marshal.
+	// Unmarshal's result stands alone, so no break draws two issues. A cancelled Unmarshal
 	// may not have reached the break, so the refusal stands beside its result.
-	loaded, loadRes := Load(ctx, data, s)
+	var header Header
+	loaded, loadRes := unmarshal(ctx, data, s, nil, &header)
 	if loadRes.HasErrors() {
 		if hasCancellation(loadRes) {
 			return nil, mergeResults(res, loadRes)
 		}
 		return nil, loadRes
 	}
+	createdAt := header.CreatedAt
 
 	var fallbackWarnings []diag.Issue
 	marshalOpts := []Option{WithMetadata(newMeta)}
 	// The fallback must not lose what the input document stated. The primitive
-	// rebuilds the header in place and keeps both; Load + Marshal reconstructs
+	// rebuilds the header in place and keeps both; Unmarshal + Marshal reconstructs
 	// it, so the indent and the created_at have to be carried across or a
 	// pretty-printed document comes back compact and a stamped one comes back
 	// unstamped.
 	if indent := detectIndent(data); indent != "" {
 		marshalOpts = append(marshalOpts, WithIndent(indent))
 	}
-	if hdr, hdrRes := HeaderOnly(ctx, data); !hdrRes.HasErrors() && hdr != nil && hdr.CreatedAt != "" {
+	if createdAt != "" {
 		// Parsed to know it is RFC 3339, then carried as text: a
 		// re-format through time.Time drops fractional seconds and the
 		// offset, which the fast path keeps.
-		if _, err := time.Parse(time.RFC3339Nano, hdr.CreatedAt); err == nil {
-			marshalOpts = append(marshalOpts, withCreatedAtText(hdr.CreatedAt))
+		if _, err := time.Parse(time.RFC3339Nano, createdAt); err == nil {
+			marshalOpts = append(marshalOpts, withCreatedAtText(createdAt))
 		} else {
 			// Dropping it silently loses a value the input stated. The
 			// primitive keeps the header's text whatever it says. This
 			// path cannot, so it reports what it could not carry.
 			fallbackWarnings = append(fallbackWarnings, diag.NewIssue(diag.Warning, diag.W_SNAPSHOT_VALUE_DROPPED,
-				fmt.Sprintf("input header states created_at %s, which is not RFC 3339; the re-marshalled document carries none", diag.QuoteValue(hdr.CreatedAt))).
+				fmt.Sprintf("input header states created_at %s, which is not RFC 3339; the re-marshalled document carries none", diag.QuoteValue(createdAt))).
 				Build())
 		}
 	}
@@ -376,10 +378,10 @@ func UpdateMetadataOrReMarshal(
 	}
 
 	warn := diag.NewIssue(diag.Warning, diag.W_UPDATE_METADATA_FALLBACK,
-		"snapshot.UpdateMetadataOrReMarshal: fell back to Load + Marshal after UpdateMetadata refused input").
+		"snapshot.UpdateMetadataOrReMarshal: fell back to Unmarshal + Marshal after UpdateMetadata refused input").
 		WithDetail(diag.DetailKeyTriggeringCodes, strings.Join(triggeringCodes, ",")).
 		Build()
-	// The legs' own warnings travel with it, so every warning Load and Marshal
+	// The legs' own warnings travel with it, so every warning Unmarshal and Marshal
 	// report reaches the caller.
 	c := diag.NewCollector(0)
 	c.Collect(warn)
@@ -442,12 +444,7 @@ func distinctTriggeringCodes(r diag.Result) []string {
 	for iss := range r.BySeverity(diag.Error) {
 		seen[iss.Code().String()] = struct{}{}
 	}
-	codes := make([]string, 0, len(seen))
-	for c := range seen {
-		codes = append(codes, c)
-	}
-	sort.Strings(codes)
-	return codes
+	return slices.Sorted(maps.Keys(seen))
 }
 
 // mergeResults returns a Result holding a's and b's issues. It merges both, so

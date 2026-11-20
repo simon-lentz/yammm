@@ -80,7 +80,7 @@ func TestDetailPairBuilders(t *testing.T) {
 		wantKey0, want0 string
 		wantKey1, want1 string
 	}{
-		{"ExpectedGot", ExpectedGot("string", "int"), DetailKeyExpected, "string", DetailKeyGot, "int"},
+		{"expectedGot", expectedGot("string", "int"), DetailKeyExpected, "string", DetailKeyGot, "int"},
 		{"TypeProp", TypeProp("Person", "name"), DetailKeyTypeName, "Person", DetailKeyPropertyName, "name"},
 		{"RelationField", RelationField("owns", "unknownField"), DetailKeyRelationName, "owns", DetailKeyField, "unknownField"},
 		{"TypeField", TypeField("Car", "invalidField"), DetailKeyTypeName, "Car", DetailKeyField, "invalidField"},

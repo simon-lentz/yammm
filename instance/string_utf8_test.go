@@ -7,6 +7,7 @@ import (
 
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/instance"
+	"github.com/simon-lentz/yammm/internal/value"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -135,7 +136,7 @@ func TestValidateOne_RefusesAStringThatIsNotValidUTF8(t *testing.T) {
 
 // The exported check and coercion, and the key read, apply the rule the
 // validator applies: none of them passes a string that is not valid UTF-8.
-func TestCheckValue_RefusesAStringThatIsNotValidUTF8(t *testing.T) {
+func TestCheck_RefusesAStringThatIsNotValidUTF8(t *testing.T) {
 	t.Parallel()
 	s, res := schema.LoadString(t.Context(), utf8Schema, "utf8.yammm")
 	if res.HasErrors() {
@@ -144,16 +145,16 @@ func TestCheckValue_RefusesAStringThatIsNotValidUTF8(t *testing.T) {
 	holder, _ := s.Type("Holder")
 	for _, name := range []string{"id", "text", "code", "kind", "uid", "day", "at"} {
 		prop, _ := holder.Property(name)
-		if err := instance.CheckValue(invalidText, prop.Constraint()); err == nil {
-			t.Errorf("CheckValue passed a string that is not valid UTF-8 at %s", name)
+		if err := value.Check(invalidText, prop.Constraint()); err == nil {
+			t.Errorf("value.Check passed a string that is not valid UTF-8 at %s", name)
 		} else if !utf8.ValidString(err.Error()) {
-			t.Errorf("CheckValue's error at %s is not valid UTF-8: %q", name, err.Error())
+			t.Errorf("value.Check's error at %s is not valid UTF-8: %q", name, err.Error())
 		}
 	}
 	for _, name := range []string{"tags", "codes"} {
 		prop, _ := holder.Property(name)
-		if err := instance.CheckValue([]any{invalidText}, prop.Constraint()); err == nil {
-			t.Errorf("CheckValue passed a list holding a string that is not valid UTF-8 at %s", name)
+		if err := value.Check([]any{invalidText}, prop.Constraint()); err == nil {
+			t.Errorf("value.Check passed a list holding a string that is not valid UTF-8 at %s", name)
 		}
 	}
 

@@ -10,7 +10,6 @@ import (
 
 	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/internal/snappartstest"
-	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -44,7 +43,7 @@ func TestEdgeQueries_ImportedSourceTypeWritesUnderClosureShape(t *testing.T) {
 	if res.HasErrors() {
 		t.Fatalf("load schema: %s", res)
 	}
-	basin, ok := s.ResolveType(schema.NewTypeRef("base", "Basin", location.Span{}))
+	basin, ok := s.ResolveTypeName("base.Basin")
 	if !ok {
 		t.Fatal("base.Basin did not resolve through the entry schema")
 	}

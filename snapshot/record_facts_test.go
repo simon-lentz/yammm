@@ -174,7 +174,7 @@ func TestLoad_HoldsRecordsToTheFactsAddDerivesThemBy(t *testing.T) {
 			t.Parallel()
 			s, doc := readerFactsDoc(t)
 			edited := applyReaderEdits(t, doc, c.edits)
-			g, res := snapshot.Load(t.Context(), []byte(edited), s, snapshot.WithIntegrityCheck(false))
+			g, res := snapshot.Unmarshal(t.Context(), []byte(edited), s, snapshot.WithIntegrityCheck(false))
 			if !g.IsZero() {
 				t.Error("Load returned a graph Add could not build")
 			}
@@ -215,7 +215,7 @@ func TestLoad_AcceptsEachRecordAddMakes(t *testing.T) {
 			t.Parallel()
 			s, doc := readerFactsDoc(t)
 			edited := applyReaderEdits(t, doc, c.edits)
-			if _, res := snapshot.Load(t.Context(), []byte(edited), s, snapshot.WithIntegrityCheck(false)); res.HasErrors() {
+			if _, res := snapshot.Unmarshal(t.Context(), []byte(edited), s, snapshot.WithIntegrityCheck(false)); res.HasErrors() {
 				t.Errorf("a record Add makes was refused: %s\n%s", res, edited)
 			}
 		})

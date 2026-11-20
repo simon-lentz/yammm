@@ -1,6 +1,7 @@
 package snapshot_test
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -129,7 +130,7 @@ func TestUpdateMetadata_RefusesUnknownHashAlgorithm(t *testing.T) {
 		t.Error("a refused relabel returned output bytes")
 	}
 
-	header, hres := snapshot.HeaderOnly(ctx, data)
+	header, hres := snapshot.ReadHeader(ctx, bytes.NewReader(data))
 	if hres.HasErrors() {
 		t.Errorf("a header-only read must stay classifiable: %v", hres)
 	}

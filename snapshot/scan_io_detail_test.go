@@ -44,9 +44,12 @@ func TestScanIODetail_PerFileCarriesTheOSError(t *testing.T) {
 		t.Skipf("symlinks unavailable: %v", err)
 	}
 
-	entries, res := snapshot.ScanDirSlice(t.Context(), dir)
-	if res.HasErrors() {
-		t.Fatalf("the scan itself failed: %s", res)
+	var entries []snapshot.ScanEntry
+	for entry, err := range snapshot.ScanDir(t.Context(), dir) {
+		if err != nil {
+			t.Fatalf("the scan itself failed: %v", err)
+		}
+		entries = append(entries, entry)
 	}
 	if len(entries) != 1 {
 		t.Fatalf("scanned %d entries, want 1", len(entries))
@@ -74,28 +77,5 @@ func TestScanIODetail_PerFileCarriesTheOSError(t *testing.T) {
 	}
 	if !strings.Contains(detail, "broken.ys") || !strings.Contains(detail, pathErr.Err.Error()) {
 		t.Errorf("detail = %q, want the underlying os error %q", detail, pathErr.Err)
-	}
-}
-
-// The dir-level failure carries it too. diag/code.go's promise covers "either a
-// dir-level failure … or a per-file failure", so fixing only scanFile would
-// have left half the claim false.
-//
-// Mutation: removing the DetailKeyDetail call in ScanDirSlice turns this
-// red.
-func TestScanIODetail_DirLevelCarriesTheOSError(t *testing.T) {
-	missing := filepath.Join(t.TempDir(), "no-such-dir")
-
-	_, res := snapshot.ScanDirSlice(t.Context(), missing)
-	if !res.HasErrors() {
-		t.Fatal("scanning a missing directory reported no error")
-	}
-
-	detail, ok := detailOf(res, diag.E_SNAPSHOT_IO, diag.DetailKeyDetail)
-	if !ok {
-		t.Fatalf("the dir-level E_SNAPSHOT_IO carries no %q detail: %s", diag.DetailKeyDetail, res)
-	}
-	if !strings.Contains(detail, "no-such-dir") {
-		t.Errorf("detail = %q, want the underlying os error", detail)
 	}
 }

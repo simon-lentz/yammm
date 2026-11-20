@@ -138,7 +138,7 @@ func TestMarshal_FloatEmissionEveryPosition(t *testing.T) {
 		t.Errorf("gain emitted %d times in float form, want 2 (resolved + unresolved edge)", got)
 	}
 
-	loaded, lres := snapshot.Load(ctx, data, s)
+	loaded, lres := snapshot.Unmarshal(ctx, data, s)
 	if err := lres.Err(); err != nil {
 		t.Fatalf("Load: %v", err)
 	}
@@ -191,7 +191,7 @@ func TestRoundTrip_AnIntegerAtAFloatReadsAsItsNearestFloat64(t *testing.T) {
 	if doc := string(data); !strings.Contains(doc, `"reading":1860000.0`) || !strings.Contains(doc, `"samples":[3.0,9007199254740992.0]`) {
 		t.Fatalf("the loaded floats were not written as floats:\n%s", doc)
 	}
-	loaded, lres := snapshot.Load(ctx, data, s)
+	loaded, lres := snapshot.Unmarshal(ctx, data, s)
 	if err := lres.Err(); err != nil {
 		t.Fatalf("Load: %v", err)
 	}

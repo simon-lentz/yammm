@@ -1,6 +1,7 @@
 package snapshot_test
 
 import (
+	"bytes"
 	"context"
 	"maps"
 	"strings"
@@ -68,12 +69,12 @@ func TestMetadata_ValidTextReadsBackAsWritten(t *testing.T) {
 		t.Fatalf("UpdateMetadata: %s", res)
 	}
 	for surface, doc := range map[string][]byte{"Marshal": data, "UpdateMetadata": updated} {
-		if _, lres := snapshot.Load(ctx, doc, s); lres.HasErrors() {
+		if _, lres := snapshot.Unmarshal(ctx, doc, s); lres.HasErrors() {
 			t.Errorf("%s: Load refuses the document: %s", surface, lres)
 		}
-		info, hres := snapshot.HeaderOnly(ctx, doc)
+		info, hres := snapshot.ReadHeader(ctx, bytes.NewReader(doc))
 		if hres.HasErrors() {
-			t.Fatalf("%s: HeaderOnly: %s", surface, hres)
+			t.Fatalf("%s: ReadHeader: %s", surface, hres)
 		}
 		if !maps.Equal(info.Metadata, meta) {
 			t.Errorf("%s: metadata reads back %q, want %q", surface, info.Metadata, meta)

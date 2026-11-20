@@ -10,21 +10,10 @@ type RawInstance struct {
 	// and each relation's under its field name.
 	// Property names may use any casing by default; the validator normalizes
 	// them. Under [WithStrictPropertyNames] a name that differs in case is not
-	// matched. A [Refused] may stand as a property's value, and in an edge
-	// object as a foreign-key field's or an edge property's value; at any
-	// other position the validator judges, it is a value of no form.
+	// matched.
 	Properties map[string]any
 
 	// Provenance optionally captures source location metadata.
 	// If zero, error messages will not include source locations.
 	Provenance Provenance
-}
-
-// Refused is a member value its producer refused: a parser that cannot read
-// an input as its member's type reports that issue and writes a Refused in
-// the value's place. The validator judges a Refused it reads as a member's
-// value no further and reports nothing for it, and refuses the instance that
-// holds it. Value is the input as the producer read it.
-type Refused struct {
-	Value any
 }

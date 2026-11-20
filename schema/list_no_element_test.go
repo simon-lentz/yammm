@@ -14,26 +14,26 @@ func TestListConstraint_WithNoElementAnswersEveryMethod(t *testing.T) {
 	t.Parallel()
 	for name, build := range map[string]func() schema.ListConstraint{
 		"the zero value":      func() schema.ListConstraint { return schema.ListConstraint{} },
-		"a nil element":       func() schema.ListConstraint { return schema.NewListConstraint(nil) },
-		"bounded, no element": func() schema.ListConstraint { return schema.ListLenBetween(nil, 1, 3) },
+		"a nil element":       func() schema.ListConstraint { return schema.TestNewListConstraint(nil) },
+		"bounded, no element": func() schema.ListConstraint { return schema.TestListLenBetween(nil, 1, 3) },
 	} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 			list, twin := build(), build()
-			ref := schema.NewAliasConstraint("A", list)
+			ref := schema.TestNewAliasConstraint("A", list)
 			if got := list.String(); got != "List<>" && got != "List<>[1, 3]" {
 				t.Errorf("String = %q", got)
 			}
-			if !list.Equal(twin) || !ref.Equal(twin) {
+			if !schema.TestConstraintEqual(list, twin) || !schema.TestConstraintEqual(ref, twin) {
 				t.Error("a List with no element is not equal to itself")
 			}
-			if list.Equal(schema.NewListConstraint(schema.NewStringConstraint())) || schema.NewListConstraint(schema.NewStringConstraint()).Equal(list) {
+			if schema.TestConstraintEqual(list, schema.TestNewListConstraint(schema.TestNewStringConstraint())) || schema.TestConstraintEqual(schema.TestNewListConstraint(schema.TestNewStringConstraint()), list) {
 				t.Error("a List with no element equals a List of String")
 			}
-			if list.NarrowsTo(twin) || ref.NarrowsTo(twin) {
+			if schema.TestConstraintNarrowsTo(list, twin) || schema.TestConstraintNarrowsTo(ref, twin) {
 				t.Error("a List with no element narrows")
 			}
-			if list.IsResolved() || ref.IsResolved() {
+			if schema.TestConstraintIsResolved(list) || schema.TestConstraintIsResolved(ref) {
 				t.Error("a List with no element is resolved")
 			}
 		})

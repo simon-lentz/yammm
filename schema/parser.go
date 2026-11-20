@@ -105,6 +105,7 @@ func (p *schemaParser) typeDecl(t *parse.TypeDecl) *typeDecl {
 		out.Invariants = append(out.Invariants, &invariantDecl{
 			Name:          inv.Message,
 			Expr:          inv.Expr,
+			Text:          inv.Text,
 			NoValue:       inv.NoValue,
 			Documentation: inv.Doc,
 			Span:          inv.Span,
@@ -230,7 +231,7 @@ func (p *schemaParser) constraint(c *parse.Constraint) (Constraint, DataTypeRef)
 	case parse.ConstraintFloat:
 		return floatConstraint(c), DataTypeRef{}
 	case parse.ConstraintBoolean:
-		return NewBooleanConstraint(), DataTypeRef{}
+		return newBooleanConstraint(), DataTypeRef{}
 	case parse.ConstraintString:
 		return stringConstraint(c), DataTypeRef{}
 	case parse.ConstraintEnum:
@@ -238,16 +239,16 @@ func (p *schemaParser) constraint(c *parse.Constraint) (Constraint, DataTypeRef)
 	case parse.ConstraintPattern:
 		return parsedPatternConstraint(c.PatternRegexp()), DataTypeRef{}
 	case parse.ConstraintTimestamp:
-		return NewTimestampConstraint(), DataTypeRef{}
+		return newTimestampConstraint(), DataTypeRef{}
 	case parse.ConstraintDate:
-		return NewDateConstraint(), DataTypeRef{}
+		return newDateConstraint(), DataTypeRef{}
 	case parse.ConstraintUUID:
-		return NewUUIDConstraint(), DataTypeRef{}
+		return newUUIDConstraint(), DataTypeRef{}
 	case parse.ConstraintVector:
 		if c.VectorDims == nil {
 			return nil, DataTypeRef{}
 		}
-		return NewVectorConstraint(*c.VectorDims), DataTypeRef{}
+		return newVectorConstraint(*c.VectorDims), DataTypeRef{}
 	case parse.ConstraintList:
 		return p.listConstraint(c)
 	case parse.ConstraintAlias:
@@ -269,43 +270,43 @@ func aliasConstraint(c *parse.Constraint) (Constraint, DataTypeRef) {
 	if ref.Qualifier != "" {
 		fullName = ref.Qualifier + "." + ref.Name
 	}
-	return NewAliasConstraint(fullName, nil), NewDataTypeRef(ref.Qualifier, ref.Name, ref.Span)
+	return newAliasConstraint(fullName, nil), DataTypeRef{qualifier: ref.Qualifier, name: ref.Name, span: ref.Span}
 }
 
 func integerConstraint(c *parse.Constraint) Constraint {
 	switch {
 	case c.IntMin != nil && c.IntMax != nil:
-		return IntegerBetween(*c.IntMin, *c.IntMax)
+		return integerBetween(*c.IntMin, *c.IntMax)
 	case c.IntMin != nil:
-		return IntegerMin(*c.IntMin)
+		return integerMin(*c.IntMin)
 	case c.IntMax != nil:
-		return IntegerMax(*c.IntMax)
+		return integerMax(*c.IntMax)
 	}
-	return NewIntegerConstraint()
+	return newIntegerConstraint()
 }
 
 func floatConstraint(c *parse.Constraint) Constraint {
 	switch {
 	case c.FloatMin != nil && c.FloatMax != nil:
-		return FloatBetween(*c.FloatMin, *c.FloatMax)
+		return floatBetween(*c.FloatMin, *c.FloatMax)
 	case c.FloatMin != nil:
-		return FloatMin(*c.FloatMin)
+		return floatMin(*c.FloatMin)
 	case c.FloatMax != nil:
-		return FloatMax(*c.FloatMax)
+		return floatMax(*c.FloatMax)
 	}
-	return NewFloatConstraint()
+	return newFloatConstraint()
 }
 
 func stringConstraint(c *parse.Constraint) Constraint {
 	switch {
 	case c.LenMin != nil && c.LenMax != nil:
-		return StringLenBetween(*c.LenMin, *c.LenMax)
+		return stringLenBetween(*c.LenMin, *c.LenMax)
 	case c.LenMin != nil:
-		return StringMinLen(*c.LenMin)
+		return stringMinLen(*c.LenMin)
 	case c.LenMax != nil:
-		return StringMaxLen(*c.LenMax)
+		return stringMaxLen(*c.LenMax)
 	}
-	return NewStringConstraint()
+	return newStringConstraint()
 }
 
 // listConstraint returns nil when the element type is unusable, because a list
@@ -319,11 +320,11 @@ func (p *schemaParser) listConstraint(c *parse.Constraint) (Constraint, DataType
 	}
 	switch {
 	case c.LenMin != nil && c.LenMax != nil:
-		return ListLenBetween(elem, *c.LenMin, *c.LenMax), ref
+		return listLenBetween(elem, *c.LenMin, *c.LenMax), ref
 	case c.LenMin != nil:
-		return ListMinLen(elem, *c.LenMin), ref
+		return listMinLen(elem, *c.LenMin), ref
 	case c.LenMax != nil:
-		return ListMaxLen(elem, *c.LenMax), ref
+		return listMaxLen(elem, *c.LenMax), ref
 	}
-	return NewListConstraint(elem), ref
+	return newListConstraint(elem), ref
 }

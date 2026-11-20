@@ -46,11 +46,6 @@ func (i Import) ResolvedSourceID() location.SourceID {
 	return i.resolvedSourceID
 }
 
-// ResolvedPath returns the resolved path as a string.
-func (i Import) ResolvedPath() string {
-	return i.resolvedSourceID.String()
-}
-
 // Schema returns the resolved schema. Every Schema a load returns has each
 // import resolved, so an Import read from one never answers zero here.
 func (i Import) Schema() Schema {

@@ -506,6 +506,36 @@ func escapeBreaksUTF8(written string, escaped []int) bool {
 	return false
 }
 
+// Quote returns s as a double-quoted STRING literal that unquote reads back as
+// s. It escapes the quote, the backslash, and each byte the lexer or the source
+// rules refuse inside a literal: a line break, a NUL and a byte order mark. s
+// must be valid UTF-8, as every value unquote returns is.
+func Quote(s string) string {
+	var b strings.Builder
+	b.Grow(len(s) + 2)
+	b.WriteByte('"')
+	for _, r := range s {
+		switch r {
+		case '"':
+			b.WriteString(`\"`)
+		case '\\':
+			b.WriteString(`\\`)
+		case '\n':
+			b.WriteString(`\n`)
+		case '\r':
+			b.WriteString(`\r`)
+		case 0:
+			b.WriteString(`\0`)
+		case '\uFEFF':
+			b.WriteString(`\uFEFF`)
+		default:
+			b.WriteRune(r)
+		}
+	}
+	b.WriteByte('"')
+	return b.String()
+}
+
 func isQuoted(s string) bool {
 	if len(s) < 2 {
 		return false

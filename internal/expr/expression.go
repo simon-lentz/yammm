@@ -28,23 +28,6 @@ const SelfVariable = "self"
 // Expression nodes are immutable after construction. The AST is built during
 // schema parsing and stored for later evaluation by the instance layer.
 type Expression interface {
-	// Op returns the operation name for this node.
-	// For SExpr, this is the first element (e.g., "+", "&&", "Any").
-	// For Literal, this is "lit".
-	// For Op, this is the operation string itself.
-	Op() string
-
-	// Children returns the child expressions.
-	// For SExpr, these are the operands (excluding the operation).
-	// For Literal and Op, this returns an empty slice.
-	Children() []Expression
-
-	// Literal returns the literal value for literal nodes.
-	// For SExpr, this returns the Op() value.
-	// For Literal, this returns the wrapped value.
-	// For Op, this returns the operation string.
-	Literal() any
-
 	// unexported marker to prevent external implementations
 	expression()
 }
@@ -57,7 +40,8 @@ type Expression interface {
 // Example: (+ 1 2) is represented as SExpr{Op("+"), Literal{1}, Literal{2}}
 type SExpr []Expression
 
-// Op implements Expression.
+// Op returns the operation name, the first element, or "" when the first
+// element is no Op or there is none.
 func (e SExpr) Op() string {
 	if len(e) == 0 {
 		return ""
@@ -68,7 +52,7 @@ func (e SExpr) Op() string {
 	return ""
 }
 
-// Children implements Expression.
+// Children returns the operands, every element after the operation name.
 //
 // Returns a defensive copy of the child expressions to preserve immutability.
 // Callers may safely modify the returned slice without affecting the original.
@@ -77,11 +61,6 @@ func (e SExpr) Children() []Expression {
 		return nil
 	}
 	return slices.Clone(e[1:])
-}
-
-// Literal implements Expression.
-func (e SExpr) Literal() any {
-	return e.Op()
 }
 
 // expression implements Expression.
@@ -111,21 +90,6 @@ func NewLiteral(val any) Expression {
 	return &Literal{Val: val}
 }
 
-// Op implements Expression.
-func (*Literal) Op() string {
-	return "lit"
-}
-
-// Children implements Expression.
-func (*Literal) Children() []Expression {
-	return nil
-}
-
-// Literal implements Expression.
-func (l *Literal) Literal() any {
-	return l.Val
-}
-
 // expression implements Expression.
 func (*Literal) expression() {}
 
@@ -141,27 +105,11 @@ func (*Literal) expression() {}
 //   - Builtins: "Any", "All", "AllOrNone", "Filter", "Map", "Reduce", etc.
 type Op string
 
-// Op implements Expression.
-func (o Op) Op() string {
-	return string(o)
-}
-
-// Children implements Expression.
-func (Op) Children() []Expression {
-	return nil
-}
-
-// Literal implements Expression.
-func (o Op) Literal() any {
-	return string(o)
-}
-
 // expression implements Expression.
 func (Op) expression() {}
 
-// StringLiteral extracts the string a [*Literal] wraps. Any other node returns
-// false — including an [SExpr], whose Literal() is its op name and is not a
-// string literal.
+// StringLiteral extracts the string a [*Literal] wraps. Any other node, an
+// [SExpr] or an [Op] among them, returns false.
 func StringLiteral(expr Expression) (string, bool) {
 	lit, ok := expr.(*Literal)
 	if !ok {

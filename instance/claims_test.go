@@ -101,7 +101,7 @@ func TestEdgeTarget_AShadowedForeignKeyNamesItsField(t *testing.T) {
 	_, res := v.ValidateOne(t.Context(), "Person", instance.RawInstance{Properties: map[string]any{
 		"id": "p", "works_at": map[string]any{"_target_id": "c1", "_TARGET_ID": "c2"},
 	}})
-	is := mustIssue(t, res, instance.ErrUnknownEdgeField)
+	is := mustIssue(t, res, diag.E_UNKNOWN_EDGE_FIELD)
 	if r := detailValues(is, diag.DetailKeyReason); len(r) != 1 || r[0] != "case_fold_shadowed" {
 		t.Errorf("reason = %v, want case_fold_shadowed", r)
 	}
@@ -119,7 +119,7 @@ func TestEdgeTarget_ACollisionNamesItsMember(t *testing.T) {
 	}})
 	var fk, prop bool
 	for is := range res.Issues() {
-		if is.Code() != instance.ErrCaseFoldCollision {
+		if is.Code() != diag.E_CASE_FOLD_COLLISION {
 			continue
 		}
 		switch {
@@ -150,7 +150,7 @@ func TestCollisions_ALimitKeepsTheFirstInOrder(t *testing.T) {
 		{"relations", map[string]any{"id": "p", "PETS": []any{}, "Pets": []any{}, "WORKS_AT": map[string]any{}, "Works_At": map[string]any{}}, "WORKS_AT"},
 	} {
 		_, res := v.ValidateOne(t.Context(), "Person", instance.RawInstance{Properties: c.props})
-		is, ok := issueWithCode(res, instance.ErrCaseFoldCollision)
+		is, ok := issueWithCode(res, diag.E_CASE_FOLD_COLLISION)
 		if !ok || !strings.Contains(is.Message()+strings.Join(detailValues(is, diag.DetailKeyRelationName), ","), c.want) {
 			t.Errorf("%s: kept %s, want the collision on %s", c.name, res, c.want)
 		}

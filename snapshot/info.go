@@ -12,11 +12,10 @@ import (
 )
 
 // TypeRef is a type identity as a .ys document states it: declaring schema
-// name plus type name. It is the schema-less display surface for the Info and
-// HeaderOnly readers, which run without an import closure to resolve
-// against; two same-named types in different schemas stay distinct because
+// name plus type name. It is the schema-less display surface for [Stat] and
+// [ReadHeader], which run without an import closure to resolve against; two same-named types in different schemas stay distinct because
 // schema names are unique across a closure. TypeRef renders and does not
-// parse: the Info surfaces are a report projection, so there is no
+// parse: [Header] and [Info] are a report projection, so there is no
 // UnmarshalText and they serialize one way by design.
 type TypeRef struct {
 	Schema string
@@ -39,101 +38,78 @@ func (r TypeRef) MarshalText() ([]byte, error) {
 	return []byte(r.String()), nil
 }
 
-// SnapshotInfo contains summary metadata and statistics extracted from a
-// .ys file without full deserialization.
-//
-// SnapshotInfo uses exported fields rather than accessor methods. This is a
-// deliberate departure from the library's typical pattern — SnapshotInfo is
-// a read-only data transfer object with no invariants to protect.
-type SnapshotInfo struct { //nolint:revive // intentional stutter — mirrors .ys format section name
-	// Header fields.
+// Header is the metadata a .ys document's header and types table state. It is
+// a read-only data transfer object with no invariants to protect, so its fields
+// are exported. [ReadHeader] returns it, and [Info] embeds it.
+type Header struct {
 	Version             int
-	Features            []string
 	SchemaName          string
 	SchemaSource        string
 	SchemaHash          string
 	SchemaHashAlgorithm int
-	IntegrityHash       string
+	IntegrityHash       string            // as stored, not a verification result
 	CreatedAt           string            // as the header states it: RFC 3339 as yammm writes it, or empty
 	Metadata            map[string]string // user-provided annotations, nil if absent
 
-	// Content summary. Types holds one entry per types-table row;
-	// InstanceCounts holds one entry per type an instances group names whose
-	// row resolves, the number of its roots.
-	Types           []TypeRef
+	// Types holds one entry per types-table row.
+	Types []TypeRef
+
+	// Attestation is the header's validity claim, or nil for a document that
+	// states none. See [github.com/simon-lentz/yammm/graph.Attestation].
+	Attestation *graph.Attestation
+}
+
+// Info is a .ys document's header and a summary of its body, as [Stat] reads
+// them. InstanceCounts holds one entry per type an instances group names whose
+// row resolves: the number of its roots.
+type Info struct {
+	Header
+
 	InstanceCounts  map[TypeRef]int
 	TotalInstances  int
 	TotalEdges      int
 	DuplicateCount  int
 	UnresolvedCount int
 
-	// Attestation is the header's validity claim, or nil for a document that
-	// states none. See [github.com/simon-lentz/yammm/graph.Attestation].
-	Attestation *graph.Attestation
-
-	// File metadata.
-	FileSize        int64  // len(data)
-	IntegrityStatus string // "ok" or "mismatch"
+	IntegrityStatus IntegrityStatus
 }
 
-// Info reads summary metadata and statistics from a .ys file without
-// loading the schema or materializing instance objects.
-//
-// Info uses the shared streamDecoder infrastructure. It holds the decoded
-// instances section in memory, so peak usage scales with document size.
-//
-// Info verifies the integrity hash and reports the result in IntegrityStatus:
-// a header that holds no hash (an empty, null or absent integrity_hash) is a
-// mismatch.
-// Schema hash cannot be verified (no schema available).
-//
-// Cost scales with file size because Info decodes the instance sections
-// to populate [SnapshotInfo.InstanceCounts] and [SnapshotInfo.TotalEdges].
-// For dispatch-style workloads that only need header-level fields, use
-// [HeaderOnly] — it returns after parsing the header and skips decoding
-// the instance body, though it still scans the whole document to check
-// its shape. [HeaderOnlyRead] is the streaming sibling whose cost is
-// proportional to the header, the types table and any member before it, up to
-// [MaxHeaderSize].
-//
-// Diagnostics are capped at the same default [Load] uses (100). This surface
-// takes no option that raises it; a caller needing every issue on a
-// heavily-malformed document reads it through [Load].
-//
-// Returns (nil, result) when the header or the types table breaks a rule — an
-// unreadable or malformed header, an unsupported version, an unrecognized
-// feature, an unrecognized schema hash algorithm, a types table that states
-// one identity twice — when the document's top level is not the format's four
-// keys, in order, each once and none null, with nothing after them, when an
-// object repeats a member name or spells one the format declares in another
-// case, when a string is not valid UTF-8 or holds a surrogate escape that is half
-// of no pair, when a section does not decode, or when the context is cancelled. A document that decodes but fails a structural check returns a
-// summary beside Error-severity diagnostics — an integrity mismatch reports
-// IntegrityStatus "mismatch", and an instances group whose row names no table
-// entry is reported and left out of the instance counts, while an edge or a
-// record naming no row is reported and still counted. Read the result before
-// the summary.
-//
-// Info runs the structural validation [Load] and [Verify] run and stops before
-// materialization. It resolves no schema, so a document Info summarizes cleanly
-// can still fail Load or Verify on the schema hash, on schema resolution, on
-// each check of the graph package doc's "Structural facts" that needs a
-// schema, on a Timestamp, Date or UUID key component its kind stores as other
-// text, and under [WithRevalidation] on the values. Info compares keys as
-// written, so it reports such a component only where it parts two keys that
-// name one address: a reference and the root it names as a dangling
-// reference, a duplicate's key and the key its instance carries as malformed,
-// and a duplicate's conflict and the key the duplicate carries as malformed.
-// Info runs the checks that need none, such as a key component
-// [graph.ParseKey] cannot read back, an undocumented reason and two roots
-// whose stored keys it accepts at one address, comparing keys as the reader's
-// number rule renders
-// them.
-//
-// Info follows the library's standard (T, diag.Result) return pattern.
-func Info(ctx context.Context, data []byte) (*SnapshotInfo, diag.Result) {
+// IntegrityStatus is the result of [Stat]'s integrity-hash check. The zero
+// IntegrityStatus names no status.
+type IntegrityStatus uint8
+
+const (
+	// IntegrityOK: the stored hash matches the document's content.
+	IntegrityOK IntegrityStatus = iota + 1
+	// IntegrityMismatch: the stored hash does not match the content, or the
+	// header holds no hash.
+	IntegrityMismatch
+)
+
+// String returns "ok" or "mismatch", and IntegrityStatus(n) for any other
+// value.
+func (s IntegrityStatus) String() string {
+	switch s {
+	case IntegrityOK:
+		return "ok"
+	case IntegrityMismatch:
+		return "mismatch"
+	default:
+		return fmt.Sprintf("IntegrityStatus(%d)", uint8(s))
+	}
+}
+
+// Stat reads a .ys document's header and summarizes its body without a schema
+// and without materializing an instance, so its cost scales with the document's
+// size. It runs each structural check [Unmarshal] runs that needs no schema,
+// records the integrity check in [Info.IntegrityStatus], and caps its
+// diagnostics at 100. It returns (nil, result) for a document it cannot decode
+// or whose header or types table breaks a rule, and an Info beside the result
+// for one whose body breaks a check, as the package doc's Reading Without a
+// Schema section states.
+func Stat(ctx context.Context, data []byte) (*Info, diag.Result) {
 	if ctx == nil {
-		panic("snapshot.Info: nil context")
+		panic("snapshot.Stat: nil context")
 	}
 	if err := ctx.Err(); err != nil {
 		c := diag.NewCollector(0)
@@ -147,7 +123,6 @@ func Info(ctx context.Context, data []byte) (*SnapshotInfo, diag.Result) {
 		return nil, sd.collector.Result()
 	}
 
-	// Decode header + types.
 	if err := sd.decodeHeader(); err != nil {
 		sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_MALFORMED, err.Error()).Build())
 		return nil, sd.collector.Result()
@@ -156,7 +131,6 @@ func Info(ctx context.Context, data []byte) (*SnapshotInfo, diag.Result) {
 		return nil, sd.collector.Result()
 	}
 
-	// Decode remaining sections.
 	groups, diags, err := sd.decodeSections()
 	if err != nil {
 		sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_MALFORMED, err.Error()).Build())
@@ -167,237 +141,40 @@ func Info(ctx context.Context, data []byte) (*SnapshotInfo, diag.Result) {
 		return nil, sd.collector.Result()
 	}
 	counts, totalEdges := sd.countInstances(groups)
-	duplicateCount, unresolvedCount := len(diags.Duplicates), len(diags.Unresolved)
 
 	totalInstances := 0
 	for _, c := range counts {
 		totalInstances += c
 	}
 
-	info := &SnapshotInfo{
-		Version:             sd.header.Version,
-		Features:            sd.header.Features,
-		SchemaName:          sd.header.SchemaName,
-		SchemaSource:        sd.header.SchemaSource,
-		SchemaHash:          sd.header.SchemaHash,
-		SchemaHashAlgorithm: sd.header.SchemaHashAlgorithm,
-		IntegrityHash:       sd.header.IntegrityHash,
-		CreatedAt:           sd.header.CreatedAt,
-		Metadata:            sd.header.Metadata,
-		Types:               sd.typeRefs(),
-		Attestation:         sd.headerAttestation(),
-		InstanceCounts:      counts,
-		TotalInstances:      totalInstances,
-		TotalEdges:          totalEdges,
-		DuplicateCount:      duplicateCount,
-		UnresolvedCount:     unresolvedCount,
-		FileSize:            int64(len(data)),
-		IntegrityStatus:     integrityStatus,
-	}
-
-	return info, sd.collector.Result()
+	return &Info{
+		Header:          sd.decodedHeader(),
+		InstanceCounts:  counts,
+		TotalInstances:  totalInstances,
+		TotalEdges:      totalEdges,
+		DuplicateCount:  len(diags.Duplicates),
+		UnresolvedCount: len(diags.Unresolved),
+		IntegrityStatus: integrityStatus,
+	}, sd.collector.Result()
 }
 
-// HeaderInfo contains header metadata extracted from a .ys file without
-// decoding the instance body or verifying the integrity hash. It is the
-// fast, dispatch-friendly counterpart of [SnapshotInfo].
-//
-// HeaderInfo uses exported fields rather than accessor methods, matching
-// the [SnapshotInfo] convention: it is a read-only data transfer object
-// with no invariants to protect.
-type HeaderInfo struct {
-	// Header fields.
-	Version             int
-	Features            []string
-	SchemaName          string
-	SchemaSource        string
-	SchemaHash          string
-	SchemaHashAlgorithm int
-	IntegrityHash       string
-	CreatedAt           string            // as the header states it: RFC 3339 as yammm writes it, or empty
-	Metadata            map[string]string // user-provided annotations, nil if absent
-
-	// Types array (adjacent to the header in the wire format; read in
-	// the same streaming pass by decodeHeader).
-	Types []TypeRef
-
-	// Attestation is the header's validity claim, or nil for a document that
-	// states none. See [github.com/simon-lentz/yammm/graph.Attestation].
-	Attestation *graph.Attestation
-
-	// FileSize is the document's size in bytes, or zero when unknown. Three
-	// cases: [HeaderOnly] reports len(data); [ScanDir] reports the file's size
-	// on disk; a bare [HeaderOnlyRead] reports zero, because a size is not
-	// knowable from an io.Reader.
-	FileSize int64
-}
-
-// HeaderOnly reads header metadata from a .ys file without decoding the
-// instance body or verifying the integrity hash.
-//
-// HeaderOnly is the right choice for dispatch-style workloads that scan
-// many .ys files to classify lifecycle state, compare schema hashes, or
-// inspect metadata annotations like CreatedAt. It decodes the header and
-// the types table alone, where [Info] decodes the body to populate its counts. Its
-// scan of the whole document checks the outermost shape, every member name and the
-// text of every string, as the next paragraph states.
-//
-// HeaderOnly holds the whole document, so it checks the outermost shape as
-// [Load] does: the top level must be the format's four keys, in order, each
-// once and none null, with nothing after them, no object may repeat a member
-// name or spell one the format declares in another case, and no string may be
-// invalid UTF-8 or hold a surrogate escape that is half of no pair.
-// [HeaderOnlyRead] and [ScanDir] read through a capped reader and stop at the
-// types table, holding any member before it up to the cap, so they cannot check
-// the whole document's shape or member names, as each one's doc states. They judge
-// text only up to the end of that table.
-//
-// Integrity is not verified. The returned [HeaderInfo.IntegrityHash] is
-// the value stored in the file, not a verification result. Callers that
-// need to confirm the hash matches the document content should use
-// [Verify]. Similarly, schema-hash correctness against a loaded schema
-// is not checked here — HeaderOnly never loads or consults a schema.
-// The [HeaderInfo.SchemaHashMatches] helper performs that cross-check
-// at the dispatch site when needed.
-//
-// For anything that needs instance counts, diagnostic counts, or a
-// verified integrity status, use [Info] instead. For callers reading
-// from an io.Reader (e.g., an os.File) without first materializing the
-// full document into memory, use [HeaderOnlyRead].
-//
-// Returns (nil, result) with Error-severity diagnostics for malformed
-// input. Follows the library's standard (T, diag.Result) return pattern.
-func HeaderOnly(ctx context.Context, data []byte) (*HeaderInfo, diag.Result) {
-	if ctx == nil {
-		panic("snapshot.HeaderOnly: nil context")
-	}
-	if err := ctx.Err(); err != nil {
-		c := diag.NewCollector(0)
-		c.Collect(diag.NewIssue(diag.Fatal, diag.E_CONTEXT_CANCELLED, err.Error()).Build())
-		return nil, c.Result()
-	}
-
-	// HeaderOnly holds the whole document, so it owes the outermost-shape check
-	// every other whole-document surface runs. HeaderOnlyRead and ScanDir do
-	// not hold it and say so on their own godoc.
-	c := diag.NewCollector(0)
-	if err := checkDocument(data); err != nil {
-		c.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_MALFORMED, err.Error()).Build())
-		return nil, c.Result()
-	}
-
-	cfg := defaultLoadConfig()
-	cfg.headerOnly = true
-	sd := newStreamDecoder(data, schema.Schema{}, cfg)
-
-	// Decode header + types only — no instance body, no integrity check.
-	if err := sd.decodeHeader(); err != nil {
-		sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_MALFORMED, err.Error()).Build())
-		return nil, sd.collector.Result()
-	}
-	if sd.collector.HasErrors() {
-		return nil, sd.collector.Result()
-	}
-
-	info := &HeaderInfo{
-		Version:             sd.header.Version,
-		Features:            sd.header.Features,
-		SchemaName:          sd.header.SchemaName,
-		SchemaSource:        sd.header.SchemaSource,
-		SchemaHash:          sd.header.SchemaHash,
-		SchemaHashAlgorithm: sd.header.SchemaHashAlgorithm,
-		IntegrityHash:       sd.header.IntegrityHash,
-		CreatedAt:           sd.header.CreatedAt,
-		Metadata:            sd.header.Metadata,
-		Types:               sd.typeRefs(),
-		Attestation:         sd.headerAttestation(),
-		FileSize:            int64(len(data)),
-	}
-
-	return info, sd.collector.Result()
-}
-
-// MaxHeaderSize is the upper bound on bytes [HeaderOnlyRead] will read
-// from an io.Reader before returning E_SNAPSHOT_MALFORMED. The limit
-// protects against malformed or malicious inputs; .ys files whose header
-// section exceeds this bound are rejected rather than consuming unbounded
-// memory during dispatch.
-//
-// 16 MiB accommodates typical .ys headers (< 1 KiB) with substantial
-// margin for callers that carry large work-set arrays in header metadata —
-// for example a consumer's state-batched pipelines, which persist target_keys /
-// processed_keys / failed_keys per batch in the header. Callers whose headers legitimately
-// exceed even this bound should split metadata across multiple documents
-// or use [Info] / [Load] (which do not cap input size) against a
-// pre-materialized byte slice.
+// MaxHeaderSize is the upper bound on bytes [ReadHeader] reads before it
+// returns E_SNAPSHOT_MALFORMED. 16 MiB holds a typical header (< 1 KiB) and
+// large work-set arrays in header metadata. A caller whose header exceeds it
+// reads the bytes with [Stat] or [Unmarshal], which do not cap their input.
 const MaxHeaderSize = 16 * 1024 * 1024
 
-// HeaderOnlyRead reads header metadata from a .ys stream without
-// materializing the instance body. It is [HeaderOnly]'s counterpart for an
-// io.Reader, avoiding the caller-side requirement to read the entire document
-// into memory before dispatch. The paragraphs below state how the two differ.
-//
-// HeaderOnlyRead reads at most [MaxHeaderSize] bytes from r. Inputs whose
-// header section exceeds this bound are rejected with E_SNAPSHOT_MALFORMED
-// and a message naming the limit, so operators can distinguish the cap
-// from a generic JSON-parse failure. Integrity is not verified (matching
-// [HeaderOnly]).
-//
-// Schema cross-check: HeaderOnlyRead takes no schema parameter and performs
-// no schema-hash verification during the read, matching [HeaderOnly]. Dispatch callers compare
-// [HeaderInfo.SchemaHash] against their loaded schema themselves via the
-// [HeaderInfo.SchemaHashMatches] helper — a string equality check against
-// schema.StructuralHash(s), which hashes s's import closure on each call, that
-// captures intent at dispatch sites. Callers that need schema-hash
-// verification inside the read call should materialize the bytes first and
-// use [Verify] or [Load], which take the schema.
-//
-// Read-error handling: a reader that returns io.EOF or
-// io.ErrUnexpectedEOF, or an error wrapping either, partway through the
-// header surfaces as Error-severity
-// E_SNAPSHOT_MALFORMED on the returned diag.Result, not as a bare error
-// return: a truncated header is a malformed document, whether the
-// truncation is on disk or in transit. Another reader error that stops the
-// header's decode is an I/O failure and surfaces as Fatal E_SNAPSHOT_IO, the
-// first such error as a detail, so a file that opens and cannot be read is not
-// reported as a document that is wrong. A reader error after the types table
-// decodes is not read.
-//
-// ctx cancellation is checked at function entry; individual Read calls
-// on r are not cancellable mid-read. Readers backed by slow or network
-// I/O should apply their own per-read deadline wrapping if finer-grained
-// cancellation is required.
-//
-// Cost: proportional to the size of the members up to the types table and that table
-// (typically < 1 KiB), not the underlying file size. The returned [HeaderInfo.FileSize] is not
-// populated (zero value) in the reader variant — a size is not knowable
-// from an io.Reader. Consumers that need one use the []byte form via
-// [HeaderOnly], or [ScanDir], which stats the handle it opened and fills
-// the field in for every entry whose header it reads and whose handle it
-// can stat.
-//
-// Shape: HeaderOnlyRead reads through a reader capped at [MaxHeaderSize] and
-// stops at the types table, holding any member before it up to the cap, so it
-// cannot check the document's outermost shape or its member names. A document whose sections are absent, repeated, out of
-// order, or followed by trailing bytes, or whose objects repeat a member name,
-// reads its header here without complaint. Of these, only a first section
-// other than the header and a missing types section are refused. Use [HeaderOnly],
-// [Verify] or [Load] when that matters.
-//
-// Text: HeaderOnlyRead judges the text only once it has read the header and the
-// types table without a fault, where [HeaderOnly] judges the text first. With no
-// such fault, E_SNAPSHOT_MALFORMED refuses a string up to the end of the table that
-// is not valid UTF-8 or that holds a surrogate escape that is half of no pair. A
-// string past the table goes unjudged.
-//
-// Returns (nil, result) with Error-severity diagnostics for malformed
-// input. Follows the library's standard (T, diag.Result) return pattern.
-//
-// See also [ScanDir] for directory-wide iteration that uses this
-// primitive per file.
-func HeaderOnlyRead(ctx context.Context, r io.Reader) (*HeaderInfo, diag.Result) {
+// ReadHeader reads a .ys document's header and types table from r, at most
+// [MaxHeaderSize] bytes, without decoding the body or verifying the integrity
+// hash. It stops at the types table, so it judges neither the document's
+// outermost shape nor its member names beyond refusing a top level that is no
+// JSON object, a first section other than the header and a missing types
+// section, nor the text of a string past the table.
+// [Header.SchemaHashMatches] compares the header with a loaded schema. The
+// package doc's Reading Without a Schema section states its refusals.
+func ReadHeader(ctx context.Context, r io.Reader) (*Header, diag.Result) {
 	if ctx == nil {
-		panic("snapshot.HeaderOnlyRead: nil context")
+		panic("snapshot.ReadHeader: nil context")
 	}
 	if err := ctx.Err(); err != nil {
 		c := diag.NewCollector(0)
@@ -412,7 +189,6 @@ func HeaderOnlyRead(ctx context.Context, r io.Reader) (*HeaderInfo, diag.Result)
 	var read bytes.Buffer
 	sd := newStreamDecoderFromReader(io.TeeReader(lr, &read), schema.Schema{}, cfg)
 
-	// Decode header + types only — no instance body, no integrity check.
 	if err := sd.decodeHeader(); err != nil {
 		if lr.readErr != nil {
 			sd.collector.Collect(diag.NewIssue(diag.Fatal, diag.E_SNAPSHOT_IO,
@@ -436,9 +212,14 @@ func HeaderOnlyRead(ctx context.Context, r io.Reader) (*HeaderInfo, diag.Result)
 		return nil, sd.collector.Result()
 	}
 
-	info := &HeaderInfo{
+	h := sd.decodedHeader()
+	return &h, sd.collector.Result()
+}
+
+// decodedHeader returns the header and types table sd decoded.
+func (sd *streamDecoder) decodedHeader() Header {
+	return Header{
 		Version:             sd.header.Version,
-		Features:            sd.header.Features,
 		SchemaName:          sd.header.SchemaName,
 		SchemaSource:        sd.header.SchemaSource,
 		SchemaHash:          sd.header.SchemaHash,
@@ -448,14 +229,10 @@ func HeaderOnlyRead(ctx context.Context, r io.Reader) (*HeaderInfo, diag.Result)
 		Metadata:            sd.header.Metadata,
 		Types:               sd.typeRefs(),
 		Attestation:         sd.headerAttestation(),
-		// FileSize intentionally left 0: not known from an io.Reader.
 	}
-
-	return info, sd.collector.Result()
 }
 
-// headerAttestation converts the decoded header's claim for the Info
-// surfaces. Nil means the document states no claim, as Marshal writes one of a
+// headerAttestation converts the decoded header's claim for [Header]. Nil means the document states no claim, as Marshal writes one of a
 // snapshot that holds none.
 func (sd *streamDecoder) headerAttestation() *graph.Attestation {
 	a := sd.header.Attestation
@@ -465,25 +242,12 @@ func (sd *streamDecoder) headerAttestation() *graph.Attestation {
 	return &graph.Attestation{Values: a.Values, Associations: a.Associations}
 }
 
-// SchemaHashMatches reports whether the header's SchemaHash equals the
-// structural hash of s under the same algorithm version. This is the
-// documented cross-check dispatch callers perform after [HeaderOnly] or
-// [HeaderOnlyRead] to detect snapshots produced under a different schema
-// version — e.g., a consumer's stale-schema path.
-//
-// The comparison is a string equality against schema.StructuralHash(s),
-// which hashes s's import closure on each call; the helper exists so the cross-check is a
-// single method call that signals intent at dispatch sites and keeps the
-// "forgot to compare" foot-gun out of consumer code paths.
-//
-// Nil-safety: SchemaHashMatches returns false without panicking when
-// the receiver is nil or s is zero, when the header's SchemaHash is
-// empty, or when the header's SchemaHashAlgorithm does not match
-// [schema.StructuralHashVersion] (a hash produced by a different
-// algorithm is not comparable, even if the string happens to match). An empty or
-// version-mismatched SchemaHash never matches anything, so false means "unknown
-// or incompatible schema".
-func (h *HeaderInfo) SchemaHashMatches(s schema.Schema) bool {
+// SchemaHashMatches reports whether the header's SchemaHash equals
+// schema.StructuralHash(s), which hashes s's import closure on each call. It
+// returns false for a nil receiver, a zero s, an empty SchemaHash, or a
+// SchemaHashAlgorithm other than [schema.StructuralHashVersion], so false means
+// an unknown or incompatible schema.
+func (h *Header) SchemaHashMatches(s schema.Schema) bool {
 	if h == nil || s.IsZero() || h.SchemaHash == "" {
 		return false
 	}

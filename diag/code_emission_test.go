@@ -11,8 +11,8 @@ import (
 
 // TestCodeEmission_AllCodes verifies that every defined code can be used to
 // create a valid issue that survives a Collector round-trip — the one
-// property the registry guards in code_test.go cannot check. (Uniqueness,
-// category membership, and specific-code existence are pinned there.)
+// property the registry guards in code_test.go cannot check. (Uniqueness and
+// specific-code existence are pinned there.)
 func TestCodeEmission_AllCodes(t *testing.T) {
 	t.Parallel()
 

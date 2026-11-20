@@ -91,7 +91,7 @@ func newStreamDecoder(data []byte, s schema.Schema, cfg loadConfig) *streamDecod
 }
 
 // newRevalidator builds the validator the revalidation walk runs, or nil
-// when nobody asked. Only [Load] and [Verify] take the option, and each panics
+// when nobody asked. Only [Unmarshal] and [Verify] take the option, and each panics
 // on a zero schema, so a schema is present to validate against. It caps a
 // row at the load's limit, so the load has one cap and an unlimited load
 // stores every finding a row draws.
@@ -209,7 +209,7 @@ func (sd *streamDecoder) decodeHeader() error {
 	sd.bodyOffset = dec.InputOffset()
 
 	// Validate version.
-	if iss, ok := acceptVersion(sd.header.Version, MinReadableVersion, currentVersion); !ok {
+	if iss, ok := acceptVersion(sd.header.Version, minReadableVersion, currentVersion); !ok {
 		sd.collector.Collect(iss)
 		return nil
 	}
@@ -230,7 +230,7 @@ func (sd *streamDecoder) decodeHeader() error {
 	// Validate schema hash algorithm. A body-reading surface refuses the
 	// document: where a body would be trusted, an uncheckable schema
 	// identity is a refusal. A header-only read stays non-fatal, so
-	// dispatch still receives a HeaderInfo whose SchemaHashMatches reports
+	// dispatch still receives a Header whose SchemaHashMatches reports
 	// false — the stale-schema classification consumers route on.
 	if sd.header.SchemaHashAlgorithm != schema.StructuralHashVersion {
 		sev, msg := diag.Error, "unrecognized schema hash algorithm version %d; the document cannot be checked against a schema"
@@ -2015,7 +2015,7 @@ var unresolvedReasons = map[string]bool{"target_missing": true, "absent": true, 
 
 // checkUnresolvedReason holds a record to the reasons graph.UnresolvedEdge
 // documents, and a reason naming no target to carry no target key or edge
-// properties; Verify and Info then report what Load refuses. It reports whether the reason is a documented one.
+// properties; Verify and Stat then report what Unmarshal refuses. It reports whether the reason is a documented one.
 func (sd *streamDecoder) checkUnresolvedReason(ui int, u unresolvedWire) bool {
 	if u.Reason == "" {
 		sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_MALFORMED,
@@ -2264,14 +2264,14 @@ func (sd *streamDecoder) runPipeline(ctx context.Context) ([]instanceGroupWire, 
 
 // validateBody runs every structural check the format defines over a decoded
 // body, the integrity hash last, then the revalidation the options ask for,
-// and returns [streamDecoder.verifyIntegrity]'s status. Load, Verify and Info
+// and returns [streamDecoder.verifyIntegrity]'s status. Unmarshal, Verify and Stat
 // share it: the rules are one definition and only the gating policy differs,
 // so a surface that summarises a document cannot report it clean while a
 // surface that loads one refuses it.
-func (sd *streamDecoder) validateBody(ctx context.Context, groups []instanceGroupWire, diags diagWire) (string, error) {
+func (sd *streamDecoder) validateBody(ctx context.Context, groups []instanceGroupWire, diags diagWire) (IntegrityStatus, error) {
 	idx, err := sd.walkInstances(ctx, groups)
 	if err != nil {
-		return "", err
+		return 0, err
 	}
 	sd.validateDiagnostics(diags, idx)
 	sd.validateEdgeRefs(idx)
@@ -2385,7 +2385,7 @@ func (sd *streamDecoder) instanceParts(row int, inst instWire) snapparts.Instanc
 	return ip
 }
 
-// countInstances token-counts the instances section for Info, keyed by each
+// countInstances token-counts the instances section for Stat, keyed by each
 // group row's identity so two same-named types never merge. It reports
 // nothing: validateBody has already classified the document, and a counting
 // pass that reported would double every diagnostic it raised.
@@ -2410,11 +2410,12 @@ func (sd *streamDecoder) countInstances(groups []instanceGroupWire) (map[TypeRef
 }
 
 // verifyIntegrity verifies the integrity hash unless the caller skips the
-// check. A header that holds no hash is a mismatch: every writer stores the
-// hash it computed, so a document without one is a document no writer signed.
-func (sd *streamDecoder) verifyIntegrity() string {
+// check, and returns zero when it does. A header that holds no hash is a
+// mismatch: every writer stores the hash it computed, so a document without one
+// is a document no writer signed.
+func (sd *streamDecoder) verifyIntegrity() IntegrityStatus {
 	if sd.loadCfg.skipIntegrityCheck {
-		return "skipped"
+		return 0
 	}
 
 	// decodeHeader read the header first and as an object, so no spans means an
@@ -2430,7 +2431,7 @@ func (sd *streamDecoder) verifyIntegrity() string {
 		sd.collector.Collect(issue.
 			WithHint("a writer stores the hash it computed; skip the check to read an unsigned document").
 			Build())
-		return "mismatch"
+		return IntegrityMismatch
 	}
 
 	h := sha256Sum(prefix, emptyJSONString, suffix)
@@ -2441,10 +2442,10 @@ func (sd *streamDecoder) verifyIntegrity() string {
 			WithDetail(diag.DetailKeyActualHash, h).
 			WithHint("the file may be corrupted, truncated, or modified").
 			Build())
-		return "mismatch"
+		return IntegrityMismatch
 	}
 
-	return "ok"
+	return IntegrityOK
 }
 
 // emptyJSONString is the integrity_hash value the canonical form carries.

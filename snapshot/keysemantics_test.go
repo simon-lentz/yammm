@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/simon-lentz/yammm/diag"
+	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/internal/snapparts"
 	"github.com/simon-lentz/yammm/internal/snappartstest"
@@ -38,7 +39,7 @@ func TestRoundTrip_AbsentAssociationKeepsEmptyTargetKey(t *testing.T) {
 	if len(built) != 1 {
 		t.Fatalf("fixture is vacuous: %d unresolved records, want 1", len(built))
 	}
-	if built[0].Reason() != "absent" {
+	if built[0].Reason() != graph.ReasonAbsent {
 		t.Fatalf("fixture is vacuous: reason %q, want %q", built[0].Reason(), "absent")
 	}
 	if built[0].TargetKey() != "" {
@@ -49,7 +50,7 @@ func TestRoundTrip_AbsentAssociationKeepsEmptyTargetKey(t *testing.T) {
 	if err := res.Err(); err != nil {
 		t.Fatalf("marshal: %v", err)
 	}
-	loaded, res := snapshot.Load(ctx, data, s)
+	loaded, res := snapshot.Unmarshal(ctx, data, s)
 	if err := res.Err(); err != nil {
 		t.Fatalf("load: %v", err)
 	}
@@ -58,7 +59,7 @@ func TestRoundTrip_AbsentAssociationKeepsEmptyTargetKey(t *testing.T) {
 	if len(got) != 1 {
 		t.Fatalf("loaded %d unresolved records, want 1", len(got))
 	}
-	if got[0].Reason() != "absent" {
+	if got[0].Reason() != graph.ReasonAbsent {
 		t.Errorf("loaded reason = %q, want %q", got[0].Reason(), "absent")
 	}
 	if got[0].TargetKey() != "" {
@@ -98,7 +99,7 @@ func TestInfo_ReportsAnUnresolvableInstancesEntry(t *testing.T) {
 	}
 
 	// The clean document is the control: Info counts it and reports nothing.
-	clean, cleanRes := snapshot.Info(ctx, data)
+	clean, cleanRes := snapshot.Stat(ctx, data)
 	if cleanRes.HasErrors() {
 		t.Fatalf("Info reported the unedited document: %v", cleanRes)
 	}
@@ -107,11 +108,11 @@ func TestInfo_ReportsAnUnresolvableInstancesEntry(t *testing.T) {
 	}
 
 	// Load refuses the edited document, which is what makes a clean Info a defect.
-	if _, loadRes := snapshot.Load(ctx, edited, s, snapshot.WithIntegrityCheck(false)); !loadRes.HasErrors() {
+	if _, loadRes := snapshot.Unmarshal(ctx, edited, s, snapshot.WithIntegrityCheck(false)); !loadRes.HasErrors() {
 		t.Fatal("precondition: Load must refuse an out-of-range instances row")
 	}
 
-	info, infoRes := snapshot.Info(ctx, edited)
+	info, infoRes := snapshot.Stat(ctx, edited)
 	if !hasCode(infoRes, diag.E_SNAPSHOT_MALFORMED) {
 		t.Errorf("Info summarized an out-of-range instances row without %s: %v",
 			diag.E_SNAPSHOT_MALFORMED, infoRes)

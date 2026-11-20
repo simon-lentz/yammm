@@ -58,11 +58,6 @@ func (g *Graph) importSnapshot(snap Snapshot) {
 func (g *Graph) installPending(source Instance, u UnresolvedEdge) {
 	typ, _ := g.schema.TypeByID(source.typeID)
 	rel, _ := typ.Relation(u.relation)
-	reason := u.reason
-	// Graph.Snapshot renders the empty reason Add stores as "target_missing".
-	if reason == "target_missing" {
-		reason = ""
-	}
 	g.installPendingEdge(&pendingEdge{
 		source:       source,
 		relation:     u.relation,
@@ -71,6 +66,6 @@ func (g *Graph) installPending(source Instance, u UnresolvedEdge) {
 		targetKey:    u.targetKey,
 		properties:   u.properties,
 		isRequired:   !rel.IsOptional(),
-		reasonDetail: reason,
+		reasonDetail: u.reason,
 	})
 }

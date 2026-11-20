@@ -69,7 +69,7 @@ func spliceOnce(t *testing.T, data []byte, anchor, replacement string) []byte {
 // loadAndVerify renders both read surfaces over one document.
 func loadAndVerify(ctx context.Context, t *testing.T, data []byte, s schema.Schema) (loadSig, verifySig string, loaded graph.Snapshot) {
 	t.Helper()
-	snap, loadRes := snapshot.Load(ctx, data, s, snapshot.WithIntegrityCheck(false))
+	snap, loadRes := snapshot.Unmarshal(ctx, data, s, snapshot.WithIntegrityCheck(false))
 	verifyRes := snapshot.Verify(ctx, data, s, snapshot.WithIntegrityCheck(false))
 	return sigOf(loadRes), sigOf(verifyRes), snap
 }
@@ -178,7 +178,7 @@ func TestWireProbe_TypesTableWiderThanInstances(t *testing.T) {
 		},
 	})
 
-	loaded, res := snapshot.Load(ctx, first, s)
+	loaded, res := snapshot.Unmarshal(ctx, first, s)
 	if err := res.Err(); err != nil {
 		t.Fatalf("load: %v", err)
 	}
@@ -512,10 +512,10 @@ func TestWireProbe_DuplicateIdentityRefusedWithoutASchema(t *testing.T) {
 	if _, res := snapshot.UpdateMetadata(ctx, edited, map[string]string{"k": "v"}); !hasCode(res, diag.E_SNAPSHOT_MALFORMED) {
 		t.Errorf("UpdateMetadata rewrote a document whose types table repeats an identity: %v", res)
 	}
-	if _, res := snapshot.HeaderOnly(ctx, edited); !hasCode(res, diag.E_SNAPSHOT_MALFORMED) {
-		t.Errorf("HeaderOnly accepted a types table that repeats an identity: %v", res)
+	if _, res := snapshot.ReadHeader(ctx, bytes.NewReader(edited)); !hasCode(res, diag.E_SNAPSHOT_MALFORMED) {
+		t.Errorf("ReadHeader accepted a types table that repeats an identity: %v", res)
 	}
-	if _, res := snapshot.Info(ctx, edited); !hasCode(res, diag.E_SNAPSHOT_MALFORMED) {
+	if _, res := snapshot.Stat(ctx, edited); !hasCode(res, diag.E_SNAPSHOT_MALFORMED) {
 		t.Errorf("Info accepted a types table that repeats an identity: %v", res)
 	}
 }
@@ -659,7 +659,7 @@ func TestWireProbe_UnresolvedSourceRowOutOfRange(t *testing.T) {
 	data := unresolvedDoc(ctx, t, s)
 
 	edited := spliceOnce(t, data, `{"source_type":0,`, `{"source_type":9,`)
-	snap, loadRes := snapshot.Load(ctx, edited, s, snapshot.WithIntegrityCheck(false))
+	snap, loadRes := snapshot.Unmarshal(ctx, edited, s, snapshot.WithIntegrityCheck(false))
 	fact := "; snapshot=nil"
 	if !snap.IsZero() {
 		fact = fmt.Sprintf("; snapshot=non-nil with %d unresolved", len(slices.Collect(snap.Unresolved())))
@@ -790,7 +790,7 @@ func TestWireProbe_NonCanonicalProvenancePathSurvives(t *testing.T) {
 		t.Run(stated, func(t *testing.T) {
 			t.Parallel()
 			edited := spliceOnce(t, data, `"provenance":null`, `"provenance":{"source_name":"probe","path":"`+stated+`"}`)
-			snap, res := snapshot.Load(ctx, edited, s, snapshot.WithIntegrityCheck(false))
+			snap, res := snapshot.Unmarshal(ctx, edited, s, snapshot.WithIntegrityCheck(false))
 			if res.HasErrors() || res.HasWarnings() {
 				t.Fatalf("load: %v", res)
 			}
@@ -818,7 +818,7 @@ func TestWireProbe_DuplicateSecondGeneration(t *testing.T) {
 	}
 
 	const want = `gen2 carries conflict Parent@test_comp.yammm[["p1"]]`
-	gen1, res := snapshot.Load(ctx, first, s)
+	gen1, res := snapshot.Unmarshal(ctx, first, s)
 	if err := res.Err(); err != nil {
 		expectOutcome(t, want, "gen1 load["+sigOf(res)+"]")
 		return
@@ -828,7 +828,7 @@ func TestWireProbe_DuplicateSecondGeneration(t *testing.T) {
 		expectOutcome(t, want, "gen2 marshal["+sigOf(res)+"]")
 		return
 	}
-	gen2, res := snapshot.Load(ctx, second, s)
+	gen2, res := snapshot.Unmarshal(ctx, second, s)
 	if err := res.Err(); err != nil {
 		expectOutcome(t, want, "gen2 load["+sigOf(res)+"]")
 		return

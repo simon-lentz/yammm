@@ -1,7 +1,7 @@
 // Package snapparts carries a decoded .ys document from the snapshot package to
 // the graph package, which alone can construct a graph.Snapshot. Neither the
 // part types nor the constructor are public API: a consumer reaches a snapshot
-// through graph.Graph.Add or snapshot.Load.
+// through graph.Graph.Add or snapshot.Unmarshal.
 //
 // # Dependencies
 //

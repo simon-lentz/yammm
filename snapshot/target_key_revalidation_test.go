@@ -63,7 +63,7 @@ func TestRevalidation_ATargetKeyIsJudgedOnceAtItsRoot(t *testing.T) {
 	data = rehashDocument(t, bytes.Replace(data, []byte(`"size":2`), []byte(`"size":20`), 1))
 
 	want := map[diag.Code]int{diag.E_CONSTRAINT_FAIL: 1, diag.E_INVARIANT_FAIL: 1}
-	_, lres := snapshot.Load(t.Context(), data, s, snapshot.WithRevalidation(diag.Error))
+	_, lres := snapshot.Unmarshal(t.Context(), data, s, snapshot.WithRevalidation(diag.Error))
 	if got := errorCodes(lres); !maps.Equal(got, want) {
 		t.Errorf("Load: %v, want %v:\n%s", got, want, lres)
 	}
@@ -114,7 +114,7 @@ func TestRevalidation_ARecordsRespelledSourceLeavesTheRootJudged(t *testing.T) {
 
 	want := map[diag.Code]int{diag.E_SNAPSHOT_MALFORMED: 1, diag.E_INVARIANT_FAIL: 1}
 	revalidate := snapshot.WithRevalidation(diag.Error)
-	if _, lres := snapshot.Load(t.Context(), data, s, revalidate); !maps.Equal(errorCodes(lres), want) {
+	if _, lres := snapshot.Unmarshal(t.Context(), data, s, revalidate); !maps.Equal(errorCodes(lres), want) {
 		t.Errorf("Load: %v, want %v:\n%s", errorCodes(lres), want, lres)
 	}
 	if vres := snapshot.Verify(t.Context(), data, s, revalidate); !maps.Equal(errorCodes(vres), want) {

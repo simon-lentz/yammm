@@ -415,7 +415,7 @@ func checkInteger(val any, c schema.Constraint) error {
 
 // vectorElementConstraint is the constraint of a Vector's element: a Float with
 // no bounds.
-var vectorElementConstraint schema.Constraint = schema.NewFloatConstraint()
+var vectorElementConstraint schema.Constraint = schema.FloatConstraint{}
 
 // checkFloat validates that val is a float or integer with optional bounds.
 // An integer widens: an unsigned value above math.MaxInt64 and an integer

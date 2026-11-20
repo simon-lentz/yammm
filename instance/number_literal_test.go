@@ -5,6 +5,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/simon-lentz/yammm/internal/schematest"
+	"github.com/simon-lentz/yammm/internal/value"
+
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/instance"
 	"github.com/simon-lentz/yammm/schema"
@@ -19,11 +22,11 @@ var notLiterals = []string{
 // A json.Number whose text is no JSON number literal is no number at an
 // Integer or a Float, and the refusal names it as such, whatever strconv would
 // read it as.
-func TestCheckValue_AJSONNumberThatIsNoLiteralIsRefused(t *testing.T) {
+func TestCheck_AJSONNumberThatIsNoLiteralIsRefused(t *testing.T) {
 	t.Parallel()
 	for _, text := range notLiterals {
-		for _, c := range []schema.Constraint{schema.NewIntegerConstraint(), schema.NewFloatConstraint()} {
-			err := instance.CheckValue(json.Number(text), c)
+		for _, c := range []schema.Constraint{schematest.Constraint(t, "Integer"), schematest.Constraint(t, "Float")} {
+			err := value.Check(json.Number(text), c)
 			if err == nil || !strings.Contains(err.Error(), "a json.Number that is no JSON number literal") {
 				t.Errorf("%q at %s: %v, want a refusal naming no JSON number literal", text, c.Kind(), err)
 			}
@@ -60,14 +63,14 @@ func TestValidateOne_AJSONNumberThatIsNoLiteralIsRefused(t *testing.T) {
 
 // A literal no finite float64 holds keeps its own words, and text that is no
 // literal is named as no literal even where no float64 would hold its value.
-func TestCheckValue_OnlyALiteralIsCalledANumberNoFloat64Holds(t *testing.T) {
+func TestCheck_OnlyALiteralIsCalledANumberNoFloat64Holds(t *testing.T) {
 	t.Parallel()
 	for _, c := range []struct{ text, want string }{
 		{"1e400", "expected float, got a number no float64 holds: 1e400"},
 		{"0x1p5000", `expected float, got a json.Number that is no JSON number literal: "0x1p5000"`},
 		{"1_0e400", `expected float, got a json.Number that is no JSON number literal: "1_0e400"`},
 	} {
-		if err := instance.CheckValue(json.Number(c.text), schema.NewFloatConstraint()); err == nil || err.Error() != c.want {
+		if err := value.Check(json.Number(c.text), schematest.Constraint(t, "Float")); err == nil || err.Error() != c.want {
 			t.Errorf("%q at a Float: %v, want %q", c.text, err, c.want)
 		}
 	}

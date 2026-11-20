@@ -317,7 +317,8 @@ func TestNewIssue_PanicsOnInvalidInput(t *testing.T) {
 		{"invalid severity", func() { NewIssue(Severity(255), E_SYNTAX, "test") }},
 		{"zero code", func() { NewIssue(Error, Code{}, "test") }},
 		{"empty message", func() { NewIssue(Error, E_SYNTAX, "") }},
-		{"severity just above Hint", func() { NewIssue(Severity(5), E_SYNTAX, "test") }}, // Hint = 4
+		{"severity just above Hint", func() { NewIssue(Hint+1, E_SYNTAX, "test") }},
+		{"the zero severity", func() { NewIssue(Severity(0), E_SYNTAX, "test") }},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

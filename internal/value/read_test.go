@@ -6,6 +6,8 @@ import (
 	"reflect"
 	"testing"
 
+	"github.com/simon-lentz/yammm/internal/schematest"
+
 	"github.com/simon-lentz/yammm/internal/value"
 	"github.com/simon-lentz/yammm/schema"
 )
@@ -106,7 +108,7 @@ func TestRead_HasNoDepthBound(t *testing.T) {
 
 func TestReadAt_ReadsANumberAtTheKindItsPositionDeclares(t *testing.T) {
 	t.Parallel()
-	float := schema.NewFloatConstraint()
+	float := schematest.Constraint(t, "Float")
 	negZero := math.Copysign(0, -1)
 	for _, c := range []struct {
 		name string
@@ -125,22 +127,22 @@ func TestReadAt_ReadsANumberAtTheKindItsPositionDeclares(t *testing.T) {
 		{"NaN at a Float", json.Number("NaN"), float, json.Number("NaN")},
 		{"an int64 at a Float", int64(-3), float, float64(-3)},
 		{"an int64 past 2^53 at a Float", int64(9007199254740993), float, float64(9007199254740992)},
-		{"an int64 at a Vector", []any{int64(3)}, schema.NewVectorConstraint(1), []any{float64(3)}},
-		{"an int64 at an Integer", int64(3), schema.NewIntegerConstraint(), int64(3)},
+		{"an int64 at a Vector", []any{int64(3)}, schematest.Constraint(t, "Vector[1]"), []any{float64(3)}},
+		{"an int64 at an Integer", int64(3), schematest.Constraint(t, "Integer"), int64(3)},
 		{"a list at a Float", []any{json.Number("1")}, float, []any{int64(1)}},
-		{"an integer at an alias of Float", json.Number("7"), schema.NewAliasConstraint("Ratio", float), float64(7)},
-		{"an integer at an Integer", json.Number("5"), schema.NewIntegerConstraint(), int64(5)},
-		{"-0 at an Integer", json.Number("-0"), schema.NewIntegerConstraint(), int64(0)},
-		{"an integer past int64 at an Integer", json.Number("9223372036854775808"), schema.NewIntegerConstraint(), json.Number("9223372036854775808")},
+		{"an integer at an alias of Float", json.Number("7"), schematest.Constraint(t, "Ratio", "type Ratio = Float"), float64(7)},
+		{"an integer at an Integer", json.Number("5"), schematest.Constraint(t, "Integer"), int64(5)},
+		{"-0 at an Integer", json.Number("-0"), schematest.Constraint(t, "Integer"), int64(0)},
+		{"an integer past int64 at an Integer", json.Number("9223372036854775808"), schematest.Constraint(t, "Integer"), json.Number("9223372036854775808")},
 		{"an integer at no constraint", json.Number("5"), nil, int64(5)},
-		{"integers at a Vector", []any{json.Number("3"), json.Number("-0"), []any{json.Number("4")}}, schema.NewVectorConstraint(3), []any{float64(3), negZero, []any{int64(4)}}},
-		{"a string at a Vector", "v", schema.NewVectorConstraint(1), "v"},
-		{"a map at a Vector", map[string]any{"a": json.Number("1")}, schema.NewVectorConstraint(1), map[string]any{"a": int64(1)}},
-		{"integers at a List of Float", []any{json.Number("1"), json.Number("2.5")}, schema.NewListConstraint(float), []any{float64(1), 2.5}},
-		{"integers at a List of List of Float", []any{[]any{json.Number("1")}}, schema.NewListConstraint(schema.NewListConstraint(float)), []any{[]any{float64(1)}}},
-		{"integers at a List of Integer", []any{json.Number("1"), json.Number("18446744073709551616")}, schema.NewListConstraint(schema.NewIntegerConstraint()), []any{int64(1), json.Number("18446744073709551616")}},
-		{"a map at a List of Float", map[string]any{"a": json.Number("1")}, schema.NewListConstraint(float), map[string]any{"a": int64(1)}},
-		{"a list at a String", []any{json.Number("1")}, schema.NewStringConstraint(), []any{int64(1)}},
+		{"integers at a Vector", []any{json.Number("3"), json.Number("-0"), []any{json.Number("4")}}, schematest.Constraint(t, "Vector[3]"), []any{float64(3), negZero, []any{int64(4)}}},
+		{"a string at a Vector", "v", schematest.Constraint(t, "Vector[1]"), "v"},
+		{"a map at a Vector", map[string]any{"a": json.Number("1")}, schematest.Constraint(t, "Vector[1]"), map[string]any{"a": int64(1)}},
+		{"integers at a List of Float", []any{json.Number("1"), json.Number("2.5")}, schematest.Constraint(t, "List<Float>"), []any{float64(1), 2.5}},
+		{"integers at a List of List of Float", []any{[]any{json.Number("1")}}, schematest.Constraint(t, "List<List<Float>>"), []any{[]any{float64(1)}}},
+		{"integers at a List of Integer", []any{json.Number("1"), json.Number("18446744073709551616")}, schematest.Constraint(t, "List<Integer>"), []any{int64(1), json.Number("18446744073709551616")}},
+		{"a map at a List of Float", map[string]any{"a": json.Number("1")}, schematest.Constraint(t, "List<Float>"), map[string]any{"a": int64(1)}},
+		{"a list at a String", []any{json.Number("1")}, schematest.Constraint(t, "String"), []any{int64(1)}},
 	} {
 		if got := value.ReadAt(c.in, c.c); !sameRead(got, c.want) {
 			t.Errorf("%s: ReadAt = %#v, want %#v", c.name, got, c.want)

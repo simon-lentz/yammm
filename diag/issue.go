@@ -14,10 +14,6 @@ import (
 //
 // Direct struct literal construction bypasses validity checks and will cause
 // panics when the issue is collected via [Collector.Collect].
-//
-// Zero-value note: The Go zero value for Severity is Fatal (value 0). When
-// constructing Issue literals in tests, set severity explicitly to avoid
-// unintentionally creating Fatal issues.
 type Issue struct {
 	span       location.Span // source location; check HasSpan() or span.IsZero()
 	sourceName string        // instance provenance label (e.g., "data.json")
@@ -96,7 +92,8 @@ func (i Issue) IsZero() bool {
 // An issue is valid if it has:
 //   - A valid code (not zero)
 //   - A non-empty message
-//   - A valid severity (not an undefined value like Severity(255))
+//   - A valid severity, Fatal through Hint (not the zero Severity or an
+//     undefined value like Severity(255))
 //
 // [IssueBuilder.Build], [FromIssue] and every [Collector] method that takes an
 // issue directly — [Collector.Collect], [Collector.CollectAll],
@@ -107,7 +104,7 @@ func (i Issue) IsZero() bool {
 func (i Issue) IsValid() bool {
 	return !i.code.IsZero() &&
 		i.message != "" &&
-		i.severity <= Hint // Hint (4) is the highest valid severity value
+		i.severity >= Fatal && i.severity <= Hint
 }
 
 // Related returns a copy of the related location information.
@@ -141,33 +138,13 @@ func (i Issue) Details() []Detail {
 	return cp
 }
 
-// Clone returns a deep copy of the issue.
-//
-// INVARIANT: All slice element types (RelatedInfo, Detail) must not contain
-// mutable reference fields (maps, slices, pointers, funcs, chans). Strings
-// are permitted (immutable). If mutable reference fields are ever added to
-// these types, this method must be updated to deep-copy their targets to
-// preserve immutability guarantees.
-func (i Issue) Clone() Issue {
-	clone := i
-	if len(i.related) > 0 {
-		clone.related = make([]RelatedInfo, len(i.related))
-		copy(clone.related, i.related)
-	}
-	if len(i.details) > 0 {
-		clone.details = make([]Detail, len(i.details))
-		copy(clone.details, i.details)
-	}
-	return clone
-}
-
 // LogValue implements [slog.LogValuer] for structured logging.
 //
 // Returns a GroupValue with the following attributes:
 //
 //   - "severity" (string): one of "fatal", "error", "warning", "info",
 //     "hint" — matches [Severity.String] and is part of the wire-format
-//     stability guarantee. Always emitted.
+//     stability guarantee; the zero Issue's is "unknown". Always emitted.
 //   - "message" (string): the human-readable description. Always emitted.
 //   - "code" (string): the stable [Code] identifier. Omitted when
 //     [Code.IsZero] is true.

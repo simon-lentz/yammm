@@ -753,6 +753,42 @@ func TestGraph_ComposedRelations_Sorted(t *testing.T) {
 	}
 }
 
+// Marshal and the Neo4j writer call ComposedRelations once per instance, so it
+// allocates its result alone.
+func TestGraph_ComposedRelations_AllocatesItsSliceAlone(t *testing.T) {
+	s := testSchemaWithMultipleCompositions(t)
+	g := graph.New(s)
+	doc := instancetest.Valid(t, s, "Document", composedData(t, s, "Document",
+		composedData(t, s, "Document", keyedProps(t, s, "Document", []any{"doc1"}, map[string]any{"title": "Doc 1"}),
+			"TAGS", partData(t, s, "Tag", []any{"t1"}, map[string]any{})),
+		"NOTES", partData(t, s, "Note", []any{"n1"}, map[string]any{"text": "Note 1"})))
+	if r := g.Add(t.Context(), doc); !r.OK() {
+		t.Fatalf("Add document failed: %s", r.String())
+	}
+	docs := slices.Collect(g.Snapshot().InstancesOf(mustTypeID(t, s, "Document")))
+	if allocs := testing.AllocsPerRun(100, func() { _ = docs[0].ComposedRelations() }); allocs != 1 {
+		t.Errorf("ComposedRelations allocated %v times, want 1", allocs)
+	}
+}
+
+// An instance with no composed children names none as nil, as the zero
+// Instance does, so it encodes and compares as the zero instance's list.
+func TestGraph_ComposedRelations_NilWithoutChildren(t *testing.T) {
+	s := testSchemaWithMultipleCompositions(t)
+	g := graph.New(s)
+	doc := instancetest.Valid(t, s, "Document", keyedProps(t, s, "Document", []any{"doc1"}, map[string]any{"title": "Doc 1"}))
+	if r := g.Add(t.Context(), doc); !r.OK() {
+		t.Fatalf("Add document failed: %s", r.String())
+	}
+	docs := slices.Collect(g.Snapshot().InstancesOf(mustTypeID(t, s, "Document")))
+	if got := docs[0].ComposedRelations(); got != nil {
+		t.Errorf("ComposedRelations() = %#v, want nil", got)
+	}
+	if got := (graph.Instance{}).ComposedRelations(); got != nil {
+		t.Errorf("the zero Instance's ComposedRelations() = %#v, want nil", got)
+	}
+}
+
 func TestGraph_MultipleCompositions(t *testing.T) {
 	// Parent with multiple composition relations
 	s := testSchemaWithMultipleCompositions(t)
@@ -976,11 +1012,11 @@ func TestResult_Instances(t *testing.T) {
 
 	// Count all instances via the deterministic iterator.
 	total := 0
-	for range snap.AllInstances() {
+	for range snap.Instances() {
 		total++
 	}
 	if total != 3 {
-		t.Errorf("AllInstances() yielded %d items, want 3", total)
+		t.Errorf("Instances() yielded %d items, want 3", total)
 	}
 }
 

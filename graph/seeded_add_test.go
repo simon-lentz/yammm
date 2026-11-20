@@ -196,7 +196,7 @@ func TestNewFromSnapshot_ALoadedSnapshotSeedsAResume(t *testing.T) {
 	if res.HasErrors() {
 		t.Fatalf("Marshal: %s", res)
 	}
-	loaded, res := snapshot.Load(ctx, data, s)
+	loaded, res := snapshot.Unmarshal(ctx, data, s)
 	if res.HasErrors() {
 		t.Fatalf("Load: %s", res)
 	}

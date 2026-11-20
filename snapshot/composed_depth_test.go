@@ -59,7 +59,7 @@ func TestRead_TheComposedDepthBoundIsTheValidators(t *testing.T) {
 	if res.HasErrors() {
 		t.Fatalf("marshal: %s", res)
 	}
-	if _, res := snapshot.Load(ctx, rehashDocument(t, data), s); res.HasErrors() {
+	if _, res := snapshot.Unmarshal(ctx, rehashDocument(t, data), s); res.HasErrors() {
 		t.Errorf("Load at the bound: %s", res)
 	}
 	if res := snapshot.Verify(ctx, rehashDocument(t, data), s); res.HasErrors() {
@@ -73,7 +73,7 @@ func TestRead_TheComposedDepthBoundIsTheValidators(t *testing.T) {
 	const leaf = `{"key":["c"],"type":0,"properties":{"code":"c"},"provenance":null}`
 	deeper := []byte(editOnce(t, doc, leaf,
 		`{"key":["c"],"type":0,"properties":{"code":"c"},"composed":{"NEXT":[`+leaf+`]},"provenance":null}`))
-	_, l := snapshot.Load(ctx, rehashDocument(t, deeper), s)
+	_, l := snapshot.Unmarshal(ctx, rehashDocument(t, deeper), s)
 	for surface, got := range map[string]diag.Result{"Load": l, "Verify": snapshot.Verify(ctx, rehashDocument(t, deeper), s)} {
 		if got.Len() != 1 || !got.HasCode(diag.E_SNAPSHOT_DEPTH_EXCEEDED) {
 			t.Errorf("%s one level past the bound: %s, want one %s", surface, got, diag.E_SNAPSHOT_DEPTH_EXCEEDED)

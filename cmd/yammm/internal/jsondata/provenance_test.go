@@ -9,7 +9,7 @@ import (
 	"github.com/simon-lentz/yammm/location"
 )
 
-func parseForProvenance(t *testing.T, id location.SourceID, doc string) (map[string][]Element, diag.Result) {
+func parseForProvenance(t *testing.T, id location.SourceID, doc string) (map[string]Batch, diag.Result) {
 	t.Helper()
 	return Parse(t.Context(), id, []byte(doc))
 }
@@ -46,7 +46,7 @@ func TestParse_RecordsProvenancePerInstance(t *testing.T) {
 		{"Company", 0, "$.Company[0]", 7, 5},
 	}
 	for _, c := range cases {
-		prov := parsed[c.typeName][c.index].Provenance
+		prov := parsed[c.typeName].Elements[c.index].Provenance
 		if prov.IsZero() {
 			t.Fatalf("%s[%d]: no provenance", c.typeName, c.index)
 		}
@@ -78,7 +78,7 @@ func TestParse_ProvenanceStartsPastTheSeparator(t *testing.T) {
 	doc := `{"Person": [{"a": 1}, {"b": 2}]}`
 
 	parsed, _ := parseForProvenance(t, id, doc)
-	second := parsed["Person"][1].Provenance.Span().Start
+	second := parsed["Person"].Elements[1].Provenance.Span().Start
 	// Column 23 is the "{" of the second object; 22 is the comma before it.
 	if second.Line != 1 || second.Column != 23 {
 		t.Errorf("second element at %d:%d, want 1:23", second.Line, second.Column)
@@ -100,7 +100,7 @@ func TestParse_ProvenanceCountsColumnsOverTheOriginalBytes(t *testing.T) {
 	if result.HasErrors() {
 		t.Fatalf("parse: %s", result)
 	}
-	start := parsed["Person"][0].Provenance.Span().Start
+	start := parsed["Person"].Elements[0].Provenance.Span().Start
 	// The comment is 13 runes and 14 bytes, so measuring over jsonc's buffer
 	// would report column 26.
 	if start.Line != 1 || start.Column != 25 {
@@ -119,7 +119,7 @@ func TestParse_ProvenanceSkipsTheByteOrderMark(t *testing.T) {
 	if result.HasErrors() {
 		t.Fatalf("parse: %s", result)
 	}
-	start := parsed["Person"][0].Provenance.Span().Start
+	start := parsed["Person"].Elements[0].Provenance.Span().Start
 	// The mark is one rune, so the "{" of the element is the 14th.
 	if start.Line != 1 || start.Column != 14 {
 		t.Errorf("element after a byte order mark: %d:%d, want 1:14", start.Line, start.Column)
@@ -206,11 +206,11 @@ func TestParse_PathIndexesTheDocumentNotTheResult(t *testing.T) {
 	}
 
 	rows := parsed["Person"]
-	if len(rows) != 2 {
-		t.Fatalf("got %d instances, want 2", len(rows))
+	if len(rows.Elements) != 2 {
+		t.Fatalf("got %d instances, want 2", len(rows.Elements))
 	}
 	for i, want := range []string{"$.Person[0]", "$.Person[2]"} {
-		if got := rows[i].Provenance.Path().String(); got != want {
+		if got := rows.Elements[i].Provenance.Path().String(); got != want {
 			t.Errorf("instance %d: path %q, want %q", i, got, want)
 		}
 	}

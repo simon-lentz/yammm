@@ -55,10 +55,10 @@ func TestTimestampConstraint_IsOneValue(t *testing.T) {
 	loaded := at.Constraint()
 	for name, c := range map[string]schema.Constraint{
 		"the loader's":      loaded,
-		"the constructor's": schema.NewTimestampConstraint(),
+		"the constructor's": schema.TestNewTimestampConstraint(),
 		"the zero value":    schema.TimestampConstraint{},
 	} {
-		if c != schema.NewTimestampConstraint() || !c.Equal(loaded) || !loaded.Equal(c) {
+		if c != schema.TestNewTimestampConstraint() || !schema.TestConstraintEqual(c, loaded) || !schema.TestConstraintEqual(loaded, c) {
 			t.Errorf("%s Timestamp is %#v, want the one Timestamp", name, c)
 		}
 		if c.String() != "Timestamp" || c.Kind() != schema.KindTimestamp {

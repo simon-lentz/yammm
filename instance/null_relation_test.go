@@ -97,8 +97,8 @@ func TestValidateOne_ANullRelationDrawsNoShapeError(t *testing.T) {
 		"c_opt_one": nil, "c_opt_many": nil, "c_req_one": nil, "c_req_many": nil,
 	}})
 	want := []string{
-		instance.ErrUnresolvedRequiredComposition.String(),
-		instance.ErrUnresolvedRequiredComposition.String(),
+		diag.E_UNRESOLVED_REQUIRED_COMPOSITION.String(),
+		diag.E_UNRESOLVED_REQUIRED_COMPOSITION.String(),
 	}
 	if got := codes(res); !slices.Equal(got, want) {
 		t.Fatalf("codes %v, want %v: %s", got, want, res)

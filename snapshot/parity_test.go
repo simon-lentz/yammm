@@ -34,7 +34,7 @@ type visibility int
 const (
 	// fromShape means the defect is in the header, the types table, or the
 	// top-level key sequence — every surface holding the whole document can see
-	// it: Load, Verify, Info, HeaderOnly and UpdateMetadata. HeaderOnlyRead and
+	// it: Load, Verify, Info, ReadHeader and UpdateMetadata. ReadHeader and
 	// ScanDir are excluded by construction, not by omission: they read through a
 	// reader capped at MaxHeaderSize and never hold the body.
 	fromShape visibility = iota
@@ -145,17 +145,13 @@ func TestParity_EverySurfaceAgrees(t *testing.T) {
 			}
 
 			verdicts := map[string]bool{
-				"Load":   refusedBy(t, func() diag.Result { _, r := snapshot.Load(ctx, rehashDocument(t, edited), s); return r }),
+				"Load":   refusedBy(t, func() diag.Result { _, r := snapshot.Unmarshal(ctx, rehashDocument(t, edited), s); return r }),
 				"Verify": refusedBy(t, func() diag.Result { return snapshot.Verify(ctx, rehashDocument(t, edited), s) }),
-				"Info":   refusedBy(t, func() diag.Result { _, r := snapshot.Info(ctx, rehashDocument(t, edited)); return r }),
+				"Info":   refusedBy(t, func() diag.Result { _, r := snapshot.Stat(ctx, rehashDocument(t, edited)); return r }),
 			}
 			if tc.seen == fromShape {
 				verdicts["UpdateMetadata"] = refusedBy(t, func() diag.Result {
 					_, r := snapshot.UpdateMetadata(ctx, edited, nil)
-					return r
-				})
-				verdicts["HeaderOnly"] = refusedBy(t, func() diag.Result {
-					_, r := snapshot.HeaderOnly(ctx, edited)
 					return r
 				})
 			}
@@ -181,20 +177,20 @@ func TestParity_EverySurfaceAcceptsAWellFormedDocument(t *testing.T) {
 	s := testSchemaWithComposition(t)
 	clean := v3Doc(t)
 
-	if _, res := snapshot.Load(ctx, rehashDocument(t, clean), s); res.HasErrors() {
+	if _, res := snapshot.Unmarshal(ctx, rehashDocument(t, clean), s); res.HasErrors() {
 		t.Errorf("Load refused a well-formed document: %v", res)
 	}
 	if res := snapshot.Verify(ctx, rehashDocument(t, clean), s); res.HasErrors() {
 		t.Errorf("Verify refused a well-formed document: %v", res)
 	}
-	if info, res := snapshot.Info(ctx, rehashDocument(t, clean)); res.HasErrors() || info == nil {
+	if info, res := snapshot.Stat(ctx, rehashDocument(t, clean)); res.HasErrors() || info == nil {
 		t.Errorf("Info refused a well-formed document: %v", res)
 	}
 	if out, res := snapshot.UpdateMetadata(ctx, clean, map[string]string{"k": "v"}); res.HasErrors() || len(out) == 0 {
 		t.Errorf("UpdateMetadata refused a well-formed document: %v", res)
 	}
-	if h, res := snapshot.HeaderOnly(ctx, clean); res.HasErrors() || h == nil {
-		t.Errorf("HeaderOnly refused a well-formed document: %v", res)
+	if h, res := snapshot.ReadHeader(ctx, bytes.NewReader(clean)); res.HasErrors() || h == nil {
+		t.Errorf("ReadHeader refused a well-formed document: %v", res)
 	}
 }
 

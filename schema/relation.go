@@ -8,13 +8,14 @@ import (
 	"github.com/simon-lentz/yammm/location"
 )
 
-// RelationKind identifies the kind of relationship.
+// RelationKind identifies the kind of relationship. The zero RelationKind names
+// no kind.
 type RelationKind uint8
 
 const (
 	// RelationAssociation represents an association between types.
 	// Associations may have edge properties.
-	RelationAssociation RelationKind = iota
+	RelationAssociation RelationKind = iota + 1
 	// RelationComposition represents a composition (part-of) relationship.
 	// Compositions do not have edge properties.
 	RelationComposition
@@ -140,11 +141,6 @@ func (r Relation) seal() {
 	r.sealed = true
 }
 
-// isSealed reports whether the relation has been sealed.
-func (r Relation) isSealed() bool {
-	return r.sealed
-}
-
 // Span returns the source location of this relation declaration.
 func (r Relation) Span() location.Span {
 	return r.span
@@ -215,12 +211,12 @@ func (r Relation) HasProperties() bool {
 	return len(r.properties) > 0
 }
 
-// Equal reports whether two relations are one definition: the same name,
+// equal reports whether two relations are one definition: the same name,
 // kind, resolved target identity, multiplicities and edge properties (by name
 // set). Span and docs are declaration-site facts and are not compared. A
 // relation whose target never resolved is equal to nothing, itself included —
 // the load that left it unresolved already carries that diagnostic.
-func (r Relation) Equal(other Relation) bool {
+func (r Relation) equal(other Relation) bool {
 	if r.IsZero() || other.IsZero() {
 		return r == other
 	}
@@ -246,7 +242,7 @@ func (r Relation) Equal(other Relation) bool {
 	}
 	for _, op := range other.properties {
 		p, ok := ownProps[op.Name()]
-		if !ok || !p.Equal(op) {
+		if !ok || !p.equal(op) {
 			return false
 		}
 	}

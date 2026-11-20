@@ -19,7 +19,7 @@ func TestRelation_SetTargetID(t *testing.T) {
 		schema.RelationAssociation,
 		"REL",
 		"rel",
-		schema.NewTypeRef("", "Target", location.Span{}),
+		schema.TestNewTypeRef("", "Target", location.Span{}),
 		schema.TypeID{},
 		// Initially zero
 		location.Span{},
@@ -46,7 +46,7 @@ func TestRelation_Equal_WithTargetID(t *testing.T) {
 		schema.RelationAssociation,
 		"REL",
 		"rel",
-		schema.NewTypeRef("", "Target", location.Span{}),
+		schema.TestNewTypeRef("", "Target", location.Span{}),
 		targetID1,
 		location.Span{},
 		"",
@@ -59,7 +59,7 @@ func TestRelation_Equal_WithTargetID(t *testing.T) {
 		schema.RelationAssociation,
 		"REL",
 		"rel",
-		schema.NewTypeRef("", "Target", location.Span{}),
+		schema.TestNewTypeRef("", "Target", location.Span{}),
 		targetID2,
 		location.Span{},
 		"",
@@ -69,10 +69,10 @@ func TestRelation_Equal_WithTargetID(t *testing.T) {
 		nil,
 	)
 
-	assert.False(t, r1.Equal(r2), "relations with different targetID should not be equal")
+	assert.False(t, schema.TestRelationEqual(r1, r2), "relations with different targetID should not be equal")
 
 	schema.TestSetRelationTargetID(r2, targetID1)
-	assert.True(t, r1.Equal(r2), "relations with same targetID should be equal")
+	assert.True(t, schema.TestRelationEqual(r1, r2), "relations with same targetID should be equal")
 }
 
 func TestRelation_Equal_ZeroTargetIDs(t *testing.T) {
@@ -82,7 +82,7 @@ func TestRelation_Equal_ZeroTargetIDs(t *testing.T) {
 		schema.RelationAssociation,
 		"REL",
 		"rel",
-		schema.NewTypeRef("", "Target", location.Span{}),
+		schema.TestNewTypeRef("", "Target", location.Span{}),
 		schema.TypeID{},
 		location.Span{},
 		"",
@@ -95,7 +95,7 @@ func TestRelation_Equal_ZeroTargetIDs(t *testing.T) {
 		schema.RelationAssociation,
 		"REL",
 		"rel",
-		schema.NewTypeRef("", "Target", location.Span{}),
+		schema.TestNewTypeRef("", "Target", location.Span{}),
 		schema.TypeID{},
 		location.Span{},
 		"",
@@ -107,7 +107,7 @@ func TestRelation_Equal_ZeroTargetIDs(t *testing.T) {
 
 	// An unresolved relation is equal to nothing: the load that left it
 	// unresolved already carries that diagnostic.
-	assert.False(t, r1.Equal(r2), "relations with zero targetIDs are never equal")
+	assert.False(t, schema.TestRelationEqual(r1, r2), "relations with zero targetIDs are never equal")
 }
 
 func TestRelation_Seal_PreventsSetTargetID(t *testing.T) {
@@ -115,7 +115,7 @@ func TestRelation_Seal_PreventsSetTargetID(t *testing.T) {
 		schema.RelationAssociation,
 		"REL",
 		"rel",
-		schema.NewTypeRef("", "Target", location.Span{}),
+		schema.TestNewTypeRef("", "Target", location.Span{}),
 		schema.TypeID{},
 		location.Span{},
 		"",
@@ -149,7 +149,7 @@ func TestRelation_SetTargetID_WorksBeforeSeal(t *testing.T) {
 		schema.RelationAssociation,
 		"REL",
 		"rel",
-		schema.NewTypeRef("", "Target", location.Span{}),
+		schema.TestNewTypeRef("", "Target", location.Span{}),
 		schema.TypeID{},
 		location.Span{},
 		"",
@@ -170,7 +170,7 @@ func TestRelation_SetTargetID_WorksBeforeSeal(t *testing.T) {
 }
 
 func TestNewRelation(t *testing.T) {
-	target := schema.NewTypeRef("users", "Person", location.Span{})
+	target := schema.TestNewTypeRef("users", "Person", location.Span{})
 	targetID := schema.NewTypeID(sourcetest.ID("test://users"), "Person")
 	span := location.Span{
 		Source: sourcetest.ID("test://schema"),
@@ -178,7 +178,7 @@ func TestNewRelation(t *testing.T) {
 		End:    location.Position{Line: 10, Column: 50, Offset: 150},
 	}
 	props := []schema.Property{
-		schema.TestNewProperty("since", location.Span{}, "", schema.NewTimestampConstraint(), schema.DataTypeRef{}, false, false, schema.DeclaringScope{}, nil),
+		schema.TestNewProperty("since", location.Span{}, "", schema.TestNewTimestampConstraint(), schema.DataTypeRef{}, false, false, schema.DeclaringScope{}, nil),
 	}
 
 	r := schema.TestNewRelation(
@@ -220,6 +220,7 @@ func TestRelationKind_String(t *testing.T) {
 		{"association", schema.RelationAssociation, "association"},
 		{"composition", schema.RelationComposition, "composition"},
 		{"unknown", schema.RelationKind(99), "unknown"},
+		{"zero names no kind", schema.RelationKind(0), "unknown"},
 	}
 
 	for _, tt := range tests {
@@ -298,7 +299,7 @@ func TestRelation_FieldName(t *testing.T) {
 }
 
 func TestRelation_Target(t *testing.T) {
-	target := schema.NewTypeRef("users", "Person", location.Span{})
+	target := schema.TestNewTypeRef("users", "Person", location.Span{})
 
 	r := schema.TestNewRelation(
 		schema.RelationAssociation,
@@ -522,8 +523,8 @@ func TestRelation_Properties(t *testing.T) {
 
 func TestRelation_Property_Found(t *testing.T) {
 	props := []schema.Property{
-		schema.TestNewProperty("since", location.Span{}, "", schema.NewTimestampConstraint(), schema.DataTypeRef{}, false, false, schema.DeclaringScope{}, nil),
-		schema.TestNewProperty("role", location.Span{}, "", schema.NewStringConstraint(), schema.DataTypeRef{}, true, false, schema.DeclaringScope{}, nil),
+		schema.TestNewProperty("since", location.Span{}, "", schema.TestNewTimestampConstraint(), schema.DataTypeRef{}, false, false, schema.DeclaringScope{}, nil),
+		schema.TestNewProperty("role", location.Span{}, "", schema.TestNewStringConstraint(), schema.DataTypeRef{}, true, false, schema.DeclaringScope{}, nil),
 	}
 
 	r := schema.TestNewRelation(
@@ -696,7 +697,7 @@ func TestRelation_Equal_DifferentName(t *testing.T) {
 		nil,
 	)
 
-	assert.False(t, r1.Equal(r2))
+	assert.False(t, schema.TestRelationEqual(r1, r2))
 }
 
 func TestRelation_Equal_DifferentKind(t *testing.T) {
@@ -727,7 +728,7 @@ func TestRelation_Equal_DifferentKind(t *testing.T) {
 		nil,
 	)
 
-	assert.False(t, r1.Equal(r2))
+	assert.False(t, schema.TestRelationEqual(r1, r2))
 }
 
 func TestRelation_Equal_DifferentMultiplicity(t *testing.T) {
@@ -758,7 +759,7 @@ func TestRelation_Equal_DifferentMultiplicity(t *testing.T) {
 		nil,
 	)
 
-	assert.False(t, r1.Equal(r2))
+	assert.False(t, schema.TestRelationEqual(r1, r2))
 }
 
 func TestRelation_Equal_DifferentPropertyCount(t *testing.T) {
@@ -791,7 +792,7 @@ func TestRelation_Equal_DifferentPropertyCount(t *testing.T) {
 		nil,
 	)
 
-	assert.False(t, r1.Equal(r2))
+	assert.False(t, schema.TestRelationEqual(r1, r2))
 }
 
 func TestRelation_Equal_Zero(t *testing.T) {
@@ -810,15 +811,15 @@ func TestRelation_Equal_Zero(t *testing.T) {
 	)
 	var nilRel schema.Relation
 
-	assert.False(t, r.Equal(nilRel))
-	assert.False(t, nilRel.Equal(r))
+	assert.False(t, schema.TestRelationEqual(r, nilRel))
+	assert.False(t, schema.TestRelationEqual(nilRel, r))
 }
 
 func TestRelation_Equal_BothNil(t *testing.T) {
 	var r1 schema.Relation
 	var r2 schema.Relation
 
-	assert.True(t, r1.Equal(r2))
+	assert.True(t, schema.TestRelationEqual(r1, r2))
 }
 
 func TestRelation_IsSealed(t *testing.T) {

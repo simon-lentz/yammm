@@ -4,7 +4,6 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
 	"github.com/simon-lentz/yammm/schema/cypher"
 )
@@ -92,7 +91,7 @@ part type Item {
 	if res.HasErrors() {
 		t.Fatalf("load schema: %s", res)
 	}
-	item, ok := s.ResolveType(schema.NewTypeRef("base", "Item", location.Span{}))
+	item, ok := s.ResolveTypeName("base.Item")
 	if !ok {
 		t.Fatal("base.Item did not resolve through the entry schema")
 	}

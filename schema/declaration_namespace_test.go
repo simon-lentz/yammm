@@ -361,8 +361,8 @@ func TestLoad_AnImportAliasCollisionNamesTheLocalKind(t *testing.T) {
 func TestComplete_DeclarationsAtOneSpanKeepTheFirstVisited(t *testing.T) {
 	t.Parallel()
 
-	key := []*schema.TestPropertyDecl{{Name: "id", Constraint: schema.NewStringConstraint(), IsPrimaryKey: true}}
-	shared := &schema.TestDataTypeDecl{Name: "A", Constraint: schema.NewStringConstraint()}
+	key := []*schema.TestPropertyDecl{{Name: "id", Constraint: schema.TestNewStringConstraint(), IsPrimaryKey: true}}
+	shared := &schema.TestDataTypeDecl{Name: "A", Constraint: schema.TestNewStringConstraint()}
 	tests := map[string]struct {
 		model *schema.TestModel
 		want  string
@@ -371,7 +371,7 @@ func TestComplete_DeclarationsAtOneSpanKeepTheFirstVisited(t *testing.T) {
 			model: &schema.TestModel{
 				Name:      "test",
 				Types:     []*schema.TestTypeDecl{{Name: "A", Properties: key}},
-				DataTypes: []*schema.TestDataTypeDecl{{Name: "A", Constraint: schema.NewStringConstraint()}},
+				DataTypes: []*schema.TestDataTypeDecl{{Name: "A", Constraint: schema.TestNewStringConstraint()}},
 			},
 			want: datatypeAfterType,
 		},

@@ -55,11 +55,11 @@ func assertIndexMatchesARebuild(t *testing.T, g *Graph, step string) {
 			}
 		}
 		for k, p := range h.pending {
-			if k != p.targetKey || p.reasonDetail != "" {
-				t.Errorf("%s: %s: a record naming %s (reason %q) is filed under %s", step, slot.relation, p.targetKey, p.reasonDetail, k)
+			if k != p.targetKey || p.reasonDetail != ReasonTargetMissing {
+				t.Errorf("%s: %s: a record naming %s (reason %s) is filed under %s", step, slot.relation, p.targetKey, p.reasonDetail, k)
 			}
 		}
-		if h.reason != nil && h.reason.reasonDetail == "" {
+		if h.reason != nil && h.reason.reasonDetail == ReasonTargetMissing {
 			t.Errorf("%s: %s: a record naming %s is filed as the slot's reason record", step, slot.relation, h.reason.targetKey)
 		}
 	}

@@ -7,12 +7,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/simon-lentz/yammm/internal/schematest"
+
 	"github.com/neo4j/neo4j-go-driver/v6/neo4j/dbtype"
 	"github.com/simon-lentz/yammm/schema"
 )
 
 func TestCoerceScalar_TimestampParse(t *testing.T) {
-	got, err := coerceScalar(schema.NewTimestampConstraint(), "2024-01-01T00:00:00Z")
+	got, err := coerceScalar(schematest.Constraint(t, "Timestamp"), "2024-01-01T00:00:00Z")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -22,7 +24,7 @@ func TestCoerceScalar_TimestampParse(t *testing.T) {
 }
 
 func TestCoerceScalar_DateParse(t *testing.T) {
-	got, err := coerceScalar(schema.NewDateConstraint(), "2024-06-15")
+	got, err := coerceScalar(schematest.Constraint(t, "Date"), "2024-06-15")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -32,26 +34,26 @@ func TestCoerceScalar_DateParse(t *testing.T) {
 }
 
 func TestCoerceScalar_TimestampParseFailureErrors(t *testing.T) {
-	if _, err := coerceScalar(schema.NewTimestampConstraint(), "not-a-timestamp"); err == nil {
+	if _, err := coerceScalar(schematest.Constraint(t, "Timestamp"), "not-a-timestamp"); err == nil {
 		t.Fatal("want error on unparseable timestamp string, got nil")
 	}
 }
 
 func TestCoerceScalar_DateParseFailureErrors(t *testing.T) {
-	if _, err := coerceScalar(schema.NewDateConstraint(), "06/15/2024"); err == nil {
+	if _, err := coerceScalar(schematest.Constraint(t, "Date"), "06/15/2024"); err == nil {
 		t.Fatal("want error on unparseable date string, got nil")
 	}
 }
 
 func TestCoerceScalar_PassThroughString(t *testing.T) {
-	got, err := coerceScalar(schema.NewStringConstraint(), "hello")
+	got, err := coerceScalar(schematest.Constraint(t, "String"), "hello")
 	if err != nil || got != "hello" {
 		t.Fatalf("string pass-through: got %#v, err %v", got, err)
 	}
 }
 
 func TestCoerceScalar_NilPassThrough(t *testing.T) {
-	got, err := coerceScalar(schema.NewTimestampConstraint(), nil)
+	got, err := coerceScalar(schematest.Constraint(t, "Timestamp"), nil)
 	if err != nil || got != nil {
 		t.Fatalf("nil pass-through: got %#v, err %v", got, err)
 	}
@@ -75,8 +77,8 @@ func TestCoerceParams_FloatRepairAndUnknownKey(t *testing.T) {
 		"untouched": int64(7),
 	}
 	types := ParamTypes{
-		"principal": schema.NewFloatConstraint(),
-		"missing":   schema.NewFloatConstraint(), // names a key params doesn't carry: no-op
+		"principal": schematest.Constraint(t, "Float"),
+		"missing":   schematest.Constraint(t, "Float"), // names a key params doesn't carry: no-op
 	}
 	out, err := CoerceParams(params, types)
 	if err != nil {
@@ -103,11 +105,11 @@ func TestCoerceParams_TemporalGood(t *testing.T) {
 		"label":   "unrelated",
 	}
 	types := ParamTypes{
-		"ts":      schema.NewTimestampConstraint(),
-		"ts_nano": schema.NewTimestampConstraint(),
-		"native":  schema.NewTimestampConstraint(),
-		"date":    schema.NewDateConstraint(),
-		"label":   schema.NewStringConstraint(),
+		"ts":      schematest.Constraint(t, "Timestamp"),
+		"ts_nano": schematest.Constraint(t, "Timestamp"),
+		"native":  schematest.Constraint(t, "Timestamp"),
+		"date":    schematest.Constraint(t, "Date"),
+		"label":   schematest.Constraint(t, "String"),
 	}
 	out, err := CoerceParams(params, types)
 	if err != nil {
@@ -135,13 +137,13 @@ func TestCoerceParams_BadTemporalErrors(t *testing.T) {
 	// param boundary surfaces it (a naive passthrough would let these through).
 	if _, err := CoerceParams(
 		map[string]any{"ts": "not-a-timestamp"},
-		ParamTypes{"ts": schema.NewTimestampConstraint()},
+		ParamTypes{"ts": schematest.Constraint(t, "Timestamp")},
 	); err == nil {
 		t.Fatal("want error for unparseable Timestamp param, got nil")
 	}
 	if _, err := CoerceParams(
 		map[string]any{"d": "2026/04/22"},
-		ParamTypes{"d": schema.NewDateConstraint()},
+		ParamTypes{"d": schematest.Constraint(t, "Date")},
 	); err == nil {
 		t.Fatal("want error for unparseable Date param, got nil")
 	}
@@ -172,10 +174,10 @@ func TestCoerceParams_WalksNoValue(t *testing.T) {
 	rows := []map[string]any{{"release_date": "2026-04-22"}, nil}
 	list := []any{map[string]any{"release_date": "2026-04-22"}, nil}
 	types := ParamTypes{
-		"updates.release_date": schema.NewDateConstraint(),
-		"updates.principal":    schema.NewFloatConstraint(),
-		"rows.release_date":    schema.NewDateConstraint(),
-		"list.release_date":    schema.NewDateConstraint(),
+		"updates.release_date": schematest.Constraint(t, "Date"),
+		"updates.principal":    schematest.Constraint(t, "Float"),
+		"rows.release_date":    schematest.Constraint(t, "Date"),
+		"list.release_date":    schematest.Constraint(t, "Date"),
 	}
 	out, err := CoerceParams(map[string]any{"updates": nested, "rows": rows, "list": list}, types)
 	if err != nil {
@@ -196,12 +198,12 @@ func TestCoerceParams_WalksNoValue(t *testing.T) {
 // class of every refused value. A nil constraint judges nothing.
 func TestCoerceParams_JudgesAMapOrRowsAtADeclaredKey(t *testing.T) {
 	t.Parallel()
-	strings := schema.NewListConstraint(schema.NewStringConstraint())
+	strings := schematest.Constraint(t, "List<String>")
 	for name, tc := range map[string]struct {
 		c   schema.Constraint
 		val any
 	}{
-		"a map at a String":                 {schema.NewStringConstraint(), map[string]any{"a": "b"}},
+		"a map at a String":                 {schematest.Constraint(t, "String"), map[string]any{"a": "b"}},
 		"a map at a List of String":         {strings, map[string]any{"a": "b"}},
 		"rows at a List of String":          {strings, []map[string]any{{"a": "b"}}},
 		"a list of maps at a List":          {strings, []any{map[string]any{"a": "b"}}},
@@ -225,7 +227,7 @@ func contains(err error, text string) bool {
 
 func TestCoerceParams_NilValuePassThrough(t *testing.T) {
 	params := map[string]any{"deactivated_at": nil, "run_id": "runA"}
-	types := ParamTypes{"deactivated_at": schema.NewTimestampConstraint()}
+	types := ParamTypes{"deactivated_at": schematest.Constraint(t, "Timestamp")}
 	out, err := CoerceParams(params, types)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -247,8 +249,8 @@ func TestCoerceParams_TopLevelListCoerced(t *testing.T) {
 		"labels": []any{"x", "y"},           // List<String>
 	}
 	types := ParamTypes{
-		"scores": schema.NewListConstraint(schema.NewFloatConstraint()),
-		"labels": schema.NewListConstraint(schema.NewStringConstraint()),
+		"scores": schematest.Constraint(t, "List<Float>"),
+		"labels": schematest.Constraint(t, "List<String>"),
 	}
 	out, err := CoerceParams(params, types)
 	if err != nil {
@@ -351,7 +353,7 @@ func TestCoerceParams_ListElementTypeMismatchErrors(t *testing.T) {
 	// built into a []float64; CoerceParams must error rather than hand the driver
 	// a heterogeneous []any it will reject.
 	params := map[string]any{"scores": []any{float64(1), "oops"}}
-	types := ParamTypes{"scores": schema.NewListConstraint(schema.NewFloatConstraint())}
+	types := ParamTypes{"scores": schematest.Constraint(t, "List<Float>")}
 	if _, err := CoerceParams(params, types); err == nil {
 		t.Fatal("want error for a wrong-type List<Float> element, got nil")
 	}
@@ -376,7 +378,7 @@ func TestCoerceParams_ReturnsIndependentMap(t *testing.T) {
 	t.Run("ActiveCoercionPath", func(t *testing.T) {
 		t.Parallel()
 		in := map[string]any{"a": int64(1), "b": "x"}
-		out, err := CoerceParams(in, ParamTypes{"a": schema.NewFloatConstraint()})
+		out, err := CoerceParams(in, ParamTypes{"a": schematest.Constraint(t, "Float")})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -393,8 +395,8 @@ func TestCoerceParams_DeterministicError(t *testing.T) {
 	// runs (keys processed in sorted order), not a function of map iteration
 	// order — so a coercion failure is reproducible and testable.
 	types := ParamTypes{
-		"a_date": schema.NewDateConstraint(),
-		"z_date": schema.NewDateConstraint(),
+		"a_date": schematest.Constraint(t, "Date"),
+		"z_date": schematest.Constraint(t, "Date"),
 	}
 	params := map[string]any{"a_date": "not-a-date", "z_date": "also-bad"}
 
@@ -426,12 +428,12 @@ func TestCoerceScalar_StrictRejectsUnrepairableInput(t *testing.T) {
 		constraint schema.Constraint
 		in         any
 	}{
-		{"Float/string", schema.NewFloatConstraint(), "1.5"},
-		{"Float/bool", schema.NewFloatConstraint(), true},
-		{"Timestamp/int", schema.NewTimestampConstraint(), int64(123)},
-		{"Timestamp/bool", schema.NewTimestampConstraint(), true},
-		{"Date/int", schema.NewDateConstraint(), int64(123)},
-		{"Date/bool", schema.NewDateConstraint(), true},
+		{"Float/string", schematest.Constraint(t, "Float"), "1.5"},
+		{"Float/bool", schematest.Constraint(t, "Float"), true},
+		{"Timestamp/int", schematest.Constraint(t, "Timestamp"), int64(123)},
+		{"Timestamp/bool", schematest.Constraint(t, "Timestamp"), true},
+		{"Date/int", schematest.Constraint(t, "Date"), int64(123)},
+		{"Date/bool", schematest.Constraint(t, "Date"), true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -448,13 +450,13 @@ func TestCoerceParams_StrictRejectsWrongScalarType(t *testing.T) {
 	// CoerceParams refuses a string at a Float, as the validator does.
 	if _, err := CoerceParams(
 		map[string]any{"principal": "not-a-number"},
-		ParamTypes{"principal": schema.NewFloatConstraint()},
+		ParamTypes{"principal": schematest.Constraint(t, "Float")},
 	); err == nil {
 		t.Fatal("want error for a string under Float, got nil")
 	}
 	if _, err := CoerceParams(
 		map[string]any{"observed_at": int64(123)},
-		ParamTypes{"observed_at": schema.NewTimestampConstraint()},
+		ParamTypes{"observed_at": schematest.Constraint(t, "Timestamp")},
 	); err == nil {
 		t.Fatal("want error for an int under Timestamp, got nil")
 	}
@@ -467,7 +469,7 @@ func TestCoerceParams_VectorElementCoercion(t *testing.T) {
 	// rule the List paths apply. A Vector is float-valued, so reaching the driver
 	// as []any (or a list of int64) would be rejected against its FLOAT-list type.
 	params := map[string]any{"embedding": []any{int64(1), int64(2), int64(3)}}
-	types := ParamTypes{"embedding": schema.NewVectorConstraint(3)}
+	types := ParamTypes{"embedding": schematest.Constraint(t, "Vector[3]")}
 	out, err := CoerceParams(params, types)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -488,7 +490,7 @@ func TestCoerceParams_ListValueUnderScalarConstraintErrors(t *testing.T) {
 	// handing the driver a []any it will reject — the same fail-fast contract the
 	// element-type checks already enforce, applied to the container shape.
 	params := map[string]any{"score": []any{int64(1), int64(2)}}
-	types := ParamTypes{"score": schema.NewFloatConstraint()}
+	types := ParamTypes{"score": schematest.Constraint(t, "Float")}
 	if _, err := CoerceParams(params, types); err == nil {
 		t.Fatal("want error for a list value under a scalar Float constraint, got nil")
 	}
@@ -508,22 +510,20 @@ func TestParamTypes_AKeyNamedPropertyIsTheProperty(t *testing.T) {
 	}
 }
 
-// coerceScalar and CoerceParams judge a hand-built constraint before they coerce
-// anything, refusing what the DSL refuses and a DataType reference
-// with no resolved constraint, so neither reaches the driver as a value in the
-// wrong type.
+// coerceScalar and CoerceParams judge a caller's constraint before they coerce
+// anything, refusing a zero value that needs an argument and a constraint of a
+// type the schema package does not construct, so neither reaches the driver as
+// a value in the wrong type.
 func TestCoerceParams_RefusesAConstraintNoSchemaHolds(t *testing.T) {
-	unresolved := schema.NewAliasConstraint("Day", nil)
-	list := schema.NewListConstraint(schema.NewStringConstraint())
+	list := schematest.Constraint(t, "List<String>").(schema.ListConstraint)
 	for name, tc := range map[string]struct {
 		c    schema.Constraint
 		raw  any
 		want string
 	}{
-		"an unresolved reference":             {unresolved, "2026-01-01", `datatype "Day" resolves to no constraint`},
-		"a List of an unresolved reference":   {schema.NewListConstraint(unresolved), []any{"2026-01-01"}, `datatype "Day" resolves to no constraint`},
-		"a pointer to a List":                 {&list, []any{"a"}, "none this package constructs"},
-		"inverted bounds, whatever the value": {schema.IntegerBetween(5, 1), nil, "integer bounds inverted"},
+		"a reference with no name":          {schema.AliasConstraint{}, "2026-01-01", `datatype reference "" is not one`},
+		"a pointer to a List":               {&list, []any{"a"}, "none this package constructs"},
+		"a zero Vector, whatever the value": {schema.VectorConstraint{}, nil, "vector dimensions must be between"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			got, err := CoerceParams(map[string]any{"v": tc.raw}, ParamTypes{"v": tc.c})
@@ -536,8 +536,8 @@ func TestCoerceParams_RefusesAConstraintNoSchemaHolds(t *testing.T) {
 
 // A constraint judged sound passes, resolved or not wrapped in a reference.
 func TestCoerceParams_CoercesThroughAResolvedReference(t *testing.T) {
-	day := schema.NewAliasConstraint("Day", schema.NewDateConstraint())
-	got, err := CoerceParams(map[string]any{"days": []any{"2026-01-01"}}, ParamTypes{"days": schema.NewListConstraint(day)})
+	days := schematest.Constraint(t, "List<Day>", "type Day = Date")
+	got, err := CoerceParams(map[string]any{"days": []any{"2026-01-01"}}, ParamTypes{"days": days})
 	if err != nil {
 		t.Fatalf("CoerceParams: %v", err)
 	}
@@ -551,7 +551,7 @@ func TestCoerceParams_CoercesThroughAResolvedReference(t *testing.T) {
 // several refused keys the first in sorted order is named. A nil constraint is
 // "no type to coerce against" and passes its value through.
 func TestCoerceParams_JudgesEveryTypeBeforeAnyValue(t *testing.T) {
-	bad := schema.IntegerBetween(5, 1)
+	bad := schema.VectorConstraint{}
 	for name, params := range map[string]map[string]any{
 		"a key params does not hold": {"a": int64(1)},
 		"empty params":               {},

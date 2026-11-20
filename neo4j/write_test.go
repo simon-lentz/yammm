@@ -10,6 +10,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/simon-lentz/yammm/internal/schematest"
+
 	"github.com/neo4j/neo4j-go-driver/v6/neo4j/dbtype"
 	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/schema"
@@ -485,11 +487,11 @@ type Calendar {
 
 func TestCoerceParams_RefusesAListWithoutAnElementConstraint(t *testing.T) {
 	t.Parallel()
-	// [schema.NewListConstraint] accepts a nil element, and CoerceParams judges
-	// the caller's constraints before any value.
+	// The zero ListConstraint holds no element, and CoerceParams judges the
+	// caller's constraints before any value.
 	_, err := CoerceParams(
 		map[string]any{"tags": []any{"a"}},
-		ParamTypes{"tags": schema.NewListConstraint(nil)},
+		ParamTypes{"tags": schema.ListConstraint{}},
 	)
 	if err == nil {
 		t.Fatal("expected an error for a List constraint holding no element constraint, got nil")
@@ -767,12 +769,12 @@ func TestCoerceSlice_TypeMismatchErrors(t *testing.T) {
 		c    schema.Constraint
 		raw  []any
 	}{
-		{"String", schema.NewListConstraint(schema.NewStringConstraint()), []any{"a", int64(2)}},
-		{"Integer", schema.NewListConstraint(schema.NewIntegerConstraint()), []any{int64(1), "x"}},
-		{"Float", schema.NewListConstraint(schema.NewFloatConstraint()), []any{float64(1), "x"}},
-		{"Boolean", schema.NewListConstraint(schema.NewBooleanConstraint()), []any{true, "x"}},
-		{"Date", schema.NewListConstraint(schema.NewDateConstraint()), []any{"2024-01-01", int64(5)}},
-		{"Timestamp", schema.NewListConstraint(schema.NewTimestampConstraint()), []any{"2024-01-01T00:00:00Z", int64(5)}},
+		{"String", schematest.Constraint(t, "List<String>"), []any{"a", int64(2)}},
+		{"Integer", schematest.Constraint(t, "List<Integer>"), []any{int64(1), "x"}},
+		{"Float", schematest.Constraint(t, "List<Float>"), []any{float64(1), "x"}},
+		{"Boolean", schematest.Constraint(t, "List<Boolean>"), []any{true, "x"}},
+		{"Date", schematest.Constraint(t, "List<Date>"), []any{"2024-01-01", int64(5)}},
+		{"Timestamp", schematest.Constraint(t, "List<Timestamp>"), []any{"2024-01-01T00:00:00Z", int64(5)}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -950,8 +952,8 @@ func TestExtractKeyProps_ReportsEveryProblemInOnePass(t *testing.T) {
 		label:       "T",
 		primaryKeys: []string{"first", "kept", "second"},
 		keyConstraints: map[string]schema.Constraint{
-			"first":  schema.NewDateConstraint(),
-			"second": schema.NewDateConstraint(),
+			"first":  schematest.Constraint(t, "Date"),
+			"second": schematest.Constraint(t, "Date"),
 		},
 	}
 	props := immutable.WrapProperties(map[string]any{"first": "not-a-date", "kept": "k", "second": "not-a-date"})

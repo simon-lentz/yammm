@@ -8,6 +8,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/instance"
 	"github.com/simon-lentz/yammm/internal/yammmtest"
 	"github.com/simon-lentz/yammm/schema"
@@ -349,7 +350,7 @@ func TestValidateCompositions_DuplicatePK_PathFormat(t *testing.T) {
 	// Find the duplicate PK error and check its path
 	var foundPath string
 	for issue := range result.Issues() {
-		if issue.Code() == instance.ErrDuplicateComposedPK {
+		if issue.Code() == diag.E_DUPLICATE_COMPOSED_PK {
 			foundPath = issue.Path()
 			break
 		}
@@ -394,7 +395,7 @@ type School {
 	// Find the duplicate PK error and check its path
 	var foundPath string
 	for issue := range result.Issues() {
-		if issue.Code() == instance.ErrDuplicateComposedPK {
+		if issue.Code() == diag.E_DUPLICATE_COMPOSED_PK {
 			foundPath = issue.Path()
 			break
 		}
@@ -438,7 +439,7 @@ type Person {
 	// assembly reports the same fact with.
 	_, result = validator.ValidateOne(t.Context(), "Person", person(addr("100"), addr("200")))
 	require.False(t, result.OK())
-	assert.True(t, result.HasCode(instance.ErrDuplicateComposedPK),
+	assert.True(t, result.HasCode(diag.E_DUPLICATE_COMPOSED_PK),
 		"want E_DUPLICATE_COMPOSED_PK, got %s", result.String())
 
 	// An empty array on an optional (one) slot stays legal — the cardinality

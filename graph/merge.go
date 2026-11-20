@@ -91,7 +91,7 @@ func (g *Graph) unindexPending(p *pendingEdge) {
 	h := g.bySource[recordSlot{p.source, p.relation}]
 	switch {
 	case h == nil:
-	case p.reasonDetail != "":
+	case p.reasonDetail != ReasonTargetMissing:
 		if h.reason == p {
 			h.reason = nil
 		}
@@ -118,7 +118,7 @@ func (h *heldRecords) addEdge(e Edge) {
 }
 
 func (h *heldRecords) addPending(p *pendingEdge) {
-	if p.reasonDetail != "" {
+	if p.reasonDetail != ReasonTargetMissing {
 		h.reason = p
 		return
 	}
@@ -176,8 +176,8 @@ func (g *Graph) planMerge(typ schema.Type, held Instance, staged []stagedEdge) (
 	// A validator refuses a listing that repeats a target key, so staged names
 	// each target of a slot once.
 	for _, se := range staged {
-		// An "absent" or "empty" record names no target, so it adds nothing.
-		if se.reason != "" {
+		// An absent or empty record names no target, so it adds nothing.
+		if se.reason != ReasonTargetMissing {
 			continue
 		}
 		slot := recordSlot{held, se.relation}
@@ -227,13 +227,14 @@ func (g *Graph) commitMerge(held Instance, plan []stagedEdge) {
 			continue
 		}
 		g.installPendingEdge(&pendingEdge{
-			source:     held,
-			relation:   se.relation,
-			jsonField:  se.jsonField,
-			targetType: se.targetType,
-			targetKey:  se.targetKey,
-			properties: se.properties,
-			isRequired: se.isRequired,
+			source:       held,
+			relation:     se.relation,
+			jsonField:    se.jsonField,
+			targetType:   se.targetType,
+			targetKey:    se.targetKey,
+			properties:   se.properties,
+			isRequired:   se.isRequired,
+			reasonDetail: se.reason,
 		})
 	}
 }

@@ -1,7 +1,9 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"maps"
 	"os"
@@ -61,7 +63,7 @@ func runSnapshotInfo(cmd *cobra.Command, args []string, sink *cli.DiagnosticSink
 		}
 		defer f.Close()
 
-		header, result := snapshot.HeaderOnlyRead(cmd.Context(), f)
+		header, result := snapshot.ReadHeader(cmd.Context(), f)
 		sink.Add(result)
 		if result.HasErrors() {
 			return cli.Exit(cli.ExitForResult(result))
@@ -69,7 +71,7 @@ func runSnapshotInfo(cmd *cobra.Command, args []string, sink *cli.DiagnosticSink
 
 		sink.Flush()
 		w := cmd.OutOrStdout()
-		dto := newHeaderInfoDTO(header, statSize(f, header.FileSize))
+		dto := newHeaderDTO(header, statSize(f))
 		if sink.Format() == cli.FormatJSON {
 			enc, err := json.MarshalIndent(dto, "", "  ")
 			if err != nil {
@@ -78,7 +80,7 @@ func runSnapshotInfo(cmd *cobra.Command, args []string, sink *cli.DiagnosticSink
 			fmt.Fprintln(w, string(enc))
 			return nil
 		}
-		printHeaderInfo(w, dto)
+		printHeader(w, dto)
 		return nil
 	}
 
@@ -89,7 +91,7 @@ func runSnapshotInfo(cmd *cobra.Command, args []string, sink *cli.DiagnosticSink
 
 	// A document that decodes and fails a structural check has a summary
 	// beside its errors: the summary prints, and the result decides the exit.
-	info, result := snapshot.Info(cmd.Context(), data)
+	info, result := snapshot.Stat(cmd.Context(), data)
 	sink.Add(result)
 	exit := cli.Exit(cli.ExitForResult(result))
 	if info == nil {
@@ -98,7 +100,7 @@ func runSnapshotInfo(cmd *cobra.Command, args []string, sink *cli.DiagnosticSink
 
 	sink.Flush()
 	w := cmd.OutOrStdout()
-	dto := newSnapshotInfoDTO(info)
+	dto := newInfoDTO(info, int64(len(data)))
 
 	if sink.Format() == cli.FormatJSON {
 		enc, err := json.MarshalIndent(dto, "", "  ")
@@ -109,34 +111,27 @@ func runSnapshotInfo(cmd *cobra.Command, args []string, sink *cli.DiagnosticSink
 		return exit
 	}
 
-	printSnapshotInfo(w, dto)
+	printInfo(w, dto)
 	return exit
 }
 
-// statSize reports the open file's size, keeping fallback when the handle
-// cannot be stat'd. HeaderOnlyRead answers zero because a size is not knowable
-// from an io.Reader, and this command holds the handle it opened.
-func statSize(f *os.File, fallback int64) int64 {
+// statSize reports a regular file's size, or zero for any other handle: a
+// pipe's Size is the count of its unread bytes, not the document's.
+func statSize(f *os.File) int64 {
 	stat, err := f.Stat()
-	if err != nil {
-		return fallback
+	if err != nil || !stat.Mode().IsRegular() {
+		return 0
 	}
 	return stat.Size()
 }
 
-// printSnapshotInfo and printHeaderInfo read the DTO the JSON mode marshals, so
+// printInfo and printHeader read the DTO the JSON mode marshals, so
 // a field one mode reports the other reports too. Every text read from the
 // document is written through [termtext.String], so no byte of a .ys acts on
 // the terminal.
-func printSnapshotInfo(w interface{ Write([]byte) (int, error) }, info *snapshotInfoDTO) {
+func printInfo(w interface{ Write([]byte) (int, error) }, info *infoDTO) {
 	fmt.Fprintf(w, "Snapshot: %s\n", termtext.String(info.SchemaName))
 	fmt.Fprintf(w, "  Version:    %d\n", info.Version)
-
-	if len(info.Features) > 0 {
-		fmt.Fprintf(w, "  Features:   [%s]\n", termtext.String(strings.Join(info.Features, ", ")))
-	} else {
-		fmt.Fprintf(w, "  Features:   none\n")
-	}
 
 	fmt.Fprintf(w, "  Schema:     %s (%s)\n", termtext.String(info.SchemaName), termtext.String(info.SchemaSource))
 	fmt.Fprintf(w, "  Hash:       %s (algorithm v%d)\n", termtext.String(info.SchemaHash), info.SchemaHashAlgorithm)
@@ -169,15 +164,9 @@ func printSnapshotInfo(w interface{ Write([]byte) (int, error) }, info *snapshot
 	fmt.Fprintf(w, "  File size:       %d bytes\n", info.FileSize)
 }
 
-func printHeaderInfo(w interface{ Write([]byte) (int, error) }, header *headerInfoDTO) {
+func printHeader(w interface{ Write([]byte) (int, error) }, header *headerDTO) {
 	fmt.Fprintf(w, "Snapshot: %s\n", termtext.String(header.SchemaName))
 	fmt.Fprintf(w, "  Version:    %d\n", header.Version)
-
-	if len(header.Features) > 0 {
-		fmt.Fprintf(w, "  Features:   [%s]\n", termtext.String(strings.Join(header.Features, ", ")))
-	} else {
-		fmt.Fprintf(w, "  Features:   none\n")
-	}
 
 	fmt.Fprintf(w, "  Schema:     %s (%s)\n", termtext.String(header.SchemaName), termtext.String(header.SchemaSource))
 	fmt.Fprintf(w, "  Hash:       %s (algorithm v%d)\n", termtext.String(header.SchemaHash), header.SchemaHashAlgorithm)
@@ -231,7 +220,7 @@ func formatMetadata(metadata map[string]string) string {
 }
 
 // The CLI owns the JSON shape of every `snapshot info` mode: the library's
-// HeaderInfo and SnapshotInfo carry no json tags, so marshalling them directly
+// Header and Info carry no json tags, so marshalling them directly
 // published Go field names as a wire contract. These types are the only thing
 // marshalled, snake_case in all three modes; a --dir entry's diagnostics is
 // diag's own wire, the object the diagnostic stream carries.
@@ -240,9 +229,8 @@ type attestationDTO struct {
 	Associations bool `json:"associations"`
 }
 
-type headerInfoDTO struct {
+type headerDTO struct {
 	Version             int                `json:"version"`
-	Features            []string           `json:"features"`
 	SchemaName          string             `json:"schema_name"`
 	SchemaSource        string             `json:"schema_source"`
 	SchemaHash          string             `json:"schema_hash"`
@@ -255,9 +243,8 @@ type headerInfoDTO struct {
 	FileSize            int64              `json:"file_size"`
 }
 
-type snapshotInfoDTO struct {
+type infoDTO struct {
 	Version             int                      `json:"version"`
-	Features            []string                 `json:"features"`
 	SchemaName          string                   `json:"schema_name"`
 	SchemaSource        string                   `json:"schema_source"`
 	SchemaHash          string                   `json:"schema_hash"`
@@ -277,8 +264,7 @@ type snapshotInfoDTO struct {
 }
 
 // orEmptyMap writes absent metadata as an empty object, as types is written, so
-// one object never answers "none" two ways. Features needs no fallback: every
-// reader refuses a header whose features is null.
+// one object never answers "none" two ways.
 func orEmptyMap(m map[string]string) map[string]string {
 	if m == nil {
 		return map[string]string{}
@@ -293,16 +279,14 @@ func newAttestationDTO(att *graph.Attestation) *attestationDTO {
 	return &attestationDTO{Values: att.Values, Associations: att.Associations}
 }
 
-// newHeaderInfoDTO takes the size explicitly: the three producers of a
-// HeaderInfo know it to different degrees, and only the caller knows which
-// one it read.
-func newHeaderInfoDTO(header *snapshot.HeaderInfo, fileSize int64) *headerInfoDTO {
+// newHeaderDTO takes the size from the caller, since a header carries none: the
+// full mode counts the bytes it read, and --header-only and --dir stat the file.
+func newHeaderDTO(header *snapshot.Header, fileSize int64) *headerDTO {
 	if header == nil {
 		return nil
 	}
-	return &headerInfoDTO{
+	return &headerDTO{
 		Version:             header.Version,
-		Features:            header.Features,
 		SchemaName:          header.SchemaName,
 		SchemaSource:        header.SchemaSource,
 		SchemaHash:          header.SchemaHash,
@@ -316,13 +300,12 @@ func newHeaderInfoDTO(header *snapshot.HeaderInfo, fileSize int64) *headerInfoDT
 	}
 }
 
-func newSnapshotInfoDTO(info *snapshot.SnapshotInfo) *snapshotInfoDTO {
+func newInfoDTO(info *snapshot.Info, fileSize int64) *infoDTO {
 	if info == nil {
 		return nil
 	}
-	return &snapshotInfoDTO{
+	return &infoDTO{
 		Version:             info.Version,
-		Features:            info.Features,
 		SchemaName:          info.SchemaName,
 		SchemaSource:        info.SchemaSource,
 		SchemaHash:          info.SchemaHash,
@@ -337,8 +320,8 @@ func newSnapshotInfoDTO(info *snapshot.SnapshotInfo) *snapshotInfoDTO {
 		DuplicateCount:      info.DuplicateCount,
 		UnresolvedCount:     info.UnresolvedCount,
 		Attestation:         newAttestationDTO(info.Attestation),
-		FileSize:            info.FileSize,
-		IntegrityStatus:     info.IntegrityStatus,
+		FileSize:            fileSize,
+		IntegrityStatus:     info.IntegrityStatus.String(),
 	}
 }
 
@@ -347,13 +330,13 @@ func newSnapshotInfoDTO(info *snapshot.SnapshotInfo) *snapshotInfoDTO {
 type dirEntryDTO struct {
 	Name string `json:"name"`
 	Path string `json:"path"`
-	// FileSize repeats the header's when the header parsed, and carries the
-	// size alone when it did not — a corrupt file still occupies disk.
+	// FileSize is the file's size on disk, whether or not its header parsed: a
+	// corrupt file still occupies disk.
 	FileSize int64 `json:"file_size"`
 	// ModTime is RFC 3339 in UTC at fixed width, empty when the file could not
 	// be stat'd — a zero time would sort first and corrupt orderings.
-	ModTime string         `json:"mod_time"`
-	Header  *headerInfoDTO `json:"header"`
+	ModTime string     `json:"mod_time"`
+	Header  *headerDTO `json:"header"`
 	// Diagnostics is the entry's result in the wire every --json
 	// diagnostic document uses: every detail, and the truncation state.
 	Diagnostics json.RawMessage `json:"diagnostics"`
@@ -372,7 +355,7 @@ func runSnapshotInfoDir(cmd *cobra.Command, sink *cli.DiagnosticSink, dirPath st
 	if err != nil {
 		return cli.Runtimef("open dir %q: %v", dirPath, err)
 	}
-	entries, result := snapshot.ScanDirSlice(cmd.Context(), host)
+	entries, result := scanDir(cmd.Context(), host)
 	sink.Add(result)
 	if result.HasErrors() {
 		return cli.Exit(cli.ExitForResult(result))
@@ -397,9 +380,32 @@ func runSnapshotInfoDir(cmd *cobra.Command, sink *cli.DiagnosticSink, dirPath st
 	return dirEntriesExit(entries)
 }
 
+// scanDir collects [snapshot.ScanDir]'s entries, each holding what its file
+// drew. A scan that ends early returns no entries and one fatal issue with the
+// error as a detail: E_CONTEXT_CANCELLED for a cancelled or expired context,
+// E_SNAPSHOT_IO otherwise.
+func scanDir(ctx context.Context, dir string) ([]snapshot.ScanEntry, diag.Result) {
+	var entries []snapshot.ScanEntry
+	for entry, err := range snapshot.ScanDir(ctx, dir) {
+		if err != nil {
+			code := diag.E_SNAPSHOT_IO
+			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+				code = diag.E_CONTEXT_CANCELLED
+			}
+			c := diag.NewCollector(0)
+			c.Collect(diag.NewIssue(diag.Fatal, code, err.Error()).
+				WithDetail(diag.DetailKeyDetail, err.Error()).
+				Build())
+			return nil, c.Result()
+		}
+		entries = append(entries, entry)
+	}
+	return entries, diag.OK()
+}
+
 // dirEntriesExit reports the failure a scanned directory earns.
 //
-// ScanDirSlice's own result covers reading the directory, not reading the files
+// scanDir's own result covers reading the directory, not reading the files
 // in it, so gating on that alone exits 0 over a directory whose every entry is
 // malformed — while the same file named on its own exits 1. The entries'
 // results decide together, so an I/O failure outranks a malformed file as it
@@ -413,17 +419,12 @@ func dirEntriesExit(entries []snapshot.ScanEntry) error {
 }
 
 func scanEntryToDTO(entry snapshot.ScanEntry) dirEntryDTO {
-	// ScanDir already stat'd the entry, so the header's own size is the one to
-	// carry; Header is nil by contract on an error-severity result.
-	var headerSize int64
-	if entry.Header != nil {
-		headerSize = entry.Header.FileSize
-	}
+	// Header is nil by contract on an error-severity result.
 	dto := dirEntryDTO{
 		Name:        entry.Name,
 		Path:        entry.Path,
 		FileSize:    entry.FileSize,
-		Header:      newHeaderInfoDTO(entry.Header, headerSize),
+		Header:      newHeaderDTO(entry.Header, entry.FileSize),
 		Diagnostics: diagnosticWire(entry.Result),
 	}
 	if !entry.ModTime.IsZero() {

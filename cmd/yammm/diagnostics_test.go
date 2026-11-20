@@ -196,11 +196,9 @@ func TestOwnPhaseDiagnosticsReachTheOperator(t *testing.T) {
 	})
 }
 
-// TestUpdateMetadataSurfacesHeaderWarning pins that the header read's result
-// renders when it carries only a warning. Otherwise the one warning HeaderOnly
-// can produce is dropped, and the operator sees the later error alone, with no
-// statement that the header was read and found unverifiable.
-func TestUpdateMetadataSurfacesHeaderWarning(t *testing.T) {
+// An unsupported hash algorithm is one break, so update-metadata reports it
+// once, as the Error every whole-document read reports.
+func TestUpdateMetadataReportsAnUnsupportedAlgorithmOnce(t *testing.T) {
 	t.Parallel()
 
 	path := filepath.Join(t.TempDir(), "subject.ys")
@@ -210,11 +208,8 @@ func TestUpdateMetadataSurfacesHeaderWarning(t *testing.T) {
 	if code != cli.ExitValidation {
 		t.Errorf("exit code = %d, want %d", code, cli.ExitValidation)
 	}
-	if !strings.Contains(stderr, "schema hash verification skipped") {
-		t.Errorf("the header read's warning was discarded; stderr:\n%s", stderr)
-	}
-	if !strings.Contains(stderr, "the document cannot be checked against a schema") {
-		t.Errorf("the update's own error must still render; stderr:\n%s", stderr)
+	if got := strings.Count(stderr, "E_SNAPSHOT_UNSUPPORTED_HASH_ALGORITHM"); got != 1 || !strings.Contains(stderr, "error[E_SNAPSHOT_UNSUPPORTED_HASH_ALGORITHM]") {
+		t.Errorf("stderr reports the break %d times, want one Error:\n%s", got, stderr)
 	}
 }
 

@@ -31,7 +31,7 @@ func revalDocumentWithFailures(t *testing.T, s schema.Schema, n int) []byte {
 // taken with no limit, is what a capped run's stored + dropped must add up to.
 func unlimitedFindings(t *testing.T, s schema.Schema, data []byte) int {
 	t.Helper()
-	_, res := snapshot.Load(t.Context(), data, s,
+	_, res := snapshot.Unmarshal(t.Context(), data, s,
 		snapshot.WithRevalidation(diag.Warning), snapshot.WithIssueLimit(0))
 	if res.LimitReached() {
 		t.Fatal("an unlimited load reports a reached limit")
@@ -52,7 +52,7 @@ func TestLoad_WithIssueLimit_BoundsTheStoredIssuesNotTheWalk(t *testing.T) {
 		t.Fatalf("fixture produced %d findings, want at least 7", total)
 	}
 
-	snap, res := snapshot.Load(t.Context(), data, s,
+	snap, res := snapshot.Unmarshal(t.Context(), data, s,
 		snapshot.WithRevalidation(diag.Warning), snapshot.WithIssueLimit(3))
 	if snap.IsZero() {
 		t.Fatalf("Load refused a warnings-only document: %s", res)
@@ -86,7 +86,7 @@ func TestLoad_IssueLimitDefaultsTo100(t *testing.T) {
 		t.Fatalf("fixture produced %d findings, want more than 100", total)
 	}
 
-	_, res := snapshot.Load(t.Context(), data, s, snapshot.WithRevalidation(diag.Warning))
+	_, res := snapshot.Unmarshal(t.Context(), data, s, snapshot.WithRevalidation(diag.Warning))
 	if got := res.Len(); got != 100 {
 		t.Errorf("stored issues without the option = %d, want the default 100", got)
 	}
@@ -102,7 +102,7 @@ func TestLoad_WithIssueLimitZero_IsUnlimited(t *testing.T) {
 	s := revalLoadSchema(t)
 	data := revalDocumentWithFailures(t, s, 120)
 
-	_, res := snapshot.Load(t.Context(), data, s,
+	_, res := snapshot.Unmarshal(t.Context(), data, s,
 		snapshot.WithRevalidation(diag.Warning), snapshot.WithIssueLimit(0))
 	if res.LimitReached() || res.DroppedCount() != 0 {
 		t.Errorf("WithIssueLimit(0) truncated: limitReached=%v dropped=%d", res.LimitReached(), res.DroppedCount())
@@ -145,7 +145,7 @@ func TestLoad_WithIssueLimit_KeepsTheFindingsRaisedFirst(t *testing.T) {
 		revalEdit{`"code":"c-9"`, `"code":"bad"`},
 	)
 
-	_, all := snapshot.Load(t.Context(), data, s,
+	_, all := snapshot.Unmarshal(t.Context(), data, s,
 		snapshot.WithRevalidation(diag.Warning), snapshot.WithIssueLimit(0))
 	if got, want := findingProperties(all), []string{"code", "count", "state"}; !slices.Equal(got, want) {
 		t.Fatalf("unlimited findings = %v, want %v", got, want)
@@ -161,7 +161,7 @@ func TestLoad_WithIssueLimit_KeepsTheFindingsRaisedFirst(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(fmt.Sprintf("limit_%d", tc.limit), func(t *testing.T) {
 			t.Parallel()
-			_, res := snapshot.Load(t.Context(), data, s,
+			_, res := snapshot.Unmarshal(t.Context(), data, s,
 				snapshot.WithRevalidation(diag.Warning), snapshot.WithIssueLimit(tc.limit))
 			if got := findingProperties(res); !slices.Equal(got, tc.want) {
 				t.Errorf("kept findings = %v, want %v", got, tc.want)
@@ -226,7 +226,7 @@ func TestLoad_RevalidationSharesTheLoadsIssueLimit(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			_, res := snapshot.Load(t.Context(), data, s,
+			_, res := snapshot.Unmarshal(t.Context(), data, s,
 				snapshot.WithRevalidation(diag.Warning), snapshot.WithIssueLimit(tt.limit))
 			if res.Len() != tt.wantLen || res.LimitReached() != tt.wantReached || res.DroppedCount() != tt.wantDropped {
 				t.Errorf("Len=%d LimitReached=%t DroppedCount=%d; want %d, %t, %d",

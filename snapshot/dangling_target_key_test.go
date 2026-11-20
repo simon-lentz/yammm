@@ -340,7 +340,7 @@ func TestRead_AnEdgeThatNamesNoRootDrawsOneIssueForItsKey(t *testing.T) {
 			opts := append([]snapshot.LoadOption{snapshot.WithIntegrityCheck(false)}, mode.opts...)
 			t.Run(c.name+"/Load/"+mode.name, func(t *testing.T) {
 				t.Parallel()
-				_, res := snapshot.Load(t.Context(), data, s, opts...)
+				_, res := snapshot.Unmarshal(t.Context(), data, s, opts...)
 				matchIssues(t, readIssues(res), mode.want)
 			})
 			t.Run(c.name+"/Verify/"+mode.name, func(t *testing.T) {
@@ -376,7 +376,7 @@ func TestRead_EachRelationsDanglingEdgesAreJudged(t *testing.T) {
 		diag.E_SNAPSHOT_DANGLING_REFERENCE.String() + `: edge target dk#X[["abcd"]]`,
 	}
 	for range 20 {
-		_, res := snapshot.Load(t.Context(), data, s, snapshot.WithIntegrityCheck(false), snapshot.WithRevalidation(diag.Error))
+		_, res := snapshot.Unmarshal(t.Context(), data, s, snapshot.WithIntegrityCheck(false), snapshot.WithRevalidation(diag.Error))
 		matchIssues(t, readIssues(res), want)
 	}
 }

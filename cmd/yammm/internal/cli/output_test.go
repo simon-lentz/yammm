@@ -20,7 +20,7 @@ func TestExitForResult(t *testing.T) {
 
 	t.Run("error result", func(t *testing.T) {
 		t.Parallel()
-		c := diag.NewCollectorUnlimited()
+		c := diag.NewCollector(diag.NoLimit)
 		c.Collect(diag.NewIssue(diag.Error, diag.E_TYPE_MISMATCH, "test error").Build())
 		assert.Equal(t, ExitValidation, ExitForResult(c.Result()))
 	})
@@ -29,7 +29,7 @@ func TestExitForResult(t *testing.T) {
 func TestRenderResult_Text(t *testing.T) {
 	t.Parallel()
 
-	c := diag.NewCollectorUnlimited()
+	c := diag.NewCollector(diag.NoLimit)
 	c.Collect(diag.NewIssue(diag.Error, diag.E_INTERNAL, "something went wrong").Build())
 
 	renderer := diag.NewRenderer()
@@ -42,7 +42,7 @@ func TestRenderResult_Text(t *testing.T) {
 func TestRenderResult_JSON(t *testing.T) {
 	t.Parallel()
 
-	c := diag.NewCollectorUnlimited()
+	c := diag.NewCollector(diag.NoLimit)
 	c.Collect(diag.NewIssue(diag.Error, diag.E_INTERNAL, "json test").Build())
 
 	renderer := diag.NewRenderer()
@@ -144,7 +144,7 @@ func TestRenderResult_JSON_SurfacesTruncationOnOKResult(t *testing.T) {
 func TestRenderResult_Text_RendersWarningOnlyResult(t *testing.T) {
 	t.Parallel()
 
-	c := diag.NewCollectorUnlimited()
+	c := diag.NewCollector(diag.NoLimit)
 	c.Collect(diag.NewIssue(diag.Warning, diag.W_ANNOTATION_SHADOWED, "dropped an inherited annotation").Build())
 	res := c.Result()
 	require.True(t, res.OK(), "precondition: a warnings-only result is OK")
@@ -159,7 +159,7 @@ func TestRenderResult_Text_RendersWarningOnlyResult(t *testing.T) {
 func TestRenderResult_JSON_RendersWarningOnlyResult(t *testing.T) {
 	t.Parallel()
 
-	c := diag.NewCollectorUnlimited()
+	c := diag.NewCollector(diag.NoLimit)
 	c.Collect(diag.NewIssue(diag.Warning, diag.W_ANNOTATION_SHADOWED, "dropped an inherited annotation").Build())
 
 	renderer := diag.NewRenderer()

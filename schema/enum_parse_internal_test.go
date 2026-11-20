@@ -11,7 +11,7 @@ import (
 	"github.com/simon-lentz/yammm/internal/raceskip"
 )
 
-// The loader's Enum holds the values the parser kept, with no fault, and is
+// The loader's Enum holds the values the parser kept, and is
 // built without a second judgement: beside reading the values it allocates
 // only the constraint it returns.
 func TestSchemaParser_TakesTheParsersEnumValues(t *testing.T) {
@@ -25,8 +25,8 @@ func TestSchemaParser_TakesTheParsersEnumValues(t *testing.T) {
 	p := newParser(id, diag.NewCollector(0))
 	c, _ := p.constraint(node)
 	held, ok := c.(EnumConstraint)
-	if !ok || !slices.Equal(held.values, node.EnumValues()) || held.invalid != "" {
-		t.Fatalf("constraint = %#v; want the parser's nine values and no fault", c)
+	if !ok || !slices.Equal(held.values, node.EnumValues()) {
+		t.Fatalf("constraint = %#v; want the parser's nine values", c)
 	}
 	if _, found := constraintFault(c); found {
 		t.Fatal("the judge refuses an Enum the parser kept")

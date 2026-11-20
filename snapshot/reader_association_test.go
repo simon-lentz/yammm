@@ -3,6 +3,7 @@ package snapshot_test
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 
@@ -109,7 +110,7 @@ func tableRow(t *testing.T, doc, name string) int {
 // readBoth returns Verify's and Load's results for doc.
 func readBoth(t *testing.T, s schema.Schema, doc string) map[string]diag.Result {
 	t.Helper()
-	_, l := snapshot.Load(context.Background(), []byte(doc), s, snapshot.WithIntegrityCheck(false))
+	_, l := snapshot.Unmarshal(context.Background(), []byte(doc), s, snapshot.WithIntegrityCheck(false))
 	return map[string]diag.Result{"Verify": snapshot.Verify(context.Background(), []byte(doc), s, snapshot.WithIntegrityCheck(false)), "Load": l}
 }
 
@@ -118,7 +119,7 @@ func requireReaderRule(t *testing.T, name string, got map[string]diag.Result, co
 	for surface, res := range got {
 		found := false
 		for issue := range res.Issues() {
-			if issue.Code() == code && issue.Severity().IsFailure() && strings.Contains(issue.Message(), phrase) {
+			if issue.Code() == code && (issue.Severity() == diag.Fatal || issue.Severity() == diag.Error) && strings.Contains(issue.Message(), phrase) {
 				found = true
 			}
 		}
@@ -210,6 +211,17 @@ func TestReader_AcceptsAnEmptyRecord(t *testing.T) {
 			t.Errorf("%s refused an empty record Graph.Add made: %s", surface, res)
 		}
 	}
+	snap, res := snapshot.Unmarshal(t.Context(), []byte(doc), s, snapshot.WithIntegrityCheck(false))
+	if res.HasErrors() {
+		t.Fatalf("unmarshal: %s", res)
+	}
+	var reasons []graph.UnresolvedReason
+	for u := range snap.Unresolved() {
+		reasons = append(reasons, u.Reason())
+	}
+	if !slices.Equal(reasons, []graph.UnresolvedReason{graph.ReasonEmpty}) {
+		t.Errorf("reasons after Unmarshal = %v, want [empty]", reasons)
+	}
 }
 
 // A root duplicate's type must be able to hold a root, and the refusal names
@@ -251,7 +263,7 @@ func TestReader_TakesRequiredFromTheSchema(t *testing.T) {
 	s := loadReaderSchema(t)
 	doc := personDoc(t, s)
 	count := func(d string) int {
-		_, res := snapshot.Load(context.Background(), []byte(d), s, snapshot.WithIntegrityCheck(false), snapshot.WithRevalidation(diag.Warning))
+		_, res := snapshot.Unmarshal(context.Background(), []byte(d), s, snapshot.WithIntegrityCheck(false), snapshot.WithRevalidation(diag.Warning))
 		n := 0
 		for issue := range res.Issues() {
 			if issue.Code() == diag.W_SNAPSHOT_UNRESOLVED_REQUIRED {
@@ -305,7 +317,7 @@ func TestReader_RefusesAKeyComponentParseKeyCannotRead(t *testing.T) {
 	} {
 		edited := editOnce(t, doc, c.from, c.to)
 		requireReaderRule(t, c.name, readBoth(t, s, edited), diag.E_SNAPSHOT_MALFORMED, c.phrase)
-		_, info := snapshot.Info(t.Context(), []byte(edited))
+		_, info := snapshot.Stat(t.Context(), []byte(edited))
 		if !info.HasCode(diag.E_SNAPSHOT_MALFORMED) || !strings.Contains(info.String(), c.phrase) {
 			t.Errorf("%s, Info: %s, want the component refused", c.name, info)
 		}

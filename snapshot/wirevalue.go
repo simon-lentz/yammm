@@ -138,8 +138,8 @@ func wireValue(v any, c schema.Constraint) any {
 
 // wireCanonical renders a temporal or UUID value in the one form the kind
 // stores. A shape the constraint cannot render, which only a document can hold,
-// passes through, its floats keeping their indicator: Load re-validates only when
-// the caller asks, and what it loads stays writable.
+// passes through, its floats keeping their indicator: Unmarshal re-validates
+// only when the caller asks, and what it reads stays writable.
 func wireCanonical(v any, c schema.Constraint) any {
 	canonical, err := value.Canonical(v, c)
 	if err != nil {

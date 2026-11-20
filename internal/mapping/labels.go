@@ -13,7 +13,7 @@ import (
 // schema/cypher exports it as E_NEO4J_INVALID_IDENTIFIER, and neo4j's write
 // path raises it too. A property name, a label part or a composed label that
 // [IsIdentifier] refuses, or a schema name a label cannot decode, draws it.
-var InvalidIdentifier = diag.NewCode("E_NEO4J_INVALID_IDENTIFIER", diag.CategoryNeo4j)
+var InvalidIdentifier = diag.NewCode("E_NEO4J_INVALID_IDENTIFIER")
 
 // DetailKeyLabel is the neo4j-specific detail key for generated label strings.
 const DetailKeyLabel = "label"

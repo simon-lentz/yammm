@@ -3,14 +3,15 @@ package diag
 // Severity represents the severity level of a diagnostic issue.
 //
 // Severity is an ordered enumeration where lower numeric values are more severe.
-// Use [Severity.IsMoreSevereThan] rather than a raw numeric comparison.
+// The zero Severity names no severity. Only the zero [Issue] carries it, and a
+// [Collector] refuses that Issue.
 type Severity uint8
 
 const (
 	// Fatal indicates an unrecoverable condition. Fatal issues typically halt
 	// further processing. Reaching a collection limit marks no severity; see
 	// [Result.LimitReached].
-	Fatal Severity = iota
+	Fatal Severity = iota + 1
 
 	// Error indicates a validation failure where collection can continue.
 	// Errors cause the overall result to be unsuccessful.
@@ -50,18 +51,14 @@ func (s Severity) String() string {
 	}
 }
 
-// IsFailure reports whether the severity indicates a failure.
-//
-// Returns true for Fatal and Error severities. This matches the condition
-// checked by !Result.OK().
-func (s Severity) IsFailure() bool {
-	return s <= Error
+// isFailure reports whether s is Fatal or Error, the condition !Result.OK()
+// checks.
+func (s Severity) isFailure() bool {
+	return s == Fatal || s == Error
 }
 
-// IsMoreSevereThan reports whether s is more severe than other.
-//
-// Since lower numeric values are more severe, this returns s < other.
-// Use this method instead of raw numeric comparisons for clarity.
-func (s Severity) IsMoreSevereThan(other Severity) bool {
+// isMoreSevereThan reports whether s is more severe than other; a lower value is
+// more severe.
+func (s Severity) isMoreSevereThan(other Severity) bool {
 	return s < other
 }

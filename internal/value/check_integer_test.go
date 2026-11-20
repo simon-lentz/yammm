@@ -8,8 +8,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/simon-lentz/yammm/internal/schematest"
+
 	"github.com/simon-lentz/yammm/internal/value"
-	"github.com/simon-lentz/yammm/schema"
 )
 
 // checkFloat accepts every unsigned value coerceFloat converts: a uint64
@@ -17,7 +18,7 @@ import (
 // uintptr is accepted whatever its width.
 func TestCheckFloat_AcceptsUnsignedAboveInt64(t *testing.T) {
 	t.Parallel()
-	c := schema.NewFloatConstraint()
+	c := schematest.Constraint(t, "Float")
 	for name, tc := range map[string]struct {
 		val  any
 		want float64
@@ -43,7 +44,7 @@ func TestCheckFloat_AcceptsUnsignedAboveInt64(t *testing.T) {
 func TestCheckInteger_AFloatIsATypeMismatch(t *testing.T) {
 	t.Parallel()
 	for _, f := range []float64{1e19, 3, math.Inf(1)} {
-		err := value.Check(f, schema.NewIntegerConstraint())
+		err := value.Check(f, schematest.Constraint(t, "Integer"))
 		var ce *value.CheckError
 		if !errors.As(err, &ce) {
 			t.Fatalf("Check(%v) err = %v, want a *CheckError", f, err)
@@ -62,7 +63,7 @@ func TestIntegerLiteralOutsideInt64_IsATypeMismatchAtAnInteger(t *testing.T) {
 	for _, n := range []json.Number{"9223372036854775808", "-9223372036854775809", "-9223372036854776832"} {
 		t.Run(string(n), func(t *testing.T) {
 			t.Parallel()
-			err := value.Check(n, schema.NewIntegerConstraint())
+			err := value.Check(n, schematest.Constraint(t, "Integer"))
 			var ce *value.CheckError
 			if !errors.As(err, &ce) {
 				t.Fatalf("Check err = %v, want a *CheckError", err)
@@ -70,7 +71,7 @@ func TestIntegerLiteralOutsideInt64_IsATypeMismatchAtAnInteger(t *testing.T) {
 			if ce.Kind != value.KindTypeMismatch || !strings.Contains(ce.Msg, "outside the int64 range") {
 				t.Errorf("kind=%v msg=%q; want KindTypeMismatch naming the range", ce.Kind, ce.Msg)
 			}
-			if got, err := value.Coerce(n, schema.NewIntegerConstraint()); err == nil {
+			if got, err := value.Coerce(n, schematest.Constraint(t, "Integer")); err == nil {
 				t.Errorf("Coerce(%s) = %#v, want an error", n, got)
 			}
 		})
@@ -83,7 +84,7 @@ func TestIntegerLiteralOutsideInt64_IsATypeMismatchAtAnInteger(t *testing.T) {
 func TestIntegerLiteralNoFloatHolds_IsRefusedAtAVectorElement(t *testing.T) {
 	t.Parallel()
 	huge := json.Number("1" + strings.Repeat("0", 400))
-	c := schema.NewVectorConstraint(2)
+	c := schematest.Constraint(t, "Vector[2]")
 	err := value.Check([]any{huge, int64(1)}, c)
 	var ce *value.CheckError
 	if !errors.As(err, &ce) {
@@ -120,11 +121,11 @@ func TestCoerceInteger_OnlyAnIntegerLiteralIsCalledOutOfRange(t *testing.T) {
 		{"100000000000000000000.5", "cannot coerce float 100000000000000000000.0 to int64"},
 		{"18446744073709551616e-18", "cannot coerce float 18.446744073709553 to int64"},
 	} {
-		_, err := value.Coerce(c.n, schema.NewIntegerConstraint())
+		_, err := value.Coerce(c.n, schematest.Constraint(t, "Integer"))
 		if err == nil || err.Error() != c.want {
 			t.Errorf("Coerce(%q) = %v, want %q", c.n, err, c.want)
 		}
-		if cerr := value.Check(c.n, schema.NewIntegerConstraint()); cerr == nil || strings.Contains(cerr.Error(), "outside the int64 range") {
+		if cerr := value.Check(c.n, schematest.Constraint(t, "Integer")); cerr == nil || strings.Contains(cerr.Error(), "outside the int64 range") {
 			t.Errorf("Check(%q) = %v, want a refusal that names no range", c.n, cerr)
 		}
 	}
@@ -135,12 +136,12 @@ func TestCoerceInteger_OnlyAnIntegerLiteralIsCalledOutOfRange(t *testing.T) {
 func TestIntegerLiteralOutsideInt64_MessageIsBounded(t *testing.T) {
 	t.Parallel()
 	n := json.Number("9" + strings.Repeat("0", 100000))
-	err := value.Check(n, schema.NewIntegerConstraint())
+	err := value.Check(n, schematest.Constraint(t, "Integer"))
 	const want = "expected integer, got an integer outside the int64 range: 90000000000000000000000000000000… (100001 bytes)"
 	if err == nil || err.Error() != want {
 		t.Errorf("Check = %v, want %q", err, want)
 	}
-	if _, cerr := value.Coerce(n, schema.NewIntegerConstraint()); cerr == nil || len(cerr.Error()) > 200 {
+	if _, cerr := value.Coerce(n, schematest.Constraint(t, "Integer")); cerr == nil || len(cerr.Error()) > 200 {
 		t.Errorf("Coerce error is %d bytes, want a bounded message", len(fmt.Sprint(cerr)))
 	}
 }
@@ -150,10 +151,10 @@ func TestIntegerLiteralOutsideInt64_MessageIsBounded(t *testing.T) {
 func TestIntegerLiteralOutsideInt64_IsItsNearestFloatAtAFloat(t *testing.T) {
 	t.Parallel()
 	n := json.Number("99999999999999999999")
-	if err := value.Check(n, schema.NewFloatConstraint()); err != nil {
+	if err := value.Check(n, schematest.Constraint(t, "Float")); err != nil {
 		t.Fatalf("Check: %v", err)
 	}
-	got, err := value.Coerce(n, schema.NewFloatConstraint())
+	got, err := value.Coerce(n, schematest.Constraint(t, "Float"))
 	if err != nil {
 		t.Fatalf("Coerce: %v", err)
 	}
@@ -168,21 +169,21 @@ func TestIntegerLiteralOutsideInt64_IsItsNearestFloatAtAFloat(t *testing.T) {
 func TestNumberLiteral_CheckAndCoerceAgree(t *testing.T) {
 	t.Parallel()
 	five := json.Number("5")
-	if err := value.Check(five, schema.NewIntegerConstraint()); err != nil {
+	if err := value.Check(five, schematest.Constraint(t, "Integer")); err != nil {
 		t.Errorf("Check(5) = %v, want nil", err)
 	}
-	if got, err := value.Coerce(five, schema.NewIntegerConstraint()); err != nil || got != int64(5) {
+	if got, err := value.Coerce(five, schematest.Constraint(t, "Integer")); err != nil || got != int64(5) {
 		t.Errorf("Coerce(5) = %#v, %v; want int64(5)", got, err)
 	}
-	got, err := value.Coerce(json.Number("-0"), schema.NewFloatConstraint())
+	got, err := value.Coerce(json.Number("-0"), schematest.Constraint(t, "Float"))
 	if f, ok := got.(float64); err != nil || !ok || !math.Signbit(f) {
 		t.Errorf("Coerce(-0) = %#v, %v; want the float64 -0", got, err)
 	}
 	half := json.Number("2.5")
-	if err := value.Check(half, schema.NewIntegerConstraint()); err == nil || err.Error() != "expected integer, got float 2.5" {
+	if err := value.Check(half, schematest.Constraint(t, "Integer")); err == nil || err.Error() != "expected integer, got float 2.5" {
 		t.Errorf("Check(2.5) = %v", err)
 	}
-	if _, err := value.Coerce(half, schema.NewIntegerConstraint()); err == nil || err.Error() != "cannot coerce float 2.5 to int64" {
+	if _, err := value.Coerce(half, schematest.Constraint(t, "Integer")); err == nil || err.Error() != "cannot coerce float 2.5 to int64" {
 		t.Errorf("Coerce(2.5) = %v", err)
 	}
 }
@@ -192,17 +193,17 @@ func TestNumberLiteral_CheckAndCoerceAgree(t *testing.T) {
 func TestNonFiniteNumberLiteral_IsRefusedByCheckAndCoerce(t *testing.T) {
 	t.Parallel()
 	for _, n := range []json.Number{"NaN", "Inf", "-Infinity"} {
-		if err := value.Check(n, schema.NewFloatConstraint()); err == nil {
+		if err := value.Check(n, schematest.Constraint(t, "Float")); err == nil {
 			t.Errorf("Check(%q) accepted", n)
 		}
-		if got, err := value.Coerce(n, schema.NewFloatConstraint()); err == nil {
+		if got, err := value.Coerce(n, schematest.Constraint(t, "Float")); err == nil {
 			t.Errorf("Coerce(%q) = %v, want an error", n, got)
 		}
-		if got, err := value.Coerce([]any{n, json.Number("1")}, schema.NewVectorConstraint(2)); err == nil {
+		if got, err := value.Coerce([]any{n, json.Number("1")}, schematest.Constraint(t, "Vector[2]")); err == nil {
 			t.Errorf("Coerce([%q 1], Vector[2]) = %v, want an error", n, got)
 		}
 	}
-	if _, err := value.Coerce(json.Number("0x1q"), schema.NewFloatConstraint()); err == nil || strings.Contains(err.Error(), "no finite float64") {
+	if _, err := value.Coerce(json.Number("0x1q"), schematest.Constraint(t, "Float")); err == nil || strings.Contains(err.Error(), "no finite float64") {
 		t.Errorf("a malformed literal drew %v, want a refusal that names no range", err)
 	}
 }
@@ -214,7 +215,7 @@ func TestNonFiniteNumberLiteral_IsRefusedByCheckAndCoerce(t *testing.T) {
 // literal is named out of range by the coercion as by the check.
 func TestIntegerMessages_NameTheFactAsWritten(t *testing.T) {
 	t.Parallel()
-	ic := schema.NewIntegerConstraint()
+	ic := schematest.Constraint(t, "Integer")
 	msg := func(err error) string {
 		if err == nil {
 			return "<nil>"

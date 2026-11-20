@@ -259,11 +259,11 @@ func TestSources_PopulatesSourceRegistry(t *testing.T) {
 
 	// Verify registry contains the entry file
 	mainSourceID := spelledSourceID(t, mainPath)
-	assert.True(t, snapshot.Sources.Has(mainSourceID), "registry should contain main file: %s", mainSourceID)
+	assert.True(t, hasSource(snapshot.Sources, mainSourceID), "registry should contain main file: %s", mainSourceID)
 
 	// Verify registry contains the imported file
 	partsSourceID := spelledSourceID(t, partsPath)
-	assert.True(t, snapshot.Sources.Has(partsSourceID), "registry should contain imported file: %s", partsSourceID)
+	assert.True(t, hasSource(snapshot.Sources, partsSourceID), "registry should contain imported file: %s", partsSourceID)
 
 	// Verify LineStartByte works for imported file (critical for UTF-16 conversion)
 	offset, ok := snapshot.Sources.LineStartByte(partsSourceID, 1)
@@ -308,9 +308,8 @@ func TestSources_FailedLoadKeepsEverySourceItRead(t *testing.T) {
 	// identity of the file's on-disk spelling.
 	mainSourceID := spelledSourceID(t, mainPath)
 	partsSourceID := spelledSourceID(t, partsPath)
-	assert.True(t, snapshot.Sources.Has(mainSourceID), "overlay content stays available")
-	assert.True(t, snapshot.Sources.Has(partsSourceID), "the import the failed load read is available")
-	assert.Equal(t, 2, snapshot.Sources.Len())
+	assert.True(t, hasSource(snapshot.Sources, mainSourceID), "overlay content stays available")
+	assert.True(t, hasSource(snapshot.Sources, partsSourceID), "the import the failed load read is available")
 
 	// The type's span runs from its comment, after `schema "parts" `, to the
 	// closing brace: 15 units, then 3 + 2 + 4 for the comment and 31 for the
@@ -608,4 +607,9 @@ func spelledSourceID(t *testing.T, path string) location.SourceID {
 		t.Fatalf("SourceIDFromPath(%q): %v", spelled, err)
 	}
 	return id
+}
+
+func hasSource(texts *lsputil.Texts, id location.SourceID) bool {
+	_, ok := texts.ContentBySource(id)
+	return ok
 }

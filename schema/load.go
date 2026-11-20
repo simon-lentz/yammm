@@ -38,7 +38,7 @@ func errorToFatalIssue(err error) diag.Issue {
 // fatalResult creates a diag.Result containing a single Fatal diagnostic from an error,
 // optionally merged with a partial result that may contain earlier diagnostics.
 func fatalResult(err error, partial diag.Result) (Schema, diag.Result) {
-	c := diag.NewCollectorUnlimited()
+	c := diag.NewCollector(diag.NoLimit)
 	c.Merge(partial)
 	c.Collect(errorToFatalIssue(err))
 	return Schema{}, c.Result()
@@ -50,7 +50,7 @@ func fatalResult(err error, partial diag.Result) (Schema, diag.Result) {
 // its author corrects, rather than the machine-level failure Fatal marks. The
 // load still stops: [Load] returns a zero Schema with this result.
 func issueResult(issue diag.Issue) diag.Result {
-	c := diag.NewCollectorUnlimited()
+	c := diag.NewCollector(diag.NoLimit)
 	c.Collect(issue)
 	return c.Result()
 }
@@ -731,7 +731,7 @@ func (l *loader) loadSource(ctx context.Context, sourceID location.SourceID, con
 	// against — hasImportRoot already treats the two as one — so it is what
 	// the accessor reports. Recording "" here would deny the root the loader
 	// used and leave every module-root-relative key deriving from a fallback.
-	s.setSources(NewSources(l.sourceRegistry))
+	s.setSources(newSources(l.sourceRegistry))
 	if l.syntheticRoot != "" {
 		s.setModuleRoot(l.syntheticRoot)
 	} else {
@@ -1037,43 +1037,21 @@ func (l *loader) loadImport(ctx context.Context, sourceID location.SourceID, imp
 	return nil
 }
 
-// errImportBackslash refuses an import path holding a backslash, which Windows
-// reads as a separator and every other host as part of a file name, so the path
-// would name a different file on each.
-var errImportBackslash = errors.New("an import path separates its segments with / and holds no backslash")
-
-// errImportNoFile refuses an import path that names a directory or nothing.
-var errImportNoFile = errors.New("an import path ends in a file name, and this one ends in none")
-
-// checkImportPath refuses a path no host reads alike and a path whose last
-// segment is absent or a dot segment, which the extension rule would turn into
-// a dotfile. A trailing separator after a file name is read past.
-func checkImportPath(importPath string) error {
-	if strings.ContainsRune(importPath, '\\') {
-		return errImportBackslash
-	}
-	switch path.Base(importPath) {
-	case ".", "..", "/":
-		return errImportNoFile
-	}
-	return nil
-}
-
 // errNoHostPath reports a file-backed source the loader never recorded reading,
 // which leaves its relative imports nothing to resolve against.
 var errNoHostPath = errors.New("no host path recorded for the importing source")
 
 // resolveImportToRelative resolves an import path to a path relative to the module root.
 func (l *loader) resolveImportToRelative(sourceID location.SourceID, importPath string) (string, error) {
-	if err := checkImportPath(importPath); err != nil {
-		return "", err
+	if err := source.CheckImportPath(importPath); err != nil {
+		return "", err //nolint:wrapcheck // the caller names the import path
 	}
 	// Relative import (./foo or ../bar)
 	if strings.HasPrefix(importPath, "./") || strings.HasPrefix(importPath, "../") {
 		// Under a synthetic root a source's key is its identity past the root,
 		// so a relative import resolves against the key's directory, as text.
 		if key, ok := l.syntheticKey(sourceID); ok {
-			return importKeyText(key, importPath), nil
+			return source.ImportKeyText(key, importPath), nil
 		}
 		if !sourceID.IsFilePath() {
 			return "", errors.New("relative imports require a file-based source or a synthetic root")
@@ -1088,7 +1066,7 @@ func (l *loader) resolveImportToRelative(sourceID location.SourceID, importPath 
 
 		// The target is the file with its extension, so a path spelling an
 		// ancestor of the root names that ancestor's sibling file and escapes.
-		targetPath := importFileName(filepath.Join(sourceDir, importPath))
+		targetPath := source.ImportFileName(filepath.Join(sourceDir, importPath))
 
 		// Make it relative to module root
 		if l.moduleRoot != "" {
@@ -1113,37 +1091,6 @@ func (l *loader) resolveImportToRelative(sourceID location.SourceID, importPath 
 	return strings.TrimRight(importPath, "/"), nil
 }
 
-// SyntheticImportKey returns the key a load under [WithSyntheticRoot] looks
-// an import up by: importPath resolved as text against importerKey, the key of
-// the source declaring it — from the importer's directory for "./" and "../",
-// from the root otherwise — with ".yammm" added when absent. A key climbing
-// above the root keeps its leading "..". It is the loader's own rule, so a
-// generator writing embedded sources keys each one exactly as the re-load
-// will ask for it. importerKey is read by the key rule [WithSyntheticRoot]
-// states, and a key or an import path the loader refuses is refused.
-func SyntheticImportKey(importerKey, importPath string) (string, error) {
-	if err := checkImportPath(importPath); err != nil {
-		return "", err
-	}
-	importer, err := source.NormalizeSyntheticKey(importerKey)
-	if err != nil {
-		return "", fmt.Errorf("importer: %w", err)
-	}
-	key, err := source.NormalizeSyntheticKey(importFileName(importKeyText(importer, importPath)))
-	if err != nil {
-		return "", fmt.Errorf("import %q: %w", importPath, err)
-	}
-	return key, nil
-}
-
-// importKeyText resolves an import path against its importer's key as text.
-func importKeyText(importerKey, importPath string) string {
-	if strings.HasPrefix(importPath, "./") || strings.HasPrefix(importPath, "../") {
-		return path.Join(path.Dir(importerKey), importPath)
-	}
-	return strings.TrimRight(importPath, "/")
-}
-
 // syntheticKey returns the key a synthetic-root load registered id under: its
 // identity past the root. It reports false for every other identity.
 func (l *loader) syntheticKey(id location.SourceID) (string, bool) {
@@ -1153,22 +1100,11 @@ func (l *loader) syntheticKey(id location.SourceID) (string, bool) {
 	return strings.CutPrefix(id.String(), l.syntheticRoot+"/")
 }
 
-// importFileName returns the file name an import path resolves to: the path
-// itself when it ends in ".yammm", else the path with ".yammm" added. An import
-// never resolves to a file named by the bare path, of whatever content type, by
-// the extension rule docs/SPEC.md states.
-func importFileName(relativePath string) string {
-	if strings.HasSuffix(relativePath, ".yammm") {
-		return relativePath
-	}
-	return relativePath + ".yammm"
-}
-
 // readImportFile reads an import file from the in-memory sources, else through
 // the sandboxed rootLoader. Every read it makes is bounded and non-blocking;
 // there is no unsandboxed fallback.
 func (l *loader) readImportFile(relativePath string) ([]byte, location.SourceID, error) {
-	name := importFileName(relativePath)
+	name := source.ImportFileName(relativePath)
 
 	// First check the content this load already holds; the derivation matches
 	// pre-registration's.

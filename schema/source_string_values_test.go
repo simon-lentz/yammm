@@ -70,22 +70,6 @@ func TestStringValues_TheDSLAcceptsWhatJSONKeeps(t *testing.T) {
 	}
 }
 
-func TestCheckConstraint_RefusesAStringValueNotValidUTF8(t *testing.T) {
-	for name, tc := range map[string]struct {
-		c    schema.Constraint
-		want string
-	}{
-		"enum value":          {schema.NewEnumConstraint([]string{"a\xff", "b"}), `enum value "a\xff" is not valid UTF-8`},
-		"a list's enum value": {schema.NewListConstraint(schema.NewEnumConstraint([]string{"a", "b\xff"})), `enum value "b\xff" is not valid UTF-8`},
-	} {
-		t.Run(name, func(t *testing.T) {
-			if err := schema.CheckConstraint(tc.c); err == nil || !strings.Contains(err.Error(), tc.want) {
-				t.Errorf("CheckConstraint = %v, want %s", err, tc.want)
-			}
-		})
-	}
-}
-
 // TestLoad_RefusesADocHoldingWhatTheSourceRulesRefuse pins E_SYNTAX on a doc
 // comment holding what the source rules refuse.
 func TestLoad_RefusesADocHoldingWhatTheSourceRulesRefuse(t *testing.T) {
@@ -101,7 +85,7 @@ func TestLoad_RefusesADocHoldingWhatTheSourceRulesRefuse(t *testing.T) {
 // accepts: an escape that names a surrogate code point compiles, and it
 // matches no string.
 func TestPattern_ASurrogateEscapeLoads(t *testing.T) {
-	c := schema.NewPatternConstraint(regexp.MustCompile(`a\x{D800}`))
+	c := schema.TestParsedPatternConstraint(regexp.MustCompile(`a\x{D800}`))
 	if err := schema.CheckConstraint(c); err != nil {
 		t.Errorf("CheckConstraint = %v, want nil", err)
 	}

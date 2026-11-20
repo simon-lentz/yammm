@@ -164,7 +164,7 @@ func TestRead_ATargetNamedTwiceUnderOneAssociationIsRefused(t *testing.T) {
 			opts := append([]snapshot.LoadOption{snapshot.WithIntegrityCheck(false)}, mode.opts...)
 			t.Run(c.name+"/Load/"+mode.name, func(t *testing.T) {
 				t.Parallel()
-				snap, res := snapshot.Load(t.Context(), data, s, opts...)
+				snap, res := snapshot.Unmarshal(t.Context(), data, s, opts...)
 				matchIssues(t, readIssues(res), c.want)
 				if len(c.want) > 0 && (!snap.IsZero() || !res.HasErrors()) {
 					t.Errorf("a refused document yields a snapshot, or no Error: %s", res)
@@ -200,12 +200,12 @@ func TestInfo_JudgesNoRepeatedTarget(t *testing.T) {
 		"a record":            {`"target_key":["u8"]`, `"target_key":["u9"]`},
 		"a (one) association": {`"ONE_U":[{"target_type":2,"target_key":["u1"],"properties":{}}]`, `"ONE_U":[{"target_type":2,"target_key":["u1"],"properties":{}},{"target_type":2,"target_key":["u1"],"properties":{}}]`},
 	} {
-		_, res := snapshot.Info(t.Context(), edited(t, doc, edit))
+		_, res := snapshot.Stat(t.Context(), edited(t, doc, edit))
 		if res.HasCode(diag.E_SNAPSHOT_MALFORMED) || res.HasCode(diag.E_GRAPH_CARDINALITY) {
 			t.Errorf("%s: Info: %s, want no structural refusal", name, res)
 		}
 	}
-	if _, res := snapshot.Info(t.Context(), doc); res.HasErrors() {
+	if _, res := snapshot.Stat(t.Context(), doc); res.HasErrors() {
 		t.Errorf("Info of the untouched document: %s", res)
 	}
 }
@@ -254,7 +254,7 @@ func TestRead_EachRefusalOfARootsRecordsNamesItsKey(t *testing.T) {
 			},
 		},
 	} {
-		_, res := snapshot.Load(t.Context(), edited(t, doc, c.edit), s, snapshot.WithIntegrityCheck(false))
+		_, res := snapshot.Unmarshal(t.Context(), edited(t, doc, c.edit), s, snapshot.WithIntegrityCheck(false))
 		var got [][]diag.Detail
 		for issue := range res.Issues() {
 			if issue.Code() == c.code {
@@ -287,7 +287,7 @@ func TestRead_RevalidationRaisesNoSecondIssueForATargetNoRootHolds(t *testing.T)
 	} {
 		data := edited(t, doc, c.edits...)
 		for _, sev := range []diag.Severity{diag.Error, diag.Warning} {
-			_, res := snapshot.Load(t.Context(), data, s, snapshot.WithIntegrityCheck(false), snapshot.WithRevalidation(sev))
+			_, res := snapshot.Unmarshal(t.Context(), data, s, snapshot.WithIntegrityCheck(false), snapshot.WithRevalidation(sev))
 			dangling := 0
 			for issue := range res.Issues() {
 				switch issue.Code() {
@@ -328,7 +328,7 @@ func TestRead_ARefusedRepeatUnderARequiredAssociationDrawsNoWarning(t *testing.T
 		t.Fatal(mr)
 	}
 	data := edited(t, doc, [2]string{`"target_key":["u8"]`, `"target_key":["u9"]`})
-	_, res = snapshot.Load(ctx, data, s, snapshot.WithIntegrityCheck(false), snapshot.WithRevalidation(diag.Error))
+	_, res = snapshot.Unmarshal(ctx, data, s, snapshot.WithIntegrityCheck(false), snapshot.WithRevalidation(diag.Error))
 	matchIssues(t, readIssues(res), []string{
 		diag.E_SNAPSHOT_MALFORMED.String() + `: unresolved record 1 names target rq#U[["u9"]]`,
 		diag.W_SNAPSHOT_UNRESOLVED_REQUIRED.String() + `: `,
@@ -371,7 +371,7 @@ func TestRead_RevalidationRunsTheInvariantOfARootBesideARepeatNoRootHolds(t *tes
 		[2]string{`"target_key":["u1"]`, `"target_key":["u7"]`},
 		[2]string{`"target_key":["u2"]`, `"target_key":["u7"]`})
 	for _, sev := range []diag.Severity{diag.Error, diag.Warning} {
-		_, res := snapshot.Load(ctx, data, s, snapshot.WithIntegrityCheck(false), snapshot.WithRevalidation(sev))
+		_, res := snapshot.Unmarshal(ctx, data, s, snapshot.WithIntegrityCheck(false), snapshot.WithRevalidation(sev))
 		matchIssues(t, readIssues(res), []string{
 			diag.E_SNAPSHOT_DANGLING_REFERENCE.String() + `: edge target ri#U[["u7"]]`,
 			diag.E_SNAPSHOT_DANGLING_REFERENCE.String() + `: edge target ri#U[["u7"]]`,
@@ -390,7 +390,7 @@ func TestRead_RevalidationJudgesTheValuesOfARepeatNoRootHolds(t *testing.T) {
 		[2]string{`"target_key":["u1"],"properties":{"w":1}`, `"target_key":["zz"],"properties":{"w":1}`},
 		[2]string{`"target_key":["u3"],"properties":{"w":3}`, `"target_key":["zz"],"properties":{"w":"x"}`},
 		[2]string{`"target_key":["u8"]`, `"target_key":["zz"]`})
-	_, res := snapshot.Load(t.Context(), data, s, snapshot.WithIntegrityCheck(false), snapshot.WithRevalidation(diag.Warning))
+	_, res := snapshot.Unmarshal(t.Context(), data, s, snapshot.WithIntegrityCheck(false), snapshot.WithRevalidation(diag.Warning))
 	matchIssues(t, readIssues(res), []string{
 		diag.E_SNAPSHOT_DANGLING_REFERENCE.String() + `: edge target de#U[["zz"]]`,
 		diag.E_SNAPSHOT_DANGLING_REFERENCE.String() + `: edge target de#U[["zz"]]`,
@@ -408,7 +408,7 @@ func TestRead_RevalidationNamesARepeatTheIssueLimitDropped(t *testing.T) {
 		[2]string{`"target_key":["u1"],"properties":{"w":1}`, `"target_key":["zz"],"properties":{"w":1}`},
 		[2]string{`"target_key":["u3"],"properties":{"w":3}`, `"target_key":["zz"],"properties":{"w":"x"}`},
 		[2]string{`"target_key":["u8"]`, `"target_key":["zz"]`})
-	_, res := snapshot.Load(t.Context(), data, s, snapshot.WithIntegrityCheck(false),
+	_, res := snapshot.Unmarshal(t.Context(), data, s, snapshot.WithIntegrityCheck(false),
 		snapshot.WithRevalidation(diag.Warning), snapshot.WithIssueLimit(1))
 	if got := res.CodeCounts(diag.Warning); got[diag.E_DUPLICATE_EDGE] != 0 || got[diag.E_TYPE_MISMATCH] != 1 {
 		t.Errorf("revalidation findings %v, want one E_TYPE_MISMATCH and no E_DUPLICATE_EDGE: %s", got, res)

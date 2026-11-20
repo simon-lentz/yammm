@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/instance"
 
 	"github.com/simon-lentz/yammm/immutable"
@@ -90,7 +91,7 @@ func documentShapes(t *testing.T) (schema.Schema, snapparts.Parts) {
 func TestDocument_WritesEveryShapeWhereTheFormatHoldsIt(t *testing.T) {
 	t.Parallel()
 	s, parts := documentShapes(t)
-	header := `{"version":` + strconv.Itoa(snapshot.MinReadableVersion) +
+	header := `{"version":` + strconv.Itoa(snappartstest.WrittenVersion(t, s)) +
 		`,"schema_name":"shapes","schema_source":` + strconv.Quote(s.SourceID().String()) +
 		`,"schema_hash":` + strconv.Quote(schema.StructuralHash(s)) +
 		`,"schema_hash_algorithm":` + strconv.Itoa(schema.StructuralHashVersion) +
@@ -162,7 +163,7 @@ func TestLoaded_ReadsEveryShapeBack(t *testing.T) {
 	if got := slices.Collect(snap.Duplicates()); len(got) != 1 || got[0].Instance().Properties().Clone()["score"] != 3.5 {
 		t.Errorf("duplicates = %v, want one holding the score 3.5", got)
 	}
-	if got := slices.Collect(snap.Unresolved()); len(got) != 1 || got[0].Relation() != "MENTOR" || got[0].Reason() != "target_missing" {
+	if got := slices.Collect(snap.Unresolved()); len(got) != 1 || got[0].Relation() != "MENTOR" || got[0].Reason() != graph.ReasonTargetMissing {
 		t.Errorf("unresolved = %v, want one MENTOR target_missing", got)
 	}
 }

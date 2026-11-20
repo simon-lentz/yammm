@@ -5,6 +5,8 @@ import (
 	"reflect"
 	"testing"
 
+	"github.com/simon-lentz/yammm/internal/schematest"
+
 	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/internal/value"
 	"github.com/simon-lentz/yammm/schema"
@@ -15,8 +17,8 @@ import (
 // instance, is a list to both, as it is to Canonical. An array is not.
 func TestCheckAndCoerce_ReadAStoredList(t *testing.T) {
 	t.Parallel()
-	lc := schema.NewListConstraint(schema.NewStringConstraint())
-	vc := schema.NewVectorConstraint(2)
+	lc := schematest.Constraint(t, "List<String>")
+	vc := schematest.Constraint(t, "Vector[2]")
 	for _, c := range []struct {
 		name string
 		in   []any
@@ -55,13 +57,13 @@ func TestCheckAndCoerce_ANamedNumberIsItsBase(t *testing.T) {
 		c    schema.Constraint
 		want any
 	}{
-		{"a named int64 at Integer", namedInt64(42), schema.NewIntegerConstraint(), int64(42)},
-		{"a named float64 at Float", namedFloat64(2.5), schema.NewFloatConstraint(), 2.5},
-		{"a named float32 at Float", namedFloat32(1.5), schema.NewFloatConstraint(), 1.5},
-		{"a named int64 at Float", namedInt64(3), schema.NewFloatConstraint(), 3.0},
-		{"a named uint at Integer", namedUint(5), schema.NewIntegerConstraint(), int64(5)},
-		{"a named uint at Float", namedUint(5), schema.NewFloatConstraint(), 5.0},
-		{"named numbers at Vector", []any{namedFloat64(1.0), namedInt64(2), namedFloat32(3.0)}, schema.NewVectorConstraint(3), []float64{1, 2, 3}},
+		{"a named int64 at Integer", namedInt64(42), schematest.Constraint(t, "Integer"), int64(42)},
+		{"a named float64 at Float", namedFloat64(2.5), schematest.Constraint(t, "Float"), 2.5},
+		{"a named float32 at Float", namedFloat32(1.5), schematest.Constraint(t, "Float"), 1.5},
+		{"a named int64 at Float", namedInt64(3), schematest.Constraint(t, "Float"), 3.0},
+		{"a named uint at Integer", namedUint(5), schematest.Constraint(t, "Integer"), int64(5)},
+		{"a named uint at Float", namedUint(5), schematest.Constraint(t, "Float"), 5.0},
+		{"named numbers at Vector", []any{namedFloat64(1.0), namedInt64(2), namedFloat32(3.0)}, schematest.Constraint(t, "Vector[3]"), []float64{1, 2, 3}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
@@ -82,16 +84,16 @@ func TestCheckAndCoerce_ANamedNumberIsItsBase(t *testing.T) {
 func TestCheckAndCoerce_ANamedStringReadsAtATemporalKind(t *testing.T) {
 	t.Parallel()
 	d, ts := namedString("2030-01-01"), namedString("2030-01-01T00:00:00Z")
-	if err := value.Check(d, schema.NewDateConstraint()); err != nil {
+	if err := value.Check(d, schematest.Constraint(t, "Date")); err != nil {
 		t.Errorf("Check(a named string, Date) = %v", err)
 	}
-	if err := value.Check(ts, schema.NewTimestampConstraint()); err != nil {
+	if err := value.Check(ts, schematest.Constraint(t, "Timestamp")); err != nil {
 		t.Errorf("Check(a named string, Timestamp) = %v", err)
 	}
-	if got, err := value.Coerce(d, schema.NewDateConstraint()); err != nil || got != "2030-01-01" {
+	if got, err := value.Coerce(d, schematest.Constraint(t, "Date")); err != nil || got != "2030-01-01" {
 		t.Errorf("Coerce(a named string, Date) = %#v, %v; want the base string", got, err)
 	}
-	if got, err := value.Coerce(ts, schema.NewTimestampConstraint()); err != nil || got != "2030-01-01T00:00:00Z" {
+	if got, err := value.Coerce(ts, schematest.Constraint(t, "Timestamp")); err != nil || got != "2030-01-01T00:00:00Z" {
 		t.Errorf("Coerce(a named string, Timestamp) = %#v, %v; want the base string", got, err)
 	}
 }
@@ -106,16 +108,16 @@ func TestCoerce_EveryArmRefusesTheWrongKind(t *testing.T) {
 		val  any
 		c    schema.Constraint
 	}{
-		{"a struct at Timestamp", struct{ X int }{1}, schema.NewTimestampConstraint()},
-		{"a struct at Date", struct{ X int }{1}, schema.NewDateConstraint()},
-		{"a struct at UUID", struct{ X int }{1}, schema.NewUUIDConstraint()},
-		{"a struct at String", struct{ X int }{1}, schema.NewStringConstraint()},
-		{"a struct at Integer", struct{ X int }{1}, schema.NewIntegerConstraint()},
-		{"an int at String", 42, schema.NewStringConstraint()},
-		{"a string at Boolean", "true", schema.NewBooleanConstraint()},
-		{"an int at Enum", 7, schema.NewEnumConstraint([]string{"a"})},
-		{"an int at Pattern", 7, schema.NewPatternConstraint(nil)},
-		{"a json.Number at String", json.Number("42"), schema.NewStringConstraint()},
+		{"a struct at Timestamp", struct{ X int }{1}, schematest.Constraint(t, "Timestamp")},
+		{"a struct at Date", struct{ X int }{1}, schematest.Constraint(t, "Date")},
+		{"a struct at UUID", struct{ X int }{1}, schematest.Constraint(t, "UUID")},
+		{"a struct at String", struct{ X int }{1}, schematest.Constraint(t, "String")},
+		{"a struct at Integer", struct{ X int }{1}, schematest.Constraint(t, "Integer")},
+		{"an int at String", 42, schematest.Constraint(t, "String")},
+		{"a string at Boolean", "true", schematest.Constraint(t, "Boolean")},
+		{"an int at Enum", 7, schematest.Constraint(t, `Enum["a", "z"]`)},
+		{"an int at Pattern", 7, schema.PatternConstraint{}},
+		{"a json.Number at String", json.Number("42"), schematest.Constraint(t, "String")},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
@@ -124,10 +126,10 @@ func TestCoerce_EveryArmRefusesTheWrongKind(t *testing.T) {
 			}
 		})
 	}
-	if got, err := value.Coerce(namedString("x"), schema.NewStringConstraint()); err != nil || got != "x" {
+	if got, err := value.Coerce(namedString("x"), schematest.Constraint(t, "String")); err != nil || got != "x" {
 		t.Errorf("a named string must coerce to its base: got %#v, %v", got, err)
 	}
-	if got, err := value.Coerce(namedBool(true), schema.NewBooleanConstraint()); err != nil || got != true {
+	if got, err := value.Coerce(namedBool(true), schematest.Constraint(t, "Boolean")); err != nil || got != true {
 		t.Errorf("a named bool must coerce to its base: got %#v, %v", got, err)
 	}
 }
@@ -137,8 +139,8 @@ func TestCoerce_EveryArmRefusesTheWrongKind(t *testing.T) {
 func TestCheckAndCoerce_AValueThatHoldsNoneIsNil(t *testing.T) {
 	t.Parallel()
 	for _, c := range []schema.Constraint{
-		schema.NewStringConstraint(), schema.NewIntegerConstraint(), schema.NewTimestampConstraint(),
-		schema.NewVectorConstraint(2), schema.NewListConstraint(schema.NewStringConstraint()),
+		schematest.Constraint(t, "String"), schematest.Constraint(t, "Integer"), schematest.Constraint(t, "Timestamp"),
+		schematest.Constraint(t, "Vector[2]"), schematest.Constraint(t, "List<String>"),
 	} {
 		for _, v := range []any{nil, []any(nil), []string(nil), map[string]any(nil), immutable.Wrap([]any(nil)).Any()} {
 			if err := value.Check(v, c); err != nil {

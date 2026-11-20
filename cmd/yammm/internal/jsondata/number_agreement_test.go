@@ -128,7 +128,7 @@ func jsonReader(ctx context.Context, t *testing.T, v *instance.Validator, prop, 
 	if err := pres.Err(); err != nil {
 		t.Fatalf("JSON parse %s: %v", doc, err)
 	}
-	return validated(ctx, v, parsed["T"][0].RawInstance, prop)
+	return validated(ctx, v, parsed["T"].Elements[0].RawInstance, prop)
 }
 
 func validated(ctx context.Context, v *instance.Validator, raw instance.RawInstance, prop string) (any, bool) {
@@ -171,7 +171,7 @@ func ysReader(ctx context.Context, t *testing.T, s schema.Schema, ys []byte, pro
 	t.Helper()
 	anchor := map[string]string{"n": `"n":0`, "f": `"f":0.5`}[prop]
 	data := bytes.Replace(ys, []byte(anchor), []byte(`"`+prop+`":`+lit), 1)
-	_, lres := snapshot.Load(ctx, data, s, snapshot.WithIntegrityCheck(false), snapshot.WithRevalidation(diag.Error))
+	_, lres := snapshot.Unmarshal(ctx, data, s, snapshot.WithIntegrityCheck(false), snapshot.WithRevalidation(diag.Error))
 	for issue := range lres.Issues() {
 		if issue.Code() != diag.E_TYPE_MISMATCH {
 			t.Fatalf(".ys load drew %s, want at most E_TYPE_MISMATCH", lres)

@@ -184,13 +184,13 @@ func TestTexts_ReadsAnswerFromTheRegisteredContent(t *testing.T) {
 
 	id := sourcetest.ID("test://reads.yammm")
 	texts := NewTexts()
-	if texts.Has(id) || texts.Len() != 0 {
-		t.Fatalf("a new Texts holds a source: Has = %v, Len = %d", texts.Has(id), texts.Len())
+	if _, ok := texts.ContentBySource(id); ok {
+		t.Fatal("a new Texts holds a source")
 	}
 	mustRegister(t, texts.RegisterFile, id, markedLines)
 
-	if !texts.Has(id) || texts.Len() != 1 {
-		t.Errorf("Has = %v, Len = %d, want true, 1", texts.Has(id), texts.Len())
+	if _, ok := texts.ContentBySource(id); !ok {
+		t.Error("ContentBySource finds no content for the registered source")
 	}
 	// The content's own line start counts the mark.
 	if start, ok := texts.LineStartByte(id, 1); !ok || start != 0 {

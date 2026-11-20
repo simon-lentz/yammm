@@ -28,7 +28,7 @@ func TestRelationCollision_DoesNotSuppressCompositionDiagnostics(t *testing.T) {
 	if !res.HasCode(diag.E_CASE_FOLD_COLLISION) {
 		t.Fatalf("control: want E_CASE_FOLD_COLLISION, got %v", codes(res))
 	}
-	if !res.HasCode(instance.ErrUnresolvedRequiredComposition) {
+	if !res.HasCode(diag.E_UNRESOLVED_REQUIRED_COMPOSITION) {
 		t.Errorf("the absent required NOTES was hidden behind the relation collision: %v", codes(res))
 	}
 	if n := countCode(res, diag.E_CASE_FOLD_COLLISION); n != 1 {
@@ -96,7 +96,7 @@ func TestValidate_ACancelledRowsPartialDiagnosticsAreDropped(t *testing.T) {
 		if valids != nil {
 			t.Errorf("check %d: a cancelled batch returned a slice of %d", at+1, len(valids))
 		}
-		if res.HasCode(instance.ErrTypeMismatch) {
+		if res.HasCode(diag.E_TYPE_MISMATCH) {
 			t.Errorf("check %d: the cancelled row's partial E_TYPE_MISMATCH was merged into a nil-slice result: %v", at+1, codes(res))
 		}
 		if n := countCode(res, diag.E_CONTEXT_CANCELLED); n != 1 {
@@ -116,7 +116,7 @@ func TestListProperty_RefusesAUUIDAsSixteenIntegers(t *testing.T) {
 	_, res := v.ValidateOne(t.Context(), "T", instance.RawInstance{Properties: map[string]any{
 		"id": "a", "nums": uuid.MustParse("123e4567-e89b-12d3-a456-426614174000"),
 	}})
-	if !res.HasCode(instance.ErrTypeMismatch) {
+	if !res.HasCode(diag.E_TYPE_MISMATCH) {
 		t.Errorf("a uuid.UUID at a List<Integer> property validated clean: %v", codes(res))
 	}
 }

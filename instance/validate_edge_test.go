@@ -1022,7 +1022,7 @@ type County {
 		valid, result := validator.ValidateOne(t.Context(), "County", raw)
 		assert.True(t, valid.IsZero())
 		require.False(t, result.OK())
-		assert.True(t, result.HasCode(instance.ErrConstraintFail),
+		assert.True(t, result.HasCode(diag.E_CONSTRAINT_FAIL),
 			"want E_CONSTRAINT_FAIL, got: %s", result)
 	})
 }

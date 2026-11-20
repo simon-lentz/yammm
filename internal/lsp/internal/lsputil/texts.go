@@ -52,12 +52,6 @@ func (t *Texts) RegisterFile(id location.SourceID, content []byte) error {
 	return nil
 }
 
-// Has reports whether the source is registered.
-func (t *Texts) Has(id location.SourceID) bool { return t.registry.Has(id) }
-
-// Len returns the number of registered sources.
-func (t *Texts) Len() int { return t.registry.Len() }
-
 // ContentBySource returns the registered bytes of a source.
 func (t *Texts) ContentBySource(id location.SourceID) ([]byte, bool) {
 	return t.registry.ContentBySource(id)

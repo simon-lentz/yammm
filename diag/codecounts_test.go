@@ -29,7 +29,7 @@ func TestResult_CodeCounts_SeenBasedUnderTruncation(t *testing.T) {
 // Severity is independent of code: the same code at two severities counts
 // once under each, and a severity-agnostic map could not tell them apart.
 func TestResult_CodeCounts_SeparatesSeverities(t *testing.T) {
-	c := NewCollectorUnlimited()
+	c := NewCollector(NoLimit)
 	c.Collect(NewIssue(Error, E_CONSTRAINT_FAIL, "as an error").Build())
 	c.Collect(NewIssue(Warning, E_CONSTRAINT_FAIL, "retagged to a warning").Build())
 	c.Collect(NewIssue(Warning, E_CONSTRAINT_FAIL, "and again").Build())
@@ -51,7 +51,7 @@ func TestCollector_Merge_SumsCodeCounts(t *testing.T) {
 	src.Collect(NewIssue(Warning, W_ANNOTATION_SHADOWED, "one").Build())
 	src.Collect(NewIssue(Warning, W_ANNOTATION_SHADOWED, "two, dropped").Build())
 
-	dst := NewCollectorUnlimited()
+	dst := NewCollector(NoLimit)
 	dst.Collect(NewIssue(Warning, W_ANNOTATION_SHADOWED, "three").Build())
 	dst.Merge(src.Result())
 
@@ -61,7 +61,7 @@ func TestCollector_Merge_SumsCodeCounts(t *testing.T) {
 }
 
 func TestResult_CodeCounts_ReturnsACopy(t *testing.T) {
-	c := NewCollectorUnlimited()
+	c := NewCollector(NoLimit)
 	c.Collect(NewIssue(Warning, W_ANNOTATION_SHADOWED, "one").Build())
 	r := c.Result()
 

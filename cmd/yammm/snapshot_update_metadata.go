@@ -22,6 +22,10 @@ Use --set key=value to set or override a metadata key (repeatable).
 Use --unset key to remove a metadata key (repeatable).
 At least one --set or --unset is required.
 
+The file is first read whole as snapshot info reads it, and a document
+whose integrity hash or structure fails is refused rather than re-sealed
+under a fresh hash.
+
 The write is atomic (tmp+fsync+rename) and preserves the file's mode.
 
 This command uses the strict fast path and surfaces an
@@ -71,15 +75,18 @@ func runSnapshotUpdateMetadata(cmd *cobra.Command, args []string, sink *cli.Diag
 
 	ctx := cmd.Context()
 
-	header, headerRes := snapshot.HeaderOnly(ctx, data)
-	sink.Add(headerRes)
-	if headerRes.HasErrors() {
-		return cli.Exit(cli.ExitForResult(headerRes))
+	// UpdateMetadata trusts the body and seals it under a fresh hash, so the
+	// file is first read whole as every reader reads it: a document whose hash
+	// or structure fails is refused, never re-sealed.
+	info, statRes := snapshot.Stat(ctx, data)
+	sink.Add(statRes)
+	if statRes.HasErrors() {
+		return cli.Exit(cli.ExitForResult(statRes))
 	}
 
 	// Build the new metadata map from the existing header.Metadata, apply
 	// --set overrides, then remove --unset keys.
-	newMeta := maps.Clone(header.Metadata)
+	newMeta := maps.Clone(info.Metadata)
 	if newMeta == nil {
 		newMeta = make(map[string]string, len(setPairs))
 	}

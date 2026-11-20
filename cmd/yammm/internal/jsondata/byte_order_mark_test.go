@@ -17,10 +17,10 @@ func TestParse_SkipsOneLeadingByteOrderMark(t *testing.T) {
 	if result.HasErrors() {
 		t.Fatalf("issues: %s", result.String())
 	}
-	if len(parsed["Test"]) != 1 {
-		t.Fatalf("parsed %d instances, want 1", len(parsed["Test"]))
+	if len(parsed["Test"].Elements) != 1 {
+		t.Fatalf("parsed %d instances, want 1", len(parsed["Test"].Elements))
 	}
-	if got := parsed["Test"][0].Properties["id"]; got != "a" {
+	if got := parsed["Test"].Elements[0].Properties["id"]; got != "a" {
 		t.Errorf("id = %v, want %q", got, "a")
 	}
 

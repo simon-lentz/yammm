@@ -1,6 +1,8 @@
 package graph
 
 import (
+	"fmt"
+
 	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/schema"
 )
@@ -57,9 +59,9 @@ func (d Duplicate) Conflict() Instance {
 // empty.
 //
 // Unresolved edges occur when:
-//   - The target instance was not added yet (Reason: "target_missing")
-//   - A required association field is absent from the data (Reason: "absent")
-//   - A required association array is empty (Reason: "empty")
+//   - The target instance was not added yet ([ReasonTargetMissing])
+//   - A required association field is absent from the data ([ReasonAbsent])
+//   - A required association array is empty ([ReasonEmpty])
 //
 // For required associations ([UnresolvedEdge.Required]), unresolved edges cause
 // [Graph.Check] to report E_UNRESOLVED_REQUIRED diagnostics. Optional
@@ -79,8 +81,8 @@ type unresolvedEdgeState struct {
 	targetType schema.TypeID
 	targetKey  string
 	required   bool
-	reason     string
-	// properties is empty for the "absent" and "empty" reasons, which never
+	reason     UnresolvedReason
+	// properties is empty for the absent and empty reasons, which never
 	// had a target to attach properties to.
 	properties immutable.Properties
 }
@@ -109,8 +111,8 @@ func (u UnresolvedEdge) TargetType() schema.TypeID {
 	return u.targetType
 }
 
-// TargetKey returns the foreign key in [FormatKey] form, and "" for the
-// "absent" and "empty" reasons, which name no target.
+// TargetKey returns the foreign key in [FormatKey] form, and "" for
+// [ReasonAbsent] and [ReasonEmpty], which name no target.
 func (u UnresolvedEdge) TargetKey() string {
 	if u.IsZero() {
 		return ""
@@ -128,23 +130,59 @@ func (u UnresolvedEdge) Required() bool {
 	return u.required
 }
 
-// Reason explains why the edge is unresolved:
-//   - "target_missing": the target instance is not in the graph
-//   - "absent": the instance data leaves the association field out or holds no
-//     value there, such as null
-//   - "empty": the association array is present but empty
-func (u UnresolvedEdge) Reason() string {
+// Reason explains why the edge is unresolved, and is zero for a zero receiver.
+func (u UnresolvedEdge) Reason() UnresolvedReason {
 	if u.IsZero() {
-		return ""
+		return 0
 	}
 	return u.reason
+}
+
+// UnresolvedReason says why an association edge is unresolved. The zero
+// UnresolvedReason names no reason.
+type UnresolvedReason uint8
+
+const (
+	// ReasonTargetMissing: the target instance is not in the graph.
+	ReasonTargetMissing UnresolvedReason = iota + 1
+	// ReasonAbsent: the instance data leaves the association field out or
+	// holds no value there, such as null.
+	ReasonAbsent
+	// ReasonEmpty: the association array is present but empty.
+	ReasonEmpty
+)
+
+// String returns the reason's text in a .ys document: "target_missing",
+// "absent" or "empty".
+func (r UnresolvedReason) String() string {
+	switch r {
+	case ReasonTargetMissing:
+		return "target_missing"
+	case ReasonAbsent:
+		return "absent"
+	case ReasonEmpty:
+		return "empty"
+	default:
+		return fmt.Sprintf("UnresolvedReason(%d)", uint8(r))
+	}
+}
+
+// unresolvedReason reads a reason from its text in a .ys document, and returns
+// zero for a text that names none.
+func unresolvedReason(text string) UnresolvedReason {
+	for r := ReasonTargetMissing; r <= ReasonEmpty; r++ {
+		if r.String() == text {
+			return r
+		}
+	}
+	return 0
 }
 
 // Property returns the value for the given edge property name and true if it exists.
 // Returns (zero Value, false) if the property does not exist or the receiver is zero.
 //
 // Edge properties on unresolved edges are declared on the association in the
-// yammm DSL; they survive Marshal/Load in every readable .ys wire
+// yammm DSL; they survive Marshal/Unmarshal in every readable .ys wire
 // format. Symmetric with [Edge.Property] for resolved edges.
 func (u UnresolvedEdge) Property(name string) (immutable.Value, bool) {
 	if u.IsZero() {
@@ -173,7 +211,7 @@ func newDuplicate(instance, conflict Instance) Duplicate {
 }
 
 // newUnresolvedEdge creates an UnresolvedEdge record.
-func newUnresolvedEdge(source Instance, relation string, targetType schema.TypeID, targetKey string, required bool, reason string, properties immutable.Properties) UnresolvedEdge {
+func newUnresolvedEdge(source Instance, relation string, targetType schema.TypeID, targetKey string, required bool, reason UnresolvedReason, properties immutable.Properties) UnresolvedEdge {
 	return UnresolvedEdge{&unresolvedEdgeState{
 		source:     source,
 		relation:   relation,

@@ -3,6 +3,8 @@ package neo4j
 import (
 	"testing"
 
+	"github.com/simon-lentz/yammm/internal/schematest"
+
 	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/internal/snapparts"
 	"github.com/simon-lentz/yammm/internal/snappartstest"
@@ -25,7 +27,7 @@ func TestEdgeQueries_ARefusalNamesTheRelationOnce(t *testing.T) {
 func TestCoerceValue_ATimestampRefusalNamesRFC3339(t *testing.T) {
 	t.Parallel()
 	for _, text := range []string{"nope", "2026-08-19", "2026-08-19 12:00:00"} {
-		_, err := coerceValue(schema.NewTimestampConstraint(), text)
+		_, err := coerceValue(schematest.Constraint(t, "Timestamp"), text)
 		want := `coerce Timestamp: cannot parse "` + text + `" as an RFC3339 timestamp`
 		if err == nil || err.Error() != want {
 			t.Errorf("error = %v; want %s", err, want)

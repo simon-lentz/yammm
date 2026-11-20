@@ -48,7 +48,7 @@ func TestLoadAndParseJSON_MintsTheLoadersIdentity(t *testing.T) {
 	}
 
 	want := wantSourceID(t, p)
-	span := parsed["Anchor"][0].Provenance.Span()
+	span := parsed["Anchor"].Elements[0].Provenance.Span()
 	if span.Source != want {
 		t.Errorf("span source %q, want %q", span.Source, want)
 	}
@@ -77,8 +77,8 @@ func TestLoadAndParse_OneSpellingOfOneFileGivesOneIdentity(t *testing.T) {
 		t.Fatalf("LoadAndParseJSON: %v", err)
 	}
 
-	a := first["Anchor"][0].Provenance.Span().Source
-	b := second["Anchor"][0].Provenance.Span().Source
+	a := first["Anchor"].Elements[0].Provenance.Span().Source
+	b := second["Anchor"].Elements[0].Provenance.Span().Source
 	if a != b {
 		t.Errorf("two spellings gave two identities: %q and %q", a, b)
 	}

@@ -1,8 +1,11 @@
 package cypher
 
 import (
+	"fmt"
 	"strings"
 	"testing"
+
+	"github.com/simon-lentz/yammm/internal/schematest"
 
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/internal/mapping"
@@ -99,7 +102,7 @@ func TestIndexTargetDefense_RejectsTargetsTheLoaderWouldHaveRejected(t *testing.
 		// A valid dimension, so only the not-a-Vector guard can fire: a zero
 		// one is caught by the guard after it and the branch stays unpinned.
 		ok := validVectorTarget(typ, propertyOn(t, typ, "title"), vectorAnn,
-			schema.NewVectorConstraint(3), false, collector, reportedTargets{})
+			vectorOf(t, 3), false, collector, reportedTargets{})
 		if ok {
 			t.Error("validVectorTarget accepted a String — the declared ANN index would be dropped silently")
 		}
@@ -113,10 +116,10 @@ func TestIndexTargetDefense_RejectsTargetsTheLoaderWouldHaveRejected(t *testing.
 
 	t.Run("vector target rejects a dimension outside 1 to the bound", func(t *testing.T) {
 		t.Parallel()
-		for _, d := range []int{0, parse.MaxIndexedVectorDimensions + 1} {
+		for d, c := range map[int]schema.VectorConstraint{0: {}, parse.MaxIndexedVectorDimensions + 1: vectorOf(t, parse.MaxIndexedVectorDimensions+1)} {
 			collector := diag.NewCollector(0)
 			ok := validVectorTarget(typ, propertyOn(t, typ, "flat"), vectorAnn,
-				schema.NewVectorConstraint(d), true, collector, reportedTargets{})
+				c, true, collector, reportedTargets{})
 			if ok {
 				t.Errorf("validVectorTarget accepted dimension %d — Neo4j aborts the DDL apply on it", d)
 			}
@@ -136,11 +139,11 @@ func TestIndexTargetDefense_RejectsTargetsTheLoaderWouldHaveRejected(t *testing.
 			t.Error("validFulltextTarget rejected a String")
 		}
 		if !validVectorTarget(typ, propertyOn(t, typ, "embedding"), vectorAnn,
-			schema.NewVectorConstraint(3), true, collector, reportedTargets{}) {
+			vectorOf(t, 3), true, collector, reportedTargets{}) {
 			t.Error("validVectorTarget rejected a 3-dimensional Vector")
 		}
 		if !validVectorTarget(typ, propertyOn(t, typ, "embedding"), vectorAnn,
-			schema.NewVectorConstraint(parse.MaxIndexedVectorDimensions), true, collector, reportedTargets{}) {
+			vectorOf(t, parse.MaxIndexedVectorDimensions), true, collector, reportedTargets{}) {
 			t.Errorf("validVectorTarget rejected a %d-dimensional Vector, the bound Neo4j accepts", parse.MaxIndexedVectorDimensions)
 		}
 		if collector.Result().HasErrors() {
@@ -155,4 +158,14 @@ func TestTargetScope_AnUnknownPropertyNamesTheAnnotatedType(t *testing.T) {
 	if got := targetScope(book, schema.Property{}); got != (mapping.IdentifierSubject{TypeName: "Entity"}) {
 		t.Errorf("targetScope = %+v", got)
 	}
+}
+
+// vectorOf returns the constraint the DSL declares as Vector[d].
+func vectorOf(tb testing.TB, d int) schema.VectorConstraint {
+	tb.Helper()
+	c, ok := schematest.Constraint(tb, fmt.Sprintf("Vector[%d]", d)).(schema.VectorConstraint)
+	if !ok {
+		tb.Fatalf("Vector[%d] is not a VectorConstraint", d)
+	}
+	return c
 }

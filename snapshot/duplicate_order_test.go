@@ -82,7 +82,7 @@ func TestMarshal_ALoadKeepsTheBytesOfManyDuplicates(t *testing.T) {
 			location.Span{Start: location.Position{Line: i + 1, Column: 1}}))
 	}
 	want := marshalDuplicates(t, s, provs)
-	loaded, res := snapshot.Load(t.Context(), want, s)
+	loaded, res := snapshot.Unmarshal(t.Context(), want, s)
 	if res.HasErrors() {
 		t.Fatalf("load: %s", res)
 	}

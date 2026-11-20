@@ -59,10 +59,10 @@ func TestValidate_EachGateReadsItsOwnPassesErrors(t *testing.T) {
 				"parts": []any{map[string]any{"id": "p1"}},
 			},
 		})
-		if !res.HasCode(ErrTypeMismatch) {
+		if !res.HasCode(diag.E_TYPE_MISMATCH) {
 			t.Errorf("the property error is missing: %s", res)
 		}
-		if !res.HasCode(ErrCaseFoldCollision) {
+		if !res.HasCode(diag.E_CASE_FOLD_COLLISION) {
 			t.Errorf("the relation collision is missing: %s", res)
 		}
 	})
@@ -76,10 +76,10 @@ func TestValidate_EachGateReadsItsOwnPassesErrors(t *testing.T) {
 				"LINK": map[string]any{"_target_id": "t2"},
 			},
 		})
-		if !res.HasCode(ErrCaseFoldCollision) {
+		if !res.HasCode(diag.E_CASE_FOLD_COLLISION) {
 			t.Errorf("the association collision is missing: %s", res)
 		}
-		if !res.HasCode(ErrUnresolvedRequiredComposition) {
+		if !res.HasCode(diag.E_UNRESOLVED_REQUIRED_COMPOSITION) {
 			t.Errorf("the absent required composition is missing: %s", res)
 		}
 	})
@@ -96,7 +96,7 @@ func TestValidate_EachGateReadsItsOwnPassesErrors(t *testing.T) {
 		})
 		var msg string
 		for is := range res.Issues() {
-			if is.Code() == ErrCaseFoldCollision {
+			if is.Code() == diag.E_CASE_FOLD_COLLISION {
 				msg = is.Message()
 			}
 		}
@@ -305,10 +305,10 @@ type Order {
 // reported as a deadline.
 func TestKeepInternalErrors(t *testing.T) {
 	t.Parallel()
-	c := diag.NewCollectorUnlimited()
-	c.Collect(diag.NewIssue(diag.Error, ErrTypeMismatch, "a partial finding").Build())
+	c := diag.NewCollector(diag.NoLimit)
+	c.Collect(diag.NewIssue(diag.Error, diag.E_TYPE_MISMATCH, "a partial finding").Build())
 	c.Collect(diag.NewIssue(diag.Fatal, diag.E_INTERNAL, "a library defect").Build())
-	c.Collect(diag.NewIssue(diag.Error, ErrMissingRequired, "another partial finding").Build())
+	c.Collect(diag.NewIssue(diag.Error, diag.E_MISSING_REQUIRED, "another partial finding").Build())
 
 	kept := keepInternalErrors(c.Result())
 
@@ -323,8 +323,15 @@ func TestKeepInternalErrors(t *testing.T) {
 		t.Errorf("kept %d issues, want the one E_INTERNAL", n)
 	}
 
-	empty := diag.NewCollectorUnlimited()
-	empty.Collect(diag.NewIssue(diag.Error, ErrTypeMismatch, "a partial finding").Build())
+	two := diag.NewCollector(diag.NoLimit)
+	two.Collect(diag.NewIssue(diag.Fatal, diag.E_INTERNAL, "a library defect").Build())
+	two.Collect(diag.NewIssue(diag.Fatal, diag.E_INTERNAL, "a second library defect").Build())
+	if kept := keepInternalErrors(two.Result()); kept.Len() != 2 || kept.LimitReached() {
+		t.Errorf("two stored defects kept %d, limit reached %v; want both, no limit", kept.Len(), kept.LimitReached())
+	}
+
+	empty := diag.NewCollector(diag.NoLimit)
+	empty.Collect(diag.NewIssue(diag.Error, diag.E_TYPE_MISMATCH, "a partial finding").Build())
 	if kept := keepInternalErrors(empty.Result()); kept.HasErrors() {
 		t.Errorf("a row with no internal error kept something: %s", kept)
 	}

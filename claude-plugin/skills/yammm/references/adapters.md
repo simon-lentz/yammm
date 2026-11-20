@@ -79,7 +79,7 @@ A type's write-once properties come from its `@writeOnce` annotations, own and i
 
 ### Parameter Coercion (Direct-Cypher Path)
 
-Values passing through `NodeQueries` are coerced to driver-native types automatically, save two the validator takes: a value that holds one at a list whose element is a collection, which is refused by its type first, and a `Timestamp` at a UTC offset past 18 hours. Consumers hand-building Cypher parameters call `CoerceParams`. It reads each value at a declared key as the validator reads a property value, and sends it as the write path sends the value the validator stores. A value the validator refuses is an error, a pointer included: a `Date` takes a `"2006-01-02"` string or a `time.Time`, and a `dbtype.Date` is refused. A value that holds none (`instance.IsAbsent`), nil, a nil slice, a nil map or a nil `immutable` container, it returns as nil, which the driver writes as null:
+Values passing through `NodeQueries` are coerced to driver-native types automatically, save two the validator takes: a value that holds one at a list whose element is a collection, which is refused by its type first, and a `Timestamp` at a UTC offset past 18 hours. Consumers hand-building Cypher parameters call `CoerceParams`. It reads each value at a declared key as the validator reads a property value, and sends it as the write path sends the value the validator stores. A value the validator refuses is an error, a pointer included: a `Date` takes a `"2006-01-02"` string or a `time.Time`, and a `dbtype.Date` is refused. A value that holds none, nil, a nil slice, a nil map or a nil `immutable` container, it returns as nil, which the driver writes as null:
 
 ```go
 types := neo4j.ParamTypesForType(t)   // property-name -> constraint map for a type
@@ -97,11 +97,11 @@ label := c.Label(t)  // "inventory__Product" for type Product of schema inventor
 result := c.CheckLabels(s)
 ```
 
-A label is `LabelPrefix` + schema name + `LabelSeparator` + type name, as written; nothing is sanitized. `CheckLabels` reports each break with `E_NEO4J_INVALID_IDENTIFIER`: a prefix that does not start an identifier or a separator that is not ASCII letters, digits and underscores (once per call), a schema name that holds the separator or runs into it from its end, as `"a__B"` and `"geo_"` do under `__` (once per schema, and its types' labels are then not judged), and a label that is a Cypher reserved keyword (once per type). A label that keeps the rule decodes to one (schema, type) pair, so two types never share one. Every generator and both write calls run it first.
+A label is `LabelPrefix` + schema name + `LabelSeparator` + type name, as written; nothing is sanitized. `CheckLabels` reports each break with `E_NEO4J_INVALID_IDENTIFIER`: a prefix that does not start an identifier or a separator that is not ASCII letters, digits and underscores (once per call), a schema name that holds the separator or runs into it from its end, as `"a__B"` and `"geo_"` do under `__` (once per schema, and its types' labels are then not judged), and a label that is a Cypher reserved keyword (once per type). A label that keeps the rule decodes to one (schema, type) pair, so two types never share one. `Config.Constraints`, `Config.Indexes` and the two write calls, `neo4j.NodeQueries` and `neo4j.EdgeQueries`, run it first.
 
-**Cypher reserved words:** the DSL reserves none as one; of the six spellings
-its grammar refuses as a property name, four are Cypher keywords too (`as`,
-`in`, `true` and `false`). A property named
+**Cypher reserved words:** of the six spellings the DSL's grammar refuses as
+a property name, four are Cypher keywords (`as`, `in`, `true` and `false`);
+it refuses no other Cypher keyword. A property named
 `match` is valid yammm (and fine in a `.ys` snapshot) but is rejected with
 `E_NEO4J_INVALID_IDENTIFIER`, whose detail reads "the name is a Cypher reserved keyword",
 wherever a generated constraint or index statement writes it, because property names appear unquoted in generated Cypher; the

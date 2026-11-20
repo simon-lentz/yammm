@@ -119,7 +119,7 @@ func syntaxResult(path string, content []byte, iss diag.Issue) (diag.Result, boo
 	span.Source = source
 	span.Start.Offset = fileOffset(content, span.Start.Offset)
 	span.End.Offset = fileOffset(content, span.End.Offset)
-	c := diag.NewCollectorUnlimited()
+	c := diag.NewCollector(diag.NoLimit)
 	c.Collect(diag.FromIssue(iss).WithSpan(span).Build())
 	return c.Result(), true
 }

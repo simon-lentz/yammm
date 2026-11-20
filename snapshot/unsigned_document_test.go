@@ -52,7 +52,7 @@ func TestRead_AHeaderThatHoldsNoHashIsAMismatch(t *testing.T) {
 			t.Run(layout+"/"+form, func(t *testing.T) {
 				t.Parallel()
 				want := map[diag.Code]int{diag.E_SNAPSHOT_INTEGRITY_MISMATCH: 1}
-				_, lres := snapshot.Load(ctx, unsigned, s)
+				_, lres := snapshot.Unmarshal(ctx, unsigned, s)
 				if !maps.Equal(errorCodes(lres), want) {
 					t.Errorf("Load: %v, want %v:\n%s", errorCodes(lres), want, lres)
 				}
@@ -73,16 +73,16 @@ func TestRead_AHeaderThatHoldsNoHashIsAMismatch(t *testing.T) {
 				if vres := snapshot.Verify(ctx, unsigned, s); !maps.Equal(errorCodes(vres), want) {
 					t.Errorf("Verify: %v, want %v:\n%s", errorCodes(vres), want, vres)
 				}
-				info, ires := snapshot.Info(ctx, unsigned)
+				info, ires := snapshot.Stat(ctx, unsigned)
 				if !maps.Equal(errorCodes(ires), want) {
 					t.Errorf("Info: %v, want %v:\n%s", errorCodes(ires), want, ires)
 				}
-				if info == nil || info.IntegrityStatus != "mismatch" {
-					t.Errorf("Info: IntegrityStatus of %+v, want mismatch", info)
+				if info == nil || info.IntegrityStatus != snapshot.IntegrityMismatch {
+					t.Errorf("Stat: IntegrityStatus of %+v, want mismatch", info)
 				}
 
 				skip := snapshot.WithIntegrityCheck(false)
-				if _, lres := snapshot.Load(ctx, unsigned, s, skip); lres.HasErrors() {
+				if _, lres := snapshot.Unmarshal(ctx, unsigned, s, skip); lres.HasErrors() {
 					t.Errorf("Load skipping the check: %s", lres)
 				}
 				if vres := snapshot.Verify(ctx, unsigned, s, skip); vres.HasErrors() {

@@ -105,7 +105,7 @@ func TestLoad_RefusesEdgeTargetTypeMismatch(t *testing.T) {
 		t.Fatalf("no target_type edit possible in %s", doc)
 	}
 
-	_, lres := snapshot.Load(ctx, []byte(edited), s, snapshot.WithIntegrityCheck(false))
+	_, lres := snapshot.Unmarshal(ctx, []byte(edited), s, snapshot.WithIntegrityCheck(false))
 	if !lres.HasCode(diag.E_SNAPSHOT_TYPE_MISMATCH) {
 		t.Errorf("Load did not refuse an edge target contradicting the association: %s", lres)
 	}
@@ -157,7 +157,7 @@ func TestLoad_RefusesComposedChildTypeMismatch(t *testing.T) {
 		t.Fatalf("no composed type edit possible in %s", doc)
 	}
 
-	_, lres := snapshot.Load(ctx, []byte(edited), s, snapshot.WithIntegrityCheck(false))
+	_, lres := snapshot.Unmarshal(ctx, []byte(edited), s, snapshot.WithIntegrityCheck(false))
 	if !lres.HasCode(diag.E_SNAPSHOT_TYPE_MISMATCH) {
 		t.Errorf("Load did not refuse a composed child contradicting the composition: %s", lres)
 	}

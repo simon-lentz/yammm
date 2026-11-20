@@ -14,13 +14,13 @@ import (
 func TestEdgeShapeMismatch_AlwaysCarriesExpectedAndGot(t *testing.T) {
 	v := instance.NewValidator(loadSrc(t, personCompany))
 	_, res := v.ValidateOne(t.Context(), "Person", instance.RawInstance{Properties: map[string]any{"id": "p", "works_at": 42}})
-	is := mustIssue(t, res, instance.ErrEdgeShapeMismatch)
+	is := mustIssue(t, res, diag.E_EDGE_SHAPE_MISMATCH)
 	yammmtest.Diff(t, []string{"object"}, detailValues(is, diag.DetailKeyExpected))
 	yammmtest.Diff(t, []string{"number"}, detailValues(is, diag.DetailKeyGot))
 
 	v = instance.NewValidator(loadSrc(t, docSrc))
 	_, res = v.ValidateOne(t.Context(), "Doc", instance.RawInstance{Properties: map[string]any{"id": "d", "lines": "x"}})
-	is = mustIssue(t, res, instance.ErrEdgeShapeMismatch)
+	is = mustIssue(t, res, diag.E_EDGE_SHAPE_MISMATCH)
 	yammmtest.Diff(t, []string{"array"}, detailValues(is, diag.DetailKeyExpected))
 	yammmtest.Diff(t, []string{"string"}, detailValues(is, diag.DetailKeyGot))
 }
@@ -29,7 +29,7 @@ func TestEdgeShapeMismatch_AlwaysCarriesExpectedAndGot(t *testing.T) {
 func TestEdgeShapeMismatch_NamesTypedContainers(t *testing.T) {
 	v := instance.NewValidator(loadSrc(t, personCompany))
 	_, res := v.ValidateOne(t.Context(), "Person", instance.RawInstance{Properties: map[string]any{"id": "p", "works_at": []string{"x"}}})
-	yammmtest.Diff(t, []string{"array"}, detailValues(mustIssue(t, res, instance.ErrEdgeShapeMismatch), diag.DetailKeyGot))
+	yammmtest.Diff(t, []string{"array"}, detailValues(mustIssue(t, res, diag.E_EDGE_SHAPE_MISMATCH), diag.DetailKeyGot))
 }
 
 // A json.Number, the form a JSON document's numbers take, is named a number,
@@ -37,5 +37,5 @@ func TestEdgeShapeMismatch_NamesTypedContainers(t *testing.T) {
 func TestEdgeShapeMismatch_NamesAJSONNumberANumber(t *testing.T) {
 	v := instance.NewValidator(loadSrc(t, personCompany))
 	_, res := v.ValidateOne(t.Context(), "Person", instance.RawInstance{Properties: map[string]any{"id": "p", "works_at": json.Number("42")}})
-	yammmtest.Diff(t, []string{"number"}, detailValues(mustIssue(t, res, instance.ErrEdgeShapeMismatch), diag.DetailKeyGot))
+	yammmtest.Diff(t, []string{"number"}, detailValues(mustIssue(t, res, diag.E_EDGE_SHAPE_MISMATCH), diag.DetailKeyGot))
 }

@@ -3,6 +3,7 @@ package snapshot_test
 import (
 	"bytes"
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -57,7 +58,7 @@ func TestUpdateMetadataOrReMarshal_FallbackKeepsCreatedAtBytes(t *testing.T) {
 		t.Errorf("the fallback reported dropping a created_at it could carry: %v", outRes)
 	}
 	if !bytes.Contains(out, []byte(`"created_at":"`+foreign+`"`)) {
-		hdr, _ := snapshot.HeaderOnly(ctx, out)
+		hdr, _ := snapshot.ReadHeader(ctx, bytes.NewReader(out))
 		t.Errorf("created_at after the fallback = %q, want %q byte-for-byte", hdr.CreatedAt, foreign)
 	}
 }
@@ -91,5 +92,41 @@ func TestUpdateMetadataOrReMarshal_FallbackMarksACreatedAtItCannotCarry(t *testi
 	}
 	if bytes.Contains(out, []byte("yesterday")) {
 		t.Errorf("the fallback carried a created_at Marshal cannot write: %s", out)
+	}
+}
+
+// The fallback takes created_at from the document it decodes whole, so a header
+// past [snapshot.MaxHeaderSize], which ReadHeader refuses, keeps its stamp.
+func TestUpdateMetadataOrReMarshal_FallbackKeepsCreatedAtPastTheHeaderCap(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	s := testSchema(t)
+	snap := buildSnapshot(t, s,
+		mustValidInstance(t, s, "Company", []any{"c1"}, map[string]any{"id": "c1", "title": "Acme"}))
+	stamped := time.Date(2026, 8, 17, 12, 0, 0, 0, time.UTC)
+	big := strings.Repeat("x", snapshot.MaxHeaderSize)
+	data, res := snapshot.Marshal(ctx, snap, snapshot.WithCreatedAt(stamped), snapshot.WithMetadata(map[string]string{"big": big}))
+	if res.HasErrors() {
+		t.Fatalf("marshal: %v", res)
+	}
+	spaced := bytes.Replace(data, []byte(`},"types":`), []byte(`} ,"types":`), 1)
+	if bytes.Equal(spaced, data) {
+		t.Fatal("fixture shape changed; header boundary not found")
+	}
+	spaced = rehashDocument(t, spaced)
+	if _, hdrRes := snapshot.ReadHeader(ctx, bytes.NewReader(spaced)); !hdrRes.HasErrors() {
+		t.Fatal("ReadHeader accepted a header past MaxHeaderSize; the fixture tests nothing")
+	}
+
+	out, outRes := snapshot.UpdateMetadataOrReMarshal(ctx, spaced, map[string]string{"big": big, "stage": "fallback"}, s)
+	if outRes.HasErrors() || !hasCode(outRes, diag.W_UPDATE_METADATA_FALLBACK) {
+		t.Fatalf("result = %v, want the fallback's success", outRes)
+	}
+	info, infoRes := snapshot.Stat(ctx, out)
+	if infoRes.HasErrors() {
+		t.Fatalf("stat: %v", infoRes)
+	}
+	if info.CreatedAt != "2026-08-17T12:00:00Z" {
+		t.Errorf("created_at after the fallback = %q, want the input's", info.CreatedAt)
 	}
 }

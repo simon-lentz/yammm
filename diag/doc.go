@@ -56,8 +56,9 @@
 //   - [Error]: Validation failure but collection can continue
 //   - [Warning], [Info], [Hint]: Non-blocking diagnostics
 //
-// The [Severity.IsFailure] method returns true for Fatal and Error severities,
-// matching the [Result.Err] != nil check.
+// A Fatal or Error issue is a failure, the condition the [Result.Err] != nil
+// check reads. The zero Severity names no severity. Only the zero [Issue]
+// carries it, and a [Collector] refuses that Issue.
 //
 // # Issue Construction
 //
@@ -160,8 +161,8 @@
 //
 // # v0.3.0 Diagnostic Code Additions
 //
-// v0.3.0 adds three stable diagnostic codes under [CategorySnapshot],
-// raised by the snapshot package's scan and metadata primitives. Severity
+// v0.3.0 adds three stable diagnostic codes for reading a snapshot and updating
+// its metadata; the table below names each code's emitters. Severity
 // lives on the Issue, so a code's prefix is a convention and not a guarantee:
 // W_ marks a code raised at Warning, and E_ every other code, one raised at
 // more than one severity such as E_SNAPSHOT_UNSUPPORTED_HASH_ALGORITHM among
@@ -171,10 +172,10 @@
 //	Code                              Severity  Emitted by
 //	--------------------------------  --------  -----------------------------------------------------
 //	E_SNAPSHOT_IO                     Fatal     snapshot.ScanDir (a file that fails to open, on ScanEntry.Result)
-//	                                            snapshot.ScanDirSlice (a directory that fails to read)
-//	                                            snapshot.HeaderOnlyRead (a reader that fails, not a truncation)
+//	                                            snapshot.ReadHeader (a reader that fails, not a truncation)
+//	                                            yammm snapshot info --dir (a directory that fails to read)
 //	E_UPDATE_METADATA_BODY_OFFSET     Fatal     snapshot.UpdateMetadata (body-offset tracker cannot resolve)
-//	W_UPDATE_METADATA_FALLBACK        Warning   snapshot.UpdateMetadataOrReMarshal (fallback to Load+Marshal)
+//	W_UPDATE_METADATA_FALLBACK        Warning   snapshot.UpdateMetadataOrReMarshal (fallback to Unmarshal+Marshal)
 //
 // The Godoc on each code states its failure mode.
 package diag

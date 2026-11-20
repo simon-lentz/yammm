@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"context"
 	"errors"
 	"io/fs"
 	"os"
@@ -63,11 +62,7 @@ func TestStagingName_IsInvisibleToADirectoryScan(t *testing.T) {
 		t.Errorf("staging name %q does not end in %q", filepath.Base(staged.Name()), snapshot.TmpSuffix)
 	}
 
-	entries, result := snapshot.ScanDirSlice(context.Background(), dir)
-	if err := result.Err(); err != nil {
-		t.Fatalf("scan: %v", err)
-	}
-	if len(entries) != 0 {
+	if entries := scanEntries(t, dir); len(entries) != 0 {
 		t.Errorf("a directory scan reported the staging file: %v", entries)
 	}
 
@@ -76,8 +71,7 @@ func TestStagingName_IsInvisibleToADirectoryScan(t *testing.T) {
 	if err := os.WriteFile(old, []byte("{}"), 0o600); err != nil {
 		t.Fatalf("write fixture: %v", err)
 	}
-	entries, _ = snapshot.ScanDirSlice(context.Background(), dir)
-	if len(entries) != 1 {
+	if entries := scanEntries(t, dir); len(entries) != 1 {
 		t.Errorf("the old staging name should be reported by a scan; got %d entries", len(entries))
 	}
 }
@@ -206,4 +200,17 @@ func assertNoDebris(t *testing.T, dir string, expected ...string) {
 			t.Errorf("left behind: %q", e.Name())
 		}
 	}
+}
+
+// scanEntries collects every entry snapshot.ScanDir yields for dir.
+func scanEntries(t *testing.T, dir string) []snapshot.ScanEntry {
+	t.Helper()
+	var entries []snapshot.ScanEntry
+	for entry, err := range snapshot.ScanDir(t.Context(), dir) {
+		if err != nil {
+			t.Fatalf("scan: %v", err)
+		}
+		entries = append(entries, entry)
+	}
+	return entries
 }

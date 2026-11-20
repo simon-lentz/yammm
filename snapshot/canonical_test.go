@@ -177,7 +177,7 @@ func TestMarshal_TemporalKindsReachOneFixpoint(t *testing.T) {
 		}
 	}
 
-	loaded, lres := snapshot.Load(ctx, fromNative, s)
+	loaded, lres := snapshot.Unmarshal(ctx, fromNative, s)
 	if err := lres.Err(); err != nil {
 		t.Fatalf("Load: %v", err)
 	}
@@ -270,7 +270,7 @@ func TestMarshal_HealsOrPassesThroughNonConformingText(t *testing.T) {
 	}
 
 	// Healing is idempotent, so the healed document is the fixpoint.
-	loaded, lres := snapshot.Load(ctx, data, s)
+	loaded, lres := snapshot.Unmarshal(ctx, data, s)
 	if err := lres.Err(); err != nil {
 		t.Fatalf("Load: %v", err)
 	}
@@ -307,7 +307,7 @@ func TestLoad_CanonicalizesNonConformingWireText(t *testing.T) {
 		t.Fatalf("fixture did not carry %s; the edit is a no-op", canonical)
 	}
 
-	loaded, lres := snapshot.Load(ctx, []byte(edited), s, snapshot.WithIntegrityCheck(false))
+	loaded, lres := snapshot.Unmarshal(ctx, []byte(edited), s, snapshot.WithIntegrityCheck(false))
 	if err := lres.Err(); err != nil {
 		t.Fatalf("Load: %v", err)
 	}

@@ -2,10 +2,11 @@ package value_test
 
 import (
 	"errors"
-	"regexp"
 	"strings"
 	"testing"
 	"unicode/utf8"
+
+	"github.com/simon-lentz/yammm/internal/schematest"
 
 	"github.com/simon-lentz/yammm/internal/value"
 	"github.com/simon-lentz/yammm/schema"
@@ -24,15 +25,15 @@ func TestCheck_AStringIsValidUTF8AtEveryTextKind(t *testing.T) {
 		val  any
 		c    schema.Constraint
 	}{
-		{"String", bad, schema.NewStringConstraint()},
-		{"String in a named type", carrier(bad), schema.NewStringConstraint()},
-		{"Pattern its pattern matches", bad, schema.NewPatternConstraint(regexp.MustCompile("^a.b$"))},
-		{"Enum holding the string", bad, schema.NewEnumConstraint([]string{bad, "c"})},
-		{"Timestamp", bad, schema.NewTimestampConstraint()},
-		{"Date", bad, schema.NewDateConstraint()},
-		{"UUID", bad, schema.NewUUIDConstraint()},
-		{"List element", []any{"ok", bad}, schema.NewListConstraint(schema.NewStringConstraint())},
-		{"alias of String", bad, schema.NewAliasConstraint("Name", schema.NewStringConstraint())},
+		{"String", bad, schematest.Constraint(t, "String")},
+		{"String in a named type", carrier(bad), schematest.Constraint(t, "String")},
+		{"Pattern its pattern matches", bad, schematest.Constraint(t, `Pattern["^a.b$"]`)},
+		{"Enum", bad, schematest.Constraint(t, `Enum["c", "d"]`)},
+		{"Timestamp", bad, schematest.Constraint(t, "Timestamp")},
+		{"Date", bad, schematest.Constraint(t, "Date")},
+		{"UUID", bad, schematest.Constraint(t, "UUID")},
+		{"List element", []any{"ok", bad}, schematest.Constraint(t, "List<String>")},
+		{"alias of String", bad, schematest.Constraint(t, "Name", "type Name = String")},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
@@ -70,10 +71,10 @@ func TestCheck_AStringIsValidUTF8AtEveryTextKind(t *testing.T) {
 func TestCheck_ValidUTF8IsNotRefused(t *testing.T) {
 	t.Parallel()
 	for _, s := range []string{"", "a�b", "é", "\U0001F600", strings.Repeat("é", 3)} {
-		if err := value.Check(s, schema.NewStringConstraint()); err != nil {
+		if err := value.Check(s, schematest.Constraint(t, "String")); err != nil {
 			t.Errorf("Check(%q): %v", s, err)
 		}
-		got, err := value.Coerce(carrier(s), schema.NewStringConstraint())
+		got, err := value.Coerce(carrier(s), schematest.Constraint(t, "String"))
 		if err != nil {
 			t.Fatalf("Coerce(%q): %v", s, err)
 		}
@@ -81,7 +82,7 @@ func TestCheck_ValidUTF8IsNotRefused(t *testing.T) {
 			t.Errorf("Coerce(%q) = %#v", s, got)
 		}
 	}
-	if err := value.Check("ééé", schema.StringLenBetween(3, 3)); err != nil {
+	if err := value.Check("ééé", schematest.Constraint(t, "String[3, 3]")); err != nil {
 		t.Errorf("a string of three runes under a bound of three: %v", err)
 	}
 }

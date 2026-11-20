@@ -116,7 +116,7 @@ func edgesOf(snap graph.Snapshot) []string {
 func unresolvedOf(snap graph.Snapshot) []string {
 	var out []string
 	for u := range snap.Unresolved() {
-		out = append(out, u.Relation()+":"+u.Reason()+":"+u.TargetKey())
+		out = append(out, u.Relation()+":"+u.Reason().String()+":"+u.TargetKey())
 	}
 	slices.Sort(out)
 	return out
@@ -302,7 +302,7 @@ func TestMerge_RetiresARequiredAssociationsAbsentRecord(t *testing.T) {
 	if res.HasErrors() {
 		t.Fatalf("Marshal: %s", res)
 	}
-	if _, res := snapshot.Load(t.Context(), data, s); res.HasErrors() {
+	if _, res := snapshot.Unmarshal(t.Context(), data, s); res.HasErrors() {
 		t.Errorf("the snapshot reader refuses the merged snapshot: %s", res)
 	}
 }
@@ -496,6 +496,29 @@ func TestMerge_CountsAOneAssociationsHeldTarget(t *testing.T) {
 	}
 }
 
+// An empty array merged onto an instance that holds a target names no target,
+// so it files no "empty" record beside the edge, and a merge that adds targets
+// retires the "empty" record an Add filed.
+func TestMerge_AnEmptyArrayNamesNoTarget(t *testing.T) {
+	t.Parallel()
+	s := mergeSchema(t)
+	g := graph.New(s)
+	mustAdd(t, g, roots(t, s)...)
+	mustAdd(t, g, issue(t, s, "held", "t", map[string][]target{"HOME": {{key: "p1"}}, "LISTED_ON": {{key: "p1"}}}))
+	mustMerge(t, g, issue(t, s, "held", "t", map[string][]target{"HOME": {{key: "p1"}}, "LISTED_ON": {}}))
+	mustAdd(t, g, issue(t, s, "filled", "t", map[string][]target{"HOME": {{key: "p1"}}, "LISTED_ON": {}}))
+	mustMerge(t, g, issue(t, s, "filled", "t", map[string][]target{"LISTED_ON": {{key: "p1"}, {key: "zz"}}}))
+
+	var got []string
+	for u := range g.Snapshot().Unresolved() {
+		got = append(got, u.Source().PrimaryKey().String()+":"+u.Relation()+":"+u.Reason().String()+":"+u.TargetKey())
+	}
+	slices.Sort(got)
+	if want := []string{`["filled"]:LISTED_ON:target_missing:["zz"]`}; !slices.Equal(got, want) {
+		t.Errorf("records %q, want %q", got, want)
+	}
+}
+
 // Retiring one of several "absent" or "empty" records filed under one target
 // type keeps the others, and the snapshot still reads back.
 func TestMerge_RetiresOneRecordOfSeveralSharingATargetType(t *testing.T) {
@@ -514,7 +537,7 @@ func TestMerge_RetiresOneRecordOfSeveralSharingATargetType(t *testing.T) {
 	snap := g.Snapshot()
 	var got []string
 	for u := range snap.Unresolved() {
-		got = append(got, u.Source().PrimaryKey().String()+":"+u.Relation()+":"+u.Reason())
+		got = append(got, u.Source().PrimaryKey().String()+":"+u.Relation()+":"+u.Reason().String())
 	}
 	slices.Sort(got)
 	if want := []string{`["i1"]:HOME:absent`, `["i2"]:LISTED_ON:absent`}; !slices.Equal(got, want) {
@@ -524,7 +547,7 @@ func TestMerge_RetiresOneRecordOfSeveralSharingATargetType(t *testing.T) {
 	if res.HasErrors() {
 		t.Fatalf("Marshal: %s", res)
 	}
-	if _, res := snapshot.Load(t.Context(), data, s); res.HasErrors() {
+	if _, res := snapshot.Unmarshal(t.Context(), data, s); res.HasErrors() {
 		t.Errorf("Load refuses the merged snapshot: %s", res)
 	}
 }
@@ -786,7 +809,7 @@ func TestAddOrMerge_AMidRunSnapshotSeedsAResume(t *testing.T) {
 		if res.HasErrors() {
 			t.Fatalf("the snapshot of %d listings: Marshal: %s", k, res)
 		}
-		loaded, res := snapshot.Load(ctx, data, s)
+		loaded, res := snapshot.Unmarshal(ctx, data, s)
 		if res.HasErrors() {
 			t.Fatalf("the snapshot of %d listings: Load: %s", k, res)
 		}
@@ -860,7 +883,7 @@ func TestAdd_PanicsAndCancellationsNameTheMethod(t *testing.T) {
 			if !res.HasCode(diag.E_CONTEXT_CANCELLED) || !strings.Contains(res.String(), name+" cancelled") {
 				t.Errorf("a cancelled call = %s, want an E_CONTEXT_CANCELLED naming %s", res, name)
 			}
-			if n := len(slices.Collect(g.Snapshot().AllInstances())); n != 0 {
+			if n := len(slices.Collect(g.Snapshot().Instances())); n != 0 {
 				t.Errorf("a cancelled call installed %d instances", n)
 			}
 		})

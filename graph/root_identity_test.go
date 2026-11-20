@@ -6,7 +6,6 @@ import (
 
 	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/internal/snapparts"
-	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -54,11 +53,11 @@ func TestRebuild_FilesARootUnderItsOwnIdentity(t *testing.T) {
 		t.Errorf("Types() = %v, want [Anchor Site]", types)
 	}
 	n := 0
-	for range snap.AllInstances() {
+	for range snap.Instances() {
 		n++
 	}
 	if n != 1 {
-		t.Errorf("AllInstances yields %d, want 1", n)
+		t.Errorf("Instances yields %d, want 1", n)
 	}
 }
 
@@ -88,7 +87,7 @@ func loadAliased(t *testing.T, entry, alias string) (schema.Schema, schema.TypeI
 	if res.HasErrors() {
 		t.Fatalf("load: %s", res)
 	}
-	basin, ok := s.ResolveType(schema.NewTypeRef(alias, "Basin", location.Span{}))
+	basin, ok := s.ResolveTypeName(alias + ".Basin")
 	if !ok {
 		t.Fatal("Basin did not resolve through the entry schema")
 	}

@@ -15,14 +15,14 @@ import (
 
 // warningResult returns a result carrying one Warning with the given message.
 func warningResult(message string) diag.Result {
-	c := diag.NewCollectorUnlimited()
+	c := diag.NewCollector(diag.NoLimit)
 	c.Collect(diag.NewIssue(diag.Warning, diag.W_ANNOTATION_SHADOWED, message).Build())
 	return c.Result()
 }
 
 // errorResult returns a result carrying one Error with the given message.
 func errorResult(message string) diag.Result {
-	c := diag.NewCollectorUnlimited()
+	c := diag.NewCollector(diag.NoLimit)
 	c.Collect(diag.NewIssue(diag.Error, diag.E_CONSTRAINT_FAIL, message).Build())
 	return c.Result()
 }
@@ -299,7 +299,7 @@ func TestDiagnosticSink_SourceReachesTheRenderer(t *testing.T) {
 	t.Parallel()
 
 	source := sourcetest.ID("thing.yammm")
-	c := diag.NewCollectorUnlimited()
+	c := diag.NewCollector(diag.NoLimit)
 	c.Collect(diag.NewIssue(diag.Error, diag.E_SYNTAX, "unexpected token").
 		WithSpan(location.Span{
 			Source: source,

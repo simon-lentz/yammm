@@ -15,6 +15,7 @@ func TestInternalErrorKind_String(t *testing.T) {
 	}{
 		{KindInvariantPanic, "invariant evaluation panic"},
 		{KindConstraintPanic, "constraint checking panic"},
+		{InternalErrorKind(0), "unknown"},
 		{InternalErrorKind(999), "unknown"},
 	}
 	for _, tt := range tests {

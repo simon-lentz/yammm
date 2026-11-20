@@ -59,7 +59,7 @@ func TestSeal_SecondCallPanics(t *testing.T) {
 	schema.TestSealType(typ)
 	yammmtest.AssertPanics(t, func() { schema.TestSealType(typ) })
 
-	dt := schema.TestNewDataType("D", schema.NewStringConstraint(), location.Span{}, "")
+	dt := schema.TestNewDataType("D", schema.TestNewStringConstraint(), location.Span{}, "")
 	schema.TestSealDataType(dt)
 	yammmtest.AssertPanics(t, func() { schema.TestSealDataType(dt) })
 }

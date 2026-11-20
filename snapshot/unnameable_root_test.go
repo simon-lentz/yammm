@@ -103,7 +103,7 @@ func TestLoad_KeepsARootTheEntrySchemaCannotNameApartFromItsNamesake(t *testing.
 		"revalidation at Warning": {snapshot.WithRevalidation(diag.Warning)},
 		"revalidation at Error":   {snapshot.WithRevalidation(diag.Error)},
 	} {
-		snap, res := snapshot.Load(ctx, data, s, opts...)
+		snap, res := snapshot.Unmarshal(ctx, data, s, opts...)
 		if res.Len() != 0 {
 			t.Errorf("%s: Load = %s, want no issue", name, res)
 			continue
@@ -125,7 +125,7 @@ func TestLoad_KeepsAnEmptyGroupOfATypeTheEntrySchemaCannotName(t *testing.T) {
 	t.Parallel()
 	s, _, _, deepBeacon := unnameableFixture(t)
 	doc := snappartstest.Document(t, s, snapparts.Parts{Types: []schema.TypeID{deepBeacon}})
-	snap, res := snapshot.Load(t.Context(), doc, s)
+	snap, res := snapshot.Unmarshal(t.Context(), doc, s)
 	if res.Len() != 0 {
 		t.Fatalf("Load = %s, want no issue", res)
 	}
@@ -145,7 +145,7 @@ func TestLoad_RevalidatesARootTheEntrySchemaCannotNameAsItsOwnType(t *testing.T)
 		PrimaryKey: immutable.WrapKey([]any{"d1"}),
 		Properties: immutable.WrapProperties(map[string]any{"id": "d1", "power": "high"}),
 	}}})
-	_, res := snapshot.Load(t.Context(), doc, s, snapshot.WithRevalidation(diag.Warning))
+	_, res := snapshot.Unmarshal(t.Context(), doc, s, snapshot.WithRevalidation(diag.Warning))
 	if res.Len() != 1 || !res.HasCode(diag.E_TYPE_MISMATCH) || res.HasErrors() {
 		t.Errorf("Load = %s, want one %s at Warning", res, diag.E_TYPE_MISMATCH)
 	}
@@ -165,10 +165,10 @@ func TestLoad_RevalidatesADirectlyImportedRootUnderItsTag(t *testing.T) {
 			Properties: immutable.WrapProperties(map[string]any{"id": "b1", "area": area}),
 		}}})
 	}
-	if _, res := snapshot.Load(t.Context(), doc(float64(2)), s, snapshot.WithRevalidation(diag.Error)); res.Len() != 0 {
+	if _, res := snapshot.Unmarshal(t.Context(), doc(float64(2)), s, snapshot.WithRevalidation(diag.Error)); res.Len() != 0 {
 		t.Errorf("clean Load = %s, want no issue", res)
 	}
-	_, res := snapshot.Load(t.Context(), doc("wide"), s, snapshot.WithRevalidation(diag.Warning))
+	_, res := snapshot.Unmarshal(t.Context(), doc("wide"), s, snapshot.WithRevalidation(diag.Warning))
 	if res.Len() != 1 || !res.HasCode(diag.E_TYPE_MISMATCH) {
 		t.Fatalf("Load = %s, want one %s", res, diag.E_TYPE_MISMATCH)
 	}
@@ -216,7 +216,7 @@ func TestLoad_RevalidationHoldsTheIssueLimitAtATypeTheEntrySchemaCannotName(t *t
 		Properties: immutable.WrapProperties(values),
 	}}})
 	for limit, want := range map[int][2]int{0: {width, 0}, 120: {120, width - 120}} {
-		_, res := snapshot.Load(t.Context(), doc, s, snapshot.WithRevalidation(diag.Warning), snapshot.WithIssueLimit(limit))
+		_, res := snapshot.Unmarshal(t.Context(), doc, s, snapshot.WithRevalidation(diag.Warning), snapshot.WithIssueLimit(limit))
 		if res.Len() != want[0] || res.DroppedCount() != want[1] {
 			t.Errorf("limit %d: %d issues, %d dropped; want %d and %d", limit, res.Len(), res.DroppedCount(), want[0], want[1])
 		}

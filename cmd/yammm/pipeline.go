@@ -25,15 +25,20 @@ func checkDataOperands(paths ...string) error {
 // valid instances go into base or a new graph ([cli.BuildGraph]). Each file's parse
 // diagnostics reach sink as it is read.
 func assembleGraph(cmd *cobra.Command, sink *cli.DiagnosticSink, s schema.Schema, paths []string, base *graph.Graph) (*graph.Graph, error) {
-	parsed := make(map[string][]jsondata.Element)
+	parsed := make(map[string]jsondata.Batch)
 	for _, path := range paths {
 		fileParsed, parseResult, err := cli.LoadAndParseJSON(cmd.Context(), path)
 		if err != nil {
 			return nil, err
 		}
 		sink.Add(parseResult)
-		for typeName, raws := range fileParsed {
-			parsed[typeName] = append(parsed[typeName], raws...)
+		// A type keeps the source of the first file that holds its array.
+		for typeName, batch := range fileParsed {
+			if held, ok := parsed[typeName]; ok {
+				held.Elements = append(held.Elements, batch.Elements...)
+				batch = held
+			}
+			parsed[typeName] = batch
 		}
 	}
 	doc, validateResult := cli.ValidateInstances(cmd.Context(), s, parsed)

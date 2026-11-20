@@ -88,7 +88,7 @@ func rebuildSnapshot(s schema.Schema, parts snapparts.Parts) Snapshot {
 
 		unresolvedEdges = append(unresolvedEdges,
 			newUnresolvedEdge(source, up.Relation, associationTarget(s, up.SourceType, up.Relation), targetKey,
-				requiredUnder(s, up.SourceType, up.Relation), up.Reason, up.Properties))
+				requiredUnder(s, up.SourceType, up.Relation), unresolvedReason(up.Reason), up.Properties))
 	}
 
 	// Step 5: Assemble the Snapshot. newSnapshot establishes every ordering

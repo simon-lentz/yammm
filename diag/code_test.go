@@ -30,35 +30,6 @@ func TestCode_String(t *testing.T) {
 	}
 }
 
-func TestCode_Category(t *testing.T) {
-	tests := []struct {
-		code Code
-		want CodeCategory
-	}{
-		{E_INTERNAL, CategorySentinel},
-		{E_INHERIT_CYCLE, CategorySchema},
-		{E_COMPOSITION_CYCLE, CategorySchema},
-		{E_INVALID_SUPERTYPE, CategorySchema},
-		{E_INVALID_EDGE_PROPERTY_TYPE, CategorySchema},
-		{E_SYNTAX, CategorySyntax},
-		{E_IMPORT_RESOLVE, CategoryImport},
-		{E_IMPORT_CYCLE, CategoryImport},
-		{E_INSTANCE_TYPE_NOT_FOUND, CategoryInstance},
-		{E_TYPE_MISMATCH, CategoryInstance},
-		{E_DUPLICATE_PK, CategoryGraph},
-		{E_UNRESOLVED_REQUIRED, CategoryGraph},
-		{E_DATA_PARSE, CategoryInstance},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.code.String(), func(t *testing.T) {
-			if got := tt.code.Category(); got != tt.want {
-				t.Errorf("%s.Category() = %s; want %s", tt.code, got, tt.want)
-			}
-		})
-	}
-}
-
 func TestCode_IsZero(t *testing.T) {
 	tests := []struct {
 		name string
@@ -79,32 +50,6 @@ func TestCode_IsZero(t *testing.T) {
 	}
 }
 
-func TestCodeCategory_String(t *testing.T) {
-	tests := []struct {
-		cat  CodeCategory
-		want string
-	}{
-		{CategorySentinel, "sentinel"},
-		{CategorySchema, "schema"},
-		{CategorySyntax, "syntax"},
-		{CategoryImport, "import"},
-		{CategoryInstance, "instance"},
-		{CategoryGraph, "graph"},
-		{CategoryNeo4j, "neo4j"},
-		{CategorySnapshot, "snapshot"},
-		{CodeCategory(0), "unknown"},
-		{CodeCategory(255), "unknown"},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.want, func(t *testing.T) {
-			if got := tt.cat.String(); got != tt.want {
-				t.Errorf("CodeCategory(%d).String() = %q; want %q", tt.cat, got, tt.want)
-			}
-		})
-	}
-}
-
 func TestAllCodes_Uniqueness(t *testing.T) {
 	// Critical test: verify all code strings are unique
 	codes := AllCodes()
@@ -117,8 +62,7 @@ func TestAllCodes_Uniqueness(t *testing.T) {
 			continue
 		}
 		if prev, ok := seen[str]; ok {
-			t.Errorf("duplicate code string %q: categories %s and %s",
-				str, prev.Category(), c.Category())
+			t.Errorf("duplicate code string %q (%v and %v)", str, prev, c)
 		}
 		seen[str] = c
 	}
@@ -134,146 +78,6 @@ func TestAllCodes_NoZeroValues(t *testing.T) {
 		if c.IsZero() {
 			t.Errorf("AllCodes() contains zero-value code")
 		}
-	}
-}
-
-func TestCodes_EachCategoryHoldsItsRequiredCodes(t *testing.T) {
-	tests := []struct {
-		cat         CodeCategory
-		minExpected int
-		mustContain []Code
-	}{
-		{
-			cat:         CategorySentinel,
-			minExpected: 2,
-			mustContain: []Code{E_INTERNAL, E_CONTEXT_CANCELLED},
-		},
-		{
-			cat:         CategorySchema,
-			minExpected: 15,
-			mustContain: []Code{E_INHERIT_CYCLE, E_INVALID_NAME},
-		},
-		{
-			cat:         CategorySyntax,
-			minExpected: 1,
-			mustContain: []Code{E_SYNTAX},
-		},
-		{
-			cat:         CategoryImport,
-			minExpected: 4,
-			mustContain: []Code{E_IMPORT_RESOLVE, E_IMPORT_CYCLE},
-		},
-		{
-			cat:         CategoryInstance,
-			minExpected: 15,
-			mustContain: []Code{E_TYPE_MISMATCH, E_MISSING_REQUIRED, E_CONSTRAINT_FAIL},
-		},
-		{
-			cat:         CategoryGraph,
-			minExpected: 5,
-			mustContain: []Code{E_DUPLICATE_PK, E_UNRESOLVED_REQUIRED},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.cat.String(), func(t *testing.T) {
-			codes := codesIn(tt.cat)
-
-			if len(codes) < tt.minExpected {
-				t.Errorf("category %s holds %d codes; expected at least %d",
-					tt.cat, len(codes), tt.minExpected)
-			}
-
-			// Verify all returned codes have the correct category
-			for _, c := range codes {
-				if c.Category() != tt.cat {
-					t.Errorf("code %s has category %s; expected %s",
-						c, c.Category(), tt.cat)
-				}
-			}
-
-			// Verify must-contain codes are present
-			codeSet := make(map[string]bool)
-			for _, c := range codes {
-				codeSet[c.String()] = true
-			}
-			for _, required := range tt.mustContain {
-				if !codeSet[required.String()] {
-					t.Errorf("category %s misses required code %s",
-						tt.cat, required)
-				}
-			}
-		})
-	}
-}
-
-func TestCodes_EveryCodeIsInOneListedCategory(t *testing.T) {
-	// Verify every code in AllCodes appears in exactly one category
-	allByCategory := make(map[string]bool)
-	categories := []CodeCategory{
-		CategorySentinel,
-		CategorySchema,
-		CategorySyntax,
-		CategoryImport,
-		CategoryInstance,
-		CategoryGraph,
-		CategoryNeo4j,
-		CategorySnapshot,
-	}
-
-	for _, cat := range categories {
-		for _, c := range codesIn(cat) {
-			if allByCategory[c.String()] {
-				t.Errorf("code %s appears in multiple categories", c)
-			}
-			allByCategory[c.String()] = true
-		}
-	}
-
-	for _, c := range AllCodes() {
-		if !allByCategory[c.String()] {
-			t.Errorf("code %s is in no listed category", c)
-		}
-	}
-}
-
-// TestContractValidationCodesExist holds each core validation code to the
-// category it is registered under.
-func TestContractValidationCodesExist(t *testing.T) {
-	requiredCodes := []struct {
-		code     Code
-		category CodeCategory
-	}{
-		// Sentinel
-		{E_INTERNAL, CategorySentinel},
-		// Schema - core validation
-		{E_INHERIT_CYCLE, CategorySchema},
-		{E_DUPLICATE_PROPERTY, CategorySchema},
-		{E_DUPLICATE_RELATION, CategorySchema},
-		{E_INVALID_NAME, CategorySchema},
-		// Syntax
-		{E_SYNTAX, CategorySyntax},
-		// Import
-		{E_IMPORT_RESOLVE, CategoryImport},
-		{E_IMPORT_CYCLE, CategoryImport},
-		// Instance - core validation
-		{E_INSTANCE_TYPE_NOT_FOUND, CategoryInstance},
-		{E_TYPE_MISMATCH, CategoryInstance},
-		{E_MISSING_REQUIRED, CategoryInstance},
-		{E_CONSTRAINT_FAIL, CategoryInstance},
-		// Graph
-		{E_DUPLICATE_PK, CategoryGraph},
-		{E_UNRESOLVED_REQUIRED, CategoryGraph},
-		{E_DATA_PARSE, CategoryInstance},
-	}
-
-	for _, tc := range requiredCodes {
-		t.Run(tc.code.String(), func(t *testing.T) {
-			if tc.code.Category() != tc.category {
-				t.Errorf("code %s has category %s; want %s",
-					tc.code, tc.code.Category(), tc.category)
-			}
-		})
 	}
 }
 
@@ -362,44 +166,5 @@ func TestNewCodeDuplicatePanics(t *testing.T) {
 			t.Errorf("panic message %q does not mention 'duplicate code'", msg)
 		}
 	}()
-	NewCode("E_INTERNAL", CategorySentinel)
-}
-
-// TestIsImportDeclarationCode_PartitionsEveryImportCode pins that every code in
-// [CategoryImport] is classified as exactly one of the two families the
-// predicates split: declaration codes (a rejected, duplicated, colliding, or
-// invalid import alias — downgraded to Hint in the LSP markdown surface) and
-// resolution codes (a path/cycle/escape failure that keeps Error severity and
-// carries the module root and its origin as details).
-//
-// Both classifications are hand-maintained switches rather than properties of
-// the Code, so this guard converts the silent-drift risk into a loud failure:
-// a new CategoryImport code added to neither switch — or to both — fails here
-// rather than silently mis-rendering in the markdown surface or shipping an
-// issue with no provenance.
-func TestIsImportDeclarationCode_PartitionsEveryImportCode(t *testing.T) {
-	imports := codesIn(CategoryImport)
-	if len(imports) == 0 {
-		t.Fatal("CategoryImport has no codes; the partition guard would pass vacuously")
-	}
-	for _, code := range imports {
-		isDecl := IsImportDeclarationCode(code.String())
-		isRes := code == E_IMPORT_RESOLVE || code == E_IMPORT_CYCLE || code == E_PATH_ESCAPE
-		if isDecl == isRes {
-			t.Errorf("import code %s: declaration %v, resolution %v; "+
-				"every CategoryImport code is exactly one of them",
-				code, isDecl, isRes)
-		}
-	}
-}
-
-// codesIn returns the registered codes of one category.
-func codesIn(cat CodeCategory) []Code {
-	var out []Code
-	for _, c := range AllCodes() {
-		if c.Category() == cat {
-			out = append(out, c)
-		}
-	}
-	return out
+	NewCode("E_INTERNAL")
 }

@@ -53,7 +53,7 @@ type County {
 	if !isAlias {
 		t.Fatalf("edge property constraint is %T, want AliasConstraint", prop.Constraint())
 	}
-	if !alias.IsResolved() {
+	if !schema.TestConstraintIsResolved(alias) {
 		t.Error("edge-property alias constraint must be resolved by completion")
 	}
 }
@@ -92,7 +92,7 @@ type Anchor {
 	if !isAlias {
 		t.Fatalf("edge property constraint is %T, want AliasConstraint", prop.Constraint())
 	}
-	if !alias.IsResolved() {
+	if !schema.TestConstraintIsResolved(alias) {
 		t.Error("imported-datatype edge-property alias must be resolved by completion")
 	}
 }

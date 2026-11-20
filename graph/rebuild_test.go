@@ -243,14 +243,14 @@ func TestRebuild_EstablishesTheDocumentedOrdering(t *testing.T) {
 	if !slices.IsSorted(keys) {
 		t.Errorf("InstancesOf is not sorted by primary key: %v", keys)
 	}
-	// AllInstances walks Types x InstancesOf, so a duplicated identity would
+	// Instances walks Types x InstancesOf, so a duplicated identity would
 	// yield every instance twice.
 	n := 0
-	for range snap.AllInstances() {
+	for range snap.Instances() {
 		n++
 	}
 	if n != 3 {
-		t.Errorf("AllInstances yielded %d instances, want 3", n)
+		t.Errorf("Instances yielded %d instances, want 3", n)
 	}
 }
 

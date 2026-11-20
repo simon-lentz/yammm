@@ -103,13 +103,14 @@ func (s Schema) ResolveTypeName(name string) (Type, bool) {
 	return s.ResolveType(typeRefFromName(name))
 }
 
-// typeRefFromName reads "alias.Name" as a qualified reference and any other
-// spelling — a bare name, a leading dot, a trailing dot — as a local one.
+// typeRefFromName reads a name holding a dot after its first byte as
+// "alias.Name", so "a." names no type of alias a; any other spelling, a bare name
+// or a leading dot, is local.
 func typeRefFromName(name string) TypeRef {
 	if idx := strings.Index(name, "."); idx > 0 {
-		return NewTypeRef(name[:idx], name[idx+1:], location.Span{})
+		return newTypeRef(name[:idx], name[idx+1:], location.Span{})
 	}
-	return LocalTypeRef(name, location.Span{})
+	return localTypeRef(name, location.Span{})
 }
 
 // ResolveType resolves a TypeRef to a Type, handling qualified references
@@ -138,13 +139,15 @@ func (s Schema) DataTypes() iter.Seq[DataType] {
 	return slices.Values(s.dataTypes)
 }
 
-// ResolveDataType resolves a DataTypeRef to a DataType, handling qualified
-// references to imported data types.
-func (s Schema) ResolveDataType(ref DataTypeRef) (DataType, bool) {
+// ResolveDataType resolves a datatype name as [Schema.ResolveTypeName] resolves
+// a type name: a bare name for a datatype this schema declares, or "alias.Name"
+// for one of a schema this schema imports directly. [AliasConstraint.DataTypeName]
+// returns that form.
+func (s Schema) ResolveDataType(name string) (DataType, bool) {
+	ref := typeRefFromName(name)
 	if ref.qualifier == "" {
 		return s.DataType(ref.name)
 	}
-	// Resolve via import alias
 	imp, ok := s.ImportByAlias(ref.qualifier)
 	if !ok {
 		return DataType{}, false
@@ -205,11 +208,6 @@ func (s Schema) seal() {
 		panic("schema: sealed twice")
 	}
 	s.sealed = true
-}
-
-// isSealed reports whether the schema has been sealed.
-func (s Schema) isSealed() bool {
-	return s.sealed
 }
 
 // setTypes sets the types (called during completion).

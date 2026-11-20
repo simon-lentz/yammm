@@ -7,9 +7,9 @@ import (
 )
 
 // stagedEdge is one association record resolved against the schema but not yet
-// against the graph, which only the commit phase may read. reason is empty for
-// a target-bearing reference, or "absent" / "empty" for the two shapes that
-// name no target.
+// against the graph, which only the commit phase may read. reason is
+// [ReasonTargetMissing] for a target-bearing reference, or [ReasonAbsent] or
+// [ReasonEmpty] for the two shapes that name no target.
 type stagedEdge struct {
 	relation   string
 	jsonField  string
@@ -17,7 +17,7 @@ type stagedEdge struct {
 	targetKey  string
 	properties immutable.Properties
 	isRequired bool
-	reason     string
+	reason     UnresolvedReason
 }
 
 // build returns the Instance tree of inst, a record [Graph.add] holds to be of
@@ -57,14 +57,15 @@ func stageRelation(rel schema.Relation, inst instance.ValidInstance, stage *[]st
 			targetKey:  target.TargetKey().String(),
 			properties: target.Properties(),
 			isRequired: isRequired,
+			reason:     ReasonTargetMissing,
 		})
 	}
 	if !isRequired || !edgeData.IsEmpty() {
 		return
 	}
-	reason := "absent"
+	reason := ReasonAbsent
 	if present {
-		reason = "empty"
+		reason = ReasonEmpty
 	}
 	*stage = append(*stage, stagedEdge{
 		relation:   rel.Name(),

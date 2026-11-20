@@ -3,7 +3,6 @@ package schema_test
 import (
 	"context"
 	"fmt"
-	"math"
 	"regexp"
 	"strings"
 	"testing"
@@ -13,62 +12,19 @@ import (
 	"github.com/simon-lentz/yammm/schema"
 )
 
-// A float literal the DSL reads is finite or draws E_INVALID_CONSTRAINT, so an
-// infinite or NaN bound is a constraint no .yammm source can state.
-func TestCheckConstraint_RefusesNonFiniteFloatBound(t *testing.T) {
-	cases := []struct {
-		name string
-		c    schema.Constraint
-	}{
-		{"infinite max", schema.FloatMax(math.Inf(1))},
-		{"negative infinite min", schema.FloatMin(math.Inf(-1))},
-		{"NaN min", schema.FloatBetween(math.NaN(), 1)},
-		{"NaN max", schema.FloatBetween(0, math.NaN())},
-		{"list element", schema.NewListConstraint(schema.FloatMax(math.Inf(1)))},
-		{"nested list element", schema.NewListConstraint(schema.NewListConstraint(schema.FloatMin(math.Inf(-1))))},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			err := schema.CheckConstraint(tc.c)
-			if err == nil || !strings.Contains(err.Error(), "non-finite float bound") {
-				t.Errorf("CheckConstraint = %v, want a refusal naming the non-finite bound", err)
-			}
-		})
-	}
-
-	t.Run("finite bounds pass", func(t *testing.T) {
-		for _, c := range []schema.Constraint{
-			schema.FloatBetween(-math.MaxFloat64, math.MaxFloat64),
-			schema.NewListConstraint(schema.FloatMin(0)),
-		} {
-			if err := schema.CheckConstraint(c); err != nil {
-				t.Errorf("CheckConstraint(%v) = %v", c, err)
-			}
-		}
-	})
-}
-
-// Every constraint argument the DSL refuses with E_INVALID_CONSTRAINT,
-// CheckConstraint refuses too. Each case is stated both ways, so the two are
-// checked against each other rather than against a list.
-func TestCheckConstraint_RefusesEveryConstraintTheDSLRefuses(t *testing.T) {
+// An Enum's value count and a Vector's dimension are the arguments a caller can
+// hold out of range, through a zero value; the DSL refuses the same counts with
+// E_INVALID_CONSTRAINT. Each case is stated both ways.
+func TestCheckConstraint_RefusesACountTheDSLRefuses(t *testing.T) {
 	cases := []struct {
 		name string
 		dsl  string
 		c    schema.Constraint
 		want string
 	}{
-		{"inverted integer bounds", "Integer[5, 1]", schema.IntegerBetween(5, 1), "integer bounds inverted"},
-		{"inverted float bounds", "Float[2.5, 1.0]", schema.FloatBetween(2.5, 1), "float bounds inverted"},
-		{"inverted string length", "String[5, 1]", schema.StringLenBetween(5, 1), "string length bounds inverted"},
-		{"inverted list length", "List<String>[5, 1]", schema.ListLenBetween(schema.NewStringConstraint(), 5, 1), "list length bounds inverted"},
-		{"inverted bounds on a list element", "List<Integer[5, 1]>", schema.NewListConstraint(schema.IntegerBetween(5, 1)), "integer bounds inverted"},
-		{"an empty enum value", `Enum["a", ""]`, schema.NewEnumConstraint([]string{"a", ""}), "enum value cannot be empty"},
-		{"a duplicate enum value", `Enum["a", "b", "a"]`, schema.NewEnumConstraint([]string{"a", "b", "a"}), "duplicate enum value"},
-		{"a one-value enum", `Enum["a"]`, schema.NewEnumConstraint([]string{"a"}), "at least two values"},
-		{"a zero-dimension vector", "Vector[0]", schema.NewVectorConstraint(0), "vector dimensions"},
-		{"a vector past the maximum", "Vector[65537]", schema.NewVectorConstraint(65537), "vector dimensions"},
-		{"a pattern Perl syntax refuses", `Pattern["a**"]`, schema.NewPatternConstraint(regexp.MustCompilePOSIX("a**")), `invalid regex pattern "a**"`},
+		{"a one-value enum", `Enum["a"]`, schema.TestParsedEnumConstraint([]string{"a"}), "at least two values"},
+		{"a zero-dimension vector", "Vector[0]", schema.TestNewVectorConstraint(0), "vector dimensions"},
+		{"a vector past the maximum", "Vector[65537]", schema.TestNewVectorConstraint(65537), "vector dimensions"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -85,24 +41,9 @@ func TestCheckConstraint_RefusesEveryConstraintTheDSLRefuses(t *testing.T) {
 	}
 }
 
-// A negative length has no DSL spelling: the lexer gives an unsigned bound no
-// minus sign.
-func TestCheckConstraint_RefusesANegativeLength(t *testing.T) {
-	for name, c := range map[string]schema.Constraint{
-		"string minimum": schema.StringMinLen(-1),
-		"list maximum":   schema.ListMaxLen(schema.NewStringConstraint(), -1),
-	} {
-		t.Run(name, func(t *testing.T) {
-			if err := schema.CheckConstraint(c); err == nil || !strings.Contains(err.Error(), "cannot be negative") {
-				t.Errorf("CheckConstraint = %v, want a refusal naming the negative length", err)
-			}
-		})
-	}
-}
-
 // A Pattern with no pattern is one the DSL cannot write.
 func TestCheckConstraint_RefusesAPatternWithNone(t *testing.T) {
-	err := schema.CheckConstraint(schema.NewPatternConstraint(nil))
+	err := schema.CheckConstraint(schema.TestParsedPatternConstraint(nil))
 	if err == nil || !strings.Contains(err.Error(), "needs a pattern") {
 		t.Errorf("CheckConstraint = %v, want a refusal naming the missing pattern", err)
 	}
@@ -112,12 +53,12 @@ func TestCheckConstraint_RefusesAPatternWithNone(t *testing.T) {
 // constructor handed nil or the zero ListConstraint, is refused at any depth.
 func TestCheckConstraint_RefusesAListWithNoElement(t *testing.T) {
 	for name, c := range map[string]schema.Constraint{
-		"NewListConstraint(nil)":        schema.NewListConstraint(nil),
+		"NewListConstraint(nil)":        schema.TestNewListConstraint(nil),
 		"the zero ListConstraint":       schema.ListConstraint{},
-		"ListMinLen(nil, 1)":            schema.ListMinLen(nil, 1),
-		"ListMaxLen(nil, 1)":            schema.ListMaxLen(nil, 1),
-		"ListLenBetween(nil, 0, 1)":     schema.ListLenBetween(nil, 0, 1),
-		"a nested List with no element": schema.NewListConstraint(schema.NewListConstraint(nil)),
+		"ListMinLen(nil, 1)":            schema.TestListMinLen(nil, 1),
+		"ListMaxLen(nil, 1)":            schema.TestListMaxLen(nil, 1),
+		"ListLenBetween(nil, 0, 1)":     schema.TestListLenBetween(nil, 0, 1),
+		"a nested List with no element": schema.TestNewListConstraint(schema.TestNewListConstraint(nil)),
 	} {
 		t.Run(name, func(t *testing.T) {
 			err := schema.CheckConstraint(c)
@@ -131,12 +72,12 @@ func TestCheckConstraint_RefusesAListWithNoElement(t *testing.T) {
 // Every constraint method has a value receiver, so a pointer to a constraint
 // satisfies the interface and names no constraint the DSL states.
 func TestCheckConstraint_RefusesAConstraintThePackageDoesNotConstruct(t *testing.T) {
-	list := schema.NewListConstraint(schema.NewStringConstraint())
-	str := schema.NewStringConstraint()
+	list := schema.TestNewListConstraint(schema.TestNewStringConstraint())
+	str := schema.TestNewStringConstraint()
 	for name, c := range map[string]schema.Constraint{
 		"a pointer to a List":             &list,
 		"a pointer to a String":           &str,
-		"a List of a pointer to a String": schema.NewListConstraint(&str),
+		"a List of a pointer to a String": schema.TestNewListConstraint(&str),
 	} {
 		t.Run(name, func(t *testing.T) {
 			err := schema.CheckConstraint(c)
@@ -246,10 +187,10 @@ func TestLoad_ResolvesADataTypeAliasByItsName(t *testing.T) {
 		if s.IsZero() {
 			t.Fatalf("load refused: %s", res.String())
 		}
-		want := schema.IntegerBetween(1, 5)
+		want := schema.TestIntegerBetween(1, 5)
 		car, _ := s.Type("Car")
 		v, _ := car.Property("v")
-		if got := schema.ResolveAlias(v.Constraint()); !got.Equal(want) {
+		if got := schema.ResolveAlias(v.Constraint()); !schema.TestConstraintEqual(got, want) {
 			t.Errorf("v resolves to %v; want %v", got, want)
 		}
 		wides, _ := s.DataType("Wides")
@@ -257,7 +198,7 @@ func TestLoad_ResolvesADataTypeAliasByItsName(t *testing.T) {
 		if !ok {
 			t.Fatalf("Wides is %T; want a ListConstraint", wides.Constraint())
 		}
-		if got := schema.ResolveAlias(lc.Element()); !got.Equal(want) {
+		if got := schema.ResolveAlias(lc.Element()); !schema.TestConstraintEqual(got, want) {
 			t.Errorf("Wides element resolves to %v; want %v", got, want)
 		}
 	})
@@ -300,22 +241,20 @@ func TestLoad_KeepsAListsLengthBoundsAroundAnAlias(t *testing.T) {
 // reference that resolves to no constraint, which a raw constraint never
 // meets completion to resolve.
 func TestCheckConstraint_RefusesWhatNoSchemaHolds(t *testing.T) {
-	str := schema.NewStringConstraint()
+	str := schema.TestNewStringConstraint()
 	for name, tc := range map[string]struct {
 		c    schema.Constraint
 		want string
 	}{
 		"nil":                                                 {nil, "no constraint"},
-		"inverted integer bounds":                             {schema.IntegerBetween(5, 1), "integer bounds inverted"},
-		"a List with no element":                              {schema.NewListConstraint(nil), "list has no element constraint"},
-		"a pattern constraint with no pattern":                {schema.NewPatternConstraint(nil), "needs a pattern"},
-		"a pattern Perl syntax refuses":                       {schema.NewPatternConstraint(regexp.MustCompilePOSIX("a**")), `invalid regex pattern "a**"`},
+		"a List with no element":                              {schema.TestNewListConstraint(nil), "list has no element constraint"},
+		"a pattern constraint with no pattern":                {schema.TestParsedPatternConstraint(nil), "needs a pattern"},
 		"a pointer to a constraint":                           {&str, "none this package constructs"},
-		"an unresolved DataType reference":                    {schema.NewAliasConstraint("Code", nil), `datatype "Code" resolves to no constraint`},
-		"a List of an unresolved reference":                   {schema.NewListConstraint(schema.NewAliasConstraint("Code", nil)), `datatype "Code" resolves to no constraint`},
-		"a reference resolved to a fault":                     {schema.NewAliasConstraint("Code", schema.IntegerBetween(5, 1)), "integer bounds inverted"},
-		"a reference resolved to an unresolved":               {schema.NewAliasConstraint("Code", schema.NewAliasConstraint("Inner", nil)), `datatype "Code" resolves to datatype "Inner" alone`},
-		"a List of a reference resolved to a no-element List": {schema.NewListConstraint(schema.NewAliasConstraint("Tags", schema.NewListConstraint(nil))), "list has no element constraint"},
+		"an unresolved DataType reference":                    {schema.TestNewAliasConstraint("Code", nil), `datatype "Code" resolves to no constraint`},
+		"a List of an unresolved reference":                   {schema.TestNewListConstraint(schema.TestNewAliasConstraint("Code", nil)), `datatype "Code" resolves to no constraint`},
+		"a reference resolved to a fault":                     {schema.TestNewAliasConstraint("Code", schema.TestParsedPatternConstraint(nil)), "needs a pattern"},
+		"a reference resolved to an unresolved":               {schema.TestNewAliasConstraint("Code", schema.TestNewAliasConstraint("Inner", nil)), `datatype "Code" resolves to datatype "Inner" alone`},
+		"a List of a reference resolved to a no-element List": {schema.TestNewListConstraint(schema.TestNewAliasConstraint("Tags", schema.TestNewListConstraint(nil))), "list has no element constraint"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			err := schema.CheckConstraint(tc.c)
@@ -364,7 +303,7 @@ type Car {
 			t.Errorf("property %s: %v", p.Name(), err)
 		}
 	}
-	if err := schema.CheckConstraint(schema.NewAliasConstraint("Code", schema.IntegerBetween(1, 5))); err != nil {
+	if err := schema.CheckConstraint(schema.TestNewAliasConstraint("Code", schema.TestIntegerBetween(1, 5))); err != nil {
 		t.Errorf("a resolved hand-built reference: %v", err)
 	}
 }
@@ -373,20 +312,11 @@ type Car {
 // that skips the judge still holds a working regexp; the judge refuses it.
 func TestNewPatternConstraint_KeepsASourcePerlSyntaxRefuses(t *testing.T) {
 	posix := regexp.MustCompilePOSIX("a**")
-	c := schema.NewPatternConstraint(posix)
+	c := schema.TestParsedPatternConstraint(posix)
 	if got := expr.PatternRegexp(c); got != posix {
 		t.Errorf("PatternRegexp = %v; want the caller's regexp", got)
 	}
 	if got := c.Pattern(); got != "a**" {
 		t.Errorf("Pattern = %q; want a**", got)
-	}
-}
-
-// A range of one value is legal: bounds are inverted only when min exceeds max.
-func TestCheckConstraint_AdmitsEqualBounds(t *testing.T) {
-	for _, c := range []schema.Constraint{schema.IntegerBetween(1, 1), schema.FloatBetween(1.5, 1.5)} {
-		if err := schema.CheckConstraint(c); err != nil {
-			t.Errorf("CheckConstraint(%v) = %v", c, err)
-		}
 	}
 }

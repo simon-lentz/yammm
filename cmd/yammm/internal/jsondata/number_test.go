@@ -23,10 +23,10 @@ func numberSchemaless(t *testing.T, doc string) map[string]any {
 		t.Fatalf("parse %s: %v", doc, err)
 	}
 	items := parsed["T"]
-	if len(items) != 1 {
-		t.Fatalf("parse %s: %d instances, want 1", doc, len(items))
+	if len(items.Elements) != 1 {
+		t.Fatalf("parse %s: %d instances, want 1", doc, len(items.Elements))
 	}
-	return items[0].Properties
+	return items.Elements[0].Properties
 }
 
 // The parser reads a number by the module's lexical rule,
@@ -150,7 +150,7 @@ func TestParse_IntegerLiteralOutsideInt64IsRefusedAtAnInteger(t *testing.T) {
 			if err := pres.Err(); err != nil {
 				t.Fatalf("parse: %v", err)
 			}
-			_, vres := instance.NewValidator(s).Validate(ctx, "T", rawsOf(parsed["T"]))
+			_, vres := instance.NewValidator(s).Validate(ctx, "T", rawsOf(parsed["T"].Elements))
 			if !vres.HasErrors() {
 				t.Fatalf("%s validated at an Integer property", literal)
 			}
@@ -187,7 +187,7 @@ func TestParse_AFloatLiteralIsRefusedAtAnInteger(t *testing.T) {
 			if err := pres.Err(); err != nil {
 				t.Fatalf("parse: %v", err)
 			}
-			_, vres := instance.NewValidator(s).Validate(ctx, "T", rawsOf(parsed["T"]))
+			_, vres := instance.NewValidator(s).Validate(ctx, "T", rawsOf(parsed["T"].Elements))
 			if !vres.HasCode(diag.E_TYPE_MISMATCH) || !strings.Contains(vres.String(), "got float") ||
 				strings.Contains(vres.String(), "int64 range") {
 				t.Errorf("%s drew %s, want E_TYPE_MISMATCH naming a float", literal, vres.String())
@@ -210,7 +210,7 @@ func TestParse_IntegerLiteralOutsideInt64IsAFloatAtAFloat(t *testing.T) {
 	if err := pres.Err(); err != nil {
 		t.Fatalf("parse: %v", err)
 	}
-	valid, vres := instance.NewValidator(s).Validate(ctx, "T", rawsOf(parsed["T"]))
+	valid, vres := instance.NewValidator(s).Validate(ctx, "T", rawsOf(parsed["T"].Elements))
 	if vres.HasErrors() {
 		t.Fatalf("validate: %s", vres.String())
 	}

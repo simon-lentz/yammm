@@ -114,12 +114,12 @@ func TestMessages_NameADeclaredIdentityWhole(t *testing.T) {
 		{old: `"year":2020`, replacement: `"year":"x"`, want: "revalidation of " + ref + "[", opts: []snapshot.LoadOption{snapshot.WithRevalidation(diag.Error)}},
 		{old: `"name":"Garage"`, replacement: `"name":"MissingTypeWithANameRunningPastTheCut"`, want: "names " + declaredSchemaName + "#MissingType"},
 	} {
-		_, r := snapshot.Load(ctx, edit(data, c.old, c.replacement), s, c.opts...)
+		_, r := snapshot.Unmarshal(ctx, edit(data, c.old, c.replacement), s, c.opts...)
 		wantWhole("snapshot.Load", r, c.want)
 	}
 	duplicated := marshal(map[string]any{"vin": "v1"}, map[string]any{"vin": "v1", "year": 2020})
-	_, r := snapshot.Load(ctx, edit(duplicated, `,"conflict":{"type":0,"key":["v1"]}`, ""), s)
+	_, r := snapshot.Unmarshal(ctx, edit(duplicated, `,"conflict":{"type":0,"key":["v1"]}`, ""), s)
 	wantWhole("snapshot.Load", r, "("+ref+"[")
-	_, r = snapshot.Info(ctx, edit(data, `"v2"`, `"v1"`))
+	_, r = snapshot.Stat(ctx, edit(data, `"v2"`, `"v1"`))
 	wantWhole("snapshot.Info", r, `#"`+declaredTypeName[:32]+`"…`)
 }

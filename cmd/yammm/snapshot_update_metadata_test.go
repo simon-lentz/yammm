@@ -1,10 +1,12 @@
 package main
 
 import (
+	"bytes"
 	"maps"
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -65,7 +67,7 @@ func TestSnapshotUpdateMetadata_SetAndUnsetLandInTheHeader(t *testing.T) {
 		t.Helper()
 		data, err := os.ReadFile(ysPath)
 		require.NoError(t, err)
-		header, result := snapshot.HeaderOnly(t.Context(), data)
+		header, result := snapshot.ReadHeader(t.Context(), bytes.NewReader(data))
 		require.False(t, result.HasErrors(), "header: %s", result.String())
 		return slices.Sorted(maps.Keys(header.Metadata))
 	}
@@ -89,4 +91,59 @@ func sortedWith(keys []string, more ...string) []string {
 	all := append(slices.Clone(keys), more...)
 	slices.Sort(all)
 	return all
+}
+
+// The command reads the file whole, so a header past snapshot.MaxHeaderSize,
+// which a header read refuses, is still updated.
+func TestSnapshotUpdateMetadata_AHeaderPastTheHeaderCapIsUpdated(t *testing.T) {
+	t.Parallel()
+	ysPath := filepath.Join(t.TempDir(), "big.ys")
+	code, _, errOut := executeCmdOutput(t, "snapshot", "save",
+		"testdata/valid.yammm", "testdata/data.json", "-o", ysPath,
+		"-m", "big="+strings.Repeat("x", snapshot.MaxHeaderSize))
+	require.Equal(t, cli.ExitOK, code, "stderr:\n%s", errOut)
+
+	code, _, errOut = executeCmdOutput(t, "snapshot", "update-metadata", "-s", "k=v", ysPath)
+	require.Equal(t, cli.ExitOK, code, "stderr:\n%s", errOut)
+	data, err := os.ReadFile(ysPath)
+	require.NoError(t, err)
+	info, res := snapshot.Stat(t.Context(), data)
+	require.False(t, res.HasErrors(), "stat: %s", res.String())
+	assert.Equal(t, "v", info.Metadata["k"])
+	assert.Len(t, info.Metadata["big"], snapshot.MaxHeaderSize)
+}
+
+// A document that breaks its outer shape is refused as malformed before its
+// header is judged, as every whole-document read refuses it.
+func TestSnapshotUpdateMetadata_AShapeBreakIsMalformedBeforeTheHeader(t *testing.T) {
+	t.Parallel()
+	ysPath := createYSFixtureWithMetadata(t, t.TempDir())
+	data, err := os.ReadFile(ysPath)
+	require.NoError(t, err)
+	broken := append(bytes.Replace(data, []byte(`"version":4`), []byte(`"version":3`), 1), 'x')
+	require.NoError(t, os.WriteFile(ysPath, broken, 0o600))
+
+	code, _, errOut := executeCmdOutput(t, "snapshot", "update-metadata", "-s", "k=v", ysPath)
+	assert.Equal(t, cli.ExitValidation, code)
+	assert.Contains(t, errOut, "error[E_SNAPSHOT_MALFORMED]")
+	assert.NotContains(t, errOut, "E_SNAPSHOT_UNSUPPORTED_VERSION")
+}
+
+// The update seals the body under a fresh hash, so a document whose stored hash
+// does not match its content is refused and left as it was.
+func TestSnapshotUpdateMetadata_AnIntegrityMismatchIsRefused(t *testing.T) {
+	t.Parallel()
+	ysPath := createYSFixtureWithMetadata(t, t.TempDir())
+	data, err := os.ReadFile(ysPath)
+	require.NoError(t, err)
+	tampered := bytes.Replace(data, []byte(`"name":"Bob"`), []byte(`"name":"Rob"`), 1)
+	require.NotEqual(t, data, tampered, "fixture shape changed; Bob not found")
+	require.NoError(t, os.WriteFile(ysPath, tampered, 0o600))
+
+	code, _, errOut := executeCmdOutput(t, "snapshot", "update-metadata", "-s", "k=v", ysPath)
+	assert.Equal(t, cli.ExitValidation, code)
+	assert.Contains(t, errOut, "E_SNAPSHOT_INTEGRITY_MISMATCH")
+	after, err := os.ReadFile(ysPath)
+	require.NoError(t, err)
+	assert.Equal(t, tampered, after, "a refused document is not rewritten")
 }

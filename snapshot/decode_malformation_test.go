@@ -17,7 +17,7 @@ func TestDecode_OneMalformationOneDiagnostic(t *testing.T) {
 	s, _ := attWireFixture(t)
 	bad := []byte(`{"types":[],"instances":[],"diagnostics":{"duplicates":[],"unresolved":[]}}`)
 
-	_, res := snapshot.Load(t.Context(), bad, s, snapshot.WithIntegrityCheck(false))
+	_, res := snapshot.Unmarshal(t.Context(), bad, s, snapshot.WithIntegrityCheck(false))
 	n := 0
 	for range res.Issues() {
 		n++
@@ -47,7 +47,7 @@ func TestDecode_UnresolvedDuplicateRowDoesNotNameRowZero(t *testing.T) {
 		t.Skipf("fixture carries no empty duplicates array: %s", data)
 	}
 
-	_, res := snapshot.Load(t.Context(), []byte(edited), s, snapshot.WithIntegrityCheck(false))
+	_, res := snapshot.Unmarshal(t.Context(), []byte(edited), s, snapshot.WithIntegrityCheck(false))
 	for iss := range res.Issues() {
 		if iss.Code() != diag.E_SNAPSHOT_EDGES_ON_DUPLICATE {
 			continue
@@ -81,7 +81,7 @@ func TestDecode_ARepeatedUnknownRowIsUnknownOnce(t *testing.T) {
 		res  diag.Result
 	}{
 		{"Load", func() diag.Result {
-			_, res := snapshot.Load(t.Context(), []byte(edited), s, snapshot.WithIntegrityCheck(false))
+			_, res := snapshot.Unmarshal(t.Context(), []byte(edited), s, snapshot.WithIntegrityCheck(false))
 			return res
 		}()},
 		{"Verify", snapshot.Verify(t.Context(), []byte(edited), s, snapshot.WithIntegrityCheck(false))},

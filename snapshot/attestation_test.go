@@ -55,7 +55,7 @@ func TestAttestation_ValidatorBuiltRoundTripsTrue(t *testing.T) {
 		t.Fatalf("marshalled header does not carry the attestation: %s", data)
 	}
 
-	snap, res := snapshot.Load(t.Context(), data, s)
+	snap, res := snapshot.Unmarshal(t.Context(), data, s)
 	if res.HasErrors() {
 		t.Fatalf("Load: %s", res.String())
 	}
@@ -94,7 +94,7 @@ func TestAttestation_AFalseClaimRoundTrips(t *testing.T) {
 		t.Fatal("a false Values claim did not write values=false")
 	}
 
-	snap, lres := snapshot.Load(t.Context(), data, s)
+	snap, lres := snapshot.Unmarshal(t.Context(), data, s)
 	if lres.HasErrors() {
 		t.Fatalf("Load: %s", lres.String())
 	}
@@ -103,16 +103,16 @@ func TestAttestation_AFalseClaimRoundTrips(t *testing.T) {
 	}
 }
 
-func TestAttestation_HeaderOnlySeesTheClaim(t *testing.T) {
+func TestAttestation_ReadHeaderSeesTheClaim(t *testing.T) {
 	t.Parallel()
 	_, data := attWireFixture(t)
 
-	header, res := snapshot.HeaderOnly(t.Context(), data)
+	header, res := snapshot.ReadHeader(t.Context(), bytes.NewReader(data))
 	if res.HasErrors() {
-		t.Fatalf("HeaderOnly: %s", res.String())
+		t.Fatalf("ReadHeader: %s", res.String())
 	}
 	if header.Attestation == nil || !header.Attestation.Values || !header.Attestation.Associations {
-		t.Fatalf("HeaderOnly attestation = %+v, want both true", header.Attestation)
+		t.Fatalf("ReadHeader attestation = %+v, want both true", header.Attestation)
 	}
 }
 
@@ -163,7 +163,7 @@ func TestLoad_AbsentAttestationSurvivesTheRoundTrip(t *testing.T) {
 	s, data := attWireFixture(t)
 
 	stripped := bytes.Replace(data, []byte(attTrueSegment), nil, 1)
-	snap, res := snapshot.Load(t.Context(), stripped, s, snapshot.WithIntegrityCheck(false))
+	snap, res := snapshot.Unmarshal(t.Context(), stripped, s, snapshot.WithIntegrityCheck(false))
 	if res.HasErrors() {
 		t.Fatalf("Load: %s", res.String())
 	}

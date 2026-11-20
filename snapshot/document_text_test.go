@@ -83,18 +83,14 @@ var wholeDocumentReaders = []struct {
 	read func(ctx context.Context, doc []byte, s schema.Schema) diag.Result
 }{
 	{"Load", func(ctx context.Context, doc []byte, s schema.Schema) diag.Result {
-		_, res := snapshot.Load(ctx, doc, s)
+		_, res := snapshot.Unmarshal(ctx, doc, s)
 		return res
 	}},
 	{"Verify", func(ctx context.Context, doc []byte, s schema.Schema) diag.Result {
 		return snapshot.Verify(ctx, doc, s)
 	}},
 	{"Info", func(ctx context.Context, doc []byte, _ schema.Schema) diag.Result {
-		_, res := snapshot.Info(ctx, doc)
-		return res
-	}},
-	{"HeaderOnly", func(ctx context.Context, doc []byte, _ schema.Schema) diag.Result {
-		_, res := snapshot.HeaderOnly(ctx, doc)
+		_, res := snapshot.Stat(ctx, doc)
 		return res
 	}},
 	{"UpdateMetadata", func(ctx context.Context, doc []byte, _ schema.Schema) diag.Result {
@@ -220,19 +216,19 @@ func TestReaders_ReadValidTextBackUnchanged(t *testing.T) {
 			}
 			loadTextNote(t, written, s, note.ID(), c.want)
 
-			info, res := snapshot.Info(ctx, rehashDocument(t, data))
+			info, res := snapshot.Stat(ctx, rehashDocument(t, data))
 			if res.HasErrors() {
 				t.Fatalf("Info: %s", res)
 			}
 			if got := info.Metadata["run"]; got != c.want {
 				t.Errorf("Info metadata = %q, want %q", got, c.want)
 			}
-			header, res := snapshot.HeaderOnly(ctx, data)
+			header, res := snapshot.ReadHeader(ctx, bytes.NewReader(data))
 			if res.HasErrors() {
-				t.Fatalf("HeaderOnly: %s", res)
+				t.Fatalf("ReadHeader: %s", res)
 			}
 			if got := header.Metadata["run"]; got != c.want {
-				t.Errorf("HeaderOnly metadata = %q, want %q", got, c.want)
+				t.Errorf("ReadHeader metadata = %q, want %q", got, c.want)
 			}
 
 			updated, res := snapshot.UpdateMetadata(ctx, data, map[string]string{"run": c.want})
@@ -243,9 +239,9 @@ func TestReaders_ReadValidTextBackUnchanged(t *testing.T) {
 				t.Errorf("UpdateMetadata changed the body's spelling: %s", updated)
 			}
 			loadTextNote(t, updated, s, note.ID(), c.want)
-			after, res := snapshot.HeaderOnly(ctx, updated)
+			after, res := snapshot.ReadHeader(ctx, bytes.NewReader(updated))
 			if res.HasErrors() {
-				t.Fatalf("HeaderOnly after UpdateMetadata: %s", res)
+				t.Fatalf("ReadHeader after UpdateMetadata: %s", res)
 			}
 			if got := after.Metadata["run"]; got != c.want {
 				t.Errorf("metadata after UpdateMetadata = %q, want %q", got, c.want)
@@ -258,7 +254,7 @@ func TestReaders_ReadValidTextBackUnchanged(t *testing.T) {
 // element.
 func loadTextNote(t *testing.T, doc []byte, s schema.Schema, id schema.TypeID, want string) graph.Snapshot {
 	t.Helper()
-	snap, res := snapshot.Load(t.Context(), rehashDocument(t, doc), s)
+	snap, res := snapshot.Unmarshal(t.Context(), rehashDocument(t, doc), s)
 	if res.HasErrors() {
 		t.Fatalf("Load: %s", res)
 	}
@@ -282,13 +278,13 @@ func loadTextNote(t *testing.T, doc []byte, s schema.Schema, id schema.TypeID, w
 // headerReaders are the surfaces that read only up to the end of the types table.
 var headerReaders = []struct {
 	name string
-	read func(t *testing.T, doc []byte) (*snapshot.HeaderInfo, diag.Result)
+	read func(t *testing.T, doc []byte) (*snapshot.Header, diag.Result)
 }{
-	{"HeaderOnlyRead", func(t *testing.T, doc []byte) (*snapshot.HeaderInfo, diag.Result) {
+	{"ReadHeader", func(t *testing.T, doc []byte) (*snapshot.Header, diag.Result) {
 		t.Helper()
-		return snapshot.HeaderOnlyRead(t.Context(), strings.NewReader(string(doc)))
+		return snapshot.ReadHeader(t.Context(), strings.NewReader(string(doc)))
 	}},
-	{"ScanDir", func(t *testing.T, doc []byte) (*snapshot.HeaderInfo, diag.Result) {
+	{"ScanDir", func(t *testing.T, doc []byte) (*snapshot.Header, diag.Result) {
 		t.Helper()
 		dir := t.TempDir()
 		if err := os.WriteFile(filepath.Join(dir, "doc.ys"), doc, 0o600); err != nil {
@@ -322,8 +318,8 @@ func TestHeaderReaders_RefuseBadTextUpToTheEndOfTheTypes(t *testing.T) {
 	}
 }
 
-// HeaderOnlyRead and ScanDir stop at the types table, so bad text past it goes
-// unread, as their documentation states. HeaderOnly holds the whole document and
+// ReadHeader and ScanDir stop at the types table, so bad text past it goes
+// unread, as their documentation states. Stat holds the whole document and
 // refuses the same bytes.
 func TestHeaderReaders_LeaveBadTextPastTheTypesUnread(t *testing.T) {
 	t.Parallel()
@@ -337,8 +333,8 @@ func TestHeaderReaders_LeaveBadTextPastTheTypesUnread(t *testing.T) {
 				if res.HasErrors() || info == nil {
 					t.Errorf("%s, %s, %s: info %v, %s; want a header", r.name, p.name, c.name, info != nil, res)
 				}
-				if _, whole := snapshot.HeaderOnly(ctx, edited); !whole.HasCode(diag.E_SNAPSHOT_MALFORMED) {
-					t.Errorf("HeaderOnly, %s, %s: %s, want %s", p.name, c.name, whole, diag.E_SNAPSHOT_MALFORMED)
+				if _, whole := snapshot.Stat(ctx, edited); !whole.HasCode(diag.E_SNAPSHOT_MALFORMED) {
+					t.Errorf("Stat, %s, %s: %s, want %s", p.name, c.name, whole, diag.E_SNAPSHOT_MALFORMED)
 				}
 			}
 		}
@@ -375,7 +371,7 @@ func TestReaders_JudgeTextBeforeVersionOverTheWholeDocument(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()
 	doc, s := textDocument(t)
-	doc = editOnce(t, doc, `"version":`+strconv.Itoa(snapshot.MinReadableVersion), `"version":`+strconv.Itoa(snapshot.MinReadableVersion-1))
+	doc = editOnce(t, doc, `"version":`+strconv.Itoa(snapshot.TestMinReadableVersion), `"version":`+strconv.Itoa(snapshot.TestMinReadableVersion-1))
 	onlyVersion := []byte(doc)
 	badText := []byte(editOnce(t, doc, `"run":"META"`, "\"run\":\"\xff\""))
 	for _, r := range wholeDocumentReaders {
@@ -386,8 +382,8 @@ func TestReaders_JudgeTextBeforeVersionOverTheWholeDocument(t *testing.T) {
 			t.Errorf("%s, an unsupported version alone: %s, want %s", r.name, res, diag.E_SNAPSHOT_UNSUPPORTED_VERSION)
 		}
 	}
-	_, res := snapshot.HeaderOnlyRead(ctx, bytes.NewReader(badText))
+	_, res := snapshot.ReadHeader(ctx, bytes.NewReader(badText))
 	if res.Len() != 1 || !res.HasCode(diag.E_SNAPSHOT_UNSUPPORTED_VERSION) {
-		t.Errorf("HeaderOnlyRead: %s, want one %s", res, diag.E_SNAPSHOT_UNSUPPORTED_VERSION)
+		t.Errorf("ReadHeader: %s, want one %s", res, diag.E_SNAPSHOT_UNSUPPORTED_VERSION)
 	}
 }

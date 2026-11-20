@@ -13,7 +13,7 @@ import (
 
 // MaxComposedDepth is the deepest composed nesting a validated instance may
 // hold: a root is depth 0, its composed children depth 1, and a child at a
-// depth past this bound draws [ErrCompositionDepthExceeded]. The .ys reader
+// depth past this bound draws [diag.E_COMPOSITION_DEPTH_EXCEEDED]. The .ys reader
 // refuses a document nested past the same number, so no validated instance is
 // nested deeper than a snapshot can carry.
 const MaxComposedDepth = 32
@@ -49,7 +49,7 @@ func pkPathFromInstance(basePath path.Path, child ValidInstance, childType schem
 
 // validateCompositions validates all composition relations for an instance
 // at the given composed depth. Returns each relation's composed children by
-// relation name, and whether a child holds a [Refused] value.
+// relation name.
 func (v *Validator) validateCompositions(
 	ctx context.Context,
 	typ schema.Type,
@@ -58,13 +58,12 @@ func (v *Validator) validateCompositions(
 	prov Provenance,
 	base path.Path,
 	depth int,
-) (map[string][]ValidInstance, bool) {
+) map[string][]ValidInstance {
 	var composed map[string][]ValidInstance
-	refused := false
 
 	for rel := range typ.AllCompositions() {
 		if err := ctx.Err(); err != nil {
-			return composed, refused
+			return composed
 		}
 
 		in := rels[rel]
@@ -75,7 +74,7 @@ func (v *Validator) validateCompositions(
 			if !rel.IsOptional() && in.state == relationAbsent {
 				issue := diag.NewIssue(
 					diag.Error,
-					ErrUnresolvedRequiredComposition,
+					diag.E_UNRESOLVED_REQUIRED_COMPOSITION,
 					fmt.Sprintf("missing required composition %q", rel.Name()),
 				).WithDetail(diag.DetailKeyReason, "absent").
 					WithDetail(diag.DetailKeyRelationName, rel.Name()).
@@ -86,8 +85,7 @@ func (v *Validator) validateCompositions(
 			continue
 		}
 
-		children, childRefused := v.validateComposition(ctx, rel, in.value, collector, prov, base.Key(in.key), depth)
-		refused = refused || childRefused
+		children := v.validateComposition(ctx, rel, in.value, collector, prov, base.Key(in.key), depth)
 		if children != nil {
 			if composed == nil {
 				composed = make(map[string][]ValidInstance)
@@ -95,12 +93,12 @@ func (v *Validator) validateCompositions(
 			composed[rel.Name()] = children
 		}
 	}
-	return composed, refused
+	return composed
 }
 
 // validateComposition validates a present composition value at relPath, whose
 // children sit at depth+1, and returns them: nil when it fails, and non-nil but
-// empty for an empty composition. It reports whether a child holds a [Refused].
+// empty for an empty composition.
 func (v *Validator) validateComposition(
 	ctx context.Context,
 	rel schema.Relation,
@@ -109,13 +107,13 @@ func (v *Validator) validateComposition(
 	prov Provenance,
 	relPath path.Path,
 	depth int,
-) ([]ValidInstance, bool) {
+) []ValidInstance {
 	// Compositions always expect an array (accept typed slices via reflection)
 	arr, ok := toSliceOfAny(rawValue)
 	if !ok {
 		collector.Collect(shapeMismatch(rel, fmt.Sprintf("composition %q: expected array, got %s", rel.Name(), kindOf(rawValue)),
 			"array", kindOf(rawValue), prov, relPath))
-		return nil, false
+		return nil
 	}
 
 	// Empty array is valid for optional, error for required
@@ -123,16 +121,16 @@ func (v *Validator) validateComposition(
 		if !rel.IsOptional() {
 			issue := diag.NewIssue(
 				diag.Error,
-				ErrUnresolvedRequiredComposition,
+				diag.E_UNRESOLVED_REQUIRED_COMPOSITION,
 				fmt.Sprintf("composition %q: required composition cannot be empty", rel.Name()),
 			).WithDetail(diag.DetailKeyReason, "empty").
 				WithDetail(diag.DetailKeyRelationName, rel.Name()).
 				WithDetail(diag.DetailKeyJSONField, rel.FieldName())
 			withProvenance(issue, prov, relPath.String())
 			collector.Collect(issue.Build())
-			return nil, false
+			return nil
 		}
-		return []ValidInstance{}, false
+		return []ValidInstance{}
 	}
 
 	// A composition always arrives as an array, so its multiplicity is not
@@ -142,28 +140,28 @@ func (v *Validator) validateComposition(
 	if !rel.IsMany() && len(arr) > 1 {
 		issue := diag.NewIssue(
 			diag.Error,
-			ErrDuplicateComposedPK,
+			diag.E_DUPLICATE_COMPOSED_PK,
 			fmt.Sprintf("composition %q: (one) cardinality violated, got %d children", rel.Name(), len(arr)),
 		).WithExpectedGot("1 child", fmt.Sprintf("%d children", len(arr))).
 			WithDetail(diag.DetailKeyRelationName, rel.Name()).
 			WithDetail(diag.DetailKeyJSONField, rel.FieldName())
 		withProvenance(issue, prov, relPath.String())
 		collector.Collect(issue.Build())
-		return nil, false
+		return nil
 	}
 
 	childDepth := depth + 1
 	if childDepth > MaxComposedDepth {
 		issue := diag.NewIssue(
 			diag.Error,
-			ErrCompositionDepthExceeded,
+			diag.E_COMPOSITION_DEPTH_EXCEEDED,
 			fmt.Sprintf("composition %q: composed nesting depth %d exceeds limit %d", rel.Name(), childDepth, MaxComposedDepth),
 		).WithDetail(diag.DetailKeyDepth, strconv.Itoa(childDepth)).
 			WithDetail(diag.DetailKeyRelationName, rel.Name()).
 			WithDetail(diag.DetailKeyJSONField, rel.FieldName())
 		withProvenance(issue, prov, relPath.String())
 		collector.Collect(issue.Build())
-		return nil, false
+		return nil
 	}
 
 	// Build raw instances for the children, each remembering its position in
@@ -214,13 +212,13 @@ func (v *Validator) validateComposition(
 			seenPKs := make(map[string]int) // pk string -> first occurrence's input index
 			for i, child := range validChildren {
 				if child.IsZero() {
-					continue // failed validation, or holds a Refused value: nothing to compare
+					continue // failed validation: nothing to compare
 				}
 				pkStr := child.PrimaryKey().String()
 				if firstIdx, exists := seenPKs[pkStr]; exists {
 					issue := diag.NewIssue(
 						diag.Error,
-						ErrDuplicateComposedPK,
+						diag.E_DUPLICATE_COMPOSED_PK,
 						fmt.Sprintf("duplicate primary key in composed children at indices %d and %d", firstIdx, inputIndex[i]),
 					).WithDetail(diag.DetailKeyRelationName, rel.Name()).
 						WithDetail(diag.DetailKeyJSONField, rel.FieldName()).
@@ -235,14 +233,9 @@ func (v *Validator) validateComposition(
 	}
 
 	if collector.HasErrors() {
-		return nil, false
+		return nil
 	}
-	// A child the validator refused with no error holds a Refused value.
-	if slices.Contains(validChildren, ValidInstance{}) {
-		return nil, true
-	}
-
-	return validChildren, false
+	return validChildren
 }
 
 // hasDetailKey reports whether issue already carries a detail under key.

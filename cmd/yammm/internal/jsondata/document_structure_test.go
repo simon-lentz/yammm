@@ -89,7 +89,7 @@ func TestParse_ARepeatedTypeKeyIsReportedAndRead(t *testing.T) {
 				t.Fatalf("no entry for Person")
 			}
 			var ids []string
-			for _, r := range rows {
+			for _, r := range rows.Elements {
 				ids = append(ids, r.Properties["id"].(string))
 			}
 			if !slices.Equal(ids, c.want) {
@@ -104,11 +104,11 @@ func TestParse_ARepeatedTypeKeyIsReportedAndRead(t *testing.T) {
 		if got := len(allIssues(result)); got != 2 {
 			t.Fatalf("got %d issues, want 2:%s", got, describe(result))
 		}
-		if len(parsed["Person"]) != 2 {
-			t.Fatalf("Person holds %d instances, want 2 (p1 and p3)", len(parsed["Person"]))
+		if len(parsed["Person"].Elements) != 2 {
+			t.Fatalf("Person holds %d instances, want 2 (p1 and p3)", len(parsed["Person"].Elements))
 		}
 		// The second array indexes its own elements, as the document writes it.
-		if got := parsed["Person"][1].Provenance.Path().String(); got != "$.Person[1]" {
+		if got := parsed["Person"].Elements[1].Provenance.Path().String(); got != "$.Person[1]" {
 			t.Errorf("the second array's instance has path %q, want %q", got, "$.Person[1]")
 		}
 	})
@@ -120,7 +120,7 @@ func TestParse_ARepeatedTypeKeyIsReportedAndRead(t *testing.T) {
 				t.Fatalf("unexpected repetition refusal:%s", describe(result))
 			}
 		}
-		if len(parsed["Person"]) != 1 || len(parsed["Company"]) != 1 {
+		if len(parsed["Person"].Elements) != 1 || len(parsed["Company"].Elements) != 1 {
 			t.Fatalf("got %v", parsed)
 		}
 	})
@@ -161,8 +161,8 @@ func TestParse_TrailingContentIsRefused(t *testing.T) {
 			if got := len(allIssues(result)); got != 1 {
 				t.Errorf("got %d issues, want 1:%s", got, describe(result))
 			}
-			if len(parsed["A"]) != 1 {
-				t.Errorf("A holds %d instances, want 1", len(parsed["A"]))
+			if len(parsed["A"].Elements) != 1 {
+				t.Errorf("A holds %d instances, want 1", len(parsed["A"].Elements))
 			}
 		})
 	}
@@ -229,7 +229,7 @@ func TestParse_ARepeatedMemberIsReported(t *testing.T) {
 			}
 			rows := parsed["Person"]
 			var paths []string
-			for _, r := range rows {
+			for _, r := range rows.Elements {
 				paths = append(paths, r.Provenance.Path().String())
 			}
 			if want := []string{"$.Person[0]", "$.Person[1]", "$.Person[2]"}; !slices.Equal(paths, want) {
@@ -255,11 +255,11 @@ func TestParse_ARepeatedMemberIsReported(t *testing.T) {
 			t.Fatalf("got %d issues, want 1:%s", got, describe(result))
 		}
 		rows := parsed["Person"]
-		if len(rows) != 1 {
-			t.Fatalf("got %d instances, want 1", len(rows))
+		if len(rows.Elements) != 1 {
+			t.Fatalf("got %d instances, want 1", len(rows.Elements))
 		}
 		// encoding/json keeps the last value of a repeated name.
-		if got := rows[0].Properties["id"]; got != "b" {
+		if got := rows.Elements[0].Properties["id"]; got != "b" {
 			t.Errorf("id is %v, want \"b\"", got)
 		}
 	})
@@ -368,8 +368,8 @@ func TestParse_ARepeatedMemberIsReported(t *testing.T) {
 			if !result.OK() {
 				t.Fatalf("refused:%s", describe(result))
 			}
-			if len(parsed["Person"]) != 1 {
-				t.Fatalf("got %d instances, want 1", len(parsed["Person"]))
+			if len(parsed["Person"].Elements) != 1 {
+				t.Fatalf("got %d instances, want 1", len(parsed["Person"].Elements))
 			}
 		})
 	}
@@ -402,8 +402,8 @@ func TestParse_AnEmptyArrayKeepsItsKey(t *testing.T) {
 			if entry != c.entry {
 				t.Fatalf("entry present %v, want %v (%v)", entry, c.entry, parsed)
 			}
-			if len(rows) != 0 {
-				t.Fatalf("got %d instances, want 0", len(rows))
+			if len(rows.Elements) != 0 {
+				t.Fatalf("got %d instances, want 0", len(rows.Elements))
 			}
 		})
 	}
@@ -432,7 +432,7 @@ type Person {
 		if !ok {
 			t.Fatalf("no entry for %q", name)
 		}
-		_, vr := v.Validate(t.Context(), name, rawsOf(raws))
+		_, vr := v.Validate(t.Context(), name, rawsOf(raws.Elements))
 		for issue := range vr.Issues() {
 			codes = append(codes, issue.Code())
 		}
@@ -481,8 +481,8 @@ func TestParse_AnUnreadableDocumentReportsOneFault(t *testing.T) {
 			}
 			for name, n := range c.kept {
 				rows, ok := parsed[name]
-				if !ok || len(rows) != n {
-					t.Errorf("%s: entry %v with %d instances, want %d", name, ok, len(rows), n)
+				if !ok || len(rows.Elements) != n {
+					t.Errorf("%s: entry %v with %d instances, want %d", name, ok, len(rows.Elements), n)
 				}
 			}
 			if len(parsed) != len(c.kept) {
@@ -505,8 +505,8 @@ func TestParse_AValueThatIsNotAnArrayIsSkippedWhole(t *testing.T) {
 		if got := len(allIssues(result)); got != 1 || !issueAt(result, "expected array", 1, 7) {
 			t.Fatalf("%s: want one refusal at 1:7:%s", doc, describe(result))
 		}
-		if len(parsed["B"]) != 1 {
-			t.Fatalf("%s: B holds %d instances, want 1", doc, len(parsed["B"]))
+		if len(parsed["B"].Elements) != 1 {
+			t.Fatalf("%s: B holds %d instances, want 1", doc, len(parsed["B"].Elements))
 		}
 	}
 }

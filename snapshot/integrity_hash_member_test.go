@@ -45,13 +45,13 @@ type T {
 			if res.HasErrors() {
 				t.Fatalf("marshal: %s", res)
 			}
-			if _, res := snapshot.Load(ctx, data, s); res.HasErrors() {
+			if _, res := snapshot.Unmarshal(ctx, data, s); res.HasErrors() {
 				t.Errorf("Load: %s", res)
 			}
 			if res := snapshot.Verify(ctx, data, s); res.HasErrors() {
 				t.Errorf("Verify: %s", res)
 			}
-			if _, res := snapshot.Info(ctx, data); res.HasErrors() {
+			if _, res := snapshot.Stat(ctx, data); res.HasErrors() {
 				t.Errorf("Info: %s", res)
 			}
 			edited := []byte(strings.ReplaceAll(string(data), `"written"`, `"changed"`))

@@ -155,7 +155,7 @@ func TestSchema_ResolveType_Local(t *testing.T) {
 	typ := schema.TestNewType("Customer", location.SourceID{}, location.Span{}, "", false, false)
 	schema.TestSetSchemaTypes(s, []schema.Type{typ})
 
-	ref := schema.NewTypeRef("", "Customer", location.Span{})
+	ref := schema.TestNewTypeRef("", "Customer", location.Span{})
 	result, ok := s.ResolveType(ref)
 
 	assert.True(t, ok)
@@ -167,7 +167,7 @@ func TestSchema_ResolveType_Local(t *testing.T) {
 func TestSchema_ResolveType_LocalNotFound(t *testing.T) {
 	s := schema.TestNewSchema("test", location.SourceID{}, location.Span{}, "")
 
-	ref := schema.NewTypeRef("", "NonExistent", location.Span{})
+	ref := schema.TestNewTypeRef("", "NonExistent", location.Span{})
 	result, ok := s.ResolveType(ref)
 
 	assert.False(t, ok)
@@ -177,7 +177,7 @@ func TestSchema_ResolveType_LocalNotFound(t *testing.T) {
 func TestSchema_ResolveType_QualifiedNoImport(t *testing.T) {
 	s := schema.TestNewSchema("test", location.SourceID{}, location.Span{}, "")
 
-	ref := schema.NewTypeRef("users", "Person", location.Span{})
+	ref := schema.TestNewTypeRef("users", "Person", location.Span{})
 	result, ok := s.ResolveType(ref)
 
 	assert.False(t, ok)
@@ -186,7 +186,7 @@ func TestSchema_ResolveType_QualifiedNoImport(t *testing.T) {
 
 func TestSchema_DataType_Found(t *testing.T) {
 	s := schema.TestNewSchema("test", location.SourceID{}, location.Span{}, "")
-	dt := schema.TestNewDataType("Email", schema.NewStringConstraint(), location.Span{}, "")
+	dt := schema.TestNewDataType("Email", schema.TestNewStringConstraint(), location.Span{}, "")
 	schema.TestSetSchemaDataTypes(s, []schema.DataType{dt})
 
 	result, ok := s.DataType("Email")
@@ -241,8 +241,7 @@ func TestSchema_ResolveDataType_Local(t *testing.T) {
 	dt := schema.TestNewDataType("Currency", nil, location.Span{}, "")
 	schema.TestSetSchemaDataTypes(s, []schema.DataType{dt})
 
-	ref := schema.NewDataTypeRef("", "Currency", location.Span{})
-	result, ok := s.ResolveDataType(ref)
+	result, ok := s.ResolveDataType("Currency")
 
 	assert.True(t, ok)
 	if dt != result {
@@ -253,8 +252,7 @@ func TestSchema_ResolveDataType_Local(t *testing.T) {
 func TestSchema_ResolveDataType_LocalNotFound(t *testing.T) {
 	s := schema.TestNewSchema("test", location.SourceID{}, location.Span{}, "")
 
-	ref := schema.NewDataTypeRef("", "NonExistent", location.Span{})
-	result, ok := s.ResolveDataType(ref)
+	result, ok := s.ResolveDataType("NonExistent")
 
 	assert.False(t, ok)
 	assert.True(t, result.IsZero())
@@ -263,8 +261,7 @@ func TestSchema_ResolveDataType_LocalNotFound(t *testing.T) {
 func TestSchema_ResolveDataType_QualifiedNoImport(t *testing.T) {
 	s := schema.TestNewSchema("test", location.SourceID{}, location.Span{}, "")
 
-	ref := schema.NewDataTypeRef("types", "Email", location.Span{})
-	result, ok := s.ResolveDataType(ref)
+	result, ok := s.ResolveDataType("types.Email")
 
 	assert.False(t, ok)
 	assert.True(t, result.IsZero())
@@ -358,7 +355,7 @@ func TestSchema_Sources_Zero(t *testing.T) {
 
 func TestSchema_Sources_Set(t *testing.T) {
 	s := schema.TestNewSchema("test", location.SourceID{}, location.Span{}, "")
-	sources := schema.NewSources(nil) // nil registry creates nil Sources
+	sources := schema.TestNewSources(nil) // nil registry creates nil Sources
 
 	schema.TestSetSchemaSources(s, sources)
 

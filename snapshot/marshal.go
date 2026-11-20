@@ -354,10 +354,10 @@ func marshalDiagnostics(view *writerView, s schema.Schema, tt *typeTable) (diagW
 			Relation:   u.Relation(),
 			TargetType: targetRow,
 			Required:   u.Required(),
-			Reason:     u.Reason(),
+			Reason:     u.Reason().String(),
 		}
 		switch u.Reason() {
-		case "absent", "empty":
+		case graph.ReasonAbsent, graph.ReasonEmpty:
 			uw.TargetKey = nil
 		default:
 			key, err := parseTargetKey(u.TargetKey())

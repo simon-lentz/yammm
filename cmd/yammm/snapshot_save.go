@@ -94,7 +94,7 @@ func runSnapshotSave(cmd *cobra.Command, args []string, sink *cli.DiagnosticSink
 	// Load existing snapshot if --into is set. What the load reports reaches
 	// the operator whether or not this command gets as far as writing anything.
 	var g *graph.Graph
-	var imported *snapshot.HeaderInfo
+	var imported *snapshot.Header
 	if intoPath != "" {
 		snap, header, loadResult, loadErr := cli.LoadSnapshotFile(cmd.Context(), intoPath, s)
 		if loadErr != nil {
@@ -152,7 +152,7 @@ func runSnapshotSave(cmd *cobra.Command, args []string, sink *cli.DiagnosticSink
 	// Raised only once the file exists: the code states that a snapshot was
 	// written where a reader that discovers snapshots by extension will not find it.
 	if !strings.HasSuffix(outputPath, ".ys") {
-		c := diag.NewCollectorUnlimited()
+		c := diag.NewCollector(diag.NoLimit)
 		c.Collect(diag.NewIssue(diag.Warning, diag.W_SNAPSHOT_PATH_EXTENSION,
 			fmt.Sprintf("output path %q does not use the .ys extension", outputPath)).
 			WithPath(outputPath, "").Build())
@@ -164,7 +164,7 @@ func runSnapshotSave(cmd *cobra.Command, args []string, sink *cli.DiagnosticSink
 // mergeMetadata overlays flag pairs onto the imported header's. The header's
 // annotations survive a merge that does not name them, and a flag wins on a
 // key that appears in both.
-func mergeMetadata(imported *snapshot.HeaderInfo, flags map[string]string) map[string]string {
+func mergeMetadata(imported *snapshot.Header, flags map[string]string) map[string]string {
 	merged := make(map[string]string, len(flags))
 	if imported != nil {
 		maps.Copy(merged, imported.Metadata)

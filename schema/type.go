@@ -43,10 +43,10 @@ type typeState struct {
 	allAnnotations  []Annotation // own type-level annotations then inherited, deduped keep-first
 
 	// Inheritance
-	extendsClause []TypeRef         // every reference the clause spells, in source order
-	inherits      []TypeRef         // the clause's first spelling of each supertype
-	superTypes    []ResolvedTypeRef // linearized ancestors
-	subTypes      []ResolvedTypeRef // LOCAL subtypes only; completeTypes records a subtype only where its supertype is in the same schema (a cross-schema descendant is invisible here — the known limit concreteEmitters and the @index redundancy rule depend on)
+	extendsClause []TypeRef // every reference the clause spells, in source order
+	inherits      []TypeRef // the clause's first spelling of each supertype
+	superTypes    []TypeID  // linearized ancestors
+	subTypes      []TypeID  // LOCAL subtypes only; completeTypes records a subtype only where its supertype is in the same schema (a cross-schema descendant is invisible here — the known limit concreteEmitters and the @index redundancy rule depend on)
 
 	// O(1) lookup indices
 	propByName map[string]Property
@@ -277,32 +277,22 @@ func (t Type) Inherits() iter.Seq[TypeRef] {
 	return slices.Values(t.inherits)
 }
 
-// SuperTypes returns an iterator over linearized ancestors.
-// Order is DFS left-to-right with keep-first deduplication.
-func (t Type) SuperTypes() iter.Seq[ResolvedTypeRef] {
+// SuperTypes returns an iterator over the identities of the linearized
+// ancestors. Order is DFS left-to-right with keep-first deduplication.
+func (t Type) SuperTypes() iter.Seq[TypeID] {
 	return slices.Values(t.superTypes)
 }
 
-// SubTypes returns an iterator over this type's known subtypes, which are
+// SubTypes returns an iterator over the identities of this type's known
+// subtypes, which are
 // LOCAL to the declaring schema. Completion records a subtype only when the
 // supertype lives in the schema being completed, so a concrete descendant
 // declared in an importing schema does not appear here. Consumers that emit
 // per-label output for every concrete descendant of an abstract type must walk
 // the closure ([Schema.Closure]) rather than rely on this iterator, or they
 // will silently skip cross-schema descendants.
-func (t Type) SubTypes() iter.Seq[ResolvedTypeRef] {
+func (t Type) SubTypes() iter.Seq[TypeID] {
 	return slices.Values(t.subTypes)
-}
-
-// IsSubTypeOf reports whether this type is a subtype of the given type.
-// Uses TypeID for cross-schema comparison.
-func (t Type) IsSubTypeOf(id TypeID) bool {
-	for _, st := range t.superTypes {
-		if st.id == id {
-			return true
-		}
-	}
-	return false
 }
 
 // CanonicalPropertyName maps a lowercased property name to the type's declared
@@ -338,11 +328,6 @@ func (t Type) seal() {
 		t.canonicalMap[lower] = p.name
 	}
 	t.sealed = true
-}
-
-// isSealed reports whether the type has been sealed.
-func (t Type) isSealed() bool {
-	return t.sealed
 }
 
 // setSchemaName sets the owning schema's name (called during completion).
@@ -508,7 +493,7 @@ func (t Type) setAllCompositions(all []Relation) {
 }
 
 // setSuperTypes sets the linearized ancestors (called during completion).
-func (t Type) setSuperTypes(supers []ResolvedTypeRef) {
+func (t Type) setSuperTypes(supers []TypeID) {
 	if t.sealed {
 		panic("schema: cannot mutate sealed type")
 	}
@@ -516,7 +501,7 @@ func (t Type) setSuperTypes(supers []ResolvedTypeRef) {
 }
 
 // setSubTypes sets the known subtypes (called during completion).
-func (t Type) setSubTypes(subs []ResolvedTypeRef) {
+func (t Type) setSubTypes(subs []TypeID) {
 	if t.sealed {
 		panic("schema: cannot mutate sealed type")
 	}

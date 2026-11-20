@@ -702,7 +702,7 @@ func loadedIdentities(snap graph.Snapshot) []string {
 			}
 		}
 	}
-	for inst := range snap.AllInstances() {
+	for inst := range snap.Instances() {
 		walk("root", inst)
 	}
 	for d := range snap.Duplicates() {
@@ -746,7 +746,7 @@ func TestIdentityOracle_RoundTripPreservesIdentity(t *testing.T) {
 		"geo.Part under IMPORTED":         composedCase("IMPORTED", "", "Part", "p4"),
 		"geo.Part under undeclared GHOST": composedCase("GHOST", "", "Part", "p5"),
 	} {
-		if _, res := snapshot.Load(ctx, snappartstest.Document(t, s, build(t, s)), s); !res.HasErrors() {
+		if _, res := snapshot.Unmarshal(ctx, snappartstest.Document(t, s, build(t, s)), s); !res.HasErrors() {
 			t.Errorf("Load admitted %s, which a validator refuses", name)
 		}
 	}
@@ -766,7 +766,7 @@ func TestIdentityOracle_RoundTripPreservesIdentity(t *testing.T) {
 			if err := result.Err(); err != nil {
 				t.Fatalf("marshal: %v", err)
 			}
-			loaded, result := snapshot.Load(ctx, data, s)
+			loaded, result := snapshot.Unmarshal(ctx, data, s)
 			if err := result.Err(); err != nil {
 				t.Fatalf("load rejected a document Marshal produced: %v\n%s", err, data)
 			}
@@ -801,7 +801,7 @@ func TestIdentityOracle_ByteFixpoint(t *testing.T) {
 			if err := result.Err(); err != nil {
 				t.Fatalf("first marshal: %v", err)
 			}
-			loaded, result := snapshot.Load(ctx, first, s)
+			loaded, result := snapshot.Unmarshal(ctx, first, s)
 			if err := result.Err(); err != nil {
 				t.Fatalf("load: %v", err)
 			}

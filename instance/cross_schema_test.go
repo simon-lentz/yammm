@@ -136,7 +136,7 @@ func TestValidate_ShadowedEdgeTarget(t *testing.T) {
 		if result.OK() {
 			t.Fatal("wrong-keyed edge must be rejected")
 		}
-		if !result.HasCode(instance.ErrMissingFKTarget) {
+		if !result.HasCode(diag.E_MISSING_FK_TARGET) {
 			t.Errorf("want E_MISSING_FK_TARGET, got: %s", result)
 		}
 	})
@@ -295,7 +295,7 @@ part type Item {
 	if result.OK() {
 		t.Fatal("duplicate composed PKs must be rejected")
 	}
-	if !result.HasCode(instance.ErrDuplicateComposedPK) {
+	if !result.HasCode(diag.E_DUPLICATE_COMPOSED_PK) {
 		t.Errorf("want E_DUPLICATE_COMPOSED_PK, got: %s", result)
 	}
 }

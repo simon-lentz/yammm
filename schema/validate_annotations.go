@@ -448,8 +448,8 @@ func (c *completer) concreteEmitters(t Type) iter.Seq[Type] {
 		if !t.IsAbstract() && !yield(t) {
 			return
 		}
-		for ref := range t.SubTypes() {
-			sub := c.resolveTypeID(ref.ID())
+		for id := range t.SubTypes() {
+			sub := c.resolveTypeID(id)
 			if sub.IsAbstract() {
 				continue
 			}

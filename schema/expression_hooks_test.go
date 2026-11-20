@@ -14,19 +14,19 @@ func TestExpressionHooks_PanicOnAnotherType(t *testing.T) {
 	t.Parallel()
 	yammmtest.AssertPanics(t, func() { expr.InvariantExpression(42) })
 	yammmtest.AssertPanics(t, func() { expr.PatternRegexp(42) })
-	yammmtest.AssertPanics(t, func() { expr.PatternRegexp(schema.NewEnumConstraint([]string{"a"})) })
+	yammmtest.AssertPanics(t, func() { expr.PatternRegexp(schema.TestParsedEnumConstraint([]string{"a"})) })
 }
 
-// The tree and the compiled patterns have no public read.
+// The tree and the compiled patterns have no public read: an invariant's
+// expression is read as text.
 func TestExpressionReads_LeaveTheExportedSurface(t *testing.T) {
 	t.Parallel()
-	for typ, name := range map[reflect.Type]string{
-		reflect.TypeFor[schema.Invariant]():         "Expression",
-		reflect.TypeFor[schema.PatternConstraint](): "CompiledPatterns",
-	} {
-		if _, ok := typ.MethodByName(name); ok {
-			t.Errorf("%s exports %s", typ, name)
-		}
+	if _, ok := reflect.TypeFor[schema.PatternConstraint]().MethodByName("CompiledPatterns"); ok {
+		t.Error("schema.PatternConstraint exports CompiledPatterns")
+	}
+	m, ok := reflect.TypeFor[schema.Invariant]().MethodByName("Expression")
+	if !ok || m.Type.NumOut() != 1 || m.Type.Out(0) != reflect.TypeFor[string]() {
+		t.Errorf("schema.Invariant.Expression is %v; want a method returning the text", m.Type)
 	}
 }
 

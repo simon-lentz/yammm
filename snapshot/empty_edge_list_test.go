@@ -34,9 +34,9 @@ func TestRead_AnEmptyEdgeListIsHeldToItsName(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 			edited := []byte(editOnce(t, doc, `"edges":{"BOSS"`, `"edges":{`+c.list+`,"BOSS"`))
-			_, plain := snapshot.Load(ctx, rehashDocument(t, edited), s)
-			_, warn := snapshot.Load(ctx, rehashDocument(t, edited), s, snapshot.WithRevalidation(diag.Warning))
-			_, fail := snapshot.Load(ctx, rehashDocument(t, edited), s, snapshot.WithRevalidation(diag.Error))
+			_, plain := snapshot.Unmarshal(ctx, rehashDocument(t, edited), s)
+			_, warn := snapshot.Unmarshal(ctx, rehashDocument(t, edited), s, snapshot.WithRevalidation(diag.Warning))
+			_, fail := snapshot.Unmarshal(ctx, rehashDocument(t, edited), s, snapshot.WithRevalidation(diag.Error))
 			for surface, res := range map[string]diag.Result{
 				"Load": plain, "Load, revalidating at Warning": warn, "Load, revalidating at Error": fail,
 				"Verify, revalidating at Error": snapshot.Verify(ctx, rehashDocument(t, edited), s, snapshot.WithRevalidation(diag.Error)),
@@ -44,7 +44,7 @@ func TestRead_AnEmptyEdgeListIsHeldToItsName(t *testing.T) {
 				failures := 0
 				for issue := range res.Issues() {
 					// The fixture's required records report at the option's severity.
-					if issue.Severity().IsFailure() && issue.Code() != diag.W_SNAPSHOT_UNRESOLVED_REQUIRED {
+					if (issue.Severity() == diag.Fatal || issue.Severity() == diag.Error) && issue.Code() != diag.W_SNAPSHOT_UNRESOLVED_REQUIRED {
 						failures++
 					}
 				}

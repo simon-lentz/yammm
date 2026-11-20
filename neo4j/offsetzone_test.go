@@ -4,6 +4,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/simon-lentz/yammm/internal/schematest"
+
 	"github.com/simon-lentz/yammm/neo4j"
 	"github.com/simon-lentz/yammm/schema"
 )
@@ -18,7 +20,7 @@ const driverOffsetZoneName = "Offset"
 // offset name at that offset, whether text or a time.Time carries it.
 func TestCoerce_OffsetOnlyInstantsCarryTheDriverZoneName(t *testing.T) {
 	t.Parallel()
-	c := schema.NewTimestampConstraint()
+	c := schematest.Constraint(t, "Timestamp")
 
 	cases := map[string]any{
 		"string with a numeric offset":  "2026-08-19T12:00:00+02:00",
@@ -48,7 +50,7 @@ func TestCoerce_OffsetOnlyInstantsCarryTheDriverZoneName(t *testing.T) {
 // the named form unequal to its own reading of the same RFC 3339 text.
 func TestCoerce_AUTCInstantGoesAsOffsetZero(t *testing.T) {
 	t.Parallel()
-	c := schema.NewTimestampConstraint()
+	c := schematest.Constraint(t, "Timestamp")
 	want := time.Date(2026, 8, 19, 12, 0, 0, 0, time.UTC)
 	for _, in := range []any{"2026-08-19T12:00:00Z", "2026-08-19T12:00:00+00:00", want} {
 		got := coerceTime(t, c, in)
@@ -66,7 +68,7 @@ func TestCoerce_AUTCInstantGoesAsOffsetZero(t *testing.T) {
 // An instant at another offset is the control.
 func TestCoerce_UTCInstantsShareOneLocation(t *testing.T) {
 	t.Parallel()
-	c := schema.NewTimestampConstraint()
+	c := schematest.Constraint(t, "Timestamp")
 	first := coerceTime(t, c, "2026-08-19T12:00:00Z").Location()
 	for _, text := range []string{
 		"2026-08-19T12:00:00Z",
@@ -88,7 +90,7 @@ func TestCoerce_UTCInstantsShareOneLocation(t *testing.T) {
 func TestCoerce_OffsetRepairPreservesTheInstant(t *testing.T) {
 	t.Parallel()
 	in := mustParse(t, "2026-08-19T12:00:00.5+02:00")
-	got := coerceTime(t, schema.NewTimestampConstraint(), in)
+	got := coerceTime(t, schematest.Constraint(t, "Timestamp"), in)
 	if !got.Equal(in) {
 		t.Errorf("coerced %s, want the same instant as %s", got, in)
 	}
@@ -143,7 +145,7 @@ func TestCoerce_TextDerivedInstantNeverCarriesTheHostZone(t *testing.T) {
 		t.Fatalf("time.Parse(%q) did not resolve to time.Local; the fixture no longer reproduces the case", text)
 	}
 
-	got := coerceTime(t, schema.NewTimestampConstraint(), text)
+	got := coerceTime(t, schematest.Constraint(t, "Timestamp"), text)
 	if got.Location() == time.Local {
 		t.Errorf("coerced value still carries the host's location %q", got.Location())
 	}
@@ -159,7 +161,7 @@ func TestCoerce_TextDerivedInstantNeverCarriesTheHostZone(t *testing.T) {
 // directly: one text coerces to one driver payload, wherever it runs.
 func TestCoerce_IsHostIndependent(t *testing.T) {
 	t.Parallel()
-	c := schema.NewTimestampConstraint()
+	c := schematest.Constraint(t, "Timestamp")
 
 	for _, text := range []string{
 		"2026-08-19T12:00:00Z",
@@ -194,7 +196,7 @@ func TestCoerce_IsHostIndependent(t *testing.T) {
 // legacy name the host's tz database resolves are no exception.
 func TestCoerce_ACallersLocationIsSentAsItsOffset(t *testing.T) {
 	t.Parallel()
-	c := schema.NewTimestampConstraint()
+	c := schematest.Constraint(t, "Timestamp")
 
 	berlin, err := time.LoadLocation("Europe/Berlin")
 	if err != nil {
@@ -255,7 +257,7 @@ func TestCoerce_HostLocalTimeValueIsSentAsOffset(t *testing.T) {
 			in := time.Date(2026, 8, 19, 12, 0, 0, 0, time.Local)
 			_, wantOffset := in.Zone()
 
-			got := coerceTime(t, schema.NewTimestampConstraint(), in)
+			got := coerceTime(t, schematest.Constraint(t, "Timestamp"), in)
 			if got.Location() == time.Local {
 				t.Errorf("coerced value still carries time.Local (%q)", got.Location())
 			}
@@ -281,7 +283,7 @@ func TestCoerce_UnresolvableZoneNameIsSentAsOffset(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 			in := time.Date(2026, 8, 19, 12, 0, 0, 0, loc)
-			got := coerceTime(t, schema.NewTimestampConstraint(), in)
+			got := coerceTime(t, schematest.Constraint(t, "Timestamp"), in)
 			if zone, offset := got.Zone(); zone != driverOffsetZoneName || offset != 3600 {
 				t.Errorf("zone = %q/%d, want %q/3600", zone, offset, driverOffsetZoneName)
 			}

@@ -1,31 +1,17 @@
 package schema_test
 
 import (
-	"strings"
 	"testing"
 
 	"github.com/simon-lentz/yammm/internal/raceskip"
 	"github.com/simon-lentz/yammm/schema"
 )
 
-// An Enum's value fault is recorded where the Enum is built, from the copy it
-// holds; the count is read at the judge, so the zero value is refused too.
+// An Enum holding fewer than two values is refused, the zero value too.
 func TestEnumConstraint_IsJudgedOnTheValuesItHolds(t *testing.T) {
-	given := []string{"a", "b"}
-	sound := schema.NewEnumConstraint(given)
-	given[1] = "a"
-	if err := schema.CheckConstraint(sound); err != nil {
-		t.Errorf("an Enum built from two distinct values is refused after its argument changed: %v", err)
-	}
-	given = []string{"a", "a"}
-	repeated := schema.NewEnumConstraint(given)
-	given[1] = "b"
-	if err := schema.CheckConstraint(repeated); err == nil || !strings.Contains(err.Error(), `duplicate enum value "a"`) {
-		t.Errorf("CheckConstraint = %v; want the duplicate the Enum holds", err)
-	}
 	for name, c := range map[string]schema.Constraint{
 		"the zero value": schema.EnumConstraint{},
-		"nil values":     schema.NewEnumConstraint(nil),
+		"nil values":     schema.TestParsedEnumConstraint(nil),
 	} {
 		if err := schema.CheckConstraint(c); err == nil || err.Error() != "schema: enum must have at least two values (got 0)" {
 			t.Errorf("%s: CheckConstraint = %v; want the two-value minimum", name, err)
@@ -36,12 +22,12 @@ func TestEnumConstraint_IsJudgedOnTheValuesItHolds(t *testing.T) {
 // Two Enums of one length holding one set of values are equal and narrow to
 // each other, whichever value each repeats.
 func TestEnumConstraint_ComparesByItsValuesAlone(t *testing.T) {
-	a := schema.NewEnumConstraint([]string{"a", "a", "b"})
-	b := schema.NewEnumConstraint([]string{"a", "b", "b"})
-	if !a.Equal(b) || !b.Equal(a) {
+	a := schema.TestParsedEnumConstraint([]string{"a", "a", "b"})
+	b := schema.TestParsedEnumConstraint([]string{"a", "b", "b"})
+	if !schema.TestConstraintEqual(a, b) || !schema.TestConstraintEqual(b, a) {
 		t.Error("Enums holding one set of values are not equal")
 	}
-	if !a.NarrowsTo(b) || !b.NarrowsTo(a) {
+	if !schema.TestConstraintNarrowsTo(a, b) || !schema.TestConstraintNarrowsTo(b, a) {
 		t.Error("Enums holding one set of values do not narrow to each other")
 	}
 	if got := a.String(); got != `Enum["a", "a", "b"]` {
@@ -56,15 +42,15 @@ func TestCheckConstraint_AcceptingAllocatesNothing(t *testing.T) {
 	for i := range values {
 		values[i] = "value_" + string(rune('A'+i))
 	}
-	enum := schema.NewEnumConstraint(values)
+	enum := schema.TestParsedEnumConstraint(values)
 	for name, c := range map[string]schema.Constraint{
 		"an Enum of forty values": enum,
-		"a reference to it":       schema.NewAliasConstraint("Colour", enum),
-		"a List of a reference":   schema.NewListConstraint(schema.NewAliasConstraint("Colour", enum)),
-		"a bounded String":        schema.StringLenBetween(1, 64),
-		"a bounded Float":         schema.FloatBetween(0.5, 2.5),
-		"a Timestamp":             schema.NewTimestampConstraint(),
-		"a List of a List":        schema.NewListConstraint(schema.NewListConstraint(schema.IntegerBetween(1, 5))),
+		"a reference to it":       schema.TestNewAliasConstraint("Colour", enum),
+		"a List of a reference":   schema.TestNewListConstraint(schema.TestNewAliasConstraint("Colour", enum)),
+		"a bounded String":        schema.TestStringLenBetween(1, 64),
+		"a bounded Float":         schema.TestFloatBetween(0.5, 2.5),
+		"a Timestamp":             schema.TestNewTimestampConstraint(),
+		"a List of a List":        schema.TestNewListConstraint(schema.TestNewListConstraint(schema.TestIntegerBetween(1, 5))),
 	} {
 		if allocs := testing.AllocsPerRun(100, func() {
 			if err := schema.CheckConstraint(c); err != nil {

@@ -55,7 +55,7 @@ func TestValidateOne_RefusesCompositionPastMaxDepth(t *testing.T) {
 	if res.OK() {
 		t.Fatalf("depth %d must be refused", instance.MaxComposedDepth+1)
 	}
-	is, ok := issueWithCode(res, instance.ErrCompositionDepthExceeded)
+	is, ok := issueWithCode(res, diag.E_COMPOSITION_DEPTH_EXCEEDED)
 	if !ok {
 		t.Fatalf("want E_COMPOSITION_DEPTH_EXCEEDED, got %s", res)
 	}
@@ -87,7 +87,7 @@ type Person {
 	_, res := v.ValidateOne(t.Context(), "Person", instance.RawInstance{Properties: map[string]any{
 		"id": "p", "home": []any{map[string]any{"id": "h1"}, map[string]any{"id": "h2"}},
 	}})
-	if !res.HasCode(instance.ErrDuplicateComposedPK) || res.HasCode(instance.ErrEdgeShapeMismatch) {
+	if !res.HasCode(diag.E_DUPLICATE_COMPOSED_PK) || res.HasCode(diag.E_EDGE_SHAPE_MISMATCH) {
 		t.Errorf("want E_DUPLICATE_COMPOSED_PK alone, got %s", res)
 	}
 }

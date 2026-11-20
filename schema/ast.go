@@ -141,6 +141,7 @@ type relationDecl struct {
 type invariantDecl struct {
 	Name string
 	Expr expr.Expression // Compiled expression
+	Text string          // the expression as [Invariant.Expression] returns it
 	// NoValue holds each literal in Expr that stands in for one with no
 	// value, with the kind of literal the source wrote.
 	NoValue       []parse.NoValueLiteral

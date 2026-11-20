@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/simon-lentz/yammm/diag"
+	"github.com/simon-lentz/yammm/internal/source"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -541,7 +542,7 @@ func TestSyntheticImportKey_IsTheLoadersLookup(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			got, err := schema.SyntheticImportKey(tc.importer, tc.imp)
+			got, err := source.SyntheticImportKey(tc.importer, tc.imp)
 			if tc.want == "" {
 				if err == nil {
 					t.Fatalf("SyntheticImportKey = %q, want an error", got)

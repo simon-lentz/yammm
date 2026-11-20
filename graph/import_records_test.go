@@ -72,7 +72,7 @@ func TestNewFromSnapshot_InstallsTheRecordsAsTheyStand(t *testing.T) {
 	built := importRecordsSnapshot(t)
 	reasons := map[string]int{}
 	for u := range built.Unresolved() {
-		reasons[u.Reason()]++
+		reasons[u.Reason().String()]++
 	}
 	withProps := 0
 	for e := range built.Edges() {

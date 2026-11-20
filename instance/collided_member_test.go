@@ -4,6 +4,7 @@ import (
 	"maps"
 	"testing"
 
+	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/instance"
 )
 
@@ -49,7 +50,7 @@ func TestValidateOne_ACollidedMemberDrawsTheCollisionAlone(t *testing.T) {
 				t.Fatal("a collided member validated")
 			}
 			for issue := range res.Issues() {
-				if issue.Code() != instance.ErrCaseFoldCollision {
+				if issue.Code() != diag.E_CASE_FOLD_COLLISION {
 					t.Errorf("drew %s beside the collision: %s", issue.Code(), res)
 				}
 			}

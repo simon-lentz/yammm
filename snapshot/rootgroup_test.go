@@ -79,7 +79,7 @@ func TestRootGroup_AnEmptyPartGroupIsRefused(t *testing.T) {
 	if mres.HasErrors() {
 		t.Fatalf("marshal: %s", mres)
 	}
-	if _, lres := snapshot.Load(ctx, data, s); lres.HasErrors() {
+	if _, lres := snapshot.Unmarshal(ctx, data, s); lres.HasErrors() {
 		t.Fatalf("a composed part under a real root must load: %s", lres)
 	}
 	// Card sorts before Holder, so row 0 is the part type, and the writer
@@ -89,7 +89,7 @@ func TestRootGroup_AnEmptyPartGroupIsRefused(t *testing.T) {
 	if doc == string(data) {
 		t.Fatalf("fixture shape changed; %s not found in %s", holderGroup, data)
 	}
-	_, lres := snapshot.Load(ctx, []byte(doc), s, snapshot.WithIntegrityCheck(false))
+	_, lres := snapshot.Unmarshal(ctx, []byte(doc), s, snapshot.WithIntegrityCheck(false))
 	if !lres.HasCode(diag.E_SNAPSHOT_INVALID_ROOT) || !strings.Contains(lres.String(), "instances entry 0 denotes") {
 		t.Errorf("Load accepted an empty part-type group: %s", lres)
 	}
@@ -119,7 +119,7 @@ func TestRootGroup_LoadRefusesIneligibleTypes(t *testing.T) {
 	if doc == string(data) {
 		t.Fatalf("fixture shape changed; %s not found in %s", holderGroup, data)
 	}
-	_, lres := snapshot.Load(ctx, []byte(doc), s, snapshot.WithIntegrityCheck(false))
+	_, lres := snapshot.Unmarshal(ctx, []byte(doc), s, snapshot.WithIntegrityCheck(false))
 	if !lres.HasCode(diag.E_SNAPSHOT_INVALID_ROOT) {
 		t.Errorf("Load accepted a part type as a root group: %s", lres)
 	}
@@ -132,7 +132,7 @@ func TestRootGroup_LoadRefusesIneligibleTypes(t *testing.T) {
 				Properties: immutable.WrapProperties(map[string]any{"id": "x"}),
 			}}},
 		} {
-			if _, res := snapshot.Load(ctx, snappartstest.Document(t, s, parts), s); !res.HasCode(diag.E_SNAPSHOT_INVALID_ROOT) {
+			if _, res := snapshot.Unmarshal(ctx, snappartstest.Document(t, s, parts), s); !res.HasCode(diag.E_SNAPSHOT_INVALID_ROOT) {
 				t.Errorf("%s, %s: Load drew %s, want %s", id, shape, res, diag.E_SNAPSHOT_INVALID_ROOT)
 			}
 		}

@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/simon-lentz/yammm/internal/schematest"
+
 	"github.com/google/uuid"
 
 	"github.com/simon-lentz/yammm/diag"
@@ -34,11 +36,11 @@ type T {
 }
 `
 
-// The validator judges a value as its one form: at each scalar kind, CheckValue
-// accepts a value only when Scalar reads it in a form CheckValue accepts, and
+// The validator judges a value as its one form: at each scalar kind, value.Check
+// accepts a value only when Scalar reads it in a form value.Check accepts, and
 // the validator stores what it stores for the form. A pointer has no form, so
 // every kind refuses it.
-func TestCheckValue_JudgesAValueAsItsForm(t *testing.T) {
+func TestCheck_JudgesAValueAsItsForm(t *testing.T) {
 	t.Parallel()
 	s := loadT(t, oneFormSchema)
 	typ, _ := s.Type("T")
@@ -110,10 +112,10 @@ func TestCheckValue_JudgesAValueAsItsForm(t *testing.T) {
 		for _, prop := range []string{"s", "i", "f", "b", "ts", "d", "u", "e", "p"} {
 			p, _ := typ.Property(prop)
 			k := p.Constraint()
-			got := instance.CheckValue(c.v, k) == nil
-			want := hasForm && instance.CheckValue(form, k) == nil
+			got := value.Check(c.v, k) == nil
+			want := hasForm && value.Check(form, k) == nil
 			if got != want {
-				t.Errorf("%s at %s: CheckValue accepts = %v, its form %#v (%v) = %v", c.name, k.Kind(), got, form, hasForm, want)
+				t.Errorf("%s at %s: value.Check accepts = %v, its form %#v (%v) = %v", c.name, k.Kind(), got, form, hasForm, want)
 			}
 			if !got {
 				continue
@@ -127,17 +129,17 @@ func TestCheckValue_JudgesAValueAsItsForm(t *testing.T) {
 	}
 }
 
-// A list or vector element that holds none is a null element to CheckValue: nil,
+// A list or vector element that holds none is a null element to value.Check: nil,
 // a nil slice or a nil map. A pointer or a channel is no null element, a nil one
 // too: the element's kind refuses it by its Go type.
-func TestCheckValue_ANullElementIsAValueThatHoldsNone(t *testing.T) {
+func TestCheck_ANullElementIsAValueThatHoldsNone(t *testing.T) {
 	t.Parallel()
-	list := schema.NewListConstraint(schema.NewStringConstraint())
+	list := schematest.Constraint(t, "List<String>")
 	var nilText *string
 	var heldNil any
 	var nilSlice []string
 	elements := func(elem any) map[schema.Constraint][]any {
-		return map[schema.Constraint][]any{list: {"a", elem}, schema.NewVectorConstraint(2): {1.5, elem}}
+		return map[schema.Constraint][]any{list: {"a", elem}, schematest.Constraint(t, "Vector[2]"): {1.5, elem}}
 	}
 	for name, elem := range map[string]any{
 		"a nil":       nil,
@@ -145,8 +147,8 @@ func TestCheckValue_ANullElementIsAValueThatHoldsNone(t *testing.T) {
 		"a nil map":   map[string]any(nil),
 	} {
 		for c, v := range elements(elem) {
-			if err := instance.CheckValue(v, c); err == nil || !strings.Contains(err.Error(), "element [1]: expected ") || !strings.HasSuffix(err.Error(), ", got null") {
-				t.Errorf("CheckValue with %s as a %s element = %v, want a null element", name, c.Kind(), err)
+			if err := value.Check(v, c); err == nil || !strings.Contains(err.Error(), "element [1]: expected ") || !strings.HasSuffix(err.Error(), ", got null") {
+				t.Errorf("value.Check with %s as a %s element = %v, want a null element", name, c.Kind(), err)
 			}
 		}
 	}
@@ -158,8 +160,8 @@ func TestCheckValue_ANullElementIsAValueThatHoldsNone(t *testing.T) {
 	} {
 		for c, v := range elements(elem) {
 			want := fmt.Sprintf(", got %T", elem)
-			if err := instance.CheckValue(v, c); err == nil || !strings.Contains(err.Error(), "element [1]: expected ") || !strings.HasSuffix(err.Error(), want) {
-				t.Errorf("CheckValue with %s as a %s element = %v, want a refusal that ends %q", name, c.Kind(), err, want)
+			if err := value.Check(v, c); err == nil || !strings.Contains(err.Error(), "element [1]: expected ") || !strings.HasSuffix(err.Error(), want) {
+				t.Errorf("value.Check with %s as a %s element = %v, want a refusal that ends %q", name, c.Kind(), err, want)
 			}
 		}
 	}

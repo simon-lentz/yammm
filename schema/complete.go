@@ -211,7 +211,7 @@ func (c *completer) complete() Schema {
 	c.validateRelationProperties()
 
 	// Phase 3c: Bind every own relation to its target's identity. This runs
-	// before inheritance merges so Relation.Equal compares identities, and a
+	// before inheritance merges so Relation.equal compares identities, and a
 	// relation that shadows an inherited one under the same name collides
 	// when the targets differ.
 	c.resolveRelationTargets()
@@ -376,7 +376,7 @@ func (c *completer) indexTypes() {
 		clause := make([]TypeRef, 0, len(td.Inherits))
 		for _, ref := range td.Inherits {
 			if ref != nil {
-				clause = append(clause, NewTypeRef(ref.Qualifier, ref.Name, ref.Span))
+				clause = append(clause, newTypeRef(ref.Qualifier, ref.Name, ref.Span))
 			}
 		}
 		t.setInherits(clause)
@@ -520,7 +520,7 @@ func (c *completer) convertProperties(decls []*propertyDecl, ownerType string) [
 		}
 		seen[pd.Name] = pd
 
-		scope := TypeScope(NewTypeRef("", ownerType, pd.Span))
+		scope := typeScope(newTypeRef("", ownerType, pd.Span))
 		p := newProperty(
 			pd.Name,
 			pd.Span,
@@ -563,7 +563,7 @@ func (c *completer) convertRelations(decls []*relationDecl, ownerType string) (a
 
 		var target TypeRef
 		if rd.Target != nil {
-			target = NewTypeRef(rd.Target.Qualifier, rd.Target.Name, rd.Target.Span)
+			target = newTypeRef(rd.Target.Qualifier, rd.Target.Name, rd.Target.Span)
 		}
 
 		fieldName := strings.ToLower(rd.Name)
@@ -586,7 +586,7 @@ func (c *completer) convertRelations(decls []*relationDecl, ownerType string) (a
 					continue
 				}
 				seenProp[pd.Name] = pd
-				scope := RelationScope(rd.Name)
+				scope := relationScope(rd.Name)
 				p := newProperty(
 					pd.Name,
 					pd.Span,
@@ -673,7 +673,7 @@ func (c *completer) convertInvariants(typeName string, decls []*invariantDecl) [
 			}
 			c.noValue[nv.Literal] = nv.Kind
 		}
-		invs = append(invs, newInvariant(id.Name, id.Expr, id.Span, id.Documentation))
+		invs = append(invs, newInvariant(id.Name, id.Text, id.Expr, id.Span, id.Documentation))
 	}
 
 	return invs
@@ -859,13 +859,13 @@ func (c *completer) resolveConstraint(con Constraint, span location.Span) (Const
 		maxLen, hasMax := x.MaxLen()
 		switch {
 		case hasMin && hasMax:
-			return ListLenBetween(elem, minLen, maxLen), true
+			return listLenBetween(elem, minLen, maxLen), true
 		case hasMin:
-			return ListMinLen(elem, minLen), true
+			return listMinLen(elem, minLen), true
 		case hasMax:
-			return ListMaxLen(elem, maxLen), true
+			return listMaxLen(elem, maxLen), true
 		default:
-			return NewListConstraint(elem), true
+			return newListConstraint(elem), true
 		}
 	}
 	return con, true
@@ -891,7 +891,7 @@ func (c *completer) resolveReference(dataTypeName string, span location.Span) (C
 			return nil, false
 		}
 		c.resolveDataType(dt)
-		return NewAliasConstraint(dataTypeName, dt.Constraint()), true
+		return newAliasConstraint(dataTypeName, dt.Constraint()), true
 	}
 	state, sourceID := c.classifyQualifier(qualifier)
 	switch state {
@@ -910,7 +910,7 @@ func (c *completer) resolveReference(dataTypeName string, span location.Span) (C
 			dataTypeName, name, qualifier)
 		return nil, false
 	}
-	return NewAliasConstraint(dataTypeName, dt.Constraint()), true
+	return newAliasConstraint(dataTypeName, dt.Constraint()), true
 }
 
 // aliasResolution classifies an import qualifier against the resolution map —
@@ -976,7 +976,7 @@ func constraintKindUnknown(constraint Constraint) bool {
 		return true
 	}
 	terminal, isAlias := ResolveAlias(constraint).(AliasConstraint)
-	return isAlias && !terminal.IsResolved()
+	return isAlias && !terminal.isResolved()
 }
 
 // referenceParts splits a datatype reference as the DSL writes one, Name or
@@ -1140,7 +1140,7 @@ func (c *completer) lostAMember(t Type) bool {
 		return true
 	}
 	for super := range t.SuperTypes() {
-		if st := c.resolveTypeID(super.ID()); !st.IsZero() && st.lostMember {
+		if st := c.resolveTypeID(super); !st.IsZero() && st.lostMember {
 			return true
 		}
 	}

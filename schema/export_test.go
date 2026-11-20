@@ -32,10 +32,9 @@ var (
 
 // IsSealed accessors.
 var (
-	TestIsSealedSchema   = Schema.isSealed
-	TestIsSealedType     = Type.isSealed
-	TestIsSealedRelation = Relation.isSealed
-	TestIsSealedDataType = DataType.isSealed
+	TestIsSealedSchema   = func(s Schema) bool { return s.sealed }
+	TestIsSealedType     = func(t Type) bool { return t.sealed }
+	TestIsSealedRelation = func(r Relation) bool { return r.sealed }
 )
 
 // Schema mutators.
@@ -49,12 +48,10 @@ var (
 // Type mutators.
 var (
 	TestSetTypeSchemaName            = Type.setSchemaName
-	TestSetTypeNameSpan              = Type.setNameSpan
 	TestSetTypeProperties            = Type.setProperties
 	TestSetTypeAssociations          = Type.setAssociations
 	TestSetTypeCompositions          = Type.setCompositions
 	TestSetTypeInvariants            = Type.setInvariants
-	TestSetTypeAllInvariants         = Type.setAllInvariants
 	TestSetTypeAnnotations           = Type.setAnnotations
 	TestSetTypeAllAnnotations        = Type.setAllAnnotations
 	TestSetTypeInherits              = Type.setInherits
@@ -79,6 +76,56 @@ var TestSetDataTypeConstraint = DataType.setConstraint
 // Import mutators.
 var (
 	TestSetImportSchema = Import.setSchema
+)
+
+// Constraint constructors, which only the parser calls in production.
+var (
+	TestNewStringConstraint     = newStringConstraint
+	TestStringMinLen            = stringMinLen
+	TestStringMaxLen            = stringMaxLen
+	TestStringLenBetween        = stringLenBetween
+	TestNewIntegerConstraint    = newIntegerConstraint
+	TestIntegerMin              = integerMin
+	TestIntegerMax              = integerMax
+	TestIntegerBetween          = integerBetween
+	TestNewFloatConstraint      = newFloatConstraint
+	TestFloatMin                = floatMin
+	TestFloatMax                = floatMax
+	TestFloatBetween            = floatBetween
+	TestNewBooleanConstraint    = newBooleanConstraint
+	TestNewTimestampConstraint  = newTimestampConstraint
+	TestNewDateConstraint       = newDateConstraint
+	TestNewUUIDConstraint       = newUUIDConstraint
+	TestNewVectorConstraint     = newVectorConstraint
+	TestNewListConstraint       = newListConstraint
+	TestListMinLen              = listMinLen
+	TestListMaxLen              = listMaxLen
+	TestListLenBetween          = listLenBetween
+	TestNewAliasConstraint      = newAliasConstraint
+	TestParsedEnumConstraint    = parsedEnumConstraint
+	TestParsedPatternConstraint = parsedPatternConstraint
+)
+
+// Comparisons the completer runs.
+var (
+	TestConstraintEqual       = func(a, b Constraint) bool { return a.equal(b) }
+	TestConstraintNarrowsTo   = func(parent, child Constraint) bool { return parent.narrowsTo(child) }
+	TestConstraintIsResolved  = func(c Constraint) bool { return c.isResolved() }
+	TestPropertyEqual         = Property.equal
+	TestPropertyCanNarrowFrom = Property.canNarrowFrom
+	TestRelationEqual         = Relation.equal
+)
+
+// References, scopes and sources the loader builds.
+var (
+	TestNewTypeRef     = newTypeRef
+	TestLocalTypeRef   = localTypeRef
+	TestTypeScope      = typeScope
+	TestRelationScope  = relationScope
+	TestNewSources     = newSources
+	TestNewDataTypeRef = func(qualifier, name string, span location.Span) DataTypeRef {
+		return DataTypeRef{qualifier: qualifier, name: name, span: span}
+	}
 )
 
 // Internal functions from merged packages.

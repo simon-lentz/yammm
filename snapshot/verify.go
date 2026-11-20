@@ -7,8 +7,8 @@ import (
 	"github.com/simon-lentz/yammm/schema"
 )
 
-// Verify runs the checks [Load] runs on a .ys file before it materializes a
-// Snapshot. Returns diag.Result with the same diagnostic codes as Load.
+// Verify runs the checks [Unmarshal] runs on a .ys file before it materializes a
+// Snapshot. Returns diag.Result with the same diagnostic codes as Unmarshal.
 //
 // Verify stops before materialization, so it builds no Snapshot and no graph
 // instance; under [WithRevalidation] a validator run that passes builds an instance

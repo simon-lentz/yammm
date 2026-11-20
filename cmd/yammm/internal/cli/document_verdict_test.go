@@ -105,10 +105,19 @@ func model(base, doc []person) expectedVerdict {
 	return want
 }
 
-func raws(people []person) map[string][]jsondata.Element {
+func raws(people []person) map[string]jsondata.Batch {
 	out := map[string][]jsondata.Element{}
 	for _, p := range people {
 		out["Person"] = append(out["Person"], jsondata.Element{RawInstance: p.raw()})
+	}
+	return batches(out)
+}
+
+// batches gives each type's elements a batch of their own.
+func batches(byType map[string][]jsondata.Element) map[string]jsondata.Batch {
+	out := make(map[string]jsondata.Batch, len(byType))
+	for name, elements := range byType {
+		out[name] = jsondata.Batch{Elements: elements}
 	}
 	return out
 }
@@ -200,7 +209,7 @@ type Person {
 }
 `
 
-func teamRaws(team, people []map[string]any) map[string][]jsondata.Element {
+func teamRaws(team, people []map[string]any) map[string]jsondata.Batch {
 	out := map[string][]jsondata.Element{}
 	for _, p := range team {
 		out["Team"] = append(out["Team"], jsondata.Element{RawInstance: instance.RawInstance{Properties: p}})
@@ -208,7 +217,7 @@ func teamRaws(team, people []map[string]any) map[string][]jsondata.Element {
 	for _, p := range people {
 		out["Person"] = append(out["Person"], jsondata.Element{RawInstance: instance.RawInstance{Properties: p}})
 	}
-	return out
+	return batches(out)
 }
 
 func codeCount(result diag.Result, code diag.Code) int {
@@ -234,7 +243,7 @@ func TestBuildGraph_TypesAMissingTargetByItsRelation(t *testing.T) {
 	member := map[string]any{"id": "p", "name": "P", "team": map[string]any{"_target_id": "t"}}
 	for _, tc := range []struct {
 		name        string
-		raws        map[string][]jsondata.Element
+		raws        map[string]jsondata.Batch
 		wantMissing int
 	}{
 		{"a refused Team", teamRaws([]map[string]any{{"id": "t"}}, []map[string]any{member}), 0},

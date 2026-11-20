@@ -18,7 +18,7 @@ func TestParse_AnExplicitNullKeepsItsKey(t *testing.T) {
 	if !result.OK() {
 		t.Fatalf("parse: %s", result)
 	}
-	props := byType["Person"][0].Properties
+	props := byType["Person"].Elements[0].Properties
 	if v, stated := props["name"]; !stated || v != nil {
 		t.Errorf(`"name": stated=%v value=%#v, want the key present and nil`, stated, v)
 	}

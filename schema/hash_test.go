@@ -59,7 +59,7 @@ func makeAssoc(name, targetName string, optional, many bool, edgeProps []schema.
 		schema.RelationAssociation,
 		name,
 		strings.ToLower(name),
-		schema.LocalTypeRef(targetName, zeroSpan),
+		schema.TestLocalTypeRef(targetName, zeroSpan),
 		targetID,
 		zeroSpan,
 		"",
@@ -77,7 +77,7 @@ func makeComp(name, targetName string, optional, many bool) schema.Relation {
 		schema.RelationComposition,
 		name,
 		strings.ToLower(name),
-		schema.LocalTypeRef(targetName, zeroSpan),
+		schema.TestLocalTypeRef(targetName, zeroSpan),
 		targetID,
 		zeroSpan,
 		"",
@@ -118,7 +118,7 @@ func TestStructuralHash_NilPanics(t *testing.T) {
 }
 
 func TestStructuralHash_Determinism(t *testing.T) {
-	prop := makeProp("id", schema.NewUUIDConstraint(), false, true)
+	prop := makeProp("id", schema.TestNewUUIDConstraint(), false, true)
 	typ := buildTypeWithProps("User", []schema.Property{prop})
 	s := buildMinimalSchema("app", []schema.Type{typ}, nil)
 
@@ -147,11 +147,11 @@ func TestStructuralHash_NameSensitivity(t *testing.T) {
 }
 
 func TestStructuralHash_PropertyConstraintSensitivity(t *testing.T) {
-	propA := makeProp("name", schema.NewStringConstraint(), false, false)
+	propA := makeProp("name", schema.TestNewStringConstraint(), false, false)
 	typA := buildTypeWithProps("Person", []schema.Property{propA})
 	sA := buildMinimalSchema("app", []schema.Type{typA}, nil)
 
-	propB := makeProp("name", schema.StringMinLen(1), false, false)
+	propB := makeProp("name", schema.TestStringMinLen(1), false, false)
 	typB := buildTypeWithProps("Person", []schema.Property{propB})
 	sB := buildMinimalSchema("app", []schema.Type{typB}, nil)
 
@@ -160,11 +160,11 @@ func TestStructuralHash_PropertyConstraintSensitivity(t *testing.T) {
 }
 
 func TestStructuralHash_RequiredVsOptional(t *testing.T) {
-	propReq := makeProp("email", schema.NewStringConstraint(), false, false) // required
+	propReq := makeProp("email", schema.TestNewStringConstraint(), false, false) // required
 	typReq := buildTypeWithProps("User", []schema.Property{propReq})
 	sReq := buildMinimalSchema("app", []schema.Type{typReq}, nil)
 
-	propOpt := makeProp("email", schema.NewStringConstraint(), true, false) // optional
+	propOpt := makeProp("email", schema.TestNewStringConstraint(), true, false) // optional
 	typOpt := buildTypeWithProps("User", []schema.Property{propOpt})
 	sOpt := buildMinimalSchema("app", []schema.Type{typOpt}, nil)
 
@@ -207,7 +207,7 @@ func TestStructuralHash_AssociationMultiplicitySensitivity(t *testing.T) {
 }
 
 func TestStructuralHash_AssociationEdgeProperties(t *testing.T) {
-	edgeProp := makeProp("since", schema.NewDateConstraint(), false, false)
+	edgeProp := makeProp("since", schema.TestNewDateConstraint(), false, false)
 	assocWith := makeAssoc("WORKS_AT", "Company", false, false, []schema.Property{edgeProp})
 	typWith := buildTypeWithProps("Person", nil)
 	schema.TestSetTypeAssociations(typWith, []schema.Relation{assocWith})
@@ -251,30 +251,30 @@ func TestStructuralHash_ConstraintSensitivity(t *testing.T) {
 		a, b     schema.Constraint
 		wantSame bool
 	}{
-		{"string unbounded vs min", schema.NewStringConstraint(), schema.StringMinLen(5), false},
-		{"string unbounded vs max", schema.NewStringConstraint(), schema.StringMaxLen(100), false},
-		{"string different min", schema.StringMinLen(1), schema.StringMinLen(2), false},
-		{"string both bounds vs one", schema.StringLenBetween(1, 100), schema.StringMinLen(1), false},
-		{"integer unbounded vs min", schema.NewIntegerConstraint(), schema.IntegerMin(0), false},
-		{"integer different max", schema.IntegerMax(100), schema.IntegerMax(200), false},
-		{"integer between vs single bound", schema.IntegerBetween(0, 100), schema.IntegerMin(0), false},
-		{"float unbounded vs min", schema.NewFloatConstraint(), schema.FloatMin(0.0), false},
-		{"float different min", schema.FloatMin(1.5), schema.FloatMin(2.5), false},
-		{"float different max", schema.FloatMax(100.0), schema.FloatMax(200.0), false},
-		{"enum different values", schema.NewEnumConstraint([]string{"ACTIVE", "INACTIVE"}), schema.NewEnumConstraint([]string{"ACTIVE", "DELETED"}), false},
+		{"string unbounded vs min", schema.TestNewStringConstraint(), schema.TestStringMinLen(5), false},
+		{"string unbounded vs max", schema.TestNewStringConstraint(), schema.TestStringMaxLen(100), false},
+		{"string different min", schema.TestStringMinLen(1), schema.TestStringMinLen(2), false},
+		{"string both bounds vs one", schema.TestStringLenBetween(1, 100), schema.TestStringMinLen(1), false},
+		{"integer unbounded vs min", schema.TestNewIntegerConstraint(), schema.TestIntegerMin(0), false},
+		{"integer different max", schema.TestIntegerMax(100), schema.TestIntegerMax(200), false},
+		{"integer between vs single bound", schema.TestIntegerBetween(0, 100), schema.TestIntegerMin(0), false},
+		{"float unbounded vs min", schema.TestNewFloatConstraint(), schema.TestFloatMin(0.0), false},
+		{"float different min", schema.TestFloatMin(1.5), schema.TestFloatMin(2.5), false},
+		{"float different max", schema.TestFloatMax(100.0), schema.TestFloatMax(200.0), false},
+		{"enum different values", schema.TestParsedEnumConstraint([]string{"ACTIVE", "INACTIVE"}), schema.TestParsedEnumConstraint([]string{"ACTIVE", "DELETED"}), false},
 		// Enum values are sorted before hashing, so order must not matter.
-		{"enum order insensitive", schema.NewEnumConstraint([]string{"B", "A"}), schema.NewEnumConstraint([]string{"A", "B"}), true},
-		{"enum different count", schema.NewEnumConstraint([]string{"A"}), schema.NewEnumConstraint([]string{"A", "B"}), false},
-		{"pattern different patterns", schema.NewPatternConstraint(regexp.MustCompile(`^[A-Z]+$`)), schema.NewPatternConstraint(regexp.MustCompile(`^[0-9]+$`)), false},
-		{"pattern empty and none", schema.NewPatternConstraint(regexp.MustCompile("")), schema.NewPatternConstraint(nil), false},
-		{"vector dimension", schema.NewVectorConstraint(128), schema.NewVectorConstraint(256), false},
-		{"boolean vs string kind", schema.NewBooleanConstraint(), schema.NewStringConstraint(), false},
-		{"timestamp vs date kind", schema.NewTimestampConstraint(), schema.NewDateConstraint(), false},
-		{"date vs uuid kind", schema.NewDateConstraint(), schema.NewUUIDConstraint(), false},
-		{"list different element types", schema.NewListConstraint(schema.NewStringConstraint()), schema.NewListConstraint(schema.NewIntegerConstraint()), false},
-		{"list unbounded vs bounded", schema.NewListConstraint(schema.NewStringConstraint()), schema.ListMinLen(schema.NewStringConstraint(), 1), false},
-		{"list different max", schema.ListLenBetween(schema.NewStringConstraint(), 1, 10), schema.ListLenBetween(schema.NewStringConstraint(), 1, 20), false},
-		{"list same bounds match", schema.ListLenBetween(schema.NewStringConstraint(), 1, 10), schema.ListLenBetween(schema.NewStringConstraint(), 1, 10), true},
+		{"enum order insensitive", schema.TestParsedEnumConstraint([]string{"B", "A"}), schema.TestParsedEnumConstraint([]string{"A", "B"}), true},
+		{"enum different count", schema.TestParsedEnumConstraint([]string{"A"}), schema.TestParsedEnumConstraint([]string{"A", "B"}), false},
+		{"pattern different patterns", schema.TestParsedPatternConstraint(regexp.MustCompile(`^[A-Z]+$`)), schema.TestParsedPatternConstraint(regexp.MustCompile(`^[0-9]+$`)), false},
+		{"pattern empty and none", schema.TestParsedPatternConstraint(regexp.MustCompile("")), schema.TestParsedPatternConstraint(nil), false},
+		{"vector dimension", schema.TestNewVectorConstraint(128), schema.TestNewVectorConstraint(256), false},
+		{"boolean vs string kind", schema.TestNewBooleanConstraint(), schema.TestNewStringConstraint(), false},
+		{"timestamp vs date kind", schema.TestNewTimestampConstraint(), schema.TestNewDateConstraint(), false},
+		{"date vs uuid kind", schema.TestNewDateConstraint(), schema.TestNewUUIDConstraint(), false},
+		{"list different element types", schema.TestNewListConstraint(schema.TestNewStringConstraint()), schema.TestNewListConstraint(schema.TestNewIntegerConstraint()), false},
+		{"list unbounded vs bounded", schema.TestNewListConstraint(schema.TestNewStringConstraint()), schema.TestListMinLen(schema.TestNewStringConstraint(), 1), false},
+		{"list different max", schema.TestListLenBetween(schema.TestNewStringConstraint(), 1, 10), schema.TestListLenBetween(schema.TestNewStringConstraint(), 1, 20), false},
+		{"list same bounds match", schema.TestListLenBetween(schema.TestNewStringConstraint(), 1, 10), schema.TestListLenBetween(schema.TestNewStringConstraint(), 1, 10), true},
 	}
 
 	for _, tt := range tests {
@@ -291,10 +291,10 @@ func TestStructuralHash_ConstraintSensitivity(t *testing.T) {
 }
 
 func TestStructuralHash_DataTypeSensitivity(t *testing.T) {
-	dtA := schema.TestNewDataType("Email", schema.StringMinLen(1), zeroSpan, "")
+	dtA := schema.TestNewDataType("Email", schema.TestStringMinLen(1), zeroSpan, "")
 	sA := buildMinimalSchema("app", nil, []schema.DataType{dtA})
 
-	dtB := schema.TestNewDataType("Email", schema.StringMinLen(5), zeroSpan, "")
+	dtB := schema.TestNewDataType("Email", schema.TestStringMinLen(5), zeroSpan, "")
 	sB := buildMinimalSchema("app", nil, []schema.DataType{dtB})
 
 	assert.NotEqual(t, schema.StructuralHash(sA), schema.StructuralHash(sB),
@@ -302,10 +302,10 @@ func TestStructuralHash_DataTypeSensitivity(t *testing.T) {
 }
 
 func TestStructuralHash_DataTypeName(t *testing.T) {
-	dtA := schema.TestNewDataType("Email", schema.NewStringConstraint(), zeroSpan, "")
+	dtA := schema.TestNewDataType("Email", schema.TestNewStringConstraint(), zeroSpan, "")
 	sA := buildMinimalSchema("app", nil, []schema.DataType{dtA})
 
-	dtB := schema.TestNewDataType("Phone", schema.NewStringConstraint(), zeroSpan, "")
+	dtB := schema.TestNewDataType("Phone", schema.TestNewStringConstraint(), zeroSpan, "")
 	sB := buildMinimalSchema("app", nil, []schema.DataType{dtB})
 
 	assert.NotEqual(t, schema.StructuralHash(sA), schema.StructuralHash(sB),
@@ -315,11 +315,7 @@ func TestStructuralHash_DataTypeName(t *testing.T) {
 func TestStructuralHash_SuperTypeSensitivity(t *testing.T) {
 	// Type with a super type reference.
 	typ1 := buildTypeWithProps("Admin", nil)
-	superRef := schema.NewResolvedTypeRef(
-		schema.LocalTypeRef("User", zeroSpan),
-		schema.NewTypeID(location.SourceID{}, "User"),
-	)
-	schema.TestSetTypeSuperTypes(typ1, []schema.ResolvedTypeRef{superRef})
+	schema.TestSetTypeSuperTypes(typ1, []schema.TypeID{schema.NewTypeID(location.SourceID{}, "User")})
 	s1 := buildMinimalSchema("app", []schema.Type{typ1}, nil)
 
 	// Same type without super type.
@@ -331,11 +327,11 @@ func TestStructuralHash_SuperTypeSensitivity(t *testing.T) {
 }
 
 func TestStructuralHash_PrimaryKeySensitivity(t *testing.T) {
-	propPK := makeProp("id", schema.NewUUIDConstraint(), false, true)
+	propPK := makeProp("id", schema.TestNewUUIDConstraint(), false, true)
 	typPK := buildTypeWithProps("User", []schema.Property{propPK})
 	sPK := buildMinimalSchema("app", []schema.Type{typPK}, nil)
 
-	propNonPK := makeProp("id", schema.NewUUIDConstraint(), false, false)
+	propNonPK := makeProp("id", schema.TestNewUUIDConstraint(), false, false)
 	typNonPK := buildTypeWithProps("User", []schema.Property{propNonPK})
 	sNonPK := buildMinimalSchema("app", []schema.Type{typNonPK}, nil)
 
@@ -345,12 +341,12 @@ func TestStructuralHash_PrimaryKeySensitivity(t *testing.T) {
 
 func TestStructuralHash_AliasResolution(t *testing.T) {
 	// Schema with a direct StringMinLen(1) constraint on a property.
-	propDirect := makeProp("email", schema.StringMinLen(1), false, false)
+	propDirect := makeProp("email", schema.TestStringMinLen(1), false, false)
 	typDirect := buildTypeWithProps("User", []schema.Property{propDirect})
 	sDirect := buildMinimalSchema("app", []schema.Type{typDirect}, nil)
 
 	// Schema with an alias that resolves to StringMinLen(1).
-	alias := schema.NewAliasConstraint("Email", schema.StringMinLen(1))
+	alias := schema.TestNewAliasConstraint("Email", schema.TestStringMinLen(1))
 	propAlias := makeProp("email", alias, false, false)
 	typAlias := buildTypeWithProps("User", []schema.Property{propAlias})
 	sAlias := buildMinimalSchema("app", []schema.Type{typAlias}, nil)
@@ -361,16 +357,16 @@ func TestStructuralHash_AliasResolution(t *testing.T) {
 
 func TestStructuralHash_TypeOrderingDeterministic(t *testing.T) {
 	// Create schema with types added in one order.
-	propA := makeProp("id", schema.NewUUIDConstraint(), false, true)
-	propB := makeProp("name", schema.NewStringConstraint(), false, false)
+	propA := makeProp("id", schema.TestNewUUIDConstraint(), false, true)
+	propB := makeProp("name", schema.TestNewStringConstraint(), false, false)
 	typA := buildTypeWithProps("Alpha", []schema.Property{propA})
 	typB := buildTypeWithProps("Beta", []schema.Property{propB})
 
 	// The hash sorts members, so declaration order does not reach it.
 	// Each schema seals its own records, so the second gets fresh ones.
 	s1 := buildMinimalSchema("app", []schema.Type{typB, typA}, nil)
-	typA2 := buildTypeWithProps("Alpha", []schema.Property{makeProp("id", schema.NewUUIDConstraint(), false, true)})
-	typB2 := buildTypeWithProps("Beta", []schema.Property{makeProp("name", schema.NewStringConstraint(), false, false)})
+	typA2 := buildTypeWithProps("Alpha", []schema.Property{makeProp("id", schema.TestNewUUIDConstraint(), false, true)})
+	typB2 := buildTypeWithProps("Beta", []schema.Property{makeProp("name", schema.TestNewStringConstraint(), false, false)})
 	s2 := buildMinimalSchema("app", []schema.Type{typA2, typB2}, nil)
 
 	assert.Equal(t, schema.StructuralHash(s1), schema.StructuralHash(s2),
@@ -392,29 +388,29 @@ func TestStructuralHash_Format(t *testing.T) {
 
 func TestStructuralHash_ComprehensiveSchema(t *testing.T) {
 	// Build a schema with types, properties, associations, compositions, data types.
-	idProp := makeProp("id", schema.NewUUIDConstraint(), false, true)
-	nameProp := makeProp("name", schema.StringLenBetween(1, 255), false, false)
-	ageProp := makeProp("age", schema.IntegerBetween(0, 200), true, false)
-	activeProp := makeProp("active", schema.NewBooleanConstraint(), false, false)
+	idProp := makeProp("id", schema.TestNewUUIDConstraint(), false, true)
+	nameProp := makeProp("name", schema.TestStringLenBetween(1, 255), false, false)
+	ageProp := makeProp("age", schema.TestIntegerBetween(0, 200), true, false)
+	activeProp := makeProp("active", schema.TestNewBooleanConstraint(), false, false)
 
 	personType := buildTypeWithProps("Person", []schema.Property{idProp, nameProp, ageProp, activeProp})
 
-	companyID := makeProp("id", schema.NewUUIDConstraint(), false, true)
-	companyName := makeProp("name", schema.NewStringConstraint(), false, false)
+	companyID := makeProp("id", schema.TestNewUUIDConstraint(), false, true)
+	companyName := makeProp("name", schema.TestNewStringConstraint(), false, false)
 	companyType := buildTypeWithProps("Company", []schema.Property{companyID, companyName})
 
-	edgeProp := makeProp("since", schema.NewDateConstraint(), false, false)
+	edgeProp := makeProp("since", schema.TestNewDateConstraint(), false, false)
 	worksAt := makeAssoc("WORKS_AT", "Company", false, false, []schema.Property{edgeProp})
 	schema.TestSetTypeAssociations(personType, []schema.Relation{worksAt})
 	schema.TestSetTypeAllAssociations(personType, []schema.Relation{worksAt})
 
-	addressProp := makeProp("street", schema.NewStringConstraint(), false, false)
+	addressProp := makeProp("street", schema.TestNewStringConstraint(), false, false)
 	addressType := buildTypeWithProps("Address", []schema.Property{addressProp})
 	hasAddress := makeComp("HAS_ADDRESS", "Address", true, false)
 	schema.TestSetTypeCompositions(personType, []schema.Relation{hasAddress})
 	schema.TestSetTypeAllCompositions(personType, []schema.Relation{hasAddress})
 
-	emailDT := schema.TestNewDataType("Email", schema.StringMinLen(1), zeroSpan, "")
+	emailDT := schema.TestNewDataType("Email", schema.TestStringMinLen(1), zeroSpan, "")
 
 	s := buildMinimalSchema(
 		"hr",
@@ -460,8 +456,7 @@ func assertConstraintsMatch(t *testing.T, propA, propB schema.Property) {
 func TestStructuralHash_ConstraintFieldCoverage(t *testing.T) {
 	// Map of constraint type name → set of field names that are hashed.
 	// Each entry must correspond to a field on the concrete struct.
-	// "compiled" on PatternConstraint is hashed by whether it is nil, and
-	// "invalid" is derived from "pattern".
+	// "compiled" on PatternConstraint is hashed by whether it is nil.
 	hashedFields := map[string]map[string]bool{
 		"StringConstraint": {
 			"minLen": true, // TestStructuralHash_ConstraintSensitivity ("string unbounded vs min")
@@ -486,13 +481,11 @@ func TestStructuralHash_ConstraintFieldCoverage(t *testing.T) {
 		"DateConstraint":      {}, // no fields
 		"UUIDConstraint":      {}, // no fields
 		"EnumConstraint": {
-			"values":  true, // TestStructuralHash_ConstraintSensitivity ("enum different values")
-			"invalid": true, // derived from values; CheckConstraint refuses a constraint that sets it
+			"values": true, // TestStructuralHash_ConstraintSensitivity ("enum different values")
 		},
 		"PatternConstraint": {
 			"pattern":  true, // TestStructuralHash_ConstraintSensitivity ("pattern different patterns")
 			"compiled": true, // TestStructuralHash_ConstraintSensitivity ("pattern empty and none")
-			"invalid":  true, // derived from pattern; CheckConstraint refuses a constraint that sets it
 		},
 		"VectorConstraint": {
 			"dimension": true, // TestStructuralHash_ConstraintSensitivity ("vector dimension")
@@ -588,27 +581,27 @@ func TestStructuralHashVectors(t *testing.T) {
 
 // buildVectorSchemaMinimal: single type, one string PK, no relations.
 func buildVectorSchemaMinimal() schema.Schema {
-	idProp := makeProp("id", schema.NewStringConstraint(), false, true)
+	idProp := makeProp("id", schema.TestNewStringConstraint(), false, true)
 	typ := buildTypeWithProps("Item", []schema.Property{idProp})
 	return buildMinimalSchema("minimal", []schema.Type{typ}, nil)
 }
 
 // buildVectorSchemaRelational: two types with association (+ edge props) and composition.
 func buildVectorSchemaRelational() schema.Schema {
-	personID := makeProp("id", schema.NewStringConstraint(), false, true)
-	personName := makeProp("name", schema.NewStringConstraint(), false, false)
+	personID := makeProp("id", schema.TestNewStringConstraint(), false, true)
+	personName := makeProp("name", schema.TestNewStringConstraint(), false, false)
 	personType := buildTypeWithProps("Person", []schema.Property{personID, personName})
 
-	companyID := makeProp("id", schema.NewStringConstraint(), false, true)
-	companyName := makeProp("name", schema.NewStringConstraint(), false, false)
+	companyID := makeProp("id", schema.TestNewStringConstraint(), false, true)
+	companyName := makeProp("name", schema.TestNewStringConstraint(), false, false)
 	companyType := buildTypeWithProps("Company", []schema.Property{companyID, companyName})
 
-	edgeProp := makeProp("since", schema.NewDateConstraint(), false, false)
+	edgeProp := makeProp("since", schema.TestNewDateConstraint(), false, false)
 	worksAt := makeAssoc("WORKS_AT", "Company", false, false, []schema.Property{edgeProp})
 	schema.TestSetTypeAssociations(personType, []schema.Relation{worksAt})
 	schema.TestSetTypeAllAssociations(personType, []schema.Relation{worksAt})
 
-	addressStreet := makeProp("street", schema.NewStringConstraint(), false, false)
+	addressStreet := makeProp("street", schema.TestNewStringConstraint(), false, false)
 	addressType := buildTypeWithProps("Address", []schema.Property{addressStreet})
 	hasAddress := makeComp("HAS_ADDRESS", "Address", true, true)
 	schema.TestSetTypeCompositions(personType, []schema.Relation{hasAddress})
@@ -621,18 +614,18 @@ func buildVectorSchemaRelational() schema.Schema {
 // buildVectorSchemaConstraintRich: one type with properties exercising every constraint kind.
 func buildVectorSchemaConstraintRich() schema.Schema {
 	props := []schema.Property{
-		makeProp("id", schema.NewStringConstraint(), false, true),
-		makeProp("str_bounded", schema.StringLenBetween(1, 255), false, false),
-		makeProp("int_bounded", schema.IntegerBetween(0, 1000), false, false),
-		makeProp("flt_bounded", schema.FloatBetween(0.0, 100.0), false, false),
-		makeProp("flag", schema.NewBooleanConstraint(), false, false),
-		makeProp("ts", schema.NewTimestampConstraint(), false, false),
-		makeProp("dt", schema.NewDateConstraint(), false, false),
-		makeProp("uid", schema.NewUUIDConstraint(), false, false),
-		makeProp("status", schema.NewEnumConstraint([]string{"ACTIVE", "INACTIVE"}), false, false),
-		makeProp("code", schema.NewPatternConstraint(regexp.MustCompile(`^[A-Z]{3}$`)), false, false),
-		makeProp("embedding", schema.NewVectorConstraint(128), false, false),
-		makeProp("tags", schema.ListLenBetween(schema.NewStringConstraint(), 1, 10), false, false),
+		makeProp("id", schema.TestNewStringConstraint(), false, true),
+		makeProp("str_bounded", schema.TestStringLenBetween(1, 255), false, false),
+		makeProp("int_bounded", schema.TestIntegerBetween(0, 1000), false, false),
+		makeProp("flt_bounded", schema.TestFloatBetween(0.0, 100.0), false, false),
+		makeProp("flag", schema.TestNewBooleanConstraint(), false, false),
+		makeProp("ts", schema.TestNewTimestampConstraint(), false, false),
+		makeProp("dt", schema.TestNewDateConstraint(), false, false),
+		makeProp("uid", schema.TestNewUUIDConstraint(), false, false),
+		makeProp("status", schema.TestParsedEnumConstraint([]string{"ACTIVE", "INACTIVE"}), false, false),
+		makeProp("code", schema.TestParsedPatternConstraint(regexp.MustCompile(`^[A-Z]{3}$`)), false, false),
+		makeProp("embedding", schema.TestNewVectorConstraint(128), false, false),
+		makeProp("tags", schema.TestListLenBetween(schema.TestNewStringConstraint(), 1, 10), false, false),
 	}
 	typ := buildTypeWithProps("Everything", props)
 	return buildMinimalSchema("constraint_rich", []schema.Type{typ}, nil)

@@ -103,7 +103,7 @@ func TestMarshal_ProvenanceSurvivesTheRoundTrip(t *testing.T) {
 		t.Fatalf("marshalled document carries no provenance:\n%s", data)
 	}
 
-	loaded, result := snapshot.Load(ctx, data, s)
+	loaded, result := snapshot.Unmarshal(ctx, data, s)
 	if err := result.Err(); err != nil {
 		t.Fatalf("load: %v", err)
 	}
@@ -178,7 +178,7 @@ func TestMarshal_NestedCompositionSurvivesToDepthTwo(t *testing.T) {
 		t.Fatalf("the depth-2 child never reached the wire:\n%s", data)
 	}
 
-	loaded, result := snapshot.Load(ctx, data, s)
+	loaded, result := snapshot.Unmarshal(ctx, data, s)
 	if err := result.Err(); err != nil {
 		t.Fatalf("load: %v", err)
 	}
@@ -246,7 +246,7 @@ func TestRoundTrip_ResolvedEdgeToImportedTypeTarget(t *testing.T) {
 	if err := result.Err(); err != nil {
 		t.Fatalf("marshal: %v", err)
 	}
-	loaded, result := snapshot.Load(ctx, data, s)
+	loaded, result := snapshot.Unmarshal(ctx, data, s)
 	if err := result.Err(); err != nil {
 		t.Fatalf("load: %v", err)
 	}
@@ -302,7 +302,7 @@ func TestUpdateMetadata_PreservesAnIntShapedBodyThatReMarshalHeals(t *testing.T)
 		t.Fatalf("UpdateMetadata: %v", err)
 	}
 
-	loaded, result := snapshot.Load(ctx, intShaped, s)
+	loaded, result := snapshot.Unmarshal(ctx, intShaped, s)
 	if err := result.Err(); err != nil {
 		t.Fatalf("load: %v", err)
 	}
@@ -396,7 +396,7 @@ func TestLoad_ParallelEdgeOrderIsDeterministic(t *testing.T) {
 		t.Fatalf("marshal: %v", err)
 	}
 	for i := range 16 {
-		loaded, lres := snapshot.Load(ctx, first, s)
+		loaded, lres := snapshot.Unmarshal(ctx, first, s)
 		if err := lres.Err(); err != nil {
 			t.Fatalf("load: %v", err)
 		}

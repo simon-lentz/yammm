@@ -9,8 +9,8 @@ import (
 	"time"
 
 	neo4jdriver "github.com/neo4j/neo4j-go-driver/v6/neo4j"
+	"github.com/simon-lentz/yammm/internal/schematest"
 	n4j "github.com/simon-lentz/yammm/neo4j"
-	"github.com/simon-lentz/yammm/schema"
 )
 
 // TestCoerce_OffsetBearingTimestampReachesTheServer is the measurement behind
@@ -347,7 +347,7 @@ func TestCoerce_TheServerHoldsAnOffsetOfEighteenHoursAtMost(t *testing.T) {
 		}
 	}
 	for _, text := range []string{"2026-08-19T12:00:00+18:01", "2026-08-19T12:00:00-18:01"} {
-		if _, err := n4j.CoerceParams(map[string]any{"v": text}, n4j.ParamTypes{"v": schema.NewTimestampConstraint()}); !errors.Is(err, n4j.ErrUnrepresentable) {
+		if _, err := n4j.CoerceParams(map[string]any{"v": text}, n4j.ParamTypes{"v": schematest.Constraint(t, "Timestamp")}); !errors.Is(err, n4j.ErrUnrepresentable) {
 			t.Errorf("%s: CoerceParams = %v, want a refusal that matches ErrUnrepresentable", text, err)
 		}
 	}
@@ -357,7 +357,7 @@ func TestCoerce_TheServerHoldsAnOffsetOfEighteenHoursAtMost(t *testing.T) {
 // Timestamp.
 func coerceTimestamp(t *testing.T, raw any) any {
 	t.Helper()
-	params, err := n4j.CoerceParams(map[string]any{"v": raw}, n4j.ParamTypes{"v": schema.NewTimestampConstraint()})
+	params, err := n4j.CoerceParams(map[string]any{"v": raw}, n4j.ParamTypes{"v": schematest.Constraint(t, "Timestamp")})
 	if err != nil {
 		t.Fatalf("CoerceParams(%v): %v", raw, err)
 	}

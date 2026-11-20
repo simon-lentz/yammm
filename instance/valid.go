@@ -111,7 +111,8 @@ func (v ValidInstance) Properties() immutable.Properties {
 // Edge returns the validated edge data for the relation named relationName,
 // its DSL name or its field name.
 // Returns the zero ValidEdgeData and false if the relation is absent, its key
-// left out or holding no value ([IsAbsent]), or the receiver is zero. A many
+// left out or holding no value (nil, a nil map, a nil slice or a nil immutable
+// container), or the receiver is zero. A many
 // association given an empty array returns a non-zero ValidEdgeData with no
 // targets, and true. A (many) association lists each target key once
 // (E_DUPLICATE_EDGE), a (one) association refuses an empty array

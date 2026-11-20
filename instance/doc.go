@@ -60,18 +60,12 @@
 //   - Edge object validation (associations and compositions)
 //   - Invariant expression evaluation
 //
-// A refused value at a property, a foreign-key field or an edge property draws
-// its producer's issue alone; anywhere else the validator judges a shape, it
-// reports the value as any other of the wrong shape. A key no member claims, or
-// one that collides, is judged as any such key. A parser that cannot read
-// an input as its member's type reports that and writes a [Refused] in the value's place: the
-// validator reports nothing for it and refuses the instance, which fails as a
-// member error fails it, so no pass after the one that met it runs. A
-// [Validator.ValidateOne] result then holds no error for that member, and
-// [ErrRefusedValue] names the case for a caller that must return an error. A
-// case-fold collision is its member's one issue too: a collided required
-// property, foreign-key field, required edge property or required composition is
-// not also missing.
+// A key no member claims draws E_UNKNOWN_FIELD, or E_UNKNOWN_EDGE_FIELD in an
+// edge object, unless [WithAllowUnknownFields] is set. Without
+// [WithStrictPropertyNames], keys that fold onto one member draw
+// E_CASE_FOLD_COLLISION, and the collision is its member's one issue: a
+// collided required property, foreign-key field, required edge property or
+// required composition is not also missing.
 //
 // # Validator Options
 //
@@ -80,14 +74,6 @@
 //   - [WithStrictPropertyNames]: require exact-case property names
 //   - [WithAllowUnknownFields]: allow extra properties without diagnostics
 //   - [WithIssueLimit]: cap the issues one instance stores
-//
-// # Value Functions
-//
-// [CheckValue] is the validator's per-value rule, exported for code outside the
-// validator that reads a value under a constraint.
-// It accepts a nil constraint, and a value that holds none ([IsAbsent]) under a
-// constraint [schema.CheckConstraint] accepts; it refuses a constraint that
-// function refuses, whatever the value.
 //
 // # Thread Safety
 //

@@ -186,10 +186,8 @@ const (
 	ModuleRootNone = "none"
 )
 
-// ExpectedGot creates a pair of details for type mismatch diagnostics.
-//
-// This is the standard pattern for reporting "expected X, got Y" errors.
-func ExpectedGot(expected, got string) []Detail {
+// expectedGot returns the "expected X, got Y" pair of details.
+func expectedGot(expected, got string) []Detail {
 	return []Detail{
 		{Key: DetailKeyExpected, Value: expected},
 		{Key: DetailKeyGot, Value: got},

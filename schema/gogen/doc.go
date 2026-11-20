@@ -273,8 +273,7 @@
 // by the base name it was loaded under, split at either separator and written
 // in NFC; a name with no base, such as ".", names no file and is refused.
 // Every imported source keys by the text that imports it, resolved against its
-// importer's key by [github.com/simon-lentz/yammm/schema.SyntheticImportKey],
-// the loader's own rule, so an import through a symlinked directory keys by
+// importer's key by the loader's own rule, so an import through a symlinked directory keys by
 // the path the import names, not by where the link resolves.
 //
 // Two import layouts a load accepts have no store the re-load can read, and

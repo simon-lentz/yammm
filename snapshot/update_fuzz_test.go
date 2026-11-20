@@ -1,6 +1,7 @@
 package snapshot_test
 
 import (
+	"bytes"
 	"context"
 	"testing"
 
@@ -51,7 +52,7 @@ func FuzzUpdateMetadata(f *testing.F) {
 		if res.HasErrors() {
 			return
 		}
-		header, headerRes := snapshot.HeaderOnly(context.Background(), out)
+		header, headerRes := snapshot.ReadHeader(context.Background(), bytes.NewReader(out))
 		if headerRes.HasErrors() {
 			t.Errorf("UpdateMetadata returned OK but output does not parse: %v", headerRes)
 			return

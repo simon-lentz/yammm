@@ -2,6 +2,7 @@ package graph
 
 import (
 	"iter"
+	"maps"
 	"slices"
 
 	"github.com/simon-lentz/yammm/instance"
@@ -19,7 +20,7 @@ import (
 // Instances are created internally, by [Graph.Add] and [Graph.AddOrMerge], the
 // snapshot package's reader, and the snapshot copies [Graph.Snapshot] and
 // [NewFromSnapshot] take.
-// A root is accessed via [Snapshot.AllInstances], [Snapshot.InstancesOf], or
+// A root is accessed via [Snapshot.Instances], [Snapshot.InstancesOf], or
 // [Snapshot.InstanceByKey]; a composed child via [Instance.Composed]; and the
 // instances an edge, a duplicate or an unresolved record names via that
 // record's methods.
@@ -121,7 +122,7 @@ func (i Instance) Properties() immutable.Properties {
 //
 // Returns the zero Provenance when the instance's source carried none: the
 // validated instance [Graph.Add] or [Graph.AddOrMerge] took, or the document
-// snapshot.Load read.
+// snapshot.Unmarshal read.
 // Provenance includes SourceName, Path, and Span for diagnostic reporting.
 func (i Instance) Provenance() instance.Provenance {
 	if i.IsZero() {
@@ -166,12 +167,11 @@ func (i Instance) ComposedRelations() []string {
 	if i.IsZero() || len(i.composed) == 0 {
 		return nil
 	}
-	result := make([]string, 0, len(i.composed))
-	for name := range i.composed {
-		result = append(result, name)
-	}
-	slices.Sort(result)
-	return result
+	// Sized first: slices.Sorted grows its slice from empty, which costs Marshal
+	// and the Neo4j writer several allocations per instance.
+	names := slices.AppendSeq(make([]string, 0, len(i.composed)), maps.Keys(i.composed))
+	slices.Sort(names)
+	return names
 }
 
 // newInstance creates an Instance from graph-internal data. [Graph.Add] and

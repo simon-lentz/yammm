@@ -227,7 +227,7 @@ func TestValidate_UnknownTypeFailsOnAnEmptyBatch(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 			valids, res := v.Validate(t.Context(), "Nope", raws)
-			if valids != nil || !res.HasCode(instance.ErrTypeNotFound) {
+			if valids != nil || !res.HasCode(diag.E_INSTANCE_TYPE_NOT_FOUND) {
 				t.Errorf("valids=%v codes=%v; want nil and E_INSTANCE_TYPE_NOT_FOUND", valids, codes(res))
 			}
 		})
@@ -292,7 +292,7 @@ func TestValidate_BatchWideErrorBlamesNoRow(t *testing.T) {
 	v := instance.NewValidator(s)
 	prov := instance.NewProvenance("rows.json", path.Root.Index(7), location.Span{})
 	valids, res := v.Validate(t.Context(), "NoSuchType", []instance.RawInstance{{Properties: map[string]any{"id": "x"}, Provenance: prov}})
-	if !res.HasCode(instance.ErrTypeNotFound) {
+	if !res.HasCode(diag.E_INSTANCE_TYPE_NOT_FOUND) {
 		t.Fatalf("want E_TYPE_NOT_FOUND, got %v", codes(res))
 	}
 	if valids != nil {

@@ -1,6 +1,7 @@
 package snapshot_test
 
 import (
+	"bytes"
 	"testing"
 
 	"github.com/simon-lentz/yammm/immutable"
@@ -71,9 +72,9 @@ func marshalCounty(t *testing.T, s schema.Schema) []byte {
 }
 
 // headerOf reads back only the header, the way a dispatch caller classifies.
-func headerOf(t *testing.T, data []byte) *snapshot.HeaderInfo {
+func headerOf(t *testing.T, data []byte) *snapshot.Header {
 	t.Helper()
-	header, res := snapshot.HeaderOnly(t.Context(), data)
+	header, res := snapshot.ReadHeader(t.Context(), bytes.NewReader(data))
 	if res.HasErrors() {
 		t.Fatalf("header-only read: %v", res.Err())
 	}
@@ -89,7 +90,7 @@ func mustBind(t *testing.T, data []byte, s schema.Schema, what string) {
 	if !headerOf(t, data).SchemaHashMatches(s) {
 		t.Fatalf("%s: the header does not classify the document as current", what)
 	}
-	loaded, res := snapshot.Load(t.Context(), data, s)
+	loaded, res := snapshot.Unmarshal(t.Context(), data, s)
 	if res.HasErrors() {
 		t.Fatalf("%s: full load: %v", what, res.Err())
 	}

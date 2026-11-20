@@ -256,7 +256,7 @@ func (w *Workspace) publishMarkdownDiagnostics(snap *MarkdownDocumentSnapshot) {
 			// here, not an error in the example. The block's own semantic
 			// diagnostics keep their severity.
 			if d.Code != nil {
-				if codeVal, ok := d.Code.Value.(string); ok && diag.IsImportDeclarationCode(codeVal) {
+				if codeVal, ok := d.Code.Value.(string); ok && isImportDeclarationCode(codeVal) {
 					hint := protocol.DiagnosticSeverityHint
 					d.Severity = &hint
 				}
@@ -328,4 +328,18 @@ func (w *Workspace) publishMarkdownDiagnostics(snap *MarkdownDocumentSnapshot) {
 
 	v := protocol.Integer(snap.Version) //nolint:gosec // LSP version fits int32
 	w.publishDiagnostics(snap.URI, &v, allDiagnostics)
+}
+
+// isImportDeclarationCode reports whether code (a diagnostic code's String())
+// names an import-declaration diagnostic: a rejected, duplicated, colliding or
+// invalid import alias. The resolution codes E_IMPORT_RESOLVE, E_IMPORT_CYCLE
+// and E_PATH_ESCAPE keep their severity in a markdown block.
+func isImportDeclarationCode(code string) bool {
+	switch code {
+	case diag.E_IMPORT_NOT_ALLOWED.String(), diag.E_DUPLICATE_IMPORT.String(),
+		diag.E_IMPORT_ALIAS_COLLISION.String(), diag.E_INVALID_ALIAS.String():
+		return true
+	default:
+		return false
+	}
 }

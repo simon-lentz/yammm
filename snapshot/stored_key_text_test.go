@@ -189,7 +189,7 @@ func TestRead_AKeyComponentSpelledOtherwiseThanItsKindStoresIsMalformed(t *testi
 			data := respellAt(t, doc, p, sp)
 			t.Run(p.name+"/"+sp.name, func(t *testing.T) {
 				t.Parallel()
-				snap, res := snapshot.Load(t.Context(), data, s)
+				snap, res := snapshot.Unmarshal(t.Context(), data, s)
 				if !snap.IsZero() {
 					t.Error("Load returned a snapshot")
 				}
@@ -205,7 +205,7 @@ func TestRead_AKeyComponentSpelledOtherwiseThanItsKindStoresIsMalformed(t *testi
 				if got := errorCodes(snapshot.Verify(t.Context(), data, s)); !maps.Equal(got, want) {
 					t.Errorf("Verify: %v, want %v", got, want)
 				}
-				if _, ires := snapshot.Info(t.Context(), data); !maps.Equal(errorCodes(ires), p.info) {
+				if _, ires := snapshot.Stat(t.Context(), data); !maps.Equal(errorCodes(ires), p.info) {
 					t.Errorf("Info: %v, want %v:\n%s", errorCodes(ires), p.info, ires)
 				}
 			})
@@ -246,7 +246,7 @@ func TestRead_AKeyItsKindStoresAsWrittenIsNotRespelled(t *testing.T) {
 		}
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
-			_, res := snapshot.Load(t.Context(), data, s)
+			_, res := snapshot.Unmarshal(t.Context(), data, s)
 			if got := errorCodes(res); !maps.Equal(got, c.want) {
 				t.Errorf("Load: %v, want %v:\n%s", got, c.want, res)
 			}
@@ -265,11 +265,11 @@ func TestInfo_ReportsNoDanglingReferenceLoadResolves(t *testing.T) {
 	s, doc := keyTextDocument(t, asWritten, asWritten)
 	accepted := 0
 	check := func(name string, data []byte) {
-		if _, res := snapshot.Load(t.Context(), data, s); res.HasErrors() {
+		if _, res := snapshot.Unmarshal(t.Context(), data, s); res.HasErrors() {
 			return
 		}
 		accepted++
-		if _, res := snapshot.Info(t.Context(), data); res.HasCode(diag.E_SNAPSHOT_DANGLING_REFERENCE) {
+		if _, res := snapshot.Stat(t.Context(), data); res.HasCode(diag.E_SNAPSHOT_DANGLING_REFERENCE) {
 			t.Errorf("%s: Load accepts the document and Info reports a dangling reference:\n%s", name, res)
 		}
 	}
@@ -305,7 +305,7 @@ func TestLoad_AnAcceptedDocumentKeepsEveryKeyOnReMarshal(t *testing.T) {
 	s, doc := keyTextDocument(t, asWritten, asWritten)
 	accepted := 0
 	check := func(name string, data []byte) {
-		if _, res := snapshot.Load(t.Context(), data, s); res.HasErrors() {
+		if _, res := snapshot.Unmarshal(t.Context(), data, s); res.HasErrors() {
 			return
 		}
 		accepted++
@@ -314,7 +314,7 @@ func TestLoad_AnAcceptedDocumentKeepsEveryKeyOnReMarshal(t *testing.T) {
 			"plain":      nil,
 			"revalidate": {snapshot.WithRevalidation(diag.Error)},
 		} {
-			snap, res := snapshot.Load(t.Context(), data, s, opts...)
+			snap, res := snapshot.Unmarshal(t.Context(), data, s, opts...)
 			if res.HasErrors() {
 				t.Fatalf("%s, %s: %s", name, mode, res)
 			}
@@ -352,7 +352,7 @@ func TestMarshal_WritesEverySpellingOfAKeyAsItsKindStoresIt(t *testing.T) {
 		if got := keysOf(doc); !slices.Equal(got, keysOf(want)) {
 			t.Errorf("%s and %s: keys = %q, want %q", u.name, a.name, got, keysOf(want))
 		}
-		if _, res := snapshot.Load(t.Context(), doc, s); res.HasErrors() {
+		if _, res := snapshot.Unmarshal(t.Context(), doc, s); res.HasErrors() {
 			t.Errorf("%s and %s: the reader refuses what the writer wrote: %s", u.name, a.name, res)
 		}
 	}
@@ -388,7 +388,7 @@ func TestRead_ADuplicatesConflictKeyIsJudgedBesideTheRecordsOtherBreaks(t *testi
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
 			want := map[diag.Code]int{diag.E_SNAPSHOT_MALFORMED: c.want}
-			if _, res := snapshot.Load(t.Context(), data, s); !maps.Equal(errorCodes(res), want) {
+			if _, res := snapshot.Unmarshal(t.Context(), data, s); !maps.Equal(errorCodes(res), want) {
 				t.Errorf("Load: %v, want %v:\n%s", errorCodes(res), want, res)
 			}
 			if res := snapshot.Verify(t.Context(), data, s); !maps.Equal(errorCodes(res), want) {
@@ -425,7 +425,7 @@ func TestRead_TwoChildrenOfOneSlotCompareTheirKeysAsWritten(t *testing.T) {
 		data := rehashDocument(t, bytes.Replace(doc, []byte(from), []byte(`"PARTS":[`+child(c.first)+`,`+child(c.second)+`]`), 1))
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
-			if _, res := snapshot.Load(t.Context(), data, s); !maps.Equal(errorCodes(res), c.want) {
+			if _, res := snapshot.Unmarshal(t.Context(), data, s); !maps.Equal(errorCodes(res), c.want) {
 				t.Errorf("Load: %v, want %v:\n%s", errorCodes(res), c.want, res)
 			}
 			if res := snapshot.Verify(t.Context(), data, s); !maps.Equal(errorCodes(res), c.want) {
@@ -497,7 +497,7 @@ func TestRead_ARespelledKeyBesideAnotherBreak(t *testing.T) {
 		data := rehashDocument(t, bytes.Replace(doc, []byte(c.edit[0]), []byte(c.edit[1]), 1))
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
-			if _, res := snapshot.Load(t.Context(), data, s); !maps.Equal(errorCodes(res), c.want) {
+			if _, res := snapshot.Unmarshal(t.Context(), data, s); !maps.Equal(errorCodes(res), c.want) {
 				t.Errorf("Load: %v, want %v:\n%s", errorCodes(res), c.want, res)
 			}
 			if res := snapshot.Verify(t.Context(), data, s); !maps.Equal(errorCodes(res), c.want) {

@@ -682,8 +682,10 @@ func argsLiterals(e expr.Expression) [][]expr.Expression {
 			}
 			return
 		}
-		for _, c := range n.Children() {
-			walk(c)
+		if s, ok := n.(expr.SExpr); ok {
+			for _, c := range s.Children() {
+				walk(c)
+			}
 		}
 	}
 	walk(e)
@@ -861,25 +863,25 @@ func grammarTypeNames() []string {
 	return names
 }
 
-// TestParse_CategorySeparatesSyntaxFromConstraints pins the contract the
-// package doc states for callers: a caller wanting syntax errors alone
-// filters on diag.CategorySyntax, which yields the text-level errors and
-// excludes the constraint errors. The source below carries one of each, so
-// the filter has something to separate.
-func TestParse_CategorySeparatesSyntaxFromConstraints(t *testing.T) {
+// TestParse_SyntaxCodeSeparatesSyntaxFromConstraints pins the contract the
+// package doc states for callers: a caller wanting syntax errors alone keeps
+// E_SYNTAX, which yields the text-level errors and excludes the constraint
+// errors. The source below carries one of each, so the filter has something to
+// separate.
+func TestParse_SyntaxCodeSeparatesSyntaxFromConstraints(t *testing.T) {
 	src := "schema \"s\"\ntype T {\n\tn Integer[9, 2]\n\t@\n}\n"
 	_, issues := Parse([]byte(src), location.SourceID{})
 
 	var syntax, rest []diag.Issue
 	for _, iss := range issues {
-		if iss.Code().Category() == diag.CategorySyntax {
+		if iss.Code() == diag.E_SYNTAX {
 			syntax = append(syntax, iss)
 			continue
 		}
 		rest = append(rest, iss)
 	}
 	if len(syntax) != 1 || syntax[0].Code() != diag.E_SYNTAX {
-		t.Errorf("syntax-category issues = %v, want exactly one E_SYNTAX", syntax)
+		t.Errorf("syntax issues = %v, want exactly one E_SYNTAX", syntax)
 	}
 	if len(rest) != 1 || rest[0].Code() != diag.E_INVALID_CONSTRAINT {
 		t.Errorf("other issues = %v, want exactly one E_INVALID_CONSTRAINT", rest)
@@ -887,10 +889,9 @@ func TestParse_CategorySeparatesSyntaxFromConstraints(t *testing.T) {
 }
 
 // TestParse_ReportsEveryDocumentedCode pins the third code the package doc
-// names. E_INVALID_INVARIANT is diag.CategorySchema, so it survives neither
-// the category filter above nor a caller enumerating the other two codes — a
-// P2a adapter written to a two-code contract drops every malformed literal
-// inside an invariant expression.
+// names. E_INVALID_INVARIANT survives neither the syntax filter above nor a
+// caller enumerating the other two codes, so an adapter written to a two-code
+// contract drops every malformed literal inside an invariant expression.
 func TestParse_ReportsEveryDocumentedCode(t *testing.T) {
 	tests := []struct {
 		name string
@@ -922,11 +923,6 @@ func TestParse_ReportsEveryDocumentedCode(t *testing.T) {
 				t.Fatalf("got %v, want exactly one %s", issues, tc.want)
 			}
 		})
-	}
-
-	if got := diag.E_INVALID_INVARIANT.Category(); got != diag.CategorySchema {
-		t.Errorf("E_INVALID_INVARIANT category = %v, want %v — the doc's warning "+
-			"about the CategorySyntax filter no longer holds", got, diag.CategorySchema)
 	}
 }
 
@@ -1046,8 +1042,8 @@ func TestParse_ConditionalRequiresElse(t *testing.T) {
 // TestParse_IntegerBoundsRejectAFloat pins the split between the two numeric
 // bound sets. An Integer bound is INTEGER or '_'; a Float bound also takes
 // FLOAT. Sharing one set let Integer[1.5, 3] parse and then fail a constraint
-// check, which moves the diagnostic out of diag.CategorySyntax — the category
-// the package doc tells callers to filter on.
+// check, which turns the E_SYNTAX the package doc tells callers to filter on
+// into another code.
 func TestParse_IntegerBoundsRejectAFloat(t *testing.T) {
 	prop := func(p string) string {
 		return "schema \"s\"\ntype T {\n\tid String primary\n\t" + p + "\n}\n"

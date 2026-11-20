@@ -46,6 +46,16 @@ func TestNewCode_PanicsOnAnEmptyValue(t *testing.T) {
 	t.Parallel()
 
 	wantPanic(t, "empty", func() {
-		_ = NewCode("", CategorySentinel)
+		_ = NewCode("")
+	})
+}
+
+// TestNewIssue_PanicsOnTheZeroSeverity holds NewIssue to refusing the zero
+// Severity, which names no severity.
+func TestNewIssue_PanicsOnTheZeroSeverity(t *testing.T) {
+	t.Parallel()
+
+	wantPanic(t, "invalid severity 0 (must be 1-5)", func() {
+		_ = NewIssue(Severity(0), E_SYNTAX, "m")
 	})
 }

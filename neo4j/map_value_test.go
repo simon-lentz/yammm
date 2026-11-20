@@ -4,6 +4,8 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/simon-lentz/yammm/internal/schematest"
+
 	"github.com/simon-lentz/yammm/schema"
 	"github.com/simon-lentz/yammm/schema/cypher"
 )
@@ -46,23 +48,23 @@ func TestCoerceScalar_RefusesAMapValue(t *testing.T) {
 		raw any
 		typ string
 	}{
-		"a map[string]string at a String":  {schema.NewStringConstraint(), map[string]string{"a": "b"}, "map[string]string"},
-		"an empty map at a Boolean":        {schema.NewBooleanConstraint(), map[string]any{}, "map[string]interface {}"},
-		"a map[int]int at a List<String>":  {schema.NewListConstraint(schema.NewStringConstraint()), map[int]int{1: 2}, "map[int]int"},
-		"a map[string]float64 at a Vector": {schema.NewVectorConstraint(2), map[string]float64{}, "map[string]float64"},
-		"an empty map at an Integer":       {schema.NewIntegerConstraint(), map[string]any{}, "map[string]interface {}"},
-		"a named map at a UUID":            {schema.NewUUIDConstraint(), namedMap{}, "neo4j.namedMap"},
+		"a map[string]string at a String":  {schematest.Constraint(t, "String"), map[string]string{"a": "b"}, "map[string]string"},
+		"an empty map at a Boolean":        {schematest.Constraint(t, "Boolean"), map[string]any{}, "map[string]interface {}"},
+		"a map[int]int at a List<String>":  {schematest.Constraint(t, "List<String>"), map[int]int{1: 2}, "map[int]int"},
+		"a map[string]float64 at a Vector": {schematest.Constraint(t, "Vector[2]"), map[string]float64{}, "map[string]float64"},
+		"an empty map at an Integer":       {schematest.Constraint(t, "Integer"), map[string]any{}, "map[string]interface {}"},
+		"a named map at a UUID":            {schematest.Constraint(t, "UUID"), namedMap{}, "neo4j.namedMap"},
 	} {
 		want := "coerce " + tc.c.Kind().String() + ": cannot store " + tc.typ + ", a map, as a property value"
 		if _, err := coerceScalar(tc.c, tc.raw); err == nil || err.Error() != want {
 			t.Errorf("coerceScalar, %s: error = %v; want %s", name, err, want)
 		}
 	}
-	_, err := CoerceParams(map[string]any{"p": map[string]any{}}, ParamTypes{"p": schema.NewStringConstraint()})
+	_, err := CoerceParams(map[string]any{"p": map[string]any{}}, ParamTypes{"p": schematest.Constraint(t, "String")})
 	if want := `param "p": expected string, got map[string]interface {}`; !errors.Is(err, ErrUnrepresentable) || err.Error() != want {
 		t.Errorf("CoerceParams, an empty map at a String: error = %v; want %s", err, want)
 	}
-	_, err = CoerceParams(map[string]any{"p": map[string]string{"a": "b"}}, ParamTypes{"p": schema.NewStringConstraint()})
+	_, err = CoerceParams(map[string]any{"p": map[string]string{"a": "b"}}, ParamTypes{"p": schematest.Constraint(t, "String")})
 	if want := `param "p": expected string, got map[string]string`; !errors.Is(err, ErrUnrepresentable) || err.Error() != want {
 		t.Errorf("CoerceParams, a map[string]string at a String: error = %v; want %s", err, want)
 	}
@@ -72,7 +74,7 @@ func TestCoerceScalar_RefusesAMapValue(t *testing.T) {
 // a map there draws the nested collection's refusal.
 func TestCoerceScalar_ANestedCollectionIsRefusedBeforeAMap(t *testing.T) {
 	t.Parallel()
-	nested := schema.NewListConstraint(schema.NewListConstraint(schema.NewStringConstraint()))
+	nested := schematest.Constraint(t, "List<List<String>>")
 	_, err := coerceScalar(nested, map[string]any{"a": "b"})
 	if want := "neo4j: unsupported list element type: list element kind List"; err == nil || err.Error() != want {
 		t.Errorf("error = %v; want %s", err, want)

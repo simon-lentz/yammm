@@ -9,7 +9,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/simon-lentz/yammm/instance"
 	"github.com/simon-lentz/yammm/internal/yammmtest/sourcetest"
 )
 
@@ -17,7 +16,7 @@ import (
 // decoder would read as U+FFFD: each is an E_DATA_PARSE at its opening quote,
 // and the element that holds it is produced refused, beside the others, with
 // each member whose name holds one removed and each whose value holds one
-// holding an [instance.Refused].
+// holding nil.
 func TestParse_AStringThatIsNotItsTextIsRefused(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
@@ -52,7 +51,7 @@ func TestParse_AStringThatIsNotItsTextIsRefused(t *testing.T) {
 			}
 			var paths []string
 			var refusedAt []bool
-			for _, e := range parsed["T"] {
+			for _, e := range parsed["T"].Elements {
 				paths = append(paths, e.Provenance.Path().String())
 				refusedAt = append(refusedAt, e.Refused)
 			}
@@ -62,11 +61,11 @@ func TestParse_AStringThatIsNotItsTextIsRefused(t *testing.T) {
 			if want := []bool{false, true, false}; !slices.Equal(refusedAt, want) {
 				t.Errorf("refused %v, want %v", refusedAt, want)
 			}
-			props := parsed["T"][1].Properties
+			props := parsed["T"].Elements[1].Properties
 			kept := slices.Sorted(maps.Keys(props))
 			var refused []string
 			for _, name := range kept {
-				if _, ok := props[name].(instance.Refused); ok {
+				if props[name] == nil {
 					refused = append(refused, name)
 				}
 			}
@@ -79,27 +78,23 @@ func TestParse_AStringThatIsNotItsTextIsRefused(t *testing.T) {
 
 // TestParse_ARefusedElementHoldsEachFaultedValueAtItsMember pins that a refused
 // element keeps the name of each top-level member whose value holds a text
-// fault at any depth, with the decoder's reading of that value inside an
-// [instance.Refused], drops a member whose name holds one, and keeps every
-// other member as the decoder read it.
+// fault at any depth with a nil value, drops a member whose name holds one,
+// and keeps every other member as the decoder read it.
 func TestParse_ARefusedElementHoldsEachFaultedValueAtItsMember(t *testing.T) {
 	t.Parallel()
 	doc := "{\"T\": [{\"id\": \"a\", \"m\": {\"_target_id\": \"x\xff\", \"w\": 1}, \"ok\": [1, {\"k\": \"v\"}], " +
 		"\"lines\": [{\"sku\": \"s\"}, {\"sku\": \"t\", \"tags\": [\"u\", \"v\xfe\"]}], \"n\xff\": 2}]}"
 	parsed, result := Parse(t.Context(), sourcetest.ID("data.json"), []byte(doc))
-	if got := len(allIssues(result)); got != 3 || len(parsed["T"]) != 1 || !parsed["T"][0].Refused {
+	if got := len(allIssues(result)); got != 3 || len(parsed["T"].Elements) != 1 || !parsed["T"].Elements[0].Refused {
 		t.Fatalf("got %d issues and %v, want 3 and one refused element:%s", got, parsed["T"], describe(result))
 	}
 	want := map[string]any{
-		"id": "a",
-		"m":  instance.Refused{Value: map[string]any{"_target_id": "x\uFFFD", "w": int64(1)}},
-		"ok": []any{int64(1), map[string]any{"k": "v"}},
-		"lines": instance.Refused{Value: []any{
-			map[string]any{"sku": "s"},
-			map[string]any{"sku": "t", "tags": []any{"u", "v\uFFFD"}},
-		}},
+		"id":    "a",
+		"m":     nil,
+		"ok":    []any{int64(1), map[string]any{"k": "v"}},
+		"lines": nil,
 	}
-	if got := parsed["T"][0].Properties; !reflect.DeepEqual(got, want) {
+	if got := parsed["T"].Elements[0].Properties; !reflect.DeepEqual(got, want) {
 		t.Errorf("properties %#v\nwant %#v", got, want)
 	}
 }
@@ -115,7 +110,7 @@ func TestParse_ATextFaultEditsTheOccurrenceTheDecoderKeeps(t *testing.T) {
 		repeats int
 		want    map[string]any
 	}{
-		"the kept occurrence's value":         {"{\"id\": \"a\", \"id\": \"\xff\"}", 1, map[string]any{"id": instance.Refused{Value: "\uFFFD"}}},
+		"the kept occurrence's value":         {"{\"id\": \"a\", \"id\": \"\xff\"}", 1, map[string]any{"id": nil}},
 		"a dropped occurrence's value":        {"{\"id\": \"\xff\", \"id\": \"a\"}", 1, map[string]any{"id": "a"}},
 		"one faulted name twice":              {"{\"id\": \"a\", \"p\xff\": \"x\", \"p\xff\": \"y\"}", 0, map[string]any{"id": "a"}},
 		"a faulted name with a faulted value": {"{\"id\": \"a\", \"p\xff\": [\"\xfe\"]}", 0, map[string]any{"id": "a"}},
@@ -133,10 +128,10 @@ func TestParse_ATextFaultEditsTheOccurrenceTheDecoderKeeps(t *testing.T) {
 			if repeats != c.repeats || !result.HasErrors() {
 				t.Errorf("%d repeated members, want %d:%s", repeats, c.repeats, describe(result))
 			}
-			if len(parsed["T"]) != 1 || !parsed["T"][0].Refused {
+			if len(parsed["T"].Elements) != 1 || !parsed["T"].Elements[0].Refused {
 				t.Fatalf("elements %v, want one refused", parsed["T"])
 			}
-			if got := parsed["T"][0].Properties; !reflect.DeepEqual(got, c.want) {
+			if got := parsed["T"].Elements[0].Properties; !reflect.DeepEqual(got, c.want) {
 				t.Errorf("properties %#v, want %#v", got, c.want)
 			}
 		})
@@ -179,7 +174,7 @@ func TestParse_ATypeNameThatIsNotItsTextIsRefused(t *testing.T) {
 			if len(issues) != 1 || !issueAt(result, "string", 1, 2) {
 				t.Fatalf("want one E_DATA_PARSE at 1:2:%s", describe(result))
 			}
-			if len(parsed) != 1 || len(parsed["U"]) != 1 {
+			if len(parsed) != 1 || len(parsed["U"].Elements) != 1 {
 				t.Errorf("parsed %v, want U alone", parsed)
 			}
 		})
@@ -204,10 +199,10 @@ func TestParse_AValidSurrogatePairIsRead(t *testing.T) {
 	t.Parallel()
 	doc := "{\"T\": [{\"id\": \"\\ud83d\\ude00\", \"r\": \"\uFFFD\", \"e\": \"\\uFFFD\"}]}"
 	parsed, result := Parse(context.Background(), sourcetest.ID("data.json"), []byte(doc))
-	if result.HasErrors() || len(parsed["T"]) != 1 {
-		t.Fatalf("parsed %d instances:%s", len(parsed["T"]), describe(result))
+	if result.HasErrors() || len(parsed["T"].Elements) != 1 {
+		t.Fatalf("parsed %d instances:%s", len(parsed["T"].Elements), describe(result))
 	}
-	props := parsed["T"][0].Properties
+	props := parsed["T"].Elements[0].Properties
 	if props["id"] != "\U0001F600" || props["r"] != "\uFFFD" || props["e"] != "\uFFFD" {
 		t.Errorf("properties %#v, want the pair's character and U+FFFD twice", props)
 	}

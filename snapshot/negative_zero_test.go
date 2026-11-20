@@ -45,7 +45,7 @@ func TestMarshal_ANegativeZeroKeepsItsSignAtAFloat(t *testing.T) {
 		if mres.HasErrors() {
 			t.Fatalf("%s: Marshal: %s", name, mres)
 		}
-		back, lres := snapshot.Load(t.Context(), data, s)
+		back, lres := snapshot.Unmarshal(t.Context(), data, s)
 		if lres.HasErrors() {
 			t.Fatalf("%s: Load: %s", name, lres)
 		}

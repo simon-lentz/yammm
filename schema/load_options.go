@@ -120,7 +120,7 @@ func WithSourcesOnly(only bool) LoadOption {
 // permitted and yields a ".."-bearing identity, which stays stable and
 // distinct. A relative import ("./x", "../x") resolves
 // against the importing source's key, as text, and one climbing above the root
-// keeps its ".."; [SyntheticImportKey] states the rule. [Schema.ModuleRoot] reports the
+// keeps its "..". [Schema.ModuleRoot] reports the
 // synthetic root, because the root is the one this load resolved imports
 // against; a schema loaded this way is a supported input to
 // [github.com/simon-lentz/yammm/schema/gogen.Marshal], whose embedded keys
@@ -168,5 +168,5 @@ func (c *loadConfig) startCapture() {
 	if c.sourceRegistry == nil {
 		c.sourceRegistry = source.NewRegistry()
 	}
-	*c.sourcesOut = NewSources(c.sourceRegistry)
+	*c.sourcesOut = newSources(c.sourceRegistry)
 }

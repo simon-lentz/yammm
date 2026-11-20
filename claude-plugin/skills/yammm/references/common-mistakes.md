@@ -53,7 +53,7 @@ type Person {
 
 ## 3. Missing Nil Guard in Invariants
 
-Optional fields can be nil. An unguarded comparison against a nil field evaluates to false, tripping the invariant (`E_INVARIANT_FAIL`) on every instance where the optional field is absent.
+Optional fields can be nil, and nil orders below every other value. So `end_date > start_date` is false wherever `end_date` is absent, and the invariant trips (`E_INVARIANT_FAIL`) on every such instance.
 
 ```yammm-snippet
 // WRONG -- loads clean; trips at validation time on every nil end_date

@@ -59,12 +59,12 @@ import (
 //     that insert a fifth top-level key, shift the header-body
 //     transition, or change the inter-key separator pattern silently
 //     break UpdateMetadata even without relaxing the field-order rule.
-//     UpdateMetadata(x, newMeta) == Marshal(Load(x), WithIndent(i)) for a
+//     UpdateMetadata(x, newMeta) == Marshal(Unmarshal(x), WithIndent(i)) for a
 //     document the current Marshal produced with indent i that carries no
 //     created_at, when newMeta is empty: UpdateMetadata keeps the input's
 //     indent. The last two conditions are not the same kind of condition.
 //     created_at is a condition on the document: UpdateMetadata preserves
-//     it from the input header and Load does not return it, so a
+//     it from the input header and Unmarshal does not return it, so a
 //     re-marshal cannot reproduce it. Metadata is a condition on the
 //     call: UpdateMetadata writes newMeta and discards whatever the
 //     input carried, so a document holding metadata still matches a
@@ -76,7 +76,7 @@ import (
 //     never a migration. The only readable version is the current one:
 //     an older document is refused with
 //     E_SNAPSHOT_UNSUPPORTED_VERSION rather than rewritten, and
-//     UpdateMetadataOrReMarshal's Load + Marshal fallback refuses it
+//     UpdateMetadataOrReMarshal's Unmarshal + Marshal fallback refuses it
 //     the same way.
 //
 // These contracts are tested in snapshot/wire_test.go via:
@@ -106,7 +106,7 @@ var topLevelKeys = [...]string{"yammm_snapshot", "types", "instances", "diagnost
 // checkTopLevelKeys is the one definition of the document's outermost shape:
 // presence, order, uniqueness and non-nullness of the four top-level keys, and
 // that the document ends where the object does. Every surface holding the whole
-// document runs it. [HeaderOnlyRead] and [ScanDir] cannot and say so on their
+// document runs it. [ReadHeader] and [ScanDir] cannot and say so on their
 // own godoc: they read through a capped reader and never hold the body.
 //
 // It is not free: it scans the whole document and copies each top-level value
@@ -185,22 +185,11 @@ func skipValue(dec *json.Decoder, key string) error {
 	return nil
 }
 
-// MinReadableVersion is the lowest .ys wire-format version this package
-// accepts on read paths (Load, Verify, Info, HeaderOnly, HeaderOnlyRead, the
-// ScanDir family) and at UpdateMetadata, which decodes the header it rewrites.
-// The accept range is the closed interval [MinReadableVersion, currentVersion].
-// A document of the expected shape outside the range draws an Error-severity
-// [diag.E_SNAPSHOT_UNSUPPORTED_VERSION]. Load, Verify, Info, HeaderOnly and
-// UpdateMetadata report one of another shape, or holding a string [checkDocument]
-// refuses, as E_SNAPSHOT_MALFORMED first. The package doc's Wire Format Versions
-// section and docs/API.md's Versioning Policy carry the full policy.
-//
-// It is DERIVED from currentVersion, not written as a second literal: this
-// package reads only the version it writes, and two independent literals let
-// a version bump widen the accept range by accident — a reader that silently
-// admits the previous format instead of refusing it. Widening the range is a
-// deliberate act that replaces this expression, never an edit that forgets to.
-const MinReadableVersion = currentVersion
+// minReadableVersion is the lowest .ys wire-format version this package
+// accepts on read paths and at UpdateMetadata. It is derived from
+// currentVersion, not written as a second literal, so a version bump cannot
+// widen the accept range by accident.
+const minReadableVersion = currentVersion
 
 const (
 	// Version 4 keys the types table by the declaring schema's NAME. Version 3
@@ -373,9 +362,9 @@ type diagWire struct {
 
 // checkDocument holds data to the document's outermost shape, to its member
 // names and to its text. Every surface that holds the whole document runs it
-// before it decodes the header, so a document one of them accepts is one Load
+// before it decodes the header, so a document one of them accepts is one Unmarshal
 // decodes as written. A fault it finds draws E_SNAPSHOT_MALFORMED whatever version
-// the header states; [HeaderOnlyRead] judges the version first.
+// the header states; [ReadHeader] judges the version first.
 func checkDocument(data []byte) error {
 	if err := checkTopLevelKeys(data); err != nil {
 		return err

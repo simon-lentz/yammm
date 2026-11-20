@@ -142,7 +142,7 @@ func (c *completer) completeTypes() {
 		completed[t.Name()] = true
 
 		// Complete supertypes first
-		supers := make([]ResolvedTypeRef, 0)
+		supers := make([]TypeID, 0)
 		seenSupers := make(map[TypeID]bool)
 
 		// A cross-schema inheritance cycle cannot form: it would need mutual
@@ -193,15 +193,14 @@ func (c *completer) completeTypes() {
 			}
 
 			// Now read supertype's ancestors (guaranteed to be populated)
-			for super := range resolved.SuperTypes() {
-				superID := super.ID()
+			for superID := range resolved.SuperTypes() {
 				if !seenSupers[superID] {
 					seenSupers[superID] = true
-					supers = append(supers, super)
+					supers = append(supers, superID)
 				}
 			}
 
-			supers = append(supers, NewResolvedTypeRef(ref, id))
+			supers = append(supers, id)
 		}
 
 		// Process declared inherits
@@ -278,18 +277,17 @@ func (c *completer) completeTypes() {
 
 	// Each local supertype's list is set once: a rebuild per subtype costs the
 	// cube of a chain's depth. An imported supertype is sealed and takes none.
-	subs := make(map[string][]ResolvedTypeRef)
+	subs := make(map[string][]TypeID)
 	var order []string
 	for _, t := range c.schema.types {
-		for super := range t.SuperTypes() {
-			superID := super.ID()
+		for superID := range t.SuperTypes() {
 			if superID.SchemaPath() != c.sourceID {
 				continue
 			}
 			if _, ok := subs[superID.Name()]; !ok {
 				order = append(order, superID.Name())
 			}
-			subs[superID.Name()] = append(subs[superID.Name()], ResolvedTypeRefFromType(t, superID.SchemaPath().String()))
+			subs[superID.Name()] = append(subs[superID.Name()], t.ID())
 		}
 	}
 	for _, name := range order {
@@ -362,7 +360,7 @@ type annotationSource struct {
 // rule per property name over every declaration of that name on its linearized
 // ancestors:
 //
-//   - The type's own declaration must narrow (equal, or [Property.CanNarrowFrom])
+//   - The type's own declaration must narrow (equal, or Property.canNarrowFrom)
 //     every inherited declaration of its name, and it is the property.
 //   - With no own declaration, the property is the inherited declaration that
 //     narrows every other. With none, the load fails.
@@ -381,7 +379,7 @@ type annotationSource struct {
 // holds the first of unknown type, so the rules that read the merged view defer
 // to its reported cause, or else the first. The rule decides STRUCTURE only:
 // [completer.resolveInheritedAnnotations] settles annotations.
-func (c *completer) mergeProperties(t Type, supers []ResolvedTypeRef, direct []Type) []Property {
+func (c *completer) mergeProperties(t Type, supers []TypeID, direct []Type) []Property {
 	result := slices.Collect(t.Properties())
 	at := make(map[string]int, len(result))
 	for i, p := range result {
@@ -393,7 +391,7 @@ func (c *completer) mergeProperties(t Type, supers []ResolvedTypeRef, direct []T
 	// own declarations reads every inherited declaration once.
 	inherited := make(map[string][]Property)
 	for _, superRef := range supers {
-		for p := range c.resolveTypeID(superRef.ID()).Properties() {
+		for p := range c.resolveTypeID(superRef).Properties() {
 			inherited[p.Name()] = append(inherited[p.Name()], p)
 			if _, ok := at[p.Name()]; !ok {
 				at[p.Name()] = len(result)
@@ -468,7 +466,7 @@ func (c *completer) mergeProperties(t Type, supers []ResolvedTypeRef, direct []T
 // narrows reports whether declaration a narrows declaration b: the two are
 // equal, or every value a accepts b accepts.
 func narrows(a, b Property) bool {
-	return a.Equal(b) || a.CanNarrowFrom(b)
+	return a.equal(b) || a.canNarrowFrom(b)
 }
 
 // minimal returns a declaration of decls that no other narrows strictly, and
@@ -603,7 +601,7 @@ func (c *completer) directSuperTypes(t Type) []Type {
 	ancestors := make(map[TypeID]bool)
 	for _, s := range resolved {
 		for _, st := range s.superTypes {
-			ancestors[st.id] = true
+			ancestors[st] = true
 		}
 	}
 	var out []Type
@@ -630,7 +628,7 @@ func (c *completer) directSuperTypes(t Type) []Type {
 // subtype:
 //
 //   - Same name, different arguments — only differing @vector similarity
-//     keywords in practice, since Property.Equal excludes annotations and so
+//     keywords in practice, since Property.equal excludes annotations and so
 //     lets two structurally equal ancestors disagree about them.
 //   - One supertype carries the annotation while another SUPPRESSED it: some
 //     type on that arm re-declared the property without it, and honouring
@@ -1039,7 +1037,7 @@ func (c *completer) unifyInvariants(a, b Invariant) (Invariant, bool) {
 	if !ok {
 		return Invariant{}, false
 	}
-	return newInvariant(a.Name(), e, a.Span(), a.Documentation()), true
+	return newInvariant(a.Name(), a.text, e, a.Span(), a.Documentation()), true
 }
 
 func unifyNode(a, b expr.Expression, noValue map[*expr.Literal]parse.LiteralKind) (expr.Expression, bool) {
@@ -1119,7 +1117,7 @@ func literalKindOf(v any) parse.LiteralKind {
 // — so the merged view the generators and the write path read reflects what the
 // type body actually declares. validateTypeAnnotations reports the duplicate independently, off the
 // raw own slice, so the two never interact.
-func (c *completer) mergeAnnotations(t Type, supers []ResolvedTypeRef) []Annotation {
+func (c *completer) mergeAnnotations(t Type, supers []TypeID) []Annotation {
 	result := slices.Collect(t.Annotations())
 	seen := make(map[string]bool)
 	for _, a := range result {
@@ -1127,7 +1125,7 @@ func (c *completer) mergeAnnotations(t Type, supers []ResolvedTypeRef) []Annotat
 	}
 
 	for _, superRef := range supers {
-		superType := c.resolveTypeID(superRef.ID())
+		superType := c.resolveTypeID(superRef)
 
 		for a := range superType.AllAnnotations() {
 			id := a.identity()
@@ -1147,7 +1145,7 @@ func (c *completer) mergeAnnotations(t Type, supers []ResolvedTypeRef) []Annotat
 // or in a List element. The cause of each is already reported.
 func typeUnknown(p Property) bool {
 	constraint := p.Constraint()
-	return constraint == nil || !constraint.IsResolved()
+	return constraint == nil || !constraint.isResolved()
 }
 
 // relationUnknown reports whether r's target did not resolve or r holds an edge
@@ -1169,7 +1167,7 @@ func relationUnknown(r Relation) bool {
 // An inherited relation that conflicts with an existing relation (own or
 // from another ancestor) draws E_RELATION_COLLISION, unless a definition of
 // the relation is not known ([relationUnknown]).
-func (c *completer) mergeRelations(t Type, own []Relation, supers []ResolvedTypeRef, kind RelationKind) []Relation {
+func (c *completer) mergeRelations(t Type, own []Relation, supers []TypeID, kind RelationKind) []Relation {
 	result := own
 	seen := make(map[string]Relation)
 	for _, r := range result {
@@ -1182,7 +1180,7 @@ func (c *completer) mergeRelations(t Type, own []Relation, supers []ResolvedType
 	// are re-detections of one collision, and one edit to the surviving
 	// declaration clears them together.
 	//
-	// Rivals group by [Relation.Equal], a true equivalence: structural
+	// Rivals group by Relation.equal, a true equivalence: structural
 	// field-by-field equality, so it is transitive and testing a group's first
 	// member decides the whole group. Relations merge keep-first with no
 	// narrowing, so the survivor under a field name never changes mid-walk.
@@ -1194,7 +1192,7 @@ func (c *completer) mergeRelations(t Type, own []Relation, supers []ResolvedType
 	var unjudged map[string]bool
 
 	for _, superRef := range supers {
-		superType := c.resolveTypeID(superRef.ID())
+		superType := c.resolveTypeID(superRef)
 
 		var inherited []Relation
 		if kind == RelationAssociation {
@@ -1214,7 +1212,7 @@ func (c *completer) mergeRelations(t Type, own []Relation, supers []ResolvedType
 					unjudged[r.FieldName()] = true
 					continue
 				}
-				if !existing.Equal(r) {
+				if !existing.equal(r) {
 					matched := false
 					for _, cl := range collisions {
 						if cl.matches(r) {
@@ -1277,11 +1275,11 @@ type relationClash struct {
 
 // matches reports whether a rival re-detects this collision: same field, and
 // structurally equal to the rivals already recorded. Testing only the first
-// recorded rival is sound because [Relation.Equal] is a true equivalence
+// recorded rival is sound because Relation.equal is a true equivalence
 // relation — structural equality, hence transitive — so every recorded rival
 // answers identically.
 func (cl *relationClash) matches(rival Relation) bool {
-	return cl.survivor.FieldName() == rival.FieldName() && cl.rivals[0].Equal(rival)
+	return cl.survivor.FieldName() == rival.FieldName() && cl.rivals[0].equal(rival)
 }
 
 // appendUniqueRelation appends r to rivals unless the same declaration is

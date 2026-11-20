@@ -28,7 +28,7 @@ func TestLoad_RefusesAnOldHashAlgorithm(t *testing.T) {
 		t.Fatalf("fixture does not carry algorithm %d", schema.StructuralHashVersion)
 	}
 
-	_, res := snapshot.Load(t.Context(), old, s, snapshot.WithIntegrityCheck(false))
+	_, res := snapshot.Unmarshal(t.Context(), old, s, snapshot.WithIntegrityCheck(false))
 	if !res.HasErrors() || !res.HasCode(diag.E_SNAPSHOT_UNSUPPORTED_HASH_ALGORITHM) {
 		t.Fatalf("Load accepted a previous-algorithm document: %v", res)
 	}
@@ -39,7 +39,7 @@ func TestLoad_RefusesAnOldHashAlgorithm(t *testing.T) {
 		t.Fatalf("Verify accepted a previous-algorithm document: %v", res)
 	}
 
-	header, hres := snapshot.HeaderOnly(t.Context(), old)
+	header, hres := snapshot.ReadHeader(t.Context(), bytes.NewReader(old))
 	if hres.HasErrors() {
 		t.Fatalf("a header-only read must stay classifiable: %v", hres)
 	}
