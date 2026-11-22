@@ -7,8 +7,8 @@
 // # Scope
 //
 // The [Scope] interface provides variable bindings for expression evaluation.
-// A bare property name reads through the scope's LookupFold method, a $ variable
-// reads through its Lookup method, and WithVar binds a variable.
+// A bare name and a $ variable read through the scope's Lookup method, a member
+// by its declared name alone, and WithVar binds a variable.
 //
 //	scope := eval.PropertyScopeOf(immutable.WrapProperties(map[string]any{
 //	    "name": "Alice",

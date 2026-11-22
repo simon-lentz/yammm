@@ -63,8 +63,7 @@ var ErrEmptyPath = hostpath.ErrEmptyPath
 // link's target.
 //
 // An identity is text that reaches JSON wires — a diagnostic under --json,
-// and a .ys document's schema_source and each instance's provenance
-// source_name — and encoding/json writes
+// and a .ys document's provenance source_name — and encoding/json writes
 // an invalid byte as U+FFFD, which merges two names into one.
 //
 // Returned by: SourceIDFromPath, ResolveSourcePath and NewSourceID. A caller

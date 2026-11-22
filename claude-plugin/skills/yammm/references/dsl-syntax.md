@@ -161,7 +161,7 @@ Associations cannot target part types.
 
 Relation names are UPPER_SNAKE (`E_INVALID_NAME` otherwise; a reserved word or a datatype keyword in that place, such as `type` or `String`, is `E_SYNTAX`). The relation's
 field name — its key in instance data — is the name in lower case: `WORKS_AT`
-arrives as `works_at`. An invariant reads the relation by its declared name
+arrives as `works_at`, and under no other spelling. An invariant reads the relation by its declared name
 alone: `WORKS_AT`, `$self.WORKS_AT`, `$WORKS_AT`.
 
 ### Edge Properties

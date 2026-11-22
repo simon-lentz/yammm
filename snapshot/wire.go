@@ -28,75 +28,55 @@ import (
 // Rules:
 //   - Do NOT reorder existing fields within a format version.
 //   - New fields may be appended (with omitempty for backward compatibility).
-//   - Removing or reordering fields requires a format version bump.
+//   - A writer may stop writing a field only when the reader needs none of
+//     it. The reader reads past a member it does not declare, so a document
+//     that still carries the field reads as before, at the same version.
+//     schema_source left the writer so.
+//   - Any other removal or reordering requires a format version bump.
 //   - TestWireStructs_FieldOrder in wire_internal_test.go pins every wire
 //     struct's field order and tags by name, and
 //     TestWireStructs_EveryStructIsPinned fails when a new wire struct is
 //     added without a row there.
 //
-// TOP-LEVEL KEY ORDER AND BODY-SUFFIX STABILITY CONTRACT.
-//
-// The .ys wire format commits to two structural contracts beyond the
-// per-struct field order above, and UpdateMetadata adds a third rule of its
-// own. The two format contracts are load-bearing for UpdateMetadata's
-// byte-surgery primitive: they are properties of the bytes Marshal emits, and
-// relaxing either silently breaks every existing and future metadata-rewrite
-// call site. The third is a behaviour of UpdateMetadata rather than of the
-// format, and relaxing it would announce itself through the version field.
+// TOP-LEVEL KEY ORDER AND METADATA-REWRITE CONTRACT.
 //
 //  1. Field-order contract (established pre-v0.3.0). The top-level
 //     document has exactly four keys in a fixed order:
 //     yammm_snapshot → types → instances → diagnostics. No future Marshal
 //     change may reorder these or insert a new key in between.
 //
-//  2. Body-byte-range stability contract (introduced v0.3.0). The byte
-//     range starting at the ',' immediately following the yammm_snapshot
-//     header value's closing '}' and running through the document's
-//     final '}' is the "body suffix". UpdateMetadata preserves this
-//     suffix verbatim: it rebuilds only the header, recomputes the
-//     integrity hash over new_header + body_suffix, and emits
-//     new_header + body_suffix as the output. Future Marshal changes
-//     that insert a fifth top-level key, shift the header-body
-//     transition, or change the inter-key separator pattern silently
-//     break UpdateMetadata even without relaxing the field-order rule.
+//  2. Header-splice contract. UpdateMetadata replaces the header value alone,
+//     at the offsets the header decode reports: from its opening '{' to the
+//     byte after its closing '}'. Every byte before and after that span is kept
+//     verbatim, so it updates every document the readers accept, whatever
+//     whitespace surrounds the header. It writes the header as Marshal does,
+//     in the indent that follows a line feed directly after the document's
+//     opening brace, and recomputes the integrity hash over the result.
 //     UpdateMetadata(x, newMeta) == Marshal(Unmarshal(x), WithIndent(i)) for a
 //     document the current Marshal produced with indent i that carries no
-//     created_at, when newMeta is empty: UpdateMetadata keeps the input's
-//     indent. The last two conditions are not the same kind of condition.
-//     created_at is a condition on the document: UpdateMetadata preserves
-//     it from the input header and Unmarshal does not return it, so a
-//     re-marshal cannot reproduce it. Metadata is a condition on the
-//     call: UpdateMetadata writes newMeta and discards whatever the
-//     input carried, so a document holding metadata still matches a
-//     re-marshal when newMeta is empty, and a document holding none
+//     created_at, when newMeta is empty. The last two conditions are not the
+//     same kind of condition. created_at is a condition on the document:
+//     UpdateMetadata keeps its bytes from the input header and Unmarshal does
+//     not return it, so a re-marshal cannot reproduce it. Metadata is a
+//     condition on the call: UpdateMetadata writes newMeta and discards
+//     whatever the input carried, so a document holding metadata still
+//     matches a re-marshal when newMeta is empty, and a document holding none
 //     diverges when newMeta is not.
 //
 //  3. Version preservation (introduced v0.12.0). UpdateMetadata rebuilds
 //     the header at the version it read, so it is a header rewrite and
 //     never a migration. The only readable version is the current one:
-//     an older document is refused with
-//     E_SNAPSHOT_UNSUPPORTED_VERSION rather than rewritten, and
-//     UpdateMetadataOrReMarshal's Unmarshal + Marshal fallback refuses it
-//     the same way.
+//     an older document is refused with E_SNAPSHOT_UNSUPPORTED_VERSION
+//     rather than rewritten.
 //
-// These contracts are tested in snapshot/wire_test.go via:
-//   - TestWireFormat_TopLevelKeyOrder (token-level key-order pin)
-//   - TestWireFormat_BodySuffixContract (bodyOffset-capture + shape pin)
-//
-// the equivalence above in snapshot/wire_equivalence_test.go via
-// TestWireContract_UpdateMetadataMatchesReMarshal, which pins the
-// equality, the created_at divergence and both metadata directions in
-// the same test, and version preservation in
-// snapshot/update_contract_test.go via
-// TestUpdateMetadata_PreservesInputVersion.
-//
-// TestWireFormat_TopLevelKeyOrder and TestWireFormat_BodySuffixContract run
-// across a corpus of Marshal outputs under six combinations of the indent,
-// created_at and metadata options, so a future Marshal-side
-// change that silently breaks either contract fails at the wire-format
-// test level before reaching the consumers that depend on it.
-// See snapshot/update.go for the UpdateMetadata primitive that consumes
-// these contracts.
+// These contracts are tested in snapshot/wire_test.go via
+// TestWireFormat_TopLevelKeyOrder (token-level key-order pin), the equivalence
+// above in snapshot/wire_equivalence_test.go via
+// TestWireContract_UpdateMetadataMatchesReMarshal, which pins the equality,
+// the created_at divergence and both metadata directions in the same test,
+// and version preservation in snapshot/update_contract_test.go via
+// TestUpdateMetadata_PreservesInputVersion. See snapshot/update.go for the
+// UpdateMetadata primitive that consumes these contracts.
 
 // topLevelKeys is the exact key sequence contract 1 fixes. A document that
 // does not present these four keys, in this order, exactly once each, and none
@@ -206,17 +186,21 @@ const (
 // headerWire is used for decoding .ys headers. All fields are present
 // including version and hash algorithm version (which are written as
 // literal constants during marshal).
+//
+// It declares no schema_source. A document an earlier writer wrote carries
+// one, and the reader reads past it as it reads past any member it does not
+// declare.
 type headerWire struct {
-	Version             int               `json:"version"`
-	SchemaName          string            `json:"schema_name"`
-	SchemaSource        string            `json:"schema_source"`
-	SchemaHash          string            `json:"schema_hash"`
-	SchemaHashAlgorithm int               `json:"schema_hash_algorithm"`
-	IntegrityHash       string            `json:"integrity_hash"`
-	Features            []string          `json:"features"`
-	CreatedAt           string            `json:"created_at,omitempty"`
-	Metadata            map[string]string `json:"metadata,omitempty"`
-	Attestation         *attestationWire  `json:"attestation,omitempty"`
+	Version             int      `json:"version"`
+	SchemaName          string   `json:"schema_name"`
+	SchemaHash          string   `json:"schema_hash"`
+	SchemaHashAlgorithm int      `json:"schema_hash_algorithm"`
+	IntegrityHash       string   `json:"integrity_hash"`
+	Features            []string `json:"features"`
+	// CreatedAt is the member's JSON text, so a header rewrite keeps its bytes.
+	CreatedAt   json.RawMessage   `json:"created_at,omitempty"`
+	Metadata    map[string]string `json:"metadata,omitempty"`
+	Attestation *attestationWire  `json:"attestation,omitempty"`
 }
 
 // marshalHeaderWire is used for encoding .ys headers. Version and
@@ -224,11 +208,10 @@ type headerWire struct {
 // byte assembly, not serialized from this struct.
 type marshalHeaderWire struct {
 	SchemaName    string            `json:"schema_name"`
-	SchemaSource  string            `json:"schema_source"`
 	SchemaHash    string            `json:"schema_hash"`
 	IntegrityHash string            `json:"integrity_hash"`
 	Features      []string          `json:"features"`
-	CreatedAt     string            `json:"created_at,omitempty"`
+	CreatedAt     json.RawMessage   `json:"created_at,omitempty"`
 	Metadata      map[string]string `json:"metadata,omitempty"`
 	Attestation   *attestationWire  `json:"attestation,omitempty"`
 }

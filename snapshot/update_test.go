@@ -10,10 +10,9 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"slices"
+	"regexp"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -304,28 +303,14 @@ func TestUpdateMetadata_ConcurrentAccess(t *testing.T) {
 	}
 }
 
-// Each malformed shape pins the exact code its branch draws, so neither
-// branch can go dead behind the other.
-func TestUpdateMetadata_BodyOffsetFailure(t *testing.T) {
+// A document that ends at the header states no types table, which the header
+// decode refuses before any offset is read.
+func TestUpdateMetadata_RefusesADocumentThatEndsAtTheHeader(t *testing.T) {
 	ctx := context.Background()
-	header := fmt.Sprintf(`{"yammm_snapshot":{"version":4,"schema_name":"x","schema_source":"s","schema_hash":"h","schema_hash_algorithm":%d,"integrity_hash":"","features":[]}`, schema.StructuralHashVersion)
-
-	// A document that ends at the header: the decoder rejects it for the
-	// missing types key before the body offset is ever consulted.
+	header := fmt.Sprintf(`{"yammm_snapshot":{"version":4,"schema_name":"x","schema_hash":"h","schema_hash_algorithm":%d,"integrity_hash":"","features":[]}`, schema.StructuralHashVersion)
 	_, res := snapshot.UpdateMetadata(ctx, []byte(header+`}`), map[string]string{"k": "v"})
 	if !res.HasCode(diag.E_SNAPSHOT_MALFORMED) {
 		t.Errorf("a document with no types key drew %v, want %s", res, diag.E_SNAPSHOT_MALFORMED)
-	}
-	if res.HasCode(diag.E_UPDATE_METADATA_BODY_OFFSET) {
-		t.Errorf("the body-offset guard fired before the decoder rejected the document: %v", res)
-	}
-
-	// A complete document whose byte after the header is not ',': the header
-	// parses clean and the body-offset shape check is the branch that fires.
-	spaced := header + ` ,"types":[],"instances":[],"diagnostics":{"duplicates":[],"unresolved":[]}}`
-	_, res = snapshot.UpdateMetadata(ctx, []byte(spaced), map[string]string{"k": "v"})
-	if !res.HasCode(diag.E_UPDATE_METADATA_BODY_OFFSET) {
-		t.Errorf("a non-Marshal-shaped body boundary drew %v, want %s", res, diag.E_UPDATE_METADATA_BODY_OFFSET)
 	}
 }
 
@@ -375,6 +360,7 @@ func TestUpdateMetadata_BestEffortIndent(t *testing.T) {
 	// (valid JSON, non-standard whitespace).
 	mutated := bytes.Replace(data, []byte("{\n  \"yammm_snapshot\": "), []byte("{ \"yammm_snapshot\": "), 1)
 	require.NotEqual(t, string(data), string(mutated), "mutation must have landed")
+	mutated = rehashDocument(t, mutated)
 
 	out, res := snapshot.UpdateMetadata(ctx, mutated, map[string]string{"phase": "link"})
 	require.NoError(t, res.Err(), "best-effort should not fail")
@@ -436,68 +422,6 @@ func TestUpdateMetadata_CrossMarshalParityProperty(t *testing.T) {
 			})
 		}
 	}
-}
-
-// -- UpdateMetadataOrReMarshal coverage --
-
-func TestUpdateMetadataOrReMarshal_HappyPathParity(t *testing.T) {
-	ctx := context.Background()
-	s := testSchema(t)
-	data := makeSnapshotBytes(ctx, t, snapshot.WithMetadata(map[string]string{"k": "v"}))
-	newMeta := map[string]string{"phase": "link"}
-
-	fast, fastRes := snapshot.UpdateMetadata(ctx, data, newMeta)
-	require.NoError(t, fastRes.Err())
-
-	wrapped, wrappedRes := snapshot.UpdateMetadataOrReMarshal(ctx, data, newMeta, s)
-	require.NoError(t, wrappedRes.Err())
-	assert.False(t, wrappedRes.HasWarnings(), "happy path must not emit fallback warning")
-	assert.True(t, bytes.Equal(fast, wrapped),
-		"wrapper output must equal primitive output on well-formed input")
-}
-
-func TestUpdateMetadataOrReMarshal_FallbackOnMalformed(t *testing.T) {
-	// An input with a garbled first key triggers E_SNAPSHOT_MALFORMED
-	// on the fast path. Load will also reject this input, so the
-	// wrapper's both-paths-failed merge path fires. This is the
-	// documented behavior for truly unrecoverable input.
-	ctx := context.Background()
-	s := testSchema(t)
-
-	data := makeSnapshotBytes(ctx, t)
-	bad := bytes.Replace(data, []byte(`{"yammm_snapshot":`), []byte(`{"garbled":`), 1)
-	require.NotEqual(t, string(data), string(bad))
-
-	newMeta := map[string]string{"phase": "link"}
-	out, res := snapshot.UpdateMetadataOrReMarshal(ctx, bad, newMeta, s)
-	// Both paths fail for this input; merged-diagnostics path.
-	assert.Nil(t, out, "both paths failed → nil bytes")
-	assert.True(t, res.HasErrors(), "merged failure must surface")
-}
-
-func TestUpdateMetadataOrReMarshal_BothPathsFailed(t *testing.T) {
-	ctx := context.Background()
-	s := testSchema(t)
-	bad := []byte("this is not json at all")
-
-	out, res := snapshot.UpdateMetadataOrReMarshal(ctx, bad, map[string]string{"k": "v"}, s)
-	assert.Nil(t, out, "unrecoverable input must return nil bytes")
-	assert.True(t, res.HasErrors(), "error surface must be non-empty")
-}
-
-func TestUpdateMetadataOrReMarshal_CancellationPropagates(t *testing.T) {
-	// Marshal fixture with a live ctx, then cancel before calling the
-	// primitive so only the UpdateMetadata path observes cancellation.
-	s := testSchema(t)
-	data := makeSnapshotBytes(context.Background(), t)
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-
-	_, res := snapshot.UpdateMetadataOrReMarshal(ctx, data, map[string]string{"k": "v"}, s)
-	require.True(t, res.HasErrors())
-	assert.True(t, res.HasCode(diag.E_CONTEXT_CANCELLED))
-	assert.False(t, res.HasWarnings(),
-		"cancellation must not fire W_UPDATE_METADATA_FALLBACK")
 }
 
 // -- test helpers --
@@ -617,21 +541,19 @@ type Company {
 	return nil
 }
 
+// integrityHashValue matches the first integrity_hash member, compact or
+// indented, and holds its value's text.
+var integrityHashValue = regexp.MustCompile(`"integrity_hash":\s*"([^"]*)"`)
+
 // rehashDocument recomputes a hand-edited document's integrity hash so every
 // read path accepts the edited bytes.
 func rehashDocument(t *testing.T, data []byte) []byte {
 	t.Helper()
-	const key = `"integrity_hash":"`
-	i := bytes.Index(data, []byte(key))
-	if i < 0 {
+	at := integrityHashValue.FindSubmatchIndex(data)
+	if at == nil {
 		t.Fatal("rehashDocument: no integrity_hash value found")
 	}
-	start := i + len(key)
-	end := bytes.IndexByte(data[start:], '"')
-	if end < 0 {
-		t.Fatal("rehashDocument: unterminated integrity_hash value")
-	}
-	end += start
+	start, end := at[2], at[3]
 
 	canon := append(append([]byte{}, data[:start]...), data[end:]...)
 	sum := sha256.Sum256(canon)
@@ -639,135 +561,4 @@ func rehashDocument(t *testing.T, data []byte) []byte {
 
 	out := append(append(append([]byte{}, data[:start]...), newVal...), data[end:]...)
 	return out
-}
-
-// TestUpdateMetadataOrReMarshal_FallbackRecoversNonMarshalShape pins the
-// fallback path: an input whose body boundary is not Marshal-shaped is
-// refused by the fast path and recovered through Load + Marshal, with the
-// transition surfaced as W_UPDATE_METADATA_FALLBACK naming the trigger.
-func TestUpdateMetadataOrReMarshal_FallbackRecoversNonMarshalShape(t *testing.T) {
-	t.Parallel()
-	ctx := context.Background()
-	s := testSchema(t)
-	snap := buildSnapshot(t, s,
-		mustValidInstance(t, s, "Company", []any{"c1"}, map[string]any{"id": "c1", "title": "Acme"}))
-	data, res := snapshot.Marshal(ctx, snap)
-	if res.HasErrors() {
-		t.Fatalf("marshal: %v", res)
-	}
-
-	// A JSON-insignificant space after the header object breaks the
-	// body-suffix shape while every read path still accepts the bytes.
-	spaced := bytes.Replace(data, []byte(`},"types":`), []byte(`} ,"types":`), 1)
-	if bytes.Equal(spaced, data) {
-		t.Fatal("fixture shape changed; header boundary not found")
-	}
-	spaced = rehashDocument(t, spaced)
-
-	if _, fastRes := snapshot.UpdateMetadata(ctx, spaced, nil); !hasCode(fastRes, diag.E_UPDATE_METADATA_BODY_OFFSET) {
-		t.Fatalf("the fast path accepted a non-Marshal shape: %v", fastRes)
-	}
-
-	newMeta := map[string]string{"stage": "fallback"}
-	out, outRes := snapshot.UpdateMetadataOrReMarshal(ctx, spaced, newMeta, s)
-	if outRes.HasErrors() {
-		t.Fatalf("the fallback failed: %v", outRes)
-	}
-
-	var sawFallback bool
-	for iss := range outRes.Issues() {
-		if iss.Code() != diag.W_UPDATE_METADATA_FALLBACK {
-			continue
-		}
-		sawFallback = true
-		var codes string
-		for _, d := range iss.Details() {
-			if d.Key == "triggering_codes" {
-				codes = d.Value
-			}
-		}
-		if !strings.Contains(codes, "E_UPDATE_METADATA_BODY_OFFSET") {
-			t.Errorf("fallback warning names %q, want it to carry E_UPDATE_METADATA_BODY_OFFSET", codes)
-		}
-	}
-	if !sawFallback {
-		t.Fatalf("no W_UPDATE_METADATA_FALLBACK warning on the fallback path: %v", outRes)
-	}
-
-	// The correctness floor: byte-identical to a direct Marshal of the
-	// loaded document under the equivalent options.
-	loaded, loadRes := snapshot.Unmarshal(ctx, spaced, s)
-	if err := loadRes.Err(); err != nil {
-		t.Fatalf("load: %v", err)
-	}
-	want, wantRes := snapshot.Marshal(ctx, loaded, snapshot.WithMetadata(newMeta))
-	if err := wantRes.Err(); err != nil {
-		t.Fatalf("floor marshal: %v", err)
-	}
-	if !bytes.Equal(out, want) {
-		t.Errorf("fallback output diverges from the Load + Marshal floor\n got:  %s\n want: %s", out, want)
-	}
-}
-
-// When the fallback's Load fails too, the result is Load's alone: Load judges
-// the whole document the fast path refused, so a repeated types row draws one
-// issue, where the fast path's refusal stood beside Load's.
-// Where the fast path and Load refuse a document for different breaks, a
-// failed Load leg returns Load's refusal and not the fast path's.
-func TestUpdateMetadataOrReMarshal_AFailedLoadLegReturnsLoadsRefusal(t *testing.T) {
-	ctx := context.Background()
-	s := testSchema(t)
-	bad := []byte(strings.Replace(string(makeSnapshotBytes(ctx, t)), `},"types":`, `} ,"types":`, 1))
-	_, fast := snapshot.UpdateMetadata(ctx, bad, map[string]string{"k": "v"})
-	require.True(t, fast.HasCode(diag.E_UPDATE_METADATA_BODY_OFFSET), fast.String())
-	_, res := snapshot.UpdateMetadataOrReMarshal(ctx, bad, map[string]string{"k": "v"}, s)
-	assert.True(t, res.HasCode(diag.E_SNAPSHOT_INTEGRITY_MISMATCH), res.String())
-	assert.False(t, res.HasCode(diag.E_UPDATE_METADATA_BODY_OFFSET), res.String())
-}
-
-// cancelAfter reports no error for its first n Err calls and Canceled after.
-type cancelAfter struct {
-	context.Context //nolint:containedctx // the type is a context: it overrides Err alone
-	n               int64
-	calls           atomic.Int64
-}
-
-func (c *cancelAfter) Err() error {
-	if c.calls.Add(1) > c.n {
-		return context.Canceled
-	}
-	return nil
-}
-
-// A fallback cancelled in either leg judged the document no further, so the
-// fast path's refusal stands beside the cancellation.
-func TestUpdateMetadataOrReMarshal_ACancelledFallbackKeepsTheRefusal(t *testing.T) {
-	s := testSchema(t)
-	data := rehashDocument(t, []byte(strings.Replace(string(makeSnapshotBytes(context.Background(), t)), `},"types":`, `} ,"types":`, 1)))
-	for n := int64(1); ; n++ {
-		require.Less(t, n, int64(64), "the fallback never completed")
-		out, res := snapshot.UpdateMetadataOrReMarshal(&cancelAfter{Context: context.Background(), n: n}, data, map[string]string{"k": "v"}, s)
-		if out != nil {
-			break
-		}
-		assert.True(t, res.HasCode(diag.E_CONTEXT_CANCELLED) && res.HasCode(diag.E_UPDATE_METADATA_BODY_OFFSET),
-			"cancelled after %d Err calls: %s", n, res)
-	}
-}
-
-func TestUpdateMetadataOrReMarshal_AFailedLoadLegReportsEachBreakOnce(t *testing.T) {
-	ctx := context.Background()
-	s := testSchema(t)
-	data := makeSnapshotBytes(ctx, t)
-	start := bytes.Index(data, []byte(`"types":[`)) + len(`"types":[`)
-	end := start + bytes.IndexByte(data[start:], '}') + 1
-	row := slices.Clone(data[start:end])
-	bad := slices.Concat(data[:end], []byte(","), row, data[end:])
-
-	out, res := snapshot.UpdateMetadataOrReMarshal(ctx, bad, map[string]string{"k": "v"}, s)
-	_, loadRes := snapshot.Unmarshal(ctx, bad, s)
-	assert.Nil(t, out)
-	require.True(t, loadRes.HasErrors(), "the edited document must fail Load")
-	assert.Equal(t, loadRes.String(), res.String())
-	assert.Equal(t, 1, strings.Count(res.String(), "carry one identity"), res.String())
 }

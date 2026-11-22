@@ -9,8 +9,11 @@ import (
 	"fmt"
 	"io"
 	"maps"
+	"regexp"
 	"slices"
 	"strconv"
+	"strings"
+	"time"
 
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/graph"
@@ -69,9 +72,13 @@ type streamDecoder struct {
 	// cancellation, so revalidate's own poll does not report it a second time.
 	cancelReported bool
 
-	// bodyOffset is the byte offset of the body suffix UpdateMetadata
-	// reuses verbatim; -1 until decodeHeader captures it.
-	bodyOffset int64
+	// headerOffset and bodyOffset are the byte offsets of the header value's
+	// opening brace and of the byte after its closing brace: the span
+	// UpdateMetadata replaces. Each is -1 until decodeHeader captures it.
+	headerOffset, bodyOffset int64
+
+	// createdAt is the header's created_at, zero when the header states none.
+	createdAt time.Time
 
 	// typesEnd is the byte offset just past the types table, zero until
 	// decodeHeader decodes it.
@@ -81,12 +88,13 @@ type streamDecoder struct {
 // newStreamDecoder creates a new streamDecoder from raw .ys bytes.
 func newStreamDecoder(data []byte, s schema.Schema, cfg loadConfig) *streamDecoder {
 	return &streamDecoder{
-		data:        data,
-		collector:   diag.NewCollector(cfg.issueLimit),
-		loadCfg:     cfg,
-		schema:      s,
-		revalidator: newRevalidator(s, cfg),
-		bodyOffset:  -1,
+		data:         data,
+		collector:    diag.NewCollector(cfg.issueLimit),
+		loadCfg:      cfg,
+		schema:       s,
+		revalidator:  newRevalidator(s, cfg),
+		headerOffset: -1,
+		bodyOffset:   -1,
 	}
 }
 
@@ -154,11 +162,12 @@ func (sd *streamDecoder) revalidatorFor(t schema.Type) *revalidationTarget {
 // the full byte slice and must not be called on it.
 func newStreamDecoderFromReader(r io.Reader, s schema.Schema, cfg loadConfig) *streamDecoder {
 	return &streamDecoder{
-		reader:     r,
-		collector:  diag.NewCollector(cfg.issueLimit),
-		loadCfg:    cfg,
-		schema:     s,
-		bodyOffset: -1,
+		reader:       r,
+		collector:    diag.NewCollector(cfg.issueLimit),
+		loadCfg:      cfg,
+		schema:       s,
+		headerOffset: -1,
+		bodyOffset:   -1,
 	}
 }
 
@@ -199,20 +208,31 @@ func (sd *streamDecoder) decodeHeader() error {
 		return fmt.Errorf("yammm_snapshot must be the first key in the top-level object; got %s", diag.QuoteValue(firstKey))
 	}
 
-	// Decode header.
+	// The decoder stands just past the key's closing quote, before its colon.
+	keyEnd := dec.InputOffset()
 	if err := dec.Decode(&sd.header); err != nil {
 		return fmt.Errorf("failed to decode header: %w", err)
 	}
-
-	// InputOffset here is the byte after the header value's closing '}' —
-	// in Marshal-produced output, the ',' that starts the body suffix.
 	sd.bodyOffset = dec.InputOffset()
+	if sd.data != nil {
+		sd.headerOffset = valueStart(sd.data, keyEnd)
+	}
 
 	// Validate version.
 	if iss, ok := acceptVersion(sd.header.Version, minReadableVersion, currentVersion); !ok {
 		sd.collector.Collect(iss)
 		return nil
 	}
+
+	// Judged after the version: a version this reader does not know is refused
+	// for its version alone, whatever its other members state.
+	// A value fault, so it is collected and the header's other faults are
+	// reported beside it.
+	createdAt, err := parseCreatedAt(sd.header.CreatedAt)
+	if err != nil {
+		sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_MALFORMED, err.Error()).Build())
+	}
+	sd.createdAt = createdAt
 
 	// Validate features — must not be null (required field).
 	if sd.header.Features == nil {
@@ -282,6 +302,88 @@ func (sd *streamDecoder) decodeHeader() error {
 	}
 
 	return errors.New("types key not found in document")
+}
+
+// parseCreatedAt reads a header's created_at: absent or null states none, and
+// anything else must be a string holding an RFC 3339 time, as encoding/json
+// reads a [time.Time].
+func parseCreatedAt(raw json.RawMessage) (time.Time, error) {
+	if len(raw) == 0 || string(raw) == "null" {
+		return time.Time{}, nil
+	}
+	var text string
+	if err := json.Unmarshal(raw, &text); err != nil {
+		return time.Time{}, fmt.Errorf("created_at %s is not a string", diag.CutValue(string(raw)))
+	}
+	t, err := createdAtTime(text)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("created_at %s %w", diag.QuoteValue(text), err)
+	}
+	return t, nil
+}
+
+// rfc3339DateTime is RFC 3339's date-time production (section 5.6), whose "T"
+// and "Z" may be lower case. Its groups are the year, month, day, hour,
+// minute, second, offset hour and offset minute.
+var rfc3339DateTime = regexp.MustCompile(
+	`^(\d{4})-(\d{2})-(\d{2})[Tt](\d{2}):(\d{2}):(\d{2})(?:\.\d+)?(?:[Zz]|[+-](\d{2}):(\d{2}))$`)
+
+// createdAtTime returns the time text states, or an error that completes the
+// sentence "created_at <text> ...". text must match [rfc3339DateTime]:
+// time.Parse alone accepts a one-digit hour, a comma before the fraction and
+// an offset of 24 hours, which the production does not. Two times the
+// production allows are refused: a leap second, which a time.Time cannot
+// hold, and the zero instant, which a [Header] reads as no created_at. A zero
+// offset, +00:00 or -00:00, reads as UTC, as Z does.
+func createdAtTime(text string) (time.Time, error) {
+	m := rfc3339DateTime.FindStringSubmatch(text)
+	if m == nil {
+		return time.Time{}, errors.New("is not an RFC 3339 time")
+	}
+	limits := []struct {
+		field string
+		max   int
+	}{{m[4], 23}, {m[5], 59}, {m[6], 60}, {m[7], 23}, {m[8], 59}}
+	for _, l := range limits {
+		if n, err := strconv.Atoi(l.field); err == nil && n > l.max {
+			return time.Time{}, errors.New("is not an RFC 3339 time")
+		}
+	}
+	if m[6] == "60" {
+		// RFC 3339 allows a 60th second at 23:59 UTC alone.
+		if t, err := time.Parse(time.RFC3339, strings.ToUpper(text[:17]+"59"+text[19:])); err != nil || t.UTC().Hour() != 23 || t.UTC().Minute() != 59 {
+			return time.Time{}, errors.New("is not an RFC 3339 time")
+		}
+		return time.Time{}, errors.New("states a leap second, which a time.Time cannot hold")
+	}
+	t, err := time.Parse(time.RFC3339Nano, strings.ToUpper(text))
+	if err != nil {
+		return time.Time{}, errors.New("is not an RFC 3339 time")
+	}
+	if t.IsZero() {
+		return time.Time{}, errors.New("states the zero time, which reads as no created_at; omit the member to state none")
+	}
+	if _, offset := t.Zone(); offset == 0 {
+		t = t.UTC()
+	}
+	return t, nil
+}
+
+// valueStart returns the offset of the value that follows an object key whose
+// closing quote ends at keyEnd in data: past the whitespace and the colon
+// between them.
+func valueStart(data []byte, keyEnd int64) int64 {
+	i := keyEnd
+	for i < int64(len(data)) && (isJSONSpace(data[i]) || data[i] == ':') {
+		i++
+	}
+	return i
+}
+
+// isJSONSpace reports whether b is one of the four whitespace bytes RFC 8259
+// allows between tokens.
+func isJSONSpace(b byte) bool {
+	return b == ' ' || b == '\t' || b == '\n' || b == '\r'
 }
 
 // decodeSections decodes the instances and diagnostics sections by

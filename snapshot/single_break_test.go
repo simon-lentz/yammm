@@ -125,22 +125,22 @@ func singleBreakDoc(t *testing.T) (schema.Schema, string) {
 	add("Company", map[string]any{"id": "c1"})
 	add("Person", map[string]any{
 		"id": "p1", "age": 30,
-		"EMPLOYER": map[string]any{"_target_id": "c1", "since": 1999},
-		"MENTOR":   map[string]any{"_target_id": "p2"},
-		"CLIENTS":  []any{map[string]any{"_target_id": "c1"}, map[string]any{"_target_id": "c2"}},
-		"KNOWS":    []any{map[string]any{"_target_id": "p2", "note": "n"}},
+		"employer": map[string]any{"_target_id": "c1", "since": 1999},
+		"mentor":   map[string]any{"_target_id": "p2"},
+		"clients":  []any{map[string]any{"_target_id": "c1"}, map[string]any{"_target_id": "c2"}},
+		"knows":    []any{map[string]any{"_target_id": "p2", "note": "n"}},
 	})
 	add("Person", map[string]any{
-		"id": "p2", "CLIENTS": []any{},
-		"MENTOR": map[string]any{"_target_id": "p9"},
-		"KNOWS":  []any{map[string]any{"_target_id": "p8", "note": "m"}},
+		"id": "p2", "clients": []any{},
+		"mentor": map[string]any{"_target_id": "p9"},
+		"knows":  []any{map[string]any{"_target_id": "p8", "note": "m"}},
 	})
 	add("Order", map[string]any{
 		"id":    "o1",
-		"TAGS":  []any{map[string]any{"code": "t1"}, map[string]any{"code": "t2"}},
-		"LINES": []any{map[string]any{"note": "a"}, map[string]any{"note": "b"}},
-		"SEAL":  []any{map[string]any{"code": "s1"}},
-		"BOX":   []any{map[string]any{"n": 1, "BOX": []any{map[string]any{"n": 2}}}},
+		"tags":  []any{map[string]any{"code": "t1"}, map[string]any{"code": "t2"}},
+		"lines": []any{map[string]any{"note": "a"}, map[string]any{"note": "b"}},
+		"seal":  []any{map[string]any{"code": "s1"}},
+		"box":   []any{map[string]any{"n": 1, "box": []any{map[string]any{"n": 2}}}},
 	})
 	data, res := snapshot.Marshal(t.Context(), g.Snapshot())
 	if res.HasErrors() {
@@ -1176,7 +1176,7 @@ type Watcher {
 	}{
 		{"Ev", map[string]any{"at": "2020-01-01T00:00:00Z"}},
 		{"Ev", map[string]any{"at": "2021-01-01T00:00:00Z"}},
-		{"Watcher", map[string]any{"id": "w1", "SEES": []any{
+		{"Watcher", map[string]any{"id": "w1", "sees": []any{
 			map[string]any{"_target_at": "2020-01-01T00:00:00Z"},
 			map[string]any{"_target_at": "2021-01-01T00:00:00Z"},
 		}}},
@@ -1263,7 +1263,7 @@ func TestRead_AnEdgeWithNoTargetRowIsOneBreak(t *testing.T) {
 	s := loadReaderSchema(t)
 	doc := readerDoc(t, s,
 		map[string]any{"$type": "Person", "id": "p0"},
-		map[string]any{"$type": "Person", "id": "p1", "BOSS": map[string]any{"_target_id": "p0"}, "KNOWS": []any{map[string]any{"_target_id": "p0"}}},
+		map[string]any{"$type": "Person", "id": "p1", "boss": map[string]any{"_target_id": "p0"}, "knows": []any{map[string]any{"_target_id": "p0"}}},
 	)
 	known := regexp.MustCompile(`"KNOWS":\[\{[^}]*\}[^}]*\}\]`)
 	if !known.MatchString(doc) {
@@ -1293,7 +1293,7 @@ func TestRead_AnEdgeWithNoTargetRowStillAnswersForItsOtherBreaks(t *testing.T) {
 	s := loadReaderSchema(t)
 	doc := readerDoc(t, s,
 		map[string]any{"$type": "Person", "id": "p0"},
-		map[string]any{"$type": "Person", "id": "p1", "KNOWS": []any{map[string]any{"_target_id": "p0"}}},
+		map[string]any{"$type": "Person", "id": "p1", "knows": []any{map[string]any{"_target_id": "p0"}}},
 	)
 	known := regexp.MustCompile(`"KNOWS":\[\{[^}]*\}[^}]*\}\]`)
 	if !known.MatchString(doc) {
@@ -1360,7 +1360,7 @@ part type K {
 		t.Fatalf("schema: %s", res)
 	}
 	vi, res := instance.NewValidator(s).ValidateOne(t.Context(), "R", instance.RawInstance{Properties: map[string]any{
-		"id": "r1", "K": []any{map[string]any{"code": "a"}},
+		"id": "r1", "k": []any{map[string]any{"code": "a"}},
 	}})
 	if res.HasErrors() {
 		t.Fatalf("validate: %s", res)

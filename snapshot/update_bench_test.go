@@ -3,14 +3,11 @@ package snapshot_test
 import (
 	"context"
 	"fmt"
-	"runtime"
-	"slices"
 	"sync"
 	"testing"
 
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/instance"
-	"github.com/simon-lentz/yammm/internal/raceskip"
 	"github.com/simon-lentz/yammm/schema"
 	"github.com/simon-lentz/yammm/snapshot"
 )
@@ -122,83 +119,4 @@ func BenchmarkLoadMarshalRoundTrip(b *testing.B) {
 			b.Fatal("Marshal returned empty output")
 		}
 	}
-}
-
-// TestUpdateMetadataRatioFloor asserts UpdateMetadata is at least 3×
-// faster than Load + Marshal on a 14.7 MB input. Median of 5 samples per
-// path; runtime.GC between samples to damp CI-runner noise.
-//
-// Threshold rationale: 3× is the floor below which the primitive stops
-// being interesting. The measured ratio varies with hardware and falls
-// as UpdateMetadata gains header checks before the body splice, so the
-// floor is what this test asserts and the sampled numbers are logged
-// rather than pinned.
-//
-// Skipped under `go test -short` since the median-of-5 loop over the
-// 14.7 MB input dominates short-test runtime. Also skipped
-// under the race detector: instrumentation slows the allocation-heavy
-// Load+Marshal baseline and the byte-splice fast path by different factors,
-// so the instrumented ratio neither measures the documented claim nor gates it
-// honestly — and the median-of-5 loop takes many times longer instrumented. The skip
-// goes through [raceskip.Skip], so scripts/test.sh runs the test again
-// without -race, and that run is the gate.
-func TestUpdateMetadataRatioFloor(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping ratio-floor benchmark gate under -short")
-	}
-	raceskip.Skip(t)
-	in := loadBenchInputs(t)
-	ctx := context.Background()
-
-	fastSamples := make([]int64, 0, 5)
-	slowSamples := make([]int64, 0, 5)
-	for range 5 {
-		runtime.GC()
-		fast := testing.Benchmark(func(b *testing.B) {
-			b.Helper()
-			for b.Loop() {
-				_, res := snapshot.UpdateMetadata(ctx, in.data, in.newMeta)
-				if res.HasErrors() {
-					b.Fatalf("UpdateMetadata: %v", res.Err())
-				}
-			}
-		})
-		fastSamples = append(fastSamples, fast.NsPerOp())
-
-		runtime.GC()
-		slow := testing.Benchmark(func(b *testing.B) {
-			b.Helper()
-			for b.Loop() {
-				loaded, loadRes := snapshot.Unmarshal(ctx, in.data, in.schema)
-				if loadRes.HasErrors() {
-					b.Fatalf("Load: %v", loadRes.Err())
-				}
-				_, marshalRes := snapshot.Marshal(ctx, loaded, snapshot.WithMetadata(in.newMeta))
-				if marshalRes.HasErrors() {
-					b.Fatalf("Marshal: %v", marshalRes.Err())
-				}
-			}
-		})
-		slowSamples = append(slowSamples, slow.NsPerOp())
-	}
-
-	fastMedian := median(fastSamples)
-	slowMedian := median(slowSamples)
-	ratio := float64(slowMedian) / float64(fastMedian)
-	t.Logf("UpdateMetadata median: %d ns/op; Load+Marshal median: %d ns/op; ratio: %.2fx",
-		fastMedian, slowMedian, ratio)
-	const floor = 3.0
-	if ratio < floor {
-		t.Errorf("UpdateMetadata speedup ratio %.2fx is below the %.2fx floor; "+
-			"fast=%d ns/op, slow=%d ns/op",
-			ratio, floor, fastMedian, slowMedian)
-	}
-}
-
-// median returns the median of a sorted-in-place copy of xs. Pure
-// stdlib — avoids a math library dependency for a one-line use case.
-func median(xs []int64) int64 {
-	s := slices.Clone(xs)
-	slices.Sort(s)
-	return s[len(s)/2]
 }

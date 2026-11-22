@@ -11,44 +11,6 @@ import (
 	"github.com/simon-lentz/yammm/instance"
 )
 
-// TestRelationCollision_DoesNotSuppressCompositionDiagnostics pins that a
-// relation fold collision is reported by the pass that reads
-// the entry, so it no longer trips the property pass's error gate and hides
-// every edge and composition diagnostic behind it.
-func TestRelationCollision_DoesNotSuppressCompositionDiagnostics(t *testing.T) {
-	t.Parallel()
-	s := loadT(t, "schema \"p\"\n\npart type Line {\n\tid String primary\n}\n\npart type Note {\n\tid String primary\n}\n\ntype Doc {\n\tid String primary\n\t*-> LINES (many) Line\n\t*-> NOTES (one:many) Note\n}\n")
-	v := instance.NewValidator(s)
-	_, res := v.ValidateOne(t.Context(), "Doc", instance.RawInstance{Properties: map[string]any{
-		"id":    "d",
-		"Lines": []any{map[string]any{"id": "l1"}},
-		"LINES": []any{map[string]any{"id": "l2"}}, // two keys fold onto lines and neither is exact: a collision
-		// NOTES absent
-	}})
-	if !res.HasCode(diag.E_CASE_FOLD_COLLISION) {
-		t.Fatalf("control: want E_CASE_FOLD_COLLISION, got %v", codes(res))
-	}
-	if !res.HasCode(diag.E_UNRESOLVED_REQUIRED_COMPOSITION) {
-		t.Errorf("the absent required NOTES was hidden behind the relation collision: %v", codes(res))
-	}
-	if n := countCode(res, diag.E_CASE_FOLD_COLLISION); n != 1 {
-		t.Errorf("%d E_CASE_FOLD_COLLISION issues, want 1", n)
-	}
-}
-
-func TestRelationCollision_OnAnAssociationIsStillReported(t *testing.T) {
-	t.Parallel()
-	v := instance.NewValidator(loadSrc(t, personCompany))
-	_, res := v.ValidateOne(t.Context(), "Person", instance.RawInstance{Properties: map[string]any{
-		"id": "p", "name": "n",
-		"WORKS_AT": map[string]any{"_target_id": "c1"},
-		"Works_at": map[string]any{"_target_id": "c2"},
-	}})
-	if n := countCode(res, diag.E_CASE_FOLD_COLLISION); n != 1 {
-		t.Errorf("%d E_CASE_FOLD_COLLISION issues, want 1: %v", n, codes(res))
-	}
-}
-
 // TestValidate_CancellationInsideAComposedBatchIsReportedOnce pins one
 // cancellation rule at every point that ends
 // work. A cancellation raised INSIDE a composed batch is exactly one E_CONTEXT_CANCELLED on the root row, not one per

@@ -18,7 +18,7 @@ import (
 
 // Marshal serializes a Snapshot to the yammm snapshot persistence format
 // (.ys). Output is deterministic by default — created_at is omitted unless
-// [WithCreatedAt] or [WithCreatedAtFrom] opts in — so one snapshot and one
+// [WithCreatedAt] opts in — so one snapshot and one
 // option set always produce identical bytes. Marshal checks ctx.Err() at the
 // start and once per type group during emission, returning Fatal
 // E_CONTEXT_CANCELLED on cancellation.
@@ -28,10 +28,11 @@ import (
 // accepts. Fatal E_INTERNAL marks only a broken invariant of the snapshot
 // itself. Panics if snap is zero or ctx is nil.
 //
-// Three further refusals, each Error [diag.E_SNAPSHOT_MALFORMED]: an indent that is
-// not JSON whitespace, which would produce bytes that are not JSON, and a metadata
-// key or value, or an instance provenance's source name or path, that is not
-// valid UTF-8, which encoding/json would write as U+FFFD.
+// Four further refusals, each Error [diag.E_SNAPSHOT_MALFORMED]: an indent that is
+// not JSON whitespace, which would produce bytes that are not JSON; a created_at
+// time that has no RFC 3339 form, which no reader would return as that time;
+// and a metadata key or value, or an instance provenance's source name or
+// path, that is not valid UTF-8, which encoding/json would write as U+FFFD.
 func Marshal(ctx context.Context, snap graph.Snapshot, opts ...Option) ([]byte, diag.Result) {
 	if snap.IsZero() {
 		panic("snapshot.Marshal: zero Snapshot")
@@ -53,6 +54,12 @@ func Marshal(ctx context.Context, snap graph.Snapshot, opts ...Option) ([]byte, 
 			Build())
 		return nil, c.Result()
 	}
+	createdAt, err := createdAtMember(cfg.createdAt)
+	if err != nil {
+		c := diag.NewCollector(0)
+		c.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_MALFORMED, "snapshot.Marshal: "+err.Error()).Build())
+		return nil, c.Result()
+	}
 	if err := invalidMetadata(cfg.metadata); err != nil {
 		c := diag.NewCollector(0)
 		c.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_MALFORMED, "snapshot.Marshal: "+err.Error()).Build())
@@ -62,7 +69,6 @@ func Marshal(ctx context.Context, snap graph.Snapshot, opts ...Option) ([]byte, 
 
 	// Step 1: Compute schema structural hash.
 	schemaHash := schema.StructuralHash(s)
-	schemaSource := s.SourceID().String()
 
 	// Step 2: Read the snapshot once, then serialize the payload sections —
 	// identity lives in the types table, every other position is a row index.
@@ -98,12 +104,6 @@ func Marshal(ctx context.Context, snap graph.Snapshot, opts ...Option) ([]byte, 
 		return nil, marshalFatalErr("diagnostics", marshalErr)
 	}
 
-	// Build header and assemble document.
-	createdAt := cfg.createdAtText
-	if createdAt == "" && !cfg.createdAt.IsZero() {
-		createdAt = cfg.createdAt.UTC().Format(time.RFC3339)
-	}
-
 	features := []string{}
 	var metadata map[string]string
 	if len(cfg.metadata) > 0 {
@@ -119,7 +119,7 @@ func Marshal(ctx context.Context, snap graph.Snapshot, opts ...Option) ([]byte, 
 	}
 
 	return assembleDocument(
-		schemaHash, s.Name(), schemaSource, createdAt, features, metadata,
+		schemaHash, s.Name(), createdAt, features, metadata,
 		attWire,
 		typesJSON, instancesJSON, diagJSON,
 		cfg.indent, currentVersion,
@@ -400,7 +400,7 @@ func marshalProvenance(inst graph.Instance) (*provenanceWire, error) {
 
 // assembleDocument builds the full .ys document with integrity hash.
 func assembleDocument(
-	schemaHash, schemaName, schemaSource, createdAt string,
+	schemaHash, schemaName string, createdAt json.RawMessage,
 	features []string, metadata map[string]string,
 	attestation *attestationWire,
 	typesJSON, instancesJSON, diagJSON []byte,
@@ -408,7 +408,7 @@ func assembleDocument(
 ) ([]byte, diag.Result) {
 	// Step 3-5: Build canonical-form document (integrity_hash = "").
 	canonBytes := buildDocument(
-		schemaHash, schemaName, schemaSource, createdAt, features, metadata,
+		schemaHash, schemaName, createdAt, features, metadata,
 		attestation,
 		"", // integrity_hash placeholder
 		typesJSON, instancesJSON, diagJSON,
@@ -420,7 +420,7 @@ func assembleDocument(
 
 	// Step 7: Re-assemble with computed hash.
 	finalBytes := buildDocument(
-		schemaHash, schemaName, schemaSource, createdAt, features, metadata,
+		schemaHash, schemaName, createdAt, features, metadata,
 		attestation,
 		integrityHash,
 		typesJSON, instancesJSON, diagJSON,
@@ -428,6 +428,27 @@ func assembleDocument(
 	)
 
 	return finalBytes, diag.OK()
+}
+
+// createdAtMember returns the created_at member's JSON text for t, nil for a
+// zero t. It is t.Format(time.RFC3339Nano) in t's own offset, as encoding/json
+// writes a [time.Time]. It refuses the times encoding/json refuses and a time
+// whose offset is no whole number of minutes, which have no RFC 3339 form for
+// a reader to return.
+func createdAtMember(t time.Time) (json.RawMessage, error) {
+	if t.IsZero() {
+		return nil, nil
+	}
+	// RFC 3339 states an offset in whole minutes, and Format drops the seconds
+	// of any other, so the time a reader returned would not equal t.
+	if _, offset := t.Zone(); offset%60 != 0 {
+		return nil, fmt.Errorf("created_at %s has no RFC 3339 form: its offset of %d seconds is no whole number of minutes", t.String(), offset)
+	}
+	member, err := json.Marshal(t)
+	if err != nil {
+		return nil, fmt.Errorf("created_at %s has no RFC 3339 form: %w", t.String(), err)
+	}
+	return member, nil
 }
 
 // nonWhitespaceIndent reports the first rune in an indent that is not JSON
@@ -448,7 +469,7 @@ func nonWhitespaceIndent(indent string) (string, bool) {
 
 // buildDocument assembles a complete .ys document from pre-serialized sections.
 func buildDocument(
-	schemaHash, schemaName, schemaSource, createdAt string,
+	schemaHash, schemaName string, createdAt json.RawMessage,
 	features []string, metadata map[string]string,
 	attestation *attestationWire,
 	integrityHash string,
@@ -457,7 +478,6 @@ func buildDocument(
 ) []byte {
 	hdr := marshalHeaderWire{
 		SchemaName:    schemaName,
-		SchemaSource:  schemaSource,
 		SchemaHash:    schemaHash,
 		IntegrityHash: integrityHash,
 		Features:      features,
@@ -501,10 +521,6 @@ func buildHeaderCompact(hdr marshalHeaderWire, version, hashAlgo int) []byte {
 	b.WriteString(`,"schema_name":`)
 	writeJSONString(&b, hdr.SchemaName)
 
-	// schema_source
-	b.WriteString(`,"schema_source":`)
-	writeJSONString(&b, hdr.SchemaSource)
-
 	// schema_hash
 	b.WriteString(`,"schema_hash":`)
 	writeJSONString(&b, hdr.SchemaHash)
@@ -523,9 +539,9 @@ func buildHeaderCompact(hdr marshalHeaderWire, version, hashAlgo int) []byte {
 	b.Write(featJSON)
 
 	// created_at (omitempty)
-	if hdr.CreatedAt != "" {
+	if len(hdr.CreatedAt) > 0 {
 		b.WriteString(`,"created_at":`)
-		writeJSONString(&b, hdr.CreatedAt)
+		b.Write(hdr.CreatedAt)
 	}
 
 	// metadata (omitempty)
@@ -565,12 +581,6 @@ func buildHeaderIndented(hdr marshalHeaderWire, indent string, version, hashAlgo
 	b.WriteString(`"schema_name": `)
 	writeJSONString(&b, hdr.SchemaName)
 
-	// schema_source
-	b.WriteString(",\n")
-	b.WriteString(pfx)
-	b.WriteString(`"schema_source": `)
-	writeJSONString(&b, hdr.SchemaSource)
-
 	// schema_hash
 	b.WriteString(",\n")
 	b.WriteString(pfx)
@@ -597,11 +607,11 @@ func buildHeaderIndented(hdr marshalHeaderWire, indent string, version, hashAlgo
 	b.Write(featJSON)
 
 	// created_at (omitempty)
-	if hdr.CreatedAt != "" {
+	if len(hdr.CreatedAt) > 0 {
 		b.WriteString(",\n")
 		b.WriteString(pfx)
 		b.WriteString(`"created_at": `)
-		writeJSONString(&b, hdr.CreatedAt)
+		b.Write(hdr.CreatedAt)
 	}
 
 	// metadata (omitempty)

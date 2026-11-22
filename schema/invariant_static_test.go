@@ -303,7 +303,7 @@ func TestStaticInvariant_Table(t *testing.T) {
 		{`LINES.qty > 0`, diag.E_INVALID_INVARIANT, "list"},
 		{`LINES -> All |$l| { $l.Len > 0 }`, diag.E_UNKNOWN_PROPERTY, "Len"},
 		// a named variable that names nothing declared is refused, and a
-		// variable name never folds
+		// variable name matches exactly
 		{`$undefined > 0`, diag.E_INVALID_INVARIANT, "undefined variable"},
 		{`tags -> All |$myVar| { $myvar -> Len > 0 }`, diag.E_INVALID_INVARIANT, "undefined variable"},
 		// an unknown function and a call shape the builtin refuses
@@ -661,9 +661,8 @@ func issueWithCode(res diag.Result, code diag.Code) (diag.Issue, bool) {
 
 // TestStaticInvariant_RelationIsReadByItsDeclaredName pins docs/SPEC.md's
 // rule: an invariant reads a relation by its declared UPPER_SNAKE name, whether
-// bare, as a member or after $, and a bare or member read in any other casing,
-// the field name among them, is refused at load with E_INVALID_NAME; a property
-// is read in any casing.
+// bare, as a member or after $, and a read in any other casing, the field name
+// among them, is refused at load with E_INVALID_NAME.
 func TestStaticInvariant_RelationIsReadByItsDeclaredName(t *testing.T) {
 	t.Parallel()
 
@@ -671,7 +670,7 @@ func TestStaticInvariant_RelationIsReadByItsDeclaredName(t *testing.T) {
 		`PLACED_BY != nil`, `$PLACED_BY != nil`,
 		`MAIN_LINE.ITEM != nil`, `$MAIN_LINE.ITEM != nil`,
 		`LINES -> All |$l| { $l.ITEM != nil }`,
-		`Name != ""`, `MAIN_LINE.QTY > 0`,
+		`name != ""`, `MAIN_LINE.qty > 0`,
 	} {
 		t.Run("accepts "+inv, func(t *testing.T) {
 			t.Parallel()
@@ -737,10 +736,39 @@ type T {
 	}
 }
 
+// A relation's name in another case is refused as a misspelt relation even when
+// a property holds the relation's field name.
+func TestStaticInvariant_AMiscasedRelationBesideACollidingPropertyIsARelationSpelling(t *testing.T) {
+	t.Parallel()
+	src := `schema "c"
+
+type C {
+    id String primary
+}
+
+type T {
+    id String primary
+    works_at String
+    --> WORKS_AT (_) C
+
+    ! "miscased" Works_At != nil
+}
+`
+	_, res := schema.LoadString(t.Context(), src, "c.yammm")
+	var got []string
+	for is := range res.Issues() {
+		got = append(got, is.Code().String())
+	}
+	slices.Sort(got)
+	if want := []string{"E_INVALID_NAME", "E_PROPERTY_RELATION_COLLISION"}; !slices.Equal(got, want) {
+		t.Errorf("codes = %v, want %v", got, want)
+	}
+}
+
 // TestStaticInvariant_RelationSpellingIsJudgedOnEveryTypeAValueMayBe pins that
 // a member read on a value that may be one of several types is judged against
-// each of them, whichever comes first: a miscased read that one type answers
-// as a property and another as a relation is refused for the relation.
+// each of them, whichever comes first: a read that one type answers as a
+// property and another as a miscased relation is refused for the relation.
 func TestStaticInvariant_RelationSpellingIsJudgedOnEveryTypeAValueMayBe(t *testing.T) {
 	t.Parallel()
 
@@ -766,12 +794,12 @@ type Owner {
     *-> P (one) WithProperty
     *-> R (one) WithRelation
 `
-	for _, inv := range []string{`(f ? { P : R }).Item != nil`, `(f ? { R : P }).Item != nil`} {
+	for _, inv := range []string{`(f ? { P : R }).item != nil`, `(f ? { R : P }).item != nil`} {
 		t.Run(inv, func(t *testing.T) {
 			t.Parallel()
 			_, res := schema.LoadString(t.Context(), types+"    ! \"m\" "+inv+"\n}\n", "u.yammm")
 			if _, ok := issueWithCode(res, diag.E_INVALID_NAME); !ok {
-				t.Errorf("result = %v, want E_INVALID_NAME for the relation ITEM read as Item", res.Err())
+				t.Errorf("result = %v, want E_INVALID_NAME for the relation ITEM read as item", res.Err())
 			}
 		})
 	}

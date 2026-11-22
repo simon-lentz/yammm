@@ -59,22 +59,6 @@ func composedChildren(inst instance.ValidInstance) []instance.ValidInstance {
 	return out
 }
 
-// A diagnostic's path names the token in the INPUT document; the schema
-// spelling is a detail, not the address.
-func TestDiagnosticPath_NamesTheInputKey(t *testing.T) {
-	v := instance.NewValidator(loadSrc(t, `schema "p"
-
-type Person {
-    id String primary
-    age Integer
-}
-`))
-	_, res := v.ValidateOne(t.Context(), "Person", instance.RawInstance{Properties: map[string]any{"id": "p", "Age": "x"}})
-	if got := mustIssue(t, res, diag.E_TYPE_MISMATCH).Path(); got != "$.Age" {
-		t.Errorf("path = %q, want $.Age", got)
-	}
-}
-
 const docSrc = `schema "p"
 
 part type Line {
@@ -93,10 +77,10 @@ type Doc {
 func TestComposedChildDiagnosticPath_NamesTheInputKey(t *testing.T) {
 	v := instance.NewValidator(loadSrc(t, docSrc))
 	_, res := v.ValidateOne(t.Context(), "Doc", instance.RawInstance{Properties: map[string]any{
-		"id": "d", "Lines": []any{map[string]any{"n": "a", "qty": "x"}},
+		"id": "d", "lines": []any{map[string]any{"n": "a", "qty": "x"}},
 	}})
-	if got := mustIssue(t, res, diag.E_TYPE_MISMATCH).Path(); got != "$.Lines[0].qty" {
-		t.Errorf("path = %q, want $.Lines[0].qty", got)
+	if got := mustIssue(t, res, diag.E_TYPE_MISMATCH).Path(); got != "$.lines[0].qty" {
+		t.Errorf("path = %q, want $.lines[0].qty", got)
 	}
 }
 

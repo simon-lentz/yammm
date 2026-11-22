@@ -141,9 +141,8 @@
 // validates none of it, so its one issue is the parse's: its other breaks are
 // reported once its text is the document's, as a schema's are once it parses.
 // A member whose name is one is removed. A member whose value holds one at any
-// depth keeps its name with a nil value, so the case-fold rule claims the same
-// members it would without the fault, and a key component that holds one reads
-// as no key. Of a repeated name, the member is edited only when the occurrence
+// depth keeps its name with a nil value, and a key component that holds one
+// reads as no key. Of a repeated name, the member is edited only when the occurrence
 // the decoder keeps, the last, holds one. So every string Parse returns is the
 // text the document states.
 //

@@ -1,0 +1,31 @@
+# Every mode reports a file_size only for a regular file: a pipe reports 0,
+# a redirected file its size.
+[windows] skip
+
+exec yammm snapshot save valid.yammm data.json -o saved.ys
+
+stdin saved.ys
+exec yammm snapshot info --json /dev/stdin
+stdout '"file_size": 0,?$'
+
+stdin saved.ys
+exec yammm snapshot info --header-only --json /dev/stdin
+stdout '"file_size": 0,?$'
+
+stdin saved.ys
+exec yammm snapshot info /dev/stdin
+stdout '^  File size: +0 bytes$'
+
+exec sh -c 'yammm snapshot info --json /dev/stdin < saved.ys'
+! stdout '"file_size": 0,?$'
+stdout '"file_size": [1-9][0-9]*,?$'
+
+-- valid.yammm --
+schema "test"
+
+type Person {
+	id   String primary
+	name String required
+}
+-- data.json --
+{"Person":[{"id":"a","name":"alice"}]}

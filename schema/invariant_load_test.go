@@ -28,9 +28,8 @@ func TestLoad_RefusesAnEmptyInvariantMessage(t *testing.T) {
 	}
 }
 
-// Two edge properties on one relation whose names fold to one lowercase are
-// a schema error, as two node properties are: the case-folded lookup is
-// sound only when the schema guarantees uniqueness under fold.
+// Two edge properties on one relation whose names differ only by case are a
+// schema error, as two node properties are.
 func TestLoad_RefusesEdgePropertyCollisions(t *testing.T) {
 	t.Parallel()
 	base := "schema \"s\"\ntype Company {\n    id String primary\n}\ntype Person {\n    id String primary\n    --> WORKS_AT Company {\n%s    }\n}\n"
@@ -39,7 +38,7 @@ func TestLoad_RefusesEdgePropertyCollisions(t *testing.T) {
 		code  diag.Code
 		want  string
 	}{
-		"case fold":  {"        startDate Timestamp\n        startdate String\n", diag.E_CASE_COLLISION, "startdate"},
+		"case only":  {"        startDate Timestamp\n        startdate String\n", diag.E_CASE_COLLISION, "startdate"},
 		"exact name": {"        title String\n        title String\n", diag.E_DUPLICATE_PROPERTY, "title"},
 	} {
 		t.Run(name, func(t *testing.T) {

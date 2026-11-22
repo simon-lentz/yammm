@@ -60,7 +60,6 @@ func Document(tb testing.TB, s schema.Schema, parts snapparts.Parts) []byte {
 		Header: header{
 			Version:             WrittenVersion(tb, s),
 			SchemaName:          s.Name(),
-			SchemaSource:        s.SourceID().String(),
 			SchemaHash:          schema.StructuralHash(s),
 			SchemaHashAlgorithm: schema.StructuralHashVersion,
 			Features:            []string{},
@@ -122,7 +121,6 @@ type (
 	header struct {
 		Version             int          `json:"version"`
 		SchemaName          string       `json:"schema_name"`
-		SchemaSource        string       `json:"schema_source"`
 		SchemaHash          string       `json:"schema_hash"`
 		SchemaHashAlgorithm int          `json:"schema_hash_algorithm"`
 		IntegrityHash       string       `json:"integrity_hash"`

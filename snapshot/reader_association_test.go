@@ -136,11 +136,11 @@ func personDoc(t *testing.T, s schema.Schema) string {
 	return readerDoc(t, s,
 		map[string]any{"$type": "Company", "id": "c1"},
 		map[string]any{"$type": "Office", "id": "o1"},
-		map[string]any{"$type": "Person", "id": "p0", "BOSS": map[string]any{"_target_id": "p0"}, "FRIENDS": []any{map[string]any{"_target_id": "p0"}}},
+		map[string]any{"$type": "Person", "id": "p0", "boss": map[string]any{"_target_id": "p0"}, "friends": []any{map[string]any{"_target_id": "p0"}}},
 		map[string]any{
-			"$type": "Person", "id": "p1", "BOSS": map[string]any{"_target_id": "p0"},
-			"FRIENDS":  []any{map[string]any{"_target_id": "p0"}},
-			"WORKS_AT": map[string]any{"_target_id": "c9"}, "KNOWS": []any{map[string]any{"_target_id": "p8"}},
+			"$type": "Person", "id": "p1", "boss": map[string]any{"_target_id": "p0"},
+			"friends":  []any{map[string]any{"_target_id": "p0"}},
+			"works_at": map[string]any{"_target_id": "c9"}, "knows": []any{map[string]any{"_target_id": "p8"}},
 		},
 	)
 }
@@ -178,8 +178,8 @@ func TestReader_CountsAOneOnceAtItsSource(t *testing.T) {
 	s := loadReaderSchema(t)
 	doc := readerDoc(t, s,
 		map[string]any{"$type": "Company", "id": "c1"},
-		map[string]any{"$type": "Event", "at": canonicalStamp, "HOST": map[string]any{"_target_id": "c1"}},
-		map[string]any{"$type": "Event", "at": "2021-01-01T00:00:00Z", "HOST": map[string]any{"_target_id": "c9"}},
+		map[string]any{"$type": "Event", "at": canonicalStamp, "host": map[string]any{"_target_id": "c1"}},
+		map[string]any{"$type": "Event", "at": "2021-01-01T00:00:00Z", "host": map[string]any{"_target_id": "c9"}},
 	)
 	moved := editOnce(t, doc, `"source_key":["2021-01-01T00:00:00Z"]`, `"source_key":["`+canonicalStamp+`"]`)
 	for surface, res := range readBoth(t, s, moved) {
@@ -201,7 +201,7 @@ func TestReader_AcceptsAnEmptyRecord(t *testing.T) {
 	t.Parallel()
 	s := loadReaderSchema(t)
 	doc := readerDoc(t, s,
-		map[string]any{"$type": "Person", "id": "p0", "BOSS": map[string]any{"_target_id": "p0"}, "FRIENDS": []any{}},
+		map[string]any{"$type": "Person", "id": "p0", "boss": map[string]any{"_target_id": "p0"}, "friends": []any{}},
 	)
 	if !strings.Contains(doc, `"reason":"empty"`) {
 		t.Fatalf("fixture is vacuous: no empty record in %s", doc)
@@ -231,10 +231,10 @@ func TestReader_RefusesARootDuplicateOfAnIneligibleType(t *testing.T) {
 	s := loadReaderSchema(t)
 	doc := readerDoc(t, s,
 		map[string]any{
-			"$type": "Person", "id": "p1", "BOSS": map[string]any{"_target_id": "p1"}, "FRIENDS": []any{map[string]any{"_target_id": "p1"}},
-			"TAGS": []any{map[string]any{"label": "a"}},
+			"$type": "Person", "id": "p1", "boss": map[string]any{"_target_id": "p1"}, "friends": []any{map[string]any{"_target_id": "p1"}},
+			"tags": []any{map[string]any{"label": "a"}},
 		},
-		map[string]any{"$type": "Person", "id": "p1", "BOSS": map[string]any{"_target_id": "p1"}, "FRIENDS": []any{map[string]any{"_target_id": "p1"}}},
+		map[string]any{"$type": "Person", "id": "p1", "boss": map[string]any{"_target_id": "p1"}, "friends": []any{map[string]any{"_target_id": "p1"}}},
 	)
 	person, tag := tableRow(t, doc, "Person"), tableRow(t, doc, "Tag")
 	edited := editOnce(t, doc, fmt.Sprintf(`"duplicates":[{"type":%d`, person), fmt.Sprintf(`"duplicates":[{"type":%d`, tag))
@@ -248,8 +248,8 @@ func TestReader_RefusesChildrenUnderAnUndeclaredComposition(t *testing.T) {
 	s := loadReaderSchema(t)
 	doc := readerDoc(t, s,
 		map[string]any{
-			"$type": "Person", "id": "p1", "BOSS": map[string]any{"_target_id": "p1"}, "FRIENDS": []any{map[string]any{"_target_id": "p1"}},
-			"TAGS": []any{map[string]any{"label": "a"}},
+			"$type": "Person", "id": "p1", "boss": map[string]any{"_target_id": "p1"}, "friends": []any{map[string]any{"_target_id": "p1"}},
+			"tags": []any{map[string]any{"label": "a"}},
 		},
 	)
 	requireReaderRule(t, "an undeclared name", readBoth(t, s, editOnce(t, doc, `"TAGS":[`, `"NOPE":[`)),

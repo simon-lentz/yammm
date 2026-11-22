@@ -521,8 +521,8 @@ func TestRead_AKeyPropertyStatesItsNumberInAnySpelling(t *testing.T) {
 	g := graph.New(s)
 	for _, props := range []map[string]any{
 		{"id": "n10"},
-		{"id": "n20", "LINK": []any{map[string]any{"_target_id": "n20"}}},
-		{"id": "n30", "P": []any{map[string]any{"code": "k7"}}},
+		{"id": "n20", "link": []any{map[string]any{"_target_id": "n20"}}},
+		{"id": "n30", "p": []any{map[string]any{"code": "k7"}}},
 	} {
 		vi, res := v.ValidateOne(t.Context(), "N", instance.RawInstance{Properties: props})
 		if res.HasErrors() {

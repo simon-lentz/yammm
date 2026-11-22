@@ -487,3 +487,33 @@ type Document {
     @@index(state, published_on)
 }
 ```
+
+---
+
+## 22. A Member Name in Another Case
+
+A member is named by one exact spelling at each door, in instance data and in an invariant. With `name` declared, the data key `"Name"` is an unknown field (`E_UNKNOWN_FIELD`) and `name` stays absent; the relation `WORKS_AT` arrives as `works_at` and under no other key. In an invariant, `Name` reads no member and is refused at load.
+
+```yammm-invalid
+schema "people"
+
+type Person {
+    id String primary
+    name String
+
+    // WRONG -- the property is "name": E_UNKNOWN_PROPERTY
+    ! "has_name" Name != nil
+}
+```
+
+```yammm-schema
+schema "people"
+
+type Person {
+    id String primary
+    name String
+
+    // RIGHT -- read the property by its declared name
+    ! "has_name" name != nil
+}
+```

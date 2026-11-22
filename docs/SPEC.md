@@ -620,6 +620,8 @@ PropertyName = LC_WORD .   // except as, part, in, nil, true, false
 
 Property names must start with a lower-case letter. A property may not be named `self`; see Lexical Structure.
 
+**Names match exactly, at every door.** Every door compares a name exactly, so a name in a case the door does not take names nothing there. In instance data a property arrives under its name, a relation under its [field name](#associations), an edge property under its name and a foreign-key field under its `_target_` name. A key in another case is an unknown field (`E_UNKNOWN_FIELD`, or `E_UNKNOWN_EDGE_FIELD` in an edge object), and the member it was meant for stays absent. In an invariant a bare name, a `$` variable and a member after `.` read a property by its name and a relation by its declared name, and a read in another case is refused at load where the checker knows the type read from. With `name` declared, `Name` is unknown in the data and in an invariant.
+
 ### Property Modifiers
 
 **Primary properties** form part of the type's identity. They are implicitly required:
@@ -657,8 +659,7 @@ element of a `(many)` association array or a `null` composition child reports
 `E_EDGE_SHAPE_MISMATCH`, and a `null` inside a List or a Vector is refused as
 the next paragraph states. The key that holds a `null` is still a key: it is
 matched to its member as a key holding a value is, so it is an unknown field
-where it names none, and it is judged beside another key for the same member as
-that key would be.
+where it names none.
 
 **A `null` inside a collection is not the absent case.** No element position is
 optional, so the element constraint applies to it and `["a", null]` is rejected
@@ -1028,7 +1029,7 @@ RelationName = upper_letter { upper_letter | decimal_digit | "_" } .   // except
 
 A relation name is UPPER_SNAKE. Its **field name** — the key instance data
 carries the relation under — is the name in lower case: `WORKS_AT` arrives in
-instance data as `works_at`, matched as a property name is. An invariant reads
+instance data as `works_at`, and under no other spelling. An invariant reads
 the relation by its declared name alone, as a bare name, as a member or as a
 variable (`WORKS_AT`, `$self.WORKS_AT`, `$WORKS_AT`). A read in any other
 casing, the field name among them (`works_at`, `$self.works_at`, `$works_at`),
@@ -1589,7 +1590,7 @@ type Order {
 
 **Numeric variables** (`$0`, `$1`, ...) are evaluator-local and default to `nil` when unset.
 
-**Named variables** resolve in the invariant's scope — lambda parameters first, then the instance's own members, so `$age` reads the property `age` when no parameter shadows it. A name bound by neither, save `$self` below, is rejected at schema load (`E_INVALID_INVARIANT`), unless it spells a relation's name in another casing, which is `E_INVALID_NAME` (see [Associations](#associations)). Variable names are matched exactly: `$myVar` and `$myvar` are two names, where property names are matched case-insensitively. A lambda parameter may be named `$self`, and then shadows the instance for the body. A property may not be named `self`: the binding reaches the instance first, so it is refused at load (`E_INVALID_NAME`).
+**Named variables** resolve in the invariant's scope — lambda parameters first, then the instance's own members, so `$age` reads the property `age` when no parameter shadows it. A name bound by neither, save `$self` below, is rejected at schema load (`E_INVALID_INVARIANT`), unless it spells a relation's name in another casing, which is `E_INVALID_NAME` (see [Associations](#associations)). Variable names are matched exactly, as member names are: `$myVar` and `$myvar` are two names. A lambda parameter may be named `$self`, and then shadows the instance for the body. A property may not be named `self`: the binding reaches the instance first, so it is refused at load (`E_INVALID_NAME`).
 
 **`$self`** is bound when evaluating invariants against property maps. A lambda body's scope keeps the binding unless a parameter named `$self` overrides it.
 
@@ -1859,7 +1860,6 @@ Codes are stable identifiers for programmatic matching. `diag/code.go` holds the
 - `E_DUPLICATE_EDGE` — a `(many)` association names one target twice for one source: a graph holds one edge per source, association and target. The validator raises it at each listing of a target key that an earlier listing names, where no other check refused either listing, since two listings can carry different edge properties; a refused listing's own issue stands for the repeat. `snapshot.Unmarshal` and `snapshot.Verify` refuse such a document with `E_SNAPSHOT_MALFORMED` where no other check refused the repeating listing, one sound root (of a type that can hold a root, its stored key admitted by the key rule) holds the source's address alone, and an edge's target's, and no root stands at a record's target and no refused unit states it; elsewhere the issue at the listing, the source or the target stands for the repeat; `snapshot.Stat` reads no schema, so it knows no multiplicity and does not judge it. A `(one)` association never draws this code: its count, `E_GRAPH_CARDINALITY`, judges a second record there
 - `E_INVALID_TYPE_TAG` — a type tag that is not a type name by the grammar: a JSON document's top-level key
 - `E_DATA_PARSE` — an instance document `yammm check` or `yammm snapshot save` reads is not well formed, is not one object, holds a type name whose value is not an array of objects, states one member name twice in one object, holds a string that is not valid UTF-8 or holds a `\u` escape that is half of no surrogate pair, or nests deeper than the decoder's 10,000-level limit
-- `E_CASE_FOLD_COLLISION` — multiple input fields map to the same schema property, relation field, edge property or `_target_` foreign-key field after case-folding. Property name matching is case-insensitive by default (see `WithStrictPropertyNames` in [API.md](API.md)). When two or more input fields fold to one schema property and none of them matches it exactly (schema `name`, input `Name` and `NAME`), the collision is reported and neither field is mapped. An input name that matches a schema property exactly is claimed first and never collides
 
 **Graph** — graph construction errors:
 
@@ -1874,7 +1874,7 @@ Codes are stable identifiers for programmatic matching. `diag/code.go` holds the
 
 **Snapshot** — persistence errors:
 
-- `E_SNAPSHOT_MALFORMED` — invalid JSON, a header past `MaxHeaderSize` where `snapshot.ReadHeader` reads, missing required fields, a wrong outer shape (the four top-level keys, in order, each once and none null, with nothing after them, and no object repeating a member name or spelling a declared one in another case), or content a structural rule refuses, such as an undeclared name, a stored key its key properties contradict, a key or target key component `graph.ParseKey` cannot read back, a `Timestamp`, `Date` or `UUID` component of a stored key, a target key, a record's source key, or a duplicate's key or conflict key that its kind stores as other text (`Stat` reads no kind and compares keys as written, so it reports such a component only where it parts two keys that name one address: a reference and the root it names as `E_SNAPSHOT_DANGLING_REFERENCE`, a duplicate's key and the key its instance carries as malformed, a duplicate's conflict and the key the duplicate carries as malformed), a target key of the wrong arity, an undocumented reason, a record contradicting itself, records `graph.Add` would not derive, a duplicate with no conflict or another one, a duplicate stating a parent or a relation (a `null` `parent_type`, and a `null` or empty `parent_key` or `relation`, state none, and the next `Marshal` drops the member), or a string holding invalid UTF-8 or a surrogate escape that is half of no pair, which `encoding/json` would silently read as U+FFFD. `snapshot.Marshal` raises it for input it refuses to write: an indent that is not JSON whitespace, or a metadata key or value, or a provenance source name or path, that is not valid UTF-8; `snapshot.UpdateMetadata` raises it for such metadata too
+- `E_SNAPSHOT_MALFORMED` — invalid JSON, a header past `MaxHeaderSize` where `snapshot.ReadHeader` reads, missing required fields, a wrong outer shape (the four top-level keys, in order, each once and none null, with nothing after them, and no object repeating a member name or spelling a declared one in another case), or content a structural rule refuses, such as an undeclared name, a stored key its key properties contradict, a key or target key component `graph.ParseKey` cannot read back, a `Timestamp`, `Date` or `UUID` component of a stored key, a target key, a record's source key, or a duplicate's key or conflict key that its kind stores as other text (`Stat` reads no kind and compares keys as written, so it reports such a component only where it parts two keys that name one address: a reference and the root it names as `E_SNAPSHOT_DANGLING_REFERENCE`, a duplicate's key and the key its instance carries as malformed, a duplicate's conflict and the key the duplicate carries as malformed), a target key of the wrong arity, an undocumented reason, a record contradicting itself, records `graph.Add` would not derive, a duplicate with no conflict or another one, a duplicate stating a parent or a relation (a `null` `parent_type`, and a `null` or empty `parent_key` or `relation`, state none, and the next `Marshal` drops the member), or a string holding invalid UTF-8 or a surrogate escape that is half of no pair, which `encoding/json` would silently read as U+FFFD. Every reader raises it for a `created_at` that is not an RFC 3339 time, the empty string included. `snapshot.Marshal` raises it for input it refuses to write: an indent that is not JSON whitespace, a metadata key or value, or a provenance source name or path, that is not valid UTF-8, or a `WithCreatedAt` time with no RFC 3339 form; `snapshot.UpdateMetadata` raises it for such metadata too
 - `E_SNAPSHOT_UNSUPPORTED_VERSION` — unrecognized format version. A surface that holds the whole document raises it only for a document whose outer shape, member names and text pass, which it judges first
 - `E_SNAPSHOT_UNSUPPORTED_FEATURE` — unrecognized feature flag
 - `E_SNAPSHOT_INCOMPATIBLE_SCHEMA` — schema structural hash mismatch
@@ -1886,12 +1886,9 @@ Codes are stable identifiers for programmatic matching. `diag/code.go` holds the
 - `E_DUPLICATE_PK` — two root instances in one group, both of whose stored keys the key rule accepts, state one primary key. Under a schema, only roots of a type that can hold a root count. Listed here as well as under Graph: `snapshot.Unmarshal`, `snapshot.Verify` and `snapshot.Stat` emit it, because the wire has a diagnostics section for a rejected duplicate and two live instances at one address is not a shape it can carry. `Stat` resolves no schema, so it judges no type and compares keys as the reader's number rule renders them; `Unmarshal` and `Verify` compare them as written too, since they refuse a `Timestamp`, `Date` or `UUID` key component its kind stores as other text
 - `E_SNAPSHOT_COMPOSED_ON_DUPLICATE`, `E_SNAPSHOT_EDGES_ON_DUPLICATE` — illegal data on duplicate records
 - `E_SNAPSHOT_DEPTH_EXCEEDED` — composed nesting exceeds depth limit (32)
-- `E_SNAPSHOT_INTEGRITY_MISMATCH` — integrity hash does not match the document, or the header holds none (an empty, null or absent `integrity_hash`); `WithIntegrityCheck(false)` skips the check
+- `E_SNAPSHOT_INTEGRITY_MISMATCH` — integrity hash does not match the document, or the header holds none (an empty, null or absent `integrity_hash`); `WithIntegrityCheck(false)` skips the check, and `UpdateMetadata` always runs it
 - `E_SNAPSHOT_UNSUPPORTED_HASH_ALGORITHM` — the schema hash algorithm in the snapshot header is not recognized. An Error on the body-reading surfaces (`Unmarshal`, `Verify`, `Stat`, `UpdateMetadata`): the document is refused rather than half-trusted. A Warning at `ReadHeader` and `ScanDir`, which stay classifiable for dispatch
 - `E_SNAPSHOT_IO` — a file that fails to open during `ScanDir`, a failing reader under `ReadHeader`, or a directory `yammm snapshot info --dir` fails to read
-- `E_UPDATE_METADATA_BODY_OFFSET` — `UpdateMetadata` could not resolve the byte range of the body it reuses
-- `W_UPDATE_METADATA_FALLBACK` (Warning) — `UpdateMetadataOrReMarshal` fell back from the fast path to `Unmarshal` + `Marshal`
-- `W_SNAPSHOT_VALUE_DROPPED` (Warning) — a write path held a value it could not write at that position and left it out. The document is well-formed; the warning names what is missing from it
 - `W_SNAPSHOT_UNRESOLVED_REQUIRED` — under `WithRevalidation`, a loaded document carries an unresolved record, one no structural check refused, for a required association
 - `W_SNAPSHOT_PATH_EXTENSION` (Warning) — a snapshot was written to a path that does not end in `.ys`. The write succeeded; a reader that discovers snapshots by extension will not find it
 

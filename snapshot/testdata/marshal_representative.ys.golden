@@ -2,10 +2,9 @@
 	"yammm_snapshot": {
 		"version": 4,
 		"schema_name": "test",
-		"schema_source": "string://test.yammm",
 		"schema_hash": "sha256:fa0cde371d426aaa451d3a5d7891b85a631c56ffafc68424556f40165739b936",
 		"schema_hash_algorithm": 4,
-		"integrity_hash": "sha256:6f419ef5f2751c3d226bb023053c1589c7830ffd00a5d5a8c647ed3452935ab5",
+		"integrity_hash": "sha256:9969e4eca56c1e68d8c45fe12cc6182fb397b72bdaf3e40d0ec50515f07673d0",
 		"features": [],
 		"attestation": {
 			"values": true,

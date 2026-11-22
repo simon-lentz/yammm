@@ -165,7 +165,7 @@ type staticScope struct {
 }
 
 // child binds one variable. Variable names match exactly, as the evaluator's
-// Scope.Lookup does; only member names fold.
+// Scope.Lookup does.
 func (s *staticScope) child(name string, t staticType) *staticScope {
 	vars := make(map[string]staticType, len(s.vars)+1)
 	maps.Copy(vars, s.vars)
@@ -178,8 +178,8 @@ func (s *staticScope) lookupVar(name string) (staticType, bool) {
 	return t, ok
 }
 
-// staticMembers is a type's merged members keyed by the name an expression
-// writes, lower-cased: properties by name, relations by field name.
+// staticMembers is a type's merged members keyed by their declared names, the
+// one spelling an expression reads a member by.
 type staticMembers map[string]staticType
 
 // keyTypeOf is what an association to target evaluates to: the target's
@@ -216,21 +216,21 @@ func (c *completer) membersOf(t Type) staticMembers {
 	}
 	m := make(staticMembers, len(t.allProperties)+len(t.allAssociations)+len(t.allCompositions))
 	for _, p := range t.allProperties {
-		m[strings.ToLower(p.Name())] = propertyType(p.Constraint())
+		m[p.Name()] = propertyType(p.Constraint())
 	}
 	for _, r := range t.allAssociations {
 		key := c.keyTypeOf(c.resolveTypeID(r.TargetID()))
 		if r.IsMany() {
 			key = listOf(key)
 		}
-		m[r.FieldName()] = key
+		m[r.Name()] = key
 	}
 	for _, r := range t.allCompositions {
 		child := instanceOf(c.resolveTypeID(r.TargetID()))
 		if r.IsMany() {
 			child = listOf(child)
 		}
-		m[r.FieldName()] = child
+		m[r.Name()] = child
 	}
 	c.staticMembers[t] = m
 	return m
@@ -739,34 +739,29 @@ func (c *completer) typeProperty(children []expr.Expression, sc *staticScope, ow
 	if t, found := sc.lookupVar(name); found {
 		return t
 	}
-	if t, found := c.membersOf(owner)[strings.ToLower(name)]; found {
-		if !c.relationSpelled(owner, owner, name, inv) {
-			return unknownType
-		}
+	if t, found := c.membersOf(owner)[name]; found {
 		return t
+	}
+	if c.relationMiscased(owner, owner, name, inv) {
+		return unknownType
 	}
 	c.invariantErrorf(inv, diag.E_UNKNOWN_PROPERTY,
 		"unknown property %q in invariant %q on type %q", name, inv.Name(), owner.Name())
 	return unknownType
 }
 
-// relationSpelled reports whether name, which reads a member of t by its
-// folded spelling in an invariant on owner, is a spelling docs/SPEC.md admits:
-// a property in any case, a relation by its declared name alone.
-func (c *completer) relationSpelled(owner, t Type, name string, inv Invariant) bool {
+// relationMiscased reports whether name, which names no member of t, spells a
+// relation of t in another casing, and reports that read in an invariant on
+// owner: a relation is read by its declared name alone.
+func (c *completer) relationMiscased(owner, t Type, name string, inv Invariant) bool {
 	rel, ok := t.RelationByField(strings.ToLower(name))
-	if !ok || name == rel.Name() {
-		return true
-	}
-	// A property of exactly this spelling is the member read; the collision
-	// with the relation is E_PROPERTY_RELATION_COLLISION's report.
-	if _, isProperty := t.Property(name); isProperty {
-		return true
+	if !ok {
+		return false
 	}
 	c.invariantErrorf(inv, diag.E_INVALID_NAME,
 		"relation %s on type %q is read as %q in invariant %q on type %q: a relation is read by its declared name %s",
 		rel.Name(), t.Name(), name, inv.Name(), owner.Name(), rel.Name())
-	return false
+	return true
 }
 
 // typeVariable resolves a lambda parameter, a member of the owner, or a
@@ -778,15 +773,11 @@ func (c *completer) typeVariable(children []expr.Expression, sc *staticScope, ow
 	if t, found := sc.lookupVar(name); found {
 		return t
 	}
-	// A $ variable names a member exactly, as the evaluator reads it. Another
-	// casing of a relation's name draws relationSpelled's issue at every door.
-	if t, found := c.membersOf(owner)[strings.ToLower(name)]; found {
-		if memberSpelled(owner, name) {
-			return t
-		}
-		if !c.relationSpelled(owner, owner, name, inv) {
-			return unknownType
-		}
+	if t, found := c.membersOf(owner)[name]; found {
+		return t
+	}
+	if c.relationMiscased(owner, owner, name, inv) {
+		return unknownType
 	}
 	if isNumericVar(name) {
 		return unknownType
@@ -794,16 +785,6 @@ func (c *completer) typeVariable(children []expr.Expression, sc *staticScope, ow
 	c.invariantErrorf(inv, diag.E_INVALID_INVARIANT,
 		"undefined variable $%s in invariant %q on type %q", name, inv.Name(), owner.Name())
 	return unknownType
-}
-
-// memberSpelled reports whether name is the declared name of one of t's
-// members, a property or a relation.
-func memberSpelled(t Type, name string) bool {
-	if _, ok := t.Property(name); ok {
-		return true
-	}
-	_, ok := t.Relation(name)
-	return ok
 }
 
 func isNumericVar(name string) bool {
@@ -859,8 +840,11 @@ func (c *completer) typeInstanceMember(recv staticType, name string, owner Type,
 	member := nilType
 	declared := make([]staticType, 0, len(recv.typs))
 	for _, ty := range recv.typs {
-		t, found := c.membersOf(ty)[strings.ToLower(name)]
+		t, found := c.membersOf(ty)[name]
 		if !found {
+			if c.relationMiscased(owner, ty, name, inv) {
+				return unknownType
+			}
 			if len(recv.typs) == 1 {
 				c.invariantErrorf(inv, diag.E_UNKNOWN_PROPERTY,
 					"unknown property %q on type %q in invariant %q on type %q",
@@ -870,9 +854,6 @@ func (c *completer) typeInstanceMember(recv staticType, name string, owner Type,
 					"unknown property %q on type %q, one of the types the value may be (%s), in invariant %q on type %q",
 					name, ty.Name(), recv.typeName(), inv.Name(), owner.Name())
 			}
-			return unknownType
-		}
-		if !c.relationSpelled(owner, ty, name, inv) {
 			return unknownType
 		}
 		declared = append(declared, t)

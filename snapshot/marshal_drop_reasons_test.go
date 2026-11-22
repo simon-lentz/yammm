@@ -4,7 +4,6 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/instance"
@@ -65,8 +64,8 @@ func TestMarshal_ADuplicateDrawsNoDropWarning(t *testing.T) {
 	}
 
 	data, mres := snapshot.Marshal(t.Context(), snap)
-	if mres.HasCode(diag.W_SNAPSHOT_VALUE_DROPPED) {
-		t.Errorf("the deliberate silent drop was marked: %s", mres)
+	if !mres.OK() {
+		t.Errorf("marshal: %s", mres)
 	}
 	loaded, lres := snapshot.Unmarshal(t.Context(), data, s)
 	if lres.HasErrors() {

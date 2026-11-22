@@ -60,19 +60,17 @@
 //   - Edge object validation (associations and compositions)
 //   - Invariant expression evaluation
 //
-// A key no member claims draws E_UNKNOWN_FIELD, or E_UNKNOWN_EDGE_FIELD in an
-// edge object, unless [WithAllowUnknownFields] is set. Without
-// [WithStrictPropertyNames], keys that fold onto one member draw
-// E_CASE_FOLD_COLLISION, and the collision is its member's one issue: a
-// collided required property, foreign-key field, required edge property or
-// required composition is not also missing.
+// Every input key names its member exactly: a property by its declared name, a
+// relation by its field name (its declared name in lower case), and in an edge
+// object a foreign-key field by its `_target_` name and an edge property by its
+// name. A key that names no member draws E_UNKNOWN_FIELD, or
+// E_UNKNOWN_EDGE_FIELD in an edge object, and the member a key in another case
+// was meant for stays absent.
 //
 // # Validator Options
 //
 // [NewValidator] accepts [Option] values to configure behavior:
 //
-//   - [WithStrictPropertyNames]: require exact-case property names
-//   - [WithAllowUnknownFields]: allow extra properties without diagnostics
 //   - [WithIssueLimit]: cap the issues one instance stores
 //
 // # Thread Safety

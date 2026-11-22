@@ -25,8 +25,8 @@
 //	for name, v := range props.All() {
 //	    fmt.Printf("%s: %v\n", name, v)
 //	}
-//	if v, ok := props.GetFold("UserName"); ok {
-//	    // matches "username", "USERNAME" and "UserName" (ASCII letters only)
+//	if v, ok := props.Get("userName"); ok {
+//	    fmt.Println(v.Any())
 //	}
 //
 //	key := immutable.WrapKey([]any{"us", int64(12345)})
@@ -128,9 +128,8 @@
 //
 // All types in this package are safe for concurrent read access. Their content
 // does not change after construction. A [Properties] sorts its names on the
-// first Keys, All or GetFold miss, and builds its case-folded index on the
-// first GetFold miss, each once, under a sync.Once. Every copy of that
-// Properties shares the result, and concurrent first use is safe.
+// first Keys or All, once, under a sync.Once. Every copy of that Properties
+// shares the result, and concurrent first use is safe.
 //
 // # Performance Characteristics
 //
@@ -139,8 +138,7 @@
 // | Wrap(scalar) | O(1) | The scalar is stored as given |
 // | Wrap(map) / Wrap(slice) | O(n) deep | Copies each map and slice it reaches |
 // | Get(name) / At(i) | O(1) | A map or slice lookup |
-// | GetFold(name) | O(1) after the first miss | A miss of the exact name reads the folded index; the first miss sorts the names and builds it in O(n log n), and a later one allocates nothing for a name of up to 64 bytes |
-// | Keys() / All() / Values() | O(1) start | Keys and All visit names in sorted order; the first Keys, All or GetFold miss sorts them in O(n log n), and after that a range allocates nothing |
+// | Keys() / All() / Values() | O(1) start | Keys and All visit names in sorted order; the first Keys or All sorts them in O(n log n), and after that a range allocates nothing |
 // | Clone() | O(n) deep | Copies every container to Go data; a value stored as given and an element a map with a non-string key keeps as itself are returned as stored |
 //
 // # Escape Hatch

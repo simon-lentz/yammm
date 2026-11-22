@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"time"
 
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/graph"
@@ -44,11 +45,10 @@ func (r TypeRef) MarshalText() ([]byte, error) {
 type Header struct {
 	Version             int
 	SchemaName          string
-	SchemaSource        string
 	SchemaHash          string
 	SchemaHashAlgorithm int
 	IntegrityHash       string            // as stored, not a verification result
-	CreatedAt           string            // as the header states it: RFC 3339 as yammm writes it, or empty
+	CreatedAt           time.Time         // zero when the header states none
 	Metadata            map[string]string // user-provided annotations, nil if absent
 
 	// Types holds one entry per types-table row.
@@ -161,7 +161,8 @@ func Stat(ctx context.Context, data []byte) (*Info, diag.Result) {
 // MaxHeaderSize is the upper bound on bytes [ReadHeader] reads before it
 // returns E_SNAPSHOT_MALFORMED. 16 MiB holds a typical header (< 1 KiB) and
 // large work-set arrays in header metadata. A caller whose header exceeds it
-// reads the bytes with [Stat] or [Unmarshal], which do not cap their input.
+// reads the bytes with [Stat] or [Unmarshal] and updates them with
+// [UpdateMetadata], none of which caps its input.
 const MaxHeaderSize = 16 * 1024 * 1024
 
 // ReadHeader reads a .ys document's header and types table from r, at most
@@ -171,18 +172,24 @@ const MaxHeaderSize = 16 * 1024 * 1024
 // JSON object, a first section other than the header and a missing types
 // section, nor the text of a string past the table.
 // [Header.SchemaHashMatches] compares the header with a loaded schema. The
-// package doc's Reading Without a Schema section states its refusals.
+// package doc's Reading Without a Schema section states what it reads, and
+// its Error Handling section the header refusals every reader makes.
 func ReadHeader(ctx context.Context, r io.Reader) (*Header, diag.Result) {
 	if ctx == nil {
 		panic("snapshot.ReadHeader: nil context")
 	}
+	return readHeader(ctx, r, MaxHeaderSize)
+}
+
+// readHeader is [ReadHeader] with limit in place of [MaxHeaderSize].
+func readHeader(ctx context.Context, r io.Reader, limit int64) (*Header, diag.Result) {
 	if err := ctx.Err(); err != nil {
 		c := diag.NewCollector(0)
 		c.Collect(diag.NewIssue(diag.Fatal, diag.E_CONTEXT_CANCELLED, err.Error()).Build())
 		return nil, c.Result()
 	}
 
-	lr := newLimitReader(r, MaxHeaderSize)
+	lr := newLimitReader(r, limit)
 	cfg := defaultLoadConfig()
 	cfg.headerOnly = true
 	// The decoder keeps no bytes it has decoded, so the text rule reads this copy.
@@ -221,11 +228,10 @@ func (sd *streamDecoder) decodedHeader() Header {
 	return Header{
 		Version:             sd.header.Version,
 		SchemaName:          sd.header.SchemaName,
-		SchemaSource:        sd.header.SchemaSource,
 		SchemaHash:          sd.header.SchemaHash,
 		SchemaHashAlgorithm: sd.header.SchemaHashAlgorithm,
 		IntegrityHash:       sd.header.IntegrityHash,
-		CreatedAt:           sd.header.CreatedAt,
+		CreatedAt:           sd.createdAt,
 		Metadata:            sd.header.Metadata,
 		Types:               sd.typeRefs(),
 		Attestation:         sd.headerAttestation(),

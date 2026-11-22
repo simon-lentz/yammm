@@ -27,12 +27,12 @@ func TestPropertyScopeFromMap_BindsSelfWithoutRewrapping(t *testing.T) {
 	// A wrapped map is not comparable, so sharing is read through a scalar
 	// member: the same entries answer both lookups.
 	viaSelf, _ := sm.Get("x")
-	viaProp, _ := scope.LookupFold("x")
+	viaProp, _ := scope.Lookup("x")
 	if viaSelf != viaProp {
 		t.Error("$self.x and the property lookup do not share one wrapped value")
 	}
 	nestedSelf, _ := sm.Get("nested")
-	nestedProp, _ := scope.LookupFold("nested")
+	nestedProp, _ := scope.Lookup("nested")
 	ns, _ := nestedSelf.Any().(immutable.Properties)
 	np, _ := nestedProp.Any().(immutable.Properties)
 	ys, _ := ns.Get("y")

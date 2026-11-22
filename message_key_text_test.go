@@ -271,10 +271,11 @@ func TestMessages_RepeatAKeyCutToItsHead(t *testing.T) {
 		snapshot.WithRevalidation(diag.Warning))
 	shows("Load a value its constraint refuses", messages(revalidated), "revalidation of keys#T["+head+"]: ")
 
-	stamped := strings.Replace(string(doc(ts(root("t"))+","+us("u"), "", "")), `{"yammm_snapshot":{`, `{"yammm_snapshot":{"created_at":"`+Z+`",`, 1)
-	stamped = strings.Replace(stamped, `,"types":`, ` ,"types":`, 1)
-	_, r = snapshot.UpdateMetadataOrReMarshal(ctx, []byte(stamped), map[string]string{"k": "v"}, s)
-	result("UpdateMetadataOrReMarshal a long created_at", r)
+	stamped := []byte(strings.Replace(string(doc(ts(root("t"))+","+us("u"), "", "")), `{"yammm_snapshot":{`, `{"yammm_snapshot":{"created_at":"`+Z+`",`, 1))
+	_, r = snapshot.Unmarshal(ctx, stamped, s)
+	result("Load a long created_at", r)
+	_, r = snapshot.UpdateMetadata(ctx, stamped, map[string]string{"k": "v"})
+	result("UpdateMetadata a long created_at", r)
 
 	for _, where := range paths {
 		if c.judged[where] == 0 {

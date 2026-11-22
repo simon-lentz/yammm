@@ -309,13 +309,6 @@ var (
 	// valid UTF-8 or a \u escape that is half of no surrogate pair, or nests
 	// deeper than the decoder's 10,000-level limit.
 	E_DATA_PARSE = NewCode("E_DATA_PARSE")
-
-	// E_CASE_FOLD_COLLISION indicates multiple input fields collide after case-folding.
-	// This occurs when non-strict mode is enabled and two or more field names fold
-	// to one member that none of them matches exactly: a property (schema "name",
-	// input "Name" and "NAME"), a relation's field, an edge property or a
-	// foreign-key field. An exact match is claimed first and never collides.
-	E_CASE_FOLD_COLLISION = NewCode("E_CASE_FOLD_COLLISION")
 )
 
 // Graph codes.
@@ -380,12 +373,14 @@ var (
 	// contradict, a key or target key component graph.ParseKey cannot read back,
 	// a target key of the wrong arity, an undocumented reason, a record
 	// contradicting itself, records graph.Add would not derive, a duplicate with
-	// no conflict or another one, a duplicate stating a parent or a relation, or
-	// a string holding invalid UTF-8 or half a surrogate pair, which
-	// encoding/json would silently read as U+FFFD.
+	// no conflict or another one, a duplicate stating a parent or a relation, a
+	// string holding invalid UTF-8 or half a surrogate pair, which encoding/json
+	// would silently read as U+FFFD, or a created_at that is not an RFC 3339
+	// time or that states a leap second or the zero instant.
 	// snapshot.Marshal raises it for input it refuses to write: an indent that is
-	// not JSON whitespace, or a metadata key or value, a source name or a path
-	// that is not valid UTF-8; snapshot.UpdateMetadata raises it for such metadata too.
+	// not JSON whitespace, a created_at time with no RFC 3339 form, or a metadata
+	// key or value, a source name or a path that is not valid UTF-8;
+	// snapshot.UpdateMetadata raises it for such metadata too.
 	E_SNAPSHOT_MALFORMED = NewCode("E_SNAPSHOT_MALFORMED")
 
 	// E_SNAPSHOT_UNSUPPORTED_VERSION indicates the format version is not recognized.
@@ -419,20 +414,6 @@ var (
 	// declare as a composition.
 	E_SNAPSHOT_INVALID_COMPOSED = NewCode("E_SNAPSHOT_INVALID_COMPOSED")
 
-	// W_SNAPSHOT_VALUE_DROPPED (Warning) indicates a write path held a value it
-	// could not write and left it out, so the document produced is well-formed
-	// and the warning names what is missing.
-	//
-	// It marks one site: a metadata update that re-marshals the document and
-	// cannot carry a created_at the input header states in a form other than
-	// RFC 3339.
-	//
-	// Two drops are DELIBERATE and are NOT marked: an instance provenance's
-	// SPAN, which the reader rebuilds as zero, and an instance's own validated
-	// flag, which the header's attestation states for the document whole. A
-	// consumer cannot gate loss detection on this code alone and be right.
-	W_SNAPSHOT_VALUE_DROPPED = NewCode("W_SNAPSHOT_VALUE_DROPPED")
-
 	// E_SNAPSHOT_INVALID_ROOT indicates an instances group, empty or not, or a
 	// duplicate record names a type that cannot hold a root instance: an
 	// abstract type, a part type, or one declaring no primary key. No instance of
@@ -465,8 +446,6 @@ var (
 	// at ReadHeader and ScanDir, which stay classifiable for dispatch.
 	E_SNAPSHOT_UNSUPPORTED_HASH_ALGORITHM = NewCode("E_SNAPSHOT_UNSUPPORTED_HASH_ALGORITHM")
 
-	// --- v0.3.0 additions ---
-
 	// E_SNAPSHOT_IO indicates an I/O failure reading a snapshot: a file that
 	// fails to open (os.Open, on snapshot.ScanDir's per-file path), a reader
 	// that fails inside snapshot.ReadHeader with an error that is not and does
@@ -480,38 +459,6 @@ var (
 	// bare I/O name, to match the E_SNAPSHOT_* convention, as E_LOAD_IO_FAILURE
 	// names the schema load's I/O failure.
 	E_SNAPSHOT_IO = NewCode("E_SNAPSHOT_IO")
-
-	// E_UPDATE_METADATA_BODY_OFFSET indicates the header parsed cleanly
-	// but snapshot.UpdateMetadata's body-boundary offset tracker could
-	// not resolve a valid byte range for the reused body. The input does
-	// not match the shape snapshot.Marshal produces; byte-identical
-	// recovery via UpdateMetadata is not possible. Consumers using the
-	// primitive UpdateMetadata directly fall back to Unmarshal + Marshal;
-	// snapshot.UpdateMetadataOrReMarshal takes that fallback itself, save
-	// for newMeta that is not valid UTF-8, and pairs a fallback that
-	// succeeds with a W_UPDATE_METADATA_FALLBACK warning on the returned
-	// Result.
-	E_UPDATE_METADATA_BODY_OFFSET = NewCode("E_UPDATE_METADATA_BODY_OFFSET")
-
-	// W_UPDATE_METADATA_FALLBACK (Warning) indicates that
-	// snapshot.UpdateMetadataOrReMarshal fell back from the UpdateMetadata
-	// fast path to Unmarshal + Marshal because the fast path reported an Error or
-	// Fatal issue other than a cancellation: E_SNAPSHOT_MALFORMED at Error,
-	// E_UPDATE_METADATA_BODY_OFFSET at Fatal, or another. The output carries an
-	// indent only where a line feed directly follows an opening brace at the
-	// input's first byte, and, when it parses, the input's created_at, so it differs
-	// from a direct Marshal only where the input did; the warning surfaces the
-	// path transition so operators can observe fallback frequency and triage
-	// persistent cases. Details include a "triggering_codes" entry listing the
-	// distinct Error and Fatal codes that caused the fallback.
-	//
-	// Uses the W_ prefix, the convention for a code whose severity is fixed at
-	// Warning. E_SNAPSHOT_UNSUPPORTED_HASH_ALGORITHM keeps E_ because it is
-	// raised at both severities; severity lives on the Issue, so the prefix is
-	// a naming convention rather than a type-enforced property, and
-	// W_SNAPSHOT_UNRESOLVED_REQUIRED is raised at whatever severity
-	// snapshot.WithRevalidation was given.
-	W_UPDATE_METADATA_FALLBACK = NewCode("W_UPDATE_METADATA_FALLBACK")
 
 	// W_SNAPSHOT_UNRESOLVED_REQUIRED indicates a loaded document carries an
 	// unresolved record for an association the schema declares required, which

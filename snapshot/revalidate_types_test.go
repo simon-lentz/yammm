@@ -73,7 +73,7 @@ func TestLoad_RefusesEdgeTargetTypeMismatch(t *testing.T) {
 		t.Fatalf("station: %s", res)
 	}
 	sensor, res := v.ValidateOne(ctx, "Sensor", instance.RawInstance{
-		Properties: map[string]any{"id": "s1", "FEED": map[string]any{"_target_id": "a"}},
+		Properties: map[string]any{"id": "s1", "feed": map[string]any{"_target_id": "a"}},
 	})
 	if res.HasErrors() {
 		t.Fatalf("sensor: %s", res)

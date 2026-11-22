@@ -32,26 +32,6 @@ func countCode(res diag.Result, code diag.Code) int {
 	return n
 }
 
-// One member index for every input key: a key that folds onto a relation
-// field an exact key already claimed is unknown, as it is for a property —
-// it is not silently a relation field.
-func TestUnknownField_FoldingOntoAClaimedRelationFieldIsUnknown(t *testing.T) {
-	t.Parallel()
-	v := instance.NewValidator(loadSrc(t, personCompany))
-	_, res := v.ValidateOne(t.Context(), "Person", instance.RawInstance{Properties: map[string]any{
-		"id": "p", "name": "n",
-		"works_at": map[string]any{"_target_id": "c1", "note": "n"},
-		"Works_At": map[string]any{"_target_id": "c2", "note": "n"},
-	}})
-	is := mustIssue(t, res, diag.E_UNKNOWN_FIELD)
-	if reason, _ := detail(is, diag.DetailKeyReason); reason != "case_fold_shadowed" {
-		t.Errorf("reason = %q, want case_fold_shadowed", reason)
-	}
-	if is.Path() != "$.Works_At" {
-		t.Errorf("path = %q", is.Path())
-	}
-}
-
 // An absent required composition is reported beside a sibling composition's
 // own error: the gate is the relation's state, never the collector's.
 func TestComposition_AbsentRequiredIsReportedBesideASiblingsError(t *testing.T) {
@@ -167,21 +147,13 @@ func TestValidInstance_EdgeAcceptsEitherSpelling(t *testing.T) {
 	}
 }
 
-// The collision message lists its candidates in sorted order, and the unknown
-// keys of an edge object are reported in sorted order, run after run.
+// The unknown keys of an edge object are reported in sorted order, run after
+// run.
 func TestDiagnosticOrder_IsSortedAndStable(t *testing.T) {
 	t.Parallel()
 	v := instance.NewValidator(loadSrc(t, personCompany))
 	for range 5 {
 		_, res := v.ValidateOne(t.Context(), "Person", instance.RawInstance{Properties: map[string]any{
-			"id": "p", "nAme": "x", "NAME": "y", "Name": "z",
-		}})
-		if msg := mustIssue(t, res, diag.E_CASE_FOLD_COLLISION).Message(); !strings.Contains(msg, "[NAME Name nAme]") {
-			t.Errorf("collision candidates not sorted: %s", msg)
-		}
-		// A property collision ends the instance before its edges are read,
-		// so the edge keys are ordered on a clean instance.
-		_, res = v.ValidateOne(t.Context(), "Person", instance.RawInstance{Properties: map[string]any{
 			"id": "p", "name": "n",
 			"works_at": map[string]any{"_target_id": "c1", "note": "n", "zeta": 1, "alpha": 2},
 		}})

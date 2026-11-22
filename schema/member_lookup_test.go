@@ -61,24 +61,3 @@ func TestType_RelationByField(t *testing.T) {
 		t.Error("an unknown field resolved")
 	}
 }
-
-// PropertyFold answers the case-folded lookup for an edge-property block
-// without a scan per input key.
-func TestRelation_PropertyFold(t *testing.T) {
-	rel, ok := loadMembers(t).Relation("WORKS_AT")
-	if !ok {
-		t.Fatal("no WORKS_AT")
-	}
-	if p, ok := rel.PropertyFold("startdate"); !ok || p.Name() != "startDate" {
-		t.Errorf("PropertyFold(startdate) = %v, %v", p, ok)
-	}
-	if p, ok := rel.PropertyFold("title"); !ok || p.Name() != "title" {
-		t.Errorf("PropertyFold(title) = %v, %v", p, ok)
-	}
-	if _, ok := rel.PropertyFold("StartDate"); ok {
-		t.Error("the argument is the lowercased key; the caller folds")
-	}
-	if _, ok := rel.PropertyFold("nope"); ok {
-		t.Error("an unknown property resolved")
-	}
-}

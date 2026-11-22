@@ -96,33 +96,3 @@ func TestLoad_RefusesACompositionTargetThatIsNoPart(t *testing.T) {
 		})
 	}
 }
-
-// A validator that allows unknown fields stores none of them, so a graph over its
-// load meets only declared names.
-func TestValidateOne_AllowUnknownFieldsStoresNoUndeclaredName(t *testing.T) {
-	t.Parallel()
-	s, res := schema.LoadString(t.Context(), "schema \"x\"\n\ntype T {\n\tid String primary\n}\n\ntype H {\n\tid String primary\n\t--> OWNER (_:one) T\n}\n", "x.yammm")
-	if res.HasErrors() {
-		t.Fatalf("load: %s", res)
-	}
-	valid, res := instance.NewValidator(s, instance.WithAllowUnknownFields(true)).ValidateOne(t.Context(), "H", instance.RawInstance{Properties: map[string]any{
-		"id":    "h",
-		"bogus": 1,
-		"owner": map[string]any{"_target_id": "a", "bogus": 1},
-	}})
-	if valid.IsZero() {
-		t.Fatalf("ValidateOne: %s", res)
-	}
-	if _, ok := valid.Property("bogus"); ok {
-		t.Error("the instance holds an undeclared property")
-	}
-	edge, ok := valid.Edge("OWNER")
-	if !ok {
-		t.Fatal("the instance holds no OWNER edge")
-	}
-	for target := range edge.Targets() {
-		if target.HasProperties() {
-			t.Error("the edge target holds an undeclared property")
-		}
-	}
-}

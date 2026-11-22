@@ -40,16 +40,14 @@ const (
 	DetailKeyPrimaryKey = "pk"
 
 	// DetailKeyReason is the failure reason discriminant. Used with
-	// E_UNRESOLVED_REQUIRED ("absent", "empty", "target_missing"),
-	// E_UNRESOLVED_REQUIRED_COMPOSITION ("absent", "empty"), and E_UNKNOWN_FIELD
-	// and E_UNKNOWN_EDGE_FIELD ("case_fold_shadowed").
+	// E_UNRESOLVED_REQUIRED ("absent", "empty", "target_missing") and
+	// E_UNRESOLVED_REQUIRED_COMPOSITION ("absent", "empty").
 	DetailKeyReason = "reason"
 
 	// DetailKeyField is a field name of the instance data: the key as the data
-	// spells it for an unknown field and for a property the data spells in
-	// another case, and the `_target_` field the association declares for a
-	// foreign-key field's refusal. A value that is not valid UTF-8 is quoted, as
-	// [IssueBuilder.WithDetails] holds every detail value.
+	// spells it for an unknown field, and the `_target_` field the association
+	// declares for a foreign-key field's refusal. A value that is not valid
+	// UTF-8 is quoted, as [IssueBuilder.WithDetails] holds every detail value.
 	DetailKeyField = "field"
 
 	// DetailKeyJSONField is a relation's JSON field name in a path: the
@@ -81,11 +79,10 @@ const (
 	// Used with E_COMMAND_FAILED.
 	DetailKeyExitCode = "exit_code"
 
-	// DetailKeyTriggeringCodes is the comma-joined list of Error and Fatal
-	// codes that caused a fallback. Used with W_UPDATE_METADATA_FALLBACK.
-	DetailKeyTriggeringCodes = "triggering_codes"
-
-	// DetailKeyAlias is the import alias (for alias validation errors).
+	// DetailKeyAlias is the alias an import declares. Used with
+	// E_IMPORT_RESOLVE, E_PATH_ESCAPE, E_IMPORT_CYCLE and E_UPSTREAM_FAIL raised
+	// at an import declaration, and with E_INTERNAL for an alias the load left
+	// unbound.
 	DetailKeyAlias = "alias"
 
 	// DetailKeyFirstAlias is the first import alias in duplicate detection.

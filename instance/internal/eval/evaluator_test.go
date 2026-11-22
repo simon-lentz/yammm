@@ -273,12 +273,6 @@ func TestEvaluator_Properties(t *testing.T) {
 		assert.Equal(t, "Alice", result)
 	})
 
-	t.Run("case_insensitive", func(t *testing.T) {
-		result, err := ev.Evaluate(t.Context(), sx("p", lit("NAME")), scope)
-		require.NoError(t, err)
-		assert.Equal(t, "Alice", result)
-	})
-
 	t.Run("undefined_property_returns_nil", func(t *testing.T) {
 		// Missing optional properties evaluate to nil, enabling patterns like:
 		//   age lest 0        (default value)
@@ -409,8 +403,7 @@ func TestEvaluator_SliceConcat(t *testing.T) {
 }
 
 // TestEvaluator_MemberAccess_EdgeCases is the canonical member-access table:
-// nil receiver, exact and case-insensitive map keys, missing keys, and
-// non-map receivers.
+// nil receiver, exact map keys, missing keys, and non-map receivers.
 func TestEvaluator_MemberAccess_EdgeCases(t *testing.T) {
 	t.Run("access_nil_returns_nil", func(t *testing.T) {
 		evalEq(t, sx(".", lit(nil), lit("field")), nil)
@@ -418,11 +411,6 @@ func TestEvaluator_MemberAccess_EdgeCases(t *testing.T) {
 
 	t.Run("access_map_exact_match", func(t *testing.T) {
 		m := immutable.WrapProperties(map[string]any{"name": "Alice", "age": int64(30)})
-		evalEq(t, sx(".", lit(m), lit("name")), "Alice")
-	})
-
-	t.Run("access_map_case_insensitive", func(t *testing.T) {
-		m := immutable.WrapProperties(map[string]any{"Name": "Alice"})
 		evalEq(t, sx(".", lit(m), lit("name")), "Alice")
 	})
 

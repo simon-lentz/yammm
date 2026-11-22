@@ -29,12 +29,6 @@ func (s *mapScope) Lookup(name string) (immutable.Value, bool) {
 	return v, ok
 }
 
-// LookupFold on a variable-only scope is an exact lookup: variable names
-// never fold, whichever spelling reaches them.
-func (s *mapScope) LookupFold(name string) (immutable.Value, bool) {
-	return s.Lookup(name)
-}
-
 func (s *mapScope) WithVar(name string, value any) Scope {
 	newVars := make(map[string]immutable.Value, len(s.vars)+1)
 	maps.Copy(newVars, s.vars)

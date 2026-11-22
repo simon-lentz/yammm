@@ -3,37 +3,12 @@ package instance_test
 import (
 	"testing"
 
-	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/simon-lentz/yammm/instance"
 	"github.com/simon-lentz/yammm/instance/path"
 	"github.com/simon-lentz/yammm/location"
 )
-
-func TestRecommendedOptions(t *testing.T) {
-	s := mustLoad(t, `schema "test"
-
-type Person {
-	id String primary
-}
-`)
-
-	// RecommendedOptions should return valid options
-	opts := instance.RecommendedOptions()
-	assert.Len(t, opts, 2)
-
-	// Should be usable
-	validator := instance.NewValidator(s, opts...)
-
-	raw := instance.RawInstance{
-		Properties: map[string]any{"id": "1"},
-	}
-
-	valid, result := validator.ValidateOne(t.Context(), "Person", raw)
-	require.True(t, result.OK())
-	require.False(t, valid.IsZero())
-}
 
 func TestOptionsWithProvenance(t *testing.T) {
 	// Test that provenance functions are covered in various scenarios

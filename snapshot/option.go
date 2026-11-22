@@ -14,10 +14,7 @@ type Option func(*config)
 type config struct {
 	indent    string
 	createdAt time.Time
-	// createdAtText is a header's created_at carried as text, set by
-	// [WithCreatedAtFrom]; it wins over createdAt.
-	createdAtText string
-	metadata      map[string]string
+	metadata  map[string]string
 }
 
 func applyOptions(opts []Option) config {
@@ -48,40 +45,15 @@ func WithIndent(indent string) Option {
 	}
 }
 
-// WithCreatedAt sets the created_at timestamp in the snapshot header.
-// If not set, created_at is omitted from the header (omitempty), preserving
-// byte-level determinism. Breaking determinism is always opt-in: callers
-// that need a timestamp must explicitly provide one.
+// WithCreatedAt sets the header's created_at to t, which [Marshal] writes as
+// t.Format(time.RFC3339Nano) in t's own offset, as encoding/json writes a
+// [time.Time]. A zero t writes no created_at, so output is deterministic unless
+// a caller opts in. Marshal refuses a t that has no RFC 3339 form, a year past
+// 9999 and an offset that is no whole number of minutes among them, with Error
+// [diag.E_SNAPSHOT_MALFORMED].
 func WithCreatedAt(t time.Time) Option {
 	return func(c *config) {
 		c.createdAt = t
-	}
-}
-
-// withCreatedAtText writes text as the created_at field verbatim. The caller
-// has parsed it as RFC 3339 already; carrying the bytes rather than the parsed
-// value keeps a foreign header's fractional seconds and offset.
-func withCreatedAtText(text string) Option {
-	return func(c *config) {
-		c.createdAtText = text
-	}
-}
-
-// WithCreatedAtFrom carries header's created_at text into the new document, for a
-// caller re-marshaling a document it has read.
-//
-// Prefer it over [WithCreatedAt] whenever the timestamp comes from an existing
-// header: [WithCreatedAt] writes its time at second precision in UTC, so it
-// does not round-trip a foreign header's sub-second part or offset. It takes
-// a parsed header rather than a string because an Option cannot report an
-// error. A nil header sets nothing; otherwise the last WithCreatedAtFrom sets
-// the text, which wins over [WithCreatedAt] unless it is empty.
-func WithCreatedAtFrom(header *Header) Option {
-	return func(c *config) {
-		if header == nil {
-			return
-		}
-		c.createdAtText = header.CreatedAt
 	}
 }
 

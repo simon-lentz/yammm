@@ -133,12 +133,13 @@ func TestUpdateMetadata_DoesNotFabricateAnAttestation(t *testing.T) {
 	t.Parallel()
 	_, data := attWireFixture(t)
 
-	// A document that states no claim: the same bytes with the attestation removed.
-	// UpdateMetadata never verifies integrity, so the edit is safe here.
+	// A document that states no claim: the same bytes with the attestation
+	// removed, signed again.
 	stripped := bytes.Replace(data, []byte(attTrueSegment), nil, 1)
 	if bytes.Equal(stripped, data) {
 		t.Fatal("fixture did not carry the attestation segment")
 	}
+	stripped = rehashDocument(t, stripped)
 
 	out, res := snapshot.UpdateMetadata(t.Context(), stripped, map[string]string{"k": "v"})
 	if res.HasErrors() {

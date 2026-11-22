@@ -8,6 +8,7 @@ import (
 
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/instance/path"
+	"github.com/simon-lentz/yammm/internal/value"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -53,7 +54,7 @@ func pkPathFromInstance(basePath path.Path, child ValidInstance, childType schem
 func (v *Validator) validateCompositions(
 	ctx context.Context,
 	typ schema.Type,
-	rels map[schema.Relation]relationInput,
+	props map[string]any,
 	collector *diag.Collector,
 	prov Provenance,
 	base path.Path,
@@ -66,12 +67,12 @@ func (v *Validator) validateCompositions(
 			return composed
 		}
 
-		in := rels[rel]
-		if in.state != relationPresent {
-			// A collided slot has nothing to read and the member index already
-			// reported it; an absent required composition is reported here,
-			// whatever else the instance drew.
-			if !rel.IsOptional() && in.state == relationAbsent {
+		raw := props[rel.FieldName()]
+		if value.Absent(raw) {
+			// An absent required composition is reported here, beside an unknown
+			// field or another composition's error; a property or edge error
+			// ends the row before this pass.
+			if !rel.IsOptional() {
 				issue := diag.NewIssue(
 					diag.Error,
 					diag.E_UNRESOLVED_REQUIRED_COMPOSITION,
@@ -85,7 +86,7 @@ func (v *Validator) validateCompositions(
 			continue
 		}
 
-		children := v.validateComposition(ctx, rel, in.value, collector, prov, base.Key(in.key), depth)
+		children := v.validateComposition(ctx, rel, raw, collector, prov, base.Key(rel.FieldName()), depth)
 		if children != nil {
 			if composed == nil {
 				composed = make(map[string][]ValidInstance)

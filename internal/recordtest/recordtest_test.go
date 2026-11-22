@@ -146,8 +146,5 @@ func TestWalk_RendersPropertiesByContent(t *testing.T) {
 	unread := bag{&bagState{props: immutable.WrapProperties(src)}}
 	for range read.props.Keys() {
 	}
-	if _, ok := read.props.GetFold("A"); !ok {
-		t.Fatal("GetFold(A) found nothing")
-	}
 	yammmtest.Diff(t, recordtest.Walk(unread, recordtest.Options{}), recordtest.Walk(read, recordtest.Options{}))
 }

@@ -2,6 +2,7 @@ package cli
 
 import (
 	"errors"
+	"io"
 	"io/fs"
 	"os"
 	"unicode/utf8"
@@ -72,6 +73,23 @@ func Open(path string) (*os.File, error) {
 	}
 	f, err := os.Open(host)
 	return f, renamePathError(err, path)
+}
+
+// SpelledReader returns a reader of f, which [Open] opened for path, whose
+// errors name path as the operator spelled it, as Open's own do. A read of f
+// itself names the host's path.
+func SpelledReader(f *os.File, path string) io.Reader {
+	return spelledReader{f: f, path: path}
+}
+
+type spelledReader struct {
+	f    *os.File
+	path string
+}
+
+func (r spelledReader) Read(p []byte) (int, error) {
+	n, err := r.f.Read(p)
+	return n, renamePathError(err, r.path)
 }
 
 // renamePathError makes an [fs.PathError] name path.

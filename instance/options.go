@@ -5,38 +5,12 @@ type Option func(*validatorConfig)
 
 // validatorConfig holds validator configuration.
 type validatorConfig struct {
-	strictPropertyNames  bool
-	allowUnknownFields   bool
 	maxIssuesPerInstance int
 }
 
 // defaultConfig returns the default validator configuration.
 func defaultConfig() *validatorConfig {
-	return &validatorConfig{
-		strictPropertyNames:  false,
-		allowUnknownFields:   false,
-		maxIssuesPerInstance: 100,
-	}
-}
-
-// WithStrictPropertyNames controls property name matching.
-//
-// When true, property names must match exactly (case-sensitive).
-// When false (default), property names are matched case-insensitively.
-func WithStrictPropertyNames(strict bool) Option {
-	return func(c *validatorConfig) {
-		c.strictPropertyNames = strict
-	}
-}
-
-// WithAllowUnknownFields controls handling of unknown fields.
-//
-// When true, unknown fields in the input are silently ignored.
-// When false (default), unknown fields produce a diagnostic error.
-func WithAllowUnknownFields(allow bool) Option {
-	return func(c *validatorConfig) {
-		c.allowUnknownFields = allow
-	}
+	return &validatorConfig{maxIssuesPerInstance: 100}
 }
 
 // WithIssueLimit sets the maximum number of diagnostic issues one instance
@@ -49,22 +23,6 @@ func WithAllowUnknownFields(allow bool) Option {
 func WithIssueLimit(limit int) Option {
 	return func(c *validatorConfig) {
 		c.maxIssuesPerInstance = max(limit, 0)
-	}
-}
-
-// RecommendedOptions returns the recommended default options
-// for new projects. These options prioritize correctness and early error
-// detection over permissiveness.
-//
-// Includes:
-//   - WithStrictPropertyNames(true): require exact case matching for property names
-//   - WithAllowUnknownFields(false): report unknown fields
-//
-// Use this as a starting point and relax specific options as needed for your use case.
-func RecommendedOptions() []Option {
-	return []Option{
-		WithStrictPropertyNames(true),
-		WithAllowUnknownFields(false),
 	}
 }
 

@@ -288,11 +288,7 @@ func TestUpdateMetadata_PreservesAnIntShapedBodyThatReMarshalHeals(t *testing.T)
 	if !bytes.Contains(written, []byte(`"reading":2.0`)) {
 		t.Fatalf("fixture does not carry the healed form to un-heal:\n%s", written)
 	}
-	intShaped, result := snapshot.UpdateMetadata(ctx,
-		bytes.Replace(written, []byte(`"reading":2.0`), []byte(`"reading":2`), 1), nil)
-	if err := result.Err(); err != nil {
-		t.Fatalf("re-sealing the int-shaped fixture: %v", err)
-	}
+	intShaped := rehashDocument(t, bytes.Replace(written, []byte(`"reading":2.0`), []byte(`"reading":2`), 1))
 	if !bytes.Contains(intShaped, []byte(`"reading":2,`)) {
 		t.Fatalf("fixture is not int-shaped:\n%s", intShaped)
 	}

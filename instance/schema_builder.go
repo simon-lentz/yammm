@@ -107,10 +107,8 @@ func BuilderFor(s schema.Schema, typeName string) (*SchemaBuilder, error) {
 //
 // If name is not a property of the bound type, Property records the error
 // with the caller's file:line (captured via runtime.Callers); Build() returns
-// the accumulated error including the locator. Property name matching is
-// case-sensitive against the schema's canonical names — the programmatic API
-// opts out of the case-insensitive fallback the validator performs on
-// JSON inputs.
+// the accumulated error including the locator. name matches a property by its
+// declared spelling alone, as the validator matches an input key.
 //
 // Property(name, nil) passes through; the validator handles nil-value
 // semantics (emitting E_MISSING_REQUIRED when the property is required).

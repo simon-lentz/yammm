@@ -69,7 +69,8 @@ const (
 )
 
 // forgeEveryField returns the fixture with each header text the report prints,
-// and the type's name, set to forgedJSON.
+// and the type's name, set to forgedJSON. The report prints created_at as the
+// time it reads, which holds no text of the document.
 func forgeEveryField(t *testing.T) string {
 	t.Helper()
 	data, err := os.ReadFile("testdata/valid_snapshot.ys")
@@ -79,9 +80,8 @@ func forgeEveryField(t *testing.T) string {
 	doc := string(data)
 	for _, r := range [][2]string{
 		{`"schema_name":"test"`, `"schema_name":"` + forgedJSON + `"`},
-		{`"schema_source":"testdata/valid.yammm"`, `"schema_source":"` + forgedJSON + `"`},
 		{`"schema_hash":"sha256:`, `"schema_hash":"` + forgedJSON + `sha256:`},
-		{`"features":[]`, `"created_at":"` + forgedJSON + `","metadata":{"k` + forgedJSON + `":"` + forgedJSON + `"},"features":[]`},
+		{`"features":[]`, `"metadata":{"k` + forgedJSON + `":"` + forgedJSON + `"},"features":[]`},
 		{`"name":"Person"`, `"name":"Per` + forgedJSON + `"`},
 	} {
 		if !strings.Contains(doc, r[0]) {
@@ -139,8 +139,8 @@ func TestSnapshotInfo_EscapesEveryFieldItPrints(t *testing.T) {
 		args  []string
 		lines []string
 	}{
-		{[]string{"snapshot", "info", sealed}, []string{"Snapshot:", "Schema:", "Hash:", "Created:", "Metadata:", "Per"}},
-		{[]string{"snapshot", "info", "--header-only", header}, []string{"Snapshot:", "Schema:", "Hash:", "Integrity:", "Created:", "Metadata:", "Per"}},
+		{[]string{"snapshot", "info", sealed}, []string{"Snapshot:", "Schema:", "Hash:", "Metadata:", "Per"}},
+		{[]string{"snapshot", "info", "--header-only", header}, []string{"Snapshot:", "Schema:", "Hash:", "Integrity:", "Metadata:", "Per"}},
 	} {
 		code, stdout, stderr := executeCmdOutput(t, c.args...)
 		if code != 0 {
@@ -164,8 +164,8 @@ func TestSnapshotInfo_EscapesEveryFieldItPrints(t *testing.T) {
 
 // TestSnapshotInfo_DirEscapesEveryRow holds a directory scan to the rule for
 // every text it prints: the directory's path, each entry's name in an ok, a
-// malformed, an unreadable and a refused row, a created time, and an error
-// message, which carries the host path.
+// malformed, an unreadable and a refused row, and an error message, which
+// carries the host path.
 func TestSnapshotInfo_DirEscapesEveryRow(t *testing.T) {
 	t.Parallel()
 	if runtime.GOOS == "windows" {
@@ -190,7 +190,6 @@ func TestSnapshotInfo_DirEscapesEveryRow(t *testing.T) {
 		return p
 	}
 	write("ok"+forgedRaw+".ys", src)
-	write("created.ys", strings.Replace(src, `"features":[]`, `"created_at":"`+forgedJSON+`","features":[]`, 1))
 	write("malformed"+forgedRaw+".ys", "{not json")
 	write("refused"+forgedRaw+".ys", strings.Replace(src, `"features":[]`, `"features":["zz"]`, 1))
 	unreadable := write("unreadable"+forgedRaw+".ys", src)
@@ -214,7 +213,7 @@ func TestSnapshotInfo_DirEscapesEveryRow(t *testing.T) {
 			t.Errorf("no row shows %q:\n%s%s", want, stdout, stderr)
 		}
 	}
-	if n := strings.Count(stdout, "X\u241b[31mY\u240aForged"); n < 8 {
-		t.Errorf("%d texts show the forged text, want the directory, five names, a created time and an error message:\n%s", n, stdout)
+	if n := strings.Count(stdout, "X\u241b[31mY\u240aForged"); n < 7 {
+		t.Errorf("%d texts show the forged text, want the directory, four names and an error message that names both:\n%s", n, stdout)
 	}
 }

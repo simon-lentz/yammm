@@ -5,10 +5,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"maps"
 	"os"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -56,14 +58,16 @@ func runSnapshotInfo(cmd *cobra.Command, args []string, sink *cli.DiagnosticSink
 		return err
 	}
 
-	if headerOnly, _ := cmd.Flags().GetBool("header-only"); headerOnly {
-		f, err := cli.Open(args[0])
-		if err != nil {
-			return cli.Runtimef("open file: %v", err)
-		}
-		defer f.Close()
+	f, err := cli.Open(args[0])
+	if err != nil {
+		return cli.Runtimef("open file: %v", err)
+	}
+	defer f.Close()
+	size := statSize(f)
+	r := cli.SpelledReader(f, args[0])
 
-		header, result := snapshot.ReadHeader(cmd.Context(), f)
+	if headerOnly, _ := cmd.Flags().GetBool("header-only"); headerOnly {
+		header, result := snapshot.ReadHeader(cmd.Context(), r)
 		sink.Add(result)
 		if result.HasErrors() {
 			return cli.Exit(cli.ExitForResult(result))
@@ -71,7 +75,7 @@ func runSnapshotInfo(cmd *cobra.Command, args []string, sink *cli.DiagnosticSink
 
 		sink.Flush()
 		w := cmd.OutOrStdout()
-		dto := newHeaderDTO(header, statSize(f))
+		dto := newHeaderDTO(header, size)
 		if sink.Format() == cli.FormatJSON {
 			enc, err := json.MarshalIndent(dto, "", "  ")
 			if err != nil {
@@ -84,7 +88,7 @@ func runSnapshotInfo(cmd *cobra.Command, args []string, sink *cli.DiagnosticSink
 		return nil
 	}
 
-	data, err := cli.ReadFile(args[0])
+	data, err := io.ReadAll(r)
 	if err != nil {
 		return cli.Runtimef("read file: %v", err)
 	}
@@ -100,7 +104,7 @@ func runSnapshotInfo(cmd *cobra.Command, args []string, sink *cli.DiagnosticSink
 
 	sink.Flush()
 	w := cmd.OutOrStdout()
-	dto := newInfoDTO(info, int64(len(data)))
+	dto := newInfoDTO(info, size)
 
 	if sink.Format() == cli.FormatJSON {
 		enc, err := json.MarshalIndent(dto, "", "  ")
@@ -116,7 +120,8 @@ func runSnapshotInfo(cmd *cobra.Command, args []string, sink *cli.DiagnosticSink
 }
 
 // statSize reports a regular file's size, or zero for any other handle: a
-// pipe's Size is the count of its unread bytes, not the document's.
+// pipe's Size is the count of its unread bytes, not the document's. Every mode
+// reports this size, the one [snapshot.ScanEntry.FileSize] reports for --dir.
 func statSize(f *os.File) int64 {
 	stat, err := f.Stat()
 	if err != nil || !stat.Mode().IsRegular() {
@@ -133,12 +138,12 @@ func printInfo(w interface{ Write([]byte) (int, error) }, info *infoDTO) {
 	fmt.Fprintf(w, "Snapshot: %s\n", termtext.String(info.SchemaName))
 	fmt.Fprintf(w, "  Version:    %d\n", info.Version)
 
-	fmt.Fprintf(w, "  Schema:     %s (%s)\n", termtext.String(info.SchemaName), termtext.String(info.SchemaSource))
+	fmt.Fprintf(w, "  Schema:     %s\n", termtext.String(info.SchemaName))
 	fmt.Fprintf(w, "  Hash:       %s (algorithm v%d)\n", termtext.String(info.SchemaHash), info.SchemaHashAlgorithm)
 	fmt.Fprintf(w, "  Integrity:  %s (%s)\n", info.IntegrityStatus, termtext.String(info.IntegrityHash))
 
 	if info.CreatedAt != "" {
-		fmt.Fprintf(w, "  Created:    %s\n", termtext.String(info.CreatedAt))
+		fmt.Fprintf(w, "  Created:    %s\n", info.CreatedAt)
 	} else {
 		fmt.Fprintf(w, "  Created:    not set\n")
 	}
@@ -168,12 +173,12 @@ func printHeader(w interface{ Write([]byte) (int, error) }, header *headerDTO) {
 	fmt.Fprintf(w, "Snapshot: %s\n", termtext.String(header.SchemaName))
 	fmt.Fprintf(w, "  Version:    %d\n", header.Version)
 
-	fmt.Fprintf(w, "  Schema:     %s (%s)\n", termtext.String(header.SchemaName), termtext.String(header.SchemaSource))
+	fmt.Fprintf(w, "  Schema:     %s\n", termtext.String(header.SchemaName))
 	fmt.Fprintf(w, "  Hash:       %s (algorithm v%d)\n", termtext.String(header.SchemaHash), header.SchemaHashAlgorithm)
 	fmt.Fprintf(w, "  Integrity:  %s (stored; not verified)\n", termtext.String(header.IntegrityHash))
 
 	if header.CreatedAt != "" {
-		fmt.Fprintf(w, "  Created:    %s\n", termtext.String(header.CreatedAt))
+		fmt.Fprintf(w, "  Created:    %s\n", header.CreatedAt)
 	} else {
 		fmt.Fprintf(w, "  Created:    not set\n")
 	}
@@ -232,7 +237,6 @@ type attestationDTO struct {
 type headerDTO struct {
 	Version             int                `json:"version"`
 	SchemaName          string             `json:"schema_name"`
-	SchemaSource        string             `json:"schema_source"`
 	SchemaHash          string             `json:"schema_hash"`
 	SchemaHashAlgorithm int                `json:"schema_hash_algorithm"`
 	IntegrityHash       string             `json:"integrity_hash"`
@@ -246,7 +250,6 @@ type headerDTO struct {
 type infoDTO struct {
 	Version             int                      `json:"version"`
 	SchemaName          string                   `json:"schema_name"`
-	SchemaSource        string                   `json:"schema_source"`
 	SchemaHash          string                   `json:"schema_hash"`
 	SchemaHashAlgorithm int                      `json:"schema_hash_algorithm"`
 	IntegrityHash       string                   `json:"integrity_hash"`
@@ -272,6 +275,15 @@ func orEmptyMap(m map[string]string) map[string]string {
 	return m
 }
 
+// createdAtText renders a header's created_at in RFC 3339 at the precision it
+// holds, and the zero time, which stands for none, as "".
+func createdAtText(t time.Time) string {
+	if t.IsZero() {
+		return ""
+	}
+	return t.Format(time.RFC3339Nano)
+}
+
 func newAttestationDTO(att *graph.Attestation) *attestationDTO {
 	if att == nil {
 		return nil
@@ -279,8 +291,7 @@ func newAttestationDTO(att *graph.Attestation) *attestationDTO {
 	return &attestationDTO{Values: att.Values, Associations: att.Associations}
 }
 
-// newHeaderDTO takes the size from the caller, since a header carries none: the
-// full mode counts the bytes it read, and --header-only and --dir stat the file.
+// newHeaderDTO takes the size from the caller, since a header carries none.
 func newHeaderDTO(header *snapshot.Header, fileSize int64) *headerDTO {
 	if header == nil {
 		return nil
@@ -288,11 +299,10 @@ func newHeaderDTO(header *snapshot.Header, fileSize int64) *headerDTO {
 	return &headerDTO{
 		Version:             header.Version,
 		SchemaName:          header.SchemaName,
-		SchemaSource:        header.SchemaSource,
 		SchemaHash:          header.SchemaHash,
 		SchemaHashAlgorithm: header.SchemaHashAlgorithm,
 		IntegrityHash:       header.IntegrityHash,
-		CreatedAt:           header.CreatedAt,
+		CreatedAt:           createdAtText(header.CreatedAt),
 		Metadata:            orEmptyMap(header.Metadata),
 		Types:               header.Types,
 		Attestation:         newAttestationDTO(header.Attestation),
@@ -307,11 +317,10 @@ func newInfoDTO(info *snapshot.Info, fileSize int64) *infoDTO {
 	return &infoDTO{
 		Version:             info.Version,
 		SchemaName:          info.SchemaName,
-		SchemaSource:        info.SchemaSource,
 		SchemaHash:          info.SchemaHash,
 		SchemaHashAlgorithm: info.SchemaHashAlgorithm,
 		IntegrityHash:       info.IntegrityHash,
-		CreatedAt:           info.CreatedAt,
+		CreatedAt:           createdAtText(info.CreatedAt),
 		Metadata:            orEmptyMap(info.Metadata),
 		Types:               info.Types,
 		InstanceCounts:      info.InstanceCounts,
@@ -465,13 +474,13 @@ func printDirEntries(w interface{ Write([]byte) (int, error) }, dirPath string, 
 			} else {
 				okCount++
 			}
-			created := entry.Header.CreatedAt
+			created := createdAtText(entry.Header.CreatedAt)
 			if created == "" {
 				created = "not set"
 			}
 			fmt.Fprintf(w, "  %-40s  %-12sschema=%s  v%d  created=%s%s\n",
 				termtext.String(entry.Name), status, termtext.String(entry.Header.SchemaName), entry.Header.Version,
-				termtext.String(created), firstWarning(entry.Result))
+				created, firstWarning(entry.Result))
 			continue
 		}
 		// Surface the first error code and message.

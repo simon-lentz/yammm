@@ -3,7 +3,6 @@ package schema
 import (
 	"iter"
 	"slices"
-	"strings"
 
 	"github.com/simon-lentz/yammm/location"
 )
@@ -60,9 +59,6 @@ type typeState struct {
 	// error. Nil for the overwhelming majority of types, which drop nothing.
 	// See [completer.inheritedAnnotations].
 	suppressedAnns map[string]map[string]bool
-
-	// Cached canonical property map (lowercase -> canonical name)
-	canonicalMap map[string]string
 
 	// Immutability enforcement
 	sealed bool // true after completion; prevents further mutation
@@ -149,8 +145,8 @@ func (t Type) IsPart() bool {
 }
 
 // Property returns the property with the given name (own or inherited), if it
-// exists. The lookup is exact-case, as annotation arguments are resolved. An input
-// key resolves case-insensitively through [Type.CanonicalPropertyName].
+// exists. The lookup is exact, as every name in the DSL and in instance data is
+// matched.
 func (t Type) Property(name string) (Property, bool) {
 	p, ok := t.propByName[name]
 	return p, ok
@@ -212,9 +208,8 @@ func (t Type) Relation(name string) (Relation, bool) {
 }
 
 // RelationByField returns the relation (own or inherited) whose
-// [Relation.FieldName] is fieldName, if one exists. The lookup is exact: a
-// field name is the DSL name in lower case, so a caller that folds an input
-// key lowercases it first.
+// [Relation.FieldName] is fieldName, if one exists. The lookup is exact, and a
+// field name is the DSL name in lower case.
 func (t Type) RelationByField(fieldName string) (Relation, bool) {
 	r, ok := t.relByField[fieldName]
 	return r, ok
@@ -295,24 +290,6 @@ func (t Type) SubTypes() iter.Seq[TypeID] {
 	return slices.Values(t.subTypes)
 }
 
-// CanonicalPropertyName maps a lowercased property name to the type's declared
-// spelling, the case-folded half of [Type.Property]. The caller lowercases the
-// input key; the answer comes from an index built at seal.
-func (t Type) CanonicalPropertyName(lower string) (string, bool) {
-	if t.canonicalMap != nil {
-		name, ok := t.canonicalMap[lower]
-		return name, ok
-	}
-	// Unsealed: the same last-wins walk seal uses to build the map.
-	name, found := "", false
-	for _, p := range t.allProperties {
-		if strings.ToLower(p.name) == lower {
-			name, found = p.name, true
-		}
-	}
-	return name, found
-}
-
 // --- Internal setters used during completion ---
 
 // seal marks the type as immutable.
@@ -320,12 +297,6 @@ func (t Type) CanonicalPropertyName(lower string) (string, bool) {
 func (t Type) seal() {
 	if t.sealed {
 		panic("type: sealed twice")
-	}
-	// Precompute cached maps for thread-safe access after sealing
-	t.canonicalMap = make(map[string]string, len(t.allProperties))
-	for _, p := range t.allProperties {
-		lower := strings.ToLower(p.name)
-		t.canonicalMap[lower] = p.name
 	}
 	t.sealed = true
 }

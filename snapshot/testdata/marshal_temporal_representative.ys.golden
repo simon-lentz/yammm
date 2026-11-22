@@ -2,10 +2,9 @@
 	"yammm_snapshot": {
 		"version": 4,
 		"schema_name": "temporaltest",
-		"schema_source": "string://temporaltest.yammm",
 		"schema_hash": "sha256:1a3f4f3fdd261e185f0f79841fc5585e27328d8fb2d300674981e9082a400ed6",
 		"schema_hash_algorithm": 4,
-		"integrity_hash": "sha256:b7c4c11c35da974381d1216ba0023780f14bfef23842ad2b10796df2871d46e8",
+		"integrity_hash": "sha256:6bb51965b007847fce89a45615b21d70f0870c5523e914f064fb40592e2eff97",
 		"features": [],
 		"attestation": {
 			"values": true,

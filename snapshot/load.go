@@ -1,6 +1,7 @@
 package snapshot
 
 import (
+	"bytes"
 	"context"
 
 	"github.com/simon-lentz/yammm/diag"
@@ -11,6 +12,13 @@ import (
 )
 
 func init() {
+	snapread.HeaderOf = func(ctx context.Context, data []byte) (any, diag.Result) {
+		if ctx == nil {
+			panic("snapread.HeaderOf: nil context")
+		}
+		h, res := readHeader(ctx, bytes.NewReader(data), int64(len(data))+1)
+		return h, res
+	}
 	snapread.UnmarshalWithHeader = func(ctx context.Context, data []byte, s schema.Schema) (graph.Snapshot, any, diag.Result) {
 		checkUnmarshalArgs(ctx, s)
 		var h Header

@@ -460,8 +460,7 @@ func TestConcurrent_Properties_Read(t *testing.T) {
 	yammmtest.RunConcurrent(100, 1000, func() {
 		_ = p.Len()
 		_, _ = p.Get("Name")
-		_, _ = p.GetFold("name")
-		_, _ = p.GetFold("nonexistent")
+		_, _ = p.Get("nonexistent")
 		for k := range p.Keys() {
 			_ = k
 		}

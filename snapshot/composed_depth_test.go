@@ -29,11 +29,11 @@ func nestedRoot(levels int) map[string]any {
 	for range levels {
 		link := map[string]any{"code": "c"}
 		if below != nil {
-			link["NEXT"] = below
+			link["next"] = below
 		}
 		below = []any{link}
 	}
-	return map[string]any{"id": "r", "NEXT": below}
+	return map[string]any{"id": "r", "next": below}
 }
 
 // The reader's depth bound is the validator's: a tree at the bound validates, writes

@@ -34,11 +34,10 @@ func TestMetadata_RefusesTextThatIsNotValidUTF8(t *testing.T) {
 			t.Parallel()
 			data, mres := snapshot.Marshal(ctx, g.Snapshot(), snapshot.WithMetadata(c.meta))
 			out, ures := snapshot.UpdateMetadata(ctx, []byte(doc), c.meta)
-			re, rres := snapshot.UpdateMetadataOrReMarshal(ctx, []byte(doc), c.meta, s)
 			for surface, r := range map[string]struct {
 				bytes []byte
 				res   diag.Result
-			}{"Marshal": {data, mres}, "UpdateMetadata": {out, ures}, "UpdateMetadataOrReMarshal": {re, rres}} {
+			}{"Marshal": {data, mres}, "UpdateMetadata": {out, ures}} {
 				issues := r.res.Len()
 				if r.bytes != nil || issues != 1 || !r.res.HasErrors() || !strings.Contains(r.res.String(), c.want) {
 					t.Errorf("%s returned %d bytes and %s, want none and one Error naming %s", surface, len(r.bytes), r.res, c.want)
@@ -79,28 +78,5 @@ func TestMetadata_ValidTextReadsBackAsWritten(t *testing.T) {
 		if !maps.Equal(info.Metadata, meta) {
 			t.Errorf("%s: metadata reads back %q, want %q", surface, info.Metadata, meta)
 		}
-	}
-}
-
-// UpdateMetadataOrReMarshal keeps UpdateMetadata's order: a cancelled context
-// is reported as cancellation, and a document that is no snapshot draws its
-// own refusal beside the metadata's.
-func TestUpdateMetadataOrReMarshal_RefusesBadMetadataInItsPlace(t *testing.T) {
-	t.Parallel()
-	s := loadReaderSchema(t)
-	bad := map[string]string{"k\xff": "v"}
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-	if _, res := snapshot.UpdateMetadataOrReMarshal(ctx, []byte(`{}`), bad, s); res.Len() != 1 || !res.HasCode(diag.E_CONTEXT_CANCELLED) {
-		t.Errorf("a cancelled call: %s, want one %s", res, diag.E_CONTEXT_CANCELLED)
-	}
-	_, res := snapshot.UpdateMetadataOrReMarshal(context.Background(), []byte(`xx`), bad, s)
-	if res.Len() != 2 || !strings.Contains(res.String(), "is not a yammm snapshot") || !strings.Contains(res.String(), "metadata key") {
-		t.Errorf("a document that is no snapshot, with bad metadata: %s, want both refusals", res)
-	}
-	doc := strings.Replace(readerDoc(t, s, map[string]any{"$type": "Company", "id": "c1"}), `"version":4`, `"version":99`, 1)
-	_, res = snapshot.UpdateMetadataOrReMarshal(context.Background(), []byte(doc), bad, s)
-	if res.Len() != 2 || !res.HasCode(diag.E_SNAPSHOT_UNSUPPORTED_VERSION) || !strings.Contains(res.String(), "metadata key") {
-		t.Errorf("a header no read path accepts, with bad metadata: %s, want both refusals", res)
 	}
 }

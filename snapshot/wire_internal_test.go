@@ -15,12 +15,12 @@ var wireStructCases = []struct {
 	tags []string
 }{
 	{reflect.TypeFor[headerWire](), []string{
-		"version", "schema_name", "schema_source", "schema_hash",
+		"version", "schema_name", "schema_hash",
 		"schema_hash_algorithm", "integrity_hash", "features",
 		"created_at,omitempty", "metadata,omitempty", "attestation,omitempty",
 	}},
 	{reflect.TypeFor[marshalHeaderWire](), []string{
-		"schema_name", "schema_source", "schema_hash", "integrity_hash",
+		"schema_name", "schema_hash", "integrity_hash",
 		"features", "created_at,omitempty", "metadata,omitempty",
 		"attestation,omitempty",
 	}},

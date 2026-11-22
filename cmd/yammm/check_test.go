@@ -94,29 +94,6 @@ func TestCheck_ATextFaultRefusesAnInstanceTheDocumentStillStates(t *testing.T) {
 				"{\"id\":\"m\",\"name\":[\"\xff\"],\"manager\":{\"_target_id\":\"m\"}}]}",
 			[]string{"E_DATA_PARSE"},
 		},
-		// A faulted value keeps its member, so the case-fold rule reads the
-		// members it reads without the fault: a collision is still no key, and
-		// an exact name still outranks its case variant.
-		"a faulted value in a case collision": {
-			"{\"Person\":[{\"Id\":\"a\",\"ID\":\"\xff\",\"name\":\"A\",\"manager\":{\"_target_id\":\"a\"}}," +
-				"{\"id\":\"a\",\"name\":\"B\",\"manager\":{\"_target_id\":\"a\"}}]}",
-			[]string{"E_DATA_PARSE"},
-		},
-		"a faulted exact key beside its case variant": {
-			"{\"Person\":[{\"id\":\"\xff\",\"ID\":\"a\",\"name\":\"A\",\"manager\":{\"_target_id\":\"a\"}}," +
-				"{\"id\":\"a\",\"name\":\"B\",\"manager\":{\"_target_id\":\"a\"}}]}",
-			[]string{"E_DATA_PARSE"},
-		},
-		"a referrer to a key in a faulted collision": {
-			"{\"Person\":[{\"id\":\"a\",\"name\":\"A\",\"manager\":{\"_target_id\":\"t\"}}," +
-				"{\"Id\":\"t\",\"ID\":\"\xff\",\"name\":\"T\",\"manager\":{\"_target_id\":\"a\"}}]}",
-			[]string{"E_DATA_PARSE", "E_UNRESOLVED_REQUIRED"},
-		},
-		"a referrer to a case variant of a faulted key": {
-			"{\"Person\":[{\"id\":\"a\",\"name\":\"A\",\"manager\":{\"_target_id\":\"t\"}}," +
-				"{\"id\":\"t\xff\",\"ID\":\"t\",\"name\":\"T\",\"manager\":{\"_target_id\":\"a\"}}]}",
-			[]string{"E_DATA_PARSE", "E_UNRESOLVED_REQUIRED"},
-		},
 		"a validator's refusal and its edge": {
 			"{\"Person\":[{\"id\":\"a\",\"name\":\"A\",\"manager\":{\"_target_id\":\"m\"}}," +
 				"{\"id\":\"m\",\"manager\":{\"_target_id\":\"nobody\"}}]}",

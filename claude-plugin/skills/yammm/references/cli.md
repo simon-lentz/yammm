@@ -167,7 +167,7 @@ Builds a graph snapshot from one or more data files and persists it as a `.ys` f
 | ---- | ----------- |
 | `-o, --output` | Output path for the `.ys` file; required unless `--into` is given, which defaults it to the merged file |
 | `-m, --metadata` | Key=value metadata pairs (repeatable) |
-| `--timestamp` | Stamp the current time as `created_at` (breaks determinism) |
+| `--timestamp` | Stamp the current time, in UTC at second precision, as `created_at` (breaks determinism) |
 | `--indent` | Produce indented output |
 | `--into` | Existing `.ys` file to merge new data into. Its `created_at` and metadata are carried forward: `--timestamp` replaces the first, and `-m` overlays the second key by key |
 
@@ -194,7 +194,7 @@ yammm snapshot info output.ys
 
 Displays metadata about a `.ys` file: schema name, version, instance counts, integrity status, timestamps, custom metadata, and the header's attestation (the writer's validity claim, v0.15+).
 
-`--header-only` reads the header and the types table alone and reports the file's size, 0 when the argument is not a regular file. `--dir <path>` scans the `.ys` files of a directory that `snapshot.ScanDir`'s filtering admits, header-only. For one file, the text and `--json` modes render one structure, so a field one reports the other reports too, and absent `metadata` reads `none` in text and `{}` in JSON; under `--dir` a JSON entry carries the name, path, size, modification time and the header, `null` where it did not parse, where a text row names the file and its status, then the schema, version and `created_at` of a file that read or the first error of one that did not. Under `--json`, each `--dir` entry carries its result under `diagnostics` in the wire the diagnostic stream uses: `issues`, plus `limitReached` and `droppedCount` when the entry's issues were truncated. In text, a `warn` row names its first warning. A document that decodes and fails a structural check, such as an integrity mismatch, still has a summary: it prints beside the errors, in both modes, and the command exits 1.
+`--header-only` reads the header and the types table alone. The single-file modes and each `--dir` JSON entry report the file's size as its stat states it, and 0 when the argument is not a regular file, such as a pipe; a `--dir` text row states no size. `--dir <path>` scans the `.ys` files of a directory that `snapshot.ScanDir`'s filtering admits, header-only. For one file, the text and `--json` modes render one structure, so a field one reports the other reports too, and absent `metadata` reads `none` in text and `{}` in JSON; under `--dir` a JSON entry carries the name, path, size, modification time and the header, `null` where it did not parse, where a text row names the file and its status, then the schema, version and `created_at` of a file that read or the first error of one that did not. Under `--json`, each `--dir` entry carries its result under `diagnostics` in the wire the diagnostic stream uses: `issues`, plus `limitReached` and `droppedCount` when the entry's issues were truncated. In text, a `warn` row names its first warning. A document that decodes and fails a structural check, such as an integrity mismatch, still has a summary: it prints beside the errors, in both modes, and the command exits 1.
 
 ### snapshot update-metadata
 
@@ -203,7 +203,7 @@ yammm snapshot update-metadata --set env=prod --set version=3 output.ys
 yammm snapshot update-metadata --unset env output.ys
 ```
 
-Rewrites metadata on an existing `.ys` file. It reuses the snapshot body verbatim and recomputes only the integrity hash. It first reads the file whole, as `snapshot info` does, and refuses a document whose integrity hash or structure fails rather than sealing it under a fresh hash. There is no fallback: the command calls the strict primitive, so a document the fast path cannot rewrite is reported and the command exits non-zero rather than re-serializing. `created_at` keeps its text, and its JSON escapes are written anew.
+Rewrites metadata on an existing `.ys` file with `snapshot.UpdateMetadata`, which writes a new header and keeps every other byte. It reads the current metadata from the file's header with no size cap, so a header of any size is updated. A document whose integrity hash does not verify, or whose shape or header a reader refuses, is refused and the file is not written; the command exits non-zero. It does not check the body's instances, which `snapshot info` and `snapshot verify` do. `created_at` keeps its bytes as written.
 
 | Flag | Description |
 | ---- | ----------- |

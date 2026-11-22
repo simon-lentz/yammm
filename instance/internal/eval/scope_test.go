@@ -14,11 +14,6 @@ func TestEmptyScope(t *testing.T) {
 		_, found := scope.Lookup("anything")
 		assert.False(t, found)
 	})
-
-	t.Run("lookup_fold_returns_false", func(t *testing.T) {
-		_, found := scope.LookupFold("ANYTHING")
-		assert.False(t, found)
-	})
 }
 
 func TestMapScope_WithVar(t *testing.T) {
@@ -47,35 +42,6 @@ func TestMapScope_WithVar(t *testing.T) {
 		assert.Equal(t, 1, v1.Any())
 		assert.Equal(t, 2, v2.Any())
 	})
-}
-
-// A variable name never folds: LookupFold on a variable-only scope is the
-// exact lookup, whichever spelling reaches it.
-func TestMapScope_LookupFold(t *testing.T) {
-	scope := eval.EmptyScope().WithVar("UserName", "Alice")
-
-	tests := []struct {
-		name     string
-		lookup   string
-		expected string
-		found    bool
-	}{
-		{"exact", "UserName", "Alice", true},
-		{"lowercase", "username", "", false},
-		{"uppercase", "USERNAME", "", false},
-		{"mixed", "uSeRnAmE", "", false},
-		{"not_found", "other", "", false},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			val, found := scope.LookupFold(tt.lookup)
-			assert.Equal(t, tt.found, found)
-			if found {
-				assert.Equal(t, tt.expected, val.Any())
-			}
-		})
-	}
 }
 
 func TestPropertyScope(t *testing.T) {
@@ -127,67 +93,6 @@ func TestPropertyScopeFromMap(t *testing.T) {
 		assert.True(t, found)
 		assert.Equal(t, "Bob", val.Any())
 	})
-}
-
-func TestPropertyScope_LookupFold(t *testing.T) {
-	props := map[string]any{
-		"UserName": "Alice",
-		"WORKS_AT": "k",
-	}
-	scope := eval.PropertyScopeFromMap(props)
-
-	tests := []struct {
-		name     string
-		lookup   string
-		expected string
-		found    bool
-	}{
-		{"exact", "UserName", "Alice", true},
-		{"lowercase", "username", "Alice", true},
-		{"uppercase", "USERNAME", "Alice", true},
-		{"a relation by its name", "WORKS_AT", "k", true},
-		{"a relation by its field name", "works_at", "", false},
-		{"a relation in another casing", "Works_At", "", false},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			val, found := scope.LookupFold(tt.lookup)
-			assert.Equal(t, tt.found, found)
-			if found {
-				assert.Equal(t, tt.expected, val.Any())
-			}
-		})
-	}
-}
-
-// A variable of exactly the looked-up name shadows a property; a variable that
-// differs only in case does not, because variable names never fold while
-// property names always do.
-func TestPropertyScope_LookupFold_VariablePrecedence(t *testing.T) {
-	props := map[string]any{
-		"Name": "FromProps",
-	}
-
-	exact := eval.PropertyScopeFromMap(props).WithVar("name", "FromVar")
-	val, found := exact.LookupFold("name")
-	assert.True(t, found)
-	assert.Equal(t, "FromVar", val.Any())
-
-	differing := eval.PropertyScopeFromMap(props).WithVar("NAME", "FromVar")
-	val, found = differing.LookupFold("name")
-	assert.True(t, found)
-	assert.Equal(t, "FromProps", val.Any())
-}
-
-func TestPropertyScope_LookupFold_NotFound(t *testing.T) {
-	props := map[string]any{
-		"name": "Alice",
-	}
-	scope := eval.PropertyScopeFromMap(props)
-
-	_, found := scope.LookupFold("nonexistent")
-	assert.False(t, found)
 }
 
 // A $ variable names a member exactly: a relation by its declared name, and

@@ -9,6 +9,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/simon-lentz/yammm/cmd/yammm/internal/cli"
 	"github.com/simon-lentz/yammm/internal/raceskip"
@@ -72,7 +73,7 @@ func TestSnapshotSave_IntoCarriesAHeaderPastTheHeaderCap(t *testing.T) {
 		t.Fatalf("base save exit code = %d, want %d\nstderr:\n%s", code, cli.ExitOK, errOut)
 	}
 	before := statHeader(t, base)
-	if before.CreatedAt == "" {
+	if before.CreatedAt.IsZero() {
 		t.Fatal("the base snapshot has no created_at, so the assertion below is vacuous")
 	}
 
@@ -83,8 +84,8 @@ func TestSnapshotSave_IntoCarriesAHeaderPastTheHeaderCap(t *testing.T) {
 	}
 
 	after := statHeader(t, base)
-	if after.CreatedAt != before.CreatedAt {
-		t.Errorf("created_at = %q, want %q", after.CreatedAt, before.CreatedAt)
+	if !after.CreatedAt.Equal(before.CreatedAt) {
+		t.Errorf("created_at = %s, want %s", after.CreatedAt, before.CreatedAt)
 	}
 	if after.Metadata["env"] != "prod" || after.Metadata["big"] != big {
 		t.Errorf("metadata keys after the merge = %v, want big and env carried forward", slices.Sorted(maps.Keys(after.Metadata)))
@@ -148,7 +149,7 @@ func TestSnapshotSave_IntoCarriesTheHeaderForward(t *testing.T) {
 
 	base, more := saveInto(t)
 	before := readHeader(t, base)
-	if before.CreatedAt == "" {
+	if before.CreatedAt.IsZero() {
 		t.Fatal("the base snapshot has no created_at, so the assertion below is vacuous")
 	}
 
@@ -159,8 +160,8 @@ func TestSnapshotSave_IntoCarriesTheHeaderForward(t *testing.T) {
 	}
 
 	after := readHeader(t, base)
-	if after.CreatedAt != before.CreatedAt {
-		t.Errorf("created_at = %q, want %q — an in-place merge preserves it", after.CreatedAt, before.CreatedAt)
+	if !after.CreatedAt.Equal(before.CreatedAt) {
+		t.Errorf("created_at = %s, want %s — an in-place merge preserves it", after.CreatedAt, before.CreatedAt)
 	}
 	for key, want := range map[string]string{"env": "prod", "owner": "simon"} {
 		if got := after.Metadata[key]; got != want {
@@ -176,12 +177,11 @@ func TestSnapshotSave_IntoLetsFlagsOverride(t *testing.T) {
 	t.Parallel()
 
 	base, more := saveInto(t)
-	// The base is seeded with a timestamp yammm would never write, so a
+	// The base is seeded with a timestamp --timestamp would never write, so a
 	// --timestamp that failed to override is visible. Comparing two
 	// time.Now() values would not: both render at second precision, and two
 	// saves inside one second are equal without the flag doing anything.
-	const seeded = "2020-02-02T02:02:02.020202+02:00"
-	writeForeignSnapshot(t, base, seeded)
+	seeded := writeForeignSnapshot(t, base, "2020-02-02T02:02:02.020202+02:00")
 
 	code, _, errOut := executeCmdOutput(t, "snapshot", "save",
 		"--timestamp", "-m", "env=staging",
@@ -191,10 +191,10 @@ func TestSnapshotSave_IntoLetsFlagsOverride(t *testing.T) {
 	}
 
 	after := readHeader(t, base)
-	if after.CreatedAt == seeded {
-		t.Errorf("created_at = %q, unchanged — --timestamp must replace the carried value", after.CreatedAt)
+	if after.CreatedAt.Equal(seeded) {
+		t.Errorf("created_at = %s, unchanged — --timestamp must replace the carried value", after.CreatedAt)
 	}
-	if after.CreatedAt == "" {
+	if after.CreatedAt.IsZero() {
 		t.Error("created_at is empty — --timestamp must set one")
 	}
 	if got := after.Metadata["env"]; got != "staging" {
@@ -205,12 +205,10 @@ func TestSnapshotSave_IntoLetsFlagsOverride(t *testing.T) {
 	}
 }
 
-// TestSnapshotSave_IntoKeepsAForeignTimestampByte pins why the repair carries
-// bytes rather than a parsed time. yammm writes created_at at second precision,
-// so its own documents round-trip through a parse; a foreign header carrying
-// fractional seconds and an offset does not, and rewriting an operator's bytes
-// is the defect class this unit exists to remove.
-func TestSnapshotSave_IntoKeepsAForeignTimestampByte(t *testing.T) {
+// A merge carries the merged file's created_at as the time it states, written
+// as Marshal writes a time: its fraction and its offset survive, where
+// --timestamp writes whole seconds in UTC.
+func TestSnapshotSave_IntoKeepsAForeignTimestamp(t *testing.T) {
 	t.Parallel()
 
 	const foreign = "2026-01-01T12:00:00.123456+02:00"
@@ -218,30 +216,33 @@ func TestSnapshotSave_IntoKeepsAForeignTimestampByte(t *testing.T) {
 	base, more := saveInto(t)
 	writeForeignSnapshot(t, base, foreign)
 
-	if got := readHeader(t, base).CreatedAt; got != foreign {
-		t.Fatalf("fixture created_at = %q, want %q — the fixture itself is wrong", got, foreign)
-	}
-
 	code, _, errOut := executeCmdOutput(t, "snapshot", "save",
 		"testdata/valid.yammm", more, "--into", base)
 	if code != cli.ExitOK {
 		t.Fatalf("merge exit code = %d, want %d\nstderr:\n%s", code, cli.ExitOK, errOut)
 	}
 
-	if got := readHeader(t, base).CreatedAt; got != foreign {
-		t.Errorf("created_at = %q, want %q byte for byte — a parse-and-reformat loses the fraction and the offset",
-			got, foreign)
+	data, err := os.ReadFile(base)
+	if err != nil {
+		t.Fatalf("read snapshot: %v", err)
+	}
+	if !bytes.Contains(data, []byte(`"created_at":"`+foreign+`"`)) {
+		t.Errorf("created_at = %s, want %s with its fraction and its offset", readHeader(t, base).CreatedAt, foreign)
 	}
 }
 
-// writeForeignSnapshot rewrites the snapshot at path so its created_at is a
-// form yammm does not write, changing nothing else. Marshal computes the
-// integrity hash over the header it is given, so the document loads; patching
-// the bytes would not.
-func writeForeignSnapshot(t *testing.T, path, createdAt string) {
+// writeForeignSnapshot rewrites the snapshot at path so its created_at is
+// createdAt, a form --timestamp does not write, changing nothing else, and
+// returns that time. Marshal computes the integrity hash over the header it is
+// given, so the document loads; patching the bytes would not.
+func writeForeignSnapshot(t *testing.T, path, createdAt string) time.Time {
 	t.Helper()
 	ctx := context.Background()
 
+	stamp, err := time.Parse(time.RFC3339Nano, createdAt)
+	if err != nil {
+		t.Fatalf("parse %q: %v", createdAt, err)
+	}
 	s, schemaResult := schema.Load(ctx, mustAbs(t, "testdata/valid.yammm"))
 	if err := schemaResult.Err(); err != nil {
 		t.Fatalf("load schema: %v", err)
@@ -256,7 +257,7 @@ func writeForeignSnapshot(t *testing.T, path, createdAt string) {
 
 	// The metadata is carried too: a fixture that quietly dropped it would
 	// make the overlay assertions pass or fail for the wrong reason.
-	opts := []snapshot.Option{snapshot.WithCreatedAtFrom(&snapshot.Header{CreatedAt: createdAt})}
+	opts := []snapshot.Option{snapshot.WithCreatedAt(stamp)}
 	if len(header.Metadata) > 0 {
 		opts = append(opts, snapshot.WithMetadata(header.Metadata))
 	}
@@ -268,6 +269,7 @@ func writeForeignSnapshot(t *testing.T, path, createdAt string) {
 	if err := os.WriteFile(path, data, 0o600); err != nil {
 		t.Fatalf("write snapshot: %v", err)
 	}
+	return stamp
 }
 
 func mustAbs(t *testing.T, path string) string {

@@ -405,47 +405,6 @@ func TestValidateInvariant_InheritedProperty(t *testing.T) {
 	assert.False(t, collector.HasErrors(), "no errors expected for inherited property reference")
 }
 
-// TestValidateInvariant_CaseInsensitive verifies that property references in
-// invariants are resolved case-insensitively, matching the collation behavior.
-func TestValidateInvariant_CaseInsensitive(t *testing.T) {
-	t.Parallel()
-
-	model := &schema.TestModel{
-		Name: "test",
-		Types: []*schema.TestTypeDecl{
-			{
-				Name: "Person",
-				Properties: []*schema.TestPropertyDecl{
-					{
-						Name:         "name",
-						Constraint:   schema.TestNewStringConstraint(),
-						IsPrimaryKey: true,
-					},
-				},
-				Invariants: []*schema.TestInvariantDecl{
-					{
-						Name: "case_check",
-						// Name != "" (uppercase N, property declared lowercase)
-						Expr: expr.SExpr{
-							expr.Op("!="),
-							expr.SExpr{expr.Op("p"), &expr.Literal{Val: "Name"}},
-							&expr.Literal{Val: ""},
-						},
-					},
-				},
-			},
-		},
-	}
-
-	collector := diag.NewCollector(0)
-	srcID := sourceID(t, "case_insensitive.yammm")
-
-	s := schema.TestCompleteModel(model, srcID, collector, nil, nil)
-
-	require.False(t, s.IsZero(), "schema should compile")
-	assert.False(t, collector.HasErrors(), "no errors expected for case-insensitive property reference")
-}
-
 // TestValidateInvariant_RelationNameValid verifies that invariants can reference
 // composition relation names directly (e.g., ITEMS -> Len > 0).
 func TestValidateInvariant_RelationNameValid(t *testing.T) {

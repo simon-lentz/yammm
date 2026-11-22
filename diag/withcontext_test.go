@@ -23,7 +23,7 @@ import (
 var (
 	testCodeError       = diag.E_SYNTAX
 	testCodeDuplicatePK = diag.E_DUPLICATE_PK
-	testCodeWarning     = diag.W_UPDATE_METADATA_FALLBACK
+	testCodeWarning     = diag.W_SNAPSHOT_PATH_EXTENSION
 	testCodeFatal       = diag.E_INTERNAL
 )
 

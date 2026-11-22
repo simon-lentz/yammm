@@ -134,7 +134,7 @@ func TestSnapshotInfo_HeaderOnlyReportsFileSize(t *testing.T) {
 	}
 }
 
-// The full mode counts the bytes it read, in both renderings.
+// The full mode reports the regular file's size, in both renderings.
 func TestSnapshotInfo_FullModeReportsFileSize(t *testing.T) {
 	t.Parallel()
 

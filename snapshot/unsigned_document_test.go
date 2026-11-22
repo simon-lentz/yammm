@@ -17,8 +17,7 @@ import (
 // A header that holds no hash attests nothing, and every writer stores the
 // hash it computed, so each surface that checks the hash refuses an empty, a
 // null and an absent integrity_hash as one mismatch, which says so. A caller
-// that skips the check reads the document, and UpdateMetadata, which trusts the
-// body, signs it.
+// that skips the check reads the document.
 func TestRead_AHeaderThatHoldsNoHashIsAMismatch(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()
@@ -87,14 +86,6 @@ func TestRead_AHeaderThatHoldsNoHashIsAMismatch(t *testing.T) {
 				}
 				if vres := snapshot.Verify(ctx, unsigned, s, skip); vres.HasErrors() {
 					t.Errorf("Verify skipping the check: %s", vres)
-				}
-
-				resigned, ures := snapshot.UpdateMetadata(ctx, unsigned, map[string]string{"k": "v"})
-				if ures.HasErrors() {
-					t.Fatalf("UpdateMetadata: %s", ures)
-				}
-				if vres := snapshot.Verify(ctx, resigned, s); vres.HasErrors() {
-					t.Errorf("Verify after UpdateMetadata: %s", vres)
 				}
 			})
 		}

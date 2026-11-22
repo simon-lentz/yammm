@@ -244,12 +244,8 @@ func (e *Evaluator) evalVar(children []expr.Expression, scope Scope) (any, error
 	return val.Any(), nil
 }
 
-// evalProperty reads a bare name within the current scope by [Scope.LookupFold]:
-// a property in any ASCII casing, a relation by its name.
-//
-// Safety: Schema validation prevents types from having multiple properties
-// that fold to the same lowercase name (e.g., "Name" and "name" cannot coexist),
-// so LookupFold always returns a deterministic result.
+// evalProperty reads a bare name within the current scope by [Scope.Lookup],
+// as a $ variable reads.
 //
 // Missing optional properties evaluate to nil, enabling patterns like:
 //
@@ -265,7 +261,7 @@ func (e *Evaluator) evalProperty(children []expr.Expression, scope Scope) (any, 
 		return nil, errors.New("property name must be a string literal")
 	}
 
-	val, found := scope.LookupFold(name)
+	val, found := scope.Lookup(name)
 	if !found {
 		return nil, nil //nolint:nilnil // missing property → nil enables lest/then patterns
 	}
@@ -295,8 +291,8 @@ func (e *Evaluator) evalMember(ctx context.Context, children []expr.Expression, 
 
 // accessMember reads name from obj. A map a member is read from is an
 // immutable.Properties — a stored value unwraps to one and every scope wraps
-// its map — and it reads by [readMember], the rule a bare name reads by. Nil
-// reads nil, and any other value is an error.
+// its map — and it reads the member by its declared name, as a bare name does.
+// Nil reads nil, and any other value is an error.
 func (e *Evaluator) accessMember(obj any, name string) (any, error) {
 	if obj == nil {
 		return nil, nil //nolint:nilnil // member access on nil returns nil
@@ -305,7 +301,7 @@ func (e *Evaluator) accessMember(obj any, name string) (any, error) {
 	if !ok {
 		return nil, fmt.Errorf("cannot access member on %T", obj)
 	}
-	if val, exists := readMember(m, name); exists {
+	if val, exists := m.Get(name); exists {
 		return val.Any(), nil
 	}
 	return nil, nil //nolint:nilnil // missing key returns nil

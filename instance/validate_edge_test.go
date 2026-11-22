@@ -258,27 +258,6 @@ func TestValidateEdges_UnknownField(t *testing.T) {
 	assert.Contains(t, result.String(), "unknown field")
 }
 
-func TestValidateEdges_UnknownField_Allowed(t *testing.T) {
-	s := fkSchema(t, true, false)
-
-	validator := instance.NewValidator(s, instance.WithAllowUnknownFields(true))
-
-	raw := instance.RawInstance{
-		Properties: map[string]any{
-			"id": "1",
-			"employer": map[string]any{
-				"_target_id":    "42",
-				"unknown_field": "value", // Should be ignored
-			},
-		},
-	}
-
-	valid, result := validator.ValidateOne(t.Context(), "Person", raw)
-
-	require.True(t, result.OK())
-	require.False(t, valid.IsZero())
-}
-
 func TestValidateEdges_EdgePropertyValidation(t *testing.T) {
 	s, result := schema.LoadString(t.Context(), `schema "test"
 type Company {
@@ -530,29 +509,12 @@ func TestValidateEdges_PartialCompositeFK(t *testing.T) {
 }
 
 // TestValidateEdges_FKFieldCase verifies that FK field matching follows the
-// one fold rule every input key follows: a case variant matches under the
-// default mode and does not under WithStrictPropertyNames.
+// rule every input key follows: the declared spelling alone matches.
 func TestValidateEdges_FKFieldCase(t *testing.T) {
 	s := fkSchema(t, true, false)
 
-	t.Run("case_variant_matches_without_strict_mode", func(t *testing.T) {
+	t.Run("wrong_case_fails", func(t *testing.T) {
 		validator := instance.NewValidator(s)
-
-		raw := instance.RawInstance{
-			Properties: map[string]any{
-				"id":       "1",
-				"employer": map[string]any{"_target_ID": "42"},
-			},
-		}
-
-		valid, result := validator.ValidateOne(t.Context(), "Person", raw)
-
-		require.True(t, result.OK(), result.String())
-		require.False(t, valid.IsZero(), "_target_ID folds to _target_id under the default mode")
-	})
-
-	t.Run("wrong_case_fails_with_strict_mode", func(t *testing.T) {
-		validator := instance.NewValidator(s, instance.WithStrictPropertyNames(true))
 
 		raw := instance.RawInstance{
 			Properties: map[string]any{

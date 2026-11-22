@@ -3,7 +3,6 @@ package schema
 import (
 	"iter"
 	"slices"
-	"strings"
 
 	"github.com/simon-lentz/yammm/location"
 )
@@ -43,18 +42,17 @@ func (r Relation) IsZero() bool { return r.relationState == nil }
 // relationState is the record a [Relation] names.
 type relationState struct {
 	kind       RelationKind
-	name       string              // DSL name (e.g., "OWNER")
-	fieldName  string              // lower-case name, cached at completion
-	target     TypeRef             // syntactic reference
-	targetID   TypeID              // resolved identity
-	span       location.Span       // source location
-	doc        string              // documentation comment
-	optional   bool                // forward multiplicity: optional?
-	many       bool                // forward multiplicity: many?
-	owner      string              // declaring type name
-	properties []Property          // edge properties (associations only)
-	propByFold map[string]Property // lowercased name → property, built at seal
-	sealed     bool                // true after completion; prevents further mutation
+	name       string        // DSL name (e.g., "OWNER")
+	fieldName  string        // lower-case name, cached at completion
+	target     TypeRef       // syntactic reference
+	targetID   TypeID        // resolved identity
+	span       location.Span // source location
+	doc        string        // documentation comment
+	optional   bool          // forward multiplicity: optional?
+	many       bool          // forward multiplicity: many?
+	owner      string        // declaring type name
+	properties []Property    // edge properties (associations only)
+	sealed     bool          // true after completion; prevents further mutation
 }
 
 // newRelation creates a new Relation. This is primarily for internal use;
@@ -134,10 +132,6 @@ func (r Relation) seal() {
 	if r.sealed {
 		panic("relation: sealed twice")
 	}
-	r.propByFold = make(map[string]Property, len(r.properties))
-	for _, p := range r.properties {
-		r.propByFold[strings.ToLower(p.name)] = p
-	}
 	r.sealed = true
 }
 
@@ -177,7 +171,7 @@ func (r Relation) Properties() iter.Seq[Property] {
 // Property returns the edge property with the given name, if it exists.
 //
 // Uses linear search. Edge properties are typically few (0-3), so O(n)
-// lookup is acceptable and avoids a second index beside propByFold.
+// lookup is acceptable and needs no index.
 func (r Relation) Property(name string) (Property, bool) {
 	for _, p := range r.properties {
 		if p.name == name {
@@ -185,14 +179,6 @@ func (r Relation) Property(name string) (Property, bool) {
 		}
 	}
 	return Property{}, false
-}
-
-// PropertyFold returns the edge property whose lowercased name is lower, if
-// one exists. The caller lowercases the input key; this is the case-folded
-// half of [Relation.Property], answered from an index built at seal.
-func (r Relation) PropertyFold(lower string) (Property, bool) {
-	p, ok := r.propByFold[lower]
-	return p, ok
 }
 
 // IsAssociation reports whether this relation is an association.

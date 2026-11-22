@@ -92,8 +92,7 @@ func TestDocument_WritesEveryShapeWhereTheFormatHoldsIt(t *testing.T) {
 	t.Parallel()
 	s, parts := documentShapes(t)
 	header := `{"version":` + strconv.Itoa(snappartstest.WrittenVersion(t, s)) +
-		`,"schema_name":"shapes","schema_source":` + strconv.Quote(s.SourceID().String()) +
-		`,"schema_hash":` + strconv.Quote(schema.StructuralHash(s)) +
+		`,"schema_name":"shapes","schema_hash":` + strconv.Quote(schema.StructuralHash(s)) +
 		`,"schema_hash_algorithm":` + strconv.Itoa(schema.StructuralHashVersion) +
 		`,"integrity_hash":"","features":[],"attestation":{"values":true,"associations":false}}`
 	want := `{"yammm_snapshot":` + header +

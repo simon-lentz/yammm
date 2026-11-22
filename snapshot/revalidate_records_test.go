@@ -149,22 +149,22 @@ func TestLoad_RevalidationJudgesARecordAsTheValidatorJudgesItsEdge(t *testing.T)
 	}{
 		"under a (one) association": {
 			from: sbAbsent, to: sbLost("p2", "EMPLOYER", 1, `["c9"]`, `{"since":9999}`), root: "p2",
-			raw: map[string]any{"id": "p2", "CLIENTS": []any{}, "EMPLOYER": map[string]any{"_target_id": "c9", "since": json.Number("9999")}},
+			raw: map[string]any{"id": "p2", "clients": []any{}, "employer": map[string]any{"_target_id": "c9", "since": json.Number("9999")}},
 		},
 		"under a (many) association": {
 			from: sbKnowsLost, to: strings.Replace(sbKnowsLost, `{"note":"m"}`, `{"note":7}`, 1), root: "p2",
-			raw: map[string]any{"id": "p2", "CLIENTS": []any{}, "KNOWS": []any{map[string]any{"_target_id": "p8", "note": json.Number("7")}}},
+			raw: map[string]any{"id": "p2", "clients": []any{}, "knows": []any{map[string]any{"_target_id": "p8", "note": json.Number("7")}}},
 		},
 		"the second of two records under a (many) association": {
 			from: sbKnowsLost, to: sbKnowsLost + `,` + sbLost("p2", "KNOWS", 4, `["p7"]`, `{"note":7}`), root: "p2",
-			raw: map[string]any{"id": "p2", "CLIENTS": []any{}, "KNOWS": []any{
+			raw: map[string]any{"id": "p2", "clients": []any{}, "knows": []any{
 				map[string]any{"_target_id": "p8", "note": "m"},
 				map[string]any{"_target_id": "p7", "note": json.Number("7")},
 			}},
 		},
 		"beside an edge of the association": {
 			from: sbUnresolved, to: sbUnresolved + sbLost("p1", "KNOWS", 4, `["p8"]`, `{"note":7}`) + `,`, root: "p1",
-			raw: map[string]any{"id": "p1", "KNOWS": []any{
+			raw: map[string]any{"id": "p1", "knows": []any{
 				map[string]any{"_target_id": "p2", "note": "n"},
 				map[string]any{"_target_id": "p8", "note": json.Number("7")},
 			}},
@@ -273,8 +273,8 @@ func gatedHashedDoc(t *testing.T) (schema.Schema, string) {
 	}{
 		{"B", map[string]any{"id": "b1"}},
 		{"A", map[string]any{
-			"id": "a1", "KNOWS": []any{map[string]any{"_target_id": "b9", "since": 1}},
-			"BEST": map[string]any{"_target_id": "b9", "since": 1},
+			"id": "a1", "knows": []any{map[string]any{"_target_id": "b9", "since": 1}},
+			"best": map[string]any{"_target_id": "b9", "since": 1},
 		}},
 	} {
 		vi, res := v.ValidateOne(t.Context(), c.typ, instance.RawInstance{Properties: c.props})
@@ -467,7 +467,7 @@ func TestLoad_RevalidationFindsARecordAtItsSourceKey(t *testing.T) {
 	}
 	vi, res := instance.NewValidator(s).ValidateOne(t.Context(), "Event", instance.RawInstance{Properties: map[string]any{
 		"at":   "2024-01-01T00:00:00Z",
-		"NEXT": map[string]any{"_target_at": "2030-01-01T00:00:00Z", "weight": 5},
+		"next": map[string]any{"_target_at": "2030-01-01T00:00:00Z", "weight": 5},
 	}})
 	if res.HasErrors() {
 		t.Fatalf("validate: %s", res)

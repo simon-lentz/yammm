@@ -6,11 +6,9 @@ package instance
 // property and relation values from the input source (typically JSON) and optional
 // provenance information for error reporting.
 type RawInstance struct {
-	// Properties contains the raw member values keyed by name: each property's,
-	// and each relation's under its field name.
-	// Property names may use any casing by default; the validator normalizes
-	// them. Under [WithStrictPropertyNames] a name that differs in case is not
-	// matched.
+	// Properties contains the raw member values keyed by name: each property's
+	// under its declared name, and each relation's under its field name. A key
+	// spelled in any other case is an unknown field.
 	Properties map[string]any
 
 	// Provenance optionally captures source location metadata.

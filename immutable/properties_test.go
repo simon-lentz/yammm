@@ -2,7 +2,6 @@ package immutable
 
 import (
 	"slices"
-	"strings"
 	"sync"
 	"testing"
 )
@@ -51,9 +50,6 @@ func TestProperties_NilAndEmpty(t *testing.T) {
 		if _, ok := tt.p.Get("anything"); ok {
 			t.Errorf("%s: Get found a value", name)
 		}
-		if _, ok := tt.p.GetFold("ANYTHING"); ok {
-			t.Errorf("%s: GetFold found a value", name)
-		}
 		if got := IsNilContainer(tt.p); got != tt.wantNil {
 			t.Errorf("%s: IsNilContainer = %v, want %v", name, got, tt.wantNil)
 		}
@@ -66,72 +62,6 @@ func TestProperties_NilAndEmpty(t *testing.T) {
 		for range tt.p.All() {
 			t.Errorf("%s: All yielded a pair", name)
 		}
-	}
-}
-
-func TestProperties_GetFold_CaseInsensitive(t *testing.T) {
-	p := WrapProperties(map[string]any{"UserName": "Alice"})
-
-	for _, name := range []string{"UserName", "username", "USERNAME", "uSeRnAmE"} {
-		t.Run(name, func(t *testing.T) {
-			v, ok := p.GetFold(name)
-			if !ok {
-				t.Fatalf("GetFold(%q) found nothing", name)
-			}
-			wantString(t, v, "Alice")
-		})
-	}
-}
-
-func TestProperties_GetFold_ASCIIOnly(t *testing.T) {
-	p := WrapProperties(map[string]any{"café": "value"})
-
-	if _, ok := p.GetFold("CAFÉ"); ok {
-		t.Error("GetFold folded a non-ASCII letter")
-	}
-	v, ok := p.GetFold("CAFé")
-	if !ok {
-		t.Fatal("GetFold(CAFé) found nothing; the ASCII letters fold")
-	}
-	wantString(t, v, "value")
-}
-
-func TestProperties_GetFold_NotFound(t *testing.T) {
-	p := WrapProperties(map[string]any{"name": "value"})
-
-	if _, ok := p.GetFold("nonexistent"); ok {
-		t.Error("GetFold found a name the map does not hold")
-	}
-}
-
-// When several names fold to one, the alphabetically first wins, whichever
-// spelling asks.
-func TestProperties_GetFold_CollisionDeterminism(t *testing.T) {
-	p := WrapProperties(map[string]any{
-		"Name": "name-value",
-		"NAME": "all-uppercase-value",
-		"NaMe": "mixed-case-value",
-	})
-
-	for _, query := range []string{"nAmE", "namE", "nAME", "name"} {
-		v, ok := p.GetFold(query)
-		if !ok {
-			t.Fatalf("GetFold(%q) found nothing", query)
-		}
-		wantString(t, v, "all-uppercase-value")
-	}
-}
-
-// An exact match wins over a folded one.
-func TestProperties_GetFold_ExactMatchPriority(t *testing.T) {
-	p := WrapProperties(map[string]any{"NAME": "uppercase", "Name": "mixed"})
-
-	for query, want := range map[string]string{"NAME": "uppercase", "Name": "mixed", "name": "uppercase"} {
-		v, ok := p.GetFold(query)
-		if !ok {
-			t.Fatalf("GetFold(%q) found nothing", query)
-		}
-		wantString(t, v, want)
 	}
 }
 
@@ -248,79 +178,6 @@ func TestProperties_CloneOfAnEmptyMapIsMutable(t *testing.T) {
 	cloned["x"] = 1
 }
 
-// The sorted names and folded index are computed once and shared by every
-// copy: a GetFold after the first allocates nothing, at the top and nested.
-func TestProperties_ComputesTheFoldedViewOnce(t *testing.T) {
-	src := map[string]any{}
-	for i := range 40 {
-		src[string(rune('A'+i%26))+string(rune('a'+i/26))] = int64(i)
-	}
-	p := WrapProperties(src)
-	if v, ok := p.GetFold("aa"); !ok || v.Any() != int64(0) {
-		t.Fatalf("GetFold(aa) = %v, %v; want 0, true", v.Any(), ok)
-	}
-	if allocs := testing.AllocsPerRun(100, func() { _, _ = p.GetFold("zz") }); allocs != 0 {
-		t.Errorf("GetFold allocates %v per call after the first, want 0", allocs)
-	}
-	shared := p
-	if allocs := testing.AllocsPerRun(100, func() { _, _ = shared.GetFold("zz") }); allocs != 0 {
-		t.Errorf("GetFold on a copy allocates %v per call, want 0", allocs)
-	}
-
-	outer := WrapProperties(map[string]any{"outer": src})
-	inner, _ := outer.Get("outer")
-	ip := inner.Any().(Properties)
-	_, _ = ip.GetFold("aa")
-	if allocs := testing.AllocsPerRun(100, func() { _, _ = ip.GetFold("zz") }); allocs != 0 {
-		t.Errorf("GetFold on a nested Properties allocates %v per call after the first, want 0", allocs)
-	}
-}
-
-// TestProperties_ASortedReadBuildsNoFoldedIndex holds a sorted read to the
-// names alone: the folded index waits for a GetFold that misses the exact name.
-func TestProperties_ASortedReadBuildsNoFoldedIndex(t *testing.T) {
-	p := WrapProperties(map[string]any{"b": int64(2), "A": int64(1)})
-	for range p.All() {
-	}
-	if _, ok := p.GetFold("b"); !ok {
-		t.Fatal("GetFold(b) found nothing")
-	}
-	if p.view.foldedIndex != nil {
-		t.Fatalf("after All and an exact GetFold, the folded index is %v, want none", p.view.foldedIndex)
-	}
-	if _, ok := p.GetFold("a"); !ok || p.view.foldedIndex == nil {
-		t.Errorf("GetFold(a) = %v with folded index %v, want a hit that builds it", ok, p.view.foldedIndex)
-	}
-}
-
-// TestProperties_AFoldedMissAllocatesNothing holds a GetFold that misses the
-// exact name to no allocation once the index is built, for a name of up to 64
-// bytes, capitals or not.
-func TestProperties_AFoldedMissAllocatesNothing(t *testing.T) {
-	p := WrapProperties(map[string]any{"Name": int64(1)})
-	_, _ = p.GetFold("name")
-	for _, q := range []string{"NAME", strings.Repeat("Q", 64), strings.Repeat("q", 64), strings.Repeat("q", 33)} {
-		if allocs := testing.AllocsPerRun(100, func() { _, _ = p.GetFold(q) }); allocs != 0 {
-			t.Errorf("GetFold(%d bytes) allocates %v per call, want 0", len(q), allocs)
-		}
-	}
-}
-
-// foldSink keeps toLowerASCII's answer live for an allocation test.
-var foldSink string
-
-// TestToLowerASCII_ReturnsALowercaseNameAsIs holds the folded index's build to
-// one copy per name that holds a capital: a lowercase name is used as given.
-func TestToLowerASCII_ReturnsALowercaseNameAsIs(t *testing.T) {
-	name := strings.Repeat("q", 40)
-	if allocs := testing.AllocsPerRun(100, func() { foldSink = toLowerASCII(name) }); allocs != 0 {
-		t.Errorf("toLowerASCII of a lowercase name allocates %v per call, want 0", allocs)
-	}
-	if got := toLowerASCII("aBc[Z"); got != "abc[z" {
-		t.Errorf("toLowerASCII(aBc[Z) = %q, want abc[z", got)
-	}
-}
-
 // The first computation may race between goroutines; every caller must see
 // one complete view. Run under -race.
 func TestProperties_FirstUseIsSafeConcurrently(t *testing.T) {
@@ -328,9 +185,6 @@ func TestProperties_FirstUseIsSafeConcurrently(t *testing.T) {
 	var wg sync.WaitGroup
 	for range 16 {
 		wg.Go(func() {
-			if v, ok := p.GetFold("gamma"); !ok || v.Any() != int64(3) {
-				t.Errorf("GetFold(gamma) = %v, %v; want 3, true", v.Any(), ok)
-			}
 			if got := slices.Collect(p.Keys()); !slices.Equal(got, []string{"Alpha", "GAMMA", "beta"}) {
 				t.Errorf("Keys() = %v, want sorted", got)
 			}

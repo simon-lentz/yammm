@@ -40,7 +40,7 @@ type CodeRules struct {
 // that names no code in rules, and returns how many names it read.
 //
 // A code name is an E_ or W_ word in capitals, bare or qualified as
-// diag.W_SNAPSHOT_VALUE_DROPPED, or the capitals that open a longer word, as
+// diag.W_SNAPSHOT_PATH_EXTENSION, or the capitals that open a longer word, as
 // in E_TYPE_MISMATCHes. A name that ends in an underscore and is followed by
 // an asterisk, as in E_SNAPSHOT_*, cites a family and must be the prefix of at
 // least one code. The names are

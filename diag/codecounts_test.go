@@ -9,19 +9,19 @@ import "testing"
 func TestResult_CodeCounts_SeenBasedUnderTruncation(t *testing.T) {
 	c := NewCollector(1)
 	c.Collect(NewIssue(Warning, W_ANNOTATION_SHADOWED, "stored").Build())
-	c.Collect(NewIssue(Warning, W_UPDATE_METADATA_FALLBACK, "dropped").Build())
+	c.Collect(NewIssue(Warning, W_SNAPSHOT_PATH_EXTENSION, "dropped").Build())
 	r := c.Result()
 
-	if r.HasCode(W_UPDATE_METADATA_FALLBACK) {
+	if r.HasCode(W_SNAPSHOT_PATH_EXTENSION) {
 		t.Fatal("setup: the second code must have been dropped past the limit")
 	}
-	if got := r.CodeCounts(Warning)[W_UPDATE_METADATA_FALLBACK]; got != 1 {
+	if got := r.CodeCounts(Warning)[W_SNAPSHOT_PATH_EXTENSION]; got != 1 {
 		t.Errorf("CodeCounts(Warning)[dropped code] = %d; want 1", got)
 	}
 	if got := r.CodeCounts(Warning)[W_ANNOTATION_SHADOWED]; got != 1 {
 		t.Errorf("CodeCounts(Warning)[stored code] = %d; want 1", got)
 	}
-	if got := r.CodeCounts(Error)[W_UPDATE_METADATA_FALLBACK]; got != 0 {
+	if got := r.CodeCounts(Error)[W_SNAPSHOT_PATH_EXTENSION]; got != 0 {
 		t.Errorf("CodeCounts(Error)[a warning's code] = %d; want 0", got)
 	}
 }

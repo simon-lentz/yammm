@@ -152,20 +152,19 @@ The all-or-nothing contract is unchanged: any error still yields a zero schema.
 | `E_PART_TYPE_DIRECT` | Attempt to directly instantiate a part type, an empty batch under its name included |
 | `E_TYPE_MISMATCH` | Value has wrong type for its property |
 | `E_MISSING_REQUIRED` | Required property is missing |
-| `E_UNKNOWN_FIELD` | Unexpected field in instance data |
+| `E_UNKNOWN_FIELD` | Unexpected field in instance data, a member's name spelled in another case included |
 | `E_CONSTRAINT_FAIL` | A value fails its declared constraint |
 | `E_INVARIANT_FAIL` | Invariant expression evaluated to false |
 | `E_EVAL_ERROR` | Error during expression evaluation |
 | `E_MISSING_FK_TARGET` | An edge object holds none of its target's `_target_` foreign-key fields |
 | `E_PARTIAL_COMPOSITE_FK` | Partial composite foreign key |
-| `E_UNKNOWN_EDGE_FIELD` | Unknown field in edge data |
+| `E_UNKNOWN_EDGE_FIELD` | Unknown field in edge data, a foreign-key field or edge property spelled in another case included |
 | `E_DUPLICATE_EDGE` | A `(many)` association lists one target key twice for one source, where no other check refused either listing |
 | `E_EDGE_SHAPE_MISMATCH` | An edge's or a composition's value has a shape its relation does not take |
 | `E_UNRESOLVED_REQUIRED_COMPOSITION` | Required composition is unresolved |
 | `E_COMPOSITION_DEPTH_EXCEEDED` | Composed nesting deeper than the bound (32) |
 | `E_INVALID_TYPE_TAG` | A JSON top-level key is not a type name |
 | `E_DATA_PARSE` | A data file `yammm check` or `yammm snapshot save` reads is not well formed, is not one object, holds a type name whose value is not an array of objects, states one member name twice in one object, holds a string that is not valid UTF-8 or holds a `\u` escape that is half of no surrogate pair, or nests deeper than the decoder's 10,000-level limit |
-| `E_CASE_FOLD_COLLISION` | Input fields collide after case-folding |
 
 ### Graph
 
@@ -184,7 +183,7 @@ The all-or-nothing contract is unchanged: any error still yields a zero schema.
 
 | Code | Meaning |
 | ---- | ------- |
-| `E_SNAPSHOT_MALFORMED` | `.ys` file not valid JSON, a wrong outer shape (the four top-level keys in order, each once and none null, nothing after them, and no object repeating a member name or spelling a declared one in another case), or content a structural rule refuses, such as an undeclared name, a stored key its key properties contradict, a key or target key component `graph.ParseKey` cannot read back, a `Timestamp`, `Date` or `UUID` key component spelled other than the text its kind stores (at a stored key, a target key, a record's source key, or a duplicate's key or conflict key), a target key of the wrong arity, an undocumented reason, a record contradicting itself, records `graph.Add` would not derive (two edges or `target_missing` records of one source naming one target under a `(many)` association among them), a duplicate with no conflict or another one, a duplicate stating a parent or a relation, a string holding invalid UTF-8 or half a surrogate pair, or a header past `MaxHeaderSize`; from `snapshot.Marshal`, an indent that is not JSON whitespace, a metadata key or value that is not valid UTF-8, or a provenance source name or path that is not valid UTF-8; from `snapshot.UpdateMetadata`, such metadata too, or a document whose first byte is not `{` |
+| `E_SNAPSHOT_MALFORMED` | `.ys` file not valid JSON, a wrong outer shape (the four top-level keys in order, each once and none null, nothing after them, and no object repeating a member name or spelling a declared one in another case), or content a structural rule refuses, such as an undeclared name, a stored key its key properties contradict, a key or target key component `graph.ParseKey` cannot read back, a `Timestamp`, `Date` or `UUID` key component spelled other than the text its kind stores (at a stored key, a target key, a record's source key, or a duplicate's key or conflict key), a target key of the wrong arity, an undocumented reason, a record contradicting itself, records `graph.Add` would not derive (two edges or `target_missing` records of one source naming one target under a `(many)` association among them), a duplicate with no conflict or another one, a duplicate stating a parent or a relation, a string holding invalid UTF-8 or half a surrogate pair, a `created_at` that is not an RFC 3339 time or that states a leap second or the zero instant, or a header past `MaxHeaderSize` where `snapshot.ReadHeader` reads; from `snapshot.Marshal`, an indent that is not JSON whitespace, a metadata key or value that is not valid UTF-8, a provenance source name or path that is not valid UTF-8, or a `WithCreatedAt` time with no RFC 3339 form; from `snapshot.UpdateMetadata`, such metadata too |
 | `E_SNAPSHOT_UNSUPPORTED_VERSION` | Format version not recognized |
 | `E_SNAPSHOT_UNSUPPORTED_FEATURE` | Unrecognized feature flag in header |
 | `E_SNAPSHOT_INCOMPATIBLE_SCHEMA` | Schema structural hash mismatch |
@@ -193,15 +192,12 @@ The all-or-nothing contract is unchanged: any error still yields a zero schema.
 | `E_SNAPSHOT_DANGLING_REFERENCE` | An edge target, a duplicate's conflict, or an unresolved record's source names no root instance; none for an address a refused unit states |
 | `E_SNAPSHOT_INVALID_COMPOSED` | Composed child carries edges, or composed children stand under a name the parent's type does not declare as a composition |
 | `E_SNAPSHOT_INVALID_ROOT` | An instances group, empty or not, or a duplicate record names a type that cannot be a root: abstract, part, or no primary key |
-| `W_SNAPSHOT_VALUE_DROPPED` | A write path held a value it could not write at that position and left it out |
 | `E_SNAPSHOT_COMPOSED_ON_DUPLICATE` | Duplicate record has composed children |
 | `E_SNAPSHOT_EDGES_ON_DUPLICATE` | Duplicate record has edges |
 | `E_SNAPSHOT_DEPTH_EXCEEDED` | Composed nesting exceeds depth limit (32) |
-| `E_SNAPSHOT_INTEGRITY_MISMATCH` | Integrity hash doesn't match content, or is empty, null or absent |
+| `E_SNAPSHOT_INTEGRITY_MISMATCH` | Integrity hash doesn't match content, or is empty, null or absent; `snapshot.UpdateMetadata` refuses such a document too |
 | `E_SNAPSHOT_UNSUPPORTED_HASH_ALGORITHM` | Schema hash algorithm not recognized — Warning from `ReadHeader` (so `ScanDir`), Error from every other surface (v0.15+) |
 | `E_SNAPSHOT_IO` | A file that fails to open during `snapshot.ScanDir`, a directory `yammm snapshot info --dir` fails to read (v0.3+), or a reader `snapshot.ReadHeader` reads failing with an error that is not a truncation, Fatal (unreleased; on the line after v0.21.0, not in v0.21.1) |
-| `E_UPDATE_METADATA_BODY_OFFSET` | `snapshot.UpdateMetadata` body-offset tracker could not resolve the reused-body byte range (v0.3+) |
-| `W_UPDATE_METADATA_FALLBACK` | `snapshot.UpdateMetadataOrReMarshal` fell back from the fast path to `Unmarshal + Marshal` (Warning, v0.3+) |
 | `W_SNAPSHOT_UNRESOLVED_REQUIRED` | A loaded document carries an unresolved record, one no structural check refused, for an association the schema declares required (read from the schema, never the record); reported only under `snapshot.WithRevalidation`, at that option's severity (v0.15+) |
 | `W_SNAPSHOT_PATH_EXTENSION` | A snapshot was written to a path that does not end in `.ys`; the write succeeded, and a reader that discovers snapshots by extension will not find it |
 

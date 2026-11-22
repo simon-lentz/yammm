@@ -2,7 +2,6 @@ package instance
 
 import (
 	"context"
-	"strings"
 	"testing"
 
 	"github.com/simon-lentz/yammm/internal/yammmtest"
@@ -11,9 +10,9 @@ import (
 	"github.com/simon-lentz/yammm/schema"
 )
 
-// cancellationSchema declares a foldable property beside two relations whose field
-// names fold, so one row can carry a property error, a property-name collision
-// and a relation collision at once.
+// cancellationSchema declares a property beside an association and a required
+// composition, so one row can carry an unknown field beside a property error
+// or beside an absent composition.
 func cancellationSchema(t *testing.T) schema.Schema {
 	t.Helper()
 	const src = `schema "cancellation"
@@ -40,68 +39,45 @@ type Row {
 	return s
 }
 
-// TestValidate_EachGateReadsItsOwnPassesErrors pins that an error from one pass
-// does not stop a later one. The gates asked HasErrors, so any earlier issue —
-// a property error, or the member index's own collision report — silenced every
-// pass after it and a row reported one defect per round trip. Returning the
-// gates to HasErrors turns these red.
+// TestValidate_EachGateReadsItsOwnPassesErrors pins that an unknown field stops
+// no pass. The gates asked HasErrors, so an unknown field silenced every pass
+// after it and a row reported one defect per round trip. Returning the gates to
+// HasErrors turns the second subtest red; the first holds either way, since
+// both its issues arrive before the first gate.
 func TestValidate_EachGateReadsItsOwnPassesErrors(t *testing.T) {
 	t.Parallel()
 	v := NewValidator(cancellationSchema(t))
 
-	t.Run("a property error beside a relation collision reports both", func(t *testing.T) {
+	t.Run("a property error beside an unknown field reports both", func(t *testing.T) {
 		t.Parallel()
 		_, res := v.ValidateOne(t.Context(), "Row", RawInstance{
 			Properties: map[string]any{
 				"id": "r1", "count": "not a number",
-				"Link":  map[string]any{"_target_id": "t1"},
-				"LINK":  map[string]any{"_target_id": "t2"},
+				"extra": "x",
 				"parts": []any{map[string]any{"id": "p1"}},
 			},
 		})
 		if !res.HasCode(diag.E_TYPE_MISMATCH) {
 			t.Errorf("the property error is missing: %s", res)
 		}
-		if !res.HasCode(diag.E_CASE_FOLD_COLLISION) {
-			t.Errorf("the relation collision is missing: %s", res)
+		if !res.HasCode(diag.E_UNKNOWN_FIELD) {
+			t.Errorf("the unknown field is missing: %s", res)
 		}
 	})
 
-	t.Run("an association collision beside an absent required composition reports both", func(t *testing.T) {
-		t.Parallel()
-		_, res := v.ValidateOne(t.Context(), "Row", RawInstance{
-			Properties: map[string]any{
-				"id":   "r1",
-				"Link": map[string]any{"_target_id": "t1"},
-				"LINK": map[string]any{"_target_id": "t2"},
-			},
-		})
-		if !res.HasCode(diag.E_CASE_FOLD_COLLISION) {
-			t.Errorf("the association collision is missing: %s", res)
-		}
-		if !res.HasCode(diag.E_UNRESOLVED_REQUIRED_COMPOSITION) {
-			t.Errorf("the absent required composition is missing: %s", res)
-		}
-	})
-
-	t.Run("the collision message names both keys", func(t *testing.T) {
+	t.Run("an unknown field beside an absent required composition reports both", func(t *testing.T) {
 		t.Parallel()
 		_, res := v.ValidateOne(t.Context(), "Row", RawInstance{
 			Properties: map[string]any{
 				"id":    "r1",
-				"Link":  map[string]any{"_target_id": "t1"},
-				"LINK":  map[string]any{"_target_id": "t2"},
-				"parts": []any{map[string]any{"id": "p1"}},
+				"extra": "x",
 			},
 		})
-		var msg string
-		for is := range res.Issues() {
-			if is.Code() == diag.E_CASE_FOLD_COLLISION {
-				msg = is.Message()
-			}
+		if !res.HasCode(diag.E_UNKNOWN_FIELD) {
+			t.Errorf("the unknown field is missing: %s", res)
 		}
-		if !strings.Contains(msg, "LINK") || !strings.Contains(msg, "Link") {
-			t.Errorf("the collision message names one key, not both: %q", msg)
+		if !res.HasCode(diag.E_UNRESOLVED_REQUIRED_COMPOSITION) {
+			t.Errorf("the absent required composition is missing: %s", res)
 		}
 	})
 }
@@ -115,7 +91,7 @@ func TestValidate_EachGateReadsItsOwnPassesErrors(t *testing.T) {
 func TestValidateOne_CancelledMidRowReturnsTheCancellationAlone(t *testing.T) {
 	t.Parallel()
 	v := NewValidator(cancellationSchema(t))
-	raw := RawInstance{Properties: map[string]any{"id": "r1", "Count": "not a number"}}
+	raw := RawInstance{Properties: map[string]any{"id": "r1", "count": "not a number"}}
 	total := yammmtest.CountChecks(t.Context(), func(ctx context.Context) { v.ValidateOne(ctx, "Row", raw) })
 
 	for n := range total {
@@ -143,7 +119,7 @@ func TestValidateOne_CancelledMidRowReturnsTheCancellationAlone(t *testing.T) {
 func TestValidateProperties_CancellationRecordedAtEveryExit(t *testing.T) {
 	t.Parallel()
 	v := NewValidator(cancellationSchema(t))
-	raws := []RawInstance{{Properties: map[string]any{"id": "r1", "Count": "not a number"}}}
+	raws := []RawInstance{{Properties: map[string]any{"id": "r1", "count": "not a number"}}}
 	total := yammmtest.CountChecks(t.Context(), func(ctx context.Context) { v.Validate(ctx, "Row", raws) })
 
 	for n := range total {

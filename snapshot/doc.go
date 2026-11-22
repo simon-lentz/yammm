@@ -86,18 +86,13 @@
 //	    use(entry.Header)
 //	}
 //
-//	// Rewrite metadata on an existing .ys without reloading the body
-//	// (fast path — reuses body bytes verbatim)
+//	// Replace the metadata of an existing .ys, keeping every byte outside the header
 //	out, result := snapshot.UpdateMetadata(ctx, data, newMeta)
-//
-//	// Same, with automatic Unmarshal+Marshal fallback on non-Marshal-shaped inputs
-//	out, result := snapshot.UpdateMetadataOrReMarshal(ctx, data, newMeta, s)
 //
 // # Functions
 //
 // [Marshal] serializes a graph.Snapshot to .ys bytes. Output is deterministic
-// by default (no timestamp unless [WithCreatedAt] or [WithCreatedAtFrom] is
-// used).
+// by default (no timestamp unless [WithCreatedAt] is used).
 //
 // [Unmarshal] deserializes .ys bytes back to a graph.Snapshot, verifying structural
 // integrity and schema compatibility.
@@ -169,34 +164,48 @@
 // fails with an error matching [syscall.ENOTDIR] on every host; an element a
 // ".." cancels is never read.
 //
-// [UpdateMetadata] rewrites the header of an existing .ys document
-// with a new metadata map, reusing the body bytes verbatim and
-// recomputing only the SHA-256 integrity hash. The fast path is
-// several times faster than the equivalent Unmarshal + Marshal round trip;
-// [TestUpdateMetadataRatioFloor] enforces a floor of 3×. Depends
-// on the field-order and body-suffix stability contracts documented
-// in wire.go; future Marshal-side shape changes must respect those
-// contracts or update this primitive in lockstep.
+// [UpdateMetadata] replaces the metadata of an existing .ys document and
+// recomputes its integrity hash, keeping every byte outside the header. The
+// Updating Metadata section below states what it writes and refuses.
 //
-// [UpdateMetadataOrReMarshal] is the default consumer entry point:
-// it runs [UpdateMetadata] on the happy path and transparently falls
-// back to [Unmarshal] + [Marshal] on any Error or Fatal (a body-offset failure
-// or a malformed header among them) but a cancellation or metadata that is
-// not valid UTF-8, which no path can write. A fallback that succeeds
-// surfaces a Warning-severity [diag.W_UPDATE_METADATA_FALLBACK] on the
-// returned [diag.Result] so operators can observe fallback frequency.
+// # Updating Metadata
 //
-// [UpdateMetadata] and [UpdateMetadataOrReMarshal] keep the text of the existing
-// created_at, except that the fallback path drops, with a Warning, a value it
-// cannot parse.
+// [UpdateMetadata] updates every document [Unmarshal] accepts under its
+// default options, whatever whitespace stands around its sections, and a
+// header of any size: it holds the whole document, so [MaxHeaderSize] does not
+// bind it. It splices a new header between the bytes before the header value
+// and the bytes after it, at the offsets the header decode ends at, and keeps
+// those bytes as they were.
+//
+// The header it writes holds the members [Marshal] writes, in Marshal's order:
+// the version, schema name, schema hash and hash algorithm the input states,
+// the new integrity hash, the input's features, the bytes of its created_at as
+// written, the new metadata, and the input's attestation. A null created_at
+// and an absent attestation are not written. The header is compact, or, when a
+// line feed directly follows the opening brace, indented by the whitespace
+// between that line feed and the header's name: the indent Marshal wrote. A
+// header member the format does not declare, such as the schema_source an
+// earlier writer wrote, is dropped.
+//
+// It refuses, with the code a reader uses for the same fault, a document whose
+// shape or text no reader accepts, a header or types table a reader refuses
+// without a schema, and a document whose integrity hash does not verify, a
+// header that holds no hash among them.
+// It then refuses metadata that is not valid UTF-8. It decodes no instance: a
+// body that a verified hash seals is the body its writer sealed, so a body that
+// [Unmarshal] refuses for its instances is updated and still refused.
+//
+// It checks the document's shape and text, decodes the header, and hashes
+// the document twice: once to verify the stored hash and once to seal
+// the new header. [TestUpdateMetadataRatioFloor] holds it to at most a third of
+// the CPU time [Unmarshal] and [Marshal] take on the same document.
 //
 // # Marshal Options
 //
 // [Marshal] accepts [Option] values:
 //
 //   - [WithIndent]: pretty-print JSON output with the given indent string
-//   - [WithCreatedAt]: embed a creation timestamp in the snapshot
-//   - [WithCreatedAtFrom]: embed the creation timestamp another header states
+//   - [WithCreatedAt]: embed a creation timestamp, written as RFC 3339 at its own precision
 //   - [WithMetadata]: embed key-value metadata, each key and value valid UTF-8
 //
 // # Load Options
@@ -258,14 +267,16 @@
 // returns an error, and [ScanDir] yields a [diag.Result] per entry, in
 // [ScanEntry.Result]:
 //
-//   - Fatal: an I/O failure, a cancelled context, a body the metadata update
-//     cannot locate, or a broken invariant (E_INTERNAL)
+//   - Fatal: an I/O failure, a cancelled context, or a broken invariant
+//     (E_INTERNAL)
 //   - Error: the input is refused. Among the causes are a schema hash
 //     mismatch, an integrity check failure, a structural break, and a
 //     version, feature or type this library does not read; at [Marshal], an
-//     indent that is not JSON whitespace, or a provenance source name or path
-//     that is not valid UTF-8; and at [Marshal] and the metadata update, a
-//     metadata key or value that is not valid UTF-8
+//     indent that is not JSON whitespace, a provenance source name or path
+//     that is not valid UTF-8, or a creation time with no RFC 3339 form; at
+//     every reader, a created_at that is not an RFC 3339 time or that states
+//     a leap second or the zero instant; and at [Marshal]
+//     and the metadata update, a metadata key or value that is not valid UTF-8
 //   - Any severity: a [WithRevalidation] finding takes the severity the
 //     caller passed
 //   - OK: success (may include warnings)
@@ -320,5 +331,6 @@
 // [instance.NewProvenance], which gives each instance the reader loads its
 // provenance, and for [instance.MaxComposedDepth], the depth bound the reader
 // shares with it. The internal/snapread edge hands the module's CLI the header
-// of the decode that accepted a document.
+// of the decode that accepted a document, and a header read with no size cap
+// over bytes already in memory.
 package snapshot

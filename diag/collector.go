@@ -3,6 +3,7 @@ package diag
 import (
 	"cmp"
 	"fmt"
+	"maps"
 	"slices"
 	"sync"
 )
@@ -177,26 +178,39 @@ func (c *Collector) MergeFunc(res Result, fn func(Issue) Issue) {
 
 // MergeRetag is [Collector.MergeFunc] for a merge that changes what an issue is:
 // retag declares, for each severity and code, the severity an issue is stored at
-// and whether it is kept, and fn builds each kept issue at that severity. The
-// counts and truncation facts are derived from res's per-code counts through
-// retag, so they stay exact when res was truncated, and the survivors are stored
-// in arrival order. It panics when retag declares a severity outside Fatal to
-// Hint for a kept code, or fn's issue differs from the declaration.
+// and whether it is kept, and fn builds each kept issue at that severity. retag
+// runs once per severity and code res counted, in (severity, code) order, so the
+// counts and truncation facts stay exact when res was truncated. It panics on the
+// first kept code declared a severity outside Fatal to Hint, naming the severity
+// and code it was asked for, or when fn's issue differs from the declaration; the
+// survivors are stored in arrival order.
 func (c *Collector) MergeRetag(res Result, retag func(Severity, Code) (Severity, bool), fn func(Issue) Issue) {
+	type key struct {
+		sev  Severity
+		code Code
+	}
+	type decision struct {
+		to   Severity
+		keep bool
+	}
+	decisions := make(map[key]decision)
 	var counts SeverityCounts
 	var codes codeCounts
 	seen := 0
-	for sev, byCode := range res.codeCounts {
-		for code, n := range byCode {
+	for _, sev := range slices.Sorted(maps.Keys(res.codeCounts)) {
+		byCode := res.codeCounts[sev]
+		for _, code := range slices.SortedFunc(maps.Keys(byCode), func(a, b Code) int { return cmp.Compare(a.value, b.value) }) {
 			to, keep := retag(sev, code)
+			decisions[key{sev, code}] = decision{to: to, keep: keep}
 			if !keep {
 				continue
 			}
 			// A code res only counted reaches no issue's checks, so its
 			// severity is checked here.
 			if to < Fatal || to > Hint {
-				panic(fmt.Sprintf("diag.Collector.MergeRetag: retag declared invalid severity %d for %s", to, code))
+				panic(fmt.Sprintf("diag.Collector.MergeRetag: retag declared invalid severity %d for %s %s", to, sev, code))
 			}
+			n := byCode[code]
 			counts.addN(to, n)
 			codes.addN(to, code, n)
 			seen += n
@@ -205,15 +219,15 @@ func (c *Collector) MergeRetag(res Result, retag func(Severity, Code) (Severity,
 	ordered := res.inArrivalOrder()
 	kept := make([]Issue, 0, len(ordered))
 	for _, issue := range ordered {
-		to, keep := retag(issue.Severity(), issue.Code())
-		if !keep {
+		d := decisions[key{issue.Severity(), issue.Code()}]
+		if !d.keep {
 			continue
 		}
 		out := fn(issue)
 		c.validateIssue("MergeRetag", out)
-		if out.Severity() != to || out.Code() != issue.Code() {
+		if out.Severity() != d.to || out.Code() != issue.Code() {
 			panic(fmt.Sprintf("diag.Collector.MergeRetag: fn built %s %s where retag declared %s %s",
-				out.Severity(), out.Code(), to, issue.Code()))
+				out.Severity(), out.Code(), d.to, issue.Code()))
 		}
 		kept = append(kept, out)
 	}

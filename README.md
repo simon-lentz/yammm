@@ -152,7 +152,7 @@ data, result := snapshot.Marshal(ctx, g.Snapshot())
 
 For a source that lists one record under several parents, `g.AddOrMerge(ctx, valid)` takes `Add`'s place: at a primary key the graph already holds, a record with no composed children merges: its association targets are installed on the held root and `merged` is true. A record with composed children is refused there as `Add` refuses a duplicate (`E_DUPLICATE_PK`), and a merge that would give a `(one)` association a second target is refused whole (`E_GRAPH_CARDINALITY`); `merged` is false whenever the result holds an error.
 
-To resume a persisted batch on a later run, seed the graph from a loaded snapshot with `graph.NewFromSnapshot(snap)`, which binds the graph to the snapshot's own schema and installs its records as they stand — new adds resolve against the seeded instances and `Check` covers the union. `snapshot.UpdateMetadata` rewrites a snapshot's metadata in place, without a full load/re-marshal round-trip; `snapshot.UpdateMetadataOrReMarshal` falls back to that round-trip, with `W_UPDATE_METADATA_FALLBACK`, when the in-place rewrite refuses for any reason but a cancelled context or metadata that is not valid UTF-8.
+To resume a persisted batch on a later run, seed the graph from a loaded snapshot with `graph.NewFromSnapshot(snap)`, which binds the graph to the snapshot's own schema and installs its records as they stand — new adds resolve against the seeded instances and `Check` covers the union. `snapshot.UpdateMetadata` replaces a snapshot's metadata without a load/re-marshal round-trip: it verifies the integrity hash, writes a new header and keeps every other byte, for every document `snapshot.Unmarshal` accepts under its default options.
 
 ### Build Instances Programmatically
 

@@ -26,9 +26,8 @@ func (c *completer) detectTypeCollisions(t Type) {
 }
 
 // checkEdgePropertyCaseCollisions reports two edge properties on one of t's
-// own associations whose names differ only by case: the case-folded lookup
-// the validator reads them through is sound only when the schema guarantees
-// uniqueness under fold, as it does for node properties.
+// own associations whose names differ only by case, as
+// checkPropertyCaseCollisions reports two node properties.
 func (c *completer) checkEdgePropertyCaseCollisions(t Type) {
 	for r := range t.Associations() {
 		first := make(map[string]Property)

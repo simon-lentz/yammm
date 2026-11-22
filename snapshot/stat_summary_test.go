@@ -10,16 +10,16 @@ import (
 )
 
 // Stat's counts are the duplicates and the unresolved records Unmarshal reads,
-// each from its own section, and its header states the schema's source.
-func TestStat_CountsEachSectionAndStatesTheSource(t *testing.T) {
+// each from its own section, and its header states the schema's name.
+func TestStat_CountsEachSectionAndStatesTheSchemaName(t *testing.T) {
 	t.Parallel()
 	s := loadReaderSchema(t)
 	doc := readerDoc(t, s,
 		map[string]any{
-			"$type": "Person", "id": "p1", "BOSS": map[string]any{"_target_id": "p1"},
-			"FRIENDS": []any{map[string]any{"_target_id": "p8"}, map[string]any{"_target_id": "p9"}},
+			"$type": "Person", "id": "p1", "boss": map[string]any{"_target_id": "p1"},
+			"friends": []any{map[string]any{"_target_id": "p8"}, map[string]any{"_target_id": "p9"}},
 		},
-		map[string]any{"$type": "Person", "id": "p1", "BOSS": map[string]any{"_target_id": "p1"}, "FRIENDS": []any{map[string]any{"_target_id": "p1"}}},
+		map[string]any{"$type": "Person", "id": "p1", "boss": map[string]any{"_target_id": "p1"}, "friends": []any{map[string]any{"_target_id": "p1"}}},
 	)
 	snap, res := snapshot.Unmarshal(t.Context(), []byte(doc), s)
 	if res.HasErrors() {
@@ -43,18 +43,18 @@ func TestStat_CountsEachSectionAndStatesTheSource(t *testing.T) {
 
 	var wire struct {
 		Header struct {
-			SchemaSource string `json:"schema_source"`
+			SchemaName string `json:"schema_name"`
 		} `json:"yammm_snapshot"`
 	}
-	if err := json.Unmarshal([]byte(doc), &wire); err != nil || wire.Header.SchemaSource == "" {
-		t.Fatalf("fixture states no schema_source: %v", err)
+	if err := json.Unmarshal([]byte(doc), &wire); err != nil || wire.Header.SchemaName == "" {
+		t.Fatalf("fixture states no schema_name: %v", err)
 	}
 	hdr, hdrRes := snapshot.ReadHeader(t.Context(), strings.NewReader(doc))
 	if hdrRes.HasErrors() {
 		t.Fatalf("read header: %s", hdrRes)
 	}
-	if info.SchemaSource != wire.Header.SchemaSource || hdr.SchemaSource != wire.Header.SchemaSource {
-		t.Errorf("SchemaSource: Stat %q, ReadHeader %q, want %q", info.SchemaSource, hdr.SchemaSource, wire.Header.SchemaSource)
+	if info.SchemaName != wire.Header.SchemaName || hdr.SchemaName != wire.Header.SchemaName {
+		t.Errorf("SchemaName: Stat %q, ReadHeader %q, want %q", info.SchemaName, hdr.SchemaName, wire.Header.SchemaName)
 	}
 }
 
@@ -80,7 +80,7 @@ func TestStat_StoresAtMostOneHundredIssues(t *testing.T) {
 		friends[i] = map[string]any{"_target_id": "missing" + strings.Repeat("x", i)}
 	}
 	doc := readerDoc(t, s,
-		map[string]any{"$type": "Person", "id": "p1", "BOSS": map[string]any{"_target_id": "p1"}, "FRIENDS": friends})
+		map[string]any{"$type": "Person", "id": "p1", "boss": map[string]any{"_target_id": "p1"}, "friends": friends})
 	if n := strings.Count(doc, `"reason":"target_missing"`); n != 150 {
 		t.Fatalf("fixture holds %d target_missing records, want 150", n)
 	}

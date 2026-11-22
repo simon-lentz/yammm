@@ -229,7 +229,7 @@ func TestMarshal_IsDeterministicOverUnresolvedRecords(t *testing.T) {
 	for i := range 40 {
 		raw := instance.RawInstance{Properties: map[string]any{
 			"id": fmt.Sprintf("p%02d", i),
-			"EMPLOYERS": []any{
+			"employers": []any{
 				map[string]any{"_target_id": fmt.Sprintf("c%02d", i), "since": "2020-01-01T00:00:00Z"},
 				map[string]any{"_target_id": fmt.Sprintf("c%02d", i+1), "since": "2021-01-01T00:00:00Z"},
 			},

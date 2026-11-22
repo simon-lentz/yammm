@@ -53,8 +53,9 @@ func TestSnapshotUpdateMetadata_MalformedInput(t *testing.T) {
 	tmp := filepath.Join(t.TempDir(), "bad.ys")
 	require.NoError(t, os.WriteFile(tmp, []byte("not a yammm snapshot"), 0o600))
 
-	code := executeCmd(t, "snapshot", "update-metadata", "-s", "k=v", tmp)
+	code, _, errOut := executeCmdOutput(t, "snapshot", "update-metadata", "-s", "k=v", tmp)
 	assert.Equal(t, cli.ExitValidation, code)
+	assert.Contains(t, errOut, "error[E_SNAPSHOT_MALFORMED]: expected JSON object")
 }
 
 // TestSnapshotUpdateMetadata_SetAndUnsetLandInTheHeader pins what the header
@@ -94,42 +95,44 @@ func sortedWith(keys []string, more ...string) []string {
 	return all
 }
 
-// The command reads the file whole, so a header past snapshot.MaxHeaderSize,
-// which a header read refuses, is still updated.
-func TestSnapshotUpdateMetadata_AHeaderPastTheHeaderCapIsUpdated(t *testing.T) {
+// The command reads the metadata it edits with no size cap, so a header past
+// snapshot.MaxHeaderSize, which snapshot.ReadHeader refuses, is updated.
+func TestSnapshotUpdateMetadata_UpdatesAHeaderPastTheHeaderCap(t *testing.T) {
 	t.Parallel()
 	// The 16 MiB header is read on one goroutine, and the detector multiplies each byte.
 	raceskip.Skip(t)
 	ysPath := filepath.Join(t.TempDir(), "big.ys")
+	big := strings.Repeat("x", snapshot.MaxHeaderSize)
 	code, _, errOut := executeCmdOutput(t, "snapshot", "save",
-		"testdata/valid.yammm", "testdata/data.json", "-o", ysPath,
-		"-m", "big="+strings.Repeat("x", snapshot.MaxHeaderSize))
+		"testdata/valid.yammm", "testdata/data.json", "-o", ysPath, "-m", "big="+big)
 	require.Equal(t, cli.ExitOK, code, "stderr:\n%s", errOut)
 
 	code, _, errOut = executeCmdOutput(t, "snapshot", "update-metadata", "-s", "k=v", ysPath)
 	require.Equal(t, cli.ExitOK, code, "stderr:\n%s", errOut)
+
 	data, err := os.ReadFile(ysPath)
 	require.NoError(t, err)
 	info, res := snapshot.Stat(t.Context(), data)
-	require.False(t, res.HasErrors(), "stat: %s", res.String())
-	assert.Equal(t, "v", info.Metadata["k"])
-	assert.Len(t, info.Metadata["big"], snapshot.MaxHeaderSize)
+	require.False(t, res.HasErrors(), "the updated document verifies: %v", res)
+	assert.Equal(t, map[string]string{"big": big, "k": "v"}, info.Metadata)
 }
 
-// A document that breaks its outer shape is refused as malformed before its
-// header is judged, as every whole-document read refuses it.
-func TestSnapshotUpdateMetadata_AShapeBreakIsMalformedBeforeTheHeader(t *testing.T) {
+// A document whose header reads but whose outer shape breaks past it is
+// refused as malformed, as every whole-document read refuses it.
+func TestSnapshotUpdateMetadata_AShapeBreakPastTheHeaderIsMalformed(t *testing.T) {
 	t.Parallel()
 	ysPath := createYSFixtureWithMetadata(t, t.TempDir())
 	data, err := os.ReadFile(ysPath)
 	require.NoError(t, err)
-	broken := append(bytes.Replace(data, []byte(`"version":4`), []byte(`"version":3`), 1), 'x')
-	require.NoError(t, os.WriteFile(ysPath, broken, 0o600))
+	data = append(data, 'x')
+	require.NoError(t, os.WriteFile(ysPath, data, 0o600))
 
 	code, _, errOut := executeCmdOutput(t, "snapshot", "update-metadata", "-s", "k=v", ysPath)
 	assert.Equal(t, cli.ExitValidation, code)
 	assert.Contains(t, errOut, "error[E_SNAPSHOT_MALFORMED]")
-	assert.NotContains(t, errOut, "E_SNAPSHOT_UNSUPPORTED_VERSION")
+	after, err := os.ReadFile(ysPath)
+	require.NoError(t, err)
+	assert.True(t, bytes.Equal(data, after), "a refused document is not rewritten")
 }
 
 // The update seals the body under a fresh hash, so a document whose stored hash

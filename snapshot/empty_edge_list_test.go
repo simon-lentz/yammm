@@ -21,7 +21,7 @@ func TestRead_AnEmptyEdgeListIsHeldToItsName(t *testing.T) {
 	doc := readerDoc(t, s,
 		map[string]any{"$type": "Company", "id": "c1"},
 		map[string]any{"$type": "Person", "id": "p0"},
-		map[string]any{"$type": "Person", "id": "p1", "BOSS": map[string]any{"_target_id": "p0"}, "WORKS_AT": map[string]any{"_target_id": "c1"}},
+		map[string]any{"$type": "Person", "id": "p1", "boss": map[string]any{"_target_id": "p0"}, "works_at": map[string]any{"_target_id": "c1"}},
 	)
 	for name, c := range map[string]struct {
 		list    string

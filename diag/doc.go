@@ -159,12 +159,11 @@
 //
 // It must not import schema, instance, graph, schema/cypher, or neo4j.
 //
-// # v0.3.0 Diagnostic Code Additions
+// # Snapshot I/O Code
 //
-// v0.3.0 adds three stable diagnostic codes for reading a snapshot and updating
-// its metadata; the table below names each code's emitters. Severity
-// lives on the Issue, so a code's prefix is a convention and not a guarantee:
-// W_ marks a code raised at Warning, and E_ every other code, one raised at
+// E_SNAPSHOT_IO is the stable code for an I/O failure reading a snapshot; the
+// table below names its emitters. Severity lives on the Issue, so a code's
+// prefix is a convention and not a guarantee: W_ marks a code raised at Warning, and E_ every other code, one raised at
 // more than one severity such as E_SNAPSHOT_UNSUPPORTED_HASH_ALGORITHM among
 // them, save W_SNAPSHOT_UNRESOLVED_REQUIRED, raised at whatever severity
 // snapshot.WithRevalidation was given.
@@ -174,8 +173,6 @@
 //	E_SNAPSHOT_IO                     Fatal     snapshot.ScanDir (a file that fails to open, on ScanEntry.Result)
 //	                                            snapshot.ReadHeader (a reader that fails, not a truncation)
 //	                                            yammm snapshot info --dir (a directory that fails to read)
-//	E_UPDATE_METADATA_BODY_OFFSET     Fatal     snapshot.UpdateMetadata (body-offset tracker cannot resolve)
-//	W_UPDATE_METADATA_FALLBACK        Warning   snapshot.UpdateMetadataOrReMarshal (fallback to Unmarshal+Marshal)
 //
 // The Godoc on each code states its failure mode.
 package diag

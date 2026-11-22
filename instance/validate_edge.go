@@ -9,7 +9,6 @@ import (
 	"maps"
 	"reflect"
 	"slices"
-	"strconv"
 	"strings"
 
 	"github.com/simon-lentz/yammm/diag"
@@ -28,7 +27,7 @@ const fkPrefix = "_target_"
 func (v *Validator) validateEdges(
 	ctx context.Context,
 	typ schema.Type,
-	rels map[schema.Relation]relationInput,
+	props map[string]any,
 	collector *diag.Collector,
 	prov Provenance,
 	base path.Path,
@@ -42,14 +41,12 @@ func (v *Validator) validateEdges(
 
 		// Absent is valid for an association: presence and requiredness are
 		// graph.Check's question, reported there as E_UNRESOLVED_REQUIRED.
-		in := rels[rel]
-		if in.state != relationPresent {
-			// A collided slot has nothing to read. The member index already
-			// reported it, before any pass ran.
+		raw := props[rel.FieldName()]
+		if value.Absent(raw) {
 			continue
 		}
 
-		edgeData := v.validateEdgeData(ctx, rel, in.value, collector, prov, base.Key(in.key))
+		edgeData := v.validateEdgeData(ctx, rel, raw, collector, prov, base.Key(rel.FieldName()))
 		if edges == nil {
 			edges = make(map[string]ValidEdgeData)
 		}
@@ -164,64 +161,6 @@ func coercionIssue(err error, message string) *diag.IssueBuilder {
 	return diag.NewIssue(diag.Error, diag.E_TYPE_MISMATCH, message+": coercion error: "+err.Error())
 }
 
-// edgeObject is one edge target's input object with each key resolved to the
-// member it names: a foreign-key field of the target type, an edge property
-// of the relation, or neither. Resolution applies the one fold rule the node
-// path applies: exact first, then under the default mode the ASCII fold, with
-// an exact match never a collision and two folds to one member a collision
-// reported at the object.
-type edgeObject struct {
-	obj      map[string]any
-	fk       map[string]string          // expected FK field → input key
-	props    map[schema.Property]string // edge property → input key
-	unknown  []string                   // input keys naming no member, sorted
-	shadowed map[string]string          // unknown key → the member an exact match already claimed
-	// collidedFK and collidedProps hold each member a collision claims. The
-	// collision is that member's one issue: it is present, and judged no further.
-	collidedFK    map[string]bool
-	collidedProps map[schema.Property]bool
-}
-
-func (v *Validator) resolveEdgeObject(rel schema.Relation, targetType schema.Type, obj map[string]any, collector *diag.Collector, prov Provenance, targetPath path.Path) edgeObject {
-	claims := claimEdgeObject(rel, targetType, slices.Sorted(maps.Keys(obj)), v.cfg.strictPropertyNames)
-	eo := edgeObject{obj: obj, fk: claims.fk, props: claims.props, unknown: claims.unknown, shadowed: claims.shadowed}
-	for _, c := range claims.collisions {
-		if c.fk != "" {
-			if eo.collidedFK == nil {
-				eo.collidedFK = make(map[string]bool)
-			}
-			eo.collidedFK[c.fk] = true
-		} else {
-			if eo.collidedProps == nil {
-				eo.collidedProps = make(map[schema.Property]bool)
-			}
-			eo.collidedProps[c.prop] = true
-		}
-		what := "edge property " + strconv.Quote(memberName(c.fk, c.prop))
-		if c.fk != "" {
-			what = "foreign-key field " + strconv.Quote(c.fk)
-		}
-		issue := diag.NewIssue(
-			diag.Error,
-			diag.E_CASE_FOLD_COLLISION,
-			fmt.Sprintf("multiple input fields %s fold to %s", nameList(c.keys), what),
-		).WithDetail(diag.DetailKeyRelationName, rel.Name())
-		if !c.prop.IsZero() {
-			issue.WithDetail(diag.DetailKeyPropertyName, c.prop.Name())
-		}
-		withProvenance(issue, prov, targetPath.String())
-		collector.Collect(issue.Build())
-	}
-	return eo
-}
-
-func memberName(fk string, p schema.Property) string {
-	if !p.IsZero() {
-		return p.Name()
-	}
-	return fk
-}
-
 // validateEdgeTarget validates a single edge target object at targetPath; a
 // target that fails is nil. A foreign-key field holding a [value.Resolved]
 // gives the key its component unjudged.
@@ -249,8 +188,6 @@ func (v *Validator) validateEdgeTarget(
 	// types or inherited cross-schema resolve against the true target.
 	targetType, _ := resolveRelationTarget(v.schema, rel)
 
-	eo := v.resolveEdgeObject(rel, targetType, obj, targetCollector, prov, targetPath)
-
 	pkFields := slices.Collect(targetType.PrimaryKeys())
 	allExpectedFKFields := make([]string, len(pkFields))
 	for i, pk := range pkFields {
@@ -259,20 +196,20 @@ func (v *Validator) validateEdgeTarget(
 
 	// Unknown keys first, as the node path reports them: a typo'd key is
 	// unknown whether or not the key it was meant to be is present.
-	if !v.cfg.allowUnknownFields {
-		for _, fieldName := range eo.unknown {
-			issue := diag.NewIssue(
-				diag.Error,
-				diag.E_UNKNOWN_EDGE_FIELD,
-				"unknown field in edge object: "+diag.QuoteValue(fieldName),
-			).WithDetails(diag.RelationField(rel.Name(), fieldName)...)
-			if member, ok := eo.shadowed[fieldName]; ok {
-				issue.WithDetail(diag.DetailKeyReason, "case_fold_shadowed").
-					WithDetail(diag.DetailKeyPropertyName, member)
-			}
-			withProvenance(issue, prov, targetPath.Key(fieldName).String())
-			targetCollector.Collect(issue.Build())
+	for _, fieldName := range slices.Sorted(maps.Keys(obj)) {
+		if slices.Contains(allExpectedFKFields, fieldName) {
+			continue
 		}
+		if _, ok := rel.Property(fieldName); ok {
+			continue
+		}
+		issue := diag.NewIssue(
+			diag.Error,
+			diag.E_UNKNOWN_EDGE_FIELD,
+			"unknown field in edge object: "+diag.QuoteValue(fieldName),
+		).WithDetails(diag.RelationField(rel.Name(), fieldName)...)
+		withProvenance(issue, prov, targetPath.Key(fieldName).String())
+		targetCollector.Collect(issue.Build())
 	}
 
 	pkComponents := make([]any, 0, len(pkFields))
@@ -281,22 +218,17 @@ func (v *Validator) validateEdgeTarget(
 
 	for i, pk := range pkFields {
 		fkFieldName := allExpectedFKFields[i]
-		inputKey, hasFKField := eo.fk[fkFieldName]
+		val, hasFKField := obj[fkFieldName]
 
 		// Check key existence (not value)
 		if !hasFKField {
-			if eo.collidedFK[fkFieldName] {
-				presentFKFields = append(presentFKFields, fkFieldName)
-				continue
-			}
 			missingFKFields = append(missingFKFields, fkFieldName)
 			continue
 		}
 
 		// Key exists - track as present regardless of value
 		presentFKFields = append(presentFKFields, fkFieldName)
-		val := obj[inputKey]
-		fkPath := targetPath.Key(inputKey).String()
+		fkPath := targetPath.Key(fkFieldName).String()
 		if r, ok := val.(value.Resolved); ok {
 			pkComponents = append(pkComponents, r.Value)
 			continue
@@ -387,19 +319,12 @@ func (v *Validator) validateEdgeTarget(
 	edgeProps := make(map[string]any)
 	present := make(map[string]bool)
 	for prop := range rel.Properties() {
-		fieldName, has := eo.props[prop]
-		if !has {
-			if eo.collidedProps[prop] {
-				present[prop.Name()] = true
-			}
-			continue
-		}
-		fieldVal := obj[fieldName]
+		fieldVal := obj[prop.Name()]
 		if value.Absent(fieldVal) {
 			continue
 		}
 		present[prop.Name()] = true
-		propPath := targetPath.Key(fieldName).String()
+		propPath := targetPath.Key(prop.Name()).String()
 
 		if err := checkValueRecovering(fieldVal, prop.Constraint()); err != nil {
 			issue := checkIssue(err, fmt.Sprintf("edge property %q", prop.Name())).

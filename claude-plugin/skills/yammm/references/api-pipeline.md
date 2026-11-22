@@ -113,11 +113,10 @@ Validate raw data against a loaded schema. Produces immutable `ValidInstance` va
 ```go
 import "github.com/simon-lentz/yammm/instance"
 
-v := instance.NewValidator(s,
-    instance.WithStrictPropertyNames(true),
-    instance.WithAllowUnknownFields(false),
-)
+v := instance.NewValidator(s)
 ```
+
+Every input key names its member exactly: a property by its declared name, a relation by its field name, its declared name in lower case (`works_at` for `WORKS_AT`), an edge property by its name and a foreign-key field by its `_target_` name. A key in any other case is an unknown field (`E_UNKNOWN_FIELD`, or `E_UNKNOWN_EDGE_FIELD` in an edge object), and the member it was meant for stays absent. `instance.WithIssueLimit(n)` caps the issues one instance stores (100 by default, 0 for no limit).
 
 ### Validate Instances
 
@@ -278,7 +277,7 @@ info, result := snapshot.Stat(ctx, data)
 // info.SchemaName, info.TotalInstances, info.IntegrityStatus, etc.
 ```
 
-`Info` embeds `Header` (`Version`, `SchemaName`, `SchemaSource`, `SchemaHash`, `SchemaHashAlgorithm`, `IntegrityHash`, `CreatedAt`, `Metadata`, `Types`, `Attestation`) and adds `InstanceCounts`, `TotalInstances`, `TotalEdges`, `DuplicateCount`, `UnresolvedCount` and `IntegrityStatus` (`snapshot.IntegrityOK` or `snapshot.IntegrityMismatch`). `snapshot.ReadHeader(ctx, r)` reads the `Header` alone from an `io.Reader`.
+`Info` embeds `Header` (`Version`, `SchemaName`, `SchemaHash`, `SchemaHashAlgorithm`, `IntegrityHash`, `CreatedAt` — a `time.Time`, zero when the header states none — `Metadata`, `Types`, `Attestation`) and adds `InstanceCounts`, `TotalInstances`, `TotalEdges`, `DuplicateCount`, `UnresolvedCount` and `IntegrityStatus` (`snapshot.IntegrityOK` or `snapshot.IntegrityMismatch`). `snapshot.ReadHeader(ctx, r)` reads the `Header` alone from an `io.Reader`.
 
 ### Update Metadata In Place
 
@@ -289,10 +288,10 @@ if newMeta == nil {                             // a document that states no met
     newMeta = map[string]string{}
 }
 newMeta["pipeline_completed"] = "true"
-updated, result := snapshot.UpdateMetadataOrReMarshal(ctx, data, newMeta, s)
+updated, result := snapshot.UpdateMetadata(ctx, data, newMeta)
 ```
 
-`UpdateMetadataOrReMarshal(ctx, data, newMeta, s)` is the default entry point: it rewrites the header's metadata map (a full replace — clone the old map and mutate) while reusing the body bytes verbatim (fast path), and transparently falls back to `Unmarshal + Marshal` on any Error or Fatal but a cancellation and metadata that is not valid UTF-8, emitting `W_UPDATE_METADATA_FALLBACK` when the fallback succeeds so the transition is observable. `UpdateMetadata(ctx, data, newMeta)` is the strict fast path alone, for a consumer that cannot accept a round-trip. CLI form: `yammm snapshot update-metadata --set k=v`.
+`UpdateMetadata(ctx, data, newMeta)` replaces the header's metadata map (a full replace — clone the old map and mutate), writes a new header and keeps every other byte, for every document `Unmarshal` accepts under its default options. It verifies the integrity hash first and refuses a mismatch, or a header that holds no hash, with `E_SNAPSHOT_INTEGRITY_MISMATCH`; it decodes no instance. It keeps `created_at` as written; to change it, re-marshal with `WithCreatedAt`. For a header past `MaxHeaderSize`, read the metadata with `Stat`, since `ReadHeader` refuses it. CLI form: `yammm snapshot update-metadata --set k=v`.
 
 ---
 

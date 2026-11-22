@@ -122,11 +122,9 @@ func runSnapshotSave(cmd *cobra.Command, args []string, sink *cli.DiagnosticSink
 	var opts []snapshot.Option
 	switch {
 	case timestamp:
-		opts = append(opts, snapshot.WithCreatedAt(time.Now()))
+		opts = append(opts, snapshot.WithCreatedAt(time.Now().UTC().Truncate(time.Second)))
 	case imported != nil:
-		// Exclusive, not additive: WithCreatedAtFrom wins over WithCreatedAt,
-		// so appending both would make --timestamp silently do nothing.
-		opts = append(opts, snapshot.WithCreatedAtFrom(imported))
+		opts = append(opts, snapshot.WithCreatedAt(imported.CreatedAt))
 	}
 	if indent {
 		opts = append(opts, snapshot.WithIndent("\t"))

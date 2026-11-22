@@ -266,15 +266,14 @@ func TestZeroRoots_EachPanicNamesTheCallAndWhatIsZero(t *testing.T) {
 		t.Fatal(res)
 	}
 	for want, call := range map[string]func(){
-		"graph.New: zero Schema":                          func() { graph.New(schema.Schema{}) },
-		"instance.NewValidator: zero Schema":              func() { instance.NewValidator(schema.Schema{}) },
-		"graph.NewFromSnapshot: zero Snapshot":            func() { graph.NewFromSnapshot(graph.Snapshot{}) },
-		"graph.Add: zero ValidInstance":                   func() { g.Add(ctx, instance.ValidInstance{}) },
-		"graph.AddOrMerge: zero ValidInstance":            func() { _, _ = g.AddOrMerge(ctx, instance.ValidInstance{}) },
-		"snapshot.Marshal: zero Snapshot":                 func() { _, _ = snapshot.Marshal(ctx, graph.Snapshot{}) },
-		"snapshot.Unmarshal: zero Schema":                 func() { _, _ = snapshot.Unmarshal(ctx, data, schema.Schema{}) },
-		"snapshot.Verify: zero Schema":                    func() { snapshot.Verify(ctx, data, schema.Schema{}) },
-		"snapshot.UpdateMetadataOrReMarshal: zero Schema": func() { _, _ = snapshot.UpdateMetadataOrReMarshal(ctx, data, nil, schema.Schema{}) },
+		"graph.New: zero Schema":               func() { graph.New(schema.Schema{}) },
+		"instance.NewValidator: zero Schema":   func() { instance.NewValidator(schema.Schema{}) },
+		"graph.NewFromSnapshot: zero Snapshot": func() { graph.NewFromSnapshot(graph.Snapshot{}) },
+		"graph.Add: zero ValidInstance":        func() { g.Add(ctx, instance.ValidInstance{}) },
+		"graph.AddOrMerge: zero ValidInstance": func() { _, _ = g.AddOrMerge(ctx, instance.ValidInstance{}) },
+		"snapshot.Marshal: zero Snapshot":      func() { _, _ = snapshot.Marshal(ctx, graph.Snapshot{}) },
+		"snapshot.Unmarshal: zero Schema":      func() { _, _ = snapshot.Unmarshal(ctx, data, schema.Schema{}) },
+		"snapshot.Verify: zero Schema":         func() { snapshot.Verify(ctx, data, schema.Schema{}) },
 	} {
 		if got := yammmtest.AssertPanics(t, call); got != want {
 			t.Errorf("panic = %v, want %q", got, want)

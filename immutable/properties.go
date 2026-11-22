@@ -9,26 +9,23 @@ import (
 
 // Properties holds a string-keyed map immutably, such as an instance's or an
 // edge's properties. [Wrap] makes one of each string-keyed map it reaches, save
-// inside a map with a non-string key. Its iterators visit the names in sorted
-// order, and [Properties.GetFold] reads a name with its ASCII letters folded.
+// inside a map with a non-string key. [Properties.Get] reads a name exactly,
+// and its iterators visit the names in sorted order.
 //
 // Properties is safe for concurrent read access.
 type Properties struct {
 	entries map[string]Value
 
-	// view holds the sorted names and the folded index, each computed on first
-	// use and shared by every copy. It is nil exactly when entries is.
+	// view holds the sorted names, computed on first use and shared by every
+	// copy. It is nil exactly when entries is.
 	view *propertiesView
 }
 
-// propertiesView is the sorted-name list and folded index of one entry set,
-// each computed once, so building a Properties pays for neither until it is
-// read, and a sorted read pays for no folded index.
+// propertiesView is the sorted-name list of one entry set, computed once, so
+// building a Properties pays for no sort until a sorted read.
 type propertiesView struct {
-	sortOnce    sync.Once
-	sortedKeys  []string
-	foldOnce    sync.Once
-	foldedIndex map[string]string
+	sortOnce   sync.Once
+	sortedKeys []string
 }
 
 // newProperties returns a Properties over entries, which it takes.
@@ -45,17 +42,6 @@ func (p Properties) sorted() []string {
 		p.view.sortedKeys = slices.Sorted(maps.Keys(p.entries))
 	})
 	return p.view.sortedKeys
-}
-
-// folded returns the folded index. Safe for concurrent first use.
-func (p Properties) folded() map[string]string {
-	if p.view == nil {
-		return nil
-	}
-	p.view.foldOnce.Do(func() {
-		p.view.foldedIndex = computeFoldedIndex(p.sorted())
-	})
-	return p.view.foldedIndex
 }
 
 // WrapProperties returns props held immutably. It copies the map, and wraps
@@ -76,40 +62,10 @@ func WrapProperties(props map[string]any) Properties {
 // Get returns the value for the given property name and true if it exists.
 // Returns (zero Value, false) if the property does not exist.
 //
-// This performs an exact, case-sensitive match. Use [Properties.GetFold]
-// for case-insensitive lookup.
+// The match is exact.
 func (p Properties) Get(name string) (Value, bool) {
 	v, ok := p.entries[name]
 	return v, ok
-}
-
-// GetFold returns the value for a property name using ASCII case-insensitive matching.
-//
-// Only ASCII letters (a-z, A-Z) are folded; other characters must match exactly.
-// A key that matches name exactly wins. Otherwise, of the keys that fold to name
-// (e.g., "Name" and "NAME"), the alphabetically first wins, so the result is
-// deterministic.
-//
-// Returns (zero Value, false) if no matching property exists.
-func (p Properties) GetFold(name string) (Value, bool) {
-	if v, ok := p.entries[name]; ok {
-		return v, ok
-	}
-	if originalKey, ok := lookupFolded(p.folded(), name); ok {
-		return p.entries[originalKey], true
-	}
-	return Value{}, false
-}
-
-// lookupFolded reads index at name with its ASCII capitals lowered. A name of
-// up to 64 bytes is lowered in a stack buffer and read without a copy, so the
-// lookup allocates nothing.
-func lookupFolded(index map[string]string, name string) (string, bool) {
-	var buf [64]byte
-	b := append(buf[:0], name...)
-	lowerASCII(b)
-	k, ok := index[string(b)]
-	return k, ok
 }
 
 // Len returns the number of properties.
@@ -156,51 +112,4 @@ func (p Properties) Clone() map[string]any {
 		result[k] = cloneValue(v)
 	}
 	return result
-}
-
-// computeFoldedIndex builds a map from lowercase (ASCII-folded) keys to original keys.
-// Keys are processed in sorted order, so collisions resolve to the alphabetically first key.
-func computeFoldedIndex(sortedKeys []string) map[string]string {
-	if len(sortedKeys) == 0 {
-		return nil
-	}
-
-	index := make(map[string]string, len(sortedKeys))
-	for _, k := range sortedKeys {
-		folded := toLowerASCII(k)
-		// First key (alphabetically) wins on collision
-		if _, exists := index[folded]; !exists {
-			index[folded] = k
-		}
-	}
-	return index
-}
-
-// toLowerASCII converts ASCII letters (A-Z) to lowercase (a-z).
-// Non-ASCII characters are left unchanged.
-func toLowerASCII(s string) string {
-	// Fast path: check if any conversion is needed
-	needsConversion := false
-	for i := range len(s) {
-		if 'A' <= s[i] && s[i] <= 'Z' {
-			needsConversion = true
-			break
-		}
-	}
-	if !needsConversion {
-		return s
-	}
-
-	b := []byte(s)
-	lowerASCII(b)
-	return string(b)
-}
-
-// lowerASCII lowers the ASCII capitals of b in place.
-func lowerASCII(b []byte) {
-	for i, c := range b {
-		if 'A' <= c && c <= 'Z' {
-			b[i] = c + ('a' - 'A')
-		}
-	}
 }
