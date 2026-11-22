@@ -7,6 +7,7 @@ import (
 	"github.com/simon-lentz/yammm/internal/doclint"
 
 	// Each Neo4j package registers its own codes with diag when it is imported.
+	"github.com/simon-lentz/yammm/internal/raceskip"
 	_ "github.com/simon-lentz/yammm/neo4j"
 	_ "github.com/simon-lentz/yammm/schema/cypher"
 )
@@ -17,6 +18,8 @@ import (
 // registry.
 func TestModuleCitesRegisteredCodes(t *testing.T) {
 	t.Parallel()
+	// The module is read on one goroutine, and the detector multiplies each read.
+	raceskip.Skip(t)
 	var codes []string
 	for _, c := range diag.AllCodes() {
 		codes = append(codes, c.String())

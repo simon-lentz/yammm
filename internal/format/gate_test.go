@@ -15,6 +15,7 @@ import (
 
 	"github.com/simon-lentz/yammm/internal/format"
 	"github.com/simon-lentz/yammm/internal/gittree"
+	"github.com/simon-lentz/yammm/internal/raceskip"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -323,6 +324,8 @@ func TestSource_CorpusVariants(t *testing.T) {
 // refuses with ErrNotPreserved and returns nothing — whichever defects are live.
 func TestSource_FailsClosedOnEveryVariant(t *testing.T) {
 	t.Parallel()
+	// The variants are formatted on one goroutine, and the detector multiplies each pass.
+	raceskip.Skip(t)
 
 	checked, refused := 0, 0
 	for _, path := range discoverInputs(t) {
@@ -362,6 +365,8 @@ func TestSource_FailsClosedOnEveryVariant(t *testing.T) {
 // repository's schemas; this package's fixtures, built to reproduce defects,
 // are the corpus test's.
 func FuzzSource(f *testing.F) {
+	// The seeds are formatted on one goroutine, and the detector multiplies each pass.
+	raceskip.Skip(f)
 	for _, src := range repositorySchemas(f) {
 		f.Add(src)
 	}

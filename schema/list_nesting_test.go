@@ -8,6 +8,7 @@ import (
 
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/internal/parse"
+	"github.com/simon-lentz/yammm/internal/raceskip"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -100,6 +101,8 @@ func TestLoad_ListNestingCountsThroughDatatypes(t *testing.T) {
 // from its longest datatype down loads under a stack that a nested call per
 // datatype passes.
 func TestLoad_ADatatypeChainDeclaredLongestFirstTakesNoStackPerDatatype(t *testing.T) {
+	// The detector's instrumentation grows each frame the stack bound measures.
+	raceskip.Skip(t)
 	// The stack limit is the process's, so the test runs alone.
 	defer debug.SetMaxStack(debug.SetMaxStack(8 << 20))
 	const links = 12_000

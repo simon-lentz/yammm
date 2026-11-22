@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/simon-lentz/yammm/internal/doclint"
+	"github.com/simon-lentz/yammm/internal/raceskip"
 )
 
 // TestModuleNamesCarryNoProcessReference points the name gate at the module:
@@ -12,6 +13,8 @@ import (
 // gave it meaning, and nothing else refuses one.
 func TestModuleNamesCarryNoProcessReference(t *testing.T) {
 	t.Parallel()
+	// The module is read on one goroutine, and the detector multiplies each read.
+	raceskip.Skip(t)
 	paths, tests := doclint.AssertProcessFreeNames(t, "..")
 	// Each floor sits just under the count at the tree that set it, so a walk
 	// that stops reaching the tree fails instead of passing over nothing.

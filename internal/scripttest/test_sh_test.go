@@ -17,6 +17,8 @@ func ratioTests(body string) string {
 	return "package ratio\n\nimport (\n\t\"testing\"\n\n\t\"" + fixtureModule + "/internal/raceskip\"\n)\n\n" + body
 }
 
+// The run leaves out a package git ignores, whose test does not compile, and
+// names it once, though both package lists write the note.
 func TestTestScript_NamesEveryPackageWithNoTestAndEverySkip(t *testing.T) {
 	t.Parallel()
 	f := newFixture(t)
@@ -24,10 +26,17 @@ func TestTestScript_NamesEveryPackageWithNoTestAndEverySkip(t *testing.T) {
 	f.write("skips/s.go", "package skips\n")
 	f.write("skips/s_test.go", "package skips\n\nimport \"testing\"\n\nfunc TestNeedsSymlink(t *testing.T) { t.Skip(\"needs a symlink\") }\n")
 	f.write("ok/nocgo_test.go", "//go:build !cgo\n\npackage ok\n\nimport \"testing\"\n\nfunc TestRunsWithCgo(t *testing.T) { t.Fatal(\"the suite ran with cgo disabled\") }\n")
+	f.write(".gitignore", "untracked/\n")
 	f.index()
+	f.write("untracked/u.go", "package untracked\n")
+	f.write("untracked/u_test.go", "package untracked\n\nimport \"testing\"\n\nfunc TestU(t *notatype) {}\n")
 
 	r := f.run("test.sh")
 	r.wantCode(t, 0)
+	r.wantStderr(t, "packages: leaving out 1 package(s) that git ignores:\n  "+fixtureModule+"/untracked\n")
+	if n := strings.Count(r.stderr, "packages: leaving out"); n != 1 {
+		t.Errorf("the note prints %d times, want once:\n%s", n, r.stderr)
+	}
 	r.wantStdout(t, "test: 5 package(s) ran no test:\n"+
 		"  "+fixtureModule+"/internal/mutants\n"+
 		"  "+fixtureModule+"/internal/raceskip\n"+
@@ -63,11 +72,10 @@ func TestTestScript_RunsEveryBenchmarkOnce(t *testing.T) {
 		wantCode int
 		stdout   string
 	}{
-		{"a benchmark that runs", "func BenchmarkRuns(b *testing.B) {\n\tfor b.Loop() {\n\t}\n}\n", 0, "test: 5 of 5 packages reported a result, and none failed\n"},
 		{"a benchmark that fails", "func BenchmarkFails(b *testing.B) { b.Fatal(\"the benchmark's setup is wrong\") }\n", 1, "bench_test.go:5: the benchmark's setup is wrong"},
 		// The benchmarks run without the race detector, so a file only that
-		// build reads holds none of them.
-		{"a benchmark only the race build reads", "func BenchmarkRaceOnly(b *testing.B) { b.Fatal(\"ran under the race detector\") }\n", 0, "test: 5 of 5 packages reported a result, and none failed\n"},
+		// build reads holds none of them, and the one beside it passes.
+		{"a benchmark that runs beside one only the race build reads", "func BenchmarkRaceOnly(b *testing.B) { b.Fatal(\"ran under the race detector\") }\n", 0, "test: 5 of 5 packages reported a result, and none failed\n"},
 	}
 	for _, row := range rows {
 		t.Run(row.name, func(t *testing.T) {
@@ -76,6 +84,7 @@ func TestTestScript_RunsEveryBenchmarkOnce(t *testing.T) {
 			src := "package ok\n\nimport \"testing\"\n\n" + row.bench
 			if strings.Contains(row.name, "race build") {
 				src = "//go:build race\n\n" + src
+				f.write("ok/runs_bench_test.go", "package ok\n\nimport \"testing\"\n\nfunc BenchmarkRuns(b *testing.B) {\n\tfor b.Loop() {\n\t}\n}\n")
 			}
 			f.write("ok/bench_test.go", src)
 			f.index()
@@ -476,24 +485,6 @@ func TestTestScript_RunsEveryPackageHoldingATrackedGoFile(t *testing.T) {
 	r.wantStderr(t, "test: 2 of 7 packages failed:\n  "+fixtureModule+"\n  "+fixtureModule+"/cafe\n")
 }
 
-func TestTestScript_LeavesOutAnUntrackedPackage(t *testing.T) {
-	t.Parallel()
-	f := newFixture(t)
-	f.write(".gitignore", "untracked/\n")
-	f.index()
-	f.write("untracked/u.go", "package untracked\n")
-	f.write("untracked/u_test.go", "package untracked\n\nimport \"testing\"\n\nfunc TestU(t *notatype) {}\n")
-
-	r := f.run("test.sh")
-	r.wantCode(t, 0)
-	r.wantStderr(t, "packages: leaving out 1 package(s) that git ignores:\n  "+fixtureModule+"/untracked\n")
-	// Both package lists write this note, and it prints once.
-	if n := strings.Count(r.stderr, "packages: leaving out"); n != 1 {
-		t.Errorf("the note prints %d times, want once:\n%s", n, r.stderr)
-	}
-	r.wantStdout(t, "test: 5 of 5 packages reported a result, and none failed\n")
-}
-
 func TestTestScript_RunsEveryTestRatherThanReplayingACachedResult(t *testing.T) {
 	t.Parallel()
 	f := newFixture(t)
@@ -506,6 +497,19 @@ func TestTestScript_RunsEveryTestRatherThanReplayingACachedResult(t *testing.T) 
 	r.wantCode(t, 0)
 	if strings.Contains(r.stdout, "(cached)") {
 		t.Errorf("the second run replayed a cached result\nstdout:\n%s", r.stdout)
+	}
+	// Neither run names TEST_DURATIONS, so neither writes into the module.
+	for _, args := range [][]string{{"ls-files", "--others"}, {"diff", "--name-only"}} {
+		cmd := exec.CommandContext(t.Context(), "git", args...)
+		cmd.Dir = f.dir
+		cmd.Env = gittree.WithoutRepositoryVars(t, os.Environ())
+		out, err := cmd.Output()
+		if err != nil {
+			t.Fatalf("git %v: %v", args, err)
+		}
+		if len(out) != 0 {
+			t.Errorf("a run with no TEST_DURATIONS wrote into the module (git %v):\n%s", args, out)
+		}
 	}
 }
 
@@ -553,26 +557,6 @@ func TestTestScript_ReportsTheSecondsOfTheRunUnderRace(t *testing.T) {
 			t.Errorf("the run named its slowest packages %d times, want once\nstdout:\n%s", n, r.stdout)
 		}
 	})
-}
-
-func TestTestScript_WritesNoDurationsUnlessNamed(t *testing.T) {
-	t.Parallel()
-	f := newFixture(t)
-	f.index()
-
-	f.run("test.sh").wantCode(t, 0)
-	for _, args := range [][]string{{"ls-files", "--others"}, {"diff", "--name-only"}} {
-		cmd := exec.CommandContext(t.Context(), "git", args...)
-		cmd.Dir = f.dir
-		cmd.Env = gittree.WithoutRepositoryVars(t, os.Environ())
-		out, err := cmd.Output()
-		if err != nil {
-			t.Fatalf("git %v: %v", args, err)
-		}
-		if len(out) != 0 {
-			t.Errorf("a run with no TEST_DURATIONS wrote into the module (git %v):\n%s", args, out)
-		}
-	}
 }
 
 // Not parallel: it sets each variable for the whole process.

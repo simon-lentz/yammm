@@ -9,6 +9,7 @@ import (
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/instance"
+	"github.com/simon-lentz/yammm/internal/raceskip"
 	"github.com/simon-lentz/yammm/schema"
 	"github.com/simon-lentz/yammm/snapshot"
 )
@@ -268,6 +269,8 @@ func sbRevalidated(row sbRow) int {
 // it. The table is exact: every pair it names draws less.
 func TestRead_TwoBreaksDrawTheIssuesOfEach(t *testing.T) {
 	t.Parallel()
+	// Each pair is read on one goroutine, and the detector multiplies each Verify.
+	raceskip.Skip(t)
 	s, doc := singleBreakDoc(t)
 	rows := sbRows()
 	verify := func(mode sbMode, text string) int {

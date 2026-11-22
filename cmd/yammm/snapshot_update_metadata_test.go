@@ -13,6 +13,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/simon-lentz/yammm/cmd/yammm/internal/cli"
+	"github.com/simon-lentz/yammm/internal/raceskip"
 	"github.com/simon-lentz/yammm/snapshot"
 )
 
@@ -97,6 +98,8 @@ func sortedWith(keys []string, more ...string) []string {
 // which a header read refuses, is still updated.
 func TestSnapshotUpdateMetadata_AHeaderPastTheHeaderCapIsUpdated(t *testing.T) {
 	t.Parallel()
+	// The 16 MiB header is read on one goroutine, and the detector multiplies each byte.
+	raceskip.Skip(t)
 	ysPath := filepath.Join(t.TempDir(), "big.ys")
 	code, _, errOut := executeCmdOutput(t, "snapshot", "save",
 		"testdata/valid.yammm", "testdata/data.json", "-o", ysPath,

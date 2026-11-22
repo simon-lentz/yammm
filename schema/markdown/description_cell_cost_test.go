@@ -6,6 +6,8 @@ import (
 	"runtime/debug"
 	"strings"
 	"testing"
+
+	"github.com/simon-lentz/yammm/internal/raceskip"
 )
 
 // foldBytes returns how many bytes one descriptionCell call over doc allocates,
@@ -34,6 +36,8 @@ func foldBytes(doc string) uint64 {
 // a closer read. It is not parallel: it reads the process's allocation
 // counters, and it runs with the collector off.
 func TestDescriptionCell_CostIsLinearInItsLines(t *testing.T) {
+	// The detector's instrumentation allocates and multiplies each read of the text.
+	raceskip.Skip(t)
 	// A collection that runs beside a measured call allocates on its own.
 	defer debug.SetGCPercent(debug.SetGCPercent(-1))
 	for _, tt := range []struct {
@@ -104,6 +108,8 @@ const searchBound = 12
 // each repeated 200 times.
 func TestDescriptionCell_SearchesReadTheTextABoundedNumberOfTimes(t *testing.T) {
 	t.Parallel()
+	// The texts are read on one goroutine, and the detector multiplies each read.
+	raceskip.Skip(t)
 
 	pieces := []string{"<a", " ", " ", "b=", "c=", `"`, "'", `"`, "'", "x", "\n", ">", "/", "=", "<!--", "-->", "`", "``", "<?", "?>", "<!x", "<![CDATA[", "]]>", "</a", `\`}
 	r := rand.New(rand.NewPCG(1, 2)) //nolint:gosec // a seeded generator makes the draws repeatable

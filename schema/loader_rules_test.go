@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/simon-lentz/yammm/diag"
+	"github.com/simon-lentz/yammm/internal/raceskip"
 	"github.com/simon-lentz/yammm/internal/yammmtest"
 	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
@@ -247,6 +248,8 @@ func TestLoadSourcesWithEntry_EmptyEntrySelectsTheSmallestKey(t *testing.T) {
 // A source of exactly the bound is legal; the first byte beyond it is refused.
 func TestLoad_SourceBoundIsInclusive(t *testing.T) {
 	t.Parallel()
+	// The 16 MiB source is read on one goroutine, and the detector multiplies each byte.
+	raceskip.Skip(t)
 
 	head := "schema \"edge\"\n\ntype T {\n    id String primary\n}\n"
 	exact := make([]byte, 16<<20)

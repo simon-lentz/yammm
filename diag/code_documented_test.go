@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/simon-lentz/yammm/diag"
+	"github.com/simon-lentz/yammm/internal/raceskip"
 
 	// Blank imports register the Neo4j packages' diagnostic codes so AllCodes()
 	// includes them. This is a test file, so the coupling is acceptable.
@@ -31,6 +32,8 @@ const specRefPath = "../docs/SPEC.md"
 // [TestModuleCitesRegisteredCodes]'s, over
 // the whole module.
 func TestRegisteredCodesDocumented(t *testing.T) {
+	// The documents are read on one goroutine, and the detector multiplies each read.
+	raceskip.Skip(t)
 	// Both documents enumerate the whole code set, so both are oracles: a
 	// code documented in one and absent from the other is the drift this
 	// guard exists to catch.
