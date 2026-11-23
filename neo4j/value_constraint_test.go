@@ -8,7 +8,7 @@ import (
 
 func loadConstraintType(t *testing.T) schema.Type {
 	t.Helper()
-	s, res := schema.LoadString(t.Context(), `schema "c"
+	s, err := schema.LoadString(t.Context(), `schema "c"
 
 type Ratio = Float
 
@@ -23,8 +23,8 @@ type Grid {
 	rs Ratios
 }
 `, "c.yammm")
-	if res.HasErrors() {
-		t.Fatalf("load schema: %s", res)
+	if err != nil {
+		t.Fatalf("load schema: %s", err)
 	}
 	typ, _ := s.Type("Grid")
 	return typ

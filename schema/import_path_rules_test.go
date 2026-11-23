@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/simon-lentz/yammm/diag"
+	"github.com/simon-lentz/yammm/internal/diagtest"
 	"github.com/simon-lentz/yammm/internal/source"
 	"github.com/simon-lentz/yammm/internal/yammmtest"
 	"github.com/simon-lentz/yammm/schema"
@@ -44,7 +45,9 @@ func TestImportPath_BackslashIsRefused(t *testing.T) {
 			writeHostPathFile(t, entry,
 				"schema \"main\"\n\nimport \""+strings.ReplaceAll(row.importPath, `\`, `\\`)+"\" as d\n\ntype T {\n\tid String primary\n}\n")
 
-			s, res := schema.Load(t.Context(), entry, schema.WithModuleRoot(root))
+			s, res := diagtest.Capture(t, func(warn func(diag.Issue)) (schema.Schema, error) {
+				return schema.Load(t.Context(), entry, schema.WithModuleRoot(root), schema.WithWarnings(warn))
+			})
 			if !s.IsZero() {
 				t.Fatalf("import %q loaded", row.importPath)
 			}
@@ -83,7 +86,9 @@ func TestImportPath_BackslashRefusalIsLoadBearing(t *testing.T) {
 	writeHostPathFile(t, entry,
 		"schema \"main\"\n\nimport \"./a\\\\b\" as d\n\ntype T {\n\tid String primary\n\t--> USES (one) d.Dep\n}\n")
 
-	s, res := schema.Load(t.Context(), entry, schema.WithModuleRoot(root))
+	s, res := diagtest.Capture(t, func(warn func(diag.Issue)) (schema.Schema, error) {
+		return schema.Load(t.Context(), entry, schema.WithModuleRoot(root), schema.WithWarnings(warn))
+	})
 	if !s.IsZero() {
 		t.Fatal("the import reached the file a\\b.yammm names on this host")
 	}
@@ -94,7 +99,7 @@ func TestImportPath_BackslashRefusalIsLoadBearing(t *testing.T) {
 		}
 	}
 	if !named {
-		t.Errorf("the refusal did not name the separator rule: %v", res.Err())
+		t.Errorf("the refusal did not name the separator rule: %v", res)
 	}
 }
 
@@ -107,7 +112,9 @@ func TestImportPath_ModuleStyleRequiresAModuleRoot(t *testing.T) {
 	sources := map[string][]byte{
 		"/main.yammm": []byte("schema \"main\"\n\nimport \"lib/common\" as c\n\ntype T {\n\tid String primary\n}\n"),
 	}
-	s, res := schema.LoadSourcesWithEntry(t.Context(), sources, "/main.yammm", "")
+	s, res := diagtest.Capture(t, func(warn func(diag.Issue)) (schema.Schema, error) {
+		return schema.LoadSourcesWithEntry(t.Context(), sources, "/main.yammm", schema.WithWarnings(warn))
+	})
 	if !s.IsZero() {
 		t.Fatal("a module-style import resolved with no module root")
 	}
@@ -166,7 +173,9 @@ func TestImportPath_APathNamingNoFileIsRefused(t *testing.T) {
 			entry := filepath.Join(root, filepath.FromSlash(row.entry))
 			writeHostPathFile(t, entry, "schema \"main\"\n\nimport \""+row.importPath+"\" as d\n\ntype T {\n\tid String primary\n}\n")
 
-			s, res := schema.Load(t.Context(), entry, schema.WithModuleRoot(root))
+			s, res := diagtest.Capture(t, func(warn func(diag.Issue)) (schema.Schema, error) {
+				return schema.Load(t.Context(), entry, schema.WithModuleRoot(root), schema.WithWarnings(warn))
+			})
 			if !s.IsZero() {
 				t.Fatalf("import %q loaded", row.importPath)
 			}
@@ -196,9 +205,9 @@ func TestImportPath_TrailingSeparatorsAreReadPast(t *testing.T) {
 			entry := filepath.Join(root, "main.yammm")
 			writeHostPathFile(t, entry, "schema \"main\"\n\nimport \""+importPath+"\" as d\n\ntype T {\n\tid String primary\n}\n")
 
-			s, res := schema.Load(t.Context(), entry, schema.WithModuleRoot(root))
+			s, err := schema.Load(t.Context(), entry, schema.WithModuleRoot(root))
 			if s.IsZero() {
-				t.Fatalf("import %q did not load: %v", importPath, res)
+				t.Fatalf("import %q did not load: %v", importPath, err)
 			}
 			for imp := range s.Imports() {
 				if got := imp.Schema().Name(); got != "want" {
@@ -220,7 +229,9 @@ func TestImportPath_TwoSpellingsWithASeparatorAreADuplicateImport(t *testing.T) 
 	entry := filepath.Join(root, "main.yammm")
 	writeHostPathFile(t, entry, "schema \"main\"\n\nimport \"b\" as x\nimport \"b/\" as y\n\ntype T {\n\tid String primary\n}\n")
 
-	_, res := schema.Load(t.Context(), entry, schema.WithModuleRoot(root))
+	_, res := diagtest.Capture(t, func(warn func(diag.Issue)) (schema.Schema, error) {
+		return schema.Load(t.Context(), entry, schema.WithModuleRoot(root), schema.WithWarnings(warn))
+	})
 	wantCounts(t, res, map[diag.Code]int{diag.E_DUPLICATE_IMPORT: 1})
 }
 
@@ -235,7 +246,9 @@ func TestLoadSources_APathOfSeparatorsBindsNoSourceKey(t *testing.T) {
 			"main.yammm": []byte("schema \"main\"\n\nimport \"" + importPath + "\" as d\n\ntype T {\n\tid String primary\n}\n"),
 			"/.yammm":    []byte("schema \"absolute\"\n"),
 		}
-		s, res := schema.LoadSourcesWithEntry(t.Context(), sources, "main.yammm", root)
+		s, res := diagtest.Capture(t, func(warn func(diag.Issue)) (schema.Schema, error) {
+			return schema.LoadSourcesWithEntry(t.Context(), sources, "main.yammm", schema.WithModuleRoot(root), schema.WithWarnings(warn))
+		})
 		if !s.IsZero() {
 			t.Fatalf("import %q loaded", importPath)
 		}
@@ -278,7 +291,9 @@ func TestImportPath_SpellingTheRootEscapes(t *testing.T) {
 			entry := filepath.Join(root, "m.yammm")
 			writeHostPathFile(t, entry, "schema \"main\"\n\nimport \""+row.importPath+"\" as d\n\ntype T {\n\tid String primary\n}\n")
 
-			s, res := schema.Load(t.Context(), entry, schema.WithModuleRoot(root))
+			s, res := diagtest.Capture(t, func(warn func(diag.Issue)) (schema.Schema, error) {
+				return schema.Load(t.Context(), entry, schema.WithModuleRoot(root), schema.WithWarnings(warn))
+			})
 			if !s.IsZero() {
 				t.Fatalf("import %q loaded", row.importPath)
 			}
@@ -303,7 +318,9 @@ func TestSyntheticImportPath_APathNamingNoFileIsRefused(t *testing.T) {
 				"..yammm":     []byte("schema \"dot\"\n"),
 				".yammm":      []byte("schema \"empty\"\n"),
 			}
-			s, res := schema.LoadSourcesWithEntry(t.Context(), sources, "sub/m.yammm", "", schema.WithSyntheticRoot("test://r"))
+			s, res := diagtest.Capture(t, func(warn func(diag.Issue)) (schema.Schema, error) {
+				return schema.LoadSourcesWithEntry(t.Context(), sources, "sub/m.yammm", schema.WithSyntheticRoot("test://r"), schema.WithWarnings(warn))
+			})
 			if !s.IsZero() {
 				t.Fatalf("import %q loaded", importPath)
 			}

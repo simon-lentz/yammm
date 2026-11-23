@@ -54,17 +54,17 @@ type Zone {
 func copiesGraph(t *testing.T) (schema.Schema, *graph.Graph) {
 	t.Helper()
 	ctx := t.Context()
-	s, res := schema.LoadString(ctx, copiesSource, "copies.yammm")
-	if res.HasErrors() {
-		t.Fatal(res)
+	s, err := schema.LoadString(ctx, copiesSource, "copies.yammm")
+	if err != nil {
+		t.Fatal(err)
 	}
 	v := instance.NewValidator(s)
 	g := graph.New(s)
 	add := func(typ string, props map[string]any) {
 		t.Helper()
-		valid, res := v.ValidateOne(ctx, typ, instance.RawInstance{Properties: props})
-		if !res.OK() {
-			t.Fatal(res)
+		valid, err := v.ValidateOne(ctx, typ, instance.RawInstance{Properties: props})
+		if err != nil {
+			t.Fatal(err)
 		}
 		_ = g.Add(ctx, valid)
 	}
@@ -124,13 +124,13 @@ func TestCopies_EveryRecordNamesTheRecordsOfItsOwnSnapshot(t *testing.T) {
 	ctx := t.Context()
 	s, g := copiesGraph(t)
 	built := g.Snapshot()
-	data, res := snapshot.Marshal(ctx, built)
-	if res.HasErrors() {
-		t.Fatal(res)
+	data, err := snapshot.Marshal(ctx, built)
+	if err != nil {
+		t.Fatal(err)
 	}
-	loaded, res := snapshot.Unmarshal(ctx, data, s)
-	if res.HasErrors() {
-		t.Fatal(res)
+	loaded, err := snapshot.Unmarshal(ctx, data, s)
+	if err != nil {
+		t.Fatal(err)
 	}
 	imported := func(from graph.Snapshot) graph.Snapshot {
 		t.Helper()
@@ -166,13 +166,13 @@ func TestCopies_ADuplicateWalksTheSameBuiltAndLoaded(t *testing.T) {
 	ctx := t.Context()
 	s, g := copiesGraph(t)
 	built := g.Snapshot()
-	data, res := snapshot.Marshal(ctx, built)
-	if res.HasErrors() {
-		t.Fatal(res)
+	data, err := snapshot.Marshal(ctx, built)
+	if err != nil {
+		t.Fatal(err)
 	}
-	loaded, res := snapshot.Unmarshal(ctx, data, s)
-	if res.HasErrors() {
-		t.Fatal(res)
+	loaded, err := snapshot.Unmarshal(ctx, data, s)
+	if err != nil {
+		t.Fatal(err)
 	}
 	walks := func(snap graph.Snapshot) [][]string {
 		var out [][]string
@@ -261,19 +261,19 @@ func TestZeroRoots_EachPanicNamesTheCallAndWhatIsZero(t *testing.T) {
 	ctx := t.Context()
 	_, g := copiesGraph(t)
 	built := g.Snapshot()
-	data, res := snapshot.Marshal(ctx, built)
-	if res.HasErrors() {
-		t.Fatal(res)
+	data, err := snapshot.Marshal(ctx, built)
+	if err != nil {
+		t.Fatal(err)
 	}
 	for want, call := range map[string]func(){
 		"graph.New: zero Schema":               func() { graph.New(schema.Schema{}) },
 		"instance.NewValidator: zero Schema":   func() { instance.NewValidator(schema.Schema{}) },
 		"graph.NewFromSnapshot: zero Snapshot": func() { graph.NewFromSnapshot(graph.Snapshot{}) },
-		"graph.Add: zero ValidInstance":        func() { g.Add(ctx, instance.ValidInstance{}) },
+		"graph.Add: zero ValidInstance":        func() { _ = g.Add(ctx, instance.ValidInstance{}) },
 		"graph.AddOrMerge: zero ValidInstance": func() { _, _ = g.AddOrMerge(ctx, instance.ValidInstance{}) },
 		"snapshot.Marshal: zero Snapshot":      func() { _, _ = snapshot.Marshal(ctx, graph.Snapshot{}) },
 		"snapshot.Unmarshal: zero Schema":      func() { _, _ = snapshot.Unmarshal(ctx, data, schema.Schema{}) },
-		"snapshot.Verify: zero Schema":         func() { snapshot.Verify(ctx, data, schema.Schema{}) },
+		"snapshot.Verify: zero Schema":         func() { _ = snapshot.Verify(ctx, data, schema.Schema{}) },
 	} {
 		if got := yammmtest.AssertPanics(t, call); got != want {
 			t.Errorf("panic = %v, want %q", got, want)
@@ -284,24 +284,24 @@ func TestZeroRoots_EachPanicNamesTheCallAndWhatIsZero(t *testing.T) {
 func TestInfo_AnEdgeListUnderAnUndeclaredRelationDoesNotPanic(t *testing.T) {
 	ctx := t.Context()
 	_, g := copiesGraph(t)
-	data, res := snapshot.Marshal(ctx, g.Snapshot())
-	if res.HasErrors() {
-		t.Fatal(res)
+	data, err := snapshot.Marshal(ctx, g.Snapshot())
+	if err != nil {
+		t.Fatal(err)
 	}
 	const anchor = `"key":["o2"],`
 	if !strings.Contains(string(data), anchor) {
 		t.Fatalf("no %s in the document", anchor)
 	}
 	edited := strings.Replace(string(data), anchor, anchor+`"edges":{"NOPE":[]},`, 1)
-	if info, res := snapshot.Stat(ctx, []byte(edited)); info == nil && !res.HasErrors() {
+	if info, err := snapshot.Stat(ctx, []byte(edited)); info == nil && err == nil {
 		t.Error("Info returned no record and no error")
 	}
 }
 
 func TestLoad_ADuplicateWithNoProvenanceSortsBeforeAnEmptySourceName(t *testing.T) {
-	s, res := schema.LoadString(t.Context(), "schema \"t\"\n\ntype Co {\n\tid String primary\n\tnote String\n}\n", "t.yammm")
-	if res.HasErrors() {
-		t.Fatal(res)
+	s, err := schema.LoadString(t.Context(), "schema \"t\"\n\ntype Co {\n\tid String primary\n\tnote String\n}\n", "t.yammm")
+	if err != nil {
+		t.Fatal(err)
 	}
 	co, ok := s.Type("Co")
 	if !ok {

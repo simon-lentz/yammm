@@ -15,15 +15,15 @@ import (
 
 func loadPerson(t *testing.T) schema.Schema {
 	t.Helper()
-	s, res := schema.LoadString(t.Context(), `schema "person"
+	s, err := schema.LoadString(t.Context(), `schema "person"
 
 type Person {
 	id String primary
 	name String required
 }
 `, "person.yammm")
-	if res.HasErrors() {
-		t.Fatalf("load: %s", res)
+	if err != nil {
+		t.Fatalf("load: %s", err)
 	}
 	return s
 }
@@ -51,10 +51,14 @@ func TestValidRaw_CarriesTheProvenance(t *testing.T) {
 
 func TestValid_FailsTheTestOnARefusal(t *testing.T) {
 	s := loadPerson(t)
-	if !fatalOf(t, func(tb *recordingTB) {
+	got := fatalOf(t, func(tb *recordingTB) {
 		instancetest.Valid(tb, s, "Person", map[string]any{"id": "p7"})
-	}).fatal {
-		t.Error("a refused fixture did not fail the test")
+	})
+	if !got.fatal {
+		t.Fatal("a refused fixture did not fail the test")
+	}
+	if !strings.Contains(got.message, "validate Person") || !strings.Contains(got.message, "E_MISSING_REQUIRED") {
+		t.Errorf("Fatalf message = %q, want the type and the refusal", got.message)
 	}
 }
 

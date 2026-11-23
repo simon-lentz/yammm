@@ -69,7 +69,7 @@ func validateSynthetic(name string) error {
 // SourceIDFromPath returns the file-backed identity of path: the host path the
 // package documentation's resolution gives, in NFC with forward slashes. Two
 // spellings that resolve to one host path give one identity. A path that does
-// not exist yet is allowed.
+// not exist yet is allowed. A path that does not resolve returns a plain error.
 func SourceIDFromPath(path string) (SourceID, error) {
 	host, err := hostpath.Resolve(path)
 	if err != nil {

@@ -61,8 +61,8 @@ func benchCorpus(b *testing.B) []benchInput {
 
 	ctx := b.Context()
 	for _, in := range out {
-		if _, res := schema.LoadString(ctx, in.src, in.name); res.HasErrors() {
-			b.Fatalf("fixture %s does not load cleanly: %v", in.name, res)
+		if _, err := schema.LoadString(ctx, in.src, in.name); err != nil {
+			b.Fatalf("fixture %s does not load cleanly: %v", in.name, err)
 		}
 	}
 	return out

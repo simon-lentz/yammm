@@ -131,7 +131,7 @@ func TestWrite_AValueThatHoldsNoneAtANestedCollectionIsNil(t *testing.T) {
 // can stand at, and an association that declares an edge property.
 func nilValueType(t *testing.T) schema.Type {
 	t.Helper()
-	s, res := schema.LoadString(t.Context(), `schema "p"
+	s, err := schema.LoadString(t.Context(), `schema "p"
 
 type C {
 	id String primary
@@ -148,8 +148,8 @@ type T {
 	}
 }
 `, "p.yammm")
-	if res.HasErrors() {
-		t.Fatalf("load: %s", res)
+	if err != nil {
+		t.Fatalf("load: %s", err)
 	}
 	typ, ok := s.Type("T")
 	if !ok {
@@ -178,7 +178,7 @@ func TestExtractKeyProps_APointerAtAKeyIsRefusedByItsConstraint(t *testing.T) {
 	var nilString *string
 	text := "x"
 	for name, p := range map[string]any{"a nil pointer": nilString, "a pointer to a nil pointer": &nilString, "a pointer to a string": &text} {
-		got, err := extractKeyProps(immutable.WrapProperties(map[string]any{"id": p}), shape)
+		got, err := extractKeyProps(immutable.WrapProperties(map[string]any{"id": p}), shape, "type \"T\"")
 		if !errors.Is(err, ErrUnrepresentable) || !strings.Contains(err.Error(), `primary key "id": coerce String: cannot use `) {
 			t.Errorf("%s: extractKeyProps = %#v, %v; want the key's constraint to refuse it", name, got, err)
 		}

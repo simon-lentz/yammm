@@ -20,8 +20,8 @@ func TestScope_IsMemoisedAndLinearInDepth(t *testing.T) {
 	allocs := func(depth int) float64 {
 		s, raw := chainSchemaAndInstance(t, depth)
 		v := NewValidator(s)
-		if _, res := v.ValidateOne(t.Context(), "L0", RawInstance{Properties: raw}); res.Err() != nil {
-			t.Fatalf("depth %d: %v", depth, res.Err())
+		if _, err := v.ValidateOne(t.Context(), "L0", RawInstance{Properties: raw}); err != nil {
+			t.Fatalf("depth %d: %v", depth, err)
 		}
 		return testing.AllocsPerRun(20, func() {
 			_, _ = v.ValidateOne(t.Context(), "L0", RawInstance{Properties: raw})
@@ -51,9 +51,9 @@ func TestScope_IsMemoisedAndLinearInDepth(t *testing.T) {
 func TestScope_ParentHoldsTheChildsMemo(t *testing.T) {
 	s, raw := chainSchemaAndInstance(t, 2)
 	v := NewValidator(s)
-	root, res := v.ValidateOne(t.Context(), "L0", RawInstance{Properties: raw})
-	if res.Err() != nil {
-		t.Fatal(res.Err())
+	root, err := v.ValidateOne(t.Context(), "L0", RawInstance{Properties: raw})
+	if err != nil {
+		t.Fatal(err)
 	}
 	var child ValidInstance
 	for c := range root.Composed("NEXT") {
@@ -101,9 +101,9 @@ func chainSchemaAndInstance(t *testing.T, depth int) (schema.Schema, map[string]
 		}
 		sb.WriteString("}\n\n")
 	}
-	s, res := schema.LoadString(t.Context(), sb.String(), "chain.yammm")
-	if res.Err() != nil {
-		t.Fatal(res.Err())
+	s, err := schema.LoadString(t.Context(), sb.String(), "chain.yammm")
+	if err != nil {
+		t.Fatal(err)
 	}
 	var build func(i int) map[string]any
 	build = func(i int) map[string]any {

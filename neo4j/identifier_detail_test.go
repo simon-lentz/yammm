@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/simon-lentz/yammm/diag"
+	"github.com/simon-lentz/yammm/internal/diagtest"
 	"github.com/simon-lentz/yammm/schema"
 	"github.com/simon-lentz/yammm/schema/cypher"
 )
@@ -36,14 +37,14 @@ func detailsOf(t *testing.T, res diag.Result, code diag.Code) map[string]string 
 func TestInvalidIdentifier_ScopeSiteMatchesTheContract(t *testing.T) {
 	t.Parallel()
 
-	s, lres := schema.LoadSourcesWithEntry(t.Context(), map[string][]byte{
+	s, err := schema.LoadSourcesWithEntry(t.Context(), map[string][]byte{
 		"base.yammm":  []byte("schema \"base\"\n\ntype Thing {\n\tid String primary\n\twhere String\n}\n"),
 		"entry.yammm": []byte("schema \"entry\"\n\nimport \"./base\" as base\n\ntype Heir extends base.Thing {\n\textra String\n\n\t@@index(where, extra)\n}\n"),
-	}, "entry.yammm", ".", schema.WithSourcesOnly(true))
+	}, "entry.yammm", schema.WithSourcesOnly(true), schema.WithModuleRoot("."))
 	if s.IsZero() {
-		t.Fatalf("load: %s", lres)
+		t.Fatalf("load: %s", err)
 	}
-	_, res := indexStatements(cypher.Config{}, s)
+	_, res := indexStatements(t, cypher.Config{}, s)
 
 	got := detailsOf(t, res, cypher.E_NEO4J_INVALID_IDENTIFIER)
 	if got == nil {
@@ -72,9 +73,9 @@ func TestInvalidIdentifier_LabelSitesCarryTheSameContract(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 
-	s, lres := schema.LoadString(ctx, "schema \"A\"\n\ntype C {\n\tid String primary\n}\n", "x.yammm")
+	s, err := schema.LoadString(ctx, "schema \"A\"\n\ntype C {\n\tid String primary\n}\n", "x.yammm")
 	if s.IsZero() {
-		t.Fatalf("load: %s", lres)
+		t.Fatalf("load: %s", err)
 	}
 	for _, tc := range []struct {
 		name string
@@ -84,7 +85,9 @@ func TestInvalidIdentifier_LabelSitesCarryTheSameContract(t *testing.T) {
 		{"a prefix starting with a digit", cypher.Config{LabelPrefix: "9"}, map[string]string{"schema_name": "", "type": "", "label": ""}},
 		{"a label that is a keyword", cypher.Config{LabelSeparator: "S"}, map[string]string{"schema_name": "A", "type": "C", "label": "ASC"}},
 	} {
-		_, res := shapeFor(tc.c, s)
+		_, res := diagtest.Issues(t, func() (*graphShape, error) {
+			return shapeFor(tc.c, s)
+		})
 		got := detailsOf(t, res, cypher.E_NEO4J_INVALID_IDENTIFIER)
 		if got == nil {
 			t.Fatalf("%s: no E_NEO4J_INVALID_IDENTIFIER: %s", tc.name, res)
@@ -130,11 +133,13 @@ func TestInvalidIdentifier_EachLabelBreakCarriesItsReason(t *testing.T) {
 			map[string]string{"schema_name": "", "detail": "the separator is not ASCII letters, digits and underscores"},
 		},
 	} {
-		s, lres := schema.LoadString(t.Context(), tc.src, "x.yammm")
+		s, err := schema.LoadString(t.Context(), tc.src, "x.yammm")
 		if s.IsZero() {
-			t.Fatalf("%s: load: %s", tc.name, lres)
+			t.Fatalf("%s: load: %s", tc.name, err)
 		}
-		_, res := shapeFor(tc.c, s)
+		_, res := diagtest.Issues(t, func() (*graphShape, error) {
+			return shapeFor(tc.c, s)
+		})
 		got := detailsOf(t, res, cypher.E_NEO4J_INVALID_IDENTIFIER)
 		if got == nil {
 			t.Fatalf("%s: no E_NEO4J_INVALID_IDENTIFIER: %s", tc.name, res)

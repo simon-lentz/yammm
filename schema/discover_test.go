@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/simon-lentz/yammm/diag"
+	"github.com/simon-lentz/yammm/internal/diagtest"
 	"github.com/simon-lentz/yammm/internal/yammmtest"
 	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
@@ -356,9 +357,9 @@ func TestLoad_DiscoversMarker(t *testing.T) {
 	root, entry := writeModuleTree(t)
 	writeMarker(t, root, "# project root\n")
 
-	s, res := schema.Load(t.Context(), entry)
-	if res.HasErrors() {
-		t.Fatalf("load with a discovered root: %v", res.Err())
+	s, err := schema.Load(t.Context(), entry)
+	if err != nil {
+		t.Fatalf("load with a discovered root: %v", err)
 	}
 	if want := canonicalPath(t, root); s.ModuleRoot() != want {
 		t.Errorf("ModuleRoot = %q, want the discovered %q", s.ModuleRoot(), want)
@@ -378,8 +379,8 @@ func TestLoad_NoMarkerKeepsTheEntryDirectory(t *testing.T) {
 	}
 
 	s, res := schema.Load(t.Context(), path)
-	if res.HasErrors() {
-		t.Fatalf("load: %v", res.Err())
+	if res != nil {
+		t.Fatalf("load: %v", res)
 	}
 	if want := canonicalPath(t, dir); s.ModuleRoot() != want {
 		t.Errorf("ModuleRoot = %q, want the entry directory %q", s.ModuleRoot(), want)
@@ -399,11 +400,13 @@ func TestLoad_MalformedMarkerFailsTheLoad(t *testing.T) {
 	root, entry := writeModuleTree(t)
 	writeMarker(t, root, "module example.com/thing\n")
 
-	s, res := schema.Load(t.Context(), entry)
+	s, res := diagtest.Capture(t, func(warn func(diag.Issue)) (schema.Schema, error) {
+		return schema.Load(t.Context(), entry, schema.WithWarnings(warn))
+	})
 	if !s.IsZero() {
 		t.Error("a malformed marker must not produce a schema")
 	}
-	if !res.HasErrors() {
+	if diagtest.Err(res) == nil {
 		t.Fatal("a malformed marker must fail the load")
 	}
 	if res.HasFatal() {
@@ -427,7 +430,7 @@ func TestLoad_MalformedMarkerFailsTheLoad(t *testing.T) {
 		}
 	}
 	if !found {
-		t.Errorf("no E_LOAD_MODULE_ROOT_MALFORMED in %v", res.Err())
+		t.Errorf("no E_LOAD_MODULE_ROOT_MALFORMED in %v", res)
 	}
 }
 
@@ -442,9 +445,9 @@ func TestLoad_ExplicitRootDoesNotReadTheMarker(t *testing.T) {
 	root, entry := writeModuleTree(t)
 	writeMarker(t, root, "definitely not a comment\n")
 
-	s, res := schema.Load(t.Context(), entry, schema.WithModuleRoot(root))
-	if res.HasErrors() {
-		t.Fatalf("an explicit root must win before discovery runs: %v", res.Err())
+	s, err := schema.Load(t.Context(), entry, schema.WithModuleRoot(root))
+	if err != nil {
+		t.Fatalf("an explicit root must win before discovery runs: %v", err)
 	}
 	if want := canonicalPath(t, root); s.ModuleRoot() != want {
 		t.Errorf("ModuleRoot = %q, want the explicit %q", s.ModuleRoot(), want)
@@ -463,10 +466,10 @@ func TestModuleRoot_ReportsSyntheticRoot(t *testing.T) {
 		"assets/main.yammm": []byte("schema \"main\"\n\nimport \"assets/dep\" as dep\n\ntype T {\n\tid String primary\n\t--> USES (one) dep.P\n}\n"),
 		"assets/dep.yammm":  []byte("schema \"dep\"\n\ntype P {\n\tpid String primary\n}\n"),
 	}
-	s, res := schema.LoadSourcesWithEntry(t.Context(), sources, "assets/main.yammm", "",
+	s, err := schema.LoadSourcesWithEntry(t.Context(), sources, "assets/main.yammm",
 		schema.WithSyntheticRoot("embedded://app"), schema.WithSourcesOnly(true))
-	if res.HasErrors() {
-		t.Fatalf("synthetic load: %v", res.Err())
+	if err != nil {
+		t.Fatalf("synthetic load: %v", err)
 	}
 	if got := s.ModuleRoot(); got != "embedded://app" {
 		t.Errorf("ModuleRoot = %q, want the synthetic root %q", got, "embedded://app")

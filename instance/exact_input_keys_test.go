@@ -6,6 +6,7 @@ import (
 
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/instance"
+	"github.com/simon-lentz/yammm/internal/diagtest"
 	"github.com/simon-lentz/yammm/internal/yammmtest"
 )
 
@@ -90,7 +91,9 @@ func TestValidate_AKeyInAnotherCaseIsAnUnknownField(t *testing.T) {
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
-			valid, res := v.ValidateOne(t.Context(), "Person", instance.RawInstance{Properties: c.props})
+			valid, res := diagtest.Issues(t, func() (instance.ValidInstance, error) {
+				return v.ValidateOne(t.Context(), "Person", instance.RawInstance{Properties: c.props})
+			})
 			if !valid.IsZero() {
 				t.Error("an instance with an unknown field validated")
 			}
@@ -122,9 +125,11 @@ func TestValidate_AnEdgeKeyInAnotherCaseIsAnUnknownEdgeField(t *testing.T) {
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
-			_, res := v.ValidateOne(t.Context(), "Person", instance.RawInstance{Properties: map[string]any{
-				"id": "p", "name": "n", "works_at": c.edge,
-			}})
+			_, res := diagtest.Issues(t, func() (instance.ValidInstance, error) {
+				return v.ValidateOne(t.Context(), "Person", instance.RawInstance{Properties: map[string]any{
+					"id": "p", "name": "n", "works_at": c.edge,
+				}})
+			})
 			yammmtest.Diff(t, c.want, issuesAt(t, res))
 		})
 	}
@@ -135,9 +140,11 @@ func TestValidate_AnEdgeKeyInAnotherCaseIsAnUnknownEdgeField(t *testing.T) {
 func TestValidate_ARequiredCompositionInAnotherCaseIsAbsent(t *testing.T) {
 	t.Parallel()
 	v := instance.NewValidator(loadSrc(t, exactKeysSchema))
-	_, res := v.ValidateOne(t.Context(), "Order", instance.RawInstance{Properties: map[string]any{
-		"id": "o", "REQ": map[string]any{"n": "a"},
-	}})
+	_, res := diagtest.Issues(t, func() (instance.ValidInstance, error) {
+		return v.ValidateOne(t.Context(), "Order", instance.RawInstance{Properties: map[string]any{
+			"id": "o", "REQ": map[string]any{"n": "a"},
+		}})
+	})
 	var got []string
 	for is := range res.Issues() {
 		got = append(got, is.Code().String()+" "+is.Path())
@@ -152,10 +159,12 @@ func TestValidate_UnknownEdgeFieldsAreSortedUnderACap(t *testing.T) {
 	t.Parallel()
 	v := instance.NewValidator(loadSrc(t, exactKeysSchema), instance.WithIssueLimit(1))
 	for range 20 {
-		_, res := v.ValidateOne(t.Context(), "Person", instance.RawInstance{Properties: map[string]any{
-			"id": "p", "name": "n",
-			"works_at": map[string]any{"_target_id": "c", "title": "t", "zz": 1, "yy": 1, "bb": 1, "aa": 1},
-		}})
+		_, res := diagtest.Issues(t, func() (instance.ValidInstance, error) {
+			return v.ValidateOne(t.Context(), "Person", instance.RawInstance{Properties: map[string]any{
+				"id": "p", "name": "n",
+				"works_at": map[string]any{"_target_id": "c", "title": "t", "zz": 1, "yy": 1, "bb": 1, "aa": 1},
+			}})
+		})
 		got := issuesAt(t, res)
 		if len(got) != 1 || got[0] != "E_UNKNOWN_EDGE_FIELD $.works_at.aa" {
 			t.Fatalf("kept %v, want the first unknown edge field in sorted order", got)
@@ -167,8 +176,10 @@ func TestValidate_UnknownEdgeFieldsAreSortedUnderACap(t *testing.T) {
 func TestValidate_AForeignKeyValueIssueNamesItsField(t *testing.T) {
 	t.Parallel()
 	v := instance.NewValidator(loadSrc(t, exactKeysSchema))
-	_, res := v.ValidateOne(t.Context(), "Person", instance.RawInstance{Properties: map[string]any{
-		"id": "p", "name": "n", "works_at": map[string]any{"_target_id": 5, "title": "t"},
-	}})
+	_, res := diagtest.Issues(t, func() (instance.ValidInstance, error) {
+		return v.ValidateOne(t.Context(), "Person", instance.RawInstance{Properties: map[string]any{
+			"id": "p", "name": "n", "works_at": map[string]any{"_target_id": 5, "title": "t"},
+		}})
+	})
 	yammmtest.Diff(t, []string{"E_TYPE_MISMATCH $.works_at._target_id"}, issuesAt(t, res))
 }

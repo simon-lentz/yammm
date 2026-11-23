@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/simon-lentz/yammm/diag"
+	"github.com/simon-lentz/yammm/internal/diagtest"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -68,7 +69,9 @@ func TestInheritance_TheNarrowestDefinitionIsThePropertyInEveryOrder(t *testing.
 					body += "\tx " + row.own + "\n"
 				}
 				text := src.String() + "type T extends " + strings.Join(order, ", ") + " {\n" + body + "}\n"
-				s, res := schema.LoadString(t.Context(), text, "s.yammm")
+				s, res := diagtest.Capture(t, func(warn func(diag.Issue)) (schema.Schema, error) {
+					return schema.LoadString(t.Context(), text, "s.yammm", schema.WithWarnings(warn))
+				})
 				if row.want == "" {
 					if res.Len() != 1 || !res.HasCode(diag.E_PROPERTY_CONFLICT) {
 						t.Errorf("extends %v: want one E_PROPERTY_CONFLICT, got %v", order, res)

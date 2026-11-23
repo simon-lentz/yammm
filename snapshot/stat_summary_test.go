@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/simon-lentz/yammm/internal/diagtest"
 	"github.com/simon-lentz/yammm/snapshot"
 )
 
@@ -21,18 +22,18 @@ func TestStat_CountsEachSectionAndStatesTheSchemaName(t *testing.T) {
 		},
 		map[string]any{"$type": "Person", "id": "p1", "boss": map[string]any{"_target_id": "p1"}, "friends": []any{map[string]any{"_target_id": "p1"}}},
 	)
-	snap, res := snapshot.Unmarshal(t.Context(), []byte(doc), s)
-	if res.HasErrors() {
-		t.Fatalf("unmarshal: %s", res)
+	snap, readErr := snapshot.Unmarshal(t.Context(), []byte(doc), s)
+	if readErr != nil {
+		t.Fatalf("unmarshal: %s", readErr)
 	}
 	dups, unresolved := len(slices.Collect(snap.Duplicates())), len(slices.Collect(snap.Unresolved()))
 	if dups != 1 || unresolved != 2 {
 		t.Fatalf("fixture holds %d duplicates and %d unresolved records, want 1 and 2", dups, unresolved)
 	}
 
-	info, res := snapshot.Stat(t.Context(), []byte(doc))
-	if res.HasErrors() {
-		t.Fatalf("stat: %s", res)
+	info, readErr := snapshot.Stat(t.Context(), []byte(doc))
+	if readErr != nil {
+		t.Fatalf("stat: %s", readErr)
 	}
 	if info.DuplicateCount != dups || info.UnresolvedCount != unresolved {
 		t.Errorf("Stat counts %d duplicates and %d unresolved, want %d and %d", info.DuplicateCount, info.UnresolvedCount, dups, unresolved)
@@ -49,9 +50,9 @@ func TestStat_CountsEachSectionAndStatesTheSchemaName(t *testing.T) {
 	if err := json.Unmarshal([]byte(doc), &wire); err != nil || wire.Header.SchemaName == "" {
 		t.Fatalf("fixture states no schema_name: %v", err)
 	}
-	hdr, hdrRes := snapshot.ReadHeader(t.Context(), strings.NewReader(doc))
-	if hdrRes.HasErrors() {
-		t.Fatalf("read header: %s", hdrRes)
+	hdr, readErr2 := snapshot.ReadHeader(t.Context(), strings.NewReader(doc))
+	if readErr2 != nil {
+		t.Fatalf("read header: %s", readErr2)
 	}
 	if info.SchemaName != wire.Header.SchemaName || hdr.SchemaName != wire.Header.SchemaName {
 		t.Errorf("SchemaName: Stat %q, ReadHeader %q, want %q", info.SchemaName, hdr.SchemaName, wire.Header.SchemaName)
@@ -86,7 +87,9 @@ func TestStat_StoresAtMostOneHundredIssues(t *testing.T) {
 	}
 	bogus := rehashDocument(t, []byte(strings.ReplaceAll(doc, `"reason":"target_missing"`, `"reason":"bogus"`)))
 
-	_, res := snapshot.Stat(t.Context(), bogus)
+	_, res := diagtest.Issues(t, func() (*snapshot.Info, error) {
+		return snapshot.Stat(t.Context(), bogus)
+	})
 	if res.Len() != 100 || res.DroppedCount() != 50 {
 		t.Errorf("Stat stored %d issues and dropped %d, want 100 and 50: %s", res.Len(), res.DroppedCount(), res)
 	}

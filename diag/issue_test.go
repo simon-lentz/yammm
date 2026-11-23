@@ -333,7 +333,7 @@ func TestIssue_Details_NilForEmpty(t *testing.T) {
 
 // ---- Issue.LogValue ----
 //
-// Paired with ContextualError.LogValue but tested here so the per-issue
+// Paired with ResultError.LogValue but tested here so the per-issue
 // attribute-shape pins live next to the surface they describe. The map
 // helper (issueLogMap) shares the shape; covering the slog form covers
 // both.

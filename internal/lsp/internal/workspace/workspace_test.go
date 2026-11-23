@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/simon-lentz/yammm/internal/diagtest"
 	"github.com/simon-lentz/yammm/internal/lsp/internal/protocol"
 	"github.com/simon-lentz/yammm/internal/lsp/internal/testutil"
 	"github.com/simon-lentz/yammm/internal/yammmtest"
@@ -2723,7 +2724,7 @@ func TestAnalyzeMarkdownAndPublish_SnippetBlock(t *testing.T) {
 
 	// Snapshot should be non-nil and have a valid schema
 	require.NotNil(t, snap.Snapshots[0], "snapshot should be non-nil for snippet block")
-	assert.True(t, snap.Snapshots[0].Result.OK(), "snippet block should produce no errors, got: %v", snap.Snapshots[0].Result)
+	require.NoError(t, diagtest.Err(snap.Snapshots[0].Result), "snippet block should produce no errors, got: %v", snap.Snapshots[0].Result)
 
 	// Diagnostics should have no Fatal/Error entries
 	diags := collector.DiagnosticsFor(uri)
@@ -2883,7 +2884,7 @@ func TestAnalyzeMarkdownAndPublish_ValidSchema(t *testing.T) {
 
 	// Valid schema should have a snapshot with no error diagnostics
 	if snap.Snapshots[0] != nil {
-		assert.True(t, snap.Snapshots[0].Result.OK(), "expected valid schema to produce no errors")
+		require.NoError(t, diagtest.Err(snap.Snapshots[0].Result), "expected valid schema to produce no errors")
 	}
 
 	// Diagnostics should be empty for a valid schema

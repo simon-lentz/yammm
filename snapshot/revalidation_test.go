@@ -12,6 +12,7 @@ import (
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/instance"
+	"github.com/simon-lentz/yammm/internal/diagtest"
 	"github.com/simon-lentz/yammm/internal/instancetest"
 	"github.com/simon-lentz/yammm/schema"
 	"github.com/simon-lentz/yammm/snapshot"
@@ -47,9 +48,9 @@ type Thing {
 
 func revalLoadSchema(t *testing.T) schema.Schema {
 	t.Helper()
-	s, res := schema.LoadString(t.Context(), revalSchema, "reval.yammm")
-	if res.HasErrors() {
-		t.Fatalf("load schema: %s", res.String())
+	s, err := schema.LoadString(t.Context(), revalSchema, "reval.yammm")
+	if err != nil {
+		t.Fatalf("load schema: %s", err)
 	}
 	return s
 }
@@ -73,13 +74,13 @@ func revalDocumentOf(t *testing.T, s schema.Schema, insts []instance.ValidInstan
 	t.Helper()
 	g := graph.New(s)
 	for _, inst := range insts {
-		if r := g.Add(t.Context(), inst); !r.OK() {
-			t.Fatalf("Add: %s", r.String())
+		if err := g.Add(t.Context(), inst); err != nil {
+			t.Fatalf("Add: %s", err)
 		}
 	}
-	data, mres := snapshot.Marshal(t.Context(), g.Snapshot())
-	if mres.HasErrors() {
-		t.Fatalf("Marshal: %s", mres.String())
+	data, err := snapshot.Marshal(t.Context(), g.Snapshot())
+	if err != nil {
+		t.Fatalf("Marshal: %s", err)
 	}
 	for _, e := range append([]revalEdit{{`"attestation":\{"values":true`, `"attestation":{"values":false`}}, edits...) {
 		re := regexp.MustCompile(e.from)
@@ -128,8 +129,10 @@ func TestLoad_RevalidationMatrix(t *testing.T) {
 			data := revalDocument(t, s, revalThing(), tc.edit)
 
 			// Silent without the option.
-			_, plain := snapshot.Unmarshal(t.Context(), data, s)
-			if plain.HasErrors() {
+			_, plain := diagtest.Capture(t, func(warn func(diag.Issue)) (graph.Snapshot, error) {
+				return snapshot.Unmarshal(t.Context(), data, s, snapshot.WithWarnings(warn))
+			})
+			if diagtest.Err(plain) != nil {
 				t.Fatalf("plain Load refused the document: %s", plain.String())
 			}
 			if plain.HasCode(tc.want) {
@@ -137,8 +140,10 @@ func TestLoad_RevalidationMatrix(t *testing.T) {
 			}
 
 			// Reported under the option, still loading at Warning severity.
-			snap, res := snapshot.Unmarshal(t.Context(), data, s, snapshot.WithRevalidation(diag.Warning))
-			if res.HasErrors() || snap.IsZero() {
+			snap, res := diagtest.Capture(t, func(warn func(diag.Issue)) (graph.Snapshot, error) {
+				return snapshot.Unmarshal(t.Context(), data, s, snapshot.WithRevalidation(diag.Warning), snapshot.WithWarnings(warn))
+			})
+			if (diagtest.Err(res) != nil) || snap.IsZero() {
 				t.Fatalf("Warning-severity revalidation refused the load: %s", res.String())
 			}
 			if !res.HasCode(tc.want) {
@@ -146,8 +151,10 @@ func TestLoad_RevalidationMatrix(t *testing.T) {
 			}
 
 			// Error severity refuses the document.
-			snap, res = snapshot.Unmarshal(t.Context(), data, s, snapshot.WithRevalidation(diag.Error))
-			if !snap.IsZero() || !res.HasErrors() {
+			snap, res = diagtest.Capture(t, func(warn func(diag.Issue)) (graph.Snapshot, error) {
+				return snapshot.Unmarshal(t.Context(), data, s, snapshot.WithRevalidation(diag.Error), snapshot.WithWarnings(warn))
+			})
+			if !snap.IsZero() || diagtest.Err(res) == nil {
 				t.Error("Error-severity revalidation returned a snapshot for a failing document")
 			}
 		})
@@ -161,11 +168,11 @@ func revalCleanDocument(t *testing.T, s schema.Schema) []byte {
 	v := instance.NewValidator(s)
 
 	g := graph.New(s)
-	target, res := v.ValidateOne(t.Context(), "Target", instance.RawInstance{Properties: map[string]any{"id": "x1"}})
-	if !res.OK() {
-		t.Fatalf("validate Target: %s", res.String())
+	target, validateErr := v.ValidateOne(t.Context(), "Target", instance.RawInstance{Properties: map[string]any{"id": "x1"}})
+	if validateErr != nil {
+		t.Fatalf("validate Target: %s", validateErr)
 	}
-	thing, res := v.ValidateOne(t.Context(), "Thing", instance.RawInstance{Properties: map[string]any{
+	thing, validateErr := v.ValidateOne(t.Context(), "Thing", instance.RawInstance{Properties: map[string]any{
 		"id":    "t1",
 		"count": int64(5),
 		"state": "on",
@@ -174,17 +181,17 @@ func revalCleanDocument(t *testing.T, s schema.Schema) []byte {
 		"links": []any{map[string]any{"_target_id": "x1", "note": "n"}},
 		"items": []any{map[string]any{"sku": "sku-1"}},
 	}})
-	if !res.OK() {
-		t.Fatalf("validate Thing: %s", res.String())
+	if validateErr != nil {
+		t.Fatalf("validate Thing: %s", validateErr)
 	}
 	for _, vi := range []instance.ValidInstance{target, thing} {
-		if r := g.Add(t.Context(), vi); !r.OK() {
-			t.Fatalf("Add: %s", r.String())
+		if err := g.Add(t.Context(), vi); err != nil {
+			t.Fatalf("Add: %s", err)
 		}
 	}
-	data, mres := snapshot.Marshal(t.Context(), g.Snapshot())
-	if mres.HasErrors() {
-		t.Fatalf("Marshal: %s", mres.String())
+	data, err := snapshot.Marshal(t.Context(), g.Snapshot())
+	if err != nil {
+		t.Fatalf("Marshal: %s", err)
 	}
 	return data
 }
@@ -194,8 +201,10 @@ func TestLoad_RevalidationCleanDataSilent(t *testing.T) {
 	s := revalLoadSchema(t)
 	data := revalCleanDocument(t, s)
 
-	snap, lres := snapshot.Unmarshal(t.Context(), data, s, snapshot.WithRevalidation(diag.Error))
-	if snap.IsZero() || lres.HasErrors() {
+	snap, lres := diagtest.Capture(t, func(warn func(diag.Issue)) (graph.Snapshot, error) {
+		return snapshot.Unmarshal(t.Context(), data, s, snapshot.WithRevalidation(diag.Error), snapshot.WithWarnings(warn))
+	})
+	if snap.IsZero() || (diagtest.Err(lres) != nil) {
 		t.Fatalf("clean validator-built data failed revalidation: %s", lres.String())
 	}
 	for issue := range lres.Issues() {
@@ -246,7 +255,9 @@ func TestLoad_RevalidationReportsACancelledRowAtItsOwnSeverity(t *testing.T) {
 	sawRow := false
 	for after := 1; ; after++ {
 		ctx := &cancelAfterPolls{after: after}
-		snap, res := snapshot.Unmarshal(ctx, data, s, snapshot.WithRevalidation(diag.Warning))
+		snap, res := diagtest.Capture(t, func(warn func(diag.Issue)) (graph.Snapshot, error) {
+			return snapshot.Unmarshal(ctx, data, s, snapshot.WithRevalidation(diag.Warning), snapshot.WithWarnings(warn))
+		})
 		if ctx.polled() < after {
 			if snap.IsZero() {
 				t.Fatalf("an uncancelled load failed: %s", res)
@@ -297,10 +308,14 @@ func TestLoad_RefusesAnEdgeUnderAnUndeclaredRelation(t *testing.T) {
 	if bytes.Equal(edited, data) {
 		t.Fatalf("no LINKS edge to rename in %s", data)
 	}
-	if _, lres := snapshot.Unmarshal(t.Context(), edited, s, snapshot.WithIntegrityCheck(false)); !lres.HasCode(diag.E_GRAPH_UNKNOWN_RELATION) {
+	if _, lres := diagtest.Capture(t, func(warn func(diag.Issue)) (graph.Snapshot, error) {
+		return snapshot.Unmarshal(t.Context(), edited, s, snapshot.WithIntegrityCheck(false), snapshot.WithWarnings(warn))
+	}); !lres.HasCode(diag.E_GRAPH_UNKNOWN_RELATION) {
 		t.Errorf("Load did not refuse an edge under an undeclared relation: %s", lres)
 	}
-	if vres := snapshot.Verify(t.Context(), edited, s, snapshot.WithIntegrityCheck(false)); !vres.HasCode(diag.E_GRAPH_UNKNOWN_RELATION) {
+	if vres := diagtest.CaptureErr(t, func(warn func(diag.Issue)) error {
+		return snapshot.Verify(t.Context(), edited, s, snapshot.WithIntegrityCheck(false), snapshot.WithWarnings(warn))
+	}); !vres.HasCode(diag.E_GRAPH_UNKNOWN_RELATION) {
 		t.Errorf("Verify did not refuse an edge under an undeclared relation: %s", vres)
 	}
 }
@@ -315,12 +330,16 @@ func TestLoad_RevalidationUnresolvedRequired(t *testing.T) {
 	owned["owner"] = map[string]any{"_target_id": "missing"}
 	data := revalDocument(t, s, owned)
 
-	_, plain := snapshot.Unmarshal(t.Context(), data, s)
+	_, plain := diagtest.Capture(t, func(warn func(diag.Issue)) (graph.Snapshot, error) {
+		return snapshot.Unmarshal(t.Context(), data, s, snapshot.WithWarnings(warn))
+	})
 	if plain.HasCode(diag.W_SNAPSHOT_UNRESOLVED_REQUIRED) {
 		t.Fatal("the unresolved-required warning fired without the option")
 	}
 
-	_, res := snapshot.Unmarshal(t.Context(), data, s, snapshot.WithRevalidation(diag.Warning))
+	_, res := diagtest.Capture(t, func(warn func(diag.Issue)) (graph.Snapshot, error) {
+		return snapshot.Unmarshal(t.Context(), data, s, snapshot.WithRevalidation(diag.Warning), snapshot.WithWarnings(warn))
+	})
 	if !res.HasCode(diag.W_SNAPSHOT_UNRESOLVED_REQUIRED) {
 		t.Errorf("a Required unresolved record was not reported: %s", res.String())
 	}
@@ -335,7 +354,7 @@ func TestLoad_RevalidationUnresolvedRequired(t *testing.T) {
 func TestLoad_RevalidationJudgesANumberByItsText(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()
-	s, res := schema.LoadString(ctx, `schema "num"
+	s, err := schema.LoadString(ctx, `schema "num"
 
 type T {
 	id String primary
@@ -344,22 +363,22 @@ type T {
 	s String
 }
 `, "num.yammm")
-	if res.HasErrors() {
-		t.Fatalf("load schema: %s", res.String())
+	if err != nil {
+		t.Fatalf("load schema: %s", err)
 	}
-	vi, vr := instance.NewValidator(s).ValidateOne(ctx, "T", instance.RawInstance{
+	vi, validateErr := instance.NewValidator(s).ValidateOne(ctx, "T", instance.RawInstance{
 		Properties: map[string]any{"id": "a", "n": int64(7), "f": 1.5, "s": "x"},
 	})
-	if vr.HasErrors() {
-		t.Fatalf("validate: %s", vr.String())
+	if validateErr != nil {
+		t.Fatalf("validate: %s", validateErr)
 	}
 	g := graph.New(s)
-	if r := g.Add(ctx, vi); r.HasErrors() {
-		t.Fatalf("add: %s", r.String())
+	if err := g.Add(ctx, vi); err != nil {
+		t.Fatalf("add: %s", err)
 	}
-	clean, mr := snapshot.Marshal(ctx, g.Snapshot())
-	if mr.HasErrors() {
-		t.Fatalf("marshal: %s", mr.String())
+	clean, readErr := snapshot.Marshal(ctx, g.Snapshot())
+	if readErr != nil {
+		t.Fatalf("marshal: %s", readErr)
 	}
 	for _, c := range []struct {
 		name, from, to string
@@ -385,8 +404,10 @@ type T {
 				}
 				data = bytes.Replace(clean, []byte(c.from), []byte(c.to), 1)
 			}
-			_, res := snapshot.Unmarshal(ctx, data, s,
-				snapshot.WithIntegrityCheck(false), snapshot.WithRevalidation(diag.Error))
+			_, res := diagtest.Capture(t, func(warn func(diag.Issue)) (graph.Snapshot, error) {
+				return snapshot.Unmarshal(ctx, data, s,
+					snapshot.WithIntegrityCheck(false), snapshot.WithRevalidation(diag.Error), snapshot.WithWarnings(warn))
+			})
 			var got []string
 			for issue := range res.Issues() {
 				got = append(got, issue.Code().String()+": "+issue.Message())
@@ -411,7 +432,7 @@ type T {
 func TestLoad_RevalidationJudgesAnEdgePropertyNumberByItsText(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()
-	s, res := schema.LoadString(ctx, `schema "edgenum"
+	s, err := schema.LoadString(ctx, `schema "edgenum"
 
 type U {
 	id String primary
@@ -422,33 +443,33 @@ type T {
 	--> LINKS (_:many) U { n Integer }
 }
 `, "edgenum.yammm")
-	if res.HasErrors() {
-		t.Fatalf("load schema: %s", res.String())
+	if err != nil {
+		t.Fatalf("load schema: %s", err)
 	}
 	v := instance.NewValidator(s)
-	u, ur := v.ValidateOne(ctx, "U", instance.RawInstance{Properties: map[string]any{"id": "u1"}})
-	if ur.HasErrors() {
-		t.Fatalf("validate U: %s", ur.String())
+	u, validateErr := v.ValidateOne(ctx, "U", instance.RawInstance{Properties: map[string]any{"id": "u1"}})
+	if validateErr != nil {
+		t.Fatalf("validate U: %s", validateErr)
 	}
-	ti, tr := v.ValidateOne(ctx, "T", instance.RawInstance{Properties: map[string]any{
+	ti, validateErr2 := v.ValidateOne(ctx, "T", instance.RawInstance{Properties: map[string]any{
 		"id": "t1",
 		"links": []any{
 			map[string]any{"_target_id": "u1", "n": int64(7)},
 			map[string]any{"_target_id": "u9", "n": int64(8)},
 		},
 	}})
-	if tr.HasErrors() {
-		t.Fatalf("validate T: %s", tr.String())
+	if validateErr2 != nil {
+		t.Fatalf("validate T: %s", validateErr2)
 	}
 	g := graph.New(s)
 	for _, vi := range []instance.ValidInstance{u, ti} {
-		if r := g.Add(ctx, vi); r.HasErrors() {
-			t.Fatalf("add: %s", r.String())
+		if err := g.Add(ctx, vi); err != nil {
+			t.Fatalf("add: %s", err)
 		}
 	}
-	clean, mr := snapshot.Marshal(ctx, g.Snapshot())
-	if mr.HasErrors() {
-		t.Fatalf("marshal: %s", mr.String())
+	clean, readErr := snapshot.Marshal(ctx, g.Snapshot())
+	if readErr != nil {
+		t.Fatalf("marshal: %s", readErr)
 	}
 	for _, c := range []struct {
 		name, from, to string
@@ -469,8 +490,10 @@ type T {
 				}
 				data = bytes.Replace(clean, []byte(c.from), []byte(c.to), 1)
 			}
-			_, res := snapshot.Unmarshal(ctx, data, s,
-				snapshot.WithIntegrityCheck(false), snapshot.WithRevalidation(diag.Error))
+			_, res := diagtest.Capture(t, func(warn func(diag.Issue)) (graph.Snapshot, error) {
+				return snapshot.Unmarshal(ctx, data, s,
+					snapshot.WithIntegrityCheck(false), snapshot.WithRevalidation(diag.Error), snapshot.WithWarnings(warn))
+			})
 			var got []string
 			for issue := range res.Issues() {
 				got = append(got, issue.Code().String()+": "+issue.Message())

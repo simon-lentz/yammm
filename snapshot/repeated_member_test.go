@@ -9,6 +9,7 @@ import (
 
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/graph"
+	"github.com/simon-lentz/yammm/internal/diagtest"
 	"github.com/simon-lentz/yammm/snapshot"
 )
 
@@ -31,16 +32,24 @@ func TestReader_RefusesAnObjectThatRepeatsAMember(t *testing.T) {
 		map[string]any{"$type": "Person", "id": "p1", "boss": map[string]any{"_target_id": "p0"}, "works_at": map[string]any{"_target_id": "c1"}},
 	)
 	read := func(doc string) map[string]diag.Result {
-		_, l := snapshot.Unmarshal(context.Background(), rehashDocument(t, []byte(doc)), s)
-		_, i := snapshot.Stat(context.Background(), rehashDocument(t, []byte(doc)))
-		_, u := snapshot.UpdateMetadata(context.Background(), []byte(doc), map[string]string{"k": "v"})
+		_, l := diagtest.Capture(t, func(warn func(diag.Issue)) (graph.Snapshot, error) {
+			return snapshot.Unmarshal(context.Background(), rehashDocument(t, []byte(doc)), s, snapshot.WithWarnings(warn))
+		})
+		_, i := diagtest.Issues(t, func() (*snapshot.Info, error) {
+			return snapshot.Stat(context.Background(), rehashDocument(t, []byte(doc)))
+		})
+		_, u := diagtest.Issues(t, func() ([]byte, error) {
+			return snapshot.UpdateMetadata(context.Background(), []byte(doc), map[string]string{"k": "v"})
+		})
 		return map[string]diag.Result{
-			"Load": l, "Verify": snapshot.Verify(context.Background(), rehashDocument(t, []byte(doc)), s), "Info": i,
+			"Load": l, "Verify": diagtest.CaptureErr(t, func(warn func(diag.Issue)) error {
+				return snapshot.Verify(context.Background(), rehashDocument(t, []byte(doc)), s, snapshot.WithWarnings(warn))
+			}), "Info": i,
 			"UpdateMetadata": u,
 		}
 	}
 	for surface, res := range read(doc) {
-		if res.HasErrors() {
+		if diagtest.Err(res) != nil {
 			t.Fatalf("control, %s: the document with its hash blanked is refused: %s", surface, res)
 		}
 	}
@@ -86,16 +95,16 @@ func TestReader_KeepsMapKeysThatDifferOnlyInCase(t *testing.T) {
 	ctx := context.Background()
 	s := loadReaderSchema(t)
 	meta := map[string]string{"key": "a", "Key": "b", "KEY": "c"}
-	data, res := snapshot.Marshal(ctx, graph.New(s).Snapshot(), snapshot.WithMetadata(meta))
-	if res.HasErrors() {
-		t.Fatalf("Marshal: %s", res)
+	data, err := snapshot.Marshal(ctx, graph.New(s).Snapshot(), snapshot.WithMetadata(meta))
+	if err != nil {
+		t.Fatalf("Marshal: %s", err)
 	}
-	if _, lres := snapshot.Unmarshal(ctx, rehashDocument(t, data), s); lres.HasErrors() {
-		t.Errorf("Load: %s", lres)
+	if _, err := snapshot.Unmarshal(ctx, rehashDocument(t, data), s); err != nil {
+		t.Errorf("Load: %s", err)
 	}
-	info, hres := snapshot.ReadHeader(ctx, bytes.NewReader(data))
-	if hres.HasErrors() {
-		t.Fatalf("ReadHeader: %s", hres)
+	info, readErr := snapshot.ReadHeader(ctx, bytes.NewReader(data))
+	if readErr != nil {
+		t.Fatalf("ReadHeader: %s", readErr)
 	}
 	if !maps.Equal(info.Metadata, meta) {
 		t.Errorf("metadata reads back %q, want %q", info.Metadata, meta)

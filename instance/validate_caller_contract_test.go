@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/simon-lentz/yammm/internal/diagtest"
 	"github.com/simon-lentz/yammm/internal/yammmtest/sourcetest"
 
 	"github.com/simon-lentz/yammm/diag"
@@ -18,9 +19,9 @@ import (
 
 func loadT(t *testing.T, src string) schema.Schema {
 	t.Helper()
-	s, res := schema.LoadString(t.Context(), src, "p.yammm")
-	if res.Err() != nil {
-		t.Fatal(res.Err())
+	s, err := schema.LoadString(t.Context(), src, "p.yammm")
+	if err != nil {
+		t.Fatal(err)
 	}
 	return s
 }
@@ -62,9 +63,9 @@ func TestValidateOne_ANilSliceOrMapIsAbsentAtEveryNullRuleSite(t *testing.T) {
 	t.Run("optional nil slice is dropped", func(t *testing.T) {
 		t.Parallel()
 		for _, nilTags := range []any{[]any(nil), []string(nil)} {
-			vi, res := v.ValidateOne(t.Context(), "T", instance.RawInstance{Properties: map[string]any{"id": "x", "must": "m", "tags": nilTags}})
-			if res.Err() != nil {
-				t.Fatalf("%T: refused: %v", nilTags, res.Err())
+			vi, err := v.ValidateOne(t.Context(), "T", instance.RawInstance{Properties: map[string]any{"id": "x", "must": "m", "tags": nilTags}})
+			if err != nil {
+				t.Fatalf("%T: refused: %v", nilTags, err)
 			}
 			if _, ok := vi.Property("tags"); ok {
 				t.Errorf("%T: a nil slice was stored", nilTags)
@@ -73,19 +74,29 @@ func TestValidateOne_ANilSliceOrMapIsAbsentAtEveryNullRuleSite(t *testing.T) {
 	})
 	t.Run("edge value nil map and nil slice are the absent value an explicit null is", func(t *testing.T) {
 		t.Parallel()
-		_, oneControl := v.ValidateOne(t.Context(), "T", instance.RawInstance{Properties: map[string]any{"id": "x", "must": "m", "at": nil}})
-		_, one := v.ValidateOne(t.Context(), "T", instance.RawInstance{Properties: map[string]any{"id": "x", "must": "m", "at": map[string]any(nil)}})
-		_, manyControl := v.ValidateOne(t.Context(), "T", instance.RawInstance{Properties: map[string]any{"id": "x", "must": "m", "lines": nil}})
-		_, many := v.ValidateOne(t.Context(), "T", instance.RawInstance{Properties: map[string]any{"id": "x", "must": "m", "lines": []any(nil)}})
+		_, oneControl := diagtest.Issues(t, func() (instance.ValidInstance, error) {
+			return v.ValidateOne(t.Context(), "T", instance.RawInstance{Properties: map[string]any{"id": "x", "must": "m", "at": nil}})
+		})
+		_, one := diagtest.Issues(t, func() (instance.ValidInstance, error) {
+			return v.ValidateOne(t.Context(), "T", instance.RawInstance{Properties: map[string]any{"id": "x", "must": "m", "at": map[string]any(nil)}})
+		})
+		_, manyControl := diagtest.Issues(t, func() (instance.ValidInstance, error) {
+			return v.ValidateOne(t.Context(), "T", instance.RawInstance{Properties: map[string]any{"id": "x", "must": "m", "lines": nil}})
+		})
+		_, many := diagtest.Issues(t, func() (instance.ValidInstance, error) {
+			return v.ValidateOne(t.Context(), "T", instance.RawInstance{Properties: map[string]any{"id": "x", "must": "m", "lines": []any(nil)}})
+		})
 		for name, pair := range map[string][2]diag.Result{"a nil map at a (one) association": {oneControl, one}, "a nil slice at a (many) composition": {manyControl, many}} {
-			if !slices.Equal(codes(pair[0]), codes(pair[1])) || pair[1].Err() != nil {
+			if !slices.Equal(codes(pair[0]), codes(pair[1])) || diagtest.Err(pair[1]) != nil {
 				t.Errorf("%s drew %v, an explicit null %v; want both accepted as absent", name, codes(pair[1]), codes(pair[0]))
 			}
 		}
 	})
 	t.Run("FK component nil slice is a null component", func(t *testing.T) {
 		t.Parallel()
-		_, res := v.ValidateOne(t.Context(), "T", instance.RawInstance{Properties: map[string]any{"id": "x", "must": "m", "at": map[string]any{"_target_id": []string(nil)}}})
+		_, res := diagtest.Issues(t, func() (instance.ValidInstance, error) {
+			return v.ValidateOne(t.Context(), "T", instance.RawInstance{Properties: map[string]any{"id": "x", "must": "m", "at": map[string]any{"_target_id": []string(nil)}}})
+		})
 		if !strings.Contains(res.String(), `FK field "_target_id": expected string, got null`) {
 			t.Errorf("a nil slice at an FK component was not reported as null: %s", res)
 		}
@@ -102,7 +113,9 @@ func TestValidateOne_ANilPointerIsNoAbsentValueAtAnyNullRuleSite(t *testing.T) {
 	var nilStr *string
 	t.Run("optional property", func(t *testing.T) {
 		t.Parallel()
-		vi, res := v.ValidateOne(t.Context(), "T", instance.RawInstance{Properties: map[string]any{"id": "x", "must": "m", "nick": nilStr}})
+		vi, res := diagtest.Issues(t, func() (instance.ValidInstance, error) {
+			return v.ValidateOne(t.Context(), "T", instance.RawInstance{Properties: map[string]any{"id": "x", "must": "m", "nick": nilStr}})
+		})
 		if !slices.Equal(codes(res), []string{diag.E_TYPE_MISMATCH.String()}) || !vi.IsZero() {
 			t.Errorf("want E_TYPE_MISMATCH alone and no instance, got %v", codes(res))
 		}
@@ -112,7 +125,9 @@ func TestValidateOne_ANilPointerIsNoAbsentValueAtAnyNullRuleSite(t *testing.T) {
 	})
 	t.Run("required property", func(t *testing.T) {
 		t.Parallel()
-		_, res := v.ValidateOne(t.Context(), "T", instance.RawInstance{Properties: map[string]any{"id": "x", "must": nilStr}})
+		_, res := diagtest.Issues(t, func() (instance.ValidInstance, error) {
+			return v.ValidateOne(t.Context(), "T", instance.RawInstance{Properties: map[string]any{"id": "x", "must": nilStr}})
+		})
 		if !slices.Equal(codes(res), []string{diag.E_TYPE_MISMATCH.String()}) {
 			t.Errorf("want E_TYPE_MISMATCH alone, got %v", codes(res))
 		}
@@ -120,15 +135,19 @@ func TestValidateOne_ANilPointerIsNoAbsentValueAtAnyNullRuleSite(t *testing.T) {
 	t.Run("edge value", func(t *testing.T) {
 		t.Parallel()
 		var nilEdge *map[string]any
-		_, res := v.ValidateOne(t.Context(), "T", instance.RawInstance{Properties: map[string]any{"id": "x", "must": "m", "at": nilEdge}})
+		_, res := diagtest.Issues(t, func() (instance.ValidInstance, error) {
+			return v.ValidateOne(t.Context(), "T", instance.RawInstance{Properties: map[string]any{"id": "x", "must": "m", "at": nilEdge}})
+		})
 		if !res.HasCode(diag.E_EDGE_SHAPE_MISMATCH) || !strings.Contains(res.String(), "got *map[string]interface {}") || strings.Contains(res.String(), "got null") {
 			t.Errorf("want E_EDGE_SHAPE_MISMATCH naming the pointer, got %s", res)
 		}
 	})
 	t.Run("FK component", func(t *testing.T) {
 		t.Parallel()
-		_, res := v.ValidateOne(t.Context(), "T", instance.RawInstance{Properties: map[string]any{"id": "x", "must": "m", "at": map[string]any{"_target_id": nilStr}}})
-		if res.Err() == nil || strings.Contains(res.String(), "got null") || !strings.Contains(res.String(), "*string") {
+		_, res := diagtest.Issues(t, func() (instance.ValidInstance, error) {
+			return v.ValidateOne(t.Context(), "T", instance.RawInstance{Properties: map[string]any{"id": "x", "must": "m", "at": map[string]any{"_target_id": nilStr}}})
+		})
+		if diagtest.Err(res) == nil || strings.Contains(res.String(), "got null") || !strings.Contains(res.String(), "*string") {
 			t.Errorf("want a refusal naming the pointer, got %s", res)
 		}
 	})
@@ -180,7 +199,9 @@ type T {
 		"a nil pointer at a one-edge's value": {map[string]any{"at": nilLine}, diag.E_EDGE_SHAPE_MISMATCH, `expected object, got *map[string]interface {}`},
 	} {
 		c.props["id"] = "x"
-		vi, res := v.ValidateOne(t.Context(), "T", instance.RawInstance{Properties: c.props})
+		vi, res := diagtest.Issues(t, func() (instance.ValidInstance, error) {
+			return v.ValidateOne(t.Context(), "T", instance.RawInstance{Properties: c.props})
+		})
 		if !slices.Equal(codes(res), []string{c.code.String()}) || !vi.IsZero() {
 			t.Errorf("%s: want %s alone and no instance, got %v", name, c.code, codes(res))
 		}
@@ -203,12 +224,16 @@ func TestValidate_CancellationReturnsNoPartialSlice(t *testing.T) {
 	}
 	ctx, cancel := context.WithCancel(t.Context())
 	// Cancel after the first instance validates: the second ctx.Err() check trips.
-	valids, res := v.Validate(ctx, "T", raws)
-	if res.Err() != nil || len(valids) != 5 {
-		t.Fatalf("control: %d valids, %v", len(valids), res.Err())
+	valids, res := diagtest.Issues(t, func() ([]instance.ValidInstance, error) {
+		return v.Validate(ctx, "T", raws)
+	})
+	if diagtest.Err(res) != nil || len(valids) != 5 {
+		t.Fatalf("control: %d valids, %v", len(valids), res)
 	}
 	cancel()
-	valids, res = v.Validate(ctx, "T", raws)
+	valids, res = diagtest.Issues(t, func() ([]instance.ValidInstance, error) {
+		return v.Validate(ctx, "T", raws)
+	})
 	if valids != nil {
 		t.Errorf("a cancelled batch returned a partial slice of %d", len(valids))
 	}
@@ -226,14 +251,16 @@ func TestValidate_UnknownTypeFailsOnAnEmptyBatch(t *testing.T) {
 	for name, raws := range map[string][]instance.RawInstance{"nil": nil, "empty": {}} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
-			valids, res := v.Validate(t.Context(), "Nope", raws)
+			valids, res := diagtest.Issues(t, func() ([]instance.ValidInstance, error) {
+				return v.Validate(t.Context(), "Nope", raws)
+			})
 			if valids != nil || !res.HasCode(diag.E_INSTANCE_TYPE_NOT_FOUND) {
 				t.Errorf("valids=%v codes=%v; want nil and E_INSTANCE_TYPE_NOT_FOUND", valids, codes(res))
 			}
 		})
 	}
-	if valids, res := v.Validate(t.Context(), "T", nil); valids != nil || res.Err() != nil {
-		t.Errorf("control: a known type and a nil batch is nil, OK; got %v, %v", valids, res.Err())
+	if valids, err := v.Validate(t.Context(), "T", nil); valids != nil || err != nil {
+		t.Errorf("control: a known type and a nil batch is nil, OK; got %v, %v", valids, err)
 	}
 }
 
@@ -249,7 +276,9 @@ func TestValidate_AnAbstractOrPartNameFailsOnAnEmptyBatch(t *testing.T) {
 		code diag.Code
 	}{{"A", diag.E_ABSTRACT_TYPE}, {"P", diag.E_PART_TYPE_DIRECT}} {
 		for batch, raws := range map[string][]instance.RawInstance{"nil": nil, "empty": {}} {
-			valids, res := v.Validate(t.Context(), c.name, raws)
+			valids, res := diagtest.Issues(t, func() ([]instance.ValidInstance, error) {
+				return v.Validate(t.Context(), c.name, raws)
+			})
 			if valids != nil || !res.HasCode(c.code) {
 				t.Errorf("%s, %s batch: valids=%v codes=%v; want nil and %s", c.name, batch, valids, codes(res), c.code)
 			}
@@ -262,8 +291,8 @@ func TestValidate_AnAbstractOrPartNameFailsOnAnEmptyBatch(t *testing.T) {
 			}
 		}
 	}
-	if valids, res := v.Validate(t.Context(), "T", []instance.RawInstance{}); valids == nil || res.Err() != nil {
-		t.Errorf("control: a root type and an empty batch is empty, OK; got %v, %v", valids, res.Err())
+	if valids, err := v.Validate(t.Context(), "T", []instance.RawInstance{}); valids == nil || err != nil {
+		t.Errorf("control: a root type and an empty batch is empty, OK; got %v, %v", valids, err)
 	}
 }
 
@@ -273,7 +302,9 @@ func TestValidate_AnAbstractRowRefusalCarriesItsSpan(t *testing.T) {
 	s := loadT(t, "schema \"a\"\n\nabstract type A {\n\tid String primary\n}\n")
 	span := location.Span{Source: sourcetest.ID("rows.json"), Start: location.Position{Line: 7, Column: 3}, End: location.Position{Line: 7, Column: 3}}
 	raw := instance.RawInstance{Properties: map[string]any{"id": "x"}, Provenance: instance.NewProvenance("rows.json", path.Root, span)}
-	_, res := instance.NewValidator(s).Validate(t.Context(), "A", []instance.RawInstance{raw})
+	_, res := diagtest.Issues(t, func() ([]instance.ValidInstance, error) {
+		return instance.NewValidator(s).Validate(t.Context(), "A", []instance.RawInstance{raw})
+	})
 	if !res.HasCode(diag.E_ABSTRACT_TYPE) {
 		t.Fatalf("Validate = %s, want E_ABSTRACT_TYPE", res)
 	}
@@ -291,7 +322,9 @@ func TestValidate_BatchWideErrorBlamesNoRow(t *testing.T) {
 	s := loadT(t, "schema \"p\"\n\ntype T {\n\tid String primary\n}\n")
 	v := instance.NewValidator(s)
 	prov := instance.NewProvenance("rows.json", path.Root.Index(7), location.Span{})
-	valids, res := v.Validate(t.Context(), "NoSuchType", []instance.RawInstance{{Properties: map[string]any{"id": "x"}, Provenance: prov}})
+	valids, res := diagtest.Issues(t, func() ([]instance.ValidInstance, error) {
+		return v.Validate(t.Context(), "NoSuchType", []instance.RawInstance{{Properties: map[string]any{"id": "x"}, Provenance: prov}})
+	})
 	if !res.HasCode(diag.E_INSTANCE_TYPE_NOT_FOUND) {
 		t.Fatalf("want E_TYPE_NOT_FOUND, got %v", codes(res))
 	}
@@ -363,9 +396,11 @@ type P {
 }
 `)
 	v := instance.NewValidator(s)
-	_, res := v.ValidateOne(t.Context(), "P", instance.RawInstance{Properties: map[string]any{
-		"id": "p", "addrs": []any{map[string]any{"id": "a", "rooms": []any{map[string]any{"id": "r", "bogus": 1}}}},
-	}})
+	_, res := diagtest.Issues(t, func() (instance.ValidInstance, error) {
+		return v.ValidateOne(t.Context(), "P", instance.RawInstance{Properties: map[string]any{
+			"id": "p", "addrs": []any{map[string]any{"id": "a", "rooms": []any{map[string]any{"id": "r", "bogus": 1}}}},
+		}})
+	})
 	if !res.HasCode(diag.E_UNKNOWN_FIELD) {
 		t.Fatalf("want E_UNKNOWN_FIELD on the grandchild, got %v", codes(res))
 	}
@@ -403,7 +438,9 @@ type Sub extends Base {
 }
 `)
 	v := instance.NewValidator(s)
-	_, res := v.ValidateOne(t.Context(), "Sub", instance.RawInstance{Properties: map[string]any{"id": "s", "n": int64(-1)}})
+	_, res := diagtest.Issues(t, func() (instance.ValidInstance, error) {
+		return v.ValidateOne(t.Context(), "Sub", instance.RawInstance{Properties: map[string]any{"id": "s", "n": int64(-1)}})
+	})
 	if !res.HasCode(diag.E_INVARIANT_FAIL) {
 		t.Errorf("the inherited invariant did not run: %v", codes(res))
 	}
@@ -415,13 +452,17 @@ func TestValidateOne_JSONNumberIsNotAString(t *testing.T) {
 	t.Parallel()
 	s := loadT(t, "schema \"p\"\n\ntype T {\n\tid String primary\n\ts String\n\tn Integer\n}\n")
 	v := instance.NewValidator(s)
-	_, res := v.ValidateOne(t.Context(), "T", instance.RawInstance{Properties: map[string]any{"id": "x", "s": json.Number("4200")}})
+	_, res := diagtest.Issues(t, func() (instance.ValidInstance, error) {
+		return v.ValidateOne(t.Context(), "T", instance.RawInstance{Properties: map[string]any{"id": "x", "s": json.Number("4200")}})
+	})
 	if !res.HasCode(diag.E_TYPE_MISMATCH) {
 		t.Errorf("json.Number at a String property: want E_TYPE_MISMATCH, got %v", codes(res))
 	}
-	vi, res := v.ValidateOne(t.Context(), "T", instance.RawInstance{Properties: map[string]any{"id": "x", "n": json.Number("42")}})
-	if res.Err() != nil {
-		t.Fatalf("control: json.Number at an Integer property refused: %v", res.Err())
+	vi, res := diagtest.Issues(t, func() (instance.ValidInstance, error) {
+		return v.ValidateOne(t.Context(), "T", instance.RawInstance{Properties: map[string]any{"id": "x", "n": json.Number("42")}})
+	})
+	if diagtest.Err(res) != nil {
+		t.Fatalf("control: json.Number at an Integer property refused: %v", res)
 	}
 	if n, _ := vi.Property("n"); n.Any() != int64(42) {
 		t.Errorf("stored %#v, want int64(42)", n.Any())

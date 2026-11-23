@@ -23,6 +23,10 @@ import (
 // diagnosticSource is the value used for the Source field in LSP diagnostics.
 const diagnosticSource = "yammm"
 
+// analysisIssueLimit is the most issues one analysis publishes, warnings and
+// failures together. Past it the collector keeps the most severe.
+const analysisIssueLimit = 100
+
 // canonicalSourceID mints a SourceID whose key matches the loader's, so an
 // overlay is registered once, as text the client sent, and not again under the
 // loader's key as a file read from disk.
@@ -67,8 +71,8 @@ type Snapshot struct {
 	// contract). Warnings may still be present beside a real Schema.
 	Schema schema.Schema
 
-	// Result contains all diagnostics from analysis. Check Result.OK() to
-	// determine if the schema is semantically valid.
+	// Result contains all diagnostics from analysis. The schema is
+	// semantically valid when Result counts no Fatal or Error issue.
 	Result diag.Result
 
 	// Sources holds every overlay the analysis was given, as text the client
@@ -204,15 +208,17 @@ func NewAnalyzer(logger *slog.Logger) *Analyzer {
 //   - error != nil: the result holds a Fatal issue, such as an I/O failure, a
 //     cancellation, input the load cannot begin from, or a header that does
 //     not parse. The snapshot is still returned, with the diagnostics.
-//   - error == nil && !snapshot.Result.OK(): Semantic failure. The schema
-//     has parse or validation errors, but analysis completed normally.
-//     The snapshot contains diagnostics describing the issues.
-//   - error == nil && snapshot.Result.OK(): Success. The schema is valid.
-//     The snapshot may still contain warnings (check Result.HasWarnings()).
+//   - error == nil and snapshot.Result counts an Error issue: Semantic
+//     failure. The schema has parse or validation errors, but analysis
+//     completed normally. The snapshot contains diagnostics describing the
+//     issues.
+//   - error == nil and snapshot.Result counts no Fatal or Error issue:
+//     Success. The schema is valid. The snapshot may still contain warnings
+//     (check Result.HasWarnings()).
 //
-// The opts parameter accepts optional [schema.LoadOption] values that are forwarded
-// to [schema.LoadSourcesWithEntry]. For example, callers may pass
-// [schema.WithImportsAllowed] with false to reject import declarations.
+// The load takes [schema.WithModuleRoot] with moduleRoot, where an empty root
+// sets no root, and [schema.WithImportsAllowed] with importsAllowed, where
+// false refuses every import declaration.
 //
 // Source-registry invariance: The Analyzer creates its own [lsputil.Texts],
 // registers overlay content as text the client sent, and — after the load —
@@ -227,7 +233,7 @@ func NewAnalyzer(logger *slog.Logger) *Analyzer {
 //
 // The ctx parameter supports cancellation; if cancelled, Analyze returns the
 // partial snapshot with an error.
-func (a *Analyzer) Analyze(ctx context.Context, entryPath string, overlays map[string][]byte, moduleRoot string, opts ...schema.LoadOption) (*Snapshot, error) {
+func (a *Analyzer) Analyze(ctx context.Context, entryPath string, overlays map[string][]byte, moduleRoot string, importsAllowed bool) (*Snapshot, error) {
 	a.logger.Debug(
 		"starting analysis",
 		slog.String("entry", entryPath),
@@ -264,15 +270,19 @@ func (a *Analyzer) Analyze(ctx context.Context, entryPath string, overlays map[s
 
 	// Perform the load with explicit entry path.
 	// This ensures the correct document is analyzed even when multiple
-	// documents are open (overlays from different files).
+	// documents are open (overlays from different files). The analysis keeps
+	// the load's warnings and failures in one collector under one cap.
 	var loaded schema.Sources
-	schemaResult, diagResult := schema.LoadSourcesWithEntry(
-		ctx,
-		sources,
-		entryPath,
-		moduleRoot,
-		append(slices.Clone(opts), schema.CaptureSources(&loaded))...,
-	)
+	collected := diag.NewCollector(analysisIssueLimit)
+	schemaResult, loadErr := schema.LoadSourcesWithEntry(ctx, sources, entryPath,
+		schema.CaptureSources(&loaded), schema.WithWarnings(collected.Collect),
+		schema.WithImportsAllowed(importsAllowed), schema.WithModuleRoot(moduleRoot))
+	// The load takes every option given here, so its error is a
+	// *diag.ResultError or nil.
+	if re, ok := errors.AsType[*diag.ResultError](loadErr); ok {
+		collected.Merge(re.Result)
+	}
+	diagResult := collected.Result()
 
 	// Register every source the load read beyond the overlays: imports
 	// resolved from disk, which position conversion and symbol indexing
@@ -346,10 +356,11 @@ func (a *Analyzer) Analyze(ctx context.Context, entryPath string, overlays map[s
 		slices.Sort(snapshot.ImportedPaths) // Ensure deterministic order for logs and tests
 	}
 
+	counts := diagResult.SeverityCounts()
 	a.logger.Debug(
 		"analysis complete",
 		slog.String("entry", entryPath),
-		slog.Bool("ok", diagResult.OK()),
+		slog.Bool("ok", counts.Fatal+counts.Errors == 0),
 		slog.Int("issues", diagResult.Len()),
 	)
 

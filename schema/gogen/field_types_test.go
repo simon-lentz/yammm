@@ -15,9 +15,9 @@ import (
 // marshalString loads src as one schema and generates it.
 func marshalString(t *testing.T, src string) string {
 	t.Helper()
-	s, res := schema.LoadString(context.Background(), src, "gen.yammm")
-	if res.HasErrors() {
-		t.Fatalf("load: %v", res.Err())
+	s, loadErr := schema.LoadString(context.Background(), src, "gen.yammm")
+	if loadErr != nil {
+		t.Fatalf("load: %v", loadErr)
 	}
 	got, err := gogen.Marshal(s)
 	if err != nil {
@@ -80,12 +80,12 @@ type Doc {
 func TestMarshal_ListOfAnImportedDataTypeKeepsItsName(t *testing.T) {
 	t.Parallel()
 
-	s, res := schema.LoadSourcesWithEntry(context.Background(), map[string][]byte{
+	s, loadErr := schema.LoadSourcesWithEntry(context.Background(), map[string][]byte{
 		"main.yammm": []byte("schema \"main\"\n\nimport \"dep.yammm\" as dep\n\ntype Codes = List<List<dep.Code>>\n\ntype Doc {\n\tid String primary\n\tcs Codes\n}\n"),
 		"dep.yammm":  []byte("schema \"dep\"\n\ntype Code = String[1, 8]\n"),
-	}, "main.yammm", ".", schema.WithSourcesOnly(true))
-	if res.HasErrors() {
-		t.Fatalf("load: %v", res.Err())
+	}, "main.yammm", schema.WithSourcesOnly(true), schema.WithModuleRoot("."))
+	if loadErr != nil {
+		t.Fatalf("load: %v", loadErr)
 	}
 	got, err := gogen.Marshal(s)
 	if err != nil {
@@ -340,12 +340,12 @@ func TestMarshal_RefusesAnInitialismNoWordCanEqual(t *testing.T) {
 func TestMarshal_ImportedListDataTypeResolvesInItsOwnSchema(t *testing.T) {
 	t.Parallel()
 
-	s, res := schema.LoadSourcesWithEntry(context.Background(), map[string][]byte{
+	s, loadErr := schema.LoadSourcesWithEntry(context.Background(), map[string][]byte{
 		"main.yammm": []byte("schema \"main\"\n\nimport \"dep.yammm\" as dep\n\ntype Doc {\n\tid String primary\n\tcs dep.Codes\n}\n"),
 		"dep.yammm":  []byte("schema \"dep\"\n\ntype Code = String[1, 8]\ntype Codes = List<List<Code>>\n"),
-	}, "main.yammm", ".", schema.WithSourcesOnly(true))
-	if res.HasErrors() {
-		t.Fatalf("load: %v", res.Err())
+	}, "main.yammm", schema.WithSourcesOnly(true), schema.WithModuleRoot("."))
+	if loadErr != nil {
+		t.Fatalf("load: %v", loadErr)
 	}
 	got, err := gogen.Marshal(s)
 	if err != nil {

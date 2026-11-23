@@ -4,7 +4,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/instance"
+	"github.com/simon-lentz/yammm/internal/diagtest"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -69,12 +71,12 @@ func TestOperandKinds_WhatTheCheckDoesNotKnowLoadsAndHolds(t *testing.T) {
 	} {
 		t.Run(inv, func(t *testing.T) {
 			t.Parallel()
-			s, res := schema.LoadString(t.Context(), operandKindSchema+"\t! \"m\" "+inv+"\n}\n", "s.yammm")
-			if res.Err() != nil {
-				t.Fatalf("the check refused it: %v", res.Err())
+			s, err := schema.LoadString(t.Context(), operandKindSchema+"\t! \"m\" "+inv+"\n}\n", "s.yammm")
+			if err != nil {
+				t.Fatalf("the check refused it: %v", err)
 			}
-			if _, res := instance.NewValidator(s).ValidateOne(t.Context(), "Order", operandKindOrder()); res.Err() != nil {
-				t.Errorf("the invariant does not hold: %v", res.Err())
+			if _, err := instance.NewValidator(s).ValidateOne(t.Context(), "Order", operandKindOrder()); err != nil {
+				t.Errorf("the invariant does not hold: %v", err)
 			}
 		})
 	}
@@ -143,7 +145,9 @@ func TestOperandKinds_AKnownKindIsRefused(t *testing.T) {
 	} {
 		t.Run(row.inv, func(t *testing.T) {
 			t.Parallel()
-			_, res := schema.LoadString(t.Context(), operandKindSchema+"\t! \"m\" "+row.inv+"\n}\n", "s.yammm")
+			_, res := diagtest.Capture(t, func(warn func(diag.Issue)) (schema.Schema, error) {
+				return schema.LoadString(t.Context(), operandKindSchema+"\t! \"m\" "+row.inv+"\n}\n", "s.yammm", schema.WithWarnings(warn))
+			})
 			var got []string
 			for is := range res.Issues() {
 				got = append(got, is.Message())
@@ -163,11 +167,15 @@ func TestOperandKinds_AKnownKindIsRefused(t *testing.T) {
 // A root that is the nil literal loads, and the invariant fails on the instance.
 func TestOperandKinds_ANilRootLoadsAndFails(t *testing.T) {
 	t.Parallel()
-	s, res := schema.LoadString(t.Context(), operandKindSchema+"\t! \"m\" nil\n}\n", "s.yammm")
-	if res.Err() != nil {
-		t.Fatalf("the check refused it: %v", res.Err())
+	s, res := diagtest.Capture(t, func(warn func(diag.Issue)) (schema.Schema, error) {
+		return schema.LoadString(t.Context(), operandKindSchema+"\t! \"m\" nil\n}\n", "s.yammm", schema.WithWarnings(warn))
+	})
+	if diagtest.Err(res) != nil {
+		t.Fatalf("the check refused it: %v", res)
 	}
-	_, res = instance.NewValidator(s).ValidateOne(t.Context(), "Order", operandKindOrder())
+	_, res = diagtest.Issues(t, func() (instance.ValidInstance, error) {
+		return instance.NewValidator(s).ValidateOne(t.Context(), "Order", operandKindOrder())
+	})
 	if got := codes(res); len(got) != 1 || got[0] != "E_INVARIANT_FAIL" {
 		t.Errorf("got %v, want one E_INVARIANT_FAIL", got)
 	}

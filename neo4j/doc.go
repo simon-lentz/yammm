@@ -242,18 +242,21 @@
 // derives the desired constraints, the desired indexes and the owned labels from
 // the Config and the schema, so the three agree by construction:
 //
-//	plan, result := neo4j.Diff(c, s, constraints, indexes)
+//	plan, err := neo4j.Diff(c, s, constraints, indexes, neo4j.WithWarnings(warn))
 //
-// The result holds one [E_NEO4J_INVALID_REMOTE_OBJECT] for each break in the
-// remote rows that [Diff] cannot plan from: each row with no name, each name
-// that two or more rows of one kind share, and each property type constraint
-// that reports no property type. A plan pairs, blocks and drops a row by its name, and one server read
+// An option Diff does not take is refused with an error that names it. Any
+// other refusal is one *[diag.ResultError]. It holds one
+// [E_NEO4J_INVALID_REMOTE_OBJECT] for each break in the remote rows that [Diff]
+// cannot plan from: each row with no name, each name that two or more rows of
+// one kind share, and each property type constraint that reports no property
+// type. A plan pairs, blocks and drops a row by its name, and one server read
 // holds none of these; a constraint and the index backing it share their name.
-// Beside them the result holds the constraint generation's issues. When those
-// hold no error, the indexes are generated and the result holds their issues
-// too, sorted with the rest as [diag.Collector.Result] sorts. A constraint
-// error therefore returns before the index generation runs. A plan is returned
-// only when the result holds no error.
+// Beside them the error holds the constraint generation's failures. When there
+// are none, the indexes are generated and the error holds their failures too,
+// sorted with the rest as [diag.Collector.Err] sorts. A constraint failure
+// therefore returns before the index generation runs. A plan is returned only
+// when there is no error. The constraint generation's warnings go to
+// [WithWarnings] as they are found, never into the error.
 //
 // Ownership is set membership, not a rule applied to a remote object's label
 // string: [cypher.Config.OwnedLabels] says what the set covers and why. Only an
@@ -396,7 +399,10 @@
 // # Write Options
 //
 // [WithNodeChunkSize] and [WithEdgeChunkSize] set the most rows one UNWIND
-// batch holds.
+// batch holds, the first at [NodeQueries] and the second at [EdgeQueries].
+// [WithWarnings] is [Diff]'s. One [Option] type serves every call, and a call
+// refuses an option it does not take with an error naming the option and the
+// call.
 //
 // # Neo4j Version
 //

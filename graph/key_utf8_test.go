@@ -13,8 +13,8 @@ func TestAdd_AcceptsAKeyHoldingTheReplacementCharacter(t *testing.T) {
 	s := loadAs(t, "schema \"keyutf8\"\n\ntype Holder {\n\tid String primary\n}\n")
 	holder := mustTypeID(t, s, "Holder")
 	g := graph.New(s)
-	if res := g.Add(t.Context(), instancetest.Valid(t, s, "Holder", map[string]any{"id": "a�b"})); !res.OK() {
-		t.Fatalf("Add: %s", res)
+	if err := g.Add(t.Context(), instancetest.Valid(t, s, "Holder", map[string]any{"id": "a�b"})); err != nil {
+		t.Fatalf("Add: %s", err)
 	}
 	inst, ok := g.Snapshot().InstanceByKey(holder, graph.FormatKey("a�b"))
 	if !ok {

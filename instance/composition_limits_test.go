@@ -1,6 +1,7 @@
 package instance_test
 
 import (
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -8,6 +9,7 @@ import (
 
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/instance"
+	"github.com/simon-lentz/yammm/internal/diagtest"
 )
 
 const selfNesting = `schema "p"
@@ -46,13 +48,17 @@ func nestedRoot(depth int) map[string]any {
 func TestValidateOne_RefusesCompositionPastMaxDepth(t *testing.T) {
 	v := instance.NewValidator(loadSrc(t, selfNesting))
 
-	_, res := v.ValidateOne(t.Context(), "Root", instance.RawInstance{Properties: nestedRoot(instance.MaxComposedDepth)})
-	if !res.OK() {
+	_, res := diagtest.Issues(t, func() (instance.ValidInstance, error) {
+		return v.ValidateOne(t.Context(), "Root", instance.RawInstance{Properties: nestedRoot(instance.MaxComposedDepth)})
+	})
+	if diagtest.Err(res) != nil {
 		t.Fatalf("depth %d must validate: %s", instance.MaxComposedDepth, res)
 	}
 
-	_, res = v.ValidateOne(t.Context(), "Root", instance.RawInstance{Properties: nestedRoot(instance.MaxComposedDepth + 1)})
-	if res.OK() {
+	_, res = diagtest.Issues(t, func() (instance.ValidInstance, error) {
+		return v.ValidateOne(t.Context(), "Root", instance.RawInstance{Properties: nestedRoot(instance.MaxComposedDepth + 1)})
+	})
+	if diagtest.Err(res) == nil {
 		t.Fatalf("depth %d must be refused", instance.MaxComposedDepth+1)
 	}
 	is, ok := issueWithCode(res, diag.E_COMPOSITION_DEPTH_EXCEEDED)
@@ -84,10 +90,10 @@ type Person {
     *-> HOME (one) Home
 }
 `))
-	_, res := v.ValidateOne(t.Context(), "Person", instance.RawInstance{Properties: map[string]any{
+	_, err := v.ValidateOne(t.Context(), "Person", instance.RawInstance{Properties: map[string]any{
 		"id": "p", "home": []any{map[string]any{"id": "h1"}, map[string]any{"id": "h2"}},
 	}})
-	if !res.HasCode(diag.E_DUPLICATE_COMPOSED_PK) || res.HasCode(diag.E_EDGE_SHAPE_MISMATCH) {
-		t.Errorf("want E_DUPLICATE_COMPOSED_PK alone, got %s", res)
+	if !errors.Is(err, diag.E_DUPLICATE_COMPOSED_PK) || errors.Is(err, diag.E_EDGE_SHAPE_MISMATCH) {
+		t.Errorf("want E_DUPLICATE_COMPOSED_PK alone, got %s", err)
 	}
 }

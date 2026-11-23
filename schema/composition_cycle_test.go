@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/simon-lentz/yammm/diag"
+	"github.com/simon-lentz/yammm/internal/diagtest"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -69,7 +70,9 @@ part type PA extends Base {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 			src := "schema \"c\"\n" + tc.body + "\n"
-			_, res := schema.LoadString(t.Context(), src, "c.yammm")
+			_, res := diagtest.Capture(t, func(warn func(diag.Issue)) (schema.Schema, error) {
+				return schema.LoadString(t.Context(), src, "c.yammm", schema.WithWarnings(warn))
+			})
 			issues := slices.Collect(res.Issues())
 			if len(issues) != 1 || issues[0].Code() != diag.E_COMPOSITION_CYCLE {
 				t.Fatalf("want one E_COMPOSITION_CYCLE; got %v", res)
@@ -106,8 +109,8 @@ part type PB {
 	*-> BACK ` + multiplicity + ` PA
 }
 `
-		if _, res := schema.LoadString(t.Context(), src, "c.yammm"); res.HasErrors() {
-			t.Errorf("%s: %v", multiplicity, res)
+		if _, err := schema.LoadString(t.Context(), src, "c.yammm"); err != nil {
+			t.Errorf("%s: %v", multiplicity, err)
 		}
 	}
 }
@@ -138,7 +141,9 @@ func TestLoad_TypesThatRequireOneAnotherDrawOneIssueInAnyOrder(t *testing.T) {
 			for _, name := range tc.order {
 				src.WriteString(decls[name] + "\n")
 			}
-			_, res := schema.LoadString(t.Context(), src.String(), "c.yammm")
+			_, res := diagtest.Capture(t, func(warn func(diag.Issue)) (schema.Schema, error) {
+				return schema.LoadString(t.Context(), src.String(), "c.yammm", schema.WithWarnings(warn))
+			})
 			issues := slices.Collect(res.Issues())
 			if len(issues) != 1 || issues[0].Code() != diag.E_COMPOSITION_CYCLE {
 				t.Fatalf("want one E_COMPOSITION_CYCLE; got %v", res)
@@ -178,7 +183,9 @@ part type PC {
 	*-> C (one:many) PC
 }
 `
-	_, res := schema.LoadString(t.Context(), src, "c.yammm")
+	_, res := diagtest.Capture(t, func(warn func(diag.Issue)) (schema.Schema, error) {
+		return schema.LoadString(t.Context(), src, "c.yammm", schema.WithWarnings(warn))
+	})
 	if counts := codeCounts(res); counts[diag.E_COMPOSITION_CYCLE] != 2 || len(counts) != 1 {
 		t.Errorf("want two E_COMPOSITION_CYCLE and nothing else; got %v", res)
 	}

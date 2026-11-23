@@ -373,8 +373,10 @@ func TestRun_AHelpRefusalAfterAHelpFlagIsOneJSONDocument(t *testing.T) {
 // naming one key are refused. Accepted, they delete the key, exit 0 and report
 // "(0 keys)".
 func TestRun_UpdateMetadataRefusesContradictoryKeys(t *testing.T) {
+	snap := filepath.Join(t.TempDir(), "valid_snapshot.ys")
+	copyFile(t, "testdata/valid_snapshot.ys", snap)
 	code, _, errOut := runCLI(t, "snapshot", "update-metadata",
-		"-s", "env=staging", "--unset", "env", "testdata/valid.yammm")
+		"-s", "env=staging", "--unset", "env", snap)
 	if code != cli.ExitUsage {
 		t.Errorf("exit code = %d, want %d", code, cli.ExitUsage)
 	}

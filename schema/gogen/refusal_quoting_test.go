@@ -98,10 +98,10 @@ func TestMarshal_EveryRefusalQuotesTheSourcesItNames(t *testing.T) {
 	t.Run("a source with no key under the root", func(t *testing.T) {
 		t.Parallel()
 		root := unprintableRoot(t)
-		s, res := schema.LoadSourcesWithEntry(context.Background(),
-			map[string][]byte{".": []byte("schema \"p\"\n\ntype P {\n\tid String primary\n}\n")}, ".", root, schema.WithSourcesOnly(true))
-		if res.HasErrors() {
-			t.Fatalf("load: %v", res.Err())
+		s, loadErr := schema.LoadSourcesWithEntry(context.Background(),
+			map[string][]byte{".": []byte("schema \"p\"\n\ntype P {\n\tid String primary\n}\n")}, ".", schema.WithSourcesOnly(true), schema.WithModuleRoot(root))
+		if loadErr != nil {
+			t.Fatalf("load: %v", loadErr)
 		}
 		_, err := gogen.Marshal(s)
 		wantQuotedRefusal(t, err, "has no key relative to the schema's root")
@@ -113,9 +113,9 @@ func TestMarshal_EveryRefusalQuotesTheSourcesItNames(t *testing.T) {
 // space, inside the block comment, as every other form feed in such a line is.
 func TestMarshal_ABuildLineEndingInAFormFeedEndsInASpace(t *testing.T) {
 	t.Parallel()
-	s, res := schema.LoadString(context.Background(), "schema \"g\"\n\n/* +build x\f\n   tail. */\ntype Car {\n\tid String primary\n}\n", "gen.yammm")
-	if res.HasErrors() {
-		t.Fatalf("load: %v", res.Err())
+	s, loadErr := schema.LoadString(context.Background(), "schema \"g\"\n\n/* +build x\f\n   tail. */\ntype Car {\n\tid String primary\n}\n", "gen.yammm")
+	if loadErr != nil {
+		t.Fatalf("load: %v", loadErr)
 	}
 	out, err := gogen.Marshal(s)
 	if err != nil {

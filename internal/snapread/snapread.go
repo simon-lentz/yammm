@@ -11,23 +11,22 @@
 //
 // # Dependencies
 //
-//	snapread  ──imports──▶  diag, graph, schema
+//	snapread  ──imports──▶  graph, schema
 package snapread
 
 import (
 	"context"
 
-	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/schema"
 )
 
 // UnmarshalWithHeader is snapshot.Unmarshal with no options that also returns
-// the header the decode accepted, a *snapshot.Header, which is nil when the
-// result has errors. The header is typed any because snapshot imports this
+// the header the decode accepted, a *snapshot.Header; beside an error it
+// returns the zero Snapshot and a nil header. The header is typed any because snapshot imports this
 // package.
-var UnmarshalWithHeader func(ctx context.Context, data []byte, s schema.Schema) (graph.Snapshot, any, diag.Result)
+var UnmarshalWithHeader func(ctx context.Context, data []byte, s schema.Schema) (graph.Snapshot, any, error)
 
 // HeaderOf is snapshot.ReadHeader over data with no size cap. It returns a
-// *snapshot.Header, nil when the result has errors.
-var HeaderOf func(ctx context.Context, data []byte) (any, diag.Result)
+// *snapshot.Header, or a nil any beside an error.
+var HeaderOf func(ctx context.Context, data []byte) (any, error)

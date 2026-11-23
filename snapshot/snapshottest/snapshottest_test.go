@@ -21,7 +21,7 @@ import (
 
 func testSchema(t *testing.T) schema.Schema {
 	t.Helper()
-	s, res := schema.LoadString(t.Context(), `schema "snapshottest_self"
+	s, err := schema.LoadString(t.Context(), `schema "snapshottest_self"
 
 type Person {
 	id String primary
@@ -33,8 +33,8 @@ type Company {
 	id String primary
 }
 `, "snapshottest_self.yammm")
-	if res.HasErrors() {
-		t.Fatalf("testSchema: %v", res.Err())
+	if err != nil {
+		t.Fatalf("testSchema: %v", err)
 	}
 	return s
 }
@@ -74,9 +74,9 @@ type Holder {
 	*-> ACCOUNTS (_:many) Account
 }
 `
-	s, res := schema.LoadString(context.Background(), src, "snaptest.yammm")
-	if res.HasErrors() {
-		t.Fatalf("compositionSchema: %v", res.Err())
+	s, err := schema.LoadString(context.Background(), src, "snaptest.yammm")
+	if err != nil {
+		t.Fatalf("compositionSchema: %v", err)
 	}
 	return s
 }
@@ -254,9 +254,9 @@ func TestDiffSnapshots_SeparatesUnresolvedBySource(t *testing.T) {
 
 // An unresolved record's reason is part of what DiffSnapshots compares.
 func TestDiffSnapshots_SeesAReasonDifference(t *testing.T) {
-	s, res := schema.LoadString(t.Context(), "schema \"reasons\"\ntype Person {\n\tid String primary\n\t--> CLIENTS (one:many) Company\n}\ntype Company {\n\tid String primary\n}\n", "reasons.yammm")
-	if res.HasErrors() {
-		t.Fatalf("schema: %s", res)
+	s, err := schema.LoadString(t.Context(), "schema \"reasons\"\ntype Person {\n\tid String primary\n\t--> CLIENTS (one:many) Company\n}\ntype Company {\n\tid String primary\n}\n", "reasons.yammm")
+	if err != nil {
+		t.Fatalf("schema: %s", err)
 	}
 	withReason := func(reason string) graph.Snapshot {
 		return snappartstest.Loaded(t, s, snapparts.Parts{
@@ -374,7 +374,7 @@ func TestBuildSnapshot_FailsOnARefusalButADuplicate(t *testing.T) {
 	s := testSchema(t)
 	// A validated child read out of its parent is the one record Add refuses for
 	// its type.
-	holder, res := schema.LoadString(t.Context(), `schema "holder"
+	holder, err := schema.LoadString(t.Context(), `schema "holder"
 
 part type P {
 	id String primary
@@ -385,8 +385,8 @@ type H {
 	*-> PS (many) P
 }
 `, "holder.yammm")
-	if res.HasErrors() {
-		t.Fatalf("load the holder: %s", res)
+	if err != nil {
+		t.Fatalf("load the holder: %s", err)
 	}
 	refused := &recordingTB{TB: t}
 	var child instance.ValidInstance

@@ -26,9 +26,9 @@ func generateSources(t *testing.T, sources map[string]string) (schema.Schema, []
 	for k, v := range sources {
 		files[k] = []byte(v)
 	}
-	s, res := schema.LoadSourcesWithEntry(context.Background(), files, "main.yammm", ".", schema.WithSourcesOnly(true))
-	if res.HasErrors() {
-		t.Fatalf("load: %v", res.Err())
+	s, loadErr := schema.LoadSourcesWithEntry(context.Background(), files, "main.yammm", schema.WithSourcesOnly(true), schema.WithModuleRoot("."))
+	if loadErr != nil {
+		t.Fatalf("load: %v", loadErr)
 	}
 	got, err := gogen.Marshal(s)
 	if err != nil {
@@ -394,9 +394,9 @@ func TestMarshal_ADerivedPackageNameIsNeverPredeclared(t *testing.T) {
 func TestMarshal_AnEmptyPackageNameIsRefused(t *testing.T) {
 	t.Parallel()
 
-	s, res := schema.LoadString(context.Background(), "schema \"stamps\"\n\ntype T {\n\tid String primary\n}\n", "p.yammm")
-	if res.HasErrors() {
-		t.Fatalf("load: %v", res.Err())
+	s, loadErr := schema.LoadString(context.Background(), "schema \"stamps\"\n\ntype T {\n\tid String primary\n}\n", "p.yammm")
+	if loadErr != nil {
+		t.Fatalf("load: %v", loadErr)
 	}
 	if _, err := gogen.Marshal(s, gogen.WithPackageName("")); !errors.Is(err, gogen.ErrInvalidPackageName) {
 		t.Errorf("WithPackageName(\"\") = %v, want ErrInvalidPackageName", err)

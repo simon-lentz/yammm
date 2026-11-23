@@ -46,9 +46,9 @@ func TestEdgeQueries_RefusesARelationshipTypeThatIsNoIdentifier(t *testing.T) {
 		"LINK":  "",
 	} {
 		src := "schema \"p\"\n\ntype Target {\n\tkey String primary\n}\n\ntype Holder {\n\tid String primary\n\t--> " + rel + " (_:many) Target\n}\n"
-		s, res := schema.LoadString(t.Context(), src, "p.yammm")
-		if res.HasErrors() {
-			t.Fatalf("%s: load: %s", rel, res)
+		s, loadErr := schema.LoadString(t.Context(), src, "p.yammm")
+		if loadErr != nil {
+			t.Fatalf("%s: load: %s", rel, loadErr)
 		}
 		targetT, _ := s.Type("Target")
 		holderT, _ := s.Type("Holder")

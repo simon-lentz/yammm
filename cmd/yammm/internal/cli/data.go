@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"maps"
@@ -81,7 +82,7 @@ func ValidateInstances(ctx context.Context, s schema.Schema, parsed map[string]j
 				at = append(at, i)
 			}
 		}
-		judgedValids, result := doc.validator.Validate(ctx, typeName, judged)
+		judgedValids, err := doc.validator.Validate(ctx, typeName, judged)
 		var valids []instance.ValidInstance
 		if judgedValids != nil {
 			valids = make([]instance.ValidInstance, len(elements))
@@ -89,7 +90,7 @@ func ValidateInstances(ctx context.Context, s schema.Schema, parsed map[string]j
 				valids[at[j]] = valid
 			}
 		}
-		collector.MergeFunc(result, anchorIssue(parsed[typeName].Source, at))
+		collector.MergeFunc(FailureIssues(err), anchorIssue(parsed[typeName].Source, at))
 		doc.batches = append(doc.batches, validatedBatch{typeName: typeName, raws: raws, valids: valids})
 	}
 	return doc, collector.Result()
@@ -154,20 +155,25 @@ func BuildGraph(ctx context.Context, s schema.Schema, base *graph.Graph, doc Val
 	}
 	collector := diag.NewCollector(diag.NoLimit)
 	valids := doc.Valids()
-	added := make(map[instance.ValidInstance]diag.Result, len(valids))
+	added := make(map[instance.ValidInstance]error, len(valids))
 	refusals := false
 	for _, valid := range valids {
-		result := g.Add(ctx, valid)
-		collector.Merge(result)
-		added[valid] = result
-		refusals = refusals || result.HasErrors()
+		err := g.Add(ctx, valid)
+		added[valid] = err
+		refusals = refusals || err != nil
 	}
-	check := g.Check(ctx)
+	check := FailureIssues(g.Check(ctx))
+	var dv verdict
 	if ctx.Err() == nil && (refusals || len(valids) < doc.rootCount()) {
-		verdict := documentVerdict(s, g, base != nil, doc, added)
-		check = verdict.explain(check)
-		collector.Merge(verdict.duplicates)
+		dv = documentVerdict(s, g, base != nil, doc, added)
+		check = dv.explain(check)
 	}
+	for _, valid := range valids {
+		if !dv.renamed[valid] {
+			collector.Merge(FailureIssues(added[valid]))
+		}
+	}
+	collector.Merge(dv.duplicates)
 	collector.Merge(check)
 	return g, collector.Result()
 }
@@ -179,6 +185,19 @@ func (d Validated) rootCount() int {
 		n += len(b.raws)
 	}
 	return n
+}
+
+// FailureIssues returns the failures err holds as one result, the empty result
+// for a nil err. An err that holds no [diag.ResultError] breaks its call's
+// contract and reads as one Fatal E_INTERNAL.
+func FailureIssues(err error) diag.Result {
+	c := diag.NewCollector(diag.NoLimit)
+	if re, ok := errors.AsType[*diag.ResultError](err); ok {
+		c.Merge(re.Result)
+	} else if err != nil {
+		c.Collect(diag.NewIssue(diag.Fatal, diag.E_INTERNAL, err.Error()).Build())
+	}
+	return c.Result()
 }
 
 // MergeResults merges multiple diagnostic results into one.
@@ -205,13 +224,16 @@ func WriteTo(data []byte, path string, w io.Writer) error {
 // The header comes back because [graph.Snapshot] exposes no metadata or
 // created_at accessor, so a caller re-marshaling what it read has no other
 // route to it. It is the header the load accepted, whatever its size, and nil
-// when the result has errors. The error reports an I/O failure and the result
-// a semantic issue, as every CLI helper splits them.
-func LoadSnapshotFile(ctx context.Context, path string, s schema.Schema) (graph.Snapshot, *snapshot.Header, diag.Result, error) {
+// when the error is not. A document the load refuses returns a
+// *[diag.ResultError]; any other error is an I/O failure.
+func LoadSnapshotFile(ctx context.Context, path string, s schema.Schema) (graph.Snapshot, *snapshot.Header, error) {
 	data, err := ReadFile(path)
 	if err != nil {
-		return graph.Snapshot{}, nil, diag.Result{}, fmt.Errorf("read snapshot file: %w", err)
+		return graph.Snapshot{}, nil, fmt.Errorf("read snapshot file: %w", err)
 	}
-	snap, header, result := snapread.UnmarshalWithHeader(ctx, data, s)
-	return snap, header.(*snapshot.Header), result, nil
+	snap, header, err := snapread.UnmarshalWithHeader(ctx, data, s)
+	if err != nil {
+		return graph.Snapshot{}, nil, err
+	}
+	return snap, header.(*snapshot.Header), nil
 }

@@ -1,12 +1,14 @@
 package graph_test
 
 import (
+	"errors"
 	"slices"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/instance"
@@ -19,9 +21,9 @@ import (
 func identitySchema(t *testing.T, keyDecl string) schema.Schema {
 	t.Helper()
 	src := "schema \"identity\"\n\ntype Item {\n\tid " + keyDecl + " primary\n}\n"
-	s, result := schema.LoadString(t.Context(), src, "identity.yammm")
-	if result.HasErrors() {
-		t.Fatalf("load %q schema: %s", keyDecl, result)
+	s, err := schema.LoadString(t.Context(), src, "identity.yammm")
+	if err != nil {
+		t.Fatalf("load %q schema: %s", keyDecl, err)
 	}
 	return s
 }
@@ -36,18 +38,20 @@ func addSpellings(t *testing.T, s schema.Schema, vals []any) ([]string, graph.Sn
 	seen := map[string]bool{}
 	var keys []string
 	for _, val := range vals {
-		valid, res := v.ValidateOne(t.Context(), "Item", instance.RawInstance{
+		valid, err := v.ValidateOne(t.Context(), "Item", instance.RawInstance{
 			Properties: map[string]any{"id": val},
 		})
-		if !res.OK() {
-			t.Fatalf("validating %#v: %s", val, res)
+		if err != nil {
+			t.Fatalf("validating %#v: %s", val, err)
 		}
 		k := valid.PrimaryKey().String()
 		if !seen[k] {
 			seen[k] = true
 			keys = append(keys, k)
 		}
-		g.Add(t.Context(), valid)
+		if err := g.Add(t.Context(), valid); err != nil && !errors.Is(err, diag.E_DUPLICATE_PK) {
+			t.Errorf("Add: %v", err)
+		}
 	}
 	return keys, g.Snapshot()
 }
@@ -149,9 +153,9 @@ type Sensor {
 	*-> READINGS (many) Reading
 }
 `
-	s, result := schema.LoadString(t.Context(), src, "rebuild_canonical.yammm")
-	if result.HasErrors() {
-		t.Fatalf("load rebuild schema: %s", result)
+	s, err := schema.LoadString(t.Context(), src, "rebuild_canonical.yammm")
+	if err != nil {
+		t.Fatalf("load rebuild schema: %s", err)
 	}
 	return s
 }

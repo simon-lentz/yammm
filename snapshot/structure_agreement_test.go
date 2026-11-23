@@ -10,6 +10,7 @@ import (
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/instance"
+	"github.com/simon-lentz/yammm/internal/diagtest"
 	"github.com/simon-lentz/yammm/schema"
 	"github.com/simon-lentz/yammm/snapshot"
 )
@@ -164,9 +165,9 @@ func revisions() []revision {
 
 func loadRevisionSchema(t *testing.T, src string) schema.Schema {
 	t.Helper()
-	s, res := schema.LoadString(t.Context(), src, "rev.yammm")
-	if res.HasErrors() {
-		t.Fatalf("load revision: %s\n%s", res, src)
+	s, err := schema.LoadString(t.Context(), src, "rev.yammm")
+	if err != nil {
+		t.Fatalf("load revision: %s\n%s", err, src)
 	}
 	return s
 }
@@ -181,12 +182,12 @@ func revisionGraph(t *testing.T, s schema.Schema) graph.Snapshot {
 	v := instance.NewValidator(s)
 	g := graph.New(s)
 	add := func(typeName string, props map[string]any, wantOK bool) {
-		vi, vr := v.ValidateOne(ctx, typeName, instance.RawInstance{Properties: props})
-		if vr.HasErrors() {
-			t.Fatalf("validate %s: %s", typeName, vr)
+		vi, err := v.ValidateOne(ctx, typeName, instance.RawInstance{Properties: props})
+		if err != nil {
+			t.Fatalf("validate %s: %s", typeName, err)
 		}
-		if r := g.Add(ctx, vi); r.OK() != wantOK {
-			t.Fatalf("add %s: %s", typeName, r)
+		if err := g.Add(ctx, vi); (err == nil) != wantOK {
+			t.Fatalf("add %s: %s", typeName, err)
 		}
 	}
 	add("Audit", map[string]any{"id": "a1"}, true)
@@ -217,15 +218,17 @@ var schemaHashField = regexp.MustCompile(`"schema_hash":"[^"]*"`)
 // is not checked. A refusal then comes from the document's contents.
 func loadClaimingSchema(t *testing.T, s schema.Schema, snap graph.Snapshot) diag.Result {
 	t.Helper()
-	data, mres := snapshot.Marshal(t.Context(), snap)
-	if mres.HasErrors() {
-		t.Fatalf("marshal: %s", mres)
+	data, err := snapshot.Marshal(t.Context(), snap)
+	if err != nil {
+		t.Fatalf("marshal: %s", err)
 	}
 	if n := len(schemaHashField.FindAllIndex(data, -1)); n != 1 {
 		t.Fatalf("schema_hash appears %d times", n)
 	}
 	data = schemaHashField.ReplaceAll(data, fmt.Appendf(nil, `"schema_hash":%q`, schema.StructuralHash(s)))
-	_, res := snapshot.Unmarshal(t.Context(), data, s, snapshot.WithIntegrityCheck(false))
+	_, res := diagtest.Capture(t, func(warn func(diag.Issue)) (graph.Snapshot, error) {
+		return snapshot.Unmarshal(t.Context(), data, s, snapshot.WithIntegrityCheck(false), snapshot.WithWarnings(warn))
+	})
 	if res.HasCode(diag.E_SNAPSHOT_INCOMPATIBLE_SCHEMA) || res.HasCode(diag.E_SNAPSHOT_INTEGRITY_MISMATCH) {
 		t.Fatalf("Load refused the header, not the contents: %s", res)
 	}
@@ -301,8 +304,8 @@ func TestStructuralFacts_TheReaderJudgesEveryRevision(t *testing.T) {
 		t.Run(r.String(), func(t *testing.T) {
 			t.Parallel()
 			res := loadClaimingSchema(t, loadRevisionSchema(t, r.source()), snap)
-			if r.legal() == res.HasErrors() {
-				t.Errorf("legal=%v, refused=%v: %s", r.legal(), res.HasErrors(), res)
+			if r.legal() == (diagtest.Err(res) != nil) {
+				t.Errorf("legal=%v, refused=%v: %s", r.legal(), diagtest.Err(res) != nil, res)
 			}
 			for _, w := range wantRules(r) {
 				if !hasRule(res, w[0], w[1]) {

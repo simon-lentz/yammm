@@ -5,6 +5,8 @@ import (
 	"testing"
 
 	"github.com/simon-lentz/yammm/diag"
+	"github.com/simon-lentz/yammm/graph"
+	"github.com/simon-lentz/yammm/internal/diagtest"
 	"github.com/simon-lentz/yammm/snapshot"
 )
 
@@ -17,7 +19,9 @@ func TestDecode_OneMalformationOneDiagnostic(t *testing.T) {
 	s, _ := attWireFixture(t)
 	bad := []byte(`{"types":[],"instances":[],"diagnostics":{"duplicates":[],"unresolved":[]}}`)
 
-	_, res := snapshot.Unmarshal(t.Context(), bad, s, snapshot.WithIntegrityCheck(false))
+	_, res := diagtest.Capture(t, func(warn func(diag.Issue)) (graph.Snapshot, error) {
+		return snapshot.Unmarshal(t.Context(), bad, s, snapshot.WithIntegrityCheck(false), snapshot.WithWarnings(warn))
+	})
 	n := 0
 	for range res.Issues() {
 		n++
@@ -47,7 +51,9 @@ func TestDecode_UnresolvedDuplicateRowDoesNotNameRowZero(t *testing.T) {
 		t.Skipf("fixture carries no empty duplicates array: %s", data)
 	}
 
-	_, res := snapshot.Unmarshal(t.Context(), []byte(edited), s, snapshot.WithIntegrityCheck(false))
+	_, res := diagtest.Capture(t, func(warn func(diag.Issue)) (graph.Snapshot, error) {
+		return snapshot.Unmarshal(t.Context(), []byte(edited), s, snapshot.WithIntegrityCheck(false), snapshot.WithWarnings(warn))
+	})
 	for iss := range res.Issues() {
 		if iss.Code() != diag.E_SNAPSHOT_EDGES_ON_DUPLICATE {
 			continue
@@ -81,10 +87,14 @@ func TestDecode_ARepeatedUnknownRowIsUnknownOnce(t *testing.T) {
 		res  diag.Result
 	}{
 		{"Load", func() diag.Result {
-			_, res := snapshot.Unmarshal(t.Context(), []byte(edited), s, snapshot.WithIntegrityCheck(false))
+			_, res := diagtest.Capture(t, func(warn func(diag.Issue)) (graph.Snapshot, error) {
+				return snapshot.Unmarshal(t.Context(), []byte(edited), s, snapshot.WithIntegrityCheck(false), snapshot.WithWarnings(warn))
+			})
 			return res
 		}()},
-		{"Verify", snapshot.Verify(t.Context(), []byte(edited), s, snapshot.WithIntegrityCheck(false))},
+		{"Verify", diagtest.CaptureErr(t, func(warn func(diag.Issue)) error {
+			return snapshot.Verify(t.Context(), []byte(edited), s, snapshot.WithIntegrityCheck(false), snapshot.WithWarnings(warn))
+		})},
 	} {
 		counts := map[diag.Code]int{}
 		for iss := range read.res.Issues() {

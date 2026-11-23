@@ -53,9 +53,9 @@ func TestExtendsClause_ALongClauseOfDeclaredTypesLoadsInLinearTime(t *testing.T)
 		}
 		src.WriteString("type A extends " + strings.Join(names, ", ") + " { id String primary }\n")
 		start := costratio.CPUTime(t)
-		_, res := schema.LoadString(t.Context(), src.String(), "m.yammm")
-		if !res.OK() {
-			t.Fatal(res)
+		_, err := schema.LoadString(t.Context(), src.String(), "m.yammm")
+		if err != nil {
+			t.Fatal(err)
 		}
 		return costratio.CPUTime(t) - start
 	})

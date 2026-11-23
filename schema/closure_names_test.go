@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/simon-lentz/yammm/diag"
+	"github.com/simon-lentz/yammm/internal/diagtest"
 	"github.com/simon-lentz/yammm/internal/yammmtest"
 	"github.com/simon-lentz/yammm/schema"
 )
@@ -26,7 +27,7 @@ func sourcesOf(texts map[string]string) map[string][]byte {
 func assertOneSchemaNameClash(t *testing.T, res diag.Result, name string) {
 	t.Helper()
 	issues := slices.Collect(res.Issues())
-	if !res.HasErrors() || len(issues) != 1 || issues[0].Code() != diag.E_DUPLICATE_SCHEMA || issues[0].Severity() != diag.Error {
+	if diagtest.Err(res) == nil || len(issues) != 1 || issues[0].Code() != diag.E_DUPLICATE_SCHEMA || issues[0].Severity() != diag.Error {
 		t.Fatalf("result = %v, want one Error E_DUPLICATE_SCHEMA", res)
 	}
 	if want := (diag.Detail{Key: diag.DetailKeySchemaName, Value: name}); !slices.Contains(issues[0].Details(), want) {
@@ -50,9 +51,11 @@ func TestLoad_RefusesAClosureThatDeclaresOneSchemaNameTwice(t *testing.T) {
 
 	load := func(mainName, geoImport string) (schema.Schema, diag.Result) {
 		main := "schema \"" + mainName + "\"\n\nimport \"./x.yammm\" as x\nimport \"./" + geoImport + "\" as geo\n\ntype M {\n\tm_id String primary\n\t--> TO (one) geo.Region\n}\n"
-		return schema.LoadSourcesWithEntry(context.Background(), sourcesOf(map[string]string{
-			"main.yammm": main, "x.yammm": xSrc, "geo_a.yammm": geoA, "geo_b.yammm": geoB,
-		}), "main.yammm", ".", schema.WithSourcesOnly(true))
+		return diagtest.Capture(t, func(warn func(diag.Issue)) (schema.Schema, error) {
+			return schema.LoadSourcesWithEntry(context.Background(), sourcesOf(map[string]string{
+				"main.yammm": main, "x.yammm": xSrc, "geo_a.yammm": geoA, "geo_b.yammm": geoB,
+			}), "main.yammm", schema.WithSourcesOnly(true), schema.WithModuleRoot("."), schema.WithWarnings(warn))
+		})
 	}
 
 	t.Run("two imports", func(t *testing.T) {
@@ -71,10 +74,12 @@ func TestLoad_RefusesAClosureThatDeclaresOneSchemaNameTwice(t *testing.T) {
 	})
 	t.Run("the entry and an import", func(t *testing.T) {
 		t.Parallel()
-		s, res := schema.LoadSourcesWithEntry(context.Background(), sourcesOf(map[string]string{
-			"main.yammm":  "schema \"geo\"\n\nimport \"./geo_a.yammm\" as a\n\ntype M {\n\tm_id String primary\n}\n",
-			"geo_a.yammm": geoA,
-		}), "main.yammm", ".", schema.WithSourcesOnly(true))
+		s, res := diagtest.Capture(t, func(warn func(diag.Issue)) (schema.Schema, error) {
+			return schema.LoadSourcesWithEntry(context.Background(), sourcesOf(map[string]string{
+				"main.yammm":  "schema \"geo\"\n\nimport \"./geo_a.yammm\" as a\n\ntype M {\n\tm_id String primary\n}\n",
+				"geo_a.yammm": geoA,
+			}), "main.yammm", schema.WithSourcesOnly(true), schema.WithModuleRoot("."), schema.WithWarnings(warn))
+		})
 		if !s.IsZero() {
 			t.Fatal("a closure declaring the schema name geo twice loaded")
 		}
@@ -82,19 +87,21 @@ func TestLoad_RefusesAClosureThatDeclaresOneSchemaNameTwice(t *testing.T) {
 	})
 	t.Run("the entry and a transitive import", func(t *testing.T) {
 		t.Parallel()
-		s, res := schema.LoadSourcesWithEntry(context.Background(), sourcesOf(map[string]string{
-			"main.yammm":  "schema \"geo\"\n\nimport \"./x.yammm\" as x\n\ntype M {\n\tm_id String primary\n}\n",
-			"x.yammm":     xSrc,
-			"geo_a.yammm": geoA,
-		}), "main.yammm", ".", schema.WithSourcesOnly(true))
+		s, res := diagtest.Capture(t, func(warn func(diag.Issue)) (schema.Schema, error) {
+			return schema.LoadSourcesWithEntry(context.Background(), sourcesOf(map[string]string{
+				"main.yammm":  "schema \"geo\"\n\nimport \"./x.yammm\" as x\n\ntype M {\n\tm_id String primary\n}\n",
+				"x.yammm":     xSrc,
+				"geo_a.yammm": geoA,
+			}), "main.yammm", schema.WithSourcesOnly(true), schema.WithModuleRoot("."), schema.WithWarnings(warn))
+		})
 		if !s.IsZero() {
 			t.Fatal("a closure declaring the schema name geo twice loaded")
 		}
 		assertOneSchemaNameClash(t, res, "geo")
 	})
 
-	if s, res := load("main", "geo_a.yammm"); s.IsZero() || res.HasErrors() {
-		t.Errorf("a closure reaching one geo by two paths is refused: %v", res.Err())
+	if s, res := load("main", "geo_a.yammm"); s.IsZero() || (diagtest.Err(res) != nil) {
+		t.Errorf("a closure reaching one geo by two paths is refused: %v", res)
 	}
 }
 
@@ -113,11 +120,13 @@ func TestLoad_ASchemaAlreadyFailedDrawsNoDuplicateNameReport(t *testing.T) {
 	for _, row := range rows {
 		t.Run(row.name, func(t *testing.T) {
 			t.Parallel()
-			s, res := schema.LoadSourcesWithEntry(t.Context(), sourcesOf(map[string]string{
-				"main.yammm": "schema \"m\"\nimport \"./a\"\nimport \"./b\"\ntype T { id String primary }\n",
-				"a.yammm":    "schema \"X\"\ntype A { id String primary }\n",
-				"b.yammm":    row.second,
-			}), "main.yammm", t.TempDir())
+			s, res := diagtest.Capture(t, func(warn func(diag.Issue)) (schema.Schema, error) {
+				return schema.LoadSourcesWithEntry(t.Context(), sourcesOf(map[string]string{
+					"main.yammm": "schema \"m\"\nimport \"./a\"\nimport \"./b\"\ntype T { id String primary }\n",
+					"a.yammm":    "schema \"X\"\ntype A { id String primary }\n",
+					"b.yammm":    row.second,
+				}), "main.yammm", schema.WithModuleRoot(t.TempDir()), schema.WithWarnings(warn))
+			})
 			if !s.IsZero() {
 				t.Fatal("the load succeeded")
 			}

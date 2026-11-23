@@ -16,11 +16,11 @@ import (
 // root of inst's type at its primary key: there an inst with no composed children
 // merges, installing its association records on the held root and keeping
 // nothing else of it. It reports whether it merged; a merge records no
-// [Duplicate], and merged is false whenever res holds an error. The package
-// doc's Merge on a Duplicate Key section states the rules, among them the
+// [Duplicate], and merged is false whenever err is not nil. The package doc's
+// Merge on a Duplicate Key section states the rules, among them the
 // E_GRAPH_CARDINALITY refusal of a second (one) target. It panics as
 // [Graph.Add] does, naming AddOrMerge.
-func (g *Graph) AddOrMerge(ctx context.Context, inst instance.ValidInstance) (merged bool, res diag.Result) {
+func (g *Graph) AddOrMerge(ctx context.Context, inst instance.ValidInstance) (merged bool, err error) {
 	return g.add(ctx, inst, "graph.AddOrMerge", true)
 }
 

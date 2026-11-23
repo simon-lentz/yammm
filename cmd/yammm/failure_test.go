@@ -32,6 +32,15 @@ type documentIssue struct {
 		Key   string `json:"key"`
 		Value string `json:"value"`
 	} `json:"details"`
+	Related []struct {
+		Message string `json:"message"`
+		Span    *struct {
+			Source string `json:"source"`
+			Start  struct {
+				Line int `json:"line"`
+			} `json:"start"`
+		} `json:"span"`
+	} `json:"related"`
 }
 
 // detail returns the value of the issue's detail named key.

@@ -15,7 +15,7 @@ func TestAdd_OneCompositionAttachesItsChild(t *testing.T) {
 
 	child := partData(t, s, "Child", []any{"c1"}, map[string]any{"name": "Child 1"})
 	parent := parentWith(t, s, "Parent", []any{"p1"}, map[string]any{"name": "Parent 1"}, "CHILD", child)
-	if err := g.Add(t.Context(), parent).Err(); err != nil {
+	if err := g.Add(t.Context(), parent); err != nil {
 		t.Errorf("Add should succeed: %v", err)
 	}
 
@@ -35,7 +35,7 @@ func TestAdd_ManyCompositionAttachesKeyedChildren(t *testing.T) {
 		children = append(children, partData(t, s, "Child", []any{id}, map[string]any{"name": "Child " + id}))
 	}
 	parent := parentWith(t, s, "Parent", []any{"p1"}, map[string]any{"name": "Parent 1"}, "CHILDREN", children...)
-	if err := g.Add(t.Context(), parent).Err(); err != nil {
+	if err := g.Add(t.Context(), parent); err != nil {
 		t.Errorf("Add should succeed: %v", err)
 	}
 
@@ -55,7 +55,7 @@ func TestAdd_ManyCompositionKeepsEveryKeylessChild(t *testing.T) {
 		items = append(items, map[string]any{"value": "item"})
 	}
 	container := parentWith(t, s, "Container", []any{"box1"}, map[string]any{"name": "Box 1"}, "ITEMS", items...)
-	if err := g.Add(t.Context(), container).Err(); err != nil {
+	if err := g.Add(t.Context(), container); err != nil {
 		t.Errorf("Add should succeed: %v", err)
 	}
 
@@ -85,9 +85,9 @@ type Car {
 	*-> WHEELS (many) Wheel
 }
 `
-	s, res := schema.LoadString(ctx, src, "test://inheriting_part.yammm")
-	if res.HasErrors() {
-		t.Fatalf("schema load: %s", res.String())
+	s, err := schema.LoadString(ctx, src, "test://inheriting_part.yammm")
+	if err != nil {
+		t.Fatalf("schema load: %s", err)
 	}
 
 	inst := instancetest.Valid(t, s, "Car", map[string]any{
@@ -99,8 +99,8 @@ type Car {
 	})
 
 	g := graph.New(s)
-	if r := g.Add(ctx, inst); !r.OK() {
-		t.Fatalf("a validated child of an extending part type was refused: %s", r.String())
+	if err := g.Add(ctx, inst); err != nil {
+		t.Fatalf("a validated child of an extending part type was refused: %s", err)
 	}
 	car := slices.Collect(g.Snapshot().InstancesOf(inst.Type().ID()))[0]
 	if n := car.ComposedCount("WHEELS"); n != 2 {

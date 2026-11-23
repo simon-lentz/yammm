@@ -28,8 +28,8 @@ func TestExtractSymbols_EmptySchema(t *testing.T) {
 	t.Parallel()
 
 	ctx := context.Background()
-	s, result := schema.LoadString(ctx, `schema "empty"`, "empty.yammm")
-	require.False(t, result.HasErrors(), "load errors: %v", result)
+	s, err := schema.LoadString(ctx, `schema "empty"`, "empty.yammm")
+	require.NoError(t, err, "load errors: %v", err)
 
 	syms := symbols.ExtractSymbols(s)
 	assert.Len(t, syms, 1, "should contain only the schema itself")
@@ -48,8 +48,8 @@ type Person {
     id String primary
 }
 `
-	s, result := schema.LoadString(ctx, src, "person.yammm")
-	require.False(t, result.HasErrors(), "load errors: %v", result)
+	s, err := schema.LoadString(ctx, src, "person.yammm")
+	require.NoError(t, err, "load errors: %v", err)
 
 	syms := symbols.ExtractSymbols(s)
 
@@ -82,8 +82,8 @@ func TestBuildSymbolIndex(t *testing.T) {
 	t.Parallel()
 
 	ctx := context.Background()
-	s, result := schema.LoadString(ctx, `schema "Index"`, "index.yammm")
-	require.False(t, result.HasErrors(), "load errors: %v", result)
+	s, err := schema.LoadString(ctx, `schema "Index"`, "index.yammm")
+	require.NoError(t, err, "load errors: %v", err)
 
 	idx := symbols.BuildSymbolIndex(s)
 	require.NotNil(t, idx, "symbols.BuildSymbolIndex() returned nil")
@@ -111,8 +111,8 @@ type Target {
     id String primary
 }
 `
-	s, result := schema.LoadString(ctx, src, "find.yammm")
-	require.False(t, result.HasErrors(), "load errors: %v", result)
+	s, err := schema.LoadString(ctx, src, "find.yammm")
+	require.NoError(t, err, "load errors: %v", err)
 
 	idx := symbols.BuildSymbolIndex(s)
 
@@ -292,8 +292,8 @@ part type Wheel {
     size Integer required
 }
 `
-	s, result := schema.LoadString(ctx, src, "abstract.yammm")
-	require.False(t, result.HasErrors(), "load errors: %v", result)
+	s, err := schema.LoadString(ctx, src, "abstract.yammm")
+	require.NoError(t, err, "load errors: %v", err)
 
 	syms := symbols.ExtractSymbols(s)
 
@@ -370,8 +370,8 @@ func TestExtractSymbols_WithDataType(t *testing.T) {
 
 type ShortString = String[1, 50]
 `
-	s, result := schema.LoadString(ctx, src, "datatype.yammm")
-	require.False(t, result.HasErrors(), "load errors: %v", result)
+	s, err := schema.LoadString(ctx, src, "datatype.yammm")
+	require.NoError(t, err, "load errors: %v", err)
 
 	syms := symbols.ExtractSymbols(s)
 
@@ -412,8 +412,8 @@ type Person {
     name ShortString
 }
 `
-	s, result := schema.LoadString(ctx, src, "dtref.yammm")
-	require.False(t, result.HasErrors(), "load errors: %v", result)
+	s, err := schema.LoadString(ctx, src, "dtref.yammm")
+	require.NoError(t, err, "load errors: %v", err)
 
 	refs := symbols.ExtractReferences(s)
 
@@ -449,8 +449,8 @@ type User {
 `),
 	}
 
-	s, result := schema.LoadSourcesWithEntry(ctx, sources, "main.yammm", tmpDir)
-	require.False(t, result.HasErrors(), "load errors: %v", result)
+	s, err := schema.LoadSourcesWithEntry(ctx, sources, "main.yammm", schema.WithModuleRoot(tmpDir))
+	require.NoError(t, err, "load errors: %v", err)
 
 	refs := symbols.ExtractReferences(s)
 
@@ -535,14 +535,14 @@ func TestFormatPropertyDetail_WithConstraint(t *testing.T) {
 	// Tests that formatPropertyDetail correctly formats a property with a constraint.
 	t.Parallel()
 
-	s, result := schema.LoadString(t.Context(), `schema "test"
+	s, err := schema.LoadString(t.Context(), `schema "test"
 
 type Person {
 	id String primary
 	name String
 }
 `, "test.yammm")
-	require.False(t, result.HasErrors(), "builder errors: %v", result)
+	require.NoError(t, err, "builder errors: %v", err)
 
 	typ, ok := s.Type("Person")
 	require.True(t, ok)
@@ -558,9 +558,9 @@ type Person {
 func TestExtractReferences_EachSpellingOfARepeatedSupertype(t *testing.T) {
 	t.Parallel()
 
-	s, result := schema.LoadString(t.Context(), "schema \"m\"\ntype B { id String primary }\ntype A extends B, B { }\n", "m.yammm")
-	if !result.OK() {
-		t.Fatal(result)
+	s, err := schema.LoadString(t.Context(), "schema \"m\"\ntype B { id String primary }\ntype A extends B, B { }\n", "m.yammm")
+	if err != nil {
+		t.Fatal(err)
 	}
 
 	var spans []location.Span

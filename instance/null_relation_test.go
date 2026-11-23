@@ -9,6 +9,7 @@ import (
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/instance"
+	"github.com/simon-lentz/yammm/internal/diagtest"
 )
 
 const nullRelationSchema = `schema "n"
@@ -62,11 +63,15 @@ func TestValidateOne_ANullRelationIsTheRelationLeftOut(t *testing.T) {
 		}
 		left := base()
 		delete(left, field)
-		wantVI, want := v.ValidateOne(t.Context(), "T", instance.RawInstance{Properties: left})
+		wantVI, want := diagtest.Issues(t, func() (instance.ValidInstance, error) {
+			return v.ValidateOne(t.Context(), "T", instance.RawInstance{Properties: left})
+		})
 		for _, null := range absent {
 			props := base()
 			props[field] = null
-			gotVI, got := v.ValidateOne(t.Context(), "T", instance.RawInstance{Properties: props})
+			gotVI, got := diagtest.Issues(t, func() (instance.ValidInstance, error) {
+				return v.ValidateOne(t.Context(), "T", instance.RawInstance{Properties: props})
+			})
 			if g, w := issueLines(got), issueLines(want); !slices.Equal(g, w) {
 				t.Errorf("%s = %#v drew\n%q\nwant what the key left out draws\n%q", field, null, g, w)
 			}
@@ -92,10 +97,12 @@ func TestValidateOne_ANullRelationIsTheRelationLeftOut(t *testing.T) {
 func TestValidateOne_ANullRelationDrawsNoShapeError(t *testing.T) {
 	t.Parallel()
 	v := instance.NewValidator(loadT(t, nullRelationSchema))
-	vi, res := v.ValidateOne(t.Context(), "T", instance.RawInstance{Properties: map[string]any{
-		"id": "t", "opt_one": nil, "req_one": nil, "opt_many": nil, "req_many": nil,
-		"c_opt_one": nil, "c_opt_many": nil, "c_req_one": nil, "c_req_many": nil,
-	}})
+	vi, res := diagtest.Issues(t, func() (instance.ValidInstance, error) {
+		return v.ValidateOne(t.Context(), "T", instance.RawInstance{Properties: map[string]any{
+			"id": "t", "opt_one": nil, "req_one": nil, "opt_many": nil, "req_many": nil,
+			"c_opt_one": nil, "c_opt_many": nil, "c_req_one": nil, "c_req_many": nil,
+		}})
+	})
 	want := []string{
 		diag.E_UNRESOLVED_REQUIRED_COMPOSITION.String(),
 		diag.E_UNRESOLVED_REQUIRED_COMPOSITION.String(),
@@ -106,12 +113,14 @@ func TestValidateOne_ANullRelationDrawsNoShapeError(t *testing.T) {
 	if !vi.IsZero() {
 		t.Errorf("an instance missing a required composition was accepted")
 	}
-	vi, res = v.ValidateOne(t.Context(), "T", instance.RawInstance{Properties: map[string]any{
-		"id": "t", "opt_one": nil, "req_one": nil, "opt_many": nil, "req_many": nil,
-		"c_opt_one": nil, "c_opt_many": nil,
-		"c_req_one": []any{map[string]any{"id": "p1"}}, "c_req_many": []any{map[string]any{"id": "p2"}},
-	}})
-	if res.Err() != nil || vi.IsZero() {
+	vi, res = diagtest.Issues(t, func() (instance.ValidInstance, error) {
+		return v.ValidateOne(t.Context(), "T", instance.RawInstance{Properties: map[string]any{
+			"id": "t", "opt_one": nil, "req_one": nil, "opt_many": nil, "req_many": nil,
+			"c_opt_one": nil, "c_opt_many": nil,
+			"c_req_one": []any{map[string]any{"id": "p1"}}, "c_req_many": []any{map[string]any{"id": "p2"}},
+		}})
+	})
+	if diagtest.Err(res) != nil || vi.IsZero() {
 		t.Fatalf("null associations and null optional compositions were refused: %s", res)
 	}
 	if edges := slices.Collect(keysOf(vi.Edges())); len(edges) != 0 {

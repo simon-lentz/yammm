@@ -65,11 +65,11 @@ func TestMarshal_KeyTheReloadCannotReadIsRefused(t *testing.T) {
 	// A source nothing imports is keyed under the root as the entry is.
 	root := t.TempDir()
 	writeTree(t, root, map[string]string{"main.yammm": keyRuleDep, `a\b.yammm`: keyRuleDep})
-	s, res := schema.LoadSourcesWithEntry(context.Background(), map[string][]byte{
+	s, loadErr := schema.LoadSourcesWithEntry(context.Background(), map[string][]byte{
 		"main.yammm": []byte(keyRuleDep), `a\b.yammm`: []byte(keyRuleDep),
-	}, "main.yammm", root, schema.WithSourcesOnly(true))
-	if res.HasErrors() {
-		t.Fatalf("load: %v", res.Err())
+	}, "main.yammm", schema.WithSourcesOnly(true), schema.WithModuleRoot(root))
+	if loadErr != nil {
+		t.Fatalf("load: %v", loadErr)
 	}
 	if _, err := gogen.Marshal(s); err == nil || !strings.Contains(err.Error(), "has no key the re-load can read") || !strings.Contains(err.Error(), "holds a backslash") {
 		t.Errorf("Marshal with an unimported a\\b.yammm = %v, want the key refusal", err)
@@ -81,9 +81,9 @@ func TestMarshal_KeyTheReloadCannotReadIsRefused(t *testing.T) {
 // written in NFC, the form the re-load registers it under.
 func TestMarshal_LoadStringKeyIsInNFC(t *testing.T) {
 	t.Parallel()
-	s, res := schema.LoadString(context.Background(), keyRuleDep, "cafe\u0301.yammm")
-	if res.HasErrors() {
-		t.Fatalf("load: %v", res.Err())
+	s, loadErr := schema.LoadString(context.Background(), keyRuleDep, "cafe\u0301.yammm")
+	if loadErr != nil {
+		t.Fatalf("load: %v", loadErr)
 	}
 	got, err := gogen.Marshal(s)
 	if err != nil {
@@ -130,26 +130,26 @@ func TestEmbeddedKeys_AgreeWithTheLoadersKeyRule(t *testing.T) {
 
 			// The verdict is on the entry's key alone, so an import the key
 			// breaks cannot hide it.
-			_, res := schema.LoadSourcesWithEntry(context.Background(), map[string][]byte{l.entry: []byte(keyRuleDep)},
-				l.entry, "", schema.WithSourcesOnly(true), schema.WithSyntheticRoot(consumerRoot))
-			loaderAccepts := !res.HasErrors()
+			_, loadErr := schema.LoadSourcesWithEntry(context.Background(), map[string][]byte{l.entry: []byte(keyRuleDep)},
+				l.entry, schema.WithSourcesOnly(true), schema.WithSyntheticRoot(consumerRoot))
+			loaderAccepts := loadErr == nil
 
 			root := t.TempDir()
 			writeTree(t, root, map[string]string{l.entry: keyRuleMain, depKey: keyRuleDep})
 			disk := loadEntry(t, root, l.entry)
 			got, err := gogen.Marshal(disk)
 			if gogenAccepts := err == nil; gogenAccepts != loaderAccepts {
-				t.Fatalf("gogen accepts %t (err %v), the loader accepts the key as text %t (%v)", gogenAccepts, err, loaderAccepts, res.Err())
+				t.Fatalf("gogen accepts %t (err %v), the loader accepts the key as text %t (%v)", gogenAccepts, err, loaderAccepts, loadErr)
 			}
 			if !loaderAccepts {
 				return
 			}
-			text, res := schema.LoadSourcesWithEntry(context.Background(), map[string][]byte{
+			text, loadErr := schema.LoadSourcesWithEntry(context.Background(), map[string][]byte{
 				l.entry: []byte(keyRuleMain),
 				depKey:  []byte(keyRuleDep),
-			}, l.entry, "", schema.WithSourcesOnly(true), schema.WithSyntheticRoot(consumerRoot))
-			if res.HasErrors() {
-				t.Fatalf("the loader accepts the entry's key but not the layout: %v", res.Err())
+			}, l.entry, schema.WithSourcesOnly(true), schema.WithSyntheticRoot(consumerRoot))
+			if loadErr != nil {
+				t.Fatalf("the loader accepts the entry's key but not the layout: %v", loadErr)
 			}
 			store, entry := reloadEmitted(t, got, disk)
 			if want := strings.TrimPrefix(text.SourceID().String(), consumerRoot+"/"); entry != want {

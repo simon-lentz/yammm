@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"errors"
 	"maps"
 	"os"
 	"path/filepath"
@@ -12,6 +13,7 @@ import (
 	"time"
 
 	"github.com/simon-lentz/yammm/cmd/yammm/internal/cli"
+	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/internal/raceskip"
 	"github.com/simon-lentz/yammm/schema"
 	"github.com/simon-lentz/yammm/snapshot"
@@ -49,8 +51,8 @@ func readHeader(t *testing.T, path string) *snapshot.Header {
 	if err != nil {
 		t.Fatalf("read snapshot: %v", err)
 	}
-	header, result := snapshot.ReadHeader(context.Background(), bytes.NewReader(data))
-	if err := result.Err(); err != nil {
+	header, readErr := snapshot.ReadHeader(context.Background(), bytes.NewReader(data))
+	if err := readErr; err != nil {
 		t.Fatalf("read header: %v", err)
 	}
 	return header
@@ -110,16 +112,13 @@ func TestLoadSnapshotFile_ARefusedDocumentHasNoHeader(t *testing.T) {
 		t.Fatalf("write snapshot: %v", err)
 	}
 
-	s, schemaResult := schema.Load(t.Context(), mustAbs(t, "testdata/valid.yammm"))
-	if err := schemaResult.Err(); err != nil {
+	s, loadErr := schema.Load(t.Context(), mustAbs(t, "testdata/valid.yammm"))
+	if err := loadErr; err != nil {
 		t.Fatalf("load schema: %v", err)
 	}
-	_, header, result, err := cli.LoadSnapshotFile(t.Context(), base, s)
-	if err != nil {
-		t.Fatalf("load snapshot: %v", err)
-	}
-	if !result.HasErrors() {
-		t.Fatal("the tampered document loaded; the test asserts nothing")
+	_, header, err := cli.LoadSnapshotFile(t.Context(), base, s)
+	if _, ok := errors.AsType[*diag.ResultError](err); !ok {
+		t.Fatalf("load snapshot: %v, want the tampered document refused with diagnostics", err)
 	}
 	if header != nil {
 		t.Errorf("header = %+v, want nil beside a refused load", header)
@@ -134,8 +133,8 @@ func statHeader(t *testing.T, path string) snapshot.Header {
 	if err != nil {
 		t.Fatalf("read snapshot: %v", err)
 	}
-	info, result := snapshot.Stat(t.Context(), data)
-	if err := result.Err(); err != nil {
+	info, readErr := snapshot.Stat(t.Context(), data)
+	if err := readErr; err != nil {
 		t.Fatalf("stat: %v", err)
 	}
 	return info.Header
@@ -243,15 +242,12 @@ func writeForeignSnapshot(t *testing.T, path, createdAt string) time.Time {
 	if err != nil {
 		t.Fatalf("parse %q: %v", createdAt, err)
 	}
-	s, schemaResult := schema.Load(ctx, mustAbs(t, "testdata/valid.yammm"))
-	if err := schemaResult.Err(); err != nil {
+	s, loadErr := schema.Load(ctx, mustAbs(t, "testdata/valid.yammm"))
+	if err := loadErr; err != nil {
 		t.Fatalf("load schema: %v", err)
 	}
-	snap, header, loadResult, err := cli.LoadSnapshotFile(ctx, path, s)
+	snap, header, err := cli.LoadSnapshotFile(ctx, path, s)
 	if err != nil {
-		t.Fatalf("load snapshot: %v", err)
-	}
-	if err := loadResult.Err(); err != nil {
 		t.Fatalf("load snapshot: %v", err)
 	}
 
@@ -262,8 +258,8 @@ func writeForeignSnapshot(t *testing.T, path, createdAt string) time.Time {
 		opts = append(opts, snapshot.WithMetadata(header.Metadata))
 	}
 
-	data, marshalResult := snapshot.Marshal(ctx, snap, opts...)
-	if err := marshalResult.Err(); err != nil {
+	data, readErr := snapshot.Marshal(ctx, snap, opts...)
+	if err := readErr; err != nil {
 		t.Fatalf("marshal: %v", err)
 	}
 	if err := os.WriteFile(path, data, 0o600); err != nil {

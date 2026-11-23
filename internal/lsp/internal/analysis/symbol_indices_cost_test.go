@@ -46,7 +46,7 @@ func TestBuildSymbolIndices_ACostLinearInTheSchemasOfStackedDiamonds(t *testing.
 		if err != nil {
 			t.Fatal(err)
 		}
-		snap, err := a.Analyze(t.Context(), entry, map[string][]byte{entry: text}, dir)
+		snap, err := a.Analyze(t.Context(), entry, map[string][]byte{entry: text}, dir, true)
 		if err != nil {
 			t.Fatalf("analyze: %v", err)
 		}

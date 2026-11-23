@@ -3,12 +3,14 @@ package yammm_test
 import (
 	"bytes"
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/instance"
+	"github.com/simon-lentz/yammm/internal/diagtest"
 	"github.com/simon-lentz/yammm/schema"
 	"github.com/simon-lentz/yammm/snapshot"
 )
@@ -50,10 +52,10 @@ part type ` + declaredPartName + ` {
 func TestMessages_NameADeclaredIdentityWhole(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	s, res := schema.LoadSourcesWithEntry(ctx, map[string][]byte{"vehicles.yammm": []byte(declaredSchema)},
-		"vehicles.yammm", "", schema.WithSourcesOnly(true), schema.WithSyntheticRoot(declaredRoot))
-	if res.HasErrors() {
-		t.Fatal(res)
+	s, err := schema.LoadSourcesWithEntry(ctx, map[string][]byte{"vehicles.yammm": []byte(declaredSchema)},
+		"vehicles.yammm", schema.WithSourcesOnly(true), schema.WithSyntheticRoot(declaredRoot))
+	if err != nil {
+		t.Fatal(err)
 	}
 	messages := func(r diag.Result) string {
 		var b strings.Builder
@@ -78,15 +80,17 @@ func TestMessages_NameADeclaredIdentityWhole(t *testing.T) {
 			if _, ok := props["gid"]; ok {
 				typeName = "Garage"
 			}
-			inst, r := v.ValidateOne(ctx, typeName, instance.RawInstance{Properties: props})
+			inst, err := v.ValidateOne(ctx, typeName, instance.RawInstance{Properties: props})
 			if inst.IsZero() {
-				t.Fatal(r)
+				t.Fatal(err)
 			}
-			held.Add(ctx, inst)
+			if err := held.Add(ctx, inst); err != nil && !errors.Is(err, diag.E_DUPLICATE_PK) {
+				t.Errorf("Add: %v", err)
+			}
 		}
-		data, mr := snapshot.Marshal(ctx, held.Snapshot())
+		data, err := snapshot.Marshal(ctx, held.Snapshot())
 		if data == nil {
-			t.Fatal(mr)
+			t.Fatal(err)
 		}
 		return data
 	}
@@ -105,21 +109,27 @@ func TestMessages_NameADeclaredIdentityWhole(t *testing.T) {
 	ref := declaredSchemaName + "#" + declaredTypeName
 	for _, c := range []struct {
 		old, replacement, want string
-		opts                   []snapshot.LoadOption
+		opts                   []snapshot.Option
 	}{
 		{old: `"SERVICED_BY"`, replacement: `"SERVICED_AT"`, want: "of " + ref + "["},
 		{old: `"v2"`, replacement: `"v1"`, want: `"` + ref + `"`},
 		{old: `"name":"Garage"`, replacement: `"name":"` + declaredTypeName + `"`, want: "carry one identity " + ref},
 		{old: `"target_type":0`, replacement: `"target_type":1`, want: "targets " + ref},
-		{old: `"year":2020`, replacement: `"year":"x"`, want: "revalidation of " + ref + "[", opts: []snapshot.LoadOption{snapshot.WithRevalidation(diag.Error)}},
+		{old: `"year":2020`, replacement: `"year":"x"`, want: "revalidation of " + ref + "[", opts: []snapshot.Option{snapshot.WithRevalidation(diag.Error)}},
 		{old: `"name":"Garage"`, replacement: `"name":"MissingTypeWithANameRunningPastTheCut"`, want: "names " + declaredSchemaName + "#MissingType"},
 	} {
-		_, r := snapshot.Unmarshal(ctx, edit(data, c.old, c.replacement), s, c.opts...)
+		_, r := diagtest.Capture(t, func(warn func(diag.Issue)) (graph.Snapshot, error) {
+			return snapshot.Unmarshal(ctx, edit(data, c.old, c.replacement), s, append([]snapshot.Option{snapshot.WithWarnings(warn)}, c.opts...)...)
+		})
 		wantWhole("snapshot.Load", r, c.want)
 	}
 	duplicated := marshal(map[string]any{"vin": "v1"}, map[string]any{"vin": "v1", "year": 2020})
-	_, r := snapshot.Unmarshal(ctx, edit(duplicated, `,"conflict":{"type":0,"key":["v1"]}`, ""), s)
+	_, r := diagtest.Capture(t, func(warn func(diag.Issue)) (graph.Snapshot, error) {
+		return snapshot.Unmarshal(ctx, edit(duplicated, `,"conflict":{"type":0,"key":["v1"]}`, ""), s, snapshot.WithWarnings(warn))
+	})
 	wantWhole("snapshot.Load", r, "("+ref+"[")
-	_, r = snapshot.Stat(ctx, edit(data, `"v2"`, `"v1"`))
+	_, r = diagtest.Issues(t, func() (*snapshot.Info, error) {
+		return snapshot.Stat(ctx, edit(data, `"v2"`, `"v1"`))
+	})
 	wantWhole("snapshot.Info", r, `#"`+declaredTypeName[:32]+`"…`)
 }

@@ -9,6 +9,7 @@ import (
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/instance"
+	"github.com/simon-lentz/yammm/internal/diagtest"
 	"github.com/simon-lentz/yammm/internal/instancetest"
 	"github.com/simon-lentz/yammm/internal/snapparts"
 	"github.com/simon-lentz/yammm/schema"
@@ -60,13 +61,13 @@ type Beacon {
 // schema with the transitively imported Beacon's identity.
 func unnameableFixture(t *testing.T) (schema.Schema, schema.TypeID) {
 	t.Helper()
-	s, result := schema.LoadSourcesWithEntry(t.Context(), map[string][]byte{
+	s, err := schema.LoadSourcesWithEntry(t.Context(), map[string][]byte{
 		"entry.yammm": []byte(unnameableEntry),
 		"base.yammm":  []byte(unnameableBase),
 		"deep.yammm":  []byte(unnameableDeep),
-	}, "entry.yammm", ".", schema.WithSourcesOnly(true))
-	if result.HasErrors() {
-		t.Fatalf("load fixture: %s", result)
+	}, "entry.yammm", schema.WithSourcesOnly(true), schema.WithModuleRoot("."))
+	if err != nil {
+		t.Fatalf("load fixture: %s", err)
 	}
 	base, ok := s.ImportByAlias("base")
 	if !ok || base.Schema().IsZero() {
@@ -159,8 +160,8 @@ func TestGraphAdd_KeepsAnUnnameableRootApartFromItsNamesake(t *testing.T) {
 			instancetest.Valid(t, s, "Beacon", props),
 			instancetest.Valid(t, c.over, c.spelling, props),
 		} {
-			if res := g.Add(context.Background(), valid); !res.OK() {
-				t.Fatalf("spelled %q: Add refused %s: %s", c.spelling, valid.TypeName(), res)
+			if err := g.Add(context.Background(), valid); err != nil {
+				t.Fatalf("spelled %q: Add refused %s: %s", c.spelling, valid.TypeName(), err)
 			}
 		}
 		snap := g.Snapshot()
@@ -210,7 +211,7 @@ func TestGraphAdd_NamesAnUnnameableRootApartFromItsNamesake(t *testing.T) {
 			instancetest.Valid(t, s, "Beacon", props),
 			instancetest.Valid(t, deep.Schema(), "Beacon", props),
 		} {
-			for issue := range g.Add(context.Background(), valid).Issues() {
+			for issue := range diagtest.Failures(t, g.Add(context.Background(), valid)).Issues() {
 				if issue.Code() != diag.E_DUPLICATE_PK {
 					t.Fatalf("Add raised %s, want only E_DUPLICATE_PK", issue.Code())
 				}
@@ -238,7 +239,7 @@ func TestGraphAdd_NamesAnUnnameableRootApartFromItsNamesake(t *testing.T) {
 // the graph's rendering, not by the validating schema's own name.
 func TestGraphAdd_NamesARefusedTypeAsTheGraphRendersIt(t *testing.T) {
 	t.Parallel()
-	s, result := schema.LoadSourcesWithEntry(t.Context(), map[string][]byte{
+	s, err := schema.LoadSourcesWithEntry(t.Context(), map[string][]byte{
 		"entry.yammm": []byte(`schema "entry"
 
 import "base.yammm" as base
@@ -263,9 +264,9 @@ part type Shard {
 	name String primary
 }
 `),
-	}, "entry.yammm", ".", schema.WithSourcesOnly(true))
-	if result.HasErrors() {
-		t.Fatalf("load fixture: %s", result)
+	}, "entry.yammm", schema.WithSourcesOnly(true), schema.WithModuleRoot("."))
+	if err != nil {
+		t.Fatalf("load fixture: %s", err)
 	}
 	base, _ := s.ImportByAlias("base")
 	basin := instancetest.Valid(t, base.Schema(), "Basin", map[string]any{
@@ -288,7 +289,7 @@ part type Shard {
 		"MARKS":  {diag.E_GRAPH_MISSING_PK, "deep#Mark"},
 		"PIECES": {diag.E_GRAPH_INVALID_COMPOSITION, "deep#Shard"},
 	} {
-		res := graph.New(s).Add(context.Background(), children[rel])
+		res := diagtest.Failures(t, graph.New(s).Add(context.Background(), children[rel]))
 		if !res.HasCode(want.code) {
 			t.Fatalf("%s: Add drew %s, want %s", rel, res, want.code)
 		}
@@ -298,10 +299,10 @@ part type Shard {
 	}
 
 	g := graph.New(s)
-	if res := g.Add(context.Background(), basin); res.HasErrors() {
-		t.Fatalf("first Add: %s", res)
+	if err := g.Add(context.Background(), basin); err != nil {
+		t.Fatalf("first Add: %s", err)
 	}
-	res := g.Add(context.Background(), basin)
+	res := diagtest.Failures(t, g.Add(context.Background(), basin))
 	if !res.HasCode(diag.E_DUPLICATE_PK) {
 		t.Fatalf("a duplicate Add drew %s, want %s", res, diag.E_DUPLICATE_PK)
 	}

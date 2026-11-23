@@ -1,6 +1,7 @@
 package snapshot_test
 
 import (
+	"errors"
 	"fmt"
 	"regexp"
 	"strings"
@@ -9,6 +10,7 @@ import (
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/instance"
+	"github.com/simon-lentz/yammm/internal/diagtest"
 	"github.com/simon-lentz/yammm/schema"
 	"github.com/simon-lentz/yammm/snapshot"
 )
@@ -107,18 +109,22 @@ const (
 // two Tags, two keyless Lines, a Seal and a Box in a Box; and a duplicate of c1.
 func singleBreakDoc(t *testing.T) (schema.Schema, string) {
 	t.Helper()
-	s, res := schema.LoadString(t.Context(), singleBreakSchema, "sb.yammm")
-	if res.HasErrors() {
+	s, res := diagtest.Capture(t, func(warn func(diag.Issue)) (schema.Schema, error) {
+		return schema.LoadString(t.Context(), singleBreakSchema, "sb.yammm", schema.WithWarnings(warn))
+	})
+	if diagtest.Err(res) != nil {
 		t.Fatalf("schema: %s", res)
 	}
 	v := instance.NewValidator(s)
 	g := graph.New(s)
 	add := func(typ string, props map[string]any) {
-		vi, res := v.ValidateOne(t.Context(), typ, instance.RawInstance{Properties: props})
-		if res.HasErrors() {
-			t.Fatalf("validate %s: %s", typ, res)
+		vi, err := v.ValidateOne(t.Context(), typ, instance.RawInstance{Properties: props})
+		if err != nil {
+			t.Fatalf("validate %s: %s", typ, err)
 		}
-		g.Add(t.Context(), vi)
+		if err := g.Add(t.Context(), vi); err != nil && !errors.Is(err, diag.E_DUPLICATE_PK) {
+			t.Errorf("Add: %v", err)
+		}
 	}
 	add("Company", map[string]any{"id": "c1"})
 	add("Company", map[string]any{"id": "c2"})
@@ -142,8 +148,10 @@ func singleBreakDoc(t *testing.T) (schema.Schema, string) {
 		"seal":  []any{map[string]any{"code": "s1"}},
 		"box":   []any{map[string]any{"n": 1, "box": []any{map[string]any{"n": 2}}}},
 	})
-	data, res := snapshot.Marshal(t.Context(), g.Snapshot())
-	if res.HasErrors() {
+	data, res := diagtest.Issues(t, func() ([]byte, error) {
+		return snapshot.Marshal(t.Context(), g.Snapshot())
+	})
+	if diagtest.Err(res) != nil {
 		t.Fatalf("Marshal: %s", res)
 	}
 	doc := string(data)
@@ -875,14 +883,14 @@ type sbMode struct {
 	name  string
 	reval bool
 	sev   diag.Severity
-	opts  []snapshot.LoadOption
+	opts  []snapshot.Option
 }
 
 func sbModes() []sbMode {
 	return []sbMode{
-		{name: "plain", opts: []snapshot.LoadOption{snapshot.WithIssueLimit(0)}},
-		{name: "revalidate at Warning", reval: true, sev: diag.Warning, opts: []snapshot.LoadOption{snapshot.WithIssueLimit(0), snapshot.WithRevalidation(diag.Warning)}},
-		{name: "revalidate at Error", reval: true, sev: diag.Error, opts: []snapshot.LoadOption{snapshot.WithIssueLimit(0), snapshot.WithRevalidation(diag.Error)}},
+		{name: "plain", opts: []snapshot.Option{snapshot.WithIssueLimit(0)}},
+		{name: "revalidate at Warning", reval: true, sev: diag.Warning, opts: []snapshot.Option{snapshot.WithIssueLimit(0), snapshot.WithRevalidation(diag.Warning)}},
+		{name: "revalidate at Error", reval: true, sev: diag.Error, opts: []snapshot.Option{snapshot.WithIssueLimit(0), snapshot.WithRevalidation(diag.Error)}},
 	}
 }
 
@@ -944,11 +952,17 @@ func TestRead_TheFixtureIsClean(t *testing.T) {
 	t.Parallel()
 	s, doc := singleBreakDoc(t)
 	for _, mode := range sbModes() {
-		sbCheck(t, snapshot.Verify(t.Context(), rehashDocument(t, []byte(doc)), s, mode.opts...), nil, mode, 2)
-		_, res := snapshot.Unmarshal(t.Context(), rehashDocument(t, []byte(doc)), s, mode.opts...)
+		sbCheck(t, diagtest.CaptureErr(t, func(warn func(diag.Issue)) error {
+			return snapshot.Verify(t.Context(), rehashDocument(t, []byte(doc)), s, append([]snapshot.Option{snapshot.WithWarnings(warn)}, mode.opts...)...)
+		}), nil, mode, 2)
+		_, res := diagtest.Capture(t, func(warn func(diag.Issue)) (graph.Snapshot, error) {
+			return snapshot.Unmarshal(t.Context(), rehashDocument(t, []byte(doc)), s, append([]snapshot.Option{snapshot.WithWarnings(warn)}, mode.opts...)...)
+		})
 		sbCheck(t, res, nil, mode, 2)
 	}
-	_, res := snapshot.Stat(t.Context(), rehashDocument(t, []byte(doc)))
+	_, res := diagtest.Issues(t, func() (*snapshot.Info, error) {
+		return snapshot.Stat(t.Context(), rehashDocument(t, []byte(doc)))
+	})
 	sbCheck(t, res, nil, sbMode{}, 0)
 }
 
@@ -967,17 +981,23 @@ func TestRead_OneBreakDrawsOneIssue(t *testing.T) {
 		for _, mode := range sbModes() {
 			t.Run(row.name+"/Verify/"+mode.name, func(t *testing.T) {
 				t.Parallel()
-				sbCheck(t, snapshot.Verify(t.Context(), rehashDocument(t, []byte(edited)), s, mode.opts...), row.want, mode, required)
+				sbCheck(t, diagtest.CaptureErr(t, func(warn func(diag.Issue)) error {
+					return snapshot.Verify(t.Context(), rehashDocument(t, []byte(edited)), s, append([]snapshot.Option{snapshot.WithWarnings(warn)}, mode.opts...)...)
+				}), row.want, mode, required)
 			})
 			t.Run(row.name+"/Load/"+mode.name, func(t *testing.T) {
 				t.Parallel()
-				_, res := snapshot.Unmarshal(t.Context(), rehashDocument(t, []byte(edited)), s, mode.opts...)
+				_, res := diagtest.Capture(t, func(warn func(diag.Issue)) (graph.Snapshot, error) {
+					return snapshot.Unmarshal(t.Context(), rehashDocument(t, []byte(edited)), s, append([]snapshot.Option{snapshot.WithWarnings(warn)}, mode.opts...)...)
+				})
 				sbCheck(t, res, row.want, mode, required)
 			})
 		}
 		t.Run(row.name+"/Info", func(t *testing.T) {
 			t.Parallel()
-			_, res := snapshot.Stat(t.Context(), rehashDocument(t, []byte(edited)))
+			_, res := diagtest.Issues(t, func() (*snapshot.Info, error) {
+				return snapshot.Stat(t.Context(), rehashDocument(t, []byte(edited)))
+			})
 			if row.schemaless {
 				sbCheck(t, res, row.want, sbMode{}, 0)
 				return
@@ -1005,7 +1025,9 @@ func TestRead_ARefusedRecordNamesNoSource(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 			edited := []byte(editOnce(t, doc, sbUnresolved, sbUnresolved+record+","))
-			res := snapshot.Verify(t.Context(), rehashDocument(t, edited), s, snapshot.WithIssueLimit(0))
+			res := diagtest.CaptureErr(t, func(warn func(diag.Issue)) error {
+				return snapshot.Verify(t.Context(), rehashDocument(t, edited), s, snapshot.WithIssueLimit(0), snapshot.WithWarnings(warn))
+			})
 			if sbFailures(res) != 1 || hasCode(res, diag.E_SNAPSHOT_DANGLING_REFERENCE) {
 				t.Errorf("%d issues, want the record's one refusal and no dangling source:\n%s", sbFailures(res), res)
 			}
@@ -1037,7 +1059,9 @@ func TestRead_ACappedReadKeepsTheSameIssues(t *testing.T) {
 				edited = editOnce(t, edited, e[0], e[1])
 			}
 			read := func() string {
-				return snapshot.Verify(t.Context(), rehashDocument(t, []byte(edited)), s, snapshot.WithIssueLimit(1)).String()
+				return diagtest.CaptureErr(t, func(warn func(diag.Issue)) error {
+					return snapshot.Verify(t.Context(), rehashDocument(t, []byte(edited)), s, snapshot.WithIssueLimit(1), snapshot.WithWarnings(warn))
+				}).String()
 			}
 			first := read()
 			if !strings.Contains(first, "E_") {
@@ -1125,7 +1149,9 @@ func TestRead_AReferenceARefusedUnitStatesIsJudgedNoFurther(t *testing.T) {
 			for _, e := range c.edits {
 				edited = editOnce(t, edited, e[0], e[1])
 			}
-			res := snapshot.Verify(t.Context(), rehashDocument(t, []byte(edited)), s, snapshot.WithIssueLimit(0))
+			res := diagtest.CaptureErr(t, func(warn func(diag.Issue)) error {
+				return snapshot.Verify(t.Context(), rehashDocument(t, []byte(edited)), s, snapshot.WithIssueLimit(0), snapshot.WithWarnings(warn))
+			})
 			if n := sbFailures(res); n != c.want {
 				t.Errorf("%d issues, want %d:\n%s", n, c.want, res)
 			}
@@ -1140,7 +1166,9 @@ func TestRead_ARefusedSlotLeavesTheAssociationOfItsNameCounted(t *testing.T) {
 	s, doc := singleBreakDoc(t)
 	edited := editOnce(t, doc, sbEmployer, sbEmployerTwice)
 	edited = editOnce(t, edited, sbP1, `{"key":["p1"],"properties":{"age":30,"id":"p1"},"composed":{"EMPLOYER":[`+sbInnerBox+`]},"edges":{`)
-	res := snapshot.Verify(t.Context(), rehashDocument(t, []byte(edited)), s, snapshot.WithIssueLimit(0))
+	res := diagtest.CaptureErr(t, func(warn func(diag.Issue)) error {
+		return snapshot.Verify(t.Context(), rehashDocument(t, []byte(edited)), s, snapshot.WithIssueLimit(0), snapshot.WithWarnings(warn))
+	})
 	if n := sbFailures(res); n != 2 {
 		t.Errorf("%d issues, want 2 (the slot, the count):\n%s", n, res)
 	}
@@ -1154,7 +1182,8 @@ func TestRead_ARefusedSlotLeavesTheAssociationOfItsNameCounted(t *testing.T) {
 // its stored key spells.
 func TestRead_ARefusedUnitStatesItsCanonicalAddress(t *testing.T) {
 	t.Parallel()
-	s, res := schema.LoadString(t.Context(), `schema "ts"
+	s, res := diagtest.Capture(t, func(warn func(diag.Issue)) (schema.Schema, error) {
+		return schema.LoadString(t.Context(), `schema "ts"
 
 type Ev {
 	at Timestamp primary
@@ -1164,8 +1193,9 @@ type Watcher {
 	id String primary
 	--> SEES (_:many) Ev
 }
-`, "ts.yammm")
-	if res.HasErrors() {
+`, "ts.yammm", schema.WithWarnings(warn))
+	})
+	if diagtest.Err(res) != nil {
 		t.Fatalf("schema: %s", res)
 	}
 	v := instance.NewValidator(s)
@@ -1181,16 +1211,18 @@ type Watcher {
 			map[string]any{"_target_at": "2021-01-01T00:00:00Z"},
 		}}},
 	} {
-		vi, res := v.ValidateOne(t.Context(), raw.typ, instance.RawInstance{Properties: raw.props})
-		if res.HasErrors() {
-			t.Fatalf("validate %s: %s", raw.typ, res)
+		vi, err := v.ValidateOne(t.Context(), raw.typ, instance.RawInstance{Properties: raw.props})
+		if err != nil {
+			t.Fatalf("validate %s: %s", raw.typ, err)
 		}
-		if res := g.Add(t.Context(), vi); res.HasErrors() {
-			t.Fatalf("add %s: %s", raw.typ, res)
+		if err := g.Add(t.Context(), vi); err != nil {
+			t.Fatalf("add %s: %s", raw.typ, err)
 		}
 	}
-	data, res := snapshot.Marshal(t.Context(), g.Snapshot())
-	if res.HasErrors() {
+	data, res := diagtest.Issues(t, func() ([]byte, error) {
+		return snapshot.Marshal(t.Context(), g.Snapshot())
+	})
+	if diagtest.Err(res) != nil {
 		t.Fatalf("marshal: %s", res)
 	}
 	doc := string(data)
@@ -1209,7 +1241,9 @@ type Watcher {
 	} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
-			res := snapshot.Verify(t.Context(), rehashDocument(t, []byte(editOnce(t, doc, edit[0], edit[1]))), s, snapshot.WithIssueLimit(0))
+			res := diagtest.CaptureErr(t, func(warn func(diag.Issue)) error {
+				return snapshot.Verify(t.Context(), rehashDocument(t, []byte(editOnce(t, doc, edit[0], edit[1]))), s, snapshot.WithIssueLimit(0), snapshot.WithWarnings(warn))
+			})
 			if n := sbFailures(res); n != 1 {
 				t.Errorf("%d issues, want 1:\n%s", n, res)
 			}
@@ -1235,7 +1269,9 @@ func TestRead_ADuplicateWhoseKeyIsRefusedResolvesNoConflict(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 			edited := []byte(editOnce(t, doc, c.from, c.to))
-			res := snapshot.Verify(t.Context(), rehashDocument(t, edited), s, snapshot.WithIssueLimit(0))
+			res := diagtest.CaptureErr(t, func(warn func(diag.Issue)) error {
+				return snapshot.Verify(t.Context(), rehashDocument(t, edited), s, snapshot.WithIssueLimit(0), snapshot.WithWarnings(warn))
+			})
 			if n := sbFailures(res); n != 1 || !strings.Contains(res.String(), "stores key") {
 				t.Errorf("%d issues, want the key's one refusal:\n%s", n, res)
 			}
@@ -1250,7 +1286,9 @@ func TestRead_RecordsUnderAManyAssociationAreNoOverflow(t *testing.T) {
 	t.Parallel()
 	s, doc := singleBreakDoc(t)
 	edited := []byte(editOnce(t, doc, sbKnowsLost, sbKnowsLost+`,`+sbLost("p2", "KNOWS", 4, `["p7"]`, `{"note":"z"}`)))
-	if res := snapshot.Verify(t.Context(), rehashDocument(t, edited), s, snapshot.WithIssueLimit(0)); sbFailures(res) != 0 {
+	if res := diagtest.CaptureErr(t, func(warn func(diag.Issue)) error {
+		return snapshot.Verify(t.Context(), rehashDocument(t, edited), s, snapshot.WithIssueLimit(0), snapshot.WithWarnings(warn))
+	}); sbFailures(res) != 0 {
 		t.Errorf("two records under a (many) association are refused:\n%s", res)
 	}
 }
@@ -1276,8 +1314,12 @@ func TestRead_AnEdgeWithNoTargetRowIsOneBreak(t *testing.T) {
 		"a row out of range": `{"target_type":99,"target_key":["p0"],"properties":{}}`,
 	} {
 		edited := []byte(known.ReplaceAllLiteralString(doc, `"KNOWS":[`+edge+`]`))
-		_, l := snapshot.Unmarshal(ctx, rehashDocument(t, edited), s)
-		for surface, res := range map[string]diag.Result{"Load": l, "Verify": snapshot.Verify(ctx, rehashDocument(t, edited), s)} {
+		_, l := diagtest.Capture(t, func(warn func(diag.Issue)) (graph.Snapshot, error) {
+			return snapshot.Unmarshal(ctx, rehashDocument(t, edited), s, snapshot.WithWarnings(warn))
+		})
+		for surface, res := range map[string]diag.Result{"Load": l, "Verify": diagtest.CaptureErr(t, func(warn func(diag.Issue)) error {
+			return snapshot.Verify(ctx, rehashDocument(t, edited), s, snapshot.WithWarnings(warn))
+		})} {
 			if res.Len() != 1 || !res.HasCode(diag.E_SNAPSHOT_MALFORMED) {
 				t.Errorf("%s, %s: %s, want one %s", name, surface, res, diag.E_SNAPSHOT_MALFORMED)
 			}
@@ -1317,8 +1359,12 @@ func TestRead_AnEdgeWithNoTargetRowStillAnswersForItsOtherBreaks(t *testing.T) {
 		},
 	} {
 		edited := []byte(known.ReplaceAllLiteralString(doc, row.edit))
-		_, l := snapshot.Unmarshal(ctx, rehashDocument(t, edited), s)
-		for surface, res := range map[string]diag.Result{"Load": l, "Verify": snapshot.Verify(ctx, rehashDocument(t, edited), s)} {
+		_, l := diagtest.Capture(t, func(warn func(diag.Issue)) (graph.Snapshot, error) {
+			return snapshot.Unmarshal(ctx, rehashDocument(t, edited), s, snapshot.WithWarnings(warn))
+		})
+		for surface, res := range map[string]diag.Result{"Load": l, "Verify": diagtest.CaptureErr(t, func(warn func(diag.Issue)) error {
+			return snapshot.Verify(ctx, rehashDocument(t, edited), s, snapshot.WithWarnings(warn))
+		})} {
 			if res.Len() != sbTotal(row.want) {
 				t.Errorf("%s, %s: %s, want %v", name, surface, res, row.want)
 			}
@@ -1344,7 +1390,8 @@ func sbTotal(counts map[diag.Code]int) int {
 // no duplicate.
 func TestRead_ChildrenPastTheDepthLimitCompareNoKeys(t *testing.T) {
 	t.Parallel()
-	s, res := schema.LoadString(t.Context(), `schema "dk"
+	s, res := diagtest.Capture(t, func(warn func(diag.Issue)) (schema.Schema, error) {
+		return schema.LoadString(t.Context(), `schema "dk"
 
 type R {
 	id String primary
@@ -1355,22 +1402,27 @@ part type K {
 	code String primary
 	*-> K (_:many) K
 }
-`, "dk.yammm")
-	if res.HasErrors() {
+`, "dk.yammm", schema.WithWarnings(warn))
+	})
+	if diagtest.Err(res) != nil {
 		t.Fatalf("schema: %s", res)
 	}
-	vi, res := instance.NewValidator(s).ValidateOne(t.Context(), "R", instance.RawInstance{Properties: map[string]any{
-		"id": "r1", "k": []any{map[string]any{"code": "a"}},
-	}})
-	if res.HasErrors() {
+	vi, res := diagtest.Issues(t, func() (instance.ValidInstance, error) {
+		return instance.NewValidator(s).ValidateOne(t.Context(), "R", instance.RawInstance{Properties: map[string]any{
+			"id": "r1", "k": []any{map[string]any{"code": "a"}},
+		}})
+	})
+	if diagtest.Err(res) != nil {
 		t.Fatalf("validate: %s", res)
 	}
 	g := graph.New(s)
-	if r := g.Add(t.Context(), vi); r.HasErrors() {
-		t.Fatalf("add: %s", r)
+	if err := g.Add(t.Context(), vi); err != nil {
+		t.Fatalf("add: %s", err)
 	}
-	data, res := snapshot.Marshal(t.Context(), g.Snapshot())
-	if res.HasErrors() {
+	data, res := diagtest.Issues(t, func() ([]byte, error) {
+		return snapshot.Marshal(t.Context(), g.Snapshot())
+	})
+	if diagtest.Err(res) != nil {
 		t.Fatalf("marshal: %s", res)
 	}
 	doc := string(data)
@@ -1383,7 +1435,9 @@ part type K {
 	for range instance.MaxComposedDepth {
 		b.WriteString(`]},"provenance":null}`)
 	}
-	res = snapshot.Verify(t.Context(), rehashDocument(t, []byte(editOnce(t, doc, leaf, b.String()))), s, snapshot.WithIssueLimit(0))
+	res = diagtest.CaptureErr(t, func(warn func(diag.Issue)) error {
+		return snapshot.Verify(t.Context(), rehashDocument(t, []byte(editOnce(t, doc, leaf, b.String()))), s, snapshot.WithIssueLimit(0), snapshot.WithWarnings(warn))
+	})
 	if res.Len() == 0 {
 		t.Fatal("a tree past the depth limit is accepted")
 	}
@@ -1414,7 +1468,9 @@ func TestRead_ARootWhoseKeyIsRefusedStillStandsAtItsAddress(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 			edited := []byte(editOnce(t, doc, c.from, c.to))
-			res := snapshot.Verify(t.Context(), rehashDocument(t, edited), s, snapshot.WithIssueLimit(0))
+			res := diagtest.CaptureErr(t, func(warn func(diag.Issue)) error {
+				return snapshot.Verify(t.Context(), rehashDocument(t, edited), s, snapshot.WithIssueLimit(0), snapshot.WithWarnings(warn))
+			})
 			if n := sbFailures(res); n != 1 {
 				t.Errorf("%d issues, want 1:\n%s", n, res)
 			}
@@ -1475,7 +1531,9 @@ func TestRead_AnAddressNoSoundRootHoldsAloneJudgesNoRecord(t *testing.T) {
 			for _, e := range c.edits {
 				edited = editOnce(t, edited, e[0], e[1])
 			}
-			res := snapshot.Verify(t.Context(), rehashDocument(t, []byte(edited)), s, snapshot.WithIssueLimit(0))
+			res := diagtest.CaptureErr(t, func(warn func(diag.Issue)) error {
+				return snapshot.Verify(t.Context(), rehashDocument(t, []byte(edited)), s, snapshot.WithIssueLimit(0), snapshot.WithWarnings(warn))
+			})
 			if sbFailures(res) != 1 || !hasCode(res, c.want) {
 				t.Errorf("%d issues, want one %s:\n%s", sbFailures(res), c.want, res)
 			}
@@ -1501,7 +1559,9 @@ func TestRead_ASharedAddressKeepsEachRootsOwnOverflow(t *testing.T) {
 			edited := []byte(editOnce(t, editOnce(t, doc, sbP2, sbP2+","+roots), sbUnresolved,
 				sbUnresolved+sbRecord("p4", "CLIENTS", "empty")+","+sbRecord("p4", "EMPLOYER", "absent")+","))
 			overflows := strings.Count(roots, two)
-			res := snapshot.Verify(t.Context(), rehashDocument(t, edited), s, snapshot.WithIssueLimit(0))
+			res := diagtest.CaptureErr(t, func(warn func(diag.Issue)) error {
+				return snapshot.Verify(t.Context(), rehashDocument(t, edited), s, snapshot.WithIssueLimit(0), snapshot.WithWarnings(warn))
+			})
 			cardinality := 0
 			for issue := range res.Issues() {
 				if issue.Code() == diag.E_GRAPH_CARDINALITY {

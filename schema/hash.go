@@ -17,8 +17,9 @@ import (
 )
 
 // StructuralHashVersion identifies the version of the structural hashing
-// algorithm: a snapshot that records another version draws
-// E_SNAPSHOT_UNSUPPORTED_HASH_ALGORITHM, and its hash is not compared.
+// algorithm: a snapshot body read of a header that records another version
+// draws E_SNAPSHOT_UNSUPPORTED_HASH_ALGORITHM, a header-only read draws nothing,
+// and neither compares its hash.
 // Version 2 (v0.15.0) added invariants and the abstract/part markers.
 // Version 3 (v0.17.0) widened the input from the entry schema's own
 // declarations to its whole import closure, since an imported type's

@@ -46,7 +46,9 @@ type Employee {
 		},
 	}
 	deptValid, _ := validator.ValidateOne(ctx, "Department", deptRaw)
-	g.Add(ctx, deptValid)
+	if err := g.Add(ctx, deptValid); err != nil {
+		fmt.Println("add:", err)
+	}
 
 	// Add an employee with reference to department
 	empRaw := instance.RawInstance{
@@ -57,11 +59,13 @@ type Employee {
 		},
 	}
 	empValid, _ := validator.ValidateOne(ctx, "Employee", empRaw)
-	g.Add(ctx, empValid)
+	if err := g.Add(ctx, empValid); err != nil {
+		fmt.Println("add:", err)
+	}
 
 	// Check graph integrity
-	result := g.Check(ctx)
-	fmt.Println("Graph OK:", result.OK())
+	err := g.Check(ctx)
+	fmt.Println("Graph OK:", err == nil)
 
 	// Get snapshot
 	snap := g.Snapshot()
@@ -100,12 +104,14 @@ type Child {
 		},
 	}
 	childValid, _ := validator.ValidateOne(ctx, "Child", childRaw)
-	g.Add(ctx, childValid)
+	if err := g.Add(ctx, childValid); err != nil {
+		fmt.Println("add:", err)
+	}
 
 	// Check will find unresolved reference
-	result := g.Check(ctx)
-	fmt.Println("Graph OK:", result.OK())
-	fmt.Println("Has errors:", result.HasErrors())
+	err := g.Check(ctx)
+	fmt.Println("Graph OK:", err == nil)
+	fmt.Println("Has errors:", err != nil)
 
 	// Output:
 	// Graph OK: false

@@ -37,12 +37,12 @@ func recordIteratorsSnapshot(t *testing.T, s schema.Schema) graph.Snapshot {
 	g := graph.New(s)
 	add := func(typeName string, props map[string]any) {
 		t.Helper()
-		inst, res := v.ValidateOne(ctx, typeName, instance.RawInstance{Properties: props})
-		if !res.OK() {
-			t.Fatal(res)
+		inst, err := v.ValidateOne(ctx, typeName, instance.RawInstance{Properties: props})
+		if err != nil {
+			t.Fatal(err)
 		}
-		if res := g.Add(ctx, inst); res.HasErrors() {
-			t.Fatal(res)
+		if err := g.Add(ctx, inst); err != nil {
+			t.Fatal(err)
 		}
 	}
 	add("Company", map[string]any{"id": "c1"})
@@ -57,12 +57,12 @@ func recordIteratorsSnapshot(t *testing.T, s schema.Schema) graph.Snapshot {
 	lines := []any{map[string]any{"sku": "a"}, map[string]any{"sku": "b"}}
 	add("Person", map[string]any{"id": "p1", "employer": edges("c1", "c2", "gone1", "gone2"), "lines": lines})
 	add("Person", map[string]any{"id": "p2"})
-	repeated, res := v.ValidateOne(ctx, "Person", instance.RawInstance{Properties: map[string]any{"id": "p2"}})
-	if !res.OK() {
-		t.Fatal(res)
+	repeated, err := v.ValidateOne(ctx, "Person", instance.RawInstance{Properties: map[string]any{"id": "p2"}})
+	if err != nil {
+		t.Fatal(err)
 	}
 	for range 2 {
-		if res := g.Add(ctx, repeated); !res.HasErrors() {
+		if err := g.Add(ctx, repeated); err == nil {
 			t.Fatal("a repeated key was accepted")
 		}
 	}
@@ -94,9 +94,9 @@ func wantAscending[T comparable](t *testing.T, name string, seq iter.Seq[T], key
 }
 
 func TestRecordIterators_RestartStopAtABreakAndYieldInKeyOrder(t *testing.T) {
-	s, res := schema.LoadString(t.Context(), recordIteratorsSource, "iterators.yammm")
-	if res.HasErrors() {
-		t.Fatal(res)
+	s, err := schema.LoadString(t.Context(), recordIteratorsSource, "iterators.yammm")
+	if err != nil {
+		t.Fatal(err)
 	}
 	snap := recordIteratorsSnapshot(t, s)
 	instanceKey := func(i graph.Instance) immutable.Key { return i.PrimaryKey() }
@@ -121,7 +121,7 @@ func TestRebuild_AnUnresolvedEdgeWithNoPropertyHoldsTheZeroProperties(t *testing
 		"a schema with a value to canonicalize":  "at Timestamp\n",
 	} {
 		t.Run(name, func(t *testing.T) {
-			s, res := schema.LoadString(t.Context(), `schema "empty"
+			s, err := schema.LoadString(t.Context(), `schema "empty"
 type Company {
 	id String primary
 }
@@ -131,8 +131,8 @@ type Person {
 	--> EMPLOYER (_:many) Company
 }
 `, "empty.yammm")
-			if res.HasErrors() {
-				t.Fatal(res)
+			if err != nil {
+				t.Fatal(err)
 			}
 			person := mustTypeID(t, s, "Person")
 			snap := rebuild(s, snapparts.Parts{

@@ -25,9 +25,9 @@ func TestRenderInvariant_WritesTheExpression(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			src := "schema \"s\"\ntype T {\n\tid String primary\n\tn Integer\n\ts String\n\t! \"m\" " + tt.expr + "\n}\n"
-			s, res := schema.LoadString(t.Context(), src, "s.yammm")
-			if res.HasErrors() {
-				t.Fatalf("load: %s", res)
+			s, err := schema.LoadString(t.Context(), src, "s.yammm")
+			if err != nil {
+				t.Fatalf("load: %s", err)
 			}
 			typ, _ := s.Type("T")
 			var inv schema.Invariant
@@ -60,9 +60,9 @@ func TestRenderInvariant_TheDeclarationLoadsBack(t *testing.T) {
 
 func onlyInvariant(t *testing.T, src string) schema.Invariant {
 	t.Helper()
-	s, res := schema.LoadString(t.Context(), src, "s.yammm")
-	if res.HasErrors() {
-		t.Fatalf("load %q: %s", src, res)
+	s, err := schema.LoadString(t.Context(), src, "s.yammm")
+	if err != nil {
+		t.Fatalf("load %q: %s", src, err)
 	}
 	typ, _ := s.Type("T")
 	for inv := range typ.Invariants() {

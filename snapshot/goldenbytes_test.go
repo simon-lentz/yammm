@@ -92,10 +92,10 @@ func TestMarshalLoad_UnresolvedEdgePropertiesGoldenBytes(t *testing.T) {
 			require.Empty(t, slices.Collect(snapUnresolved.Edges()), "snapshot B: no resolved edge expected")
 			require.Len(t, slices.Collect(snapUnresolved.Unresolved()), 1, "expected unresolved edge")
 
-			dataR, mres := snapshot.Marshal(ctx, snapResolved)
-			require.NoError(t, mres.Err())
-			dataU, ures := snapshot.Marshal(ctx, snapUnresolved)
-			require.NoError(t, ures.Err())
+			dataR, err := snapshot.Marshal(ctx, snapResolved)
+			require.NoError(t, err)
+			dataU, readErr := snapshot.Marshal(ctx, snapUnresolved)
+			require.NoError(t, readErr)
 
 			// Extract the serialized properties payload from each path.
 			resolvedProps := extractResolvedEdgeProperties(t, dataR, "EMPLOYER")

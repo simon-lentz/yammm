@@ -9,9 +9,9 @@ import (
 
 func mustLoad(t *testing.T, src string) schema.Schema {
 	t.Helper()
-	s, res := schema.LoadString(t.Context(), src, "s.yammm")
+	s, err := schema.LoadString(t.Context(), src, "s.yammm")
 	if s.IsZero() {
-		t.Fatalf("load: %v", res)
+		t.Fatalf("load: %v", err)
 	}
 	return s
 }

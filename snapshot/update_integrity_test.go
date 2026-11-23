@@ -8,6 +8,8 @@ import (
 	"testing"
 
 	"github.com/simon-lentz/yammm/diag"
+	"github.com/simon-lentz/yammm/graph"
+	"github.com/simon-lentz/yammm/internal/diagtest"
 	"github.com/simon-lentz/yammm/snapshot"
 )
 
@@ -35,12 +37,16 @@ func TestUpdateMetadata_RefusesADocumentWhoseHashDoesNotVerify(t *testing.T) {
 				t.Fatal("the edit changed nothing")
 			}
 			want := map[diag.Code]int{diag.E_SNAPSHOT_INTEGRITY_MISMATCH: 1}
-			vres := snapshot.Verify(ctx, doc, s)
+			vres := diagtest.CaptureErr(t, func(warn func(diag.Issue)) error {
+				return snapshot.Verify(ctx, doc, s, snapshot.WithWarnings(warn))
+			})
 			if !maps.Equal(errorCodes(vres), want) {
 				t.Fatalf("Verify: %v, want %v; the fixture holds another fault", errorCodes(vres), want)
 			}
 
-			out, res := snapshot.UpdateMetadata(ctx, doc, map[string]string{"k": "v"})
+			out, res := diagtest.Issues(t, func() ([]byte, error) {
+				return snapshot.UpdateMetadata(ctx, doc, map[string]string{"k": "v"})
+			})
 			if out != nil {
 				t.Errorf("UpdateMetadata returned %d bytes for a document whose hash does not verify", len(out))
 			}
@@ -67,16 +73,20 @@ func TestUpdateMetadata_UpdatesASealedBodyItDoesNotDecode(t *testing.T) {
 		t.Fatal("fixture shape changed; Alice's name not found")
 	}
 	sealed := rehashDocument(t, edited)
-	_, before := snapshot.Unmarshal(ctx, sealed, s)
-	if !before.HasErrors() {
+	_, before := diagtest.Capture(t, func(warn func(diag.Issue)) (graph.Snapshot, error) {
+		return snapshot.Unmarshal(ctx, sealed, s, snapshot.WithWarnings(warn))
+	})
+	if diagtest.Err(before) == nil {
 		t.Fatal("Unmarshal accepted the fixture; it tests nothing")
 	}
 
-	out, res := snapshot.UpdateMetadata(ctx, sealed, map[string]string{"k": "v"})
-	if res.HasErrors() {
-		t.Fatalf("UpdateMetadata: %s", res)
+	out, err := snapshot.UpdateMetadata(ctx, sealed, map[string]string{"k": "v"})
+	if err != nil {
+		t.Fatalf("UpdateMetadata: %s", err)
 	}
-	if _, after := snapshot.Unmarshal(ctx, out, s); !maps.Equal(errorCodes(after), errorCodes(before)) {
+	if _, after := diagtest.Capture(t, func(warn func(diag.Issue)) (graph.Snapshot, error) {
+		return snapshot.Unmarshal(ctx, out, s, snapshot.WithWarnings(warn))
+	}); !maps.Equal(errorCodes(after), errorCodes(before)) {
 		t.Errorf("Unmarshal of the update: %v, want %v", errorCodes(after), errorCodes(before))
 	}
 }

@@ -185,8 +185,8 @@ part type Note {
 `
 	s, res := schema.LoadSourcesWithEntry(ctx, map[string][]byte{
 		"cw.yammm": []byte(src),
-	}, "cw.yammm", ".", schema.WithSourcesOnly(true))
-	if res.HasErrors() {
+	}, "cw.yammm", schema.WithModuleRoot("."), schema.WithSourcesOnly(true))
+	if res != nil {
 		t.Fatalf("load schema: %s", res)
 	}
 	a := newConfig(t, ctx, cypher.Config{})
@@ -198,12 +198,12 @@ part type Note {
 			"order_id": "o1",
 			"sections": sections,
 		}})
-		if !vres.OK() {
+		if vres != nil {
 			t.Fatalf("validate: %s", vres)
 		}
 		g := graph.New(s)
-		if ares := g.Add(ctx, valid); ares.Err() != nil {
-			t.Fatalf("graph.Add: %v", ares.Err())
+		if ares := g.Add(ctx, valid); ares != nil {
+			t.Fatalf("graph.Add: %v", ares)
 		}
 		queries, err := n4j.NodeQueries(ctx, a, g.Snapshot())
 		if err != nil {

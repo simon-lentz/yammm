@@ -7,12 +7,16 @@
 // # Overview
 //
 // The validation pipeline takes [RawInstance] objects and produces
-// [ValidInstance] objects (on success) along with a [diag.Result] containing
-// any diagnostics. The [Validator] orchestrates this process using a
-// compiled [schema.Schema].
+// [ValidInstance] objects. A refusal is one error, a *[diag.ResultError] that
+// holds the failures as issues with stable codes, at most [WithIssueLimit]'s
+// number of them for one instance, and counts every one, save on a row a
+// cancellation stopped, which keeps only its E_INTERNAL issues; read it with
+// errors.AsType, and test it for a code with errors.Is. The validator draws no
+// issue below failure severity, so its calls take no warnings callback. The
+// [Validator] orchestrates this process using a compiled [schema.Schema].
 //
 //	validator := instance.NewValidator(compiledSchema)
-//	valids, result := validator.Validate(ctx, "Person", raws)
+//	valids, err := validator.Validate(ctx, "Person", raws)
 //
 // # Instance Types
 //

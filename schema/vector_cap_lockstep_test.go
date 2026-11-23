@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/simon-lentz/yammm/diag"
+	"github.com/simon-lentz/yammm/internal/diagtest"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -39,7 +40,9 @@ func TestVectorDimensionCaps_ArePinned(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			src := fmt.Sprintf("schema \"s\"\ntype T {\n\tid String primary\n\tv Vector[%s]\n}\n", tc.dims)
-			_, res := schema.LoadString(context.Background(), src, "v.yammm")
+			_, res := diagtest.Capture(t, func(warn func(diag.Issue)) (schema.Schema, error) {
+				return schema.LoadString(context.Background(), src, "v.yammm", schema.WithWarnings(warn))
+			})
 
 			var got []string
 			for iss := range res.Issues() {

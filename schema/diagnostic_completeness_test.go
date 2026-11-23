@@ -1,12 +1,16 @@
 package schema_test
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
 	"testing"
 
 	"github.com/simon-lentz/yammm/diag"
+	"github.com/simon-lentz/yammm/internal/diagtest"
+	"github.com/simon-lentz/yammm/internal/yammmtest"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -52,11 +56,13 @@ func wantCounts(t *testing.T, res diag.Result, want map[diag.Code]int) {
 // for code-count assertions.
 func loadSourcesErr(t *testing.T, sources map[string][]byte) diag.Result {
 	t.Helper()
-	s, res := schema.LoadSourcesWithEntry(t.Context(), sources, "main.yammm", t.TempDir())
+	s, res := diagtest.Capture(t, func(warn func(diag.Issue)) (schema.Schema, error) {
+		return schema.LoadSourcesWithEntry(t.Context(), sources, "main.yammm", schema.WithModuleRoot(t.TempDir()), schema.WithWarnings(warn))
+	})
 	if !s.IsZero() {
 		t.Fatalf("load should fail, got schema %q", s.Name())
 	}
-	if !res.HasErrors() {
+	if diagtest.Err(res) == nil {
 		t.Fatal("load should produce error diagnostics")
 	}
 	return res
@@ -72,11 +78,13 @@ func loadSourcesErr(t *testing.T, sources map[string][]byte) diag.Result {
 // boundary, not an oversight.
 func loadStringErr(t *testing.T, source string) diag.Result {
 	t.Helper()
-	s, res := schema.LoadString(t.Context(), source, "main.yammm")
+	s, res := diagtest.Capture(t, func(warn func(diag.Issue)) (schema.Schema, error) {
+		return schema.LoadString(t.Context(), source, "main.yammm", schema.WithWarnings(warn))
+	})
 	if !s.IsZero() {
 		t.Fatalf("load should fail, got schema %q", s.Name())
 	}
-	if !res.HasErrors() {
+	if diagtest.Err(res) == nil {
 		t.Fatal("load should produce error diagnostics")
 	}
 	return res
@@ -548,34 +556,39 @@ func TestLoad_IssueLimit_TruncationObservable(t *testing.T) {
 	}
 }
 
-// TestLoad_DroppedErrorStillFailsLoad pins that the all-or-nothing contract
-// survives truncation. The per-schema error gates compare Collector.ErrorCount
-// deltas; if a real error is dropped at the cap without moving that count, the
-// gate passes and a broken schema is sealed and returned non-nil with
-// OK()==true — silently violating "any error ⇒ nil Schema". Here a single
-// Integer[-_, N] property emits a parse Warning that fills a limit of 1, so the
-// concrete type's E_NO_PRIMARY_KEY is dropped: it must still nil the schema.
-func TestLoad_DroppedErrorStillFailsLoad(t *testing.T) {
+// TestLoad_WarningsTakeNoFailureSlot pins that a flood of warnings cannot crowd
+// a failure out of the load's error: a hundred Integer[-_, N] properties each
+// draw a parse Warning, and the concrete type's one E_NO_PRIMARY_KEY still
+// fails the load, held in an error that dropped nothing. Every warning reaches
+// the callback, past the hundred failures the error holds.
+func TestLoad_WarningsTakeNoFailureSlot(t *testing.T) {
 	t.Parallel()
 	var src strings.Builder
 	src.WriteString("schema \"main\"\ntype Orphan {\n")
-	for i := range 100 {
+	for i := range 101 {
 		fmt.Fprintf(&src, "\tn%d Integer[-_, 5]\n", i)
 	}
 	src.WriteString("}")
-	s, res := schema.LoadString(t.Context(), src.String(), "main.yammm")
+	warnings := 0
+	s, err := schema.LoadString(t.Context(), src.String(), "main.yammm",
+		schema.WithWarnings(func(issue diag.Issue) {
+			if issue.Code() == diag.E_INVALID_CONSTRAINT {
+				warnings++
+			}
+		}))
 
 	if !s.IsZero() {
-		t.Fatalf("a schema whose only error was dropped at the cap must still fail load, got schema %q", s.Name())
+		t.Fatalf("a schema with an error must fail its load, got schema %q", s.Name())
 	}
-	if res.OK() {
-		t.Error("result.OK() = true; want false — the dropped E_NO_PRIMARY_KEY is still an error")
+	re, ok := errors.AsType[*diag.ResultError](err)
+	if !ok {
+		t.Fatalf("err = %v; want a *diag.ResultError", err)
 	}
-	if !res.HasErrors() {
-		t.Error("result.HasErrors() = false; want true")
+	if !errors.Is(err, diag.E_NO_PRIMARY_KEY) || re.Result.Len() != 1 || re.Result.LimitReached() {
+		t.Errorf("the error = %v; want the one E_NO_PRIMARY_KEY, nothing dropped", re.Result)
 	}
-	if !res.LimitReached() {
-		t.Error("result.LimitReached() = false; want true (the warnings filled the cap)")
+	if warnings != 101 {
+		t.Errorf("the callback received %d E_INVALID_CONSTRAINT warnings; want 101", warnings)
 	}
 }
 
@@ -861,7 +874,7 @@ type Thing {
 // in a resolved import loads cleanly.
 func TestLoad_ImportedDatatype_Resolves(t *testing.T) {
 	t.Parallel()
-	s, res := schema.LoadSourcesWithEntry(t.Context(), map[string][]byte{
+	s, err := schema.LoadSourcesWithEntry(t.Context(), map[string][]byte{
 		"main.yammm": []byte(`schema "main"
 import "./other" as other
 type Thing {
@@ -870,9 +883,9 @@ type Thing {
 }`),
 		"other.yammm": []byte(`schema "other"
 type Code = String[2,2]`),
-	}, "main.yammm", t.TempDir())
-	if res.HasErrors() {
-		t.Fatalf("a resolvable imported datatype must load cleanly: %v", res)
+	}, "main.yammm", schema.WithModuleRoot(t.TempDir()))
+	if err != nil {
+		t.Fatalf("a resolvable imported datatype must load cleanly: %v", err)
 	}
 	if s.IsZero() {
 		t.Fatal("expected a non-zero schema")
@@ -1042,15 +1055,15 @@ type Code = String[2,2]`),
 // and bottoms out in a key-eligible builtin loads cleanly.
 func TestLoad_PrimaryKeyTypedByResolvedImportedDatatype_Resolves(t *testing.T) {
 	t.Parallel()
-	s, res := schema.LoadSourcesWithEntry(t.Context(), map[string][]byte{
+	s, err := schema.LoadSourcesWithEntry(t.Context(), map[string][]byte{
 		"main.yammm": []byte(`schema "main"
 import "./other" as other
 type Thing { id other.Code primary }`),
 		"other.yammm": []byte(`schema "other"
 type Code = String[2,2]`),
-	}, "main.yammm", t.TempDir())
-	if res.HasErrors() {
-		t.Fatalf("a primary key typed by a resolved imported datatype must load cleanly: %v", res)
+	}, "main.yammm", schema.WithModuleRoot(t.TempDir()))
+	if err != nil {
+		t.Fatalf("a primary key typed by a resolved imported datatype must load cleanly: %v", err)
 	}
 	if s.IsZero() {
 		t.Fatal("expected a non-zero schema")
@@ -1110,8 +1123,10 @@ func TestLoad_RepeatedSupertypeIsOneEdge(t *testing.T) {
 	res := loadStringErr(t, "schema \"m\"\ntype A extends Nope, Nope { id String primary }\n")
 	wantCounts(t, res, map[diag.Code]int{diag.E_UNKNOWN_TYPE: 1})
 
-	s, res := schema.LoadString(t.Context(), "schema \"m\"\ntype B { id String primary }\ntype A extends B, B { }\n", "m.yammm")
-	if !res.OK() {
+	s, res := diagtest.Capture(t, func(warn func(diag.Issue)) (schema.Schema, error) {
+		return schema.LoadString(t.Context(), "schema \"m\"\ntype B { id String primary }\ntype A extends B, B { }\n", "m.yammm", schema.WithWarnings(warn))
+	})
+	if diagtest.Err(res) != nil {
 		t.Fatalf("load: %s", res)
 	}
 	a, ok := s.Type("A")
@@ -1140,5 +1155,57 @@ func TestLoad_InheritCycle_ReportedFromTheFirstDeclaration(t *testing.T) {
 				t.Fatalf("span starts at line %d, want W's declaration on line 2", line)
 			}
 		}
+	}
+}
+
+// TestLoad_ACancellationJoinsTheFailuresPastTheLimit pins that a load cancelled
+// after it collected failures returns at most 100 of them, every one counted,
+// and one Fatal E_CONTEXT_CANCELLED that joins them past that number.
+func TestLoad_ACancellationJoinsTheFailuresPastTheLimit(t *testing.T) {
+	t.Parallel()
+	var a strings.Builder
+	a.WriteString("schema \"a\"\n")
+	for i := range 150 {
+		fmt.Fprintf(&a, "type NoKey%03d { name String }\n", i)
+	}
+	sources := map[string][]byte{
+		"main.yammm": []byte("schema \"main\"\nimport \"./a\" as a\nimport \"./b\" as b\ntype T { id String primary }\n"),
+		"a.yammm":    []byte(a.String()),
+		"b.yammm":    []byte("schema \"b\"\ntype U { id String primary }\n"),
+	}
+	load := func(ctx context.Context) error {
+		_, err := schema.LoadSourcesWithEntry(ctx, sources, "main.yammm", schema.WithSyntheticRoot("embedded://p"))
+		return err
+	}
+	total := yammmtest.CountChecks(t.Context(), func(ctx context.Context) { _ = load(ctx) })
+	afterFailures, pastLimit := 0, 0
+	for n := range total {
+		err := load(yammmtest.NewCheckContext(t.Context(), n+1))
+		if !errors.Is(err, diag.E_CONTEXT_CANCELLED) {
+			t.Fatalf("check %d: %v, want a cancellation", n+1, err)
+		}
+		res := diagtest.Failures(t, err)
+		counts := res.SeverityCounts()
+		if counts.Errors == 0 {
+			continue
+		}
+		afterFailures++
+		kept := min(counts.Errors, 100)
+		if counts.Errors > 100 {
+			pastLimit++
+		}
+		if counts.Fatal != 1 || res.Len() != kept+1 || res.DroppedCount() != counts.Errors-kept {
+			t.Errorf("check %d: %d stored, %d dropped, counts %+v; want %d stored, the Fatal past %d Errors, and %d dropped", n+1, res.Len(), res.DroppedCount(), counts, kept+1, kept, counts.Errors-kept)
+		}
+		stored := false
+		for issue := range res.Issues() {
+			stored = stored || issue.Code() == diag.E_CONTEXT_CANCELLED
+		}
+		if !stored {
+			t.Errorf("check %d: the cancellation was not kept among %d stored failures", n+1, res.Len())
+		}
+	}
+	if afterFailures == 0 || pastLimit == 0 {
+		t.Fatalf("%d cancellations came after a failure and %d past the limit: the fixture is vacuous", afterFailures, pastLimit)
 	}
 }

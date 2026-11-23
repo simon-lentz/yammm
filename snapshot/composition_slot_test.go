@@ -8,7 +8,9 @@ import (
 	"testing"
 
 	"github.com/simon-lentz/yammm/diag"
+	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/immutable"
+	"github.com/simon-lentz/yammm/internal/diagtest"
 	"github.com/simon-lentz/yammm/internal/snapparts"
 	"github.com/simon-lentz/yammm/internal/snappartstest"
 	"github.com/simon-lentz/yammm/schema"
@@ -79,9 +81,9 @@ func (c slotCase) String() string {
 
 func loadSlotSchema(t *testing.T) schema.Schema {
 	t.Helper()
-	s, res := schema.LoadString(t.Context(), compositionSlotSchema, "slots.yammm")
-	if res.HasErrors() {
-		t.Fatalf("load: %s", res)
+	s, err := schema.LoadString(t.Context(), compositionSlotSchema, "slots.yammm")
+	if err != nil {
+		t.Fatalf("load: %s", err)
 	}
 	return s
 }
@@ -130,9 +132,9 @@ func slotWireDoc(t *testing.T, s schema.Schema) ([]byte, map[string]int) {
 		"STAMPS": {partsChild(t, s, "Stamp", "x1")},
 	}
 	built := snappartstest.Loaded(t, s, legal)
-	data, mres := snapshot.Marshal(context.Background(), built)
-	if mres.HasErrors() {
-		t.Fatalf("marshal: %s", mres)
+	data, readErr := snapshot.Marshal(context.Background(), built)
+	if readErr != nil {
+		t.Fatalf("marshal: %s", readErr)
 	}
 	var doc struct {
 		Types []struct{ Name string } `json:"types"`
@@ -178,9 +180,9 @@ func TestCompositionSlot_LoadHoldsTheRuleOverTheClass(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.String(), func(t *testing.T) {
 			t.Parallel()
-			_, lres := snapshot.Unmarshal(context.Background(), slotWire(t, data, rows, c), s, snapshot.WithIntegrityCheck(false))
-			if got := !lres.HasErrors(); got != c.legal {
-				t.Errorf("Load accepted=%v, want %v: %s", got, c.legal, lres)
+			_, err := snapshot.Unmarshal(context.Background(), slotWire(t, data, rows, c), s, snapshot.WithIntegrityCheck(false))
+			if got := err == nil; got != c.legal {
+				t.Errorf("Load accepted=%v, want %v: %s", got, c.legal, err)
 			}
 		})
 	}
@@ -200,9 +202,9 @@ func TestLoad_RefusesTwoSiblingsAtOneKey(t *testing.T) {
 		Properties: immutable.WrapProperties(map[string]any{"staff_id": "e1"}),
 		Composed:   map[string][]snapparts.Instance{"BADGES": {stamps, partsChild(t, s, "Badge", "b2")}},
 	}}})
-	data, mres := snapshot.Marshal(t.Context(), built)
-	if mres.HasErrors() {
-		t.Fatalf("marshal: %s", mres)
+	data, err := snapshot.Marshal(t.Context(), built)
+	if err != nil {
+		t.Fatalf("marshal: %s", err)
 	}
 	for name, from := range map[string]string{"a root's slot": `"b2"`, "a badge's slot": `"s2"`} {
 		doc := strings.ReplaceAll(string(data), from, strings.Replace(from, "2", "1", 1))
@@ -211,10 +213,14 @@ func TestLoad_RefusesTwoSiblingsAtOneKey(t *testing.T) {
 		}
 		for surface, got := range map[string]diag.Result{
 			"Load": func() diag.Result {
-				_, r := snapshot.Unmarshal(t.Context(), []byte(doc), s, snapshot.WithIntegrityCheck(false))
+				_, r := diagtest.Capture(t, func(warn func(diag.Issue)) (graph.Snapshot, error) {
+					return snapshot.Unmarshal(t.Context(), []byte(doc), s, snapshot.WithIntegrityCheck(false), snapshot.WithWarnings(warn))
+				})
 				return r
 			}(),
-			"Verify": snapshot.Verify(t.Context(), []byte(doc), s, snapshot.WithIntegrityCheck(false)),
+			"Verify": diagtest.CaptureErr(t, func(warn func(diag.Issue)) error {
+				return snapshot.Verify(t.Context(), []byte(doc), s, snapshot.WithIntegrityCheck(false), snapshot.WithWarnings(warn))
+			}),
 		} {
 			if !got.HasCode(diag.E_DUPLICATE_COMPOSED_PK) {
 				t.Errorf("%s, %s: %s, want E_DUPLICATE_COMPOSED_PK", name, surface, got)
@@ -238,8 +244,12 @@ func TestRead_RefusesAChildUnderAnAssociationName(t *testing.T) {
 			Properties: immutable.WrapProperties(map[string]any{"id": "c1"}),
 		}}},
 	}}})
-	_, l := snapshot.Unmarshal(ctx, doc, s)
-	for surface, res := range map[string]diag.Result{"Load": l, "Verify": snapshot.Verify(ctx, doc, s)} {
+	_, l := diagtest.Capture(t, func(warn func(diag.Issue)) (graph.Snapshot, error) {
+		return snapshot.Unmarshal(ctx, doc, s, snapshot.WithWarnings(warn))
+	})
+	for surface, res := range map[string]diag.Result{"Load": l, "Verify": diagtest.CaptureErr(t, func(warn func(diag.Issue)) error {
+		return snapshot.Verify(ctx, doc, s, snapshot.WithWarnings(warn))
+	})} {
 		if res.Len() != 1 || !res.HasCode(diag.E_SNAPSHOT_INVALID_COMPOSED) {
 			t.Errorf("%s: %s, want one %s", surface, res, diag.E_SNAPSHOT_INVALID_COMPOSED)
 		}

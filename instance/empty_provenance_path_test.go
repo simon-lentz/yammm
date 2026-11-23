@@ -6,6 +6,7 @@ import (
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/instance"
 	"github.com/simon-lentz/yammm/instance/path"
+	"github.com/simon-lentz/yammm/internal/diagtest"
 	"github.com/simon-lentz/yammm/location"
 )
 
@@ -29,11 +30,15 @@ func TestValidate_AnEmptyProvenancePathStartsAtTheRoot(t *testing.T) {
 		{path.Root, "$.zz"},
 		{path.Root.Index(3), "$[3].zz"},
 	} {
-		_, one := v.ValidateOne(t.Context(), "Person", raw(c.base))
+		_, one := diagtest.Issues(t, func() (instance.ValidInstance, error) {
+			return v.ValidateOne(t.Context(), "Person", raw(c.base))
+		})
 		if got := mustIssue(t, one, diag.E_UNKNOWN_FIELD).Path(); got != c.want {
 			t.Errorf("ValidateOne at base %q: path %q, want %q", c.base, got, c.want)
 		}
-		_, batch := v.Validate(t.Context(), "Person", []instance.RawInstance{raw(c.base)})
+		_, batch := diagtest.Issues(t, func() ([]instance.ValidInstance, error) {
+			return v.Validate(t.Context(), "Person", []instance.RawInstance{raw(c.base)})
+		})
 		if got := mustIssue(t, batch, diag.E_UNKNOWN_FIELD).Path(); got != c.want {
 			t.Errorf("Validate at base %q: path %q, want %q", c.base, got, c.want)
 		}

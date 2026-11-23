@@ -32,9 +32,9 @@ func TestExpressionReads_LeaveTheExportedSurface(t *testing.T) {
 
 func TestAnnotation_ArgsIsAFreshSlice(t *testing.T) {
 	t.Parallel()
-	s, res := schema.LoadString(t.Context(), "schema \"m\"\ntype A {\n@@index(name)\nid String primary\nname String\n}\n", "m.yammm")
-	if !res.OK() {
-		t.Fatal(res)
+	s, err := schema.LoadString(t.Context(), "schema \"m\"\ntype A {\n@@index(name)\nid String primary\nname String\n}\n", "m.yammm")
+	if err != nil {
+		t.Fatal(err)
 	}
 	a, ok := s.Type("A")
 	if !ok {

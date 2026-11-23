@@ -1,6 +1,7 @@
 package schema_test
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -8,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/simon-lentz/yammm/diag"
+	"github.com/simon-lentz/yammm/internal/diagtest"
 	"github.com/simon-lentz/yammm/internal/raceskip"
 	"github.com/simon-lentz/yammm/internal/yammmtest"
 	"github.com/simon-lentz/yammm/location"
@@ -19,15 +21,15 @@ import (
 func TestLoad_ASchemaNameThatIsNoIdentifierIsRefused(t *testing.T) {
 	t.Parallel()
 
-	s, res := schema.LoadString(t.Context(), "schema \"my schema\"\n\ntype T {\n    id String primary\n}\n", "s.yammm")
+	s, err := schema.LoadString(t.Context(), "schema \"my schema\"\n\ntype T {\n    id String primary\n}\n", "s.yammm")
 	if !s.IsZero() {
 		t.Error("a schema whose name is no identifier must not load")
 	}
-	if !res.HasCode(diag.E_INVALID_NAME) {
-		t.Errorf("want E_INVALID_NAME; got %v", res.Err())
+	if !errors.Is(err, diag.E_INVALID_NAME) {
+		t.Errorf("want E_INVALID_NAME; got %v", err)
 	}
-	if res.HasCode(diag.E_INTERNAL) || res.HasCode(diag.E_DUPLICATE_TYPE) {
-		t.Errorf("an authoring error must not be reported as the loader's; got %v", res.Err())
+	if errors.Is(err, diag.E_INTERNAL) || errors.Is(err, diag.E_DUPLICATE_TYPE) {
+		t.Errorf("an authoring error must not be reported as the loader's; got %v", err)
 	}
 }
 
@@ -84,12 +86,12 @@ func TestLoad_RefusesAnOversizedSource(t *testing.T) {
 	}
 
 	_, res := schema.Load(t.Context(), filepath.Join(dir, "big.yammm"), schema.WithModuleRoot(dir))
-	if res.Err() == nil || !strings.Contains(res.Err().Error(), "larger than") {
-		t.Errorf("an oversized entry must be refused by size; got %v", res.Err())
+	if res == nil || !strings.Contains(res.Error(), "larger than") {
+		t.Errorf("an oversized entry must be refused by size; got %v", res)
 	}
 	_, res = schema.Load(t.Context(), filepath.Join(dir, "main.yammm"), schema.WithModuleRoot(dir))
-	if res.Err() == nil || !strings.Contains(res.Err().Error(), "larger than") {
-		t.Errorf("an oversized import must be refused by size; got %v", res.Err())
+	if res == nil || !strings.Contains(res.Error(), "larger than") {
+		t.Errorf("an oversized import must be refused by size; got %v", res)
 	}
 }
 
@@ -119,14 +121,14 @@ func TestLoadSourcesWithEntry_EmptyKeyIsRefused(t *testing.T) {
 			t.Parallel()
 			root := row.root(t)
 			for i := range 20 {
-				s, res := schema.LoadSourcesWithEntry(t.Context(), sources, "", root, schema.WithSourcesOnly(true))
-				if res.Err() == nil {
+				s, err := schema.LoadSourcesWithEntry(t.Context(), sources, "", schema.WithSourcesOnly(true), schema.WithModuleRoot(root))
+				if err == nil {
 					t.Fatalf("run %d loaded %v; want the empty key refused", i, s)
 				}
 				// The loader renders the cause into a diagnostic, so the sentinel
 				// reaches the caller as text rather than through the error chain.
-				if !res.HasCode(diag.E_LOAD_IO_FAILURE) || !strings.Contains(res.Err().Error(), location.ErrEmptyPath.Error()) {
-					t.Fatalf("run %d: %v; want E_LOAD_IO_FAILURE naming %v", i, res.Err(), location.ErrEmptyPath)
+				if !errors.Is(err, diag.E_LOAD_IO_FAILURE) || !strings.Contains(err.Error(), location.ErrEmptyPath.Error()) {
+					t.Fatalf("run %d: %v; want E_LOAD_IO_FAILURE naming %v", i, err, location.ErrEmptyPath)
 				}
 			}
 		})
@@ -171,14 +173,16 @@ func TestLoadSourcesWithEntry_TwoKeysNamingOneSourceAreRefused(t *testing.T) {
 			root := t.TempDir()
 			first, second := row.keys(t, root)
 			sources := map[string][]byte{first: src, second: src}
-			s, res := schema.LoadSourcesWithEntry(t.Context(), sources, second, root)
+			s, res := diagtest.Capture(t, func(warn func(diag.Issue)) (schema.Schema, error) {
+				return schema.LoadSourcesWithEntry(t.Context(), sources, second, schema.WithModuleRoot(root), schema.WithWarnings(warn))
+			})
 			if !s.IsZero() {
 				t.Errorf("loaded %q; want the two keys refused", s.Name())
 			}
 			if !res.HasFatal() || !res.HasCode(diag.E_LOAD_IO_FAILURE) {
-				t.Fatalf("want a Fatal E_LOAD_IO_FAILURE; got %v", res.Err())
+				t.Fatalf("want a Fatal E_LOAD_IO_FAILURE; got %v", res)
 			}
-			msg := res.Err().Error()
+			msg := diagtest.Err(res).Error()
 			for _, key := range []string{first, second} {
 				if !strings.Contains(msg, strconv.Quote(key)) {
 					t.Errorf("the refusal does not name key %q: %s", key, msg)
@@ -193,12 +197,14 @@ func TestLoadSourcesWithEntry_TwoKeysNamingOneSourceAreRefused(t *testing.T) {
 func TestLoadString_RefusesASourceNameThatIsNotValidUTF8(t *testing.T) {
 	t.Parallel()
 
-	s, res := schema.LoadString(t.Context(), "schema \"s\"\n\ntype T {\n    id String primary\n}\n", "caf\xff")
+	s, res := diagtest.Capture(t, func(warn func(diag.Issue)) (schema.Schema, error) {
+		return schema.LoadString(t.Context(), "schema \"s\"\n\ntype T {\n    id String primary\n}\n", "caf\xff", schema.WithWarnings(warn))
+	})
 	if !s.IsZero() {
 		t.Errorf("loaded %q; want the source name refused", s.Name())
 	}
-	if !res.HasFatal() || !res.HasCode(diag.E_LOAD_IO_FAILURE) || !strings.Contains(res.Err().Error(), location.ErrInvalidUTF8Path.Error()) {
-		t.Fatalf("want a Fatal E_LOAD_IO_FAILURE naming %v; got %v", location.ErrInvalidUTF8Path, res.Err())
+	if !res.HasFatal() || !res.HasCode(diag.E_LOAD_IO_FAILURE) || !strings.Contains(diagtest.Err(res).Error(), location.ErrInvalidUTF8Path.Error()) {
+		t.Fatalf("want a Fatal E_LOAD_IO_FAILURE naming %v; got %v", location.ErrInvalidUTF8Path, res)
 	}
 }
 
@@ -215,9 +221,9 @@ func TestLoadSourcesWithEntry_EntryKeyChoosesTheSchema(t *testing.T) {
 		{"a.yammm", "alpha"},
 		{"b.yammm", "bravo"},
 	} {
-		s, res := schema.LoadSourcesWithEntry(t.Context(), sources, row.entry, t.TempDir(), schema.WithSourcesOnly(true))
-		if res.Err() != nil {
-			t.Fatalf("entry %s: %v", row.entry, res.Err())
+		s, err := schema.LoadSourcesWithEntry(t.Context(), sources, row.entry, schema.WithSourcesOnly(true), schema.WithModuleRoot(t.TempDir()))
+		if err != nil {
+			t.Fatalf("entry %s: %v", row.entry, err)
 		}
 		if s.IsZero() || s.Name() != row.want {
 			t.Errorf("entry %s chose %v; want %q", row.entry, s, row.want)
@@ -235,9 +241,9 @@ func TestLoadSourcesWithEntry_EmptyEntrySelectsTheSmallestKey(t *testing.T) {
 		sources[name+".yammm"] = []byte("schema \"" + name + "\"\n\ntype T {\n    id String primary\n}\n")
 	}
 	for i := range 20 {
-		s, res := schema.LoadSourcesWithEntry(t.Context(), sources, "", t.TempDir(), schema.WithSourcesOnly(true))
-		if res.Err() != nil {
-			t.Fatalf("run %d: %v", i, res.Err())
+		s, err := schema.LoadSourcesWithEntry(t.Context(), sources, "", schema.WithSourcesOnly(true), schema.WithModuleRoot(t.TempDir()))
+		if err != nil {
+			t.Fatalf("run %d: %v", i, err)
 		}
 		if s.IsZero() || s.Name() != "alpha" {
 			t.Fatalf("run %d chose %v; want the schema under alpha.yammm", i, s)
@@ -258,7 +264,7 @@ func TestLoad_SourceBoundIsInclusive(t *testing.T) {
 		exact[i] = ' '
 	}
 	dir := writeFiles(t, map[string]string{"edge.yammm": string(exact)})
-	if _, res := schema.Load(t.Context(), filepath.Join(dir, "edge.yammm"), schema.WithModuleRoot(dir)); res.Err() != nil {
-		t.Errorf("a source of exactly the bound must load; got %v", res.Err())
+	if _, err := schema.Load(t.Context(), filepath.Join(dir, "edge.yammm"), schema.WithModuleRoot(dir)); err != nil {
+		t.Errorf("a source of exactly the bound must load; got %v", err)
 	}
 }

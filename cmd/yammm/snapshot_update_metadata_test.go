@@ -69,8 +69,8 @@ func TestSnapshotUpdateMetadata_SetAndUnsetLandInTheHeader(t *testing.T) {
 		t.Helper()
 		data, err := os.ReadFile(ysPath)
 		require.NoError(t, err)
-		header, result := snapshot.ReadHeader(t.Context(), bytes.NewReader(data))
-		require.False(t, result.HasErrors(), "header: %s", result.String())
+		header, readErr := snapshot.ReadHeader(t.Context(), bytes.NewReader(data))
+		require.NoError(t, readErr, "header: %s", readErr)
 		return slices.Sorted(maps.Keys(header.Metadata))
 	}
 	before := keys()
@@ -112,8 +112,8 @@ func TestSnapshotUpdateMetadata_UpdatesAHeaderPastTheHeaderCap(t *testing.T) {
 
 	data, err := os.ReadFile(ysPath)
 	require.NoError(t, err)
-	info, res := snapshot.Stat(t.Context(), data)
-	require.False(t, res.HasErrors(), "the updated document verifies: %v", res)
+	info, readErr := snapshot.Stat(t.Context(), data)
+	require.NoError(t, readErr, "the updated document verifies: %v", readErr)
 	assert.Equal(t, map[string]string{"big": big, "k": "v"}, info.Metadata)
 }
 

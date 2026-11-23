@@ -21,8 +21,7 @@ import (
 // Name and Path are populated on every per-file yield — including
 // corrupt-file and per-file I/O-failure paths — so consumers can log or
 // pass entries across package boundaries without reassembling paths via
-// [filepath.Join]. Header is nil whenever Result has error-severity
-// issues.
+// [filepath.Join]. Header is nil whenever Err is not.
 //
 // The zero value (ScanEntry{}) is only yielded alongside an iterator-level
 // error (dir-open failure or ctx cancellation); both Name and Path are empty
@@ -32,14 +31,12 @@ type ScanEntry struct {
 	Name string
 	// Path is the full filesystem path, equivalent to filepath.Join(dir, Name).
 	Path string
-	// Header holds the parsed header; nil whenever Result has
-	// error-severity issues (malformed header, per-file I/O failure).
+	// Header holds the parsed header; nil whenever Err is not.
 	Header *Header
-	// Result carries per-file diagnostics. OK() is true on the happy
-	// path; HasErrors() is true when the file could not be parsed or
-	// opened. See the package documentation for the diagnostic codes
-	// emitted on each failure path.
-	Result diag.Result
+	// Err is nil when the file's header parsed, and otherwise a
+	// *[diag.ResultError] holding why it did not: a Fatal E_SNAPSHOT_IO for a
+	// file that does not open, or a refusal [ReadHeader] makes.
+	Err error
 	// FileSize is the file's size on disk in bytes, or zero when unknown.
 	//
 	// It is populated whenever the file was opened, including when the header
@@ -105,17 +102,17 @@ type ScanEntry struct {
 //     context.DeadlineExceeded) and ends.
 //
 // Per-file errors (corrupt header, per-file os.Open / Read failure)
-// live on the yielded ScanEntry.Result; the iterator's error is nil
+// live on the yielded ScanEntry.Err; the iterator's error is nil
 // for those and iteration continues. This cleanly separates "stop
 // iterating" (err != nil) from "this entry failed; try the next"
-// (entry.Result.HasErrors()). Context cancellation between files
+// (entry.Err != nil). Context cancellation between files
 // takes precedence over any concurrent per-file I/O failure.
 //
 // Typical caller:
 //
 //	for entry, err := range snapshot.ScanDir(ctx, dir) {
 //	    if err != nil { return fmt.Errorf("scan: %w", err) }
-//	    if entry.Result.HasErrors() { log.Warn(...); continue }
+//	    if entry.Err != nil { log.Warn(...); continue }
 //	    use(entry.Header)
 //	}
 func ScanDir(ctx context.Context, dir string) iter.Seq2[ScanEntry, error] {
@@ -197,9 +194,9 @@ func isRegular(dirent os.DirEntry, path string) bool {
 }
 
 // scanFile opens path and parses its header via ReadHeader. On open
-// failure it synthesizes a Fatal E_SNAPSHOT_IO issue on the returned
-// entry's Result; otherwise it delegates to ReadHeader and returns
-// whatever (header, result) pair that produces.
+// failure it synthesizes a Fatal E_SNAPSHOT_IO issue in the returned
+// entry's Err; otherwise it delegates to ReadHeader and returns
+// whatever (header, err) pair that produces.
 //
 // The size is read from the open handle rather than from the DirEntry: fstat
 // answers for the file that was actually opened, where the directory read's
@@ -208,15 +205,13 @@ func isRegular(dirent os.DirEntry, path string) bool {
 func scanFile(ctx context.Context, name, path string) ScanEntry {
 	f, err := os.Open(path)
 	if err != nil {
-		c := diag.NewCollector(0)
-		c.Collect(
+		return ScanEntry{Name: name, Path: path, Err: failure(
 			diag.NewIssue(diag.Fatal, diag.E_SNAPSHOT_IO,
 				fmt.Sprintf("open %q: %v", path, err)).
 				WithDetail(diag.DetailKeyFilePath, path).
 				WithDetail(diag.DetailKeyDetail, err.Error()).
 				Build(),
-		)
-		return ScanEntry{Name: name, Path: path, Result: c.Result()}
+		)}
 	}
 	defer f.Close()
 
@@ -227,8 +222,8 @@ func scanFile(ctx context.Context, name, path string) ScanEntry {
 		modTime = info.ModTime()
 	}
 
-	header, res := ReadHeader(ctx, f)
-	return ScanEntry{Name: name, Path: path, Header: header, Result: res, FileSize: size, ModTime: modTime}
+	header, err := ReadHeader(ctx, f)
+	return ScanEntry{Name: name, Path: path, Header: header, Err: err, FileSize: size, ModTime: modTime}
 }
 
 // notDirectory returns err with [hostpath.ErrNotDirectory] in place of the

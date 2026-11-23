@@ -18,14 +18,14 @@ import (
 // indexes the diff did not compare does not count it again.
 func TestNeo4jDiff_ABackingIndexThatServesADeclarationIsReportedOnce(t *testing.T) {
 	t.Parallel()
-	s, loaded := schema.LoadString(t.Context(),
+	s, loadErr := schema.LoadString(t.Context(),
 		"schema \"gs\"\n\ntype T {\n\ta String primary\n\tb String primary\n\t@@index(a, b)\n}\n", "serving.yammm")
-	if err := loaded.Err(); err != nil {
+	if err := loadErr; err != nil {
 		t.Fatal(err)
 	}
 	cfg := cypher.Config{}
-	desired, result := cfg.Indexes(s)
-	if err := result.Err(); err != nil || len(desired) != 1 {
+	desired, genErr := cfg.Indexes(s)
+	if err := genErr; err != nil || len(desired) != 1 {
 		t.Fatalf("%d declared indexes, want 1: %v", len(desired), err)
 	}
 
@@ -53,9 +53,9 @@ func TestNeo4jDiff_ABackingIndexThatServesADeclarationIsReportedOnce(t *testing.
 				t.Fatalf("fetchRemoteState: %v, %d indexes", err, len(state.indexes))
 			}
 
-			plan, res := neo4j.Diff(cfg, s, state.constraints, state.indexes)
-			if res.HasErrors() {
-				t.Fatal(res)
+			plan, diffErr := neo4j.Diff(cfg, s, state.constraints, state.indexes)
+			if diffErr != nil {
+				t.Fatal(diffErr)
 			}
 			var out bytes.Buffer
 			printIndexDiff(&out, &plan.Indexes, cfg.OwnedLabels(s))

@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/simon-lentz/yammm/internal/diagtest"
 	"github.com/simon-lentz/yammm/internal/lsp/internal/lsputil"
 )
 
@@ -53,7 +54,7 @@ func TestOpenDocuments_NormalizationTwinsLeaveEveryAnalysisLoading(t *testing.T)
 		if snap == nil || snap.Schema.IsZero() {
 			var err error
 			if snap != nil {
-				err = snap.Result.Err()
+				err = diagtest.Err(snap.Result)
 			}
 			t.Errorf("analysis of %s did not load with both twins open: %v", filepath.Base(f.path), err)
 		}

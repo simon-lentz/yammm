@@ -331,8 +331,8 @@ func TestReportPlan_WritesBothHalves(t *testing.T) {
 // W_NEO4J_EDITION_CONSTRAINT_OMITTED reports.
 func TestDiffSchema_PrintsEachGenerationWarningOnce(t *testing.T) {
 	t.Parallel()
-	s, result := schema.LoadString(t.Context(), "schema \"app\"\n\ntype T {\n\tid String primary\n\tname String required\n}\n", "app.yammm")
-	if err := result.Err(); err != nil {
+	s, loadErr := schema.LoadString(t.Context(), "schema \"app\"\n\ntype T {\n\tid String primary\n\tname String required\n}\n", "app.yammm")
+	if err := loadErr; err != nil {
 		t.Fatal(err)
 	}
 	empty := func(context.Context, string, string) ([]map[string]any, error) { return nil, nil }
@@ -359,8 +359,8 @@ func TestDiffSchema_PrintsEachGenerationWarningOnce(t *testing.T) {
 // A schema the generators refuse is reported without a connection.
 func TestDiffSchema_RefusesTheDesiredSideBeforeConnecting(t *testing.T) {
 	t.Parallel()
-	s, result := schema.LoadString(t.Context(), "schema \"a__B\"\n\ntype C {\n\tid String primary\n}\n", "a.yammm")
-	if err := result.Err(); err != nil {
+	s, loadErr := schema.LoadString(t.Context(), "schema \"a__B\"\n\ntype C {\n\tid String primary\n}\n", "a.yammm")
+	if err := loadErr; err != nil {
 		t.Fatal(err)
 	}
 	connect := func(context.Context) (cli.QueryRunner, func(context.Context) error, error) {
@@ -448,8 +448,8 @@ func TestPrintIndexDiff_ADropNamesItsLabel(t *testing.T) {
 // and closes the connection it opened.
 func TestDiffSchema_ReadsTheNamedDatabaseAndCloses(t *testing.T) {
 	t.Parallel()
-	s, result := schema.LoadString(t.Context(), "schema \"app\"\n\ntype T {\n\tid String primary\n}\n", "app.yammm")
-	if err := result.Err(); err != nil {
+	s, loadErr := schema.LoadString(t.Context(), "schema \"app\"\n\ntype T {\n\tid String primary\n}\n", "app.yammm")
+	if err := loadErr; err != nil {
 		t.Fatal(err)
 	}
 	var databases []string
@@ -478,8 +478,8 @@ func TestDiffSchema_ReadsTheNamedDatabaseAndCloses(t *testing.T) {
 // On one stream, a generation warning prints before the plan it belongs to.
 func TestDiffSchema_FlushesWarningsBeforeThePlan(t *testing.T) {
 	t.Parallel()
-	s, result := schema.LoadString(t.Context(), "schema \"app\"\n\ntype T {\n\tid String primary\n\tname String required\n}\n", "app.yammm")
-	if err := result.Err(); err != nil {
+	s, loadErr := schema.LoadString(t.Context(), "schema \"app\"\n\ntype T {\n\tid String primary\n\tname String required\n}\n", "app.yammm")
+	if err := loadErr; err != nil {
 		t.Fatal(err)
 	}
 	connect := func(context.Context) (cli.QueryRunner, func(context.Context) error, error) {
@@ -502,8 +502,8 @@ func TestDiffSchema_FlushesWarningsBeforeThePlan(t *testing.T) {
 // reports what gen --to cypher reports, before any connection.
 func TestDiffSchema_ReportsConstraintWarningsBesideAnIndexError(t *testing.T) {
 	t.Parallel()
-	s, result := schema.LoadString(t.Context(), "schema \"app\"\n\ntype T {\n\tid String primary\n\tname String required\n\tmatch String @index\n}\n", "app.yammm")
-	if err := result.Err(); err != nil {
+	s, loadErr := schema.LoadString(t.Context(), "schema \"app\"\n\ntype T {\n\tid String primary\n\tname String required\n\tmatch String @index\n}\n", "app.yammm")
+	if err := loadErr; err != nil {
 		t.Fatal(err)
 	}
 	connect := func(context.Context) (cli.QueryRunner, func(context.Context) error, error) {
@@ -529,8 +529,8 @@ func TestDiffSchema_ReportsConstraintWarningsBesideAnIndexError(t *testing.T) {
 // A generation warning is reported when the connection then fails.
 func TestDiffSchema_ReportsGenerationWarningsWhenTheConnectionFails(t *testing.T) {
 	t.Parallel()
-	s, result := schema.LoadString(t.Context(), "schema \"app\"\n\ntype T {\n\tid String primary\n\tname String required\n}\n", "app.yammm")
-	if err := result.Err(); err != nil {
+	s, loadErr := schema.LoadString(t.Context(), "schema \"app\"\n\ntype T {\n\tid String primary\n\tname String required\n}\n", "app.yammm")
+	if err := loadErr; err != nil {
 		t.Fatal(err)
 	}
 	refused := errors.New("connection refused")
@@ -556,8 +556,8 @@ func TestDiffSchema_ReportsGenerationWarningsWhenTheConnectionFails(t *testing.T
 // already printed is not printed again.
 func TestDiffSchema_ReportsARemoteRowDiffRefusesAtExitThree(t *testing.T) {
 	t.Parallel()
-	s, result := schema.LoadString(t.Context(), "schema \"app\"\n\ntype T {\n\tid String primary\n\tname String required\n}\n", "app.yammm")
-	if err := result.Err(); err != nil {
+	s, loadErr := schema.LoadString(t.Context(), "schema \"app\"\n\ntype T {\n\tid String primary\n\tname String required\n}\n", "app.yammm")
+	if err := loadErr; err != nil {
 		t.Fatal(err)
 	}
 	row := map[string]any{"name": "y", "type": "RANGE", "entityType": "NODE", "labelsOrTypes": []any{"other__U"}, "properties": []any{"q"}, "state": "ONLINE"}

@@ -27,8 +27,8 @@ func TestResolveSymbol_LocalType(t *testing.T) {
 	t.Parallel()
 
 	src := "schema \"test\"\n\ntype Person {\n    id String primary\n    name String\n}"
-	s, result := schema.LoadString(t.Context(), src, "test.yammm")
-	require.True(t, result.OK(), "schema should parse without errors: %v", result)
+	s, err := schema.LoadString(t.Context(), src, "test.yammm")
+	require.NoError(t, err, "schema should parse without errors: %v", err)
 
 	reg := lsputil.NewTexts()
 	require.NoError(t, reg.Register(s.SourceID(), []byte(src)))
@@ -89,8 +89,8 @@ func TestSymbolToLocation(t *testing.T) {
 	t.Parallel()
 
 	src := "schema \"test\"\n\ntype Customer {\n    id String primary\n}"
-	s, result := schema.LoadString(context.Background(), src, "types.yammm")
-	require.True(t, result.OK(), "schema should parse without errors: %v", result)
+	s, err := schema.LoadString(context.Background(), src, "types.yammm")
+	require.NoError(t, err, "schema should parse without errors: %v", err)
 
 	reg := lsputil.NewTexts()
 	require.NoError(t, reg.Register(s.SourceID(), []byte(src)))

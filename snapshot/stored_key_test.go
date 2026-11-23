@@ -163,9 +163,9 @@ func holderProps() map[string]any             { return map[string]any{"id": "h1"
 func holderKey() immutable.Key                { return immutable.WrapKey([]any{"h1"}) }
 func loadStoredKeySchema(t *testing.T) schema.Schema {
 	t.Helper()
-	s, res := schema.LoadString(t.Context(), storedKeySchema, "keys.yammm")
-	if res.HasErrors() {
-		t.Fatalf("load: %s", res)
+	s, err := schema.LoadString(t.Context(), storedKeySchema, "keys.yammm")
+	if err != nil {
+		t.Fatalf("load: %s", err)
 	}
 	return s
 }
@@ -195,7 +195,7 @@ func (c storedKeyCase) add(t *testing.T, s schema.Schema) bool {
 	} else {
 		inst = instancetest.Valid(t, s, c.typ.name, props)
 	}
-	return graph.New(s).Add(context.Background(), inst).OK()
+	return graph.New(s).Add(context.Background(), inst) == nil
 }
 
 type keyWireItem struct {
@@ -224,9 +224,9 @@ func keyWireFrame(t *testing.T, s schema.Schema) (head, tail string, rows map[st
 		insts = append(insts, p.Instances...)
 	}
 	built := snappartstest.Loaded(t, s, snapparts.Parts{Types: ids, Instances: insts})
-	data, mres := snapshot.Marshal(context.Background(), built)
-	if mres.HasErrors() {
-		t.Fatalf("marshal: %s", mres)
+	data, readErr := snapshot.Marshal(context.Background(), built)
+	if readErr != nil {
+		t.Fatalf("marshal: %s", readErr)
 	}
 	var doc struct {
 		Types []struct{ Name string } `json:"types"`
@@ -292,13 +292,13 @@ func TestStoredKey_TheReadersAcceptExactlyTheLegalShapes(t *testing.T) {
 					t.Error("Graph.Add refused a legal shape")
 				}
 				data := c.wire(t, head, tail, rows)
-				_, lres := snapshot.Unmarshal(context.Background(), data, s, snapshot.WithIntegrityCheck(false))
-				if got := !lres.HasErrors(); got != legal {
-					t.Errorf("Load accepted=%v, want %v: %s", got, legal, lres)
+				_, err := snapshot.Unmarshal(context.Background(), data, s, snapshot.WithIntegrityCheck(false))
+				if got := err == nil; got != legal {
+					t.Errorf("Load accepted=%v, want %v: %s", got, legal, err)
 				}
-				vres := snapshot.Verify(context.Background(), data, s, snapshot.WithIntegrityCheck(false))
-				if got := !vres.HasErrors(); got != legal {
-					t.Errorf("Verify accepted=%v, want %v: %s", got, legal, vres)
+				readErr := snapshot.Verify(context.Background(), data, s, snapshot.WithIntegrityCheck(false))
+				if got := readErr == nil; got != legal {
+					t.Errorf("Verify accepted=%v, want %v: %s", got, legal, readErr)
 				}
 			})
 		}

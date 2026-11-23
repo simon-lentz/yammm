@@ -1,11 +1,13 @@
 package snapshot_test
 
 import (
+	"errors"
 	"strings"
 	"testing"
 
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/graph"
+	"github.com/simon-lentz/yammm/internal/diagtest"
 	"github.com/simon-lentz/yammm/internal/instancetest"
 	"github.com/simon-lentz/yammm/schema"
 	"github.com/simon-lentz/yammm/snapshot"
@@ -28,42 +30,48 @@ func TestIntegrityHash_ReadsTheHeadersOwnMember(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
-			s, res := schema.LoadString(ctx, `schema "`+c.schemaName+`"
+			s, res := diagtest.Capture(t, func(warn func(diag.Issue)) (schema.Schema, error) {
+				return schema.LoadString(ctx, `schema "`+c.schemaName+`"
 
 type T {
 	id String primary
 }
-`, c.schemaName+".yammm")
-			if res.HasErrors() {
+`, c.schemaName+".yammm", schema.WithWarnings(warn))
+			})
+			if diagtest.Err(res) != nil {
 				t.Fatalf("schema: %s", res)
 			}
 			g := graph.New(s)
-			if r := g.Add(ctx, instancetest.Valid(t, s, "T", map[string]any{"id": "written"})); r.HasErrors() {
-				t.Fatalf("add: %s", r)
+			if err := g.Add(ctx, instancetest.Valid(t, s, "T", map[string]any{"id": "written"})); err != nil {
+				t.Fatalf("add: %s", err)
 			}
-			data, res := snapshot.Marshal(ctx, g.Snapshot(), c.opts...)
-			if res.HasErrors() {
+			data, res := diagtest.Issues(t, func() ([]byte, error) {
+				return snapshot.Marshal(ctx, g.Snapshot(), c.opts...)
+			})
+			if diagtest.Err(res) != nil {
 				t.Fatalf("marshal: %s", res)
 			}
-			if _, res := snapshot.Unmarshal(ctx, data, s); res.HasErrors() {
-				t.Errorf("Load: %s", res)
+			if _, err := snapshot.Unmarshal(ctx, data, s); err != nil {
+				t.Errorf("Load: %s", err)
 			}
-			if res := snapshot.Verify(ctx, data, s); res.HasErrors() {
-				t.Errorf("Verify: %s", res)
+			if err := snapshot.Verify(ctx, data, s); err != nil {
+				t.Errorf("Verify: %s", err)
 			}
-			if _, res := snapshot.Stat(ctx, data); res.HasErrors() {
-				t.Errorf("Info: %s", res)
+			if _, err := snapshot.Stat(ctx, data); err != nil {
+				t.Errorf("Info: %s", err)
 			}
 			edited := []byte(strings.ReplaceAll(string(data), `"written"`, `"changed"`))
-			if res := snapshot.Verify(ctx, edited, s); !res.HasCode(diag.E_SNAPSHOT_INTEGRITY_MISMATCH) {
-				t.Errorf("Verify of an edited document: %s, want %s", res, diag.E_SNAPSHOT_INTEGRITY_MISMATCH)
+			if err := snapshot.Verify(ctx, edited, s); !errors.Is(err, diag.E_SNAPSHOT_INTEGRITY_MISMATCH) {
+				t.Errorf("Verify of an edited document: %s, want %s", err, diag.E_SNAPSHOT_INTEGRITY_MISMATCH)
 			}
-			updated, res := snapshot.UpdateMetadata(ctx, data, map[string]string{"integrity_hash": "y"})
-			if res.HasErrors() {
+			updated, res := diagtest.Issues(t, func() ([]byte, error) {
+				return snapshot.UpdateMetadata(ctx, data, map[string]string{"integrity_hash": "y"})
+			})
+			if diagtest.Err(res) != nil {
 				t.Fatalf("UpdateMetadata: %s", res)
 			}
-			if res := snapshot.Verify(ctx, updated, s); res.HasErrors() {
-				t.Errorf("Verify after UpdateMetadata: %s", res)
+			if err := snapshot.Verify(ctx, updated, s); err != nil {
+				t.Errorf("Verify after UpdateMetadata: %s", err)
 			}
 		})
 	}

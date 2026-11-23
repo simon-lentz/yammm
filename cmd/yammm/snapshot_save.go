@@ -86,8 +86,8 @@ func runSnapshotSave(cmd *cobra.Command, args []string, sink *cli.DiagnosticSink
 	if err != nil {
 		return err
 	}
-	s, schemaResult := schema.Load(cmd.Context(), absSchemaPath, loadOpts...)
-	if err := reportSchemaLoad(sink, s, moduleRoot, absSchemaPath, schemaResult); err != nil {
+	s, loadErr := schema.Load(cmd.Context(), absSchemaPath, loadOpts...)
+	if err := reportSchemaLoad(sink, s, moduleRoot, absSchemaPath, loadErr); err != nil {
 		return err
 	}
 
@@ -96,13 +96,9 @@ func runSnapshotSave(cmd *cobra.Command, args []string, sink *cli.DiagnosticSink
 	var g *graph.Graph
 	var imported *snapshot.Header
 	if intoPath != "" {
-		snap, header, loadResult, loadErr := cli.LoadSnapshotFile(cmd.Context(), intoPath, s)
-		if loadErr != nil {
-			return cli.Runtimef("%v", loadErr)
-		}
-		sink.Add(loadResult)
-		if loadResult.HasErrors() {
-			return cli.Exit(cli.ExitForResult(loadResult))
+		snap, header, loadErr := cli.LoadSnapshotFile(cmd.Context(), intoPath, s)
+		if err := sink.AddSnapshot(loadErr); err != nil {
+			return err
 		}
 		g = graph.NewFromSnapshot(snap)
 		imported = header
@@ -112,7 +108,7 @@ func runSnapshotSave(cmd *cobra.Command, args []string, sink *cli.DiagnosticSink
 	if err != nil {
 		return err
 	}
-	if sink.Result().HasErrors() {
+	if cli.Failed(sink.Result()) {
 		return cli.Exit(cli.ExitForResult(sink.Result()))
 	}
 
@@ -135,10 +131,9 @@ func runSnapshotSave(cmd *cobra.Command, args []string, sink *cli.DiagnosticSink
 
 	// Marshal reports a failure as a diagnostic, so it reaches the sink and the
 	// exit rule decides.
-	data, marshalResult := snapshot.Marshal(cmd.Context(), snap, opts...)
-	sink.Add(marshalResult)
-	if marshalResult.Err() != nil {
-		return cli.Exit(cli.ExitForResult(marshalResult))
+	data, marshalErr := snapshot.Marshal(cmd.Context(), snap, opts...)
+	if err := sink.AddSnapshot(marshalErr); err != nil {
+		return err
 	}
 
 	// One primitive whether or not --into names the same file, so the write is

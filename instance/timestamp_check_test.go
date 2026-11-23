@@ -7,6 +7,7 @@ import (
 
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/instance"
+	"github.com/simon-lentz/yammm/internal/diagtest"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -15,17 +16,17 @@ import (
 // RFC 3339 writes an offset under a minute as +00:00, which is stored as Z.
 func TestValidateOne_ATimeAndItsTextReachOneKey(t *testing.T) {
 	t.Parallel()
-	s, res := schema.LoadString(t.Context(), "schema \"t\"\n\ntype T {\n\tat Timestamp primary\n\tseen Timestamp\n}\n", "t.yammm")
-	if res.HasErrors() {
-		t.Fatal(res)
+	s, err := schema.LoadString(t.Context(), "schema \"t\"\n\ntype T {\n\tat Timestamp primary\n\tseen Timestamp\n}\n", "t.yammm")
+	if err != nil {
+		t.Fatal(err)
 	}
 	validator := instance.NewValidator(s)
 	aSecondEast := time.Date(2024, 1, 2, 3, 4, 5, 0, time.FixedZone("", 1))
 	const stored = "2024-01-02T03:04:05Z"
 	for _, given := range []any{aSecondEast, "2024-01-02T03:04:05+00:00", stored} {
-		valid, res := validator.ValidateOne(t.Context(), "T", instance.RawInstance{Properties: map[string]any{"at": given, "seen": given}})
-		if res.HasErrors() {
-			t.Fatalf("%#v: ValidateOne = %v", given, res)
+		valid, err := validator.ValidateOne(t.Context(), "T", instance.RawInstance{Properties: map[string]any{"at": given, "seen": given}})
+		if err != nil {
+			t.Fatalf("%#v: ValidateOne = %v", given, err)
 		}
 		if key := valid.PrimaryKey().String(); key != `["`+stored+`"]` {
 			t.Errorf("%#v: the key is %s; want [%q]", given, key, stored)
@@ -43,9 +44,9 @@ func TestValidateOne_ATimeAndItsTextReachOneKey(t *testing.T) {
 // position, and a time.Time exchanges through JSON what it stores.
 func TestValidateOne_AnOffsetHourOfTwentyFourIsRefused(t *testing.T) {
 	t.Parallel()
-	s, res := schema.LoadString(t.Context(), "schema \"t\"\n\ntype T {\n\tid String primary\n\tseen Timestamp\n\tall List<Timestamp>\n}\n\ntype K {\n\tat Timestamp primary\n}\n", "t.yammm")
-	if res.HasErrors() {
-		t.Fatal(res)
+	s, loadErr := schema.LoadString(t.Context(), "schema \"t\"\n\ntype T {\n\tid String primary\n\tseen Timestamp\n\tall List<Timestamp>\n}\n\ntype K {\n\tat Timestamp primary\n}\n", "t.yammm")
+	if loadErr != nil {
+		t.Fatal(loadErr)
 	}
 	validator := instance.NewValidator(s)
 	at := func(offsetSeconds int) time.Time {
@@ -66,7 +67,9 @@ func TestValidateOne_AnOffsetHourOfTwentyFourIsRefused(t *testing.T) {
 			"a list element": {"T", map[string]any{"id": "1", "all": []any{"2024-01-02T03:04:05Z", given}}},
 			"a key":          {"K", map[string]any{"at": given}},
 		} {
-			_, res := validator.ValidateOne(t.Context(), raw.typ, instance.RawInstance{Properties: raw.props})
+			_, res := diagtest.Issues(t, func() (instance.ValidInstance, error) {
+				return validator.ValidateOne(t.Context(), raw.typ, instance.RawInstance{Properties: raw.props})
+			})
 			var codes []diag.Code
 			for issue := range res.Issues() {
 				codes = append(codes, issue.Code())
@@ -85,9 +88,9 @@ func TestValidateOne_AnOffsetHourOfTwentyFourIsRefused(t *testing.T) {
 		at(24*3600 - 1):             "2024-01-02T03:04:05+23:59",
 		at(-(24*3600 - 1)):          "2024-01-02T03:04:05-23:59",
 	} {
-		valid, res := validator.ValidateOne(t.Context(), "K", instance.RawInstance{Properties: map[string]any{"at": given}})
-		if res.HasErrors() {
-			t.Errorf("%#v: ValidateOne = %v; want it stored", given, res)
+		valid, validateErr := validator.ValidateOne(t.Context(), "K", instance.RawInstance{Properties: map[string]any{"at": given}})
+		if validateErr != nil {
+			t.Errorf("%#v: ValidateOne = %v; want it stored", given, validateErr)
 			continue
 		}
 		held, _ := valid.Property("at")

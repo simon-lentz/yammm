@@ -1,12 +1,14 @@
 package graph_test
 
 import (
+	"errors"
 	"slices"
 	"testing"
 
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/immutable"
+	"github.com/simon-lentz/yammm/internal/diagtest"
 	"github.com/simon-lentz/yammm/internal/instancetest"
 	"github.com/simon-lentz/yammm/internal/snapparts"
 	"github.com/simon-lentz/yammm/internal/snappartstest"
@@ -33,7 +35,9 @@ func TestImport_AnEmptySnapshotLeavesTheNextAddsClaimStanding(t *testing.T) {
 	t.Parallel()
 	s := loadEntry(t, importStateSchema)
 	g := graph.NewFromSnapshot(graph.New(s).Snapshot())
-	mustOK(t, g.Add(t.Context(), rootInstance(t, s, "T", "a")))
+	if err := g.Add(t.Context(), rootInstance(t, s, "T", "a")); err != nil {
+		t.Fatal(err)
+	}
 	if att := g.Snapshot().Attestation(); !att.Values {
 		t.Errorf("attestation %+v, want Values true", att)
 	}
@@ -48,7 +52,9 @@ func TestImport_ADocumentWithNoAttestationKeepsValuesUnattested(t *testing.T) {
 		Properties: immutable.WrapProperties(map[string]any{"id": "b"}),
 	}}})
 	g := graph.NewFromSnapshot(seed)
-	mustOK(t, g.Add(t.Context(), rootInstance(t, s, "T", "c")))
+	if err := g.Add(t.Context(), rootInstance(t, s, "T", "c")); err != nil {
+		t.Fatal(err)
+	}
 	if att := g.Snapshot().Attestation(); att.Values {
 		t.Errorf("attestation %+v, want Values false", att)
 	}
@@ -61,18 +67,20 @@ func TestImport_AHeldTargetCountsTowardAOneAssociation(t *testing.T) {
 	ctx := t.Context()
 	s := loadEntry(t, importStateSchema)
 	g := graph.New(s)
-	mustOK(t, g.Add(ctx, instancetest.Valid(t, s, "R", map[string]any{
+	if err := g.Add(ctx, instancetest.Valid(t, s, "R", map[string]any{
 		"id": "r",
 		"o":  map[string]any{"_target_id": "x"},
 		"m":  []any{map[string]any{"_target_id": "x"}},
-	})))
+	})); err != nil {
+		t.Fatal(err)
+	}
 	seeded := graph.NewFromSnapshot(g.Snapshot())
-	merged, res := seeded.AddOrMerge(ctx, instancetest.Valid(t, s, "R", map[string]any{
+	merged, err := seeded.AddOrMerge(ctx, instancetest.Valid(t, s, "R", map[string]any{
 		"id": "r",
 		"o":  map[string]any{"_target_id": "y"},
 	}))
-	if merged || !res.HasCode(diag.E_GRAPH_CARDINALITY) {
-		t.Errorf("merged %v, %s; want an E_GRAPH_CARDINALITY refusal", merged, res)
+	if merged || !errors.Is(err, diag.E_GRAPH_CARDINALITY) {
+		t.Errorf("merged %v, %s; want an E_GRAPH_CARDINALITY refusal", merged, err)
 	}
 	snap := seeded.Snapshot()
 	var targets []string
@@ -93,8 +101,10 @@ func TestCheck_AnAbsentRecordNamesItsField(t *testing.T) {
 	ctx := t.Context()
 	s := loadEntry(t, importStateSchema)
 	g := graph.New(s)
-	mustOK(t, g.Add(ctx, rootInstance(t, s, "R", "r")))
-	res := g.Check(ctx)
+	if err := g.Add(ctx, rootInstance(t, s, "R", "r")); err != nil {
+		t.Fatal(err)
+	}
+	res := diagtest.Failures(t, g.Check(ctx))
 	found := false
 	for issue := range res.Issues() {
 		for _, d := range issue.Details() {
@@ -115,9 +125,11 @@ func TestDuplicate_KeepsItsInstancesValidatedBit(t *testing.T) {
 	ctx := t.Context()
 	s := loadEntry(t, importStateSchema)
 	g := graph.New(s)
-	mustOK(t, g.Add(ctx, rootInstance(t, s, "T", "a")))
-	if res := g.Add(ctx, rootInstance(t, s, "T", "a")); !res.HasCode(diag.E_DUPLICATE_PK) {
-		t.Fatalf("second Add: %s, want %s", res, diag.E_DUPLICATE_PK)
+	if err := g.Add(ctx, rootInstance(t, s, "T", "a")); err != nil {
+		t.Fatal(err)
+	}
+	if err := g.Add(ctx, rootInstance(t, s, "T", "a")); !errors.Is(err, diag.E_DUPLICATE_PK) {
+		t.Fatalf("second Add: %s, want %s", err, diag.E_DUPLICATE_PK)
 	}
 	dups := slices.Collect(g.Snapshot().Duplicates())
 	if len(dups) != 1 || !dups[0].Instance().Validated() {
@@ -146,7 +158,7 @@ func TestLoad_JudgesTheKeyComponentsAfterOneItCannotRender(t *testing.T) {
 	if got := roots[0].PrimaryKey().String(); got != graph.FormatKey("not a time", lower) {
 		t.Errorf("key %s, want the first component as written and the second as stored", got)
 	}
-	if _, res := snapshot.Unmarshal(t.Context(), snappartstest.Document(t, s, parts(upper)), s); !res.HasCode(diag.E_SNAPSHOT_MALFORMED) {
-		t.Errorf("a second component in upper case: %s; want %s", res, diag.E_SNAPSHOT_MALFORMED)
+	if _, err := snapshot.Unmarshal(t.Context(), snappartstest.Document(t, s, parts(upper)), s); !errors.Is(err, diag.E_SNAPSHOT_MALFORMED) {
+		t.Errorf("a second component in upper case: %s; want %s", err, diag.E_SNAPSHOT_MALFORMED)
 	}
 }

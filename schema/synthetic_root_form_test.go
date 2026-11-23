@@ -6,6 +6,8 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/simon-lentz/yammm/diag"
+	"github.com/simon-lentz/yammm/internal/diagtest"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -123,9 +125,11 @@ var syntheticRootRows = []struct {
 
 func loadUnderRoot(t *testing.T, root string) (schema.Schema, string) {
 	t.Helper()
-	s, res := schema.LoadSourcesWithEntry(t.Context(), syntheticRootSources(), "main.yammm", "",
-		schema.WithSourcesOnly(true), schema.WithSyntheticRoot(root))
-	if res.HasErrors() {
+	s, res := diagtest.Capture(t, func(warn func(diag.Issue)) (schema.Schema, error) {
+		return schema.LoadSourcesWithEntry(t.Context(), syntheticRootSources(), "main.yammm",
+			schema.WithSourcesOnly(true), schema.WithSyntheticRoot(root), schema.WithWarnings(warn))
+	})
+	if diagtest.Err(res) != nil {
 		return schema.Schema{}, firstError(res)
 	}
 	return s, ""

@@ -20,8 +20,8 @@ func TestSource_AnAnnotatedEnumOverTheWidthWrapsAndLoads(t *testing.T) {
 	if !strings.Contains(once, "\tstate Enum[\n") || !strings.Contains(once, "\t] required @index\n") {
 		t.Fatalf("the Enum did not wrap with its annotation on the closing line:\n%s", once)
 	}
-	if _, res := schema.LoadString(t.Context(), once, "s.yammm"); res.HasErrors() {
-		t.Errorf("the wrapped form does not load: %s\n%s", res.String(), once)
+	if _, err := schema.LoadString(t.Context(), once, "s.yammm"); err != nil {
+		t.Errorf("the wrapped form does not load: %s\n%s", err, once)
 	}
 	twice, err := formatText(once)
 	if err != nil {

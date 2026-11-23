@@ -19,7 +19,7 @@ import (
 // canonicalizer is active for both.
 func canonicalizerSchema(t *testing.T) schema.Schema {
 	t.Helper()
-	s, res := schema.LoadString(t.Context(), `schema "canon"
+	s, err := schema.LoadString(t.Context(), `schema "canon"
 
 type Plain {
 	id String primary
@@ -29,8 +29,8 @@ type Stamped {
 	observed_at Timestamp primary
 }
 `, "canon.yammm")
-	if res.HasErrors() {
-		t.Fatalf("schema: %s", res)
+	if err != nil {
+		t.Fatalf("schema: %s", err)
 	}
 	return s
 }
@@ -97,8 +97,8 @@ func TestAdd_IndexKeyIsTheCanonicalKey(t *testing.T) {
 	stamped, _ := s.Type("Stamped")
 	const raw, canonical = "2020-01-02T03:04:05+00:00", `["2020-01-02T03:04:05Z"]`
 	g := New(s)
-	if r := g.Add(t.Context(), instancetest.Valid(t, s, "Stamped", map[string]any{"observed_at": raw})); !r.OK() {
-		t.Fatalf("add: %s", r)
+	if err := g.Add(t.Context(), instancetest.Valid(t, s, "Stamped", map[string]any{"observed_at": raw})); err != nil {
+		t.Fatalf("add: %s", err)
 	}
 	idx := g.Snapshot().instanceIndex[stamped.ID()]
 	if len(idx) != 1 {

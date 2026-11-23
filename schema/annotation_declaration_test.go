@@ -1,6 +1,7 @@
 package schema_test
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/simon-lentz/yammm/diag"
@@ -9,7 +10,7 @@ import (
 
 func TestAnnotation_ValidAnnotationsExposed(t *testing.T) {
 	t.Parallel()
-	s, res := schema.LoadString(t.Context(), `schema "main"
+	s, err := schema.LoadString(t.Context(), `schema "main"
 
 type Trade {
 	id String primary
@@ -17,8 +18,8 @@ type Trade {
 	@@index(id, state)
 }
 `, "main.yammm")
-	if res.HasErrors() {
-		t.Fatalf("load should succeed, got: %v", res)
+	if err != nil {
+		t.Fatalf("load should succeed, got: %v", err)
 	}
 	ty := schemaType(t, s, "Trade")
 	if _, ok := typeProperty(t, ty, "state").Annotation("index"); !ok {
@@ -31,14 +32,14 @@ type Trade {
 
 func TestAnnotation_VectorOnAStringIsAnInvalidTarget(t *testing.T) {
 	t.Parallel()
-	_, res := schema.LoadString(t.Context(), `schema "main"
+	_, err := schema.LoadString(t.Context(), `schema "main"
 
 type Trade {
 	id String primary
 	x String required @vector(cosine)
 }
 `, "main.yammm")
-	if !res.HasCode(diag.E_INVALID_ANNOTATION_TARGET) {
-		t.Errorf("want E_INVALID_ANNOTATION_TARGET, got: %v", res)
+	if !errors.Is(err, diag.E_INVALID_ANNOTATION_TARGET) {
+		t.Errorf("want E_INVALID_ANNOTATION_TARGET, got: %v", err)
 	}
 }

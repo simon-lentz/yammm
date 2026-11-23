@@ -49,9 +49,9 @@ type Ground {
 }
 `),
 	}
-	s, result := schema.LoadSourcesWithEntry(t.Context(), sources, "entry.yammm", ".", schema.WithSourcesOnly(true))
-	if result.HasErrors() {
-		t.Fatalf("load: %v", result.Err())
+	s, err := schema.LoadSourcesWithEntry(t.Context(), sources, "entry.yammm", schema.WithSourcesOnly(true), schema.WithModuleRoot("."))
+	if err != nil {
+		t.Fatalf("load: %v", err)
 	}
 	return s
 }
@@ -73,14 +73,14 @@ func TestClosure_DiamondOrderAndDedup(t *testing.T) {
 }
 
 func TestClosure_NoImports(t *testing.T) {
-	s, result := schema.LoadString(t.Context(), `schema "solo"
+	s, err := schema.LoadString(t.Context(), `schema "solo"
 
 type Only {
 	id String primary
 }
 `, "test.yammm")
-	if result.HasErrors() {
-		t.Fatalf("load: %v", result.Err())
+	if err != nil {
+		t.Fatalf("load: %v", err)
 	}
 
 	closure := slices.Collect(s.Closure())

@@ -12,8 +12,8 @@ import (
 // load error.
 func loadSchema(t *testing.T, src string) schema.Schema {
 	t.Helper()
-	s, res := schema.LoadString(context.Background(), src, "test.yammm")
-	if err := res.Err(); err != nil {
+	s, loadErr := schema.LoadString(context.Background(), src, "test.yammm")
+	if err := loadErr; err != nil {
 		t.Fatalf("LoadString: %v", err)
 	}
 	return s
@@ -23,8 +23,8 @@ func loadSchema(t *testing.T, src string) schema.Schema {
 // point and fails the test on any load error.
 func loadSources(t *testing.T, sources map[string][]byte) schema.Schema {
 	t.Helper()
-	s, res := schema.LoadSourcesWithEntry(context.Background(), sources, "entry.yammm", ".", schema.WithSourcesOnly(true))
-	if err := res.Err(); err != nil {
+	s, loadErr := schema.LoadSourcesWithEntry(context.Background(), sources, "entry.yammm", schema.WithSourcesOnly(true), schema.WithModuleRoot("."))
+	if err := loadErr; err != nil {
 		t.Fatalf("LoadSourcesWithEntry: %v", err)
 	}
 	return s

@@ -1,6 +1,7 @@
 package instance_test
 
 import (
+	"errors"
 	"maps"
 	"strings"
 	"testing"
@@ -9,6 +10,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/instance"
+	"github.com/simon-lentz/yammm/internal/diagtest"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -18,14 +20,16 @@ func invariantHolds(t *testing.T, decls, inv string, props map[string]any) (bool
 	t.Helper()
 	src := "schema \"x\"\n\ntype T {\n\tid String primary\n" + decls +
 		"\t! \"probe\" " + inv + "\n}\n"
-	s, result := schema.LoadString(t.Context(), src, "x.yammm")
-	if result.HasErrors() {
-		t.Fatalf("schema carrying %q did not load: %s", inv, result)
+	s, err := schema.LoadString(t.Context(), src, "x.yammm")
+	if err != nil {
+		t.Fatalf("schema carrying %q did not load: %s", inv, err)
 	}
 	all := map[string]any{"id": "a"}
 	maps.Copy(all, props)
-	_, res := instance.NewValidator(s).ValidateOne(t.Context(), "T", instance.RawInstance{Properties: all})
-	return res.OK(), res.String()
+	_, res := diagtest.Issues(t, func() (instance.ValidInstance, error) {
+		return instance.NewValidator(s).ValidateOne(t.Context(), "T", instance.RawInstance{Properties: all})
+	})
+	return diagtest.Err(res) == nil, res.String()
 }
 
 // A List-typed property is indexable. Its value arrives as immutable.Slice —
@@ -74,9 +78,9 @@ func TestIndexing_BracketHoldsOneIndex(t *testing.T) {
 		`tags[0,] -> IsNil`:   "expected ']' after one index",
 	} {
 		src := "schema \"x\"\n\ntype T {\n\tid String primary\n\ttags List<String>\n\t! \"probe\" " + inv + "\n}\n"
-		_, res := schema.LoadString(t.Context(), src, "x.yammm")
-		if !res.HasCode(diag.E_SYNTAX) || !strings.Contains(res.Err().Error(), want) {
-			t.Errorf("%s: want E_SYNTAX %q; got %v", inv, want, res.Err())
+		_, err := schema.LoadString(t.Context(), src, "x.yammm")
+		if !errors.Is(err, diag.E_SYNTAX) || !strings.Contains(err.Error(), want) {
+			t.Errorf("%s: want E_SYNTAX %q; got %v", inv, want, err)
 		}
 	}
 }

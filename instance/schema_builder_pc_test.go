@@ -18,7 +18,7 @@ import (
 // unexported access.
 func pcTestSchema(t *testing.T) schema.Schema {
 	t.Helper()
-	s, result := schema.LoadString(t.Context(), `schema "pctest"
+	s, err := schema.LoadString(t.Context(), `schema "pctest"
 
 part type Address {
 	id String primary
@@ -31,8 +31,8 @@ type Person {
 	*-> ADDRESSES (one:many) Address
 }
 `, "pctest.yammm")
-	if result.HasErrors() {
-		t.Fatalf("pcTestSchema: %s", result)
+	if err != nil {
+		t.Fatalf("pcTestSchema: %s", err)
 	}
 	return s
 }

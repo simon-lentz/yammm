@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/simon-lentz/yammm/internal/diagtest"
 	"github.com/simon-lentz/yammm/internal/hostpath"
 
 	"github.com/simon-lentz/yammm/diag"
@@ -43,7 +44,9 @@ func TestHostPath_Loads(t *testing.T) {
 			run: func(t *testing.T, tmp string) (bool, string) {
 				t.Helper()
 				dir := filepath.Join(tmp, "plain")
-				return loadOutcome(schema.Load(t.Context(), writeHostPathModule(t, dir, "rel_main.yammm"), schema.WithModuleRoot(dir)))
+				return loadOutcome(diagtest.Capture(t, func(warn func(diag.Issue)) (schema.Schema, error) {
+					return schema.Load(t.Context(), writeHostPathModule(t, dir, "rel_main.yammm"), schema.WithModuleRoot(dir), schema.WithWarnings(warn))
+				}))
 			},
 		},
 		{
@@ -51,7 +54,9 @@ func TestHostPath_Loads(t *testing.T) {
 			run: func(t *testing.T, tmp string) (bool, string) {
 				t.Helper()
 				dir := filepath.Join(tmp, "caf\u00e9")
-				return loadOutcome(schema.Load(t.Context(), writeHostPathModule(t, dir, "rel_main.yammm"), schema.WithModuleRoot(dir)))
+				return loadOutcome(diagtest.Capture(t, func(warn func(diag.Issue)) (schema.Schema, error) {
+					return schema.Load(t.Context(), writeHostPathModule(t, dir, "rel_main.yammm"), schema.WithModuleRoot(dir), schema.WithWarnings(warn))
+				}))
 			},
 		},
 		{
@@ -59,7 +64,9 @@ func TestHostPath_Loads(t *testing.T) {
 			run: func(t *testing.T, tmp string) (bool, string) {
 				t.Helper()
 				dir := filepath.Join(tmp, "cafe\u0301")
-				return loadOutcome(schema.Load(t.Context(), writeHostPathModule(t, dir, "rel_main.yammm"), schema.WithModuleRoot(dir)))
+				return loadOutcome(diagtest.Capture(t, func(warn func(diag.Issue)) (schema.Schema, error) {
+					return schema.Load(t.Context(), writeHostPathModule(t, dir, "rel_main.yammm"), schema.WithModuleRoot(dir), schema.WithWarnings(warn))
+				}))
 			},
 		},
 		{
@@ -67,7 +74,9 @@ func TestHostPath_Loads(t *testing.T) {
 			run: func(t *testing.T, tmp string) (bool, string) {
 				t.Helper()
 				dir := filepath.Join(tmp, "cafe\u0301")
-				return loadOutcome(schema.Load(t.Context(), writeHostPathModule(t, dir, "rel_main.yammm")))
+				return loadOutcome(diagtest.Capture(t, func(warn func(diag.Issue)) (schema.Schema, error) {
+					return schema.Load(t.Context(), writeHostPathModule(t, dir, "rel_main.yammm"), schema.WithWarnings(warn))
+				}))
 			},
 		},
 		{
@@ -78,7 +87,9 @@ func TestHostPath_Loads(t *testing.T) {
 				entry := writeHostPathModule(t, dir, "rel_main.yammm")
 				writeHostPathFile(t, filepath.Join(dir, "rel_dep.yammm"), hostPathDepImporting)
 				writeHostPathFile(t, filepath.Join(dir, "rel_leaf.yammm"), hostPathLeaf)
-				return loadOutcome(schema.Load(t.Context(), entry, schema.WithModuleRoot(dir)))
+				return loadOutcome(diagtest.Capture(t, func(warn func(diag.Issue)) (schema.Schema, error) {
+					return schema.Load(t.Context(), entry, schema.WithModuleRoot(dir), schema.WithWarnings(warn))
+				}))
 			},
 		},
 		{
@@ -101,7 +112,9 @@ func TestHostPath_Loads(t *testing.T) {
 			run: func(t *testing.T, tmp string) (bool, string) {
 				t.Helper()
 				dir := filepath.Join(tmp, `x\y`)
-				return loadOutcome(schema.Load(t.Context(), writeHostPathModule(t, dir, "rel_main.yammm"), schema.WithModuleRoot(dir)))
+				return loadOutcome(diagtest.Capture(t, func(warn func(diag.Issue)) (schema.Schema, error) {
+					return schema.Load(t.Context(), writeHostPathModule(t, dir, "rel_main.yammm"), schema.WithModuleRoot(dir), schema.WithWarnings(warn))
+				}))
 			},
 		},
 		{
@@ -110,7 +123,9 @@ func TestHostPath_Loads(t *testing.T) {
 			run: func(t *testing.T, tmp string) (bool, string) {
 				t.Helper()
 				dir := filepath.Join(tmp, "e")
-				return loadOutcome(schema.Load(t.Context(), writeHostPathModule(t, dir, `m\main.yammm`), schema.WithModuleRoot(dir)))
+				return loadOutcome(diagtest.Capture(t, func(warn func(diag.Issue)) (schema.Schema, error) {
+					return schema.Load(t.Context(), writeHostPathModule(t, dir, `m\main.yammm`), schema.WithModuleRoot(dir), schema.WithWarnings(warn))
+				}))
 			},
 		},
 		{
@@ -121,8 +136,12 @@ func TestHostPath_Loads(t *testing.T) {
 				dir := filepath.Join(tmp, "two")
 				writeHostPathFile(t, filepath.Join(dir, `a\b.yammm`), "schema \"one\"\n\ntype One {\n\tid String primary\n}\n")
 				writeHostPathFile(t, filepath.Join(dir, "a", "b.yammm"), "schema \"two\"\n\ntype Two {\n\tid String primary\n}\n")
-				one, resOne := schema.Load(t.Context(), filepath.Join(dir, `a\b.yammm`), schema.WithModuleRoot(dir))
-				two, resTwo := schema.Load(t.Context(), filepath.Join(dir, "a", "b.yammm"), schema.WithModuleRoot(dir))
+				one, resOne := diagtest.Capture(t, func(warn func(diag.Issue)) (schema.Schema, error) {
+					return schema.Load(t.Context(), filepath.Join(dir, `a\b.yammm`), schema.WithModuleRoot(dir), schema.WithWarnings(warn))
+				})
+				two, resTwo := diagtest.Capture(t, func(warn func(diag.Issue)) (schema.Schema, error) {
+					return schema.Load(t.Context(), filepath.Join(dir, "a", "b.yammm"), schema.WithModuleRoot(dir), schema.WithWarnings(warn))
+				})
 				if one.IsZero() || two.IsZero() {
 					return false, fmt.Sprintf("a load failed: %v / %v", issueCodes(resOne), issueCodes(resTwo))
 				}
@@ -177,14 +196,18 @@ func TestHostPath_LoadsWhenTheRootAndTheEntryAreSpelledDifferently(t *testing.T)
 			name: "Load",
 			load: func(t *testing.T, root, path string) (schema.Schema, diag.Result) {
 				t.Helper()
-				return schema.Load(t.Context(), path, schema.WithModuleRoot(root))
+				return diagtest.Capture(t, func(warn func(diag.Issue)) (schema.Schema, error) {
+					return schema.Load(t.Context(), path, schema.WithModuleRoot(root), schema.WithWarnings(warn))
+				})
 			},
 		},
 		{
 			name: "LoadSourcesWithEntry",
 			load: func(t *testing.T, root, path string) (schema.Schema, diag.Result) {
 				t.Helper()
-				return schema.LoadSourcesWithEntry(t.Context(), map[string][]byte{path: []byte(hostPathEntry)}, path, root)
+				return diagtest.Capture(t, func(warn func(diag.Issue)) (schema.Schema, error) {
+					return schema.LoadSourcesWithEntry(t.Context(), map[string][]byte{path: []byte(hostPathEntry)}, path, schema.WithModuleRoot(root), schema.WithWarnings(warn))
+				})
 			},
 		},
 	}
@@ -233,7 +256,9 @@ func TestHostPath_ImportThroughALinkedDirectoryResolvesFromItsTarget(t *testing.
 	writeHostPathFile(t, entry,
 		"schema \"relmain\"\n\nimport \"./link/rel_dep\" as dep\n\ntype Site {\n\tid String primary\n\t--> IN_ZONE (one) dep.Zone\n}\n")
 
-	s, res := schema.Load(t.Context(), entry, schema.WithModuleRoot(root))
+	s, res := diagtest.Capture(t, func(warn func(diag.Issue)) (schema.Schema, error) {
+		return schema.Load(t.Context(), entry, schema.WithModuleRoot(root), schema.WithWarnings(warn))
+	})
 	if ok, detail := loadOutcome(s, res); !ok {
 		t.Fatalf("the load fails: %s", detail)
 	}
@@ -283,12 +308,14 @@ func loadSourcesOutcome(t *testing.T, dir string) (bool, string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return loadOutcome(schema.LoadSourcesWithEntry(t.Context(),
-		map[string][]byte{entry: []byte(hostPathEntry)}, entry, filepath.Dir(entry)))
+	return loadOutcome(diagtest.Capture(t, func(warn func(diag.Issue)) (schema.Schema, error) {
+		return schema.LoadSourcesWithEntry(t.Context(),
+			map[string][]byte{entry: []byte(hostPathEntry)}, entry, schema.WithModuleRoot(filepath.Dir(entry)), schema.WithWarnings(warn))
+	}))
 }
 
 func loadOutcome(s schema.Schema, res diag.Result) (bool, string) {
-	return !s.IsZero() && !res.HasErrors(), fmt.Sprintf("schema loaded: %v, issues: %v", !s.IsZero(), issueCodes(res))
+	return !s.IsZero() && diagtest.Err(res) == nil, fmt.Sprintf("schema loaded: %v, issues: %v", !s.IsZero(), issueCodes(res))
 }
 
 // TestHostPath_ModuleRootDetailIsTheRootsIdentity holds an import-resolution
@@ -309,7 +336,9 @@ func TestHostPath_ModuleRootDetailIsTheRootsIdentity(t *testing.T) {
 			entry := filepath.Join(root, "main.yammm")
 			writeHostPathFile(t, entry, "schema \"main\"\n\nimport \"./missing\" as missing\n\ntype T {\n\tid String primary\n}\n")
 
-			_, res := schema.Load(t.Context(), entry, schema.WithModuleRoot(root))
+			_, res := diagtest.Capture(t, func(warn func(diag.Issue)) (schema.Schema, error) {
+				return schema.Load(t.Context(), entry, schema.WithModuleRoot(root), schema.WithWarnings(warn))
+			})
 			want := rootIdentity(t, root)
 
 			var detail, message string
@@ -356,7 +385,9 @@ func TestHostPath_MalformedMarkerDetailIsTheRootsIdentity(t *testing.T) {
 			entry := filepath.Join(root, "main.yammm")
 			writeHostPathFile(t, entry, "schema \"main\"\n\ntype T {\n\tid String primary\n}\n")
 
-			_, res := schema.Load(t.Context(), entry)
+			_, res := diagtest.Capture(t, func(warn func(diag.Issue)) (schema.Schema, error) {
+				return schema.Load(t.Context(), entry, schema.WithWarnings(warn))
+			})
 			want := rootIdentity(t, root)
 
 			found := false

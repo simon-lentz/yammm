@@ -34,9 +34,9 @@ type C extends A, B {}
 // in no type's own property slice, so a lookup by the raw pointer finds nothing
 // and Marshal fails on a schema that loads clean.
 func TestMarshal_MergedAnnotationProperty(t *testing.T) {
-	s, res := schema.LoadString(context.Background(), mergedAnnotationSchema, "probe.yammm")
-	if res.HasErrors() {
-		t.Fatalf("load: %v", res.Err())
+	s, loadErr := schema.LoadString(context.Background(), mergedAnnotationSchema, "probe.yammm")
+	if loadErr != nil {
+		t.Fatalf("load: %v", loadErr)
 	}
 
 	got, err := gogen.Marshal(s)
@@ -70,9 +70,9 @@ type C extends A, B {}
 // schema property emits []Code on its ancestors and []string on the child — a
 // generated file where assigning one to the other does not compile.
 func TestMarshal_MergedAnnotationListProperty(t *testing.T) {
-	s, res := schema.LoadString(context.Background(), mergedListAnnotationSchema, "probe.yammm")
-	if res.HasErrors() {
-		t.Fatalf("load: %v", res.Err())
+	s, loadErr := schema.LoadString(context.Background(), mergedListAnnotationSchema, "probe.yammm")
+	if loadErr != nil {
+		t.Fatalf("load: %v", loadErr)
 	}
 
 	got, err := gogen.Marshal(s)

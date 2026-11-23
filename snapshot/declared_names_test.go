@@ -5,7 +5,9 @@ import (
 	"testing"
 
 	"github.com/simon-lentz/yammm/diag"
+	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/immutable"
+	"github.com/simon-lentz/yammm/internal/diagtest"
 	"github.com/simon-lentz/yammm/internal/snapparts"
 	"github.com/simon-lentz/yammm/internal/snappartstest"
 	"github.com/simon-lentz/yammm/schema"
@@ -39,9 +41,9 @@ part type Piece {
 // stores a name, each value a marker an undeclared name can be spliced beside.
 func declaredNamesDocument(t *testing.T) (schema.Schema, string) {
 	t.Helper()
-	s, res := schema.LoadString(t.Context(), declaredNamesSchema, "names.yammm")
-	if res.HasErrors() {
-		t.Fatalf("load schema: %s", res)
+	s, err := schema.LoadString(t.Context(), declaredNamesSchema, "names.yammm")
+	if err != nil {
+		t.Fatalf("load schema: %s", err)
 	}
 	holderT, _ := s.Type("Holder")
 	targetT, _ := s.Type("Target")
@@ -78,9 +80,9 @@ func declaredNamesDocument(t *testing.T) (schema.Schema, string) {
 			Properties: immutable.WrapProperties(map[string]any{"since": "UNRES"}),
 		}},
 	})
-	data, mres := snapshot.Marshal(t.Context(), snap)
-	if mres.HasErrors() {
-		t.Fatalf("Marshal: %s", mres)
+	data, readErr := snapshot.Marshal(t.Context(), snap)
+	if readErr != nil {
+		t.Fatalf("Marshal: %s", readErr)
 	}
 	return s, string(data)
 }
@@ -106,8 +108,12 @@ func TestLoad_RefusesAnUndeclaredNameAtEveryPosition(t *testing.T) {
 				want++
 			}
 		}
-		loaded, lres := snapshot.Unmarshal(t.Context(), []byte(doc), s, snapshot.WithIntegrityCheck(false))
-		vres := snapshot.Verify(t.Context(), []byte(doc), s, snapshot.WithIntegrityCheck(false))
+		loaded, lres := diagtest.Capture(t, func(warn func(diag.Issue)) (graph.Snapshot, error) {
+			return snapshot.Unmarshal(t.Context(), []byte(doc), s, snapshot.WithIntegrityCheck(false), snapshot.WithWarnings(warn))
+		})
+		vres := diagtest.CaptureErr(t, func(warn func(diag.Issue)) error {
+			return snapshot.Verify(t.Context(), []byte(doc), s, snapshot.WithIntegrityCheck(false), snapshot.WithWarnings(warn))
+		})
 		for label, r := range map[string]diag.Result{"Load": lres, "Verify": vres} {
 			got := 0
 			for issue := range r.Issues() {
@@ -115,7 +121,7 @@ func TestLoad_RefusesAnUndeclaredNameAtEveryPosition(t *testing.T) {
 					got++
 				}
 			}
-			if got != want || (want == 0) != r.OK() {
+			if got != want || (want == 0) != (diagtest.Err(r) == nil) {
 				t.Fatalf("mask %b: %s: want %d refusals, got %d:\n%s", mask, label, want, got, r)
 			}
 		}

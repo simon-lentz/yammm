@@ -36,9 +36,9 @@ func TestLoad_DocTextLosesTheIndentationItsContinuationLinesShare(t *testing.T) 
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
 			src := c.comment + "\nschema \"s\"\n\n" + c.comment + "\ntype T {\n    " + c.comment + "\n    id String primary\n}\n"
-			s, res := schema.LoadString(t.Context(), src, "s.yammm")
-			if res.HasErrors() {
-				t.Fatalf("load: %v", res.Err())
+			s, err := schema.LoadString(t.Context(), src, "s.yammm")
+			if err != nil {
+				t.Fatalf("load: %v", err)
 			}
 			typ, ok := s.Type("T")
 			if !ok {

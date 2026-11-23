@@ -51,10 +51,10 @@ func TestAdd_RootDuplicateRecordCarriesTheCanonicalAddress(t *testing.T) {
 	}
 
 	g := graph.New(s)
-	if r := g.Add(t.Context(), sensor(canonStamp)); !r.OK() {
-		t.Fatalf("first add: %s", r)
+	if err := g.Add(t.Context(), sensor(canonStamp)); err != nil {
+		t.Fatalf("first add: %s", err)
 	}
-	if r := g.Add(t.Context(), sensor(rawStamp)); r.OK() {
+	if err := g.Add(t.Context(), sensor(rawStamp)); err == nil {
 		t.Fatal("a second spelling of one address was accepted as a second instance")
 	}
 
@@ -95,9 +95,9 @@ type Doc {
 	}
 }
 `
-	s, res := schema.LoadString(t.Context(), src, "edge_only_canon.yammm")
-	if res.HasErrors() {
-		t.Fatalf("load: %s", res)
+	s, err := schema.LoadString(t.Context(), src, "edge_only_canon.yammm")
+	if err != nil {
+		t.Fatalf("load: %s", err)
 	}
 	docID, noteID := mustTypeID(t, s, "Doc"), mustTypeID(t, s, "Note")
 

@@ -7,6 +7,7 @@ import (
 
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/instance"
+	"github.com/simon-lentz/yammm/internal/diagtest"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -14,7 +15,7 @@ import (
 // single fixture covers both halves of the null rule.
 func nullEdgePropSchema(t *testing.T) schema.Schema {
 	t.Helper()
-	s, result := schema.LoadString(t.Context(), `schema "test"
+	s, err := schema.LoadString(t.Context(), `schema "test"
 type Company {
     id String primary
 }
@@ -25,8 +26,8 @@ type Person {
         note String
     }
 }`, "test.yammm")
-	if result.HasErrors() {
-		t.Fatalf("schema: %s", result)
+	if err != nil {
+		t.Fatalf("schema: %s", err)
 	}
 	return s
 }
@@ -34,8 +35,10 @@ type Person {
 // validateEmployer validates one Person carrying the given edge object.
 func validateEmployer(t *testing.T, s schema.Schema, employer map[string]any) (instance.ValidInstance, string) {
 	t.Helper()
-	valid, result := instance.NewValidator(s).ValidateOne(t.Context(), "Person", instance.RawInstance{
-		Properties: map[string]any{"id": "1", "employer": employer},
+	valid, result := diagtest.Issues(t, func() (instance.ValidInstance, error) {
+		return instance.NewValidator(s).ValidateOne(t.Context(), "Person", instance.RawInstance{
+			Properties: map[string]any{"id": "1", "employer": employer},
+		})
 	})
 	return valid, result.String()
 }
@@ -62,8 +65,10 @@ func TestEdgeNullProperty_ExplicitNullDoesNotSatisfyRequired(t *testing.T) {
 // A required edge property the object leaves out is E_MISSING_REQUIRED, the
 // code a missing required property of the instance itself draws.
 func TestEdgeNullProperty_AMissingRequiredPropertyIsMissingRequired(t *testing.T) {
-	_, res := instance.NewValidator(nullEdgePropSchema(t)).ValidateOne(t.Context(), "Person", instance.RawInstance{
-		Properties: map[string]any{"id": "1", "employer": map[string]any{"_target_id": "42"}},
+	_, res := diagtest.Issues(t, func() (instance.ValidInstance, error) {
+		return instance.NewValidator(nullEdgePropSchema(t)).ValidateOne(t.Context(), "Person", instance.RawInstance{
+			Properties: map[string]any{"id": "1", "employer": map[string]any{"_target_id": "42"}},
+		})
 	})
 	if got := res.CodeCounts(diag.Error); len(got) != 1 || got[diag.E_MISSING_REQUIRED] != 1 {
 		t.Errorf("error codes = %v, want one E_MISSING_REQUIRED: %s", got, res)

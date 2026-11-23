@@ -1,18 +1,20 @@
 package schema_test
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/simon-lentz/yammm/diag"
+	"github.com/simon-lentz/yammm/internal/diagtest"
 	"github.com/simon-lentz/yammm/schema"
 )
 
 func hashOfInvariant(t *testing.T, invariant string) string {
 	t.Helper()
 	src := "schema \"s\"\n\ntype T {\n\tid String primary\n\tn Integer\n\tf Float\n\t! \"m\" " + invariant + "\n}\n"
-	s, res := schema.LoadString(t.Context(), src, "s.yammm")
-	if res.Err() != nil {
-		t.Fatalf("load %q: %v", invariant, res.Err())
+	s, err := schema.LoadString(t.Context(), src, "s.yammm")
+	if err != nil {
+		t.Fatalf("load %q: %v", invariant, err)
 	}
 	return schema.StructuralHash(s)
 }
@@ -63,9 +65,9 @@ type T extends P, Q {
 	id String primary
 }
 `
-	_, res := schema.LoadString(t.Context(), src, "s.yammm")
-	if !res.HasCode(diag.E_INVARIANT_CONFLICT) {
-		t.Errorf("want E_INVARIANT_CONFLICT; got %v", res.Err())
+	_, err := schema.LoadString(t.Context(), src, "s.yammm")
+	if !errors.Is(err, diag.E_INVARIANT_CONFLICT) {
+		t.Errorf("want E_INVARIANT_CONFLICT; got %v", err)
 	}
 }
 
@@ -76,14 +78,16 @@ func TestInvariantConflict_ASignedLiteralAndANegationDiffer(t *testing.T) {
 	load := func(p, q string) diag.Result {
 		src := "schema \"s\"\n\nabstract type P {\n\tn Integer\n\t! \"m\" " + p + "\n}\n\n" +
 			"abstract type Q {\n\tn Integer\n\t! \"m\" " + q + "\n}\n\ntype T extends P, Q {\n\tid String primary\n}\n"
-		_, res := schema.LoadString(t.Context(), src, "s.yammm")
+		_, res := diagtest.Capture(t, func(warn func(diag.Issue)) (schema.Schema, error) {
+			return schema.LoadString(t.Context(), src, "s.yammm", schema.WithWarnings(warn))
+		})
 		return res
 	}
 	if res := load("n > -1", "n > -(1)"); !res.HasCode(diag.E_INVARIANT_CONFLICT) {
-		t.Errorf("-1 against -(1): want E_INVARIANT_CONFLICT; got %v", res.Err())
+		t.Errorf("-1 against -(1): want E_INVARIANT_CONFLICT; got %v", res)
 	}
-	if res := load("n > -1", "n > - 1"); res.Err() != nil {
-		t.Errorf("-1 against - 1: want one definition; got %v", res.Err())
+	if res := load("n > -1", "n > - 1"); diagtest.Err(res) != nil {
+		t.Errorf("-1 against - 1: want one definition; got %v", res)
 	}
 }
 

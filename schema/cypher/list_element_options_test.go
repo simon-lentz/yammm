@@ -1,11 +1,13 @@
 package cypher
 
 import (
+	"errors"
 	"slices"
 	"strings"
 	"testing"
 
 	"github.com/simon-lentz/yammm/diag"
+	"github.com/simon-lentz/yammm/internal/diagtest"
 )
 
 // constraintConfigs are the settings that decide which constraints are
@@ -119,7 +121,9 @@ func TestConstraints_ANestedCollectionIsRefusedUnderEveryOption(t *testing.T) {
 		for _, o := range constraintConfigs {
 			t.Run(c.name+"/"+o.name, func(t *testing.T) {
 				t.Parallel()
-				constraints, res := o.c.Constraints(s)
+				constraints, res := diagtest.Capture(t, func(warn func(diag.Issue)) ([]Constraint, error) {
+					return o.c.Constraints(s, WithWarnings(warn))
+				})
 
 				if got := strings.Join(unsupportedTypeIssues(res), " "); got != c.want {
 					t.Errorf("Constraints refuses %q, want %q: %s", got, c.want, res)
@@ -130,7 +134,7 @@ func TestConstraints_ANestedCollectionIsRefusedUnderEveryOption(t *testing.T) {
 					}
 					return
 				}
-				if !res.OK() || len(constraints) == 0 {
+				if diagtest.Err(res) != nil || len(constraints) == 0 {
 					t.Errorf("a schema with nothing to refuse emits %d constraints: %s", len(constraints), res)
 				}
 			})
@@ -147,13 +151,13 @@ func TestConstraints_ScalarTypesOffEmitsNoTypeConstraintAndChecksNoListName(t *t
 	t.Parallel()
 	s := loadInline(t, "schema \"le\"\ntype A {\n id String primary\n order List<String>\n tags List<String> required\n e Vector[3]\n n Integer\n}\n")
 
-	if _, res := (Config{}).Constraints(s); !res.HasCode(E_NEO4J_INVALID_IDENTIFIER) {
-		t.Fatalf("the default configuration accepts the name, so the fixture asserts nothing: %s", res)
+	if _, err := (Config{}).Constraints(s); !errors.Is(err, E_NEO4J_INVALID_IDENTIFIER) {
+		t.Fatalf("the default configuration accepts the name, so the fixture asserts nothing: %s", err)
 	}
 	{
-		constraints, res := Config{TypeConstraints: NoProperties}.Constraints(s)
-		if !res.OK() {
-			t.Fatalf("refused: %s", res)
+		constraints, err := Config{TypeConstraints: NoProperties}.Constraints(s)
+		if err != nil {
+			t.Fatalf("refused: %s", err)
 		}
 		var kinds []string
 		for _, c := range constraints {
@@ -174,12 +178,12 @@ func TestConstraints_ScalarTypesOffEmitsNoTypeConstraintAndChecksNoListName(t *t
 func TestConstraints_RequiredOnlyChecksNoOptionalListName(t *testing.T) {
 	t.Parallel()
 	optional := loadInline(t, "schema \"le\"\ntype A {\n id String primary\n order List<String>\n tags List<String> required\n}\n")
-	if _, res := (Config{}).Constraints(optional); !res.HasCode(E_NEO4J_INVALID_IDENTIFIER) {
-		t.Fatalf("the default configuration accepts the name, so the fixture asserts nothing: %s", res)
+	if _, err := (Config{}).Constraints(optional); !errors.Is(err, E_NEO4J_INVALID_IDENTIFIER) {
+		t.Fatalf("the default configuration accepts the name, so the fixture asserts nothing: %s", err)
 	}
-	constraints, res := Config{TypeConstraints: RequiredProperties}.Constraints(optional)
-	if !res.OK() {
-		t.Fatalf("refused: %s", res)
+	constraints, err := Config{TypeConstraints: RequiredProperties}.Constraints(optional)
+	if err != nil {
+		t.Fatalf("refused: %s", err)
 	}
 	var typed []string
 	for _, c := range constraints {
@@ -193,8 +197,8 @@ func TestConstraints_RequiredOnlyChecksNoOptionalListName(t *testing.T) {
 	}
 
 	required := loadInline(t, "schema \"le\"\ntype A {\n id String primary\n order List<String> required\n}\n")
-	if _, res := (Config{TypeConstraints: RequiredProperties}).Constraints(required); !res.HasCode(E_NEO4J_INVALID_IDENTIFIER) {
-		t.Errorf("a required list's name was not checked: %s", res)
+	if _, err := (Config{TypeConstraints: RequiredProperties}).Constraints(required); !errors.Is(err, E_NEO4J_INVALID_IDENTIFIER) {
+		t.Errorf("a required list's name was not checked: %s", err)
 	}
 }
 
@@ -205,20 +209,20 @@ func TestConstraints_RequiredOnlyChecksNoOptionalListName(t *testing.T) {
 func TestConstraints_CommunityChecksNoNameItDoesNotWrite(t *testing.T) {
 	t.Parallel()
 	s := loadInline(t, "schema \"le\"\ntype A {\n id String primary\n order List<String>\n match String required\n}\n")
-	if _, res := (Config{}).Constraints(s); !res.HasCode(E_NEO4J_INVALID_IDENTIFIER) {
-		t.Fatalf("Enterprise accepts the names, so the fixture asserts nothing: %s", res)
+	if _, err := (Config{}).Constraints(s); !errors.Is(err, E_NEO4J_INVALID_IDENTIFIER) {
+		t.Fatalf("Enterprise accepts the names, so the fixture asserts nothing: %s", err)
 	}
-	constraints, res := Config{Edition: Community}.Constraints(s)
-	if !res.OK() {
-		t.Fatalf("Community refused a name no statement writes: %s", res)
+	constraints, err := Config{Edition: Community}.Constraints(s)
+	if err != nil {
+		t.Fatalf("Community refused a name no statement writes: %s", err)
 	}
 	if len(constraints) != 1 || constraints[0].Kind != ConstraintUnique || !slices.Equal(constraints[0].Properties, []string{"id"}) {
 		t.Errorf("Community emitted %+v, want the UNIQUE on id alone", constraints)
 	}
 
 	key := loadInline(t, "schema \"le\"\ntype A {\n order String primary\n}\n")
-	if _, res := (Config{Edition: Community}).Constraints(key); !res.HasCode(E_NEO4J_INVALID_IDENTIFIER) {
-		t.Errorf("Community did not check the name its UNIQUE writes: %s", res)
+	if _, err := (Config{Edition: Community}).Constraints(key); !errors.Is(err, E_NEO4J_INVALID_IDENTIFIER) {
+		t.Errorf("Community did not check the name its UNIQUE writes: %s", err)
 	}
 }
 
@@ -232,7 +236,9 @@ func TestConstraints_ANameIsJudgedOnce(t *testing.T) {
 		"schema \"le\"\ntype A {\n order String primary\n}\n",
 		"schema \"le\"\ntype A {\n id String primary\n order List<String> required\n}\n",
 	} {
-		_, res := Config{}.Constraints(loadInline(t, src))
+		_, res := diagtest.Capture(t, func(warn func(diag.Issue)) ([]Constraint, error) {
+			return Config{}.Constraints(loadInline(t, src), WithWarnings(warn))
+		})
 		n := 0
 		for iss := range res.Issues() {
 			if iss.Code() == E_NEO4J_INVALID_IDENTIFIER {
@@ -268,7 +274,9 @@ func TestConstraints_ANameIsJudgedOncePerDeclaredProperty(t *testing.T) {
 			[]string{`declared in B`},
 		},
 	} {
-		_, res := Config{}.Constraints(loadInline(t, c.src))
+		_, res := diagtest.Capture(t, func(warn func(diag.Issue)) ([]Constraint, error) {
+			return Config{}.Constraints(loadInline(t, c.src), WithWarnings(warn))
+		})
 		var got []string
 		for iss := range res.Issues() {
 			if iss.Code() == E_NEO4J_INVALID_IDENTIFIER {
@@ -295,7 +303,9 @@ func TestConstraints_CommunityCountsWhatARefusedNameWouldOmit(t *testing.T) {
 	t.Parallel()
 	for _, key := range []string{"id", "order"} {
 		s := loadInline(t, "schema \"le\"\ntype T {\n "+key+" String primary\n note String required\n}\n")
-		_, res := Config{Edition: Community}.Constraints(s)
+		_, res := diagtest.Capture(t, func(warn func(diag.Issue)) ([]Constraint, error) {
+			return Config{Edition: Community}.Constraints(s, WithWarnings(warn))
+		})
 		found := false
 		for iss := range res.Issues() {
 			if iss.Code() == W_NEO4J_EDITION_CONSTRAINT_OMITTED {

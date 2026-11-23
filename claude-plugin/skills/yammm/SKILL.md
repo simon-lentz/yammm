@@ -32,7 +32,7 @@ generator path:
 The two paths are independent: the data path carries instances, while the
 generators are schema-in, bytes-out and never touch instance data.
 
-An operation that reports diagnostics returns a `diag.Result`, beside the value where the call produces one, with stable error codes and precise source locations. Some operations return an `error` instead, among them the Neo4j batch query builders and the gogen and markdown generators. Loaded schemas and validated instances are immutable and thread-safe; a snapshot has no method that changes it and is safe for concurrent reads, and a record is a handle, so no caller holds its address.
+Every call that can fail returns `(T, error)`, or an `error` alone. A call that judges its input returns its failures as a `*diag.ResultError`, read with `errors.AsType` and tested by code with `errors.Is`, with stable error codes and precise source locations; a Warning, Info or Hint goes to the call's `WithWarnings` callback, never into the error. Some operations return a plain `error`, among them the Neo4j batch query builders and the gogen and markdown generators. Loaded schemas and validated instances are immutable and thread-safe; a snapshot has no method that changes it and is safe for concurrent reads, and a record is a handle, so no caller holds its address.
 
 ---
 
@@ -67,7 +67,7 @@ Load schemas, validate raw data, build instance graphs, persist snapshots, and w
 ## Key Design Principles
 
 - **Immutability**: Loaded schemas and validated instances are immutable and thread-safe; a snapshot has no method that changes it and is safe for concurrent reads, and a record is a handle, so no caller holds its address.
-- **Structured diagnostics**: An operation that reports diagnostics returns a `diag.Result`, beside the value where the call produces one. The Neo4j batch query builders and the `gogen` and `markdown` generators return an `error`. Stable error codes (`E_*`). Precise source locations.
+- **Structured diagnostics**: A call returns its failures as a `*diag.ResultError`, after its value where it has one, and hands each warning to its `WithWarnings` callback. The Neo4j batch query builders and the `gogen` and `markdown` generators return a plain `error`. Stable error codes (`E_*`). Precise source locations.
 - **Layer discipline**: Foundation (`location`, `diag`, `immutable`) -> Primary API (`schema`, `instance`, `graph`, `snapshot`) -> Generators (`schema/cypher`, `schema/gogen`, `schema/markdown`) and the Neo4j write path (`neo4j`). `neo4j` imports the library; the library never imports `neo4j`.
 - **Deterministic output**: Snapshots, graph traversal, and diagnostic ordering are deterministic and reproducible.
 

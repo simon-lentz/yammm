@@ -2,8 +2,10 @@ package mdsnippet
 
 import (
 	"context"
+	"errors"
 	"strings"
 
+	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -57,8 +59,7 @@ func AssertLoads(t TB, blocks []Block) (checked int) {
 			continue
 		}
 		wrapped := b.WrapForLoading()
-		_, result := schema.LoadString(context.Background(), wrapped, "snippet.yammm")
-		if err := result.Err(); err != nil {
+		if _, err := schema.LoadString(context.Background(), wrapped, "snippet.yammm"); err != nil {
 			t.Errorf("%s does not load:\n%v\n  source:\n%s", b.Ref(), err, Indent(wrapped))
 		}
 		checked++
@@ -80,8 +81,7 @@ func AssertInvalid(t TB, blocks []Block) (checked int) {
 			continue
 		}
 		wrapped := b.WrapForLoading()
-		_, result := schema.LoadString(context.Background(), wrapped, "snippet.yammm")
-		if result.Err() == nil {
+		if _, err := schema.LoadString(context.Background(), wrapped, "snippet.yammm"); err == nil {
 			t.Errorf("%s is tagged %s but loads CLEAN — either the example is no "+
 				"longer wrong (retag it, and check the prose around it still holds) "+
 				"or the loader stopped rejecting it:\n  source:\n%s",
@@ -112,10 +112,16 @@ func AssertDocumentedDiagnostics(t TB, blocks []Block) (checked int) {
 
 		// Matched by STRING rather than by constructing a diag.Code: NewCode
 		// panics on a name already registered, which every real code is.
-		_, result := schema.LoadString(context.Background(), b.WrapForLoading(), "snippet.yammm")
+		// The code may be a warning's, so every issue the load draws is read.
+		issues := diag.NewCollector(diag.NoLimit)
+		_, err := schema.LoadString(context.Background(), b.WrapForLoading(), "snippet.yammm",
+			schema.WithWarnings(issues.Collect))
+		if re, ok := errors.AsType[*diag.ResultError](err); ok {
+			issues.Merge(re.Result)
+		}
 		var got []string
 		found := false
-		for iss := range result.Issues() {
+		for iss := range issues.Result().Issues() {
 			code := iss.Code().String()
 			got = append(got, code)
 			if code == want {

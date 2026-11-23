@@ -1,6 +1,9 @@
 package cypher
 
-import "github.com/simon-lentz/yammm/internal/mapping"
+import (
+	"github.com/simon-lentz/yammm/diag"
+	"github.com/simon-lentz/yammm/internal/mapping"
+)
 
 // Config is the storage mapping from a schema to a Neo4j graph: how a type's
 // label is composed and which constraints its properties get. Its zero value is
@@ -74,5 +77,36 @@ func (c Config) typeConstraintsFor(required bool) bool {
 		return required
 	default:
 		return false
+	}
+}
+
+// Option configures one call of this package, where a [Config] is the setting
+// every call shares. Only [Config.Constraints] takes an Option: a method that
+// can draw no issue below failure severity takes none.
+type Option func(*callConfig)
+
+type callConfig struct {
+	// warnings receives each issue below failure severity a call draws; nil
+	// discards them.
+	warnings func(diag.Issue)
+}
+
+func newCallConfig(opts []Option) callConfig {
+	var cfg callConfig
+	for _, o := range opts {
+		o(&cfg)
+	}
+	return cfg
+}
+
+// WithWarnings sets fn to receive every issue below failure severity that
+// [Config.Constraints] draws: [W_NEO4J_NODE_KEY_UNSUPPORTED] and
+// [W_NEO4J_EDITION_CONSTRAINT_OMITTED]. fn is called as each is found, in that
+// order, on the goroutine that made the call and before it returns; no such
+// issue is ever in the call's error. Without the option, and with a nil fn,
+// such issues are discarded.
+func WithWarnings(fn func(diag.Issue)) Option {
+	return func(c *callConfig) {
+		c.warnings = fn
 	}
 }

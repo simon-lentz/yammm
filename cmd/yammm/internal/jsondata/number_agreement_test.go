@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/simon-lentz/yammm/internal/diagtest"
 	"github.com/simon-lentz/yammm/internal/yammmtest/sourcetest"
 
 	"github.com/simon-lentz/yammm/cmd/yammm/internal/jsondata"
@@ -51,8 +52,8 @@ var agreementLiterals = []string{
 func TestNumberRule_EveryReaderAgreesWithEncodingJSON(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	s, res := schema.LoadString(ctx, agreementSchema, "agree.yammm")
-	if err := res.Err(); err != nil {
+	s, loadErr := schema.LoadString(ctx, agreementSchema, "agree.yammm")
+	if err := loadErr; err != nil {
 		t.Fatalf("load: %v", err)
 	}
 	v := instance.NewValidator(s)
@@ -125,15 +126,15 @@ func jsonReader(ctx context.Context, t *testing.T, v *instance.Validator, prop, 
 	}
 	doc := fmt.Sprintf(`{"T":[{"id":"a",%s,"%s":%s}]}`, other, prop, lit)
 	parsed, pres := jsondata.Parse(ctx, sourcetest.ID("agree.json"), []byte(doc))
-	if err := pres.Err(); err != nil {
+	if err := diagtest.Err(pres); err != nil {
 		t.Fatalf("JSON parse %s: %v", doc, err)
 	}
 	return validated(ctx, v, parsed["T"].Elements[0].RawInstance, prop)
 }
 
 func validated(ctx context.Context, v *instance.Validator, raw instance.RawInstance, prop string) (any, bool) {
-	vi, vres := v.ValidateOne(ctx, "T", raw)
-	if !vres.OK() {
+	vi, err := v.ValidateOne(ctx, "T", raw)
+	if err != nil {
 		return nil, false
 	}
 	got, _ := vi.Property(prop)
@@ -145,17 +146,17 @@ func validated(ctx context.Context, v *instance.Validator, raw instance.RawInsta
 func ysTemplate(t *testing.T, s schema.Schema, v *instance.Validator) []byte {
 	t.Helper()
 	ctx := context.Background()
-	vi, vres := v.ValidateOne(ctx, "T", instance.RawInstance{Properties: map[string]any{"id": "a", "n": int64(0), "f": 0.5}})
-	if vres.HasErrors() {
-		t.Fatalf("validate: %s", vres)
+	vi, validateErr := v.ValidateOne(ctx, "T", instance.RawInstance{Properties: map[string]any{"id": "a", "n": int64(0), "f": 0.5}})
+	if validateErr != nil {
+		t.Fatalf("validate: %s", validateErr)
 	}
 	g := graph.New(s)
-	if r := g.Add(ctx, vi); r.HasErrors() {
-		t.Fatalf("add: %s", r)
+	if err := g.Add(ctx, vi); err != nil {
+		t.Fatalf("add: %s", err)
 	}
-	data, mres := snapshot.Marshal(ctx, g.Snapshot())
-	if mres.HasErrors() {
-		t.Fatalf("marshal: %s", mres)
+	data, err := snapshot.Marshal(ctx, g.Snapshot())
+	if err != nil {
+		t.Fatalf("marshal: %s", err)
 	}
 	for _, anchor := range []string{`"n":0`, `"f":0.5`} {
 		if bytes.Count(data, []byte(anchor)) != 1 {
@@ -171,11 +172,13 @@ func ysReader(ctx context.Context, t *testing.T, s schema.Schema, ys []byte, pro
 	t.Helper()
 	anchor := map[string]string{"n": `"n":0`, "f": `"f":0.5`}[prop]
 	data := bytes.Replace(ys, []byte(anchor), []byte(`"`+prop+`":`+lit), 1)
-	_, lres := snapshot.Unmarshal(ctx, data, s, snapshot.WithIntegrityCheck(false), snapshot.WithRevalidation(diag.Error))
+	_, lres := diagtest.Capture(t, func(warn func(diag.Issue)) (graph.Snapshot, error) {
+		return snapshot.Unmarshal(ctx, data, s, snapshot.WithIntegrityCheck(false), snapshot.WithRevalidation(diag.Error), snapshot.WithWarnings(warn))
+	})
 	for issue := range lres.Issues() {
 		if issue.Code() != diag.E_TYPE_MISMATCH {
 			t.Fatalf(".ys load drew %s, want at most E_TYPE_MISMATCH", lres)
 		}
 	}
-	return !lres.HasErrors()
+	return diagtest.Err(lres) == nil
 }

@@ -33,37 +33,35 @@ import (
 // time that has no RFC 3339 form, which no reader would return as that time;
 // and a metadata key or value, or an instance provenance's source name or
 // path, that is not valid UTF-8, which encoding/json would write as U+FFFD.
-func Marshal(ctx context.Context, snap graph.Snapshot, opts ...Option) ([]byte, diag.Result) {
+// Each failure returns nil and a *[diag.ResultError]; Marshal draws no warning.
+// It takes [WithIndent], [WithCreatedAt] and [WithMetadata], and refuses any
+// other option with an error naming it.
+func Marshal(ctx context.Context, snap graph.Snapshot, opts ...Option) ([]byte, error) {
 	if snap.IsZero() {
 		panic("snapshot.Marshal: zero Snapshot")
 	}
 	if ctx == nil {
 		panic("snapshot.Marshal: nil context")
 	}
+	cfg := newConfig(opts)
+	if err := cfg.refuse("Marshal", optIndent, optCreatedAt, optMetadata); err != nil {
+		return nil, err
+	}
 	if err := ctx.Err(); err != nil {
-		c := diag.NewCollector(0)
-		c.Collect(diag.NewIssue(diag.Fatal, diag.E_CONTEXT_CANCELLED, err.Error()).Build())
-		return nil, c.Result()
+		return nil, cancelled(err)
 	}
 
-	cfg := applyOptions(opts)
 	if bad, ok := nonWhitespaceIndent(cfg.indent); ok {
-		c := diag.NewCollector(0)
-		c.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_MALFORMED,
+		return nil, failure(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_MALFORMED,
 			fmt.Sprintf("indent must be JSON whitespace; it is written between JSON tokens and %q produces a document that is not JSON", bad)).
 			Build())
-		return nil, c.Result()
 	}
 	createdAt, err := createdAtMember(cfg.createdAt)
 	if err != nil {
-		c := diag.NewCollector(0)
-		c.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_MALFORMED, "snapshot.Marshal: "+err.Error()).Build())
-		return nil, c.Result()
+		return nil, failure(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_MALFORMED, "snapshot.Marshal: "+err.Error()).Build())
 	}
 	if err := invalidMetadata(cfg.metadata); err != nil {
-		c := diag.NewCollector(0)
-		c.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_MALFORMED, "snapshot.Marshal: "+err.Error()).Build())
-		return nil, c.Result()
+		return nil, failure(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_MALFORMED, "snapshot.Marshal: "+err.Error()).Build())
 	}
 	s := snap.Schema()
 
@@ -79,9 +77,7 @@ func Marshal(ctx context.Context, snap graph.Snapshot, opts ...Option) ([]byte, 
 	groups, err := marshalInstances(ctx, view, s, tt)
 	if err != nil {
 		if ctxErr := ctx.Err(); ctxErr != nil {
-			c := diag.NewCollector(0)
-			c.Collect(diag.NewIssue(diag.Fatal, diag.E_CONTEXT_CANCELLED, ctxErr.Error()).Build())
-			return nil, c.Result()
+			return nil, cancelled(ctxErr)
 		}
 		return nil, marshalFatalErr("instances", err)
 	}
@@ -405,7 +401,7 @@ func assembleDocument(
 	attestation *attestationWire,
 	typesJSON, instancesJSON, diagJSON []byte,
 	indent string, version int,
-) ([]byte, diag.Result) {
+) ([]byte, error) {
 	// Step 3-5: Build canonical-form document (integrity_hash = "").
 	canonBytes := buildDocument(
 		schemaHash, schemaName, createdAt, features, metadata,
@@ -427,7 +423,7 @@ func assembleDocument(
 		indent, version,
 	)
 
-	return finalBytes, diag.OK()
+	return finalBytes, nil
 }
 
 // createdAtMember returns the created_at member's JSON text for t, nil for a
@@ -705,13 +701,10 @@ func writeJSONString(b *strings.Builder, s string) {
 // marshalFatalErr reports a marshal failure. A text [errInvalidProvenance] names
 // is the caller's to correct; any other failure is a broken invariant of the
 // snapshot: every value a snapshot holds is one the wire carries.
-func marshalFatalErr(section string, err error) diag.Result {
-	c := diag.NewCollector(0)
+func marshalFatalErr(section string, err error) error {
 	if errors.Is(err, errInvalidProvenance) {
-		c.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_MALFORMED, "snapshot.Marshal: "+err.Error()).Build())
-		return c.Result()
+		return failure(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_MALFORMED, "snapshot.Marshal: "+err.Error()).Build())
 	}
-	c.Collect(diag.NewIssue(diag.Fatal, diag.E_INTERNAL,
+	return failure(diag.NewIssue(diag.Fatal, diag.E_INTERNAL,
 		fmt.Sprintf("snapshot.Marshal: failed to serialize %s: %v", section, err)).Build())
-	return c.Result()
 }

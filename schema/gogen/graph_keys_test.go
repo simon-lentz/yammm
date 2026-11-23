@@ -40,9 +40,9 @@ func TestMarshal_GraphKeysAreTheTagsTheEntrySchemaAddresses(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		s, res := schema.Load(context.Background(), abs)
-		if res.HasErrors() {
-			t.Fatalf("load %s: %v", f, res.Err())
+		s, loadErr := schema.Load(context.Background(), abs)
+		if loadErr != nil {
+			t.Fatalf("load %s: %v", f, loadErr)
 		}
 		var want []string
 		for sc := range s.Closure() {

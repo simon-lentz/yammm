@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/simon-lentz/yammm/diag"
+	"github.com/simon-lentz/yammm/internal/diagtest"
 )
 
 // detailFor returns the named detail on the first issue carrying code.
@@ -93,12 +94,12 @@ func TestScanDir_AFileFailureStaysOnItsEntry(t *testing.T) {
 	}
 
 	entries, res := scanDir(t.Context(), dir)
-	if !res.OK() {
+	if diagtest.Err(res) != nil {
 		t.Fatalf("a file failure reached the scan's result: %s", res)
 	}
 	failed := map[string]bool{}
 	for _, entry := range entries {
-		failed[entry.Name] = entry.Result.HasErrors()
+		failed[entry.Name] = entry.Err != nil
 	}
 	if len(failed) != 2 || !failed["bad.ys"] || failed["test.ys"] {
 		t.Errorf("entries failed = %v, want bad.ys alone of [bad.ys test.ys]", failed)

@@ -5,19 +5,20 @@ import (
 	"testing"
 
 	"github.com/simon-lentz/yammm/instance"
+	"github.com/simon-lentz/yammm/internal/diagtest"
 	"github.com/simon-lentz/yammm/schema"
 )
 
 func listElemSchema(t *testing.T) schema.Schema {
 	t.Helper()
-	s, result := schema.LoadString(t.Context(), `schema "test"
+	s, err := schema.LoadString(t.Context(), `schema "test"
 type T {
     id String primary
     tags List<String>
     counts List<Integer>
 }`, "test.yammm")
-	if result.HasErrors() {
-		t.Fatalf("schema: %s", result)
+	if err != nil {
+		t.Fatalf("schema: %s", err)
 	}
 	return s
 }
@@ -25,7 +26,9 @@ type T {
 // validateT validates one T and returns the instance and the rendered result.
 func validateT(t *testing.T, s schema.Schema, props map[string]any) (instance.ValidInstance, string) {
 	t.Helper()
-	valid, result := instance.NewValidator(s).ValidateOne(t.Context(), "T", instance.RawInstance{Properties: props})
+	valid, result := diagtest.Issues(t, func() (instance.ValidInstance, error) {
+		return instance.NewValidator(s).ValidateOne(t.Context(), "T", instance.RawInstance{Properties: props})
+	})
 	return valid, result.String()
 }
 
@@ -97,13 +100,13 @@ func TestListNullElement_EmptyListIsValid(t *testing.T) {
 // Vector already rejected a null element inline; the two collection kinds now
 // answer the same way, which is the point of the rule.
 func TestListNullElement_VectorAgreesWithList(t *testing.T) {
-	s, result := schema.LoadString(t.Context(), `schema "test"
+	s, err := schema.LoadString(t.Context(), `schema "test"
 type T {
     id String primary
     v Vector[2]
 }`, "test.yammm")
-	if result.HasErrors() {
-		t.Fatalf("schema: %s", result)
+	if err != nil {
+		t.Fatalf("schema: %s", err)
 	}
 
 	valid, detail := validateT(t, s, map[string]any{"id": "1", "v": []any{1.0, nil}})

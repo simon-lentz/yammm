@@ -7,6 +7,7 @@ import (
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/instance"
+	"github.com/simon-lentz/yammm/internal/diagtest"
 	"github.com/simon-lentz/yammm/internal/instancetest"
 	"github.com/simon-lentz/yammm/schema"
 )
@@ -26,9 +27,9 @@ part type Wheel {
 
 func loadCarSchema(t *testing.T) schema.Schema {
 	t.Helper()
-	s, res := schema.LoadString(t.Context(), carSchema, "guards.yammm")
-	if res.HasErrors() {
-		t.Fatalf("load schema: %s", res.String())
+	s, err := schema.LoadString(t.Context(), carSchema, "guards.yammm")
+	if err != nil {
+		t.Fatalf("load schema: %s", err)
 	}
 	return s
 }
@@ -41,8 +42,8 @@ func TestAdd_ComposedChildAtARoot_Keyed(t *testing.T) {
 	parent := instancetest.Valid(t, s, "Parent", map[string]any{
 		"id": "p1", "name": "n", "children": []any{map[string]any{"id": "c1", "name": "n"}},
 	})
-	result := graph.New(s).Add(t.Context(), firstChild(t, parent))
-	if result.OK() {
+	result := diagtest.Failures(t, graph.New(s).Add(t.Context(), firstChild(t, parent)))
+	if diagtest.Err(result) == nil {
 		t.Fatal("a part-typed root passed Add")
 	}
 	assertHasCode(t, result, diag.E_GRAPH_INVALID_COMPOSITION)
@@ -53,8 +54,8 @@ func TestAdd_ComposedChildAtARoot_Keyless(t *testing.T) {
 	t.Parallel()
 	s := loadCarSchema(t)
 	car := instancetest.Valid(t, s, "Car", map[string]any{"vin": "v1", "spare": []any{map[string]any{"position": "left"}}})
-	result := graph.New(s).Add(t.Context(), firstChild(t, car))
-	if result.OK() {
+	result := diagtest.Failures(t, graph.New(s).Add(t.Context(), firstChild(t, car)))
+	if diagtest.Err(result) == nil {
 		t.Fatal("a root of a type with no primary key passed Add")
 	}
 	assertHasCode(t, result, diag.E_GRAPH_MISSING_PK)
@@ -118,8 +119,8 @@ type Top {
 	}})
 
 	g := graph.New(schemaA)
-	if r := g.Add(ctx, middle); !r.OK() {
-		t.Fatalf("a composed child of a transitively imported type was refused: %s", r.String())
+	if err := g.Add(ctx, middle); err != nil {
+		t.Fatalf("a composed child of a transitively imported type was refused: %s", err)
 	}
 	insts := slices.Collect(g.Snapshot().InstancesOf(middleID))
 	if len(insts) != 1 || insts[0].ComposedCount("PARTS") != 2 {
@@ -145,9 +146,9 @@ part type Wheel {
 	position String required
 }
 `
-	sm, res := schema.LoadString(ctx, manySchema, "guards_many.yammm")
-	if res.HasErrors() {
-		t.Fatalf("load: %s", res.String())
+	sm, err := schema.LoadString(ctx, manySchema, "guards_many.yammm")
+	if err != nil {
+		t.Fatalf("load: %s", err)
 	}
 
 	g := graph.New(sm)
@@ -155,8 +156,8 @@ part type Wheel {
 	for _, position := range []string{"left", "right"} {
 		wheels = append(wheels, map[string]any{"position": position})
 	}
-	if r := g.Add(ctx, parentWith(t, sm, "Car", []any{"v1"}, map[string]any{"vin": "v1"}, "WHEELS", wheels...)); !r.OK() {
-		t.Fatalf("keyless siblings were rejected: %s", r.String())
+	if err := g.Add(ctx, parentWith(t, sm, "Car", []any{"v1"}, map[string]any{"vin": "v1"}, "WHEELS", wheels...)); err != nil {
+		t.Fatalf("keyless siblings were rejected: %s", err)
 	}
 
 	car := slices.Collect(g.Snapshot().InstancesOf(mustTypeID(t, sm, "Car")))[0]

@@ -8,6 +8,7 @@ import (
 	"testing"
 	"unicode/utf8"
 
+	"github.com/simon-lentz/yammm/internal/diagtest"
 	"github.com/simon-lentz/yammm/internal/schematest"
 
 	"github.com/simon-lentz/yammm/internal/snapparts"
@@ -112,9 +113,9 @@ func (c *echoChecker) err(where string, err error) {
 func TestMessages_RepeatAValueCutToItsHead(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	s, res := schema.LoadString(ctx, echoSchema, "echo.yammm")
-	if res.HasErrors() {
-		t.Fatal(res)
+	s, loadErr := schema.LoadString(ctx, echoSchema, "echo.yammm")
+	if loadErr != nil {
+		t.Fatal(loadErr)
 	}
 	typ, _ := s.Type("T")
 	c := &echoChecker{t: t, judged: map[string]int{}}
@@ -124,22 +125,26 @@ func TestMessages_RepeatAValueCutToItsHead(t *testing.T) {
 		"e": longText, "d": longText, "ts": longText, "u": longText, "p": longText,
 		"s": longText + "\xff", "n": json.Number(longDigits), "f": json.Number(longDigits + "e400"),
 	} {
-		_, r := v.ValidateOne(ctx, "T", instance.RawInstance{Properties: map[string]any{"id": "a", prop: val}})
-		if r.OK() {
+		_, r := diagtest.Issues(t, func() (instance.ValidInstance, error) {
+			return v.ValidateOne(ctx, "T", instance.RawInstance{Properties: map[string]any{"id": "a", prop: val}})
+		})
+		if diagtest.Err(r) == nil {
 			t.Errorf("property %s: the long value was accepted", prop)
 		}
 		c.result("validator", r)
 	}
-	_, r := v.ValidateOne(ctx, "T", instance.RawInstance{Properties: map[string]any{"id": "a", "te\xffxt": "x"}})
+	_, r := diagtest.Issues(t, func() (instance.ValidInstance, error) {
+		return v.ValidateOne(ctx, "T", instance.RawInstance{Properties: map[string]any{"id": "a", "te\xffxt": "x"}})
+	})
 	c.result("validator", r)
 
 	g := graph.New(s)
 	for range 2 {
-		inst, r := v.ValidateOne(ctx, "T", instance.RawInstance{Properties: map[string]any{"id": longText}})
+		inst, err := v.ValidateOne(ctx, "T", instance.RawInstance{Properties: map[string]any{"id": longText}})
 		if inst.IsZero() {
-			t.Fatal(r)
+			t.Fatal(err)
 		}
-		c.result("graph.Add", g.Add(ctx, inst))
+		c.result("graph.Add", diagtest.Failures(t, g.Add(ctx, inst)))
 	}
 	root := func(key string, props map[string]any) snapparts.Instance {
 		return snapparts.Instance{TypeID: typ.ID(), PrimaryKey: immutable.WrapKey([]any{key}), Properties: immutable.WrapProperties(props)}
@@ -150,7 +155,9 @@ func TestMessages_RepeatAValueCutToItsHead(t *testing.T) {
 		Instances: []snapparts.Instance{root("h1", map[string]any{"id": "h1", "s": marker})},
 	})
 	for _, spelled := range []string{longText + "\xff", `\ud800` + longText} {
-		_, r = snapshot.Unmarshal(ctx, bytes.Replace(clean, []byte(marker), []byte(spelled), 1), s)
+		_, r = diagtest.Capture(t, func(warn func(diag.Issue)) (graph.Snapshot, error) {
+			return snapshot.Unmarshal(ctx, bytes.Replace(clean, []byte(marker), []byte(spelled), 1), s, snapshot.WithWarnings(warn))
+		})
 		refused := false
 		for issue := range r.Issues() {
 			refused = refused || issue.Code() == diag.E_SNAPSHOT_MALFORMED
@@ -172,7 +179,9 @@ func TestMessages_RepeatAValueCutToItsHead(t *testing.T) {
 		},
 		Duplicates: []snapparts.Instance{second},
 	})
-	_, r = snapshot.Unmarshal(ctx, data, s, snapshot.WithRevalidation(diag.Warning))
+	_, r = diagtest.Capture(t, func(warn func(diag.Issue)) (graph.Snapshot, error) {
+		return snapshot.Unmarshal(ctx, data, s, snapshot.WithRevalidation(diag.Warning), snapshot.WithWarnings(warn))
+	})
 	c.result("snapshot.Load", r)
 
 	for _, k := range []schema.Constraint{schematest.Constraint(t, "Timestamp"), schematest.Constraint(t, "Date")} {

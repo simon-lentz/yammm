@@ -8,6 +8,7 @@ import (
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/instance"
+	"github.com/simon-lentz/yammm/internal/diagtest"
 	"github.com/simon-lentz/yammm/internal/yammmtest"
 	"github.com/simon-lentz/yammm/schema"
 	"github.com/simon-lentz/yammm/schema/cypher"
@@ -17,8 +18,8 @@ import (
 func loadSchema(t *testing.T, name string) schema.Schema {
 	t.Helper()
 	yammmtest.RequireNoModuleRoot(t, schema.FindModuleRoot)
-	s, result := schema.Load(context.Background(), filepath.Join("testdata", name))
-	if err := result.Err(); err != nil {
+	s, loadErr := schema.Load(context.Background(), filepath.Join("testdata", name))
+	if err := loadErr; err != nil {
 		t.Fatalf("schema %s has errors: %v", name, err)
 	}
 	return s
@@ -34,9 +35,9 @@ func loadSchemaAndValidator(t *testing.T, name string) (schema.Schema, *instance
 // mustShape returns the shape the write path derives for s under a.
 func mustShape(t *testing.T, a cypher.Config, s schema.Schema) *graphShape {
 	t.Helper()
-	shape, res := shapeFor(a, s)
-	if res.HasErrors() {
-		t.Fatalf("shapeFor: %s", res)
+	shape, err := shapeFor(a, s)
+	if err != nil {
+		t.Fatalf("shapeFor: %s", err)
 	}
 	return shape
 }
@@ -48,12 +49,12 @@ func buildGraphResult(t *testing.T, s schema.Schema, v *instance.Validator, inst
 	g := graph.New(s)
 	for typeName, records := range instances {
 		for _, props := range records {
-			valid, valResult := v.ValidateOne(ctx, typeName, instance.RawInstance{Properties: props})
-			if !valResult.OK() {
-				t.Fatalf("validate %s failed: %v", typeName, valResult)
+			valid, validateErr := v.ValidateOne(ctx, typeName, instance.RawInstance{Properties: props})
+			if validateErr != nil {
+				t.Fatalf("validate %s failed: %v", typeName, validateErr)
 			}
-			addResult := g.Add(ctx, valid)
-			if err := addResult.Err(); err != nil {
+			addErr := g.Add(ctx, valid)
+			if err := addErr; err != nil {
 				t.Fatalf("graph.Add %s issues: %v", typeName, err)
 			}
 		}
@@ -85,10 +86,13 @@ func schemaType(t *testing.T, s schema.Schema, name string) schema.Type {
 }
 
 // constraintStatements returns the statement of each constraint c emits for
-// s, and nil when the result is not OK or there is none.
-func constraintStatements(c cypher.Config, s schema.Schema) ([]string, diag.Result) {
-	constraints, result := c.Constraints(s)
-	if !result.OK() || len(constraints) == 0 {
+// s, and nil when the call fails or there is none, beside every issue it drew.
+func constraintStatements(tb testing.TB, c cypher.Config, s schema.Schema) ([]string, diag.Result) {
+	tb.Helper()
+	constraints, result := diagtest.Capture(tb, func(warn func(diag.Issue)) ([]cypher.Constraint, error) {
+		return c.Constraints(s, cypher.WithWarnings(warn))
+	})
+	if (diagtest.Err(result) != nil) || len(constraints) == 0 {
 		return nil, result
 	}
 	stmts := make([]string, len(constraints))
@@ -99,10 +103,13 @@ func constraintStatements(c cypher.Config, s schema.Schema) ([]string, diag.Resu
 }
 
 // indexStatements returns the statement of each index c emits for s, and nil
-// when the result is not OK or there is none.
-func indexStatements(c cypher.Config, s schema.Schema) ([]string, diag.Result) {
-	indexes, result := c.Indexes(s)
-	if !result.OK() || len(indexes) == 0 {
+// when the call fails or there is none, beside the failures it drew.
+func indexStatements(tb testing.TB, c cypher.Config, s schema.Schema) ([]string, diag.Result) {
+	tb.Helper()
+	indexes, result := diagtest.Issues(tb, func() ([]cypher.Index, error) {
+		return c.Indexes(s)
+	})
+	if (diagtest.Err(result) != nil) || len(indexes) == 0 {
 		return nil, result
 	}
 	stmts := make([]string, len(indexes))
@@ -116,8 +123,8 @@ func indexStatements(c cypher.Config, s schema.Schema) ([]string, diag.Result) {
 // not load.
 func loadInline(t *testing.T, src string) schema.Schema {
 	t.Helper()
-	s, result := schema.LoadString(t.Context(), src, "inline.yammm")
-	if err := result.Err(); err != nil {
+	s, loadErr := schema.LoadString(t.Context(), src, "inline.yammm")
+	if err := loadErr; err != nil {
 		t.Fatalf("fixture is not valid yammm: %v", err)
 	}
 	return s

@@ -9,6 +9,8 @@ import (
 	"testing"
 
 	"github.com/simon-lentz/yammm/diag"
+	"github.com/simon-lentz/yammm/graph"
+	"github.com/simon-lentz/yammm/internal/diagtest"
 	"github.com/simon-lentz/yammm/schema"
 	"github.com/simon-lentz/yammm/snapshot"
 )
@@ -33,9 +35,9 @@ func TestReaders_AFifthTopLevelKeyIsCut(t *testing.T) {
 	s := testSchema(t)
 	snap := buildSnapshot(t, s,
 		mustValidInstance(t, s, "Company", []any{"c1"}, map[string]any{"id": "c1", "title": "Acme"}))
-	data, res := snapshot.Marshal(ctx, snap)
-	if res.HasErrors() {
-		t.Fatalf("marshal: %v", res)
+	data, err := snapshot.Marshal(ctx, snap)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
 	}
 
 	key := strings.Repeat("k", 40)
@@ -46,9 +48,23 @@ func TestReaders_AFifthTopLevelKeyIsCut(t *testing.T) {
 		name string
 		read func() diag.Result
 	}{
-		{"Load", func() diag.Result { _, r := snapshot.Unmarshal(ctx, doc, s); return r }},
-		{"Verify", func() diag.Result { return snapshot.Verify(ctx, doc, s) }},
-		{"Info", func() diag.Result { _, r := snapshot.Stat(ctx, doc); return r }},
+		{"Load", func() diag.Result {
+			_, r := diagtest.Capture(t, func(warn func(diag.Issue)) (graph.Snapshot, error) {
+				return snapshot.Unmarshal(ctx, doc, s, snapshot.WithWarnings(warn))
+			})
+			return r
+		}},
+		{"Verify", func() diag.Result {
+			return diagtest.CaptureErr(t, func(warn func(diag.Issue)) error {
+				return snapshot.Verify(ctx, doc, s, snapshot.WithWarnings(warn))
+			})
+		}},
+		{"Info", func() diag.Result {
+			_, r := diagtest.Issues(t, func() (*snapshot.Info, error) {
+				return snapshot.Stat(ctx, doc)
+			})
+			return r
+		}},
 	}
 	for _, rd := range readers {
 		t.Run(rd.name, func(t *testing.T) {
@@ -65,14 +81,14 @@ func TestReaders_AFifthTopLevelKeyIsCut(t *testing.T) {
 // message shows whole.
 func longNamedSchema(t *testing.T, typeName string) schema.Schema {
 	t.Helper()
-	s, result := schema.LoadString(t.Context(), fmt.Sprintf(`schema "test"
+	s, err := schema.LoadString(t.Context(), fmt.Sprintf(`schema "test"
 
 type %s {
 	id String primary
 }
 `, typeName), "long_named.yammm")
-	if result.HasErrors() {
-		t.Fatalf("longNamedSchema: %s", result)
+	if err != nil {
+		t.Fatalf("longNamedSchema: %s", err)
 	}
 	return s
 }
@@ -88,9 +104,9 @@ func TestLoad_ARepeatedTypesRowIsShownWholeOnlyWhereTheSchemaDeclaresIt(t *testi
 	s := longNamedSchema(t, declared)
 	snap := buildSnapshot(t, s,
 		mustValidInstance(t, s, declared, []any{"a1"}, map[string]any{"id": "a1"}))
-	data, res := snapshot.Marshal(ctx, snap)
-	if res.HasErrors() {
-		t.Fatalf("marshal: %v", res)
+	data, err := snapshot.Marshal(ctx, snap)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
 	}
 	row := `{"schema":"test","name":"` + declared + `"}`
 	if !bytes.Contains(data, []byte(`"types":[`+row+`]`)) {
@@ -118,7 +134,9 @@ func TestLoad_ARepeatedTypesRowIsShownWholeOnlyWhereTheSchemaDeclaresIt(t *testi
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			doc := bytes.Replace(data, []byte(`"types":[`+row+`]`), []byte(`"types":[`+tc.types+`]`), 1)
-			_, result := snapshot.Unmarshal(ctx, doc, s, snapshot.WithIntegrityCheck(false))
+			_, result := diagtest.Capture(t, func(warn func(diag.Issue)) (graph.Snapshot, error) {
+				return snapshot.Unmarshal(ctx, doc, s, snapshot.WithIntegrityCheck(false), snapshot.WithWarnings(warn))
+			})
 			msgs := malformedMessages(result)
 			if !slices.Contains(msgs, tc.want) {
 				t.Fatalf("E_SNAPSHOT_MALFORMED messages = %q, want one %q", msgs, tc.want)
@@ -136,9 +154,9 @@ func TestSchemalessReaders_ARepeatedTypesRowIsCut(t *testing.T) {
 	s := longNamedSchema(t, declared)
 	snap := buildSnapshot(t, s,
 		mustValidInstance(t, s, declared, []any{"a1"}, map[string]any{"id": "a1"}))
-	data, res := snapshot.Marshal(ctx, snap)
-	if res.HasErrors() {
-		t.Fatalf("marshal: %v", res)
+	data, err := snapshot.Marshal(ctx, snap)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
 	}
 	row := `{"schema":"test","name":"` + declared + `"}`
 	if !bytes.Contains(data, []byte(`"types":[`+row+`]`)) {
@@ -151,9 +169,24 @@ func TestSchemalessReaders_ARepeatedTypesRowIsCut(t *testing.T) {
 		name string
 		read func() diag.Result
 	}{
-		{"Info", func() diag.Result { _, r := snapshot.Stat(ctx, doc); return r }},
-		{"ReadHeader", func() diag.Result { _, r := snapshot.ReadHeader(ctx, bytes.NewReader(doc)); return r }},
-		{"UpdateMetadata", func() diag.Result { _, r := snapshot.UpdateMetadata(ctx, doc, map[string]string{"k": "v"}); return r }},
+		{"Info", func() diag.Result {
+			_, r := diagtest.Issues(t, func() (*snapshot.Info, error) {
+				return snapshot.Stat(ctx, doc)
+			})
+			return r
+		}},
+		{"ReadHeader", func() diag.Result {
+			_, r := diagtest.Issues(t, func() (*snapshot.Header, error) {
+				return snapshot.ReadHeader(ctx, bytes.NewReader(doc))
+			})
+			return r
+		}},
+		{"UpdateMetadata", func() diag.Result {
+			_, r := diagtest.Issues(t, func() ([]byte, error) {
+				return snapshot.UpdateMetadata(ctx, doc, map[string]string{"k": "v"})
+			})
+			return r
+		}},
 	}
 	for _, reader := range readers {
 		t.Run(reader.name, func(t *testing.T) {

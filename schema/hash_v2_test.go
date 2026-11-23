@@ -8,9 +8,9 @@ import (
 
 func loadHashSchema(t *testing.T, src string) schema.Schema {
 	t.Helper()
-	s, res := schema.LoadString(t.Context(), src, "hashv2.yammm")
-	if res.HasErrors() {
-		t.Fatalf("load: %s", res.String())
+	s, err := schema.LoadString(t.Context(), src, "hashv2.yammm")
+	if err != nil {
+		t.Fatalf("load: %s", err)
 	}
 	return s
 }

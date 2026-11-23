@@ -41,9 +41,9 @@ type Floor {
 
 func loadPrimaryKeyOfSchema(t *testing.T) schema.Schema {
 	t.Helper()
-	s, res := schema.LoadString(t.Context(), primaryKeyOfSchema, "pk.yammm")
-	if res.HasErrors() {
-		t.Fatalf("load schema: %s", res.String())
+	s, err := schema.LoadString(t.Context(), primaryKeyOfSchema, "pk.yammm")
+	if err != nil {
+		t.Fatalf("load schema: %s", err)
 	}
 	return s
 }

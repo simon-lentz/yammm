@@ -52,7 +52,7 @@ func BenchmarkSchemaBuilder_FullCycle(b *testing.B) {
 
 func benchSchema(b *testing.B) schema.Schema {
 	b.Helper()
-	s, result := schema.LoadString(b.Context(), `schema "bench"
+	s, err := schema.LoadString(b.Context(), `schema "bench"
 
 type Company {
 	id String primary
@@ -65,8 +65,8 @@ type Person {
 	--> WORKS_AT (_:one) Company
 }
 `, "bench.yammm")
-	if result.HasErrors() {
-		b.Fatalf("benchmark schema build: %s", result)
+	if err != nil {
+		b.Fatalf("benchmark schema build: %s", err)
 	}
 	return s
 }

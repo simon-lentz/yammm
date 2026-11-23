@@ -10,6 +10,8 @@ import (
 	"testing"
 	"unicode/utf8"
 
+	"github.com/simon-lentz/yammm/diag"
+	"github.com/simon-lentz/yammm/internal/diagtest"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -46,7 +48,9 @@ func loadIssues(t *testing.T, source string, siblings map[string]string) []strin
 	if err := os.WriteFile(path, []byte(source), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	_, result := schema.Load(context.Background(), path)
+	_, result := diagtest.Capture(t, func(warn func(diag.Issue)) (schema.Schema, error) {
+		return schema.Load(context.Background(), path, schema.WithWarnings(warn))
+	})
 	placeholder := strings.NewReplacer(rootIdentity(t, dir), "<dir>", dir, "<dir>")
 	var issues []string
 	for iss := range result.Issues() {

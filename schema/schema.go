@@ -186,13 +186,14 @@ func (s Schema) Sources() Sources {
 // module-style imports against: for a plain Load the WithModuleRoot value when
 // given, then the directory of the nearest ancestor holding a
 // [ModuleRootMarker] file and failing that the entry file's own directory,
-// and the canonicalized root argument for LoadSourcesWithEntry (including the
-// "." form).
+// and for LoadSourcesWithEntry the canonicalized [WithModuleRoot] value
+// (including the "." form).
 // A load under [WithSyntheticRoot] reports the synthetic root, which is the
 // root that load resolved module-style imports against.
 //
-// Returns "" when no module root was in play — LoadString sources, or an
-// empty root passed to LoadSourcesWithEntry.
+// Returns "" when no module root was in play — LoadString sources, or a
+// LoadSourcesWithEntry call given no WithSyntheticRoot and no WithModuleRoot or
+// an empty one.
 //
 // The entry schema and every import of one load record that load's root.
 func (s Schema) ModuleRoot() string {

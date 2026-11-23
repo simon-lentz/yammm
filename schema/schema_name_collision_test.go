@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/simon-lentz/yammm/diag"
+	"github.com/simon-lentz/yammm/internal/diagtest"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -46,8 +48,10 @@ type T {
 }
 `)
 
-	_, res := schema.Load(t.Context(), filepath.Join(dir, "main.yammm"), schema.WithModuleRoot(dir))
-	if res.Err() == nil {
+	_, res := diagtest.Capture(t, func(warn func(diag.Issue)) (schema.Schema, error) {
+		return schema.Load(t.Context(), filepath.Join(dir, "main.yammm"), schema.WithModuleRoot(dir), schema.WithWarnings(warn))
+	})
+	if diagtest.Err(res) == nil {
 		t.Fatal("two schemas declaring one name must not both register")
 	}
 

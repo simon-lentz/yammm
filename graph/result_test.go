@@ -20,7 +20,9 @@ func TestEdgesFrom_NilInstance(t *testing.T) {
 	g := graph.New(s)
 
 	company := mustValidInstance(t, s, "Company", []any{"c1"}, map[string]any{"id": "c1", "name": "Acme"})
-	g.Add(context.Background(), company)
+	if err := g.Add(context.Background(), company); err != nil {
+		t.Errorf("Add: %v", err)
+	}
 
 	snap := g.Snapshot()
 	assert.Nil(t, slices.Collect(snap.EdgesFrom(graph.Instance{})))
@@ -31,7 +33,9 @@ func TestEdgesFrom_NoEdges(t *testing.T) {
 	g := graph.New(s)
 
 	person := mustValidInstance(t, s, "Person", []any{"p1"}, map[string]any{"id": "p1", "name": "Alice"})
-	g.Add(context.Background(), person)
+	if err := g.Add(context.Background(), person); err != nil {
+		t.Errorf("Add: %v", err)
+	}
 
 	snap := g.Snapshot()
 	instances := slices.Collect(snap.InstancesOf(mustTypeID(t, s, "Person")))
@@ -47,8 +51,12 @@ func TestEdgesFrom_SingleEdge(t *testing.T) {
 	company := mustValidInstance(t, s, "Company", []any{"c1"}, map[string]any{"id": "c1", "name": "Acme"})
 	person := mustValidInstanceWithEdge(t, s, "Person", []any{"p1"}, map[string]any{"id": "p1", "name": "Alice"}, "EMPLOYER", [][]any{{"c1"}})
 
-	g.Add(context.Background(), company)
-	g.Add(context.Background(), person)
+	if err := g.Add(context.Background(), company); err != nil {
+		t.Errorf("Add: %v", err)
+	}
+	if err := g.Add(context.Background(), person); err != nil {
+		t.Errorf("Add: %v", err)
+	}
 
 	snap := g.Snapshot()
 	personInst := slices.Collect(snap.InstancesOf(mustTypeID(t, s, "Person")))[0]
@@ -68,9 +76,15 @@ func TestEdgesFrom_MultipleEdges(t *testing.T) {
 	c2 := mustValidInstance(t, s, "Company", []any{"c2"}, map[string]any{"id": "c2", "name": "Beta"})
 	person := mustValidInstanceWithEdge(t, s, "Person", []any{"p1"}, map[string]any{"id": "p1", "name": "Alice"}, "EMPLOYERS", [][]any{{"c1"}, {"c2"}})
 
-	g.Add(context.Background(), c1)
-	g.Add(context.Background(), c2)
-	g.Add(context.Background(), person)
+	if err := g.Add(context.Background(), c1); err != nil {
+		t.Errorf("Add: %v", err)
+	}
+	if err := g.Add(context.Background(), c2); err != nil {
+		t.Errorf("Add: %v", err)
+	}
+	if err := g.Add(context.Background(), person); err != nil {
+		t.Errorf("Add: %v", err)
+	}
 
 	snap := g.Snapshot()
 	personInst := slices.Collect(snap.InstancesOf(mustTypeID(t, s, "Person")))[0]
@@ -92,13 +106,21 @@ func TestEdgesFrom_InstanceFromDifferentSnapshot(t *testing.T) {
 	g1 := graph.New(s)
 	company := mustValidInstance(t, s, "Company", []any{"c1"}, map[string]any{"id": "c1", "name": "Acme"})
 	person := mustValidInstanceWithEdge(t, s, "Person", []any{"p1"}, map[string]any{"id": "p1", "name": "Alice"}, "EMPLOYER", [][]any{{"c1"}})
-	g1.Add(context.Background(), company)
-	g1.Add(context.Background(), person)
+	if err := g1.Add(context.Background(), company); err != nil {
+		t.Errorf("Add: %v", err)
+	}
+	if err := g1.Add(context.Background(), person); err != nil {
+		t.Errorf("Add: %v", err)
+	}
 	snap1 := g1.Snapshot()
 
 	g2 := graph.New(s)
-	g2.Add(context.Background(), company)
-	g2.Add(context.Background(), person)
+	if err := g2.Add(context.Background(), company); err != nil {
+		t.Errorf("Add: %v", err)
+	}
+	if err := g2.Add(context.Background(), person); err != nil {
+		t.Errorf("Add: %v", err)
+	}
 	snap2 := g2.Snapshot()
 
 	// Instance from snap1 should not be found in snap2's index (pointer identity)

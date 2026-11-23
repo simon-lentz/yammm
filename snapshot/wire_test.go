@@ -81,8 +81,8 @@ func marshalCorpus(t *testing.T) []corpusEntry {
 		{"unresolved_with_props", unresolvedWithPropsSnap},
 	} {
 		for _, v := range optionVariants {
-			data, res := snapshot.Marshal(ctx, snapPair.snap, v.opts...)
-			require.NoError(t, res.Err(), "marshal %s %s", snapPair.name, v.label)
+			data, err := snapshot.Marshal(ctx, snapPair.snap, v.opts...)
+			require.NoError(t, err, "marshal %s %s", snapPair.name, v.label)
 			corpus = append(corpus, corpusEntry{
 				label: snapPair.name + "/" + v.label,
 				data:  data,

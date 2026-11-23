@@ -42,9 +42,9 @@ type assocIDs struct{ company, pair, badge, person, run schema.TypeID }
 
 func loadAssociationShapes(t *testing.T) (schema.Schema, assocIDs) {
 	t.Helper()
-	s, res := schema.LoadString(t.Context(), associationShapeSchema, "assoc.yammm")
-	if res.HasErrors() {
-		t.Fatalf("load: %s", res)
+	s, err := schema.LoadString(t.Context(), associationShapeSchema, "assoc.yammm")
+	if err != nil {
+		t.Fatalf("load: %s", err)
 	}
 	return s, assocIDs{
 		company: mustTypeID(t, s, "Company"), pair: mustTypeID(t, s, "Pair"), badge: mustTypeID(t, s, "Badge"),

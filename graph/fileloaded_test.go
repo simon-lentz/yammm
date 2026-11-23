@@ -24,9 +24,9 @@ func loadFromDisk(t *testing.T) schema.Schema {
 	if err != nil {
 		t.Fatalf("abs testdata path: %v", err)
 	}
-	s, res := schema.Load(t.Context(), path)
-	if res.HasErrors() {
-		t.Fatalf("load %s: %s", path, res.String())
+	s, loadErr := schema.Load(t.Context(), path)
+	if loadErr != nil {
+		t.Fatalf("load %s: %s", path, loadErr)
 	}
 	return s
 }
@@ -42,9 +42,9 @@ func loadFromDiskAt(t *testing.T, file string) schema.Schema {
 	if err := os.WriteFile(file, text, 0o600); err != nil {
 		t.Fatalf("write schema: %v", err)
 	}
-	s, res := schema.Load(t.Context(), file)
-	if res.HasErrors() {
-		t.Fatalf("load %s: %s", file, res.String())
+	s, loadErr := schema.Load(t.Context(), file)
+	if loadErr != nil {
+		t.Fatalf("load %s: %s", file, loadErr)
 	}
 	return s
 }
@@ -98,8 +98,8 @@ func TestFileLoadedSchema_OneCompositionShapes(t *testing.T) {
 	order := orderWithNotes(t, s, "n1")
 
 	g := graph.New(s)
-	if res := g.Add(ctx, order); !res.OK() {
-		t.Fatalf("a (one) composition to a keyed and a keyless part was refused: %s", res.String())
+	if err := g.Add(ctx, order); err != nil {
+		t.Fatalf("a (one) composition to a keyed and a keyless part was refused: %s", err)
 	}
 
 	roots := slices.Collect(g.Snapshot().InstancesOf(mustTypeID(t, s, "Order")))

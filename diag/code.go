@@ -19,6 +19,13 @@ func (c Code) String() string {
 	return c.value
 }
 
+// Error returns the code's name, as [Code.String] does, so %v and %s print the
+// name. A Code is the target of errors.Is, which reads a [ResultError] by the
+// codes it saw; no call returns a Code as an error.
+func (c Code) Error() string {
+	return c.value
+}
+
 // IsZero reports whether the code is unset.
 func (c Code) IsZero() bool {
 	return c.value == ""
@@ -170,8 +177,9 @@ var (
 	E_NO_PRIMARY_KEY = NewCode("E_NO_PRIMARY_KEY")
 
 	// E_LOAD_IO_FAILURE indicates an I/O error during schema loading, or a load
-	// whose arguments or options the loader refuses. It covers file read
-	// failures, path resolution errors and other filesystem issues.
+	// whose arguments or option values the loader refuses. It covers file read
+	// failures, path resolution errors and other filesystem issues. An option
+	// a load does not take is refused with an error that carries no code.
 	E_LOAD_IO_FAILURE = NewCode("E_LOAD_IO_FAILURE")
 
 	// E_LOAD_MODULE_ROOT_MALFORMED indicates a yammm.mod module-root marker
@@ -442,8 +450,10 @@ var (
 
 	// E_SNAPSHOT_UNSUPPORTED_HASH_ALGORITHM indicates a schema hash
 	// algorithm version this library does not implement. Error on the
-	// body-reading surfaces (Unmarshal, Verify, Stat, UpdateMetadata); Warning
-	// at ReadHeader and ScanDir, which stay classifiable for dispatch.
+	// body-reading surfaces (Unmarshal, Verify, Stat, UpdateMetadata).
+	// ReadHeader and ScanDir accept such a header and draw nothing, so a
+	// document stays classifiable for dispatch; the CLI reports it as a Warning,
+	// save beside another header failure, which returns no header to read.
 	E_SNAPSHOT_UNSUPPORTED_HASH_ALGORITHM = NewCode("E_SNAPSHOT_UNSUPPORTED_HASH_ALGORITHM")
 
 	// E_SNAPSHOT_IO indicates an I/O failure reading a snapshot: a file that
@@ -452,7 +462,7 @@ var (
 	// not wrap io.EOF or io.ErrUnexpectedEOF, or, at yammm snapshot info --dir,
 	// a directory that fails to read. A header that ends early is ReadHeader's
 	// Error-severity E_SNAPSHOT_MALFORMED, never this code.
-	// Per-file emissions land on ScanEntry.Result so the iterator
+	// Per-file emissions land on ScanEntry.Err so the iterator
 	// continues to the next file rather than aborting.
 	// The underlying os error is preserved as a detail entry so the
 	// operator can recover the concrete cause. Named E_SNAPSHOT_IO, not a

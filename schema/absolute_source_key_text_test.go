@@ -4,6 +4,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/simon-lentz/yammm/diag"
+	"github.com/simon-lentz/yammm/internal/diagtest"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -16,9 +18,11 @@ func TestLoadSources_AnAbsoluteKeyIsRefusedWithoutSchemeAdvice(t *testing.T) {
 	t.Parallel()
 	source := []byte("schema \"s\"\n\ntype A {\n\tid String primary\n}\n")
 	for _, key := range []string{"/abs.yammm", "C:/abs.yammm"} {
-		_, res := schema.LoadSourcesWithEntry(t.Context(), map[string][]byte{key: source}, key, "",
-			schema.WithSourcesOnly(true), schema.WithSyntheticRoot("embedded://app"))
-		if !res.HasErrors() {
+		_, res := diagtest.Capture(t, func(warn func(diag.Issue)) (schema.Schema, error) {
+			return schema.LoadSourcesWithEntry(t.Context(), map[string][]byte{key: source}, key,
+				schema.WithSourcesOnly(true), schema.WithSyntheticRoot("embedded://app"), schema.WithWarnings(warn))
+		})
+		if diagtest.Err(res) == nil {
 			t.Errorf("key %q loaded", key)
 			continue
 		}

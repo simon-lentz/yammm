@@ -14,9 +14,9 @@ func loadClosure(t *testing.T, sources map[string]string, entry string) schema.S
 	for k, v := range sources {
 		bytesBy[k] = []byte(v)
 	}
-	s, result := schema.LoadSourcesWithEntry(t.Context(), bytesBy, entry, ".", schema.WithSourcesOnly(true))
-	if result.HasErrors() {
-		t.Fatalf("load %s: %v", entry, result.Err())
+	s, err := schema.LoadSourcesWithEntry(t.Context(), bytesBy, entry, schema.WithSourcesOnly(true), schema.WithModuleRoot("."))
+	if err != nil {
+		t.Fatalf("load %s: %v", entry, err)
 	}
 	return s
 }
@@ -227,9 +227,9 @@ func TestStructuralHash_NoImportHashMovedFromAlgorithm2(t *testing.T) {
 // it moves when the hash algorithm does.
 func TestStructuralHash_ATypeHoldsItsInheritedInvariants(t *testing.T) {
 	t.Parallel()
-	s, res := schema.LoadString(t.Context(), "schema \"h\"\n\nabstract type P {\n\tid String primary\n\t! \"p\" id != \"\"\n}\n\ntype K extends P {\n\t! \"k\" id != \"x\"\n}\n", "h.yammm")
-	if res.HasErrors() {
-		t.Fatal(res)
+	s, err := schema.LoadString(t.Context(), "schema \"h\"\n\nabstract type P {\n\tid String primary\n\t! \"p\" id != \"\"\n}\n\ntype K extends P {\n\t! \"k\" id != \"x\"\n}\n", "h.yammm")
+	if err != nil {
+		t.Fatal(err)
 	}
 	const want = "sha256:b8d311ed99f90e73f7c1ac815bd42674f3cfd68391f050354d1d7757b49587af"
 	if got := schema.StructuralHash(s); got != want {

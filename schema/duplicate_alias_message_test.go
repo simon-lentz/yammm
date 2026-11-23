@@ -7,6 +7,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/simon-lentz/yammm/diag"
+	"github.com/simon-lentz/yammm/internal/diagtest"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -116,7 +117,9 @@ func TestLoad_ADuplicateAliasShowsEachImportsPath(t *testing.T) {
 func TestLoadString_ADuplicateAliasShowsEachImportsPath(t *testing.T) {
 	t.Parallel()
 	source := "schema \"s\"\nimport \"./d\\xZZ\" as d\nimport \"./e\\xZZ\" as d\ntype T {\n\tid String primary\n}\n"
-	_, result := schema.LoadString(context.Background(), source, "s.yammm")
+	_, result := diagtest.Capture(t, func(warn func(diag.Issue)) (schema.Schema, error) {
+		return schema.LoadString(context.Background(), source, "s.yammm", schema.WithWarnings(warn))
+	})
 	var got []string
 	for iss := range result.Issues() {
 		if iss.Code() == diag.E_DUPLICATE_IMPORT {

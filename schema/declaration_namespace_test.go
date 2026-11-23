@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/simon-lentz/yammm/diag"
+	"github.com/simon-lentz/yammm/internal/diagtest"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -37,7 +38,9 @@ func duplicatesOf(t *testing.T, res diag.Result) []duplicate {
 
 func wantDuplicates(t *testing.T, source string, want []duplicate) {
 	t.Helper()
-	s, res := schema.LoadString(t.Context(), source, "s.yammm")
+	s, res := diagtest.Capture(t, func(warn func(diag.Issue)) (schema.Schema, error) {
+		return schema.LoadString(t.Context(), source, "s.yammm", schema.WithWarnings(warn))
+	})
 	if !s.IsZero() {
 		t.Errorf("the schema loads; want it refused")
 	}
@@ -288,8 +291,9 @@ func TestLoad_ANameOfTheOtherKindIsUnknown(t *testing.T) {
 func TestLoad_AnImportedNameIsOutsideTheLocalNamespace(t *testing.T) {
 	t.Parallel()
 
-	s, res := schema.LoadSourcesWithEntry(t.Context(), map[string][]byte{
-		"main.yammm": []byte(`schema "main"
+	s, res := diagtest.Capture(t, func(warn func(diag.Issue)) (schema.Schema, error) {
+		return schema.LoadSourcesWithEntry(t.Context(), map[string][]byte{
+			"main.yammm": []byte(`schema "main"
 import "./lib" as lib
 type Code {
     id String primary
@@ -298,13 +302,14 @@ type Code {
 }
 type Region = String
 `),
-		"lib.yammm": []byte(`schema "lib"
+			"lib.yammm": []byte(`schema "lib"
 type Code = String[1, 5]
 type Region {
     id String primary
 }
 `),
-	}, "main.yammm", t.TempDir())
+		}, "main.yammm", schema.WithModuleRoot(t.TempDir()), schema.WithWarnings(warn))
+	})
 	if s.IsZero() || res.Len() != 0 {
 		t.Fatalf("a local type and an imported datatype of one name must load together\n%v", res)
 	}

@@ -1,35 +1,38 @@
 # Go API Pipeline Reference
 
-The yammm Go library follows a four-stage pipeline: **load schema -> validate instances -> build graph -> persist or write**. An operation that reports diagnostics returns a `diag.Result`, beside the value where the call produces one, with stable error codes and, where a diagnostic has a source position, its span. Some operations return an `error` instead, among them `neo4j.NodeQueries` and `neo4j.EdgeQueries`, `gogen.Marshal` and `markdown.Marshal`, and `instance.BuilderFor`.
+The yammm Go library follows a four-stage pipeline: **load schema -> validate instances -> build graph -> persist or write**. Every call that can fail returns `(T, error)`, or an `error` alone when it has no value, or `false` as its last value where the caller needs no reason. A schema load, a validation, `Graph.Add`, `Graph.AddOrMerge` and `Graph.Check`, a snapshot read and a Cypher generation return the failures they find in their input as a `*diag.ResultError`, with stable error codes and, where a diagnostic has a source position, its span. An option a call does not take is refused with a plain error, and some calls return a plain error, among them `gogen.Marshal`, `markdown.Marshal`, `instance.BuilderFor`, `graph.ParseKey`, and `neo4j.NodeQueries` and `neo4j.EdgeQueries`, which mark a value they cannot write with `neo4j.ErrUnrepresentable`.
 
 ---
 
 ## Error Handling Pattern
 
-All load/validation functions return `(T, diag.Result)`:
+Every load and validation function returns its value beside an error, or an error alone where it has no value, as `snapshot.Verify` and `Graph.Check` do:
 
 ```go
-schema, result := schema.Load(ctx, "path/to/schema.yammm")
-if result.HasErrors() {
-    // result.Err() returns an error wrapping the diagnostic issues
-    // result.Issues() iterates all issues
-    // result.Errors() iterates Fatal + Error issues only
-    return result.Err()
+s, err := schema.Load(ctx, "path/to/schema.yammm",
+    schema.WithWarnings(func(w diag.Issue) { /* a Warning, Info or Hint */ }))
+if err != nil {
+    if errors.Is(err, diag.E_IMPORT_CYCLE) { /* test one code */ }
+    if re, ok := errors.AsType[*diag.ResultError](err); ok {
+        // re.Result.Issues() iterates the failures
+    }
+    return fmt.Errorf("load schema: %w", err)
 }
 ```
 
-Key `diag.Result` methods:
+- A failure is a `*diag.ResultError`: the Fatal and Error issues the call drew. `errors.AsType` finds it through `%w` tags and `errors.Join`, and `errors.Is(err, code)` matches each code it saw, a dropped one included.
+- A Warning, Info or Hint is never in the error. A call that can draw one takes a `WithWarnings(func(diag.Issue))` option: every schema load, `snapshot.Unmarshal` and `snapshot.Verify`, `cypher.Config.Constraints` and `neo4j.Diff`. Without it they are discarded.
+- A call refuses an option it does not take with an error, with no diagnostic code, that names the option and the call.
+
+Key `diag.Result` methods, on a failure's `re.Result`:
 
 | Method | Returns |
 | ------ | ------- |
-| `OK()` | `true` if no Fatal or Error issues |
 | `HasFatal()` | `true` if any Fatal issue |
-| `HasErrors()` | `true` if any Fatal or Error issue |
-| `HasWarnings()` | `true` if any Warning issue |
-| `Err()` | `nil` if OK, or `*diag.ResultError` |
-| `Issues()` | Iterator over all issues |
+| `SeverityCounts()` | Counts by severity, over every issue seen |
+| `Issues()` | Iterator over the retained issues |
 | `Errors()` | Iterator over Fatal + Error issues |
-| `HasCode(code)` | `true` if any issue carries the given diagnostic code |
+| `HasCode(code)` | `true` if any retained issue carries the given diagnostic code |
 | `TruncationNote()` | One-line dropped-issues note when the issue limit was hit (empty otherwise) |
 
 ---
@@ -43,16 +46,16 @@ Load a schema from a file, string, or in-memory sources.
 ```go
 import "github.com/simon-lentz/yammm/schema"
 
-s, result := schema.Load(ctx, "path/to/schema.yammm")
-if result.HasErrors() {
-    return result.Err()
+s, err := schema.Load(ctx, "path/to/schema.yammm")
+if err != nil {
+    return err
 }
 ```
 
 ### From String (No Imports)
 
 ```go
-s, result := schema.LoadString(ctx, `
+s, err := schema.LoadString(ctx, `
 schema "example"
 type Item {
     id UUID primary
@@ -68,10 +71,11 @@ sources := map[string][]byte{
     "main.yammm":   mainContent,
     "common.yammm": commonContent,
 }
-s, result := schema.LoadSourcesWithEntry(ctx, sources, "main.yammm", "/module/root")
+s, err := schema.LoadSourcesWithEntry(ctx, sources, "main.yammm",
+    schema.WithModuleRoot("/module/root"))
 ```
 
-The third argument names the entry source. An empty entry path selects the lexicographically smallest key.
+The third argument names the entry source. An empty entry path selects the lexicographically smallest key. A relative key resolves under the `WithModuleRoot` root, or under the working directory without one; under `WithSyntheticRoot` it joins the synthetic root and names no host path.
 
 ### Load Options
 
@@ -82,10 +86,10 @@ schema.Load(ctx, path,
 )
 ```
 
-Two options apply to `LoadSourcesWithEntry` alone; `Load` and `LoadString` refuse `WithSyntheticRoot` and `WithSourcesOnly(true)`:
+`LoadString` refuses `WithModuleRoot` and `WithImportsAllowed`. Two options apply to `LoadSourcesWithEntry` alone, and `Load` and `LoadString` refuse them: `WithSyntheticRoot`, which `LoadSourcesWithEntry` refuses beside `WithModuleRoot`, and `WithSourcesOnly`:
 
 ```go
-schema.LoadSourcesWithEntry(ctx, sources, "main.yammm", "",
+schema.LoadSourcesWithEntry(ctx, sources, "main.yammm",
     schema.WithSyntheticRoot("embedded://app"), // identities under a root no checkout or mount point moves
 )
 ```
@@ -125,10 +129,12 @@ Every input key names its member exactly: a property by its declared name, a rel
 raws := []instance.RawInstance{
     {Properties: map[string]any{"id": "abc-123", "name": "Widget"}},
 }
-valids, result := v.Validate(ctx, "Product", raws)
+// One slot per input, a zero instance for each one err refuses, when the
+// batch runs; nil when it does not (an unknown type, a cancellation)
+valids, err := v.Validate(ctx, "Product", raws)
 
 // Validate a single instance
-valid, result := v.ValidateOne(ctx, "Product", instance.RawInstance{
+valid, err := v.ValidateOne(ctx, "Product", instance.RawInstance{
     Properties: map[string]any{"id": "abc-123", "name": "Widget"},
 })
 ```
@@ -182,10 +188,9 @@ import "github.com/simon-lentz/yammm/graph"
 
 g := graph.New(s)
 
-// Add validated instances: Validate's result was checked, so no entry is zero
+// Add validated instances: Validate's error was checked, so no entry is zero
 for _, valid := range validInstances {
-    result := g.Add(ctx, valid)
-    if result.HasErrors() {
+    if err := g.Add(ctx, valid); err != nil {
         // handle a duplicate primary key, a keyless or part type, etc.
     }
 }
@@ -196,9 +201,8 @@ for _, valid := range validInstances {
 ### Check Graph Completeness
 
 ```go
-result := g.Check(ctx)
-if result.HasErrors() {
-    // E_UNRESOLVED_REQUIRED: required associations not satisfied
+if err := g.Check(ctx); errors.Is(err, diag.E_UNRESOLVED_REQUIRED) {
+    // required associations not satisfied
 }
 ```
 
@@ -246,7 +250,7 @@ import "github.com/simon-lentz/yammm/snapshot"
 ### Marshal (Serialize)
 
 ```go
-data, result := snapshot.Marshal(ctx, snap,
+data, err := snapshot.Marshal(ctx, snap,
     snapshot.WithIndent("  "),
     snapshot.WithCreatedAt(time.Now()),
     snapshot.WithMetadata(map[string]string{"source": "pipeline"}),
@@ -256,7 +260,7 @@ data, result := snapshot.Marshal(ctx, snap,
 ### Unmarshal (Deserialize)
 
 ```go
-snap, result := snapshot.Unmarshal(ctx, data, s,
+snap, err := snapshot.Unmarshal(ctx, data, s,
     snapshot.WithIntegrityCheck(false),
 )
 ```
@@ -264,8 +268,7 @@ snap, result := snapshot.Unmarshal(ctx, data, s,
 ### Verify (Lightweight Validation)
 
 ```go
-result := snapshot.Verify(ctx, data, s)
-if result.HasErrors() {
+if err := snapshot.Verify(ctx, data, s); err != nil {
     // schema mismatch, integrity failure, dangling references, etc.
 }
 ```
@@ -273,8 +276,10 @@ if result.HasErrors() {
 ### Stat (Inspect Without Loading)
 
 ```go
-info, result := snapshot.Stat(ctx, data)
+info, err := snapshot.Stat(ctx, data)
 // info.SchemaName, info.TotalInstances, info.IntegrityStatus, etc.
+// info is non-nil beside err when the document decodes and only its body
+// breaks a structural check
 ```
 
 `Info` embeds `Header` (`Version`, `SchemaName`, `SchemaHash`, `SchemaHashAlgorithm`, `IntegrityHash`, `CreatedAt` — a `time.Time`, zero when the header states none — `Metadata`, `Types`, `Attestation`) and adds `InstanceCounts`, `TotalInstances`, `TotalEdges`, `DuplicateCount`, `UnresolvedCount` and `IntegrityStatus` (`snapshot.IntegrityOK` or `snapshot.IntegrityMismatch`). `snapshot.ReadHeader(ctx, r)` reads the `Header` alone from an `io.Reader`.
@@ -282,16 +287,16 @@ info, result := snapshot.Stat(ctx, data)
 ### Update Metadata In Place
 
 ```go
-header, res := snapshot.ReadHeader(ctx, bytes.NewReader(data)) // read existing metadata
+header, err := snapshot.ReadHeader(ctx, bytes.NewReader(data)) // read existing metadata
 newMeta := maps.Clone(header.Metadata)          // replace-not-merge contract
 if newMeta == nil {                             // a document that states no metadata
     newMeta = map[string]string{}
 }
 newMeta["pipeline_completed"] = "true"
-updated, result := snapshot.UpdateMetadata(ctx, data, newMeta)
+updated, err := snapshot.UpdateMetadata(ctx, data, newMeta)
 ```
 
-`UpdateMetadata(ctx, data, newMeta)` replaces the header's metadata map (a full replace — clone the old map and mutate), writes a new header and keeps every other byte, for every document `Unmarshal` accepts under its default options. It verifies the integrity hash first and refuses a mismatch, or a header that holds no hash, with `E_SNAPSHOT_INTEGRITY_MISMATCH`; it decodes no instance. It keeps `created_at` as written; to change it, re-marshal with `WithCreatedAt`. For a header past `MaxHeaderSize`, read the metadata with `Stat`, since `ReadHeader` refuses it. CLI form: `yammm snapshot update-metadata --set k=v`.
+`UpdateMetadata(ctx, data, newMeta, opts...)` replaces the header's metadata map (a full replace — clone the old map and mutate), writes a new header and keeps every other byte, for every document `Unmarshal` accepts under its default options. It verifies the integrity hash first and refuses a mismatch, or a header that holds no hash, with `E_SNAPSHOT_INTEGRITY_MISMATCH`, unless `WithIntegrityCheck(false)`, the one option it takes, skips that check; it decodes no instance. It keeps `created_at` as written; to change it, re-marshal with `WithCreatedAt`. For a header past `MaxHeaderSize`, read the metadata with `Stat`, since `ReadHeader` refuses it. CLI form: `yammm snapshot update-metadata --set k=v`.
 
 ---
 
@@ -301,7 +306,7 @@ updated, result := snapshot.UpdateMetadata(ctx, data, newMeta)
 - **Validated instances** (`instance.ValidInstance`) are immutable
 - **Graph snapshots** (`graph.Snapshot`) have no method that changes them, and a record is a handle, so no caller holds its address
 - **The `Graph` type** (`*graph.Graph`) is concurrent-safe for `Add` and `AddOrMerge` calls — multiple goroutines may add instances in parallel; the graph handles forward references, duplicate detection and merges atomically. `Snapshot()` acquires a read lock, briefly blocking concurrent adds, and returns a snapshot later Adds do not change
-- **The validate→add pipeline** shares one `Validator` and one `Graph` across its workers: each worker validates a record with `ValidateOne`, returns on its result's `HasErrors`, and adds it with `Add`, or with `AddOrMerge` for a source that lists one record under several parents. The caller waits for its workers, then checks the graph and takes its snapshot. Each call returns its own result, and a snapshot holds no diagnostics. To resume, seed the graph with `graph.NewFromSnapshot(snap)` (new adds resolve against, and may complete, the seeded state; it binds the graph to the snapshot's own schema, installs its records as they stand, and panics on a zero snapshot). See the Batch Assembly section of `docs/API.md`
+- **The validate→add pipeline** shares one `Validator` and one `Graph` across its workers: each worker validates a record with `ValidateOne`, returns on its error, and adds it with `Add`, or with `AddOrMerge` for a source that lists one record under several parents. The caller waits for its workers, then checks the graph and takes its snapshot. Each call returns its own error, and a snapshot holds no diagnostics. To resume, seed the graph with `graph.NewFromSnapshot(snap)` (new adds resolve against, and may complete, the seeded state; it binds the graph to the snapshot's own schema, installs its records as they stand, and panics on a zero snapshot). See the Batch Assembly section of `docs/API.md`
 - **Validators** (`*instance.Validator`) are safe for concurrent use (stateless after construction)
 
 ---
@@ -320,9 +325,9 @@ Build its instances through `instance.Validator`. `internal/instancetest` is thi
 
 ```go
 // 1. Load schema
-s, result := schema.Load(ctx, "inventory.yammm")
-if result.HasErrors() {
-    return result.Err()
+s, err := schema.Load(ctx, "inventory.yammm")
+if err != nil {
+    return err
 }
 
 // 2. Decode the data: one array of objects per type name. UseNumber keeps an
@@ -342,26 +347,26 @@ for typeName, objects := range doc {
     for i, props := range objects {
         raws[i] = instance.RawInstance{Properties: props}
     }
-    valids, result := v.Validate(ctx, typeName, raws)
-    if result.HasErrors() {
-        return result.Err()
+    valids, err := v.Validate(ctx, typeName, raws)
+    if err != nil {
+        return fmt.Errorf("validate %s: %w", typeName, err)
     }
     for _, valid := range valids {
-        if res := g.Add(ctx, valid); res.HasErrors() {
-            return res.Err()
+        if err := g.Add(ctx, valid); err != nil {
+            return err
         }
     }
 }
 
 // 4. Check graph completeness
-if result := g.Check(ctx); result.HasErrors() {
-    return result.Err()
+if err := g.Check(ctx); err != nil {
+    return err
 }
 
 // 5. Persist snapshot
-data, result := snapshot.Marshal(ctx, g.Snapshot())
-if result.HasErrors() {
-    return result.Err()
+data, err := snapshot.Marshal(ctx, g.Snapshot())
+if err != nil {
+    return err
 }
 os.WriteFile("inventory.ys", data, 0644)
 ```

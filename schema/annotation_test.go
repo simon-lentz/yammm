@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/simon-lentz/yammm/diag"
+	"github.com/simon-lentz/yammm/internal/diagtest"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -16,8 +17,10 @@ import (
 // annotation test files depend on it.
 func loadNoErr(t *testing.T, source string) (schema.Schema, diag.Result) {
 	t.Helper()
-	s, res := schema.LoadString(t.Context(), source, "main.yammm")
-	if res.HasErrors() {
+	s, res := diagtest.Capture(t, func(warn func(diag.Issue)) (schema.Schema, error) {
+		return schema.LoadString(t.Context(), source, "main.yammm", schema.WithWarnings(warn))
+	})
+	if diagtest.Err(res) != nil {
 		t.Fatalf("schema should load without errors, got: %v", res)
 	}
 	if s.IsZero() {
@@ -41,7 +44,9 @@ func loadAnnotationImport(t *testing.T, base, main string) (schema.Schema, diag.
 			t.Fatalf("write %s: %v", path, err)
 		}
 	}
-	return schema.Load(t.Context(), mainPath, schema.WithModuleRoot(dir))
+	return diagtest.Capture(t, func(warn func(diag.Issue)) (schema.Schema, error) {
+		return schema.Load(t.Context(), mainPath, schema.WithModuleRoot(dir), schema.WithWarnings(warn))
+	})
 }
 
 func schemaType(t *testing.T, s schema.Schema, name string) schema.Type {

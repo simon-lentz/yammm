@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/simon-lentz/yammm/internal/diagtest"
 	"github.com/simon-lentz/yammm/internal/yammmtest/sourcetest"
 
 	"github.com/simon-lentz/yammm/diag"
@@ -104,7 +105,7 @@ func TestDiagnosticSink_EmptyRendersNothingAsTextAndOneDocumentAsJSON(t *testing
 			t.Parallel()
 			var out strings.Builder
 			sink := NewDiagnosticSink(&out, c.format, true, false)
-			sink.Add(diag.OK())
+			sink.Add(diag.Result{})
 			_ = sink.Close(nil)
 			if out.String() != c.want {
 				t.Errorf("an empty sink wrote %q, want %q", out.String(), c.want)
@@ -130,7 +131,7 @@ func TestDiagnosticSink_ResultMergesEveryPhase(t *testing.T) {
 	if result.Len() != 2 {
 		t.Errorf("merged result holds %d issues, want 2", result.Len())
 	}
-	if !result.HasErrors() {
+	if diagtest.Err(result) == nil {
 		t.Error("an error added by an early phase must survive the merge")
 	}
 	if ExitForResult(result) != ExitValidation {

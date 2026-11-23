@@ -38,8 +38,8 @@ func makeSnapshotBytes(ctx context.Context, t *testing.T, opts ...snapshot.Optio
 		mustValidInstance(t, s, "Person", []any{"p1"}, map[string]any{"name": "Alice"}),
 		mustValidInstance(t, s, "Company", []any{"c1"}, map[string]any{"title": "Acme"}),
 	)
-	data, res := snapshot.Marshal(ctx, snap, opts...)
-	require.NoError(t, res.Err(), "Marshal")
+	data, err := snapshot.Marshal(ctx, snap, opts...)
+	require.NoError(t, err, "Marshal")
 	return data
 }
 
@@ -47,11 +47,11 @@ func TestUpdateMetadata_HappyPath(t *testing.T) {
 	ctx := context.Background()
 	data := makeSnapshotBytes(ctx, t, snapshot.WithMetadata(map[string]string{"pre": "existing"}))
 
-	out, res := snapshot.UpdateMetadata(ctx, data, map[string]string{"phase": "link", "pre": "existing"})
-	require.NoError(t, res.Err())
+	out, err := snapshot.UpdateMetadata(ctx, data, map[string]string{"phase": "link", "pre": "existing"})
+	require.NoError(t, err)
 
-	loaded, loadRes := snapshot.ReadHeader(ctx, bytes.NewReader(out))
-	require.NoError(t, loadRes.Err())
+	loaded, readErr := snapshot.ReadHeader(ctx, bytes.NewReader(out))
+	require.NoError(t, readErr)
 	assert.Equal(t, "link", loaded.Metadata["phase"])
 	assert.Equal(t, "existing", loaded.Metadata["pre"])
 }
@@ -61,11 +61,11 @@ func TestUpdateMetadata_Idempotence(t *testing.T) {
 	// UpdateMetadata reproduces the input byte-for-byte.
 	ctx := context.Background()
 	data := makeSnapshotBytes(ctx, t, snapshot.WithMetadata(map[string]string{"k": "v", "phase": "link"}))
-	header, res := snapshot.ReadHeader(ctx, bytes.NewReader(data))
-	require.NoError(t, res.Err())
+	header, err := snapshot.ReadHeader(ctx, bytes.NewReader(data))
+	require.NoError(t, err)
 
-	out, upRes := snapshot.UpdateMetadata(ctx, data, header.Metadata)
-	require.NoError(t, upRes.Err())
+	out, readErr := snapshot.UpdateMetadata(ctx, data, header.Metadata)
+	require.NoError(t, readErr)
 	assert.True(t, bytes.Equal(data, out),
 		"idempotent UpdateMetadata should produce byte-identical output")
 }
@@ -94,15 +94,15 @@ func TestUpdateMetadata_CrossCheckVsLoadMarshal(t *testing.T) {
 	for _, v := range variants {
 		t.Run(v.name, func(t *testing.T) {
 			original := makeSnapshotBytes(ctx, t, v.opts...)
-			fast, res := snapshot.UpdateMetadata(ctx, original, newMeta)
-			require.NoError(t, res.Err())
+			fast, err := snapshot.UpdateMetadata(ctx, original, newMeta)
+			require.NoError(t, err)
 
-			loaded, loadRes := snapshot.Unmarshal(ctx, original, s)
-			require.NoError(t, loadRes.Err())
+			loaded, readErr := snapshot.Unmarshal(ctx, original, s)
+			require.NoError(t, readErr)
 			marshalOpts := append([]snapshot.Option{}, v.opts...)
 			marshalOpts = append(marshalOpts, snapshot.WithMetadata(newMeta))
-			slow, marshalRes := snapshot.Marshal(ctx, loaded, marshalOpts...)
-			require.NoError(t, marshalRes.Err())
+			slow, readErr2 := snapshot.Marshal(ctx, loaded, marshalOpts...)
+			require.NoError(t, readErr2)
 
 			assert.True(t, bytes.Equal(fast, slow),
 				"fast/slow divergence for %s:\n  fast len=%d\n  slow len=%d",
@@ -128,8 +128,8 @@ func TestUpdateMetadata_IndentPreservation(t *testing.T) {
 				opts = []snapshot.Option{snapshot.WithIndent(tc.indent)}
 			}
 			data := makeSnapshotBytes(ctx, t, opts...)
-			out, res := snapshot.UpdateMetadata(ctx, data, map[string]string{"phase": "link"})
-			require.NoError(t, res.Err())
+			out, err := snapshot.UpdateMetadata(ctx, data, map[string]string{"phase": "link"})
+			require.NoError(t, err)
 
 			if tc.indent == "" {
 				assert.False(t, bytes.Contains(out, []byte("\n")),
@@ -151,8 +151,8 @@ func TestUpdateMetadata_RoundTripBodyBytesVerbatim(t *testing.T) {
 	origOffset := bodyOffsetOf(t, data)
 	origSuffix := data[origOffset:]
 
-	out, res := snapshot.UpdateMetadata(ctx, data, map[string]string{"phase": "link"})
-	require.NoError(t, res.Err())
+	out, err := snapshot.UpdateMetadata(ctx, data, map[string]string{"phase": "link"})
+	require.NoError(t, err)
 
 	outOffset := bodyOffsetOf(t, out)
 	outSuffix := out[outOffset:]
@@ -165,26 +165,26 @@ func TestUpdateMetadata_HashEquivalence(t *testing.T) {
 	s := testSchema(t)
 	data := makeSnapshotBytes(ctx, t)
 
-	out, res := snapshot.UpdateMetadata(ctx, data, map[string]string{"phase": "link"})
-	require.NoError(t, res.Err())
+	out, err := snapshot.UpdateMetadata(ctx, data, map[string]string{"phase": "link"})
+	require.NoError(t, err)
 
-	_, loadRes := snapshot.Unmarshal(ctx, out, s)
-	require.NoError(t, loadRes.Err(), "Load must accept UpdateMetadata output")
+	_, readErr := snapshot.Unmarshal(ctx, out, s)
+	require.NoError(t, readErr, "Load must accept UpdateMetadata output")
 }
 
 func TestUpdateMetadata_CreatedAtPreserved(t *testing.T) {
 	ctx := context.Background()
 	fixedTime := time.Date(2026, 4, 17, 12, 0, 0, 0, time.UTC)
 	data := makeSnapshotBytes(ctx, t, snapshot.WithCreatedAt(fixedTime))
-	origHeader, res := snapshot.ReadHeader(ctx, bytes.NewReader(data))
-	require.NoError(t, res.Err())
+	origHeader, err := snapshot.ReadHeader(ctx, bytes.NewReader(data))
+	require.NoError(t, err)
 	require.NotEmpty(t, origHeader.CreatedAt)
 
-	out, upRes := snapshot.UpdateMetadata(ctx, data, map[string]string{"phase": "link"})
-	require.NoError(t, upRes.Err())
+	out, readErr := snapshot.UpdateMetadata(ctx, data, map[string]string{"phase": "link"})
+	require.NoError(t, readErr)
 
-	outHeader, res := snapshot.ReadHeader(ctx, bytes.NewReader(out))
-	require.NoError(t, res.Err())
+	outHeader, err := snapshot.ReadHeader(ctx, bytes.NewReader(out))
+	require.NoError(t, err)
 	assert.Equal(t, origHeader.CreatedAt, outHeader.CreatedAt,
 		"CreatedAt must be preserved byte-for-byte when no override is provided")
 }
@@ -194,28 +194,28 @@ func TestUpdateMetadata_EmptyMetadata(t *testing.T) {
 
 	t.Run("populated->nil", func(t *testing.T) {
 		data := makeSnapshotBytes(ctx, t, snapshot.WithMetadata(map[string]string{"k": "v"}))
-		out, res := snapshot.UpdateMetadata(ctx, data, nil)
-		require.NoError(t, res.Err())
-		header, headerRes := snapshot.ReadHeader(ctx, bytes.NewReader(out))
-		require.NoError(t, headerRes.Err())
+		out, err := snapshot.UpdateMetadata(ctx, data, nil)
+		require.NoError(t, err)
+		header, readErr := snapshot.ReadHeader(ctx, bytes.NewReader(out))
+		require.NoError(t, readErr)
 		assert.Empty(t, header.Metadata, "nil newMeta must clear metadata (omitempty)")
 	})
 
 	t.Run("nil->populated", func(t *testing.T) {
 		data := makeSnapshotBytes(ctx, t)
-		out, res := snapshot.UpdateMetadata(ctx, data, map[string]string{"phase": "link"})
-		require.NoError(t, res.Err())
-		header, headerRes := snapshot.ReadHeader(ctx, bytes.NewReader(out))
-		require.NoError(t, headerRes.Err())
+		out, err := snapshot.UpdateMetadata(ctx, data, map[string]string{"phase": "link"})
+		require.NoError(t, err)
+		header, readErr := snapshot.ReadHeader(ctx, bytes.NewReader(out))
+		require.NoError(t, readErr)
 		assert.Equal(t, "link", header.Metadata["phase"])
 	})
 
 	t.Run("emptyMap->omitted", func(t *testing.T) {
 		data := makeSnapshotBytes(ctx, t, snapshot.WithMetadata(map[string]string{"k": "v"}))
-		out, res := snapshot.UpdateMetadata(ctx, data, map[string]string{})
-		require.NoError(t, res.Err())
-		header, headerRes := snapshot.ReadHeader(ctx, bytes.NewReader(out))
-		require.NoError(t, headerRes.Err())
+		out, err := snapshot.UpdateMetadata(ctx, data, map[string]string{})
+		require.NoError(t, err)
+		header, readErr := snapshot.ReadHeader(ctx, bytes.NewReader(out))
+		require.NoError(t, readErr)
 		assert.Empty(t, header.Metadata, "empty map must clear metadata (omitempty)")
 	})
 }
@@ -225,15 +225,15 @@ func TestUpdateMetadata_TamperingDetected(t *testing.T) {
 	s := testSchema(t)
 	data := makeSnapshotBytes(ctx, t, snapshot.WithMetadata(map[string]string{"k": "v"}))
 
-	out, res := snapshot.UpdateMetadata(ctx, data, map[string]string{"phase": "link"})
-	require.NoError(t, res.Err())
+	out, err := snapshot.UpdateMetadata(ctx, data, map[string]string{"phase": "link"})
+	require.NoError(t, err)
 
 	offset := bodyOffsetOf(t, out) + 10
 	require.Less(t, offset, int64(len(out)), "offset in bounds")
 	out[offset] ^= 0x01
 
-	_, loadRes := snapshot.Unmarshal(ctx, out, s)
-	require.True(t, loadRes.HasErrors(), "tampered body should fail Load")
+	_, readErr := snapshot.Unmarshal(ctx, out, s)
+	require.Error(t, readErr, "tampered body should fail Load")
 }
 
 func TestUpdateMetadata_MalformedInput(t *testing.T) {
@@ -250,10 +250,10 @@ func TestUpdateMetadata_MalformedInput(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			_, res := snapshot.UpdateMetadata(ctx, tc.data, map[string]string{"k": "v"})
-			assert.True(t, res.HasErrors(), "malformed input must produce diagnostics")
-			assert.True(t, res.HasCode(diag.E_SNAPSHOT_MALFORMED),
-				"expected E_SNAPSHOT_MALFORMED, got: %v", res)
+			_, err := snapshot.UpdateMetadata(ctx, tc.data, map[string]string{"k": "v"})
+			require.Error(t, err, "malformed input must produce diagnostics")
+			require.ErrorIs(t, err, diag.E_SNAPSHOT_MALFORMED,
+				"expected E_SNAPSHOT_MALFORMED, got: %v", err)
 		})
 	}
 }
@@ -263,9 +263,9 @@ func TestUpdateMetadata_Cancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	_, res := snapshot.UpdateMetadata(ctx, data, map[string]string{"phase": "link"})
-	require.True(t, res.HasErrors())
-	assert.True(t, res.HasCode(diag.E_CONTEXT_CANCELLED))
+	_, err := snapshot.UpdateMetadata(ctx, data, map[string]string{"phase": "link"})
+	require.Error(t, err)
+	require.ErrorIs(t, err, diag.E_CONTEXT_CANCELLED)
 }
 
 func TestUpdateMetadata_ConcurrentAccess(t *testing.T) {
@@ -285,9 +285,9 @@ func TestUpdateMetadata_ConcurrentAccess(t *testing.T) {
 		go func(idx int) {
 			defer wg.Done()
 			meta := map[string]string{"worker": string(workerLabels[idx : idx+1])}
-			out, res := snapshot.UpdateMetadata(ctx, data, meta)
-			if res.HasErrors() {
-				errCh <- res.Err()
+			out, err := snapshot.UpdateMetadata(ctx, data, meta)
+			if err != nil {
+				errCh <- err
 				return
 			}
 			if len(out) == 0 {
@@ -308,9 +308,9 @@ func TestUpdateMetadata_ConcurrentAccess(t *testing.T) {
 func TestUpdateMetadata_RefusesADocumentThatEndsAtTheHeader(t *testing.T) {
 	ctx := context.Background()
 	header := fmt.Sprintf(`{"yammm_snapshot":{"version":4,"schema_name":"x","schema_hash":"h","schema_hash_algorithm":%d,"integrity_hash":"","features":[]}`, schema.StructuralHashVersion)
-	_, res := snapshot.UpdateMetadata(ctx, []byte(header+`}`), map[string]string{"k": "v"})
-	if !res.HasCode(diag.E_SNAPSHOT_MALFORMED) {
-		t.Errorf("a document with no types key drew %v, want %s", res, diag.E_SNAPSHOT_MALFORMED)
+	_, err := snapshot.UpdateMetadata(ctx, []byte(header+`}`), map[string]string{"k": "v"})
+	if !errors.Is(err, diag.E_SNAPSHOT_MALFORMED) {
+		t.Errorf("a document with no types key drew %v, want %s", err, diag.E_SNAPSHOT_MALFORMED)
 	}
 }
 
@@ -337,14 +337,14 @@ func TestUpdateMetadata_GoldenCorpus(t *testing.T) {
 			data, err := os.ReadFile(filepath.Join(dir, e.Name()))
 			require.NoError(t, err)
 
-			out, res := snapshot.UpdateMetadata(ctx, data, newMeta)
-			require.NoError(t, res.Err(), "UpdateMetadata on %s", e.Name())
+			out, readErr := snapshot.UpdateMetadata(ctx, data, newMeta)
+			require.NoError(t, readErr, "UpdateMetadata on %s", e.Name())
 
-			_, loadRes := snapshot.Unmarshal(ctx, out, s)
-			require.NoError(t, loadRes.Err(), "Load of UpdateMetadata output for %s", e.Name())
+			_, readErr2 := snapshot.Unmarshal(ctx, out, s)
+			require.NoError(t, readErr2, "Load of UpdateMetadata output for %s", e.Name())
 
 			header, headerRes := snapshot.ReadHeader(ctx, bytes.NewReader(out))
-			require.NoError(t, headerRes.Err())
+			require.NoError(t, headerRes)
 			assert.Equal(t, "link", header.Metadata["phase"])
 		})
 	}
@@ -362,10 +362,10 @@ func TestUpdateMetadata_BestEffortIndent(t *testing.T) {
 	require.NotEqual(t, string(data), string(mutated), "mutation must have landed")
 	mutated = rehashDocument(t, mutated)
 
-	out, res := snapshot.UpdateMetadata(ctx, mutated, map[string]string{"phase": "link"})
-	require.NoError(t, res.Err(), "best-effort should not fail")
-	_, headerRes := snapshot.ReadHeader(ctx, bytes.NewReader(out))
-	require.NoError(t, headerRes.Err())
+	out, err := snapshot.UpdateMetadata(ctx, mutated, map[string]string{"phase": "link"})
+	require.NoError(t, err, "best-effort should not fail")
+	_, readErr := snapshot.ReadHeader(ctx, bytes.NewReader(out))
+	require.NoError(t, readErr)
 }
 
 func TestUpdateMetadata_CrossMarshalParityProperty(t *testing.T) {
@@ -406,17 +406,17 @@ func TestUpdateMetadata_CrossMarshalParityProperty(t *testing.T) {
 		for optIdx, opts := range optionVariants {
 			label := sn.name + "/opts" + string(rune('0'+optIdx))
 			t.Run(label, func(t *testing.T) {
-				data, res := snapshot.Marshal(ctx, sn.snap, opts...)
-				require.NoError(t, res.Err())
+				data, err := snapshot.Marshal(ctx, sn.snap, opts...)
+				require.NoError(t, err)
 
-				out, upRes := snapshot.UpdateMetadata(ctx, data, newMeta)
-				require.NoError(t, upRes.Err())
+				out, readErr := snapshot.UpdateMetadata(ctx, data, newMeta)
+				require.NoError(t, readErr)
 
-				_, loadRes := snapshot.Unmarshal(ctx, out, s)
-				require.NoError(t, loadRes.Err())
+				_, readErr2 := snapshot.Unmarshal(ctx, out, s)
+				require.NoError(t, readErr2)
 
 				header, headerRes := snapshot.ReadHeader(ctx, bytes.NewReader(out))
-				require.NoError(t, headerRes.Err())
+				require.NoError(t, headerRes)
 				assert.Equal(t, "link", header.Metadata["phase"])
 				assert.Equal(t, "true", header.Metadata["pipeline_completed"])
 			})
@@ -480,7 +480,7 @@ func seedCorpus(dir string) error {
 	// Must mirror testSchema exactly so TestUpdateMetadata_GoldenCorpus's
 	// Load call with testSchema accepts the fixtures — schema hashes must
 	// match.
-	s, schemaRes := schema.LoadString(context.Background(), `schema "test"
+	s, loadErr := schema.LoadString(context.Background(), `schema "test"
 
 type Person {
 	id String primary
@@ -493,20 +493,20 @@ type Company {
 	title String required
 }
 `, "test.yammm")
-	if schemaRes.HasErrors() {
-		return schemaRes.Err()
+	if loadErr != nil {
+		return loadErr
 	}
 
 	// A tiny validated graph for deterministic content.
-	valid, res := instance.NewValidator(s).ValidateOne(ctx, "Person", instance.RawInstance{
+	valid, validateErr := instance.NewValidator(s).ValidateOne(ctx, "Person", instance.RawInstance{
 		Properties: map[string]any{"id": "p1", "name": "Alice"},
 	})
-	if res.HasErrors() {
-		return res.Err()
+	if validateErr != nil {
+		return validateErr
 	}
 	g := graph.New(s)
-	if res := g.Add(ctx, valid); res.HasErrors() {
-		return res.Err()
+	if err := g.Add(ctx, valid); err != nil {
+		return err
 	}
 	snap := g.Snapshot()
 
@@ -521,9 +521,9 @@ type Company {
 		{"metadata.ys", []snapshot.Option{snapshot.WithMetadata(map[string]string{"seed": "corpus"})}},
 	}
 	for _, f := range fixtures {
-		data, res := snapshot.Marshal(ctx, snap, f.opts...)
-		if res.HasErrors() {
-			return res.Err()
+		data, readErr := snapshot.Marshal(ctx, snap, f.opts...)
+		if readErr != nil {
+			return readErr
 		}
 		path := filepath.Join(dir, f.name)
 		committed, err := os.ReadFile(path)

@@ -1,11 +1,13 @@
 // Package snapshottest provides test helpers for snapshot persistence
-// tests. It is a separate package (not _test.go helpers in snapshot/) so
-// the graph and snapshot test suites can share one structural-equivalence
-// vocabulary for round-trip assertions.
+// tests: building a snapshot from validated instances, asserting that it
+// round-trips through Marshal and Unmarshal and that two marshals give the same
+// bytes, and diffing two snapshots by structure. A consumer's tests and this module's share one
+// structural-equivalence vocabulary for round-trip assertions.
 package snapshottest
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
@@ -26,10 +28,17 @@ func BuildSnapshot(tb testing.TB, s schema.Schema, instances ...instance.ValidIn
 	tb.Helper()
 	g := graph.New(s)
 	for i, inst := range instances {
-		res := g.Add(context.Background(), inst)
-		for issue := range res.Issues() {
-			if (issue.Severity() == diag.Fatal || issue.Severity() == diag.Error) && issue.Code() != diag.E_DUPLICATE_PK {
-				tb.Fatalf("BuildSnapshot: instance %d was refused: %s", i, res)
+		err := g.Add(context.Background(), inst)
+		if err == nil {
+			continue
+		}
+		re, ok := errors.AsType[*diag.ResultError](err)
+		if !ok {
+			tb.Fatalf("BuildSnapshot: instance %d was refused: %v", i, err)
+		}
+		for issue := range re.Result.Issues() {
+			if issue.Code() != diag.E_DUPLICATE_PK {
+				tb.Fatalf("BuildSnapshot: instance %d was refused: %v", i, err)
 			}
 		}
 	}
@@ -43,13 +52,13 @@ func AssertRoundTrip(tb testing.TB, snap graph.Snapshot, opts ...snapshot.Option
 	tb.Helper()
 	ctx := context.Background()
 
-	data, result := snapshot.Marshal(ctx, snap, opts...)
-	if err := result.Err(); err != nil {
+	data, err := snapshot.Marshal(ctx, snap, opts...)
+	if err != nil {
 		tb.Fatalf("AssertRoundTrip: Marshal failed: %v", err)
 	}
 
-	loaded, result := snapshot.Unmarshal(ctx, data, snap.Schema())
-	if err := result.Err(); err != nil {
+	loaded, err := snapshot.Unmarshal(ctx, data, snap.Schema())
+	if err != nil {
 		tb.Fatalf("AssertRoundTrip: Unmarshal failed: %v", err)
 	}
 
@@ -62,13 +71,13 @@ func AssertDeterministic(tb testing.TB, snap graph.Snapshot, opts ...snapshot.Op
 	tb.Helper()
 	ctx := context.Background()
 
-	data1, result := snapshot.Marshal(ctx, snap, opts...)
-	if err := result.Err(); err != nil {
+	data1, err := snapshot.Marshal(ctx, snap, opts...)
+	if err != nil {
 		tb.Fatalf("AssertDeterministic: first Marshal failed: %v", err)
 	}
 
-	data2, result := snapshot.Marshal(ctx, snap, opts...)
-	if err := result.Err(); err != nil {
+	data2, err := snapshot.Marshal(ctx, snap, opts...)
+	if err != nil {
 		tb.Fatalf("AssertDeterministic: second Marshal failed: %v", err)
 	}
 

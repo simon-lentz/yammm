@@ -25,6 +25,7 @@ import (
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/instance"
+	"github.com/simon-lentz/yammm/internal/diagtest"
 	"github.com/simon-lentz/yammm/internal/instancetest"
 	"github.com/simon-lentz/yammm/internal/yammmtest"
 	"github.com/simon-lentz/yammm/schema"
@@ -34,7 +35,7 @@ import (
 
 func testSchema(t *testing.T) schema.Schema {
 	t.Helper()
-	s, result := schema.LoadString(t.Context(), `schema "test"
+	s, err := schema.LoadString(t.Context(), `schema "test"
 
 type Person {
 	id String primary
@@ -47,8 +48,8 @@ type Company {
 	title String required
 }
 `, "test.yammm")
-	if result.HasErrors() {
-		t.Fatalf("testSchema: %s", result)
+	if err != nil {
+		t.Fatalf("testSchema: %s", err)
 	}
 	return s
 }
@@ -57,7 +58,7 @@ type Company {
 // property the edge-property round-trip tests and their fixture store.
 func testSchemaWithEdgeProps(t *testing.T) schema.Schema {
 	t.Helper()
-	s, result := schema.LoadString(t.Context(), `schema "test"
+	s, err := schema.LoadString(t.Context(), `schema "test"
 
 type Person {
 	id String primary
@@ -78,15 +79,15 @@ type Company {
 	title String
 }
 `, "test.yammm")
-	if result.HasErrors() {
-		t.Fatalf("testSchemaWithEdgeProps: %s", result)
+	if err != nil {
+		t.Fatalf("testSchemaWithEdgeProps: %s", err)
 	}
 	return s
 }
 
 func testSchemaWithComposition(t *testing.T) schema.Schema {
 	t.Helper()
-	s, result := schema.LoadString(t.Context(), `schema "test_comp"
+	s, err := schema.LoadString(t.Context(), `schema "test_comp"
 
 type Parent {
 	id String primary
@@ -99,8 +100,8 @@ part type Child {
 	value String required
 }
 `, "test_comp.yammm")
-	if result.HasErrors() {
-		t.Fatalf("testSchemaWithComposition: %s", result)
+	if err != nil {
+		t.Fatalf("testSchemaWithComposition: %s", err)
 	}
 	return s
 }
@@ -197,7 +198,7 @@ func TestMarshal_NilPanics(t *testing.T) {
 			t.Error("expected panic for nil snapshot")
 		}
 	}()
-	snapshot.Marshal(context.Background(), graph.Snapshot{})
+	_, _ = snapshot.Marshal(context.Background(), graph.Snapshot{})
 }
 
 func TestVerify_ZeroSchemaPanics(t *testing.T) {
@@ -207,7 +208,7 @@ func TestVerify_ZeroSchemaPanics(t *testing.T) {
 			t.Error("expected panic for nil schema")
 		}
 	}()
-	snapshot.Verify(context.Background(), []byte(`{}`), schema.Schema{})
+	_ = snapshot.Verify(context.Background(), []byte(`{}`), schema.Schema{})
 }
 
 func TestLoad_ZeroSchemaPanics(t *testing.T) {
@@ -217,7 +218,7 @@ func TestLoad_ZeroSchemaPanics(t *testing.T) {
 			t.Error("expected panic for nil schema")
 		}
 	}()
-	snapshot.Unmarshal(context.Background(), []byte(`{}`), schema.Schema{})
+	_, _ = snapshot.Unmarshal(context.Background(), []byte(`{}`), schema.Schema{})
 }
 
 func TestMarshal_EmptySnapshot(t *testing.T) {
@@ -225,8 +226,8 @@ func TestMarshal_EmptySnapshot(t *testing.T) {
 	snap := buildSnapshot(t, s)
 	ctx := context.Background()
 
-	data, result := snapshot.Marshal(ctx, snap)
-	if err := result.Err(); err != nil {
+	data, readErr := snapshot.Marshal(ctx, snap)
+	if err := readErr; err != nil {
 		t.Fatalf("Marshal: %v", err)
 	}
 	if len(data) == 0 {
@@ -284,8 +285,8 @@ func TestMarshalLoad_RoundTrip_WithComposition(t *testing.T) {
 	})
 
 	g := graph.New(s)
-	if res := g.Add(context.Background(), parent); res.HasErrors() {
-		t.Fatalf("Add: %s", res)
+	if err := g.Add(context.Background(), parent); err != nil {
+		t.Fatalf("Add: %s", err)
 	}
 
 	snap := g.Snapshot()
@@ -299,13 +300,13 @@ func TestMarshalLoad_EdgeReconstruction(t *testing.T) {
 	snap := buildSnapshot(t, s, company, person)
 
 	ctx := context.Background()
-	data, result := snapshot.Marshal(ctx, snap)
-	if err := result.Err(); err != nil {
+	data, readErr := snapshot.Marshal(ctx, snap)
+	if err := readErr; err != nil {
 		t.Fatalf("Marshal: %v", err)
 	}
 
-	loaded, result := snapshot.Unmarshal(ctx, data, s)
-	if err := result.Err(); err != nil {
+	loaded, readErr := snapshot.Unmarshal(ctx, data, s)
+	if err := readErr; err != nil {
 		t.Fatalf("Load: %v", err)
 	}
 
@@ -341,18 +342,20 @@ func TestVerify_SchemaMismatch(t *testing.T) {
 	data, _ := snapshot.Marshal(ctx, snap)
 
 	// Build a different schema.
-	otherSchema, result := schema.LoadString(t.Context(), `schema "other"
+	otherSchema, err := schema.LoadString(t.Context(), `schema "other"
 
 type Widget {
 	id String primary
 }
 `, "other.yammm")
-	if result.HasErrors() {
-		t.Fatalf("build other schema: %s", result)
+	if err != nil {
+		t.Fatalf("build other schema: %s", err)
 	}
 
-	verifyResult := snapshot.Verify(ctx, data, otherSchema)
-	if verifyResult.OK() {
+	verifyResult := diagtest.CaptureErr(t, func(warn func(diag.Issue)) error {
+		return snapshot.Verify(ctx, data, otherSchema, snapshot.WithWarnings(warn))
+	})
+	if diagtest.Err(verifyResult) == nil {
 		t.Error("expected schema mismatch error")
 	}
 
@@ -372,8 +375,10 @@ func TestVerify_UnsupportedVersion(t *testing.T) {
 	doc := `{"yammm_snapshot":{"version":99,"schema_name":"test","schema_source":"test://test.yammm","schema_hash":"sha256:abc","schema_hash_algorithm":1,"integrity_hash":"","features":[]},"types":[],"instances":{},"diagnostics":{"duplicates":[],"unresolved":[]}}`
 
 	s := testSchema(t)
-	result := snapshot.Verify(context.Background(), []byte(doc), s)
-	if result.OK() {
+	result := diagtest.CaptureErr(t, func(warn func(diag.Issue)) error {
+		return snapshot.Verify(context.Background(), []byte(doc), s, snapshot.WithWarnings(warn))
+	})
+	if diagtest.Err(result) == nil {
 		t.Error("expected version error")
 	}
 
@@ -405,8 +410,10 @@ func TestVerify_IntegrityMismatch(t *testing.T) {
 		corrupted[idx] = 'X'
 	}
 
-	result := snapshot.Verify(ctx, corrupted, s)
-	if result.OK() {
+	result := diagtest.CaptureErr(t, func(warn func(diag.Issue)) error {
+		return snapshot.Verify(ctx, corrupted, s, snapshot.WithWarnings(warn))
+	})
+	if diagtest.Err(result) == nil {
 		t.Error("expected integrity mismatch")
 	}
 
@@ -438,7 +445,9 @@ func TestVerify_SkipIntegrityCheck(t *testing.T) {
 	}
 
 	// With the integrity check off, should not fail on integrity.
-	result := snapshot.Verify(ctx, corrupted, s, snapshot.WithIntegrityCheck(false))
+	result := diagtest.CaptureErr(t, func(warn func(diag.Issue)) error {
+		return snapshot.Verify(ctx, corrupted, s, snapshot.WithIntegrityCheck(false), snapshot.WithWarnings(warn))
+	})
 	// May have other issues but not integrity mismatch.
 	for issue := range result.Errors() {
 		if issue.Code() == diag.E_SNAPSHOT_INTEGRITY_MISMATCH {
@@ -463,24 +472,26 @@ func TestVerify_WithIntegrityCheckTrue_ReportsTheMismatch(t *testing.T) {
 		t.Fatal("the corruption did not apply")
 	}
 
-	result := snapshot.Verify(ctx, corrupted, s, snapshot.WithIntegrityCheck(true))
-	if !result.HasCode(diag.E_SNAPSHOT_INTEGRITY_MISMATCH) {
-		t.Errorf("expected E_SNAPSHOT_INTEGRITY_MISMATCH with the check on, got: %s", result)
+	err := snapshot.Verify(ctx, corrupted, s, snapshot.WithIntegrityCheck(true))
+	if !errors.Is(err, diag.E_SNAPSHOT_INTEGRITY_MISMATCH) {
+		t.Errorf("expected E_SNAPSHOT_INTEGRITY_MISMATCH with the check on, got: %s", err)
 	}
 }
 
 func TestVerify_MalformedJSON(t *testing.T) {
 	s := testSchema(t)
-	result := snapshot.Verify(context.Background(), []byte(`not json`), s)
-	if result.OK() {
+	err := snapshot.Verify(context.Background(), []byte(`not json`), s)
+	if err == nil {
 		t.Error("expected error for malformed JSON")
 	}
 }
 
 func TestVerify_MissingHeader(t *testing.T) {
 	s := testSchema(t)
-	result := snapshot.Verify(context.Background(), []byte(`{"types":[]}`), s)
-	if result.OK() {
+	result := diagtest.CaptureErr(t, func(warn func(diag.Issue)) error {
+		return snapshot.Verify(context.Background(), []byte(`{"types":[]}`), s, snapshot.WithWarnings(warn))
+	})
+	if diagtest.Err(result) == nil {
 		t.Error("expected error for missing header")
 	}
 
@@ -504,8 +515,8 @@ func TestInfo_Basic(t *testing.T) {
 	ctx := context.Background()
 	data, _ := snapshot.Marshal(ctx, snap)
 
-	info, result := snapshot.Stat(ctx, data)
-	if err := result.Err(); err != nil {
+	info, readErr := snapshot.Stat(ctx, data)
+	if err := readErr; err != nil {
 		t.Fatalf("Info: %v", err)
 	}
 	if info == nil {
@@ -538,8 +549,8 @@ func TestReadHeader_Basic(t *testing.T) {
 	ctx := context.Background()
 	data, _ := snapshot.Marshal(ctx, snap)
 
-	header, result := snapshot.ReadHeader(ctx, bytes.NewReader(data))
-	require.NoError(t, result.Err(), "ReadHeader should succeed")
+	header, err := snapshot.ReadHeader(ctx, bytes.NewReader(data))
+	require.NoError(t, err, "ReadHeader should succeed")
 	require.NotNil(t, header, "ReadHeader should return a non-nil Header")
 
 	assert.Equal(t, 4, header.Version, "Version")
@@ -562,8 +573,8 @@ func TestReadHeader_WithMetadata(t *testing.T) {
 		"extraction_complete": "true",
 	}))
 
-	header, result := snapshot.ReadHeader(ctx, bytes.NewReader(data))
-	require.NoError(t, result.Err())
+	header, err := snapshot.ReadHeader(ctx, bytes.NewReader(data))
+	require.NoError(t, err)
 	require.NotNil(t, header.Metadata, "Metadata should be present")
 	assert.Equal(t, "catalog.book_ingest", header.Metadata["pipeline"])
 	assert.Equal(t, "true", header.Metadata["extraction_complete"])
@@ -580,8 +591,8 @@ func TestReadHeader_WithCreatedAt(t *testing.T) {
 	ctx := context.Background()
 	data, _ := snapshot.Marshal(ctx, snap, snapshot.WithCreatedAt(created))
 
-	header, result := snapshot.ReadHeader(ctx, bytes.NewReader(data))
-	require.NoError(t, result.Err())
+	header, readErr := snapshot.ReadHeader(ctx, bytes.NewReader(data))
+	require.NoError(t, readErr)
 	assert.Equal(t, created, header.CreatedAt, "CreatedAt should round-trip as RFC 3339")
 }
 
@@ -593,8 +604,8 @@ func TestReadHeader_CreatedAtOmitted(t *testing.T) {
 	ctx := context.Background()
 	data, _ := snapshot.Marshal(ctx, snap) // No WithCreatedAt — default is empty.
 
-	header, result := snapshot.ReadHeader(ctx, bytes.NewReader(data))
-	require.NoError(t, result.Err())
+	header, err := snapshot.ReadHeader(ctx, bytes.NewReader(data))
+	require.NoError(t, err)
 	assert.True(t, header.CreatedAt.IsZero(), "CreatedAt should be zero when not set during marshal")
 }
 
@@ -607,10 +618,10 @@ func TestReadHeader_ConsistentWithInfo(t *testing.T) {
 	ctx := context.Background()
 	data, _ := snapshot.Marshal(ctx, snap, snapshot.WithMetadata(map[string]string{"key": "val"}))
 
-	info, infoRes := snapshot.Stat(ctx, data)
-	require.NoError(t, infoRes.Err())
-	header, headerRes := snapshot.ReadHeader(ctx, bytes.NewReader(data))
-	require.NoError(t, headerRes.Err())
+	info, err := snapshot.Stat(ctx, data)
+	require.NoError(t, err)
+	header, readErr := snapshot.ReadHeader(ctx, bytes.NewReader(data))
+	require.NoError(t, readErr)
 
 	assert.Equal(t, info.Header, *header)
 }
@@ -642,16 +653,16 @@ func TestReadHeader_IntegrityNotVerified(t *testing.T) {
 
 	// ReadHeader succeeds — it does not verify integrity. The stored hash is
 	// returned as-is, callers who want verification use Verify.
-	header, headerRes := snapshot.ReadHeader(ctx, bytes.NewReader(corrupted))
-	require.NoError(t, headerRes.Err(), "ReadHeader should not error on body corruption")
+	header, err := snapshot.ReadHeader(ctx, bytes.NewReader(corrupted))
+	require.NoError(t, err, "ReadHeader should not error on body corruption")
 	assert.NotEmpty(t, header.IntegrityHash, "ReadHeader returns the stored hash value")
 	assert.Equal(t, info.IntegrityHash, header.IntegrityHash,
 		"the stored integrity hash is unchanged by body corruption")
 }
 
 func TestReadHeader_EmptyInput(t *testing.T) {
-	_, result := snapshot.ReadHeader(context.Background(), bytes.NewReader(nil))
-	assert.False(t, result.OK(), "ReadHeader should error on nil input")
+	_, err := snapshot.ReadHeader(context.Background(), bytes.NewReader(nil))
+	require.Error(t, err, "ReadHeader should error on nil input")
 }
 
 // ReadHeader streams header metadata from an io.Reader without
@@ -670,8 +681,8 @@ func TestReadHeader_HappyPath(t *testing.T) {
 	ctx := context.Background()
 	data, _ := snapshot.Marshal(ctx, snap)
 
-	header, result := snapshot.ReadHeader(ctx, bytes.NewReader(data))
-	require.NoError(t, result.Err(), "ReadHeader should succeed on well-formed input")
+	header, err := snapshot.ReadHeader(ctx, bytes.NewReader(data))
+	require.NoError(t, err, "ReadHeader should succeed on well-formed input")
 	require.NotNil(t, header, "ReadHeader should return a non-nil Header")
 
 	assert.Equal(t, 4, header.Version)
@@ -694,8 +705,10 @@ func TestReadHeader_ExceedsMaxHeaderSize(t *testing.T) {
 	huge := strings.Repeat("x", snapshot.MaxHeaderSize+10*1024)
 	data, _ := snapshot.Marshal(ctx, snap, snapshot.WithMetadata(map[string]string{"huge": huge}))
 
-	_, result := snapshot.ReadHeader(ctx, bytes.NewReader(data))
-	require.True(t, result.HasErrors(), "header exceeding MaxHeaderSize should error")
+	_, result := diagtest.Issues(t, func() (*snapshot.Header, error) {
+		return snapshot.ReadHeader(ctx, bytes.NewReader(data))
+	})
+	require.Error(t, diagtest.Err(result), "header exceeding MaxHeaderSize should error")
 
 	var found bool
 	for issue := range result.Errors() {
@@ -722,8 +735,10 @@ func TestReadHeader_MaxHeaderSizeBoundaryMidToken(t *testing.T) {
 	midTok := strings.Repeat("y", snapshot.MaxHeaderSize+10*1024)
 	data, _ := snapshot.Marshal(ctx, snap, snapshot.WithMetadata(map[string]string{"mid": midTok}))
 
-	_, result := snapshot.ReadHeader(ctx, bytes.NewReader(data))
-	require.True(t, result.HasErrors(), "mid-token over-limit header should error")
+	_, result := diagtest.Issues(t, func() (*snapshot.Header, error) {
+		return snapshot.ReadHeader(ctx, bytes.NewReader(data))
+	})
+	require.Error(t, diagtest.Err(result), "mid-token over-limit header should error")
 
 	// The assertion targets the distinguished "exceeded MaxHeaderSize"
 	// message, not the underlying json.Decoder error text, which is
@@ -757,10 +772,12 @@ func assertLoadTruncationClean(t *testing.T, offset int) {
 	require.Greater(t, len(data), offset, "fixture must exceed truncation offset")
 
 	truncated := data[:offset]
-	loaded, result := snapshot.Unmarshal(ctx, truncated, s)
+	loaded, result := diagtest.Capture(t, func(warn func(diag.Issue)) (graph.Snapshot, error) {
+		return snapshot.Unmarshal(ctx, truncated, s, snapshot.WithWarnings(warn))
+	})
 
 	assert.True(t, loaded.IsZero(), "truncated Load must not return a partial struct")
-	require.True(t, result.HasErrors(), "truncated Load must surface errors")
+	require.Error(t, diagtest.Err(result), "truncated Load must surface errors")
 
 	var found bool
 	for issue := range result.Errors() {
@@ -820,8 +837,8 @@ func TestReadHeader_SlowReader(t *testing.T) {
 		}
 	}()
 
-	header, result := snapshot.ReadHeader(ctx, pr)
-	require.NoError(t, result.Err(), "slow reader should not surface an error on well-formed input")
+	header, readErr := snapshot.ReadHeader(ctx, pr)
+	require.NoError(t, readErr, "slow reader should not surface an error on well-formed input")
 	require.NotNil(t, header)
 	assert.Equal(t, "test", header.SchemaName)
 	assert.ElementsMatch(t, []snapshot.TypeRef{{Schema: "test", Name: "Company"}}, header.Types)
@@ -836,8 +853,10 @@ func TestReadHeader_ContextCancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	_, result := snapshot.ReadHeader(ctx, bytes.NewReader(data))
-	require.True(t, result.HasErrors(), "cancelled context should produce a diagnostic")
+	_, result := diagtest.Issues(t, func() (*snapshot.Header, error) {
+		return snapshot.ReadHeader(ctx, bytes.NewReader(data))
+	})
+	require.Error(t, diagtest.Err(result), "cancelled context should produce a diagnostic")
 
 	var found bool
 	for issue := range result.BySeverity(diag.Fatal) {
@@ -871,8 +890,10 @@ func TestReadHeader_ReaderErrors(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			_, result := snapshot.ReadHeader(context.Background(), &errReader{err: tc.err})
-			require.True(t, result.HasErrors(), "reader error should error")
+			_, result := diagtest.Issues(t, func() (*snapshot.Header, error) {
+				return snapshot.ReadHeader(context.Background(), &errReader{err: tc.err})
+			})
+			require.Error(t, diagtest.Err(result), "reader error should error")
 			var issues []diag.Issue
 			for issue := range result.Errors() {
 				issues = append(issues, issue)
@@ -912,7 +933,9 @@ func (r *bytesThenErrors) Read(p []byte) (int, error) {
 func TestReadHeader_ReportsTheFirstReaderError(t *testing.T) {
 	first, second := errors.New("first failure"), errors.New("second failure")
 	r := &bytesThenErrors{data: []byte(`{"yammm_snapshot":`), errs: []error{first, second}}
-	_, result := snapshot.ReadHeader(context.Background(), r)
+	_, result := diagtest.Issues(t, func() (*snapshot.Header, error) {
+		return snapshot.ReadHeader(context.Background(), r)
+	})
 	var got []string
 	for issue := range result.Errors() {
 		if issue.Code() == diag.E_SNAPSHOT_IO {
@@ -923,13 +946,15 @@ func TestReadHeader_ReportsTheFirstReaderError(t *testing.T) {
 }
 
 func TestReadHeader_MalformedJSON(t *testing.T) {
-	_, result := snapshot.ReadHeader(context.Background(), strings.NewReader("not a json snapshot"))
-	assert.True(t, result.HasErrors(), "ReadHeader should error on malformed JSON")
+	_, err := snapshot.ReadHeader(context.Background(), strings.NewReader("not a json snapshot"))
+	require.Error(t, err, "ReadHeader should error on malformed JSON")
 }
 
 func TestReadHeader_MissingYammmSnapshotKey(t *testing.T) {
-	_, result := snapshot.ReadHeader(context.Background(), strings.NewReader(`{"types":[]}`))
-	require.True(t, result.HasErrors(), "valid JSON with wrong first key should error")
+	_, result := diagtest.Issues(t, func() (*snapshot.Header, error) {
+		return snapshot.ReadHeader(context.Background(), strings.NewReader(`{"types":[]}`))
+	})
+	require.Error(t, diagtest.Err(result), "valid JSON with wrong first key should error")
 
 	var found bool
 	for issue := range result.Errors() {
@@ -946,13 +971,13 @@ func TestHeader_SchemaHashMatches(t *testing.T) {
 	require.NotEmpty(t, realHash, "precondition: schema.StructuralHash should return non-empty")
 
 	// A second schema with a different type set hashes differently.
-	s2, res := schema.LoadString(t.Context(), `schema "other"
+	s2, err := schema.LoadString(t.Context(), `schema "other"
 
 type OnlyType {
 	id String primary
 }
 `, "other.yammm")
-	require.NoError(t, res.Err())
+	require.NoError(t, err)
 	otherHash := schema.StructuralHash(s2)
 	require.NotEqual(t, realHash, otherHash, "precondition: different schemas should hash differently")
 
@@ -999,8 +1024,8 @@ func TestMarshal_WithIndent(t *testing.T) {
 		mustValidInstance(t, s, "Company", []any{"c1"}, map[string]any{"id": "c1", "title": "Acme"}))
 
 	ctx := context.Background()
-	data, result := snapshot.Marshal(ctx, snap, snapshot.WithIndent("\t"))
-	if err := result.Err(); err != nil {
+	data, readErr := snapshot.Marshal(ctx, snap, snapshot.WithIndent("\t"))
+	if err := readErr; err != nil {
 		t.Fatalf("Marshal with indent: %v", err)
 	}
 
@@ -1010,8 +1035,8 @@ func TestMarshal_WithIndent(t *testing.T) {
 	}
 
 	// Should still be loadable.
-	loaded, result := snapshot.Unmarshal(ctx, data, s)
-	if err := result.Err(); err != nil {
+	loaded, readErr := snapshot.Unmarshal(ctx, data, s)
+	if err := readErr; err != nil {
 		t.Fatalf("Load indented: %v", err)
 	}
 	if loaded.IsZero() {
@@ -1047,8 +1072,8 @@ func TestMarshalLoad_ContextCancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // Cancel immediately.
 
-	_, result := snapshot.Marshal(ctx, snap)
-	if result.OK() {
+	_, err := snapshot.Marshal(ctx, snap)
+	if err == nil {
 		t.Error("expected cancellation error from Marshal")
 	}
 }
@@ -1060,13 +1085,13 @@ func TestConstructionPathEquivalence(t *testing.T) {
 	constructed := buildSnapshot(t, s, company, person)
 
 	ctx := context.Background()
-	data, result := snapshot.Marshal(ctx, constructed)
-	if err := result.Err(); err != nil {
+	data, readErr := snapshot.Marshal(ctx, constructed)
+	if err := readErr; err != nil {
 		t.Fatalf("Marshal: %v", err)
 	}
 
-	loaded, result := snapshot.Unmarshal(ctx, data, s)
-	if err := result.Err(); err != nil {
+	loaded, readErr := snapshot.Unmarshal(ctx, data, s)
+	if err := readErr; err != nil {
 		t.Fatalf("Load: %v", err)
 	}
 
@@ -1102,8 +1127,8 @@ func TestLoad_NullProvenanceRoundTrip(t *testing.T) {
 
 	ctx := context.Background()
 	data, _ := snapshot.Marshal(ctx, snap)
-	loaded, result := snapshot.Unmarshal(ctx, data, s)
-	if err := result.Err(); err != nil {
+	loaded, readErr := snapshot.Unmarshal(ctx, data, s)
+	if err := readErr; err != nil {
 		t.Fatalf("Load: %v", err)
 	}
 
@@ -1131,8 +1156,8 @@ func TestMarshalLoad_DuplicateRoundTrip(t *testing.T) {
 
 	ctx := context.Background()
 	data, _ := snapshot.Marshal(ctx, snap)
-	loaded, result := snapshot.Unmarshal(ctx, data, s)
-	if err := result.Err(); err != nil {
+	loaded, readErr := snapshot.Unmarshal(ctx, data, s)
+	if err := readErr; err != nil {
 		t.Fatalf("Load: %v", err)
 	}
 
@@ -1158,8 +1183,8 @@ func TestMarshalLoad_UnresolvedRoundTrip(t *testing.T) {
 
 	ctx := context.Background()
 	data, _ := snapshot.Marshal(ctx, snap)
-	loaded, result := snapshot.Unmarshal(ctx, data, s)
-	if err := result.Err(); err != nil {
+	loaded, readErr := snapshot.Unmarshal(ctx, data, s)
+	if err := readErr; err != nil {
 		t.Fatalf("Load: %v", err)
 	}
 
@@ -1188,10 +1213,10 @@ func TestMarshalLoad_UnresolvedEdgePropertiesRoundTrip(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	data, result := snapshot.Marshal(ctx, snap)
-	require.NoError(t, result.Err(), "Marshal")
-	loaded, result := snapshot.Unmarshal(ctx, data, s)
-	require.NoError(t, result.Err(), "Load")
+	data, err := snapshot.Marshal(ctx, snap)
+	require.NoError(t, err, "Marshal")
+	loaded, err := snapshot.Unmarshal(ctx, data, s)
+	require.NoError(t, err, "Load")
 
 	require.Len(t, slices.Collect(loaded.Unresolved()), 1)
 	u := slices.Collect(loaded.Unresolved())[0]
@@ -1239,10 +1264,10 @@ func TestMarshalLoad_MixedResolvedAndUnresolvedEdgeProperties(t *testing.T) {
 	require.Len(t, slices.Collect(snap.Unresolved()), 1, "expected one unresolved edge")
 
 	ctx := context.Background()
-	data, mres := snapshot.Marshal(ctx, snap)
-	require.NoError(t, mres.Err())
-	loaded, lres := snapshot.Unmarshal(ctx, data, s)
-	require.NoError(t, lres.Err())
+	data, err := snapshot.Marshal(ctx, snap)
+	require.NoError(t, err)
+	loaded, readErr := snapshot.Unmarshal(ctx, data, s)
+	require.NoError(t, readErr)
 
 	// Both the resolved and unresolved entries survive with identical
 	// property content (per-key comparison using the .Clone() map form).
@@ -1274,11 +1299,13 @@ func TestLoad_V1Rejected(t *testing.T) {
 	doc := fmt.Sprintf(`{"yammm_snapshot":{"version":1,"schema_name":"test","schema_source":"test://test.yammm","schema_hash":%q,"schema_hash_algorithm":1,"integrity_hash":"","features":[]},"types":["Person"],"instances":{"Person":[{"key":["p1"],"properties":{"id":"p1","name":"Alice"},"provenance":null}]},"diagnostics":{"duplicates":[],"unresolved":[{"source_type":"Person","source_key":["p1"],"relation":"EMPLOYER","target_type":"Company","target_key":["c99"],"required":true,"reason":"target_missing"}]}}`, schemaHash)
 
 	ctx := context.Background()
-	loaded, result := snapshot.Unmarshal(ctx, []byte(doc), s, snapshot.WithIntegrityCheck(false))
+	loaded, result := diagtest.Capture(t, func(warn func(diag.Issue)) (graph.Snapshot, error) {
+		return snapshot.Unmarshal(ctx, []byte(doc), s, snapshot.WithIntegrityCheck(false), snapshot.WithWarnings(warn))
+	})
 	require.True(t, loaded.IsZero(), "a refused document yields no snapshot")
 	require.True(t, hasCode(result, diag.E_SNAPSHOT_UNSUPPORTED_VERSION),
 		"v1 must be refused with the supported version named: %v", result)
-	require.Contains(t, result.Err().Error(), "supported: 4")
+	require.Contains(t, diagtest.Err(result).Error(), "supported: 4")
 }
 
 // TestLoad_UnsupportedVersion pins the rejection path for versions outside
@@ -1292,9 +1319,11 @@ func TestLoad_UnsupportedVersion(t *testing.T) {
 		t.Run(fmt.Sprintf("v%d", v), func(t *testing.T) {
 			doc := fmt.Sprintf(`{"yammm_snapshot":{"version":%d,"schema_name":"test","schema_source":"test://test.yammm","schema_hash":%q,"schema_hash_algorithm":1,"integrity_hash":"","features":[]},"types":[],"instances":{},"diagnostics":{"duplicates":[],"unresolved":[]}}`, v, schemaHash)
 
-			_, result := snapshot.Unmarshal(context.Background(), []byte(doc), s,
-				snapshot.WithIntegrityCheck(false))
-			require.True(t, result.HasErrors(), "version %d must be rejected", v)
+			_, result := diagtest.Capture(t, func(warn func(diag.Issue)) (graph.Snapshot, error) {
+				return snapshot.Unmarshal(context.Background(), []byte(doc), s,
+					snapshot.WithIntegrityCheck(false), snapshot.WithWarnings(warn))
+			})
+			require.Error(t, diagtest.Err(result), "version %d must be rejected", v)
 
 			found := false
 			for issue := range result.Errors() {
@@ -1322,8 +1351,8 @@ type Item {
     id String primary
     val ` + propDecl + `
 }`
-	s, result := schema.LoadString(t.Context(), src, "proptest")
-	require.False(t, result.HasErrors(), "fidelitySchema: %s", result)
+	s, err := schema.LoadString(t.Context(), src, "proptest")
+	require.NoError(t, err, "fidelitySchema: %s", err)
 	return s, instance.NewValidator(s)
 }
 
@@ -1332,19 +1361,21 @@ type Item {
 func fidelityRoundTrip(t *testing.T, s schema.Schema, v *instance.Validator, val any) map[string]any {
 	t.Helper()
 	raw := instance.RawInstance{Properties: map[string]any{"id": "x", "val": val}}
-	valid, result := v.ValidateOne(t.Context(), "Item", raw)
-	require.True(t, result.OK(), "validate: %s", result)
+	valid, validateErr := v.ValidateOne(t.Context(), "Item", raw)
+	require.NoError(t, validateErr, "validate: %s", validateErr)
 	require.False(t, valid.IsZero())
 
 	g := graph.New(s)
-	g.Add(t.Context(), valid)
+	if err := g.Add(t.Context(), valid); err != nil {
+		t.Errorf("Add: %v", err)
+	}
 	snap := g.Snapshot()
 
-	data, mr := snapshot.Marshal(t.Context(), snap)
-	require.True(t, mr.OK(), "marshal: %s", mr)
+	data, err := snapshot.Marshal(t.Context(), snap)
+	require.NoError(t, err, "marshal: %s", err)
 
-	loaded, lr := snapshot.Unmarshal(t.Context(), data, s)
-	require.True(t, lr.OK(), "load: %s", lr)
+	loaded, readErr := snapshot.Unmarshal(t.Context(), data, s)
+	require.NoError(t, readErr, "load: %s", readErr)
 
 	items := slices.Collect(loaded.InstancesOf(tidOf(t, s, "Item")))
 	require.Len(t, items, 1)
@@ -1381,20 +1412,22 @@ func TestMarshalLoad_PropertyFidelity(t *testing.T) {
 		// preserves the dynamic type exactly — no narrowing, no coercion.
 		s, v := fidelitySchema(t, "Float")
 		raw := instance.RawInstance{Properties: map[string]any{"id": "x", "val": float64(1.0)}}
-		valid, result := v.ValidateOne(t.Context(), "Item", raw)
-		require.True(t, result.OK())
+		valid, validateErr := v.ValidateOne(t.Context(), "Item", raw)
+		require.NoError(t, validateErr)
 
 		g := graph.New(s)
-		g.Add(t.Context(), valid)
+		if err := g.Add(t.Context(), valid); err != nil {
+			t.Errorf("Add: %v", err)
+		}
 		snap := g.Snapshot()
 
-		data, mr := snapshot.Marshal(t.Context(), snap)
-		require.True(t, mr.OK())
+		data, err := snapshot.Marshal(t.Context(), snap)
+		require.NoError(t, err)
 		if !strings.Contains(string(data), `"val":1.0`) {
 			t.Fatalf("marshal output lacks %q, so the whole float did not emit in decimal form", `"val":1.0`)
 		}
-		loaded, lr := snapshot.Unmarshal(t.Context(), data, s)
-		require.True(t, lr.OK())
+		loaded, readErr := snapshot.Unmarshal(t.Context(), data, s)
+		require.NoError(t, readErr)
 
 		items := slices.Collect(loaded.InstancesOf(tidOf(t, s, "Item")))
 		require.Len(t, items, 1)
@@ -1728,7 +1761,7 @@ func TestMarshal_GoldenBytes(t *testing.T) {
 			"EMPLOYER", [][]any{{"c-missing"}}),
 	)
 
-	data, res := snapshot.Marshal(t.Context(), snap, snapshot.WithIndent("\t"))
-	require.NoError(t, res.Err())
+	data, err := snapshot.Marshal(t.Context(), snap, snapshot.WithIndent("\t"))
+	require.NoError(t, err)
 	yammmtest.Golden(t, "marshal_representative.ys", data)
 }

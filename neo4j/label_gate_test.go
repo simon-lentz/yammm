@@ -1,6 +1,7 @@
 package neo4j
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/simon-lentz/yammm/schema/cypher"
@@ -18,18 +19,18 @@ func TestCheckLabels_GatesEveryEmitter(t *testing.T) {
 
 	t.Run("indexes", func(t *testing.T) {
 		t.Parallel()
-		got, result := a.Indexes(s)
-		assertGated(t, got == nil, result.HasCode(cypher.E_NEO4J_INVALID_IDENTIFIER), result.Err())
+		got, err := a.Indexes(s)
+		assertGated(t, got == nil, errors.Is(err, cypher.E_NEO4J_INVALID_IDENTIFIER), err)
 	})
 	t.Run("constraints", func(t *testing.T) {
 		t.Parallel()
-		got, result := a.Constraints(s)
-		assertGated(t, got == nil, result.HasCode(cypher.E_NEO4J_INVALID_IDENTIFIER), result.Err())
+		got, err := a.Constraints(s)
+		assertGated(t, got == nil, errors.Is(err, cypher.E_NEO4J_INVALID_IDENTIFIER), err)
 	})
 	t.Run("shape", func(t *testing.T) {
 		t.Parallel()
-		got, result := shapeFor(a, s)
-		assertGated(t, got == nil, result.HasCode(cypher.E_NEO4J_INVALID_IDENTIFIER), result.Err())
+		got, err := shapeFor(a, s)
+		assertGated(t, got == nil, errors.Is(err, cypher.E_NEO4J_INVALID_IDENTIFIER), err)
 	})
 }
 

@@ -23,8 +23,8 @@ func TestGraph_StrictResolution_LocalOnly(t *testing.T) {
 	// Add a local User instance (should succeed)
 	user := instancetest.Valid(t, mainSchema, "User", map[string]any{"id": "u1", "username": "alice"})
 
-	result := g.Add(ctx, user)
-	if err := result.Err(); err != nil {
+	addErr := g.Add(ctx, user)
+	if err := addErr; err != nil {
 		t.Errorf("Add user should succeed: %v", err)
 	}
 
@@ -35,8 +35,8 @@ func TestGraph_StrictResolution_LocalOnly(t *testing.T) {
 	entityType, _ := commonSchema.Type("Entity")
 	entity := instancetest.Valid(t, commonSchema, "Entity", map[string]any{"id": "e1", "name": "Entity 1"})
 
-	if res := g.Add(ctx, entity); !res.OK() {
-		t.Fatalf("Add resolves by identity, so the unqualified name is irrelevant: %s", res.String())
+	if err := g.Add(ctx, entity); err != nil {
+		t.Fatalf("Add resolves by identity, so the unqualified name is irrelevant: %s", err)
 	}
 
 	snap := g.Snapshot()
@@ -57,8 +57,8 @@ func TestGraph_StrictResolution_QualifiedLookup(t *testing.T) {
 	// Add Entity using qualified name "c.Entity"
 	entity := instancetest.Valid(t, mainSchema, "c.Entity", map[string]any{"id": "e1", "name": "Entity 1"})
 
-	result := g.Add(ctx, entity)
-	if err := result.Err(); err != nil {
+	addErr := g.Add(ctx, entity)
+	if err := addErr; err != nil {
 		t.Errorf("Add entity should succeed: %v", err)
 	}
 
@@ -79,7 +79,9 @@ func TestGraph_InstanceByKey_Qualified(t *testing.T) {
 	// Add Entity
 	entity := instancetest.Valid(t, mainSchema, "c.Entity", map[string]any{"id": "e1", "name": "Entity 1"})
 
-	g.Add(ctx, entity)
+	if err := g.Add(ctx, entity); err != nil {
+		t.Errorf("Add: %v", err)
+	}
 
 	snap := g.Snapshot()
 
@@ -110,12 +112,16 @@ func TestGraph_Types_InstanceTagForm(t *testing.T) {
 	// Add local User
 	user := instancetest.Valid(t, mainSchema, "User", map[string]any{"id": "u1", "username": "alice"})
 
-	g.Add(ctx, user)
+	if err := g.Add(ctx, user); err != nil {
+		t.Errorf("Add: %v", err)
+	}
 
 	// Add imported Entity
 	entity := instancetest.Valid(t, mainSchema, "c.Entity", map[string]any{"id": "e1", "name": "Entity 1"})
 
-	g.Add(ctx, entity)
+	if err := g.Add(ctx, entity); err != nil {
+		t.Errorf("Add: %v", err)
+	}
 
 	snap := g.Snapshot()
 	types := snap.Types()
@@ -148,15 +154,17 @@ func TestGraph_Edge_CrossSchema(t *testing.T) {
 	// First add Entity (target)
 	entity := instancetest.Valid(t, mainSchema, "c.Entity", map[string]any{"id": "e1", "name": "Entity 1"})
 
-	g.Add(ctx, entity)
+	if err := g.Add(ctx, entity); err != nil {
+		t.Errorf("Add: %v", err)
+	}
 
 	// Add User with edge to Entity
 	user := instancetest.Valid(t, mainSchema, "User", map[string]any{
 		"id": "u1", "username": "alice", "entity": map[string]any{"_target_id": "e1"},
 	})
 
-	result := g.Add(ctx, user)
-	if err := result.Err(); err != nil {
+	addErr := g.Add(ctx, user)
+	if err := addErr; err != nil {
 		t.Errorf("Add user should succeed: %v", err)
 	}
 
@@ -216,12 +224,16 @@ type Container {
 	// Add b.Resource
 	instB := instancetest.Valid(t, schemaA, "b.Resource", map[string]any{"id": "r1", "nameB": "Resource from B"})
 
-	g.Add(ctx, instB)
+	if err := g.Add(ctx, instB); err != nil {
+		t.Errorf("Add: %v", err)
+	}
 
 	// Add c.Resource
 	instC := instancetest.Valid(t, schemaA, "c.Resource", map[string]any{"id": "r1", "nameC": "Resource from C"})
 
-	g.Add(ctx, instC)
+	if err := g.Add(ctx, instC); err != nil {
+		t.Errorf("Add: %v", err)
+	}
 
 	// Verify both are in graph with correct types
 	snap := g.Snapshot()

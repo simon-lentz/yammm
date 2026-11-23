@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/simon-lentz/yammm/diag"
+	"github.com/simon-lentz/yammm/internal/diagtest"
 	"github.com/simon-lentz/yammm/internal/parse"
 	"github.com/simon-lentz/yammm/schema"
 )
@@ -23,9 +24,9 @@ func TestLoad_ResolvesDataTypesInAnyDeclarationOrder(t *testing.T) {
 	}
 	hashes := make(map[string]string, len(orders))
 	for name, datatypes := range orders {
-		s, res := schema.LoadString(t.Context(), "schema \"p\"\n\n"+datatypes+body, "p.yammm")
-		if res.HasErrors() {
-			t.Fatalf("%s: load: %v", name, res.Err())
+		s, err := schema.LoadString(t.Context(), "schema \"p\"\n\n"+datatypes+body, "p.yammm")
+		if err != nil {
+			t.Fatalf("%s: load: %v", name, err)
 		}
 		for dt := range s.DataTypes() {
 			if !schema.TestConstraintIsResolved(dt.Constraint()) {
@@ -172,9 +173,11 @@ func TestLoad_AFailedDataTypeKeepsItsShapeForLaterPhases(t *testing.T) {
 // import's own report and stays a List, so an edge property typed by it is still
 // refused for its shape.
 func TestLoad_ADataTypeOverAFailedImportStaysAList(t *testing.T) {
-	s, res := schema.LoadSourcesWithEntry(t.Context(), map[string][]byte{
-		"main.yammm": []byte("schema \"main\"\nimport \"./missing\" as bad\n\ntype X = List<bad.Y>\n\ntype T {\n\tid String primary\n\t--> R (one) T {\n\t\tp X\n\t}\n}\n"),
-	}, "main.yammm", t.TempDir())
+	s, res := diagtest.Capture(t, func(warn func(diag.Issue)) (schema.Schema, error) {
+		return schema.LoadSourcesWithEntry(t.Context(), map[string][]byte{
+			"main.yammm": []byte("schema \"main\"\nimport \"./missing\" as bad\n\ntype X = List<bad.Y>\n\ntype T {\n\tid String primary\n\t--> R (one) T {\n\t\tp X\n\t}\n}\n"),
+		}, "main.yammm", schema.WithModuleRoot(t.TempDir()), schema.WithWarnings(warn))
+	})
 	if !s.IsZero() {
 		t.Fatal("a schema importing a missing file loaded")
 	}
@@ -213,8 +216,9 @@ func TestLoad_APrimaryKeyTypedByAListDataTypeNamesTheList(t *testing.T) {
 func TestLoad_ADataTypeOverAnImportedOneOfItsNameIsNoCycle(t *testing.T) {
 	t.Parallel()
 
-	s, res := schema.LoadSourcesWithEntry(t.Context(), map[string][]byte{
-		"main.yammm": []byte(`schema "main"
+	s, res := diagtest.Capture(t, func(warn func(diag.Issue)) (schema.Schema, error) {
+		return schema.LoadSourcesWithEntry(t.Context(), map[string][]byte{
+			"main.yammm": []byte(`schema "main"
 import "./lib" as lib
 type Codes = List<lib.Codes>
 type T {
@@ -222,10 +226,11 @@ type T {
     codes Codes
 }
 `),
-		"lib.yammm": []byte(`schema "lib"
+			"lib.yammm": []byte(`schema "lib"
 type Codes = List<String>
 `),
-	}, "main.yammm", t.TempDir())
+		}, "main.yammm", schema.WithModuleRoot(t.TempDir()), schema.WithWarnings(warn))
+	})
 	if s.IsZero() || res.Len() != 0 {
 		t.Fatalf("got %v, want the schema to load", res)
 	}

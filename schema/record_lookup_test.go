@@ -38,9 +38,9 @@ type Person extends Named {
 `
 
 func TestSchema_EveryLookupNamesOneRecord(t *testing.T) {
-	s, res := schema.LoadString(t.Context(), recordLookupSource, "main.yammm")
-	if res.HasErrors() {
-		t.Fatal(res)
+	s, err := schema.LoadString(t.Context(), recordLookupSource, "main.yammm")
+	if err != nil {
+		t.Fatal(err)
 	}
 
 	company := mustType(t, s, "Company")
@@ -87,7 +87,7 @@ func mustType(t *testing.T, s schema.Schema, name string) schema.Type {
 }
 
 func TestSchema_TypesAndDataTypesYieldDeclarationOrder(t *testing.T) {
-	s, res := schema.LoadString(t.Context(), `schema "order"
+	s, err := schema.LoadString(t.Context(), `schema "order"
 
 type Zebra {
 	id String primary
@@ -105,8 +105,8 @@ type Word = String
 
 type Alpha = Integer
 `, "order.yammm")
-	if res.HasErrors() {
-		t.Fatal(res)
+	if err != nil {
+		t.Fatal(err)
 	}
 
 	var types, dataTypes []string
@@ -121,7 +121,7 @@ type Alpha = Integer
 }
 
 func TestSchema_EveryPropertyFormNamesItsDataType(t *testing.T) {
-	s, res := schema.LoadString(t.Context(), `schema "b"
+	s, err := schema.LoadString(t.Context(), `schema "b"
 
 type Code = String[1, 3]
 
@@ -131,8 +131,8 @@ type Doc {
 	optional Code
 }
 `, "b.yammm")
-	if res.HasErrors() {
-		t.Fatal(res)
+	if err != nil {
+		t.Fatal(err)
 	}
 	doc := mustType(t, s, "Doc")
 	for _, name := range []string{"id", "required", "optional"} {

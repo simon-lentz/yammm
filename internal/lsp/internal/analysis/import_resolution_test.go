@@ -29,10 +29,10 @@ func assertImportsResolved(t *testing.T, s schema.Schema, seen map[location.Sour
 func TestAnalyze_ASnapshotSchemaHoldsOnlyResolvedImports(t *testing.T) {
 	const dep = "schema \"dep\"\ntype Wheel {\n  id String primary\n}\n"
 	cases := []struct {
-		name    string
-		sources map[string]string
-		opts    []schema.LoadOption
-		loads   bool
+		name          string
+		sources       map[string]string
+		refuseImports bool
+		loads         bool
 	}{
 		{
 			name: "a resolved import and its own import",
@@ -108,7 +108,7 @@ func TestAnalyze_ASnapshotSchemaHoldsOnlyResolvedImports(t *testing.T) {
 				"main.yammm": "schema \"main\"\nimport \"./dep\" as dep\n",
 				"dep.yammm":  dep,
 			},
-			opts: []schema.LoadOption{schema.WithImportsAllowed(false)},
+			refuseImports: true,
 		},
 	}
 	for _, tc := range cases {
@@ -118,7 +118,7 @@ func TestAnalyze_ASnapshotSchemaHoldsOnlyResolvedImports(t *testing.T) {
 			for name, text := range tc.sources {
 				overlays[filepath.Join(root, name)] = []byte(text)
 			}
-			snapshot, _ := NewAnalyzer(nil).Analyze(t.Context(), filepath.Join(root, "main.yammm"), overlays, root, tc.opts...)
+			snapshot, _ := NewAnalyzer(nil).Analyze(t.Context(), filepath.Join(root, "main.yammm"), overlays, root, !tc.refuseImports)
 			if got := !snapshot.Schema.IsZero(); got != tc.loads {
 				t.Fatalf("snapshot holds a schema: %v, want %v; diagnostics: %s", got, tc.loads, snapshot.Result)
 			}

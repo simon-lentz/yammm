@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/simon-lentz/yammm/diag"
+	"github.com/simon-lentz/yammm/internal/diagtest"
 	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
 )
@@ -50,7 +51,9 @@ func TestExcerpt_MarksTheParsersSpan(t *testing.T) {
 			p := filepath.Join(dir, "x.yammm")
 			writeHostPathFile(t, p, content)
 
-			_, res := schema.Load(t.Context(), p, schema.WithModuleRoot(dir))
+			_, res := diagtest.Capture(t, func(warn func(diag.Issue)) (schema.Schema, error) {
+				return schema.Load(t.Context(), p, schema.WithModuleRoot(dir), schema.WithWarnings(warn))
+			})
 			var issue diag.Issue
 			found := false
 			for is := range res.Issues() {

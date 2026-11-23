@@ -18,9 +18,9 @@ import (
 func TestConstraintDiff_TheOtherKeyKindIsDrift(t *testing.T) {
 	t.Parallel()
 	load := func(src string) schema.Schema {
-		s, res := schema.LoadString(t.Context(), src, "flip.yammm")
-		if res.HasErrors() {
-			t.Fatal(res)
+		s, err := schema.LoadString(t.Context(), src, "flip.yammm")
+		if err != nil {
+			t.Fatal(err)
 		}
 		return s
 	}
@@ -150,9 +150,9 @@ func TestConstraintDiff_TheOtherKeyKindIsDrift(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			desired, res := tc.config.c.Constraints(tc.schema)
-			if res.HasErrors() {
-				t.Fatal(res)
+			desired, err := tc.config.c.Constraints(tc.schema)
+			if err != nil {
+				t.Fatal(err)
 			}
 			if tc.config.unnamed {
 				for i := range desired {
@@ -229,9 +229,9 @@ func TestConstraintDiff_AKeyKindHolderBlocksEveryDeclarationOfTheOtherKind(t *te
 // shared database's other schemas out of the key-kind search: no declaration names
 // their labels, so a UNIQUE there costs no more than a NOT NULL.
 func TestConstraintDiff_AnUnownedKeyConstraintCostsWhatAnyUnownedRowCosts(t *testing.T) {
-	s, res := schema.LoadString(t.Context(), "schema \"app\"\n\ntype Doc {\n\tid String primary\n}\n", "app.yammm")
-	if res.HasErrors() {
-		t.Fatal(res)
+	s, err := schema.LoadString(t.Context(), "schema \"app\"\n\ntype Doc {\n\tid String primary\n}\n", "app.yammm")
+	if err != nil {
+		t.Fatal(err)
 	}
 	a := cypher.Config{NodeKeys: true}
 	desired, _ := a.Constraints(s)
@@ -253,9 +253,9 @@ func TestConstraintDiff_AnUnownedKeyConstraintCostsWhatAnyUnownedRowCosts(t *tes
 // server refuses the NODE KEY beside it whichever declaration it is paired with.
 func TestConstraintDiff_AKeyKindHolderPairedByNameStillBlocks(t *testing.T) {
 	t.Parallel()
-	s, res := schema.LoadString(t.Context(), "schema \"flip\"\n\ntype Doc {\n\tid String primary\n\tname String required\n}\n", "flip.yammm")
-	if res.HasErrors() {
-		t.Fatal(res)
+	s, err := schema.LoadString(t.Context(), "schema \"flip\"\n\ntype Doc {\n\tid String primary\n\tname String required\n}\n", "flip.yammm")
+	if err != nil {
+		t.Fatal(err)
 	}
 	a := cypher.Config{NodeKeys: true}
 	desired, _ := a.Constraints(s)

@@ -26,9 +26,9 @@ type Site {
 
 func TestRebuild_FilesARootUnderItsOwnIdentity(t *testing.T) {
 	t.Parallel()
-	s, res := schema.LoadString(t.Context(), rootIdentityEntry, "entry.yammm")
-	if res.HasErrors() {
-		t.Fatalf("load: %s", res)
+	s, err := schema.LoadString(t.Context(), rootIdentityEntry, "entry.yammm")
+	if err != nil {
+		t.Fatalf("load: %s", err)
 	}
 	anchor := mustTypeID(t, s, "Anchor")
 	site := mustTypeID(t, s, "Site")
@@ -80,12 +80,12 @@ import "base.yammm" as x
 
 func loadAliased(t *testing.T, entry, alias string) (schema.Schema, schema.TypeID) {
 	t.Helper()
-	s, res := schema.LoadSourcesWithEntry(t.Context(), map[string][]byte{
+	s, err := schema.LoadSourcesWithEntry(t.Context(), map[string][]byte{
 		"entry.yammm": []byte(entry),
 		"base.yammm":  []byte(aliasBase),
-	}, "entry.yammm", ".", schema.WithSourcesOnly(true))
-	if res.HasErrors() {
-		t.Fatalf("load: %s", res)
+	}, "entry.yammm", schema.WithSourcesOnly(true), schema.WithModuleRoot("."))
+	if err != nil {
+		t.Fatalf("load: %s", err)
 	}
 	basin, ok := s.ResolveTypeName(alias + ".Basin")
 	if !ok {

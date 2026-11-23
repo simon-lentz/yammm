@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/simon-lentz/yammm/internal/diagtest"
 	"github.com/simon-lentz/yammm/internal/yammmtest/sourcetest"
 
 	"github.com/simon-lentz/yammm/diag"
@@ -174,7 +175,9 @@ func setPlacedBy(id string) mutation {
 
 func validateOrder(t *testing.T, s schema.Schema, order map[string]any) diag.Result {
 	t.Helper()
-	_, res := NewValidator(s).ValidateOne(t.Context(), "Order", RawInstance{Properties: order})
+	_, res := diagtest.Issues(t, func() (ValidInstance, error) {
+		return NewValidator(s).ValidateOne(t.Context(), "Order", RawInstance{Properties: order})
+	})
 	return res
 }
 
@@ -409,12 +412,14 @@ func TestInvariantContract_AcceptRows(t *testing.T) {
 	for _, row := range rows {
 		t.Run(row.inv, func(t *testing.T) {
 			t.Parallel()
-			s, res := schema.LoadString(t.Context(), contractSource(row.inv), "s.yammm")
-			if res.Err() != nil {
-				t.Fatalf("legal invariant refused at load: %v", res.Err())
+			s, res := diagtest.Capture(t, func(warn func(diag.Issue)) (schema.Schema, error) {
+				return schema.LoadString(t.Context(), contractSource(row.inv), "s.yammm", schema.WithWarnings(warn))
+			})
+			if diagtest.Err(res) != nil {
+				t.Fatalf("legal invariant refused at load: %v", res)
 			}
-			if res := validateOrder(t, s, goodOrder()); res.Err() != nil {
-				t.Fatalf("the invariant does not hold on a conforming instance: %v", res.Err())
+			if res := validateOrder(t, s, goodOrder()); diagtest.Err(res) != nil {
+				t.Fatalf("the invariant does not hold on a conforming instance: %v", res)
 			}
 			if row.bad == nil {
 				return
@@ -423,10 +428,10 @@ func TestInvariantContract_AcceptRows(t *testing.T) {
 			row.bad(order)
 			res = validateOrder(t, s, order)
 			if !res.HasCode(diag.E_INVARIANT_FAIL) {
-				t.Errorf("the invariant did not fail on a violating instance (vacuous): %v", res.Err())
+				t.Errorf("the invariant did not fail on a violating instance (vacuous): %v", res)
 			}
 			if res.HasCode(diag.E_EVAL_ERROR) {
-				t.Errorf("the invariant errored instead of failing: %v", res.Err())
+				t.Errorf("the invariant errored instead of failing: %v", res)
 			}
 		})
 	}
@@ -455,14 +460,18 @@ func TestInvariantContract_RefuseRows(t *testing.T) {
 
 	// The good instance, validated once against the base schema, is the scope
 	// every refuse row is evaluated in.
-	base, res := schema.LoadString(t.Context(), contractSource(""), "s.yammm")
-	if res.Err() != nil {
-		t.Fatal(res.Err())
+	base, res := diagtest.Capture(t, func(warn func(diag.Issue)) (schema.Schema, error) {
+		return schema.LoadString(t.Context(), contractSource(""), "s.yammm", schema.WithWarnings(warn))
+	})
+	if diagtest.Err(res) != nil {
+		t.Fatal(res)
 	}
 	v := NewValidator(base)
-	good, res := v.ValidateOne(t.Context(), "Order", RawInstance{Properties: goodOrder()})
-	if res.Err() != nil {
-		t.Fatal(res.Err())
+	good, res := diagtest.Issues(t, func() (ValidInstance, error) {
+		return v.ValidateOne(t.Context(), "Order", RawInstance{Properties: goodOrder()})
+	})
+	if diagtest.Err(res) != nil {
+		t.Fatal(res)
 	}
 	scope := eval.PropertyScopeOf(v.scopeOf(good))
 	empty := map[string]any{}
@@ -771,12 +780,14 @@ func TestInvariantContract_RefuseRows(t *testing.T) {
 		t.Run(row.inv, func(t *testing.T) {
 			t.Parallel()
 			src := contractSource(row.inv)
-			_, res := schema.LoadString(t.Context(), src, "s.yammm")
-			if res.Err() == nil {
+			_, res := diagtest.Capture(t, func(warn func(diag.Issue)) (schema.Schema, error) {
+				return schema.LoadString(t.Context(), src, "s.yammm", schema.WithWarnings(warn))
+			})
+			if diagtest.Err(res) == nil {
 				t.Fatal("the checker accepted a shape the evaluator cannot honour")
 			}
 			if is, ok := issueWithFragment(res, row.code, row.want); !ok {
-				t.Errorf("want %s mentioning %q; got %v", row.code, row.want, res.Err())
+				t.Errorf("want %s mentioning %q; got %v", row.code, row.want, res)
 			} else if is.Span().IsZero() {
 				t.Error("the diagnostic carries no span")
 			}
@@ -842,13 +853,15 @@ func TestInvariantContract_OneMistakeOneDiagnostic(t *testing.T) {
 	} {
 		t.Run(inv, func(t *testing.T) {
 			t.Parallel()
-			_, res := schema.LoadString(t.Context(), contractSource(inv), "s.yammm")
+			_, res := diagtest.Capture(t, func(warn func(diag.Issue)) (schema.Schema, error) {
+				return schema.LoadString(t.Context(), contractSource(inv), "s.yammm", schema.WithWarnings(warn))
+			})
 			n := 0
 			for range res.Issues() {
 				n++
 			}
 			if n != 1 {
-				t.Errorf("one mistake drew %d diagnostics: %v", n, res.Err())
+				t.Errorf("one mistake drew %d diagnostics: %v", n, res)
 			}
 		})
 	}
@@ -925,12 +938,14 @@ func TestInvariantContract_EveryRetypedResultIsRefusedByItsConsumer(t *testing.T
 		t.Run(s.Name, func(t *testing.T) {
 			t.Parallel()
 			inv := "(" + recv + ") " + c.pipe
-			_, res := schema.LoadString(t.Context(), contractSource(inv), "s.yammm")
-			if res.Err() == nil {
+			_, res := diagtest.Capture(t, func(warn func(diag.Issue)) (schema.Schema, error) {
+				return schema.LoadString(t.Context(), contractSource(inv), "s.yammm", schema.WithWarnings(warn))
+			})
+			if diagtest.Err(res) == nil {
 				t.Fatalf("%s's result was piped into a builtin that refuses it and the schema loaded", s.Name)
 			}
 			if _, ok := issueWithFragment(res, diag.E_INVALID_INVARIANT, c.want); !ok {
-				t.Errorf("want E_INVALID_INVARIANT mentioning %q; got %v", c.want, res.Err())
+				t.Errorf("want E_INVALID_INVARIANT mentioning %q; got %v", c.want, res)
 			}
 		})
 	}

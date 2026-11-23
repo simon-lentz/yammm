@@ -10,6 +10,7 @@ import (
 
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/instance"
+	"github.com/simon-lentz/yammm/internal/diagtest"
 	"github.com/simon-lentz/yammm/internal/yammmtest"
 	"github.com/simon-lentz/yammm/schema"
 )
@@ -66,9 +67,9 @@ type Person {
 		},
 	}
 
-	valid, result := validator.ValidateOne(t.Context(), "Person", raw)
+	valid, err := validator.ValidateOne(t.Context(), "Person", raw)
 
-	require.True(t, result.OK())
+	require.NoError(t, err)
 	require.False(t, valid.IsZero())
 
 	assert.Len(t, composedOf(valid, "ADDRESSES"), 1)
@@ -101,9 +102,9 @@ type Person {
 		},
 	}
 
-	valid, result := validator.ValidateOne(t.Context(), "Person", raw)
+	valid, err := validator.ValidateOne(t.Context(), "Person", raw)
 
-	require.True(t, result.OK())
+	require.NoError(t, err)
 	require.False(t, valid.IsZero())
 
 	children := composedOf(valid, "ADDRESSES")
@@ -125,9 +126,9 @@ func TestValidateCompositions_Optional_Nil(t *testing.T) {
 		},
 	}
 
-	valid, result := validator.ValidateOne(t.Context(), "Person", raw)
+	valid, err := validator.ValidateOne(t.Context(), "Person", raw)
 
-	require.True(t, result.OK())
+	require.NoError(t, err)
 	require.False(t, valid.IsZero())
 
 	assert.Empty(t, composedOf(valid, "ADDRESSES"))
@@ -145,9 +146,9 @@ func TestValidateCompositions_Optional_Empty(t *testing.T) {
 		},
 	}
 
-	valid, result := validator.ValidateOne(t.Context(), "Person", raw)
+	valid, err := validator.ValidateOne(t.Context(), "Person", raw)
 
-	require.True(t, result.OK())
+	require.NoError(t, err)
 	require.False(t, valid.IsZero())
 
 	assert.Empty(t, composedOf(valid, "ADDRESSES"))
@@ -165,10 +166,12 @@ func TestValidateCompositions_Required_Missing(t *testing.T) {
 		},
 	}
 
-	valid, result := validator.ValidateOne(t.Context(), "Person", raw)
+	valid, result := diagtest.Issues(t, func() (instance.ValidInstance, error) {
+		return validator.ValidateOne(t.Context(), "Person", raw)
+	})
 
 	assert.True(t, valid.IsZero())
-	require.False(t, result.OK())
+	require.Error(t, diagtest.Err(result))
 	assert.Contains(t, result.String(), "missing required composition")
 }
 
@@ -184,10 +187,12 @@ func TestValidateCompositions_Required_Empty(t *testing.T) {
 		},
 	}
 
-	valid, result := validator.ValidateOne(t.Context(), "Person", raw)
+	valid, result := diagtest.Issues(t, func() (instance.ValidInstance, error) {
+		return validator.ValidateOne(t.Context(), "Person", raw)
+	})
 
 	assert.True(t, valid.IsZero())
-	require.False(t, result.OK())
+	require.Error(t, diagtest.Err(result))
 	assert.Contains(t, result.String(), "required composition cannot be empty")
 }
 
@@ -206,10 +211,12 @@ func TestValidateCompositions_DuplicatePK(t *testing.T) {
 		},
 	}
 
-	valid, result := validator.ValidateOne(t.Context(), "Person", raw)
+	valid, result := diagtest.Issues(t, func() (instance.ValidInstance, error) {
+		return validator.ValidateOne(t.Context(), "Person", raw)
+	})
 
 	assert.True(t, valid.IsZero())
-	require.False(t, result.OK())
+	require.Error(t, diagtest.Err(result))
 	assert.Contains(t, result.String(), "duplicate primary key")
 }
 
@@ -238,10 +245,12 @@ type Person {
 		},
 	}
 
-	valid, result := validator.ValidateOne(t.Context(), "Person", raw)
+	valid, result := diagtest.Issues(t, func() (instance.ValidInstance, error) {
+		return validator.ValidateOne(t.Context(), "Person", raw)
+	})
 
 	assert.True(t, valid.IsZero())
-	require.False(t, result.OK())
+	require.Error(t, diagtest.Err(result))
 	assert.Contains(t, result.String(), "missing required")
 }
 
@@ -259,10 +268,12 @@ func TestValidateCompositions_InvalidChildShape(t *testing.T) {
 		},
 	}
 
-	valid, result := validator.ValidateOne(t.Context(), "Person", raw)
+	valid, result := diagtest.Issues(t, func() (instance.ValidInstance, error) {
+		return validator.ValidateOne(t.Context(), "Person", raw)
+	})
 
 	assert.True(t, valid.IsZero())
-	require.False(t, result.OK())
+	require.Error(t, diagtest.Err(result))
 	assert.Contains(t, result.String(), "composition child must be an object")
 }
 
@@ -278,10 +289,12 @@ func TestValidateCompositions_NotArray(t *testing.T) {
 		},
 	}
 
-	valid, result := validator.ValidateOne(t.Context(), "Person", raw)
+	valid, result := diagtest.Issues(t, func() (instance.ValidInstance, error) {
+		return validator.ValidateOne(t.Context(), "Person", raw)
+	})
 
 	assert.True(t, valid.IsZero())
-	require.False(t, result.OK())
+	require.Error(t, diagtest.Err(result))
 	assert.Contains(t, result.String(), "expected array")
 }
 
@@ -298,10 +311,12 @@ func TestValidateCompositions_ReasonDetail_Absent(t *testing.T) {
 		},
 	}
 
-	valid, result := validator.ValidateOne(t.Context(), "Person", raw)
+	valid, result := diagtest.Issues(t, func() (instance.ValidInstance, error) {
+		return validator.ValidateOne(t.Context(), "Person", raw)
+	})
 
 	assert.True(t, valid.IsZero())
-	require.False(t, result.OK())
+	require.Error(t, diagtest.Err(result))
 
 	yammmtest.GoldenJSON(t, "composition_diag_reason_absent", issueProjection(result))
 }
@@ -319,10 +334,12 @@ func TestValidateCompositions_ReasonDetail_Empty(t *testing.T) {
 		},
 	}
 
-	valid, result := validator.ValidateOne(t.Context(), "Person", raw)
+	valid, result := diagtest.Issues(t, func() (instance.ValidInstance, error) {
+		return validator.ValidateOne(t.Context(), "Person", raw)
+	})
 
 	assert.True(t, valid.IsZero())
-	require.False(t, result.OK())
+	require.Error(t, diagtest.Err(result))
 
 	yammmtest.GoldenJSON(t, "composition_diag_reason_empty", issueProjection(result))
 }
@@ -343,9 +360,11 @@ func TestValidateCompositions_DuplicatePK_PathFormat(t *testing.T) {
 		},
 	}
 
-	_, result := validator.ValidateOne(t.Context(), "Person", raw)
+	_, result := diagtest.Issues(t, func() (instance.ValidInstance, error) {
+		return validator.ValidateOne(t.Context(), "Person", raw)
+	})
 
-	require.False(t, result.OK())
+	require.Error(t, diagtest.Err(result))
 
 	// Find the duplicate PK error and check its path
 	var foundPath string
@@ -388,9 +407,11 @@ type School {
 		},
 	}
 
-	_, result := validator.ValidateOne(t.Context(), "School", raw)
+	_, result := diagtest.Issues(t, func() (instance.ValidInstance, error) {
+		return validator.ValidateOne(t.Context(), "School", raw)
+	})
 
-	require.False(t, result.OK())
+	require.Error(t, diagtest.Err(result))
 
 	// Find the duplicate PK error and check its path
 	var foundPath string
@@ -431,26 +452,36 @@ type Person {
 	addr := func(id string) any { return map[string]any{"id": id, "street": "Main St"} }
 
 	// One child is the whole of what a (one) slot may hold.
-	valid, result := validator.ValidateOne(t.Context(), "Person", person(addr("100")))
-	require.True(t, result.OK(), result.String())
+	valid, result := diagtest.Issues(t, func() (instance.ValidInstance, error) {
+		return validator.ValidateOne(t.Context(), "Person", person(addr("100")))
+	})
+	require.NoError(t, diagtest.Err(result), result.String())
 	require.False(t, valid.IsZero())
 
 	// Two is refused here, not deferred to the graph, under the code graph
 	// assembly reports the same fact with.
-	_, result = validator.ValidateOne(t.Context(), "Person", person(addr("100"), addr("200")))
-	require.False(t, result.OK())
+	_, result = diagtest.Issues(t, func() (instance.ValidInstance, error) {
+		return validator.ValidateOne(t.Context(), "Person", person(addr("100"), addr("200")))
+	})
+	require.Error(t, diagtest.Err(result))
 	assert.True(t, result.HasCode(diag.E_DUPLICATE_COMPOSED_PK),
 		"want E_DUPLICATE_COMPOSED_PK, got %s", result.String())
 
 	// An empty array on an optional (one) slot stays legal — the cardinality
 	// check must not swallow the empty case the arm above it handles.
-	_, result = validator.ValidateOne(t.Context(), "Person", person([]any{}...))
-	require.True(t, result.OK(), result.String())
+	_, result = diagtest.Issues(t, func() (instance.ValidInstance, error) {
+		return validator.ValidateOne(t.Context(), "Person", person([]any{}...))
+	})
+	require.NoError(t, diagtest.Err(result), result.String())
 
 	// A nil slice is no empty array: it holds no value, so it is the absent
 	// slot an explicit null is, as encoding/json writes it.
-	_, nullResult := validator.ValidateOne(t.Context(), "Person", instance.RawInstance{Properties: map[string]any{"id": "1", "home": nil}})
-	_, result = validator.ValidateOne(t.Context(), "Person", person())
-	require.True(t, result.OK(), result.String())
+	_, nullResult := diagtest.Issues(t, func() (instance.ValidInstance, error) {
+		return validator.ValidateOne(t.Context(), "Person", instance.RawInstance{Properties: map[string]any{"id": "1", "home": nil}})
+	})
+	_, result = diagtest.Issues(t, func() (instance.ValidInstance, error) {
+		return validator.ValidateOne(t.Context(), "Person", person())
+	})
+	require.NoError(t, diagtest.Err(result), result.String())
 	assert.Equal(t, nullResult.String(), result.String(), "a nil slice must draw what an explicit null draws")
 }

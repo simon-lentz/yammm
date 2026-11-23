@@ -2,12 +2,14 @@ package snapshot_test
 
 import (
 	"bytes"
+	"errors"
 	"slices"
 	"testing"
 
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/instance"
+	"github.com/simon-lentz/yammm/internal/diagtest"
 	"github.com/simon-lentz/yammm/schema"
 	"github.com/simon-lentz/yammm/snapshot"
 )
@@ -42,9 +44,9 @@ const (
 func duplicateEdgeDoc(t *testing.T) (schema.Schema, []byte) {
 	t.Helper()
 	ctx := t.Context()
-	s, res := schema.LoadString(ctx, duplicateEdgeSchema, "de.yammm")
-	if res.HasErrors() {
-		t.Fatalf("load schema: %s", res)
+	s, err := schema.LoadString(ctx, duplicateEdgeSchema, "de.yammm")
+	if err != nil {
+		t.Fatalf("load schema: %s", err)
 	}
 	v := instance.NewValidator(s)
 	g := graph.New(s)
@@ -68,17 +70,17 @@ func duplicateEdgeDoc(t *testing.T) (schema.Schema, []byte) {
 			"one_u": map[string]any{"_target_id": "u1"},
 		}},
 	} {
-		vi, vr := v.ValidateOne(ctx, raw.typ, instance.RawInstance{Properties: raw.props})
-		if vr.HasErrors() {
-			t.Fatalf("validate %s: %s", raw.typ, vr)
+		vi, err := v.ValidateOne(ctx, raw.typ, instance.RawInstance{Properties: raw.props})
+		if err != nil {
+			t.Fatalf("validate %s: %s", raw.typ, err)
 		}
-		if r := g.Add(ctx, vi); r.HasErrors() {
-			t.Fatalf("add %s: %s", raw.typ, r)
+		if err := g.Add(ctx, vi); err != nil {
+			t.Fatalf("add %s: %s", raw.typ, err)
 		}
 	}
-	doc, mr := snapshot.Marshal(ctx, g.Snapshot())
-	if mr.HasErrors() {
-		t.Fatalf("marshal: %s", mr)
+	doc, readErr := snapshot.Marshal(ctx, g.Snapshot())
+	if readErr != nil {
+		t.Fatalf("marshal: %s", readErr)
 	}
 	return s, doc
 }
@@ -156,23 +158,27 @@ func TestRead_ATargetNamedTwiceUnderOneAssociationIsRefused(t *testing.T) {
 		data := edited(t, doc, c.edits...)
 		for _, mode := range []struct {
 			name string
-			opts []snapshot.LoadOption
+			opts []snapshot.Option
 		}{
 			{"plain", nil},
-			{"revalidate", []snapshot.LoadOption{snapshot.WithRevalidation(diag.Error)}},
+			{"revalidate", []snapshot.Option{snapshot.WithRevalidation(diag.Error)}},
 		} {
-			opts := append([]snapshot.LoadOption{snapshot.WithIntegrityCheck(false)}, mode.opts...)
+			opts := append([]snapshot.Option{snapshot.WithIntegrityCheck(false)}, mode.opts...)
 			t.Run(c.name+"/Load/"+mode.name, func(t *testing.T) {
 				t.Parallel()
-				snap, res := snapshot.Unmarshal(t.Context(), data, s, opts...)
+				snap, res := diagtest.Capture(t, func(warn func(diag.Issue)) (graph.Snapshot, error) {
+					return snapshot.Unmarshal(t.Context(), data, s, append([]snapshot.Option{snapshot.WithWarnings(warn)}, opts...)...)
+				})
 				matchIssues(t, readIssues(res), c.want)
-				if len(c.want) > 0 && (!snap.IsZero() || !res.HasErrors()) {
+				if len(c.want) > 0 && (!snap.IsZero() || diagtest.Err(res) == nil) {
 					t.Errorf("a refused document yields a snapshot, or no Error: %s", res)
 				}
 			})
 			t.Run(c.name+"/Verify/"+mode.name, func(t *testing.T) {
 				t.Parallel()
-				matchIssues(t, readIssues(snapshot.Verify(t.Context(), data, s, opts...)), c.want)
+				matchIssues(t, readIssues(diagtest.CaptureErr(t, func(warn func(diag.Issue)) error {
+					return snapshot.Verify(t.Context(), data, s, append([]snapshot.Option{snapshot.WithWarnings(warn)}, opts...)...)
+				})), c.want)
 			})
 		}
 	}
@@ -200,13 +206,13 @@ func TestInfo_JudgesNoRepeatedTarget(t *testing.T) {
 		"a record":            {`"target_key":["u8"]`, `"target_key":["u9"]`},
 		"a (one) association": {`"ONE_U":[{"target_type":2,"target_key":["u1"],"properties":{}}]`, `"ONE_U":[{"target_type":2,"target_key":["u1"],"properties":{}},{"target_type":2,"target_key":["u1"],"properties":{}}]`},
 	} {
-		_, res := snapshot.Stat(t.Context(), edited(t, doc, edit))
-		if res.HasCode(diag.E_SNAPSHOT_MALFORMED) || res.HasCode(diag.E_GRAPH_CARDINALITY) {
-			t.Errorf("%s: Info: %s, want no structural refusal", name, res)
+		_, err := snapshot.Stat(t.Context(), edited(t, doc, edit))
+		if errors.Is(err, diag.E_SNAPSHOT_MALFORMED) || errors.Is(err, diag.E_GRAPH_CARDINALITY) {
+			t.Errorf("%s: Info: %s, want no structural refusal", name, err)
 		}
 	}
-	if _, res := snapshot.Stat(t.Context(), doc); res.HasErrors() {
-		t.Errorf("Info of the untouched document: %s", res)
+	if _, err := snapshot.Stat(t.Context(), doc); err != nil {
+		t.Errorf("Info of the untouched document: %s", err)
 	}
 }
 
@@ -254,7 +260,9 @@ func TestRead_EachRefusalOfARootsRecordsNamesItsKey(t *testing.T) {
 			},
 		},
 	} {
-		_, res := snapshot.Unmarshal(t.Context(), edited(t, doc, c.edit), s, snapshot.WithIntegrityCheck(false))
+		_, res := diagtest.Capture(t, func(warn func(diag.Issue)) (graph.Snapshot, error) {
+			return snapshot.Unmarshal(t.Context(), edited(t, doc, c.edit), s, snapshot.WithIntegrityCheck(false), snapshot.WithWarnings(warn))
+		})
 		var got [][]diag.Detail
 		for issue := range res.Issues() {
 			if issue.Code() == c.code {
@@ -287,7 +295,9 @@ func TestRead_RevalidationRaisesNoSecondIssueForATargetNoRootHolds(t *testing.T)
 	} {
 		data := edited(t, doc, c.edits...)
 		for _, sev := range []diag.Severity{diag.Error, diag.Warning} {
-			_, res := snapshot.Unmarshal(t.Context(), data, s, snapshot.WithIntegrityCheck(false), snapshot.WithRevalidation(sev))
+			_, res := diagtest.Capture(t, func(warn func(diag.Issue)) (graph.Snapshot, error) {
+				return snapshot.Unmarshal(t.Context(), data, s, snapshot.WithIntegrityCheck(false), snapshot.WithRevalidation(sev), snapshot.WithWarnings(warn))
+			})
 			dangling := 0
 			for issue := range res.Issues() {
 				switch issue.Code() {
@@ -309,26 +319,30 @@ func TestRead_RevalidationRaisesNoSecondIssueForATargetNoRootHolds(t *testing.T)
 func TestRead_ARefusedRepeatUnderARequiredAssociationDrawsNoWarning(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()
-	s, res := schema.LoadString(ctx, "schema \"rq\"\ntype U {\n id String primary\n}\ntype T {\n id String primary\n --> TO_U (one:many) U\n}\n", "rq.yammm")
-	if res.HasErrors() {
+	s, res := diagtest.Capture(t, func(warn func(diag.Issue)) (schema.Schema, error) {
+		return schema.LoadString(ctx, "schema \"rq\"\ntype U {\n id String primary\n}\ntype T {\n id String primary\n --> TO_U (one:many) U\n}\n", "rq.yammm", schema.WithWarnings(warn))
+	})
+	if diagtest.Err(res) != nil {
 		t.Fatal(res)
 	}
 	g := graph.New(s)
-	vi, vr := instance.NewValidator(s).ValidateOne(ctx, "T", instance.RawInstance{Properties: map[string]any{
+	vi, validateErr := instance.NewValidator(s).ValidateOne(ctx, "T", instance.RawInstance{Properties: map[string]any{
 		"id": "t1", "to_u": []any{map[string]any{"_target_id": "u8"}, map[string]any{"_target_id": "u9"}},
 	}})
-	if vr.HasErrors() {
-		t.Fatal(vr)
+	if validateErr != nil {
+		t.Fatal(validateErr)
 	}
-	if r := g.Add(ctx, vi); r.HasErrors() {
-		t.Fatal(r)
+	if err := g.Add(ctx, vi); err != nil {
+		t.Fatal(err)
 	}
-	doc, mr := snapshot.Marshal(ctx, g.Snapshot())
-	if mr.HasErrors() {
-		t.Fatal(mr)
+	doc, err := snapshot.Marshal(ctx, g.Snapshot())
+	if err != nil {
+		t.Fatal(err)
 	}
 	data := edited(t, doc, [2]string{`"target_key":["u8"]`, `"target_key":["u9"]`})
-	_, res = snapshot.Unmarshal(ctx, data, s, snapshot.WithIntegrityCheck(false), snapshot.WithRevalidation(diag.Error))
+	_, res = diagtest.Capture(t, func(warn func(diag.Issue)) (graph.Snapshot, error) {
+		return snapshot.Unmarshal(ctx, data, s, snapshot.WithIntegrityCheck(false), snapshot.WithRevalidation(diag.Error), snapshot.WithWarnings(warn))
+	})
 	matchIssues(t, readIssues(res), []string{
 		diag.E_SNAPSHOT_MALFORMED.String() + `: unresolved record 1 names target rq#U[["u9"]]`,
 		diag.W_SNAPSHOT_UNRESOLVED_REQUIRED.String() + `: `,
@@ -340,9 +354,9 @@ func TestRead_ARefusedRepeatUnderARequiredAssociationDrawsNoWarning(t *testing.T
 func TestRead_RevalidationRunsTheInvariantOfARootBesideARepeatNoRootHolds(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()
-	s, res := schema.LoadString(ctx, "schema \"ri\"\ntype U {\n id String primary\n}\ntype T {\n id String primary\n name String\n --> TO_U (_:many) U\n ! \"name is not bad\" name != \"bad\"\n}\n", "ri.yammm")
-	if res.HasErrors() {
-		t.Fatal(res)
+	s, err := schema.LoadString(ctx, "schema \"ri\"\ntype U {\n id String primary\n}\ntype T {\n id String primary\n name String\n --> TO_U (_:many) U\n ! \"name is not bad\" name != \"bad\"\n}\n", "ri.yammm")
+	if err != nil {
+		t.Fatal(err)
 	}
 	g := graph.New(s)
 	v := instance.NewValidator(s)
@@ -354,24 +368,26 @@ func TestRead_RevalidationRunsTheInvariantOfARootBesideARepeatNoRootHolds(t *tes
 		{"U", map[string]any{"id": "u2"}},
 		{"T", map[string]any{"id": "t1", "name": "good", "to_u": []any{map[string]any{"_target_id": "u1"}, map[string]any{"_target_id": "u2"}}}},
 	} {
-		vi, vr := v.ValidateOne(ctx, raw.typ, instance.RawInstance{Properties: raw.props})
-		if vr.HasErrors() {
-			t.Fatal(vr)
+		vi, err := v.ValidateOne(ctx, raw.typ, instance.RawInstance{Properties: raw.props})
+		if err != nil {
+			t.Fatal(err)
 		}
-		if r := g.Add(ctx, vi); r.HasErrors() {
-			t.Fatal(r)
+		if err := g.Add(ctx, vi); err != nil {
+			t.Fatal(err)
 		}
 	}
-	doc, mr := snapshot.Marshal(ctx, g.Snapshot())
-	if mr.HasErrors() {
-		t.Fatal(mr)
+	doc, readErr := snapshot.Marshal(ctx, g.Snapshot())
+	if readErr != nil {
+		t.Fatal(readErr)
 	}
 	data := edited(t, doc,
 		[2]string{`"name":"good"`, `"name":"bad"`},
 		[2]string{`"target_key":["u1"]`, `"target_key":["u7"]`},
 		[2]string{`"target_key":["u2"]`, `"target_key":["u7"]`})
 	for _, sev := range []diag.Severity{diag.Error, diag.Warning} {
-		_, res := snapshot.Unmarshal(ctx, data, s, snapshot.WithIntegrityCheck(false), snapshot.WithRevalidation(sev))
+		_, res := diagtest.Capture(t, func(warn func(diag.Issue)) (graph.Snapshot, error) {
+			return snapshot.Unmarshal(ctx, data, s, snapshot.WithIntegrityCheck(false), snapshot.WithRevalidation(sev), snapshot.WithWarnings(warn))
+		})
 		matchIssues(t, readIssues(res), []string{
 			diag.E_SNAPSHOT_DANGLING_REFERENCE.String() + `: edge target ri#U[["u7"]]`,
 			diag.E_SNAPSHOT_DANGLING_REFERENCE.String() + `: edge target ri#U[["u7"]]`,
@@ -390,7 +406,9 @@ func TestRead_RevalidationJudgesTheValuesOfARepeatNoRootHolds(t *testing.T) {
 		[2]string{`"target_key":["u1"],"properties":{"w":1}`, `"target_key":["zz"],"properties":{"w":1}`},
 		[2]string{`"target_key":["u3"],"properties":{"w":3}`, `"target_key":["zz"],"properties":{"w":"x"}`},
 		[2]string{`"target_key":["u8"]`, `"target_key":["zz"]`})
-	_, res := snapshot.Unmarshal(t.Context(), data, s, snapshot.WithIntegrityCheck(false), snapshot.WithRevalidation(diag.Warning))
+	_, res := diagtest.Capture(t, func(warn func(diag.Issue)) (graph.Snapshot, error) {
+		return snapshot.Unmarshal(t.Context(), data, s, snapshot.WithIntegrityCheck(false), snapshot.WithRevalidation(diag.Warning), snapshot.WithWarnings(warn))
+	})
 	matchIssues(t, readIssues(res), []string{
 		diag.E_SNAPSHOT_DANGLING_REFERENCE.String() + `: edge target de#U[["zz"]]`,
 		diag.E_SNAPSHOT_DANGLING_REFERENCE.String() + `: edge target de#U[["zz"]]`,
@@ -398,8 +416,8 @@ func TestRead_RevalidationJudgesTheValuesOfARepeatNoRootHolds(t *testing.T) {
 	})
 }
 
-// A row's issue limit drops no repeat from the second judgement: a repeat the
-// capped run raised but did not keep is named all the same, so the reference
+// The read's issue limit drops no repeat from the second judgement, at any
+// revalidation severity: every repeat the row raised is named, so the reference
 // issues stand for it and it draws no revalidation finding of its own.
 func TestRead_RevalidationNamesARepeatTheIssueLimitDropped(t *testing.T) {
 	t.Parallel()
@@ -408,12 +426,19 @@ func TestRead_RevalidationNamesARepeatTheIssueLimitDropped(t *testing.T) {
 		[2]string{`"target_key":["u1"],"properties":{"w":1}`, `"target_key":["zz"],"properties":{"w":1}`},
 		[2]string{`"target_key":["u3"],"properties":{"w":3}`, `"target_key":["zz"],"properties":{"w":"x"}`},
 		[2]string{`"target_key":["u8"]`, `"target_key":["zz"]`})
-	_, res := snapshot.Unmarshal(t.Context(), data, s, snapshot.WithIntegrityCheck(false),
-		snapshot.WithRevalidation(diag.Warning), snapshot.WithIssueLimit(1))
-	if got := res.CodeCounts(diag.Warning); got[diag.E_DUPLICATE_EDGE] != 0 || got[diag.E_TYPE_MISMATCH] != 1 {
-		t.Errorf("revalidation findings %v, want one E_TYPE_MISMATCH and no E_DUPLICATE_EDGE: %s", got, res)
-	}
-	if got := res.CodeCounts(diag.Error)[diag.E_SNAPSHOT_DANGLING_REFERENCE]; got != 2 {
-		t.Errorf("E_SNAPSHOT_DANGLING_REFERENCE seen %d times, want 2: %s", got, res)
+	for _, sev := range []diag.Severity{diag.Fatal, diag.Error, diag.Warning} {
+		t.Run(sev.String(), func(t *testing.T) {
+			t.Parallel()
+			_, res := diagtest.Capture(t, func(warn func(diag.Issue)) (graph.Snapshot, error) {
+				return snapshot.Unmarshal(t.Context(), data, s, snapshot.WithIntegrityCheck(false),
+					snapshot.WithRevalidation(sev), snapshot.WithIssueLimit(1), snapshot.WithWarnings(warn))
+			})
+			if got := res.CodeCounts(sev); got[diag.E_DUPLICATE_EDGE] != 0 || got[diag.E_TYPE_MISMATCH] != 1 {
+				t.Errorf("revalidation findings %v, want one E_TYPE_MISMATCH and no E_DUPLICATE_EDGE: %s", got, res)
+			}
+			if got := res.CodeCounts(diag.Error)[diag.E_SNAPSHOT_DANGLING_REFERENCE]; got != 2 {
+				t.Errorf("E_SNAPSHOT_DANGLING_REFERENCE seen %d times, want 2: %s", got, res)
+			}
+		})
 	}
 }

@@ -37,9 +37,9 @@ type Tag {
 	name String primary
 }
 `
-	s, res := schema.LoadString(t.Context(), src, "caller_spelling.yammm")
-	if res.HasErrors() {
-		t.Fatalf("load: %s", res)
+	s, err := schema.LoadString(t.Context(), src, "caller_spelling.yammm")
+	if err != nil {
+		t.Fatalf("load: %s", err)
 	}
 	return s
 }
@@ -63,8 +63,8 @@ func TestAdd_AnUnresolvedTargetCarriesTheCanonicalKey(t *testing.T) {
 	want := graph.FormatKey(canonInstant)
 
 	g := graph.New(s)
-	if r := g.Add(t.Context(), runInstance(t, s, "2021-01-01T00:00:00Z", rawInstant)); !r.OK() {
-		t.Fatalf("add: %s", r)
+	if err := g.Add(t.Context(), runInstance(t, s, "2021-01-01T00:00:00Z", rawInstant)); err != nil {
+		t.Fatalf("add: %s", err)
 	}
 	added := slices.Collect(g.Snapshot().Unresolved())
 	if len(added) != 1 || added[0].TargetKey() != want {

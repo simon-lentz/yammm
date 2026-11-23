@@ -5,6 +5,7 @@ import (
 
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/instance"
+	"github.com/simon-lentz/yammm/internal/diagtest"
 	"github.com/simon-lentz/yammm/internal/yammmtest"
 	"github.com/simon-lentz/yammm/schema"
 )
@@ -37,9 +38,9 @@ part type Cell {
 }
 `),
 	}
-	s, res := schema.LoadSourcesWithEntry(t.Context(), m, "entry.yammm", ".", schema.WithSourcesOnly(true))
-	if !res.OK() {
-		t.Fatalf("load: %s", res)
+	s, err := schema.LoadSourcesWithEntry(t.Context(), m, "entry.yammm", schema.WithSourcesOnly(true), schema.WithModuleRoot("."))
+	if err != nil {
+		t.Fatalf("load: %s", err)
 	}
 	return s
 }
@@ -49,11 +50,11 @@ part type Cell {
 // schema's alias.
 func TestComposedChild_TypeNameIsTheEntryRelativeForm(t *testing.T) {
 	s := loadClosure(t)
-	inst, res := instance.NewValidator(s).ValidateOne(t.Context(), "common.Region", instance.RawInstance{Properties: map[string]any{
+	inst, err := instance.NewValidator(s).ValidateOne(t.Context(), "common.Region", instance.RawInstance{Properties: map[string]any{
 		"id": "r", "name": "n", "cells": []any{map[string]any{"id": "c1"}},
 	}})
-	if !res.OK() {
-		t.Fatal(res)
+	if err != nil {
+		t.Fatal(err)
 	}
 	children := composedChildren(inst)
 	if len(children) != 1 {
@@ -66,6 +67,8 @@ func TestComposedChild_TypeNameIsTheEntryRelativeForm(t *testing.T) {
 
 func TestDiagnosticTypeName_IsTheEntryRelativeForm(t *testing.T) {
 	s := loadClosure(t)
-	_, res := instance.NewValidator(s).ValidateOne(t.Context(), "common.Region", instance.RawInstance{Properties: map[string]any{"id": "r"}})
+	_, res := diagtest.Issues(t, func() (instance.ValidInstance, error) {
+		return instance.NewValidator(s).ValidateOne(t.Context(), "common.Region", instance.RawInstance{Properties: map[string]any{"id": "r"}})
+	})
 	yammmtest.Diff(t, []string{"common.Region"}, detailValues(mustIssue(t, res, diag.E_MISSING_REQUIRED), diag.DetailKeyTypeName))
 }

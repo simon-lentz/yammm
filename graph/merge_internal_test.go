@@ -122,7 +122,7 @@ func sameElements[T comparable](a, b []T) bool {
 // resolution once the first merge has built it.
 func TestSourceIndex_MatchesARebuildAfterEveryOperation(t *testing.T) {
 	t.Parallel()
-	s, res := schema.LoadString(t.Context(), `schema "merge"
+	s, err := schema.LoadString(t.Context(), `schema "merge"
 
 type Issuer {
 	id String primary
@@ -140,14 +140,14 @@ type Issue {
 	--> HOME (one) Page
 }
 `, "merge.yammm")
-	if res.HasErrors() {
-		t.Fatal(res)
+	if err != nil {
+		t.Fatal(err)
 	}
 	g := New(s)
 	add := func(step, typ, id string, edges map[string][]string) {
 		t.Helper()
-		if r := g.Add(t.Context(), indexedInstance(t, s, typ, id, edges)); r.HasErrors() {
-			t.Fatalf("%s: %s", step, r)
+		if err := g.Add(t.Context(), indexedInstance(t, s, typ, id, edges)); err != nil {
+			t.Fatalf("%s: %s", step, err)
 		}
 		if g.bySource != nil {
 			assertIndexMatchesARebuild(t, g, step)
@@ -155,8 +155,8 @@ type Issue {
 	}
 	merge := func(step, id string, edges map[string][]string) {
 		t.Helper()
-		if merged, r := g.AddOrMerge(t.Context(), indexedInstance(t, s, "Issue", id, edges)); r.HasErrors() || !merged {
-			t.Fatalf("%s: merged %v, %s", step, merged, r)
+		if merged, err := g.AddOrMerge(t.Context(), indexedInstance(t, s, "Issue", id, edges)); err != nil || !merged {
+			t.Fatalf("%s: merged %v, %s", step, merged, err)
 		}
 		assertIndexMatchesARebuild(t, g, step)
 	}

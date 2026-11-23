@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/simon-lentz/yammm/internal/diagtest"
 	"github.com/simon-lentz/yammm/internal/yammmtest/sourcetest"
 
 	"github.com/simon-lentz/yammm/diag"
@@ -262,7 +263,7 @@ func TestParse_ReadStartSkipsEveryBlank(t *testing.T) {
 		}
 	}
 	parsed, result := parseForProvenance(t, id, "{\"A\": [{},\r\n{}]}")
-	if result.HasErrors() || len(parsed["A"].Elements) != 2 {
+	if (diagtest.Err(result) != nil) || len(parsed["A"].Elements) != 2 {
 		t.Fatalf("parse:%s", describe(result))
 	}
 	if got := parsed["A"].Elements[1].Provenance.Span().Start.Offset; got != 12 {

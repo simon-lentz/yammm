@@ -18,7 +18,7 @@ import (
 // schema an entry point returns holds, so only these tests reach the re-checks.
 func defenseModel(t *testing.T) schema.Type {
 	t.Helper()
-	s, result := schema.LoadString(t.Context(), `schema "defense"
+	s, err := schema.LoadString(t.Context(), `schema "defense"
 
 type Entity {
 	id String primary
@@ -29,8 +29,8 @@ type Entity {
 	flat Vector[3] required
 }
 `, "defense.yammm")
-	if result.HasErrors() {
-		t.Fatalf("defense model must build cleanly: %v", result.Err())
+	if err != nil {
+		t.Fatalf("defense model must build cleanly: %v", err)
 	}
 	typ, ok := s.Type("Entity")
 	if !ok {
@@ -146,7 +146,7 @@ func TestIndexTargetDefense_RejectsTargetsTheLoaderWouldHaveRejected(t *testing.
 			vectorOf(t, parse.MaxIndexedVectorDimensions), true, collector, reportedTargets{}) {
 			t.Errorf("validVectorTarget rejected a %d-dimensional Vector, the bound Neo4j accepts", parse.MaxIndexedVectorDimensions)
 		}
-		if collector.Result().HasErrors() {
+		if collector.Err() != nil {
 			t.Errorf("valid targets drew diagnostics: %v", collector.Result())
 		}
 	})

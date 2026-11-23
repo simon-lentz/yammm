@@ -450,8 +450,8 @@ func TestSchemaBuilder_RoundTrip_ValidatorAccepts(t *testing.T) {
 		Build()
 	require.NoError(t, err)
 
-	valid, result := validator.ValidateOne(t.Context(), "Person", raw)
-	require.True(t, result.OK(), "validator rejected builder output: %s", result)
+	valid, validateErr := validator.ValidateOne(t.Context(), "Person", raw)
+	require.NoError(t, validateErr, "validator rejected builder output: %s", validateErr)
 	require.False(t, valid.IsZero())
 	assert.Equal(t, "Person", valid.TypeName())
 }

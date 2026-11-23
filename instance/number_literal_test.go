@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/simon-lentz/yammm/internal/diagtest"
 	"github.com/simon-lentz/yammm/internal/schematest"
 	"github.com/simon-lentz/yammm/internal/value"
 
@@ -51,12 +52,14 @@ func TestValidateOne_AJSONNumberThatIsNoLiteralIsRefused(t *testing.T) {
 		{"f", json.Number(".5"), json.Number("0.5")},
 		{"ns", []any{json.Number("+5")}, []any{json.Number("5")}},
 	} {
-		_, res := v.ValidateOne(t.Context(), "T", instance.RawInstance{Properties: map[string]any{"id": "x", c.prop: c.bad}})
+		_, res := diagtest.Issues(t, func() (instance.ValidInstance, error) {
+			return v.ValidateOne(t.Context(), "T", instance.RawInstance{Properties: map[string]any{"id": "x", c.prop: c.bad}})
+		})
 		if !res.HasCode(diag.E_TYPE_MISMATCH) {
 			t.Errorf("%s = %#v: want E_TYPE_MISMATCH, got %v", c.prop, c.bad, codes(res))
 		}
-		if _, res := v.ValidateOne(t.Context(), "T", instance.RawInstance{Properties: map[string]any{"id": "x", c.prop: c.ok}}); res.Err() != nil {
-			t.Errorf("control %s = %#v refused: %v", c.prop, c.ok, res.Err())
+		if _, err := v.ValidateOne(t.Context(), "T", instance.RawInstance{Properties: map[string]any{"id": "x", c.prop: c.ok}}); err != nil {
+			t.Errorf("control %s = %#v refused: %v", c.prop, c.ok, err)
 		}
 	}
 }

@@ -38,9 +38,9 @@ part type Piece {
 
 func loadDeclaredNamesSchema(t *testing.T) schema.Schema {
 	t.Helper()
-	s, res := schema.LoadString(t.Context(), declaredNamesSchema, "names.yammm")
-	if res.HasErrors() {
-		t.Fatalf("load schema: %s", res)
+	s, err := schema.LoadString(t.Context(), declaredNamesSchema, "names.yammm")
+	if err != nil {
+		t.Fatalf("load schema: %s", err)
 	}
 	return s
 }

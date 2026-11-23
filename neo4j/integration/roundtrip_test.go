@@ -34,8 +34,8 @@ func loadRoundTripSchema(t *testing.T) schema.Schema {
 	t.Helper()
 	yammmtest.RequireNoModuleRoot(t, schema.FindModuleRoot)
 	s, res := schema.Load(context.Background(), filepath.Join("testdata", "roundtrip.yammm"))
-	if res.HasErrors() {
-		t.Fatalf("loading the round-trip schema: %v", res.Err())
+	if res != nil {
+		t.Fatalf("loading the round-trip schema: %v", res)
 	}
 	return s
 }
@@ -51,12 +51,12 @@ func loadRoundTripSchema(t *testing.T) schema.Schema {
 func applySchemaDDL(t *testing.T, ctx context.Context, a cypher.Config, s schema.Schema) {
 	t.Helper()
 	constraints, cRes := a.Constraints(s)
-	if cRes.HasErrors() {
-		t.Fatalf("emitting constraints: %v", cRes.Err())
+	if cRes != nil {
+		t.Fatalf("emitting constraints: %v", cRes)
 	}
 	indexes, iRes := a.Indexes(s)
-	if iRes.HasErrors() {
-		t.Fatalf("emitting indexes: %v", iRes.Err())
+	if iRes != nil {
+		t.Fatalf("emitting indexes: %v", iRes)
 	}
 	for _, c := range constraints {
 		run(t, ctx, c.Statement)

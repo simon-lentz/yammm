@@ -12,6 +12,7 @@ import (
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/immutable"
+	"github.com/simon-lentz/yammm/internal/diagtest"
 	"github.com/simon-lentz/yammm/internal/instancetest"
 	"github.com/simon-lentz/yammm/internal/snapparts"
 	"github.com/simon-lentz/yammm/internal/snappartstest"
@@ -52,13 +53,13 @@ func duplicateOfAComposingRoot(t *testing.T) graph.Snapshot {
 	s := testSchemaWithComposition(t)
 
 	g := graph.New(s)
-	if res := g.Add(ctx, instancetest.Valid(t, s, "Parent", map[string]any{
+	if err := g.Add(ctx, instancetest.Valid(t, s, "Parent", map[string]any{
 		"id": "p1", "name": "Root",
 		"children": []any{map[string]any{"id": "c1", "value": "first"}},
-	})); res.HasErrors() {
-		t.Fatalf("Add parent: %v", res)
+	})); err != nil {
+		t.Fatalf("Add parent: %v", err)
 	}
-	if res := g.Add(ctx, mustValidInstance(t, s, "Parent", []any{"p1"}, map[string]any{"name": "Again"})); !res.HasErrors() {
+	if err := g.Add(ctx, mustValidInstance(t, s, "Parent", []any{"p1"}, map[string]any{"name": "Again"})); err == nil {
 		t.Fatal("a second Parent at p1 must report a duplicate")
 	}
 
@@ -73,9 +74,9 @@ func duplicateOfAComposingRoot(t *testing.T) graph.Snapshot {
 func v3Doc(t *testing.T) []byte {
 	t.Helper()
 	ctx := context.Background()
-	data, res := snapshot.Marshal(ctx, duplicateOfAComposingRoot(t))
-	if res.HasErrors() {
-		t.Fatalf("marshal: %v", res)
+	data, err := snapshot.Marshal(ctx, duplicateOfAComposingRoot(t))
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
 	}
 	return data
 }
@@ -98,7 +99,9 @@ func TestWireV3_DuplicateGroupEntryIsReported(t *testing.T) {
 	}
 	edited := append(append([]byte{}, data[:idx]...), append([]byte(`,{"type":1,"items":[]}`), data[idx:]...)...)
 
-	_, res := snapshot.Unmarshal(ctx, edited, s, snapshot.WithIntegrityCheck(false))
+	_, res := diagtest.Capture(t, func(warn func(diag.Issue)) (graph.Snapshot, error) {
+		return snapshot.Unmarshal(ctx, edited, s, snapshot.WithIntegrityCheck(false), snapshot.WithWarnings(warn))
+	})
 	if !hasCode(res, diag.E_SNAPSHOT_MALFORMED) {
 		t.Errorf("two instances entries referencing one table row loaded without %s: %v",
 			diag.E_SNAPSHOT_MALFORMED, res)
@@ -130,7 +133,9 @@ func TestWireV3_ComposedChildWithoutTypeIsReported(t *testing.T) {
 	}
 	stripped := body[:idx+len(`"CHILDREN":[{"key":["c1"],`)] + body[idx+len(anchor)+end+1:]
 
-	_, res := snapshot.Unmarshal(ctx, []byte(stripped), s, snapshot.WithIntegrityCheck(false))
+	_, res := diagtest.Capture(t, func(warn func(diag.Issue)) (graph.Snapshot, error) {
+		return snapshot.Unmarshal(ctx, []byte(stripped), s, snapshot.WithIntegrityCheck(false), snapshot.WithWarnings(warn))
+	})
 	if !hasCode(res, diag.E_SNAPSHOT_MALFORMED) {
 		t.Errorf("a composed child carrying no type index loaded without %s: %v",
 			diag.E_SNAPSHOT_MALFORMED, res)
@@ -145,9 +150,9 @@ func TestWireV3_TableIsOrderedByIdentity(t *testing.T) {
 	s := loadIdentitySchema(t)
 
 	built, _, _ := sameNameBeacons(t, s)
-	data, res := snapshot.Marshal(ctx, built)
-	if res.HasErrors() {
-		t.Fatalf("marshal: %v", res)
+	data, err := snapshot.Marshal(ctx, built)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
 	}
 
 	table := wireTypeTable(t, data)
@@ -177,9 +182,9 @@ func TestWireV3_TableIsOrderedByIdentity(t *testing.T) {
 	// A comparator that ties on the name leaves the tie to map iteration order,
 	// so repeated marshals of the same snapshot stop agreeing.
 	for range 8 {
-		again, res := snapshot.Marshal(ctx, built)
-		if res.HasErrors() {
-			t.Fatalf("marshal: %v", res)
+		again, err := snapshot.Marshal(ctx, built)
+		if err != nil {
+			t.Fatalf("marshal: %v", err)
 		}
 		if !bytes.Equal(data, again) {
 			t.Fatalf("Marshal is not deterministic for two types rendering one tag:\nfirst:\n%s\nlater:\n%s", data, again)
@@ -215,11 +220,13 @@ func TestWireV4_UnresolvableSchemaNameIsReported(t *testing.T) {
 		t.Fatalf("fixture shape changed; %s row not found in:\n%s", rooted, data)
 	}
 
-	loaded, res := snapshot.Unmarshal(ctx, moved, s, snapshot.WithIntegrityCheck(false))
+	loaded, res := diagtest.Capture(t, func(warn func(diag.Issue)) (graph.Snapshot, error) {
+		return snapshot.Unmarshal(ctx, moved, s, snapshot.WithIntegrityCheck(false), snapshot.WithWarnings(warn))
+	})
 	if !hasCode(res, diag.E_SNAPSHOT_UNKNOWN_TYPE) {
 		t.Errorf("a moved schema path loaded without %s: %v", diag.E_SNAPSHOT_UNKNOWN_TYPE, res)
 	}
-	if !res.HasErrors() || !loaded.IsZero() {
+	if diagtest.Err(res) == nil || !loaded.IsZero() {
 		t.Errorf("a row the closure does not declare must refuse the document, not rebind it: %v", res)
 	}
 }
@@ -242,12 +249,14 @@ func TestWireV3_UnknownTableRowIsReported(t *testing.T) {
 		t.Fatalf("fixture shape changed; name not found in:\n%s", data)
 	}
 
-	loaded, res := snapshot.Unmarshal(ctx, ghosted, s, snapshot.WithIntegrityCheck(false))
+	loaded, res := diagtest.Capture(t, func(warn func(diag.Issue)) (graph.Snapshot, error) {
+		return snapshot.Unmarshal(ctx, ghosted, s, snapshot.WithIntegrityCheck(false), snapshot.WithWarnings(warn))
+	})
 	if !hasCode(res, diag.E_SNAPSHOT_UNKNOWN_TYPE) {
 		t.Errorf("a types table row naming nothing loaded without %s: %v",
 			diag.E_SNAPSHOT_UNKNOWN_TYPE, res)
 	}
-	if !res.HasErrors() || !loaded.IsZero() {
+	if diagtest.Err(res) == nil || !loaded.IsZero() {
 		t.Errorf("a row that denotes no type must refuse the document, not annotate it: %v", res)
 	}
 }
@@ -266,9 +275,9 @@ func TestWireV3_TableCarriesUnresolvedTargetTypes(t *testing.T) {
 		t.Fatal("fixture is vacuous: no unresolved edge")
 	}
 
-	data, res := snapshot.Marshal(ctx, snap)
-	if res.HasErrors() {
-		t.Fatalf("marshal: %v", res)
+	data, err := snapshot.Marshal(ctx, snap)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
 	}
 
 	var company bool
@@ -281,8 +290,8 @@ func TestWireV3_TableCarriesUnresolvedTargetTypes(t *testing.T) {
 		t.Errorf("the unresolved edge's target type took no table row:\n%s", data)
 	}
 
-	if _, res := snapshot.Unmarshal(ctx, data, s); res.HasErrors() {
-		t.Errorf("the document does not read back: %v", res)
+	if _, err := snapshot.Unmarshal(ctx, data, s); err != nil {
+		t.Errorf("the document does not read back: %v", err)
 	}
 }
 
@@ -376,7 +385,9 @@ func TestWireV3_AbsentSectionIsMalformed(t *testing.T) {
 				t.Fatalf("edit is vacuous: the document is unchanged")
 			}
 
-			loaded, res := snapshot.Unmarshal(ctx, edited, s, snapshot.WithIntegrityCheck(false))
+			loaded, res := diagtest.Capture(t, func(warn func(diag.Issue)) (graph.Snapshot, error) {
+				return snapshot.Unmarshal(ctx, edited, s, snapshot.WithIntegrityCheck(false), snapshot.WithWarnings(warn))
+			})
 			if !hasMalformedReason(res, tc.wantReason) {
 				t.Errorf("Load did not report %q: %v", tc.wantReason, res)
 			}
@@ -384,12 +395,16 @@ func TestWireV3_AbsentSectionIsMalformed(t *testing.T) {
 				t.Errorf("Load returned a snapshot beside a malformed document")
 			}
 
-			vres := snapshot.Verify(ctx, edited, s, snapshot.WithIntegrityCheck(false))
+			vres := diagtest.CaptureErr(t, func(warn func(diag.Issue)) error {
+				return snapshot.Verify(ctx, edited, s, snapshot.WithIntegrityCheck(false), snapshot.WithWarnings(warn))
+			})
 			if !hasMalformedReason(vres, tc.wantReason) {
 				t.Errorf("Verify did not report %q: %v", tc.wantReason, vres)
 			}
 
-			info, ires := snapshot.Stat(ctx, edited)
+			info, ires := diagtest.Issues(t, func() (*snapshot.Info, error) {
+				return snapshot.Stat(ctx, edited)
+			})
 			if !hasMalformedReason(ires, tc.wantReason) {
 				t.Errorf("Info did not report %q: %v", tc.wantReason, ires)
 			}
@@ -418,9 +433,9 @@ func TestWireV3_EmptySectionsAreNotAbsence(t *testing.T) {
 	ctx := context.Background()
 	s := testSchemaWithComposition(t)
 
-	data, res := snapshot.Marshal(ctx, buildSnapshot(t, s))
-	if res.HasErrors() {
-		t.Fatalf("marshal: %v", res)
+	data, err := snapshot.Marshal(ctx, buildSnapshot(t, s))
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
 	}
 	if !bytes.Contains(data, []byte(`"instances":[]`)) {
 		t.Fatalf("fixture is vacuous: an empty snapshot did not write an empty instances section:\n%s", data)
@@ -429,14 +444,14 @@ func TestWireV3_EmptySectionsAreNotAbsence(t *testing.T) {
 		t.Fatalf("fixture is vacuous: no diagnostics section:\n%s", data)
 	}
 
-	if loaded, lres := snapshot.Unmarshal(ctx, data, s); lres.HasErrors() || loaded.IsZero() {
-		t.Errorf("Load refused a document whose sections are present and empty: %v", lres)
+	if loaded, err := snapshot.Unmarshal(ctx, data, s); err != nil || loaded.IsZero() {
+		t.Errorf("Load refused a document whose sections are present and empty: %v", err)
 	}
-	if vres := snapshot.Verify(ctx, data, s); vres.HasErrors() {
-		t.Errorf("Verify refused a document whose sections are present and empty: %v", vres)
+	if err := snapshot.Verify(ctx, data, s); err != nil {
+		t.Errorf("Verify refused a document whose sections are present and empty: %v", err)
 	}
-	if info, ires := snapshot.Stat(ctx, data); ires.HasErrors() || info == nil {
-		t.Errorf("Info refused a document whose sections are present and empty: %v", ires)
+	if info, err := snapshot.Stat(ctx, data); err != nil || info == nil {
+		t.Errorf("Info refused a document whose sections are present and empty: %v", err)
 	}
 }
 
@@ -455,10 +470,10 @@ func TestWireV3_UnresolvedReasonBindsItsPayload(t *testing.T) {
 	s := testSchema(t)
 
 	// A Person with no EMPLOYER edge records one "absent" unresolved edge.
-	data, res := snapshot.Marshal(ctx, buildSnapshot(t, s,
+	data, err := snapshot.Marshal(ctx, buildSnapshot(t, s,
 		mustValidInstance(t, s, "Person", []any{"p1"}, map[string]any{"name": "Alice"})))
-	if res.HasErrors() {
-		t.Fatalf("marshal: %v", res)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
 	}
 	if !bytes.Contains(data, []byte(`"reason":"absent"`)) {
 		t.Fatalf("fixture is vacuous: no absent unresolved record:\n%s", data)
@@ -479,10 +494,14 @@ func TestWireV3_UnresolvedReasonBindsItsPayload(t *testing.T) {
 			if bytes.Equal(edited, data) {
 				t.Fatalf("fixture shape changed; %s not found in:\n%s", tc.from, data)
 			}
-			if _, res := snapshot.Unmarshal(ctx, edited, s, snapshot.WithIntegrityCheck(false)); !hasCode(res, diag.E_SNAPSHOT_MALFORMED) {
+			if _, res := diagtest.Capture(t, func(warn func(diag.Issue)) (graph.Snapshot, error) {
+				return snapshot.Unmarshal(ctx, edited, s, snapshot.WithIntegrityCheck(false), snapshot.WithWarnings(warn))
+			}); !hasCode(res, diag.E_SNAPSHOT_MALFORMED) {
 				t.Errorf("Load accepted it without %s: %v", diag.E_SNAPSHOT_MALFORMED, res)
 			}
-			if res := snapshot.Verify(ctx, edited, s, snapshot.WithIntegrityCheck(false)); !hasCode(res, diag.E_SNAPSHOT_MALFORMED) {
+			if res := diagtest.CaptureErr(t, func(warn func(diag.Issue)) error {
+				return snapshot.Verify(ctx, edited, s, snapshot.WithIntegrityCheck(false), snapshot.WithWarnings(warn))
+			}); !hasCode(res, diag.E_SNAPSHOT_MALFORMED) {
 				t.Errorf("Verify accepted it without %s: %v", diag.E_SNAPSHOT_MALFORMED, res)
 			}
 		})
@@ -499,9 +518,9 @@ func rootDuplicateDoc(t *testing.T) ([]byte, schema.Schema) {
 	snap := buildSnapshot(t, s,
 		mustValidInstance(t, s, "Person", []any{"p1"}, map[string]any{"name": "Alice"}),
 		mustValidInstance(t, s, "Person", []any{"p1"}, map[string]any{"name": "Bob"}))
-	data, res := snapshot.Marshal(ctx, snap)
-	if res.HasErrors() {
-		t.Fatalf("marshal: %v", res)
+	data, err := snapshot.Marshal(ctx, snap)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
 	}
 	if !bytes.Contains(data, []byte(`"duplicates":[{`)) {
 		t.Fatalf("fixture is vacuous: no duplicate record:\n%s", data)
@@ -533,7 +552,9 @@ func TestWireV3_StrayParentCoordinateIsReported(t *testing.T) {
 			cut := idx + len(anchor)
 			edited := append(append([]byte{}, data[:cut]...), append([]byte(tc.field), data[cut:]...)...)
 
-			if _, res := snapshot.Unmarshal(ctx, edited, s, snapshot.WithIntegrityCheck(false)); !hasMalformedReason(res, "states a parent or a relation") {
+			if _, res := diagtest.Capture(t, func(warn func(diag.Issue)) (graph.Snapshot, error) {
+				return snapshot.Unmarshal(ctx, edited, s, snapshot.WithIntegrityCheck(false), snapshot.WithWarnings(warn))
+			}); !hasMalformedReason(res, "states a parent or a relation") {
 				t.Errorf("Load accepted a duplicate carrying %s: %v", tc.field, res)
 			}
 		})
@@ -548,13 +569,13 @@ func TestWireV3_AnEmptyParentCoordinateStatesNone(t *testing.T) {
 	for _, field := range []string{`"parent_type":null,`, `"parent_key":null,`, `"parent_key":[],`, `"relation":"",`} {
 		t.Run(field, func(t *testing.T) {
 			edited := bytes.Replace(data, []byte(`"duplicates":[{`), []byte(`"duplicates":[{`+field), 1)
-			snap, res := snapshot.Unmarshal(ctx, edited, s, snapshot.WithIntegrityCheck(false))
-			if res.HasErrors() {
-				t.Fatalf("Load: %s", res)
+			snap, err := snapshot.Unmarshal(ctx, edited, s, snapshot.WithIntegrityCheck(false))
+			if err != nil {
+				t.Fatalf("Load: %s", err)
 			}
-			again, res := snapshot.Marshal(ctx, snap)
-			if res.HasErrors() {
-				t.Fatalf("Marshal: %s", res)
+			again, err := snapshot.Marshal(ctx, snap)
+			if err != nil {
+				t.Fatalf("Marshal: %s", err)
 			}
 			if !bytes.Equal(again, data) {
 				t.Errorf("the next Marshal wrote\n%s\nwant\n%s", again, data)
@@ -588,7 +609,9 @@ func TestWireV3_NegativeRowIndexIsMalformed(t *testing.T) {
 
 	const wantReason = "instances entry 0 references types table row -1"
 
-	loaded, res := snapshot.Unmarshal(ctx, edited, s, snapshot.WithIntegrityCheck(false))
+	loaded, res := diagtest.Capture(t, func(warn func(diag.Issue)) (graph.Snapshot, error) {
+		return snapshot.Unmarshal(ctx, edited, s, snapshot.WithIntegrityCheck(false), snapshot.WithWarnings(warn))
+	})
 	if !hasMalformedReason(res, wantReason) {
 		t.Errorf("Load did not report %q: %v", wantReason, res)
 	}
@@ -596,7 +619,9 @@ func TestWireV3_NegativeRowIndexIsMalformed(t *testing.T) {
 		t.Errorf("Load returned a snapshot for a negative row reference")
 	}
 
-	vres := snapshot.Verify(ctx, edited, s, snapshot.WithIntegrityCheck(false))
+	vres := diagtest.CaptureErr(t, func(warn func(diag.Issue)) error {
+		return snapshot.Verify(ctx, edited, s, snapshot.WithIntegrityCheck(false), snapshot.WithWarnings(warn))
+	})
 	if !hasMalformedReason(vres, wantReason) {
 		t.Errorf("Verify did not report %q: %v", wantReason, vres)
 	}
@@ -630,9 +655,9 @@ func TestWireV3_InstancelessTypeEmitsAnEmptyGroup(t *testing.T) {
 	})
 
 	emptyRow := -1
-	data, mres := snapshot.Marshal(ctx, built)
-	if mres.HasErrors() {
-		t.Fatalf("marshal: %v", mres)
+	data, err := snapshot.Marshal(ctx, built)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
 	}
 	for i, e := range wireTypeTable(t, data) {
 		if e.Name == "Company" {

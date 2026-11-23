@@ -23,9 +23,9 @@ type Run {
 	at ` + keyKind + ` primary
 }
 `
-	s, res := schema.LoadString(t.Context(), src, "instant_key.yammm")
-	if res.HasErrors() {
-		t.Fatalf("load %s: %s", keyKind, res)
+	s, err := schema.LoadString(t.Context(), src, "instant_key.yammm")
+	if err != nil {
+		t.Fatalf("load %s: %s", keyKind, err)
 	}
 	return s
 }
@@ -44,8 +44,8 @@ func TestNewFromSnapshot_KeepsTheAddressAddStored(t *testing.T) {
 	runID := mustTypeID(t, s, "Run")
 
 	src := graph.New(s)
-	if r := src.Add(t.Context(), instantKeyInstance(t, s, rawInstant)); !r.OK() {
-		t.Fatalf("add: %s", r)
+	if err := src.Add(t.Context(), instantKeyInstance(t, s, rawInstant)); err != nil {
+		t.Fatalf("add: %s", err)
 	}
 	before := slices.Collect(src.Snapshot().InstancesOf(runID))[0].PrimaryKey().String()
 
@@ -85,11 +85,11 @@ type Doc {
 	})
 
 	g := graph.New(s)
-	if r := g.Add(t.Context(), note); !r.OK() {
-		t.Fatalf("add note: %s", r)
+	if err := g.Add(t.Context(), note); err != nil {
+		t.Fatalf("add note: %s", err)
 	}
-	if r := g.Add(t.Context(), doc); !r.OK() {
-		t.Fatalf("add doc: %s", r)
+	if err := g.Add(t.Context(), doc); err != nil {
+		t.Fatalf("add doc: %s", err)
 	}
 
 	edges := slices.Collect(g.Snapshot().Edges())
@@ -124,9 +124,9 @@ part type Line {
 	sku String primary
 }
 `
-	s, res := schema.LoadString(t.Context(), src, "composed_one_slot.yammm")
-	if res.HasErrors() {
-		t.Fatalf("load: %s", res)
+	s, err := schema.LoadString(t.Context(), src, "composed_one_slot.yammm")
+	if err != nil {
+		t.Fatalf("load: %s", err)
 	}
 	return s
 }

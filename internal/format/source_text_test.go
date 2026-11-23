@@ -120,9 +120,9 @@ func TestSource_AFormattedSourceTextFaultStillFailsToLoad(t *testing.T) {
 			if text == "" {
 				continue
 			}
-			_, result := schema.LoadString(context.Background(), text, "s.yammm")
-			if !result.HasCode(diag.E_SYNTAX) {
-				t.Errorf("%s: LoadString(%q) reports no E_SYNTAX: %v", row.name, text, result)
+			_, err := schema.LoadString(context.Background(), text, "s.yammm")
+			if !errors.Is(err, diag.E_SYNTAX) {
+				t.Errorf("%s: LoadString(%q) reports no E_SYNTAX: %v", row.name, text, err)
 			}
 		}
 	}

@@ -377,8 +377,8 @@ func FuzzSource(f *testing.F) {
 		if failure := formatOutcome(src); failure != "" {
 			t.Fatal(failure)
 		}
-		s, result := schema.LoadString(context.Background(), src, "fuzz.yammm")
-		if result.Err() != nil || s.IsZero() {
+		s, err := schema.LoadString(context.Background(), src, "fuzz.yammm")
+		if err != nil || s.IsZero() {
 			return
 		}
 		out, _ := formatText(src)

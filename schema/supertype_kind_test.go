@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/simon-lentz/yammm/diag"
+	"github.com/simon-lentz/yammm/internal/diagtest"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -34,7 +35,9 @@ func TestExtends_ASupertypeIsAbstractOrOfTheSubtypesKind(t *testing.T) {
 	n String
 }
 `, modifier[super], modifier[sub])
-				s, res := schema.LoadString(t.Context(), src, "s.yammm")
+				s, res := diagtest.Capture(t, func(warn func(diag.Issue)) (schema.Schema, error) {
+					return schema.LoadString(t.Context(), src, "s.yammm", schema.WithWarnings(warn))
+				})
 				if !refused[[2]string{sub, super}] {
 					if s.IsZero() {
 						t.Fatalf("want a load, got %v", res)

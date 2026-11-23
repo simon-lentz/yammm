@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/simon-lentz/yammm/diag"
+	"github.com/simon-lentz/yammm/internal/diagtest"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -22,7 +23,9 @@ func TestLoad_AnAnnotationWhoseArgumentsDoNotParseDrawsOneIssue(t *testing.T) {
 		t.Run(member, func(t *testing.T) {
 			t.Parallel()
 			src := "schema \"s\"\ntype T {\n\tid String primary\n\ta String\n" + member + "\n}\n"
-			_, res := schema.LoadString(t.Context(), src, "s.yammm")
+			_, res := diagtest.Capture(t, func(warn func(diag.Issue)) (schema.Schema, error) {
+				return schema.LoadString(t.Context(), src, "s.yammm", schema.WithWarnings(warn))
+			})
 			issues := slices.Collect(res.Issues())
 			if len(issues) != 1 || issues[0].Code() != diag.E_SYNTAX {
 				t.Errorf("want one E_SYNTAX; got %v", res)

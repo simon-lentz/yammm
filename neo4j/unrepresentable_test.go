@@ -50,7 +50,7 @@ func TestErrUnrepresentable_MarksEveryRefusalOfAValue(t *testing.T) {
 		"CoerceParams, rows at a declared key": second(CoerceParams(
 			map[string]any{"rows": []map[string]any{{"x": 1}}}, ParamTypes{"rows": schematest.Constraint(t, "String")})),
 		"a primary key its constraint refuses": second(extractKeyProps(immutable.WrapProperties(map[string]any{"id": "x"}),
-			&nodeShape{label: "Holder", primaryKeys: []string{"id"}, keyConstraints: map[string]schema.Constraint{"id": schematest.Constraint(t, "Date")}})),
+			&nodeShape{label: "Holder", primaryKeys: []string{"id"}, keyConstraints: map[string]schema.Constraint{"id": schematest.Constraint(t, "Date")}}, `type "Holder"`)),
 	} {
 		if !errors.Is(err, ErrUnrepresentable) {
 			t.Errorf("%s: error = %v; want ErrUnrepresentable", name, err)

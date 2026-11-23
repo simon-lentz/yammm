@@ -10,9 +10,11 @@
 // Like schema/cypher and unlike neo4j, gogen has no instance-data path: it never parses,
 // validates, or serializes instances. It imports neither instance nor graph.
 // It maps a completed schema to Go source, nothing more. It also returns a plain error rather than the
-// [github.com/simon-lentz/yammm/diag.Result] the library's loading, validation
+// *[github.com/simon-lentz/yammm/diag.ResultError] the library's loading, validation
 // and graph code return, because its failures are refusals of its inputs and generator bugs (see
-// Error Conditions), not data diagnostics with source locations.
+// Error Conditions), not data diagnostics with source locations. The one exception is an
+// embedded store that does not re-load, a generator bug whose error wraps the load's
+// *[github.com/simon-lentz/yammm/diag.ResultError].
 //
 // # Generated Declarations
 //
@@ -252,8 +254,8 @@
 //   - func SerializedSources() map[string][]byte returns every source the
 //     schema's load held, by its key, and const SerializedEntry names the
 //     entry's key. The recommended re-load is
-//     [github.com/simon-lentz/yammm/schema.LoadSourcesWithEntry] with an empty
-//     module root and [github.com/simon-lentz/yammm/schema.WithSyntheticRoot],
+//     [github.com/simon-lentz/yammm/schema.LoadSourcesWithEntry] with
+//     [github.com/simon-lentz/yammm/schema.WithSyntheticRoot] and no module root,
 //     which reads no disk and gives type identities no working directory,
 //     checkout, or container mount point can move.
 //

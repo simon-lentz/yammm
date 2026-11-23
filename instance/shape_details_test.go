@@ -6,6 +6,7 @@ import (
 
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/instance"
+	"github.com/simon-lentz/yammm/internal/diagtest"
 	"github.com/simon-lentz/yammm/internal/yammmtest"
 )
 
@@ -13,13 +14,17 @@ import (
 // structured consumer never has to parse the message.
 func TestEdgeShapeMismatch_AlwaysCarriesExpectedAndGot(t *testing.T) {
 	v := instance.NewValidator(loadSrc(t, personCompany))
-	_, res := v.ValidateOne(t.Context(), "Person", instance.RawInstance{Properties: map[string]any{"id": "p", "works_at": 42}})
+	_, res := diagtest.Issues(t, func() (instance.ValidInstance, error) {
+		return v.ValidateOne(t.Context(), "Person", instance.RawInstance{Properties: map[string]any{"id": "p", "works_at": 42}})
+	})
 	is := mustIssue(t, res, diag.E_EDGE_SHAPE_MISMATCH)
 	yammmtest.Diff(t, []string{"object"}, detailValues(is, diag.DetailKeyExpected))
 	yammmtest.Diff(t, []string{"number"}, detailValues(is, diag.DetailKeyGot))
 
 	v = instance.NewValidator(loadSrc(t, docSrc))
-	_, res = v.ValidateOne(t.Context(), "Doc", instance.RawInstance{Properties: map[string]any{"id": "d", "lines": "x"}})
+	_, res = diagtest.Issues(t, func() (instance.ValidInstance, error) {
+		return v.ValidateOne(t.Context(), "Doc", instance.RawInstance{Properties: map[string]any{"id": "d", "lines": "x"}})
+	})
 	is = mustIssue(t, res, diag.E_EDGE_SHAPE_MISMATCH)
 	yammmtest.Diff(t, []string{"array"}, detailValues(is, diag.DetailKeyExpected))
 	yammmtest.Diff(t, []string{"string"}, detailValues(is, diag.DetailKeyGot))
@@ -28,7 +33,9 @@ func TestEdgeShapeMismatch_AlwaysCarriesExpectedAndGot(t *testing.T) {
 // A typed container is named by its kind, which is what a Go caller sent.
 func TestEdgeShapeMismatch_NamesTypedContainers(t *testing.T) {
 	v := instance.NewValidator(loadSrc(t, personCompany))
-	_, res := v.ValidateOne(t.Context(), "Person", instance.RawInstance{Properties: map[string]any{"id": "p", "works_at": []string{"x"}}})
+	_, res := diagtest.Issues(t, func() (instance.ValidInstance, error) {
+		return v.ValidateOne(t.Context(), "Person", instance.RawInstance{Properties: map[string]any{"id": "p", "works_at": []string{"x"}}})
+	})
 	yammmtest.Diff(t, []string{"array"}, detailValues(mustIssue(t, res, diag.E_EDGE_SHAPE_MISMATCH), diag.DetailKeyGot))
 }
 
@@ -36,6 +43,8 @@ func TestEdgeShapeMismatch_NamesTypedContainers(t *testing.T) {
 // not by its underlying Go kind, which is string.
 func TestEdgeShapeMismatch_NamesAJSONNumberANumber(t *testing.T) {
 	v := instance.NewValidator(loadSrc(t, personCompany))
-	_, res := v.ValidateOne(t.Context(), "Person", instance.RawInstance{Properties: map[string]any{"id": "p", "works_at": json.Number("42")}})
+	_, res := diagtest.Issues(t, func() (instance.ValidInstance, error) {
+		return v.ValidateOne(t.Context(), "Person", instance.RawInstance{Properties: map[string]any{"id": "p", "works_at": json.Number("42")}})
+	})
 	yammmtest.Diff(t, []string{"number"}, detailValues(mustIssue(t, res, diag.E_EDGE_SHAPE_MISMATCH), diag.DetailKeyGot))
 }

@@ -1,7 +1,6 @@
 package cypher
 
 import (
-	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/internal/mapping"
 	"github.com/simon-lentz/yammm/schema"
 )
@@ -27,8 +26,9 @@ func (c Config) Label(t schema.Type) string {
 // rule; a break of c's settings is reported alone, and a schema name's break
 // leaves its types' labels unjudged (the package doc's Labels section). A label
 // that keeps the rule decodes to one (schema, type) pair, so no two types share
-// one. Every generator and the neo4j write path call it and refuse the schema
+// one. The breaks are returned as one *[diag.ResultError], nil when there is
+// none; every generator and the neo4j write path call it and refuse the schema
 // on its error.
-func (c Config) CheckLabels(s schema.Schema) diag.Result {
+func (c Config) CheckLabels(s schema.Schema) error {
 	return c.labels().Check(s)
 }

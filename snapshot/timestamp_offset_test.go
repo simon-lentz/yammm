@@ -6,6 +6,7 @@ import (
 
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/graph"
+	"github.com/simon-lentz/yammm/internal/diagtest"
 	"github.com/simon-lentz/yammm/internal/instancetest"
 	"github.com/simon-lentz/yammm/schema"
 	"github.com/simon-lentz/yammm/snapshot"
@@ -17,24 +18,26 @@ import (
 // respelled, since its kind stores no text for it.
 func TestLoad_ATimestampAtAnOffsetHourOfTwentyFourIsReported(t *testing.T) {
 	t.Parallel()
-	s, res := schema.LoadString(t.Context(), "schema \"offsets\"\n\ntype Sensor {\n\tobserved_at Timestamp primary\n\tseen Timestamp\n}\n", "offsets.yammm")
-	if res.HasErrors() {
-		t.Fatalf("load: %s", res)
+	s, err := schema.LoadString(t.Context(), "schema \"offsets\"\n\ntype Sensor {\n\tobserved_at Timestamp primary\n\tseen Timestamp\n}\n", "offsets.yammm")
+	if err != nil {
+		t.Fatalf("load: %s", err)
 	}
 	const (
 		key      = "2020-01-02T03:04:05+23:59"
 		property = "2021-01-02T03:04:05+23:59"
 	)
 	g := graph.New(s)
-	if r := g.Add(t.Context(), instancetest.Valid(t, s, "Sensor", map[string]any{"observed_at": key, "seen": property})); !r.OK() {
-		t.Fatalf("add: %s", r)
+	if err := g.Add(t.Context(), instancetest.Valid(t, s, "Sensor", map[string]any{"observed_at": key, "seen": property})); err != nil {
+		t.Fatalf("add: %s", err)
 	}
-	data, mr := snapshot.Marshal(t.Context(), g.Snapshot())
-	if mr.HasErrors() {
-		t.Fatalf("marshal: %s", mr)
+	data, readErr := snapshot.Marshal(t.Context(), g.Snapshot())
+	if readErr != nil {
+		t.Fatalf("marshal: %s", readErr)
 	}
 	revalidate := snapshot.WithRevalidation(diag.Error)
-	if _, res := snapshot.Unmarshal(t.Context(), data, s, revalidate); res.HasCode(diag.E_CONSTRAINT_FAIL) {
+	if _, res := diagtest.Capture(t, func(warn func(diag.Issue)) (graph.Snapshot, error) {
+		return snapshot.Unmarshal(t.Context(), data, s, revalidate, snapshot.WithWarnings(warn))
+	}); res.HasCode(diag.E_CONSTRAINT_FAIL) {
 		t.Fatalf("control: revalidation reports the widest offset: %s", res)
 	}
 	for position, stamp := range map[string]string{"a key": key, "a property": property} {
@@ -43,10 +46,14 @@ func TestLoad_ATimestampAtAnOffsetHourOfTwentyFourIsReported(t *testing.T) {
 		}
 		wide := stamp[:len(stamp)-len("+23:59")] + "+24:00"
 		doc := rehashDocument(t, bytes.ReplaceAll(data, []byte(stamp), []byte(wide)))
-		if _, res := snapshot.Unmarshal(t.Context(), doc, s, revalidate); !res.HasCode(diag.E_CONSTRAINT_FAIL) {
+		if _, res := diagtest.Capture(t, func(warn func(diag.Issue)) (graph.Snapshot, error) {
+			return snapshot.Unmarshal(t.Context(), doc, s, revalidate, snapshot.WithWarnings(warn))
+		}); !res.HasCode(diag.E_CONSTRAINT_FAIL) {
 			t.Errorf("Load of %s at %s: %s; want E_CONSTRAINT_FAIL", wide, position, res)
 		}
-		if res := snapshot.Verify(t.Context(), doc, s, revalidate); !res.HasCode(diag.E_CONSTRAINT_FAIL) {
+		if res := diagtest.CaptureErr(t, func(warn func(diag.Issue)) error {
+			return snapshot.Verify(t.Context(), doc, s, revalidate, snapshot.WithWarnings(warn))
+		}); !res.HasCode(diag.E_CONSTRAINT_FAIL) {
 			t.Errorf("Verify of %s at %s: %s; want E_CONSTRAINT_FAIL", wide, position, res)
 		}
 	}

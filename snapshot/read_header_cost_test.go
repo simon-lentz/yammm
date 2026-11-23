@@ -23,8 +23,8 @@ func TestReadHeader_AllocatesNoCopyOfTheHeader(t *testing.T) {
 	read := func() uint64 {
 		var before, after runtime.MemStats
 		runtime.ReadMemStats(&before)
-		if _, res := snapshot.ReadHeader(ctx, bytes.NewReader(data)); res.HasErrors() {
-			t.Fatalf("ReadHeader: %s", res)
+		if _, err := snapshot.ReadHeader(ctx, bytes.NewReader(data)); err != nil {
+			t.Fatalf("ReadHeader: %s", err)
 		}
 		runtime.ReadMemStats(&after)
 		return after.TotalAlloc - before.TotalAlloc

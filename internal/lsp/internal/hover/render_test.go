@@ -48,8 +48,8 @@ func TestRenderSymbol_Golden(t *testing.T) {
 					yammmtest.HostAbs("/test/main.yammm"):  []byte("schema \"main\"\nimport \"./parts\" as parts\n"),
 					yammmtest.HostAbs("/test/parts.yammm"): []byte("schema \"parts\"\ntype Wheel {\n  id String primary\n}\n"),
 				}
-				s, result := schema.LoadSourcesWithEntry(t.Context(), sources, yammmtest.HostAbs("/test/main.yammm"), yammmtest.HostAbs("/test"))
-				require.False(t, result.HasErrors(), "load: %s", result)
+				s, err := schema.LoadSourcesWithEntry(t.Context(), sources, yammmtest.HostAbs("/test/main.yammm"), schema.WithModuleRoot(yammmtest.HostAbs("/test")))
+				require.NoError(t, err, "load: %s", err)
 				var imp schema.Import
 				for i := range s.Imports() {
 					imp = i
@@ -64,14 +64,14 @@ func TestRenderSymbol_Golden(t *testing.T) {
 			root: "/project",
 			build: func(t *testing.T) *symbols.Symbol {
 				t.Helper()
-				s, result := schema.LoadString(t.Context(), `schema "test"
+				s, err := schema.LoadString(t.Context(), `schema "test"
 
 /* A person entity. */
 type Person {
 	id String primary
 }
 `, "types.yammm")
-				require.False(t, result.HasErrors())
+				require.NoError(t, err)
 				return &symbols.Symbol{Name: "Person", Kind: symbols.SymbolType, SourceID: s.SourceID(), Data: mustType(t, s, "Person")}
 			},
 		},
@@ -79,13 +79,13 @@ type Person {
 			name: "abstract type",
 			build: func(t *testing.T) *symbols.Symbol {
 				t.Helper()
-				s, result := schema.LoadString(t.Context(), `schema "test"
+				s, err := schema.LoadString(t.Context(), `schema "test"
 
 abstract type Entity {
 	id String primary
 }
 `, "types.yammm")
-				require.False(t, result.HasErrors())
+				require.NoError(t, err)
 				return &symbols.Symbol{Name: "Entity", Kind: symbols.SymbolType, SourceID: s.SourceID(), Data: mustType(t, s, "Entity")}
 			},
 		},
@@ -93,13 +93,13 @@ abstract type Entity {
 			name: "part type",
 			build: func(t *testing.T) *symbols.Symbol {
 				t.Helper()
-				s, result := schema.LoadString(t.Context(), `schema "test"
+				s, err := schema.LoadString(t.Context(), `schema "test"
 
 part type Wheel {
 	id String primary
 }
 `, "types.yammm")
-				require.False(t, result.HasErrors())
+				require.NoError(t, err)
 				return &symbols.Symbol{Name: "Wheel", Kind: symbols.SymbolType, SourceID: s.SourceID(), Data: mustType(t, s, "Wheel")}
 			},
 		},
@@ -107,14 +107,14 @@ part type Wheel {
 			name: "property",
 			build: func(t *testing.T) *symbols.Symbol {
 				t.Helper()
-				s, result := schema.LoadString(t.Context(), `schema "test"
+				s, err := schema.LoadString(t.Context(), `schema "test"
 
 type Person {
 	id String primary
 	name String required
 }
 `, "p.yammm")
-				require.False(t, result.HasErrors())
+				require.NoError(t, err)
 				prop, ok := mustType(t, s, "Person").Property("name")
 				require.True(t, ok)
 				return &symbols.Symbol{Name: "name", Kind: symbols.SymbolProperty, ParentName: "Person", Data: prop}
@@ -124,7 +124,7 @@ type Person {
 			name: "association",
 			build: func(t *testing.T) *symbols.Symbol {
 				t.Helper()
-				s, result := schema.LoadString(t.Context(), `schema "test"
+				s, err := schema.LoadString(t.Context(), `schema "test"
 
 type Address {
 	id String primary
@@ -135,7 +135,7 @@ type Person {
 	--> ADDRESSES (one:many) Address
 }
 `, "test.yammm")
-				require.False(t, result.HasErrors())
+				require.NoError(t, err)
 				rel, ok := mustType(t, s, "Person").Relation("ADDRESSES")
 				require.True(t, ok)
 				return &symbols.Symbol{Name: "ADDRESSES", Kind: symbols.SymbolAssociation, ParentName: "Person", Data: rel}
@@ -145,7 +145,7 @@ type Person {
 			name: "composition",
 			build: func(t *testing.T) *symbols.Symbol {
 				t.Helper()
-				s, result := schema.LoadString(t.Context(), `schema "test"
+				s, err := schema.LoadString(t.Context(), `schema "test"
 
 part type Wheel {
 	id String primary
@@ -156,7 +156,7 @@ type Car {
 	*-> WHEELS (one:many) Wheel
 }
 `, "test.yammm")
-				require.False(t, result.HasErrors())
+				require.NoError(t, err)
 				rel, ok := mustType(t, s, "Car").Relation("WHEELS")
 				require.True(t, ok)
 				return &symbols.Symbol{Name: "WHEELS", Kind: symbols.SymbolComposition, ParentName: "Car", Data: rel}
@@ -166,8 +166,8 @@ type Car {
 			name: "datatype",
 			build: func(t *testing.T) *symbols.Symbol {
 				t.Helper()
-				s, result := schema.LoadString(t.Context(), "schema \"test\"\n/* A short name string. */\ntype ShortName = String", "test.yammm")
-				require.False(t, result.HasErrors(), "load: %s", result)
+				s, err := schema.LoadString(t.Context(), "schema \"test\"\n/* A short name string. */\ntype ShortName = String", "test.yammm")
+				require.NoError(t, err, "load: %s", err)
 				dt, ok := s.DataType("ShortName")
 				require.True(t, ok)
 				return &symbols.Symbol{Name: "ShortName", Kind: symbols.SymbolDataType, Data: dt}
@@ -179,13 +179,13 @@ type Car {
 			build: func(t *testing.T) *symbols.Symbol {
 				t.Helper()
 				entry := yammmtest.HostAbs("/project/schemas/person.yammm")
-				s, result := schema.LoadSourcesWithEntry(t.Context(), map[string][]byte{entry: []byte(`schema "test"
+				s, err := schema.LoadSourcesWithEntry(t.Context(), map[string][]byte{entry: []byte(`schema "test"
 
 type TestType {
 	id String primary
 }
-`)}, entry, "")
-				require.False(t, result.HasErrors())
+`)}, entry)
+				require.NoError(t, err)
 				return &symbols.Symbol{Name: "TestType", Kind: symbols.SymbolType, SourceID: s.SourceID(), Data: mustType(t, s, "TestType")}
 			},
 		},
@@ -194,13 +194,13 @@ type TestType {
 			build: func(t *testing.T) *symbols.Symbol {
 				t.Helper()
 				entry := yammmtest.HostAbs("/project/person.yammm")
-				s, result := schema.LoadSourcesWithEntry(t.Context(), map[string][]byte{entry: []byte(`schema "test"
+				s, err := schema.LoadSourcesWithEntry(t.Context(), map[string][]byte{entry: []byte(`schema "test"
 
 type TestType {
 	id String primary
 }
-`)}, entry, "")
-				require.False(t, result.HasErrors())
+`)}, entry)
+				require.NoError(t, err)
 				return &symbols.Symbol{Name: "TestType", Kind: symbols.SymbolType, SourceID: s.SourceID(), Data: mustType(t, s, "TestType")}
 			},
 		},

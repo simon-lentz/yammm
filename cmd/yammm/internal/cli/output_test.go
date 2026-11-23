@@ -8,6 +8,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/simon-lentz/yammm/diag"
+	"github.com/simon-lentz/yammm/internal/diagtest"
 )
 
 func TestExitForResult(t *testing.T) {
@@ -95,7 +96,7 @@ func TestRenderResult_Text_SurfacesTruncationOnOKResult(t *testing.T) {
 	// visible alongside the retained warnings.
 	res := truncatedResult(diag.Warning, 7, 5)
 	require.True(t, res.LimitReached())
-	require.True(t, res.OK())
+	require.NoError(t, diagtest.Err(res))
 
 	renderer := diag.NewRenderer()
 	var buf bytes.Buffer
@@ -126,7 +127,7 @@ func TestRenderResult_JSON_SurfacesTruncationOnOKResult(t *testing.T) {
 	// from a clean one.
 	res := truncatedResult(diag.Warning, 8, 6)
 	require.True(t, res.LimitReached())
-	require.True(t, res.OK())
+	require.NoError(t, diagtest.Err(res))
 
 	renderer := diag.NewRenderer()
 	var buf bytes.Buffer
@@ -147,7 +148,7 @@ func TestRenderResult_Text_RendersWarningOnlyResult(t *testing.T) {
 	c := diag.NewCollector(diag.NoLimit)
 	c.Collect(diag.NewIssue(diag.Warning, diag.W_ANNOTATION_SHADOWED, "dropped an inherited annotation").Build())
 	res := c.Result()
-	require.True(t, res.OK(), "precondition: a warnings-only result is OK")
+	require.NoError(t, diagtest.Err(res), "precondition: a warnings-only result is OK")
 
 	renderer := diag.NewRenderer()
 	var buf bytes.Buffer

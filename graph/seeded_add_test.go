@@ -1,12 +1,14 @@
 package graph_test
 
 import (
+	"errors"
 	"slices"
 	"testing"
 
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/instance"
+	"github.com/simon-lentz/yammm/internal/diagtest"
 	"github.com/simon-lentz/yammm/schema"
 	"github.com/simon-lentz/yammm/snapshot"
 )
@@ -19,7 +21,7 @@ func employerSchema(t *testing.T, required bool) schema.Schema {
 	if required {
 		multiplicity = "one"
 	}
-	s, result := schema.LoadString(t.Context(), `schema "employer"
+	s, err := schema.LoadString(t.Context(), `schema "employer"
 
 type Company {
 	id String primary
@@ -32,8 +34,8 @@ type Person {
 	--> EMPLOYER (`+multiplicity+`) Company
 }
 `, "employer.yammm")
-	if result.HasErrors() {
-		t.Fatalf("schema: %s", result)
+	if err != nil {
+		t.Fatalf("schema: %s", err)
 	}
 	return s
 }
@@ -63,12 +65,12 @@ func addRecords(t *testing.T, g *graph.Graph, s schema.Schema, records ...employ
 	v := instance.NewValidator(s)
 	var res diag.Result
 	for i, rec := range records {
-		valid, vRes := v.ValidateOne(t.Context(), rec.typeName, instance.RawInstance{Properties: rec.props})
-		if vRes.HasErrors() || valid.IsZero() {
-			t.Fatalf("validate %s %v: %s", rec.typeName, rec.props["id"], vRes)
+		valid, err := v.ValidateOne(t.Context(), rec.typeName, instance.RawInstance{Properties: rec.props})
+		if err != nil || valid.IsZero() {
+			t.Fatalf("validate %s %v: %s", rec.typeName, rec.props["id"], err)
 		}
-		res = g.Add(t.Context(), valid)
-		if res.HasErrors() && i < len(records)-1 {
+		res = diagtest.Failures(t, g.Add(t.Context(), valid))
+		if (diagtest.Err(res) != nil) && i < len(records)-1 {
 			t.Fatalf("add %s %v: %s", rec.typeName, rec.props["id"], res)
 		}
 	}
@@ -81,7 +83,7 @@ func seedOf(t *testing.T, s schema.Schema, records ...employerRecord) graph.Snap
 	t.Helper()
 	g := graph.New(s)
 	if len(records) > 0 {
-		if res := addRecords(t, g, s, records...); res.HasErrors() {
+		if res := addRecords(t, g, s, records...); diagtest.Err(res) != nil {
 			t.Fatalf("seed: %s", res)
 		}
 	}
@@ -100,11 +102,11 @@ func TestNewFromSnapshot_AnAddResolvesAgainstTheSeed(t *testing.T) {
 	seed := seedOf(t, s, company("acme"), person("alice"))
 
 	g := graph.NewFromSnapshot(seed)
-	if res := addRecords(t, g, s, personAt("bob", "acme")); res.HasErrors() {
+	if res := addRecords(t, g, s, personAt("bob", "acme")); diagtest.Err(res) != nil {
 		t.Fatalf("add bob: %s", res)
 	}
-	if res := g.Check(t.Context()); res.HasErrors() {
-		t.Fatalf("Check: %s", res)
+	if err := g.Check(t.Context()); err != nil {
+		t.Fatalf("Check: %s", err)
 	}
 	snap := g.Snapshot()
 	if n := count(snap.InstancesOf(mustTypeID(t, s, "Person"))); n != 2 {
@@ -134,11 +136,11 @@ func TestNewFromSnapshot_AnAddResolvesASeededRecord(t *testing.T) {
 	}
 
 	g := graph.NewFromSnapshot(seed)
-	if res := addRecords(t, g, s, company("acme")); res.HasErrors() {
+	if res := addRecords(t, g, s, company("acme")); diagtest.Err(res) != nil {
 		t.Fatalf("add acme: %s", res)
 	}
-	if res := g.Check(t.Context()); res.HasErrors() {
-		t.Fatalf("Check: %s; the add supplied the missing target", res)
+	if err := g.Check(t.Context()); err != nil {
+		t.Fatalf("Check: %s; the add supplied the missing target", err)
 	}
 	snap := g.Snapshot()
 	if count(snap.Edges()) != 1 || count(snap.Unresolved()) != 0 {
@@ -152,8 +154,8 @@ func TestNewFromSnapshot_ASeededRecordFailsCheck(t *testing.T) {
 	t.Parallel()
 	s := employerSchema(t, true)
 	g := graph.NewFromSnapshot(seedOf(t, s, personAt("alice", "missing")))
-	if res := g.Check(t.Context()); !res.HasCode(diag.E_UNRESOLVED_REQUIRED) {
-		t.Errorf("Check = %s, want E_UNRESOLVED_REQUIRED from the seeded record", res)
+	if err := g.Check(t.Context()); !errors.Is(err, diag.E_UNRESOLVED_REQUIRED) {
+		t.Errorf("Check = %s, want E_UNRESOLVED_REQUIRED from the seeded record", err)
 	}
 	if n := count(g.Snapshot().Unresolved()); n != 1 {
 		t.Errorf("%d unresolved records, want 1", n)
@@ -172,8 +174,8 @@ func TestNewFromSnapshot_AnAddAtASeededKeyIsADuplicate(t *testing.T) {
 	if !res.HasCode(diag.E_DUPLICATE_PK) {
 		t.Fatalf("add at a seeded key = %s, want E_DUPLICATE_PK", res)
 	}
-	if res := g.Check(t.Context()); res.HasErrors() {
-		t.Fatalf("Check: %s; a duplicate is no Check finding", res)
+	if err := g.Check(t.Context()); err != nil {
+		t.Fatalf("Check: %s; a duplicate is no Check finding", err)
 	}
 	snap := g.Snapshot()
 	if count(snap.InstancesOf(mustTypeID(t, s, "Person"))) != 1 || count(snap.Duplicates()) != 1 {
@@ -189,31 +191,31 @@ func TestNewFromSnapshot_ALoadedSnapshotSeedsAResume(t *testing.T) {
 	s := employerSchema(t, false)
 	ctx := t.Context()
 	first := graph.New(s)
-	if res := addRecords(t, first, s, company("acme"), personAt("alice", "acme")); res.HasErrors() {
+	if res := addRecords(t, first, s, company("acme"), personAt("alice", "acme")); diagtest.Err(res) != nil {
 		t.Fatalf("first run: %s", res)
 	}
-	data, res := snapshot.Marshal(ctx, first.Snapshot())
-	if res.HasErrors() {
-		t.Fatalf("Marshal: %s", res)
+	data, err := snapshot.Marshal(ctx, first.Snapshot())
+	if err != nil {
+		t.Fatalf("Marshal: %s", err)
 	}
-	loaded, res := snapshot.Unmarshal(ctx, data, s)
-	if res.HasErrors() {
-		t.Fatalf("Load: %s", res)
+	loaded, err := snapshot.Unmarshal(ctx, data, s)
+	if err != nil {
+		t.Fatalf("Load: %s", err)
 	}
 
 	g := graph.NewFromSnapshot(loaded)
-	if res := addRecords(t, g, s, personAt("bob", "acme")); res.HasErrors() {
+	if res := addRecords(t, g, s, personAt("bob", "acme")); diagtest.Err(res) != nil {
 		t.Fatalf("second run: %s", res)
 	}
-	if res := g.Check(ctx); res.HasErrors() {
-		t.Fatalf("Check: %s", res)
+	if err := g.Check(ctx); err != nil {
+		t.Fatalf("Check: %s", err)
 	}
 	snap := g.Snapshot()
 	if count(snap.InstancesOf(mustTypeID(t, s, "Person"))) != 2 || count(snap.Edges()) != 2 {
 		t.Errorf("%d persons and %d edges, want 2 and 2: alice's edge survives the round trip and bob's resolves against the loaded acme",
 			count(snap.InstancesOf(mustTypeID(t, s, "Person"))), count(snap.Edges()))
 	}
-	if _, res := snapshot.Marshal(ctx, snap); res.HasErrors() {
-		t.Errorf("Marshal of the resumed batch: %s", res)
+	if _, err := snapshot.Marshal(ctx, snap); err != nil {
+		t.Errorf("Marshal of the resumed batch: %s", err)
 	}
 }

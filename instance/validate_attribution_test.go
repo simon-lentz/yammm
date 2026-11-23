@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/simon-lentz/yammm/internal/diagtest"
 	"github.com/simon-lentz/yammm/internal/yammmtest"
 
 	"github.com/simon-lentz/yammm/diag"
@@ -38,9 +39,11 @@ func TestComposition_AbsentRequiredIsReportedBesideASiblingsError(t *testing.T) 
 	t.Parallel()
 	s := loadT(t, "schema \"p\"\n\npart type Line {\n\tid String primary\n}\n\npart type Note {\n\tid String primary\n}\n\ntype Doc {\n\tid String primary\n\t*-> LINES (many) Line\n\t*-> NOTES (one:many) Note\n}\n")
 	v := instance.NewValidator(s)
-	_, res := v.ValidateOne(t.Context(), "Doc", instance.RawInstance{Properties: map[string]any{
-		"id": "d", "lines": []any{map[string]any{"id": 5}}, // a child with a type error; NOTES absent
-	}})
+	_, res := diagtest.Issues(t, func() (instance.ValidInstance, error) {
+		return v.ValidateOne(t.Context(), "Doc", instance.RawInstance{Properties: map[string]any{
+			"id": "d", "lines": []any{map[string]any{"id": 5}}, // a child with a type error; NOTES absent
+		}})
+	})
 	if !res.HasCode(diag.E_TYPE_MISMATCH) {
 		t.Fatalf("control: want the child's E_TYPE_MISMATCH, got %v", codes(res))
 	}
@@ -53,7 +56,7 @@ func TestComposition_AbsentRequiredIsReportedBesideASiblingsError(t *testing.T) 
 // batch's head check for raws[1], which a run over raws[:1] calibrates.
 func checkInSecondRow(t *testing.T, v *instance.Validator, typeName string, raws []instance.RawInstance) context.Context {
 	t.Helper()
-	first := yammmtest.CountChecks(t.Context(), func(ctx context.Context) { v.Validate(ctx, typeName, raws[:1]) })
+	first := yammmtest.CountChecks(t.Context(), func(ctx context.Context) { _, _ = v.Validate(ctx, typeName, raws[:1]) })
 	return yammmtest.NewCheckContext(t.Context(), first+2)
 }
 
@@ -68,7 +71,9 @@ func TestValidate_CancellationMidBatchIsReportedOnceOnItsRow(t *testing.T) {
 		{Properties: map[string]any{"id": "c"}},
 	}
 	v := instance.NewValidator(s)
-	valids, res := v.Validate(checkInSecondRow(t, v, "T", raws), "T", raws)
+	valids, res := diagtest.Issues(t, func() ([]instance.ValidInstance, error) {
+		return v.Validate(checkInSecondRow(t, v, "T", raws), "T", raws)
+	})
 	if valids != nil {
 		t.Errorf("a cancelled batch returned a slice of %d", len(valids))
 	}
@@ -91,7 +96,9 @@ func TestValidate_CancellationBeforeTheFirstRowIsBatchWide(t *testing.T) {
 	raws := []instance.RawInstance{{Properties: map[string]any{"id": "a"}, Provenance: prov}}
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
-	valids, res := v.Validate(ctx, "T", raws)
+	valids, res := diagtest.Issues(t, func() ([]instance.ValidInstance, error) {
+		return v.Validate(ctx, "T", raws)
+	})
 	if valids != nil {
 		t.Errorf("valids = %v, want nil", valids)
 	}
@@ -111,9 +118,11 @@ func TestComposition_ShapeMismatchCarriesTheRelationPairOnce(t *testing.T) {
 	t.Parallel()
 	s := loadT(t, "schema \"p\"\n\npart type Item {\n\tid String primary\n}\n\npart type Line {\n\tid String primary\n\t*-> ITEM (one) Item\n}\n\ntype Doc {\n\tid String primary\n\t*-> LINES (many) Line\n}\n")
 	v := instance.NewValidator(s)
-	_, res := v.ValidateOne(t.Context(), "Doc", instance.RawInstance{Properties: map[string]any{
-		"id": "d", "lines": []any{map[string]any{"id": "l", "item": 5}},
-	}})
+	_, res := diagtest.Issues(t, func() (instance.ValidInstance, error) {
+		return v.ValidateOne(t.Context(), "Doc", instance.RawInstance{Properties: map[string]any{
+			"id": "d", "lines": []any{map[string]any{"id": "l", "item": 5}},
+		}})
+	})
 	is := mustIssue(t, res, diag.E_EDGE_SHAPE_MISMATCH)
 	if rel, _ := detail(is, diag.DetailKeyRelationName); rel != "ITEM" {
 		t.Errorf("relation = %q, want the innermost ITEM", rel)
@@ -134,11 +143,11 @@ func TestComposition_ShapeMismatchCarriesTheRelationPairOnce(t *testing.T) {
 func TestValidInstance_EdgeAcceptsEitherSpelling(t *testing.T) {
 	t.Parallel()
 	v := instance.NewValidator(loadSrc(t, personCompany))
-	inst, res := v.ValidateOne(t.Context(), "Person", instance.RawInstance{Properties: map[string]any{
+	inst, err := v.ValidateOne(t.Context(), "Person", instance.RawInstance{Properties: map[string]any{
 		"id": "p", "name": "n", "works_at": map[string]any{"_target_id": "c1", "note": "n"},
 	}})
 	if inst.IsZero() {
-		t.Fatal(res)
+		t.Fatal(err)
 	}
 	for _, name := range []string{"WORKS_AT", "works_at"} {
 		if _, ok := inst.Edge(name); !ok {
@@ -153,10 +162,12 @@ func TestDiagnosticOrder_IsSortedAndStable(t *testing.T) {
 	t.Parallel()
 	v := instance.NewValidator(loadSrc(t, personCompany))
 	for range 5 {
-		_, res := v.ValidateOne(t.Context(), "Person", instance.RawInstance{Properties: map[string]any{
-			"id": "p", "name": "n",
-			"works_at": map[string]any{"_target_id": "c1", "note": "n", "zeta": 1, "alpha": 2},
-		}})
+		_, res := diagtest.Issues(t, func() (instance.ValidInstance, error) {
+			return v.ValidateOne(t.Context(), "Person", instance.RawInstance{Properties: map[string]any{
+				"id": "p", "name": "n",
+				"works_at": map[string]any{"_target_id": "c1", "note": "n", "zeta": 1, "alpha": 2},
+			}})
+		})
 		var unknown []string
 		for is := range res.Issues() {
 			if is.Code() == diag.E_UNKNOWN_EDGE_FIELD {
@@ -174,9 +185,11 @@ func TestDiagnosticOrder_IsSortedAndStable(t *testing.T) {
 func TestEdgeTarget_NullFKCarriesGotNull(t *testing.T) {
 	t.Parallel()
 	v := instance.NewValidator(loadSrc(t, personCompany))
-	_, res := v.ValidateOne(t.Context(), "Person", instance.RawInstance{Properties: map[string]any{
-		"id": "p", "name": "n", "works_at": map[string]any{"_target_id": nil, "note": "n"},
-	}})
+	_, res := diagtest.Issues(t, func() (instance.ValidInstance, error) {
+		return v.ValidateOne(t.Context(), "Person", instance.RawInstance{Properties: map[string]any{
+			"id": "p", "name": "n", "works_at": map[string]any{"_target_id": nil, "note": "n"},
+		}})
+	})
 	is := mustIssue(t, res, diag.E_TYPE_MISMATCH)
 	if got, _ := detail(is, diag.DetailKeyGot); got != "null" {
 		t.Errorf("got detail = %q, want null", got)

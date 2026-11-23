@@ -36,9 +36,9 @@ type Basin {
 
 func loadCrossSchema(t *testing.T) schema.Schema {
 	t.Helper()
-	s, result := schema.LoadSourcesWithEntry(t.Context(), crossSchemaSources, "entry.yammm", ".", schema.WithSourcesOnly(true))
-	if result.HasErrors() {
-		t.Fatalf("load cross-schema fixture: %s", result)
+	s, err := schema.LoadSourcesWithEntry(t.Context(), crossSchemaSources, "entry.yammm", schema.WithSourcesOnly(true), schema.WithModuleRoot("."))
+	if err != nil {
+		t.Fatalf("load cross-schema fixture: %s", err)
 	}
 	return s
 }
@@ -51,12 +51,12 @@ func TestRoundTrip_ComposedChildKeepsTypeIdentity(t *testing.T) {
 	s := loadWireTestSchema(t)
 	snap := buildWireTestSnapshot(t, s, float64(2), []any{float64(1)})
 
-	data, result := snapshot.Marshal(ctx, snap)
-	if err := result.Err(); err != nil {
+	data, readErr := snapshot.Marshal(ctx, snap)
+	if err := readErr; err != nil {
 		t.Fatalf("marshal: %v", err)
 	}
-	loaded, result := snapshot.Unmarshal(ctx, data, s)
-	if err := result.Err(); err != nil {
+	loaded, readErr := snapshot.Unmarshal(ctx, data, s)
+	if err := readErr; err != nil {
 		t.Fatalf("load: %v", err)
 	}
 
@@ -88,12 +88,12 @@ func TestDiffSnapshots_SeesComposedChildType(t *testing.T) {
 	snap := buildWireTestSnapshot(t, s, float64(2), []any{float64(1)})
 	snapshottest.AssertRoundTrip(t, snap)
 
-	data, result := snapshot.Marshal(ctx, snap)
-	if err := result.Err(); err != nil {
+	data, readErr := snapshot.Marshal(ctx, snap)
+	if err := readErr; err != nil {
 		t.Fatalf("marshal: %v", err)
 	}
-	loaded, result := snapshot.Unmarshal(ctx, data, s)
-	if err := result.Err(); err != nil {
+	loaded, readErr := snapshot.Unmarshal(ctx, data, s)
+	if err := readErr; err != nil {
 		t.Fatalf("load: %v", err)
 	}
 	snapshottest.DiffSnapshots(t, snap, loaded)
@@ -111,16 +111,16 @@ func TestRoundTrip_CrossSchemaInstance(t *testing.T) {
 	imported := instancetest.Valid(t, s, "base.Basin", map[string]any{"id": "b1", "area": float64(7)})
 	snap := snapshottest.BuildSnapshot(t, s, anchor, imported)
 
-	data, result := snapshot.Marshal(ctx, snap)
-	if err := result.Err(); err != nil {
+	data, readErr := snapshot.Marshal(ctx, snap)
+	if err := readErr; err != nil {
 		t.Fatalf("marshal: %v", err)
 	}
 	if !strings.Contains(string(data), `"name":"Basin"`) {
 		t.Fatalf("marshalled types table does not carry the imported identity:\n%s", data)
 	}
 
-	loaded, result := snapshot.Unmarshal(ctx, data, s)
-	if err := result.Err(); err != nil {
+	loaded, readErr := snapshot.Unmarshal(ctx, data, s)
+	if err := readErr; err != nil {
 		t.Fatalf("load rejected a document Marshal produced: %v", err)
 	}
 	if _, ok := loaded.InstanceByKey(tidOf(t, s, "base.Basin"), graph.FormatKey("b1")); !ok {

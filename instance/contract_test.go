@@ -10,6 +10,7 @@ import (
 
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/instance"
+	"github.com/simon-lentz/yammm/internal/diagtest"
 	"github.com/simon-lentz/yammm/internal/yammmtest"
 	"github.com/simon-lentz/yammm/schema"
 )
@@ -22,9 +23,9 @@ func contractFixture(t *testing.T, schemaFile, dataFile string) (schema.Schema, 
 	if err != nil {
 		t.Fatal(err)
 	}
-	s, result := schema.LoadString(t.Context(), string(src), schemaFile)
-	if result.HasErrors() {
-		t.Fatalf("load %s: %s", schemaFile, result)
+	s, loadErr := schema.LoadString(t.Context(), string(src), schemaFile)
+	if loadErr != nil {
+		t.Fatalf("load %s: %s", schemaFile, loadErr)
 	}
 
 	raw, err := os.ReadFile(filepath.Join("testdata", "contract", dataFile))
@@ -63,9 +64,9 @@ func TestContract_PassCorpus(t *testing.T) {
 	validated := 0
 	for typeName, instances := range data {
 		for _, props := range instances {
-			valid, result := v.ValidateOne(t.Context(), typeName, instance.RawInstance{Properties: props})
-			if !result.OK() {
-				t.Errorf("pass corpus drew diagnostics: %s", result)
+			valid, err := v.ValidateOne(t.Context(), typeName, instance.RawInstance{Properties: props})
+			if err != nil {
+				t.Errorf("pass corpus drew diagnostics: %s", err)
 			}
 			if valid.IsZero() {
 				t.Error("pass corpus returned nil instance")
@@ -117,7 +118,9 @@ func TestContract_ErrCorpus(t *testing.T) {
 	var got []string
 	for typeName, instances := range data {
 		for _, props := range instances {
-			valid, result := v.ValidateOne(t.Context(), typeName, instance.RawInstance{Properties: props})
+			valid, result := diagtest.Issues(t, func() (instance.ValidInstance, error) {
+				return v.ValidateOne(t.Context(), typeName, instance.RawInstance{Properties: props})
+			})
 			if !valid.IsZero() {
 				t.Error("err corpus returned a valid instance")
 			}

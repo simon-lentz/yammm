@@ -7,10 +7,12 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/instance"
 
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/immutable"
+	"github.com/simon-lentz/yammm/internal/diagtest"
 	"github.com/simon-lentz/yammm/internal/snapparts"
 	"github.com/simon-lentz/yammm/internal/snappartstest"
 	"github.com/simon-lentz/yammm/location"
@@ -95,16 +97,16 @@ func TestMarshal_ProvenanceSurvivesTheRoundTrip(t *testing.T) {
 	}
 
 	built := snappartstest.Loaded(t, s, parts)
-	data, result := snapshot.Marshal(ctx, built)
-	if err := result.Err(); err != nil {
+	data, readErr := snapshot.Marshal(ctx, built)
+	if err := readErr; err != nil {
 		t.Fatalf("marshal: %v", err)
 	}
 	if !strings.Contains(string(data), "parents.json") || !strings.Contains(string(data), "children.json") {
 		t.Fatalf("marshalled document carries no provenance:\n%s", data)
 	}
 
-	loaded, result := snapshot.Unmarshal(ctx, data, s)
-	if err := result.Err(); err != nil {
+	loaded, readErr := snapshot.Unmarshal(ctx, data, s)
+	if err := readErr; err != nil {
 		t.Fatalf("load: %v", err)
 	}
 	root, ok := loaded.InstanceByKey(parentID, graph.FormatKey("p1"))
@@ -138,8 +140,10 @@ func TestMarshal_ProvenanceSurvivesTheRoundTrip(t *testing.T) {
 func TestMarshal_NestedCompositionSurvivesToDepthTwo(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	s, result := schema.LoadString(t.Context(), nestedSchema, "nested.yammm")
-	if result.HasErrors() {
+	s, result := diagtest.Capture(t, func(warn func(diag.Issue)) (schema.Schema, error) {
+		return schema.LoadString(t.Context(), nestedSchema, "nested.yammm", schema.WithWarnings(warn))
+	})
+	if diagtest.Err(result) != nil {
 		t.Fatalf("load nested schema: %s", result)
 	}
 	rootID := mustTypeID(t, s, "Root")
@@ -170,16 +174,20 @@ func TestMarshal_NestedCompositionSurvivesToDepthTwo(t *testing.T) {
 	}
 
 	built := snappartstest.Loaded(t, s, parts)
-	data, result := snapshot.Marshal(ctx, built)
-	if err := result.Err(); err != nil {
+	data, result := diagtest.Issues(t, func() ([]byte, error) {
+		return snapshot.Marshal(ctx, built)
+	})
+	if err := diagtest.Err(result); err != nil {
 		t.Fatalf("marshal: %v", err)
 	}
 	if !strings.Contains(string(data), `"deep"`) {
 		t.Fatalf("the depth-2 child never reached the wire:\n%s", data)
 	}
 
-	loaded, result := snapshot.Unmarshal(ctx, data, s)
-	if err := result.Err(); err != nil {
+	loaded, result := diagtest.Capture(t, func(warn func(diag.Issue)) (graph.Snapshot, error) {
+		return snapshot.Unmarshal(ctx, data, s, snapshot.WithWarnings(warn))
+	})
+	if err := diagtest.Err(result); err != nil {
 		t.Fatalf("load: %v", err)
 	}
 	root, ok := loaded.InstanceByKey(rootID, graph.FormatKey("r1"))
@@ -207,11 +215,13 @@ func TestMarshal_NestedCompositionSurvivesToDepthTwo(t *testing.T) {
 func TestRoundTrip_ResolvedEdgeToImportedTypeTarget(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	s, result := schema.LoadSourcesWithEntry(t.Context(), map[string][]byte{
-		"entry.yammm": []byte(crossSchemaEdgeEntry),
-		"base.yammm":  []byte(crossSchemaEdgeBase),
-	}, "entry.yammm", ".", schema.WithSourcesOnly(true))
-	if result.HasErrors() {
+	s, result := diagtest.Capture(t, func(warn func(diag.Issue)) (schema.Schema, error) {
+		return schema.LoadSourcesWithEntry(t.Context(), map[string][]byte{
+			"entry.yammm": []byte(crossSchemaEdgeEntry),
+			"base.yammm":  []byte(crossSchemaEdgeBase),
+		}, "entry.yammm", schema.WithSourcesOnly(true), schema.WithModuleRoot("."), schema.WithWarnings(warn))
+	})
+	if diagtest.Err(result) != nil {
 		t.Fatalf("load cross-schema-with-edge fixture: %s", result)
 	}
 
@@ -242,12 +252,16 @@ func TestRoundTrip_ResolvedEdgeToImportedTypeTarget(t *testing.T) {
 	}
 
 	built := snappartstest.Loaded(t, s, parts)
-	data, result := snapshot.Marshal(ctx, built)
-	if err := result.Err(); err != nil {
+	data, result := diagtest.Issues(t, func() ([]byte, error) {
+		return snapshot.Marshal(ctx, built)
+	})
+	if err := diagtest.Err(result); err != nil {
 		t.Fatalf("marshal: %v", err)
 	}
-	loaded, result := snapshot.Unmarshal(ctx, data, s)
-	if err := result.Err(); err != nil {
+	loaded, result := diagtest.Capture(t, func(warn func(diag.Issue)) (graph.Snapshot, error) {
+		return snapshot.Unmarshal(ctx, data, s, snapshot.WithWarnings(warn))
+	})
+	if err := diagtest.Err(result); err != nil {
 		t.Fatalf("load: %v", err)
 	}
 
@@ -281,8 +295,8 @@ func TestUpdateMetadata_PreservesAnIntShapedBodyThatReMarshalHeals(t *testing.T)
 
 	// Marshal always writes the healed form, so the int shape is put back by
 	// hand and the document re-sealed.
-	written, result := snapshot.Marshal(ctx, snap)
-	if err := result.Err(); err != nil {
+	written, readErr := snapshot.Marshal(ctx, snap)
+	if err := readErr; err != nil {
 		t.Fatalf("Marshal: %v", err)
 	}
 	if !bytes.Contains(written, []byte(`"reading":2.0`)) {
@@ -293,17 +307,17 @@ func TestUpdateMetadata_PreservesAnIntShapedBodyThatReMarshalHeals(t *testing.T)
 		t.Fatalf("fixture is not int-shaped:\n%s", intShaped)
 	}
 
-	updated, result := snapshot.UpdateMetadata(ctx, intShaped, map[string]string{"stage": "done"})
-	if err := result.Err(); err != nil {
+	updated, readErr := snapshot.UpdateMetadata(ctx, intShaped, map[string]string{"stage": "done"})
+	if err := readErr; err != nil {
 		t.Fatalf("UpdateMetadata: %v", err)
 	}
 
-	loaded, result := snapshot.Unmarshal(ctx, intShaped, s)
-	if err := result.Err(); err != nil {
+	loaded, readErr := snapshot.Unmarshal(ctx, intShaped, s)
+	if err := readErr; err != nil {
 		t.Fatalf("load: %v", err)
 	}
-	healed, result := snapshot.Marshal(ctx, loaded)
-	if err := result.Err(); err != nil {
+	healed, readErr := snapshot.Marshal(ctx, loaded)
+	if err := readErr; err != nil {
 		t.Fatalf("re-marshal: %v", err)
 	}
 
@@ -343,9 +357,9 @@ const parallelRelations = "ABCDEFGHIJKLMNOP"
 func TestLoad_ParallelEdgeOrderIsDeterministic(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	s, res := schema.LoadString(t.Context(), parallelEdgeSchema, "parallel.yammm")
-	if res.HasErrors() {
-		t.Fatalf("load parallel schema: %s", res)
+	s, loadErr := schema.LoadString(t.Context(), parallelEdgeSchema, "parallel.yammm")
+	if loadErr != nil {
+		t.Fatalf("load parallel schema: %s", loadErr)
 	}
 	typ, ok := s.Type("Node")
 	if !ok {
@@ -387,17 +401,17 @@ func TestLoad_ParallelEdgeOrderIsDeterministic(t *testing.T) {
 		t.Fatalf("fixture is vacuous: %d edges survived assembly, want %d", len(slices.Collect(built.Edges())), len(edges))
 	}
 
-	first, mres := snapshot.Marshal(ctx, built)
-	if err := mres.Err(); err != nil {
+	first, readErr := snapshot.Marshal(ctx, built)
+	if err := readErr; err != nil {
 		t.Fatalf("marshal: %v", err)
 	}
 	for i := range 16 {
-		loaded, lres := snapshot.Unmarshal(ctx, first, s)
-		if err := lres.Err(); err != nil {
+		loaded, readErr := snapshot.Unmarshal(ctx, first, s)
+		if err := readErr; err != nil {
 			t.Fatalf("load: %v", err)
 		}
-		again, ares := snapshot.Marshal(ctx, loaded)
-		if err := ares.Err(); err != nil {
+		again, readErr2 := snapshot.Marshal(ctx, loaded)
+		if err := readErr2; err != nil {
 			t.Fatalf("re-marshal: %v", err)
 		}
 		if !bytes.Equal(first, again) {

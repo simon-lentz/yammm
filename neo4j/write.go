@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/neo4j/neo4j-go-driver/v6/neo4j/dbtype"
+	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/internal/mapping"
@@ -69,12 +70,36 @@ type EdgeQuery struct {
 	RelationType string         // Neo4j relationship type (e.g., "IN_REGION")
 }
 
-// Option configures write query generation.
-type Option func(*writeConfig)
+// Option configures a call of this package. Each call's doc names the options
+// it takes, and a call refuses any other with an error, with no diagnostic
+// code, that names the option and the call.
+type Option func(*config)
 
-type writeConfig struct {
+// optionKind names the constructor that built an [Option], so a call can refuse
+// one it does not take.
+type optionKind uint8
+
+const (
+	optNodeChunkSize optionKind = iota
+	optEdgeChunkSize
+	optWarnings
+)
+
+var optionNames = [...]string{
+	optNodeChunkSize: "WithNodeChunkSize",
+	optEdgeChunkSize: "WithEdgeChunkSize",
+	optWarnings:      "WithWarnings",
+}
+
+type config struct {
+	given []optionKind // every option passed, in argument order
+
 	nodeChunkSize int
 	edgeChunkSize int
+
+	// warnings receives each issue below failure severity a call draws; nil
+	// discards them.
+	warnings func(diag.Issue)
 }
 
 const (
@@ -82,26 +107,57 @@ const (
 	defaultEdgeChunkSize = 5000
 )
 
-func defaultWriteConfig() writeConfig {
-	return writeConfig{
+// newConfig applies opts to the state every call starts from.
+func newConfig(opts []Option) config {
+	cfg := config{
 		nodeChunkSize: defaultNodeChunkSize,
 		edgeChunkSize: defaultEdgeChunkSize,
 	}
+	for _, o := range opts {
+		o(&cfg)
+	}
+	return cfg
+}
+
+// refuse returns an error naming the first option, in argument order, that
+// call does not take, or nil when it takes every option it was given.
+func (c *config) refuse(call string, takes ...optionKind) error {
+	for _, g := range c.given {
+		if !slices.Contains(takes, g) {
+			return fmt.Errorf("neo4j.%s does not take the %s option", call, optionNames[g])
+		}
+	}
+	return nil
 }
 
 // WithNodeChunkSize sets the maximum number of nodes per UNWIND batch.
-// Default: 5000.
+// Default: 5000. Only [NodeQueries] takes it.
 func WithNodeChunkSize(size int) Option {
-	return func(c *writeConfig) {
+	return func(c *config) {
+		c.given = append(c.given, optNodeChunkSize)
 		c.nodeChunkSize = size
 	}
 }
 
 // WithEdgeChunkSize sets the maximum number of edges per UNWIND batch.
-// Default: 5000.
+// Default: 5000. Only [EdgeQueries] takes it.
 func WithEdgeChunkSize(size int) Option {
-	return func(c *writeConfig) {
+	return func(c *config) {
+		c.given = append(c.given, optEdgeChunkSize)
 		c.edgeChunkSize = size
+	}
+}
+
+// WithWarnings sets fn to receive every issue below failure severity that
+// [Diff] draws: the constraint generation's warnings, which
+// [github.com/simon-lentz/yammm/schema/cypher.WithWarnings] states. fn is
+// called as each is found, in that order, on the goroutine that made the call
+// and before it returns; no such issue is ever in the call's error. Without the
+// option, and with a nil fn, such issues are discarded. Only [Diff] takes it.
+func WithWarnings(fn func(diag.Issue)) Option {
+	return func(c *config) {
+		c.given = append(c.given, optWarnings)
+		c.warnings = fn
 	}
 }
 
@@ -120,16 +176,17 @@ func WithEdgeChunkSize(size int) Option {
 //
 // Each call derives every type's label and keys from the snapshot's own schema
 // (see the package doc's "Write Surface"), and refuses a zero snapshot with
-// [ErrZeroSnapshot].
+// [ErrZeroSnapshot]. NodeQueries takes [WithNodeChunkSize], and refuses any
+// other option with an error naming it.
 func NodeQueries(
 	ctx context.Context,
 	c cypher.Config,
 	snap graph.Snapshot,
 	opts ...Option,
 ) ([]NodeQuery, error) {
-	cfg := defaultWriteConfig()
-	for _, opt := range opts {
-		opt(&cfg)
+	cfg := newConfig(opts)
+	if err := cfg.refuse("NodeQueries", optNodeChunkSize); err != nil {
+		return nil, err
 	}
 
 	shapes, err := writeShape(c, snap)
@@ -155,11 +212,12 @@ func NodeQueries(
 
 		instances := slices.Collect(snap.InstancesOf(typeID))
 		var rows []map[string]any
+		where := fmt.Sprintf("type %q", typeName)
 
 		for _, inst := range instances {
-			keyProps, err := extractKeyProps(inst.Properties(), &nodeShape)
+			keyProps, err := extractKeyProps(inst.Properties(), &nodeShape, where)
 			if err != nil {
-				return nil, fmt.Errorf("type %q: %w", typeName, err)
+				return nil, err
 			}
 
 			props, err := propsToParamMap(inst.Properties(), schemaType)
@@ -206,16 +264,17 @@ func NodeQueries(
 // keys are derived as [NodeQueries] derives them, so a zero snapshot
 // and a schema whose labels that derivation refuses are refused here too. An edge
 // whose relationship type [cypher.IsIdentifier] refuses, a reserved keyword
-// included, is refused with an error that names it.
+// included, is refused with an error that names it. EdgeQueries takes
+// [WithEdgeChunkSize], and refuses any other option with an error naming it.
 func EdgeQueries(
 	ctx context.Context,
 	c cypher.Config,
 	snap graph.Snapshot,
 	opts ...Option,
 ) ([]EdgeQuery, error) {
-	cfg := defaultWriteConfig()
-	for _, opt := range opts {
-		opt(&cfg)
+	cfg := newConfig(opts)
+	if err := cfg.refuse("EdgeQueries", optEdgeChunkSize); err != nil {
+		return nil, err
 	}
 
 	shapes, err := writeShape(c, snap)
@@ -285,28 +344,30 @@ func EdgeQueries(
 		// chokepoint, and a hub node at the end of a thousand edges paid for it
 		// a thousand times.
 		keyCache := make(map[string]map[string]any)
-		endpointKeys := func(inst graph.Instance, shape *nodeShape) (map[string]any, error) {
+		endpointKeys := func(inst graph.Instance, shape *nodeShape, where string) (map[string]any, error) {
 			id := inst.TypeID().String() + "\x00" + inst.PrimaryKey().String()
 			if cached, ok := keyCache[id]; ok {
 				return cached, nil
 			}
-			keys, err := extractKeyProps(inst.Properties(), shape)
+			keys, err := extractKeyProps(inst.Properties(), shape, where)
 			if err != nil {
 				return nil, err
 			}
 			keyCache[id] = keys
 			return keys, nil
 		}
+		srcWhere := fmt.Sprintf("source type %q", schema.TagForm(snap.Schema(), sig.sourceType))
+		tgtWhere := fmt.Sprintf("target type %q", schema.TagForm(snap.Schema(), sig.targetType))
 
 		var rows []map[string]any
 		for _, edge := range sigEdges {
-			srcKeys, err := endpointKeys(edge.Source(), &srcShape)
+			srcKeys, err := endpointKeys(edge.Source(), &srcShape, srcWhere)
 			if err != nil {
-				return nil, fmt.Errorf("source %s: %w", sig.sourceType, err)
+				return nil, err
 			}
-			tgtKeys, err := endpointKeys(edge.Target(), &tgtShape)
+			tgtKeys, err := endpointKeys(edge.Target(), &tgtShape, tgtWhere)
 			if err != nil {
-				return nil, fmt.Errorf("target %s: %w", sig.targetType, err)
+				return nil, err
 			}
 
 			row := make(map[string]any)
@@ -690,17 +751,18 @@ func coerceKey(shape *nodeShape, name string, raw any) (any, error) {
 }
 
 // extractKeyProps returns a root's primary key properties, each coerced against
-// its declared constraint, and every key it cannot coerce as one joined error. A
-// root of a snapshot holds each key property with a value: the validator and the
-// .ys reader refuse one that does not.
-func extractKeyProps(props immutable.Properties, shape *nodeShape) (map[string]any, error) {
+// its declared constraint, and every key it cannot coerce as one joined error
+// whose every member is prefixed by where, the context the caller reports the
+// root in. A root of a snapshot holds each key property with a value: the
+// validator and the .ys reader refuse one that does not.
+func extractKeyProps(props immutable.Properties, shape *nodeShape, where string) (map[string]any, error) {
 	result := make(map[string]any, len(shape.primaryKeys))
 	var errs []error
 	for _, name := range shape.primaryKeys {
 		val, _ := props.Get(name)
 		cv, err := coerceKey(shape, name, val.Any())
 		if err != nil {
-			errs = append(errs, err)
+			errs = append(errs, fmt.Errorf("%s: %w", where, err))
 			continue
 		}
 		result[name] = cv

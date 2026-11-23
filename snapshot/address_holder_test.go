@@ -2,12 +2,15 @@ package snapshot_test
 
 import (
 	"context"
+	"errors"
 	"maps"
 	"strings"
 	"testing"
 
 	"github.com/simon-lentz/yammm/diag"
+	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/immutable"
+	"github.com/simon-lentz/yammm/internal/diagtest"
 	"github.com/simon-lentz/yammm/internal/snapparts"
 	"github.com/simon-lentz/yammm/internal/snappartstest"
 	"github.com/simon-lentz/yammm/schema"
@@ -52,8 +55,12 @@ func TestRead_ARootWhoseKeyIsRefusedHoldsNoAddress(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
-			_, l := snapshot.Unmarshal(ctx, rehashDocument(t, []byte(c.doc)), s)
-			for surface, res := range map[string]diag.Result{"Load": l, "Verify": snapshot.Verify(ctx, rehashDocument(t, []byte(c.doc)), s)} {
+			_, l := diagtest.Capture(t, func(warn func(diag.Issue)) (graph.Snapshot, error) {
+				return snapshot.Unmarshal(ctx, rehashDocument(t, []byte(c.doc)), s, snapshot.WithWarnings(warn))
+			})
+			for surface, res := range map[string]diag.Result{"Load": l, "Verify": diagtest.CaptureErr(t, func(warn func(diag.Issue)) error {
+				return snapshot.Verify(ctx, rehashDocument(t, []byte(c.doc)), s, snapshot.WithWarnings(warn))
+			})} {
 				var got []diag.Code
 				for issue := range res.Issues() {
 					got = append(got, issue.Code())
@@ -88,8 +95,12 @@ func TestRead_ARootOfAKeylessTypeHoldsNoAddress(t *testing.T) {
 	doc = editOnce(t, doc, `"provenance":null}]}]`, `"provenance":null}]},{"type":1,"items":[`+
 		`{"key":null,"properties":{"label":"a"},"provenance":null},{"key":null,"properties":{"label":"b"},"provenance":null},`+
 		`{"key":null,"properties":{"label":"c"},"provenance":null}]}]`)
-	_, l := snapshot.Unmarshal(ctx, rehashDocument(t, []byte(doc)), s)
-	for surface, res := range map[string]diag.Result{"Load": l, "Verify": snapshot.Verify(ctx, rehashDocument(t, []byte(doc)), s)} {
+	_, l := diagtest.Capture(t, func(warn func(diag.Issue)) (graph.Snapshot, error) {
+		return snapshot.Unmarshal(ctx, rehashDocument(t, []byte(doc)), s, snapshot.WithWarnings(warn))
+	})
+	for surface, res := range map[string]diag.Result{"Load": l, "Verify": diagtest.CaptureErr(t, func(warn func(diag.Issue)) error {
+		return snapshot.Verify(ctx, rehashDocument(t, []byte(doc)), s, snapshot.WithWarnings(warn))
+	})} {
 		if res.Len() != 1 || !hasCode(res, diag.E_SNAPSHOT_INVALID_ROOT) {
 			t.Errorf("%s: %s, want one %s", surface, res, diag.E_SNAPSHOT_INVALID_ROOT)
 		}
@@ -105,9 +116,15 @@ func TestRead_RootsWithUnreadableKeysAreNoDuplicates(t *testing.T) {
 	doc := readerDoc(t, s, map[string]any{"$type": "Company", "id": "c1"})
 	bad := `{"key":[["x"]],"properties":{"id":"c1"},"provenance":null}`
 	doc = editOnce(t, doc, `{"key":["c1"],"properties":{"id":"c1"},"provenance":null}`, bad+`,`+bad)
-	_, l := snapshot.Unmarshal(ctx, rehashDocument(t, []byte(doc)), s)
-	_, i := snapshot.Stat(ctx, rehashDocument(t, []byte(doc)))
-	for surface, res := range map[string]diag.Result{"Load": l, "Verify": snapshot.Verify(ctx, rehashDocument(t, []byte(doc)), s), "Info": i} {
+	_, l := diagtest.Capture(t, func(warn func(diag.Issue)) (graph.Snapshot, error) {
+		return snapshot.Unmarshal(ctx, rehashDocument(t, []byte(doc)), s, snapshot.WithWarnings(warn))
+	})
+	_, i := diagtest.Issues(t, func() (*snapshot.Info, error) {
+		return snapshot.Stat(ctx, rehashDocument(t, []byte(doc)))
+	})
+	for surface, res := range map[string]diag.Result{"Load": l, "Verify": diagtest.CaptureErr(t, func(warn func(diag.Issue)) error {
+		return snapshot.Verify(ctx, rehashDocument(t, []byte(doc)), s, snapshot.WithWarnings(warn))
+	}), "Info": i} {
 		if res.Len() != 2 || hasCode(res, diag.E_DUPLICATE_PK) || !strings.Contains(res.String(), "is not a scalar graph.ParseKey reads back") {
 			t.Errorf("%s: %s, want two refusals of the key and no %s", surface, res, diag.E_DUPLICATE_PK)
 		}
@@ -130,8 +147,8 @@ func TestRead_ASoundRootHoldsTheAddressARefusedRootStoodAt(t *testing.T) {
 		twin = `{"key":["p1"],"properties":{"id":"p9"},"provenance":null},`
 	)
 	refusedThenSound := editOnce(t, doc, root, twin+root)
-	if _, res := snapshot.Unmarshal(ctx, rehashDocument(t, []byte(doc)), s); res.HasErrors() {
-		t.Fatalf("control: %s", res)
+	if _, err := snapshot.Unmarshal(ctx, rehashDocument(t, []byte(doc)), s); err != nil {
+		t.Fatalf("control: %s", err)
 	}
 	for name, c := range map[string]struct {
 		doc  string
@@ -148,8 +165,12 @@ func TestRead_ASoundRootHoldsTheAddressARefusedRootStoodAt(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
-			_, l := snapshot.Unmarshal(ctx, rehashDocument(t, []byte(c.doc)), s)
-			for surface, res := range map[string]diag.Result{"Load": l, "Verify": snapshot.Verify(ctx, rehashDocument(t, []byte(c.doc)), s)} {
+			_, l := diagtest.Capture(t, func(warn func(diag.Issue)) (graph.Snapshot, error) {
+				return snapshot.Unmarshal(ctx, rehashDocument(t, []byte(c.doc)), s, snapshot.WithWarnings(warn))
+			})
+			for surface, res := range map[string]diag.Result{"Load": l, "Verify": diagtest.CaptureErr(t, func(warn func(diag.Issue)) error {
+				return snapshot.Verify(ctx, rehashDocument(t, []byte(c.doc)), s, snapshot.WithWarnings(warn))
+			})} {
 				got := map[diag.Code]int{}
 				for issue := range res.Issues() {
 					got[issue.Code()]++
@@ -167,7 +188,7 @@ func TestRead_ASoundRootHoldsTheAddressARefusedRootStoodAt(t *testing.T) {
 func TestRead_ARootOfAnIneligibleTypeStandsAtItsKey(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()
-	s, res := schema.LoadString(ctx, `schema "ineligible"
+	s, err := schema.LoadString(ctx, `schema "ineligible"
 
 abstract type Keyless {
 	v String
@@ -178,8 +199,8 @@ type Target {
 	id String primary
 }
 `, "ineligible.yammm")
-	if res.HasErrors() {
-		t.Fatalf("schema: %s", res)
+	if err != nil {
+		t.Fatalf("schema: %s", err)
 	}
 	keyless := mustTypeID(t, s, "Keyless")
 	key := immutable.WrapKey([]any{"a"})
@@ -187,7 +208,9 @@ type Target {
 		Instances:  []snapparts.Instance{{TypeID: keyless, PrimaryKey: key, Properties: immutable.WrapProperties(map[string]any{"v": "x"})}},
 		Unresolved: []snapparts.Unresolved{{SourceType: keyless, SourceKey: key, Relation: "NEEDS", Reason: "absent"}},
 	})
-	got := snapshot.Verify(ctx, rehashDocument(t, doc), s)
+	got := diagtest.CaptureErr(t, func(warn func(diag.Issue)) error {
+		return snapshot.Verify(ctx, rehashDocument(t, doc), s, snapshot.WithWarnings(warn))
+	})
 	if got.Len() != 1 || got.HasCode(diag.E_SNAPSHOT_DANGLING_REFERENCE) {
 		t.Errorf("Verify: %s, want the type's one refusal", got)
 	}
@@ -198,7 +221,7 @@ type Target {
 func TestRead_AChildsStatedKeyIsNoRootsAddress(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()
-	s, res := schema.LoadString(ctx, `schema "child_key"
+	s, err := schema.LoadString(ctx, `schema "child_key"
 
 part type Item {
 	code String primary
@@ -214,8 +237,8 @@ type Solid {
 	id String primary
 }
 `, "child_key.yammm")
-	if res.HasErrors() {
-		t.Fatalf("schema: %s", res)
+	if err != nil {
+		t.Fatalf("schema: %s", err)
 	}
 	holder, solid := mustTypeID(t, s, "Holder"), mustTypeID(t, s, "Solid")
 	key := func(k string) immutable.Key { return immutable.WrapKey([]any{k}) }
@@ -228,8 +251,8 @@ type Solid {
 		}},
 		Edges: []snapparts.Edge{{Relation: "POINTS", SourceType: holder, SourceKey: key("h1"), TargetKey: key("stated")}},
 	})
-	got := snapshot.Verify(ctx, rehashDocument(t, doc), s, snapshot.WithIssueLimit(0))
-	if !got.HasCode(diag.E_SNAPSHOT_DANGLING_REFERENCE) {
-		t.Errorf("Verify: %s, want %s for the edge", got, diag.E_SNAPSHOT_DANGLING_REFERENCE)
+	readErr := snapshot.Verify(ctx, rehashDocument(t, doc), s, snapshot.WithIssueLimit(0))
+	if !errors.Is(readErr, diag.E_SNAPSHOT_DANGLING_REFERENCE) {
+		t.Errorf("Verify: %s, want %s for the edge", readErr, diag.E_SNAPSHOT_DANGLING_REFERENCE)
 	}
 }

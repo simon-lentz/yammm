@@ -62,9 +62,9 @@ type holderValues struct {
 // holding h.note.
 func holderSnapshot(t *testing.T, h holderValues) graph.Snapshot {
 	t.Helper()
-	s, res := schema.LoadString(t.Context(), holderSchema, "holder.yammm")
-	if res.HasErrors() {
-		t.Fatalf("load schema: %s", res)
+	s, err := schema.LoadString(t.Context(), holderSchema, "holder.yammm")
+	if err != nil {
+		t.Fatalf("load schema: %s", err)
 	}
 	targetT, _ := s.Type("Target")
 	holderT, _ := s.Type("Holder")
@@ -288,7 +288,7 @@ func TestExtractKeyProps_AKeyNoDriverNumberHoldsIsRefusedBesideTheOthers(t *test
 		label: "Holder", primaryKeys: []string{"id", "region", "code"},
 		keyConstraints: map[string]schema.Constraint{"region": schematest.Constraint(t, "Date")},
 	}
-	_, err := extractKeyProps(immutable.WrapProperties(map[string]any{"id": json.Number("1e400"), "region": "not-a-date", "code": "c"}), shape)
+	_, err := extractKeyProps(immutable.WrapProperties(map[string]any{"id": json.Number("1e400"), "region": "not-a-date", "code": "c"}), shape, "type \"T\"")
 	if !errors.Is(err, errUnheldNumber) {
 		t.Fatalf("extractKeyProps = %v; want errUnheldNumber", err)
 	}
@@ -297,7 +297,7 @@ func TestExtractKeyProps_AKeyNoDriverNumberHoldsIsRefusedBesideTheOthers(t *test
 			t.Errorf("the error does not hold %q: %v", want, err)
 		}
 	}
-	if keys, err := extractKeyProps(immutable.WrapProperties(map[string]any{"id": "a�b", "region": "2026-01-02", "code": "é"}), shape); err != nil || keys["id"] != "a�b" {
+	if keys, err := extractKeyProps(immutable.WrapProperties(map[string]any{"id": "a�b", "region": "2026-01-02", "code": "é"}), shape, "type \"T\""); err != nil || keys["id"] != "a�b" {
 		t.Errorf("valid keys: %v, %v", keys, err)
 	}
 }

@@ -40,9 +40,9 @@ type Car {
 // that coerces a row at a time pays no garbage for the types it passes again.
 func TestCoerceParams_JudgingALoadedSchemasTypesAllocatesNothing(t *testing.T) {
 	raceskip.Skip(t)
-	s, res := schema.LoadString(t.Context(), everyKindSource, "fleet.yammm")
-	if res.HasErrors() {
-		t.Fatalf("load: %v", res.Err())
+	s, loadErr := schema.LoadString(t.Context(), everyKindSource, "fleet.yammm")
+	if loadErr != nil {
+		t.Fatalf("load: %v", loadErr)
 	}
 	car, _ := s.Type("Car")
 	types := ParamTypesForType(car)

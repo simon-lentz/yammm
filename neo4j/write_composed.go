@@ -132,7 +132,7 @@ type createGroup struct {
 // children: every instance of a root type whose composition closure is
 // non-empty emits a replace row, so a write with zero children still
 // deletes stale ones. Create groups run parent-first (depth ascending).
-func composedQueries(ctx context.Context, result graph.Snapshot, shapes *graphShape, cfg *writeConfig) ([]NodeQuery, error) {
+func composedQueries(ctx context.Context, result graph.Snapshot, shapes *graphShape, cfg *config) ([]NodeQuery, error) {
 	s := result.Schema()
 	var replace []NodeQuery
 
@@ -162,10 +162,11 @@ func composedQueries(ctx context.Context, result graph.Snapshot, shapes *graphSh
 
 		instances := slices.Collect(result.InstancesOf(typeID))
 		var replaceRows []map[string]any
+		where := fmt.Sprintf("type %q", schema.TagForm(s, typeID))
 		for _, inst := range instances {
-			keyProps, err := extractKeyProps(inst.Properties(), &rootShape)
+			keyProps, err := extractKeyProps(inst.Properties(), &rootShape, where)
 			if err != nil {
-				return nil, fmt.Errorf("type %s: %w", typeID, err)
+				return nil, err
 			}
 			row := make(map[string]any, len(keyProps))
 			for k, v := range keyProps {

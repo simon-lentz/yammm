@@ -57,7 +57,7 @@ func TestAnalyze_DiagnosticRangesConvertFromParseSpans(t *testing.T) {
 	// A failing load still returns its snapshot: the diagnostics are the
 	// point, and converting them is what this exercises.
 	a := NewAnalyzer(slog.New(slog.NewTextHandler(io.Discard, nil)))
-	snap, _ := a.Analyze(t.Context(), path, map[string][]byte{path: []byte(src)}, dir)
+	snap, _ := a.Analyze(t.Context(), path, map[string][]byte{path: []byte(src)}, dir, true)
 	if snap == nil {
 		t.Fatal("analyze returned no snapshot")
 	}
@@ -119,7 +119,7 @@ func TestAnalyze_DiagnosticRangesConvertAcrossSymlinkedPaths(t *testing.T) {
 	}
 
 	a := NewAnalyzer(slog.New(slog.NewTextHandler(io.Discard, nil)))
-	snap, _ := a.Analyze(t.Context(), path, map[string][]byte{path: []byte(src)}, linkDir)
+	snap, _ := a.Analyze(t.Context(), path, map[string][]byte{path: []byte(src)}, linkDir, true)
 	if snap == nil {
 		t.Fatal("analyze returned no snapshot")
 	}

@@ -7,6 +7,7 @@ import (
 
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/graph"
+	"github.com/simon-lentz/yammm/internal/diagtest"
 	"github.com/simon-lentz/yammm/internal/instancetest"
 	"github.com/simon-lentz/yammm/schema"
 	"github.com/simon-lentz/yammm/snapshot"
@@ -33,9 +34,9 @@ part type Line {
 	sku String primary
 }
 `
-	s, res := schema.LoadString(t.Context(), src, "one_slot_reader.yammm")
-	if res.HasErrors() {
-		t.Fatalf("load: %s", res)
+	s, err := schema.LoadString(t.Context(), src, "one_slot_reader.yammm")
+	if err != nil {
+		t.Fatalf("load: %s", err)
 	}
 	return s
 }
@@ -57,12 +58,12 @@ func oneSlotDocument(t *testing.T, s schema.Schema) (sole, twoOccupants []byte) 
 	})
 
 	g := graph.New(s)
-	if r := g.Add(t.Context(), order); !r.OK() {
-		t.Fatalf("add: %s", r)
+	if err := g.Add(t.Context(), order); err != nil {
+		t.Fatalf("add: %s", err)
 	}
-	data, mr := snapshot.Marshal(t.Context(), g.Snapshot())
-	if mr.HasErrors() {
-		t.Fatalf("marshal: %s", mr)
+	data, err := snapshot.Marshal(t.Context(), g.Snapshot())
+	if err != nil {
+		t.Fatalf("marshal: %s", err)
 	}
 
 	occupant, ok := soleArrayElement(data, `"ADDRESS":[`)
@@ -116,19 +117,23 @@ func TestLoad_RefusesASecondOccupantInAOneSlot(t *testing.T) {
 
 	// The control runs first: a sole occupant must still load, or the guard
 	// would pass by refusing everything.
-	if _, res := snapshot.Unmarshal(t.Context(), sole, s); res.HasErrors() {
-		t.Fatalf("a sole occupant of a (one) composition was refused: %s", res)
+	if _, err := snapshot.Unmarshal(t.Context(), sole, s); err != nil {
+		t.Fatalf("a sole occupant of a (one) composition was refused: %s", err)
 	}
 
-	_, res := snapshot.Unmarshal(t.Context(), twoOccupants, s)
-	if !res.HasErrors() {
+	_, res := diagtest.Capture(t, func(warn func(diag.Issue)) (graph.Snapshot, error) {
+		return snapshot.Unmarshal(t.Context(), twoOccupants, s, snapshot.WithWarnings(warn))
+	})
+	if diagtest.Err(res) == nil {
 		t.Fatal("two occupants of a (one) composition loaded clean")
 	}
 	if !hasCode(res, diag.E_DUPLICATE_COMPOSED_PK) {
 		t.Errorf("want E_DUPLICATE_COMPOSED_PK; got %s", res)
 	}
 	// Verify reads the same walk, so it must agree.
-	if !hasCode(snapshot.Verify(t.Context(), twoOccupants, s), diag.E_DUPLICATE_COMPOSED_PK) {
+	if !hasCode(diagtest.CaptureErr(t, func(warn func(diag.Issue)) error {
+		return snapshot.Verify(t.Context(), twoOccupants, s, snapshot.WithWarnings(warn))
+	}), diag.E_DUPLICATE_COMPOSED_PK) {
 		t.Error("Verify did not refuse the shape Load refuses")
 	}
 }

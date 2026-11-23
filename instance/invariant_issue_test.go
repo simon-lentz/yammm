@@ -5,6 +5,7 @@ import (
 
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/instance"
+	"github.com/simon-lentz/yammm/internal/diagtest"
 	"github.com/simon-lentz/yammm/internal/yammmtest"
 )
 
@@ -22,7 +23,9 @@ type T {
 	! "ten over n is whole" 10 % n == 0
 }
 `)
-	_, res := instance.NewValidator(s).ValidateOne(t.Context(), "T", instance.RawInstance{Properties: map[string]any{"id": "x", "n": int64(0)}})
+	_, res := diagtest.Issues(t, func() (instance.ValidInstance, error) {
+		return instance.NewValidator(s).ValidateOne(t.Context(), "T", instance.RawInstance{Properties: map[string]any{"id": "x", "n": int64(0)}})
+	})
 
 	failed := mustIssue(t, res, diag.E_INVARIANT_FAIL)
 	yammmtest.Diff(t, "n is positive", failed.Message())
@@ -39,7 +42,7 @@ type T {
 	yammmtest.Diff(t, []diag.Detail{{Key: "type", Value: "T"}, {Key: "invariant", Value: "ten over n is whole"}}, errored.Details())
 
 	if got := len(codes(res)); got != 2 {
-		t.Errorf("ValidateOne reported %d issues, want the two invariants': %v", got, res.Err())
+		t.Errorf("ValidateOne reported %d issues, want the two invariants': %v", got, res)
 	}
 }
 
@@ -57,7 +60,9 @@ type T {
 	! "ten over \"n\" is whole" 10 % n == 0
 }
 `)
-	_, res := instance.NewValidator(s).ValidateOne(t.Context(), "T", instance.RawInstance{Properties: map[string]any{"id": "x", "n": int64(0)}})
+	_, res := diagtest.Issues(t, func() (instance.ValidInstance, error) {
+		return instance.NewValidator(s).ValidateOne(t.Context(), "T", instance.RawInstance{Properties: map[string]any{"id": "x", "n": int64(0)}})
+	})
 
 	failed := mustIssue(t, res, diag.E_INVARIANT_FAIL)
 	yammmtest.Diff(t, `"n" is positive`, failed.Message())
@@ -83,11 +88,15 @@ type T {
 }
 `)
 	v := instance.NewValidator(s)
-	_, res := v.ValidateOne(t.Context(), "T", instance.RawInstance{Properties: map[string]any{"id": "x", "flag": false}})
-	if res.Err() != nil {
-		t.Errorf("without the string: %v", res.Err())
+	_, res := diagtest.Issues(t, func() (instance.ValidInstance, error) {
+		return v.ValidateOne(t.Context(), "T", instance.RawInstance{Properties: map[string]any{"id": "x", "flag": false}})
+	})
+	if diagtest.Err(res) != nil {
+		t.Errorf("without the string: %v", res)
 	}
-	_, res = v.ValidateOne(t.Context(), "T", instance.RawInstance{Properties: map[string]any{"id": "x", "flag": false, "name": "n"}})
+	_, res = diagtest.Issues(t, func() (instance.ValidInstance, error) {
+		return v.ValidateOne(t.Context(), "T", instance.RawInstance{Properties: map[string]any{"id": "x", "flag": false, "name": "n"}})
+	})
 	mustIssue(t, res, diag.E_EVAL_ERROR)
 }
 
@@ -103,8 +112,8 @@ type T {
 	! "m" [] -> All |$x| { !$x && $x % 2 == 0 } && [] -> Map { $0 -> Upper } -> Len == 0 && ([] + tags)[0] -> Upper != "A"
 }
 `)
-	_, res := instance.NewValidator(s).ValidateOne(t.Context(), "T", instance.RawInstance{Properties: map[string]any{"id": "x", "tags": []any{"b"}}})
-	if res.Err() != nil {
-		t.Errorf("got %v, want the invariant to hold", res.Err())
+	_, err := instance.NewValidator(s).ValidateOne(t.Context(), "T", instance.RawInstance{Properties: map[string]any{"id": "x", "tags": []any{"b"}}})
+	if err != nil {
+		t.Errorf("got %v, want the invariant to hold", err)
 	}
 }

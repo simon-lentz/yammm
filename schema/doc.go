@@ -36,32 +36,44 @@
 // Schemas are loaded using the Load family of functions:
 //
 //	// Load from file
-//	s, result := schema.Load(ctx, "schema.yammm")
+//	s, err := schema.Load(ctx, "schema.yammm")
 //
 //	// Load from string (imports disallowed)
-//	s, result := schema.LoadString(ctx, source, "schema.yammm")
+//	s, err := schema.LoadString(ctx, source, "schema.yammm")
 //
 //	// Load from in-memory sources with an explicit entry point (useful for
 //	// LSP, and for a generated package's embedded sources)
-//	s, result := schema.LoadSourcesWithEntry(ctx, sources, entryPath, moduleRoot)
+//	s, err := schema.LoadSourcesWithEntry(ctx, sources, entryPath, schema.WithModuleRoot(moduleRoot))
 //
-// A non-OK result with a zero Schema indicates failure. result.HasFatal() reports
-// a load that could not start or finish for one of these reasons: an I/O failure, a cancellation, an
+// A load that fails returns a zero Schema and, save for an option it does not
+// take (see Load Options), a *[diag.ResultError] holding its failures, read with errors.AsType and tested by code with errors.Is. A Fatal
+// failure, which [diag.Result.HasFatal] reports on the error's Result, is a
+// load that could not start or finish for one of these reasons: an I/O failure, a cancellation, an
 // internal fault (E_INTERNAL), or input a load cannot begin from, such as no sources, a source key the loader
 // refuses, two keys that name one source, or a source name that is not valid
 // UTF-8 or holds a character that does not print, or a source whose header cannot be parsed, which the parser reports
 // as a Fatal E_SYNTAX. A schema name with no value is an Error, E_SYNTAX, one
 // that is not an identifier an Error, E_INVALID_NAME, and a malformed yammm.mod marker an
-// Error, E_LOAD_MODULE_ROOT_MALFORMED, each with a zero Schema. Check result.HasErrors() to determine semantic success.
+// Error, E_LOAD_MODULE_ROOT_MALFORMED, each with a zero Schema. The error holds
+// failures alone, at most 100 the load collected and a Fatal that ended the
+// load beside them: a warning, info or hint reaches the caller through
+// [WithWarnings] alone, every one of them.
 //
 // # Load Options
 //
-// Load functions accept [LoadOption] values to configure behavior, among them:
+// The loads share one [Option] type, among them:
 //
 //   - [WithModuleRoot]: root directory for module-style imports
 //   - [WithSourcesOnly]: resolve imports only against the in-memory sources
 //   - [WithSyntheticRoot]: synthetic identities for in-memory sources
 //   - [WithImportsAllowed]: with false, refuse import declarations
+//   - [WithWarnings]: receive each issue below failure severity
+//
+// A load refuses an option it does not take with an error, with no diagnostic
+// code, that names the option and the load: [LoadString] takes neither
+// [WithModuleRoot] nor [WithImportsAllowed], [Load] and [LoadString] take
+// neither [WithSourcesOnly] nor [WithSyntheticRoot], and [LoadSourcesWithEntry]
+// refuses [WithSyntheticRoot] beside [WithModuleRoot].
 //
 // # Constraint System
 //

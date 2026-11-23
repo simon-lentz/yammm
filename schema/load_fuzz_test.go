@@ -51,8 +51,8 @@ func FuzzLoadString(f *testing.F) {
 	}
 
 	f.Fuzz(func(t *testing.T, src string) {
-		s, result := schema.LoadString(t.Context(), src, "fuzz.yammm")
-		if s.IsZero() && !result.HasErrors() {
+		s, err := schema.LoadString(t.Context(), src, "fuzz.yammm")
+		if s.IsZero() && err == nil {
 			t.Errorf("LoadString returned zero schema without error diagnostics for %q", src)
 		}
 	})

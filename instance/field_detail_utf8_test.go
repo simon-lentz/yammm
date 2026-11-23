@@ -7,6 +7,7 @@ import (
 
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/instance"
+	"github.com/simon-lentz/yammm/internal/diagtest"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -16,9 +17,9 @@ import (
 // message holds, and a valid name is held as it was written.
 func TestValidateOne_AnUnknownFieldsDetailIsValidUTF8(t *testing.T) {
 	t.Parallel()
-	s, res := schema.LoadString(t.Context(), utf8Schema, "utf8.yammm")
-	if res.HasErrors() {
-		t.Fatalf("load schema: %s", res)
+	s, err := schema.LoadString(t.Context(), utf8Schema, "utf8.yammm")
+	if err != nil {
+		t.Fatalf("load schema: %s", err)
 	}
 	v := instance.NewValidator(s)
 
@@ -50,7 +51,9 @@ func TestValidateOne_AnUnknownFieldsDetailIsValidUTF8(t *testing.T) {
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
-			_, res := v.ValidateOne(t.Context(), "Holder", c.raw(c.field))
+			_, res := diagtest.Issues(t, func() (instance.ValidInstance, error) {
+				return v.ValidateOne(t.Context(), "Holder", c.raw(c.field))
+			})
 			n := 0
 			for issue := range res.Issues() {
 				n++

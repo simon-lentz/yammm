@@ -64,8 +64,8 @@ func runNeo4jDiff(cmd *cobra.Command, args []string, sink *cli.DiagnosticSink) e
 	if err != nil {
 		return err
 	}
-	s, schemaResult := schema.Load(cmd.Context(), absSchemaPath, loadOpts...)
-	if err := reportSchemaLoad(sink, s, moduleRoot, absSchemaPath, schemaResult); err != nil {
+	s, loadErr := schema.Load(cmd.Context(), absSchemaPath, loadOpts...)
+	if err := reportSchemaLoad(sink, s, moduleRoot, absSchemaPath, loadErr); err != nil {
 		return err
 	}
 
@@ -89,7 +89,7 @@ func diffSchema(ctx context.Context, w io.Writer, sink *cli.DiagnosticSink,
 ) error {
 	_, _, generated := generateCypher(c, s)
 	sink.Add(generated)
-	if generated.HasErrors() {
+	if cli.Failed(generated) {
 		return cli.Exit(cli.ExitForResult(generated))
 	}
 	sink.Flush()
@@ -105,10 +105,12 @@ func diffSchema(ctx context.Context, w io.Writer, sink *cli.DiagnosticSink,
 		return err
 	}
 	// Diff generates again from the same c and s, whose issues were added
-	// above, so its errors are the remote rows it cannot plan from: an answer
-	// no comparison can be built on, as an unreadable projection is.
-	plan, result := neo4j.Diff(c, s, state.constraints, state.indexes)
-	if result.HasErrors() {
+	// above, so it is given no warnings callback and its failures are the
+	// remote rows it cannot plan from: an answer no comparison can be built on,
+	// as an unreadable projection is.
+	plan, err := neo4j.Diff(c, s, state.constraints, state.indexes)
+	if err != nil {
+		result := cli.FailureIssues(err)
 		sink.Add(remoteRowIssues(result))
 		return cli.Exit(cli.ExitForResult(result))
 	}

@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/simon-lentz/yammm/diag"
+	"github.com/simon-lentz/yammm/internal/diagtest"
 	"github.com/simon-lentz/yammm/location"
 )
 
@@ -43,7 +44,7 @@ func TestLoadAndParseJSON_MintsTheLoadersIdentity(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadAndParseJSON: %v", err)
 	}
-	if !res.OK() {
+	if diagtest.Err(res) != nil {
 		t.Fatalf("parse: %s", res)
 	}
 

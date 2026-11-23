@@ -15,12 +15,16 @@ func TestSnapshotAttestation_ValidatorBuiltAttestsTrue(t *testing.T) {
 	s := testSchemaWithAssociation(t)
 	g := graph.New(s)
 
-	mustOK(t, g.Add(t.Context(), instancetest.Valid(t, s, "Company", map[string]any{"id": "c1", "name": "n"})))
-	mustOK(t, g.Add(t.Context(), instancetest.Valid(t, s, "Person", map[string]any{
+	if err := g.Add(t.Context(), instancetest.Valid(t, s, "Company", map[string]any{"id": "c1", "name": "n"})); err != nil {
+		t.Fatal(err)
+	}
+	if err := g.Add(t.Context(), instancetest.Valid(t, s, "Person", map[string]any{
 		"id":       "p1",
 		"name":     "n",
 		"employer": map[string]any{"_target_id": "c1"},
-	})))
+	})); err != nil {
+		t.Fatal(err)
+	}
 
 	snap := g.Snapshot()
 	att := snap.Attestation()
@@ -56,7 +60,9 @@ func TestSnapshotAttestation_RequiredUnresolvedFlipsAssociations(t *testing.T) {
 	// The employer association is required; the validator defers its
 	// enforcement to the graph, so a validated Person without one is the
 	// honest-token case Associations exists for.
-	mustOK(t, g.Add(t.Context(), instancetest.Valid(t, s, "Person", map[string]any{"id": "p1", "name": "n"})))
+	if err := g.Add(t.Context(), instancetest.Valid(t, s, "Person", map[string]any{"id": "p1", "name": "n"})); err != nil {
+		t.Fatal(err)
+	}
 
 	att := g.Snapshot().Attestation()
 	if att.Associations {
@@ -73,9 +79,13 @@ func TestSnapshotAttestation_SeededGraphANDsTheLoadedClaim(t *testing.T) {
 
 	// A true claim survives a seed followed by validated adds.
 	g1 := graph.New(s)
-	mustOK(t, g1.Add(t.Context(), instancetest.Valid(t, s, "Company", map[string]any{"id": "c1", "name": "n"})))
+	if err := g1.Add(t.Context(), instancetest.Valid(t, s, "Company", map[string]any{"id": "c1", "name": "n"})); err != nil {
+		t.Fatal(err)
+	}
 	g2 := graph.NewFromSnapshot(g1.Snapshot())
-	mustOK(t, g2.Add(t.Context(), instancetest.Valid(t, s, "Company", map[string]any{"id": "c2", "name": "n"})))
+	if err := g2.Add(t.Context(), instancetest.Valid(t, s, "Company", map[string]any{"id": "c2", "name": "n"})); err != nil {
+		t.Fatal(err)
+	}
 	if att := g2.Snapshot().Attestation(); !att.Values {
 		t.Fatalf("seed from a true claim plus validated adds attests %+v, want Values true", att)
 	}
@@ -91,20 +101,10 @@ func TestSnapshotAttestation_SeededGraphANDsTheLoadedClaim(t *testing.T) {
 		Attestation: &snapparts.Attestation{Values: false, Associations: true},
 	})
 	g4 := graph.NewFromSnapshot(unproven)
-	mustOK(t, g4.Add(t.Context(), instancetest.Valid(t, s, "Company", map[string]any{"id": "c4", "name": "n"})))
+	if err := g4.Add(t.Context(), instancetest.Valid(t, s, "Company", map[string]any{"id": "c4", "name": "n"})); err != nil {
+		t.Fatal(err)
+	}
 	if att := g4.Snapshot().Attestation(); att.Values {
 		t.Fatal("seed from a false claim ANDed to true after a validated add")
-	}
-}
-
-// mustOK fails the test on a non-OK graph result.
-func mustOK(t *testing.T, res interface {
-	OK() bool
-	String() string
-},
-) {
-	t.Helper()
-	if !res.OK() {
-		t.Fatalf("graph operation failed: %s", res.String())
 	}
 }

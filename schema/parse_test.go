@@ -3,6 +3,7 @@ package schema_test
 import (
 	"testing"
 
+	"github.com/simon-lentz/yammm/internal/diagtest"
 	"github.com/simon-lentz/yammm/internal/yammmtest/sourcetest"
 
 	"github.com/stretchr/testify/assert"
@@ -47,7 +48,7 @@ type Person {
 	assert.False(t, model.Types[0].Properties[0].Optional)
 
 	result := collector.Result()
-	assert.True(t, result.OK(), "expected no errors, got: %v", result)
+	assert.NoError(t, diagtest.Err(result), "expected no errors, got: %v", result)
 }
 
 func TestParser_TypeWithInheritance(t *testing.T) {
@@ -79,7 +80,7 @@ type Pet extends Animal {
 	assert.Empty(t, pet.Inherits[0].Qualifier)
 
 	result := collector.Result()
-	assert.True(t, result.OK(), "expected no errors, got: %v", result)
+	assert.NoError(t, diagtest.Err(result), "expected no errors, got: %v", result)
 }
 
 func TestParser_Association(t *testing.T) {
@@ -109,7 +110,7 @@ type Person {
 	assert.Equal(t, "Car", rel.Target.Name)
 
 	result := collector.Result()
-	assert.True(t, result.OK(), "expected no errors, got: %v", result)
+	assert.NoError(t, diagtest.Err(result), "expected no errors, got: %v", result)
 }
 
 func TestParser_Composition(t *testing.T) {
@@ -148,7 +149,7 @@ type Car {
 	assert.Equal(t, "Wheel", rel.Target.Name)
 
 	result := collector.Result()
-	assert.True(t, result.OK(), "expected no errors, got: %v", result)
+	assert.NoError(t, diagtest.Err(result), "expected no errors, got: %v", result)
 }
 
 func TestParser_AbstractType(t *testing.T) {
@@ -177,7 +178,7 @@ abstract type Entity {
 	assert.True(t, entity.Properties[0].IsPrimaryKey)
 
 	result := collector.Result()
-	assert.True(t, result.OK(), "expected no errors, got: %v", result)
+	assert.NoError(t, diagtest.Err(result), "expected no errors, got: %v", result)
 }
 
 func TestParser_DataType(t *testing.T) {
@@ -216,7 +217,7 @@ type Person {
 		"AliasConstraint must preserve datatype reference case")
 
 	result := collector.Result()
-	assert.True(t, result.OK(), "expected no errors, got: %v", result)
+	assert.NoError(t, diagtest.Err(result), "expected no errors, got: %v", result)
 }
 
 func TestParser_QualifiedDataTypeReference_PreservesCase(t *testing.T) {
@@ -248,7 +249,7 @@ type Person {
 		"qualified datatype reference must preserve case")
 
 	result := collector.Result()
-	assert.True(t, result.OK(), "expected no errors, got: %v", result)
+	assert.NoError(t, diagtest.Err(result), "expected no errors, got: %v", result)
 }
 
 func TestParser_Import(t *testing.T) {
@@ -283,7 +284,7 @@ type Car {
 	assert.Equal(t, "Wheel", rel.Target.Name)
 
 	result := collector.Result()
-	assert.True(t, result.OK(), "expected no errors, got: %v", result)
+	assert.NoError(t, diagtest.Err(result), "expected no errors, got: %v", result)
 }
 
 func TestParser_ImportDerivedAlias(t *testing.T) {
@@ -307,7 +308,7 @@ import "parts.yammm"
 	assert.Equal(t, "parts", imp.Alias) // Derived from path
 
 	result := collector.Result()
-	assert.True(t, result.OK(), "expected no errors, got: %v", result)
+	assert.NoError(t, diagtest.Err(result), "expected no errors, got: %v", result)
 }
 
 // A reserved alias is refused where it can be seen: the derivation. A written
@@ -371,7 +372,7 @@ func TestParser_ReservedKeywordAlias(t *testing.T) {
 			model := parser.Parse([]byte(tt.source))
 
 			result := collector.Result()
-			assert.False(t, result.OK(), "expected an error")
+			require.Error(t, diagtest.Err(result), "expected an error")
 			assert.True(t, result.HasCode(tt.wantCode), "want %s, got: %v", tt.wantCode, result)
 
 			require.NotNil(t, model)
@@ -414,7 +415,7 @@ type Person {
 	assert.Equal(t, ">", sexpr.Op(), "expression should be a > comparison")
 
 	result := collector.Result()
-	assert.True(t, result.OK(), "expected no errors, got: %v", result)
+	assert.NoError(t, diagtest.Err(result), "expected no errors, got: %v", result)
 }
 
 func TestParser_EnumConstraint(t *testing.T) {
@@ -439,7 +440,7 @@ type Order {
 	assert.NotNil(t, prop.Constraint)
 
 	result := collector.Result()
-	assert.True(t, result.OK(), "expected no errors, got: %v", result)
+	assert.NoError(t, diagtest.Err(result), "expected no errors, got: %v", result)
 }
 
 func TestParser_SyntaxError(t *testing.T) {
@@ -458,7 +459,7 @@ type Person {
 	_ = parser.Parse([]byte(schemaSource))
 
 	result := collector.Result()
-	assert.False(t, result.OK(), "expected syntax error")
+	assert.Error(t, diagtest.Err(result), "expected syntax error")
 }
 
 func TestParser_SyntaxError_HasByteOffset(t *testing.T) {
@@ -478,7 +479,7 @@ type Person {
 	_ = parser.Parse([]byte(schemaSource))
 
 	result := collector.Result()
-	require.False(t, result.OK(), "expected syntax error")
+	require.Error(t, diagtest.Err(result), "expected syntax error")
 
 	// Find the syntax error issue
 	var syntaxErr diag.Issue

@@ -40,21 +40,21 @@ func TestLoad_ARegistryCollisionIsAnInternalFault(t *testing.T) {
 	}{
 		// The message quotes the path as %q does, so a Windows path's separators read escaped.
 		"a file": {held: mainID, want: "register source " + strconv.Quote(mainPath), load: func(l *loader) error {
-			_, _, err := l.loadFile(t.Context(), mainID, mainPath, mainContent)
+			_, err := l.loadFile(t.Context(), mainID, mainPath, mainContent)
 			return err
 		}},
 		"a source": {held: mainID, want: "register source " + mainID.String(), load: func(l *loader) error {
-			_, _, err := l.loadSource(t.Context(), mainID, mainContent)
+			_, err := l.loadSource(t.Context(), mainID, mainContent)
 			return err
 		}},
 		"an import": {held: depID, want: "register import source", load: func(l *loader) error {
-			_, _, err := l.loadFile(t.Context(), mainID, mainPath, mainContent)
+			_, err := l.loadFile(t.Context(), mainID, mainPath, mainContent)
 			return err
 		}},
 	} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
-			l := newLoader(defaultLoadConfig(), dir, "", diag.ModuleRootDefault)
+			l := newLoader(newLoadConfig(nil), dir, "", diag.ModuleRootDefault)
 			defer l.Close()
 			if err := l.sourceRegistry.Register(c.held, []byte("other bytes")); err != nil {
 				t.Fatal(err)

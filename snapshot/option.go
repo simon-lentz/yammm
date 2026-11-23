@@ -8,21 +8,86 @@ import (
 	"github.com/simon-lentz/yammm/diag"
 )
 
-// Option configures snapshot serialization behavior.
+// Option configures a call of this package. Each call's doc names the options
+// it takes, and a call refuses any other with an error, with no diagnostic
+// code, that names the option and the call.
 type Option func(*config)
 
+// optionKind names the constructor that built an [Option], so a call can refuse
+// one it does not take.
+type optionKind uint8
+
+const (
+	optIndent optionKind = iota
+	optCreatedAt
+	optMetadata
+	optIssueLimit
+	optRevalidation
+	optIntegrityCheck
+	optWarnings
+)
+
+var optionNames = [...]string{
+	optIndent:         "WithIndent",
+	optCreatedAt:      "WithCreatedAt",
+	optMetadata:       "WithMetadata",
+	optIssueLimit:     "WithIssueLimit",
+	optRevalidation:   "WithRevalidation",
+	optIntegrityCheck: "WithIntegrityCheck",
+	optWarnings:       "WithWarnings",
+}
+
 type config struct {
+	given []optionKind // every option passed, in argument order
+
 	indent    string
 	createdAt time.Time
 	metadata  map[string]string
+
+	skipIntegrityCheck bool
+
+	// headerOnly marks the surfaces that read a header without trusting a
+	// body. They accept an unrecognized hash algorithm, so dispatch can
+	// classify a stale document by its header instead of receiving nil.
+	headerOnly bool
+
+	revalidate         bool
+	revalidateSeverity diag.Severity
+
+	issueLimit int
+
+	// warnings receives each issue below failure severity a read draws; nil
+	// discards them.
+	warnings func(diag.Issue)
 }
 
-func applyOptions(opts []Option) config {
-	var cfg config
+// defaultIssueLimit equals the cap schema.Load holds.
+const defaultIssueLimit = 100
+
+// newConfig applies opts to the state every call starts from. A surface that
+// takes no option starts from it too, so its error holds at most
+// defaultIssueLimit failures.
+func newConfig(opts []Option) config {
+	cfg := config{issueLimit: defaultIssueLimit}
 	for _, o := range opts {
 		o(&cfg)
 	}
 	return cfg
+}
+
+// refuse returns an error naming the first option, in argument order, that
+// call does not take, or nil when it takes every option it was given.
+func (c *config) refuse(call string, takes ...optionKind) error {
+	for _, g := range c.given {
+		taken := false
+		for _, t := range takes {
+			taken = taken || g == t
+		}
+		if !taken {
+			return fmt.Errorf("snapshot.%s does not take the %s option", call, optionNames[g])
+		}
+	}
+	return nil
 }
 
 // WithIndent sets the indentation string for the serialized output.
@@ -38,9 +103,10 @@ func applyOptions(opts []Option) config {
 // Error-severity [diag.E_SNAPSHOT_MALFORMED] rather than emitting it: the
 // string is written between JSON tokens, so a non-whitespace one produces a
 // document that is not JSON at all — which this package's own [Unmarshal] refuses
-// and [WriteFile] would put on disk unreadable.
+// and [WriteFile] would put on disk unreadable. Only [Marshal] takes it.
 func WithIndent(indent string) Option {
 	return func(c *config) {
+		c.given = append(c.given, optIndent)
 		c.indent = indent
 	}
 }
@@ -50,9 +116,10 @@ func WithIndent(indent string) Option {
 // [time.Time]. A zero t writes no created_at, so output is deterministic unless
 // a caller opts in. Marshal refuses a t that has no RFC 3339 form, a year past
 // 9999 and an offset that is no whole number of minutes among them, with Error
-// [diag.E_SNAPSHOT_MALFORMED].
+// [diag.E_SNAPSHOT_MALFORMED]. Only [Marshal] takes it.
 func WithCreatedAt(t time.Time) Option {
 	return func(c *config) {
+		c.given = append(c.given, optCreatedAt)
 		c.createdAt = t
 	}
 }
@@ -66,9 +133,10 @@ func WithCreatedAt(t time.Time) Option {
 // The map is shallow-copied at call time; subsequent mutations to the
 // caller's map do not affect the serialized output. Each key and value must be
 // valid UTF-8: [Marshal] refuses one that is not, since encoding/json would
-// write each byte that is not as U+FFFD.
+// write each byte that is not as U+FFFD. Only [Marshal] takes it.
 func WithMetadata(m map[string]string) Option {
 	return func(c *config) {
+		c.given = append(c.given, optMetadata)
 		if len(m) == 0 {
 			c.metadata = nil
 			return
@@ -78,55 +146,17 @@ func WithMetadata(m map[string]string) Option {
 	}
 }
 
-// LoadOption configures snapshot deserialization and validation behavior.
-// Both [Unmarshal] and [Verify] accept LoadOption values — they share the same
-// streamDecoder infrastructure and validation logic.
-type LoadOption func(*loadConfig)
-
-type loadConfig struct {
-	skipIntegrityCheck bool
-
-	// headerOnly marks the surfaces that read a header without trusting a
-	// body. They keep the hash-algorithm mismatch non-fatal, so dispatch
-	// can classify a stale document instead of receiving nil.
-	headerOnly bool
-
-	revalidate         bool
-	revalidateSeverity diag.Severity
-
-	issueLimit int
-}
-
-// defaultIssueLimit equals the cap schema.Load holds.
-const defaultIssueLimit = 100
-
-// defaultLoadConfig is the state every read surface starts from. The surfaces
-// that take no options build their config directly, and a zero value there
-// means issueLimit 0 — unlimited — so Stat and ReadHeader would run with an
-// unbounded collector that no option could bound, while Unmarshal and Verify
-// default to 100.
-func defaultLoadConfig() loadConfig {
-	return loadConfig{issueLimit: defaultIssueLimit}
-}
-
-func applyLoadOptions(opts []LoadOption) loadConfig {
-	cfg := defaultLoadConfig()
-	for _, o := range opts {
-		o(&cfg)
-	}
-	return cfg
-}
-
-// WithIssueLimit sets the maximum number of issues [Unmarshal] and [Verify] store.
-// The walk completes unless the context is cancelled: past the limit the
-// collector keeps the most severe issues seen, and [github.com/simon-lentz/yammm/diag.Result.DroppedCount],
+// WithIssueLimit sets the maximum number of failures the error of [Unmarshal]
+// and [Verify] holds. The walk completes unless the context is cancelled: past
+// the limit the error keeps the most severe failures seen, and its
+// [github.com/simon-lentz/yammm/diag.Result.DroppedCount],
 // [github.com/simon-lentz/yammm/diag.Result.LimitReached] and
 // [github.com/simon-lentz/yammm/diag.Result.TruncationNote] report the rest
-// exactly. Set to 0 for unlimited. Default is 100, the cap schema.Load holds.
-// Under [WithRevalidation] the revalidator caps each row at the same limit,
-// so the load has one cap.
-func WithIssueLimit(limit int) LoadOption {
-	return func(c *loadConfig) {
+// exactly. Set to 0 for unlimited; the default is 100, the cap schema.Load
+// holds. A warning takes no cap, since [WithWarnings] receives every one.
+func WithIssueLimit(limit int) Option {
+	return func(c *config) {
+		c.given = append(c.given, optIssueLimit)
 		c.issueLimit = limit
 	}
 }
@@ -137,7 +167,8 @@ func WithIssueLimit(limit int) LoadOption {
 // ([github.com/simon-lentz/yammm/instance.Validator]) and report its findings
 // about the data at the given severity, after every structural issue (a
 // cancellation or an E_INTERNAL keeps its own); at Error a document that fails
-// refuses to load. A root is run only when the structural checks left it
+// refuses to load, and below failure severity each finding goes to
+// [WithWarnings]. A root is run only when the structural checks left it
 // whole: no check refused its type, a unit of its tree, one of its edges (an
 // edge that names no root is the exception below), one of its unresolved
 // records, or one of its required or (one) associations, no record whose
@@ -156,28 +187,48 @@ func WithIssueLimit(limit int) LoadOption {
 // leave alone, and reports each unresolved record no check refused under a
 // required association as
 // [github.com/simon-lentz/yammm/diag.W_SNAPSHOT_UNRESOLVED_REQUIRED].
-// [WithIssueLimit] bounds what a systematic defect stores (default 100), and
-// the counts stay exact past it. It panics when severity is not one of Fatal to
-// Hint (programming error).
-func WithRevalidation(severity diag.Severity) LoadOption {
+// The read holds one row's findings at a time: a row's findings are reported
+// when its run ends, so a row that draws many costs memory in proportion until
+// then. At Fatal or Error [WithIssueLimit] bounds what a systematic defect
+// stores (default 100), and the counts stay exact past it. It panics when
+// severity is not one of Fatal to Hint (programming error).
+func WithRevalidation(severity diag.Severity) Option {
 	if severity < diag.Fatal || severity > diag.Hint {
 		panic(fmt.Sprintf("snapshot.WithRevalidation: invalid severity %d", severity))
 	}
-	return func(c *loadConfig) {
+	return func(c *config) {
+		c.given = append(c.given, optRevalidation)
 		c.revalidate = true
 		c.revalidateSeverity = severity
 	}
 }
 
-// WithIntegrityCheck selects whether [Unmarshal] and [Verify] verify the
-// integrity hash. With false, the hash is not checked; all other structural
-// validation still runs and produces diagnostics with the standard snapshot
-// codes. This follows etcd's SkipHashCheck pattern and supports debugging
-// workflows where .ys files have been hand-edited for inspection. With true —
-// the default — a mismatch, or a header that holds no hash (an empty, null or
-// absent integrity_hash), draws E_SNAPSHOT_INTEGRITY_MISMATCH.
-func WithIntegrityCheck(check bool) LoadOption {
-	return func(c *loadConfig) {
+// WithIntegrityCheck selects whether [Unmarshal], [Verify] and
+// [UpdateMetadata] verify the integrity hash. With false, the hash is not
+// checked; all other structural validation still runs and produces diagnostics
+// with the standard snapshot codes. This follows etcd's SkipHashCheck pattern and
+// supports debugging workflows where .ys files have been hand-edited for
+// inspection; [UpdateMetadata] then seals under a new hash any body whose shape
+// and text it accepts. With true — the default — a mismatch, or a header that
+// holds no hash (an empty, null or absent integrity_hash), draws
+// E_SNAPSHOT_INTEGRITY_MISMATCH.
+func WithIntegrityCheck(check bool) Option {
+	return func(c *config) {
+		c.given = append(c.given, optIntegrityCheck)
 		c.skipIntegrityCheck = !check
+	}
+}
+
+// WithWarnings sets fn to receive every issue below failure severity that
+// [Unmarshal] or [Verify] draws: a Warning, Info or Hint, which only
+// [WithRevalidation] below failure severity produces. fn is called for each in
+// the order found, a row's findings when its run ends, on the goroutine that
+// made the call, never concurrently and before the call returns; no such issue
+// is ever in the call's error, and none is capped. Without the option, and with
+// a nil fn, such issues are discarded.
+func WithWarnings(fn func(diag.Issue)) Option {
+	return func(c *config) {
+		c.given = append(c.given, optWarnings)
+		c.warnings = fn
 	}
 }

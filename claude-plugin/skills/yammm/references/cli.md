@@ -194,7 +194,7 @@ yammm snapshot info output.ys
 
 Displays metadata about a `.ys` file: schema name, version, instance counts, integrity status, timestamps, custom metadata, and the header's attestation (the writer's validity claim, v0.15+).
 
-`--header-only` reads the header and the types table alone. The single-file modes and each `--dir` JSON entry report the file's size as its stat states it, and 0 when the argument is not a regular file, such as a pipe; a `--dir` text row states no size. `--dir <path>` scans the `.ys` files of a directory that `snapshot.ScanDir`'s filtering admits, header-only. For one file, the text and `--json` modes render one structure, so a field one reports the other reports too, and absent `metadata` reads `none` in text and `{}` in JSON; under `--dir` a JSON entry carries the name, path, size, modification time and the header, `null` where it did not parse, where a text row names the file and its status, then the schema, version and `created_at` of a file that read or the first error of one that did not. Under `--json`, each `--dir` entry carries its result under `diagnostics` in the wire the diagnostic stream uses: `issues`, plus `limitReached` and `droppedCount` when the entry's issues were truncated. In text, a `warn` row names its first warning. A document that decodes and fails a structural check, such as an integrity mismatch, still has a summary: it prints beside the errors, in both modes, and the command exits 1.
+`--header-only` reads the header and the types table alone. The single-file modes and each `--dir` JSON entry report the file's size as its stat states it, and 0 when the argument is not a regular file, such as a pipe; a `--dir` text row states no size. `--dir <path>` scans the `.ys` files of a directory that `snapshot.ScanDir`'s filtering admits, header-only. For one file, the text and `--json` modes render one structure, so a field one reports the other reports too, and absent `metadata` reads `none` in text and `{}` in JSON; under `--dir` a JSON entry carries the name, path, size, modification time and the header, `null` where it did not parse, where a text row names the file and its status, then the schema, version and `created_at` of a file that read or the first error of one that did not. Under `--json`, each `--dir` entry carries what its read drew, its failures or the CLI's hash-algorithm warning, under `diagnostics` in the wire the diagnostic stream uses: `issues`, plus `limitReached` and `droppedCount` when the entry's issues were truncated. In text, a `warn` row names its first warning. A document that decodes and fails a structural check, such as an integrity mismatch, still has a summary: it prints beside the errors, in both modes, and the command exits 1.
 
 ### snapshot update-metadata
 
@@ -357,7 +357,8 @@ command prints, and names what some commands find and do not print.
   snapshot save --into` and `yammm snapshot update-metadata`, which read the
   body: the document is refused, not warned about.
   `yammm snapshot info --header-only` and `--dir` read the header and the types
-  table alone and report it as a Warning.
+  table alone and report it as a Warning, unless the header fails another way:
+  then they report that failure alone.
 
 `W_ANNOTATION_SHADOWED` is a warning, and it is the only signal that a
 subtype's property re-declaration dropped an inherited property annotation.

@@ -6,20 +6,42 @@ The YAMMM language itself — grammar, types, expressions, constraints, and diag
 
 ## Error Handling Conventions
 
-Most load and validation functions return a `(T, diag.Result)` pair. The value half is whatever the call produces, such as a `schema.Schema`, a `[]byte` or a `[]instance.ValidInstance`.
+Every call that can fail returns `(T, error)`, or an `error` alone when it has no value to return, as `snapshot.Verify`, `snapshot.WriteFile`, `graph.Graph.Add`, `graph.Graph.Check`, `cypher.Config.CheckLabels`, `schema.CheckConstraint` and `gogen.CheckPackageName` do. `schema.FindModuleRoot` and `location.ResolveSourcePath` return two values before their error, a call where the caller needs no reason, such as `instance.Validator.PrimaryKeyOf`, returns `false` as its last value, and `snapshot.ScanDir` yields an error only when the scan stops, holding a file's own failure in `ScanEntry.Err`. A call that cannot fail returns its value alone, such as `cypher.DropConstraintStatement` and `cypher.IsIdentifier`, and the introspection queries `neo4j.ShowConstraints` and `neo4j.ShowIndexes` are `string` constants.
 
-Some validation surfaces have no value to return and produce a bare `diag.Result`: `snapshot.Verify`, `graph.Graph.Add`, `graph.Graph.Check`, and `cypher.Config.CheckLabels`. For these, `result.OK()` is the whole answer.
+**A failure is a `*diag.ResultError`.** A call that judges its input returns the Fatal and Error issues it drew as one `*diag.ResultError`, whose `Result` holds those failures alone. Read it with `errors.AsType[*diag.ResultError](err)`, which finds it through a `fmt.Errorf` `%w` tag and through `errors.Join`. Test it by code with `errors.Is(err, diag.E_IMPORT_CYCLE)`: a `diag.Code` is an error, and a `ResultError` matches every code among the failures it saw, a dropped one included. A refusal of the call itself, such as an option the call does not take, is an error with no diagnostic code. Some calls return a plain error for every failure, such as `markdown.Marshal` and `neo4j.CoerceParams`; each call's doc names what it returns.
 
-**Read the result first, then the value.** The two are independent, and all four combinations occur:
+**Warnings go to a callback, never into the error.** A Warning, Info or Hint is not a failure, so no error holds one. A call that can draw one takes a `WithWarnings(func(diag.Issue))` option, as `go/types` takes each error through `Config.Error`: `schema.WithWarnings` for every load, `snapshot.WithWarnings` for `Unmarshal` and `Verify`, `cypher.WithWarnings` for `Config.Constraints` and `neo4j.WithWarnings` for `Diff`. The callback runs on the calling goroutine, once per issue in the order the call finds them, before the call returns. Without the option, and with a nil callback, such issues are discarded. A call that draws none takes no such option.
 
-- A value and `result.OK()` — success. Where the value is a slice, success covers each entry. `snapshot.ScanDir` yields one `snapshot.ScanEntry` per file, and the entry holds that file's failure in its own `Result`. A record is a handle (see [Values](#values)), so `IsZero` reports that it holds none. The result may still carry warnings.
-- No value and `!result.OK()` — failure.
-- A value and `!result.OK()` — a partial or unvalidated answer, and a documented contract on two surfaces. `snapshot.Stat` returns a populated summary beside an Error-severity `E_SNAPSHOT_INTEGRITY_MISMATCH`; `instance.Validator.Validate` returns one slot per input, a zero `ValidInstance` for each failure, beside a merged result that holds an Error or Fatal issue for each failure. Discarding the value here loses real data.
-- No value and `result.OK()` — nothing to do. `instance.Validator.Validate` returns `nil, diag.OK()` for nil input and the empty slice for a non-nil empty input, once the type name resolves to a type that is neither abstract nor a part type; an unknown name returns `nil` beside a non-OK result, and so does a nil or empty batch of an abstract or part type.
+```go
+var warnings []diag.Issue
+s, err := schema.Load(ctx, "schema.yammm", schema.WithWarnings(func(i diag.Issue) {
+    warnings = append(warnings, i)
+}))
+if err != nil {
+    if re, ok := errors.AsType[*diag.ResultError](err); ok {
+        fmt.Fprintln(os.Stderr, diag.NewRenderer().FormatResult(re.Result))
+    }
+    return fmt.Errorf("load schema: %w", err)
+}
+```
 
-Use `result.Err()` to convert to a standard Go `error` when `!result.OK()`.
+**Read the error first, then the value.** The two are independent, and all four combinations occur:
 
-Pure transformations take the shape their failures need. Some return `(T, diag.Result)`, such as `snapshot.Marshal` and `cypher.Config.Constraints`. Some return `(T, error)`, such as `gogen.Marshal` and `neo4j.NodeQueries`. One that cannot fail returns its value alone, such as `cypher.DropConstraintStatement` and `cypher.IsIdentifier`, and the introspection queries `neo4j.ShowConstraints` and `neo4j.ShowIndexes` are `string` constants.
+- A value and a nil error — success. Where the value is a slice, success covers each entry. `snapshot.ScanDir` yields one `snapshot.ScanEntry` per file, and the entry holds that file's failure in its own `Err`. A record is a handle (see [Values](#values)), so `IsZero` reports that it holds none.
+- No value and an error — failure.
+- A value and an error — a partial answer, and a documented contract on two surfaces. `snapshot.Stat` returns a populated summary beside an error holding the body's failures, such as `E_SNAPSHOT_INTEGRITY_MISMATCH`; `instance.Validator.Validate` returns one slot per input, a zero `ValidInstance` for each refused one, beside an error that holds every refusal. Discarding the value here loses real data.
+- No value and a nil error — nothing to do. `instance.Validator.Validate` returns `nil, nil` for nil input and the empty slice for a non-nil empty input, once the type name resolves to a type that is neither abstract nor a part type; an unknown name returns `nil` beside an error, and so does a nil or empty batch of an abstract or part type.
+
+## Conventions
+
+The exported API holds to these shapes, each the standard library's where it has one:
+
+- **Results.** `(T, error)`, with a warnings callback for issues below failure severity: the `go/types` `Config.Error` precedent ([Error Handling Conventions](#error-handling-conventions)).
+- **Settings and knobs.** A setting every call of a package shares is a field of a config struct whose zero value is the default, as `cypher.Config` is. A knob of one call is an option, one `Option` type per package. In `schema`, `snapshot` and `neo4j`, where several calls share that type, a call refuses an option it does not take with an error, with no diagnostic code, that names the option and the call.
+- **Collections.** An accessor over records returns `iter.Seq` or `iter.Seq2` and is named for what it yields, as `Schema.Types` and `Snapshot.Instances` are; a container names its iterators as `maps` and `slices` name theirs: `All`, `Keys` and `Values`. An indexed container adds `Len` and `At(i)`, as `immutable.Slice` and `immutable.Key` do ([Values](#values)).
+- **Text.** A type with a display form implements `fmt.Stringer`, and one with a wire text form `encoding.TextMarshaler` too, as `snapshot.TypeRef` does.
+- **Lookups.** A lookup that can miss returns `(T, bool)`, as a map index does: `Schema.TypeByID`, `Snapshot.InstanceByKey`, `immutable.Properties.Get`.
+- **Exports.** A name is exported only when a consumer outside the module needs it. The module's packages share everything else through `internal/`, so no exported name exists for this module's own tests.
 
 ## Values
 
@@ -53,27 +75,31 @@ Schemas are loaded from files or in-memory sources using the `schema` package.
 
 ```go
 // Load from file path
-s, result := schema.Load(ctx, "path/to/schema.yammm", opts...)
+s, err := schema.Load(ctx, "path/to/schema.yammm", opts...)
 
 // Load from string content (sourceCode first, then sourceName)
-s, result := schema.LoadString(ctx, content, "source-name", opts...)
+s, err := schema.LoadString(ctx, content, "source-name", opts...)
 
-// Load from in-memory sources with an explicit entry point
-// Useful in LSP scenarios where multiple documents are open but only one is being analyzed
-s, result := schema.LoadSourcesWithEntry(ctx, sources, entryPath, moduleRoot, opts...)
+// Load from in-memory sources with an explicit entry point; a relative key
+// resolves under the WithModuleRoot root, joins the WithSyntheticRoot root,
+// or resolves under the working directory without either
+s, err := schema.LoadSourcesWithEntry(ctx, sources, entryPath, opts...)
 ```
 
 A path `Load` reads, and a key `LoadSourcesWithEntry` registers under a module root on disk, names a directory when it ends in a separator or a `.` element, as a Unix kernel reads it, on every host. So `s.yammm/` and `s.yammm/.` name no file: where `s.yammm` is a regular file the load is refused with a Fatal `E_LOAD_IO_FAILURE` whose message ends in `not a directory` on every host, where v0.21.1 read the file. Under `WithSyntheticRoot` a key names no host path and is cleaned instead (see [Synthetic source identities](#synthetic-source-identities)).
 
 ### Load Options
 
-| Option | Description |
-| ------ | ----------- |
-| `WithModuleRoot` | Root directory for module-style imports. It is the first rung of the ladder in [Module root discovery](#module-root-discovery), and under it no `yammm.mod` marker is read at all. `Load` refuses a root that is not a directory it can open with a Fatal `E_LOAD_IO_FAILURE`, whether or not the schema imports anything |
-| `CaptureSources(&dst)` | Store the load's sources in `dst` before the load reads anything, so a caller can render excerpts for a load that fails and returns no schema; a load that fails before it reads anything leaves `dst` holding that load's empty sources |
-| `WithImportsAllowed` | Whether import declarations are processed (default `true`); `false` refuses them with `E_IMPORT_NOT_ALLOWED` |
-| `WithSourcesOnly` | With `true`, restrict import resolution to pre-registered in-memory sources — a miss errors instead of reading the filesystem (hermetic loads of embedded sources). It decides where an import is read from, never a source's identity. `LoadSourcesWithEntry` alone takes it: `Load` and `LoadString` refuse it with `true` |
-| `WithSyntheticRoot` | Give in-memory sources synthetic identities under a root such as `embedded://app`, so type identities do not move with the working directory (see [Synthetic source identities](#synthetic-source-identities)) |
+Every load takes `schema.Option` values. A load refuses an option it does not take, and returns a zero `Schema` beside an error, with no diagnostic code, that names the option and the load.
+
+| Option | Taken by | Description |
+| ------ | -------- | ----------- |
+| `WithModuleRoot` | `Load`, `LoadSourcesWithEntry` | Root directory for module-style imports; under these two calls an empty root sets no root. A call that refuses the option refuses an empty root too. It is the first rung of the ladder in [Module root discovery](#module-root-discovery), and under it no `yammm.mod` marker is read at all. `Load` refuses a root that is not a directory it can open with a Fatal `E_LOAD_IO_FAILURE`, whether or not the schema imports anything |
+| `CaptureSources(&dst)` | every load | Store the load's sources in `dst` before the load reads anything, so a caller can render excerpts for a load that fails and returns no schema; a load that fails before it reads anything leaves `dst` holding that load's empty sources |
+| `WithImportsAllowed` | `Load`, `LoadSourcesWithEntry` | Whether import declarations are processed (default `true`); `false` refuses them with `E_IMPORT_NOT_ALLOWED`. `LoadString` rejects every import declaration |
+| `WithSourcesOnly` | `LoadSourcesWithEntry` | With `true`, restrict import resolution to pre-registered in-memory sources — a miss errors instead of reading the filesystem (hermetic loads of embedded sources). It decides where an import is read from, never a source's identity |
+| `WithSyntheticRoot` | `LoadSourcesWithEntry`, without `WithModuleRoot` | Give in-memory sources synthetic identities under a root such as `embedded://app`, so type identities do not move with the working directory (see [Synthetic source identities](#synthetic-source-identities)) |
+| `WithWarnings(fn)` | every load | Receive each Warning, Info and Hint the load draws, in the order found, before the load returns; no such issue is in the load's error |
 
 ### Module root discovery
 
@@ -152,11 +178,10 @@ the working directory, the checkout, and the container mount point.
 `WithSyntheticRoot` replaces it:
 
 ```go
-s, result := schema.LoadSourcesWithEntry(ctx,
-    gen.SerializedSources(),  // a generated package's embedded sources
+s, err := schema.LoadSourcesWithEntry(ctx,
+    gen.SerializedSources(), // a generated package's embedded sources
     gen.SerializedEntry,
-    "",                       // no module root: the synthetic root stands in
-    schema.WithSyntheticRoot("embedded://app"),
+    schema.WithSyntheticRoot("embedded://app"), // stands in for the module root
 )
 ```
 
@@ -173,8 +198,8 @@ The option refuses rather than degrades. Each of these is an error:
 | --------- | --- |
 | A root not of the form `scheme://authority`, optionally followed by a path — empty, `embedded://`, `embedded:`, `.`, `/abs` — one whose scheme is one letter or is `string` in any case, one whose authority is `.` or `..`, or one whose path climbs above its authority (`embedded://app/..`) | Without an authority two roots join one identity (`embedded://` and `embedded:` both gave `embedded:/main.yammm`), a root with no scheme reads as a directory, a one-letter scheme reads as a drive, and `string://` is the identity `LoadString` mints. A root is normalized once — the scheme in lower case, the text after it in NFC, the path cleaned — so `EMBEDDED://app/`, `embedded://app//` and `embedded://app/.` are all `embedded://app`. The authority keeps its case |
 | A root holding, after its scheme, a character outside its set — a `?`, a `#`, a `%`, a backslash, a space, a control, format or other character that does not print, one of `" < > [ ] ^ { \| }` or a backtick, or a `:` or `@` in its authority — or text that is not valid UTF-8 | After the scheme a root holds ASCII letters and digits, `/`, the marks `- . _ ~ ! $ & ' ( ) * + , ; =`, `:` and `@` in its path alone, and a character past ASCII that prints: a letter, mark, number, punctuation or symbol, as `strconv.IsPrint` reports. It names no server, so it takes no port, no user, no query and no fragment, and no percent escape, which would give one root two spellings. The set is applied to the root in NFC, so U+1FEF GREEK VARIA, which NFC makes a backtick, is refused |
-| A root together with a non-empty `moduleRoot` argument | The two name one concept and the load can honor only one |
-| The option passed to `Load` or `LoadString` | It could only ever be a silent no-op there |
+| The option beside `WithModuleRoot`, an empty root included | The two name one concept and the load can honor only one. The error names both options and carries no diagnostic code |
+| The option passed to `Load` or `LoadString` | It could only ever be a silent no-op there. The error names the option and the load, and carries no diagnostic code |
 | An absolute source key — as given, or once cleaned and in NFC (`./C:/x.yammm`, or a key spelled with U+212A KELVIN SIGN, which NFC makes `K`) — or one naming the root itself or a directory above it (`..`) | An absolute key collides with file-backed identities, and neither the root nor a directory above it is a source. A key that spells a directory under the root is cleaned to a file key: `x.yammm/` and `x.yammm/.` are `x.yammm`. A key that escapes the root is allowed: it keeps its leading `..` and yields a stable, distinct identity |
 | A source key holding a backslash | Windows reads a backslash as a separator and every other host as part of a file name, so one store would name different sources on each |
 | A source key holding a character that does not print — a control character, a bidi or other format character, a space past ASCII, a line or paragraph separator, a private-use or unassigned code point | Such a character renders as nothing or reorders the text around it, so two identities could read alike. Every synthetic identity the library judges is held to this rule, a `LoadString` name and `location.NewSourceID` among them. `location.NewSourceID` and `gogen.Marshal` return an error wrapping `location.ErrUnprintableSourceID`. A load reports its text, so `errors.Is` cannot match it there. The verdict follows the Unicode tables of the Go toolchain that builds yammm, so a character a later Unicode assigns is refused until that toolchain moves. The ASCII space stays legal in a key |
@@ -197,16 +222,18 @@ name and the type's name, and no path.
 
 ### Error Handling Pattern
 
-All load functions return `(Schema, diag.Result)`:
+All load functions return `(Schema, error)`:
 
-- A zero `Schema` and `!result.OK()`: Failure (syntax errors, type resolution failures)
-- A `Schema` that is not zero and `result.OK()`: Success (result may contain warnings)
+- A zero `Schema` and an error: failure. The error is a `*diag.ResultError` holding the load's failures, such as syntax errors and type resolution failures, or, for an option the load does not take, an error naming it.
+- A `Schema` that is not zero and a nil error: success. The load's warnings went to `WithWarnings`.
 
 ```go
-s, result := schema.Load(ctx, "schema.yammm")
-if !result.OK() {
-    // Use diag.Renderer to format issues
-    return fmt.Errorf("schema errors: %v", result)
+s, err := schema.Load(ctx, "schema.yammm")
+if err != nil {
+    if errors.Is(err, diag.E_IMPORT_CYCLE) {
+        // one failure's code, read through the error
+    }
+    return fmt.Errorf("load schema: %w", err)
 }
 // Use s
 ```
@@ -256,7 +283,7 @@ closure — each exactly once:
   `E_RELATION_COLLISION`. The answer is the same in any order of the `extends`
   clause.
 - **The all-or-nothing contract is unchanged.** Any error still yields a
-  zero `Schema`; completeness changes what `result` carries, not the
+  zero `Schema`; completeness changes what the error carries, not the
   contract.
 
 `LoadString` — and any load with `WithImportsAllowed(false)` — rejects import
@@ -269,28 +296,30 @@ resolved.
 
 #### Issue limit
 
-As a load runs it stores at most 100 issues. A Fatal that ends a load from outside its collection, as an I/O failure, a cancellation or a refused input or option does, joins them past that number; a Fatal raised during collection, such as a header that does not parse or an internal fault, is stored as any issue is. The limit bounds *collection*: once it is reached, every further
-issue is counted in `Result.DroppedCount()` and flagged by
-`Result.LimitReached()`. **The cap retains the most severe issues seen, not the
-first ones seen.** When the store is full and an arriving issue is more severe
-than the least severe stored issue, the stored one is evicted and the arriving
-one takes its slot; only an issue that is no more severe than the least severe
-stored one is itself the drop. Arrival order breaks ties within a single
-severity — among equally severe issues the earliest-arrived are retained — but
-never decides survival across severities, so an error declared late in a file
-still displaces a warning collected early. The *display* order of surviving issues is always deterministic.
-Dropped issues still count toward `Result.OK()` / `HasErrors()` /
-`SeverityCounts()` (the counts reflect every issue *seen*, not only those
-stored), so truncation never flips a failing result to OK and the
-all-or-nothing contract holds regardless of the limit.
-Under `snapshot.WithRevalidation` the revalidator caps each row at the
-`snapshot.Unmarshal` limit (`snapshot.WithIssueLimit`), so that load has one cap and
-an unlimited one stores every finding a row draws. When the cap was hit,
+As a load runs its error stores at most 100 failures. A Fatal that ends a load from outside its collection, as an I/O failure, a cancellation or a refused input does, joins them past that number; a Fatal raised during collection, such as a header that does not parse or an internal fault, is stored as any failure is. The limit bounds *collection*: once it is reached, every further
+failure is counted in the error's `Result.DroppedCount()` and flagged by its
+`Result.LimitReached()`. A Warning, Info or Hint takes no slot and is never
+dropped: `WithWarnings` receives each one. **The cap retains the most severe
+failures seen, not the first ones seen.** When the store is full and an arriving
+Fatal finds a stored Error, the Error is evicted and the Fatal takes its slot;
+an arriving failure that is no more severe than the least severe stored one is
+itself the drop. Arrival order breaks ties within a single
+severity — among equally severe failures the earliest-arrived are retained — but
+never decides survival across severities. The *display* order of surviving issues is always deterministic.
+Dropped failures still count in the error's `SeverityCounts()` and
+`CodeCounts()`, and `errors.Is` matches a dropped failure's code (the counts
+reflect every failure *seen*, not only those stored), so truncation never
+hides a failure and the all-or-nothing contract holds regardless of the limit.
+Under `snapshot.WithRevalidation` the revalidator's failures take the
+`snapshot.WithIssueLimit` limit with the read's own, and its warnings take none. When the cap was hit,
 the JSON output format carries `limitReached` and `droppedCount`. A
 truncated result merged with `Collector.Merge` or `MergeFunc` keeps both, and
 `MergeRetag` counts as dropped only the issues of the codes its retag keeps. A cap is a collector's
 setting, so a `Result` reports none. The CLI's text output appends a
-dropped-issues note.
+dropped-issues note to a result it renders as diagnostics; `snapshot info
+--dir`'s table names an entry's first error or warning alone, and its JSON
+carries each entry's `limitReached` and `droppedCount` in the entry's
+`diagnostics` member.
 
 ### One Object Per Source
 
@@ -341,24 +370,25 @@ validator := instance.NewValidator(schema, opts...)
 
 | Option | Description |
 | ------ | ----------- |
-| `WithIssueLimit` | Cap the issues one instance stores, and count the rest as dropped (default: 100, and 0 is unlimited). [Validation](#validation) states what the batch result keeps of that count |
+| `WithIssueLimit` | Cap the issues one instance stores, and count the rest as dropped (default: 100, and 0 is unlimited). [Validation](#validation) states what the batch error keeps of that count |
 
 ### Validation
 
 ```go
 // Validate a batch of instances for a given type
-valid, result := validator.Validate(ctx, "Person", rawInstances)
-if !result.OK() {
-    // Use diag.Renderer to format issues
-    return fmt.Errorf("validation errors: %v", result)
+valid, err := validator.Validate(ctx, "Person", rawInstances)
+if err != nil {
+    // valid holds one slot per input, a zero entry for each refusal, when
+    // the batch ran, and is nil when it did not
+    return fmt.Errorf("validate: %w", err)
 }
 // Each entry is a validated instance
 
 // Validate a single instance
-one, result := validator.ValidateOne(ctx, "Person", rawInstance)
+one, err := validator.ValidateOne(ctx, "Person", rawInstance)
 ```
 
-A batch call returns one entry per input instance when the batch ran — a record for a success, a zero entry for a failure — and a nil slice when it did not: a nil batch, an unknown type, an abstract or part type named by `Validate`'s empty batch, or a cancellation, before the first row or on one. A diagnostic that belongs to a row carries exactly one `instance_index` detail, the index into the slice the caller passed; a batch-wide diagnostic carries none and is anchored on the batch's source at its root. A cancelled batch draws exactly one `E_CONTEXT_CANCELLED`, stamped with the row it stopped on; a cancellation before the first row is batch-wide, anchored on the batch's source at its root with no `instance_index`. The batch result carries the truncation facts (`LimitReached`, `DroppedCount`) of each row that finished under a live context, so such a row is never reported as complete when it was capped. A row the cancellation stopped keeps its `E_INTERNAL` issues alone, and its truncation facts are lost.
+A batch call returns one entry per input instance when the batch ran — a record for a success, a zero entry for a failure — beside an error that holds every refusal, and a nil slice when it did not: a nil batch, an unknown type, an abstract or part type named by `Validate`'s empty batch, or a cancellation, before the first row or on one. A diagnostic that belongs to a row carries exactly one `instance_index` detail, the index into the slice the caller passed; a batch-wide diagnostic carries none and is anchored on the batch's source at its root. A cancelled batch draws exactly one `E_CONTEXT_CANCELLED`, stamped with the row it stopped on; a cancellation before the first row is batch-wide, anchored on the batch's source at its root with no `instance_index`. The batch error's `Result` carries the truncation facts (`LimitReached`, `DroppedCount`) of each row that finished under a live context, so such a row is never reported as complete when it was capped. A row the cancellation stopped keeps its `E_INTERNAL` issues alone, and its truncation facts are lost.
 
 **Paths name the input document.** A diagnostic's path, and a composed child's provenance path, address the token in the document the caller supplied: the input key as written (`$.age` for the property `age`, `$.Age` for an unknown key `Age`, `$.lines[0].qty` for a child under the input key `lines`), or the parent object for something absent. The details name the declared property or relation an issue is about (`property`, `relation`), and an unknown key's `field` detail holds the key as written. A child's provenance is the parent's, extended by that path; a parent without provenance yields children without.
 
@@ -366,7 +396,7 @@ A batch call returns one entry per input instance when the batch ran — a recor
 
 **A refused instance's key.** `validator.PrimaryKeyOf(typeName, raw) (schema.TypeID, immutable.Key, bool)` returns the type and primary key `raw` would carry as a valid root instance, whether or not the validator accepts the rest of it: each key property is read, checked and coerced as `Validate` reads it, so the key equals the one `Validate` stores for an instance it accepts. It reports false when `typeName` names no type that can hold a root, or a key component is absent or refused by its constraint. The CLI's data commands read it to judge a document as a whole: an association whose target the document states but the validator refused is not reported as a missing target, and a key a refused instance shares with another is a duplicate.
 
-> **Note:** Passing an unknown type name to `Validate` or `ValidateOne` produces a validation failure (via `diag.Result`), not a panic or unexpected state — for `Validate`, whatever the batch, a nil or empty one included.
+> **Note:** Passing an unknown type name to `Validate` or `ValidateOne` returns an error holding `E_INSTANCE_TYPE_NOT_FOUND`, not a panic or unexpected state — for `Validate`, whatever the batch, a nil or empty one included.
 
 Type names passed to the validator (`Validate`, `ValidateOne` and `PrimaryKeyOf`) are entry-schema-relative: bare names for entry-schema types, alias-qualified names (`common.Region`) for directly imported ones. Relation *targets*, by contrast, are resolved internally by the absolute identity completion records (`Relation.TargetID`), never by re-reading the declared target name against the entry schema — so associations and compositions declared on imported types, or inherited from cross-schema parents, validate against the true target type even when the entry schema does not know the declaring schema's aliases or shadows the target's bare name with a type of its own.
 
@@ -442,13 +472,12 @@ The `graph` package builds an in-memory graph from validated instances.
 g := graph.New(schema)
 
 // Add validated instances
-result := g.Add(ctx, validInstance)
-if !result.OK() {
-    // Handle error
+if err := g.Add(ctx, validInstance); err != nil {
+    // The record was refused; see "What Add checks" below
 }
 
 // Check completeness (required associations)
-result = g.Check(ctx)
+err := g.Check(ctx)
 
 // Get a point-in-time snapshot
 snap := g.Snapshot()
@@ -459,9 +488,9 @@ for _, typeID := range snap.Types() {
 }
 ```
 
-**Type resolution.** No lookup in this package takes a rendered type name: a lookup takes the identity, and a name is its rendering for output. `Add` judges an instance by the schema object that validated it: the instance holds its `schema.Type` (`ValidInstance.Type()`), and `Add` compares that handle with the one `Schema.TypeByID` returns for its identity. A mismatch panics, as every other programmer error in this package does: the type is outside the graph's import closure, or another load validated the instance. One text loaded twice is two loads, so an instance crossed between them panics whether or not the texts differ. A load holds one handle per type however many import paths reach it, so a validator over any member of a closure serves a graph over any schema of that load whose own closure holds the type. Past that check, a root's type is any type of the closure that can hold a root — concrete, not a part, and keyed — one the schema reaches only through an intermediate import included. The graph holds it by identity, so it stays apart from an entry type of its name. `snapshot.Unmarshal` and `snapshot.Verify` apply the same root rule to every type a snapshot *denotes* — `Snapshot.Types`, whether or not the type holds instances. A composed child reaches the whole import closure too: its type comes from a relation the schema already resolved, so a schema where an imported type composes a part type from a further import loads, validates and builds.
+**Type resolution.** No lookup in this package takes a rendered type name: a lookup takes the identity, and a name is its rendering for output. `Add` judges an instance by the schema object that validated it: the instance holds its `schema.Type` (`ValidInstance.Type()`), and `Add` compares that handle with the one `Schema.TypeByID` returns for its identity. A mismatch panics, as each programmer error the package doc's Error Handling section lists does: the type is outside the graph's import closure, or another load validated the instance. One text loaded twice is two loads, so an instance crossed between them panics whether or not the texts differ. A load holds one handle per type however many import paths reach it, so a validator over any member of a closure serves a graph over any schema of that load whose own closure holds the type. Past that check, a root's type is any type of the closure that can hold a root — concrete, not a part, and keyed — one the schema reaches only through an intermediate import included. The graph holds it by identity, so it stays apart from an entry type of its name. `snapshot.Unmarshal` and `snapshot.Verify` apply the same root rule to every type a snapshot *denotes* — `Snapshot.Types`, whether or not the type holds instances. A composed child reaches the whole import closure too: its type comes from a relation the schema already resolved, so a schema where an imported type composes a part type from a further import loads, validates and builds.
 
-**What `Add` checks.** `Add` checks the instance's load and its root type, then assembles the tree to install and commits it under the graph's lock. It checks no structure below the root type: the validator of the same load already judged the property names, the names, property names, multiplicities and target keys of a root's edges, and every slot and child of its composition tree at any depth. A refused record installs nothing: no instance, no child and no edge, and the call's result holds its issue. A key a held instance states is such a refusal, and the graph keeps a duplicate record of it.
+**What `Add` checks.** `Add` checks the instance's load and its root type, then assembles the tree to install and commits it under the graph's lock. It checks no structure below the root type: the validator of the same load already judged the property names, the names, property names, multiplicities and target keys of a root's edges, and every slot and child of its composition tree at any depth. A refused record installs nothing: no instance, no child and no edge, and the call's error holds its issue. A key a held instance states is such a refusal, and the one that changes the graph: `Add` returns `E_DUPLICATE_PK` and appends a `Duplicate` record of the refused instance (`Snapshot.Duplicates`). The issue's span is the refused instance's, and its related location ("first declared here") is the held instance's span, when that instance carries one.
 
 `Add` panics on a nil receiver or context, a zero instance, and an instance whose type handle fails the check above: another load's, or one outside the graph's import closure. It raises `E_GRAPH_MISSING_PK` and `E_GRAPH_INVALID_COMPOSITION` (a keyless or a keyed part read out of `ValidInstance.Composed` and added as a root), `E_DUPLICATE_PK`, and `E_CONTEXT_CANCELLED`. `E_GRAPH_UNKNOWN_RELATION`, `E_UNKNOWN_FIELD`, `E_UNKNOWN_EDGE_FIELD`, `E_DUPLICATE_COMPOSED_PK` and `E_DUPLICATE_EDGE` have no route through `Add`: the validator or the schema load refuses those shapes first. The `.ys` reader raises `E_GRAPH_UNKNOWN_RELATION` and `E_DUPLICATE_COMPOSED_PK`, and refuses the other shapes as `E_SNAPSHOT_MALFORMED`. A validator defect reaches the graph, because `Add` does not judge the record again; `snapshot.WithRevalidation` runs a validator over a document's roots when it loads. See the package doc's Error Handling section for the full per-method list.
 
@@ -474,42 +503,42 @@ v := instance.NewValidator(s)
 g := graph.New(s)
 
 for i, rec := range records {
-    valid, res := v.ValidateOne(ctx, "TypeName", buildRawInstance(rec))
-    if res.HasErrors() {
-        return fmt.Errorf("record %d: %w", i, res.WithContext("validate"))
+    valid, err := v.ValidateOne(ctx, "TypeName", buildRawInstance(rec))
+    if err != nil {
+        return fmt.Errorf("record %d: validate: %w", i, err)
     }
-    if res := g.Add(ctx, valid); res.HasErrors() {
-        return fmt.Errorf("record %d: %w", i, res.WithContext("add"))
+    if err := g.Add(ctx, valid); err != nil {
+        return fmt.Errorf("record %d: add: %w", i, err)
     }
 }
 
-if result := g.Check(ctx); result.HasErrors() {
-    return fmt.Errorf("batch: %w", result.Err())
+if err := g.Check(ctx); err != nil {
+    return fmt.Errorf("batch: %w", err)
 }
 snap := g.Snapshot()
 // snapshot.Marshal(ctx, snap) gives the bytes snapshot.WriteFile writes.
 ```
 
-**Error shapes.** Each call returns its own `diag.Result`. `Result.WithContext(tag)` turns a failed one into a `*diag.ContextualError` that carries the caller's tag (see [Contextual Diagnostic Wrap](#contextual-diagnostic-wrap)), so the caller names its own record. `Add` and `AddOrMerge` panic on a zero instance, which a validation with no error never returns.
+**Error shapes.** Each call returns its own error, a `*diag.ResultError` holding that call's failures. A `fmt.Errorf` tag names the caller's record, and `errors.AsType` and `errors.Is` read the failure through it (see [Logging a Failure](#logging-a-failure)). `Add` and `AddOrMerge` panic on a zero instance, which a validation with no error never returns.
 
-**What `Check` and the snapshot report.** `Check` reports each required association left unresolved and a cancelled context, and nothing else. It accumulates nothing, which is what makes it idempotent. The graph keeps no diagnostics and a `Snapshot` holds none: each refusal is in the result of the `Add` or `AddOrMerge` that drew it, so a caller that needs a record of every refusal keeps those results. A clean `Check` means the completeness check passed, not that every record was added. `Duplicates` and `Unresolved` are the persistent structural records.
+**What `Check` and the snapshot report.** `Check` reports each required association left unresolved and a cancelled context, and nothing else. It accumulates nothing, which is what makes it idempotent. The graph keeps no diagnostics and a `Snapshot` holds none: each refusal is in the error of the `Add` or `AddOrMerge` that drew it, so a caller that needs a record of every refusal keeps those errors. A clean `Check` means the completeness check passed, not that every record was added. `Duplicates` and `Unresolved` are the persistent structural records.
 
-**Merging a duplicate key.** `g.AddOrMerge(ctx, valid)` adds `valid` as `Add` does, and returns `(merged bool, res diag.Result)`, `merged` false whenever `res` holds an error, so a caller counts its merges without racing other workers. When the graph already holds a root of `valid`'s type at its primary key, it merges instead of refusing: `valid`'s association records install on the held root, and `valid`'s properties and provenance are dropped, so the held root's stand. A merge records no `Duplicate` and raises no error. A target the held root already names under that association adds nothing. A merge that would give a `(one)` association a second target is refused whole, before anything installs, with an `E_GRAPH_CARDINALITY` for each such association. A `valid` carrying composed children is refused as `Add` refuses a duplicate, `E_DUPLICATE_PK`. The merge is decided and installed under the graph's lock, so N workers adding listings of one key to one graph keep every listing's edges. It is for a source that lists one record under several parents, each listing naming its own association targets; the graph package doc's "Merge on a Duplicate Key" section states every rule. A merge adds no instance. `AddOrMerge` panics as `Add` does, and its panics and its cancellation message name `graph.AddOrMerge`.
+**Merging a duplicate key.** `g.AddOrMerge(ctx, valid)` adds `valid` as `Add` does, and returns `(merged bool, err error)`, `merged` false whenever `err` is not nil, so a caller counts its merges without racing other workers. When the graph already holds a root of `valid`'s type at its primary key, it merges instead of refusing: `valid`'s association records install on the held root, and `valid`'s properties and provenance are dropped, so the held root's stand. A merge records no `Duplicate` and raises no error. A target the held root already names under that association adds nothing. A merge that would give a `(one)` association a second target is refused whole, before anything installs, with an `E_GRAPH_CARDINALITY` for each such association. A `valid` carrying composed children is refused as `Add` refuses a duplicate: `E_DUPLICATE_PK`, and a `Duplicate` record of it. **The commit rule.** `AddOrMerge`, as `Add` does, decides every refusal before it installs anything, the duplicate and cardinality refusals under the graph's lock, so a refused call installs no instance, child or edge. A duplicate-key refusal appends its `Duplicate` record, and a merge refused for cardinality records nothing. The merge is decided and installed under the graph's lock, so N workers adding listings of one key to one graph keep every listing's edges. It is for a source that lists one record under several parents, each listing naming its own association targets; the graph package doc's "Merge on a Duplicate Key" section states every rule. A merge adds no instance. `AddOrMerge` panics as `Add` does, and its panics and its cancellation message name `graph.AddOrMerge`.
 
 **Resuming from a prior snapshot.** Consumers that persist a batch and continue it on a later run seed a graph from the loaded snapshot with `graph.NewFromSnapshot` (see [Seeding from a Snapshot](#seeding-from-a-snapshot)) and add only the outstanding records:
 
 ```go
-snap, res := snapshot.Unmarshal(ctx, data, s) // prior batch's .ys
-if res.HasErrors() { /* handle */ }
+snap, err := snapshot.Unmarshal(ctx, data, s) // prior batch's .ys
+if err != nil { /* handle */ }
 
 g := graph.NewFromSnapshot(snap)
 for _, valid := range outstanding { // e.g. resume-by-set-difference, validated as above
-    if res := g.Add(ctx, valid); res.HasErrors() { /* handle */ }
+    if err := g.Add(ctx, valid); err != nil { /* handle */ }
 }
-result := g.Check(ctx)
+err = g.Check(ctx)
 ```
 
-New adds interact with the seeded state as if it had been assembled in the same batch: they resolve previously-unresolved edges imported from the seed, forward references resolve against seeded instances, a `(type, primary key)` collision with a seeded instance is rejected as `E_DUPLICATE_PK` by `Add`, and merged or refused by `AddOrMerge`, and `Check` covers the union — a required association imported from the seed and still unresolved draws `E_UNRESOLVED_REQUIRED` in its result.
+New adds interact with the seeded state as if it had been assembled in the same batch: they resolve previously-unresolved edges imported from the seed, forward references resolve against seeded instances, a `(type, primary key)` collision with a seeded instance is rejected as `E_DUPLICATE_PK` by `Add`, and merged or refused by `AddOrMerge`, and `Check` covers the union — a required association imported from the seed and still unresolved draws `E_UNRESOLVED_REQUIRED` in its error.
 
 **Test fixtures.** `snapshot/snapshottest` is the shared round-trip vocabulary for snapshot tests: `BuildSnapshot(tb, s, instances...)` constructs a snapshot from instances an `instance.Validator` validated over `s` itself, `AssertRoundTrip(tb, snap, opts...)` pins Marshal→Unmarshal structural equivalence against the snapshot's own schema, `AssertDeterministic(tb, snap, opts...)` pins byte-stable marshaling, and `DiffSnapshots(tb, want, got)` is the underlying go-cmp comparison — recursive over composition trees (duplicates included, with each record's conflict), provenance-presence-aware, and exact on every numeric property's dynamic type: every constructor stores a number a finite `float64` holds at a Float as a `float64` ([Values](#values)), so an `int64`/`float64` mismatch is a real defect, not a wire artifact.
 
@@ -522,7 +551,7 @@ A new mutable `Graph` can be seeded from an existing `Snapshot`, enabling increm
 g := graph.NewFromSnapshot(existingSnap)
 
 // New instances can be added on top of the imported data
-result := g.Add(ctx, newInstance)
+err := g.Add(ctx, newInstance)
 
 // Edges referencing imported instances resolve automatically
 snap := g.Snapshot()
@@ -657,28 +686,30 @@ The format includes:
 
 ```go
 // Serialize a snapshot to .ys bytes (deterministic by default)
-data, result := snapshot.Marshal(ctx, snap, opts...)
+data, err := snapshot.Marshal(ctx, snap, marshalOpts...)
 
 // Deserialize .ys bytes back to a snapshot (verifies schema compatibility)
-snap, result := snapshot.Unmarshal(ctx, data, schema, loadOpts...)
+snap, err := snapshot.Unmarshal(ctx, data, schema, loadOpts...)
 
 // Validate a .ys file without materializing a snapshot
 // Peak memory scales with document size: the instances section is decoded first
-result := snapshot.Verify(ctx, data, schema, loadOpts...)
+err := snapshot.Verify(ctx, data, schema, loadOpts...)
 
 // Read the header and a summary of the body without full deserialization
 // Cost and peak memory scale with file size: the instance sections are decoded
-info, result := snapshot.Stat(ctx, data)
+info, err := snapshot.Stat(ctx, data)
 
 // Read the header and the types table only, from any io.Reader — skips the
 // instance body and the integrity check. Reads at most snapshot.MaxHeaderSize
 // (16 MiB) bytes from the reader.
-header, result := snapshot.ReadHeader(ctx, r)
+header, err := snapshot.ReadHeader(ctx, r)
 
 // Write .ys bytes atomically to disk — tmp+fsync+rename. Consumers
 // needing crash-safe persistence should use this instead of os.WriteFile.
 if err := snapshot.WriteFile(path, data); err != nil { /* ... */ }
 ```
+
+A document a call refuses returns a `*diag.ResultError` holding its failures. `Stat` returns its `Info` beside that error when the document decodes and only its body breaks a structural check, and every other call returns no value beside it. The package has one `Option` type: `Marshal` takes the [Marshal Options](#marshal-options), `Unmarshal` and `Verify` the [Load Options](#load-options), and `UpdateMetadata` `WithIntegrityCheck` alone. A call refuses any other option with an error, with no diagnostic code, that names the option and the call.
 
 `Unmarshal`, `Verify`, `Stat` and `UpdateMetadata` refuse with `E_SNAPSHOT_MALFORMED` a document holding a string of invalid UTF-8 or a surrogate escape that is half of no pair (`\ud800`), raw or escaped, at any position: `encoding/json` would silently read either as U+FFFD. `ReadHeader` and `ScanDir` read up to the end of the `types` table and hold what they read to the same rule. The four whole-document surfaces hold a document to this rule, and to its outer shape and member names, before they read its header, so such a document draws `E_SNAPSHOT_MALFORMED` whatever version it states. `ReadHeader` and `ScanDir` judge the version first.
 
@@ -688,6 +719,8 @@ if err := snapshot.WriteFile(path, data); err != nil { /* ... */ }
 
 ### Marshal Options
 
+`Marshal` alone takes these.
+
 | Option | Description |
 | ------ | ----------- |
 | `WithIndent` | Indentation string (`""` for compact, `"\t"` for tabs) |
@@ -696,11 +729,14 @@ if err := snapshot.WriteFile(path, data); err != nil { /* ... */ }
 
 ### Load Options
 
+`Unmarshal` and `Verify` take these, and `UpdateMetadata` takes `WithIntegrityCheck`.
+
 | Option | Description |
 | ------ | ----------- |
-| `WithIssueLimit` | Maximum issues `Unmarshal` and `Verify` store (default 100, the cap `schema.Load` holds; 0 for unlimited). The walk completes unless the context is cancelled, so a completed walk's `DroppedCount` is exact |
-| `WithIntegrityCheck` | Whether the integrity hash is verified (default `true`); `false` skips it for debugging hand-edited files |
-| `WithRevalidation` | Run each root the reader walks and the structural checks left whole (no check refused its type, its tree, its edges, its unresolved records, or its required and `(one)` associations, no record whose types-table row the reader refused could be its, and no other root the reader walks stands at its address; an edge that names no root does not stop it, unless it stands beside another record under a `(one)` association; no edge draws an issue for its target key, which the root at that address, the refusal of a unit there or the edge's reference issue judges, nor does a `target_missing` record whose target a refused unit stands at or states; a listing that repeats a target no sound root holds alone is left out of the run, the target's own issue standing for the repeat) — composed children, edges, `target_missing` records and invariants included — back through `instance.Validator`, reporting its findings about the data at the given severity (a cancellation or an `E_INTERNAL` keeps its own); `Error` refuses the load, and a severity outside `diag.Fatal` to `diag.Hint` panics at the call. An unresolved record no check refused, under an association the schema declares required, draws `W_SNAPSHOT_UNRESOLVED_REQUIRED` |
+| `WithIssueLimit` | Maximum failures the error of `Unmarshal` and `Verify` stores (default 100, the cap `schema.Load` holds; 0 for unlimited). The walk completes unless the context is cancelled, so a completed walk's `DroppedCount` is exact. A warning takes no cap |
+| `WithIntegrityCheck` | Whether the integrity hash is verified (default `true`); `false` skips it for debugging hand-edited files, and `UpdateMetadata` then seals under a new hash any body whose shape and text it accepts |
+| `WithRevalidation` | Run each root the reader walks and the structural checks left whole (no check refused its type, its tree, its edges, its unresolved records, or its required and `(one)` associations, no record whose types-table row the reader refused could be its, and no other root the reader walks stands at its address; an edge that names no root does not stop it, unless it stands beside another record under a `(one)` association; no edge draws an issue for its target key, which the root at that address, the refusal of a unit there or the edge's reference issue judges, nor does a `target_missing` record whose target a refused unit stands at or states; a listing that repeats a target no sound root holds alone is left out of the run, the target's own issue standing for the repeat) — composed children, edges, `target_missing` records and invariants included — back through `instance.Validator`, reporting its findings about the data at the given severity (a cancellation or an `E_INTERNAL` keeps its own); `Error` refuses the load, below failure severity each finding goes to `WithWarnings`, and a severity outside `diag.Fatal` to `diag.Hint` panics at the call. An unresolved record no check refused, under an association the schema declares required, draws `W_SNAPSHOT_UNRESOLVED_REQUIRED` |
+| `WithWarnings(fn)` | Receive each Warning, Info and Hint the read draws, which only `WithRevalidation` below failure severity produces: a row's findings when its run ends, on the calling goroutine and before the call returns. None is in the error, and none is capped |
 
 ### Snapshot Info
 
@@ -740,9 +776,9 @@ type Info struct {
 
 `IntegrityStatus` is a `uint8` kind whose zero value names no status; `String` returns `"ok"` or `"mismatch"`, and `IntegrityStatus(n)` for any other value, the zero among them. A header that holds no hash is a mismatch. Neither struct carries a file size: a size is not knowable from the reader `ReadHeader` takes, and `ScanEntry.FileSize` carries the size on disk for a scanned file.
 
-`snapshot.TypeRef{Schema, Name string}` is the schema-less display surface: `Stat` and `ReadHeader` run without an import closure to resolve against, so each type is reported as the identity the document states, and two same-named types in different schemas stay distinct — both in `Types` and as `InstanceCounts` keys. `TypeRef` is comparable, and its `String()` and `MarshalText()` render `schema#name`. The `#` separator is deliberate beside `schema.TypeID.String()`'s `path:name` form: TypeID's rendering is byte-order-bearing (the wire's diagnostics records sort by it), so the display form stays visibly distinct rather than moving wire bytes to unify the two.
+`snapshot.TypeRef{Schema, Name string}` is the schema-less display surface: `Stat` and `ReadHeader` run without an import closure to resolve against, so each type is reported as the identity the document states, its declaring schema's name and its own, and two same-named types in different schemas stay distinct — both in `Types` and as `InstanceCounts` keys. `TypeRef` is comparable, and its `String()` and `MarshalText()` render `schema#name`. The `#` keeps that display form visibly distinct from `schema.TypeID.String()`'s `path:name`, which names a source path. The types table and the instance groups sort by schema name, then type name; the diagnostics section keeps `Snapshot.Duplicates` and `Snapshot.Unresolved` order, which sorts by `TypeID.String()`.
 
-`TypeRef` renders and does not parse. It carries no `UnmarshalText`, so `Info` and `Header` serialize one way, and nothing reads them back. `yammm snapshot info --json` does not write these structs: it owns its wire shape and emits snake_case keys, carrying each `TypeRef` through as the same `schema#name` string. This is a decision, not a gap — the surfaces are a report projection, the in-process way to scan many documents is `ScanDir`, which hands back `Header` values directly, and `schema#name` is injective over the values yammm produces but not over an arbitrary `TypeRef`. Adding `UnmarshalText` is additive and stays available if a consumer needs it.
+`TypeRef` renders and does not parse. It carries no `UnmarshalText`, so `Info` and `Header` serialize one way, and nothing reads them back. `yammm snapshot info --json` does not write these structs: it owns its wire shape and emits snake_case keys, carrying each `TypeRef` through as the same `schema#name` string. This is a decision, not a gap — the surfaces are a report projection, the in-process way to scan many documents is `ScanDir`, which hands back `Header` values directly, and `schema#name` is injective over the values yammm produces, whose schema and type names hold no `#`, but not over an arbitrary `TypeRef`. Adding `UnmarshalText` is additive and stays available if a consumer needs it.
 
 ### Header Reads
 
@@ -755,9 +791,9 @@ For dispatch-style workloads that classify many `.ys` files by header metadata a
 `ReadHeader` consults no schema, so it does not verify that the stored schema hash matches the caller's loaded schema. `Header.SchemaHashMatches(s schema.Schema) bool` performs that comparison at the dispatch site:
 
 ```go
-header, result := snapshot.ReadHeader(ctx, r)
-if result.HasErrors() {
-    return result.Err()
+header, err := snapshot.ReadHeader(ctx, r)
+if err != nil {
+    return err
 }
 if !header.SchemaHashMatches(s) {
     // stale-schema path: the .ys was produced under a different
@@ -796,8 +832,8 @@ For dispatch-style workloads that enumerate the `.ys` files of a directory — r
 type ScanEntry struct {
     Name     string               // basename, e.g., "CA.ys"
     Path     string               // full path, filepath.Join(dir, Name)
-    Header   *snapshot.Header // nil when Result has error-severity issues
-    Result   diag.Result      // OK on the happy path; carries errors per-file
+    Header   *snapshot.Header // nil whenever Err is not
+    Err      error            // nil when the header parsed, else a *diag.ResultError
     FileSize int64            // zero if the file could not be opened or stat'd, else its size on disk
     ModTime  time.Time        // modification time, or the zero Time if unknown
 }
@@ -814,8 +850,8 @@ for entry, err := range snapshot.ScanDir(ctx, dir) {
     if err != nil {
         return fmt.Errorf("scan: %w", err)
     }
-    if entry.Result.HasErrors() {
-        log.Warn("skipping", "name", entry.Name, "err", entry.Result.Err())
+    if entry.Err != nil {
+        log.Warn("skipping", "name", entry.Name, "err", entry.Err)
         continue
     }
     use(entry.Header)
@@ -829,7 +865,7 @@ Every reader reads `created_at` as RFC 3339's `date-time` (section 5.6): a date,
 **Error surface, in two categories:**
 
 - The iterator's second yielded value (the `error`) is non-nil ONLY for operation-level failures that end iteration: a dir-open error (`ENOENT`, `EACCES`, ...) is yielded as a single `(ScanEntry{}, err)` pair wrapping the underlying `os` error, and a `dir` whose element is a file, or sits under one, wraps an error matching `syscall.ENOTDIR` on every host, Windows included; a context cancelled at entry, or cancellation observed between files, is yielded as `(ScanEntry{}, ctx.Err())`. The zero-value `ScanEntry` signals "no file was reached." Cancellation observed between files takes precedence over any concurrent per-file failure.
-- Per-file failures (corrupt header, per-file `os.Open` / `Read` failure) live on `ScanEntry.Result`; the iterator's error is `nil` for those and iteration continues. A failed `os.Open` surfaces as a Fatal `E_SNAPSHOT_IO`, synthesized by the scan. Everything after the handle exists comes from `ReadHeader`: a corrupt or truncated header is an Error-severity `E_SNAPSHOT_MALFORMED`, and a reader error that stops the header's decode, and that is not and does not wrap `io.EOF` or `io.ErrUnexpectedEOF`, is a Fatal `E_SNAPSHOT_IO` carrying the reader's error as a detail.
+- Per-file failures (corrupt header, per-file `os.Open` / `Read` failure) live on `ScanEntry.Err`, a `*diag.ResultError`; the iterator's error is `nil` for those and iteration continues. A failed `os.Open` surfaces as a Fatal `E_SNAPSHOT_IO`, synthesized by the scan. Everything after the handle exists comes from `ReadHeader`: a corrupt or truncated header is an Error-severity `E_SNAPSHOT_MALFORMED`, and a reader error that stops the header's decode, and that is not and does not wrap `io.EOF` or `io.ErrUnexpectedEOF`, is a Fatal `E_SNAPSHOT_IO` carrying the reader's error as a detail.
 
 **Filtering:**
 
@@ -838,7 +874,7 @@ Every reader reads `created_at` as RFC 3339's `date-time` (section 5.6): a date,
 - Symlinks are followed: one is included when its target is a regular file or cannot be stat'd, and skipped otherwise. A broken symlink is included and yields a per-file Fatal `E_SNAPSHOT_IO` entry with the underlying `os.Open` error surfaced as a detail.
 - Entries are yielded in the order returned by `os.ReadDir`, which sorts by filename. `dir` is cleaned before it is read, so a `..` cancels the element before it rather than following a symbolic link, and each entry's `Path` names a file of the directory listed. An empty `dir` names no directory: it fails as a missing one does, and never lists the working directory.
 
-**CLI integration.** `yammm snapshot info --dir <path>` collects the iteration to produce a tabular per-file summary (text) or a `[]{name, path, file_size, mod_time, header, diagnostics}` JSON array (`diagnostics` is the entry's result on the diagnostic stream's wire) (`mod_time` is RFC 3339 in UTC, empty when the file could not be stat'd). The flag is mutually exclusive with the positional file argument; single-file mode continues to work unchanged.
+**CLI integration.** `yammm snapshot info --dir <path>` collects the iteration to produce a tabular per-file summary (text) or a `[]{name, path, file_size, mod_time, header, diagnostics}` JSON array (`diagnostics` is the entry's failure, or else the warning the CLI adds for a header whose hash algorithm it does not read, on the diagnostic stream's wire) (`mod_time` is RFC 3339 in UTC, empty when the file could not be stat'd). The flag is mutually exclusive with the positional file argument; single-file mode continues to work unchanged.
 
 ### Metadata Updates
 
@@ -849,23 +885,24 @@ func UpdateMetadata(
     ctx context.Context,
     data []byte,
     newMeta map[string]string,
-) ([]byte, diag.Result)
+    opts ...snapshot.Option, // WithIntegrityCheck alone
+) ([]byte, error)
 ```
 
 **What it updates.** `UpdateMetadata` updates every document `Unmarshal` accepts under its default options, whatever whitespace stands around its sections, and a header of any size: it holds the whole document, so `MaxHeaderSize` does not bind it. It splices the new header between the bytes before the header value and the bytes after it, at the offsets the header decode ends at. The header holds the members `Marshal` writes, in `Marshal`'s order: the input's version, schema name, schema hash and hash algorithm, the new integrity hash, the input's features, its `created_at` bytes as written, the new metadata, and the input's attestation. A `null` `created_at` and an absent attestation are not written, and a header member the format does not declare, such as an earlier writer's `schema_source`, is dropped. The header is compact, or, when a line feed directly follows the opening brace, indented by the whitespace between that line feed and the header's name: the indent `Marshal` wrote.
 
-**What it checks.** `UpdateMetadata` seals the document under a new integrity hash, so it verifies the stored one first, and refuses a document whose hash does not match or whose header holds none (`E_SNAPSHOT_INTEGRITY_MISMATCH`, as `Verify` reports it). It decodes no instance. A body that a verified hash seals is the body its writer sealed, so a body `Unmarshal` refuses for its instances is updated, and the update is refused as the input was. Use `Verify` when the body must be judged too.
+**What it checks.** `UpdateMetadata` seals the document under a new integrity hash, so it verifies the stored one first, and refuses a document whose hash does not match or whose header holds none (`E_SNAPSHOT_INTEGRITY_MISMATCH`, as `Verify` reports it). `WithIntegrityCheck(false)` skips that check and seals any body whose shape and text it accepts: a document whose top level is not its four sections in order, that holds a string that is not valid UTF-8 or an unpaired surrogate escape, or that repeats or miscases a member name is refused with `E_SNAPSHOT_MALFORMED`. It decodes no instance. A body that a verified hash seals is the body its writer sealed, so a body `Unmarshal` refuses for its instances is updated, and the update is refused as the input was. Use `Verify` when the body must be judged too.
 
 **Speedup.** On a 14.7 MB `.ys` input `UpdateMetadata` takes a fraction of the CPU time of the equivalent `Unmarshal + Marshal` round trip. **The enforced lower bound is 3×**: `TestUpdateMetadataRatioFloor` in the `snapshot` package takes the fastest of five process-CPU-time samples of each path, the paths taking turns, and fails below that ratio. It runs on Unix hosts only, and not under `-short` or the race detector. This document states the floor rather than an absolute timing, because the measured ratio varies with hardware.
 
 **`created_at` and `metadata`.** `UpdateMetadata` keeps the existing `created_at` bytes. To change it, re-marshal with `WithCreatedAt`. `metadata` itself is replaced entirely — there is no merge. Callers retrieve the current metadata via `ReadHeader`, or via `Stat` for a header past `MaxHeaderSize`, copy it, apply their changes, and pass the result.
 
-**Failure modes.** The function returns structured diagnostics with stable codes, each fault of the document under the code a reader reports for it:
+**Failure modes.** A refused document returns nil and a `*diag.ResultError` with stable codes, each fault of the document under the code a reader reports for it:
 
 - `E_SNAPSHOT_MALFORMED` — the document or the new metadata is malformed: a top-level value that is not a JSON object; the four top-level keys absent, repeated, out of order, `null`, joined by a fifth key or followed by bytes other than whitespace; a top-level value that is not valid JSON, or a document that ends before its top-level object closes; a header or a `types` table that does not decode, a header that states a null or absent `features`, or a `created_at` that is not an RFC 3339 time or that states a leap second or the zero instant; a `types` table stating one identity on two rows; any object of the document that repeats a member name, or spells a member the format declares in another case; a string holding invalid UTF-8 or a surrogate escape that is half of no pair; or a `newMeta` key or value that is not valid UTF-8, judged after the document. `ReadHeader` stops once the `types` table decodes and holds to these rules what it read: that the document is a JSON object whose first section is the header and that holds a `types` section, the header and the table, the value of each section before `types`, and each string up to the end of the table. It checks neither the rest of the outer shape nor the member names.
 - `E_SNAPSHOT_UNSUPPORTED_VERSION` — the header states a version no read path accepts (v1, v2 and v3 included; v4 is the only readable version). The document is refused rather than relabelled — `UpdateMetadata` is a header rewrite, never a migration.
 - `E_SNAPSHOT_UNSUPPORTED_FEATURE` — the header's `features` array holds an entry this version does not recognize. One issue per unrecognized entry.
-- `E_SNAPSHOT_UNSUPPORTED_HASH_ALGORITHM` — the header's `schema_hash_algorithm` is not `schema.StructuralHashVersion`. Error-severity here; the Warning downgrade applies only to `ReadHeader` and `ScanDir`.
+- `E_SNAPSHOT_UNSUPPORTED_HASH_ALGORITHM` — the header's `schema_hash_algorithm` is not `schema.StructuralHashVersion`. `ReadHeader` and `ScanDir` accept such a header and draw nothing: `Header.SchemaHashAlgorithm` states the algorithm, and the CLI reports it as a Warning. A header that fails another way returns no `Header`, so beside that failure the CLI reports no such Warning.
 - `E_SNAPSHOT_INTEGRITY_MISMATCH` — the stored integrity hash does not match the document, or the header holds an empty, `null` or absent hash.
 - `E_CONTEXT_CANCELLED` — ctx was cancelled at entry.
 
@@ -889,15 +926,16 @@ The `diag` package implements YAMMM's five-level severity model. See [Severity L
 
 ### Result Methods
 
-Every non-empty `Result` comes from a `Collector`; `diag.OK()` is the constructor for an empty success result and needs none. For the terminal one-shot case, collect into an unlimited collector and take its `Result()` immediately (`c := diag.NewCollector(0); c.Collect(issue); return nil, c.Result()`). The issue iterators return `iter.Seq[Issue]`; collect a `[]Issue` with `slices.Collect(result.Errors())` when you need one.
+A failure is a `*diag.ResultError`, and its `Result` holds the failures it carries. A `Result` comes from a `Collector` (`Collector.Result`), and the zero `Result` holds no issue. A producer collects issues into a `Collector` and returns `Collector.Err()`: nil when the collector holds no failure, and otherwise a `*diag.ResultError` whose `Result` holds the failures alone, as `go/scanner.ErrorList.Err` builds an error from its list. `Collector.RouteWarnings(fn)` sends every issue below failure severity to `fn` in place of storing it, which is how a call delivers its `WithWarnings` callback. The issue iterators return `iter.Seq[Issue]`; collect a `[]Issue` with `slices.Collect(result.Errors())` when you need one.
 
 ```go
+re, ok := errors.AsType[*diag.ResultError](err)
+result := re.Result
+
 // Status checks
-result.OK()             // No fatal or error issues
-result.HasErrors()      // Has fatal or error issues
 result.HasFatal()       // Has fatal issues
-result.HasWarnings()    // Has warning issues
-result.HasCode(code)    // A retained issue with the given code, at any severity. For gating that must stay truthful under truncation use CodeCounts/HasErrors/SeverityCounts
+result.HasWarnings()    // Has warning issues; false for a failure's Result, which holds failures alone
+result.HasCode(code)    // A retained issue with the given code, at any severity. For gating that must stay truthful under truncation use errors.Is, CodeCounts or SeverityCounts
 result.LimitReached()   // Issue collection limit was reached
 
 // Issue access (returns iter.Seq[Issue]; use slices.Collect for a []Issue)
@@ -908,14 +946,15 @@ result.BySeverity(diag.Warning)          // Issues at a specific severity
 // Metadata
 result.Len()              // Retained issue count; the total seen is Len() + DroppedCount()
 result.DroppedCount()     // Issues dropped after limit
-result.SeverityCounts()   // Counts by severity level
-result.CodeCounts(diag.Warning) // Seen-based per-code counts at one severity — a copy; truthful under truncation where HasCode is not
+result.SeverityCounts()   // Counts by severity level, over every issue seen
+result.CodeCounts(diag.Error) // Seen-based per-code counts at one severity — a copy; truthful under truncation where HasCode is not
 result.TruncationNote()   // Canonical dropped-issues line; "" when nothing was dropped
 
 // Conversion
-result.Err()              // Returns error if !OK(), nil otherwise
 result.String()           // "OK" when there is no issue at all; otherwise a summary line (errors, warnings, info, hints, the limit note) and one line per retained issue at every severity
 ```
+
+`ResultError.Error` returns its `Result.String()`. `errors.Is(err, code)` reports whether the failure saw `code`, stored or dropped.
 
 ### Values and Details in an Issue
 
@@ -945,51 +984,30 @@ raw := renderer.FormatResultJSON(result)
 
 All renderer options are optional. The zero-config `diag.NewRenderer()` produces plain-text output without excerpts or colors.
 
-### Contextual Diagnostic Wrap
+### Logging a Failure
 
-At error boundaries — the places where a diagnostic crosses from the code that produced it to the code that surfaces it — callers attach a human-readable context label to a `diag.Result` via `Result.WithContext(tag)`, which returns an `error` directly: `nil` when the result is OK, a `*diag.ContextualError` otherwise.
+A failure carries no tag of its own: a caller names its operation with a `fmt.Errorf` `%w` tag, and `errors.AsType` and `errors.Is` read the failure through any number of tags and through `errors.Join`.
 
 ```go
-if err := result.WithContext("schema_load"); err != nil {
-    logger.Error("pipeline startup failed", slog.Any("diagnostic", err))
+s, err := schema.Load(ctx, path)
+if err != nil {
+    if re, ok := errors.AsType[*diag.ResultError](err); ok {
+        logger.Error("pipeline startup failed", slog.Any("diagnostic", re))
+    }
     return fmt.Errorf("startup: %w", err)
 }
 ```
 
-A single type carries the tag through error chains and structured logging:
+Log the `*diag.ResultError` itself, not the tagged error: `slog` reads a `LogValuer` on the value it is given, and writes a tagged error as its text.
 
-```go
-// Returned (as a non-nil error) by Result.WithContext(tag) when the result is
-// not OK. Implements error and slog.LogValuer; its Unwrap returns
-// *diag.ResultError so existing errors.As consumers keep working unchanged.
-type ContextualError struct {
-    Result Result
-    Tag    string
-}
-```
+**Slog shape.** `(*ResultError).LogValue()` returns a group with these attributes. A release that changes the shape names the change in its release note, and a nil receiver returns an empty group.
 
-**Slog shape.** `(*ContextualError).LogValue()` returns a group with these attributes:
+- `code` (string) — the first failure's stable code. Omitted when no failure carries a non-zero code.
+- `counts` (group) — `{errors: int, warnings: int}`. `errors` sums Fatal + Error, every failure seen. `warnings` is 0 for an error a `Collector` builds, which holds failures alone. Always emitted.
+- `limit_reached` (bool) and `dropped` (int) — emitted together when the failure was truncated at its issue limit, so a consumer reading `issues` knows it is not reading all of them. Omitted otherwise.
+- `issues` (slice of objects) — one entry per retained issue, each carrying `severity`, `message`, and optional `code`, `source_name`, `path`, `location:{source,line,column}`, `hint`, `details:{...}`. Always emitted as a slice. Log aggregators iterate the slice directly — there are no positional `issue_0`, `issue_1`… attributes.
 
-- `context` (string) — the tag. Always emitted.
-- `code` (string) — the first error-severity issue's stable code. Omitted when the result has no error-severity issue with a non-zero code.
-- `counts` (group) — `{errors: int, warnings: int}`. `errors` sums Fatal + Error; `warnings` is the Warning count. Always emitted.
-- `limit_reached` (bool) and `dropped` (int) — emitted together when the result was truncated at its issue limit, so a consumer reading `issues` knows it is not reading all of them. Omitted otherwise.
-- `issues` (slice of objects) — one entry per issue, each carrying `severity`, `message`, and optional `code`, `source_name`, `path`, `location:{source,line,column}`, `hint`, `details:{...}`. Always emitted as a slice. Log aggregators iterate the slice directly — there are no positional `issue_0`, `issue_1`… attributes.
-
-`Issue.LogValue()` emits the same per-issue shape and is independently useful when a consumer wants to log a single issue: `logger.Error("problem", slog.Any("issue", issue))`.
-
-**Error-chain recovery.** `diag.AsContextualError(err, fallbackTag)` recovers a `*ContextualError` from an arbitrarily-wrapped error. If the chain carries a `*ContextualError`, its original tag survives; if it carries only a bare `*ResultError` (from `Result.Err()` without a tag), the supplied fallbackTag is synthesized so unified error handlers see a uniform shape across both patterns:
-
-```go
-if ce, ok := diag.AsContextualError(err, "validation"); ok {
-    for issue := range ce.Result.Issues() {
-        // triage
-    }
-    logger.Error("failed", slog.Any("diagnostic", ce))
-}
-```
-
-The helper walks through `fmt.Errorf("...: %w", err)` and other `Unwrap` chains transparently.
+`Issue.LogValue()` emits the same per-issue shape and is independently useful when a consumer wants to log a single issue, such as one a `WithWarnings` callback receives: `logger.Warn("problem", slog.Any("issue", issue))`.
 
 ## Neo4j DDL and Mapping
 
@@ -1015,7 +1033,7 @@ The supported floor is Neo4j 5.26, the oldest server the integration matrix runs
 
 ### Edition Gating
 
-Enterprise edition supports all constraint types (UNIQUE, NOT NULL, NODE KEY, PROPERTY_TYPE). Community edition supports UNIQUE constraints only. NOT NULL and PROPERTY_TYPE are omitted there — they have no Community equivalent to fall back to — and `W_NEO4J_EDITION_CONSTRAINT_OMITTED` (Warning) reports the omission once per call with a count per kind, so the guarantees the schema declares and the database will not hold are named in the result rather than silently absent from the script (v0.14.0).
+Enterprise edition supports all constraint types (UNIQUE, NOT NULL, NODE KEY, PROPERTY_TYPE). Community edition supports UNIQUE constraints only. NOT NULL and PROPERTY_TYPE are omitted there — they have no Community equivalent to fall back to — and `W_NEO4J_EDITION_CONSTRAINT_OMITTED` (Warning) reports the omission once per call with a count per kind, so the guarantees the schema declares and the database will not hold are named to the caller rather than silently absent from the script (v0.14.0). Both warnings go to the `cypher.WithWarnings` callback `Constraints` takes, and neither is ever in its error.
 
 NODE KEY is the exception: it *encodes* UNIQUE + NOT NULL rather than expressing a guarantee of its own, so under Community it degrades to its UNIQUE half instead of being dropped, and `W_NEO4J_NODE_KEY_UNSUPPORTED` (Warning) reports the substitution. Community output is therefore identical whether or not `NodeKeys` is set. Dropping it whole would take the primary key's NOT NULL with it — that NOT NULL is skipped whenever a NODE KEY is meant to cover it — leaving the primary key wholly unenforced, which is what this behavior fixes (v0.9.1).
 
@@ -1026,11 +1044,11 @@ NODE KEY is the exception: it *encodes* UNIQUE + NOT NULL rather than expressing
 // The label a schema type's nodes are written under
 label := c.Label(t)
 
-// The label rule's breaks across the import closure
-result := c.CheckLabels(s)
+// The label rule's breaks across the import closure, nil when there is none
+err := c.CheckLabels(s)
 ```
 
-`Label` composes `LabelPrefix`, the name of the schema that declares `t`, `LabelSeparator` and the type name, each as written: `book_catalog__Publisher`. An imported type keeps the label its own schema gives it. Nothing is rewritten: a label that breaks the rule is refused, never repaired. `CheckLabels` judges every non-abstract type's label, one `E_NEO4J_INVALID_IDENTIFIER` per break as each part below counts it, and `Constraints` and `Indexes` each call it and, on its error, return its result alone; `neo4j.Diff` returns that result beside its issues for the remote rows, with no plan; `neo4j.NodeQueries` and `neo4j.EdgeQueries` return an error wrapping it. The rule has four parts:
+`Label` composes `LabelPrefix`, the name of the schema that declares `t`, `LabelSeparator` and the type name, each as written: `book_catalog__Publisher`. An imported type keeps the label its own schema gives it. Nothing is rewritten: a label that breaks the rule is refused, never repaired. `CheckLabels` judges every non-abstract type's label, one `E_NEO4J_INVALID_IDENTIFIER` per break as each part below counts it, returned as one `*diag.ResultError`. `Constraints` and `Indexes` each call it and, on its error, return that error alone; `neo4j.Diff` returns its failures beside its issues for the remote rows, in one error, with no plan; `neo4j.NodeQueries` and `neo4j.EdgeQueries` return an error wrapping it. The rule has four parts:
 
 - `LabelPrefix` is empty or starts an identifier, and `LabelSeparator` is ASCII letters, digits and underscores. A setting that breaks this is one issue for the call, and nothing else is then judged.
 - The schema name and the type name are each an ASCII letter or underscore, then ASCII letters, digits and underscores. A load holds both to the stricter DSL rule, and a schema comes only from a load, so `CheckLabels` does not judge this part again.
@@ -1042,12 +1060,12 @@ A load holds one schema per name and one type per name in a schema, so two types
 ### Constraints
 
 ```go
-constraints, result := c.Constraints(s)
+constraints, err := c.Constraints(s, cypher.WithWarnings(onWarning))
 ```
 
 The `Constraint` struct contains the constraint `Name`, `Kind` (`ConstraintUnique`, `ConstraintNotNull`, `ConstraintType`, `ConstraintNodeKey`; the zero `ConstraintKind` names no kind), `Label`, `Properties`, `TypeExpr`, and the complete `Statement`. Every constraint carries a name, `{label}_{props}_{kind}`, and two constraints whose readable names would collide each receive a short deterministic digest suffix.
 
-Generation is **all-or-nothing**: any validation error returns `(nil, result)`, so one unemittable property withholds every constraint of the schema rather than emitting a partial script that looks complete. Beside a name Neo4j refuses as an identifier (Cypher reserved words, below) and a label that breaks the label rule (above), the one shape a *valid* schema can hit is a list whose element resolves to a collection, a List or a Vector, the list and its element each written directly or through an alias. Those are legal yammm but Neo4j has no nested collection property type, so `Constraints` reports `E_NEO4J_UNSUPPORTED_TYPE` for one, required or optional, whatever `TypeConstraints` and `Edition` are, `NoProperties` and `Community` included: those shape what is emitted, never whether a nested collection is refused. A label setting can decide it: a schema whose labels break the rule is refused with `CheckLabels`' issues alone, so its nested collection is not reported. `Indexes` does not make that check. The write path does: `neo4j.NodeQueries` and `neo4j.CoerceParams` refuse a value of such a property with an error wrapping `neo4j.ErrUnsupportedListElem`, an empty list included, and read an absent one as nil, which `NodeQueries` writes as null. Model the inner collection as a `part type` reached by a composition if the model must be written to Neo4j. A property of an abstract type that no concrete type and no part type extends draws no report: no label carries it. A bare `Vector` is fine — it maps to `LIST<FLOAT NOT NULL>`.
+Generation is **all-or-nothing**: any validation error returns `(nil, err)`, `err` a `*diag.ResultError` holding every failure, so one unemittable property withholds every constraint of the schema rather than emitting a partial script that looks complete. Beside a name Neo4j refuses as an identifier (Cypher reserved words, below) and a label that breaks the label rule (above), the one shape a *valid* schema can hit is a list whose element resolves to a collection, a List or a Vector, the list and its element each written directly or through an alias. Those are legal yammm but Neo4j has no nested collection property type, so `Constraints` reports `E_NEO4J_UNSUPPORTED_TYPE` for one, required or optional, whatever `TypeConstraints` and `Edition` are, `NoProperties` and `Community` included: those shape what is emitted, never whether a nested collection is refused. A label setting can decide it: a schema whose labels break the rule is refused with `CheckLabels`' issues alone, so its nested collection is not reported. `Indexes` does not make that check. The write path does: `neo4j.NodeQueries` and `neo4j.CoerceParams` refuse a value of such a property with an error wrapping `neo4j.ErrUnsupportedListElem`, an empty list included, and read an absent one as nil, which `NodeQueries` writes as null. Model the inner collection as a `part type` reached by a composition if the model must be written to Neo4j. A property of an abstract type that no concrete type and no part type extends draws no report: no label carries it. A bare `Vector` is fine — it maps to `LIST<FLOAT NOT NULL>`.
 
 
 ### Indexes
@@ -1056,7 +1074,7 @@ Indexes are derived from a schema's `@index`, `@@index`, `@vector`, `@fulltext`,
 
 ```go
 // CREATE INDEX / CREATE VECTOR INDEX / CREATE FULLTEXT INDEX statements
-indexes, result := c.Indexes(s)
+indexes, err := c.Indexes(s)
 ```
 
 The `Index` struct contains `Name`, `Kind` (`IndexRange`, `IndexVector`, or `IndexFulltext`; the zero `IndexKind` names no kind), `Label`, `Properties` (declared order, significant for composites), `VectorDimensions`, `VectorSimilarity`, and the complete `Statement`. A property-level `@index` yields a single-property range index; a type-level `@@index(a, b)` yields a composite range index; a property-level `@vector(cosine|euclidean)` yields a vector index whose dimension comes from the property's `Vector[N]` constraint; a property-level `@fulltext` and a type-level `@@fulltext(a, b)` yield fulltext indexes rendered with the `CREATE FULLTEXT INDEX ... FOR (n:Label) ON EACH [n.a, n.b]` list form.
@@ -1107,16 +1125,16 @@ The `neo4j` package writes a graph to Neo4j 5 and plans a database's constraints
 
 ### Write Queries
 
-`NodeQueries` and `EdgeQueries` operate on a complete `graph.Snapshot` for high-throughput batch writes. Each call derives every type's Neo4j label, primary keys with their constraints, and `@writeOnce` properties from the snapshot's own schema under the `cypher.Config`'s label settings, so a merge key and the property it names are coerced under one schema. The derivation covers the whole import closure (`Schema.Closure()`): every member schema's non-abstract types, imported and transitively imported ones included, labelled under the declaring schema's name. Each call pays for the derivation in proportion to the closure's types and their declared and inherited properties, beside its rows' own cost. A type is keyed by `schema.TypeID`, so two closure types sharing one bare name each get their own label. Both calls first judge the closure's labels with `cypher.Config.CheckLabels` and, on its error, return an error wrapping its result, so no two types write one label (Labels, above). A zero `Snapshot` is refused with `ErrZeroSnapshot`.
+`NodeQueries` and `EdgeQueries` operate on a complete `graph.Snapshot` for high-throughput batch writes. Each call derives every type's Neo4j label, primary keys with their constraints, and `@writeOnce` properties from the snapshot's own schema under the `cypher.Config`'s label settings, so a merge key and the property it names are coerced under one schema. The derivation covers the whole import closure (`Schema.Closure()`): every member schema's non-abstract types, imported and transitively imported ones included, labelled under the declaring schema's name. Each call pays for the derivation in proportion to the closure's types and their declared and inherited properties, beside its rows' own cost. A type is keyed by `schema.TypeID`, so two closure types sharing one bare name each get their own label. Both calls first judge the closure's labels with `cypher.Config.CheckLabels` and, on its error, return an error wrapping it, so no two types write one label (Labels, above). A zero `Snapshot` is refused with `ErrZeroSnapshot`.
 
 ```go
-nodeQueries, err := neo4j.NodeQueries(ctx, c, snap, writeOpts...)
-edgeQueries, err := neo4j.EdgeQueries(ctx, c, snap, writeOpts...)
+nodeQueries, err := neo4j.NodeQueries(ctx, c, snap, neo4j.WithNodeChunkSize(1000))
+edgeQueries, err := neo4j.EdgeQueries(ctx, c, snap, neo4j.WithEdgeChunkSize(1000))
 ```
 
 Both return query values (`[]NodeQuery`, `[]EdgeQuery`) with `Statement` and `Params` fields, ready for driver execution. `EdgeQuery` also carries `RelationType`, the Neo4j relationship type.
 
-An error matching `neo4j.ErrUnrepresentable`, naming the type and the property or the primary key, or the relation and the edge property, refuses these values: one its constraint's coercion refuses, a nested collection's (matching `ErrUnsupportedListElem` too), a map at a property the schema declares, which Neo4j stores as no property value, a list or a map a document nests more than 256 levels deep, a `json.Number` that is an integer literal past `int64` at any position but a `Float` or a `Vector` element, or that no finite `float64` holds. An integer literal a finite `float64` holds passes them at a `Float` position and rounds to its nearest `float64`. No snapshot these writers accept holds a property the schema does not declare: the validator keeps one out of what `Graph.Add` takes, and the `.ys` reader refuses one. Of the values the mark refuses, a validated snapshot holds two, which the validator accepts: a nested collection's, and an instant at a UTC offset past 18 hours. Any other is held only by a snapshot whose values no validator refused at Error. `CoerceParams` marks its refusals of a value so too. No other error carries the class: a caller's own, such as a constraint `schema.CheckConstraint` refuses, a zero snapshot, a closure whose labels break the label rule, a relationship type that is no valid identifier, and a cancelled context.
+An error matching `neo4j.ErrUnrepresentable`, naming the type and the property or the primary key, or the relation and the edge property, refuses these values: one its constraint's coercion refuses, a nested collection's (matching `ErrUnsupportedListElem` too), a map at a property the schema declares, which Neo4j stores as no property value, a list or a map a document nests more than 256 levels deep, a `json.Number` that is an integer literal past `int64` at any position but a `Float` or a `Vector` element, or that no finite `float64` holds. An integer literal a finite `float64` holds passes them at a `Float` position and rounds to its nearest `float64`. No snapshot these writers accept holds a property the schema does not declare: the validator keeps one out of what `Graph.Add` takes, and the `.ys` reader refuses one. Of the values the mark refuses, a validated snapshot holds two, which the validator accepts: a nested collection's, and an instant at a UTC offset past 18 hours. Any other is held only by a snapshot whose values no validator refused at Error. `CoerceParams` marks its refusals of a value so too. A root whose key components are refused draws one refusal for each, joined with `errors.Join`, and each names its type or its edge endpoint. No other error carries the class: a caller's own, such as a constraint `schema.CheckConstraint` refuses, a zero snapshot, a closure whose labels break the label rule, a relationship type that is no valid identifier, and a cancelled context.
 
 `NodeQueries` returns a phased, ordered slice; each query carries a `Kind` (`NodeMerge`, `CompositionReplace`, `CompositionCreate`). Every node merge precedes every composition replace, which precedes every composition create (parent-first by depth) — executing the slice in order is correct, and the ordering is a documented guarantee (v0.15.0).
 
@@ -1153,10 +1171,13 @@ Assemble rows through the constants rather than through literals. A prefix the c
 
 ### Write Options
 
-| Option | Description |
-| ------ | ----------- |
-| `WithNodeChunkSize` | `UNWIND` batch size for node queries (default: 5000) |
-| `WithEdgeChunkSize` | `UNWIND` batch size for edge queries (default: 5000) |
+The `neo4j` package has one `Option` type. Each call takes the options its row names, and refuses any other with an error, with no diagnostic code, that names the option and the call: `NodeQueries` refuses `WithEdgeChunkSize`, and `EdgeQueries` refuses `WithNodeChunkSize`.
+
+| Option | Taken by | Description |
+| ------ | -------- | ----------- |
+| `WithNodeChunkSize` | `NodeQueries` | `UNWIND` batch size for node queries (default: 5000) |
+| `WithEdgeChunkSize` | `EdgeQueries` | `UNWIND` batch size for edge queries (default: 5000) |
+| `WithWarnings(fn)` | `Diff` | Receive the constraint generation's warnings, which `cypher.WithWarnings` states; none is in `Diff`'s error |
 
 A type's write-once properties come from its `@writeOnce` annotations, own and inherited, which the write path reads from the snapshot's schema on every call. The derived set per type drives the `ON CREATE` / `ON MATCH` split, selected per type in a batch. Node merges only — relationship merges have no `ON CREATE` / `ON MATCH` split.
 
@@ -1234,11 +1255,11 @@ The introspection types are:
 
 ```go
 // One plan over both sides: what s declares under c against the database's rows
-plan, result := neo4j.Diff(c, s, actualConstraints, actualIndexes)
+plan, err := neo4j.Diff(c, s, actualConstraints, actualIndexes, neo4j.WithWarnings(onWarning))
 diff := plan.Constraints
 ```
 
-`Diff` derives the desired constraints, the desired indexes and the owned labels from `c` and `s`, so the three agree by construction. It returns a `Plan` that holds a `ConstraintDiff` and an `IndexDiff`, and a `diag.Result`. The result holds one `E_NEO4J_INVALID_REMOTE_OBJECT` for each break in the remote rows that `Diff` cannot plan from: each row with no name, each name that two or more rows of one kind share, and each property type constraint that reports no property type. A plan pairs, blocks and drops a row by its name, and one server read holds none of these; a constraint and the index backing it share their name. Beside them the result holds the constraint generation's issues; when those hold no error, the indexes are generated and their issues join, sorted with the rest as every `diag.Result` is, so a constraint error returns before the index generation runs. A plan is returned only when the result holds no error. Index and constraint names share one Neo4j namespace, and a constraint's drop also removes its backing index. A drop that one side needs can therefore remove an object that the other side matched, so one fixed point settles both sides. A schema that declares no indexes has an index half with no `Match`, `Drift`, `Create` or `Unverified`, and each owned index that `RemoteIndex.Declarable` accepts and no drift names is a `Drop`. Rows of both kinds still block creates on either side. Pass every row `ShowIndexes` returns as `actualIndexes`: index rows block constraint creates, so a plan computed without them is wrong on the constraint side too.
+`Diff` derives the desired constraints, the desired indexes and the owned labels from `c` and `s`, so the three agree by construction. It returns a `Plan` that holds a `ConstraintDiff` and an `IndexDiff`, or a zero `Plan` beside an error: a plain error naming an option `Diff` does not take, or else a `*diag.ResultError`. That error holds one `E_NEO4J_INVALID_REMOTE_OBJECT` for each break in the remote rows that `Diff` cannot plan from: each row with no name, each name that two or more rows of one kind share, and each property type constraint that reports no property type. A plan pairs, blocks and drops a row by its name, and one server read holds none of these; a constraint and the index backing it share their name. Beside them the error holds the constraint generation's failures; when there are none, the indexes are generated and their failures join, sorted with the rest as every `diag.Result` is, so a constraint failure returns before the index generation runs. The constraint generation's warnings go to `WithWarnings`. A plan is returned only when there is no failure. Index and constraint names share one Neo4j namespace, and a constraint's drop also removes its backing index. A drop that one side needs can therefore remove an object that the other side matched, so one fixed point settles both sides. A schema that declares no indexes has an index half with no `Match`, `Drift`, `Create` or `Unverified`, and each owned index that `RemoteIndex.Declarable` accepts and no drift names is a `Drop`. Rows of both kinds still block creates on either side. Pass every row `ShowIndexes` returns as `actualIndexes`: index rows block constraint creates, so a plan computed without them is wrong on the constraint side too.
 
 `Constraints` has **four** sets: `Match` (identical), `Drift` (a desired constraint a `CREATE` alone cannot realise), `Create` (missing from the database, and blocked by nothing), and `Drop` (in the database but not in the schema, and named by no drift on either side). Every constraint row is compared whole: `ParseConstraints` and `Diff` refuse a TYPE record that reports no `propertyType`.
 
@@ -1262,7 +1283,7 @@ Ownership is decided before any of this, by set membership against `cypher.Confi
 ### Index Diffing
 
 ```go
-plan, result := neo4j.Diff(c, s, actualConstraints, actualIndexes)
+plan, err := neo4j.Diff(c, s, actualConstraints, actualIndexes)
 diff := plan.Indexes
 
 // The ownership set the plan was scoped by, for a caller reporting on its rows
@@ -1402,13 +1423,13 @@ Two schemas' `Region` are `Type_geo__Region` and `Type_common__Region`; `Url` an
 
 ### Imports
 
-gogen handles schemas with `import`s too: the full import closure is flattened into one self-contained package, named by the rule [Names](#names) states. Embedded source keys are the names the re-load registers each source under, never absolute generation-machine paths, so the output of a generator one Go toolchain builds is byte-reproducible across checkouts and CI runners. The entry keys by its path under the load's recorded module root (`Schema.ModuleRoot()` — for a plain `Load` the `WithModuleRoot` value when given, then the directory of the nearest ancestor holding a `yammm.mod` and failing that the entry file's own directory, the canonicalized root argument for `LoadSourcesWithEntry`, and the synthetic root under `WithSyntheticRoot`), compared as an identity, so a root spelled with a decomposed character keys as its sources do, and an entry outside the root keys with leading `..` segments. A file entry loaded with no root keys against its own directory. A `LoadString` source has no root and keys by the base name it was loaded under, split at either separator and written in NFC; a name with no base, such as `.`, names no file and is refused. Every imported source keys by the text that imports it, resolved against its importer's key by the loader's own rule — so an import through a symlinked directory (`lib -> real`, `import "lib/dep"`) keys as `lib/dep.yammm`, not by where the link resolves. The module root is therefore an input to the generated bytes alongside the schema, the options, the yammm version and the Go toolchain that builds the generator: committing a `yammm.mod` above a schema moves the keys for an otherwise unchanged generation, and a generator that passes the root explicitly sees no change. `Marshal` refuses two layouts a load accepts, naming the paths, because no store re-loads them: one source imported by two paths under two keys, and two sources taking one key (a relative import through a symlink reads the link target's neighbour on load and the key's text on re-load). It also refuses a key the re-load's rule refuses, a source with no path relative to the root, such as one on another drive, because a key is never a generation-machine path, and a `LoadString` name with no base, which names no file. Before returning, it verifies the store re-loads hermetically through the recipe the generated file prints, under the synthetic root named there.
+gogen handles schemas with `import`s too: the full import closure is flattened into one self-contained package, named by the rule [Names](#names) states. Embedded source keys are the names the re-load registers each source under, never absolute generation-machine paths, so the output of a generator one Go toolchain builds is byte-reproducible across checkouts and CI runners. The entry keys by its path under the load's recorded module root (`Schema.ModuleRoot()` — for a plain `Load` the `WithModuleRoot` value when given, then the directory of the nearest ancestor holding a `yammm.mod` and failing that the entry file's own directory, the canonicalized `WithModuleRoot` root for `LoadSourcesWithEntry`, and the synthetic root under `WithSyntheticRoot`), compared as an identity, so a root spelled with a decomposed character keys as its sources do, and an entry outside the root keys with leading `..` segments. A file entry loaded with no root keys against its own directory. A `LoadString` source has no root and keys by the base name it was loaded under, split at either separator and written in NFC; a name with no base, such as `.`, names no file and is refused. Every imported source keys by the text that imports it, resolved against its importer's key by the loader's own rule — so an import through a symlinked directory (`lib -> real`, `import "lib/dep"`) keys as `lib/dep.yammm`, not by where the link resolves. The module root is therefore an input to the generated bytes alongside the schema, the options, the yammm version and the Go toolchain that builds the generator: committing a `yammm.mod` above a schema moves the keys for an otherwise unchanged generation, and a generator that passes the root explicitly sees no change. `Marshal` refuses two layouts a load accepts, naming the paths, because no store re-loads them: one source imported by two paths under two keys, and two sources taking one key (a relative import through a symlink reads the link target's neighbour on load and the key's text on re-load). It also refuses a key the re-load's rule refuses, a source with no path relative to the root, such as one on another drive, because a key is never a generation-machine path, and a `LoadString` name with no base, which names no file. Before returning, it verifies the store re-loads hermetically through the recipe the generated file prints, under the synthetic root named there.
 
 Re-load under a synthetic root:
 
 ```go
-s, result := schema.LoadSourcesWithEntry(ctx,
-    gen.SerializedSources(), gen.SerializedEntry, "",
+s, err := schema.LoadSourcesWithEntry(ctx,
+    gen.SerializedSources(), gen.SerializedEntry,
     schema.WithSyntheticRoot("embedded://app"))
 ```
 

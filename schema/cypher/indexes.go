@@ -89,15 +89,15 @@ func (k IndexKind) String() string {
 // @@index and @@fulltext interleaved, in annotation order.
 //
 // The labels are judged first by [Config.CheckLabels], and on its error the call
-// returns its issues alone. If validation errors are found, returns (nil,
-// result) where result contains all issues. Issues use
-// [E_NEO4J_INVALID_IDENTIFIER], [E_NEO4J_UNKNOWN_PROPERTY], or
-// [E_NEO4J_INVALID_INDEX_TARGET] codes.
-func (c Config) Indexes(s schema.Schema) ([]Index, diag.Result) {
-	if labelResult := c.CheckLabels(s); labelResult.HasErrors() {
-		return nil, labelResult
+// returns that error alone. A refused schema returns nil beside a
+// *[diag.ResultError] holding every failure, each [E_NEO4J_INVALID_IDENTIFIER],
+// [E_NEO4J_UNKNOWN_PROPERTY] or [E_NEO4J_INVALID_INDEX_TARGET]. Indexes draws no
+// issue below failure severity, so it takes no [Option].
+func (c Config) Indexes(s schema.Schema) ([]Index, error) {
+	if err := c.CheckLabels(s); err != nil {
+		return nil, err
 	}
-	collector := diag.NewCollector(0)
+	collector := diag.NewCollector(diag.NoLimit)
 
 	// Schema-scoped, so one bad annotation on an abstract mixin draws one
 	// diagnostic rather than one per concrete subtype that emits for it.
@@ -113,11 +113,10 @@ func (c Config) Indexes(s schema.Schema) ([]Index, diag.Result) {
 		indexes[i].Statement = renderIndexStatement(indexes[i])
 	}
 
-	result := collector.Result()
-	if !result.OK() {
-		return nil, result
+	if err := collector.Err(); err != nil {
+		return nil, err
 	}
-	return indexes, result
+	return indexes, nil
 }
 
 // indexesForType generates all indexes for one emitted (non-abstract) type in

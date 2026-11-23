@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/simon-lentz/yammm/diag"
+	"github.com/simon-lentz/yammm/internal/diagtest"
 	"github.com/simon-lentz/yammm/schema"
 	"github.com/simon-lentz/yammm/schema/cypher"
 )
@@ -19,18 +20,20 @@ import (
 func TestShapeFor_RefusesALabelThatDoesNotDecode(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	s, res := schema.Load(ctx, filepath.Join("testdata", "labelcollide", "entry.yammm"))
-	if res.HasErrors() {
-		t.Fatalf("load: %s", res.String())
+	s, err := schema.Load(ctx, filepath.Join("testdata", "labelcollide", "entry.yammm"))
+	if err != nil {
+		t.Fatalf("load: %s", err)
 	}
 
 	a := cypher.Config{}
-	detect := a.CheckLabels(s)
+	detect := diagtest.Failures(t, a.CheckLabels(s))
 	if !detect.HasCode(cypher.E_NEO4J_INVALID_IDENTIFIER) || !strings.Contains(detect.String(), `schema "geo__Regions"`) {
 		t.Errorf("CheckLabels = %v, want schema geo__Regions refused", detect)
 	}
 
-	shape, shapeRes := shapeFor(a, s)
+	shape, shapeRes := diagtest.Issues(t, func() (*graphShape, error) {
+		return shapeFor(a, s)
+	})
 	if shape != nil {
 		t.Errorf("shapeFor built a shape over a refused closure (%d types)", len(shape.types))
 	}
@@ -70,16 +73,16 @@ func TestBatchQueries_AClosureWhoseLabelsDoNotDecodeIsRefused(t *testing.T) {
 func TestGenerators_AClosureWhoseLabelsDoNotDecodeIsRefused(t *testing.T) {
 	t.Parallel()
 
-	s, res := schema.Load(t.Context(), filepath.Join("testdata", "labelcollide", "entry.yammm"))
-	if res.HasErrors() {
-		t.Fatalf("load: %s", res.String())
+	s, err := schema.Load(t.Context(), filepath.Join("testdata", "labelcollide", "entry.yammm"))
+	if err != nil {
+		t.Fatalf("load: %s", err)
 	}
-	constraints, constraintResult := cypher.Config{}.Constraints(s)
-	if constraints != nil || !constraintResult.HasCode(cypher.E_NEO4J_INVALID_IDENTIFIER) {
-		t.Errorf("Constraints returned %d statements and %s; want none and the refusal", len(constraints), constraintResult)
+	constraints, genErr := cypher.Config{}.Constraints(s)
+	if constraints != nil || !errors.Is(genErr, cypher.E_NEO4J_INVALID_IDENTIFIER) {
+		t.Errorf("Constraints returned %d statements and %s; want none and the refusal", len(constraints), genErr)
 	}
-	indexes, indexResult := cypher.Config{}.Indexes(s)
-	if indexes != nil || !indexResult.HasCode(cypher.E_NEO4J_INVALID_IDENTIFIER) {
-		t.Errorf("Indexes returned %d statements and %s; want none and the refusal", len(indexes), indexResult)
+	indexes, genErr2 := cypher.Config{}.Indexes(s)
+	if indexes != nil || !errors.Is(genErr2, cypher.E_NEO4J_INVALID_IDENTIFIER) {
+		t.Errorf("Indexes returned %d statements and %s; want none and the refusal", len(indexes), genErr2)
 	}
 }

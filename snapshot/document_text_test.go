@@ -2,7 +2,7 @@ package snapshot_test
 
 import (
 	"bytes"
-	"context"
+	"errors"
 	"maps"
 	"os"
 	"path/filepath"
@@ -14,6 +14,7 @@ import (
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/immutable"
+	"github.com/simon-lentz/yammm/internal/diagtest"
 	"github.com/simon-lentz/yammm/internal/snapparts"
 	"github.com/simon-lentz/yammm/internal/snappartstest"
 	"github.com/simon-lentz/yammm/schema"
@@ -34,9 +35,9 @@ type Note {
 // with text exactly as the document spells it.
 func textDocument(t *testing.T) (string, schema.Schema) {
 	t.Helper()
-	s, res := schema.LoadString(t.Context(), textSchema, "text.yammm")
-	if res.HasErrors() {
-		t.Fatalf("schema: %s", res)
+	s, err := schema.LoadString(t.Context(), textSchema, "text.yammm")
+	if err != nil {
+		t.Fatalf("schema: %s", err)
 	}
 	note, ok := s.Type("Note")
 	if !ok {
@@ -80,21 +81,33 @@ func (p textPosition) edit(t *testing.T, doc, text string) []byte {
 // wholeDocumentReaders are the surfaces that hold the whole document.
 var wholeDocumentReaders = []struct {
 	name string
-	read func(ctx context.Context, doc []byte, s schema.Schema) diag.Result
+	read func(t *testing.T, doc []byte, s schema.Schema) diag.Result
 }{
-	{"Load", func(ctx context.Context, doc []byte, s schema.Schema) diag.Result {
-		_, res := snapshot.Unmarshal(ctx, doc, s)
+	{"Load", func(t *testing.T, doc []byte, s schema.Schema) diag.Result {
+		t.Helper()
+		_, res := diagtest.Capture(t, func(warn func(diag.Issue)) (graph.Snapshot, error) {
+			return snapshot.Unmarshal(t.Context(), doc, s, snapshot.WithWarnings(warn))
+		})
 		return res
 	}},
-	{"Verify", func(ctx context.Context, doc []byte, s schema.Schema) diag.Result {
-		return snapshot.Verify(ctx, doc, s)
+	{"Verify", func(t *testing.T, doc []byte, s schema.Schema) diag.Result {
+		t.Helper()
+		return diagtest.CaptureErr(t, func(warn func(diag.Issue)) error {
+			return snapshot.Verify(t.Context(), doc, s, snapshot.WithWarnings(warn))
+		})
 	}},
-	{"Info", func(ctx context.Context, doc []byte, _ schema.Schema) diag.Result {
-		_, res := snapshot.Stat(ctx, doc)
+	{"Info", func(t *testing.T, doc []byte, _ schema.Schema) diag.Result {
+		t.Helper()
+		_, res := diagtest.Issues(t, func() (*snapshot.Info, error) {
+			return snapshot.Stat(t.Context(), doc)
+		})
 		return res
 	}},
-	{"UpdateMetadata", func(ctx context.Context, doc []byte, _ schema.Schema) diag.Result {
-		_, res := snapshot.UpdateMetadata(ctx, doc, map[string]string{"k": "v"})
+	{"UpdateMetadata", func(t *testing.T, doc []byte, _ schema.Schema) diag.Result {
+		t.Helper()
+		_, res := diagtest.Issues(t, func() ([]byte, error) {
+			return snapshot.UpdateMetadata(t.Context(), doc, map[string]string{"k": "v"})
+		})
 		return res
 	}},
 }
@@ -126,10 +139,9 @@ var unreadableText = []struct{ name, spelling, want string }{
 // would rewrite, wherever the document spells it, before it reads anything else.
 func TestReaders_RefuseTextEncodingJSONWouldRewrite(t *testing.T) {
 	t.Parallel()
-	ctx := t.Context()
 	doc, s := textDocument(t)
 	for _, r := range wholeDocumentReaders {
-		if res := r.read(ctx, []byte(doc), s); res.HasErrors() {
+		if res := r.read(t, []byte(doc), s); diagtest.Err(res) != nil {
 			t.Fatalf("control, %s: %s", r.name, res)
 		}
 	}
@@ -137,7 +149,7 @@ func TestReaders_RefuseTextEncodingJSONWouldRewrite(t *testing.T) {
 		for _, c := range unreadableText {
 			edited := p.edit(t, doc, c.spelling)
 			for _, r := range wholeDocumentReaders {
-				res := r.read(ctx, edited, s)
+				res := r.read(t, edited, s)
 				if res.Len() != 1 || !res.HasCode(diag.E_SNAPSHOT_MALFORMED) || !strings.Contains(res.String(), c.want) {
 					t.Errorf("%s, %s, %s: %s, want one %s naming %q", r.name, p.name, c.name, res, diag.E_SNAPSHOT_MALFORMED, c.want)
 				}
@@ -150,7 +162,6 @@ func TestReaders_RefuseTextEncodingJSONWouldRewrite(t *testing.T) {
 // member. The text rule refuses the first before any name compares.
 func TestReaders_RefuseInvalidMemberNamesAsTextNotAsARepeat(t *testing.T) {
 	t.Parallel()
-	ctx := t.Context()
 	doc, s := textDocument(t)
 	for name, members := range map[string]string{
 		"raw bytes":        "\"k\xff\":1,\"k\xfe\":2",
@@ -158,7 +169,7 @@ func TestReaders_RefuseInvalidMemberNamesAsTextNotAsARepeat(t *testing.T) {
 	} {
 		edited := []byte(editOnce(t, doc, `"body":"BODY"`, members+`,"body":"BODY"`))
 		for _, r := range wholeDocumentReaders {
-			res := r.read(ctx, edited, s)
+			res := r.read(t, edited, s)
 			if res.Len() != 1 || !res.HasCode(diag.E_SNAPSHOT_MALFORMED) || !strings.Contains(res.String(), "the string at byte") {
 				t.Errorf("%s, %s: %s, want one %s refusing the text", r.name, name, res, diag.E_SNAPSHOT_MALFORMED)
 			}
@@ -204,44 +215,44 @@ func TestReaders_ReadValidTextBackUnchanged(t *testing.T) {
 			data := rehashDocument(t, []byte(doc))
 
 			for _, r := range wholeDocumentReaders {
-				if res := r.read(ctx, data, s); res.HasErrors() {
+				if res := r.read(t, data, s); diagtest.Err(res) != nil {
 					t.Errorf("%s: %s", r.name, res)
 				}
 			}
 
 			loaded := loadTextNote(t, data, s, note.ID(), c.want)
-			written, res := snapshot.Marshal(ctx, loaded)
-			if res.HasErrors() {
-				t.Fatalf("Marshal: %s", res)
+			written, err := snapshot.Marshal(ctx, loaded)
+			if err != nil {
+				t.Fatalf("Marshal: %s", err)
 			}
 			loadTextNote(t, written, s, note.ID(), c.want)
 
-			info, res := snapshot.Stat(ctx, rehashDocument(t, data))
-			if res.HasErrors() {
-				t.Fatalf("Info: %s", res)
+			info, err := snapshot.Stat(ctx, rehashDocument(t, data))
+			if err != nil {
+				t.Fatalf("Info: %s", err)
 			}
 			if got := info.Metadata["run"]; got != c.want {
 				t.Errorf("Info metadata = %q, want %q", got, c.want)
 			}
-			header, res := snapshot.ReadHeader(ctx, bytes.NewReader(data))
-			if res.HasErrors() {
-				t.Fatalf("ReadHeader: %s", res)
+			header, err := snapshot.ReadHeader(ctx, bytes.NewReader(data))
+			if err != nil {
+				t.Fatalf("ReadHeader: %s", err)
 			}
 			if got := header.Metadata["run"]; got != c.want {
 				t.Errorf("ReadHeader metadata = %q, want %q", got, c.want)
 			}
 
-			updated, res := snapshot.UpdateMetadata(ctx, data, map[string]string{"run": c.want})
-			if res.HasErrors() {
-				t.Fatalf("UpdateMetadata: %s", res)
+			updated, err := snapshot.UpdateMetadata(ctx, data, map[string]string{"run": c.want})
+			if err != nil {
+				t.Fatalf("UpdateMetadata: %s", err)
 			}
 			if !strings.Contains(string(updated), `"body":"`+c.spelling+`"`) {
 				t.Errorf("UpdateMetadata changed the body's spelling: %s", updated)
 			}
 			loadTextNote(t, updated, s, note.ID(), c.want)
-			after, res := snapshot.ReadHeader(ctx, bytes.NewReader(updated))
-			if res.HasErrors() {
-				t.Fatalf("ReadHeader after UpdateMetadata: %s", res)
+			after, err := snapshot.ReadHeader(ctx, bytes.NewReader(updated))
+			if err != nil {
+				t.Fatalf("ReadHeader after UpdateMetadata: %s", err)
 			}
 			if got := after.Metadata["run"]; got != c.want {
 				t.Errorf("metadata after UpdateMetadata = %q, want %q", got, c.want)
@@ -254,9 +265,9 @@ func TestReaders_ReadValidTextBackUnchanged(t *testing.T) {
 // element.
 func loadTextNote(t *testing.T, doc []byte, s schema.Schema, id schema.TypeID, want string) graph.Snapshot {
 	t.Helper()
-	snap, res := snapshot.Unmarshal(t.Context(), rehashDocument(t, doc), s)
-	if res.HasErrors() {
-		t.Fatalf("Load: %s", res)
+	snap, err := snapshot.Unmarshal(t.Context(), rehashDocument(t, doc), s)
+	if err != nil {
+		t.Fatalf("Load: %s", err)
 	}
 	notes := slices.Collect(snap.InstancesOf(id))
 	if len(notes) != 1 {
@@ -282,7 +293,9 @@ var headerReaders = []struct {
 }{
 	{"ReadHeader", func(t *testing.T, doc []byte) (*snapshot.Header, diag.Result) {
 		t.Helper()
-		return snapshot.ReadHeader(t.Context(), strings.NewReader(string(doc)))
+		return diagtest.Issues(t, func() (*snapshot.Header, error) {
+			return snapshot.ReadHeader(t.Context(), strings.NewReader(string(doc)))
+		})
 	}},
 	{"ScanDir", func(t *testing.T, doc []byte) (*snapshot.Header, diag.Result) {
 		t.Helper()
@@ -297,7 +310,7 @@ var headerReaders = []struct {
 		if len(entries) != 1 {
 			t.Fatalf("ScanDir yielded %d entries, want 1", len(entries))
 		}
-		return entries[0].Header, entries[0].Result
+		return entries[0].Header, diagtest.Failures(t, entries[0].Err)
 	}},
 }
 
@@ -330,11 +343,11 @@ func TestHeaderReaders_LeaveBadTextPastTheTypesUnread(t *testing.T) {
 			for _, c := range unreadableText {
 				edited := p.edit(t, doc, c.spelling)
 				info, res := r.read(t, edited)
-				if res.HasErrors() || info == nil {
+				if (diagtest.Err(res) != nil) || info == nil {
 					t.Errorf("%s, %s, %s: info %v, %s; want a header", r.name, p.name, c.name, info != nil, res)
 				}
-				if _, whole := snapshot.Stat(ctx, edited); !whole.HasCode(diag.E_SNAPSHOT_MALFORMED) {
-					t.Errorf("Stat, %s, %s: %s, want %s", p.name, c.name, whole, diag.E_SNAPSHOT_MALFORMED)
+				if _, err := snapshot.Stat(ctx, edited); !errors.Is(err, diag.E_SNAPSHOT_MALFORMED) {
+					t.Errorf("Stat, %s, %s: %s, want %s", p.name, c.name, err, diag.E_SNAPSHOT_MALFORMED)
 				}
 			}
 		}
@@ -350,7 +363,7 @@ func TestHeaderReaders_ReadValidTextBackUnchanged(t *testing.T) {
 			edited := metadataValue.edit(t, doc, c.spelling)
 			edited = typesRow.edit(t, string(edited), c.spelling)
 			info, res := r.read(t, edited)
-			if res.HasErrors() || info == nil {
+			if (diagtest.Err(res) != nil) || info == nil {
 				t.Errorf("%s, %s: info %v, %s; want a header", r.name, c.name, info != nil, res)
 				continue
 			}
@@ -375,14 +388,16 @@ func TestReaders_JudgeTextBeforeVersionOverTheWholeDocument(t *testing.T) {
 	onlyVersion := []byte(doc)
 	badText := []byte(editOnce(t, doc, `"run":"META"`, "\"run\":\"\xff\""))
 	for _, r := range wholeDocumentReaders {
-		if res := r.read(ctx, badText, s); res.Len() != 1 || !res.HasCode(diag.E_SNAPSHOT_MALFORMED) {
+		if res := r.read(t, badText, s); res.Len() != 1 || !res.HasCode(diag.E_SNAPSHOT_MALFORMED) {
 			t.Errorf("%s, bad text under an unsupported version: %s, want one %s", r.name, res, diag.E_SNAPSHOT_MALFORMED)
 		}
-		if res := r.read(ctx, onlyVersion, s); !res.HasCode(diag.E_SNAPSHOT_UNSUPPORTED_VERSION) {
+		if res := r.read(t, onlyVersion, s); !res.HasCode(diag.E_SNAPSHOT_UNSUPPORTED_VERSION) {
 			t.Errorf("%s, an unsupported version alone: %s, want %s", r.name, res, diag.E_SNAPSHOT_UNSUPPORTED_VERSION)
 		}
 	}
-	_, res := snapshot.ReadHeader(ctx, bytes.NewReader(badText))
+	_, res := diagtest.Issues(t, func() (*snapshot.Header, error) {
+		return snapshot.ReadHeader(ctx, bytes.NewReader(badText))
+	})
 	if res.Len() != 1 || !res.HasCode(diag.E_SNAPSHOT_UNSUPPORTED_VERSION) {
 		t.Errorf("ReadHeader: %s, want one %s", res, diag.E_SNAPSHOT_UNSUPPORTED_VERSION)
 	}

@@ -2,6 +2,7 @@ package graph_test
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"maps"
 	"slices"
@@ -14,6 +15,7 @@ import (
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/instance"
+	"github.com/simon-lentz/yammm/internal/diagtest"
 	"github.com/simon-lentz/yammm/internal/instancetest"
 	"github.com/simon-lentz/yammm/internal/yammmtest"
 	"github.com/simon-lentz/yammm/schema"
@@ -25,7 +27,7 @@ import (
 // optional (one), and its pages through a required (many) and a required (one).
 func mergeSchema(t *testing.T) schema.Schema {
 	t.Helper()
-	s, res := schema.LoadString(t.Context(), `schema "merge"
+	s, err := schema.LoadString(t.Context(), `schema "merge"
 
 type Issuer {
 	id String primary
@@ -52,8 +54,8 @@ part type Note {
 	id String primary
 }
 `, "merge.yammm")
-	if res.HasErrors() {
-		t.Fatalf("schema: %s", res)
+	if err != nil {
+		t.Fatalf("schema: %s", err)
 	}
 	return s
 }
@@ -126,8 +128,8 @@ func unresolvedOf(snap graph.Snapshot) []string {
 func mustAdd(t *testing.T, g *graph.Graph, insts ...instance.ValidInstance) {
 	t.Helper()
 	for _, inst := range insts {
-		if res := g.Add(t.Context(), inst); res.HasErrors() {
-			t.Fatalf("Add %s: %s", inst.PrimaryKey(), res)
+		if err := g.Add(t.Context(), inst); err != nil {
+			t.Fatalf("Add %s: %s", inst.PrimaryKey(), err)
 		}
 	}
 }
@@ -135,9 +137,9 @@ func mustAdd(t *testing.T, g *graph.Graph, insts ...instance.ValidInstance) {
 // mustMerge merges inst and fails unless it merged cleanly.
 func mustMerge(t *testing.T, g *graph.Graph, inst instance.ValidInstance) {
 	t.Helper()
-	merged, res := g.AddOrMerge(t.Context(), inst)
-	if res.HasErrors() || !merged {
-		t.Fatalf("merge %s: merged %v, %s", inst.PrimaryKey(), merged, res)
+	merged, err := g.AddOrMerge(t.Context(), inst)
+	if err != nil || !merged {
+		t.Fatalf("merge %s: merged %v, %s", inst.PrimaryKey(), merged, err)
 	}
 }
 
@@ -172,9 +174,9 @@ func TestMerge_AddsAnInstanceTheGraphDoesNotHold(t *testing.T) {
 	s := mergeSchema(t)
 	g := graph.New(s)
 	mustAdd(t, g, roots(t, s)...)
-	merged, res := g.AddOrMerge(t.Context(), issue(t, s, "i1", "first", required()))
-	if res.HasErrors() || merged {
-		t.Fatalf("merged %v, %s; want an add", merged, res)
+	merged, err := g.AddOrMerge(t.Context(), issue(t, s, "i1", "first", required()))
+	if err != nil || merged {
+		t.Fatalf("merged %v, %s; want an add", merged, err)
 	}
 	if n := len(slices.Collect(g.Snapshot().InstancesOf(mustTypeID(t, s, "Issue")))); n != 1 {
 		t.Errorf("%d issues, want 1", n)
@@ -243,9 +245,9 @@ func TestMerge_RefusesASecondTargetOnAOneAssociation(t *testing.T) {
 	mustAdd(t, g, issue(t, s, "i1", "t", with(required(), "LEAD", target{"a", nil})))
 	mustMerge(t, g, issue(t, s, "i1", "t", with(required(), "LEAD", target{"a", nil})))
 
-	merged, res := g.AddOrMerge(t.Context(), issue(t, s, "i1", "t", with(with(required(), "LEAD", target{"b", nil}), "ISSUED_BY", target{"a", nil})))
-	if merged || !res.HasCode(diag.E_GRAPH_CARDINALITY) {
-		t.Fatalf("merged %v, %s; want E_GRAPH_CARDINALITY", merged, res)
+	merged, err := g.AddOrMerge(t.Context(), issue(t, s, "i1", "t", with(with(required(), "LEAD", target{"b", nil}), "ISSUED_BY", target{"a", nil})))
+	if merged || !errors.Is(err, diag.E_GRAPH_CARDINALITY) {
+		t.Fatalf("merged %v, %s; want E_GRAPH_CARDINALITY", merged, err)
 	}
 	snap := g.Snapshot()
 	want := []string{`HOME->["p1"]{}`, `LEAD->["a"]{}`, `LISTED_ON->["p1"]{}`}
@@ -295,15 +297,15 @@ func TestMerge_RetiresARequiredAssociationsAbsentRecord(t *testing.T) {
 	if !snap.Attestation().Associations {
 		t.Error("Associations claim false after the required record resolved")
 	}
-	if res := g.Check(t.Context()); !res.OK() {
-		t.Errorf("Check: %s", res)
+	if err := g.Check(t.Context()); err != nil {
+		t.Errorf("Check: %s", err)
 	}
-	data, res := snapshot.Marshal(t.Context(), snap)
-	if res.HasErrors() {
-		t.Fatalf("Marshal: %s", res)
+	data, err := snapshot.Marshal(t.Context(), snap)
+	if err != nil {
+		t.Fatalf("Marshal: %s", err)
 	}
-	if _, res := snapshot.Unmarshal(t.Context(), data, s); res.HasErrors() {
-		t.Errorf("the snapshot reader refuses the merged snapshot: %s", res)
+	if _, err := snapshot.Unmarshal(t.Context(), data, s); err != nil {
+		t.Errorf("the snapshot reader refuses the merged snapshot: %s", err)
 	}
 }
 
@@ -316,9 +318,9 @@ func TestMerge_RefusesADuplicateCarryingComposedChildren(t *testing.T) {
 	mustAdd(t, g, roots(t, s)...)
 	mustAdd(t, g, issue(t, s, "i1", "t", required()))
 	withNote := parentWith(t, s, "Issue", []any{"i1"}, map[string]any{"title": "t"}, "NOTES", partData(t, s, "Note", []any{"n1"}, nil))
-	merged, res := g.AddOrMerge(t.Context(), withNote)
-	if merged || !res.HasCode(diag.E_DUPLICATE_PK) {
-		t.Fatalf("merged %v, %s; want E_DUPLICATE_PK", merged, res)
+	merged, err := g.AddOrMerge(t.Context(), withNote)
+	if merged || !errors.Is(err, diag.E_DUPLICATE_PK) {
+		t.Fatalf("merged %v, %s; want E_DUPLICATE_PK", merged, err)
 	}
 	if n := len(slices.Collect(g.Snapshot().Duplicates())); n != 1 {
 		t.Errorf("%d duplicates, want 1", n)
@@ -335,8 +337,8 @@ func TestMerge_MergesIntoASeededInstance(t *testing.T) {
 	mustAdd(t, g, issue(t, s, "i1", "t", with(with(required(), "ISSUED_BY", target{"a", nil}), "LEAD", target{"a", nil})))
 	seeded := graph.NewFromSnapshot(g.Snapshot())
 	mustMerge(t, seeded, issue(t, s, "i1", "t", with(required(), "ISSUED_BY", target{"a", nil}, target{"b", nil})))
-	if merged, res := seeded.AddOrMerge(t.Context(), issue(t, s, "i1", "t", with(required(), "LEAD", target{"b", nil}))); merged || !res.HasCode(diag.E_GRAPH_CARDINALITY) {
-		t.Errorf("merged %v, %s; the imported LEAD edge must count", merged, res)
+	if merged, err := seeded.AddOrMerge(t.Context(), issue(t, s, "i1", "t", with(required(), "LEAD", target{"b", nil}))); merged || !errors.Is(err, diag.E_GRAPH_CARDINALITY) {
+		t.Errorf("merged %v, %s; the imported LEAD edge must count", merged, err)
 	}
 	want := []string{`HOME->["p1"]{}`, `ISSUED_BY->["a"]{}`, `ISSUED_BY->["b"]{}`, `LEAD->["a"]{}`, `LISTED_ON->["p1"]{}`}
 	if got := edgesOf(seeded.Snapshot()); !slices.Equal(got, want) {
@@ -360,9 +362,9 @@ func TestAddOrMerge_ConcurrentListingsKeepEveryEdge(t *testing.T) {
 	var merges atomic.Int64
 	for i := range issuers {
 		wg.Go(func() {
-			merged, res := g.AddOrMerge(t.Context(), issue(t, s, "shared", "t", with(required(), "ISSUED_BY", target{fmt.Sprint("x", i), nil})))
-			if res.HasErrors() {
-				t.Error(res)
+			merged, err := g.AddOrMerge(t.Context(), issue(t, s, "shared", "t", with(required(), "ISSUED_BY", target{fmt.Sprint("x", i), nil})))
+			if err != nil {
+				t.Error(err)
 			}
 			if merged {
 				merges.Add(1)
@@ -395,9 +397,9 @@ func validated(t *testing.T, s schema.Schema) func(typ string, props map[string]
 	v := instance.NewValidator(s)
 	return func(typ string, props map[string]any) instance.ValidInstance {
 		t.Helper()
-		out, res := v.ValidateOne(t.Context(), typ, instance.RawInstance{Properties: props})
-		if res.HasErrors() {
-			t.Fatalf("validate %s: %s", typ, res)
+		out, err := v.ValidateOne(t.Context(), typ, instance.RawInstance{Properties: props})
+		if err != nil {
+			t.Fatalf("validate %s: %s", typ, err)
 		}
 		return out
 	}
@@ -417,13 +419,13 @@ func TestMerge_FindsRecordsInstalledAfterTheFirstMerge(t *testing.T) {
 	// An Add after the first merge: an edge, a forward reference, a (one) edge.
 	mustAdd(t, g, issue(t, s, "i1", "t", with(with(required(), "ISSUED_BY", target{"a", nil}, target{"zz", nil}), "LEAD", target{"a", nil})))
 	mustMerge(t, g, issue(t, s, "i1", "t", with(required(), "ISSUED_BY", target{"a", nil}, target{"zz", nil})))
-	if merged, res := g.AddOrMerge(t.Context(), issue(t, s, "i1", "t", with(required(), "LEAD", target{"b", nil}))); merged || !res.HasCode(diag.E_GRAPH_CARDINALITY) {
-		t.Errorf("merged %v, %s; want E_GRAPH_CARDINALITY for a LEAD an Add installed after the first merge", merged, res)
+	if merged, err := g.AddOrMerge(t.Context(), issue(t, s, "i1", "t", with(required(), "LEAD", target{"b", nil}))); merged || !errors.Is(err, diag.E_GRAPH_CARDINALITY) {
+		t.Errorf("merged %v, %s; want E_GRAPH_CARDINALITY for a LEAD an Add installed after the first merge", merged, err)
 	}
 	// A (one) forward reference an Add installed after the first merge.
 	mustAdd(t, g, issue(t, s, "i2", "t", with(required(), "LEAD", target{"nobody", nil})))
-	if merged, res := g.AddOrMerge(t.Context(), issue(t, s, "i2", "t", with(required(), "LEAD", target{"b", nil}))); merged || !res.HasCode(diag.E_GRAPH_CARDINALITY) {
-		t.Errorf("merged %v, %s; want E_GRAPH_CARDINALITY for a pending LEAD an Add installed after the first merge", merged, res)
+	if merged, err := g.AddOrMerge(t.Context(), issue(t, s, "i2", "t", with(required(), "LEAD", target{"b", nil}))); merged || !errors.Is(err, diag.E_GRAPH_CARDINALITY) {
+		t.Errorf("merged %v, %s; want E_GRAPH_CARDINALITY for a pending LEAD an Add installed after the first merge", merged, err)
 	}
 	// An "absent" record an Add installed after the first merge retires.
 	mustAdd(t, g, issue(t, s, "i3", "t", map[string][]target{"HOME": {{key: "p1"}}}))
@@ -435,8 +437,8 @@ func TestMerge_FindsRecordsInstalledAfterTheFirstMerge(t *testing.T) {
 	// (one) target refuses a second.
 	mustMerge(t, g, issue(t, s, "i0", "t", with(with(required(), "ISSUED_BY", target{"a", nil}), "LEAD", target{"a", nil})))
 	mustMerge(t, g, issue(t, s, "i0", "t", with(required(), "ISSUED_BY", target{"a", nil})))
-	if merged, res := g.AddOrMerge(t.Context(), issue(t, s, "i0", "t", with(required(), "LEAD", target{"b", nil}))); merged || !res.HasCode(diag.E_GRAPH_CARDINALITY) {
-		t.Errorf("merged %v, %s; want E_GRAPH_CARDINALITY for a LEAD a merge installed", merged, res)
+	if merged, err := g.AddOrMerge(t.Context(), issue(t, s, "i0", "t", with(required(), "LEAD", target{"b", nil}))); merged || !errors.Is(err, diag.E_GRAPH_CARDINALITY) {
+		t.Errorf("merged %v, %s; want E_GRAPH_CARDINALITY for a LEAD a merge installed", merged, err)
 	}
 
 	snap := g.Snapshot()
@@ -468,8 +470,8 @@ func TestMerge_CountsAOneAssociationsHeldTarget(t *testing.T) {
 	mustAdd(t, g, roots(t, s)...)
 
 	mustAdd(t, g, issue(t, s, "pending", "t", with(required(), "LEAD", target{"zz", nil})))
-	if merged, res := g.AddOrMerge(t.Context(), issue(t, s, "pending", "t", with(required(), "LEAD", target{"b", nil}))); merged || !res.HasCode(diag.E_GRAPH_CARDINALITY) {
-		t.Errorf("merged %v, %s; a held forward reference is the (one) target", merged, res)
+	if merged, err := g.AddOrMerge(t.Context(), issue(t, s, "pending", "t", with(required(), "LEAD", target{"b", nil}))); merged || !errors.Is(err, diag.E_GRAPH_CARDINALITY) {
+		t.Errorf("merged %v, %s; a held forward reference is the (one) target", merged, err)
 	}
 	mustMerge(t, g, issue(t, s, "pending", "t", with(required(), "LEAD", target{"zz", nil})))
 
@@ -543,12 +545,12 @@ func TestMerge_RetiresOneRecordOfSeveralSharingATargetType(t *testing.T) {
 	if want := []string{`["i1"]:HOME:absent`, `["i2"]:LISTED_ON:absent`}; !slices.Equal(got, want) {
 		t.Errorf("unresolved %q, want %q", got, want)
 	}
-	data, res := snapshot.Marshal(t.Context(), snap)
-	if res.HasErrors() {
-		t.Fatalf("Marshal: %s", res)
+	data, err := snapshot.Marshal(t.Context(), snap)
+	if err != nil {
+		t.Fatalf("Marshal: %s", err)
 	}
-	if _, res := snapshot.Unmarshal(t.Context(), data, s); res.HasErrors() {
-		t.Errorf("Load refuses the merged snapshot: %s", res)
+	if _, err := snapshot.Unmarshal(t.Context(), data, s); err != nil {
+		t.Errorf("Load refuses the merged snapshot: %s", err)
 	}
 }
 
@@ -565,7 +567,7 @@ func TestMerge_AForwardReferenceKeepsItsRecord(t *testing.T) {
 		"LISTED_ON": {{key: "px"}},
 	}))
 
-	res := g.Check(t.Context())
+	res := diagtest.Failures(t, g.Check(t.Context()))
 	var fields []string
 	for iss := range res.Issues() {
 		if iss.Code() != diag.E_UNRESOLVED_REQUIRED {
@@ -622,8 +624,8 @@ func TestAdd_RefusesAHeldKeyWhereAddOrMergeMerges(t *testing.T) {
 	g := graph.New(s)
 	mustAdd(t, g, roots(t, s)...)
 	mustAdd(t, g, issue(t, s, "i1", "t", required()))
-	if res := g.Add(t.Context(), issue(t, s, "i1", "t", with(required(), "ISSUED_BY", target{"a", nil}))); !res.HasCode(diag.E_DUPLICATE_PK) {
-		t.Errorf("Add of a held key = %s, want E_DUPLICATE_PK", res)
+	if err := g.Add(t.Context(), issue(t, s, "i1", "t", with(required(), "ISSUED_BY", target{"a", nil}))); !errors.Is(err, diag.E_DUPLICATE_PK) {
+		t.Errorf("Add of a held key = %s, want E_DUPLICATE_PK", err)
 	}
 	snap := g.Snapshot()
 	if n := len(slices.Collect(snap.Duplicates())); n != 1 {
@@ -650,8 +652,8 @@ func TestAddOrMerge_EveryAcceptedCallIsInTheSnapshot(t *testing.T) {
 			<-start
 			for j := range perWorker {
 				id := fmt.Sprintf("x-%d-%d", w, j)
-				if _, res := g.AddOrMerge(t.Context(), mustValidInstance(t, s, "Issuer", []any{id}, map[string]any{"name": "X"})); res.HasErrors() {
-					t.Errorf("%s: %s", id, res)
+				if _, err := g.AddOrMerge(t.Context(), mustValidInstance(t, s, "Issuer", []any{id}, map[string]any{"name": "X"})); err != nil {
+					t.Errorf("%s: %s", id, err)
 					return
 				}
 				mu.Lock()
@@ -742,8 +744,8 @@ func TestAddOrMerge_AMidRunSnapshotSeedsAResume(t *testing.T) {
 	wg.Go(func() {
 		defer close(done)
 		for i, listing := range batch {
-			if _, res := g.AddOrMerge(ctx, listing); res.HasErrors() {
-				t.Error(res)
+			if _, err := g.AddOrMerge(ctx, listing); err != nil {
+				t.Error(err)
 				return
 			}
 			returned.Add(1)
@@ -797,33 +799,33 @@ func TestAddOrMerge_AMidRunSnapshotSeedsAResume(t *testing.T) {
 	}
 
 	want := edgesAt(listings)
-	if res := g.Check(ctx); res.HasErrors() {
-		t.Fatal(res)
+	if err := g.Check(ctx); err != nil {
+		t.Fatal(err)
 	}
 	if got := edgesOf(g.Snapshot()); !slices.Equal(got, want) {
 		t.Fatalf("the run ended with edges %q, want %q", got, want)
 	}
 
 	for k, snap := range midRun {
-		data, res := snapshot.Marshal(ctx, snap)
-		if res.HasErrors() {
-			t.Fatalf("the snapshot of %d listings: Marshal: %s", k, res)
+		data, err := snapshot.Marshal(ctx, snap)
+		if err != nil {
+			t.Fatalf("the snapshot of %d listings: Marshal: %s", k, err)
 		}
-		loaded, res := snapshot.Unmarshal(ctx, data, s)
-		if res.HasErrors() {
-			t.Fatalf("the snapshot of %d listings: Load: %s", k, res)
+		loaded, err := snapshot.Unmarshal(ctx, data, s)
+		if err != nil {
+			t.Fatalf("the snapshot of %d listings: Load: %s", k, err)
 		}
 		resumed := graph.NewFromSnapshot(loaded)
 		if got := edgesOf(resumed.Snapshot()); !slices.Equal(got, edgesAt(k)) {
 			t.Fatalf("the seed from %d listings holds edges %q, want %q", k, got, edgesAt(k))
 		}
 		for i, listing := range batch {
-			if merged, res := resumed.AddOrMerge(ctx, listing); res.HasErrors() || !merged {
-				t.Fatalf("resumed from %d listings, listing %d: merged %v, %s", k, i, merged, res)
+			if merged, err := resumed.AddOrMerge(ctx, listing); err != nil || !merged {
+				t.Fatalf("resumed from %d listings, listing %d: merged %v, %s", k, i, merged, err)
 			}
 		}
-		if res := resumed.Check(ctx); res.HasErrors() {
-			t.Fatalf("resumed from %d listings: Check: %s", k, res)
+		if err := resumed.Check(ctx); err != nil {
+			t.Fatalf("resumed from %d listings: Check: %s", k, err)
 		}
 		fin := resumed.Snapshot()
 		if got := edgesOf(fin); !slices.Equal(got, want) {
@@ -843,11 +845,11 @@ func TestAdd_PanicsAndCancellationsNameTheMethod(t *testing.T) {
 	s := mergeSchema(t)
 	inst := roots(t, s)[0]
 	foreign := mustValidInstance(t, testSchemaWithAssociation(t), "Company", []any{"c1"}, map[string]any{"name": "n"})
-	for name, add := range map[string]func(*graph.Graph, context.Context, instance.ValidInstance) diag.Result{
+	for name, add := range map[string]func(*graph.Graph, context.Context, instance.ValidInstance) error{
 		"graph.Add": (*graph.Graph).Add,
-		"graph.AddOrMerge": func(g *graph.Graph, ctx context.Context, v instance.ValidInstance) diag.Result {
-			_, res := g.AddOrMerge(ctx, v)
-			return res
+		"graph.AddOrMerge": func(g *graph.Graph, ctx context.Context, v instance.ValidInstance) error {
+			_, err := g.AddOrMerge(ctx, v)
+			return err
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -857,10 +859,12 @@ func TestAdd_PanicsAndCancellationsNameTheMethod(t *testing.T) {
 			cancel()
 			var none *graph.Graph
 			for want, call := range map[string]func(){
-				name + ": nil *Graph receiver": func() { add(none, ctx, inst) },
-				name + ": zero ValidInstance":  func() { add(graph.New(s), ctx, instance.ValidInstance{}) },
+				name + ": nil *Graph receiver": func() { _ = add(none, ctx, inst) },
+				name + ": zero ValidInstance":  func() { _ = add(graph.New(s), ctx, instance.ValidInstance{}) },
 				name + ": instance was validated under another schema load, or its type is outside this schema's import closure": func() {
-					add(graph.New(s), ctx, foreign)
+					if err := add(graph.New(s), ctx, foreign); err != nil {
+						t.Errorf("add: %v", err)
+					}
 				},
 			} {
 				if got := yammmtest.AssertPanics(t, call); got != want {
@@ -869,9 +873,11 @@ func TestAdd_PanicsAndCancellationsNameTheMethod(t *testing.T) {
 			}
 			// A cancelled context does not hide a programmer error.
 			for want, call := range map[string]func(){
-				name + ": zero ValidInstance": func() { add(graph.New(s), cancelled, instance.ValidInstance{}) },
+				name + ": zero ValidInstance": func() { _ = add(graph.New(s), cancelled, instance.ValidInstance{}) },
 				name + ": instance was validated under another schema load, or its type is outside this schema's import closure": func() {
-					add(graph.New(s), cancelled, foreign)
+					if err := add(graph.New(s), cancelled, foreign); err != nil {
+						t.Errorf("add: %v", err)
+					}
 				},
 			} {
 				if got := yammmtest.AssertPanics(t, call); got != want {
@@ -879,9 +885,9 @@ func TestAdd_PanicsAndCancellationsNameTheMethod(t *testing.T) {
 				}
 			}
 			g := graph.New(s)
-			res := add(g, cancelled, inst)
-			if !res.HasCode(diag.E_CONTEXT_CANCELLED) || !strings.Contains(res.String(), name+" cancelled") {
-				t.Errorf("a cancelled call = %s, want an E_CONTEXT_CANCELLED naming %s", res, name)
+			err := add(g, cancelled, inst)
+			if !errors.Is(err, diag.E_CONTEXT_CANCELLED) || !strings.Contains(fmt.Sprint(err), name+" cancelled") {
+				t.Errorf("a cancelled call = %v, want an E_CONTEXT_CANCELLED naming %s", err, name)
 			}
 			if n := len(slices.Collect(g.Snapshot().Instances())); n != 0 {
 				t.Errorf("a cancelled call installed %d instances", n)
@@ -900,7 +906,9 @@ func TestMerge_RefusesEveryOneAssociationItWouldOverfill(t *testing.T) {
 		g := graph.New(s)
 		mustAdd(t, g, roots(t, s)...)
 		mustAdd(t, g, issue(t, s, "i1", "t", with(required(), "LEAD", target{"a", nil})))
-		merged, res := g.AddOrMerge(t.Context(), issue(t, s, "i1", "t", with(with(required(), "HOME", target{"p2", nil}), "LEAD", target{"b", nil})))
+		merged, res := diagtest.Issues(t, func() (bool, error) {
+			return g.AddOrMerge(t.Context(), issue(t, s, "i1", "t", with(with(required(), "HOME", target{"p2", nil}), "LEAD", target{"b", nil})))
+		})
 		if merged {
 			t.Fatalf("run %d: merged; want a refusal", run)
 		}

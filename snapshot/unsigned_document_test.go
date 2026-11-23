@@ -9,6 +9,7 @@ import (
 
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/graph"
+	"github.com/simon-lentz/yammm/internal/diagtest"
 	"github.com/simon-lentz/yammm/internal/instancetest"
 	"github.com/simon-lentz/yammm/schema"
 	"github.com/simon-lentz/yammm/snapshot"
@@ -21,22 +22,22 @@ import (
 func TestRead_AHeaderThatHoldsNoHashIsAMismatch(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()
-	s, res := schema.LoadString(ctx, "schema \"unsigned\"\n\ntype T {\n\tid String primary\n}\n", "unsigned.yammm")
-	if res.HasErrors() {
-		t.Fatalf("schema: %s", res)
+	s, err := schema.LoadString(ctx, "schema \"unsigned\"\n\ntype T {\n\tid String primary\n}\n", "unsigned.yammm")
+	if err != nil {
+		t.Fatalf("schema: %s", err)
 	}
 	g := graph.New(s)
-	if r := g.Add(ctx, instancetest.Valid(t, s, "T", map[string]any{"id": "t1"})); r.HasErrors() {
-		t.Fatalf("add: %s", r)
+	if err := g.Add(ctx, instancetest.Valid(t, s, "T", map[string]any{"id": "t1"})); err != nil {
+		t.Fatalf("add: %s", err)
 	}
 	signed := regexp.MustCompile(`(,\s*)"integrity_hash":( ?)"(sha256:[0-9a-f]{64})"`)
 	for layout, opts := range map[string][]snapshot.Option{
 		"compact":  nil,
 		"indented": {snapshot.WithIndent("  ")},
 	} {
-		data, mr := snapshot.Marshal(ctx, g.Snapshot(), opts...)
-		if mr.HasErrors() {
-			t.Fatalf("marshal: %s", mr)
+		data, err := snapshot.Marshal(ctx, g.Snapshot(), opts...)
+		if err != nil {
+			t.Fatalf("marshal: %s", err)
 		}
 		if n := len(signed.FindAll(data, -1)); n != 1 {
 			t.Fatalf("%s: Marshal wrote %d signed integrity_hash members, want 1:\n%s", layout, n, data)
@@ -51,7 +52,9 @@ func TestRead_AHeaderThatHoldsNoHashIsAMismatch(t *testing.T) {
 			t.Run(layout+"/"+form, func(t *testing.T) {
 				t.Parallel()
 				want := map[diag.Code]int{diag.E_SNAPSHOT_INTEGRITY_MISMATCH: 1}
-				_, lres := snapshot.Unmarshal(ctx, unsigned, s)
+				_, lres := diagtest.Capture(t, func(warn func(diag.Issue)) (graph.Snapshot, error) {
+					return snapshot.Unmarshal(ctx, unsigned, s, snapshot.WithWarnings(warn))
+				})
 				if !maps.Equal(errorCodes(lres), want) {
 					t.Errorf("Load: %v, want %v:\n%s", errorCodes(lres), want, lres)
 				}
@@ -69,10 +72,14 @@ func TestRead_AHeaderThatHoldsNoHashIsAMismatch(t *testing.T) {
 						t.Errorf("Load: details %v, want %v", issue.Details(), wantDetails)
 					}
 				}
-				if vres := snapshot.Verify(ctx, unsigned, s); !maps.Equal(errorCodes(vres), want) {
+				if vres := diagtest.CaptureErr(t, func(warn func(diag.Issue)) error {
+					return snapshot.Verify(ctx, unsigned, s, snapshot.WithWarnings(warn))
+				}); !maps.Equal(errorCodes(vres), want) {
 					t.Errorf("Verify: %v, want %v:\n%s", errorCodes(vres), want, vres)
 				}
-				info, ires := snapshot.Stat(ctx, unsigned)
+				info, ires := diagtest.Issues(t, func() (*snapshot.Info, error) {
+					return snapshot.Stat(ctx, unsigned)
+				})
 				if !maps.Equal(errorCodes(ires), want) {
 					t.Errorf("Info: %v, want %v:\n%s", errorCodes(ires), want, ires)
 				}
@@ -81,11 +88,11 @@ func TestRead_AHeaderThatHoldsNoHashIsAMismatch(t *testing.T) {
 				}
 
 				skip := snapshot.WithIntegrityCheck(false)
-				if _, lres := snapshot.Unmarshal(ctx, unsigned, s, skip); lres.HasErrors() {
-					t.Errorf("Load skipping the check: %s", lres)
+				if _, err := snapshot.Unmarshal(ctx, unsigned, s, skip); err != nil {
+					t.Errorf("Load skipping the check: %s", err)
 				}
-				if vres := snapshot.Verify(ctx, unsigned, s, skip); vres.HasErrors() {
-					t.Errorf("Verify skipping the check: %s", vres)
+				if err := snapshot.Verify(ctx, unsigned, s, skip); err != nil {
+					t.Errorf("Verify skipping the check: %s", err)
 				}
 			})
 		}

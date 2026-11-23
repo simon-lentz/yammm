@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/simon-lentz/yammm/diag"
+	"github.com/simon-lentz/yammm/internal/termtext"
 	"github.com/simon-lentz/yammm/neo4j"
 )
 
@@ -35,8 +36,8 @@ var runtimeCodes = [...]diag.Code{
 // one place a result becomes an exit code.
 //
 // A failure outside the input outranks a refusal of it: 3 over 1. schema.Load
-// reports an unreadable file as a diagnostic rather than an error return, so
-// without this rule one missing path exits 1 through a command that loads a
+// reports an unreadable file as a Fatal E_LOAD_IO_FAILURE among its failures,
+// not as an error of its own kind, so without this rule one missing path exits 1 through a command that loads a
 // schema and 3 through one that opens the file itself.
 //
 // It reads [diag.Result.CodeCounts], which counts issues a full collector
@@ -50,10 +51,16 @@ func ExitForResult(result diag.Result) int {
 			}
 		}
 	}
-	if result.HasErrors() {
+	if Failed(result) {
 		return ExitValidation
 	}
 	return ExitOK
+}
+
+// Failed reports whether result saw a Fatal or Error issue, stored or dropped.
+func Failed(result diag.Result) bool {
+	counts := result.SeverityCounts()
+	return counts.Fatal+counts.Errors > 0
 }
 
 // ExitForError returns the exit code an error earns — the error-side twin of
@@ -152,7 +159,8 @@ func Validationf(format string, args ...any) error {
 }
 
 // ReportError writes err to w as one "error: " line per line of each failure it
-// carries, skipping a blank line: one of spaces, tabs and carriage returns.
+// carries, escaped by [termtext.String], skipping a blank line: one of spaces,
+// tabs and carriage returns.
 //
 // A bare exit signal ([Exit]) prints nothing:
 // its command has already rendered its diagnostics. Everything else prints,
@@ -163,7 +171,7 @@ func ReportError(w io.Writer, err error) {
 	for _, msg := range failureMessages(err) {
 		for line := range strings.SplitSeq(msg, "\n") {
 			if !blank(line) {
-				fmt.Fprintf(w, "error: %s\n", line)
+				fmt.Fprintf(w, "error: %s\n", termtext.String(line))
 			}
 		}
 	}

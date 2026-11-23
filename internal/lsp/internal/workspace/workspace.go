@@ -391,7 +391,7 @@ func (w *Workspace) analyzeDocument(analyzeCtx context.Context, uri string) (doc
 		result.Collect(schema.ModuleRootIssue(rootErr))
 		snapshot, err = w.sched.analyzer.SnapshotForResult(canonicalPath, result.Result())
 	} else {
-		snapshot, err = w.sched.analyzer.Analyze(analyzeCtx, canonicalPath, overlays, moduleRoot)
+		snapshot, err = w.sched.analyzer.Analyze(analyzeCtx, canonicalPath, overlays, moduleRoot, true)
 	}
 
 	if analyzeCtx.Err() != nil {

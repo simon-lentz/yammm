@@ -3,6 +3,7 @@ package jsondata
 import (
 	"testing"
 
+	"github.com/simon-lentz/yammm/internal/diagtest"
 	"github.com/simon-lentz/yammm/internal/yammmtest/sourcetest"
 )
 
@@ -15,7 +16,7 @@ func TestParse_AnExplicitNullKeepsItsKey(t *testing.T) {
 	t.Parallel()
 	byType, result := Parse(t.Context(), sourcetest.ID("test://null.json"),
 		[]byte(`{"Person":[{"id":"p1","name":null,"tags":[null]}]}`))
-	if !result.OK() {
+	if diagtest.Err(result) != nil {
 		t.Fatalf("parse: %s", result)
 	}
 	props := byType["Person"].Elements[0].Properties

@@ -7,7 +7,7 @@ import (
 )
 
 func TestHandles_IsZeroTellsARecordFromTheZeroValue(t *testing.T) {
-	s, res := schema.LoadString(t.Context(), `schema "h"
+	s, err := schema.LoadString(t.Context(), `schema "h"
 
 type T {
 	id String primary
@@ -17,8 +17,8 @@ type T {
 
 type Word = String
 `, "h.yammm")
-	if res.HasErrors() {
-		t.Fatal(res)
+	if err != nil {
+		t.Fatal(err)
 	}
 	typ, ok := s.Type("T")
 	if !ok {
@@ -72,9 +72,9 @@ type Word = String
 }
 
 func TestLookups_AMissReturnsTheZeroHandleAndFalse(t *testing.T) {
-	s, res := schema.LoadString(t.Context(), "schema \"m\"\n\ntype T {\n\tid String primary\n}\n", "m.yammm")
-	if res.HasErrors() {
-		t.Fatal(res)
+	s, err := schema.LoadString(t.Context(), "schema \"m\"\n\ntype T {\n\tid String primary\n}\n", "m.yammm")
+	if err != nil {
+		t.Fatal(err)
 	}
 	real, ok := s.Type("T")
 	if !ok {
@@ -110,9 +110,9 @@ func prop0(t *testing.T, typ schema.Type) schema.Property {
 }
 
 func TestAddressableTag_AZeroSchemaAddressesNothing(t *testing.T) {
-	s, res := schema.LoadString(t.Context(), "schema \"m\"\n\ntype T {\n\tid String primary\n}\n", "m.yammm")
-	if res.HasErrors() {
-		t.Fatal(res)
+	s, err := schema.LoadString(t.Context(), "schema \"m\"\n\ntype T {\n\tid String primary\n}\n", "m.yammm")
+	if err != nil {
+		t.Fatal(err)
 	}
 	typ, ok := s.Type("T")
 	if !ok {

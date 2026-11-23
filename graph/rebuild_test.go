@@ -12,7 +12,7 @@ import (
 
 func rebuildTestSchema(t *testing.T) schema.Schema {
 	t.Helper()
-	s, result := schema.LoadString(t.Context(), `schema "rebuild_test"
+	s, err := schema.LoadString(t.Context(), `schema "rebuild_test"
 
 type Person {
 	id String primary
@@ -25,8 +25,8 @@ type Company {
 	title String required
 }
 `, "rebuild.yammm")
-	if result.HasErrors() {
-		t.Fatalf("rebuildTestSchema: %s", result)
+	if err != nil {
+		t.Fatalf("rebuildTestSchema: %s", err)
 	}
 	return s
 }

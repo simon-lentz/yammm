@@ -27,14 +27,12 @@
 //	g := graph.New(s)
 //
 //	// Add validated instances (may be called concurrently)
-//	result := g.Add(ctx, validInstance)
-//	if !result.OK() {
+//	if err := g.Add(ctx, validInstance); err != nil {
 //	    // A refused instance (a duplicate PK, a keyless part read out of a composition, ...; see Error Handling)
 //	}
 //
 //	// Check completeness
-//	result = g.Check(ctx)
-//	if !result.OK() {
+//	if err := g.Check(ctx); err != nil {
 //	    // Required associations are missing, or ctx was cancelled
 //	}
 //
@@ -55,25 +53,25 @@
 //	v := instance.NewValidator(s)
 //	g := graph.New(s)
 //	for i, rec := range records {
-//	    valid, res := v.ValidateOne(ctx, "TypeName", buildRawInstance(rec))
-//	    if res.HasErrors() {
-//	        return fmt.Errorf("record %d: %w", i, res.WithContext("validate"))
+//	    valid, err := v.ValidateOne(ctx, "TypeName", buildRawInstance(rec))
+//	    if err != nil {
+//	        return fmt.Errorf("record %d: validate: %w", i, err)
 //	    }
-//	    if res := g.Add(ctx, valid); res.HasErrors() {
-//	        return fmt.Errorf("record %d: %w", i, res.WithContext("add"))
+//	    if err := g.Add(ctx, valid); err != nil {
+//	        return fmt.Errorf("record %d: add: %w", i, err)
 //	    }
 //	}
-//	if res := g.Check(ctx); res.HasErrors() {
-//	    return fmt.Errorf("batch: %w", res.WithContext("check"))
+//	if err := g.Check(ctx); err != nil {
+//	    return fmt.Errorf("batch: check: %w", err)
 //	}
 //	snap := g.Snapshot() // pass it to snapshot.Marshal
 //
 // [Graph.AddOrMerge] takes Add's place for a source that lists one record under
 // several parents. To resume a persisted batch, seed the graph with
 // [NewFromSnapshot] and add the records still outstanding: they resolve against,
-// and may complete, the seeded state. Each refusal is in the result of the call
+// and may complete, the seeded state. Each refusal is in the error of the call
 // that drew it, so a caller that needs a record of every refusal keeps those
-// results; a [Snapshot] holds no diagnostics.
+// errors; a [Snapshot] holds no diagnostics.
 //
 // # Alternative Constructors
 //
@@ -233,10 +231,11 @@
 // still refuse, before it installs anything of the record: a root at a key the
 // graph holds with E_DUPLICATE_PK, and a merge with E_GRAPH_CARDINALITY.
 //
-// A non-OK result therefore installs nothing of the record — no instance, child
-// or edge. A root [Graph.Add] refuses at its key, and a root [Graph.AddOrMerge]
-// refuses at its key for its composed children, is itself recorded in
-// [Snapshot.Duplicates]. Every refusal's issue is in the call's result alone.
+// A call that returns an error therefore installs nothing of the record — no
+// instance, child or edge. A root [Graph.Add] refuses at its key, and a root
+// [Graph.AddOrMerge] refuses at its key for its composed children, is itself
+// recorded in [Snapshot.Duplicates]. Every refusal's issue is in the call's
+// error alone.
 //
 // A validator defect reaches the graph: Add does not judge the record again.
 // [github.com/simon-lentz/yammm/snapshot.WithRevalidation] runs a validator over a
@@ -359,12 +358,12 @@
 //
 // # Error Handling
 //
-// Graph operations return [diag.Result]:
-//
-//   - [diag.Result.HasFatal]: context cancellation (E_CONTEXT_CANCELLED)
-//   - [diag.Result.HasErrors]: any Fatal or Error issue, so a semantic failure
-//     (a duplicate PK) too
-//   - [diag.Result.OK]: success (may have warnings)
+// [Graph.Add] and [Graph.Check] return an error, and [Graph.AddOrMerge] returns
+// one beside whether it merged. A refusal is a *[diag.ResultError] holding each
+// failure as an issue with a stable code: read it with errors.AsType, and test
+// it for a code with errors.Is. A cancellation is a Fatal E_CONTEXT_CANCELLED,
+// every other refusal an Error. The graph draws no issue below failure severity,
+// so its calls take no warnings callback.
 //
 // Programmer errors panic: a nil receiver at a method that adds or checks, a
 // zero instance at [Graph.Add] or [Graph.AddOrMerge], a nil context, a zero
@@ -381,7 +380,8 @@
 //     keyless part read out of [instance.ValidInstance.Composed]
 //   - E_GRAPH_INVALID_COMPOSITION: the root is a keyed part read out of
 //     [instance.ValidInstance.Composed]
-//   - E_DUPLICATE_PK: the primary key already exists for this type
+//   - E_DUPLICATE_PK: the primary key already exists for this type; its related
+//     location is the held instance's span, when that instance carries one
 //   - E_CONTEXT_CANCELLED: the context was cancelled
 //
 // [Graph.AddOrMerge] emits what [Graph.Add] emits, with two
@@ -401,7 +401,7 @@
 // [Snapshot] carries the structural records ([Snapshot.Duplicates],
 // [Snapshot.Unresolved]) and the [Attestation], never a diagnostic. [Graph.Check]
 // judges the graph as it stands at each call, so calling it again returns the
-// same result over the same graph.
+// same error over the same graph.
 //
 // # Ordering Guarantees
 //

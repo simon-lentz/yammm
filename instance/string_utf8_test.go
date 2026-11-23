@@ -7,6 +7,7 @@ import (
 
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/instance"
+	"github.com/simon-lentz/yammm/internal/diagtest"
 	"github.com/simon-lentz/yammm/internal/value"
 	"github.com/simon-lentz/yammm/schema"
 )
@@ -59,9 +60,9 @@ func utf8Link(over map[string]any) map[string]any {
 // itself valid UTF-8.
 func TestValidateOne_RefusesAStringThatIsNotValidUTF8(t *testing.T) {
 	t.Parallel()
-	s, res := schema.LoadString(t.Context(), utf8Schema, "utf8.yammm")
-	if res.HasErrors() {
-		t.Fatalf("load schema: %s", res)
+	s, err := schema.LoadString(t.Context(), utf8Schema, "utf8.yammm")
+	if err != nil {
+		t.Fatalf("load schema: %s", err)
 	}
 	v := instance.NewValidator(s)
 
@@ -86,7 +87,9 @@ func TestValidateOne_RefusesAStringThatIsNotValidUTF8(t *testing.T) {
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
-			inst, res := v.ValidateOne(t.Context(), "Holder", c.raw)
+			inst, res := diagtest.Issues(t, func() (instance.ValidInstance, error) {
+				return v.ValidateOne(t.Context(), "Holder", c.raw)
+			})
 			if !inst.IsZero() {
 				t.Errorf("ValidateOne returned an instance holding a string that is not valid UTF-8")
 			}
@@ -124,9 +127,9 @@ func TestValidateOne_RefusesAStringThatIsNotValidUTF8(t *testing.T) {
 			"link": []any{map[string]any{"_target_key": valid, "label": valid, "mark": valid}},
 		})
 		raw.Properties["id"] = valid
-		inst, res := v.ValidateOne(t.Context(), "Holder", raw)
-		if inst.IsZero() || res.HasErrors() {
-			t.Fatalf("ValidateOne refused valid text: %s", res)
+		inst, err := v.ValidateOne(t.Context(), "Holder", raw)
+		if inst.IsZero() || err != nil {
+			t.Fatalf("ValidateOne refused valid text: %s", err)
 		}
 		if got, _ := inst.Property("text"); got.Any() != valid {
 			t.Errorf("text = %q, want %q", got.Any(), valid)
@@ -138,9 +141,9 @@ func TestValidateOne_RefusesAStringThatIsNotValidUTF8(t *testing.T) {
 // validator applies: none of them passes a string that is not valid UTF-8.
 func TestCheck_RefusesAStringThatIsNotValidUTF8(t *testing.T) {
 	t.Parallel()
-	s, res := schema.LoadString(t.Context(), utf8Schema, "utf8.yammm")
-	if res.HasErrors() {
-		t.Fatalf("load schema: %s", res)
+	s, loadErr := schema.LoadString(t.Context(), utf8Schema, "utf8.yammm")
+	if loadErr != nil {
+		t.Fatalf("load schema: %s", loadErr)
 	}
 	holder, _ := s.Type("Holder")
 	for _, name := range []string{"id", "text", "code", "kind", "uid", "day", "at"} {

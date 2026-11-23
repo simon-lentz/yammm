@@ -9,13 +9,16 @@ import (
 	"testing"
 
 	"github.com/simon-lentz/yammm/diag"
+	"github.com/simon-lentz/yammm/internal/diagtest"
 	"github.com/simon-lentz/yammm/internal/yammmtest"
 	"github.com/simon-lentz/yammm/schema"
 )
 
 func issuesOfSource(t *testing.T, src string) []diag.Issue {
 	t.Helper()
-	_, res := schema.LoadString(t.Context(), src, "m.yammm")
+	_, res := diagtest.Capture(t, func(warn func(diag.Issue)) (schema.Schema, error) {
+		return schema.LoadString(t.Context(), src, "m.yammm", schema.WithWarnings(warn))
+	})
 	return slices.Collect(res.Issues())
 }
 
@@ -104,7 +107,9 @@ func TestLoad_APartInheritsAnAssociationThroughAnAncestorItNeverImports(t *testi
 		filepath.Join(dir, "b.yammm"): []byte("schema \"b\"\n\nimport \"./c\" as c\n\ntype W {\n\tid String primary\n}\n\nabstract type B extends c.C {\n\t--> TO_W (one) W\n}\n"),
 		key:                           []byte("schema \"x\"\n\nimport \"./b\" as b\n\npart type X extends b.B {\n\tmine String\n}\n"),
 	}
-	_, res := schema.LoadSourcesWithEntry(t.Context(), sources, key, dir, schema.WithSourcesOnly(true))
+	_, res := diagtest.Capture(t, func(warn func(diag.Issue)) (schema.Schema, error) {
+		return schema.LoadSourcesWithEntry(t.Context(), sources, key, schema.WithSourcesOnly(true), schema.WithModuleRoot(dir), schema.WithWarnings(warn))
+	})
 	var codes []string
 	for issue := range res.Issues() {
 		codes = append(codes, issue.Code().String())
@@ -139,8 +144,8 @@ func TestDeepDiamond_EveryWalkVisitsAMemberOnce(t *testing.T) {
 	key := filepath.Join(dir, "next.yammm")
 	sources := deepDiamond(dir)
 	sources[key] = []byte("schema \"next\"\n\nimport \"./a0\" as t\n\ntype K {\n\tid String primary\n}\n")
-	if _, res := schema.LoadSourcesWithEntry(t.Context(), sources, key, dir, schema.WithSourcesOnly(true)); res.HasErrors() {
-		t.Fatal(res)
+	if _, err := schema.LoadSourcesWithEntry(t.Context(), sources, key, schema.WithSourcesOnly(true), schema.WithModuleRoot(dir)); err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -206,9 +211,9 @@ type Sub1 extends K {
 type Sub2 extends K {
 }
 `
-	s, res := schema.LoadString(t.Context(), src, "b.yammm")
-	if res.HasErrors() {
-		t.Fatal(res)
+	s, err := schema.LoadString(t.Context(), src, "b.yammm")
+	if err != nil {
+		t.Fatal(err)
 	}
 	k, ok := s.Type("K")
 	if !ok {
@@ -238,13 +243,13 @@ func TestSchema_ImportsHoldDeclarationOrder(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	key := filepath.Join(dir, "main.yammm")
-	s, res := schema.LoadSourcesWithEntry(t.Context(), map[string][]byte{
+	s, err := schema.LoadSourcesWithEntry(t.Context(), map[string][]byte{
 		key:                           []byte("schema \"main\"\n\nimport \"./z\" as z\nimport \"./a\" as a\n\ntype M {\n\tid String primary\n}\n"),
 		filepath.Join(dir, "a.yammm"): []byte("schema \"a\"\n\ntype A {\n\tid String primary\n}\n"),
 		filepath.Join(dir, "z.yammm"): []byte("schema \"z\"\n\ntype Z {\n\tid String primary\n}\n"),
-	}, key, dir)
-	if res.HasErrors() {
-		t.Fatal(res)
+	}, key, schema.WithModuleRoot(dir))
+	if err != nil {
+		t.Fatal(err)
 	}
 	var aliases []string
 	for imp := range s.Imports() {

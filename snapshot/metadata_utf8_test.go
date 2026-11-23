@@ -9,6 +9,7 @@ import (
 
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/graph"
+	"github.com/simon-lentz/yammm/internal/diagtest"
 	"github.com/simon-lentz/yammm/snapshot"
 )
 
@@ -32,14 +33,18 @@ func TestMetadata_RefusesTextThatIsNotValidUTF8(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
-			data, mres := snapshot.Marshal(ctx, g.Snapshot(), snapshot.WithMetadata(c.meta))
-			out, ures := snapshot.UpdateMetadata(ctx, []byte(doc), c.meta)
+			data, mres := diagtest.Issues(t, func() ([]byte, error) {
+				return snapshot.Marshal(ctx, g.Snapshot(), snapshot.WithMetadata(c.meta))
+			})
+			out, ures := diagtest.Issues(t, func() ([]byte, error) {
+				return snapshot.UpdateMetadata(ctx, []byte(doc), c.meta)
+			})
 			for surface, r := range map[string]struct {
 				bytes []byte
 				res   diag.Result
 			}{"Marshal": {data, mres}, "UpdateMetadata": {out, ures}} {
 				issues := r.res.Len()
-				if r.bytes != nil || issues != 1 || !r.res.HasErrors() || !strings.Contains(r.res.String(), c.want) {
+				if r.bytes != nil || issues != 1 || diagtest.Err(r.res) == nil || !strings.Contains(r.res.String(), c.want) {
 					t.Errorf("%s returned %d bytes and %s, want none and one Error naming %s", surface, len(r.bytes), r.res, c.want)
 				}
 				for issue := range r.res.Issues() {
@@ -59,21 +64,21 @@ func TestMetadata_ValidTextReadsBackAsWritten(t *testing.T) {
 	ctx := context.Background()
 	s := loadReaderSchema(t)
 	meta := map[string]string{"run": "a�b", "étape": "日本", "": "empty key"}
-	data, res := snapshot.Marshal(ctx, graph.New(s).Snapshot(), snapshot.WithMetadata(meta))
-	if res.HasErrors() {
-		t.Fatalf("Marshal: %s", res)
+	data, err := snapshot.Marshal(ctx, graph.New(s).Snapshot(), snapshot.WithMetadata(meta))
+	if err != nil {
+		t.Fatalf("Marshal: %s", err)
 	}
-	updated, res := snapshot.UpdateMetadata(ctx, []byte(readerDoc(t, s, map[string]any{"$type": "Company", "id": "c1"})), meta)
-	if res.HasErrors() {
-		t.Fatalf("UpdateMetadata: %s", res)
+	updated, err := snapshot.UpdateMetadata(ctx, []byte(readerDoc(t, s, map[string]any{"$type": "Company", "id": "c1"})), meta)
+	if err != nil {
+		t.Fatalf("UpdateMetadata: %s", err)
 	}
 	for surface, doc := range map[string][]byte{"Marshal": data, "UpdateMetadata": updated} {
-		if _, lres := snapshot.Unmarshal(ctx, doc, s); lres.HasErrors() {
-			t.Errorf("%s: Load refuses the document: %s", surface, lres)
+		if _, err := snapshot.Unmarshal(ctx, doc, s); err != nil {
+			t.Errorf("%s: Load refuses the document: %s", surface, err)
 		}
-		info, hres := snapshot.ReadHeader(ctx, bytes.NewReader(doc))
-		if hres.HasErrors() {
-			t.Fatalf("%s: ReadHeader: %s", surface, hres)
+		info, err := snapshot.ReadHeader(ctx, bytes.NewReader(doc))
+		if err != nil {
+			t.Fatalf("%s: ReadHeader: %s", surface, err)
 		}
 		if !maps.Equal(info.Metadata, meta) {
 			t.Errorf("%s: metadata reads back %q, want %q", surface, info.Metadata, meta)

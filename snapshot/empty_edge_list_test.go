@@ -6,6 +6,8 @@ import (
 	"testing"
 
 	"github.com/simon-lentz/yammm/diag"
+	"github.com/simon-lentz/yammm/graph"
+	"github.com/simon-lentz/yammm/internal/diagtest"
 	"github.com/simon-lentz/yammm/snapshot"
 )
 
@@ -34,12 +36,20 @@ func TestRead_AnEmptyEdgeListIsHeldToItsName(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 			edited := []byte(editOnce(t, doc, `"edges":{"BOSS"`, `"edges":{`+c.list+`,"BOSS"`))
-			_, plain := snapshot.Unmarshal(ctx, rehashDocument(t, edited), s)
-			_, warn := snapshot.Unmarshal(ctx, rehashDocument(t, edited), s, snapshot.WithRevalidation(diag.Warning))
-			_, fail := snapshot.Unmarshal(ctx, rehashDocument(t, edited), s, snapshot.WithRevalidation(diag.Error))
+			_, plain := diagtest.Capture(t, func(warn func(diag.Issue)) (graph.Snapshot, error) {
+				return snapshot.Unmarshal(ctx, rehashDocument(t, edited), s, snapshot.WithWarnings(warn))
+			})
+			_, warn := diagtest.Capture(t, func(warn func(diag.Issue)) (graph.Snapshot, error) {
+				return snapshot.Unmarshal(ctx, rehashDocument(t, edited), s, snapshot.WithRevalidation(diag.Warning), snapshot.WithWarnings(warn))
+			})
+			_, fail := diagtest.Capture(t, func(warn func(diag.Issue)) (graph.Snapshot, error) {
+				return snapshot.Unmarshal(ctx, rehashDocument(t, edited), s, snapshot.WithRevalidation(diag.Error), snapshot.WithWarnings(warn))
+			})
 			for surface, res := range map[string]diag.Result{
 				"Load": plain, "Load, revalidating at Warning": warn, "Load, revalidating at Error": fail,
-				"Verify, revalidating at Error": snapshot.Verify(ctx, rehashDocument(t, edited), s, snapshot.WithRevalidation(diag.Error)),
+				"Verify, revalidating at Error": diagtest.CaptureErr(t, func(warn func(diag.Issue)) error {
+					return snapshot.Verify(ctx, rehashDocument(t, edited), s, snapshot.WithRevalidation(diag.Error), snapshot.WithWarnings(warn))
+				}),
 			} {
 				failures := 0
 				for issue := range res.Issues() {

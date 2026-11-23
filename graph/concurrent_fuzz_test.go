@@ -2,11 +2,13 @@ package graph_test
 
 import (
 	"context"
+	"errors"
 	"math/rand"
 	"slices"
 	"sync"
 	"testing"
 
+	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/instance"
 	"github.com/simon-lentz/yammm/internal/instancetest"
@@ -63,7 +65,7 @@ func FuzzGraph_ConcurrentOperations(f *testing.F) {
 func buildFuzzSchema(t *testing.T) schema.Schema {
 	t.Helper()
 
-	s, result := schema.LoadString(t.Context(), `schema "fuzz"
+	s, err := schema.LoadString(t.Context(), `schema "fuzz"
 
 type Person {
 	id String primary
@@ -71,9 +73,8 @@ type Person {
 	--> FRIEND (_:one) Person
 }
 `, "fuzz.yammm")
-
-	if result.HasErrors() {
-		t.Fatalf("Failed to build fuzz schema: %s", result.String())
+	if err != nil {
+		t.Fatalf("Failed to build fuzz schema: %s", err)
 	}
 	return s
 }
@@ -96,13 +97,15 @@ func runFuzzOperations(t *testing.T, g *graph.Graph, s schema.Schema, ctx contex
 			if r.Intn(2) == 0 {
 				data["friend"] = map[string]any{"_target_id": formatID(workerID, r.Intn(100))}
 			}
-			inst, res := validator.ValidateOne(ctx, "Person", instance.RawInstance{Properties: data})
-			if res.HasErrors() {
-				t.Errorf("validate Person: %s", res)
+			inst, err := validator.ValidateOne(ctx, "Person", instance.RawInstance{Properties: data})
+			if err != nil {
+				t.Errorf("validate Person: %s", err)
 				return
 			}
 			// Ignore results - we just want to test for races/panics
-			g.Add(ctx, inst)
+			if err := g.Add(ctx, inst); err != nil && !errors.Is(err, diag.E_DUPLICATE_PK) {
+				t.Errorf("Add: %v", err)
+			}
 
 		case 1: // Snapshot
 			snap := g.Snapshot()
@@ -112,7 +115,7 @@ func runFuzzOperations(t *testing.T, g *graph.Graph, s schema.Schema, ctx contex
 			_ = slices.Collect(snap.Unresolved())
 
 		case 2: // Check
-			g.Check(ctx)
+			_ = g.Check(ctx)
 
 		case 3: // InstanceByKey
 			id := r.Intn(100)
@@ -191,7 +194,9 @@ func FuzzGraph_AddSequence(f *testing.F) {
 		for _, id := range ids {
 			pk := []any{"p" + string(rune('0'+id))}
 			inst := instancetest.Valid(t, s, "Person", map[string]any{"id": pk[0], "name": "Person-" + string(rune('0'+id))})
-			g.Add(ctx, inst)
+			if err := g.Add(ctx, inst); err != nil && !errors.Is(err, diag.E_DUPLICATE_PK) {
+				t.Errorf("Add: %v", err)
+			}
 		}
 
 		// Count unique IDs we tried to add

@@ -1,6 +1,7 @@
 package schema_test
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/simon-lentz/yammm/diag"
@@ -12,8 +13,8 @@ import (
 // says so with E_SYNTAX rather than loading a two-line pattern.
 func TestLoad_RegexLiteralCannotCrossALine(t *testing.T) {
 	t.Parallel()
-	_, res := schema.LoadString(t.Context(), "schema \"s\"\n\ntype T {\n\tid String primary\n\tcode String\n\t! \"code shape\" code =~ /a\\\nb/\n}\n", "re.yammm")
-	if !res.HasCode(diag.E_SYNTAX) {
-		t.Fatalf("a regex literal spanning two lines must be a syntax error; got %v", res)
+	_, err := schema.LoadString(t.Context(), "schema \"s\"\n\ntype T {\n\tid String primary\n\tcode String\n\t! \"code shape\" code =~ /a\\\nb/\n}\n", "re.yammm")
+	if !errors.Is(err, diag.E_SYNTAX) {
+		t.Fatalf("a regex literal spanning two lines must be a syntax error; got %v", err)
 	}
 }

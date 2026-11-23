@@ -13,6 +13,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/simon-lentz/yammm/diag"
+	"github.com/simon-lentz/yammm/internal/diagtest"
 	"github.com/simon-lentz/yammm/internal/hostpath"
 	"github.com/simon-lentz/yammm/snapshot"
 )
@@ -27,8 +28,8 @@ func seedValidYS(t *testing.T, path string) {
 		map[string]any{"id": "c1", "title": "Acme"})
 	snap := buildSnapshot(t, s, company)
 
-	data, result := snapshot.Marshal(context.Background(), snap)
-	require.NoError(t, result.Err(), "seed: Marshal should not error")
+	data, err := snapshot.Marshal(context.Background(), snap)
+	require.NoError(t, err, "seed: Marshal should not error")
 	require.NoError(t, snapshot.WriteFile(path, data), "seed: WriteFile should not error")
 }
 
@@ -105,7 +106,7 @@ func TestScanDir_HappyPath(t *testing.T) {
 	require.Len(t, entries, 3, "should yield exactly the three valid files")
 
 	for _, entry := range entries {
-		assert.False(t, entry.Result.HasErrors(), "%s: expected OK result", entry.Name)
+		require.NoError(t, entry.Err, "%s: expected OK result", entry.Name)
 		assert.NotNil(t, entry.Header, "%s: expected non-nil Header", entry.Name)
 		assert.NotEmpty(t, entry.Name, "Name must be populated on every yield")
 		assert.Equal(t, filepath.Join(dir, entry.Name), entry.Path,
@@ -211,23 +212,16 @@ func TestScanDir_CorruptFileAmongValid(t *testing.T) {
 		byName[e.Name] = e
 	}
 
-	assert.False(t, byName["a.ys"].Result.HasErrors(), "a.ys should parse cleanly")
+	require.NoError(t, byName["a.ys"].Err, "a.ys should parse cleanly")
 	assert.NotNil(t, byName["a.ys"].Header)
 
 	corrupt := byName["b.ys"]
-	require.True(t, corrupt.Result.HasErrors(), "b.ys should report an error")
+	require.Error(t, corrupt.Err, "b.ys should report an error")
 	assert.Nil(t, corrupt.Header, "corrupt entry must have Header==nil")
 
-	var sawMalformed bool
-	for iss := range corrupt.Result.Errors() {
-		if iss.Code() == diag.E_SNAPSHOT_MALFORMED {
-			sawMalformed = true
-			break
-		}
-	}
-	assert.True(t, sawMalformed, "corrupt file should surface E_SNAPSHOT_MALFORMED")
+	require.ErrorIs(t, corrupt.Err, diag.E_SNAPSHOT_MALFORMED, "corrupt file should surface E_SNAPSHOT_MALFORMED")
 
-	assert.False(t, byName["c.ys"].Result.HasErrors(), "c.ys should parse cleanly")
+	require.NoError(t, byName["c.ys"].Err, "c.ys should parse cleanly")
 	assert.NotNil(t, byName["c.ys"].Header)
 }
 
@@ -257,22 +251,14 @@ func TestScanDir_PerFileIOFailure(t *testing.T) {
 	}
 
 	ok := byName["ok.ys"]
-	assert.False(t, ok.Result.HasErrors(), "ok.ys should succeed")
+	require.NoError(t, ok.Err, "ok.ys should succeed")
 	assert.NotNil(t, ok.Header)
 
 	bad := byName["denied.ys"]
-	require.True(t, bad.Result.HasErrors(), "denied.ys should report Fatal E_SNAPSHOT_IO")
+	require.Error(t, bad.Err, "denied.ys should report Fatal E_SNAPSHOT_IO")
 	assert.Nil(t, bad.Header, "denied entry must have Header==nil")
-	assert.True(t, bad.Result.HasFatal(), "open-denied must be Fatal, not Error")
-
-	var sawIO bool
-	for iss := range bad.Result.Errors() {
-		if iss.Code() == diag.E_SNAPSHOT_IO {
-			sawIO = true
-			break
-		}
-	}
-	assert.True(t, sawIO, "denied file should surface E_SNAPSHOT_IO")
+	assert.True(t, diagtest.Failures(t, bad.Err).HasFatal(), "open-denied must be Fatal, not Error")
+	assert.ErrorIs(t, bad.Err, diag.E_SNAPSHOT_IO, "denied file should surface E_SNAPSHOT_IO")
 }
 
 func TestScanDir_ContextCancelledMidIteration(t *testing.T) {
@@ -388,7 +374,7 @@ func TestScanDir_EarlyBreakDoesNotParseRemainingFiles(t *testing.T) {
 	var count int
 	for entry, err := range snapshot.ScanDir(context.Background(), dir) {
 		require.NoError(t, err)
-		assert.False(t, entry.Result.HasErrors(),
+		assert.NoError(t, entry.Err,
 			"early-break path should only visit readable aaa.ys")
 		count++
 		break

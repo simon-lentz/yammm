@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/simon-lentz/yammm/diag"
+	"github.com/simon-lentz/yammm/internal/diagtest"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -61,9 +62,9 @@ func TestStringValues_TheDSLAcceptsWhatJSONKeeps(t *testing.T) {
 		for _, v := range values {
 			t.Run(fmt.Sprintf("%s %q", place.name, v), func(t *testing.T) {
 				want := jsonKeeps(t, v)
-				_, lres := schema.LoadString(context.Background(), place.dsl(escaped(v)), "s.yammm")
-				if loads := !lres.HasErrors(); loads != want {
-					t.Errorf("the DSL loads %q: %v, want %v (%s)", v, loads, want, lres.String())
+				_, err := schema.LoadString(context.Background(), place.dsl(escaped(v)), "s.yammm")
+				if loads := err == nil; loads != want {
+					t.Errorf("the DSL loads %q: %v, want %v (%s)", v, loads, want, err)
 				}
 			})
 		}
@@ -75,7 +76,9 @@ func TestStringValues_TheDSLAcceptsWhatJSONKeeps(t *testing.T) {
 func TestLoad_RefusesADocHoldingWhatTheSourceRulesRefuse(t *testing.T) {
 	for _, doc := range []string{"a\uFEFFb", "a\x00b", "a\xffb", "a\xe2\x82"} {
 		src := "schema \"s\"\n\n/* " + doc + " */\ntype Car {\n\tid String primary\n}\n"
-		if _, res := schema.LoadString(context.Background(), src, "s.yammm"); !hasCode(res, diag.E_SYNTAX) {
+		if _, res := diagtest.Capture(t, func(warn func(diag.Issue)) (schema.Schema, error) {
+			return schema.LoadString(context.Background(), src, "s.yammm", schema.WithWarnings(warn))
+		}); !hasCode(res, diag.E_SYNTAX) {
 			t.Errorf("the DSL loads a doc comment holding %q: %s", doc, res.String())
 		}
 	}
@@ -90,7 +93,7 @@ func TestPattern_ASurrogateEscapeLoads(t *testing.T) {
 		t.Errorf("CheckConstraint = %v, want nil", err)
 	}
 	src := "schema \"s\"\n\ntype Car {\n\tid String primary\n\tp Pattern[\"a\\\\x{D800}\"]\n}\n"
-	if _, lres := schema.LoadString(context.Background(), src, "s.yammm"); lres.HasErrors() {
-		t.Errorf("the DSL: %s; want a load", lres.String())
+	if _, err := schema.LoadString(context.Background(), src, "s.yammm"); err != nil {
+		t.Errorf("the DSL: %s; want a load", err)
 	}
 }

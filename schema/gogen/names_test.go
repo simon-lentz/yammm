@@ -124,9 +124,9 @@ func TestBuildNameTable_OneSchemaSharingACandidateTakesExactSpellings(t *testing
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
-			s, res := schema.LoadString(context.Background(), tc.src, "collide.yammm")
-			if res.HasErrors() {
-				t.Fatalf("load: %v", res.Err())
+			s, err := schema.LoadString(context.Background(), tc.src, "collide.yammm")
+			if err != nil {
+				t.Fatalf("load: %v", err)
 			}
 			nt := nameTableOf(t, s)
 			got := map[string]string{}
@@ -153,9 +153,9 @@ func TestBuildNameTable_SharedCandidatesTakeExactSpellings(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	s, res := schema.Load(context.Background(), abs)
-	if res.HasErrors() {
-		t.Fatalf("load: %v", res.Err())
+	s, loadErr := schema.Load(context.Background(), abs)
+	if loadErr != nil {
+		t.Fatalf("load: %v", loadErr)
 	}
 	want := map[string]string{
 		"main.Bar":    "Type_main__Bar",
@@ -178,10 +178,10 @@ func TestBuildNameTable_AReservedNameIsAClaimant(t *testing.T) {
 		if reserved == dateGoName {
 			continue // a DSL keyword; TestBuildNameTable_ATypeWhoseBareSpellingIsDateTakesItsExactSpelling
 		}
-		s, res := schema.LoadString(context.Background(),
+		s, err := schema.LoadString(context.Background(),
 			"schema \"geo\"\n\ntype "+reserved+" {\n\tid String primary\n}", "g.yammm")
-		if res.HasErrors() {
-			t.Fatalf("load: %v", res.Err())
+		if err != nil {
+			t.Fatalf("load: %v", err)
 		}
 		if got := typeNames(t, s, nameTableOf(t, s))["geo."+reserved]; got != "Type_geo__"+reserved {
 			t.Errorf("type %s is named %q, want its exact spelling", reserved, got)
@@ -196,10 +196,10 @@ func TestBuildNameTable_ATypeWhoseBareSpellingIsDateTakesItsExactSpelling(t *tes
 	if !slices.Contains(reservedNames, dateGoName) {
 		t.Fatalf("%q is not a reserved name", dateGoName)
 	}
-	s, res := schema.LoadString(context.Background(),
+	s, err := schema.LoadString(context.Background(),
 		"schema \"g\"\n\ntype Date_ {\n\tid String primary\n\td Date required\n}\n", "d.yammm")
-	if res.HasErrors() {
-		t.Fatalf("load: %v", res.Err())
+	if err != nil {
+		t.Fatalf("load: %v", err)
 	}
 	if got := typeNames(t, s, nameTableOf(t, s))["g.Date_"]; got != "Type_g__Date_5F_" {
 		t.Errorf("type Date_ is named %q, want Type_g__Date_5F_", got)
@@ -210,12 +210,12 @@ func TestBuildNameTable_ATypeWhoseBareSpellingIsDateTakesItsExactSpelling(t *tes
 // "schema" and schema "b" both declaring Hash name it by kind, schema and
 // name, so no claimant can reach the emitted SchemaHash constant's name.
 func TestBuildNameTable_AnExactSpellingNeverMeetsAReservedName(t *testing.T) {
-	s, res := schema.LoadSourcesWithEntry(context.Background(), map[string][]byte{
+	s, err := schema.LoadSourcesWithEntry(context.Background(), map[string][]byte{
 		"main.yammm": []byte("schema \"schema\"\n\nimport \"b.yammm\" as b\n\ntype Hash {\n\tid String primary\n\t--> HAS_B (one) b.Hash\n}\n"),
 		"b.yammm":    []byte("schema \"b\"\n\ntype Hash {\n\tid String primary\n}\n"),
-	}, "main.yammm", ".", schema.WithSourcesOnly(true))
-	if res.HasErrors() {
-		t.Fatalf("load: %v", res.Err())
+	}, "main.yammm", schema.WithSourcesOnly(true), schema.WithModuleRoot("."))
+	if err != nil {
+		t.Fatalf("load: %v", err)
 	}
 	want := map[string]string{"schema.Hash": "Type_schema__Hash", "b.Hash": "Type_b__Hash"}
 	if got := typeNames(t, s, nameTableOf(t, s)); !maps.Equal(got, want) {
@@ -249,15 +249,15 @@ func TestBuildNameTable_NamesDoNotDependOnImportOrder(t *testing.T) {
 		for _, i := range order {
 			head.WriteString(imports[i])
 		}
-		s, res := schema.LoadSourcesWithEntry(context.Background(), map[string][]byte{
+		s, err := schema.LoadSourcesWithEntry(context.Background(), map[string][]byte{
 			"main.yammm": []byte("schema \"main\"\n\n" + head.String() + "\ntype Holder {\n\tid String primary\n}\n"),
 			"a.yammm":    src("a", "BFoo"),
 			"d.yammm":    src("d", "BFoo"),
 			"ab.yammm":   src("a_b", "Foo"),
 			"c.yammm":    src("ab", "Foo"),
-		}, "main.yammm", ".", schema.WithSourcesOnly(true))
-		if res.HasErrors() {
-			t.Fatalf("load: %v", res.Err())
+		}, "main.yammm", schema.WithSourcesOnly(true), schema.WithModuleRoot("."))
+		if err != nil {
+			t.Fatalf("load: %v", err)
 		}
 		if got := typeNames(t, s, nameTableOf(t, s)); !maps.Equal(got, want) {
 			t.Errorf("imports in order %v named %v, want %v", order, got, want)

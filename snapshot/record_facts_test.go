@@ -8,6 +8,7 @@ import (
 
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/graph"
+	"github.com/simon-lentz/yammm/internal/diagtest"
 	"github.com/simon-lentz/yammm/internal/instancetest"
 	"github.com/simon-lentz/yammm/schema"
 	"github.com/simon-lentz/yammm/snapshot"
@@ -49,28 +50,32 @@ part type Tag {
 // Tags t1 and t2.
 func readerFactsDoc(t *testing.T) (schema.Schema, string) {
 	t.Helper()
-	s, res := schema.LoadString(t.Context(), readerFactsSchema, "facts.yammm")
-	if res.HasErrors() {
+	s, res := diagtest.Capture(t, func(warn func(diag.Issue)) (schema.Schema, error) {
+		return schema.LoadString(t.Context(), readerFactsSchema, "facts.yammm", schema.WithWarnings(warn))
+	})
+	if diagtest.Err(res) != nil {
 		t.Fatalf("load schema: %s", res)
 	}
 	to := map[string]any{"_target_id": "c1"}
 	g := graph.New(s)
 	for _, r := range []diag.Result{
-		g.Add(t.Context(), instancetest.Valid(t, s, "Company", map[string]any{"id": "c1"})),
-		g.Add(t.Context(), instancetest.Valid(t, s, "Company", map[string]any{"id": "o1"})),
-		g.Add(t.Context(), instancetest.Valid(t, s, "Employee", map[string]any{"id": "e1", "works_at": to, "audits": []any{to}})),
-		g.Add(t.Context(), instancetest.Valid(t, s, "Order", map[string]any{
+		diagtest.Failures(t, g.Add(t.Context(), instancetest.Valid(t, s, "Company", map[string]any{"id": "c1"}))),
+		diagtest.Failures(t, g.Add(t.Context(), instancetest.Valid(t, s, "Company", map[string]any{"id": "o1"}))),
+		diagtest.Failures(t, g.Add(t.Context(), instancetest.Valid(t, s, "Employee", map[string]any{"id": "e1", "works_at": to, "audits": []any{to}}))),
+		diagtest.Failures(t, g.Add(t.Context(), instancetest.Valid(t, s, "Order", map[string]any{
 			"id":    "o1",
 			"lines": []any{map[string]any{"note": "a"}},
 			"tags":  []any{map[string]any{"code": "t1"}, map[string]any{"code": "t2"}},
-		})),
+		}))),
 	} {
-		if r.HasErrors() {
+		if diagtest.Err(r) != nil {
 			t.Fatalf("building the graph: %s", r)
 		}
 	}
-	data, res := snapshot.Marshal(t.Context(), g.Snapshot())
-	if res.HasErrors() {
+	data, res := diagtest.Issues(t, func() ([]byte, error) {
+		return snapshot.Marshal(t.Context(), g.Snapshot())
+	})
+	if diagtest.Err(res) != nil {
 		t.Fatalf("Marshal: %s", res)
 	}
 	return s, string(data)
@@ -174,7 +179,9 @@ func TestLoad_HoldsRecordsToTheFactsAddDerivesThemBy(t *testing.T) {
 			t.Parallel()
 			s, doc := readerFactsDoc(t)
 			edited := applyReaderEdits(t, doc, c.edits)
-			g, res := snapshot.Unmarshal(t.Context(), []byte(edited), s, snapshot.WithIntegrityCheck(false))
+			g, res := diagtest.Capture(t, func(warn func(diag.Issue)) (graph.Snapshot, error) {
+				return snapshot.Unmarshal(t.Context(), []byte(edited), s, snapshot.WithIntegrityCheck(false), snapshot.WithWarnings(warn))
+			})
 			if !g.IsZero() {
 				t.Error("Load returned a graph Add could not build")
 			}
@@ -215,8 +222,8 @@ func TestLoad_AcceptsEachRecordAddMakes(t *testing.T) {
 			t.Parallel()
 			s, doc := readerFactsDoc(t)
 			edited := applyReaderEdits(t, doc, c.edits)
-			if _, res := snapshot.Unmarshal(t.Context(), []byte(edited), s, snapshot.WithIntegrityCheck(false)); res.HasErrors() {
-				t.Errorf("a record Add makes was refused: %s\n%s", res, edited)
+			if _, err := snapshot.Unmarshal(t.Context(), []byte(edited), s, snapshot.WithIntegrityCheck(false)); err != nil {
+				t.Errorf("a record Add makes was refused: %s\n%s", err, edited)
 			}
 		})
 	}
@@ -229,7 +236,9 @@ func TestLoad_ReportsAStandingAloneBreakOncePerSlot(t *testing.T) {
 	absent := unresolvedAt("AUDITS", "absent", true, "null")
 	edited := applyReaderEdits(t, doc, []readerEdit{{auditsEdge, ""}, records(absent, absent, absent)})
 	n := 0
-	for issue := range snapshot.Verify(t.Context(), []byte(edited), s, snapshot.WithIntegrityCheck(false)).Issues() {
+	for issue := range diagtest.CaptureErr(t, func(warn func(diag.Issue)) error {
+		return snapshot.Verify(t.Context(), []byte(edited), s, snapshot.WithIntegrityCheck(false), snapshot.WithWarnings(warn))
+	}).Issues() {
 		if strings.Contains(issue.Message(), "beside another record") {
 			n++
 		}
@@ -263,24 +272,28 @@ type Clerk extends Base {
 // there.
 func TestVerify_RecordFactsCompareKeysAsWrittenAndReadInheritedAssociations(t *testing.T) {
 	t.Parallel()
-	s, res := schema.LoadString(t.Context(), stampsSchema, "stamps.yammm")
-	if res.HasErrors() {
+	s, res := diagtest.Capture(t, func(warn func(diag.Issue)) (schema.Schema, error) {
+		return schema.LoadString(t.Context(), stampsSchema, "stamps.yammm", schema.WithWarnings(warn))
+	})
+	if diagtest.Err(res) != nil {
 		t.Fatalf("load schema: %s", res)
 	}
 	g := graph.New(s)
 	for _, r := range []diag.Result{
-		g.Add(t.Context(), instancetest.Valid(t, s, "Slot", map[string]any{"id": "s1"})),
-		g.Add(t.Context(), instancetest.Valid(t, s, "Clerk", map[string]any{
+		diagtest.Failures(t, g.Add(t.Context(), instancetest.Valid(t, s, "Slot", map[string]any{"id": "s1"}))),
+		diagtest.Failures(t, g.Add(t.Context(), instancetest.Valid(t, s, "Clerk", map[string]any{
 			"at":    "2024-01-01T00:00:00Z",
 			"books": map[string]any{"_target_id": "s1"},
-		})),
+		}))),
 	} {
-		if r.HasErrors() {
+		if diagtest.Err(r) != nil {
 			t.Fatalf("building the graph: %s", r)
 		}
 	}
-	data, res := snapshot.Marshal(t.Context(), g.Snapshot())
-	if res.HasErrors() {
+	data, res := diagtest.Issues(t, func() ([]byte, error) {
+		return snapshot.Marshal(t.Context(), g.Snapshot())
+	})
+	if diagtest.Err(res) != nil {
 		t.Fatalf("Marshal: %s", res)
 	}
 	doc := string(data)
@@ -326,9 +339,11 @@ func TestVerify_RecordFactsCompareKeysAsWrittenAndReadInheritedAssociations(t *t
 			for _, e := range c.edits {
 				edited = editOnce(t, edited, e.from, e.to)
 			}
-			res := snapshot.Verify(t.Context(), []byte(edited), s, snapshot.WithIntegrityCheck(false))
+			res := diagtest.CaptureErr(t, func(warn func(diag.Issue)) error {
+				return snapshot.Verify(t.Context(), []byte(edited), s, snapshot.WithIntegrityCheck(false), snapshot.WithWarnings(warn))
+			})
 			if c.want == "" {
-				if res.HasErrors() {
+				if diagtest.Err(res) != nil {
 					t.Errorf("a document Add could build was refused: %s", res)
 				}
 				return
@@ -364,8 +379,10 @@ func TestLoad_OneBreakDrawsOnlyItsOwnRefusal(t *testing.T) {
 			t.Parallel()
 			s, doc := readerFactsDoc(t)
 			edited := applyReaderEdits(t, doc, c.edits)
-			res := snapshot.Verify(t.Context(), []byte(edited), s, snapshot.WithIntegrityCheck(false))
-			if !res.HasErrors() {
+			res := diagtest.CaptureErr(t, func(warn func(diag.Issue)) error {
+				return snapshot.Verify(t.Context(), []byte(edited), s, snapshot.WithIntegrityCheck(false), snapshot.WithWarnings(warn))
+			})
+			if diagtest.Err(res) == nil {
 				t.Fatal("the document was accepted")
 			}
 			if strings.Contains(res.String(), c.absent) {

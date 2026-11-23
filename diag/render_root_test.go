@@ -198,11 +198,11 @@ func TestModuleRoot_TextLocations(t *testing.T) {
 func TestRenderContracts(t *testing.T) {
 	t.Parallel()
 
-	failed := func() Result {
+	collected := func() *Collector {
 		c := NewCollector(0)
 		c.Collect(NewIssue(Error, E_SYNTAX, "first").Build())
 		c.Collect(NewIssue(Warning, E_INVALID_NAME, "second").Build())
-		return c.Result()
+		return c
 	}
 	endsAtItsLastIssue := func(s string) (bool, string) {
 		return !strings.HasSuffix(s, "\n"), fmt.Sprintf("%q", s)
@@ -250,15 +250,11 @@ func TestRenderContracts(t *testing.T) {
 		},
 		{
 			name: "Result.String ends at its last issue",
-			run:  func(*testing.T) (bool, string) { return endsAtItsLastIssue(failed().String()) },
+			run:  func(*testing.T) (bool, string) { return endsAtItsLastIssue(collected().Result().String()) },
 		},
 		{
-			name: "an error from Result.Err ends at its last issue",
-			run:  func(*testing.T) (bool, string) { return endsAtItsLastIssue(failed().Err().Error()) },
-		},
-		{
-			name: "an error from Result.WithContext ends at its last issue",
-			run:  func(*testing.T) (bool, string) { return endsAtItsLastIssue(failed().WithContext("probe").Error()) },
+			name: "an error from Collector.Err ends at its last issue",
+			run:  func(*testing.T) (bool, string) { return endsAtItsLastIssue(collected().Err().Error()) },
 		},
 		{
 			name: "an issue with no location renders no location",

@@ -2,6 +2,7 @@ package snapshot_test
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -10,6 +11,7 @@ import (
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/instance"
+	"github.com/simon-lentz/yammm/internal/diagtest"
 	"github.com/simon-lentz/yammm/schema"
 	"github.com/simon-lentz/yammm/snapshot"
 )
@@ -54,9 +56,9 @@ type Person {
 
 func loadReaderSchema(t *testing.T) schema.Schema {
 	t.Helper()
-	s, res := schema.LoadString(t.Context(), readerSchema, "rd.yammm")
-	if res.HasErrors() {
-		t.Fatalf("schema: %s", res)
+	s, err := schema.LoadString(t.Context(), readerSchema, "rd.yammm")
+	if err != nil {
+		t.Fatalf("schema: %s", err)
 	}
 	return s
 }
@@ -73,15 +75,17 @@ func readerDoc(t *testing.T, s schema.Schema, rows ...map[string]any) string {
 				props[k] = val
 			}
 		}
-		vi, res := v.ValidateOne(context.Background(), typ, instance.RawInstance{Properties: props})
-		if res.HasErrors() {
-			t.Fatalf("validate %s: %s", typ, res)
+		vi, err := v.ValidateOne(context.Background(), typ, instance.RawInstance{Properties: props})
+		if err != nil {
+			t.Fatalf("validate %s: %s", typ, err)
 		}
-		g.Add(context.Background(), vi)
+		if err := g.Add(context.Background(), vi); err != nil && !errors.Is(err, diag.E_DUPLICATE_PK) {
+			t.Errorf("Add: %v", err)
+		}
 	}
-	data, res := snapshot.Marshal(context.Background(), g.Snapshot())
-	if res.HasErrors() {
-		t.Fatalf("marshal: %s", res)
+	data, err := snapshot.Marshal(context.Background(), g.Snapshot())
+	if err != nil {
+		t.Fatalf("marshal: %s", err)
 	}
 	return string(data)
 }
@@ -110,8 +114,12 @@ func tableRow(t *testing.T, doc, name string) int {
 // readBoth returns Verify's and Load's results for doc.
 func readBoth(t *testing.T, s schema.Schema, doc string) map[string]diag.Result {
 	t.Helper()
-	_, l := snapshot.Unmarshal(context.Background(), []byte(doc), s, snapshot.WithIntegrityCheck(false))
-	return map[string]diag.Result{"Verify": snapshot.Verify(context.Background(), []byte(doc), s, snapshot.WithIntegrityCheck(false)), "Load": l}
+	_, l := diagtest.Capture(t, func(warn func(diag.Issue)) (graph.Snapshot, error) {
+		return snapshot.Unmarshal(context.Background(), []byte(doc), s, snapshot.WithIntegrityCheck(false), snapshot.WithWarnings(warn))
+	})
+	return map[string]diag.Result{"Verify": diagtest.CaptureErr(t, func(warn func(diag.Issue)) error {
+		return snapshot.Verify(context.Background(), []byte(doc), s, snapshot.WithIntegrityCheck(false), snapshot.WithWarnings(warn))
+	}), "Load": l}
 }
 
 func requireReaderRule(t *testing.T, name string, got map[string]diag.Result, code diag.Code, phrase string) {
@@ -150,7 +158,7 @@ func TestReader_RefusesAnUnresolvedRecordTheGraphCannotStage(t *testing.T) {
 	s := loadReaderSchema(t)
 	doc := personDoc(t, s)
 	for name, res := range readBoth(t, s, doc) {
-		if res.HasErrors() {
+		if diagtest.Err(res) != nil {
 			t.Fatalf("control, %s: the clean document was refused: %s", name, res)
 		}
 	}
@@ -207,13 +215,13 @@ func TestReader_AcceptsAnEmptyRecord(t *testing.T) {
 		t.Fatalf("fixture is vacuous: no empty record in %s", doc)
 	}
 	for surface, res := range readBoth(t, s, doc) {
-		if res.HasErrors() {
+		if diagtest.Err(res) != nil {
 			t.Errorf("%s refused an empty record Graph.Add made: %s", surface, res)
 		}
 	}
-	snap, res := snapshot.Unmarshal(t.Context(), []byte(doc), s, snapshot.WithIntegrityCheck(false))
-	if res.HasErrors() {
-		t.Fatalf("unmarshal: %s", res)
+	snap, err := snapshot.Unmarshal(t.Context(), []byte(doc), s, snapshot.WithIntegrityCheck(false))
+	if err != nil {
+		t.Fatalf("unmarshal: %s", err)
 	}
 	var reasons []graph.UnresolvedReason
 	for u := range snap.Unresolved() {
@@ -263,7 +271,9 @@ func TestReader_TakesRequiredFromTheSchema(t *testing.T) {
 	s := loadReaderSchema(t)
 	doc := personDoc(t, s)
 	count := func(d string) int {
-		_, res := snapshot.Unmarshal(context.Background(), []byte(d), s, snapshot.WithIntegrityCheck(false), snapshot.WithRevalidation(diag.Warning))
+		_, res := diagtest.Capture(t, func(warn func(diag.Issue)) (graph.Snapshot, error) {
+			return snapshot.Unmarshal(context.Background(), []byte(d), s, snapshot.WithIntegrityCheck(false), snapshot.WithRevalidation(diag.Warning), snapshot.WithWarnings(warn))
+		})
 		n := 0
 		for issue := range res.Issues() {
 			if issue.Code() == diag.W_SNAPSHOT_UNRESOLVED_REQUIRED {
@@ -285,9 +295,9 @@ func TestReader_TakesRequiredFromTheSchema(t *testing.T) {
 // keyless abstract type is keyless.
 func TestReader_JudgesARootTypeInAddsOrder(t *testing.T) {
 	t.Parallel()
-	s, res := schema.LoadString(t.Context(), "schema \"o\"\n\nabstract type A {\n\tname String\n}\n\ntype B {\n\tid String primary\n}\n", "o.yammm")
-	if res.HasErrors() {
-		t.Fatalf("schema: %s", res)
+	s, err := schema.LoadString(t.Context(), "schema \"o\"\n\nabstract type A {\n\tname String\n}\n\ntype B {\n\tid String primary\n}\n", "o.yammm")
+	if err != nil {
+		t.Fatalf("schema: %s", err)
 	}
 	doc := readerDoc(t, s, map[string]any{"$type": "B", "id": "b1"})
 	got := readBoth(t, s, editOnce(t, doc, `"name":"B"`, `"name":"A"`))
@@ -317,7 +327,9 @@ func TestReader_RefusesAKeyComponentParseKeyCannotRead(t *testing.T) {
 	} {
 		edited := editOnce(t, doc, c.from, c.to)
 		requireReaderRule(t, c.name, readBoth(t, s, edited), diag.E_SNAPSHOT_MALFORMED, c.phrase)
-		_, info := snapshot.Stat(t.Context(), []byte(edited))
+		_, info := diagtest.Issues(t, func() (*snapshot.Info, error) {
+			return snapshot.Stat(t.Context(), []byte(edited))
+		})
 		if !info.HasCode(diag.E_SNAPSHOT_MALFORMED) || !strings.Contains(info.String(), c.phrase) {
 			t.Errorf("%s, Info: %s, want the component refused", c.name, info)
 		}

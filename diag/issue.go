@@ -162,7 +162,7 @@ func (i Issue) Details() []Detail {
 //	logger.LogAttrs(ctx, slog.LevelError, "validation failed",
 //	    slog.Any("issue", issue))
 //
-// For the issues-slice shape surfaced by [ContextualError.LogValue],
+// For the issues-slice shape surfaced by [ResultError.LogValue],
 // each entry is materialized via [issueLogMap] (not [Issue.LogValue]) so that
 // [slog.JSONHandler] and other encoding/json-based handlers render a
 // JSON array of objects; slog does not recurse through [slog.LogValuer]
@@ -207,7 +207,7 @@ func (i Issue) LogValue() slog.Value {
 // issueLogMap is the map-shaped sibling of [Issue.LogValue].
 //
 // The two produce the same structural shape; the map form is used by
-// [ContextualError.LogValue] to populate the "issues" slice because
+// [ResultError.LogValue] to populate the "issues" slice because
 // slog handlers do not recurse through [slog.LogValuer] within slice
 // elements — passing []slog.Value would make handlers that route
 // through encoding/json (notably [slog.JSONHandler]) emit empty objects

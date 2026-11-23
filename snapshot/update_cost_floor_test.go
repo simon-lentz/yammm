@@ -38,17 +38,17 @@ func TestUpdateMetadataRatioFloor(t *testing.T) {
 		return costratio.CPUTime(t) - start
 	}
 	update := func() {
-		if _, res := snapshot.UpdateMetadata(ctx, in.data, in.newMeta); res.HasErrors() {
-			t.Fatalf("UpdateMetadata: %v", res.Err())
+		if _, err := snapshot.UpdateMetadata(ctx, in.data, in.newMeta); err != nil {
+			t.Fatalf("UpdateMetadata: %v", err)
 		}
 	}
 	reMarshal := func() {
-		loaded, res := snapshot.Unmarshal(ctx, in.data, in.schema)
-		if res.HasErrors() {
-			t.Fatalf("Unmarshal: %v", res.Err())
+		loaded, err := snapshot.Unmarshal(ctx, in.data, in.schema)
+		if err != nil {
+			t.Fatalf("Unmarshal: %v", err)
 		}
-		if _, res := snapshot.Marshal(ctx, loaded, snapshot.WithMetadata(in.newMeta)); res.HasErrors() {
-			t.Fatalf("Marshal: %v", res.Err())
+		if _, err := snapshot.Marshal(ctx, loaded, snapshot.WithMetadata(in.newMeta)); err != nil {
+			t.Fatalf("Marshal: %v", err)
 		}
 	}
 

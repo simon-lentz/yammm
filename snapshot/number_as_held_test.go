@@ -8,6 +8,7 @@ import (
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/immutable"
+	"github.com/simon-lentz/yammm/internal/diagtest"
 	"github.com/simon-lentz/yammm/internal/snapparts"
 	"github.com/simon-lentz/yammm/internal/snappartstest"
 	"github.com/simon-lentz/yammm/schema"
@@ -31,18 +32,18 @@ type T {
 func TestMarshal_AFloatHeldUnderAnIntegerIsWrittenAsHeld(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()
-	s, res := schema.LoadString(ctx, asHeldSchema, "held.yammm")
-	if res.HasErrors() {
-		t.Fatalf("load schema: %s", res)
+	s, err := schema.LoadString(ctx, asHeldSchema, "held.yammm")
+	if err != nil {
+		t.Fatalf("load schema: %s", err)
 	}
 	ty, _ := s.Type("T")
 	snap := snappartstest.Loaded(t, s, snapparts.Parts{Instances: []snapparts.Instance{{
 		TypeID: ty.ID(), PrimaryKey: immutable.WrapKey([]any{"a"}),
 		Properties: immutable.WrapProperties(map[string]any{"id": "a", "n": float64(6), "ns": []any{int64(1), float64(2)}}),
 	}}})
-	data, mres := snapshot.Marshal(ctx, snap)
-	if mres.HasErrors() {
-		t.Fatalf("marshal: %s", mres)
+	data, readErr := snapshot.Marshal(ctx, snap)
+	if readErr != nil {
+		t.Fatalf("marshal: %s", readErr)
 	}
 	for _, want := range []string{`"n":6.0`, `"ns":[1,2.0]`} {
 		if !bytes.Contains(data, []byte(want)) {
@@ -50,9 +51,9 @@ func TestMarshal_AFloatHeldUnderAnIntegerIsWrittenAsHeld(t *testing.T) {
 		}
 	}
 
-	loaded, lres := snapshot.Unmarshal(ctx, data, s)
-	if lres.HasErrors() {
-		t.Fatalf("load: %s", lres)
+	loaded, readErr2 := snapshot.Unmarshal(ctx, data, s)
+	if readErr2 != nil {
+		t.Fatalf("load: %s", readErr2)
 	}
 	got, ok := loaded.InstanceByKey(ty.ID(), graph.FormatKey("a"))
 	if !ok {
@@ -62,7 +63,9 @@ func TestMarshal_AFloatHeldUnderAnIntegerIsWrittenAsHeld(t *testing.T) {
 		t.Errorf("n loaded as %#v, want float64(6)", n.Any())
 	}
 
-	_, rres := snapshot.Unmarshal(ctx, data, s, snapshot.WithRevalidation(diag.Error))
+	_, rres := diagtest.Capture(t, func(warn func(diag.Issue)) (graph.Snapshot, error) {
+		return snapshot.Unmarshal(ctx, data, s, snapshot.WithRevalidation(diag.Error), snapshot.WithWarnings(warn))
+	})
 	if !rres.HasCode(diag.E_TYPE_MISMATCH) {
 		t.Errorf("revalidation of a held float at an Integer drew %s, want E_TYPE_MISMATCH", rres)
 	}
@@ -73,22 +76,22 @@ func TestMarshal_AFloatHeldUnderAnIntegerIsWrittenAsHeld(t *testing.T) {
 func TestMarshal_ANumberNoFloatHoldsReadsBackAsTheLiteral(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()
-	s, res := schema.LoadString(ctx, asHeldSchema, "held.yammm")
-	if res.HasErrors() {
-		t.Fatalf("load schema: %s", res)
+	s, err := schema.LoadString(ctx, asHeldSchema, "held.yammm")
+	if err != nil {
+		t.Fatalf("load schema: %s", err)
 	}
 	ty, _ := s.Type("T")
 	snap := snappartstest.Loaded(t, s, snapparts.Parts{Instances: []snapparts.Instance{{
 		TypeID: ty.ID(), PrimaryKey: immutable.WrapKey([]any{"a"}),
 		Properties: immutable.WrapProperties(map[string]any{"id": "a", "n": json.Number("1e400")}),
 	}}})
-	data, mres := snapshot.Marshal(ctx, snap)
-	if mres.HasErrors() {
-		t.Fatalf("marshal: %s", mres)
+	data, readErr := snapshot.Marshal(ctx, snap)
+	if readErr != nil {
+		t.Fatalf("marshal: %s", readErr)
 	}
-	back, lres := snapshot.Unmarshal(ctx, data, s)
-	if lres.HasErrors() {
-		t.Fatalf("load: %s", lres)
+	back, readErr2 := snapshot.Unmarshal(ctx, data, s)
+	if readErr2 != nil {
+		t.Fatalf("load: %s", readErr2)
 	}
 	inst, ok := back.InstanceByKey(ty.ID(), graph.FormatKey("a"))
 	if !ok {
@@ -121,9 +124,9 @@ type T {
 func TestMarshal_MarksEveryHeldFloat(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()
-	s, res := schema.LoadString(ctx, everyHeldSchema, "held.yammm")
-	if res.HasErrors() {
-		t.Fatalf("load schema: %s", res)
+	s, err := schema.LoadString(ctx, everyHeldSchema, "held.yammm")
+	if err != nil {
+		t.Fatalf("load schema: %s", err)
 	}
 	ty, _ := s.Type("T")
 	for _, c := range []struct {
@@ -150,9 +153,9 @@ func TestMarshal_MarksEveryHeldFloat(t *testing.T) {
 			TypeID: ty.ID(), PrimaryKey: immutable.WrapKey([]any{"a"}),
 			Properties: immutable.WrapProperties(map[string]any{"id": "a", c.prop: c.held}),
 		}}})
-		data, mres := snapshot.Marshal(ctx, snap)
-		if mres.HasErrors() || !bytes.Contains(data, []byte(c.want)) {
-			t.Errorf("%s=%#v wrote %s (%s), want %s", c.prop, c.held, data, mres, c.want)
+		data, err := snapshot.Marshal(ctx, snap)
+		if err != nil || !bytes.Contains(data, []byte(c.want)) {
+			t.Errorf("%s=%#v wrote %s (%s), want %s", c.prop, c.held, data, err, c.want)
 		}
 	}
 }

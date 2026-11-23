@@ -477,8 +477,8 @@ func TestIntegration_FormattingRoundTrip_Multibyte(t *testing.T) {
 	assert.Equal(t, expected, result, "round-trip result != expected")
 
 	ctx := t.Context()
-	s, res := schema.LoadString(ctx, result, "test.yammm")
-	require.False(t, res.HasErrors(), "formatted output failed to load: %s", res)
+	s, loadErr := schema.LoadString(ctx, result, "test.yammm")
+	require.NoError(t, loadErr, "formatted output failed to load: %s", loadErr)
 	assert.Equal(t, "nihongo", s.Name(), "schema name mismatch")
 }
 

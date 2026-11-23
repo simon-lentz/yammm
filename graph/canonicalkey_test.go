@@ -17,7 +17,7 @@ import (
 // An edge written with one spelling of a Timestamp key must resolve against a
 // target instance written with another, because both denote one instant.
 func TestGraph_EdgeResolvesAcrossKeySpellings(t *testing.T) {
-	s, res := schema.LoadString(t.Context(), `schema "linked"
+	s, loadErr := schema.LoadString(t.Context(), `schema "linked"
 
 type Event {
 	observed_at Timestamp primary
@@ -28,8 +28,8 @@ type Note {
 	--> ABOUT (one) Event
 }
 `, "linked.yammm")
-	if res.HasErrors() {
-		t.Fatalf("schema: %s", res)
+	if loadErr != nil {
+		t.Fatalf("schema: %s", loadErr)
 	}
 
 	// The target instance carries the instant as a time.Time.
@@ -46,11 +46,11 @@ type Note {
 	})
 
 	g := graph.New(s)
-	if r := g.Add(t.Context(), event); !r.OK() {
-		t.Fatalf("add event: %s", r)
+	if err := g.Add(t.Context(), event); err != nil {
+		t.Fatalf("add event: %s", err)
 	}
-	if r := g.Add(t.Context(), note); !r.OK() {
-		t.Fatalf("add note: %s", r)
+	if err := g.Add(t.Context(), note); err != nil {
+		t.Fatalf("add note: %s", err)
 	}
 
 	snap := g.Snapshot()
@@ -95,8 +95,8 @@ part type Sample {
 	})
 
 	g := graph.New(s)
-	if r := g.Add(t.Context(), run); !r.OK() {
-		t.Fatalf("add: %s", r)
+	if err := g.Add(t.Context(), run); err != nil {
+		t.Fatalf("add: %s", err)
 	}
 	snap := g.Snapshot()
 	root := slices.Collect(snap.InstancesOf(runID))[0]

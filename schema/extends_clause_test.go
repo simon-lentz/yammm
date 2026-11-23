@@ -10,9 +10,9 @@ import (
 func TestExtendsClause_HoldsEachSpelling(t *testing.T) {
 	t.Parallel()
 
-	s, res := schema.LoadString(t.Context(), "schema \"m\"\ntype B { id String primary }\ntype C { id String primary }\ntype A extends B, C, B { }\n", "m.yammm")
-	if !res.OK() {
-		t.Fatal(res)
+	s, err := schema.LoadString(t.Context(), "schema \"m\"\ntype B { id String primary }\ntype C { id String primary }\ntype A extends B, C, B { }\n", "m.yammm")
+	if err != nil {
+		t.Fatal(err)
 	}
 	a, ok := s.Type("A")
 	if !ok {
@@ -43,9 +43,9 @@ func TestExtendsClause_ABareAndAQualifiedNameAreTwoSupertypes(t *testing.T) {
 		"/virtual/f.yammm": []byte("schema \"f\"\ntype R { rid String primary }\n"),
 		"/virtual/e.yammm": []byte("schema \"e\"\nimport \"./f\" as a\ntype R { id String primary }\ntype X extends R, a.R, R { }\n"),
 	}
-	s, res := schema.LoadSourcesWithEntry(t.Context(), sources, "/virtual/e.yammm", "/virtual")
-	if !res.OK() {
-		t.Fatal(res)
+	s, err := schema.LoadSourcesWithEntry(t.Context(), sources, "/virtual/e.yammm", schema.WithModuleRoot("/virtual"))
+	if err != nil {
+		t.Fatal(err)
 	}
 	x, ok := s.Type("X")
 	if !ok {
@@ -70,9 +70,9 @@ func TestExtendsClause_ARepeatedNameLeavesTheStructuralHash(t *testing.T) {
 	t.Parallel()
 
 	hash := func(clause string) string {
-		s, res := schema.LoadString(t.Context(), "schema \"m\"\ntype B { id String primary }\ntype A extends "+clause+" { }\n", "m.yammm")
-		if !res.OK() {
-			t.Fatal(res)
+		s, err := schema.LoadString(t.Context(), "schema \"m\"\ntype B { id String primary }\ntype A extends "+clause+" { }\n", "m.yammm")
+		if err != nil {
+			t.Fatal(err)
 		}
 		return schema.StructuralHash(s)
 	}
@@ -87,9 +87,9 @@ func TestExtendsClause_TheOrderLeavesTheStructuralHash(t *testing.T) {
 	t.Parallel()
 
 	hash := func(clause string) string {
-		s, res := schema.LoadString(t.Context(), "schema \"m\"\nabstract type A {\n\ta Integer\n}\nabstract type B {\n\tb Integer\n}\ntype T extends "+clause+" {\n\tid String primary\n}\n", "m.yammm")
-		if !res.OK() {
-			t.Fatal(res)
+		s, err := schema.LoadString(t.Context(), "schema \"m\"\nabstract type A {\n\ta Integer\n}\nabstract type B {\n\tb Integer\n}\ntype T extends "+clause+" {\n\tid String primary\n}\n", "m.yammm")
+		if err != nil {
+			t.Fatal(err)
 		}
 		return schema.StructuralHash(s)
 	}

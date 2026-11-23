@@ -18,7 +18,7 @@ type panicContext struct{ context.Context } //nolint:containedctx // a decorator
 func (panicContext) Err() error { panic("context down") }
 
 func TestEvaluateInvariants_RecoversAPanicAsInternalError(t *testing.T) {
-	s, res := schema.LoadString(t.Context(), `schema "p"
+	s, loadErr := schema.LoadString(t.Context(), `schema "p"
 
 type Doc {
     id String primary
@@ -26,8 +26,8 @@ type Doc {
     ! "m" id != ""
 }
 `, "p.yammm")
-	if !res.OK() {
-		t.Fatal(res)
+	if loadErr != nil {
+		t.Fatal(loadErr)
 	}
 	typ, _ := s.Type("Doc")
 	v := NewValidator(s)

@@ -19,9 +19,9 @@ import (
 // a document spelled -0.0.
 func TestMarshal_ANegativeZeroKeepsItsSignAtAFloat(t *testing.T) {
 	t.Parallel()
-	s, res := schema.LoadString(t.Context(), "schema \"nz\"\n\ntype Holder {\n\tid String primary\n\tf Float\n\tv Vector[2]\n}\n", "nz.yammm")
-	if res.HasErrors() {
-		t.Fatalf("load schema: %s", res)
+	s, err := schema.LoadString(t.Context(), "schema \"nz\"\n\ntype Holder {\n\tid String primary\n\tf Float\n\tv Vector[2]\n}\n", "nz.yammm")
+	if err != nil {
+		t.Fatalf("load schema: %s", err)
 	}
 	holderT, _ := s.Type("Holder")
 	props := map[string]any{"id": "h1", "f": json.Number("-0"), "v": []any{json.Number("-0"), json.Number("1")}}
@@ -30,8 +30,8 @@ func TestMarshal_ANegativeZeroKeepsItsSignAtAFloat(t *testing.T) {
 		t.Fatalf("the validator stores -0 at a Float as %#v; want a negative zero", stored.Any())
 	}
 	g := graph.New(s)
-	if r := g.Add(t.Context(), valid); r.HasErrors() {
-		t.Fatalf("Add: %s", r)
+	if err := g.Add(t.Context(), valid); err != nil {
+		t.Fatalf("Add: %s", err)
 	}
 	for name, snap := range map[string]graph.Snapshot{
 		"validated": g.Snapshot(),
@@ -41,13 +41,13 @@ func TestMarshal_ANegativeZeroKeepsItsSignAtAFloat(t *testing.T) {
 			}),
 		}}}),
 	} {
-		data, mres := snapshot.Marshal(t.Context(), snap)
-		if mres.HasErrors() {
-			t.Fatalf("%s: Marshal: %s", name, mres)
+		data, err := snapshot.Marshal(t.Context(), snap)
+		if err != nil {
+			t.Fatalf("%s: Marshal: %s", name, err)
 		}
-		back, lres := snapshot.Unmarshal(t.Context(), data, s)
-		if lres.HasErrors() {
-			t.Fatalf("%s: Load: %s", name, lres)
+		back, readErr := snapshot.Unmarshal(t.Context(), data, s)
+		if readErr != nil {
+			t.Fatalf("%s: Load: %s", name, readErr)
 		}
 		inst, ok := back.InstanceByKey(holderT.ID(), `["h1"]`)
 		if !ok {

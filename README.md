@@ -67,6 +67,7 @@ import (
     "log"
     "os"
 
+    "github.com/simon-lentz/yammm/diag"
     "github.com/simon-lentz/yammm/graph"
     "github.com/simon-lentz/yammm/instance"
     "github.com/simon-lentz/yammm/schema"
@@ -76,13 +77,12 @@ import (
 func main() {
     ctx := context.Background()
 
-    // Load schema from file
-    s, result := schema.Load(ctx, "vehicles.yammm")
-    if result.HasFatal() {
-        log.Fatal("load error:", result)
-    }
-    if result.HasErrors() {
-        log.Fatal("schema errors:", result)
+    // Load schema from file; warnings go to the callback, never into err
+    s, err := schema.Load(ctx, "vehicles.yammm", schema.WithWarnings(func(w diag.Issue) {
+        log.Println("schema warning:", w.Message())
+    }))
+    if err != nil {
+        log.Fatal("load schema: ", err)
     }
 
     // Create validator and graph
@@ -98,26 +98,24 @@ func main() {
         },
     }
 
-    person, result := validator.ValidateOne(ctx, "Person", personRaw)
-    if !result.OK() {
-        log.Fatal("validation failed:", result)
+    person, err := validator.ValidateOne(ctx, "Person", personRaw)
+    if err != nil {
+        log.Fatal("validate: ", err)
     }
 
     // Add to graph
-    result = g.Add(ctx, person)
-    if !result.OK() {
-        log.Fatal("graph error:", result)
+    if err := g.Add(ctx, person); err != nil {
+        log.Fatal("add: ", err)
     }
 
     // Check graph integrity
-    result = g.Check(ctx)
-    fmt.Println("Graph OK:", result.OK())
+    fmt.Println("Graph complete:", g.Check(ctx) == nil)
 
     // Save graph snapshot to .ys file
     snap := g.Snapshot()
-    data, result := snapshot.Marshal(ctx, snap)
-    if !result.OK() {
-        log.Fatal("marshal error:", result)
+    data, err := snapshot.Marshal(ctx, snap)
+    if err != nil {
+        log.Fatal("marshal: ", err)
     }
     if err := os.WriteFile("vehicles.ys", data, 0o644); err != nil {
         log.Fatal("write error:", err)
@@ -128,31 +126,31 @@ func main() {
 
 ### Assemble Batches
 
-A pipeline validates each record and adds what the validator returns. `instance.Validator` and `graph.Graph` are both safe for concurrent use, so one validator and one graph serve every worker. Each call returns its own result, and a `Snapshot` holds no diagnostics, so a worker keeps the results it needs. At the end of the batch, wait for the workers, then check the graph and take its snapshot:
+A pipeline validates each record and adds what the validator returns. `instance.Validator` and `graph.Graph` are both safe for concurrent use, so one validator and one graph serve every worker. Each call returns its own error, and a `Snapshot` holds no diagnostics, so a worker keeps the errors it needs. At the end of the batch, wait for the workers, then check the graph and take its snapshot:
 
 ```go
 v := instance.NewValidator(s)
 g := graph.New(s)
 
 for i, rec := range records { // rec is an instance.RawInstance
-    valid, result := v.ValidateOne(ctx, "Person", rec)
-    if result.HasErrors() {
-        log.Fatalf("record %d: %s", i, result)
+    valid, err := v.ValidateOne(ctx, "Person", rec)
+    if err != nil {
+        log.Fatalf("record %d: validate: %v", i, err)
     }
-    if result := g.Add(ctx, valid); result.HasErrors() {
-        log.Fatalf("record %d: %s", i, result)
+    if err := g.Add(ctx, valid); err != nil {
+        log.Fatalf("record %d: add: %v", i, err)
     }
 }
 
-if result := g.Check(ctx); result.HasErrors() {
-    log.Fatal("batch failed:", result.Err())
+if err := g.Check(ctx); err != nil {
+    log.Fatal("batch failed: ", err)
 }
-data, result := snapshot.Marshal(ctx, g.Snapshot())
+data, err := snapshot.Marshal(ctx, g.Snapshot())
 ```
 
-For a source that lists one record under several parents, `g.AddOrMerge(ctx, valid)` takes `Add`'s place: at a primary key the graph already holds, a record with no composed children merges: its association targets are installed on the held root and `merged` is true. A record with composed children is refused there as `Add` refuses a duplicate (`E_DUPLICATE_PK`), and a merge that would give a `(one)` association a second target is refused whole (`E_GRAPH_CARDINALITY`); `merged` is false whenever the result holds an error.
+For a source that lists one record under several parents, `g.AddOrMerge(ctx, valid)` takes `Add`'s place: at a primary key the graph already holds, a record with no composed children merges: its association targets are installed on the held root and `merged` is true. A record with composed children is refused there as `Add` refuses a duplicate (`E_DUPLICATE_PK`), and a merge that would give a `(one)` association a second target is refused whole (`E_GRAPH_CARDINALITY`); `merged` is false whenever the error is not nil.
 
-To resume a persisted batch on a later run, seed the graph from a loaded snapshot with `graph.NewFromSnapshot(snap)`, which binds the graph to the snapshot's own schema and installs its records as they stand — new adds resolve against the seeded instances and `Check` covers the union. `snapshot.UpdateMetadata` replaces a snapshot's metadata without a load/re-marshal round-trip: it verifies the integrity hash, writes a new header and keeps every other byte, for every document `snapshot.Unmarshal` accepts under its default options.
+To resume a persisted batch on a later run, seed the graph from a loaded snapshot with `graph.NewFromSnapshot(snap)`, which binds the graph to the snapshot's own schema and installs its records as they stand — new adds resolve against the seeded instances and `Check` covers the union. `snapshot.UpdateMetadata` replaces a snapshot's metadata without a load/re-marshal round-trip: it verifies the integrity hash unless `WithIntegrityCheck(false)` is given, writes a new header and keeps every other byte, for every document `snapshot.Unmarshal` accepts under its default options.
 
 ### Build Instances Programmatically
 
@@ -202,13 +200,13 @@ Internal                 : internal/* (no compatibility guarantees), the formatt
 
 ### Entry Point Pattern
 
-Diagnostic-producing operations return `(T, diag.Result)`:
+Every call that can fail returns `(T, error)`, or an `error` alone when it has no value, or `false` as its last value where the caller needs no reason, as `Validator.PrimaryKeyOf` does. `snapshot.ScanDir` yields an error only when the scan stops, and holds a file's own failure in `ScanEntry.Err`:
 
-- `result.HasFatal()`: Any Fatal issue (such as an I/O failure, a cancellation, an internal fault, input a reader cannot go past, or an argument or option a loader refuses)
-- `result.HasErrors()`: Any Error or Fatal issue
-- `result.OK()`: Success (may have warnings)
+- A call that judges its input returns its Fatal and Error issues as one `*diag.ResultError`; a few, such as `markdown.Marshal` and `neo4j.CoerceParams`, return a plain error, and each call's doc names what it returns. Read a `*diag.ResultError` with `errors.AsType[*diag.ResultError](err)`, and test it by code with `errors.Is(err, diag.E_IMPORT_CYCLE)`.
+- A Warning, Info or Hint is never in the error. A call that can draw one takes a `WithWarnings(func(diag.Issue))` option, as `go/types` takes each error through `Config.Error`.
+- A call refuses an option it does not take with an error, with no diagnostic code, that names the option and the call.
 
-The pure transformations of the `neo4j` write path and the generators (Cypher batch queries, Go source, and Markdown generation) return their output beside a Go `error`, as `(T, error)`, but for `neo4j`'s `BuildBatchRelationshipMergeQuery`, a query template that cannot fail; `schema/cypher`'s DDL builders and its label check, and `neo4j.Diff`, report through a `diag.Result`, and the drop-statement builders, which cannot fail, return a `string`. Snapshot serialization (`snapshot.Marshal`) is diagnostic-producing and returns `(T, diag.Result)`.
+A call that cannot fail returns its value alone, such as `neo4j.BuildBatchRelationshipMergeQuery` and the drop-statement builders. [docs/API.md](docs/API.md#error-handling-conventions) states the conventions in full.
 
 ## Schema Language
 
@@ -339,8 +337,8 @@ type Product {
 The `diag` package provides structured diagnostics with stable error codes:
 
 ```go
-if !result.OK() {
-    for issue := range result.Issues() {
+if re, ok := errors.AsType[*diag.ResultError](err); ok {
+    for issue := range re.Result.Issues() {
         fmt.Printf("[%s] %s: %s\n", issue.Severity(), issue.Code(), issue.Message())
     }
 }

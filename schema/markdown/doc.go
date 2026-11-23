@@ -12,7 +12,7 @@
 // markdown has no instance-data path: it never parses, validates, or
 // serializes instances. It imports neither instance nor graph. It maps
 // a completed schema to one Markdown document, nothing more, and returns a
-// plain error rather than a [github.com/simon-lentz/yammm/diag.Result],
+// plain error rather than a *[github.com/simon-lentz/yammm/diag.ResultError],
 // because its only failures are
 // generator-internal (see Error Conditions), not data diagnostics with
 // source locations.

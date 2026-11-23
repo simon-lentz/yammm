@@ -78,8 +78,8 @@ func liveDiff(t *testing.T, ctx context.Context, a cypher.Config, s schema.Schem
 func planAgainst(t *testing.T, c cypher.Config, s schema.Schema, constraints []n4j.RemoteConstraint, indexes []n4j.RemoteIndex) n4j.Plan {
 	t.Helper()
 	plan, res := n4j.Diff(c, s, constraints, indexes)
-	if res.HasErrors() {
-		t.Fatalf("planning: %v", res.Err())
+	if res != nil {
+		t.Fatalf("planning: %v", res)
 	}
 	return plan
 }
@@ -122,8 +122,8 @@ func requireCleanPlan(t *testing.T, plan n4j.Plan) {
 func loadBlockerSchema(t *testing.T, ctx context.Context, src string) schema.Schema {
 	t.Helper()
 	s, res := schema.LoadString(ctx, src, "blk.yammm")
-	if res.HasErrors() {
-		t.Fatalf("load: %v", res.Err())
+	if res != nil {
+		t.Fatalf("load: %v", res)
 	}
 	return s
 }
@@ -191,8 +191,8 @@ func TestConstraintDriftWithTwoBlockers_ConvergesInOneApply(t *testing.T) {
 	s := loadBlockerSchema(t, ctx, "schema \"blk\"\n\ntype Doc {\n\tid String primary\n}\n")
 	a := cypher.Config{Edition: cypher.Community}
 	desired, res := a.Constraints(s)
-	if res.HasErrors() {
-		t.Fatalf("emitting constraints: %v", res.Err())
+	if res != nil {
+		t.Fatalf("emitting constraints: %v", res)
 	}
 	key := named(t, desired, func(c cypher.Constraint) bool { return c.Kind == cypher.ConstraintUnique })
 	run(t, ctx, "CREATE INDEX "+key.Name+" FOR (n:"+key.Label+") ON (n.z)")
@@ -212,8 +212,8 @@ func TestConstraintDriftWithTwoBlockers_ConvergesInOneApply(t *testing.T) {
 func vectorIndexStatement(t *testing.T, a cypher.Config, s schema.Schema) (stmt, name string) {
 	t.Helper()
 	desired, res := a.Indexes(s)
-	if res.HasErrors() {
-		t.Fatalf("emitting indexes: %v", res.Err())
+	if res != nil {
+		t.Fatalf("emitting indexes: %v", res)
 	}
 	idx := named(t, desired, func(i cypher.Index) bool { return i.Kind == cypher.IndexVector })
 	return idx.Statement, idx.Name
@@ -351,12 +351,12 @@ func readCrossSideNames(t *testing.T, s schema.Schema) crossSideNames {
 	t.Helper()
 	a := cypher.Config{}
 	constraints, res := a.Constraints(s)
-	if res.HasErrors() {
-		t.Fatalf("emitting constraints: %v", res.Err())
+	if res != nil {
+		t.Fatalf("emitting constraints: %v", res)
 	}
 	indexes, res := a.Indexes(s)
-	if res.HasErrors() {
-		t.Fatalf("emitting indexes: %v", res.Err())
+	if res != nil {
+		t.Fatalf("emitting indexes: %v", res)
 	}
 	on := func(prop string) func([]string) bool {
 		return func(props []string) bool { return slices.Equal(props, []string{prop}) }

@@ -13,8 +13,8 @@ func TestShapeFor_Basic(t *testing.T) {
 	s := loadSchema(t, "basic.yammm")
 	a := cypher.Config{}
 
-	shape, result := shapeFor(a, s)
-	if err := result.Err(); err != nil {
+	shape, shapeErr := shapeFor(a, s)
+	if err := shapeErr; err != nil {
 		t.Fatalf("shapeFor: %v", err)
 	}
 
@@ -35,8 +35,8 @@ func TestShapeFor_CompositePK(t *testing.T) {
 	s := loadSchema(t, "composite_pk.yammm")
 	a := cypher.Config{}
 
-	shape, result := shapeFor(a, s)
-	if err := result.Err(); err != nil {
+	shape, shapeErr := shapeFor(a, s)
+	if err := shapeErr; err != nil {
 		t.Fatalf("shapeFor: %v", err)
 	}
 
@@ -51,8 +51,8 @@ func TestShapeFor_SkipsAbstract(t *testing.T) {
 	s := loadSchema(t, "abstract_types.yammm")
 	a := cypher.Config{}
 
-	shape, result := shapeFor(a, s)
-	if err := result.Err(); err != nil {
+	shape, shapeErr := shapeFor(a, s)
+	if err := shapeErr; err != nil {
 		t.Fatalf("shapeFor: %v", err)
 	}
 
@@ -84,20 +84,20 @@ part type Item {
 	label String required
 }
 `
-	s, res := schema.LoadSourcesWithEntry(t.Context(), map[string][]byte{
+	s, loadErr := schema.LoadSourcesWithEntry(t.Context(), map[string][]byte{
 		"entry.yammm": []byte(entry),
 		"base.yammm":  []byte(baseSrc),
-	}, "entry.yammm", ".", schema.WithSourcesOnly(true))
-	if res.HasErrors() {
-		t.Fatalf("load schema: %s", res)
+	}, "entry.yammm", schema.WithSourcesOnly(true), schema.WithModuleRoot("."))
+	if loadErr != nil {
+		t.Fatalf("load schema: %s", loadErr)
 	}
 	item, ok := s.ResolveTypeName("base.Item")
 	if !ok {
 		t.Fatal("base.Item did not resolve through the entry schema")
 	}
 
-	shape, result := shapeFor(cypher.Config{}, s)
-	if err := result.Err(); err != nil {
+	shape, shapeErr := shapeFor(cypher.Config{}, s)
+	if err := shapeErr; err != nil {
 		t.Fatalf("shapeFor: %v", err)
 	}
 	ns, ok := shape.types[item.ID()]
@@ -114,8 +114,8 @@ func TestShapeFor_PartTypes(t *testing.T) {
 	s := loadSchema(t, "part_types.yammm")
 	a := cypher.Config{}
 
-	shape, result := shapeFor(a, s)
-	if err := result.Err(); err != nil {
+	shape, shapeErr := shapeFor(a, s)
+	if err := shapeErr; err != nil {
 		t.Fatalf("shapeFor: %v", err)
 	}
 
@@ -132,8 +132,8 @@ func TestShapeFor_Inheritance(t *testing.T) {
 	s := loadSchema(t, "inheritance.yammm")
 	a := cypher.Config{}
 
-	shape, result := shapeFor(a, s)
-	if err := result.Err(); err != nil {
+	shape, shapeErr := shapeFor(a, s)
+	if err := shapeErr; err != nil {
 		t.Fatalf("shapeFor: %v", err)
 	}
 
@@ -152,8 +152,8 @@ func TestShapeFor_MultipleTypes(t *testing.T) {
 	s := loadSchema(t, "multiple_types.yammm")
 	a := cypher.Config{}
 
-	shape, result := shapeFor(a, s)
-	if err := result.Err(); err != nil {
+	shape, shapeErr := shapeFor(a, s)
+	if err := shapeErr; err != nil {
 		t.Fatalf("shapeFor: %v", err)
 	}
 
@@ -179,8 +179,8 @@ func TestShapeFor_CustomSeparator(t *testing.T) {
 	s := loadSchema(t, "basic.yammm")
 	a := cypher.Config{LabelSeparator: "Z"}
 
-	shape, result := shapeFor(a, s)
-	if err := result.Err(); err != nil {
+	shape, shapeErr := shapeFor(a, s)
+	if err := shapeErr; err != nil {
 		t.Fatalf("shapeFor: %v", err)
 	}
 

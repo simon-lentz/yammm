@@ -1,7 +1,6 @@
 package diag
 
 import (
-	"errors"
 	"slices"
 	"strings"
 	"testing"
@@ -18,7 +17,7 @@ func TestResult_TruncationNote(t *testing.T) {
 		t.Errorf("TruncationNote() = %q; want %q", note, want)
 	}
 
-	if got := OK().TruncationNote(); got != "" {
+	if got := (Result{}).TruncationNote(); got != "" {
 		t.Errorf("TruncationNote() on a non-truncated result = %q; want empty", got)
 	}
 }
@@ -45,23 +44,28 @@ func TestResult_TruncationNote_SameAfterAMerge(t *testing.T) {
 	}
 }
 
-func TestOK(t *testing.T) {
-	r := OK()
+// sawFailure reports whether r saw a Fatal or Error issue, stored or dropped.
+func sawFailure(r Result) bool {
+	counts := r.SeverityCounts()
+	return counts.Fatal+counts.Errors > 0
+}
 
-	if !r.OK() {
-		t.Error("OK().OK() = false; want true")
-	}
-	if r.HasErrors() {
-		t.Error("OK().HasErrors() = true; want false")
+func TestResult_ZeroIsEmpty(t *testing.T) {
+	var r Result
+	if sawFailure(r) {
+		t.Error("the zero Result saw a failure")
 	}
 	if r.Len() != 0 {
-		t.Errorf("OK().Len() = %d; want 0", r.Len())
+		t.Errorf("Len() = %d; want 0", r.Len())
 	}
 	if r.LimitReached() {
-		t.Error("OK().LimitReached() = true; want false")
+		t.Error("LimitReached() = true; want false")
 	}
 	if r.DroppedCount() != 0 {
-		t.Errorf("OK().DroppedCount() = %d; want 0", r.DroppedCount())
+		t.Errorf("DroppedCount() = %d; want 0", r.DroppedCount())
+	}
+	if got := r.SeverityCounts(); got != (SeverityCounts{}) {
+		t.Errorf("SeverityCounts() = %+v; want zero", got)
 	}
 }
 
@@ -81,7 +85,7 @@ func TestResult_HasCode(t *testing.T) {
 	if r.HasCode(E_INTERNAL) {
 		t.Error("HasCode(E_INTERNAL) = true; want false")
 	}
-	if OK().HasCode(E_SYNTAX) {
+	if (Result{}).HasCode(E_SYNTAX) {
 		t.Error("empty result HasCode(E_SYNTAX) = true; want false")
 	}
 }
@@ -89,8 +93,8 @@ func TestResult_HasCode(t *testing.T) {
 func TestResult_HasCode_ReflectsRetainedIssuesUnderTruncation(t *testing.T) {
 	// HasCode is an enumeration query (like Issues/Len): it reflects the issues
 	// the result can enumerate, so a code present only among issues dropped past
-	// the limit reads false. The seen-based severity gate stays truthful — a
-	// dropped Error still fails OK()/HasErrors() — so the two families are
+	// the limit reads false. The seen-based counts stay truthful — a dropped
+	// Error still counts in SeverityCounts and CodeCounts — so the two families are
 	// deliberately distinct, not in conflict.
 	//
 	// Both issues are Errors so the second is genuinely dropped: an incoming
@@ -108,10 +112,7 @@ func TestResult_HasCode_ReflectsRetainedIssuesUnderTruncation(t *testing.T) {
 	if r.HasCode(E_INTERNAL) {
 		t.Error("HasCode(E_INTERNAL) = true; want false (the issue was dropped past the limit)")
 	}
-	// ...while the seen-based gate still counts it.
-	if r.OK() || !r.HasErrors() {
-		t.Errorf("OK=%v HasErrors=%v; want false/true — the dropped Error must still fail the gate", r.OK(), r.HasErrors())
-	}
+	// ...while the seen-based counts still count it.
 	if got := r.SeverityCounts().Errors; got != 2 {
 		t.Errorf("SeverityCounts().Errors = %d; want 2 — the dropped Error is still an Error the collector saw", got)
 	}
@@ -199,14 +200,8 @@ func TestResult_SeverityQueries(t *testing.T) {
 
 	r := newResult(issues, false, 0)
 
-	if r.OK() {
-		t.Error("OK() = true; want false (has fatal and error)")
-	}
 	if !r.HasFatal() {
 		t.Error("HasFatal() = false; want true")
-	}
-	if !r.HasErrors() {
-		t.Error("HasErrors() = false; want true")
 	}
 	if !r.HasWarnings() {
 		t.Error("HasWarnings() = false; want true")
@@ -230,7 +225,7 @@ func TestResult_SeverityQueries(t *testing.T) {
 	}
 }
 
-func TestResult_OKWithWarnings(t *testing.T) {
+func TestResult_WarningsAloneAreNoFailure(t *testing.T) {
 	issues := []Issue{
 		NewIssue(Warning, E_INVALID_NAME, "warning").Build(),
 		NewIssue(Info, E_INTERNAL, "info").Build(),
@@ -238,12 +233,8 @@ func TestResult_OKWithWarnings(t *testing.T) {
 
 	r := newResult(issues, false, 0)
 
-	// Result should be OK because there are no Fatal or Error issues
-	if !r.OK() {
-		t.Error("OK() = false; want true (only warnings)")
-	}
-	if r.HasErrors() {
-		t.Error("HasErrors() = true; want false (only warnings)")
+	if sawFailure(r) {
+		t.Errorf("SeverityCounts() = %+v; want no Fatal or Error (only warnings)", r.SeverityCounts())
 	}
 }
 
@@ -356,7 +347,7 @@ func TestResult_BySeverity(t *testing.T) {
 }
 
 func TestResult_String_OK(t *testing.T) {
-	r := OK()
+	var r Result
 
 	if s := r.String(); s != "OK" {
 		t.Errorf("String() = %q; want %q", s, "OK")
@@ -371,8 +362,8 @@ func TestResult_String_WarningsOnlyRendersThem(t *testing.T) {
 	c.Collect(NewIssue(Warning, W_ANNOTATION_SHADOWED, "shadowed").Build())
 	c.Collect(NewIssue(Info, E_INTERNAL, "for the record").Build())
 	r := c.Result()
-	if !r.OK() {
-		t.Fatal("setup: result must be OK")
+	if sawFailure(r) {
+		t.Fatal("setup: result must hold no failure")
 	}
 
 	s := r.String()
@@ -448,23 +439,15 @@ func TestResult_String_WithLimitReached(t *testing.T) {
 }
 
 func TestResult_Immutability(t *testing.T) {
-	// Result should not be constructable with arbitrary issues via public API
-	// This is verified by the fact that newResult is unexported
-
-	// The only public ways to get a Result are:
-	// 1. OK() - returns empty result
-	// 2. Collector.Result() - validates during collection
-
-	r := OK()
-	if !r.OK() {
-		t.Error("OK() should return OK result")
-	}
+	// Result should not be constructable with arbitrary issues via public API:
+	// newResult is unexported, and Collector.Result validates during
+	// collection, so the zero Result and a collector's are the only ones.
 
 	// Verify collected slices are independent (each slices.Collect allocates).
 	issues := []Issue{
 		NewIssue(Error, E_SYNTAX, "test").Build(),
 	}
-	r = newResult(issues, false, 0)
+	r := newResult(issues, false, 0)
 
 	slice1 := slices.Collect(r.Issues())
 	slice2 := slices.Collect(r.Issues())
@@ -476,113 +459,6 @@ func TestResult_Immutability(t *testing.T) {
 	// The slices should be independent
 	if &slice1[0] == &slice2[0] {
 		t.Error("slices.Collect returned same backing array")
-	}
-}
-
-func TestResult_Err_NilWhenOK(t *testing.T) {
-	r := OK()
-	if err := r.Err(); err != nil {
-		t.Errorf("OK().Err() = %v; want nil", err)
-	}
-}
-
-func TestResult_Err_NilWhenWarningsOnly(t *testing.T) {
-	issues := []Issue{
-		NewIssue(Warning, E_INVALID_NAME, "name looks odd").Build(),
-	}
-	r := newResult(issues, false, 0)
-
-	if !r.OK() {
-		t.Fatal("result with only warnings should be OK")
-	}
-	if err := r.Err(); err != nil {
-		t.Errorf("Err() = %v; want nil for warnings-only result", err)
-	}
-}
-
-func TestResult_Err_NonNilOnError(t *testing.T) {
-	issues := []Issue{
-		NewIssue(Error, E_SYNTAX, "unexpected token").Build(),
-	}
-	r := newResult(issues, false, 0)
-
-	err := r.Err()
-	if err == nil {
-		t.Fatal("Err() = nil; want non-nil for result with errors")
-	}
-
-	// Error() string should contain the issue message
-	if !strings.Contains(err.Error(), "unexpected token") {
-		t.Errorf("Error() = %q; want it to contain %q", err.Error(), "unexpected token")
-	}
-}
-
-func TestResult_Err_NonNilOnFatal(t *testing.T) {
-	issues := []Issue{
-		NewIssue(Fatal, E_INTERNAL, "internal fault").Build(),
-	}
-	r := newResult(issues, false, 0)
-
-	err := r.Err()
-	if err == nil {
-		t.Fatal("Err() = nil; want non-nil for result with fatal")
-	}
-}
-
-func TestResult_Err_ErrorsAs(t *testing.T) {
-	issues := []Issue{
-		NewIssue(Error, E_DUPLICATE_TYPE, `type "Person" already defined`).Build(),
-		NewIssue(Warning, E_INVALID_NAME, "name looks odd").Build(),
-	}
-	r := newResult(issues, false, 0)
-
-	err := r.Err()
-	if err == nil {
-		t.Fatal("Err() = nil; want non-nil")
-	}
-
-	re, ok := errors.AsType[*ResultError](err)
-	if !ok {
-		t.Fatal("errors.AsType[*ResultError] = false; want true")
-	}
-
-	// Verify the Result is accessible and intact
-	if re.Result.Len() != 2 {
-		t.Errorf("ResultError.Result.Len() = %d; want 2", re.Result.Len())
-	}
-	if re.Result.OK() {
-		t.Error("ResultError.Result.OK() = true; want false")
-	}
-}
-
-func TestResult_Err_WrappableWithFmtErrorf(t *testing.T) {
-	issues := []Issue{
-		NewIssue(Error, E_SYNTAX, "unexpected token").Build(),
-	}
-	r := newResult(issues, false, 0)
-
-	wrapped := errors.Join(errors.New("schema validation failed"), r.Err())
-
-	if _, ok := errors.AsType[*ResultError](wrapped); !ok {
-		t.Fatal("errors.AsType[*ResultError] through wrapped error = false; want true")
-	}
-}
-
-func TestResult_Err_MatchesString(t *testing.T) {
-	issues := []Issue{
-		NewIssue(Error, E_SYNTAX, "unexpected token").Build(),
-		NewIssue(Error, E_DUPLICATE_TYPE, "duplicate type").Build(),
-	}
-	r := newResult(issues, false, 0)
-
-	err := r.Err()
-	if err == nil {
-		t.Fatal("Err() = nil; want non-nil")
-	}
-
-	// Error() output should match Result.String()
-	if err.Error() != r.String() {
-		t.Errorf("Error() = %q; want %q (same as String())", err.Error(), r.String())
 	}
 }
 

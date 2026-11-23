@@ -2,10 +2,12 @@ package snapshot_test
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"slices"
 	"testing"
 
+	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/internal/instancetest"
 	"github.com/simon-lentz/yammm/snapshot/snapshottest"
@@ -36,9 +38,13 @@ func TestDiffSnapshots_SeesDuplicatePropertyDifference(t *testing.T) {
 	// duplicates section, where its properties are the only difference.
 	build := func(dupName string) graph.Snapshot {
 		g := graph.New(s)
-		g.Add(context.Background(),
-			mustValidInstance(t, s, "Person", []any{"p1"}, map[string]any{"id": "p1", "name": "Alice"}))
-		g.Add(context.Background(), instancetest.Valid(t, s, "Person", map[string]any{"id": "p1", "name": dupName}))
+		if err := g.Add(context.Background(),
+			mustValidInstance(t, s, "Person", []any{"p1"}, map[string]any{"id": "p1", "name": "Alice"})); err != nil {
+			t.Errorf("Add: %v", err)
+		}
+		if err := g.Add(context.Background(), instancetest.Valid(t, s, "Person", map[string]any{"id": "p1", "name": dupName})); err != nil && !errors.Is(err, diag.E_DUPLICATE_PK) {
+			t.Errorf("Add: %v", err)
+		}
 		return g.Snapshot()
 	}
 

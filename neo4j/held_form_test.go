@@ -145,7 +145,7 @@ func TestHeldForm_ARewrittenElementLeavesTheHeldValueAsItWas(t *testing.T) {
 // float the Float reads.
 func TestHeldForm_AnAliasReadsAsTheKindItNames(t *testing.T) {
 	t.Parallel()
-	s, res := schema.LoadString(t.Context(), `schema "alias"
+	s, loadErr := schema.LoadString(t.Context(), `schema "alias"
 
 type Ratio = Float
 
@@ -154,8 +154,8 @@ type Holder {
 	ratio Ratio
 }
 `, "alias.yammm")
-	if res.HasErrors() {
-		t.Fatalf("load schema: %s", res)
+	if loadErr != nil {
+		t.Fatalf("load schema: %s", loadErr)
 	}
 	holder, _ := s.Type("Holder")
 	ratio, _ := holder.Property("ratio")
@@ -173,7 +173,7 @@ func TestExtractKeyProps_AKeyIsCoercedInItsForm(t *testing.T) {
 		"n":  schematest.Constraint(t, "Integer"),
 		"at": schematest.Constraint(t, "Timestamp"),
 	}}
-	keys, err := extractKeyProps(immutable.WrapProperties(map[string]any{"n": json.Number("7"), "at": "2024-01-02T03:04:05Z"}), shape)
+	keys, err := extractKeyProps(immutable.WrapProperties(map[string]any{"n": json.Number("7"), "at": "2024-01-02T03:04:05Z"}), shape, "type \"T\"")
 	if err != nil {
 		t.Fatalf("extractKeyProps: %v", err)
 	}

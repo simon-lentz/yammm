@@ -1,6 +1,7 @@
 package schema_test
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"slices"
@@ -8,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/simon-lentz/yammm/diag"
+	"github.com/simon-lentz/yammm/internal/diagtest"
 	"github.com/simon-lentz/yammm/internal/expr"
 	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
@@ -300,9 +302,9 @@ func TestDeclaration_CrossSchemaInheritance(t *testing.T) {
 	dir := t.TempDir()
 	writeSchema(t, dir, "base.yammm", "schema \"base\"\n\nabstract type Entity {\n\tid UUID primary\n\tcreated Timestamp required\n}\n")
 	writeSchema(t, dir, "derived.yammm", "schema \"derived\"\n\nimport \"./base\" as base\n\ntype Person extends base.Entity {\n\tname String required\n}\n")
-	derived, res := schema.Load(t.Context(), filepath.Join(dir, "derived.yammm"), schema.WithModuleRoot(dir))
-	if res.HasErrors() {
-		t.Fatalf("result: %v", res)
+	derived, err := schema.Load(t.Context(), filepath.Join(dir, "derived.yammm"), schema.WithModuleRoot(dir))
+	if err != nil {
+		t.Fatalf("result: %v", err)
 	}
 
 	personType, ok := derived.Type("Person")
@@ -344,9 +346,9 @@ func TestDeclaration_CrossSchemaRelation(t *testing.T) {
 	dir := t.TempDir()
 	writeSchema(t, dir, "base.yammm", "schema \"base\"\n\ntype Organization {\n\tname String primary\n}\n")
 	writeSchema(t, dir, "derived.yammm", "schema \"derived\"\n\nimport \"./base\" as base\n\ntype Person {\n\tname String primary\n\t--> EMPLOYER (_:one) base.Organization\n}\n")
-	derived, res := schema.Load(t.Context(), filepath.Join(dir, "derived.yammm"), schema.WithModuleRoot(dir))
-	if res.HasErrors() {
-		t.Fatalf("result: %v", res)
+	derived, err := schema.Load(t.Context(), filepath.Join(dir, "derived.yammm"), schema.WithModuleRoot(dir))
+	if err != nil {
+		t.Fatalf("result: %v", err)
 	}
 
 	personType, ok := derived.Type("Person")
@@ -426,9 +428,9 @@ func TestImportPath_RelativeImportBindsItsFile(t *testing.T) {
 	dir := t.TempDir()
 	writeSchema(t, dir, "helper.yammm", "schema \"helper\"\n\ntype Base {\n\tid UUID primary\n}\n")
 	writeSchema(t, dir, "main.yammm", "schema \"main\"\n\nimport \"./helper\" as helper\n\ntype Person extends helper.Base {\n\tname String required\n}\n")
-	s, res := schema.Load(t.Context(), filepath.Join(dir, "main.yammm"), schema.WithModuleRoot(dir))
-	if res.HasErrors() {
-		t.Fatalf("result: %v", res)
+	s, err := schema.Load(t.Context(), filepath.Join(dir, "main.yammm"), schema.WithModuleRoot(dir))
+	if err != nil {
+		t.Fatalf("result: %v", err)
 	}
 
 	imports := slices.Collect(s.Imports())
@@ -459,8 +461,8 @@ func TestImportPath_RelativeImportBesideALinkOfItsBareName(t *testing.T) {
 	writeSchema(t, dir, "main.yammm", "schema \"main\"\n\nimport \"./helper\" as helper\n\ntype Person extends helper.Base {\n}\n")
 
 	mainSchema, res := schema.Load(t.Context(), filepath.Join(dir, "main.yammm"), schema.WithModuleRoot(dir))
-	if res.HasErrors() {
-		t.Fatal(res.Err())
+	if res != nil {
+		t.Fatal(res)
 	}
 	got := slices.Collect(mainSchema.Imports())[0].ResolvedSourceID()
 	want, err := location.SourceIDFromPath(canonicalPath(t, filepath.Join(dir, "helper.yammm")))
@@ -475,14 +477,14 @@ func TestImportPath_RelativeImportBesideALinkOfItsBareName(t *testing.T) {
 func TestImportPath_RelativeImportNotFound(t *testing.T) {
 	dir := t.TempDir()
 	writeSchema(t, dir, "main.yammm", "schema \"main\"\n\nimport \"./nonexistent\" as alias\n\ntype Person {\n\tname String primary\n}\n")
-	s, res := schema.Load(t.Context(), filepath.Join(dir, "main.yammm"), schema.WithModuleRoot(dir))
-	if !res.HasErrors() {
-		t.Fatalf("res.HasErrors() is false")
+	s, err := schema.Load(t.Context(), filepath.Join(dir, "main.yammm"), schema.WithModuleRoot(dir))
+	if err == nil {
+		t.Fatal("the load of a missing import returned no error")
 	}
 	if !s.IsZero() {
 		t.Errorf("s.IsZero() is false")
 	}
-	if !res.HasCode(diag.E_IMPORT_RESOLVE) {
+	if !errors.Is(err, diag.E_IMPORT_RESOLVE) {
 		t.Errorf("should emit E_IMPORT_RESOLVE when import not found")
 	}
 }
@@ -496,7 +498,7 @@ func TestImportPath_ParentDirectoryImport(t *testing.T) {
 	writeSchema(t, dir, "helper.yammm", "schema \"helper\"\n\ntype Base {\n\tid UUID primary\n}\n")
 	writeSchema(t, sub, "main.yammm", "schema \"main\"\n\nimport \"../helper\" as helper\n\ntype Person extends helper.Base {\n\tname String required\n}\n")
 	s, res := schema.Load(t.Context(), filepath.Join(sub, "main.yammm"), schema.WithModuleRoot(dir))
-	if res.HasErrors() {
+	if res != nil {
 		t.Fatalf("result: %v", res)
 	}
 	if s.IsZero() {
@@ -509,7 +511,9 @@ func TestImportPath_TwoSpellingsOfOneFileAreADuplicateImport(t *testing.T) {
 	dir := t.TempDir()
 	writeSchema(t, dir, "common.yammm", "schema \"common\"\n\ntype Base {\n\tid UUID primary\n}\n")
 	writeSchema(t, dir, "main.yammm", "schema \"main\"\n\nimport \"./common\" as a\nimport \"./common.yammm\" as b\n\ntype Person {\n\tname String primary\n}\n")
-	s, res := schema.Load(t.Context(), filepath.Join(dir, "main.yammm"), schema.WithModuleRoot(dir))
+	s, res := diagtest.Capture(t, func(warn func(diag.Issue)) (schema.Schema, error) {
+		return schema.Load(t.Context(), filepath.Join(dir, "main.yammm"), schema.WithModuleRoot(dir), schema.WithWarnings(warn))
+	})
 	if !s.IsZero() {
 		t.Fatalf("schema should be zero when duplicate imports are detected")
 	}

@@ -55,14 +55,16 @@ func TestAddOrMerge_ListingsOfOneKeyCostLinearTime(t *testing.T) {
 			g := graph.New(s)
 			if targetsFirst {
 				for _, target := range targets(t, s, n) {
-					mustOK(t, g.Add(ctx, target))
+					if err := g.Add(ctx, target); err != nil {
+						t.Fatal(err)
+					}
 				}
 			}
 			merges := listings(t, s, n)
 			start := costratio.CPUTime(t)
 			for _, listing := range merges {
-				if _, res := g.AddOrMerge(ctx, listing); res.HasErrors() {
-					t.Fatal(res)
+				if _, err := g.AddOrMerge(ctx, listing); err != nil {
+					t.Fatal(err)
 				}
 			}
 			return costratio.CPUTime(t) - start
@@ -83,14 +85,16 @@ func TestAdd_ResolvingAMergedSourcesForwardReferencesCostsLinearTime(t *testing.
 	ratio := costratio.Ratio(t, 2000, func(n int) time.Duration {
 		g := graph.New(s)
 		for _, listing := range listings(t, s, n) {
-			if _, res := g.AddOrMerge(ctx, listing); res.HasErrors() {
-				t.Fatal(res)
+			if _, err := g.AddOrMerge(ctx, listing); err != nil {
+				t.Fatal(err)
 			}
 		}
 		adds := targets(t, s, n)
 		start := costratio.CPUTime(t)
 		for _, target := range adds {
-			mustOK(t, g.Add(ctx, target))
+			if err := g.Add(ctx, target); err != nil {
+				t.Fatal(err)
+			}
 		}
 		return costratio.CPUTime(t) - start
 	})

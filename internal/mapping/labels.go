@@ -67,15 +67,16 @@ func (l Labels) LabeledTypes(s schema.Schema) iter.Seq2[schema.Type, string] {
 // rule, one [InvalidIdentifier] per break; the package doc's Label Rule
 // section states the rule. A label setting that breaks it is reported once,
 // and nothing else is then judged; a schema name that breaks it is reported
-// once, and its types' labels are not judged.
-func (l Labels) Check(s schema.Schema) diag.Result {
+// once, and its types' labels are not judged. The breaks are returned as one
+// *[diag.ResultError], nil when there is none.
+func (l Labels) Check(s schema.Schema) error {
 	collector := diag.NewCollector(0)
 	sep := l.separator()
 	if problem := settingProblem(l.Prefix, sep); problem != "" {
 		collector.Collect(InvalidIdentifierIssue(
 			fmt.Sprintf("label prefix %q and separator %q compose no node label: %s", l.Prefix, sep, problem),
 			IdentifierSubject{}, problem).Build())
-		return collector.Result()
+		return collector.Err()
 	}
 	for member := range s.Closure() {
 		name := member.Name()
@@ -103,7 +104,7 @@ func (l Labels) Check(s schema.Schema) diag.Result {
 			}
 		}
 	}
-	return collector.Result()
+	return collector.Err()
 }
 
 // settingProblem returns why a label prefix and separator compose no label,

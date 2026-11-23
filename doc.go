@@ -49,12 +49,14 @@
 //
 //	import "github.com/simon-lentz/yammm/schema"
 //
-//	s, result := schema.Load(ctx, "path/to/schema.yammm")
-//	if result.HasFatal() {
-//	    // Such as an I/O failure, a cancellation, a refused option, a header that does not parse, or an internal fault
-//	}
-//	if result.HasErrors() {
-//	    // Schema compilation errors
+//	s, err := schema.Load(ctx, "path/to/schema.yammm", schema.WithWarnings(func(w diag.Issue) {
+//	    // Each warning, as the load finds it
+//	}))
+//	if re, ok := errors.AsType[*diag.ResultError](err); ok {
+//	    // Schema compilation errors; re.Result.HasFatal() reports an I/O failure,
+//	    // a cancellation, a header that does not parse, or an internal fault
+//	} else if err != nil {
+//	    // An option the load does not take
 //	}
 //
 // Instance validation:
@@ -62,11 +64,12 @@
 //	import "github.com/simon-lentz/yammm/instance"
 //
 //	validator := instance.NewValidator(s)
-//	valids, result := validator.Validate(ctx, typeName, rawInstances)
-//	if !result.OK() {
-//	    // Validation failures (type mismatch, missing required, etc.)
+//	valids, err := validator.Validate(ctx, typeName, rawInstances)
+//	if err != nil {
+//	    // Validation failures (type mismatch, missing required, etc.); a batch
+//	    // that ran still returns one entry per raw instance
 //	}
-//	// valids contains validated instances (zero entries for failed instances)
+//	// valids holds the validated instances (the zero instance where one was refused)
 //
 // Graph construction:
 //
@@ -75,13 +78,11 @@
 //	g := graph.New(s)
 //	for _, inst := range valids {
 //	    if inst.IsZero() { continue }
-//	    result := g.Add(ctx, inst)
-//	    if !result.OK() {
-//	        // Diagnostic issues (duplicate PK, etc.)
+//	    if err := g.Add(ctx, inst); err != nil {
+//	        // Diagnostic issues (duplicate PK, etc.); errors.Is(err, diag.E_DUPLICATE_PK)
 //	    }
 //	}
-//	result = g.Check(ctx)
-//	if !result.OK() {
+//	if err := g.Check(ctx); err != nil {
 //	    // An unresolved required association, or a cancellation
 //	}
 package yammm

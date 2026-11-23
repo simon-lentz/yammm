@@ -639,7 +639,7 @@ func buildVectorSchemaConstraintRich() schema.Schema {
 func TestStructuralHash_DataTypeEdgeProperty(t *testing.T) {
 	load := func(edgeProps string) schema.Schema {
 		t.Helper()
-		s, result := schema.LoadString(t.Context(), `schema "geo"
+		s, err := schema.LoadString(t.Context(), `schema "geo"
 
 type StateCode = String [2, 2]
 
@@ -653,7 +653,7 @@ type County {
 	}
 }
 `, "test.yammm")
-		require.False(t, result.HasErrors(), "load: %v", result.Err())
+		require.NoError(t, err, "load: %v", err)
 		return s
 	}
 

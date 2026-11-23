@@ -33,21 +33,21 @@ func TestRead_AcceptsTheSchemaSourceAnEarlierWriterWrote(t *testing.T) {
 	}
 	legacy = rehashDocument(t, legacy)
 
-	if _, res := snapshot.Unmarshal(ctx, legacy, s); res.HasErrors() {
-		t.Errorf("Unmarshal: %s", res)
+	if _, err := snapshot.Unmarshal(ctx, legacy, s); err != nil {
+		t.Errorf("Unmarshal: %s", err)
 	}
-	if res := snapshot.Verify(ctx, legacy, s); res.HasErrors() {
-		t.Errorf("Verify: %s", res)
+	if err := snapshot.Verify(ctx, legacy, s); err != nil {
+		t.Errorf("Verify: %s", err)
 	}
-	if _, res := snapshot.Stat(ctx, legacy); res.HasErrors() {
-		t.Errorf("Stat: %s", res)
+	if _, err := snapshot.Stat(ctx, legacy); err != nil {
+		t.Errorf("Stat: %s", err)
 	}
-	if _, res := snapshot.ReadHeader(ctx, bytes.NewReader(legacy)); res.HasErrors() {
-		t.Errorf("ReadHeader: %s", res)
+	if _, err := snapshot.ReadHeader(ctx, bytes.NewReader(legacy)); err != nil {
+		t.Errorf("ReadHeader: %s", err)
 	}
-	out, res := snapshot.UpdateMetadata(ctx, legacy, nil)
-	if res.HasErrors() {
-		t.Fatalf("UpdateMetadata: %s", res)
+	out, err := snapshot.UpdateMetadata(ctx, legacy, nil)
+	if err != nil {
+		t.Fatalf("UpdateMetadata: %s", err)
 	}
 	if !bytes.Equal(out, data) {
 		t.Errorf("UpdateMetadata wrote the header other than Marshal does:\n got:  %s\n want: %s", out, data)

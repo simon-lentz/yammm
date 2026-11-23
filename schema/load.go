@@ -35,24 +35,25 @@ func errorToFatalIssue(err error) diag.Issue {
 	return diag.NewIssue(diag.Fatal, code, err.Error()).Build()
 }
 
-// fatalResult creates a diag.Result containing a single Fatal diagnostic from an error,
-// optionally merged with a partial result that may contain earlier diagnostics.
-func fatalResult(err error, partial diag.Result) (Schema, diag.Result) {
+// fatalErr returns the error of a load that err stopped: the failures prior
+// holds, which are the load's so far, and a Fatal issue for err, which joins
+// them past loadIssueLimit since it ends the collection the limit bounds.
+func fatalErr(err, prior error) error {
 	c := diag.NewCollector(diag.NoLimit)
-	c.Merge(partial)
+	if re, ok := errors.AsType[*diag.ResultError](prior); ok {
+		c.Merge(re.Result)
+	}
 	c.Collect(errorToFatalIssue(err))
-	return Schema{}, c.Result()
+	return c.Err()
 }
 
-// issueResult creates a diag.Result carrying a single non-Fatal issue and a
-// zero Schema. It is the shape a load takes when it fails on user content
-// before any source is parsed — a malformed module-root marker, today — which
-// its author corrects, rather than the machine-level failure Fatal marks. The
-// load still stops: [Load] returns a zero Schema with this result.
-func issueResult(issue diag.Issue) diag.Result {
+// issueErr returns the error of a load that stops on one issue before any
+// source is parsed — a malformed module-root marker, today — which its author
+// corrects, rather than the machine-level failure Fatal marks.
+func issueErr(issue diag.Issue) error {
 	c := diag.NewCollector(diag.NoLimit)
 	c.Collect(issue)
-	return c.Result()
+	return c.Err()
 }
 
 // rootLoader provides sandboxed file access for imports using os.Root.
@@ -246,31 +247,33 @@ func (e *pathEscapeError) Error() string {
 // nearest ancestor holding a yammm.mod marker, else the entry's directory.
 //
 // ctx must not be nil. Passing nil will panic.
-// A non-OK result with a zero Schema indicates failure. result.HasFatal() reports
-// a load that could not start or finish — an I/O failure, a cancellation, an
-// internal fault, input a load cannot begin from, or a source whose header cannot
-// be parsed; the package documentation enumerates them.
-func Load(ctx context.Context, path string, opts ...LoadOption) (Schema, diag.Result) {
+// A load that fails returns a zero Schema and a *[diag.ResultError] holding its
+// failures, or, for an option Load does not take, an error naming it. A Fatal
+// failure is a load that could not start or finish — an I/O failure, a
+// cancellation, an internal fault, input a load cannot begin from, or a source
+// whose header cannot be parsed; the package documentation enumerates them.
+// Load takes [WithModuleRoot], [WithImportsAllowed], [CaptureSources] and
+// [WithWarnings].
+func Load(ctx context.Context, path string, opts ...Option) (Schema, error) {
 	if ctx == nil {
 		panic("schema.Load: nil context")
 	}
 
-	cfg := defaultLoadConfig()
-	applyLoadOptions(cfg, opts)
+	cfg := newLoadConfig(opts)
 	cfg.startCapture()
-	if err := rejectInMemoryOptions(cfg); err != nil {
-		return fatalResult(err, diag.Result{})
+	if err := cfg.refuse("Load", optModuleRoot, optImportsAllowed, optCaptureSources, optWarnings); err != nil {
+		return Schema{}, err
 	}
 
 	// One resolution gives the entry's identity and the host path it is read from.
 	sourceID, absPath, err := location.ResolveSourcePath(path)
 	if err != nil {
-		return fatalResult(fmt.Errorf("resolve path %q: %w", path, err), diag.Result{})
+		return Schema{}, fatalErr(fmt.Errorf("resolve path %q: %w", path, err), nil)
 	}
 
 	content, err := readSourceFile(absPath)
 	if err != nil {
-		return fatalResult(err, diag.Result{})
+		return Schema{}, fatalErr(err, nil)
 	}
 
 	// Determine module root and canonicalize for consistent path comparison.
@@ -291,7 +294,7 @@ func Load(ctx context.Context, path string, opts ...LoadOption) (Schema, diag.Re
 			// A marker the author wrote and the loader could not honour fails
 			// the load. Falling through to the entry directory would be the
 			// silently-ignored marker this mechanism exists to remove.
-			return Schema{}, issueResult(ModuleRootIssue(err))
+			return Schema{}, issueErr(ModuleRootIssue(err))
 		case found:
 			moduleRoot, rootOrigin = discovered, diag.ModuleRootDiscovered
 		default:
@@ -301,7 +304,7 @@ func Load(ctx context.Context, path string, opts ...LoadOption) (Schema, diag.Re
 		var err error
 		moduleRoot, err = hostpath.Resolve(moduleRoot)
 		if err != nil {
-			return fatalResult(fmt.Errorf("invalid module root %q: %w", cfg.moduleRoot, err), diag.Result{})
+			return Schema{}, fatalErr(fmt.Errorf("invalid module root %q: %w", cfg.moduleRoot, err), nil)
 		}
 	}
 
@@ -313,19 +316,11 @@ func Load(ctx context.Context, path string, opts ...LoadOption) (Schema, diag.Re
 	// serve no import would otherwise pass every load that imports nothing.
 	if rootOrigin == diag.ModuleRootExplicit {
 		if err := ldr.ensureRootLoader(); err != nil {
-			return fatalResult(fmt.Errorf("invalid module root %q: %w", cfg.moduleRoot, err), diag.Result{})
+			return Schema{}, fatalErr(fmt.Errorf("invalid module root %q: %w", cfg.moduleRoot, err), nil)
 		}
 	}
 
-	s, result, err := ldr.loadFile(ctx, sourceID, absPath, content)
-	if err != nil {
-		return fatalResult(err, result)
-	}
-	if s.IsZero() {
-		return Schema{}, result
-	}
-
-	return s, result
+	return ldr.finish(ldr.loadFile(ctx, sourceID, absPath, content))
 }
 
 // LoadString loads a schema from a string source.
@@ -334,52 +329,51 @@ func Load(ctx context.Context, path string, opts ...LoadOption) (Schema, diag.Re
 // sourceName. For consistent error messages, use a meaningful path-like name.
 //
 // Imports are not supported when loading from a string.
-// The loader always disallows imports for string sources, regardless of other options.
+// The loader disallows imports for string sources, and LoadString refuses
+// every option that bears on them: [WithImportsAllowed], [WithModuleRoot],
+// [WithSourcesOnly] and [WithSyntheticRoot].
 // The rejection (a single E_IMPORT_NOT_ALLOWED at the first import
 // declaration the parser keeps, which drops one with a reserved alias) does not end the analysis: it
 // continues with the rejected aliases deferred as a failed import's is, and
 // the rejected imports are never probed or resolved.
 //
 // ctx must not be nil. Passing nil will panic.
-// A non-OK result with a zero Schema indicates failure. result.HasFatal() reports
-// a load that could not start or finish — an I/O failure, a cancellation, an
-// internal fault, input a load cannot begin from, or a source whose header cannot
-// be parsed; the package documentation enumerates them.
-func LoadString(ctx context.Context, sourceCode, sourceName string, opts ...LoadOption) (Schema, diag.Result) {
+// A load that fails returns a zero Schema and a *[diag.ResultError] holding its
+// failures, or, for an option LoadString does not take, an error naming it. A
+// Fatal failure is a load that could not start or finish — an I/O failure, a
+// cancellation, an internal fault, input a load cannot begin from, or a source
+// whose header cannot be parsed; the package documentation enumerates them.
+// LoadString takes [CaptureSources] and [WithWarnings].
+func LoadString(ctx context.Context, sourceCode, sourceName string, opts ...Option) (Schema, error) {
 	if ctx == nil {
 		panic("schema.LoadString: nil context")
 	}
 
-	cfg := defaultLoadConfig()
-	applyLoadOptions(cfg, opts)
+	cfg := newLoadConfig(opts)
 	cfg.startCapture()
-	if err := rejectInMemoryOptions(cfg); err != nil {
-		return fatalResult(err, diag.Result{})
+	if err := cfg.refuse("LoadString", optCaptureSources, optWarnings); err != nil {
+		return Schema{}, err
 	}
-	cfg.disallowImports = true // Always disallow imports from string, even if user opts try to enable
+	cfg.disallowImports = true
 	if !utf8.ValidString(sourceName) {
-		return fatalResult(fmt.Errorf("source name %q: %w", sourceName, location.ErrInvalidUTF8Path), diag.Result{})
+		return Schema{}, fatalErr(fmt.Errorf("source name %q: %w", sourceName, location.ErrInvalidUTF8Path), nil)
 	}
 	sourceID, err := location.NewSourceID("string://" + sourceName)
 	if err != nil {
-		return fatalResult(fmt.Errorf("source name %q: %w", sourceName, err), diag.Result{})
+		return Schema{}, fatalErr(fmt.Errorf("source name %q: %w", sourceName, err), nil)
 	}
 
 	// Create loader and load from string. A string source has no directory,
 	// so it has no root to default to — the origin is "none", not "default".
 	ldr := newLoader(cfg, "", "", diag.ModuleRootNone)
-	s, result, err := ldr.loadSource(ctx, sourceID, []byte(sourceCode))
-	if err != nil {
-		return fatalResult(err, result)
-	}
-	return s, result
+	return ldr.finish(ldr.loadSource(ctx, sourceID, []byte(sourceCode)))
 }
 
 // LoadSourcesWithEntry loads a schema from in-memory sources with an explicit entry point.
 //
-// The sources map keys are paths, a relative one resolved under moduleRoot, under
-// the working directory when moduleRoot is empty, or under the synthetic root
-// with [WithSyntheticRoot]; values are the file
+// The sources map keys are paths, a relative one resolved under the
+// [WithModuleRoot] root, under the working directory without one, or under the
+// synthetic root with [WithSyntheticRoot]; values are the file
 // contents. The provided entryPath selects the entry point; an empty
 // entryPath falls back to sorted key order.
 //
@@ -393,41 +387,46 @@ func LoadString(ctx context.Context, sourceCode, sourceName string, opts ...Load
 // empty, the lexicographically smallest key is selected.
 //
 // ctx must not be nil. Passing nil will panic.
-// A non-OK result with a zero Schema indicates failure. result.HasFatal() reports
-// a load that could not start or finish — an I/O failure, a cancellation, an
-// internal fault, input a load cannot begin from, or a source whose header cannot
-// be parsed; the package documentation enumerates them.
-func LoadSourcesWithEntry(ctx context.Context, sources map[string][]byte, entryPath string, moduleRoot string, opts ...LoadOption) (Schema, diag.Result) {
+// A load that fails returns a zero Schema and a *[diag.ResultError] holding its
+// failures, or, for [WithSyntheticRoot] beside [WithModuleRoot], an error naming
+// both. A Fatal failure is a load that could not start or finish — an I/O
+// failure, a cancellation, an internal fault, input a load cannot begin from,
+// or a source whose header cannot be parsed; the package documentation
+// enumerates them. LoadSourcesWithEntry takes every [Option].
+func LoadSourcesWithEntry(ctx context.Context, sources map[string][]byte, entryPath string, opts ...Option) (Schema, error) {
 	if ctx == nil {
 		panic("schema.LoadSourcesWithEntry: nil context")
 	}
 
-	cfg := defaultLoadConfig()
-	applyLoadOptions(cfg, opts)
+	cfg := newLoadConfig(opts)
 	cfg.startCapture()
+	if cfg.gave(optSyntheticRoot) && cfg.gave(optModuleRoot) {
+		return Schema{}, errors.New("schema.LoadSourcesWithEntry does not take the WithSyntheticRoot option with WithModuleRoot: the synthetic root stands in for the module root")
+	}
 
 	if len(sources) == 0 {
-		return fatalResult(errors.New("no sources provided"), diag.Result{})
+		return Schema{}, fatalErr(errors.New("no sources provided"), nil)
 	}
 
-	syntheticRoot, err := normalizeSyntheticRoot(cfg, moduleRoot)
+	syntheticRoot, err := normalizeSyntheticRoot(cfg)
 	if err != nil {
-		return fatalResult(err, diag.Result{})
+		return Schema{}, fatalErr(err, nil)
 	}
 
-	// Resolve moduleRoot, so a relative key joins the host path every identity
-	// under the root is resolved from.
+	// Resolve the module root, so a relative key joins the host path every
+	// identity under the root is resolved from.
+	moduleRoot := cfg.moduleRoot
 	if moduleRoot != "" {
 		canonical, err := hostpath.Resolve(moduleRoot)
 		if err != nil {
-			return fatalResult(fmt.Errorf("invalid module root %q: %w", moduleRoot, err), diag.Result{})
+			return Schema{}, fatalErr(fmt.Errorf("invalid module root %q: %w", moduleRoot, err), nil)
 		}
 		moduleRoot = canonical
 	}
 
-	// Create loader. The moduleRoot argument is "explicit" whatever produced
+	// Create loader. A root given to this load is "explicit" whatever produced
 	// it: a root the caller discovered before calling arrives here as a plain
-	// argument, and the loader has no way to know its provenance.
+	// option, and the loader has no way to know its provenance.
 	rootOrigin := diag.ModuleRootNone
 	switch {
 	case syntheticRoot != "":
@@ -446,15 +445,15 @@ func LoadSourcesWithEntry(ctx context.Context, sources map[string][]byte, entryP
 		content := sources[path]
 		sourceID, hostPath, err := ldr.inMemorySource(path)
 		if err != nil {
-			return fatalResult(fmt.Errorf("invalid path %q: %w", path, err), diag.Result{})
+			return Schema{}, fatalErr(fmt.Errorf("invalid path %q: %w", path, err), nil)
 		}
 		if other, dup := keyOf[sourceID]; dup {
-			return fatalResult(fmt.Errorf("source keys %q and %q name one source, %s", other, path, sourceID), diag.Result{})
+			return Schema{}, fatalErr(fmt.Errorf("source keys %q and %q name one source, %s", other, path, sourceID), nil)
 		}
 		keyOf[sourceID] = path
 
 		if err := ldr.sourceRegistry.Register(sourceID, content); err != nil {
-			return fatalResult(fmt.Errorf("register source %q: %w", path, err), diag.Result{})
+			return Schema{}, fatalErr(fmt.Errorf("register source %q: %w", path, err), nil)
 		}
 
 		ldr.sourceContent[sourceID] = content
@@ -477,23 +476,28 @@ func LoadSourcesWithEntry(ctx context.Context, sources map[string][]byte, entryP
 	// entry lookup hits the just-registered content.
 	sourceID, err := ldr.inMemorySourceID(selectedEntry)
 	if err != nil {
-		return fatalResult(fmt.Errorf("invalid entry path %q: %w", selectedEntry, err), diag.Result{})
+		return Schema{}, fatalErr(fmt.Errorf("invalid entry path %q: %w", selectedEntry, err), nil)
 	}
 
 	content, ok := ldr.sourceContent[sourceID]
 	if !ok {
-		return fatalResult(fmt.Errorf("entry path %q not found in sources", selectedEntry), diag.Result{})
+		return Schema{}, fatalErr(fmt.Errorf("entry path %q not found in sources", selectedEntry), nil)
 	}
 
-	s, result, err := ldr.loadSource(ctx, sourceID, content)
+	return ldr.finish(ldr.loadSource(ctx, sourceID, content))
+}
+
+// finish returns a load's outcome from its entry schema and the error that
+// stopped it, which carries only a cancellation: the zero Schema and the
+// failures the load collected, or s.
+func (l *loader) finish(s Schema, err error) (Schema, error) {
 	if err != nil {
-		return fatalResult(err, result)
+		return Schema{}, fatalErr(err, l.collector.Err())
 	}
-	if s.IsZero() {
-		return Schema{}, result
+	if err := l.collector.Err(); err != nil {
+		return Schema{}, err
 	}
-
-	return s, result
+	return s, nil
 }
 
 // importBinding records one import alias's resolution within a single schema
@@ -540,6 +544,8 @@ func newLoader(cfg *loadConfig, moduleRoot, syntheticRoot, rootOrigin string) *l
 	if sourceReg == nil {
 		sourceReg = source.NewRegistry()
 	}
+	collector := diag.NewCollector(loadIssueLimit)
+	collector.RouteWarnings(cfg.warnings)
 
 	return &loader{
 		cfg:             cfg,
@@ -547,7 +553,7 @@ func newLoader(cfg *loadConfig, moduleRoot, syntheticRoot, rootOrigin string) *l
 		rootOrigin:      rootOrigin,
 		syntheticRoot:   syntheticRoot,
 		sourceRegistry:  sourceReg,
-		collector:       diag.NewCollector(loadIssueLimit),
+		collector:       collector,
 		disallowImports: cfg.disallowImports,
 		sourceContent:   make(map[location.SourceID][]byte),
 		loadedSchemas:   make(map[location.SourceID]Schema),
@@ -594,12 +600,12 @@ func (l *loader) Close() error {
 }
 
 // loadFile loads a schema from a file path.
-func (l *loader) loadFile(ctx context.Context, sourceID location.SourceID, absPath string, content []byte) (Schema, diag.Result, error) {
+func (l *loader) loadFile(ctx context.Context, sourceID location.SourceID, absPath string, content []byte) (Schema, error) {
 	// Register the source content
 	if err := l.sourceRegistry.Register(sourceID, content); err != nil {
 		l.collector.Collect(diag.NewIssue(diag.Fatal, diag.E_INTERNAL,
 			fmt.Sprintf("register source %q: %v", absPath, err)).Build())
-		return Schema{}, l.collector.Result(), nil
+		return Schema{}, nil
 	}
 
 	l.sourceContent[sourceID] = content
@@ -608,8 +614,9 @@ func (l *loader) loadFile(ctx context.Context, sourceID location.SourceID, absPa
 	return l.loadSource(ctx, sourceID, content)
 }
 
-// loadSource loads a schema from source content.
-func (l *loader) loadSource(ctx context.Context, sourceID location.SourceID, content []byte) (Schema, diag.Result, error) {
+// loadSource loads a schema from source content. The error carries only a
+// cancellation; every other failure is collected.
+func (l *loader) loadSource(ctx context.Context, sourceID location.SourceID, content []byte) (Schema, error) {
 	l.loadingSchemas[sourceID] = true
 
 	// Ensure loadingSchemas marker is always cleaned up on exit.
@@ -621,7 +628,7 @@ func (l *loader) loadSource(ctx context.Context, sourceID location.SourceID, con
 	// Check for cancellation before starting expensive work (/19)
 	// Per, cancellation is returned as error, not collected as diagnostic.
 	if err := ctx.Err(); err != nil {
-		return Schema{}, l.collector.Result(), fmt.Errorf("load cancelled: %w", err)
+		return Schema{}, fmt.Errorf("load cancelled: %w", err)
 	}
 
 	// The collector is shared across the whole Load call, so "any errors
@@ -651,7 +658,7 @@ func (l *loader) loadSource(ctx context.Context, sourceID location.SourceID, con
 		if err := l.sourceRegistry.Register(sourceID, content); err != nil {
 			l.collector.Collect(diag.NewIssue(diag.Fatal, diag.E_INTERNAL,
 				fmt.Sprintf("register source %s: %v", sourceID, err)).Build())
-			return Schema{}, l.collector.Result(), nil
+			return Schema{}, nil
 		}
 		l.sourceContent[sourceID] = content
 	}
@@ -661,7 +668,7 @@ func (l *loader) loadSource(ctx context.Context, sourceID location.SourceID, con
 	m := parser.Parse(content)
 
 	if m == nil {
-		return Schema{}, l.collector.Result(), nil
+		return Schema{}, nil
 	}
 
 	// When the load context structurally disallows imports, the rejection
@@ -678,7 +685,7 @@ func (l *loader) loadSource(ctx context.Context, sourceID location.SourceID, con
 	if l.rejectDisallowedImports(m) {
 		l.markUnboundImportsFailed(m.Imports)
 	} else if err := l.loadImports(ctx, sourceID, m); err != nil {
-		return Schema{}, l.collector.Result(), err // propagate cancellation
+		return Schema{}, err // propagate cancellation
 	}
 
 	// Build the completion map from the loader's bindings: a successful import
@@ -700,7 +707,7 @@ func (l *loader) loadSource(ctx context.Context, sourceID location.SourceID, con
 	s := completeModel(m, sourceID, l.collector, l.loadedSchemas, resolvedImports)
 
 	if s.IsZero() {
-		return Schema{}, l.collector.Result(), nil
+		return Schema{}, nil
 	}
 
 	// The completer builds an Import only for an alias the loader bound, and a
@@ -714,14 +721,14 @@ func (l *loader) loadSource(ctx context.Context, sourceID location.SourceID, con
 	// error-delta against the entry snapshot; errors collected before this
 	// schema began belong to siblings and do not poison it).
 	if gate.tripped() {
-		return Schema{}, l.collector.Result(), nil
+		return Schema{}, nil
 	}
 
 	// A load holds one schema per name, so an import closure does too. A schema
 	// already failed takes no name, so it draws no report of one.
 	if prior, taken := l.schemaByName[s.Name()]; taken {
 		l.collector.Collect(duplicateSchemaIssue(s, prior))
-		return Schema{}, l.collector.Result(), nil
+		return Schema{}, nil
 	}
 
 	// Attach sources for diagnostics rendering and record the load's
@@ -744,7 +751,7 @@ func (l *loader) loadSource(ctx context.Context, sourceID location.SourceID, con
 	l.loadedSchemas[sourceID] = s
 	l.schemaByName[s.Name()] = s
 
-	return s, l.collector.Result(), nil
+	return s, nil
 }
 
 // duplicateSchemaIssue reports s, at its declaration, as a second schema of the
@@ -1017,7 +1024,7 @@ func (l *loader) loadImport(ctx context.Context, sourceID location.SourceID, imp
 	}
 
 	// Recursively load the imported schema
-	s, _, err := l.loadSource(ctx, importSourceID, content)
+	s, err := l.loadSource(ctx, importSourceID, content)
 	if err != nil {
 		return err // propagate cancellation
 	}
@@ -1217,11 +1224,11 @@ func (l *loader) inMemorySource(key string) (location.SourceID, string, error) {
 	return id, host, nil
 }
 
-// normalizeSyntheticRoot validates cfg's synthetic root against the load it was
-// given to and returns the value the derivation sites use, or "" when the
-// option was not passed. A root makes the load sources-only: it names every
-// identity the load mints, so the given sources are every source it reads.
-func normalizeSyntheticRoot(cfg *loadConfig, moduleRoot string) (string, error) {
+// normalizeSyntheticRoot validates cfg's synthetic root and returns the value
+// the derivation sites use, or "" when the option was not passed. A root makes
+// the load sources-only: it names every identity the load mints, so the given
+// sources are every source it reads.
+func normalizeSyntheticRoot(cfg *loadConfig) (string, error) {
 	if !cfg.syntheticRootSet {
 		return "", nil
 	}
@@ -1230,10 +1237,6 @@ func normalizeSyntheticRoot(cfg *loadConfig, moduleRoot string) (string, error) 
 		return "", fmt.Errorf("invalid synthetic root %q: %w", cfg.syntheticRoot, err)
 	}
 	cfg.sourcesOnly = true
-	if moduleRoot != "" {
-		return "", fmt.Errorf("synthetic root %q cannot be combined with module root %q: "+
-			"pass an empty module root, which the synthetic root stands in for", cfg.syntheticRoot, moduleRoot)
-	}
 	return root, nil
 }
 
@@ -1327,17 +1330,4 @@ func isURIScheme(s string) bool {
 
 func isASCIILetter(c byte) bool {
 	return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
-}
-
-// rejectInMemoryOptions refuses on Load and LoadString the two options only
-// LoadSourcesWithEntry serves: under WithSourcesOnly an import of Load fails as
-// not pre-registered, and on LoadString either option is a silent no-op.
-func rejectInMemoryOptions(cfg *loadConfig) error {
-	switch {
-	case cfg.syntheticRootSet:
-		return errors.New("WithSyntheticRoot applies to LoadSourcesWithEntry only")
-	case cfg.sourcesOnly:
-		return errors.New("WithSourcesOnly applies to LoadSourcesWithEntry only")
-	}
-	return nil
 }

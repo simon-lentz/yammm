@@ -11,6 +11,7 @@ import (
 	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
 
+	"github.com/simon-lentz/yammm/internal/diagtest"
 	"github.com/simon-lentz/yammm/internal/lsp/internal/analysis"
 	"github.com/simon-lentz/yammm/internal/lsp/internal/docstate"
 	"github.com/simon-lentz/yammm/internal/lsp/internal/lsputil"
@@ -117,8 +118,8 @@ func buildTestSnapshot(t *testing.T) (*analysis.Snapshot, *docstate.Snapshot) {
 
 	const content = "schema \"test\"\n\ntype Person {\n\tname String primary\n}\n"
 
-	s, result := schema.LoadString(t.Context(), content, "test.yammm")
-	require.True(t, result.OK(), "schema should parse without errors: %v", result)
+	s, err := schema.LoadString(t.Context(), content, "test.yammm")
+	require.NoError(t, err, "schema should parse without errors: %v", err)
 
 	reg := lsputil.NewTexts()
 	require.NoError(t, reg.Register(s.SourceID(), []byte(content)))
@@ -193,11 +194,11 @@ func buildCrossSchemaSnapshotOf(t *testing.T, entryContent string) (*analysis.Sn
 		entryPath: []byte(entryContent),
 	}
 
-	snapshot, err := analyzer.Analyze(t.Context(), entryPath, overlays, tmpDir)
+	snapshot, err := analyzer.Analyze(t.Context(), entryPath, overlays, tmpDir, true)
 	require.NoError(t, err)
 	require.NotNil(t, snapshot)
 	require.False(t, snapshot.Schema.IsZero(), "schema should parse successfully")
-	require.True(t, snapshot.Result.OK(), "schema should have no errors")
+	require.NoError(t, diagtest.Err(snapshot.Result), "schema should have no errors")
 
 	entrySourceID, err := location.SourceIDFromPath(entryPath)
 	require.NoError(t, err)

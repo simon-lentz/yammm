@@ -18,7 +18,7 @@ import (
 // importTestSchema creates a schema with Person (→EMPLOYER→ Company) and Company.
 func importTestSchema(t *testing.T) schema.Schema {
 	t.Helper()
-	s, result := schema.LoadString(t.Context(), `schema "import_test"
+	s, err := schema.LoadString(t.Context(), `schema "import_test"
 
 type Person {
 	id String primary
@@ -31,8 +31,8 @@ type Company {
 	title String required
 }
 `, "import.yammm")
-	if result.HasErrors() {
-		t.Fatalf("importTestSchema: %s", result)
+	if err != nil {
+		t.Fatalf("importTestSchema: %s", err)
 	}
 	return s
 }
@@ -40,7 +40,7 @@ type Company {
 // importTestSchemaRequired creates a schema with required EMPLOYER relation.
 func importTestSchemaRequired(t *testing.T) schema.Schema {
 	t.Helper()
-	s, result := schema.LoadString(t.Context(), `schema "import_test_req"
+	s, err := schema.LoadString(t.Context(), `schema "import_test_req"
 
 type Person {
 	id String primary
@@ -53,8 +53,8 @@ type Company {
 	title String required
 }
 `, "import_req.yammm")
-	if result.HasErrors() {
-		t.Fatalf("importTestSchemaRequired: %s", result)
+	if err != nil {
+		t.Fatalf("importTestSchemaRequired: %s", err)
 	}
 	return s
 }
@@ -81,8 +81,8 @@ func TestNewFromSnapshot_EmptySnapshot(t *testing.T) {
 
 	// Add a new instance to the imported graph.
 	company := mustValidInstance(t, s, "Company", []any{"c1"}, map[string]any{"id": "c1", "title": "Acme"})
-	result := g.Add(ctx, company)
-	assert.True(t, result.OK())
+	err := g.Add(ctx, company)
+	require.NoError(t, err)
 
 	reSnap := g.Snapshot()
 	assert.Len(t, slices.Collect(reSnap.InstancesOf(mustTypeID(t, s, "Company"))), 1)
@@ -148,8 +148,8 @@ func TestNewFromSnapshot_UnresolvedTargetMissing(t *testing.T) {
 	g := graph.NewFromSnapshot(snap)
 	ctx := context.Background()
 	company := mustValidInstance(t, s, "Company", []any{"c1"}, map[string]any{"id": "c1", "title": "Acme"})
-	result := g.Add(ctx, company)
-	assert.True(t, result.OK())
+	err := g.Add(ctx, company)
+	require.NoError(t, err)
 
 	reSnap := g.Snapshot()
 
@@ -219,8 +219,8 @@ func TestNewFromSnapshot_AddAfterImport_NewType(t *testing.T) {
 
 	// Add a Company — a type not in the original snapshot.
 	company := mustValidInstance(t, s, "Company", []any{"c1"}, map[string]any{"id": "c1", "title": "Acme"})
-	result := g.Add(ctx, company)
-	assert.True(t, result.OK())
+	err := g.Add(ctx, company)
+	require.NoError(t, err)
 
 	reSnap := g.Snapshot()
 	assert.Len(t, slices.Collect(reSnap.InstancesOf(mustTypeID(t, s, "Person"))), 1)
@@ -239,8 +239,8 @@ func TestNewFromSnapshot_AddAfterImport_DuplicatePK(t *testing.T) {
 
 	// Add another Company with same PK → should be flagged as duplicate.
 	dup := mustValidInstance(t, s, "Company", []any{"c1"}, map[string]any{"id": "c1", "title": "Beta"})
-	result := g.Add(ctx, dup)
-	assert.True(t, result.HasErrors()) // E_DUPLICATE_PK is an error
+	err := g.Add(ctx, dup)
+	require.Error(t, err) // E_DUPLICATE_PK is an error
 
 	reSnap := g.Snapshot()
 	assert.Len(t, slices.Collect(reSnap.InstancesOf(mustTypeID(t, s, "Company"))), 1)
@@ -259,8 +259,8 @@ func TestNewFromSnapshot_AddAfterImport_EdgeResolution(t *testing.T) {
 
 	// Add Person with edge to imported Company.
 	person := mustValidInstanceWithEdge(t, s, "Person", []any{"p1"}, map[string]any{"id": "p1", "name": "Alice"}, "EMPLOYER", [][]any{{"c1"}})
-	result := g.Add(ctx, person)
-	assert.True(t, result.OK())
+	err := g.Add(ctx, person)
+	require.NoError(t, err)
 
 	reSnap := g.Snapshot()
 	assert.Len(t, slices.Collect(reSnap.Edges()), 1)
@@ -281,8 +281,8 @@ func TestNewFromSnapshot_CrossResolution(t *testing.T) {
 	g := graph.NewFromSnapshot(snap)
 	ctx := context.Background()
 	company := mustValidInstance(t, s, "Company", []any{"c1"}, map[string]any{"id": "c1", "title": "Acme"})
-	result := g.Add(ctx, company)
-	assert.True(t, result.OK())
+	err := g.Add(ctx, company)
+	require.NoError(t, err)
 
 	reSnap := g.Snapshot()
 	assert.Len(t, slices.Collect(reSnap.Edges()), 1, "pending edge should be resolved")
@@ -320,7 +320,9 @@ func TestNewFromSnapshot_Independence(t *testing.T) {
 
 	// Add a new instance to the graph.
 	person := mustValidInstance(t, s, "Person", []any{"p1"}, map[string]any{"id": "p1", "name": "Alice"})
-	g.Add(ctx, person)
+	if err := g.Add(ctx, person); err != nil {
+		t.Errorf("Add: %v", err)
+	}
 
 	// Original snapshot should be unaffected.
 	assert.Empty(t, slices.Collect(snap.InstancesOf(mustTypeID(t, s, "Person"))), "original snapshot should not be modified")

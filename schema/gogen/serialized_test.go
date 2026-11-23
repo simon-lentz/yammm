@@ -18,9 +18,9 @@ func loadFixture(t *testing.T, name string) schema.Schema {
 	if err != nil {
 		t.Fatalf("abs path: %v", err)
 	}
-	s, res := schema.Load(t.Context(), path)
-	if res.HasErrors() {
-		t.Fatalf("load %s: %v", name, res.Err())
+	s, loadErr := schema.Load(t.Context(), path)
+	if loadErr != nil {
+		t.Fatalf("load %s: %v", name, loadErr)
 	}
 	return s
 }

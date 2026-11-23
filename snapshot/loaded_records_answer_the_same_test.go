@@ -6,9 +6,11 @@ import (
 	"slices"
 	"testing"
 
+	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/instance"
+	"github.com/simon-lentz/yammm/internal/diagtest"
 	"github.com/simon-lentz/yammm/internal/instancetest"
 	"github.com/simon-lentz/yammm/internal/recordtest"
 	"github.com/simon-lentz/yammm/internal/yammmtest"
@@ -48,17 +50,17 @@ type Order {
 func loadedRecordsSnapshot(t *testing.T) graph.Snapshot {
 	t.Helper()
 	ctx := t.Context()
-	s, res := schema.LoadString(ctx, loadedRecordsSource, "records.yammm")
-	if res.HasErrors() {
-		t.Fatal(res)
+	s, err := schema.LoadString(ctx, loadedRecordsSource, "records.yammm")
+	if err != nil {
+		t.Fatal(err)
 	}
 	v := instance.NewValidator(s)
 	g := graph.New(s)
 	add := func(typ string, props map[string]any) {
 		t.Helper()
-		valid, res := v.ValidateOne(ctx, typ, instance.RawInstance{Properties: props})
-		if !res.OK() {
-			t.Fatal(res)
+		valid, err := v.ValidateOne(ctx, typ, instance.RawInstance{Properties: props})
+		if err != nil {
+			t.Fatal(err)
 		}
 		_ = g.Add(ctx, valid)
 	}
@@ -116,13 +118,13 @@ func composedWalk(t *testing.T, snap graph.Snapshot) [][]string {
 func TestLoad_EveryRecordAccessorAnswersAsTheBuiltSnapshot(t *testing.T) {
 	ctx := t.Context()
 	built := loadedRecordsSnapshot(t)
-	data, res := snapshot.Marshal(ctx, built)
-	if res.HasErrors() {
-		t.Fatal(res)
+	data, err := snapshot.Marshal(ctx, built)
+	if err != nil {
+		t.Fatal(err)
 	}
-	loaded, res := snapshot.Unmarshal(ctx, data, built.Schema())
-	if res.HasErrors() {
-		t.Fatal(res)
+	loaded, err := snapshot.Unmarshal(ctx, data, built.Schema())
+	if err != nil {
+		t.Fatal(err)
 	}
 
 	yammmtest.Diff(t, recordtest.Walk(built, loadedRecordsOptions()), recordtest.Walk(loaded, loadedRecordsOptions()))
@@ -224,8 +226,10 @@ type Office {
 // so this fixture holds the same answers over the path [loadedRecordsSource] skips.
 func TestLoad_TypedValuesAnswerAsTheBuiltSnapshot(t *testing.T) {
 	ctx := t.Context()
-	s, res := schema.LoadString(ctx, typedRecordsSource, "typed.yammm")
-	if res.HasErrors() {
+	s, res := diagtest.Capture(t, func(warn func(diag.Issue)) (schema.Schema, error) {
+		return schema.LoadString(ctx, typedRecordsSource, "typed.yammm", schema.WithWarnings(warn))
+	})
+	if diagtest.Err(res) != nil {
 		t.Fatal(res)
 	}
 	const company = "9b2e1c70-6f0a-4f11-8a2d-0d6b4c1f7e10"
@@ -233,12 +237,12 @@ func TestLoad_TypedValuesAnswerAsTheBuiltSnapshot(t *testing.T) {
 	g := graph.New(s)
 	add := func(typ string, props map[string]any) {
 		t.Helper()
-		valid, res := v.ValidateOne(ctx, typ, instance.RawInstance{Properties: props})
-		if !res.OK() {
-			t.Fatal(res)
+		valid, err := v.ValidateOne(ctx, typ, instance.RawInstance{Properties: props})
+		if err != nil {
+			t.Fatal(err)
 		}
-		if res := g.Add(ctx, valid); res.HasErrors() {
-			t.Fatal(res)
+		if err := g.Add(ctx, valid); err != nil {
+			t.Fatal(err)
 		}
 	}
 	add("Company", map[string]any{
@@ -253,12 +257,16 @@ func TestLoad_TypedValuesAnswerAsTheBuiltSnapshot(t *testing.T) {
 	add("Office", map[string]any{"id": "o2", "housed_by": map[string]any{"_target_id": "9b2e1c70-6f0a-4f11-8a2d-0d6b4c1f7e11"}})
 	built := g.Snapshot()
 
-	data, res := snapshot.Marshal(ctx, built)
-	if res.HasErrors() {
+	data, res := diagtest.Issues(t, func() ([]byte, error) {
+		return snapshot.Marshal(ctx, built)
+	})
+	if diagtest.Err(res) != nil {
 		t.Fatal(res)
 	}
-	loaded, res := snapshot.Unmarshal(ctx, data, s)
-	if res.HasErrors() {
+	loaded, res := diagtest.Capture(t, func(warn func(diag.Issue)) (graph.Snapshot, error) {
+		return snapshot.Unmarshal(ctx, data, s, snapshot.WithWarnings(warn))
+	})
+	if diagtest.Err(res) != nil {
 		t.Fatal(res)
 	}
 	yammmtest.Diff(t, recordtest.Walk(built, loadedRecordsOptions()), recordtest.Walk(loaded, loadedRecordsOptions()))
@@ -290,24 +298,28 @@ func TestSnapshot_AnEarlyBreakStopsEachIterator(t *testing.T) {
 
 func TestAdd_AnEdgeWithNoPropertyHoldsTheZeroProperties(t *testing.T) {
 	ctx := t.Context()
-	s, res := schema.LoadString(ctx, loadedRecordsSource, "records.yammm")
-	if res.HasErrors() {
+	s, res := diagtest.Capture(t, func(warn func(diag.Issue)) (schema.Schema, error) {
+		return schema.LoadString(ctx, loadedRecordsSource, "records.yammm", schema.WithWarnings(warn))
+	})
+	if diagtest.Err(res) != nil {
 		t.Fatal(res)
 	}
-	company, res := instance.NewValidator(s).ValidateOne(ctx, "Company", instance.RawInstance{
-		Properties: map[string]any{"id": "c1", "name": "n"},
+	company, res := diagtest.Issues(t, func() (instance.ValidInstance, error) {
+		return instance.NewValidator(s).ValidateOne(ctx, "Company", instance.RawInstance{
+			Properties: map[string]any{"id": "c1", "name": "n"},
+		})
 	})
-	if !res.OK() {
+	if diagtest.Err(res) != nil {
 		t.Fatal(res)
 	}
 	g := graph.New(s)
-	if res := g.Add(ctx, company); res.HasErrors() {
-		t.Fatal(res)
+	if err := g.Add(ctx, company); err != nil {
+		t.Fatal(err)
 	}
 	target := map[string]any{"_target_id": "c1"}
 	inst := instancetest.Valid(t, s, "Order", map[string]any{"id": "o1", "placed_by": target, "audited_by": target})
-	if res := g.Add(ctx, inst); res.HasErrors() {
-		t.Fatal(res)
+	if err := g.Add(ctx, inst); err != nil {
+		t.Fatal(err)
 	}
 	var edges int
 	for e := range g.Snapshot().Edges() {

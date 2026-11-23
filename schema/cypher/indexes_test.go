@@ -2,12 +2,14 @@ package cypher
 
 import (
 	"context"
+	"errors"
 	"maps"
 	"slices"
 	"strings"
 	"testing"
 
 	"github.com/simon-lentz/yammm/diag"
+	"github.com/simon-lentz/yammm/internal/diagtest"
 	"github.com/simon-lentz/yammm/internal/yammmtest"
 	"github.com/simon-lentz/yammm/schema"
 )
@@ -20,8 +22,8 @@ import (
 func TestIndexes_Metadata(t *testing.T) {
 	t.Parallel()
 	s := loadSchema(t, "indexes.yammm")
-	indexes, result := Config{}.Indexes(s)
-	if err := result.Err(); err != nil {
+	indexes, genErr := Config{}.Indexes(s)
+	if err := genErr; err != nil {
 		t.Fatalf("Indexes: %v", err)
 	}
 
@@ -102,8 +104,8 @@ func TestIndexes_Metadata(t *testing.T) {
 func TestIndexes_Golden(t *testing.T) {
 	t.Parallel()
 	s := loadSchema(t, "indexes.yammm")
-	stmts, result := indexStatements(Config{}, s)
-	if err := result.Err(); err != nil {
+	stmts, result := indexStatements(t, Config{}, s)
+	if err := diagtest.Err(result); err != nil {
 		t.Fatalf("Indexes: %v", err)
 	}
 	yammmtest.Golden(t, "indexes_all", []byte(strings.Join(stmts, "\n")+"\n"))
@@ -121,13 +123,13 @@ func TestIndexes_DeterministicAcrossLoads(t *testing.T) {
 	t.Parallel()
 	a := Config{}
 
-	first, r1 := indexStatements(a, loadSchema(t, "indexes.yammm"))
-	if err := r1.Err(); err != nil {
+	first, r1 := indexStatements(t, a, loadSchema(t, "indexes.yammm"))
+	if err := diagtest.Err(r1); err != nil {
 		t.Fatalf("first load: %v", err)
 	}
 	for i := range 5 {
-		next, r := indexStatements(a, loadSchema(t, "indexes.yammm"))
-		if err := r.Err(); err != nil {
+		next, r := indexStatements(t, a, loadSchema(t, "indexes.yammm"))
+		if err := diagtest.Err(r); err != nil {
 			t.Fatalf("load %d: %v", i+2, err)
 		}
 		if !slices.Equal(first, next) {
@@ -145,9 +147,9 @@ func TestIndexes_DeterministicAcrossLoads(t *testing.T) {
 func TestIndexes_CollidingNamesAreDisambiguated(t *testing.T) {
 	t.Parallel()
 	s := loadSchema(t, "indexes_collision.yammm")
-	indexes, result := Config{}.Indexes(s)
-	if result.HasErrors() {
-		t.Fatalf("a name collision should disambiguate, not fail: %v", result.Err())
+	indexes, err := Config{}.Indexes(s)
+	if err != nil {
+		t.Fatalf("a name collision should disambiguate, not fail: %v", err)
 	}
 	if len(indexes) != 2 {
 		t.Fatalf("expected both composites emitted, got %d: %+v", len(indexes), indexes)
@@ -175,14 +177,14 @@ func TestIndexes_DisambiguationIsDeterministic(t *testing.T) {
 	t.Parallel()
 	a := Config{}
 
-	first, r1 := a.Indexes(loadSchema(t, "indexes_collision.yammm"))
-	if r1.HasErrors() {
-		t.Fatalf("first load: %v", r1.Err())
+	first, err := a.Indexes(loadSchema(t, "indexes_collision.yammm"))
+	if err != nil {
+		t.Fatalf("first load: %v", err)
 	}
 	for range 5 {
-		next, r := a.Indexes(loadSchema(t, "indexes_collision.yammm"))
-		if r.HasErrors() {
-			t.Fatalf("reload: %v", r.Err())
+		next, err := a.Indexes(loadSchema(t, "indexes_collision.yammm"))
+		if err != nil {
+			t.Fatalf("reload: %v", err)
 		}
 		if len(next) != len(first) {
 			t.Fatalf("emitted %d indexes on reload, first load emitted %d", len(next), len(first))
@@ -201,9 +203,9 @@ func TestIndexes_DisambiguationIsDeterministic(t *testing.T) {
 func TestIndexes_NonCollidingNamesUnchanged(t *testing.T) {
 	t.Parallel()
 	s := loadSchema(t, "indexes.yammm")
-	indexes, result := Config{}.Indexes(s)
-	if result.HasErrors() {
-		t.Fatalf("Indexes: %v", result.Err())
+	indexes, err := Config{}.Indexes(s)
+	if err != nil {
+		t.Fatalf("Indexes: %v", err)
 	}
 	for _, idx := range indexes {
 		if want := indexName(idx.Label, idx.Properties, idx.Kind); idx.Name != want {
@@ -219,9 +221,11 @@ func TestIndexes_NonCollidingNamesUnchanged(t *testing.T) {
 func TestIndexes_InvalidPropertyIdentifier(t *testing.T) {
 	t.Parallel()
 	s := loadSchema(t, "indexes_bad_ident.yammm")
-	_, result := Config{}.Indexes(s)
+	_, result := diagtest.Issues(t, func() ([]Index, error) {
+		return Config{}.Indexes(s)
+	})
 	if !result.HasCode(E_NEO4J_INVALID_IDENTIFIER) {
-		t.Fatalf("expected E_NEO4J_INVALID_IDENTIFIER, got: %v", result.Err())
+		t.Fatalf("expected E_NEO4J_INVALID_IDENTIFIER, got: %v", result)
 	}
 	for issue := range result.Issues() {
 		for _, d := range issue.Details() {
@@ -239,7 +243,9 @@ func TestIndexes_InvalidPropertyIdentifier(t *testing.T) {
 func TestIndexes_InvalidPropertyIdentifierReportedOnce(t *testing.T) {
 	t.Parallel()
 	s := loadSchema(t, "indexes_bad_ident_multi.yammm")
-	_, result := Config{}.Indexes(s)
+	_, result := diagtest.Issues(t, func() ([]Index, error) {
+		return Config{}.Indexes(s)
+	})
 	n := 0
 	for issue := range result.Issues() {
 		if issue.Code() == E_NEO4J_INVALID_IDENTIFIER {
@@ -247,7 +253,20 @@ func TestIndexes_InvalidPropertyIdentifierReportedOnce(t *testing.T) {
 		}
 	}
 	if n != 1 {
-		t.Fatalf("expected exactly 1 E_NEO4J_INVALID_IDENTIFIER for the reserved property, got %d: %v", n, result.Err())
+		t.Fatalf("expected exactly 1 E_NEO4J_INVALID_IDENTIFIER for the reserved property, got %d: %v", n, result)
+	}
+}
+
+// TestIndexes_ReportsEveryRefusedIndexProperty pins that each refused index
+// property draws its own issue: the call's error keeps them all.
+func TestIndexes_ReportsEveryRefusedIndexProperty(t *testing.T) {
+	t.Parallel()
+	s := loadInline(t, "schema \"p\"\n\ntype T {\n\tid String primary\n\tmatch String @index\n\treturn String @index\n}\n")
+	_, result := diagtest.Issues(t, func() ([]Index, error) {
+		return Config{}.Indexes(s)
+	})
+	if got := result.CodeCounts(diag.Error)[E_NEO4J_INVALID_IDENTIFIER]; got != 2 || result.LimitReached() {
+		t.Fatalf("E_NEO4J_INVALID_IDENTIFIER = %d (limit reached %t), want 2 kept: %v", got, result.LimitReached(), result)
 	}
 }
 
@@ -262,9 +281,9 @@ func TestIndexes_InvalidPropertyIdentifierReportedOnce(t *testing.T) {
 func TestIndexes_DuplicateDeclarationDedups(t *testing.T) {
 	t.Parallel()
 	s := loadSchema(t, "indexes_duplicate_decl.yammm")
-	indexes, result := Config{}.Indexes(s)
-	if result.HasErrors() {
-		t.Fatalf("identical duplicate declarations should emit cleanly, got: %v", result.Err())
+	indexes, err := Config{}.Indexes(s)
+	if err != nil {
+		t.Fatalf("identical duplicate declarations should emit cleanly, got: %v", err)
 	}
 	if len(indexes) != 2 {
 		t.Fatalf("expected 1 range + 1 fulltext index, got %d: %+v", len(indexes), indexes)
@@ -288,9 +307,9 @@ func TestIndexes_DuplicateDeclarationDedups(t *testing.T) {
 func TestIndexes_FulltextRangeNameCollisionDisambiguated(t *testing.T) {
 	t.Parallel()
 	s := loadSchema(t, "indexes_fulltext_collision.yammm")
-	indexes, result := Config{}.Indexes(s)
-	if result.HasErrors() {
-		t.Fatalf("a name collision should disambiguate, not fail: %v", result.Err())
+	indexes, err := Config{}.Indexes(s)
+	if err != nil {
+		t.Fatalf("a name collision should disambiguate, not fail: %v", err)
 	}
 	if len(indexes) != 2 {
 		t.Fatalf("expected both indexes emitted, got %d: %+v", len(indexes), indexes)
@@ -317,7 +336,7 @@ func TestIndexes_FulltextRangeNameCollisionDisambiguated(t *testing.T) {
 // hand the generator a model it cannot trust.
 func TestIndexes_DanglingSupertypeRejectedAtBuild(t *testing.T) {
 	t.Parallel()
-	s, res := schema.LoadString(t.Context(), `schema "probe"
+	s, err := schema.LoadString(t.Context(), `schema "probe"
 
 type Entity extends common.Base {
 	id String primary
@@ -327,15 +346,15 @@ type Entity extends common.Base {
 	if !s.IsZero() {
 		t.Fatal("a dangling qualified supertype must nil the schema")
 	}
-	if !res.HasCode(diag.E_UNKNOWN_TYPE) {
-		t.Errorf("want E_UNKNOWN_TYPE at Build, got: %v", res)
+	if !errors.Is(err, diag.E_UNKNOWN_TYPE) {
+		t.Errorf("want E_UNKNOWN_TYPE at Build, got: %v", err)
 	}
 }
 
 // The property and type spellings of fulltext both round-trip to emitted DDL.
 func TestIndexes_FulltextRoundTrip(t *testing.T) {
 	t.Parallel()
-	s, res := schema.LoadString(t.Context(), `schema "probe"
+	s, err := schema.LoadString(t.Context(), `schema "probe"
 
 type Entity {
 	id String primary
@@ -344,13 +363,13 @@ type Entity {
 	@@fulltext(title, summary)
 }
 `, "probe.yammm")
-	if res.HasErrors() {
-		t.Fatalf("builder schema should seal cleanly: %v", res)
+	if err != nil {
+		t.Fatalf("builder schema should seal cleanly: %v", err)
 	}
 
-	indexes, result := Config{}.Indexes(s)
-	if result.HasErrors() {
-		t.Fatalf("Indexes: %v", result.Err())
+	indexes, genErr := Config{}.Indexes(s)
+	if genErr != nil {
+		t.Fatalf("Indexes: %v", genErr)
 	}
 	var fulltext []Index
 	for _, idx := range indexes {
@@ -380,7 +399,7 @@ type Entity {
 // whose eligibility the generator would have to re-derive.
 func TestIndexes_DanglingAliasTargetRejectedAtBuild(t *testing.T) {
 	t.Parallel()
-	s, res := schema.LoadString(t.Context(), `schema "probe"
+	s, err := schema.LoadString(t.Context(), `schema "probe"
 
 type Entity {
 	id String primary
@@ -390,8 +409,8 @@ type Entity {
 	if !s.IsZero() {
 		t.Fatal("a dangling qualified property datatype must nil the schema")
 	}
-	if !res.HasCode(diag.E_UNKNOWN_TYPE) {
-		t.Errorf("want E_UNKNOWN_TYPE at Build, got: %v", res)
+	if !errors.Is(err, diag.E_UNKNOWN_TYPE) {
+		t.Errorf("want E_UNKNOWN_TYPE at Build, got: %v", err)
 	}
 }
 
@@ -405,9 +424,9 @@ func TestIndexes_EmittedNamesAreUnique(t *testing.T) {
 		t.Run(fixture, func(t *testing.T) {
 			t.Parallel()
 			s := loadSchema(t, fixture)
-			indexes, result := Config{}.Indexes(s)
-			if result.HasErrors() {
-				t.Fatalf("Indexes: %v", result.Err())
+			indexes, err := Config{}.Indexes(s)
+			if err != nil {
+				t.Fatalf("Indexes: %v", err)
 			}
 			seen := make(map[string]Index, len(indexes))
 			for _, idx := range indexes {
@@ -455,19 +474,19 @@ func TestUniqueDigestName_AvoidsReservedNames(t *testing.T) {
 func TestConstraints_DisambiguationIsUniqueAndReserves(t *testing.T) {
 	t.Parallel()
 	// `a_b` on Item and `b` on Item_a both render {schema}__Item_a_b_not_null.
-	s, res := schema.LoadString(context.Background(), `schema "col"
+	s, err := schema.LoadString(context.Background(), `schema "col"
 type Item { id String primary
             a_b String required }
 type Item_a { id String primary
               b String required }
 `, "p.yammm")
-	if res.HasErrors() {
-		t.Fatalf("load: %v", res.Err())
+	if err != nil {
+		t.Fatalf("load: %v", err)
 	}
 
-	got, result := Config{}.Constraints(s)
-	if result.HasErrors() {
-		t.Fatalf("Constraints: %v", result.Err())
+	got, genErr := Config{}.Constraints(s)
+	if genErr != nil {
+		t.Fatalf("Constraints: %v", genErr)
 	}
 
 	seen := make(map[string]Constraint, len(got))
@@ -502,9 +521,9 @@ func TestIndexes_AnErrorWithholdsEveryIndex(t *testing.T) {
 	t.Parallel()
 
 	s := loadInline(t, "schema \"x\"\n\ntype Thing {\n\tthing_id String primary\n\tgood String @index\n\tmatch String @index\n}\n")
-	indexes, result := Config{}.Indexes(s)
-	if !result.HasErrors() {
-		t.Fatalf("the reserved property name drew no error:\n%s", result)
+	indexes, err := Config{}.Indexes(s)
+	if err == nil {
+		t.Fatalf("the reserved property name drew no error:\n%s", err)
 	}
 	if indexes != nil {
 		t.Errorf("Indexes returned %d statements beside an error, want nil", len(indexes))

@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/simon-lentz/yammm/diag"
+	"github.com/simon-lentz/yammm/internal/diagtest"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -100,10 +101,12 @@ var referencePositions = []struct {
 func dslStates(t *testing.T, ref, body string) referenceAnswer {
 	t.Helper()
 	main := "schema \"main\"\n\nimport \"./lib\" as lib\n\ntype T1 = Integer[1, 5]\n\n" + body
-	s, res := schema.LoadSourcesWithEntry(t.Context(),
-		map[string][]byte{"main.yammm": []byte(main), "lib.yammm": []byte(referenceLibSource)},
-		"main.yammm", "", schema.WithSourcesOnly(true), schema.WithSyntheticRoot("test://refs"))
-	if !s.IsZero() && !res.HasErrors() {
+	s, res := diagtest.Capture(t, func(warn func(diag.Issue)) (schema.Schema, error) {
+		return schema.LoadSourcesWithEntry(t.Context(),
+			map[string][]byte{"main.yammm": []byte(main), "lib.yammm": []byte(referenceLibSource)},
+			"main.yammm", schema.WithSourcesOnly(true), schema.WithSyntheticRoot("test://refs"), schema.WithWarnings(warn))
+	})
+	if !s.IsZero() && diagtest.Err(res) == nil {
 		if stated := statedReference(t, s); stated != ref {
 			return refNotAName // the source states another name
 		}

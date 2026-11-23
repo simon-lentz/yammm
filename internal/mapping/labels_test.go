@@ -5,13 +5,14 @@ import (
 	"testing"
 
 	"github.com/simon-lentz/yammm/diag"
+	"github.com/simon-lentz/yammm/internal/diagtest"
 	"github.com/simon-lentz/yammm/schema"
 )
 
 func loadInline(t *testing.T, src string) schema.Schema {
 	t.Helper()
-	s, result := schema.LoadString(t.Context(), src, "mapping.yammm")
-	if err := result.Err(); err != nil {
+	s, loadErr := schema.LoadString(t.Context(), src, "mapping.yammm")
+	if err := loadErr; err != nil {
 		t.Fatalf("fixture does not load: %v", err)
 	}
 	return s
@@ -111,7 +112,7 @@ func TestLabels_Check(t *testing.T) {
 		{"a schema break is reported once, its keyword label too", Labels{Separator: "T"}, "schema \"STAR\"\n\ntype S {\n\tid String primary\n}\n", 1, `schema "STAR" composes no node label`},
 	}
 	for _, tt := range tests {
-		res := tt.l.Check(loadInline(t, tt.src))
+		res := diagtest.Failures(t, tt.l.Check(loadInline(t, tt.src)))
 		issues := 0
 		for issue := range res.Issues() {
 			issues++
@@ -135,11 +136,11 @@ func TestLabels_CheckJudgesTheClosure(t *testing.T) {
 		"/virtual/main.yammm": []byte("schema \"main\"\n\nimport \"./geo\" as geo\n\ntype Site {\n\tid String primary\n\t--> AT (one) geo.Region\n}\n"),
 		"/virtual/geo.yammm":  []byte("schema \"geo_\"\n\ntype Region {\n\tid String primary\n}\n"),
 	}
-	s, result := schema.LoadSourcesWithEntry(t.Context(), sources, "/virtual/main.yammm", "/virtual")
-	if err := result.Err(); err != nil {
+	s, loadErr := schema.LoadSourcesWithEntry(t.Context(), sources, "/virtual/main.yammm", schema.WithModuleRoot("/virtual"))
+	if err := loadErr; err != nil {
 		t.Fatalf("fixture does not load: %v", err)
 	}
-	res := Labels{}.Check(s)
+	res := diagtest.Failures(t, Labels{}.Check(s))
 	if !res.HasCode(InvalidIdentifier) || !strings.Contains(res.String(), `schema "geo_"`) {
 		t.Fatalf("Check over a closure that imports schema geo_ = %v, want its refusal", res)
 	}

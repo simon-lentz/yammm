@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/simon-lentz/yammm/diag"
+	"github.com/simon-lentz/yammm/internal/diagtest"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -20,8 +21,10 @@ type T {
     self String
 }
 `
-	s, res := schema.LoadString(t.Context(), src, "s.yammm")
-	if res.Err() == nil {
+	s, res := diagtest.Capture(t, func(warn func(diag.Issue)) (schema.Schema, error) {
+		return schema.LoadString(t.Context(), src, "s.yammm", schema.WithWarnings(warn))
+	})
+	if diagtest.Err(res) == nil {
 		t.Fatal("a property named self loaded clean")
 	}
 	if !s.IsZero() {
@@ -29,7 +32,7 @@ type T {
 	}
 	is, ok := issueWithCode(res, diag.E_INVALID_NAME)
 	if !ok {
-		t.Fatalf("want E_INVALID_NAME; got %v", res.Err())
+		t.Fatalf("want E_INVALID_NAME; got %v", res)
 	}
 	if !strings.Contains(is.Message(), "self") {
 		t.Errorf("the message does not name self: %q", is.Message())
@@ -58,7 +61,9 @@ type B extends Base {
     y Integer
 }
 `
-	_, res := schema.LoadString(t.Context(), src, "s.yammm")
+	_, res := diagtest.Capture(t, func(warn func(diag.Issue)) (schema.Schema, error) {
+		return schema.LoadString(t.Context(), src, "s.yammm", schema.WithWarnings(warn))
+	})
 	n := 0
 	for is := range res.Issues() {
 		if is.Code() == diag.E_INVALID_NAME {
@@ -66,6 +71,6 @@ type B extends Base {
 		}
 	}
 	if n != 1 {
-		t.Errorf("one declaration drew %d E_INVALID_NAME diagnostics, want 1: %v", n, res.Err())
+		t.Errorf("one declaration drew %d E_INVALID_NAME diagnostics, want 1: %v", n, res)
 	}
 }

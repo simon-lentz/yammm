@@ -35,8 +35,8 @@ type Row {
 	! "reads both" SELF == nil || $SELF != nil && self.id != ""
 }
 `
-			if _, res := schema.LoadString(t.Context(), src, "self_rel.yammm"); res.Err() != nil {
-				t.Errorf("a relation named SELF was refused: %v", res)
+			if _, err := schema.LoadString(t.Context(), src, "self_rel.yammm"); err != nil {
+				t.Errorf("a relation named SELF was refused: %v", err)
 			}
 		})
 	}

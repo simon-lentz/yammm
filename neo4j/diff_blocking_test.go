@@ -90,13 +90,13 @@ func TestConstraintDiff_FulltextOnASolePrimaryKeyConverges(t *testing.T) {
 	a := cypher.Config{}
 	s := loadSchema(t, "fulltext_pk.yammm")
 
-	indexes, ir := a.Indexes(s)
-	if ir.HasErrors() {
-		t.Fatalf("Indexes: %s", ir.String())
+	indexes, err := a.Indexes(s)
+	if err != nil {
+		t.Fatalf("Indexes: %s", err)
 	}
-	constraints, cr := a.Constraints(s)
-	if cr.HasErrors() {
-		t.Fatalf("Constraints: %s", cr.String())
+	constraints, genErr := a.Constraints(s)
+	if genErr != nil {
+		t.Fatalf("Constraints: %s", genErr)
 	}
 
 	var remote []RemoteIndex

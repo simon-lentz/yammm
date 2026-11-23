@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/simon-lentz/yammm/diag"
+	"github.com/simon-lentz/yammm/internal/diagtest"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -44,8 +45,10 @@ func TestLoad_InheritsThroughASchemaItNeverImports(t *testing.T) {
 	writeSchema(t, dir, "c.yammm", "schema \"c\"\n\ntype C {\n\tid String primary\n\textra String\n}\n")
 	writeSchema(t, dir, "b.yammm", "schema \"b\"\n\nimport \"./c\" as c\n\ntype B extends c.C {\n\tname String\n}\n")
 	writeSchema(t, dir, "x.yammm", "schema \"x\"\n\nimport \"./b\" as b\n\ntype X extends b.B {\n\tmine String\n}\n")
-	x, res := schema.Load(t.Context(), filepath.Join(dir, "x.yammm"), schema.WithModuleRoot(dir))
-	if x.IsZero() || res.HasErrors() {
+	x, res := diagtest.Capture(t, func(warn func(diag.Issue)) (schema.Schema, error) {
+		return schema.Load(t.Context(), filepath.Join(dir, "x.yammm"), schema.WithModuleRoot(dir), schema.WithWarnings(warn))
+	})
+	if x.IsZero() || (diagtest.Err(res) != nil) {
 		t.Fatalf("load x: %s", issueLines(res))
 	}
 	xt, ok := x.Type("X")
@@ -73,7 +76,9 @@ func TestLoad_APartInheritsAnAssociationPastASchemaItNeverImports(t *testing.T) 
 	writeSchema(t, dir, "c.yammm", "schema \"c\"\n\ntype C {\n\tid String primary\n}\n")
 	writeSchema(t, dir, "b.yammm", "schema \"b\"\n\nimport \"./c\" as c\n\ntype Other {\n\tid String primary\n}\n\ntype B extends c.C {\n\t--> TO_OTHER (one) Other\n}\n")
 	writeSchema(t, dir, "x.yammm", "schema \"x\"\n\nimport \"./b\" as b\n\npart type X extends b.B {\n\tmine String\n}\n")
-	x, res := schema.Load(t.Context(), filepath.Join(dir, "x.yammm"), schema.WithModuleRoot(dir))
+	x, res := diagtest.Capture(t, func(warn func(diag.Issue)) (schema.Schema, error) {
+		return schema.Load(t.Context(), filepath.Join(dir, "x.yammm"), schema.WithModuleRoot(dir), schema.WithWarnings(warn))
+	})
 	if !x.IsZero() {
 		t.Fatal("a part type carrying an association loaded")
 	}
@@ -93,8 +98,10 @@ func TestLoad_OriginOfACopyOfACopyIsTheDeclaredProperty(t *testing.T) {
 	writeSchema(t, dir, "c.yammm", "schema \"c\"\n\nabstract type N1 {\n\tid String primary\n\tx Timestamp\n}\n\nabstract type N2 {\n\tx Timestamp @writeOnce\n}\n")
 	writeSchema(t, dir, "b.yammm", "schema \"b\"\n\nimport \"./c\" as c\n\nabstract type M extends c.N1, c.N2 {\n\ty String\n}\n")
 	writeSchema(t, dir, "x.yammm", "schema \"x\"\n\nimport \"./b\" as b\n\nabstract type Y {\n\tx Timestamp @index\n}\n\ntype T extends b.M, Y {\n\tz String\n}\n")
-	x, res := schema.Load(t.Context(), filepath.Join(dir, "x.yammm"), schema.WithModuleRoot(dir))
-	if x.IsZero() || res.HasErrors() {
+	x, res := diagtest.Capture(t, func(warn func(diag.Issue)) (schema.Schema, error) {
+		return schema.Load(t.Context(), filepath.Join(dir, "x.yammm"), schema.WithModuleRoot(dir), schema.WithWarnings(warn))
+	})
+	if x.IsZero() || (diagtest.Err(res) != nil) {
 		t.Fatalf("load x: %s", issueLines(res))
 	}
 

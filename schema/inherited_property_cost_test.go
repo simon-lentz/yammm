@@ -40,9 +40,9 @@ func TestInheritance_ManyMixinsOfOnePropertyCostTheirNumber(t *testing.T) {
 		}
 		src.WriteString(" { id String primary }\n")
 		start := costratio.CPUTime(t)
-		_, res := schema.LoadString(t.Context(), src.String(), "m.yammm")
+		_, err := schema.LoadString(t.Context(), src.String(), "m.yammm")
 		spent := costratio.CPUTime(t) - start
-		if res.OK() {
+		if err == nil {
 			t.Fatal("the load succeeded, want one E_PROPERTY_CONFLICT")
 		}
 		return spent
@@ -66,10 +66,10 @@ func TestInheritance_AChainThatDeclaresAPropertyAtEachLevelCostsItsSquare(t *tes
 		}
 		fmt.Fprintf(&src, "type Leaf extends T%d { id String primary }\n", n)
 		start := costratio.CPUTime(t)
-		_, res := schema.LoadString(t.Context(), src.String(), "m.yammm")
+		_, err := schema.LoadString(t.Context(), src.String(), "m.yammm")
 		spent := costratio.CPUTime(t) - start
-		if !res.OK() {
-			t.Fatal(res)
+		if err != nil {
+			t.Fatal(err)
 		}
 		return spent
 	})

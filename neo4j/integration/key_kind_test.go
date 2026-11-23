@@ -41,8 +41,8 @@ func TestKeyKindFlip_ConvergesInOneApply(t *testing.T) {
 	t.Cleanup(func() { dropAll(t, ctx) })
 
 	s, res := schema.LoadString(ctx, "schema \"flip\"\n\ntype Doc {\n\tid String primary\n}\n", "flip.yammm")
-	if res.HasErrors() {
-		t.Fatalf("load: %v", res.Err())
+	if res != nil {
+		t.Fatalf("load: %v", res)
 	}
 	for _, tc := range []struct {
 		name     string
@@ -72,8 +72,8 @@ func TestKeyKindHolderPairedByName_ConvergesInOneApply(t *testing.T) {
 	dropAll(t, ctx)
 
 	s, res := schema.LoadString(ctx, "schema \"flip\"\n\ntype Doc {\n\tid String primary\n\tname String required\n}\n", "flip.yammm")
-	if res.HasErrors() {
-		t.Fatalf("load: %v", res.Err())
+	if res != nil {
+		t.Fatalf("load: %v", res)
 	}
 	applySchemaDDL(t, ctx, cypher.Config{}, s)
 	run(t, ctx, "DROP CONSTRAINT flip__Doc_id_unique")
@@ -95,8 +95,8 @@ func TestDriftThatTakesAnotherDriftsName_ConvergesInOneApply(t *testing.T) {
 	dropAll(t, ctx)
 
 	s, res := schema.LoadString(ctx, "schema \"flip\"\n\ntype Doc {\n\tid String primary\n\tz Integer\n}\n", "flip.yammm")
-	if res.HasErrors() {
-		t.Fatalf("load: %v", res.Err())
+	if res != nil {
+		t.Fatalf("load: %v", res)
 	}
 	run(t, ctx, "CREATE CONSTRAINT a FOR (n:flip__Doc) REQUIRE n.z IS :: STRING")
 	run(t, ctx, "CREATE CONSTRAINT flip__Doc_z_type FOR (n:flip__Doc) REQUIRE n.id IS UNIQUE")

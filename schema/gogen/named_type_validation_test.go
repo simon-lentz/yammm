@@ -67,9 +67,9 @@ func TestNamedTypes_GeneratedCarriersValidate(t *testing.T) {
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			_, res := v.ValidateOne(t.Context(), "County", instance.RawInstance{Properties: tc.props})
-			if !res.OK() {
-				t.Errorf("a generated carrier did not validate: %s", res)
+			_, err := v.ValidateOne(t.Context(), "County", instance.RawInstance{Properties: tc.props})
+			if err != nil {
+				t.Errorf("a generated carrier did not validate: %s", err)
 			}
 		})
 	}
@@ -85,15 +85,15 @@ func TestNamedTypes_GeneratedCarriersValidate(t *testing.T) {
 // exactly the half-fixed state worth guarding against.
 func TestNamedTypes_AreStoredAsTheirBaseType(t *testing.T) {
 	s := loadSchema(t, "named")
-	inst, res := instance.NewValidator(s).ValidateOne(t.Context(), "County",
+	inst, err := instance.NewValidator(s).ValidateOne(t.Context(), "County",
 		instance.RawInstance{Properties: map[string]any{
 			"fips":   fipsCode("12345"),
 			"tier":   tier("gold"),
 			"status": countyStatus("active"),
 			"codes":  []any{fipsCode("54321")},
 		}})
-	if !res.OK() {
-		t.Fatalf("validate: %s", res)
+	if err != nil {
+		t.Fatalf("validate: %s", err)
 	}
 	for _, name := range []string{"fips", "tier", "status"} {
 		v, ok := inst.Properties().Get(name)
@@ -126,7 +126,7 @@ func TestNamedTypes_StillCheckedAgainstTheirConstraint(t *testing.T) {
 		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			if _, res := v.ValidateOne(t.Context(), "County", instance.RawInstance{Properties: tc.props}); res.OK() {
+			if _, err := v.ValidateOne(t.Context(), "County", instance.RawInstance{Properties: tc.props}); err == nil {
 				t.Error("a named carrier escaped its constraint")
 			}
 		})

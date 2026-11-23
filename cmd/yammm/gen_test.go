@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -158,5 +159,41 @@ func TestGen_AnEmptyOutputIsRefused(t *testing.T) {
 					code, stdout, cli.ExitUsage, stderr)
 			}
 		})
+	}
+}
+
+// TestGen_CypherReportsEveryInvalidIdentifier pins that gen --to cypher keeps
+// no issue limit: 150 types that each declare a property named by a Cypher
+// keyword draw 150 errors and no dropped-issue note.
+func TestGen_CypherReportsEveryInvalidIdentifier(t *testing.T) {
+	t.Parallel()
+
+	var src strings.Builder
+	src.WriteString("schema \"res\"\n")
+	for i := range 150 {
+		fmt.Fprintf(&src, "\ntype T%03d {\n    id String primary\n    where String\n    extra String\n\n    @@index(where, extra)\n}\n", i)
+	}
+	schemaPath := filepath.Join(t.TempDir(), "res150.yammm")
+	if err := os.WriteFile(schemaPath, []byte(src.String()), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	code, stdout, stderr := executeCmdOutput(t, "gen", "--to", "cypher", schemaPath)
+	if code != cli.ExitValidation {
+		t.Errorf("exit code = %d, want %d", code, cli.ExitValidation)
+	}
+	if stdout != "" {
+		t.Errorf("a failed generation printed a script:\n%s", stdout)
+	}
+	if got := strings.Count(stderr, "error[E_NEO4J_INVALID_IDENTIFIER]"); got != 150 {
+		t.Errorf("gen printed %d E_NEO4J_INVALID_IDENTIFIER errors, want 150", got)
+	}
+	for _, typeName := range []string{"T000", "T149"} {
+		if !strings.Contains(stderr, fmt.Sprintf(`invalid property "where" declared in %s: the name is a Cypher reserved keyword`, typeName)) {
+			t.Errorf("no error names %s's property", typeName)
+		}
+	}
+	if strings.Contains(stderr, "dropped at an issue limit") {
+		t.Error("stderr carries a dropped-issue note")
 	}
 }

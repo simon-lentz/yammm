@@ -2,6 +2,8 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -94,5 +96,35 @@ func TestJSONDiagnosticsAreOneDocumentPerInvocation(t *testing.T) {
 				t.Errorf("the one document should carry the data-phase error; got:\n%s", doc)
 			}
 		})
+	}
+}
+
+// TestValidate_KeepsAHundredLoadWarnings pins the one-call issue limit on a
+// schema load: of 130 shadowed-annotation warnings, validate prints 100 and a
+// note that counts the 30 it dropped, and warnings alone exit 0.
+func TestValidate_KeepsAHundredLoadWarnings(t *testing.T) {
+	t.Parallel()
+
+	var base, doc strings.Builder
+	for i := range 130 {
+		fmt.Fprintf(&base, "    p%03d Timestamp @writeOnce\n", i)
+		fmt.Fprintf(&doc, "    p%03d Timestamp\n", i)
+	}
+	schemaPath := filepath.Join(t.TempDir(), "warn130.yammm")
+	src := "schema \"many\"\n\nabstract type Base {\n    id String primary\n" + base.String() +
+		"}\n\ntype Doc extends Base {\n" + doc.String() + "}\n"
+	if err := os.WriteFile(schemaPath, []byte(src), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	code, stderr := executeCmdStderr(t, "validate", schemaPath)
+	if code != cli.ExitOK {
+		t.Errorf("exit code = %d, want %d", code, cli.ExitOK)
+	}
+	if got := strings.Count(stderr, "warning[W_ANNOTATION_SHADOWED]"); got != 100 {
+		t.Errorf("validate printed %d warnings, want 100", got)
+	}
+	if !strings.Contains(stderr, "note: 30 more issue(s) dropped at an issue limit") {
+		t.Error("stderr carries no note counting the 30 dropped warnings")
 	}
 }

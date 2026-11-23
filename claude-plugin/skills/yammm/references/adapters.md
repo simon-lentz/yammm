@@ -34,23 +34,23 @@ The zero `cypher.Config` is the default mapping. The DDL, the write path and the
 **Edition differences:**
 
 - `Enterprise`: Supports UNIQUE, NOT NULL, property type, and NODE KEY constraints
-- `Community`: UNIQUE constraints only; the NOT NULL and PROPERTY_TYPE constraints it cannot hold are reported once per call as `W_NEO4J_EDITION_CONSTRAINT_OMITTED` with a count per kind
+- `Community`: UNIQUE constraints only; the NOT NULL and PROPERTY_TYPE constraints it cannot hold are reported once per call as `W_NEO4J_EDITION_CONSTRAINT_OMITTED` with a count per kind, a warning `Constraints` hands to its `cypher.WithWarnings` callback
 
 ### Constraint Generation
 
 ```go
-constraints, result := c.Constraints(s)
+constraints, err := c.Constraints(s, cypher.WithWarnings(onWarning)) // the edition's warnings go to onWarning
 // Each Constraint has: Name, Kind, Label, Properties, TypeExpr, Statement
 // Statement is CREATE CONSTRAINT <name> IF NOT EXISTS ...
 ```
 
-Every constraint carries a name. Generation is **all-or-nothing**: any validation error returns `(nil, result)`, so one unemittable property withholds every constraint of the schema rather than emitting a partial script that looks complete. Beside a name Neo4j refuses as an identifier (Cypher reserved words, below) and a label that breaks the label rule (Label Management, below), the one shape a *valid* schema can hit is a list whose element resolves to a collection, a List or a Vector, the list and its element each written directly or through an alias — legal yammm, but Neo4j has no nested collection property type, so `Constraints` reports `E_NEO4J_UNSUPPORTED_TYPE` whatever the `Config`'s other settings, `NoProperties` included, once its labels keep the label rule. `Indexes` does not make that check. The write path does: `neo4j.NodeQueries` and `neo4j.CoerceParams` refuse a value of such a property with an error wrapping `neo4j.ErrUnsupportedListElem`, an empty list included, and read a value that holds none as nil, which `NodeQueries` writes as null. The property is judged on each concrete type and part type that declares or inherits it, so one declared on an abstract type that no such type extends is not reported; a label that breaks the label rule withholds every such judgment, since `Constraints` then returns the label rule's issues alone. Model the inner collection as a `part type` reached by a composition. A `Vector[N]` property is fine; it maps to `LIST<FLOAT NOT NULL>`.
+Every constraint carries a name. Generation is **all-or-nothing**: any validation error returns `(nil, err)`, `err` a `*diag.ResultError` holding every failure, so one unemittable property withholds every constraint of the schema rather than emitting a partial script that looks complete. Beside a name Neo4j refuses as an identifier (Cypher reserved words, below) and a label that breaks the label rule (Label Management, below), the one shape a *valid* schema can hit is a list whose element resolves to a collection, a List or a Vector, the list and its element each written directly or through an alias — legal yammm, but Neo4j has no nested collection property type, so `Constraints` reports `E_NEO4J_UNSUPPORTED_TYPE` whatever the `Config`'s other settings, `NoProperties` included, once its labels keep the label rule. `Indexes` does not make that check. The write path does: `neo4j.NodeQueries` and `neo4j.CoerceParams` refuse a value of such a property with an error wrapping `neo4j.ErrUnsupportedListElem`, an empty list included, and read a value that holds none as nil, which `NodeQueries` writes as null. The property is judged on each concrete type and part type that declares or inherits it, so one declared on an abstract type that no such type extends is not reported; a label that breaks the label rule withholds every such judgment, since `Constraints` then returns the label rule's error alone. Model the inner collection as a `part type` reached by a composition. A `Vector[N]` property is fine; it maps to `LIST<FLOAT NOT NULL>`.
 
 ### Index Generation
 
 ```go
 // Index Cypher from @index / @@index / @vector / @fulltext / @@fulltext annotations
-indexes, result := c.Indexes(s)
+indexes, err := c.Indexes(s)
 // Each Index has: Name, Kind (IndexRange|IndexVector|IndexFulltext), Label, Properties,
 // VectorDimensions, VectorSimilarity, Statement
 ```
@@ -64,16 +64,16 @@ Property-level `@index` emits a single-property range index; type-level `@@index
 ```go
 // Batch node queries for an entire snapshot
 nodeQueries, err := neo4j.NodeQueries(ctx, c, snapshot,
-    neo4j.WithNodeChunkSize(5000), // max nodes per UNWIND batch
+    neo4j.WithNodeChunkSize(5000), // max nodes per UNWIND batch; EdgeQueries refuses it
 )
 
 // Batch edge queries
 edgeQueries, err := neo4j.EdgeQueries(ctx, c, snapshot,
-    neo4j.WithEdgeChunkSize(5000),
+    neo4j.WithEdgeChunkSize(5000), // NodeQueries refuses it
 )
 ```
 
-Each `NodeQuery` / `EdgeQuery` contains a Cypher statement and parameters map ready for driver execution. Each call derives every non-abstract closure type's label, primary keys and `@writeOnce` keys from the snapshot's own schema under `c`'s label settings, refuses a closure whose labels break the label rule with an error wrapping `c.CheckLabels`' result, and refuses a zero snapshot with `ErrZeroSnapshot`.
+Each `NodeQuery` / `EdgeQuery` contains a Cypher statement and parameters map ready for driver execution. Each call derives every non-abstract closure type's label, primary keys and `@writeOnce` keys from the snapshot's own schema under `c`'s label settings, refuses a closure whose labels break the label rule with an error wrapping `c.CheckLabels`' error, and refuses a zero snapshot with `ErrZeroSnapshot`.
 
 A type's write-once properties come from its `@writeOnce` annotations, own and inherited; the derived set per type drives the ON CREATE / ON MATCH split, selected per type in a batch. Node merges only — relationship merges have no ON CREATE / ON MATCH split.
 
@@ -93,11 +93,11 @@ The coercion turns an integer a caller holds at a `Float` into a `float64`, and 
 ```go
 label := c.Label(t)  // "inventory__Product" for type Product of schema inventory
 
-// Every break of the label rule across the import closure
-result := c.CheckLabels(s)
+// Every break of the label rule across the import closure, nil when there is none
+err := c.CheckLabels(s)
 ```
 
-A label is `LabelPrefix` + schema name + `LabelSeparator` + type name, as written; nothing is sanitized. `CheckLabels` reports each break with `E_NEO4J_INVALID_IDENTIFIER`: a prefix that does not start an identifier or a separator that is not ASCII letters, digits and underscores (once per call), a schema name that holds the separator or runs into it from its end, as `"a__B"` and `"geo_"` do under `__` (once per schema, and its types' labels are then not judged), and a label that is a Cypher reserved keyword (once per type). A label that keeps the rule decodes to one (schema, type) pair, so two types never share one. `Config.Constraints`, `Config.Indexes` and the two write calls, `neo4j.NodeQueries` and `neo4j.EdgeQueries`, run it first.
+A label is `LabelPrefix` + schema name + `LabelSeparator` + type name, as written; nothing is sanitized. `CheckLabels` returns every break as one `*diag.ResultError`, each an `E_NEO4J_INVALID_IDENTIFIER`: a prefix that does not start an identifier or a separator that is not ASCII letters, digits and underscores (once per call), a schema name that holds the separator or runs into it from its end, as `"a__B"` and `"geo_"` do under `__` (once per schema, and its types' labels are then not judged), and a label that is a Cypher reserved keyword (once per type). A label that keeps the rule decodes to one (schema, type) pair, so two types never share one. `Config.Constraints`, `Config.Indexes` and the two write calls, `neo4j.NodeQueries` and `neo4j.EdgeQueries`, run it first.
 
 **Cypher reserved words:** of the six spellings the DSL's grammar refuses as
 a property name, four are Cypher keywords (`as`, `in`, `true` and `false`);
@@ -128,7 +128,11 @@ of one kind under one name, and a TYPE row with no `propertyType`; one read
 returns none of them.
 
 ```go
-plan, result := neo4j.Diff(c, s, actualConstraints, actualIndexes)
+plan, err := neo4j.Diff(c, s, actualConstraints, actualIndexes,
+    neo4j.WithWarnings(onWarning)) // the constraint generation's warnings
+if err != nil {
+    return err // the remote rows' breaks and the generation's failures; no plan
+}
 cDiff, iDiff := plan.Constraints, plan.Indexes
 
 // Both halves carry Match, Drift, Create, Drop and Excluded; Indexes adds Unverified
@@ -191,7 +195,7 @@ declares.
 import "github.com/simon-lentz/yammm/schema/gogen"
 ```
 
-Schema-in, bytes-out: `gogen.Marshal` maps a loaded, resolved schema to formatted, type-checked Go source — one struct per type, named Enum/DataType types, a generated `Date` type when a position emits `Date` (it embeds `time.Time` with a JSON codec in the stored string form), `EDGE_` association structs, a Graph aggregate keyed as an instance document keys a type's array, the embedded schema source with its `SchemaHash`, reachable through `SerializedSources()` / `SerializedEntry`, which re-loads hermetically (under `schema.WithSyntheticRoot`, no filesystem participation). Generated output is stdlib-only (imports at most `time` and `encoding/json`) and byte-reproducible across checkouts for a generator one Go toolchain builds. Like `schema/cypher` and unlike `neo4j` it has no instance-data path, and it returns a plain `error` where `schema/cypher`'s `Constraints`, `Indexes` and `CheckLabels` return a `diag.Result`.
+Schema-in, bytes-out: `gogen.Marshal` maps a loaded, resolved schema to formatted, type-checked Go source — one struct per type, named Enum/DataType types, a generated `Date` type when a position emits `Date` (it embeds `time.Time` with a JSON codec in the stored string form), `EDGE_` association structs, a Graph aggregate keyed as an instance document keys a type's array, the embedded schema source with its `SchemaHash`, reachable through `SerializedSources()` / `SerializedEntry`, which re-loads hermetically (under `schema.WithSyntheticRoot`, no filesystem participation). Generated output is stdlib-only (imports at most `time` and `encoding/json`) and byte-reproducible across checkouts for a generator one Go toolchain builds. Like `schema/cypher` and unlike `neo4j` it has no instance-data path, and it returns a plain `error`, where `schema/cypher`'s `Constraints`, `Indexes` and `CheckLabels` return a `*diag.ResultError`; its one exception is an embedded store that does not re-load, a generator bug whose error wraps the load's `*diag.ResultError`.
 
 Schemas with imports are flattened into one self-contained package. A name unique in the closure stays bare; a name two entities claim, or a reserved name such as `Graph` claims, gives every claimant its exact spelling, which names its kind and its identity (for a type, its schema and name): two schemas' `Region` become `Type_geo__Region` / `Type_common__Region`, and a datatype `Uri` and a type `URI` of one schema, which the initialisms map to one Go name, become `DataType_geo__Uri` / `Type_geo__URI`. No name depends on declaration order, and adding a declaration never hands a name to another entity.
 
@@ -213,7 +217,7 @@ Full API semantics: the Markdown Documentation Generation section of `docs/API.m
 
 ## Neo4j Refusal Classes
 
-A write reports through an `error`, not a `diag.Result`, so `neo4j` carries sentinel classes a caller matches with `errors.Is` instead of matching message text.
+A write reports through a plain `error`, so `neo4j` carries sentinel classes a caller matches with `errors.Is` instead of matching message text. The one `*diag.ResultError` a write error holds is `CheckLabels`' refusal of the closure's labels, which it wraps.
 
 | Sentinel | Meaning |
 | -------- | ------- |

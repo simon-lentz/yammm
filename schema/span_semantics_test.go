@@ -16,6 +16,8 @@ import (
 	"testing"
 	"unicode/utf8"
 
+	"github.com/simon-lentz/yammm/diag"
+	"github.com/simon-lentz/yammm/internal/diagtest"
 	"github.com/simon-lentz/yammm/internal/yammmtest/sourcetest"
 
 	"github.com/simon-lentz/yammm/internal/parse"
@@ -154,7 +156,9 @@ func TestSpans_LineCommentExcludesItsNewline(t *testing.T) {
 func TestSpans_DiagnosticSpansSliceBackToSource(t *testing.T) {
 	t.Parallel()
 	src := multibyteSource + "type Broken {\n\tx Vector[0]\n}\n"
-	_, res := schema.LoadString(context.Background(), src, "m.yammm")
+	_, res := diagtest.Capture(t, func(warn func(diag.Issue)) (schema.Schema, error) {
+		return schema.LoadString(context.Background(), src, "m.yammm", schema.WithWarnings(warn))
+	})
 
 	var checked int
 	for iss := range res.Issues() {

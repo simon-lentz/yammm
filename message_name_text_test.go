@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/simon-lentz/yammm/diag"
+	"github.com/simon-lentz/yammm/internal/diagtest"
 	"github.com/simon-lentz/yammm/internal/schematest"
 
 	"github.com/simon-lentz/yammm/graph"
@@ -42,9 +44,9 @@ part type P {
 func TestMessages_RepeatANameCutToItsHead(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	s, res := schema.LoadString(ctx, nameSchema, "names.yammm")
-	if res.HasErrors() {
-		t.Fatal(res)
+	s, loadErr := schema.LoadString(ctx, nameSchema, "names.yammm")
+	if loadErr != nil {
+		t.Fatal(loadErr)
 	}
 	c := &echoChecker{t: t, judged: map[string]int{}}
 
@@ -53,25 +55,35 @@ func TestMessages_RepeatANameCutToItsHead(t *testing.T) {
 		{"id": "a", longText: "x"},
 		{"id": "a", "links": []any{map[string]any{"_target_id": "u", longText: 1}}},
 	} {
-		_, r := v.ValidateOne(ctx, "T", instance.RawInstance{Properties: props})
-		if r.OK() {
+		_, r := diagtest.Issues(t, func() (instance.ValidInstance, error) {
+			return v.ValidateOne(ctx, "T", instance.RawInstance{Properties: props})
+		})
+		if diagtest.Err(r) == nil {
 			t.Errorf("validator: %v was accepted", props)
 		}
 		c.result("validator", r)
 	}
-	_, r := v.ValidateOne(ctx, longText, instance.RawInstance{Properties: map[string]any{"id": "a"}})
+	_, r := diagtest.Issues(t, func() (instance.ValidInstance, error) {
+		return v.ValidateOne(ctx, longText, instance.RawInstance{Properties: map[string]any{"id": "a"}})
+	})
 	c.result("validator", r)
 
 	held := graph.New(s)
-	held.Add(ctx, instancetest.Valid(t, s, "U", map[string]any{"id": "u"}))
-	inst, vr := v.ValidateOne(ctx, "T", instance.RawInstance{Properties: map[string]any{
+	if err := held.Add(ctx, instancetest.Valid(t, s, "U", map[string]any{"id": "u"})); err != nil {
+		t.Errorf("Add: %v", err)
+	}
+	inst, validateErr := v.ValidateOne(ctx, "T", instance.RawInstance{Properties: map[string]any{
 		"id": "a", "links": []any{map[string]any{"_target_id": "u", "w": 1}},
 	}})
 	if inst.IsZero() {
-		t.Fatal(vr)
+		t.Fatal(validateErr)
 	}
-	held.Add(ctx, inst)
-	data, mr := snapshot.Marshal(ctx, held.Snapshot())
+	if err := held.Add(ctx, inst); err != nil {
+		t.Errorf("Add: %v", err)
+	}
+	data, mr := diagtest.Issues(t, func() ([]byte, error) {
+		return snapshot.Marshal(ctx, held.Snapshot())
+	})
 	if data == nil {
 		t.Fatal(mr)
 	}
@@ -82,18 +94,20 @@ func TestMessages_RepeatANameCutToItsHead(t *testing.T) {
 		bytes.Replace(data, []byte(`"types"`), long, 1),
 		append(bytes.TrimSuffix(bytes.TrimSpace(data), []byte("}")), []byte(`, `+string(long)+`: 1}`)...),
 	} {
-		_, r := snapshot.Unmarshal(ctx, doc, s)
-		if r.OK() {
+		_, r := diagtest.Capture(t, func(warn func(diag.Issue)) (graph.Snapshot, error) {
+			return snapshot.Unmarshal(ctx, doc, s, snapshot.WithWarnings(warn))
+		})
+		if diagtest.Err(r) == nil {
 			t.Errorf("snapshot.Load accepted %.200s", doc)
 		}
 		c.result("snapshot.Load", r)
 	}
 
 	z := strings.Repeat("z", 40)
-	fs, res := schema.LoadString(ctx, "schema \"folds\"\n\ntype F {\n\tid String primary\n\t"+z+" Integer\n\t--> "+strings.ToUpper(z)+
+	fs, loadErr := schema.LoadString(ctx, "schema \"folds\"\n\ntype F {\n\tid String primary\n\t"+z+" Integer\n\t--> "+strings.ToUpper(z)+
 		"_R (many) G {\n\t\t"+z+" Integer\n\t}\n}\n\ntype G {\n\t"+z+" String primary\n}\n", "folds.yammm")
-	if res.HasErrors() {
-		t.Fatal(res)
+	if loadErr != nil {
+		t.Fatal(loadErr)
 	}
 	upper, mixed := strings.ToUpper(z), strings.ToUpper(z[1:])+"z"
 	fv := instance.NewValidator(fs)
@@ -103,8 +117,10 @@ func TestMessages_RepeatANameCutToItsHead(t *testing.T) {
 		{"id": "a", z + "_r": []any{map[string]any{"_target_" + upper: "g", "_target_" + mixed: "g"}}},
 		{"id": "a", z + "_r": []any{map[string]any{"_target_" + z: "g", upper: 1, mixed: 2}}},
 	} {
-		_, r := fv.ValidateOne(ctx, "F", instance.RawInstance{Properties: props})
-		if r.OK() {
+		_, r := diagtest.Issues(t, func() (instance.ValidInstance, error) {
+			return fv.ValidateOne(ctx, "F", instance.RawInstance{Properties: props})
+		})
+		if diagtest.Err(r) == nil {
 			t.Errorf("validator: %v was accepted", props)
 		}
 		c.result("validator", r)
@@ -126,14 +142,22 @@ func TestMessages_RepeatANameCutToItsHead(t *testing.T) {
 	_, err = neo4j.CoerceParams(nil, neo4j.ParamTypes{longText: schema.ListConstraint{}})
 	c.err("neo4j.CoerceParams", err)
 
-	_, mr = snapshot.Marshal(ctx, held.Snapshot(), snapshot.WithMetadata(map[string]string{longText + "\xff": "v"}))
+	_, mr = diagtest.Issues(t, func() ([]byte, error) {
+		return snapshot.Marshal(ctx, held.Snapshot(), snapshot.WithMetadata(map[string]string{longText + "\xff": "v"}))
+	})
 	c.result("snapshot.Marshal", mr)
-	_, mr = snapshot.Marshal(ctx, held.Snapshot(), snapshot.WithMetadata(map[string]string{longText: "\xff"}))
+	_, mr = diagtest.Issues(t, func() ([]byte, error) {
+		return snapshot.Marshal(ctx, held.Snapshot(), snapshot.WithMetadata(map[string]string{longText: "\xff"}))
+	})
 	c.result("snapshot.Marshal", mr)
 	unknown := bytes.Replace(data, []byte(`"U"`), long, 1)
-	_, r = snapshot.Unmarshal(ctx, unknown, s)
+	_, r = diagtest.Capture(t, func(warn func(diag.Issue)) (graph.Snapshot, error) {
+		return snapshot.Unmarshal(ctx, unknown, s, snapshot.WithWarnings(warn))
+	})
 	c.result("snapshot.Load", r)
-	_, r = snapshot.Stat(ctx, bytes.Replace(unknown, []byte(`"T"`), long, 1))
+	_, r = diagtest.Issues(t, func() (*snapshot.Info, error) {
+		return snapshot.Stat(ctx, bytes.Replace(unknown, []byte(`"T"`), long, 1))
+	})
 	c.result("snapshot.Info", r)
 
 	for _, where := range []string{

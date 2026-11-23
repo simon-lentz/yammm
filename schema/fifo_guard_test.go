@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/simon-lentz/yammm/diag"
+	"github.com/simon-lentz/yammm/internal/diagtest"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -52,14 +53,16 @@ func TestLoad_RefusesANonRegularFile(t *testing.T) {
 	mkfifo(t, fifo)
 
 	res := loadWithWatchdog(t, func() diag.Result {
-		_, res := schema.Load(t.Context(), fifo, schema.WithModuleRoot(dir))
+		_, res := diagtest.Capture(t, func(warn func(diag.Issue)) (schema.Schema, error) {
+			return schema.Load(t.Context(), fifo, schema.WithModuleRoot(dir), schema.WithWarnings(warn))
+		})
 		return res
 	})
-	if res.Err() == nil {
+	if diagtest.Err(res) == nil {
 		t.Fatal("a FIFO in place of a schema must not load")
 	}
-	if !strings.Contains(res.Err().Error(), "not a regular file") {
-		t.Errorf("the refusal should name the file kind; got %v", res.Err())
+	if !strings.Contains(diagtest.Err(res).Error(), "not a regular file") {
+		t.Errorf("the refusal should name the file kind; got %v", res)
 	}
 }
 
@@ -74,14 +77,16 @@ func TestLoad_RefusesANonRegularImport(t *testing.T) {
 	}
 
 	res := loadWithWatchdog(t, func() diag.Result {
-		_, res := schema.Load(t.Context(), entry, schema.WithModuleRoot(dir))
+		_, res := diagtest.Capture(t, func(warn func(diag.Issue)) (schema.Schema, error) {
+			return schema.Load(t.Context(), entry, schema.WithModuleRoot(dir), schema.WithWarnings(warn))
+		})
 		return res
 	})
-	if res.Err() == nil {
+	if diagtest.Err(res) == nil {
 		t.Fatal("a FIFO in place of an import must not load")
 	}
-	if !strings.Contains(res.Err().Error(), "not a regular file") {
-		t.Errorf("the refusal should name the file kind; got %v", res.Err())
+	if !strings.Contains(diagtest.Err(res).Error(), "not a regular file") {
+		t.Errorf("the refusal should name the file kind; got %v", res)
 	}
 }
 
@@ -98,14 +103,16 @@ func TestLoad_RefusesANonRegularModuleRootMarker(t *testing.T) {
 	}
 
 	res := loadWithWatchdog(t, func() diag.Result {
-		_, res := schema.Load(t.Context(), entry)
+		_, res := diagtest.Capture(t, func(warn func(diag.Issue)) (schema.Schema, error) {
+			return schema.Load(t.Context(), entry, schema.WithWarnings(warn))
+		})
 		return res
 	})
 	if !res.HasCode(diag.E_LOAD_MODULE_ROOT_MALFORMED) {
-		t.Fatalf("a FIFO in place of the marker must be a malformed marker; got %v", res.Err())
+		t.Fatalf("a FIFO in place of the marker must be a malformed marker; got %v", res)
 	}
-	if !strings.Contains(res.Err().Error(), "not a regular file") {
-		t.Errorf("the refusal should name the file kind; got %v", res.Err())
+	if !strings.Contains(diagtest.Err(res).Error(), "not a regular file") {
+		t.Errorf("the refusal should name the file kind; got %v", res)
 	}
 }
 
@@ -142,14 +149,16 @@ func TestLoad_RefusesASocketAsASchema(t *testing.T) {
 	mksocket(t, sock)
 
 	res := loadWithWatchdog(t, func() diag.Result {
-		_, res := schema.Load(t.Context(), sock, schema.WithModuleRoot(dir))
+		_, res := diagtest.Capture(t, func(warn func(diag.Issue)) (schema.Schema, error) {
+			return schema.Load(t.Context(), sock, schema.WithModuleRoot(dir), schema.WithWarnings(warn))
+		})
 		return res
 	})
-	if res.Err() == nil {
+	if diagtest.Err(res) == nil {
 		t.Fatal("a socket in place of a schema must not load")
 	}
-	if !strings.Contains(res.Err().Error(), "not a regular file") {
-		t.Errorf("the refusal should name the file kind; got %v", res.Err())
+	if !strings.Contains(diagtest.Err(res).Error(), "not a regular file") {
+		t.Errorf("the refusal should name the file kind; got %v", res)
 	}
 }
 
@@ -163,14 +172,16 @@ func TestLoad_RefusesASocketAsAModuleRootMarker(t *testing.T) {
 	}
 
 	res := loadWithWatchdog(t, func() diag.Result {
-		_, res := schema.Load(t.Context(), filepath.Join(dir, "entry.yammm"))
+		_, res := diagtest.Capture(t, func(warn func(diag.Issue)) (schema.Schema, error) {
+			return schema.Load(t.Context(), filepath.Join(dir, "entry.yammm"), schema.WithWarnings(warn))
+		})
 		return res
 	})
-	if res.Err() == nil {
+	if diagtest.Err(res) == nil {
 		t.Fatal("a socket in place of the module-root marker must not load")
 	}
-	if !strings.Contains(res.Err().Error(), "not a regular file") {
-		t.Errorf("the refusal should name the file kind; got %v", res.Err())
+	if !strings.Contains(diagtest.Err(res).Error(), "not a regular file") {
+		t.Errorf("the refusal should name the file kind; got %v", res)
 	}
 }
 
@@ -187,13 +198,15 @@ func TestLoad_RefusesASocketAsAnImport(t *testing.T) {
 	}
 
 	res := loadWithWatchdog(t, func() diag.Result {
-		_, res := schema.Load(t.Context(), entry, schema.WithModuleRoot(dir))
+		_, res := diagtest.Capture(t, func(warn func(diag.Issue)) (schema.Schema, error) {
+			return schema.Load(t.Context(), entry, schema.WithModuleRoot(dir), schema.WithWarnings(warn))
+		})
 		return res
 	})
-	if res.Err() == nil {
+	if diagtest.Err(res) == nil {
 		t.Fatal("a socket in place of an import must not load")
 	}
-	if !strings.Contains(res.Err().Error(), "not a regular file") {
-		t.Errorf("the refusal should name the file kind; got %v", res.Err())
+	if !strings.Contains(diagtest.Err(res).Error(), "not a regular file") {
+		t.Errorf("the refusal should name the file kind; got %v", res)
 	}
 }

@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/simon-lentz/yammm/diag"
+	"github.com/simon-lentz/yammm/internal/diagtest"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -24,11 +25,13 @@ func TestLoadSources_AKeyThatNamesADirectoryRefusesAFile(t *testing.T) {
 	}
 	sep := string(filepath.Separator)
 	load := func(key string) diag.Result {
-		_, res := schema.LoadSourcesWithEntry(t.Context(), map[string][]byte{key: source}, key, root,
-			schema.WithSourcesOnly(true))
+		_, res := diagtest.Capture(t, func(warn func(diag.Issue)) (schema.Schema, error) {
+			return schema.LoadSourcesWithEntry(t.Context(), map[string][]byte{key: source}, key,
+				schema.WithSourcesOnly(true), schema.WithModuleRoot(root), schema.WithWarnings(warn))
+		})
 		return res
 	}
-	if res := load("x.yammm"); res.HasErrors() {
+	if res := load("x.yammm"); diagtest.Err(res) != nil {
 		t.Fatalf("the plain key was refused: %s", firstError(res))
 	}
 	for _, key := range []string{

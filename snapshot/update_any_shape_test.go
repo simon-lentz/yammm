@@ -56,20 +56,20 @@ func TestUpdateMetadata_UpdatesEveryShapeTheReadersAccept(t *testing.T) {
 				t.Fatal("the edit changed nothing")
 			}
 			doc := rehashDocument(t, []byte(edited))
-			if _, res := snapshot.Unmarshal(ctx, doc, s); res.HasErrors() {
-				t.Fatalf("the readers refuse the fixture: %s", res)
+			if _, err := snapshot.Unmarshal(ctx, doc, s); err != nil {
+				t.Fatalf("the readers refuse the fixture: %s", err)
 			}
 
-			out, res := snapshot.UpdateMetadata(ctx, doc, map[string]string{"stage": "done"})
-			if res.HasErrors() {
-				t.Fatalf("UpdateMetadata: %s", res)
+			out, err := snapshot.UpdateMetadata(ctx, doc, map[string]string{"stage": "done"})
+			if err != nil {
+				t.Fatalf("UpdateMetadata: %s", err)
 			}
-			if _, res := snapshot.Unmarshal(ctx, out, s); res.HasErrors() {
-				t.Errorf("Unmarshal of the update: %s", res)
+			if _, err := snapshot.Unmarshal(ctx, out, s); err != nil {
+				t.Errorf("Unmarshal of the update: %s", err)
 			}
-			header, res := snapshot.ReadHeader(ctx, bytes.NewReader(out))
-			if res.HasErrors() {
-				t.Fatalf("ReadHeader of the update: %s", res)
+			header, err := snapshot.ReadHeader(ctx, bytes.NewReader(out))
+			if err != nil {
+				t.Fatalf("ReadHeader of the update: %s", err)
 			}
 			if want := map[string]string{"stage": "done"}; !maps.Equal(header.Metadata, want) {
 				t.Errorf("metadata = %v, want %v", header.Metadata, want)
@@ -95,18 +95,18 @@ func TestUpdateMetadata_IndentsAsMarshalWrote(t *testing.T) {
 	s := testSchema(t)
 	for _, indent := range []string{"\t", "  ", "\n", "\n\t", "\t\n", "\r\n", " \n "} {
 		data := makeSnapshotBytes(ctx, t, snapshot.WithIndent(indent))
-		loaded, res := snapshot.Unmarshal(ctx, data, s)
-		if res.HasErrors() {
-			t.Fatalf("indent %q: Unmarshal: %s", indent, res)
+		loaded, err := snapshot.Unmarshal(ctx, data, s)
+		if err != nil {
+			t.Fatalf("indent %q: Unmarshal: %s", indent, err)
 		}
-		want, res := snapshot.Marshal(ctx, loaded, snapshot.WithIndent(indent))
-		if res.HasErrors() {
-			t.Fatalf("indent %q: Marshal: %s", indent, res)
+		want, err := snapshot.Marshal(ctx, loaded, snapshot.WithIndent(indent))
+		if err != nil {
+			t.Fatalf("indent %q: Marshal: %s", indent, err)
 		}
 		for _, lead := range []string{"", " ", "\n"} {
-			got, res := snapshot.UpdateMetadata(ctx, rehashDocument(t, append([]byte(lead), data...)), nil)
-			if res.HasErrors() {
-				t.Fatalf("indent %q, lead %q: UpdateMetadata: %s", indent, lead, res)
+			got, err := snapshot.UpdateMetadata(ctx, rehashDocument(t, append([]byte(lead), data...)), nil)
+			if err != nil {
+				t.Fatalf("indent %q, lead %q: UpdateMetadata: %s", indent, lead, err)
 			}
 			if lead == "" && !bytes.Equal(got, want) {
 				t.Errorf("indent %q: UpdateMetadata differs from Marshal(Unmarshal(x))", indent)
@@ -137,17 +137,17 @@ func TestUpdateMetadata_UpdatesAHeaderPastMaxHeaderSize(t *testing.T) {
 		t.Fatal("fixture shape changed; header boundary not found")
 	}
 	spaced = rehashDocument(t, spaced)
-	if _, res := snapshot.ReadHeader(ctx, bytes.NewReader(spaced)); !res.HasErrors() {
+	if _, err := snapshot.ReadHeader(ctx, bytes.NewReader(spaced)); err == nil {
 		t.Fatal("ReadHeader accepted a header past MaxHeaderSize; the fixture tests nothing")
 	}
 
-	out, res := snapshot.UpdateMetadata(ctx, spaced, map[string]string{"big": big, "stage": "done"})
-	if res.HasErrors() {
-		t.Fatalf("UpdateMetadata: %s", res)
+	out, err := snapshot.UpdateMetadata(ctx, spaced, map[string]string{"big": big, "stage": "done"})
+	if err != nil {
+		t.Fatalf("UpdateMetadata: %s", err)
 	}
-	info, res := snapshot.Stat(ctx, out)
-	if res.HasErrors() {
-		t.Fatalf("Stat of the update: %s", res)
+	info, err := snapshot.Stat(ctx, out)
+	if err != nil {
+		t.Fatalf("Stat of the update: %s", err)
 	}
 	if !info.CreatedAt.Equal(stamped) {
 		t.Errorf("created_at = %s, want %s", info.CreatedAt, stamped)

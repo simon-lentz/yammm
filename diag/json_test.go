@@ -289,7 +289,7 @@ func TestFormatIssueJSON_WithPath(t *testing.T) {
 
 func TestFormatResultJSON_Empty(t *testing.T) {
 	r := NewRenderer()
-	data := r.FormatResultJSON(OK())
+	data := r.FormatResultJSON(Result{})
 
 	var parsed map[string]any
 	if err := json.Unmarshal(data, &parsed); err != nil {
@@ -478,7 +478,7 @@ func TestJSON_RoundTrip(t *testing.T) {
 // TestJSON_EmptyArrayNotNull verifies issues array is [] not null.
 func TestJSON_EmptyArrayNotNull(t *testing.T) {
 	r := NewRenderer()
-	data := r.FormatResultJSON(OK())
+	data := r.FormatResultJSON(Result{})
 
 	// Should contain [] not null
 	expected := `"issues":[]`

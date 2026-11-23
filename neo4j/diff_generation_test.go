@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/simon-lentz/yammm/diag"
+	"github.com/simon-lentz/yammm/internal/diagtest"
 	"github.com/simon-lentz/yammm/schema/cypher"
 )
 
@@ -36,7 +37,9 @@ func TestDiff_AConstraintErrorReturnsBeforeTheIndexes(t *testing.T) {
 	t.Parallel()
 
 	s := loadInline(t, "schema \"p\"\n\ntype T {\n\tid String primary\n\tx String @index\n}\n")
-	plan, result := Diff(cypher.Config{LabelPrefix: "9"}, s, nil, nil)
+	plan, result := diagtest.Capture(t, func(warn func(diag.Issue)) (Plan, error) {
+		return Diff(cypher.Config{LabelPrefix: "9"}, s, nil, nil, WithWarnings(warn))
+	})
 	if !reflect.DeepEqual(plan, Plan{}) {
 		t.Errorf("plan = %+v, want the zero Plan", plan)
 	}
@@ -52,7 +55,9 @@ func TestDiff_AnIndexErrorKeepsTheConstraintWarnings(t *testing.T) {
 
 	s := loadInline(t, "schema \"p\"\n\ntype T {\n\tid String primary\n\tmatch String @index\n}\n")
 	c := cypher.Config{Edition: cypher.Community, NodeKeys: true, TypeConstraints: cypher.NoProperties}
-	plan, result := Diff(c, s, nil, nil)
+	plan, result := diagtest.Capture(t, func(warn func(diag.Issue)) (Plan, error) {
+		return Diff(c, s, nil, nil, WithWarnings(warn))
+	})
 	if !reflect.DeepEqual(plan, Plan{}) {
 		t.Errorf("plan = %+v, want the zero Plan", plan)
 	}
@@ -66,13 +71,51 @@ func TestDiff_AnIndexErrorKeepsTheConstraintWarnings(t *testing.T) {
 	}
 }
 
+// A constraint failure of a property returns no plan, though the index
+// generation, which never reads that property, would succeed: a plan without
+// the type's constraints would drop the owned ones.
+func TestDiff_AConstraintFailureOfAPropertyReturnsNoPlan(t *testing.T) {
+	t.Parallel()
+
+	s := loadInline(t, "schema \"p\"\n\ntype T {\n\tid String primary\n\tnested List<List<String>>\n}\n")
+	plan, result := diagtest.Capture(t, func(warn func(diag.Issue)) (Plan, error) {
+		return Diff(cypher.Config{}, s, nil, nil, WithWarnings(warn))
+	})
+	if !reflect.DeepEqual(plan, Plan{}) {
+		t.Errorf("plan = %+v, want the zero Plan", plan)
+	}
+	if got, want := codeCounts(result), map[string]int{"E_NEO4J_UNSUPPORTED_TYPE": 1}; !maps.Equal(got, want) {
+		t.Errorf("codes = %v, want %v", got, want)
+	}
+}
+
+// An index failure returns in one error with every refused remote row.
+func TestDiff_AnIndexFailureKeepsTheRemoteRowsFailures(t *testing.T) {
+	t.Parallel()
+
+	s := loadInline(t, "schema \"p\"\n\ntype T {\n\tid String primary\n\tmatch String @index\n}\n")
+	c := cypher.Config{TypeConstraints: cypher.NoProperties}
+	plan, result := diagtest.Capture(t, func(warn func(diag.Issue)) (Plan, error) {
+		return Diff(c, s, []RemoteConstraint{{Type: "UNIQUENESS"}}, nil, WithWarnings(warn))
+	})
+	if !reflect.DeepEqual(plan, Plan{}) {
+		t.Errorf("plan = %+v, want the zero Plan", plan)
+	}
+	want := map[string]int{"E_NEO4J_INVALID_IDENTIFIER": 1, "E_NEO4J_INVALID_REMOTE_OBJECT": 1}
+	if got := codeCounts(result); !maps.Equal(got, want) {
+		t.Errorf("codes = %v, want %v", got, want)
+	}
+}
+
 // A plan comes back with the generation's warnings.
 func TestDiff_APlanKeepsTheGenerationsWarnings(t *testing.T) {
 	t.Parallel()
 
 	s := loadInline(t, "schema \"p\"\n\ntype T {\n\tid String primary\n\tx String @index\n}\n")
-	plan, result := Diff(cypher.Config{Edition: cypher.Community, NodeKeys: true}, s, nil, nil)
-	if result.HasErrors() || len(plan.Constraints.Create) == 0 || len(plan.Indexes.Create) != 1 {
+	plan, result := diagtest.Capture(t, func(warn func(diag.Issue)) (Plan, error) {
+		return Diff(cypher.Config{Edition: cypher.Community, NodeKeys: true}, s, nil, nil, WithWarnings(warn))
+	})
+	if (diagtest.Err(result) != nil) || len(plan.Constraints.Create) == 0 || len(plan.Indexes.Create) != 1 {
 		t.Fatalf("plan = %+v; result:\n%s", plan, result)
 	}
 	if !result.HasCode(cypher.W_NEO4J_NODE_KEY_UNSUPPORTED) {
@@ -87,14 +130,14 @@ func TestDiff_OwnsTheLabelsTheConfigComposes(t *testing.T) {
 
 	s := loadInline(t, "schema \"p\"\n\ntype T {\n\tid String primary\n}\n")
 	c := cypher.Config{LabelPrefix: "app_", TypeConstraints: cypher.NoProperties}
-	desired, result := c.Constraints(s)
-	if result.HasErrors() {
-		t.Fatal(result)
+	desired, err := c.Constraints(s)
+	if err != nil {
+		t.Fatal(err)
 	}
 	stale := RemoteConstraint{Name: "stale", Type: "UNIQUENESS", EntityType: "NODE", LabelsOrTypes: []string{"app_p__T"}, Properties: []string{"zz"}}
-	plan, result := Diff(c, s, append(asRemote(desired), stale), nil)
-	if result.HasErrors() {
-		t.Fatal(result)
+	plan, err := Diff(c, s, append(asRemote(desired), stale), nil)
+	if err != nil {
+		t.Fatal(err)
 	}
 	if len(plan.Constraints.Match) != len(desired) || len(plan.Constraints.Drop) != 1 {
 		t.Errorf("matched %d of %d and dropped %d; want every declared row matched and the stale row dropped",
@@ -109,14 +152,14 @@ func TestDiff_JudgesAKindUnderTheConfigsEdition(t *testing.T) {
 
 	s := loadInline(t, "schema \"p\"\n\ntype T {\n\tid String primary\n}\n")
 	c := cypher.Config{Edition: cypher.Community}
-	desired, result := c.Constraints(s)
-	if result.HasErrors() {
-		t.Fatal(result)
+	desired, err := c.Constraints(s)
+	if err != nil {
+		t.Fatal(err)
 	}
 	notNull := RemoteConstraint{Name: "nn", Type: "NODE_PROPERTY_EXISTENCE", EntityType: "NODE", LabelsOrTypes: []string{"p__T"}, Properties: []string{"zz"}}
-	plan, result := Diff(c, s, append(asRemote(desired), notNull), nil)
-	if result.HasErrors() {
-		t.Fatal(result)
+	plan, err := Diff(c, s, append(asRemote(desired), notNull), nil)
+	if err != nil {
+		t.Fatal(err)
 	}
 	if len(plan.Constraints.Drop) != 0 || plan.Constraints.Excluded != 1 {
 		t.Errorf("dropped %v and excluded %d; a Community plan must exclude the NOT NULL", plan.Constraints.Drop, plan.Constraints.Excluded)

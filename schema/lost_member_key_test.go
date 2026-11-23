@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/simon-lentz/yammm/diag"
+	"github.com/simon-lentz/yammm/internal/diagtest"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -20,7 +21,9 @@ func TestLoad_ATypeThatLostAMemberIsNotBlamedForItsKey(t *testing.T) {
 		t.Run(member, func(t *testing.T) {
 			t.Parallel()
 			src := "schema \"s\"\ntype T {\n\t" + member + "\n}\n\ntype Keyless {\n\tname String\n}\n"
-			_, res := schema.LoadString(t.Context(), src, "s.yammm")
+			_, res := diagtest.Capture(t, func(warn func(diag.Issue)) (schema.Schema, error) {
+				return schema.LoadString(t.Context(), src, "s.yammm", schema.WithWarnings(warn))
+			})
 			counts := codeCounts(res)
 			if counts[diag.E_SYNTAX] == 0 {
 				t.Fatalf("precondition: the member is a syntax error; got %v", res)
@@ -41,7 +44,9 @@ func TestLoad_ATypeThatLostAMemberIsNotBlamedForItsKey(t *testing.T) {
 // E_SYNTAX alone.
 func TestLoad_ATypeCutOffAtEndOfInputIsNotBlamedForItsKey(t *testing.T) {
 	t.Parallel()
-	_, res := schema.LoadString(t.Context(), "schema \"s\"\ntype T {\n\tname String\n", "s.yammm")
+	_, res := diagtest.Capture(t, func(warn func(diag.Issue)) (schema.Schema, error) {
+		return schema.LoadString(t.Context(), "schema \"s\"\ntype T {\n\tname String\n", "s.yammm", schema.WithWarnings(warn))
+	})
 	if counts := codeCounts(res); counts[diag.E_SYNTAX] != 1 || counts[diag.E_NO_PRIMARY_KEY] != 0 {
 		t.Errorf("want one E_SYNTAX and no E_NO_PRIMARY_KEY; got %v", res)
 	}
@@ -55,7 +60,9 @@ func TestLoad_ATypeWhoseSupertypeLostAMemberIsNotBlamedForItsKey(t *testing.T) {
 		t.Run(member, func(t *testing.T) {
 			t.Parallel()
 			src := "schema \"s\"\nabstract type B {\n\t" + member + "\n}\n\ntype C extends B {\n}\n"
-			_, res := schema.LoadString(t.Context(), src, "s.yammm")
+			_, res := diagtest.Capture(t, func(warn func(diag.Issue)) (schema.Schema, error) {
+				return schema.LoadString(t.Context(), src, "s.yammm", schema.WithWarnings(warn))
+			})
 			if counts := codeCounts(res); counts[diag.E_SYNTAX] == 0 || counts[diag.E_NO_PRIMARY_KEY] != 0 {
 				t.Errorf("want the member's E_SYNTAX and no E_NO_PRIMARY_KEY; got %v", res)
 			}
@@ -80,7 +87,9 @@ func TestLoad_ASkipThatHoldsNoMemberLeavesTheKeyJudged(t *testing.T) {
 		t.Run(body, func(t *testing.T) {
 			t.Parallel()
 			src := "schema \"s\"\ntype T {\n\t" + body + "\n}\n"
-			_, res := schema.LoadString(t.Context(), src, "s.yammm")
+			_, res := diagtest.Capture(t, func(warn func(diag.Issue)) (schema.Schema, error) {
+				return schema.LoadString(t.Context(), src, "s.yammm", schema.WithWarnings(warn))
+			})
 			if counts := codeCounts(res); counts[diag.E_SYNTAX] == 0 || counts[diag.E_NO_PRIMARY_KEY] != 1 {
 				t.Errorf("want the E_SYNTAX and one E_NO_PRIMARY_KEY; got %v", res)
 			}
@@ -99,7 +108,9 @@ func TestLoad_AMemberSwallowedByAnOpenParenthesisIsNotBlamedForTheKey(t *testing
 		t.Run(body, func(t *testing.T) {
 			t.Parallel()
 			src := "schema \"s\"\ntype T {\n\t" + body + "\n}\n"
-			_, res := schema.LoadString(t.Context(), src, "s.yammm")
+			_, res := diagtest.Capture(t, func(warn func(diag.Issue)) (schema.Schema, error) {
+				return schema.LoadString(t.Context(), src, "s.yammm", schema.WithWarnings(warn))
+			})
 			if counts := codeCounts(res); counts[diag.E_SYNTAX] == 0 || counts[diag.E_NO_PRIMARY_KEY] != 0 {
 				t.Errorf("want the E_SYNTAX and no E_NO_PRIMARY_KEY; got %v", res)
 			}
@@ -122,7 +133,9 @@ func TestLoad_AnAnnotationNameApartFromItsAtSignLosesNoMember(t *testing.T) {
 			t.Parallel()
 			src := "schema \"s\"\ntype B {\n\tid String primary\n}\n\ntype T {\n\tname String\n\t--> R (one) B\n\t" +
 				stray + "\n}\n"
-			_, res := schema.LoadString(t.Context(), src, "s.yammm")
+			_, res := diagtest.Capture(t, func(warn func(diag.Issue)) (schema.Schema, error) {
+				return schema.LoadString(t.Context(), src, "s.yammm", schema.WithWarnings(warn))
+			})
 			counts := codeCounts(res)
 			if counts[diag.E_SYNTAX] == 0 {
 				t.Fatalf("precondition: the stray text is a syntax error; got %v", res)
@@ -145,7 +158,9 @@ func TestLoad_AMemberInsideClosedParenthesesWithinAnOpenOneIsNoMember(t *testing
 		t.Run(body, func(t *testing.T) {
 			t.Parallel()
 			src := "schema \"s\"\ntype T {\n\t" + body + "\n}\n"
-			_, res := schema.LoadString(t.Context(), src, "s.yammm")
+			_, res := diagtest.Capture(t, func(warn func(diag.Issue)) (schema.Schema, error) {
+				return schema.LoadString(t.Context(), src, "s.yammm", schema.WithWarnings(warn))
+			})
 			counts := codeCounts(res)
 			if counts[diag.E_SYNTAX] == 0 {
 				t.Fatalf("precondition: the text is a syntax error; got %v", res)

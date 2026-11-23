@@ -21,6 +21,9 @@ func TestRun_StderrIsOneJSONDocument(t *testing.T) {
 	if err := os.WriteFile(corrupt, []byte(`{"yammm_snapshot":{`), 0o600); err != nil {
 		t.Fatalf("write corrupt fixture: %v", err)
 	}
+	// update-metadata rewrites its operand in place, so it is given a copy.
+	hashAlgoCopy := filepath.Join(dir, "hash_algo_unsupported.ys")
+	copyFile(t, hashAlgoFixture, hashAlgoCopy)
 	broken := filepath.Join(dir, "broken.yammm")
 	if err := os.WriteFile(broken, []byte("schema \"b\"\ntype A {\n\tid String primary\n\tname\n}\n"), 0o600); err != nil {
 		t.Fatalf("write broken fixture: %v", err)
@@ -51,7 +54,7 @@ func TestRun_StderrIsOneJSONDocument(t *testing.T) {
 		{"snapshot verify, corrupt snapshot", "snapshot verify " + shadowedSchema + " " + corrupt},
 		{"snapshot update-metadata, unreadable file", "snapshot update-metadata -s a=b " + missing + ".ys"},
 		{"snapshot update-metadata, no operation", "snapshot update-metadata " + corrupt},
-		{"snapshot update-metadata, header warning", "snapshot update-metadata -s a=b " + hashAlgoFixture},
+		{"snapshot update-metadata, header warning", "snapshot update-metadata -s a=b " + hashAlgoCopy},
 		{"gen --to cypher, unreadable schema", "gen --to cypher " + missing},
 		{"gen --to cypher, unrecognized edition", "gen --to cypher --edition bogus " + shadowedSchema},
 		{"neo4j diff, no --uri", "neo4j diff " + shadowedSchema},

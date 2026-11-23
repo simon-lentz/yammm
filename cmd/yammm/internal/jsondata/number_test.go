@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/simon-lentz/yammm/internal/diagtest"
 	"github.com/simon-lentz/yammm/internal/yammmtest/sourcetest"
 
 	"github.com/simon-lentz/yammm/diag"
@@ -19,7 +20,7 @@ import (
 func numberSchemaless(t *testing.T, doc string) map[string]any {
 	t.Helper()
 	parsed, res := Parse(context.Background(), sourcetest.ID("numbers.json"), []byte(doc))
-	if err := res.Err(); err != nil {
+	if err := diagtest.Err(res); err != nil {
 		t.Fatalf("parse %s: %v", doc, err)
 	}
 	items := parsed["T"]
@@ -112,7 +113,7 @@ func TestParse_RefusesWhatTheDecoderWillNotNest(t *testing.T) {
 
 	_, res := Parse(context.Background(), sourcetest.ID("deep.json"), []byte(doc))
 
-	if res.Err() == nil {
+	if diagtest.Err(res) == nil {
 		t.Fatal("a document nested 10,000 levels parsed; want a diagnostic")
 	}
 }
@@ -133,8 +134,8 @@ type T {
 func TestParse_IntegerLiteralOutsideInt64IsRefusedAtAnInteger(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	s, res := schema.LoadString(ctx, integerRangeSchema, "r.yammm")
-	if err := res.Err(); err != nil {
+	s, loadErr := schema.LoadString(ctx, integerRangeSchema, "r.yammm")
+	if err := loadErr; err != nil {
 		t.Fatalf("load: %v", err)
 	}
 	for _, literal := range []string{
@@ -147,11 +148,13 @@ func TestParse_IntegerLiteralOutsideInt64IsRefusedAtAnInteger(t *testing.T) {
 			t.Parallel()
 			doc := fmt.Sprintf(`{"T":[{"id":"a","n":%s,"f":1.5}]}`, literal)
 			parsed, pres := Parse(ctx, sourcetest.ID("r.json"), []byte(doc))
-			if err := pres.Err(); err != nil {
+			if err := diagtest.Err(pres); err != nil {
 				t.Fatalf("parse: %v", err)
 			}
-			_, vres := instance.NewValidator(s).Validate(ctx, "T", rawsOf(parsed["T"].Elements))
-			if !vres.HasErrors() {
+			_, vres := diagtest.Issues(t, func() ([]instance.ValidInstance, error) {
+				return instance.NewValidator(s).Validate(ctx, "T", rawsOf(parsed["T"].Elements))
+			})
+			if diagtest.Err(vres) == nil {
 				t.Fatalf("%s validated at an Integer property", literal)
 			}
 			if !strings.Contains(vres.String(), "E_TYPE_MISMATCH") || !strings.Contains(vres.String(), "outside the int64 range") {
@@ -168,8 +171,8 @@ func TestParse_IntegerLiteralOutsideInt64IsRefusedAtAnInteger(t *testing.T) {
 func TestParse_AFloatLiteralIsRefusedAtAnInteger(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	s, res := schema.LoadString(ctx, integerRangeSchema, "r.yammm")
-	if err := res.Err(); err != nil {
+	s, loadErr := schema.LoadString(ctx, integerRangeSchema, "r.yammm")
+	if err := loadErr; err != nil {
 		t.Fatalf("load: %v", err)
 	}
 	for _, literal := range []string{
@@ -184,10 +187,12 @@ func TestParse_AFloatLiteralIsRefusedAtAnInteger(t *testing.T) {
 			t.Parallel()
 			doc := fmt.Sprintf(`{"T":[{"id":"a","n":%s,"f":1.5}]}`, literal)
 			parsed, pres := Parse(ctx, sourcetest.ID("r.json"), []byte(doc))
-			if err := pres.Err(); err != nil {
+			if err := diagtest.Err(pres); err != nil {
 				t.Fatalf("parse: %v", err)
 			}
-			_, vres := instance.NewValidator(s).Validate(ctx, "T", rawsOf(parsed["T"].Elements))
+			_, vres := diagtest.Issues(t, func() ([]instance.ValidInstance, error) {
+				return instance.NewValidator(s).Validate(ctx, "T", rawsOf(parsed["T"].Elements))
+			})
 			if !vres.HasCode(diag.E_TYPE_MISMATCH) || !strings.Contains(vres.String(), "got float") ||
 				strings.Contains(vres.String(), "int64 range") {
 				t.Errorf("%s drew %s, want E_TYPE_MISMATCH naming a float", literal, vres.String())
@@ -201,18 +206,18 @@ func TestParse_AFloatLiteralIsRefusedAtAnInteger(t *testing.T) {
 func TestParse_IntegerLiteralOutsideInt64IsAFloatAtAFloat(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	s, res := schema.LoadString(ctx, integerRangeSchema, "r.yammm")
-	if err := res.Err(); err != nil {
+	s, loadErr := schema.LoadString(ctx, integerRangeSchema, "r.yammm")
+	if err := loadErr; err != nil {
 		t.Fatalf("load: %v", err)
 	}
 	parsed, pres := Parse(ctx, sourcetest.ID("r.json"),
 		[]byte(`{"T":[{"id":"a","n":1,"f":99999999999999999999}]}`))
-	if err := pres.Err(); err != nil {
+	if err := diagtest.Err(pres); err != nil {
 		t.Fatalf("parse: %v", err)
 	}
-	valid, vres := instance.NewValidator(s).Validate(ctx, "T", rawsOf(parsed["T"].Elements))
-	if vres.HasErrors() {
-		t.Fatalf("validate: %s", vres.String())
+	valid, validateErr := instance.NewValidator(s).Validate(ctx, "T", rawsOf(parsed["T"].Elements))
+	if validateErr != nil {
+		t.Fatalf("validate: %s", validateErr)
 	}
 	got, _ := valid[0].Property("f")
 	if f, ok := got.Any().(float64); !ok || f != 1e20 {

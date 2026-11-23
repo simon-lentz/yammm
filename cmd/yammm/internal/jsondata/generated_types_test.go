@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/simon-lentz/yammm/internal/diagtest"
 	"github.com/simon-lentz/yammm/internal/yammmtest/sourcetest"
 
 	"github.com/simon-lentz/yammm/cmd/yammm/internal/jsondata"
@@ -46,24 +47,26 @@ func readSnapshot(t *testing.T, s schema.Schema, doc []byte) []byte {
 	t.Helper()
 	ctx := t.Context()
 	parsed, res := jsondata.Parse(ctx, sourcetest.ID("test://temporal.json"), doc)
-	if !res.OK() {
+	if diagtest.Err(res) != nil {
 		t.Fatalf("parse: %s\n%s", res, doc)
 	}
 	v := instance.NewValidator(s)
 	g := graph.New(s)
 	for _, typeName := range slices.Sorted(maps.Keys(parsed)) {
 		for _, raw := range parsed[typeName].Elements {
-			valid, res := v.ValidateOne(ctx, typeName, raw.RawInstance)
-			if !res.OK() {
-				t.Fatalf("validate: %s\n%s", res, doc)
+			valid, err := v.ValidateOne(ctx, typeName, raw.RawInstance)
+			if err != nil {
+				t.Fatalf("validate: %s\n%s", err, doc)
 			}
-			if res := g.Add(ctx, valid); !res.OK() {
-				t.Fatalf("add: %s\n%s", res, doc)
+			if err := g.Add(ctx, valid); err != nil {
+				t.Fatalf("add: %s\n%s", err, doc)
 			}
 		}
 	}
-	ys, res := snapshot.Marshal(ctx, g.Snapshot())
-	if res.HasErrors() {
+	ys, res := diagtest.Issues(t, func() ([]byte, error) {
+		return snapshot.Marshal(ctx, g.Snapshot())
+	})
+	if diagtest.Err(res) != nil {
 		t.Fatalf("marshal: %s", res)
 	}
 	return ys
@@ -77,9 +80,9 @@ func TestRoundTrip_Temporal(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	s, res := schema.Load(t.Context(), path)
-	if res.HasErrors() {
-		t.Fatalf("load: %s", res)
+	s, loadErr := schema.Load(t.Context(), path)
+	if loadErr != nil {
+		t.Fatalf("load: %s", loadErr)
 	}
 	doc := []byte(temporalDocument)
 	want := readSnapshot(t, s, doc)
@@ -222,7 +225,7 @@ func TestGeneratedTemporal_WritesNoDateItCannotRead(t *testing.T) {
 func compositionsOf(t *testing.T, s schema.Schema, doc []byte) [][]string {
 	t.Helper()
 	parsed, res := jsondata.Parse(t.Context(), sourcetest.ID("test://temporal.json"), doc)
-	if !res.OK() {
+	if diagtest.Err(res) != nil {
 		t.Fatalf("parse: %s\n%s", res, doc)
 	}
 	v := instance.NewValidator(s)
@@ -232,8 +235,8 @@ func compositionsOf(t *testing.T, s schema.Schema, doc []byte) [][]string {
 	}
 	var out [][]string
 	for _, raw := range parsed["Sensor"].Elements {
-		if _, res := v.ValidateOne(t.Context(), "Sensor", raw.RawInstance); !res.OK() {
-			t.Fatalf("validate: %s\n%s", res, doc)
+		if _, err := v.ValidateOne(t.Context(), "Sensor", raw.RawInstance); err != nil {
+			t.Fatalf("validate: %s\n%s", err, doc)
 		}
 		var names []string
 		for rel := range sensor.AllCompositions() {
@@ -255,9 +258,9 @@ func TestRoundTrip_TemporalKeepsAnEmptyComposition(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	s, res := schema.Load(t.Context(), path)
-	if res.HasErrors() {
-		t.Fatalf("load: %s", res)
+	s, loadErr := schema.Load(t.Context(), path)
+	if loadErr != nil {
+		t.Fatalf("load: %s", loadErr)
 	}
 	doc := []byte(temporalDocument)
 	var got temporal.Graph

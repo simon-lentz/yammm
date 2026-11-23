@@ -14,7 +14,7 @@ const (
 	Fatal Severity = iota + 1
 
 	// Error indicates a validation failure where collection can continue.
-	// Errors cause the overall result to be unsuccessful.
+	// An Error makes the call that drew it return a failure.
 	Error
 
 	// Warning indicates a condition that should be corrected but the target
@@ -51,8 +51,8 @@ func (s Severity) String() string {
 	}
 }
 
-// isFailure reports whether s is Fatal or Error, the condition !Result.OK()
-// checks.
+// isFailure reports whether s is Fatal or Error, the severities a
+// [ResultError] holds.
 func (s Severity) isFailure() bool {
 	return s == Fatal || s == Error
 }

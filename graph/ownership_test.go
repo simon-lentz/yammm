@@ -30,7 +30,7 @@ func TestGraph_SnapshotIsolation(t *testing.T) {
 	child2 := partData(t, s, "Child",
 		[]any{"c2"}, map[string]any{"name": "Child 2"})
 	parent := parentWith(t, s, "Parent", []any{"p1"}, map[string]any{"name": "Parent 1"}, "CHILDREN", child1, child2)
-	if err := g.Add(ctx, parent).Err(); err != nil {
+	if err := g.Add(ctx, parent); err != nil {
 		t.Fatalf("Add should succeed: %v", err)
 	}
 
@@ -101,7 +101,7 @@ func TestGraph_ComposedChildAccess(t *testing.T) {
 		[]any{"c3"}, map[string]any{"name": "Third Child"})
 
 	parent := parentWith(t, s, "Parent", []any{"p1"}, map[string]any{"name": "Parent 1"}, "CHILDREN", child1, child2, child3)
-	if err := g.Add(ctx, parent).Err(); err != nil {
+	if err := g.Add(ctx, parent); err != nil {
 		t.Errorf("Add should succeed: %v", err)
 	}
 
@@ -170,7 +170,9 @@ func TestGraph_InstanceReferencePreservation(t *testing.T) {
 	person := mustValidInstance(t, s, "Person",
 		[]any{"alice"}, map[string]any{"name": "Alice"})
 
-	g.Add(ctx, person)
+	if err := g.Add(ctx, person); err != nil {
+		t.Errorf("Add: %v", err)
+	}
 
 	// Access the instance multiple times within the SAME snapshot
 	snap := g.Snapshot()
@@ -219,13 +221,17 @@ func TestSnapshot_EdgeInstanceConsistency(t *testing.T) {
 	// Add company
 	company := mustValidInstance(t, s, "Company",
 		[]any{"acme"}, map[string]any{"name": "ACME Corp"})
-	g.Add(ctx, company)
+	if err := g.Add(ctx, company); err != nil {
+		t.Errorf("Add: %v", err)
+	}
 
 	// Add person with reference to company
 	person := mustValidInstanceWithEdge(t, s, "Person",
 		[]any{"alice"}, map[string]any{"name": "Alice"},
 		"EMPLOYER", [][]any{{"acme"}})
-	g.Add(ctx, person)
+	if err := g.Add(ctx, person); err != nil {
+		t.Errorf("Add: %v", err)
+	}
 
 	snap := g.Snapshot()
 

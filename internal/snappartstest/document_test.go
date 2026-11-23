@@ -47,9 +47,9 @@ type Person {
 
 func documentShapes(t *testing.T) (schema.Schema, snapparts.Parts) {
 	t.Helper()
-	s, res := schema.LoadString(t.Context(), documentShapesSchema, "shapes.yammm")
-	if res.HasErrors() {
-		t.Fatalf("schema: %s", res)
+	s, err := schema.LoadString(t.Context(), documentShapesSchema, "shapes.yammm")
+	if err != nil {
+		t.Fatalf("schema: %s", err)
 	}
 	company, person, card, empty := typeID(t, s, "Company"), typeID(t, s, "Person"), typeID(t, s, "Card"), typeID(t, s, "Empty")
 	key := func(k string) immutable.Key { return immutable.WrapKey([]any{k}) }
@@ -179,14 +179,14 @@ func TestDocument_FailsOnWhatNoDocumentHolds(t *testing.T) {
 			TypeID: person, PrimaryKey: immutable.WrapKey([]any{"p1"}), Properties: immutable.WrapProperties(props),
 		}}}
 	}
-	other, res := schema.LoadString(t.Context(), `schema "other"
+	other, err := schema.LoadString(t.Context(), `schema "other"
 
 type Stranger {
 	id String primary
 }
 `, "other.yammm")
-	if res.HasErrors() {
-		t.Fatalf("schema: %s", res)
+	if err != nil {
+		t.Fatalf("schema: %s", err)
 	}
 	for _, c := range []struct {
 		name  string
@@ -240,7 +240,7 @@ func (r *recordingTB) Fatalf(format string, args ...any) {
 // held. The reader then judges the document these rows state.
 func TestDocument_WritesATableRowForATypeNoRootHolds(t *testing.T) {
 	t.Parallel()
-	s, res := schema.LoadString(t.Context(), `schema "rows"
+	s, err := schema.LoadString(t.Context(), `schema "rows"
 
 type Alpha {
 	id String primary
@@ -255,8 +255,8 @@ type Zeta {
 	id String primary
 }
 `, "rows.yammm")
-	if res.HasErrors() {
-		t.Fatalf("schema: %s", res)
+	if err != nil {
+		t.Fatalf("schema: %s", err)
 	}
 	alpha, beta, zeta := typeID(t, s, "Alpha"), typeID(t, s, "Beta"), typeID(t, s, "Zeta")
 	key := func(k string) immutable.Key { return immutable.WrapKey([]any{k}) }
@@ -300,9 +300,9 @@ func TestDocument_WritesAProvenancePathAsHeld(t *testing.T) {
 // again: Document signs the header's member, and the reader verifies it.
 func TestDocument_SignsTheHeaderBesideAPropertyOfTheSameName(t *testing.T) {
 	t.Parallel()
-	s, res := schema.LoadString(t.Context(), "schema \"named\"\n\ntype H {\n\tid String primary\n\tintegrity_hash String\n}\n", "named.yammm")
-	if res.HasErrors() {
-		t.Fatalf("schema: %s", res)
+	s, err := schema.LoadString(t.Context(), "schema \"named\"\n\ntype H {\n\tid String primary\n\tintegrity_hash String\n}\n", "named.yammm")
+	if err != nil {
+		t.Fatalf("schema: %s", err)
 	}
 	h := typeID(t, s, "H")
 	parts := snapparts.Parts{Instances: []snapparts.Instance{{
@@ -313,7 +313,25 @@ func TestDocument_SignsTheHeaderBesideAPropertyOfTheSameName(t *testing.T) {
 	if !strings.Contains(string(data), `"properties":{"id":"h1","integrity_hash":""}`) {
 		t.Fatalf("Document moved the property:\n%s", data)
 	}
-	if res := snapshot.Verify(t.Context(), data, s); res.HasErrors() {
-		t.Errorf("Verify: %s", res)
+	if err := snapshot.Verify(t.Context(), data, s); err != nil {
+		t.Errorf("Verify: %s", err)
+	}
+}
+
+// Loaded fails its test on a document the reader refuses, naming the refusal.
+func TestLoaded_FailsTheTestOnARefusedDocument(t *testing.T) {
+	t.Parallel()
+	s, _ := documentShapes(t)
+	person := typeID(t, s, "Person")
+	parts := snapparts.Parts{
+		Instances: []snapparts.Instance{{
+			TypeID: person, PrimaryKey: immutable.WrapKey([]any{"p1"}), Properties: immutable.WrapProperties(map[string]any{"id": "p1"}),
+		}},
+		Edges: []snapparts.Edge{{Relation: "EMPLOYER", SourceType: person, SourceKey: immutable.WrapKey([]any{"p1"}), TargetKey: immutable.WrapKey([]any{"c9"})}},
+	}
+	tb := &recordingTB{TB: t}
+	snappartstest.Loaded(tb, s, parts)
+	if len(tb.fatals) != 1 || !strings.Contains(tb.fatals[0], "E_SNAPSHOT_DANGLING_REFERENCE") {
+		t.Errorf("fatals = %q, want one naming E_SNAPSHOT_DANGLING_REFERENCE", tb.fatals)
 	}
 }

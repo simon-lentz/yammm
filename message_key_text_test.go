@@ -10,6 +10,7 @@ import (
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/instance"
+	"github.com/simon-lentz/yammm/internal/diagtest"
 	"github.com/simon-lentz/yammm/internal/instancetest"
 	"github.com/simon-lentz/yammm/schema"
 	"github.com/simon-lentz/yammm/snapshot"
@@ -53,9 +54,9 @@ abstract type A {
 func TestMessages_RepeatAKeyCutToItsHead(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	s, res := schema.LoadString(ctx, keySchema, "keys.yammm")
-	if res.HasErrors() {
-		t.Fatal(res)
+	s, loadErr := schema.LoadString(ctx, keySchema, "keys.yammm")
+	if loadErr != nil {
+		t.Fatal(loadErr)
 	}
 	c := &echoChecker{t: t, judged: map[string]int{}}
 
@@ -98,11 +99,13 @@ func TestMessages_RepeatAKeyCutToItsHead(t *testing.T) {
 		valid("U", map[string]any{"id": "u2"}),
 		valid("T", map[string]any{"id": longText, "needs": needs, "maybe": map[string]any{"_target_id": "u"}}),
 	} {
-		if res := g.Add(ctx, record); res.HasErrors() {
-			t.Fatal(res)
+		if err := g.Add(ctx, record); err != nil {
+			t.Fatal(err)
 		}
 	}
-	merged, mergeRes := g.AddOrMerge(ctx, valid("T", map[string]any{"id": longText, "needs": needs, "maybe": map[string]any{"_target_id": "u2"}}))
+	merged, mergeRes := diagtest.Issues(t, func() (bool, error) {
+		return g.AddOrMerge(ctx, valid("T", map[string]any{"id": longText, "needs": needs, "maybe": map[string]any{"_target_id": "u2"}}))
+	})
 	if merged || !mergeRes.HasCode(diag.E_GRAPH_CARDINALITY) {
 		t.Fatalf("AddOrMerge a second (one) target: merged %v, %s", merged, mergeRes)
 	}
@@ -118,8 +121,10 @@ func TestMessages_RepeatAKeyCutToItsHead(t *testing.T) {
 		shows("ParseKey a cut array", err.Error(), `graph: parsing key "[1,": `)
 	}
 
-	empty, r := snapshot.Marshal(ctx, graph.New(s).Snapshot())
-	if r.HasErrors() {
+	empty, r := diagtest.Issues(t, func() ([]byte, error) {
+		return snapshot.Marshal(ctx, graph.New(s).Snapshot())
+	})
+	if diagtest.Err(r) != nil {
 		t.Fatal(r)
 	}
 	header, _, ok := strings.Cut(strings.TrimPrefix(string(empty), `{"yammm_snapshot":`), `,"types":`)
@@ -190,9 +195,11 @@ func TestMessages_RepeatAKeyCutToItsHead(t *testing.T) {
 		return `{"source_type":1,"source_key":["` + source + `"],"relation":"` + relation + `","target_type":2,"target_key":` +
 			targetKey + `,"required":false,"reason":"` + reason + `"}`
 	}
-	load := func(where string, data []byte, opts ...snapshot.LoadOption) diag.Result {
+	load := func(where string, data []byte, opts ...snapshot.Option) diag.Result {
 		t.Helper()
-		_, r := snapshot.Unmarshal(ctx, data, s, opts...)
+		_, r := diagtest.Capture(t, func(warn func(diag.Issue)) (graph.Snapshot, error) {
+			return snapshot.Unmarshal(ctx, data, s, append([]snapshot.Option{snapshot.WithWarnings(warn)}, opts...)...)
+		})
 		if r.Len() == 0 {
 			t.Errorf("%s: Load reported nothing", where)
 		}
@@ -200,15 +207,21 @@ func TestMessages_RepeatAKeyCutToItsHead(t *testing.T) {
 		return r
 	}
 
-	if _, r := snapshot.Unmarshal(ctx, doc(ts(root("t"))+","+us("u"), "", ""), s); !r.OK() {
-		t.Fatalf("the clean document draws issues:\n%s", r)
+	if _, err := snapshot.Unmarshal(ctx, doc(ts(root("t"))+","+us("u"), "", ""), s); err != nil {
+		t.Fatalf("the clean document draws issues:\n%s", err)
 	}
 
-	_, r = snapshot.ReadHeader(ctx, strings.NewReader(`"`+Z+`"`))
+	_, r = diagtest.Issues(t, func() (*snapshot.Header, error) {
+		return snapshot.ReadHeader(ctx, strings.NewReader(`"`+Z+`"`))
+	})
 	result("ReadHeader a string document", r)
-	_, r = snapshot.ReadHeader(ctx, strings.NewReader(`{"`+Z+`": 1}`))
+	_, r = diagtest.Issues(t, func() (*snapshot.Header, error) {
+		return snapshot.ReadHeader(ctx, strings.NewReader(`{"`+Z+`": 1}`))
+	})
 	result("ReadHeader a long first key", r)
-	_, r = snapshot.ReadHeader(ctx, strings.NewReader(`{"yammm_snapshot":`+header+`,"`+Z+`": }`))
+	_, r = diagtest.Issues(t, func() (*snapshot.Header, error) {
+		return snapshot.ReadHeader(ctx, strings.NewReader(`{"yammm_snapshot":`+header+`,"`+Z+`": }`))
+	})
 	result("ReadHeader a key whose value does not decode", r)
 
 	load("Load a string document", []byte(`"`+Z+`"`))
@@ -272,9 +285,13 @@ func TestMessages_RepeatAKeyCutToItsHead(t *testing.T) {
 	shows("Load a value its constraint refuses", messages(revalidated), "revalidation of keys#T["+head+"]: ")
 
 	stamped := []byte(strings.Replace(string(doc(ts(root("t"))+","+us("u"), "", "")), `{"yammm_snapshot":{`, `{"yammm_snapshot":{"created_at":"`+Z+`",`, 1))
-	_, r = snapshot.Unmarshal(ctx, stamped, s)
+	_, r = diagtest.Capture(t, func(warn func(diag.Issue)) (graph.Snapshot, error) {
+		return snapshot.Unmarshal(ctx, stamped, s, snapshot.WithWarnings(warn))
+	})
 	result("Load a long created_at", r)
-	_, r = snapshot.UpdateMetadata(ctx, stamped, map[string]string{"k": "v"})
+	_, r = diagtest.Issues(t, func() ([]byte, error) {
+		return snapshot.UpdateMetadata(ctx, stamped, map[string]string{"k": "v"})
+	})
 	result("UpdateMetadata a long created_at", r)
 
 	for _, where := range paths {

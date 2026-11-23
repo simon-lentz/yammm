@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/simon-lentz/yammm/diag"
+	"github.com/simon-lentz/yammm/internal/diagtest"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -27,8 +28,8 @@ import (
 // narrow enough combination that inline source reads better than a fixture file.
 func loadInline(t *testing.T, src string) schema.Schema {
 	t.Helper()
-	s, result := schema.LoadString(context.Background(), src, "list_element.yammm")
-	if err := result.Err(); err != nil {
+	s, loadErr := schema.LoadString(context.Background(), src, "list_element.yammm")
+	if err := loadErr; err != nil {
 		t.Fatalf("fixture is not valid yammm, so it cannot exercise the emitter: %v", err)
 	}
 	return s
@@ -71,9 +72,11 @@ type A {
 }
 `)
 
-			constraints, result := Config{}.Constraints(s)
+			constraints, result := diagtest.Capture(t, func(warn func(diag.Issue)) ([]Constraint, error) {
+				return Config{}.Constraints(s, WithWarnings(warn))
+			})
 
-			if result.Err() == nil {
+			if diagtest.Err(result) == nil {
 				t.Fatalf("emitted %d constraints for a property Neo4j cannot express", len(constraints))
 			}
 			// All-or-nothing: the schema's own id and name constraints are
@@ -114,7 +117,9 @@ type A {
     matrix List<List<Integer>> required
 }
 `)
-	_, result := Config{}.Constraints(s)
+	_, result := diagtest.Capture(t, func(warn func(diag.Issue)) ([]Constraint, error) {
+		return Config{}.Constraints(s, WithWarnings(warn))
+	})
 	var issues []diag.Issue
 	for iss := range result.Errors() {
 		issues = append(issues, iss)

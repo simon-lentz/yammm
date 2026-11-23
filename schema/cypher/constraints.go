@@ -64,7 +64,7 @@ type Constraint struct {
 // constraint on that path's property in place of its primary key's UNIQUE.
 // Abstract types are skipped: no node carries their label.
 // The labels are judged first by [Config.CheckLabels], and on its error the
-// call returns its issues alone. Every declared property name a returned
+// call returns that error alone. Every declared property name a returned
 // statement writes is then judged by [IsIdentifier]: an invalid one draws one
 // issue per declared property, naming the scope that declares it.
 //
@@ -72,16 +72,20 @@ type Constraint struct {
 // closure order, then schema declaration order; within each type: UNIQUE/NODE
 // KEY -> NOT NULL -> TYPE.
 //
-// If validation errors are found, returns (nil, result) where result contains
-// all issues: [E_NEO4J_INVALID_IDENTIFIER] and [E_NEO4J_UNSUPPORTED_TYPE] at
-// Error. The
-// warnings [W_NEO4J_NODE_KEY_UNSUPPORTED] and [W_NEO4J_EDITION_CONSTRAINT_OMITTED]
-// report what the edition changed.
-func (c Config) Constraints(s schema.Schema) ([]Constraint, diag.Result) {
-	if labelResult := c.CheckLabels(s); labelResult.HasErrors() {
-		return nil, labelResult
+// A refused schema returns nil beside a *[diag.ResultError] holding every
+// failure: [E_NEO4J_INVALID_IDENTIFIER] and [E_NEO4J_UNSUPPORTED_TYPE]. The
+// warnings [W_NEO4J_NODE_KEY_UNSUPPORTED] and
+// [W_NEO4J_EDITION_CONSTRAINT_OMITTED] report what the edition changed; they go
+// to [WithWarnings] once the labels pass [Config.CheckLabels], beside a later
+// failure too, and never into the error.
+// Constraints takes [WithWarnings], the one [Option].
+func (c Config) Constraints(s schema.Schema, opts ...Option) ([]Constraint, error) {
+	cfg := newCallConfig(opts)
+	if err := c.CheckLabels(s); err != nil {
+		return nil, err
 	}
-	collector := diag.NewCollector(0)
+	collector := diag.NewCollector(diag.NoLimit)
+	collector.RouteWarnings(cfg.warnings)
 
 	// Reported once per call, not per type: the substitution is a fact about the
 	// configuration, and repeating it for every type would scale the
@@ -113,11 +117,10 @@ func (c Config) Constraints(s schema.Schema) ([]Constraint, diag.Result) {
 		constraints = filtered
 	}
 
-	result := collector.Result()
-	if !result.OK() {
-		return nil, result
+	if err := collector.Err(); err != nil {
+		return nil, err
 	}
-	return constraints, result
+	return constraints, nil
 }
 
 // constraintsForType generates all constraints for a single type.

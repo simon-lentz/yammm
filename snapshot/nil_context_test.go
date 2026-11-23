@@ -15,15 +15,15 @@ import (
 func TestNilContext_EachPanicNamesTheCall(t *testing.T) {
 	t.Parallel()
 	s, doc := duplicateEdgeDoc(t)
-	loaded, res := snapshot.Unmarshal(t.Context(), doc, s)
-	if res.HasErrors() {
-		t.Fatal(res)
+	loaded, err := snapshot.Unmarshal(t.Context(), doc, s)
+	if err != nil {
+		t.Fatal(err)
 	}
 	var nilCtx context.Context
 	dir := t.TempDir()
 	for want, call := range map[string]func(){
 		"snapshot.Unmarshal: nil context":      func() { _, _ = snapshot.Unmarshal(nilCtx, doc, s) },
-		"snapshot.Verify: nil context":         func() { snapshot.Verify(nilCtx, doc, s) },
+		"snapshot.Verify: nil context":         func() { _ = snapshot.Verify(nilCtx, doc, s) },
 		"snapshot.Marshal: nil context":        func() { _, _ = snapshot.Marshal(nilCtx, loaded) },
 		"snapshot.UpdateMetadata: nil context": func() { _, _ = snapshot.UpdateMetadata(nilCtx, doc, nil) },
 		"snapshot.Stat: nil context":           func() { _, _ = snapshot.Stat(nilCtx, doc) },

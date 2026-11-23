@@ -2,9 +2,11 @@ package main
 
 import (
 	"bytes"
+	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -85,4 +87,73 @@ func TestSnapshotVerify_MalformedFile(t *testing.T) {
 
 	code := executeCmd(t, "snapshot", "verify", "testdata/valid.yammm", tmp)
 	assert.Equal(t, cli.ExitValidation, code)
+}
+
+// revalidationFixture saves n instances that meet the schema's invariant, then
+// rewrites every saved age so each instance breaks it. The edited snapshot's
+// integrity hash no longer verifies, so a read of it needs
+// --skip-integrity-check.
+func revalidationFixture(t *testing.T, n int) (schemaPath, ysPath string) {
+	t.Helper()
+	dir := t.TempDir()
+	schemaPath = filepath.Join(dir, "rv.yammm")
+	require.NoError(t, os.WriteFile(schemaPath, []byte(`schema "rv"
+
+type P {
+    id String primary
+    age Integer required
+    ! "adult" age >= 18
+}
+`), 0o600))
+
+	var b strings.Builder
+	b.WriteString(`{"P": [`)
+	for i := range n {
+		if i > 0 {
+			b.WriteString(",\n")
+		}
+		fmt.Fprintf(&b, `{"id": "p%03d", "age": 30}`, i)
+	}
+	b.WriteString("]}")
+	dataPath := filepath.Join(dir, "rv.json")
+	require.NoError(t, os.WriteFile(dataPath, []byte(b.String()), 0o600))
+
+	ysPath = filepath.Join(dir, "rv.ys")
+	code, _, stderr := executeCmdOutput(t, "snapshot", "save", "-o", ysPath, schemaPath, dataPath)
+	require.Equal(t, cli.ExitOK, code, "save the fixture:\n%s", stderr)
+
+	data, err := os.ReadFile(ysPath)
+	require.NoError(t, err)
+	require.Equal(t, n, bytes.Count(data, []byte(`"age":30`)), "the saved document does not spell each age as the edit expects")
+	require.NoError(t, os.WriteFile(ysPath, bytes.ReplaceAll(data, []byte(`"age":30`), []byte(`"age":5`)), 0o600))
+	return schemaPath, ysPath
+}
+
+// TestSnapshotVerify_RevalidatePrintsEachFindingAsAWarning pins that
+// --revalidate reports what the validator finds in the stored instances as
+// warnings on stderr, one per instance, and that warnings alone exit 0.
+func TestSnapshotVerify_RevalidatePrintsEachFindingAsAWarning(t *testing.T) {
+	t.Parallel()
+
+	schemaPath, ysPath := revalidationFixture(t, 3)
+	code, stdout, stderr := executeCmdOutput(t, "snapshot", "verify", "--revalidate", "--skip-integrity-check", schemaPath, ysPath)
+	assert.Equal(t, cli.ExitOK, code)
+	assert.Empty(t, stdout)
+	assert.Equal(t, 3, strings.Count(stderr, "warning[E_INVARIANT_FAIL]"), "stderr:\n%s", stderr)
+	for _, id := range []string{"p000", "p001", "p002"} {
+		assert.Contains(t, stderr, fmt.Sprintf(`revalidation of rv#P[[%q]]: adult`, id))
+	}
+}
+
+// TestSnapshotVerify_RevalidateKeepsAHundredWarnings pins the one-call issue
+// limit on a snapshot read: of 150 revalidation warnings, verify prints 100
+// and a note that counts the 50 it dropped.
+func TestSnapshotVerify_RevalidateKeepsAHundredWarnings(t *testing.T) {
+	t.Parallel()
+
+	schemaPath, ysPath := revalidationFixture(t, 150)
+	code, _, stderr := executeCmdOutput(t, "snapshot", "verify", "--revalidate", "--skip-integrity-check", schemaPath, ysPath)
+	assert.Equal(t, cli.ExitOK, code)
+	assert.Equal(t, 100, strings.Count(stderr, "warning[E_INVARIANT_FAIL]"), "printed warnings")
+	assert.Contains(t, stderr, "note: 50 more issue(s) dropped at an issue limit", "stderr carries no note counting the 50 dropped warnings")
 }

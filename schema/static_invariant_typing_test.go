@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/simon-lentz/yammm/diag"
+	"github.com/simon-lentz/yammm/internal/diagtest"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -34,11 +35,11 @@ func TestStaticInvariant_GuardVerdictDoesNotDependOnOrder(t *testing.T) {
 			t.Run(inv, func(t *testing.T) {
 				t.Parallel()
 				res := loadInvariant(t, inv)
-				if res.Err() == nil {
+				if diagtest.Err(res) == nil {
 					t.Fatalf("a guard over disjoint alternatives loaded clean")
 				}
 				if !hasCodeMentioning(res, diag.E_INVALID_INVARIANT, "Coalesce") {
-					t.Errorf("want E_INVALID_INVARIANT mentioning Coalesce; got %v", res.Err())
+					t.Errorf("want E_INVALID_INVARIANT mentioning Coalesce; got %v", res)
 				}
 			})
 		}
@@ -60,8 +61,8 @@ func TestStaticInvariant_GuardStillAdmitsAgreeingAlternatives(t *testing.T) {
 	} {
 		t.Run(inv, func(t *testing.T) {
 			t.Parallel()
-			if res := loadInvariant(t, inv); res.Err() != nil {
-				t.Errorf("a guard over agreeing alternatives was refused: %v", res.Err())
+			if res := loadInvariant(t, inv); diagtest.Err(res) != nil {
+				t.Errorf("a guard over agreeing alternatives was refused: %v", res)
 			}
 		})
 	}
@@ -77,7 +78,7 @@ func TestStaticInvariant_MinMaxTypedByTheTotalOrder(t *testing.T) {
 	// Min of a string and a number is the number, so a string stage refuses it.
 	res := loadInvariant(t, `(name -> Min(1)) -> Upper != ""`)
 	if !hasCodeMentioning(res, diag.E_INVALID_INVARIANT, "takes a string") {
-		t.Errorf("want E_INVALID_INVARIANT mentioning %q; got %v", "takes a string", res.Err())
+		t.Errorf("want E_INVALID_INVARIANT mentioning %q; got %v", "takes a string", res)
 	}
 
 	for _, inv := range []string{
@@ -91,8 +92,8 @@ func TestStaticInvariant_MinMaxTypedByTheTotalOrder(t *testing.T) {
 	} {
 		t.Run(inv, func(t *testing.T) {
 			t.Parallel()
-			if res := loadInvariant(t, inv); res.Err() != nil {
-				t.Errorf("the ranked result was refused at a stage that takes it: %v", res.Err())
+			if res := loadInvariant(t, inv); diagtest.Err(res) != nil {
+				t.Errorf("the ranked result was refused at a stage that takes it: %v", res)
 			}
 		})
 	}
@@ -100,7 +101,7 @@ func TestStaticInvariant_MinMaxTypedByTheTotalOrder(t *testing.T) {
 	// Max of two numbers is a number, so a string stage refuses it.
 	res = loadInvariant(t, `(MAIN_LINE.qty -> Max(1)) -> Upper != ""`)
 	if !hasCodeMentioning(res, diag.E_INVALID_INVARIANT, "takes a string") {
-		t.Errorf("want E_INVALID_INVARIANT mentioning %q; got %v", "takes a string", res.Err())
+		t.Errorf("want E_INVALID_INVARIANT mentioning %q; got %v", "takes a string", res)
 	}
 }
 
@@ -127,9 +128,11 @@ type Order {
 	} {
 		t.Run(inv, func(t *testing.T) {
 			t.Parallel()
-			_, res := schema.LoadString(t.Context(), head+inv+"\n}\n", "s.yammm")
+			_, res := diagtest.Capture(t, func(warn func(diag.Issue)) (schema.Schema, error) {
+				return schema.LoadString(t.Context(), head+inv+"\n}\n", "s.yammm", schema.WithWarnings(warn))
+			})
 			if !hasCodeMentioning(res, diag.E_INVALID_INVARIANT, want) {
-				t.Errorf("want E_INVALID_INVARIANT mentioning %q; got %v", want, res.Err())
+				t.Errorf("want E_INVALID_INVARIANT mentioning %q; got %v", want, res)
 			}
 		})
 	}
@@ -153,11 +156,11 @@ func TestStaticInvariant_UnionMemberOfDisjointKindsIsRefused(t *testing.T) {
 		t.Run(inv, func(t *testing.T) {
 			t.Parallel()
 			res := loadInvariant(t, inv)
-			if res.Err() == nil {
+			if diagtest.Err(res) == nil {
 				t.Fatalf("a member declared at disjoint kinds by the union's alternatives loaded clean")
 			}
 			if !hasCodeMentioning(res, diag.E_INVALID_INVARIANT, "disjoint kinds") {
-				t.Errorf("want E_INVALID_INVARIANT mentioning disjoint kinds; got %v", res.Err())
+				t.Errorf("want E_INVALID_INVARIANT mentioning disjoint kinds; got %v", res)
 			}
 		})
 	}
@@ -171,8 +174,8 @@ func TestStaticInvariant_UnionMemberOfDisjointKindsIsRefused(t *testing.T) {
 	} {
 		t.Run(inv, func(t *testing.T) {
 			t.Parallel()
-			if res := loadInvariant(t, inv); res.Err() != nil {
-				t.Errorf("a member of one kind was refused: %v", res.Err())
+			if res := loadInvariant(t, inv); diagtest.Err(res) != nil {
+				t.Errorf("a member of one kind was refused: %v", res)
 			}
 		})
 	}
@@ -195,11 +198,11 @@ func TestStaticInvariant_NilLiteralRefusedAtATypedArgument(t *testing.T) {
 		t.Run(inv, func(t *testing.T) {
 			t.Parallel()
 			res := loadInvariant(t, inv)
-			if res.Err() == nil {
+			if diagtest.Err(res) == nil {
 				t.Fatalf("the nil literal at a typed argument position loaded clean")
 			}
 			if !hasCodeMentioning(res, diag.E_INVALID_INVARIANT, "as its argument") {
-				t.Errorf("want E_INVALID_INVARIANT mentioning the argument rule; got %v", res.Err())
+				t.Errorf("want E_INVALID_INVARIANT mentioning the argument rule; got %v", res)
 			}
 		})
 	}
@@ -214,8 +217,8 @@ func TestStaticInvariant_NilLiteralRefusedAtATypedArgument(t *testing.T) {
 	} {
 		t.Run(inv, func(t *testing.T) {
 			t.Parallel()
-			if res := loadInvariant(t, inv); res.Err() != nil {
-				t.Errorf("an admitted argument was refused: %v", res.Err())
+			if res := loadInvariant(t, inv); diagtest.Err(res) != nil {
+				t.Errorf("an admitted argument was refused: %v", res)
 			}
 		})
 	}

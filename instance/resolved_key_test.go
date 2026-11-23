@@ -6,6 +6,7 @@ import (
 
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/instance"
+	"github.com/simon-lentz/yammm/internal/diagtest"
 	"github.com/simon-lentz/yammm/internal/value"
 	"github.com/simon-lentz/yammm/schema"
 )
@@ -30,9 +31,9 @@ type T {
 // for it, and still judges the edge's own properties.
 func TestValidate_AResolvedForeignKeyIsTheKeysComponentUnjudged(t *testing.T) {
 	t.Parallel()
-	s, res := schema.LoadString(t.Context(), resolvedKeySchema, "resolved.yammm")
-	if res.HasErrors() {
-		t.Fatalf("load schema: %s", res)
+	s, err := schema.LoadString(t.Context(), resolvedKeySchema, "resolved.yammm")
+	if err != nil {
+		t.Fatalf("load schema: %s", err)
 	}
 	v := instance.NewValidator(s)
 	target := func(w any) map[string]any {
@@ -43,10 +44,12 @@ func TestValidate_AResolvedForeignKeyIsTheKeysComponentUnjudged(t *testing.T) {
 		}
 	}
 
-	vi, vr := v.ValidateOne(t.Context(), "T", instance.RawInstance{Properties: map[string]any{
-		"id": "t1", "to_n": []any{target(int64(1))},
-	}})
-	if vr.HasErrors() {
+	vi, vr := diagtest.Issues(t, func() (instance.ValidInstance, error) {
+		return v.ValidateOne(t.Context(), "T", instance.RawInstance{Properties: map[string]any{
+			"id": "t1", "to_n": []any{target(int64(1))},
+		}})
+	})
+	if diagtest.Err(vr) != nil {
 		t.Fatalf("a resolved key was judged: %s", vr)
 	}
 	edge, ok := vi.Edge("TO_N")
@@ -61,9 +64,11 @@ func TestValidate_AResolvedForeignKeyIsTheKeysComponentUnjudged(t *testing.T) {
 		t.Errorf("target key = %s, want %s", got, want)
 	}
 
-	_, vr = v.ValidateOne(t.Context(), "T", instance.RawInstance{Properties: map[string]any{
-		"id": "t1", "to_n": []any{target(int64(9))},
-	}})
+	_, vr = diagtest.Issues(t, func() (instance.ValidInstance, error) {
+		return v.ValidateOne(t.Context(), "T", instance.RawInstance{Properties: map[string]any{
+			"id": "t1", "to_n": []any{target(int64(9))},
+		}})
+	})
 	if n := vr.CodeCounts(diag.Error)[diag.E_CONSTRAINT_FAIL]; n != 1 || len(vr.CodeCounts(diag.Error)) != 1 {
 		t.Errorf("an edge property out of its bounds beside a resolved key: %s; want its one E_CONSTRAINT_FAIL", vr)
 	}

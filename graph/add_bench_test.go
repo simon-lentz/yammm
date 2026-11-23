@@ -35,8 +35,8 @@ func BenchmarkAdd_WithComposedChildren(b *testing.B) {
 	b.ResetTimer()
 	b.ReportAllocs()
 	for i := range b.N {
-		if res := g.Add(ctx, insts[i]); !res.OK() {
-			b.Fatal(res.String())
+		if err := g.Add(ctx, insts[i]); err != nil {
+			b.Fatal(err)
 		}
 	}
 }
@@ -56,8 +56,8 @@ func BenchmarkAdd_PlainInstance(b *testing.B) {
 	b.ResetTimer()
 	b.ReportAllocs()
 	for i := range b.N {
-		if res := g.Add(ctx, insts[i]); !res.OK() {
-			b.Fatal(res.String())
+		if err := g.Add(ctx, insts[i]); err != nil {
+			b.Fatal(err)
 		}
 	}
 }
@@ -66,7 +66,7 @@ func BenchmarkAdd_PlainInstance(b *testing.B) {
 // whose Fatalf would panic on a nil runner instead of failing the benchmark.
 func benchFixture(b *testing.B) schema.Schema {
 	b.Helper()
-	s, res := schema.LoadString(b.Context(), `schema "composition"
+	s, err := schema.LoadString(b.Context(), `schema "composition"
 
 part type Child {
 	id String primary
@@ -79,8 +79,8 @@ type Parent {
 	*-> CHILDREN (many) Child
 }
 `, "bench_composition.yammm")
-	if res.HasErrors() {
-		b.Fatalf("build bench schema: %s", res.String())
+	if err != nil {
+		b.Fatalf("build bench schema: %s", err)
 	}
 	return s
 }

@@ -49,13 +49,13 @@ type Beacon {
 
 func loadAddrSchema(t *testing.T) schema.Schema {
 	t.Helper()
-	s, result := schema.LoadSourcesWithEntry(t.Context(), map[string][]byte{
+	s, err := schema.LoadSourcesWithEntry(t.Context(), map[string][]byte{
 		"entry.yammm": []byte(addrEntrySource),
 		"base.yammm":  []byte(addrBaseSource),
 		"deep.yammm":  []byte(addrDeepSource),
-	}, "entry.yammm", ".", schema.WithSourcesOnly(true))
-	if result.HasErrors() {
-		t.Fatalf("load addressability fixture: %s", result)
+	}, "entry.yammm", schema.WithSourcesOnly(true), schema.WithModuleRoot("."))
+	if err != nil {
+		t.Fatalf("load addressability fixture: %s", err)
 	}
 	return s
 }

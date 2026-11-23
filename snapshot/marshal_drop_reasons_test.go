@@ -34,9 +34,9 @@ type Source {
 	}
 }
 `
-	s, res := schema.LoadString(t.Context(), src, "drop_reason.yammm")
-	if res.HasErrors() {
-		t.Fatalf("load: %s", res)
+	s, err := schema.LoadString(t.Context(), src, "drop_reason.yammm")
+	if err != nil {
+		t.Fatalf("load: %s", err)
 	}
 	return s
 }
@@ -52,10 +52,10 @@ func TestMarshal_ADuplicateDrawsNoDropWarning(t *testing.T) {
 		return instancetest.Valid(t, s, "Target", map[string]any{"id": key})
 	}
 	g := graph.New(s)
-	if r := g.Add(t.Context(), row("t1")); !r.OK() {
-		t.Fatalf("add: %s", r)
+	if err := g.Add(t.Context(), row("t1")); err != nil {
+		t.Fatalf("add: %s", err)
 	}
-	if r := g.Add(t.Context(), row("t1")); r.OK() {
+	if err := g.Add(t.Context(), row("t1")); err == nil {
 		t.Fatal("a duplicate primary key was accepted")
 	}
 	snap := g.Snapshot()
@@ -63,13 +63,13 @@ func TestMarshal_ADuplicateDrawsNoDropWarning(t *testing.T) {
 		t.Fatalf("duplicates = %d, want 1", len(slices.Collect(snap.Duplicates())))
 	}
 
-	data, mres := snapshot.Marshal(t.Context(), snap)
-	if !mres.OK() {
-		t.Errorf("marshal: %s", mres)
+	data, err := snapshot.Marshal(t.Context(), snap)
+	if err != nil {
+		t.Errorf("marshal: %s", err)
 	}
-	loaded, lres := snapshot.Unmarshal(t.Context(), data, s)
-	if lres.HasErrors() {
-		t.Fatalf("load: %s", lres)
+	loaded, readErr := snapshot.Unmarshal(t.Context(), data, s)
+	if readErr != nil {
+		t.Fatalf("load: %s", readErr)
 	}
 	if got := len(slices.Collect(loaded.Duplicates())); got != 1 {
 		t.Errorf("the round trip holds %d duplicates, want 1", got)
@@ -101,13 +101,13 @@ func TestLoad_ProvenanceSurvivesOnlyWhenTheDocumentHadOne(t *testing.T) {
 	}
 	roundTrip := func(snap graph.Snapshot) graph.Instance {
 		t.Helper()
-		data, mres := snapshot.Marshal(t.Context(), snap)
-		if mres.HasErrors() {
-			t.Fatalf("marshal: %s", mres)
+		data, err := snapshot.Marshal(t.Context(), snap)
+		if err != nil {
+			t.Fatalf("marshal: %s", err)
 		}
-		loaded, lres := snapshot.Unmarshal(t.Context(), data, s)
-		if lres.HasErrors() {
-			t.Fatalf("load: %s", lres)
+		loaded, readErr := snapshot.Unmarshal(t.Context(), data, s)
+		if readErr != nil {
+			t.Fatalf("load: %s", readErr)
 		}
 		return slices.Collect(loaded.InstancesOf(targetType.ID()))[0]
 	}

@@ -1,29 +1,30 @@
 # Diagnostics Reference
 
-yammm reports problems as structured diagnostics in a `diag.Result`. An exported function of a public package that returns one returns it last, after its value when it has one: `schema.Load` returns `(Schema, diag.Result)`, and `Graph.Add` returns a `diag.Result` alone. Each issue has a stable error code, a severity and a message, and a source location where one applies. Some entry points return a Go `error` instead, among them `gogen.Marshal` and `markdown.Marshal`.
+yammm reports problems as structured diagnostics. Every call that can fail returns an `error` last, after its value when it has one, or `false` last where the caller needs no reason: `schema.Load` returns `(Schema, error)`, and `Graph.Add` returns an `error` alone. A call that judges its input returns its failures as a `*diag.ResultError`, whose `Result` holds them. Each issue has a stable error code, a severity and a message, and a source location where one applies. Some calls return a plain `error` instead, among them `gogen.Marshal`, `markdown.Marshal`, `neo4j.NodeQueries`, `neo4j.EdgeQueries` and `neo4j.ParseConstraints`; each call's doc names what it returns.
 
 ---
 
 ## How Diagnostics Work
 
-### diag.Result
+### diag.ResultError and diag.Result
 
-The primary container for diagnostic output. Check results with:
+A failure is a `*diag.ResultError`: the Fatal and Error issues one call drew. Read it through any `fmt.Errorf` `%w` tag and through `errors.Join`:
 
 ```go
-result.OK()             // true if no Fatal or Error issues
-result.HasErrors()      // true if any Fatal or Error issues
-result.HasWarnings()    // true if any Warning issues
-result.HasCode(code)    // true if any issue carries the given code
-result.Err()            // nil if OK, or *diag.ResultError
-result.Issues()         // iterator over all issues
-result.Errors()         // iterator over Fatal + Error issues only
-result.TruncationNote() // dropped-issues one-liner when the limit was hit
+errors.Is(err, diag.E_CONSTRAINT_FAIL)   // the failure saw this code, stored or dropped
+re, ok := errors.AsType[*diag.ResultError](err)
+re.Result.HasCode(code)    // true if any retained issue carries the given code
+re.Result.SeverityCounts() // counts by severity, over every issue seen
+re.Result.Issues()         // iterator over the retained issues
+re.Result.Errors()         // iterator over Fatal + Error issues only
+re.Result.TruncationNote() // dropped-issues one-liner when the limit was hit
 ```
 
-### Contextual Wrap (ContextualError)
+`slog.Any("diagnostic", re)` logs the failure through `ResultError.LogValue`: its first code, its counts, its truncation and one object per issue. Log `re`, not a tagged error, which `slog` writes as its text.
 
-`result.WithContext(tag)` converts a failed Result into an `error` — a `*diag.ContextualError` carrying the tag plus the full Result — and returns `nil` when the Result is OK, so it slots directly into `return result.WithContext("load users")`. Recover the diagnostics downstream with `errors.As` or `diag.AsContextualError(err, fallbackTag)`.
+### Warnings
+
+A Warning, Info or Hint is never in an error. A call that can draw one takes a `WithWarnings(func(diag.Issue))` option and calls it once per issue, in the order found, before it returns: every schema load (`schema.WithWarnings`), `snapshot.Unmarshal` and `snapshot.Verify` (`snapshot.WithWarnings`), `cypher.Config.Constraints` (`cypher.WithWarnings`) and `neo4j.Diff` (`neo4j.WithWarnings`). Without the option such issues are discarded.
 
 ### diag.Issue
 
@@ -43,7 +44,7 @@ Each issue contains:
 | Level | Meaning | Stops pipeline? |
 | ----- | ------- | --------------- |
 | Fatal | Unrecoverable failure | Yes |
-| Error | Invalid input or state | Yes (via `HasErrors()`) |
+| Error | Invalid input or state | Yes (in the call's error) |
 | Warning | Likely problem, not blocking | No |
 | Info | Informational note | No |
 | Hint | Suggestion for improvement | No |
@@ -60,7 +61,7 @@ One load pass reports every *independent* error in a schema and its import closu
 - **A name binds once (keep-first).** Types and datatypes share one namespace. Each later declaration of a name draws `E_DUPLICATE_TYPE` and is not completed: until the duplicate is gone its body draws no issue but the parser's. A reference that reads a declaration refused because the other kind holds the name stays silent.
 - **The inheritance merge reports no conflict on a member of unknown type.** A property or edge property has an unknown type when the parser could not build the type or when the type reads a name that did not resolve; that cause is already reported, once. On each type a property reaches with such a definition, the property's definitions draw no `E_PROPERTY_CONFLICT`. On each type a relation reaches with an unresolved target or such an edge property, the definitions of that relation kind draw no `E_RELATION_COLLISION`. The answer is the same in any order of the `extends` clause.
 - **`LoadString` / markdown blocks**: the imports-not-allowed rejection (`E_IMPORT_NOT_ALLOWED`) does not end the analysis. The rejected aliases are deferred as a failed import's is, and the source's other diagnostics are reported by the same rule.
-- **Truncation is visible**: one load stores at most 100 issues. Past that cap, the CLI's text output appends a dropped-issues note, and the JSON output carries `limitReached` / `droppedCount`.
+- **Truncation is visible**: a load's error holds at most 100 of the failures the load collected, and a Fatal that ends the load joins them past that number; a warning takes no slot. The CLI keeps at most 100 issues of one load, warnings and failures together. Past a cap, the CLI's text output appends a dropped-issues note, and the JSON output carries `limitReached` / `droppedCount`.
 
 The all-or-nothing contract is unchanged: any error still yields a zero schema.
 
@@ -135,7 +136,7 @@ The all-or-nothing contract is unchanged: any error still yields a zero schema.
 | `E_INVALID_EDGE_PROPERTY_TYPE` | A relationship property of a type an edge does not hold: a `List` or a `Vector`, written or through a datatype |
 | `E_INVALID_PRIMARY_KEY_TYPE` | Type not allowed as primary key |
 | `E_NO_PRIMARY_KEY` | Concrete type declares or inherits no primary key |
-| `E_LOAD_IO_FAILURE` | I/O error during schema loading, or a load whose arguments or options the loader refuses |
+| `E_LOAD_IO_FAILURE` | I/O error during schema loading, or a load whose arguments or option values the loader refuses (an option a load does not take is refused with an error that carries no code) |
 | `E_LOAD_MODULE_ROOT_MALFORMED` | A `yammm.mod` module-root marker holds content other than comment lines, is not a regular file, is larger than the size limit, or is a link that resolves to no file |
 | `E_UNKNOWN_ANNOTATION` | Annotation name the built-in registry holds at neither placement (one it holds only at the other placement is `E_INVALID_ANNOTATION`) |
 | `E_UNKNOWN_ANNOTATION_TARGET` | Annotation property-reference argument names no property of the type |
@@ -176,7 +177,7 @@ The all-or-nothing contract is unchanged: any error still yields a zero schema.
 | `E_UNRESOLVED_REQUIRED` | Required association is unresolved |
 | `E_GRAPH_INVALID_COMPOSITION` | Invalid composition in graph operations |
 | `E_GRAPH_MISSING_PK` | An instance added at a root whose type declares no primary key |
-| `E_GRAPH_CARDINALITY` | A `(one)` association holds more than one record: a merge at `Graph.AddOrMerge` that would add a second target, or several edges and unresolved records no check refused in a `.ys` document (v0.15+) |
+| `E_GRAPH_CARDINALITY` | A `(one)` association holds more than one record: a merge at `Graph.AddOrMerge` that would add a second target (v0.21.1+), or several edges and unresolved records no check refused in a `.ys` document (unreleased; on the line after v0.21.0, not in v0.21.1). The code dates from v0.15, where `Graph.Add` drew it for a `(one)` association given several targets |
 | `E_GRAPH_UNKNOWN_RELATION` | An association record or an empty edge list under a relation name the type does not declare as an association (v0.15+) |
 
 ### Snapshot
@@ -195,8 +196,8 @@ The all-or-nothing contract is unchanged: any error still yields a zero schema.
 | `E_SNAPSHOT_COMPOSED_ON_DUPLICATE` | Duplicate record has composed children |
 | `E_SNAPSHOT_EDGES_ON_DUPLICATE` | Duplicate record has edges |
 | `E_SNAPSHOT_DEPTH_EXCEEDED` | Composed nesting exceeds depth limit (32) |
-| `E_SNAPSHOT_INTEGRITY_MISMATCH` | Integrity hash doesn't match content, or is empty, null or absent; `snapshot.UpdateMetadata` refuses such a document too |
-| `E_SNAPSHOT_UNSUPPORTED_HASH_ALGORITHM` | Schema hash algorithm not recognized — Warning from `ReadHeader` (so `ScanDir`), Error from every other surface (v0.15+) |
+| `E_SNAPSHOT_INTEGRITY_MISMATCH` | Integrity hash doesn't match content, or is empty, null or absent; `snapshot.UpdateMetadata` refuses such a document too, unless `WithIntegrityCheck(false)` is given |
+| `E_SNAPSHOT_UNSUPPORTED_HASH_ALGORITHM` | Schema hash algorithm not recognized — Error from every surface that reads the body; `ReadHeader` and `ScanDir` accept the header and draw nothing, and the CLI reports it as a Warning (v0.15+), except beside another header failure |
 | `E_SNAPSHOT_IO` | A file that fails to open during `snapshot.ScanDir`, a directory `yammm snapshot info --dir` fails to read (v0.3+), or a reader `snapshot.ReadHeader` reads failing with an error that is not a truncation, Fatal (unreleased; on the line after v0.21.0, not in v0.21.1) |
 | `W_SNAPSHOT_UNRESOLVED_REQUIRED` | A loaded document carries an unresolved record, one no structural check refused, for an association the schema declares required (read from the schema, never the record); reported only under `snapshot.WithRevalidation`, at that option's severity (v0.15+) |
 | `W_SNAPSHOT_PATH_EXTENSION` | A snapshot was written to a path that does not end in `.ys`; the write succeeded, and a reader that discovers snapshots by extension will not find it |

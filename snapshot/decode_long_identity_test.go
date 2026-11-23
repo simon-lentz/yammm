@@ -7,6 +7,8 @@ import (
 	"testing"
 
 	"github.com/simon-lentz/yammm/diag"
+	"github.com/simon-lentz/yammm/graph"
+	"github.com/simon-lentz/yammm/internal/diagtest"
 	"github.com/simon-lentz/yammm/schema"
 	"github.com/simon-lentz/yammm/snapshot"
 )
@@ -117,7 +119,9 @@ func TestInfo_AWrittenTypeIdentityIsCutByItsParts(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, res := snapshot.Stat(t.Context(), lidInfoDoc(tt.instances, tt.duplicates, tt.unresolved))
+			_, res := diagtest.Issues(t, func() (*snapshot.Info, error) {
+				return snapshot.Stat(t.Context(), lidInfoDoc(tt.instances, tt.duplicates, tt.unresolved))
+			})
 			lidRequire(t, res, tt.code, tt.want)
 		})
 	}
@@ -136,9 +140,9 @@ type Person {
 `
 
 func TestLoad_ANameTheDocumentWritesIsCut(t *testing.T) {
-	s, res := schema.LoadString(t.Context(), lidLoadSchema, "lid.yammm")
-	if res.HasErrors() {
-		t.Fatalf("schema: %s", res)
+	s, err := schema.LoadString(t.Context(), lidLoadSchema, "lid.yammm")
+	if err != nil {
+		t.Fatalf("schema: %s", err)
 	}
 	doc := func(duplicates, unresolved string) []byte {
 		return fmt.Appendf(nil,
@@ -160,7 +164,9 @@ func TestLoad_ANameTheDocumentWritesIsCut(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, res := snapshot.Unmarshal(t.Context(), doc(tt.duplicates, tt.unresolved), s, snapshot.WithRevalidation(diag.Warning))
+			_, res := diagtest.Capture(t, func(warn func(diag.Issue)) (graph.Snapshot, error) {
+				return snapshot.Unmarshal(t.Context(), doc(tt.duplicates, tt.unresolved), s, snapshot.WithRevalidation(diag.Warning), snapshot.WithWarnings(warn))
+			})
 			lidRequire(t, res, tt.code, tt.want)
 		})
 	}
@@ -170,9 +176,9 @@ func TestLoad_ANameTheDocumentWritesIsCut(t *testing.T) {
 // document writes is cut.
 func TestLoad_ADeclaredAssociationNameIsWhole(t *testing.T) {
 	declared := "EMPLOYER_" + strings.Repeat("E", 31)
-	s, res := schema.LoadString(t.Context(), strings.Replace(lidLoadSchema, "EMPLOYER", declared, 1), "lid.yammm")
-	if res.HasErrors() {
-		t.Fatalf("schema: %s", res)
+	s, err := schema.LoadString(t.Context(), strings.Replace(lidLoadSchema, "EMPLOYER", declared, 1), "lid.yammm")
+	if err != nil {
+		t.Fatalf("schema: %s", err)
 	}
 	doc := func(targetKey string) []byte {
 		return fmt.Appendf(nil,
@@ -186,7 +192,9 @@ func TestLoad_ADeclaredAssociationNameIsWhole(t *testing.T) {
 		{"a target key component that is not a scalar", `[["c1"]]`, `edge 0 of ["p1"] under "` + declared + `" carries target key [["c1"]], whose component 0 is not a scalar graph.ParseKey reads back`},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			_, res := snapshot.Unmarshal(t.Context(), doc(tt.targetKey), s)
+			_, res := diagtest.Capture(t, func(warn func(diag.Issue)) (graph.Snapshot, error) {
+				return snapshot.Unmarshal(t.Context(), doc(tt.targetKey), s, snapshot.WithWarnings(warn))
+			})
 			for issue := range res.Issues() {
 				if issue.Code() == diag.E_SNAPSHOT_MALFORMED && issue.Message() == tt.want {
 					return

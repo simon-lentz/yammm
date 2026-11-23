@@ -1,12 +1,14 @@
 package instance_test
 
 import (
+	"errors"
 	"maps"
 	"strings"
 	"testing"
 
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/instance"
+	"github.com/simon-lentz/yammm/internal/diagtest"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -32,15 +34,17 @@ type Order {
 func relationInvariant(t *testing.T, expr string, props map[string]any) (bool, string) {
 	t.Helper()
 	src := strings.Replace(relationInvariantSrc, "%EXPR%", expr, 1)
-	s, res := schema.LoadString(t.Context(), src, "x.yammm")
-	if res.HasErrors() {
-		t.Fatalf("an invariant naming a relation did not load: %s", res)
+	s, err := schema.LoadString(t.Context(), src, "x.yammm")
+	if err != nil {
+		t.Fatalf("an invariant naming a relation did not load: %s", err)
 	}
 	all := map[string]any{"id": "o1"}
 	maps.Copy(all, props)
-	_, r := instance.NewValidator(s).ValidateOne(t.Context(), "Order",
-		instance.RawInstance{Properties: all})
-	return r.OK(), r.String()
+	_, r := diagtest.Issues(t, func() (instance.ValidInstance, error) {
+		return instance.NewValidator(s).ValidateOne(t.Context(), "Order",
+			instance.RawInstance{Properties: all})
+	})
+	return diagtest.Err(r) == nil, r.String()
 }
 
 func populatedOrder() map[string]any {
@@ -161,8 +165,8 @@ func TestInvariantRelationScope_EmptyCompositionIsNotNil(t *testing.T) {
 // is pinned by the contract table's refuse rows.
 func TestInvariantRelationScope_AssociationTargetPropertiesAreNotAvailable(t *testing.T) {
 	src := strings.Replace(relationInvariantSrc, "%EXPR%", `WORKS_AT -> Then |$c| { $c.id != "" }`, 1)
-	_, res := schema.LoadString(t.Context(), src, "x.yammm")
-	if !res.HasCode(diag.E_INVALID_INVARIANT) || !strings.Contains(res.Err().Error(), "association") {
-		t.Errorf("want E_INVALID_INVARIANT naming the association; got %v", res.Err())
+	_, err := schema.LoadString(t.Context(), src, "x.yammm")
+	if !errors.Is(err, diag.E_INVALID_INVARIANT) || !strings.Contains(err.Error(), "association") {
+		t.Errorf("want E_INVALID_INVARIANT naming the association; got %v", err)
 	}
 }

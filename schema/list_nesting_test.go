@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/simon-lentz/yammm/diag"
+	"github.com/simon-lentz/yammm/internal/diagtest"
 	"github.com/simon-lentz/yammm/internal/parse"
 	"github.com/simon-lentz/yammm/internal/raceskip"
 	"github.com/simon-lentz/yammm/schema"
@@ -25,7 +26,9 @@ func listChain(n int) string {
 
 func nestingIssues(t *testing.T, src string) []diag.Issue {
 	t.Helper()
-	_, res := schema.LoadString(t.Context(), src, "s.yammm")
+	_, res := diagtest.Capture(t, func(warn func(diag.Issue)) (schema.Schema, error) {
+		return schema.LoadString(t.Context(), src, "s.yammm", schema.WithWarnings(warn))
+	})
 	var out []diag.Issue
 	for issue := range res.Issues() {
 		if strings.Contains(issue.Message(), "List nests deeper") {

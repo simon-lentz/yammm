@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/simon-lentz/yammm/diag"
+	"github.com/simon-lentz/yammm/internal/diagtest"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -43,7 +44,9 @@ func TestLoadString_AnImportWithNoPathValueIsStillADeclaration(t *testing.T) {
 						imports.WriteString("\n")
 					}
 					source := "schema \"s\"\n" + imports.String() + "type T {\n\tid String primary\n}\n"
-					_, result := schema.LoadString(context.Background(), source, "s.yammm")
+					_, result := diagtest.Capture(t, func(warn func(diag.Issue)) (schema.Schema, error) {
+						return schema.LoadString(context.Background(), source, "s.yammm", schema.WithWarnings(warn))
+					})
 					var got []string
 					counted := ""
 					for iss := range result.Issues() {

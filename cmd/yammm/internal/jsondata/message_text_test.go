@@ -5,6 +5,7 @@ import (
 	"testing"
 	"unicode/utf8"
 
+	"github.com/simon-lentz/yammm/internal/diagtest"
 	"github.com/simon-lentz/yammm/internal/yammmtest/sourcetest"
 )
 
@@ -20,7 +21,7 @@ func TestParse_RepeatsANameCutToItsHead(t *testing.T) {
 		`{"` + long + `!": []}`,
 	} {
 		_, r := Parse(t.Context(), sourcetest.ID("test://names.json"), []byte(doc))
-		if r.OK() {
+		if diagtest.Err(r) == nil {
 			t.Errorf("Parse accepted %.40s", doc)
 		}
 		for issue := range r.Issues() {

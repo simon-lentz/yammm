@@ -1,10 +1,12 @@
 package cli
 
 import (
+	"errors"
 	"io"
 
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/schema"
+	"github.com/simon-lentz/yammm/snapshot"
 )
 
 // DiagnosticSink collects everything one invocation diagnoses, and writes it so
@@ -25,7 +27,13 @@ type DiagnosticSink struct {
 	results  []diag.Result
 	flushed  int
 	closed   bool
+	load     *diag.Collector // the schema load SchemaLoadOptions began
+	read     *diag.Collector // the snapshot read SnapshotWarnings began
 }
+
+// callIssueLimit is the most issues the sink keeps of one schema load or one
+// snapshot call, warnings and failures together, the most severe first.
+const callIssueLimit = 100
 
 // NewDiagnosticSink returns a sink that renders to w.
 func NewDiagnosticSink(w io.Writer, format OutputFormat, noColor, isTTY bool) *DiagnosticSink {
@@ -114,11 +122,59 @@ func (s *DiagnosticSink) renderFrom(i int) {
 	_ = RenderResult(s.w, renderer, s.format, MergeResults(s.results[i:]...))
 }
 
-// CaptureSchemaSources returns a load option that keeps the load's sources on
-// the sink, so a load that fails still renders excerpts: it returns no schema
-// to take them from.
-func (s *DiagnosticSink) CaptureSchemaSources() schema.LoadOption {
-	return schema.CaptureSources(&s.captured)
+// SchemaLoadOptions returns the options that keep what a schema load diagnoses
+// on the sink: its sources, so a load that fails still renders excerpts though
+// it returns no schema to take them from, and each warning as the load finds
+// it. [DiagnosticSink.AddSchemaLoad] records the load.
+func (s *DiagnosticSink) SchemaLoadOptions() []schema.Option {
+	s.load = diag.NewCollector(callIssueLimit)
+	return []schema.Option{schema.CaptureSources(&s.captured), schema.WithWarnings(s.load.Collect)}
+}
+
+// AddSchemaLoad records the schema load [DiagnosticSink.SchemaLoadOptions]
+// began: its warnings and the failures err holds, as one result under
+// callIssueLimit. It returns the exit that result earns, nil for a load
+// that did not fail. An err holding no [diag.ResultError] is a runtime failure.
+func (s *DiagnosticSink) AddSchemaLoad(err error) error {
+	load := s.load
+	s.load = nil
+	return s.addCall(load, err)
+}
+
+// SnapshotWarnings returns the option that keeps each warning a snapshot read
+// finds on the sink. [DiagnosticSink.AddSnapshot] records the read.
+func (s *DiagnosticSink) SnapshotWarnings() snapshot.Option {
+	s.read = diag.NewCollector(callIssueLimit)
+	return snapshot.WithWarnings(s.read.Collect)
+}
+
+// AddSnapshot records a snapshot call: the warnings
+// [DiagnosticSink.SnapshotWarnings] kept for it, if it began one, and the
+// failures err holds, as one result under callIssueLimit. It returns the exit
+// that result earns, nil for a call that did not fail. An err holding no
+// [diag.ResultError] is a runtime failure.
+func (s *DiagnosticSink) AddSnapshot(err error) error {
+	read := s.read
+	s.read = nil
+	return s.addCall(read, err)
+}
+
+// addCall adds the result of one call: what c kept of its warnings, c nil for
+// a call that kept none, and the failures err holds.
+func (s *DiagnosticSink) addCall(c *diag.Collector, err error) error {
+	if c == nil {
+		c = diag.NewCollector(callIssueLimit)
+	}
+	re, ok := errors.AsType[*diag.ResultError](err)
+	if err != nil && !ok {
+		return Runtime(err)
+	}
+	if ok {
+		c.Merge(re.Result)
+	}
+	result := c.Result()
+	s.Add(result)
+	return Exit(ExitForResult(result))
 }
 
 // CapturedSources returns the sources the last captured load read, or the zero Sources.

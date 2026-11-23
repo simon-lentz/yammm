@@ -4,7 +4,9 @@ import (
 	"testing"
 
 	"github.com/simon-lentz/yammm/diag"
+	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/immutable"
+	"github.com/simon-lentz/yammm/internal/diagtest"
 	"github.com/simon-lentz/yammm/internal/snapparts"
 	"github.com/simon-lentz/yammm/internal/snappartstest"
 	"github.com/simon-lentz/yammm/schema"
@@ -13,9 +15,9 @@ import (
 
 func loadFactSchema(t *testing.T, src string) schema.Schema {
 	t.Helper()
-	s, res := schema.LoadString(t.Context(), src, "facts.yammm")
-	if res.HasErrors() {
-		t.Fatalf("load: %s", res)
+	s, err := schema.LoadString(t.Context(), src, "facts.yammm")
+	if err != nil {
+		t.Fatalf("load: %s", err)
 	}
 	return s
 }
@@ -31,10 +33,14 @@ func factTypeID(t *testing.T, s schema.Schema, name string) schema.TypeID {
 
 func requireReadersRefuse(t *testing.T, doc []byte, s schema.Schema, code diag.Code) {
 	t.Helper()
-	if _, res := snapshot.Unmarshal(t.Context(), doc, s); !res.HasCode(code) {
+	if _, res := diagtest.Capture(t, func(warn func(diag.Issue)) (graph.Snapshot, error) {
+		return snapshot.Unmarshal(t.Context(), doc, s, snapshot.WithWarnings(warn))
+	}); !res.HasCode(code) {
 		t.Errorf("Load = %s, want %s", res, code)
 	}
-	if res := snapshot.Verify(t.Context(), doc, s); !res.HasCode(code) {
+	if res := diagtest.CaptureErr(t, func(warn func(diag.Issue)) error {
+		return snapshot.Verify(t.Context(), doc, s, snapshot.WithWarnings(warn))
+	}); !res.HasCode(code) {
 		t.Errorf("Verify = %s, want %s", res, code)
 	}
 }
@@ -94,8 +100,8 @@ type Item {
 		}}}
 	}
 	requireReadersRefuse(t, snappartstest.Document(t, s, parts(true, false)), s, diag.E_SNAPSHOT_MALFORMED)
-	if _, res := snapshot.Unmarshal(t.Context(), snappartstest.Document(t, s, parts(true, true)), s); res.HasErrors() {
-		t.Errorf("a key that agrees with its property: Load = %s, want no error", res)
+	if _, err := snapshot.Unmarshal(t.Context(), snappartstest.Document(t, s, parts(true, true)), s); err != nil {
+		t.Errorf("a key that agrees with its property: Load = %s, want no error", err)
 	}
 }
 
@@ -103,13 +109,13 @@ type Item {
 // root of it does.
 func TestRead_KeepsADuplicateOfATypeTheEntrySchemaCannotName(t *testing.T) {
 	t.Parallel()
-	s, res := schema.LoadSourcesWithEntry(t.Context(), map[string][]byte{
+	s, err := schema.LoadSourcesWithEntry(t.Context(), map[string][]byte{
 		"entry.yammm": []byte(unreachableRootEntry),
 		"base.yammm":  []byte(unreachableRootBase),
 		"deep.yammm":  []byte(unreachableRootDeep),
-	}, "entry.yammm", ".", schema.WithSourcesOnly(true))
-	if res.HasErrors() {
-		t.Fatalf("load: %s", res)
+	}, "entry.yammm", schema.WithSourcesOnly(true), schema.WithModuleRoot("."))
+	if err != nil {
+		t.Fatalf("load: %s", err)
 	}
 	base, ok := s.ImportByAlias("base")
 	if !ok {
@@ -129,10 +135,10 @@ func TestRead_KeepsADuplicateOfATypeTheEntrySchemaCannotName(t *testing.T) {
 		Instances:  []snapparts.Instance{record},
 		Duplicates: []snapparts.Instance{record},
 	})
-	if _, res := snapshot.Unmarshal(t.Context(), doc, s); res.HasErrors() {
-		t.Errorf("Load = %s, want no error", res)
+	if _, err := snapshot.Unmarshal(t.Context(), doc, s); err != nil {
+		t.Errorf("Load = %s, want no error", err)
 	}
-	if res := snapshot.Verify(t.Context(), doc, s); res.HasErrors() {
-		t.Errorf("Verify = %s, want no error", res)
+	if err := snapshot.Verify(t.Context(), doc, s); err != nil {
+		t.Errorf("Verify = %s, want no error", err)
 	}
 }

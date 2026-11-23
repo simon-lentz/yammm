@@ -23,8 +23,8 @@ func TestInstanceByKey_AnySpellingOnEveryPath(t *testing.T) {
 	want := graph.FormatKey(canonInstant)
 
 	g := graph.New(s)
-	if r := g.Add(t.Context(), runInstance(t, s, rawInstant, "")); !r.OK() {
-		t.Fatalf("add: %s", r)
+	if err := g.Add(t.Context(), runInstance(t, s, rawInstant, "")); err != nil {
+		t.Fatalf("add: %s", err)
 	}
 	built := g.Snapshot()
 
@@ -77,12 +77,12 @@ func TestInstanceByKey_RefusedAddressMisses(t *testing.T) {
 	// path this test names.
 	tagID := mustTypeID(t, s, "Tag")
 	g := graph.New(s)
-	if r := g.Add(t.Context(), runInstance(t, s, rawInstant, "")); !r.OK() {
-		t.Fatalf("add: %s", r)
+	if err := g.Add(t.Context(), runInstance(t, s, rawInstant, "")); err != nil {
+		t.Fatalf("add: %s", err)
 	}
 	tag := instancetest.Valid(t, s, "Tag", map[string]any{"name": "t1"})
-	if r := g.Add(t.Context(), tag); !r.OK() {
-		t.Fatalf("add tag: %s", r)
+	if err := g.Add(t.Context(), tag); err != nil {
+		t.Fatalf("add tag: %s", err)
 	}
 	snap := g.Snapshot()
 	for _, id := range []schema.TypeID{runID, tagID} {

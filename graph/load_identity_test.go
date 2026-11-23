@@ -40,7 +40,7 @@ func TestAdd_InstanceOfAnotherLoadPanics(t *testing.T) {
 			t.Parallel()
 			inst := instancetest.Valid(t, other, "T", map[string]any{"id": "t1"})
 			g := graph.New(s)
-			assertAnotherLoadPanic(t, func() { g.Add(t.Context(), inst) })
+			assertAnotherLoadPanic(t, func() { _ = g.Add(t.Context(), inst) })
 			assertAnotherLoadPanic(t, func() { _, _ = g.AddOrMerge(t.Context(), inst) })
 			if n := len(slices.Collect(g.Snapshot().Instances())); n != 0 {
 				t.Errorf("the graph holds %d instances after the panic, want 0", n)
@@ -139,8 +139,8 @@ func TestAdd_TakesAValidatorOfAnyMemberOfOneLoad(t *testing.T) {
 			t.Parallel()
 			inst := instancetest.Valid(t, members[c.validator], c.typeName, c.props)
 			g := graph.New(members[c.graph])
-			if r := g.Add(t.Context(), inst); !r.OK() {
-				t.Fatalf("Add: %s", r)
+			if err := g.Add(t.Context(), inst); err != nil {
+				t.Fatalf("Add: %s", err)
 			}
 			if n := len(slices.Collect(g.Snapshot().Instances())); n != 1 {
 				t.Errorf("the graph holds %d roots, want 1", n)
@@ -155,5 +155,5 @@ func TestAdd_TypeOutsideTheGraphsClosurePanics(t *testing.T) {
 	members := diamondClosure(t)
 	inst := instancetest.Valid(t, members["a"], "Top", map[string]any{"id": "x"})
 	g := graph.New(members["b"])
-	assertAnotherLoadPanic(t, func() { g.Add(t.Context(), inst) })
+	assertAnotherLoadPanic(t, func() { _ = g.Add(t.Context(), inst) })
 }

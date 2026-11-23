@@ -8,6 +8,7 @@ import (
 
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/instance"
+	"github.com/simon-lentz/yammm/internal/diagtest"
 )
 
 const duplicateEdgeSchema = `schema "dupedge"
@@ -81,7 +82,9 @@ func TestValidateOne_ARepeatedTargetKeyIsRefused(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
-			valid, res := v.ValidateOne(t.Context(), "Person", c.raw)
+			valid, res := diagtest.Issues(t, func() (instance.ValidInstance, error) {
+				return v.ValidateOne(t.Context(), "Person", c.raw)
+			})
 			if !valid.IsZero() {
 				t.Error("a refused listing yields an instance")
 			}
@@ -129,7 +132,9 @@ func TestValidateOne_ARefusedListingIsComparedWithNoOther(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
-			valid, res := v.ValidateOne(t.Context(), "Person", c.raw)
+			valid, res := diagtest.Issues(t, func() (instance.ValidInstance, error) {
+				return v.ValidateOne(t.Context(), "Person", c.raw)
+			})
 			if !valid.IsZero() {
 				t.Error("a refused listing yields an instance")
 			}
@@ -149,10 +154,10 @@ func TestValidateOne_ARefusedListingIsComparedWithNoOther(t *testing.T) {
 func TestValidateOne_DistinctTargetsAreAccepted(t *testing.T) {
 	t.Parallel()
 	s := mustLoadString(t, duplicateEdgeSchema, "dupedge.yammm")
-	valid, res := instance.NewValidator(s).ValidateOne(t.Context(), "Person",
+	valid, err := instance.NewValidator(s).ValidateOne(t.Context(), "Person",
 		employers(map[string]any{"_target_id": otherCompany}, map[string]any{"_target_id": companyUpper}))
-	if !res.OK() {
-		t.Fatal(res)
+	if err != nil {
+		t.Fatal(err)
 	}
 	edge, ok := valid.Edge("EMPLOYERS")
 	if !ok {

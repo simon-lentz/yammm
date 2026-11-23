@@ -17,8 +17,8 @@ func documentedGenerator(t *testing.T, doc string) *generator {
 	for _, position := range docPositions {
 		docs[position] = doc
 	}
-	s, res := schema.LoadSourcesWithEntry(context.Background(), schemaWithDocs(docs), "entry.yammm", ".", schema.WithSourcesOnly(true))
-	if err := res.Err(); err != nil {
+	s, loadErr := schema.LoadSourcesWithEntry(context.Background(), schemaWithDocs(docs), "entry.yammm", schema.WithSourcesOnly(true), schema.WithModuleRoot("."))
+	if err := loadErr; err != nil {
 		t.Fatalf("the schema does not load: %v", err)
 	}
 	g := newTestGenerator(t, s)

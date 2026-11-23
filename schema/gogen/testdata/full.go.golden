@@ -69,7 +69,7 @@ const SerializedEntry = "full.yammm"
 // SerializedSources returns every source the schema's load held, keyed by
 // the name the re-load registers it under. Re-load with:
 //
-//	schema.LoadSourcesWithEntry(ctx, SerializedSources(), SerializedEntry, "",
+//	schema.LoadSourcesWithEntry(ctx, SerializedSources(), SerializedEntry,
 //		schema.WithSyntheticRoot("embedded://your-app"))
 //
 // The synthetic root keeps the loaded type identities stable: no working

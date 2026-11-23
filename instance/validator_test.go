@@ -2,6 +2,7 @@ package instance_test
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/instance"
+	"github.com/simon-lentz/yammm/internal/diagtest"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -24,8 +26,8 @@ func mustLoad(t *testing.T, source string) schema.Schema {
 // mustLoadString loads a schema from YAMMM DSL source, failing the test on error.
 func mustLoadString(t *testing.T, source, name string) schema.Schema {
 	t.Helper()
-	s, result := schema.LoadString(t.Context(), source, name)
-	require.False(t, result.HasErrors(), "schema load: %s", result)
+	s, err := schema.LoadString(t.Context(), source, name)
+	require.NoError(t, err, "schema load: %s", err)
 	return s
 }
 
@@ -49,9 +51,9 @@ type Person {
 		},
 	}
 
-	valid, result := validator.ValidateOne(t.Context(), "Person", raw)
+	valid, err := validator.ValidateOne(t.Context(), "Person", raw)
 
-	require.True(t, result.OK())
+	require.NoError(t, err)
 	require.False(t, valid.IsZero())
 	assert.Equal(t, "Person", valid.TypeName())
 	assert.Equal(t, `["1"]`, valid.PrimaryKey().String())
@@ -80,10 +82,12 @@ type Placeholder {
 		},
 	}
 
-	valid, result := validator.ValidateOne(t.Context(), "NonExistent", raw)
+	valid, result := diagtest.Issues(t, func() (instance.ValidInstance, error) {
+		return validator.ValidateOne(t.Context(), "NonExistent", raw)
+	})
 
 	assert.True(t, valid.IsZero())
-	require.False(t, result.OK())
+	require.Error(t, diagtest.Err(result))
 	assert.Contains(t, result.String(), "not found")
 }
 
@@ -103,10 +107,12 @@ abstract type Entity {
 		},
 	}
 
-	valid, result := validator.ValidateOne(t.Context(), "Entity", raw)
+	valid, result := diagtest.Issues(t, func() (instance.ValidInstance, error) {
+		return validator.ValidateOne(t.Context(), "Entity", raw)
+	})
 
 	assert.True(t, valid.IsZero())
-	require.False(t, result.OK())
+	require.Error(t, diagtest.Err(result))
 	assert.Contains(t, result.String(), "abstract")
 }
 
@@ -126,10 +132,12 @@ part type Part {
 		},
 	}
 
-	valid, result := validator.ValidateOne(t.Context(), "Part", raw)
+	valid, result := diagtest.Issues(t, func() (instance.ValidInstance, error) {
+		return validator.ValidateOne(t.Context(), "Part", raw)
+	})
 
 	assert.True(t, valid.IsZero())
-	require.False(t, result.OK())
+	require.Error(t, diagtest.Err(result))
 	assert.Contains(t, result.String(), "part type")
 }
 
@@ -151,10 +159,12 @@ type Person {
 		},
 	}
 
-	valid, result := validator.ValidateOne(t.Context(), "Person", raw)
+	valid, result := diagtest.Issues(t, func() (instance.ValidInstance, error) {
+		return validator.ValidateOne(t.Context(), "Person", raw)
+	})
 
 	assert.True(t, valid.IsZero())
-	require.False(t, result.OK())
+	require.Error(t, diagtest.Err(result))
 	assert.Contains(t, result.String(), "missing required")
 }
 
@@ -176,9 +186,9 @@ type Person {
 		},
 	}
 
-	valid, result := validator.ValidateOne(t.Context(), "Person", raw)
+	valid, err := validator.ValidateOne(t.Context(), "Person", raw)
 
-	require.True(t, result.OK())
+	require.NoError(t, err)
 	require.False(t, valid.IsZero())
 }
 
@@ -200,10 +210,12 @@ type Person {
 		},
 	}
 
-	valid, result := validator.ValidateOne(t.Context(), "Person", raw)
+	valid, result := diagtest.Issues(t, func() (instance.ValidInstance, error) {
+		return validator.ValidateOne(t.Context(), "Person", raw)
+	})
 
 	assert.True(t, valid.IsZero())
-	require.False(t, result.OK())
+	require.Error(t, diagtest.Err(result))
 	assert.Contains(t, result.String(), "age")
 }
 
@@ -224,10 +236,12 @@ type Person {
 		},
 	}
 
-	valid, result := validator.ValidateOne(t.Context(), "Person", raw)
+	valid, result := diagtest.Issues(t, func() (instance.ValidInstance, error) {
+		return validator.ValidateOne(t.Context(), "Person", raw)
+	})
 
 	assert.True(t, valid.IsZero())
-	require.False(t, result.OK())
+	require.Error(t, diagtest.Err(result))
 	assert.Contains(t, result.String(), "unknown")
 }
 
@@ -248,9 +262,9 @@ type Person {
 		{Properties: map[string]any{"id": "3", "name": "Charlie"}},
 	}
 
-	valid, result := validator.Validate(t.Context(), "Person", raws)
+	valid, err := validator.Validate(t.Context(), "Person", raws)
 
-	require.True(t, result.OK())
+	require.NoError(t, err)
 	assert.Len(t, valid, 3)
 }
 
@@ -271,14 +285,20 @@ type Person {
 		{Properties: map[string]any{"id": "3", "name": "Charlie"}},
 	}
 
-	valid, result := validator.Validate(t.Context(), "Person", raws)
+	valid, err := validator.Validate(t.Context(), "Person", raws)
 
-	require.False(t, result.OK())
-	// Batch returns positional nils: 3 entries, with index 1 nil for the failure
+	// The partial: one entry per raw beside the error, the zero instance where
+	// the row was refused, and the error holds that row's refusal alone.
 	require.Len(t, valid, 3)
 	assert.False(t, valid[0].IsZero())
 	assert.True(t, valid[1].IsZero())
 	assert.False(t, valid[2].IsZero())
+	re, ok := errors.AsType[*diag.ResultError](err)
+	require.True(t, ok, "err = %v, want a *diag.ResultError", err)
+	issues := slices.Collect(re.Result.Issues())
+	require.Len(t, issues, 1)
+	idx, stamped := detail(issues[0], diag.DetailKeyInstanceIndex)
+	assert.True(t, stamped && idx == "1", "the refusal names instance %q, want 1", idx)
 }
 
 func TestValidator_Validate_ContextCancellation(t *testing.T) {
@@ -298,7 +318,9 @@ type Person {
 		Properties: map[string]any{"id": "1"},
 	}
 
-	_, result := validator.ValidateOne(ctx, "Person", raw)
+	_, result := diagtest.Issues(t, func() (instance.ValidInstance, error) {
+		return validator.ValidateOne(ctx, "Person", raw)
+	})
 
 	require.True(t, result.HasFatal())
 	// Verify context cancellation diagnostic code
@@ -325,8 +347,8 @@ type Person {
 		},
 	}
 
-	valid, result := validator.ValidateOne(t.Context(), "Person", raw)
-	require.True(t, result.OK())
+	valid, err := validator.ValidateOne(t.Context(), "Person", raw)
+	require.NoError(t, err)
 	require.False(t, valid.IsZero())
 
 	// Get the name before mutation
@@ -378,14 +400,14 @@ type Person {
 				},
 			}
 
-			valid, result := validator.ValidateOne(t.Context(), "Person", raw)
+			valid, err := validator.ValidateOne(t.Context(), "Person", raw)
 
 			if tt.wantErr {
 				assert.True(t, valid.IsZero())
-				assert.False(t, result.OK())
+				assert.Error(t, err)
 			} else {
 				assert.False(t, valid.IsZero())
-				assert.True(t, result.OK())
+				assert.NoError(t, err)
 			}
 		})
 	}
@@ -423,14 +445,14 @@ type Person {
 				},
 			}
 
-			valid, result := validator.ValidateOne(t.Context(), "Person", raw)
+			valid, err := validator.ValidateOne(t.Context(), "Person", raw)
 
 			if tt.wantErr {
 				assert.True(t, valid.IsZero())
-				assert.False(t, result.OK())
+				assert.Error(t, err)
 			} else {
 				assert.False(t, valid.IsZero())
-				assert.True(t, result.OK())
+				assert.NoError(t, err)
 			}
 		})
 	}
@@ -456,9 +478,9 @@ type Person {
 		},
 	}
 
-	valid, result := validator.ValidateOne(t.Context(), "Person", raw)
+	valid, err := validator.ValidateOne(t.Context(), "Person", raw)
 
-	require.True(t, result.OK())
+	require.NoError(t, err)
 	require.False(t, valid.IsZero())
 }
 
@@ -481,10 +503,12 @@ type Person {
 		},
 	}
 
-	valid, result := validator.ValidateOne(t.Context(), "Person", raw)
+	valid, result := diagtest.Issues(t, func() (instance.ValidInstance, error) {
+		return validator.ValidateOne(t.Context(), "Person", raw)
+	})
 
 	assert.True(t, valid.IsZero())
-	require.False(t, result.OK())
+	require.Error(t, diagtest.Err(result))
 	assert.Contains(t, result.String(), "age must be non-negative")
 }
 
@@ -542,12 +566,12 @@ type Record {
 				t.Run(tc.name, func(t *testing.T) {
 					t.Parallel()
 					raw := instance.RawInstance{Properties: tc.input}
-					valid, result := v.ValidateOne(t.Context(), "Record", raw)
+					valid, err := v.ValidateOne(t.Context(), "Record", raw)
 					if tc.wantOK {
-						assert.True(t, result.OK(), "expected pass: %s", result)
+						require.NoError(t, err, "expected pass: %s", err)
 						assert.False(t, valid.IsZero())
 					} else {
-						assert.False(t, result.OK(), "expected fail")
+						require.Error(t, err, "expected fail")
 						assert.True(t, valid.IsZero())
 					}
 				})
@@ -602,12 +626,14 @@ type Record {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			raw := instance.RawInstance{Properties: tc.input}
-			valid, result := v.ValidateOne(t.Context(), "Record", raw)
+			valid, result := diagtest.Issues(t, func() (instance.ValidInstance, error) {
+				return v.ValidateOne(t.Context(), "Record", raw)
+			})
 			if tc.wantOK {
-				assert.True(t, result.OK(), "expected pass: %s", result)
+				require.NoError(t, diagtest.Err(result), "expected pass: %s", result)
 				assert.False(t, valid.IsZero())
 			} else {
-				assert.False(t, result.OK(), "expected fail")
+				require.Error(t, diagtest.Err(result), "expected fail")
 				assert.True(t, valid.IsZero())
 				hasInvariantFail := false
 				for issue := range result.Issues() {
@@ -633,9 +659,9 @@ type Person {
 
 	validator := instance.NewValidator(s)
 
-	valid, result := validator.Validate(t.Context(), "Person", nil)
+	valid, err := validator.Validate(t.Context(), "Person", nil)
 
-	require.True(t, result.OK())
+	require.NoError(t, err)
 	assert.Nil(t, valid, "nil input should return nil valid slice")
 }
 
@@ -650,9 +676,9 @@ type Person {
 
 	validator := instance.NewValidator(s)
 
-	valid, result := validator.Validate(t.Context(), "Person", []instance.RawInstance{})
+	valid, err := validator.Validate(t.Context(), "Person", []instance.RawInstance{})
 
-	require.True(t, result.OK())
+	require.NoError(t, err)
 	require.NotNil(t, valid, "empty input should return non-nil empty valid slice")
 	assert.Empty(t, valid, "empty input should return empty valid slice")
 }
@@ -662,13 +688,13 @@ func TestValidator_NilReceiver(t *testing.T) {
 
 	t.Run("Validate", func(t *testing.T) {
 		require.Panics(t, func() {
-			v.Validate(t.Context(), "Test", nil)
+			_, _ = v.Validate(t.Context(), "Test", nil)
 		})
 	})
 
 	t.Run("ValidateOne", func(t *testing.T) {
 		require.Panics(t, func() {
-			v.ValidateOne(t.Context(), "Test", instance.RawInstance{})
+			_, _ = v.ValidateOne(t.Context(), "Test", instance.RawInstance{})
 		})
 	})
 
@@ -870,8 +896,8 @@ type Person {
 			validator := instance.NewValidator(tt.schema(t))
 			raw, mutate := tt.raw()
 
-			valid, result := validator.ValidateOne(t.Context(), tt.typeName, raw)
-			require.True(t, result.OK())
+			valid, err := validator.ValidateOne(t.Context(), tt.typeName, raw)
+			require.NoError(t, err)
 			require.False(t, valid.IsZero())
 
 			mutate()

@@ -29,9 +29,9 @@ import (
 func benchValidatorSchema(b *testing.B, decls, invs string) schema.Schema {
 	b.Helper()
 	src := "schema \"vbench\"\n\ntype T {\n\tid String primary\n" + decls + invs + "}\n"
-	s, result := schema.LoadString(b.Context(), src, "vbench.yammm")
-	if result.HasErrors() {
-		b.Fatalf("benchmark schema did not load: %s", result)
+	s, err := schema.LoadString(b.Context(), src, "vbench.yammm")
+	if err != nil {
+		b.Fatalf("benchmark schema did not load: %s", err)
 	}
 	return s
 }
@@ -45,8 +45,8 @@ func benchValidate(b *testing.B, s schema.Schema, props map[string]any) {
 	ctx := b.Context()
 	b.ResetTimer()
 	for b.Loop() {
-		if _, res := v.ValidateOne(ctx, "T", instance.RawInstance{Properties: props}); !res.OK() {
-			b.Fatalf("instance did not validate: %s", res)
+		if _, err := v.ValidateOne(ctx, "T", instance.RawInstance{Properties: props}); err != nil {
+			b.Fatalf("instance did not validate: %s", err)
 		}
 	}
 }
@@ -119,9 +119,9 @@ type Order {
     *-> ITEMS (_:many) Item
 ` + invariants + `}
 `
-	s, result := schema.LoadString(b.Context(), src, "vbench.yammm")
-	if result.HasErrors() {
-		b.Fatalf("benchmark schema did not load: %s", result)
+	s, err := schema.LoadString(b.Context(), src, "vbench.yammm")
+	if err != nil {
+		b.Fatalf("benchmark schema did not load: %s", err)
 	}
 	return s
 }
@@ -144,8 +144,8 @@ func benchOrder(b *testing.B, s schema.Schema) {
 	props := relationBenchProps()
 	b.ResetTimer()
 	for b.Loop() {
-		if _, res := v.ValidateOne(ctx, "Order", instance.RawInstance{Properties: props}); !res.OK() {
-			b.Fatalf("instance did not validate: %s", res)
+		if _, err := v.ValidateOne(ctx, "Order", instance.RawInstance{Properties: props}); err != nil {
+			b.Fatalf("instance did not validate: %s", err)
 		}
 	}
 }

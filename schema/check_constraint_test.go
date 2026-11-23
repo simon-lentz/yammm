@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/simon-lentz/yammm/diag"
+	"github.com/simon-lentz/yammm/internal/diagtest"
 	"github.com/simon-lentz/yammm/internal/expr"
 	"github.com/simon-lentz/yammm/schema"
 )
@@ -29,9 +30,11 @@ func TestCheckConstraint_RefusesACountTheDSLRefuses(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			src := fmt.Sprintf("schema \"fleet\"\n\ntype Car {\n\tvin String primary\n\tv %s\n}\n", tc.dsl)
-			_, lres := schema.LoadString(context.Background(), src, "fleet.yammm")
+			_, lres := diagtest.Capture(t, func(warn func(diag.Issue)) (schema.Schema, error) {
+				return schema.LoadString(context.Background(), src, "fleet.yammm", schema.WithWarnings(warn))
+			})
 			if !hasCode(lres, diag.E_INVALID_CONSTRAINT) {
-				t.Fatalf("the DSL accepts %s: %v", tc.dsl, lres.Err())
+				t.Fatalf("the DSL accepts %s: %v", tc.dsl, lres)
 			}
 			err := schema.CheckConstraint(tc.c)
 			if err == nil || !strings.Contains(err.Error(), tc.want) {
@@ -97,7 +100,9 @@ func TestLoad_RefusesAFaultBehindAnAlias(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			src := "schema \"fleet\"\n\ntype Code = Integer[5, 1]\n\ntype Car {\n\tvin String primary\n\tv " + property + "\n}\n"
-			s, res := schema.LoadString(context.Background(), src, "fleet.yammm")
+			s, res := diagtest.Capture(t, func(warn func(diag.Issue)) (schema.Schema, error) {
+				return schema.LoadString(context.Background(), src, "fleet.yammm", schema.WithWarnings(warn))
+			})
 			if !s.IsZero() || !hasCode(res, diag.E_INVALID_CONSTRAINT) {
 				t.Errorf("load = %v, %s; want E_INVALID_CONSTRAINT", s, res.String())
 			}
@@ -109,7 +114,7 @@ func TestLoad_RefusesAFaultBehindAnAlias(t *testing.T) {
 // syntax error, so no reader meets a datatype that is only another's name.
 func TestLoad_RefusesADataTypeDeclaredAsAnotherAlone(t *testing.T) {
 	src := "schema \"fleet\"\n\ntype A = Integer\ntype B = A\n\ntype Car {\n\tvin String primary\n}\n"
-	if _, lres := schema.LoadString(context.Background(), src, "fleet.yammm"); !lres.HasErrors() {
+	if _, err := schema.LoadString(context.Background(), src, "fleet.yammm"); err == nil {
 		t.Fatal("the DSL accepts a datatype declared as another alone")
 	}
 }
@@ -129,15 +134,15 @@ func TestLoad_RefusesAReservedDeclaredName(t *testing.T) {
 	for _, tc := range rows {
 		t.Run(tc.name, func(t *testing.T) {
 			src := "schema \"fleet\"\n\ntype Car {\n\tvin String primary\n}\n\n" + tc.dsl + "\n"
-			if _, lres := schema.LoadString(context.Background(), src, "fleet.yammm"); !lres.HasErrors() {
+			if _, err := schema.LoadString(context.Background(), src, "fleet.yammm"); err == nil {
 				t.Fatalf("the DSL accepts %s", tc.name)
 			}
 		})
 	}
 	t.Run("a relation named LIST and a property named schema load", func(t *testing.T) {
 		src := "schema \"fleet\"\n\ntype Car {\n\tvin String primary\n\tschema String\n\t--> LIST (one) Car\n}\n"
-		if _, lres := schema.LoadString(context.Background(), src, "fleet.yammm"); lres.HasErrors() {
-			t.Fatalf("the DSL refuses them: %v", lres.Err())
+		if _, err := schema.LoadString(context.Background(), src, "fleet.yammm"); err != nil {
+			t.Fatalf("the DSL refuses them: %v", err)
 		}
 	})
 }
@@ -154,9 +159,9 @@ func TestLoad_AcceptsBoundsThatMeet(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			src := fmt.Sprintf("schema \"fleet\"\n\ntype Car {\n\tvin String primary\n\tv %s\n}\n", dsl)
-			s, res := schema.LoadString(context.Background(), src, "fleet.yammm")
-			if s.IsZero() || res.HasErrors() {
-				t.Errorf("load refused a legal constraint: %s", res.String())
+			s, err := schema.LoadString(context.Background(), src, "fleet.yammm")
+			if s.IsZero() || err != nil {
+				t.Errorf("load refused a legal constraint: %s", err)
 			}
 		})
 	}
@@ -176,16 +181,18 @@ func hasCode(r diag.Result, code diag.Code) bool {
 func TestLoad_ResolvesADataTypeAliasByItsName(t *testing.T) {
 	t.Run("an undeclared name in a DataType is refused", func(t *testing.T) {
 		src := "schema \"fleet\"\n\ntype Wides = List<Nope>\n\ntype Car {\n\tvin String primary\n\tvs Wides\n}\n"
-		s, res := schema.LoadString(context.Background(), src, "fleet.yammm")
+		s, res := diagtest.Capture(t, func(warn func(diag.Issue)) (schema.Schema, error) {
+			return schema.LoadString(context.Background(), src, "fleet.yammm", schema.WithWarnings(warn))
+		})
 		if !s.IsZero() || !hasCode(res, diag.E_UNKNOWN_TYPE) {
 			t.Fatalf("load = %v, %s; want E_UNKNOWN_TYPE", s, res.String())
 		}
 	})
 	t.Run("the declaration governs a property alias and a DataType's List of one", func(t *testing.T) {
 		src := "schema \"fleet\"\n\ntype Code = Integer[1, 5]\n\ntype Wides = List<Code>\n\ntype Car {\n\tvin String primary\n\tv Code\n\tvs Wides\n}\n"
-		s, res := schema.LoadString(context.Background(), src, "fleet.yammm")
+		s, err := schema.LoadString(context.Background(), src, "fleet.yammm")
 		if s.IsZero() {
-			t.Fatalf("load refused: %s", res.String())
+			t.Fatalf("load refused: %s", err)
 		}
 		want := schema.TestIntegerBetween(1, 5)
 		car, _ := s.Type("Car")
@@ -218,9 +225,9 @@ func TestLoad_KeepsAListsLengthBoundsAroundAnAlias(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			src := "schema \"fleet\"\n\ntype Code = Integer[1, 5]\n\ntype Car {\n\tvin String primary\n\tvs " + c.dsl + "\n}\n"
-			s, res := schema.LoadString(context.Background(), src, "fleet.yammm")
+			s, err := schema.LoadString(context.Background(), src, "fleet.yammm")
 			if s.IsZero() {
-				t.Fatalf("load refused: %s", res.String())
+				t.Fatalf("load refused: %s", err)
 			}
 			car, _ := s.Type("Car")
 			p, _ := car.Property("vs")
@@ -289,8 +296,8 @@ type Car {
 }
 `
 	s, res := schema.LoadString(t.Context(), src, "fleet.yammm")
-	if res.HasErrors() {
-		t.Fatalf("load: %v", res.Err())
+	if res != nil {
+		t.Fatalf("load: %v", res)
 	}
 	for dt := range s.DataTypes() {
 		if err := schema.CheckConstraint(dt.Constraint()); err != nil {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/simon-lentz/yammm/internal/diagtest"
 	"github.com/simon-lentz/yammm/internal/yammmtest/sourcetest"
 )
 
@@ -14,7 +15,7 @@ func TestParse_SkipsOneLeadingByteOrderMark(t *testing.T) {
 	t.Parallel()
 	src := sourcetest.ID("data.json")
 	parsed, result := Parse(context.Background(), src, []byte("\uFEFF{\"Test\": [{\"id\": \"a\"}]}"))
-	if result.HasErrors() {
+	if diagtest.Err(result) != nil {
 		t.Fatalf("issues: %s", result.String())
 	}
 	if len(parsed["Test"].Elements) != 1 {
@@ -25,7 +26,7 @@ func TestParse_SkipsOneLeadingByteOrderMark(t *testing.T) {
 	}
 
 	_, result = Parse(context.Background(), src, []byte("\uFEFF\uFEFF{\"Test\": []}"))
-	if !result.HasErrors() {
+	if diagtest.Err(result) == nil {
 		t.Error("a second mark must not parse")
 	}
 }

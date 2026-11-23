@@ -41,8 +41,8 @@ type Document {
 
 func loadProbeSchema(t *testing.T, ctx context.Context) schema.Schema {
 	t.Helper()
-	s, result := schema.LoadString(ctx, probeSchema, "probe.yammm")
-	if err := result.Err(); err != nil {
+	s, loadErr := schema.LoadString(ctx, probeSchema, "probe.yammm")
+	if err := loadErr; err != nil {
 		t.Fatalf("loading probe schema: %v", err)
 	}
 	return s
@@ -58,12 +58,12 @@ func TestDocumentedDiffCallShapes(t *testing.T) {
 	s := loadProbeSchema(t, ctx)
 	c := cypher.Config{}
 
-	desiredConstraints, cResult := c.Constraints(s)
-	if err := cResult.Err(); err != nil {
+	desiredConstraints, genErr := c.Constraints(s)
+	if err := genErr; err != nil {
 		t.Fatalf("generating constraints: %v", err)
 	}
-	desiredIndexes, iResult := c.Indexes(s)
-	if err := iResult.Err(); err != nil {
+	desiredIndexes, genErr2 := c.Indexes(s)
+	if err := genErr2; err != nil {
 		t.Fatalf("generating indexes: %v", err)
 	}
 
@@ -72,8 +72,8 @@ func TestDocumentedDiffCallShapes(t *testing.T) {
 	var actualConstraints []neo4j.RemoteConstraint
 	var actualIndexes []neo4j.RemoteIndex
 
-	plan, result := neo4j.Diff(c, s, actualConstraints, actualIndexes)
-	if err := result.Err(); err != nil {
+	plan, diffErr := neo4j.Diff(c, s, actualConstraints, actualIndexes)
+	if err := diffErr; err != nil {
 		t.Fatalf("planning: %v", err)
 	}
 	cDiff, iDiff := plan.Constraints, plan.Indexes
@@ -199,7 +199,7 @@ func TestDocumentedRendererCallShapes(t *testing.T) {
 		diag.WithDistinguishFatal(true),
 		diag.WithModuleRoot("/project"),
 	)
-	res := diag.OK()
+	var res diag.Result
 	_ = r.FormatResult(res)
 	_ = r.FormatResultJSON(res)
 
@@ -207,8 +207,8 @@ func TestDocumentedRendererCallShapes(t *testing.T) {
 	_, _, _ = res.Len(), res.DroppedCount(), res.TruncationNote()
 	_ = res.HasCode(diag.E_SYNTAX)
 
-	// ContextualError's field types, as declared inside package diag.
-	_ = diag.ContextualError{Result: diag.OK(), Tag: "t"}
+	// ResultError's field type, as declared inside package diag.
+	_ = diag.ResultError{Result: res}
 }
 
 // TestDocumentedKeyFunctions pins the graph key surface API.md documents, in

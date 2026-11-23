@@ -7,6 +7,7 @@ import (
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/instance"
+	"github.com/simon-lentz/yammm/internal/diagtest"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -42,7 +43,7 @@ func TestZeroValidRecords_ReportZeroAndHoldNothing(t *testing.T) {
 
 // A handle is a struct, so no zero handle reads as an absent value at a property.
 func TestValidate_AZeroHandleAtAPropertyIsAMismatchAndNotAbsent(t *testing.T) {
-	s, res := schema.LoadString(t.Context(), `schema "v"
+	s, err := schema.LoadString(t.Context(), `schema "v"
 
 type T {
 	id String primary
@@ -50,8 +51,8 @@ type T {
 	label String required
 }
 `, "v.yammm")
-	if res.HasErrors() {
-		t.Fatal(res)
+	if err != nil {
+		t.Fatal(err)
 	}
 	for name, zero := range map[string]any{
 		"schema.Type":            schema.Type{},
@@ -62,7 +63,9 @@ type T {
 	} {
 		for _, property := range []string{"note", "label"} {
 			props := map[string]any{"id": "a", "label": "l", property: zero}
-			valid, res := instance.NewValidator(s).ValidateOne(t.Context(), "T", instance.RawInstance{Properties: props})
+			valid, res := diagtest.Issues(t, func() (instance.ValidInstance, error) {
+				return instance.NewValidator(s).ValidateOne(t.Context(), "T", instance.RawInstance{Properties: props})
+			})
 			if !valid.IsZero() || !slices.ContainsFunc(slices.Collect(res.Issues()), func(i diag.Issue) bool { return i.Code() == diag.E_TYPE_MISMATCH }) {
 				t.Errorf("%s at %s: record %v, result %s; want no record and E_TYPE_MISMATCH", name, property, !valid.IsZero(), res)
 			}

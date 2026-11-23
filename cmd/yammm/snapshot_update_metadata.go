@@ -72,13 +72,12 @@ func runSnapshotUpdateMetadata(cmd *cobra.Command, args []string, sink *cli.Diag
 
 	ctx := cmd.Context()
 
-	// A header read reports an unknown hash algorithm as a Warning, which
-	// UpdateMetadata then refuses at Error; only the refusal is reported. The
-	// read takes no size cap, since UpdateMetadata updates a header of any size.
-	read, headerRes := snapread.HeaderOf(ctx, data)
-	if headerRes.HasErrors() {
-		sink.Add(headerRes)
-		return cli.Exit(cli.ExitForResult(headerRes))
+	// A header read accepts an unknown hash algorithm, which UpdateMetadata
+	// then refuses. The read takes no size cap, since UpdateMetadata updates a
+	// header of any size.
+	read, headerErr := snapread.HeaderOf(ctx, data)
+	if headerErr != nil {
+		return sink.AddSnapshot(headerErr)
 	}
 	header := read.(*snapshot.Header)
 
@@ -95,10 +94,9 @@ func runSnapshotUpdateMetadata(cmd *cobra.Command, args []string, sink *cli.Diag
 
 	// UpdateMetadata refuses a document whose hash does not verify, so a
 	// tampered file is never sealed under a fresh hash.
-	out, updateRes := snapshot.UpdateMetadata(ctx, data, newMeta)
-	sink.Add(updateRes)
-	if updateRes.HasErrors() {
-		return cli.Exit(cli.ExitForResult(updateRes))
+	out, updateErr := snapshot.UpdateMetadata(ctx, data, newMeta)
+	if err := sink.AddSnapshot(updateErr); err != nil {
+		return err
 	}
 
 	if err := cli.WriteFile(path, out); err != nil {

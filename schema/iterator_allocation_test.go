@@ -33,9 +33,9 @@ type X extends Base, a.R, Base {
 type Y extends X { }
 `),
 	}
-	s, res := schema.LoadSourcesWithEntry(t.Context(), sources, "/virtual/e.yammm", "/virtual")
-	if !res.OK() {
-		t.Fatal(res)
+	s, err := schema.LoadSourcesWithEntry(t.Context(), sources, "/virtual/e.yammm", schema.WithModuleRoot("/virtual"))
+	if err != nil {
+		t.Fatal(err)
 	}
 	x, ok := s.Type("X")
 	if !ok {

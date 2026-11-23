@@ -2,6 +2,7 @@ package neo4j
 
 import (
 	"cmp"
+	"errors"
 	"fmt"
 	"maps"
 	"slices"
@@ -108,33 +109,50 @@ type Plan struct {
 // CONSTRAINTS and SHOW INDEXES report them, against what s declares under c:
 // the desired constraints and indexes and the owned labels all derive from
 // (c, s). The plan converges in one apply; the package doc's Applying a Plan
-// section says how. The result holds an [E_NEO4J_INVALID_REMOTE_OBJECT] for each
-// break in the remote rows that Diff cannot plan from, the constraint
-// generation's issues, and the index generation's when the constraints' hold
-// no error; the package doc's Diff Scope section states the order. A plan is returned only when the result
-// holds no error.
-func Diff(c cypher.Config, s schema.Schema, constraints []RemoteConstraint, indexes []RemoteIndex) (Plan, diag.Result) {
-	collector := diag.NewCollector(0)
-	collector.Merge(checkRemote(constraints, indexes))
-	desired, result := c.Constraints(s)
-	collector.Merge(result)
-	if result.HasErrors() {
-		return Plan{}, collector.Result()
+// section says how. A refusal returns a *[diag.ResultError] holding an
+// [E_NEO4J_INVALID_REMOTE_OBJECT] for each break in the remote rows that Diff
+// cannot plan from, the constraint generation's failures, and the index
+// generation's when the constraints' are none; the package doc's Diff Scope
+// section states the order. Diff takes [WithWarnings], which receives the
+// constraint generation's warnings, and refuses any other option with an error
+// naming it.
+func Diff(c cypher.Config, s schema.Schema, constraints []RemoteConstraint, indexes []RemoteIndex, opts ...Option) (Plan, error) {
+	cfg := newConfig(opts)
+	if err := cfg.refuse("Diff", optWarnings); err != nil {
+		return Plan{}, err
 	}
-	desiredIndexes, indexResult := c.Indexes(s)
-	collector.Merge(indexResult)
-	if collector.HasErrors() {
-		return Plan{}, collector.Result()
+	collector := diag.NewCollector(diag.NoLimit)
+	checkRemote(collector, constraints, indexes)
+	desired, err := c.Constraints(s, cypher.WithWarnings(cfg.warnings))
+	if err != nil {
+		return Plan{}, withFailures(collector, err)
 	}
-	return diff(c, desired, desiredIndexes, constraints, indexes, c.OwnedLabels(s)), collector.Result()
+	desiredIndexes, err := c.Indexes(s)
+	if err != nil {
+		return Plan{}, withFailures(collector, err)
+	}
+	if err := collector.Err(); err != nil {
+		return Plan{}, err
+	}
+	return diff(c, desired, desiredIndexes, constraints, indexes, c.OwnedLabels(s)), nil
 }
 
-// checkRemote reports each remote row a plan cannot be made from, one
-// [E_NEO4J_INVALID_REMOTE_OBJECT] per break. A plan pairs, blocks and drops a
-// row by its name, so each name must pick out one row of its kind; a
+// withFailures returns the failures collector holds and those err holds as one
+// error. An err that holds no [diag.ResultError] is returned as it is.
+func withFailures(collector *diag.Collector, err error) error {
+	re, ok := errors.AsType[*diag.ResultError](err)
+	if !ok {
+		return err
+	}
+	collector.Merge(re.Result)
+	return collector.Err()
+}
+
+// checkRemote reports to collector each remote row a plan cannot be made from,
+// one [E_NEO4J_INVALID_REMOTE_OBJECT] per break. A plan pairs, blocks and drops
+// a row by its name, so each name must pick out one row of its kind; a
 // constraint and the index backing it share theirs.
-func checkRemote(constraints []RemoteConstraint, indexes []RemoteIndex) diag.Result {
-	collector := diag.NewCollector(0)
+func checkRemote(collector *diag.Collector, constraints []RemoteConstraint, indexes []RemoteIndex) {
 	checkNames(collector, "constraint", "constraints", constraints, func(rc RemoteConstraint) string { return rc.Name })
 	checkNames(collector, "index", "indexes", indexes, func(ri RemoteIndex) string { return ri.Name })
 	for i, rc := range constraints {
@@ -142,7 +160,6 @@ func checkRemote(constraints []RemoteConstraint, indexes []RemoteIndex) diag.Res
 			collector.Collect(remoteIssue(fmt.Sprintf("remote constraint %d is a property type constraint that reports no property type", i)))
 		}
 	}
-	return collector.Result()
 }
 
 // checkNames reports each row with no name and each name two or more rows

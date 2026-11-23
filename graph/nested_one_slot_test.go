@@ -8,6 +8,7 @@ import (
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/instance"
+	"github.com/simon-lentz/yammm/internal/diagtest"
 	"github.com/simon-lentz/yammm/internal/instancetest"
 	"github.com/simon-lentz/yammm/internal/yammmtest"
 	"github.com/simon-lentz/yammm/schema"
@@ -37,20 +38,22 @@ func TestFileLoadedSchema_NestedOneUnderAManyIsRefusedASecondOccupant(t *testing
 	// One occupant of the nested (one) slot: accepted, and the root's raw
 	// spelling is stored canonical.
 	g := graph.New(s)
-	if res := g.Add(t.Context(), run(map[string]any{"label": "L", "marks": marks})); !res.OK() {
-		t.Fatalf("the nested (one) shape was refused: %s", res)
+	if err := g.Add(t.Context(), run(map[string]any{"label": "L", "marks": marks})); err != nil {
+		t.Fatalf("the nested (one) shape was refused: %s", err)
 	}
 	if got := slices.Collect(g.Snapshot().InstancesOf(runID))[0].PrimaryKey().String(); got != graph.FormatKey(canonInstant) {
 		t.Errorf("the root key is %s, want the canonical %s", got, graph.FormatKey(canonInstant))
 	}
 
 	// A second occupant of the nested (one) slot draws the validator's refusal.
-	_, res := instance.NewValidator(s).ValidateOne(t.Context(), "Run", instance.RawInstance{Properties: map[string]any{
-		"at": rawInstant,
-		"steps": []any{map[string]any{"step_id": "s1", "summary": []any{
-			map[string]any{"label": "L", "marks": marks},
-			map[string]any{"label": "M", "marks": marks},
-		}}},
-	}})
+	_, res := diagtest.Issues(t, func() (instance.ValidInstance, error) {
+		return instance.NewValidator(s).ValidateOne(t.Context(), "Run", instance.RawInstance{Properties: map[string]any{
+			"at": rawInstant,
+			"steps": []any{map[string]any{"step_id": "s1", "summary": []any{
+				map[string]any{"label": "L", "marks": marks},
+				map[string]any{"label": "M", "marks": marks},
+			}}},
+		}})
+	})
 	assertHasCode(t, res, diag.E_DUPLICATE_COMPOSED_PK)
 }

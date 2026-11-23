@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/simon-lentz/yammm/internal/diagtest"
 	"github.com/simon-lentz/yammm/internal/yammmtest/sourcetest"
 
 	"github.com/stretchr/testify/assert"
@@ -40,7 +41,7 @@ func TestParse(t *testing.T) {
 		}`)
 
 		result, diags := Parse(context.Background(), source, data)
-		require.True(t, diags.OK(), "expected no errors: %v", diags)
+		require.NoError(t, diagtest.Err(diags), "expected no errors: %v", diags)
 		require.Len(t, result, 1)
 		require.Len(t, result["Person"].Elements, 2)
 
@@ -56,7 +57,7 @@ func TestParse(t *testing.T) {
 		}`)
 
 		result, diags := Parse(context.Background(), source, data)
-		require.True(t, diags.OK())
+		require.NoError(t, diagtest.Err(diags))
 		require.Len(t, result, 2)
 		require.Len(t, result["Person"].Elements, 1)
 		require.Len(t, result["Company"].Elements, 1)
@@ -64,7 +65,7 @@ func TestParse(t *testing.T) {
 
 	t.Run("empty object", func(t *testing.T) {
 		result, diags := Parse(context.Background(), source, []byte(`{}`))
-		require.True(t, diags.OK())
+		require.NoError(t, diagtest.Err(diags))
 		assert.Empty(t, result)
 	})
 
@@ -72,7 +73,7 @@ func TestParse(t *testing.T) {
 		data := []byte(`{"common.Person": [{"name": "Alice"}]}`)
 
 		result, diags := Parse(context.Background(), source, data)
-		require.True(t, diags.OK())
+		require.NoError(t, diagtest.Err(diags))
 		require.Len(t, result["common.Person"].Elements, 1)
 	})
 
@@ -85,7 +86,7 @@ func TestParse(t *testing.T) {
 		}`)
 
 		result, diags := Parse(context.Background(), source, data)
-		require.True(t, diags.OK())
+		require.NoError(t, diagtest.Err(diags))
 		require.Len(t, result["Person"].Elements, 1)
 	})
 }
@@ -118,7 +119,7 @@ func TestParse_Errors(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			result, diags := Parse(context.Background(), source, []byte(tt.data))
-			require.False(t, diags.OK(), "expected parse errors")
+			require.Error(t, diagtest.Err(diags), "expected parse errors")
 			for typeName, count := range tt.wantTypes {
 				require.Len(t, result[typeName].Elements, count, "type %q", typeName)
 			}
@@ -150,7 +151,7 @@ func TestParse_NonArrayValues(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			result, diags := Parse(context.Background(), source, []byte(tt.input))
-			require.False(t, diags.OK(), "expected error for non-array value")
+			require.Error(t, diagtest.Err(diags), "expected error for non-array value")
 			require.Len(t, result["Company"].Elements, 1,
 				"should have parsed valid type after skipping invalid value")
 		})
@@ -166,7 +167,7 @@ func TestNullRejection(t *testing.T) {
 		data := []byte(`{"Person": [null, {"name": "Alice"}, null]}`)
 		result, diags := Parse(context.Background(), source, data)
 
-		require.False(t, diags.OK(), "null elements in type array should be rejected")
+		require.Error(t, diagtest.Err(diags), "null elements in type array should be rejected")
 		require.Len(t, result["Person"].Elements, 1)
 	})
 }
@@ -201,7 +202,7 @@ func TestTrailingContent(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			diags := tc.parse([]byte(tc.data))
-			require.False(t, diags.OK(), "trailing content should be rejected")
+			require.Error(t, diagtest.Err(diags), "trailing content should be rejected")
 		})
 	}
 }
@@ -212,7 +213,7 @@ func TestNumericConversion(t *testing.T) {
 	t.Run("integers preserved as int64", func(t *testing.T) {
 		data := []byte(`{"value": 42}`)
 		result, diags := parseOne(t, source, data)
-		require.True(t, diags.OK())
+		require.NoError(t, diagtest.Err(diags))
 
 		val := result.Properties["value"]
 		assert.IsType(t, int64(0), val)
@@ -222,7 +223,7 @@ func TestNumericConversion(t *testing.T) {
 	t.Run("floats preserved as float64", func(t *testing.T) {
 		data := []byte(`{"value": 3.14}`)
 		result, diags := parseOne(t, source, data)
-		require.True(t, diags.OK())
+		require.NoError(t, diagtest.Err(diags))
 
 		val := result.Properties["value"]
 		assert.IsType(t, float64(0), val)
@@ -232,7 +233,7 @@ func TestNumericConversion(t *testing.T) {
 	t.Run("large integers", func(t *testing.T) {
 		data := []byte(`{"value": 9223372036854775807}`) // MaxInt64
 		result, diags := parseOne(t, source, data)
-		require.True(t, diags.OK())
+		require.NoError(t, diagtest.Err(diags))
 
 		assert.Equal(t, int64(9223372036854775807), result.Properties["value"])
 	})
@@ -243,7 +244,7 @@ func TestNumericConversion(t *testing.T) {
 			"arr": [1, 2.5, 3]
 		}`)
 		result, diags := parseOne(t, source, data)
-		require.True(t, diags.OK())
+		require.NoError(t, diagtest.Err(diags))
 
 		obj := result.Properties["obj"].(map[string]any)
 		assert.Equal(t, int64(5), obj["count"])
@@ -262,7 +263,7 @@ func TestEdgeCases(t *testing.T) {
 		data := []byte(`{"name": "日本語", "emoji": "🎉"}`)
 
 		result, diags := parseOne(t, source, data)
-		require.True(t, diags.OK())
+		require.NoError(t, diagtest.Err(diags))
 		assert.Equal(t, "日本語", result.Properties["name"])
 		assert.Equal(t, "🎉", result.Properties["emoji"])
 	})
@@ -271,7 +272,7 @@ func TestEdgeCases(t *testing.T) {
 		data := []byte(`{"name": null}`)
 
 		result, diags := parseOne(t, source, data)
-		require.True(t, diags.OK())
+		require.NoError(t, diagtest.Err(diags))
 		assert.Nil(t, result.Properties["name"])
 	})
 
@@ -279,7 +280,7 @@ func TestEdgeCases(t *testing.T) {
 		data := []byte(`{"active": true, "deleted": false}`)
 
 		result, diags := parseOne(t, source, data)
-		require.True(t, diags.OK())
+		require.NoError(t, diagtest.Err(diags))
 		assert.Equal(t, true, result.Properties["active"])
 		assert.Equal(t, false, result.Properties["deleted"])
 	})
@@ -288,7 +289,7 @@ func TestEdgeCases(t *testing.T) {
 		data := []byte(`{"name": ""}`)
 
 		result, diags := parseOne(t, source, data)
-		require.True(t, diags.OK())
+		require.NoError(t, diagtest.Err(diags))
 		assert.Empty(t, result.Properties["name"])
 	})
 
@@ -296,7 +297,7 @@ func TestEdgeCases(t *testing.T) {
 		data := []byte(`{"data": {}}`)
 
 		result, diags := parseOne(t, source, data)
-		require.True(t, diags.OK())
+		require.NoError(t, diagtest.Err(diags))
 
 		obj, ok := result.Properties["data"].(map[string]any)
 		require.True(t, ok)
@@ -307,7 +308,7 @@ func TestEdgeCases(t *testing.T) {
 		data := []byte(`{"items": []}`)
 
 		result, diags := parseOne(t, source, data)
-		require.True(t, diags.OK())
+		require.NoError(t, diagtest.Err(diags))
 
 		arr, ok := result.Properties["items"].([]any)
 		require.True(t, ok)

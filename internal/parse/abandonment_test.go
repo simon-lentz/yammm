@@ -108,8 +108,8 @@ func TestAbandonment_GroupsReportAgainstTheEnclosingConstruct(t *testing.T) {
 			if len(issues) == 0 {
 				return // a row may record a site that reports nothing
 			}
-			// diag.Result.OK() counts only Fatal and Error, so a severity
-			// downgrade here would let every one of these sources load clean.
+			// A load fails only on a Fatal or Error, so a severity downgrade
+			// here would let every one of these sources load clean.
 			for i, iss := range issues {
 				if iss.Code() != diag.E_SYNTAX || iss.Severity() != diag.Error {
 					t.Errorf("diagnostic %d is %s at %v, want E_SYNTAX at error",

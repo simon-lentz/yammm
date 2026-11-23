@@ -14,8 +14,8 @@ func TestConfig_TheZeroValueIsTheDefaultMapping(t *testing.T) {
 	if c.Edition != Enterprise || c.TypeConstraints != AllProperties || c.NodeKeys || c.LabelPrefix != "" {
 		t.Errorf("the zero Config is %+v, want Enterprise, AllProperties, no NODE KEY and no prefix", c)
 	}
-	s, result := schema.LoadString(t.Context(), "schema \"s\"\n\ntype T {\n\tid String primary\n}\n", "s.yammm")
-	if err := result.Err(); err != nil {
+	s, loadErr := schema.LoadString(t.Context(), "schema \"s\"\n\ntype T {\n\tid String primary\n}\n", "s.yammm")
+	if err := loadErr; err != nil {
 		t.Fatal(err)
 	}
 	ty, _ := s.Type("T")

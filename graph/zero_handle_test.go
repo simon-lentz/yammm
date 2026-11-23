@@ -74,9 +74,9 @@ func TestZeroHandles_ReportZeroAndAnswerAsHoldingNothing(t *testing.T) {
 
 func TestSnapshot_EdgesFromAnswersNothingWithAZeroOnEitherSide(t *testing.T) {
 	ctx := t.Context()
-	s, res := schema.LoadString(ctx, "schema \"z\"\n\ntype T {\n\tid String primary\n}\n\ntype U {\n\tid String primary\n\t--> TO (one) T\n}\n", "z.yammm")
-	if res.HasErrors() {
-		t.Fatal(res)
+	s, err := schema.LoadString(ctx, "schema \"z\"\n\ntype T {\n\tid String primary\n}\n\ntype U {\n\tid String primary\n\t--> TO (one) T\n}\n", "z.yammm")
+	if err != nil {
+		t.Fatal(err)
 	}
 	v := instance.NewValidator(s)
 	g := graph.New(s)
@@ -84,12 +84,12 @@ func TestSnapshot_EdgesFromAnswersNothingWithAZeroOnEitherSide(t *testing.T) {
 		"T": {"id": "t"},
 		"U": {"id": "u", "to": map[string]any{"_target_id": "t"}},
 	} {
-		valid, res := v.ValidateOne(ctx, typ, instance.RawInstance{Properties: props})
-		if !res.OK() {
-			t.Fatal(res)
+		valid, err := v.ValidateOne(ctx, typ, instance.RawInstance{Properties: props})
+		if err != nil {
+			t.Fatal(err)
 		}
-		if res := g.Add(ctx, valid); res.HasErrors() {
-			t.Fatal(res)
+		if err := g.Add(ctx, valid); err != nil {
+			t.Fatal(err)
 		}
 	}
 	snap := g.Snapshot()

@@ -17,7 +17,7 @@ func TestRenderFallbacks_DegradeToTheReferenceSpelling(t *testing.T) {
 	t.Parallel()
 
 	// The model that owns the relation and the extends clause.
-	owner, result := schema.LoadString(t.Context(), `schema "owner"
+	owner, err := schema.LoadString(t.Context(), `schema "owner"
 
 type Root {
 	id String primary
@@ -32,20 +32,20 @@ type Other {
 	id String primary
 }
 `, "owner.yammm")
-	if result.HasErrors() {
-		t.Fatalf("owner fixture must load: %v", result.Err())
+	if err != nil {
+		t.Fatalf("owner fixture must load: %v", err)
 	}
 
 	// A document over an unrelated schema: its type map contains neither
 	// Other nor Root, so both lookups miss.
-	other, result := schema.LoadString(t.Context(), `schema "elsewhere"
+	other, err := schema.LoadString(t.Context(), `schema "elsewhere"
 
 type Unrelated {
 	id String primary
 }
 `, "elsewhere.yammm")
-	if result.HasErrors() {
-		t.Fatalf("elsewhere fixture must load: %v", result.Err())
+	if err != nil {
+		t.Fatalf("elsewhere fixture must load: %v", err)
 	}
 	g := newTestGenerator(t, other)
 

@@ -6,7 +6,6 @@ import (
 	"github.com/simon-lentz/yammm/internal/hostpath"
 
 	"github.com/simon-lentz/yammm/cmd/yammm/internal/cli"
-	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -36,13 +35,9 @@ func bindSchemaSource(sink *cli.DiagnosticSink, s schema.Schema, explicitRoot, a
 // the only signal that a subtype silently dropped an inherited annotation — and
 // it now reaches the operator on every path, including the ones that return
 // before the command's own phase runs.
-func reportSchemaLoad(sink *cli.DiagnosticSink, s schema.Schema, explicitRoot, absSchemaPath string, result diag.Result) error {
+func reportSchemaLoad(sink *cli.DiagnosticSink, s schema.Schema, explicitRoot, absSchemaPath string, err error) error {
 	bindSchemaSource(sink, s, explicitRoot, absSchemaPath)
-	sink.Add(result)
-	if result.HasErrors() {
-		return cli.Exit(cli.ExitForResult(result))
-	}
-	return nil
+	return sink.AddSchemaLoad(err)
 }
 
 // diagRootFor returns the host path rendered locations are relativized

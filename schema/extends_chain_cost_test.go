@@ -32,10 +32,10 @@ func TestLoad_ADeepExtendsChainCostsItsAncestry(t *testing.T) {
 		var before, after runtime.MemStats
 		runtime.GC()
 		runtime.ReadMemStats(&before)
-		s, res := schema.LoadString(t.Context(), src, "s.yammm")
+		s, err := schema.LoadString(t.Context(), src, "s.yammm")
 		runtime.ReadMemStats(&after)
 		if s.IsZero() {
-			t.Fatalf("depth %d: %v", n, res)
+			t.Fatalf("depth %d: %v", n, err)
 		}
 		return after.TotalAlloc - before.TotalAlloc
 	}

@@ -161,8 +161,8 @@ func TestMarshal_NoDocCommentIsRefused(t *testing.T) {
 
 	generate := func(t *testing.T, docs map[string]string) {
 		t.Helper()
-		s, res := schema.LoadSourcesWithEntry(context.Background(), schemaWithDocs(docs), "entry.yammm", ".", schema.WithSourcesOnly(true))
-		if err := res.Err(); err != nil {
+		s, loadErr := schema.LoadSourcesWithEntry(context.Background(), schemaWithDocs(docs), "entry.yammm", schema.WithSourcesOnly(true), schema.WithModuleRoot("."))
+		if err := loadErr; err != nil {
 			t.Fatalf("the schema does not load: %v", err)
 		}
 		for _, opts := range [][]Option{nil, {WithClassDiagram(false)}} {

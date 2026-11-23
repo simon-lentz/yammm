@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/simon-lentz/yammm/internal/diagtest"
 	"github.com/simon-lentz/yammm/internal/yammmtest/sourcetest"
 
 	"github.com/stretchr/testify/assert"
@@ -123,7 +124,7 @@ func completeGolden(t *testing.T, model *schema.TestModel) {
 	t.Helper()
 	s, result := buildAndComplete(t, model)
 	require.False(t, s.IsZero())
-	require.False(t, result.HasErrors(), "unexpected errors: %v", result)
+	require.NoError(t, diagtest.Err(result), "unexpected errors: %v", result)
 	name := strings.ToLower(strings.TrimPrefix(t.Name(), "Test"))
 	yammmtest.GoldenJSON(t, name, projectSchema(s))
 }
@@ -648,7 +649,7 @@ func TestComplete_Errors(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			s, result := buildAndComplete(t, tt.model)
 			assert.True(t, s.IsZero(), "completion must fail")
-			require.True(t, result.HasErrors(), "completion must produce error diagnostics")
+			require.Error(t, diagtest.Err(result), "completion must produce error diagnostics")
 			if tt.wantCode != (diag.Code{}) {
 				assert.True(t, result.HasCode(tt.wantCode), "expected %v in: %s", tt.wantCode, result.String())
 			}

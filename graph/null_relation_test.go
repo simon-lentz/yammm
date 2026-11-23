@@ -7,6 +7,7 @@ import (
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/instance"
+	"github.com/simon-lentz/yammm/internal/diagtest"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -14,7 +15,7 @@ import (
 // the issue the association left out draws, its message and its reason alike.
 func TestCheck_ARequiredAssociationSetToNullIsAbsent(t *testing.T) {
 	t.Parallel()
-	s, res := schema.LoadString(t.Context(), `schema "n"
+	s, err := schema.LoadString(t.Context(), `schema "n"
 
 type Co {
 	id String primary
@@ -26,20 +27,20 @@ type T {
 	--> MANY (one:many) Co
 }
 `, "n.yammm")
-	if res.Err() != nil {
-		t.Fatal(res.Err())
+	if err != nil {
+		t.Fatal(err)
 	}
 	check := func(props map[string]any) diag.Result {
 		t.Helper()
-		vi, res := instance.NewValidator(s).ValidateOne(t.Context(), "T", instance.RawInstance{Properties: props})
-		if res.Err() != nil {
-			t.Fatalf("validation refused %v: %s", props, res)
+		vi, err := instance.NewValidator(s).ValidateOne(t.Context(), "T", instance.RawInstance{Properties: props})
+		if err != nil {
+			t.Fatalf("validation refused %v: %s", props, err)
 		}
 		g := graph.New(s)
-		if res := g.Add(t.Context(), vi); res.Err() != nil {
-			t.Fatalf("Add refused %v: %s", props, res)
+		if err := g.Add(t.Context(), vi); err != nil {
+			t.Fatalf("Add refused %v: %s", props, err)
 		}
-		return g.Check(t.Context())
+		return diagtest.Failures(t, g.Check(t.Context()))
 	}
 	reasons := func(res diag.Result) []string {
 		t.Helper()

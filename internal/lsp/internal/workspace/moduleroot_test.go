@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/simon-lentz/yammm/diag"
+	"github.com/simon-lentz/yammm/internal/diagtest"
 	"github.com/simon-lentz/yammm/internal/lsp/internal/analysis"
 	"github.com/simon-lentz/yammm/internal/lsp/internal/lsputil"
 	"github.com/simon-lentz/yammm/internal/lsp/internal/testutil"
@@ -102,9 +103,9 @@ func TestModuleRoot_EditorAndLoaderAgree(t *testing.T) {
 		t.Errorf("Workspace.FindModuleRoot = %q, want %q — the editor and the CLI must answer one root", editor, canonical)
 	}
 
-	s, res := schema.Load(t.Context(), entry)
-	if res.HasErrors() {
-		t.Fatalf("schema.Load: %v", res.Err())
+	s, loadErr := schema.Load(t.Context(), entry)
+	if loadErr != nil {
+		t.Fatalf("schema.Load: %v", loadErr)
 	}
 	if s.ModuleRoot() != canonical {
 		t.Errorf("Load recorded %q, want %q", s.ModuleRoot(), canonical)
@@ -191,7 +192,7 @@ func TestModuleRoot_WorkspaceFolderHoldsAnotherSpellingOfItsDocument(t *testing.
 				t.Errorf("analysis root = %q, want the workspace folder %q", snap.Root, want)
 			}
 			if snap.Schema.IsZero() {
-				t.Errorf("the module-style import did not resolve against the workspace folder: %v", snap.Result.Err())
+				t.Errorf("the module-style import did not resolve against the workspace folder: %v", snap.Result)
 			}
 		})
 	}
@@ -227,9 +228,11 @@ func TestModuleRoot_MalformedMarkerReachesTheEditor(t *testing.T) {
 	_, entry := markerTree(t, "module example.com/thing\n")
 
 	// The CLI half.
-	_, res := schema.Load(t.Context(), entry)
+	_, res := diagtest.Capture(t, func(warn func(diag.Issue)) (schema.Schema, error) {
+		return schema.Load(t.Context(), entry, schema.WithWarnings(warn))
+	})
 	if !hasCode(res, diag.E_LOAD_MODULE_ROOT_MALFORMED) {
-		t.Fatalf("Load did not report the malformed marker: %v", res.Err())
+		t.Fatalf("Load did not report the malformed marker: %v", res)
 	}
 
 	// The editor half: discovery fails, and the failure becomes a document

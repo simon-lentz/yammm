@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/simon-lentz/yammm/diag"
+	"github.com/simon-lentz/yammm/internal/diagtest"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -206,7 +207,7 @@ import "./base" as base
 type Doc extends base.Tracked {
 	id String primary
 }`)
-	if res.HasErrors() {
+	if diagtest.Err(res) != nil {
 		t.Fatalf("cross-file load should succeed: %v", res)
 	}
 	if _, ok := typeProperty(t, schemaType(t, s, "Doc"), "first_seen").Annotation("writeOnce"); !ok {
@@ -230,7 +231,7 @@ import "./base" as base
 type Doc extends base.Shadowed {
 	id String primary
 }`)
-	if res.HasErrors() {
+	if diagtest.Err(res) != nil {
 		t.Fatalf("cross-file load should succeed: %v", res)
 	}
 	if _, ok := typeProperty(t, schemaType(t, s, "Doc"), "first_seen").Annotation("writeOnce"); ok {
@@ -255,7 +256,7 @@ abstract type Searchable {
 type Doc extends base.Audited, Searchable {
 	id String primary
 }`)
-	if res.HasErrors() {
+	if diagtest.Err(res) != nil {
 		t.Fatalf("cross-file load should succeed: %v", res)
 	}
 	got := propAnnNames(typeProperty(t, schemaType(t, s, "Doc"), "state"))
@@ -543,7 +544,8 @@ type Doc extends M1, M2 { id String primary }`)
 // it, not be reported as conflicting with its own declaration.
 func TestAnnotation_Chain_UnresolvableDatatypeDoesNotSelfConflict(t *testing.T) {
 	t.Parallel()
-	_, res := schema.LoadString(t.Context(), `schema "main"
+	_, res := diagtest.Capture(t, func(warn func(diag.Issue)) (schema.Schema, error) {
+		return schema.LoadString(t.Context(), `schema "main"
 
 abstract type A {
 	amount ext.Amount
@@ -558,7 +560,8 @@ abstract type C extends B {
 type D extends A, B, C {
 	id String primary
 }
-`, "main.yammm")
+`, "main.yammm", schema.WithWarnings(warn))
+	})
 
 	for i := range res.Issues() {
 		if i.Code() == diag.E_PROPERTY_CONFLICT {

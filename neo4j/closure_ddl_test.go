@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/simon-lentz/yammm/internal/diagtest"
 	"github.com/simon-lentz/yammm/schema"
 	"github.com/simon-lentz/yammm/schema/cypher"
 )
@@ -29,12 +30,12 @@ type Station {
 
 func loadClosureDDLSchema(t *testing.T) schema.Schema {
 	t.Helper()
-	s, res := schema.LoadSourcesWithEntry(t.Context(), map[string][]byte{
+	s, err := schema.LoadSourcesWithEntry(t.Context(), map[string][]byte{
 		"entry.yammm": []byte(closureDDLEntry),
 		"base.yammm":  []byte(closureDDLBase),
-	}, "entry.yammm", ".", schema.WithSourcesOnly(true))
-	if res.HasErrors() {
-		t.Fatalf("load schema: %s", res)
+	}, "entry.yammm", schema.WithSourcesOnly(true), schema.WithModuleRoot("."))
+	if err != nil {
+		t.Fatalf("load schema: %s", err)
 	}
 	return s
 }
@@ -50,9 +51,9 @@ func TestClosureDDL_ImportedTypeGetsConstraintsIndexesAndOwnership(t *testing.T)
 	s := loadClosureDDLSchema(t)
 	a := cypher.Config{}
 
-	shape, sres := shapeFor(a, s)
+	shape, err := shapeFor(a, s)
 	if shape == nil {
-		t.Fatalf("shapeFor: %s", sres)
+		t.Fatalf("shapeFor: %s", err)
 	}
 	var basinLabel string
 	for id, ns := range shape.types {
@@ -64,8 +65,8 @@ func TestClosureDDL_ImportedTypeGetsConstraintsIndexesAndOwnership(t *testing.T)
 		t.Fatal("shapeFor gave the imported type no label; the premise of this test is gone")
 	}
 
-	constraints, cres := constraintStatements(a, s)
-	if cres.HasErrors() {
+	constraints, cres := constraintStatements(t, a, s)
+	if diagtest.Err(cres) != nil {
 		t.Fatalf("Constraints: %s", cres)
 	}
 	if !mentionsLabel(constraints, basinLabel) {
@@ -73,8 +74,8 @@ func TestClosureDDL_ImportedTypeGetsConstraintsIndexesAndOwnership(t *testing.T)
 			basinLabel, constraints)
 	}
 
-	indexes, ires := indexStatements(a, s)
-	if ires.HasErrors() {
+	indexes, ires := indexStatements(t, a, s)
+	if diagtest.Err(ires) != nil {
 		t.Fatalf("Indexes: %s", ires)
 	}
 	if !mentionsLabel(indexes, basinLabel) {
@@ -96,9 +97,9 @@ func TestClosureDDL_EmitSetAndOwnSetAgree(t *testing.T) {
 	a := cypher.Config{}
 
 	owned := a.OwnedLabels(s)
-	shape, sres := shapeFor(a, s)
+	shape, err := shapeFor(a, s)
 	if shape == nil {
-		t.Fatalf("shapeFor: %s", sres)
+		t.Fatalf("shapeFor: %s", err)
 	}
 	for id, ns := range shape.types {
 		if !owned.Contains(ns.label) {

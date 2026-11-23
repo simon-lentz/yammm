@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/simon-lentz/yammm/diag"
+	"github.com/simon-lentz/yammm/internal/diagtest"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -24,8 +25,10 @@ func TestLoad_TimestampTakesNoFormat(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
-			_, res := schema.LoadString(t.Context(), src, "s.yammm")
-			if !res.HasErrors() {
+			_, res := diagtest.Capture(t, func(warn func(diag.Issue)) (schema.Schema, error) {
+				return schema.LoadString(t.Context(), src, "s.yammm", schema.WithWarnings(warn))
+			})
+			if diagtest.Err(res) == nil {
 				t.Fatalf("the source loads: %v", res)
 			}
 			var got []string
@@ -43,7 +46,9 @@ func TestLoad_TimestampTakesNoFormat(t *testing.T) {
 // value are equal, print alike, and CheckConstraint accepts each.
 func TestTimestampConstraint_IsOneValue(t *testing.T) {
 	t.Parallel()
-	s, res := schema.LoadString(t.Context(), "schema \"s\"\ntype T {\n\tid String primary\n\tat Timestamp required\n}\n", "s.yammm")
+	s, res := diagtest.Capture(t, func(warn func(diag.Issue)) (schema.Schema, error) {
+		return schema.LoadString(t.Context(), "schema \"s\"\ntype T {\n\tid String primary\n\tat Timestamp required\n}\n", "s.yammm", schema.WithWarnings(warn))
+	})
 	if res.Len() != 0 {
 		t.Fatalf("load: %v", res)
 	}
@@ -75,9 +80,9 @@ func TestTimestampConstraint_IsOneValue(t *testing.T) {
 func TestStructuralHash_ATimestampKeepsItsHash(t *testing.T) {
 	t.Parallel()
 	const src = "schema \"s\"\n\ntype At = Timestamp\n\ntype T {\n\tid String primary\n\tat Timestamp required\n\twhen At\n\tall List<Timestamp>\n}\n"
-	s, res := schema.LoadString(t.Context(), src, "s.yammm")
-	if res.HasErrors() {
-		t.Fatalf("load: %v", res)
+	s, err := schema.LoadString(t.Context(), src, "s.yammm")
+	if err != nil {
+		t.Fatalf("load: %v", err)
 	}
 	const want = "sha256:0f60e7065c0ec92a21519eb993fea36c46378f53912bc079e3dc8e49dcfcf02a"
 	if got := schema.StructuralHash(s); got != want {

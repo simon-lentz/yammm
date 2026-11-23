@@ -160,7 +160,7 @@ func observed(result diag.Result) expectedVerdict {
 func TestBuildGraph_AgreesWithAModelOfTheDocument(t *testing.T) {
 	t.Parallel()
 
-	s, res := schema.LoadString(t.Context(), `schema "p12"
+	s, err := schema.LoadString(t.Context(), `schema "p12"
 
 type Person {
     id String primary
@@ -168,8 +168,8 @@ type Person {
     --> MANAGER (one) Person
 }
 `, "p12.yammm")
-	if res.HasErrors() {
-		t.Fatal(res.String())
+	if err != nil {
+		t.Fatal(err)
 	}
 	r := rand.New(rand.NewPCG(12, 0)) //nolint:gosec // a fixed seed makes the documents reproducible
 	for i := range 600 {
@@ -236,9 +236,9 @@ func codeCount(result diag.Result, code diag.Code) int {
 func TestBuildGraph_TypesAMissingTargetByItsRelation(t *testing.T) {
 	t.Parallel()
 
-	s, res := schema.LoadString(t.Context(), teamSchema, "t.yammm")
-	if res.HasErrors() {
-		t.Fatal(res.String())
+	s, err := schema.LoadString(t.Context(), teamSchema, "t.yammm")
+	if err != nil {
+		t.Fatal(err)
 	}
 	member := map[string]any{"id": "p", "name": "P", "team": map[string]any{"_target_id": "t"}}
 	for _, tc := range []struct {
@@ -264,9 +264,9 @@ func TestBuildGraph_TypesAMissingTargetByItsRelation(t *testing.T) {
 func TestBuildGraph_ReportsADuplicateAsTheGraphDoes(t *testing.T) {
 	t.Parallel()
 
-	s, res := schema.LoadString(t.Context(), teamSchema, "t.yammm")
-	if res.HasErrors() {
-		t.Fatal(res.String())
+	s, err := schema.LoadString(t.Context(), teamSchema, "t.yammm")
+	if err != nil {
+		t.Fatal(err)
 	}
 	validated, _ := ValidateInstances(t.Context(), s, teamRaws([]map[string]any{{"id": "t"}, {"id": "t", "name": "A"}, {"id": "t", "name": "B"}}, nil))
 	_, result := BuildGraph(t.Context(), s, nil, validated)
@@ -309,9 +309,9 @@ func TestBuildGraph_ReportsADuplicateAsTheGraphDoes(t *testing.T) {
 func TestBuildGraph_JudgesNothingOnACancelledContext(t *testing.T) {
 	t.Parallel()
 
-	s, res := schema.LoadString(t.Context(), teamSchema, "t.yammm")
-	if res.HasErrors() {
-		t.Fatal(res.String())
+	s, err := schema.LoadString(t.Context(), teamSchema, "t.yammm")
+	if err != nil {
+		t.Fatal(err)
 	}
 	validated, _ := ValidateInstances(t.Context(), s, teamRaws([]map[string]any{{"id": "t"}, {"id": "t", "name": "A"}}, nil))
 	ctx, cancel := context.WithCancel(t.Context())

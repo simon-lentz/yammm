@@ -9,6 +9,7 @@ import (
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/immutable"
+	"github.com/simon-lentz/yammm/internal/diagtest"
 	"github.com/simon-lentz/yammm/internal/snapparts"
 	"github.com/simon-lentz/yammm/internal/snappartstest"
 	"github.com/simon-lentz/yammm/schema"
@@ -35,9 +36,9 @@ type Gauge {
 
 func loadNumberRuleSchema(t *testing.T) (schema.Schema, schema.TypeID) {
 	t.Helper()
-	s, res := schema.LoadString(t.Context(), numberRuleSchema, "numbers.yammm")
-	if res.HasErrors() {
-		t.Fatalf("schema: %s", res)
+	s, err := schema.LoadString(t.Context(), numberRuleSchema, "numbers.yammm")
+	if err != nil {
+		t.Fatalf("schema: %s", err)
 	}
 	return s, mustTypeID(t, s, "Gauge")
 }
@@ -125,9 +126,9 @@ func TestLoad_ReadsANumberAtTheKindItsPositionDeclares(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
 			doc := numberRuleDoc(t, s, gauge, c.prop, c.spelled)
-			snap, res := snapshot.Unmarshal(t.Context(), rehashDocument(t, doc), s)
-			if !res.OK() {
-				t.Fatalf("Load: %s", res)
+			snap, err := snapshot.Unmarshal(t.Context(), rehashDocument(t, doc), s)
+			if err != nil {
+				t.Fatalf("Load: %s", err)
 			}
 			g1, ok := snap.InstanceByKey(gauge, graph.FormatKey("g1"))
 			if !ok {
@@ -144,19 +145,19 @@ func TestLoad_ReadsANumberAtTheKindItsPositionDeclares(t *testing.T) {
 			if !sameNumber(got, c.want) {
 				t.Errorf("loaded %#v, want %#v", got, c.want)
 			}
-			data, mres := snapshot.Marshal(t.Context(), snap)
-			if !mres.OK() {
-				t.Fatalf("Marshal: %s", mres)
+			data, readErr := snapshot.Marshal(t.Context(), snap)
+			if readErr != nil {
+				t.Fatalf("Marshal: %s", readErr)
 			}
 			if !strings.Contains(string(data), c.written) {
 				t.Errorf("the document does not state %s:\n%s", c.written, data)
 			}
-			again, lres := snapshot.Unmarshal(t.Context(), rehashDocument(t, data), s)
-			if !lres.OK() {
-				t.Fatalf("second Load: %s", lres)
+			again, readErr2 := snapshot.Unmarshal(t.Context(), rehashDocument(t, data), s)
+			if readErr2 != nil {
+				t.Fatalf("second Load: %s", readErr2)
 			}
 			data2, mres2 := snapshot.Marshal(t.Context(), again)
-			if !mres2.OK() {
+			if mres2 != nil {
 				t.Fatalf("second Marshal: %s", mres2)
 			}
 			if string(data2) != string(data) {
@@ -173,7 +174,9 @@ func TestLoad_RevalidationRefusesAnIntegerPastInt64AtAnInteger(t *testing.T) {
 	s, gauge := loadNumberRuleSchema(t)
 	for prop, refused := range map[string]bool{"count": true, "level": false} {
 		doc := numberRuleDoc(t, s, gauge, prop, json.Number("9223372036854775808"))
-		_, res := snapshot.Unmarshal(t.Context(), rehashDocument(t, doc), s, snapshot.WithRevalidation(diag.Error))
+		_, res := diagtest.Capture(t, func(warn func(diag.Issue)) (graph.Snapshot, error) {
+			return snapshot.Unmarshal(t.Context(), rehashDocument(t, doc), s, snapshot.WithRevalidation(diag.Error), snapshot.WithWarnings(warn))
+		})
 		if got := res.HasCode(diag.E_TYPE_MISMATCH); got != refused {
 			t.Errorf("%s: revalidation refused = %v, want %v: %s", prop, got, refused, res)
 		}
@@ -244,7 +247,9 @@ func TestRead_AKeyHoldsOnlyNumbersThatReadBack(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
 			c.parts.Types = []schema.TypeID{gauge}
-			res := snapshot.Verify(t.Context(), rehashDocument(t, snappartstest.Document(t, s, c.parts)), s, snapshot.WithIssueLimit(0))
+			res := diagtest.CaptureErr(t, func(warn func(diag.Issue)) error {
+				return snapshot.Verify(t.Context(), rehashDocument(t, snappartstest.Document(t, s, c.parts)), s, snapshot.WithIssueLimit(0), snapshot.WithWarnings(warn))
+			})
 			found := false
 			for issue := range res.Errors() {
 				found = found || issue.Code() == diag.E_SNAPSHOT_MALFORMED && strings.Contains(issue.Message(), c.phrase)
@@ -256,21 +261,23 @@ func TestRead_AKeyHoldsOnlyNumbersThatReadBack(t *testing.T) {
 	}
 
 	doc := snappartstest.Document(t, s, snapparts.Parts{Types: []schema.TypeID{gauge}, Instances: []snapparts.Instance{sound}})
-	if res := snapshot.Verify(t.Context(), rehashDocument(t, doc), s); !res.OK() {
-		t.Errorf("a key 1 whose property is 1 was refused: %s", res)
+	if err := snapshot.Verify(t.Context(), rehashDocument(t, doc), s); err != nil {
+		t.Errorf("a key 1 whose property is 1 was refused: %s", err)
 	}
 
 	withDup := string(snappartstest.Document(t, s, snapparts.Parts{
 		Types: []schema.TypeID{gauge}, Instances: []snapparts.Instance{sound}, Duplicates: []snapparts.Instance{sound},
 	}))
-	if res := snapshot.Verify(t.Context(), rehashDocument(t, []byte(withDup)), s); !res.OK() {
-		t.Errorf("a duplicate of the key 1 was refused: %s", res)
+	if err := snapshot.Verify(t.Context(), rehashDocument(t, []byte(withDup)), s); err != nil {
+		t.Errorf("a duplicate of the key 1 was refused: %s", err)
 	}
 	for name, edit := range map[string][2]string{
 		"a duplicate record's key 1.0": {`"duplicates":[{"type":0,"key":[1],`, `"duplicates":[{"type":0,"key":[1.0],`},
 		"a conflict key 1.0":           {`"conflict":{"type":0,"key":[1]}`, `"conflict":{"type":0,"key":[1.0]}`},
 	} {
-		res := snapshot.Verify(t.Context(), rehashDocument(t, []byte(editOnce(t, withDup, edit[0], edit[1]))), s, snapshot.WithIssueLimit(0))
+		res := diagtest.CaptureErr(t, func(warn func(diag.Issue)) error {
+			return snapshot.Verify(t.Context(), rehashDocument(t, []byte(editOnce(t, withDup, edit[0], edit[1]))), s, snapshot.WithIssueLimit(0), snapshot.WithWarnings(warn))
+		})
 		if sbFailures(res) != 1 || !strings.Contains(res.String(), `states`) || !strings.Contains(res.String(), `[1.0], whose component 0 is not a scalar graph.ParseKey reads back`) {
 			t.Errorf("%s: want its one refusal: %s", name, res)
 		}
@@ -287,7 +294,9 @@ func TestRead_AKeyHoldsOnlyNumbersThatReadBack(t *testing.T) {
 		"a duplicate record's key 1.0 beside its instance's key 2": {`"duplicates":[{"type":0,"key":[2],`, `"duplicates":[{"type":0,"key":[1.0],`},
 		"a conflict key 1.0 naming no root":                        {`"conflict":{"type":0,"key":[2]}`, `"conflict":{"type":0,"key":[1.0]}`},
 	} {
-		res := snapshot.Verify(t.Context(), rehashDocument(t, []byte(editOnce(t, withDupOfTwo, edit[0], edit[1]))), s, snapshot.WithIssueLimit(0))
+		res := diagtest.CaptureErr(t, func(warn func(diag.Issue)) error {
+			return snapshot.Verify(t.Context(), rehashDocument(t, []byte(editOnce(t, withDupOfTwo, edit[0], edit[1]))), s, snapshot.WithIssueLimit(0), snapshot.WithWarnings(warn))
+		})
 		if sbFailures(res) != 1 || !strings.Contains(res.String(), `[1.0], whose component 0 is not a scalar graph.ParseKey reads back`) {
 			t.Errorf("%s: want its one refusal: %s", name, res)
 		}
@@ -301,7 +310,9 @@ func TestRead_AKeyHoldsOnlyNumbersThatReadBack(t *testing.T) {
 			TargetKey: immutable.WrapKey([]any{"ghost"}), Reason: "target_missing",
 		}},
 	}))
-	res := snapshot.Verify(t.Context(), rehashDocument(t, []byte(editOnce(t, withRecord, `"source_type":0`, `"source_type":9`))), s, snapshot.WithIssueLimit(0))
+	res := diagtest.CaptureErr(t, func(warn func(diag.Issue)) error {
+		return snapshot.Verify(t.Context(), rehashDocument(t, []byte(editOnce(t, withRecord, `"source_type":0`, `"source_type":9`))), s, snapshot.WithIssueLimit(0), snapshot.WithWarnings(warn))
+	})
 	if sbFailures(res) != 2 || !strings.Contains(res.String(), `source references types table row 9`) ||
 		!strings.Contains(res.String(), `unresolved record 0 states source key [1.0], whose component 0`) {
 		t.Errorf("a record of an unresolved row with source key 1.0: want both refusals: %s", res)
@@ -311,8 +322,8 @@ func TestRead_AKeyHoldsOnlyNumbersThatReadBack(t *testing.T) {
 	// read to one value of one kind.
 	for _, kp := range [][2]json.Number{{"1.5", "1.50"}, {"0", "-0"}, {"100", "100"}} {
 		doc := snappartstest.Document(t, s, snapparts.Parts{Types: []schema.TypeID{gauge}, Instances: []snapparts.Instance{root(kp[0], kp[1])}})
-		if res := snapshot.Verify(t.Context(), rehashDocument(t, doc), s); !res.OK() {
-			t.Errorf("key [%s] with property %s was refused: %s", kp[0], kp[1], res)
+		if err := snapshot.Verify(t.Context(), rehashDocument(t, doc), s); err != nil {
+			t.Errorf("key [%s] with property %s was refused: %s", kp[0], kp[1], err)
 		}
 	}
 }
@@ -333,18 +344,18 @@ func TestLoad_ReadsAnUnresolvedRecordsNumberAtItsRelationsKind(t *testing.T) {
 			Properties: immutable.WrapProperties(map[string]any{"weight": json.Number("2")}),
 		}},
 	})
-	snap, res := snapshot.Unmarshal(t.Context(), rehashDocument(t, doc), s)
-	if !res.OK() {
-		t.Fatalf("Load: %s", res)
+	snap, err := snapshot.Unmarshal(t.Context(), rehashDocument(t, doc), s)
+	if err != nil {
+		t.Fatalf("Load: %s", err)
 	}
 	for rec := range snap.Unresolved() {
 		if got, _ := rec.Properties().Get("weight"); got.Any() != float64(2) {
 			t.Errorf("the record's weight is %#v, want float64(2)", got.Any())
 		}
 	}
-	data, mres := snapshot.Marshal(t.Context(), snap)
-	if !mres.OK() {
-		t.Fatalf("Marshal: %s", mres)
+	data, readErr := snapshot.Marshal(t.Context(), snap)
+	if readErr != nil {
+		t.Fatalf("Marshal: %s", readErr)
 	}
 	if !strings.Contains(string(data), `"weight":2.0`) {
 		t.Errorf("the record's weight is not written as a float:\n%s", data)

@@ -46,22 +46,18 @@ func NewValidator(s schema.Schema, opts ...Option) *Validator {
 	}
 }
 
-// Validate validates a batch of raw instances of the given type.
-//
-// Returns:
-//   - valids: one entry per input instance when the batch ran, zero for failures
-//     and not zero for successes; a nil slice when it did not
-//   - result: merged diagnostics for the entire batch (OK when all instances pass)
-//
-// A diagnostic about one element of raws carries one
-// [diag.DetailKeyInstanceIndex] detail naming it; one about typeName itself —
-// a name that does not resolve, or an abstract or part type named by an empty
-// batch — carries none. The batch result carries each instance's truncation
-// facts ([diag.Result.LimitReached], [diag.Result.DroppedCount]), save a
-// cancelled row's, whose issues other than E_INTERNAL it drops.
-//
-// Panics if the receiver is nil or if ctx is nil.
-func (v *Validator) Validate(ctx context.Context, typeName string, raws []RawInstance) ([]ValidInstance, diag.Result) {
+// Validate validates a batch of raw instances of typeName. A batch that runs
+// returns one entry per raw, the zero instance where the validator refused it,
+// beside a *[diag.ResultError] holding every refusal, or nil when it refused
+// none; a batch that does not run (a type name that does not resolve, an
+// abstract or part type named by an empty batch, a cancellation) returns a nil
+// slice beside its error. An issue about one element of raws carries one
+// [diag.DetailKeyInstanceIndex] detail naming it, and one about typeName itself
+// carries none. The error carries each instance's truncation facts
+// ([diag.Result.LimitReached], [diag.Result.DroppedCount]), save a cancelled
+// row's, whose issues other than E_INTERNAL it drops, and Validate panics if
+// the receiver or ctx is nil.
+func (v *Validator) Validate(ctx context.Context, typeName string, raws []RawInstance) ([]ValidInstance, error) {
 	if v == nil {
 		panic("instance.Validate: nil validator receiver")
 	}
@@ -69,25 +65,25 @@ func (v *Validator) Validate(ctx context.Context, typeName string, raws []RawIns
 		panic("instance.Validate: nil context")
 	}
 	if err := ctx.Err(); err != nil {
-		return nil, cancelledResult(err, batchProvenance(raws))
+		return nil, resultErr(cancelledResult(err, batchProvenance(raws)))
 	}
 
 	// The type resolves before the empty-batch answer: an unknown name is a
 	// failure whatever the batch.
 	typ, found := v.schema.ResolveTypeName(typeName)
 	if !found {
-		return nil, typeResolutionResultForBatch(typeName, raws)
+		return nil, resultErr(typeResolutionResultForBatch(typeName, raws))
 	}
 	if len(raws) == 0 {
 		// An empty batch names a type that must be able to hold a root, as a
 		// row of it must: an abstract or part type name is refused either way.
 		if res, refused := instantiationRefusal(typ, typeName, false, Provenance{}); refused {
-			return nil, res
+			return nil, resultErr(res)
 		}
 		if raws == nil {
-			return nil, diag.OK()
+			return nil, nil
 		}
-		return []ValidInstance{}, diag.OK()
+		return []ValidInstance{}, nil
 	}
 
 	batchCollector := diag.NewCollector(diag.NoLimit)
@@ -101,29 +97,25 @@ func (v *Validator) Validate(ctx context.Context, typeName string, raws []RawIns
 		// caller is told the batch did not run.
 		if err := ctx.Err(); err != nil {
 			batchCollector.MergeFunc(cancelledResult(err, raws[i].Provenance), stampIndex(i))
-			return nil, batchCollector.Result()
+			return nil, batchCollector.Err()
 		}
 		inst, result := v.validateComposedInstance(ctx, typeName, typ, raws[i], basePath(raws[i].Provenance), false, 0)
 		if err := ctx.Err(); err != nil {
 			batchCollector.MergeFunc(keepInternalErrors(result), stampIndex(i))
 			batchCollector.MergeFunc(cancelledResult(err, raws[i].Provenance), stampIndex(i))
-			return nil, batchCollector.Result()
+			return nil, batchCollector.Err()
 		}
 		batchCollector.MergeFunc(result, stampIndex(i))
 		valids = append(valids, inst)
 	}
 
-	return valids, batchCollector.Result()
+	return valids, batchCollector.Err()
 }
 
-// ValidateOne validates a single raw instance.
-//
-// Returns:
-//   - valid: the validated instance, or the zero instance on failure
-//   - result: diagnostics for this instance (OK on success)
-//
-// Panics if the receiver is nil or if ctx is nil.
-func (v *Validator) ValidateOne(ctx context.Context, typeName string, raw RawInstance) (ValidInstance, diag.Result) {
+// ValidateOne validates a single raw instance of typeName. It returns the valid
+// instance, or the zero instance beside a *[diag.ResultError] holding its
+// refusals. It panics if the receiver or ctx is nil.
+func (v *Validator) ValidateOne(ctx context.Context, typeName string, raw RawInstance) (ValidInstance, error) {
 	if v == nil {
 		panic("instance.ValidateOne: nil validator receiver")
 	}
@@ -131,12 +123,12 @@ func (v *Validator) ValidateOne(ctx context.Context, typeName string, raw RawIns
 		panic("instance.ValidateOne: nil context")
 	}
 	if err := ctx.Err(); err != nil {
-		return ValidInstance{}, cancelledResult(err, raw.Provenance)
+		return ValidInstance{}, resultErr(cancelledResult(err, raw.Provenance))
 	}
 
 	typ, found := v.schema.ResolveTypeName(typeName)
 	if !found {
-		return ValidInstance{}, createErrorResult(diag.E_INSTANCE_TYPE_NOT_FOUND, typeNotFound(typeName), raw.Provenance)
+		return ValidInstance{}, resultErr(createErrorResult(diag.E_INSTANCE_TYPE_NOT_FOUND, typeNotFound(typeName), raw.Provenance))
 	}
 	inst, res := v.validateComposedInstance(ctx, typeName, typ, raw, basePath(raw.Provenance), false, 0)
 	// The batch rule holds at this entry too, which the snapshot revalidator
@@ -147,9 +139,19 @@ func (v *Validator) ValidateOne(ctx context.Context, typeName string, raw RawIns
 		out := diag.NewCollector(diag.NoLimit)
 		out.Merge(keepInternalErrors(res))
 		out.Merge(cancelledResult(err, raw.Provenance))
-		return ValidInstance{}, out.Result()
+		return ValidInstance{}, out.Err()
 	}
-	return inst, res
+	return inst, resultErr(res)
+}
+
+// resultErr returns res as a *[diag.ResultError], or nil when it holds no
+// failure. The validator draws no issue below failure severity, so res holds
+// failures alone, sorted and counted by the collector that built it.
+func resultErr(res diag.Result) error {
+	if counts := res.SeverityCounts(); counts.Fatal+counts.Errors == 0 {
+		return nil
+	}
+	return &diag.ResultError{Result: res}
 }
 
 // stampIndex returns the transform that marks an issue with the batch index

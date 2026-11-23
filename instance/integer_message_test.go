@@ -14,9 +14,9 @@ import (
 // its indicator, so a whole 3.0 does not read as the integer 3.
 func TestCheck_IntegerRefusesEveryFloat(t *testing.T) {
 	t.Parallel()
-	s, res := schema.LoadString(t.Context(), "schema \"p\"\n\ntype T {\n    id String primary\n    n Integer\n}\n", "p.yammm")
-	if res.Err() != nil {
-		t.Fatal(res.Err())
+	s, loadErr := schema.LoadString(t.Context(), "schema \"p\"\n\ntype T {\n    id String primary\n    n Integer\n}\n", "p.yammm")
+	if loadErr != nil {
+		t.Fatal(loadErr)
 	}
 	typ, _ := s.Type("T")
 	prop, _ := typ.Property("n")

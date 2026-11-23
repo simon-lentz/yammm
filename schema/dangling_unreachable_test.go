@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/simon-lentz/yammm/diag"
+	"github.com/simon-lentz/yammm/internal/diagtest"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -59,14 +60,18 @@ func TestDanglingQualifiedReference_UnreachableThroughEveryEntryPoint(t *testing
 
 			t.Run("LoadString", func(t *testing.T) {
 				t.Parallel()
-				s, result := schema.LoadString(t.Context(), src, "d.yammm")
+				s, result := diagtest.Capture(t, func(warn func(diag.Issue)) (schema.Schema, error) {
+					return schema.LoadString(t.Context(), src, "d.yammm", schema.WithWarnings(warn))
+				})
 				assertRejected(t, s, result)
 			})
 
 			t.Run("LoadSourcesWithEntry", func(t *testing.T) {
 				t.Parallel()
-				s, result := schema.LoadSourcesWithEntry(t.Context(),
-					map[string][]byte{"d.yammm": []byte(src)}, "d.yammm", ".")
+				s, result := diagtest.Capture(t, func(warn func(diag.Issue)) (schema.Schema, error) {
+					return schema.LoadSourcesWithEntry(t.Context(),
+						map[string][]byte{"d.yammm": []byte(src)}, "d.yammm", schema.WithModuleRoot("."), schema.WithWarnings(warn))
+				})
 				assertRejected(t, s, result)
 			})
 
@@ -77,7 +82,9 @@ func TestDanglingQualifiedReference_UnreachableThroughEveryEntryPoint(t *testing
 				if err := os.WriteFile(path, []byte(src), 0o600); err != nil {
 					t.Fatal(err)
 				}
-				s, result := schema.Load(t.Context(), path)
+				s, result := diagtest.Capture(t, func(warn func(diag.Issue)) (schema.Schema, error) {
+					return schema.Load(t.Context(), path, schema.WithWarnings(warn))
+				})
 				assertRejected(t, s, result)
 			})
 		})
@@ -89,7 +96,7 @@ func assertRejected(t *testing.T, s schema.Schema, result diag.Result) {
 	if !s.IsZero() {
 		t.Error("a dangling qualified reference sealed into a schema")
 	}
-	if !result.HasErrors() {
+	if diagtest.Err(result) == nil {
 		t.Fatal("no diagnostic reported")
 	}
 	var codes []string

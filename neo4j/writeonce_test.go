@@ -1,6 +1,7 @@
 package neo4j
 
 import (
+	"errors"
 	"slices"
 	"testing"
 
@@ -51,14 +52,14 @@ part type Note {
 	added Timestamp @writeOnce
 }
 `
-	_, res := schema.LoadSourcesWithEntry(t.Context(), map[string][]byte{
+	_, err := schema.LoadSourcesWithEntry(t.Context(), map[string][]byte{
 		"entry.yammm": []byte(src),
-	}, "entry.yammm", ".", schema.WithSourcesOnly(true))
-	if !res.HasErrors() {
+	}, "entry.yammm", schema.WithSourcesOnly(true), schema.WithModuleRoot("."))
+	if err == nil {
 		t.Fatal("@writeOnce on a part-type property must fail the load")
 	}
-	if !res.HasCode(diag.E_INVALID_ANNOTATION_TARGET) {
-		t.Errorf("want E_INVALID_ANNOTATION_TARGET, got: %v", res)
+	if !errors.Is(err, diag.E_INVALID_ANNOTATION_TARGET) {
+		t.Errorf("want E_INVALID_ANNOTATION_TARGET, got: %v", err)
 	}
 }
 

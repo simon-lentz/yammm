@@ -59,19 +59,19 @@
 // # Usage
 //
 //	// Serialize
-//	data, result := snapshot.Marshal(ctx, snap)
+//	data, err := snapshot.Marshal(ctx, snap)
 //
 //	// Deserialize
-//	snap, result := snapshot.Unmarshal(ctx, data, s)
+//	snap, err := snapshot.Unmarshal(ctx, data, s)
 //
 //	// Validate without loading
-//	result := snapshot.Verify(ctx, data, s)
+//	err := snapshot.Verify(ctx, data, s)
 //
 //	// Read the header and a summary of the body, without the schema
-//	info, result := snapshot.Stat(ctx, data)
+//	info, err := snapshot.Stat(ctx, data)
 //
 //	// Read the header and the types table from an io.Reader (dispatch-style workloads)
-//	header, result := snapshot.ReadHeader(ctx, file)
+//	header, err := snapshot.ReadHeader(ctx, file)
 //
 //	// Compare the header's schema hash against a loaded schema
 //	if !header.SchemaHashMatches(s) { /* stale-schema path */ }
@@ -82,12 +82,12 @@
 //	// Iterate the .ys files of a directory that ScanDir admits (header and types table, lazy)
 //	for entry, err := range snapshot.ScanDir(ctx, dir) {
 //	    if err != nil { /* dir-level or ctx-cancel failure */ }
-//	    if entry.Result.HasErrors() { /* per-file failure */ }
+//	    if entry.Err != nil { /* per-file failure */ }
 //	    use(entry.Header)
 //	}
 //
 //	// Replace the metadata of an existing .ys, keeping every byte outside the header
-//	out, result := snapshot.UpdateMetadata(ctx, data, newMeta)
+//	out, err := snapshot.UpdateMetadata(ctx, data, newMeta)
 //
 // # Functions
 //
@@ -154,7 +154,7 @@
 // [ReadHeader] on demand. The iterator's second yielded value is
 // non-nil only for operation-level failures (dir-open, context
 // cancellation); per-file failures (corrupt header, a failed open or read)
-// surface on [ScanEntry.Result] and iteration continues. A failed stat raises
+// surface on [ScanEntry.Err] and iteration continues. A failed stat raises
 // nothing and leaves the entry's size and modification time zero. Files whose
 // basename ends with [TmpSuffix] are skipped so crash-residual
 // staging files are not confused for complete snapshots. A directory name that is
@@ -190,35 +190,42 @@
 // It refuses, with the code a reader uses for the same fault, a document whose
 // shape or text no reader accepts, a header or types table a reader refuses
 // without a schema, and a document whose integrity hash does not verify, a
-// header that holds no hash among them.
+// header that holds no hash among them, unless [WithIntegrityCheck](false)
+// skips that check.
 // It then refuses metadata that is not valid UTF-8. It decodes no instance: a
 // body that a verified hash seals is the body its writer sealed, so a body that
 // [Unmarshal] refuses for its instances is updated and still refused.
 //
 // It checks the document's shape and text, decodes the header, and hashes
 // the document twice: once to verify the stored hash and once to seal
-// the new header. [TestUpdateMetadataRatioFloor] holds it to at most a third of
+// the new header; under WithIntegrityCheck(false) it hashes once. [TestUpdateMetadataRatioFloor] holds it to at most a third of
 // the CPU time [Unmarshal] and [Marshal] take on the same document.
 //
-// # Marshal Options
+// # Options
 //
-// [Marshal] accepts [Option] values:
+// [Marshal], [Unmarshal], [Verify] and [UpdateMetadata] take the one [Option]
+// type, and each refuses an option it does not take with an error, with no
+// diagnostic code, that names the option and the call. [Stat], [ReadHeader],
+// [ScanDir] and [WriteFile] take none.
+//
+// [Marshal] takes:
 //
 //   - [WithIndent]: pretty-print JSON output with the given indent string
 //   - [WithCreatedAt]: embed a creation timestamp, written as RFC 3339 at its own precision
 //   - [WithMetadata]: embed key-value metadata, each key and value valid UTF-8
 //
-// # Load Options
+// [Unmarshal] and [Verify] take:
 //
-// [Unmarshal] and [Verify] accept [LoadOption] values:
-//
-//   - [WithIssueLimit]: maximum issues stored (default 100; 0 for unlimited); the walk completes unless the context is cancelled
+//   - [WithIssueLimit]: maximum failures the error holds (default 100; 0 for unlimited); the walk completes unless the context is cancelled
 //   - [WithIntegrityCheck]: with false, skip SHA-256 integrity verification (useful for debugging)
 //   - [WithRevalidation]: run each root the structural checks left whole, with its composed children, edges and target_missing records, back through the real validator, reported at the given severity
+//   - [WithWarnings]: receive each issue below failure severity as it is found
+//
+// [UpdateMetadata] takes [WithIntegrityCheck].
 //
 // # Reading Without a Schema
 //
-// [Stat] returns (nil, result) when the header or the types table breaks a
+// [Stat] returns (nil, err) when the header or the types table breaks a
 // rule — an unreadable or malformed header, an unsupported version, an
 // unrecognized feature, an unrecognized schema hash algorithm, a types table
 // that states one identity twice — when the document's top level is not the
@@ -227,11 +234,11 @@
 // in another case, when a string is not valid UTF-8 or holds a surrogate escape
 // that is half of no pair, when a section does not decode, or when the context
 // is cancelled. A document that decodes but fails a structural check returns an
-// [Info] beside Error-severity diagnostics: an integrity mismatch, a header that
-// holds no hash among them, reports [IntegrityMismatch], an instances group whose
-// row names no table entry is reported and left out of the instance counts, and
-// an edge or a record naming no row is reported and still counted. Read the
-// result before the Info.
+// [Info] beside an error holding Error-severity diagnostics: an integrity
+// mismatch, a header that holds no hash among them, reports [IntegrityMismatch],
+// an instances group whose row names no table entry is reported and left out of
+// the instance counts, and an edge or a record naming no row is reported and
+// still counted. Read the error before the Info.
 //
 // Stat resolves no schema, so a document it summarizes cleanly can still fail
 // [Unmarshal] or [Verify] on the schema hash, on schema resolution, on each check
@@ -263,9 +270,12 @@
 //
 // # Error Handling
 //
-// The read, write and update functions return [diag.Result]; [WriteFile]
-// returns an error, and [ScanDir] yields a [diag.Result] per entry, in
-// [ScanEntry.Result]:
+// The read, write and update functions return an error: nil on success, an
+// error naming a refused option, or a *[diag.ResultError] whose Result holds
+// the failures. Read it with errors.AsType, and test a code with errors.Is.
+// [WriteFile] returns its own error, and [ScanDir] yields a per-entry error in
+// [ScanEntry.Err]. An issue below failure severity is never in an error: only
+// [Unmarshal] and [Verify] draw one, and they send it to [WithWarnings].
 //
 //   - Fatal: an I/O failure, a cancelled context, or a broken invariant
 //     (E_INTERNAL)
@@ -278,8 +288,7 @@
 //     a leap second or the zero instant; and at [Marshal]
 //     and the metadata update, a metadata key or value that is not valid UTF-8
 //   - Any severity: a [WithRevalidation] finding takes the severity the
-//     caller passed
-//   - OK: success (may include warnings)
+//     caller passed; below Error it reaches [WithWarnings]
 //
 // # File Extension
 //

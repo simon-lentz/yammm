@@ -10,6 +10,7 @@ import (
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/instance"
+	"github.com/simon-lentz/yammm/internal/diagtest"
 	"github.com/simon-lentz/yammm/internal/instancetest"
 	"github.com/simon-lentz/yammm/internal/snapparts"
 	"github.com/simon-lentz/yammm/internal/snappartstest"
@@ -54,13 +55,13 @@ type Beacon {
 // schema, the deep schema and the identity of each Beacon.
 func unnameableFixture(t *testing.T) (s, deep schema.Schema, entryBeacon, deepBeacon schema.TypeID) {
 	t.Helper()
-	s, res := schema.LoadSourcesWithEntry(t.Context(), map[string][]byte{
+	s, err := schema.LoadSourcesWithEntry(t.Context(), map[string][]byte{
 		"entry.yammm": []byte(unreachableRootEntry),
 		"base.yammm":  []byte(unreachableRootBase),
 		"deep.yammm":  []byte(unreachableRootDeep),
-	}, "entry.yammm", ".", schema.WithSourcesOnly(true))
-	if res.HasErrors() {
-		t.Fatalf("load fixture: %s", res)
+	}, "entry.yammm", schema.WithSourcesOnly(true), schema.WithModuleRoot("."))
+	if err != nil {
+		t.Fatalf("load fixture: %s", err)
 	}
 	base, ok := s.ImportByAlias("base")
 	if !ok || base.Schema().IsZero() {
@@ -90,20 +91,22 @@ func TestLoad_KeepsARootTheEntrySchemaCannotNameApartFromItsNamesake(t *testing.
 		instancetest.Valid(t, s, "Beacon", map[string]any{"id": "d1", "label": "lamp"}),
 		instancetest.Valid(t, deep, "Beacon", map[string]any{"id": "d1", "power": float64(2)}),
 	} {
-		if res := g.Add(ctx, valid); !res.OK() {
-			t.Fatalf("Add: %s", res)
+		if err := g.Add(ctx, valid); err != nil {
+			t.Fatalf("Add: %s", err)
 		}
 	}
-	data, res := snapshot.Marshal(ctx, g.Snapshot())
-	if res.HasErrors() {
-		t.Fatalf("marshal: %s", res)
+	data, err := snapshot.Marshal(ctx, g.Snapshot())
+	if err != nil {
+		t.Fatalf("marshal: %s", err)
 	}
-	for name, opts := range map[string][]snapshot.LoadOption{
+	for name, opts := range map[string][]snapshot.Option{
 		"plain":                   nil,
 		"revalidation at Warning": {snapshot.WithRevalidation(diag.Warning)},
 		"revalidation at Error":   {snapshot.WithRevalidation(diag.Error)},
 	} {
-		snap, res := snapshot.Unmarshal(ctx, data, s, opts...)
+		snap, res := diagtest.Capture(t, func(warn func(diag.Issue)) (graph.Snapshot, error) {
+			return snapshot.Unmarshal(ctx, data, s, append([]snapshot.Option{snapshot.WithWarnings(warn)}, opts...)...)
+		})
 		if res.Len() != 0 {
 			t.Errorf("%s: Load = %s, want no issue", name, res)
 			continue
@@ -114,7 +117,9 @@ func TestLoad_KeepsARootTheEntrySchemaCannotNameApartFromItsNamesake(t *testing.
 			}
 		}
 	}
-	if res := snapshot.Verify(ctx, data, s, snapshot.WithRevalidation(diag.Error)); res.Len() != 0 {
+	if res := diagtest.CaptureErr(t, func(warn func(diag.Issue)) error {
+		return snapshot.Verify(ctx, data, s, snapshot.WithRevalidation(diag.Error), snapshot.WithWarnings(warn))
+	}); res.Len() != 0 {
 		t.Errorf("Verify = %s, want no issue", res)
 	}
 }
@@ -125,7 +130,9 @@ func TestLoad_KeepsAnEmptyGroupOfATypeTheEntrySchemaCannotName(t *testing.T) {
 	t.Parallel()
 	s, _, _, deepBeacon := unnameableFixture(t)
 	doc := snappartstest.Document(t, s, snapparts.Parts{Types: []schema.TypeID{deepBeacon}})
-	snap, res := snapshot.Unmarshal(t.Context(), doc, s)
+	snap, res := diagtest.Capture(t, func(warn func(diag.Issue)) (graph.Snapshot, error) {
+		return snapshot.Unmarshal(t.Context(), doc, s, snapshot.WithWarnings(warn))
+	})
 	if res.Len() != 0 {
 		t.Fatalf("Load = %s, want no issue", res)
 	}
@@ -145,8 +152,10 @@ func TestLoad_RevalidatesARootTheEntrySchemaCannotNameAsItsOwnType(t *testing.T)
 		PrimaryKey: immutable.WrapKey([]any{"d1"}),
 		Properties: immutable.WrapProperties(map[string]any{"id": "d1", "power": "high"}),
 	}}})
-	_, res := snapshot.Unmarshal(t.Context(), doc, s, snapshot.WithRevalidation(diag.Warning))
-	if res.Len() != 1 || !res.HasCode(diag.E_TYPE_MISMATCH) || res.HasErrors() {
+	_, res := diagtest.Capture(t, func(warn func(diag.Issue)) (graph.Snapshot, error) {
+		return snapshot.Unmarshal(t.Context(), doc, s, snapshot.WithRevalidation(diag.Warning), snapshot.WithWarnings(warn))
+	})
+	if res.Len() != 1 || !res.HasCode(diag.E_TYPE_MISMATCH) || (diagtest.Err(res) != nil) {
 		t.Errorf("Load = %s, want one %s at Warning", res, diag.E_TYPE_MISMATCH)
 	}
 }
@@ -165,10 +174,14 @@ func TestLoad_RevalidatesADirectlyImportedRootUnderItsTag(t *testing.T) {
 			Properties: immutable.WrapProperties(map[string]any{"id": "b1", "area": area}),
 		}}})
 	}
-	if _, res := snapshot.Unmarshal(t.Context(), doc(float64(2)), s, snapshot.WithRevalidation(diag.Error)); res.Len() != 0 {
+	if _, res := diagtest.Capture(t, func(warn func(diag.Issue)) (graph.Snapshot, error) {
+		return snapshot.Unmarshal(t.Context(), doc(float64(2)), s, snapshot.WithRevalidation(diag.Error), snapshot.WithWarnings(warn))
+	}); res.Len() != 0 {
 		t.Errorf("clean Load = %s, want no issue", res)
 	}
-	_, res := snapshot.Unmarshal(t.Context(), doc("wide"), s, snapshot.WithRevalidation(diag.Warning))
+	_, res := diagtest.Capture(t, func(warn func(diag.Issue)) (graph.Snapshot, error) {
+		return snapshot.Unmarshal(t.Context(), doc("wide"), s, snapshot.WithRevalidation(diag.Warning), snapshot.WithWarnings(warn))
+	})
 	if res.Len() != 1 || !res.HasCode(diag.E_TYPE_MISMATCH) {
 		t.Fatalf("Load = %s, want one %s", res, diag.E_TYPE_MISMATCH)
 	}
@@ -182,8 +195,8 @@ func TestLoad_RevalidatesADirectlyImportedRootUnderItsTag(t *testing.T) {
 }
 
 // TestLoad_RevalidationHoldsTheIssueLimitAtATypeTheEntrySchemaCannotName pins
-// that the validator of the schema declaring a type the entry schema cannot name
-// caps a row at the load's limit, as the entry's validator does.
+// that at Error the findings of a type the entry schema cannot name take the
+// load's limit, as an entry type's do.
 func TestLoad_RevalidationHoldsTheIssueLimitAtATypeTheEntrySchemaCannotName(t *testing.T) {
 	t.Parallel()
 	const width = 130
@@ -193,13 +206,13 @@ func TestLoad_RevalidationHoldsTheIssueLimitAtATypeTheEntrySchemaCannotName(t *t
 		fmt.Fprintf(&props, "\tp%d Float\n", i)
 		values[fmt.Sprintf("p%d", i)] = "bad"
 	}
-	s, res := schema.LoadSourcesWithEntry(t.Context(), map[string][]byte{
+	s, err := schema.LoadSourcesWithEntry(t.Context(), map[string][]byte{
 		"entry.yammm": []byte("schema \"entry\"\n\nimport \"base.yammm\" as base\n"),
 		"base.yammm":  []byte("schema \"base\"\n\nimport \"deep.yammm\" as deep\n"),
 		"deep.yammm":  []byte("schema \"deep\"\n\ntype Wide {\n\tid String primary\n" + props.String() + "}\n"),
-	}, "entry.yammm", ".", schema.WithSourcesOnly(true))
-	if res.HasErrors() {
-		t.Fatalf("load fixture: %s", res)
+	}, "entry.yammm", schema.WithSourcesOnly(true), schema.WithModuleRoot("."))
+	if err != nil {
+		t.Fatalf("load fixture: %s", err)
 	}
 	var wide schema.TypeID
 	for member := range s.Closure() {
@@ -216,7 +229,8 @@ func TestLoad_RevalidationHoldsTheIssueLimitAtATypeTheEntrySchemaCannotName(t *t
 		Properties: immutable.WrapProperties(values),
 	}}})
 	for limit, want := range map[int][2]int{0: {width, 0}, 120: {120, width - 120}} {
-		_, res := snapshot.Unmarshal(t.Context(), doc, s, snapshot.WithRevalidation(diag.Warning), snapshot.WithIssueLimit(limit))
+		_, err := snapshot.Unmarshal(t.Context(), doc, s, snapshot.WithRevalidation(diag.Error), snapshot.WithIssueLimit(limit))
+		res := diagtest.Failures(t, err)
 		if res.Len() != want[0] || res.DroppedCount() != want[1] {
 			t.Errorf("limit %d: %d issues, %d dropped; want %d and %d", limit, res.Len(), res.DroppedCount(), want[0], want[1])
 		}

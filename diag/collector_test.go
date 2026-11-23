@@ -17,8 +17,8 @@ func TestNewCollector(t *testing.T) {
 	if len(c.issues) != 0 {
 		t.Errorf("len(c.issues) = %d; want 0", len(c.issues))
 	}
-	if !c.Result().OK() {
-		t.Error("OK() = false; want true for empty collector")
+	if err := c.Err(); err != nil {
+		t.Errorf("Err() = %v; want nil for empty collector", err)
 	}
 	if c.limitReached {
 		t.Error("LimitReached() = true; want false")
@@ -34,8 +34,8 @@ func TestCollector_Collect(t *testing.T) {
 	if len(c.issues) != 1 {
 		t.Errorf("len(c.issues) = %d; want 1", len(c.issues))
 	}
-	if c.Result().OK() {
-		t.Error("OK() = true; want false after collecting error")
+	if c.Err() == nil {
+		t.Error("Err() = nil; want a failure after collecting error")
 	}
 	if !c.HasErrors() {
 		t.Error("HasErrors() = false; want true")
@@ -152,20 +152,20 @@ func TestCollector_MergeTruncatedResult_PreservesCountsAndTruncation(t *testing.
 	src.Collect(NewIssue(Warning, E_SYNTAX, "fills the limit").Build())
 	src.Collect(NewIssue(Error, E_SYNTAX, "dropped but real").Build())
 	srcRes := src.Result()
-	if !srcRes.LimitReached() || srcRes.Len() != 1 || srcRes.DroppedCount() != 1 || srcRes.OK() {
-		t.Fatalf("source setup: LimitReached=%v Len=%d Dropped=%d OK=%v; want true/1/1/false",
-			srcRes.LimitReached(), srcRes.Len(), srcRes.DroppedCount(), srcRes.OK())
+	if !srcRes.LimitReached() || srcRes.Len() != 1 || srcRes.DroppedCount() != 1 || srcRes.SeverityCounts().Errors != 1 {
+		t.Fatalf("source setup: LimitReached=%v Len=%d Dropped=%d Errors=%d; want true/1/1/1",
+			srcRes.LimitReached(), srcRes.Len(), srcRes.DroppedCount(), srcRes.SeverityCounts().Errors)
 	}
 
 	dst := NewCollector(NoLimit)
 	dst.Merge(srcRes)
 	res := dst.Result()
 
-	if res.OK() {
-		t.Error("OK() = true; want false — the dropped error must survive the merge")
+	if got := res.SeverityCounts().Errors; got != 1 {
+		t.Errorf("SeverityCounts().Errors = %d; want 1 — the dropped error must survive the merge", got)
 	}
-	if !res.HasErrors() {
-		t.Error("HasErrors() = false; want true")
+	if dst.Err() == nil {
+		t.Error("Err() = nil; want the dropped error's failure")
 	}
 	if !res.LimitReached() {
 		t.Error("LimitReached() = false; want true — truncation must propagate through Merge")
@@ -234,7 +234,7 @@ func TestCollector_Limit(t *testing.T) {
 
 func TestCollector_DroppedErrorStillCounts(t *testing.T) {
 	// Severity counts reflect every issue SEEN, not just those stored under
-	// the limit. Callers gate on ErrorCount()/HasErrors()/OK() (the loader and
+	// the limit. Callers gate on ErrorCount()/HasErrors()/Err() (the loader and
 	// completer compare ErrorCount deltas to decide whether a schema failed);
 	// an error dropped at the cap that left those untouched would read as
 	// success and let a broken schema escape the all-or-nothing contract.
@@ -254,18 +254,15 @@ func TestCollector_DroppedErrorStillCounts(t *testing.T) {
 	if !c.HasErrors() {
 		t.Error("HasErrors() = false; want true (a dropped error is still an error)")
 	}
-	if c.Result().OK() {
-		t.Error("OK() = true; want false (a dropped error is still an error)")
+	if c.Err() == nil {
+		t.Error("Err() = nil; want a failure (a dropped error is still an error)")
 	}
 
-	// The Result snapshot must agree: a nil schema with an OK() result would
-	// be a self-contradiction for consumers checking result.OK().
+	// The Result snapshot must agree: a nil schema beside a Result that
+	// counts no error would contradict itself.
 	res := c.Result()
-	if res.OK() {
-		t.Error("Result.OK() = true; want false")
-	}
-	if !res.HasErrors() {
-		t.Error("Result.HasErrors() = false; want true")
+	if got := res.SeverityCounts().Errors; got != 1 {
+		t.Errorf("Result.SeverityCounts().Errors = %d; want 1", got)
 	}
 	if res.Len() != 1 {
 		t.Errorf("Result.Len() = %d; want 1 (stored count is unaffected)", res.Len())
@@ -346,8 +343,8 @@ func TestCollector_SeverityQueries(t *testing.T) {
 	c := NewCollector(0)
 
 	// Initially OK
-	if !c.Result().OK() {
-		t.Error("empty collector should be OK")
+	if c.Err() != nil {
+		t.Error("empty collector should hold no failure")
 	}
 	if c.HasErrors() {
 		t.Error("empty collector should not have errors")
@@ -358,14 +355,14 @@ func TestCollector_SeverityQueries(t *testing.T) {
 
 	// Add warning - still OK
 	c.Collect(NewIssue(Warning, E_INVALID_NAME, "warning").Build())
-	if !c.Result().OK() {
-		t.Error("collector with only warnings should be OK")
+	if c.Err() != nil {
+		t.Error("collector with only warnings should hold no failure")
 	}
 
 	// Add error - not OK
 	c.Collect(NewIssue(Error, E_SYNTAX, "error").Build())
-	if c.Result().OK() {
-		t.Error("collector with error should not be OK")
+	if c.Err() == nil {
+		t.Error("collector with error should hold a failure")
 	}
 	if !c.HasErrors() {
 		t.Error("collector with error should have errors")
@@ -403,7 +400,7 @@ func TestCollector_ThreadSafety(t *testing.T) {
 	for range numGoroutines / 2 {
 		wg.Go(func() {
 			for range issuesPerGoroutine {
-				_ = c.Result().OK()
+				_ = c.Err()
 				_ = c.HasErrors()
 				_ = c.ErrorCount()
 			}
@@ -439,7 +436,7 @@ func TestCollector_ThreadSafety_Result(t *testing.T) {
 				result := c.Result()
 				// Just access the result to ensure no race
 				_ = result.Len()
-				_ = result.OK()
+				_ = result.SeverityCounts()
 			}
 		})
 	}

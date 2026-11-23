@@ -189,6 +189,98 @@ func TestDataCommands_ReportADuplicateKeyARefusedInstanceHides(t *testing.T) {
 	}
 }
 
+// TestDataCommands_ADuplicateKeyNamesItsEarlierHolder pins that every
+// E_DUPLICATE_PK names the key's first holder as a related location, whether
+// the graph refused the later holder, the validator refused the first one or
+// every one, or the holders sit in two files, so one key names one first holder.
+func TestDataCommands_ADuplicateKeyNamesItsEarlierHolder(t *testing.T) {
+	t.Parallel()
+
+	dir, schemaPath := verdictFixture(t, map[string]string{
+		"twice.json": `{"Person": [
+{"id": "boss", "name": "A", "manager": {"_target_id": "boss"}},
+{"id": "boss", "name": "B", "manager": {"_target_id": "boss"}}
+]}`,
+		"refused_first.json": `{"Person": [
+{"id": "boss", "manager": {"_target_id": "boss"}},
+{"id": "boss", "name": "B", "manager": {"_target_id": "boss"}}
+]}`,
+		"refused_then_two.json": `{"Person": [
+{"id": "boss", "manager": {"_target_id": "boss"}},
+{"id": "boss", "name": "B", "manager": {"_target_id": "boss"}},
+{"id": "boss", "name": "C", "manager": {"_target_id": "boss"}}
+]}`,
+		"refused_thrice.json": `{"Person": [
+{"id": "boss", "manager": {"_target_id": "boss"}},
+{"id": "boss", "manager": {"_target_id": "boss"}},
+{"id": "boss", "manager": {"_target_id": "boss"}}
+]}`,
+		"first.json": `{"Person": [
+{"id": "boss", "name": "A", "manager": {"_target_id": "boss"}}
+]}`,
+		"second.json": `{"Person": [
+{"id": "boss", "name": "B", "manager": {"_target_id": "boss"}}
+]}`,
+	})
+	cases := []struct {
+		name        string
+		files       []string
+		wantSource  string
+		wantLines   []int
+		wantRelated string
+		relatedLine int
+	}{
+		{"one file", []string{"twice.json"}, "twice.json", []int{3}, "twice.json", 2},
+		{"a refused earlier holder", []string{"refused_first.json"}, "refused_first.json", []int{3}, "refused_first.json", 2},
+		{"a refused first holder of three", []string{"refused_then_two.json"}, "refused_then_two.json", []int{3, 4}, "refused_then_two.json", 2},
+		{"three refused holders", []string{"refused_thrice.json"}, "refused_thrice.json", []int{3, 4}, "refused_thrice.json", 2},
+		{"two files", []string{"first.json", "second.json"}, "second.json", []int{2}, "first.json", 2},
+	}
+	for _, tc := range cases {
+		paths := make([]string, len(tc.files))
+		for i, f := range tc.files {
+			paths[i] = filepath.Join(dir, f)
+		}
+		commands := map[string][]string{
+			"check":         append([]string{"check", "--json", schemaPath}, paths...),
+			"snapshot save": append([]string{"snapshot", "save", "--json", "-o", filepath.Join(t.TempDir(), "out.ys"), schemaPath}, paths...),
+		}
+		for command, args := range commands {
+			t.Run(tc.name+"/"+command, func(t *testing.T) {
+				t.Parallel()
+				code, _, errOut := executeCmdOutput(t, args...)
+				if code != cli.ExitValidation {
+					t.Fatalf("exit code = %d, want %d", code, cli.ExitValidation)
+				}
+				var dups []documentIssue
+				for _, iss := range decodeDocument(t, errOut).Issues {
+					if iss.Code == "E_DUPLICATE_PK" {
+						dups = append(dups, iss)
+					}
+				}
+				if len(dups) != len(tc.wantLines) {
+					t.Fatalf("E_DUPLICATE_PK drew %d issues, want %d", len(dups), len(tc.wantLines))
+				}
+				for i, iss := range dups {
+					if iss.Span == nil || !strings.HasSuffix(iss.Span.Source, tc.wantSource) || iss.Span.Start.Line != tc.wantLines[i] {
+						t.Errorf("E_DUPLICATE_PK %d span = %+v, want %s line %d", i, iss.Span, tc.wantSource, tc.wantLines[i])
+					}
+					if len(iss.Related) != 1 {
+						t.Fatalf("E_DUPLICATE_PK %d has %d related locations, want 1", i, len(iss.Related))
+					}
+					rel := iss.Related[0]
+					if rel.Message != "first declared here" {
+						t.Errorf("related message = %q, want %q", rel.Message, "first declared here")
+					}
+					if rel.Span == nil || !strings.HasSuffix(rel.Span.Source, tc.wantRelated) || rel.Span.Start.Line != tc.relatedLine {
+						t.Errorf("E_DUPLICATE_PK %d related span = %+v, want %s line %d", i, rel.Span, tc.wantRelated, tc.relatedLine)
+					}
+				}
+			})
+		}
+	}
+}
+
 // TestSnapshotSave_TheDataFilesAreOneDocument pins that snapshot save judges
 // its data files together: a target one file refuses explains the missing target
 // another file names, and a key two files state is a duplicate.
@@ -250,6 +342,40 @@ func TestSnapshotSaveInto_TheMergedFileHoldsItsKeys(t *testing.T) {
 	}
 	if got := issueLines(doc, "E_UNRESOLVED_REQUIRED"); len(got) != 0 {
 		t.Errorf("E_UNRESOLVED_REQUIRED at lines %v, want none", got)
+	}
+}
+
+// TestSnapshotSaveInto_ADuplicateOfAMergedKeyNamesNoLocation pins that under
+// --into a key the merged file holds draws E_DUPLICATE_PK at each new holder,
+// a refused one and a valid one, with no related location: the merged file's
+// instance has no span to name.
+func TestSnapshotSaveInto_ADuplicateOfAMergedKeyNamesNoLocation(t *testing.T) {
+	t.Parallel()
+
+	dir, schemaPath := verdictFixture(t, map[string]string{
+		"base.json": `{"Person": [{"id": "boss", "name": "Boss", "manager": {"_target_id": "boss"}}]}`,
+		"more.json": `{"Person": [
+{"id": "boss", "manager": {"_target_id": "boss"}},
+{"id": "boss", "name": "B2", "manager": {"_target_id": "boss"}}
+]}`,
+	})
+	base := filepath.Join(dir, "base.ys")
+	if code, _, errOut := executeCmdOutput(t, "snapshot", "save", "-o", base, schemaPath, filepath.Join(dir, "base.json")); code != cli.ExitOK {
+		t.Fatalf("save the base: exit %d\n%s", code, errOut)
+	}
+	code, _, errOut := executeCmdOutput(t, "snapshot", "save", "--json", "-o", filepath.Join(dir, "out.ys"),
+		"--into", base, schemaPath, filepath.Join(dir, "more.json"))
+	if code != cli.ExitValidation {
+		t.Fatalf("exit code = %d, want %d", code, cli.ExitValidation)
+	}
+	doc := decodeDocument(t, errOut)
+	if got := issueLines(doc, "E_DUPLICATE_PK"); !slices.Equal(got, []int{2, 3}) {
+		t.Errorf("E_DUPLICATE_PK at lines %v, want [2 3]", got)
+	}
+	for _, iss := range doc.Issues {
+		if iss.Code == "E_DUPLICATE_PK" && iss.Related != nil {
+			t.Errorf("the E_DUPLICATE_PK at %+v names related locations %+v, want none", iss.Span, iss.Related)
+		}
 	}
 }
 
@@ -382,9 +508,9 @@ type Target {
 		}
 	}
 	entryPath := filepath.Join(dir, "entry.yammm")
-	s, res := schema.Load(ctx, entryPath)
-	if res.HasErrors() {
-		t.Fatalf("load schema: %s", res)
+	s, loadErr := schema.Load(ctx, entryPath)
+	if loadErr != nil {
+		t.Fatalf("load schema: %s", loadErr)
 	}
 	var deep schema.Schema
 	for member := range s.Closure() {
@@ -392,18 +518,18 @@ type Target {
 			deep = member
 		}
 	}
-	beacon, valid := instance.NewValidator(deep).ValidateOne(ctx, "Beacon",
+	beacon, validateErr := instance.NewValidator(deep).ValidateOne(ctx, "Beacon",
 		instance.RawInstance{Properties: map[string]any{"id": "b1", "link": map[string]any{"_target_id": "t1"}}})
-	if valid.HasErrors() {
-		t.Fatalf("validate deep Beacon: %s", valid)
+	if validateErr != nil {
+		t.Fatalf("validate deep Beacon: %s", validateErr)
 	}
 	g := graph.New(s)
-	if added := g.Add(ctx, beacon); !added.OK() {
-		t.Fatalf("add deep Beacon: %s", added)
+	if err := g.Add(ctx, beacon); err != nil {
+		t.Fatalf("add deep Beacon: %s", err)
 	}
-	data, marshalled := snapshot.Marshal(ctx, g.Snapshot())
-	if marshalled.HasErrors() {
-		t.Fatalf("marshal: %s", marshalled)
+	data, readErr := snapshot.Marshal(ctx, g.Snapshot())
+	if readErr != nil {
+		t.Fatalf("marshal: %s", readErr)
 	}
 	base := filepath.Join(dir, "base.ys")
 	if err := os.WriteFile(base, data, 0o600); err != nil {

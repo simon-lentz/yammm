@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/simon-lentz/yammm/diag"
+	"github.com/simon-lentz/yammm/internal/diagtest"
 )
 
 // IsIdentifier answers for a name the generated Cypher writes unquoted.
@@ -25,7 +26,7 @@ func TestIsIdentifier(t *testing.T) {
 func TestCheckLabels_NoCollision(t *testing.T) {
 	t.Parallel()
 	s := loadSchema(t, "multiple_types.yammm")
-	if err := (Config{}).CheckLabels(s).Err(); err != nil {
+	if err := (Config{}).CheckLabels(s); err != nil {
 		t.Errorf("CheckLabels returned errors for non-colliding schema: %v", err)
 	}
 }
@@ -59,7 +60,9 @@ func TestConstraints_ALabelSettingIsReportedOnce(t *testing.T) {
 	t.Parallel()
 
 	s := loadInline(t, "schema \"g\"\n\ntype T {\n\tid String primary\n}\n\ntype U {\n\tid String primary\n}\n")
-	_, result := Config{LabelSeparator: "-"}.Constraints(s)
+	_, result := diagtest.Capture(t, func(warn func(diag.Issue)) ([]Constraint, error) {
+		return Config{LabelSeparator: "-"}.Constraints(s, WithWarnings(warn))
+	})
 	if got := result.CodeCounts(diag.Error)[E_NEO4J_INVALID_IDENTIFIER]; got != 1 {
 		t.Errorf("%d E_NEO4J_INVALID_IDENTIFIER issues, want one for the separator:\n%s", got, result)
 	}
@@ -73,12 +76,16 @@ func TestGenerators_RefuseALabelThatDoesNotDecode(t *testing.T) {
 	t.Parallel()
 
 	s := loadInline(t, "schema \"a__B\"\n\ntype C {\n\tid String primary\n\tmatch String required @index\n}\n")
-	want := Config{}.CheckLabels(s)
-	if !want.HasErrors() || !strings.Contains(want.String(), `schema "a__B" composes no node label`) {
+	want := diagtest.Failures(t, Config{}.CheckLabels(s))
+	if diagtest.Err(want) == nil || !strings.Contains(want.String(), `schema "a__B" composes no node label`) {
 		t.Fatalf("CheckLabels = %v, want the schema refused", want)
 	}
-	constraints, cResult := Config{}.Constraints(s)
-	indexes, iResult := Config{}.Indexes(s)
+	constraints, cResult := diagtest.Capture(t, func(warn func(diag.Issue)) ([]Constraint, error) {
+		return Config{}.Constraints(s, WithWarnings(warn))
+	})
+	indexes, iResult := diagtest.Issues(t, func() ([]Index, error) {
+		return Config{}.Indexes(s)
+	})
 	if constraints != nil || indexes != nil {
 		t.Errorf("Constraints = %v, Indexes = %v, want nil for a refused schema", constraints, indexes)
 	}

@@ -33,8 +33,9 @@ func (r TypeRef) String() string {
 }
 
 // MarshalText renders the "schema#name" form, so a map keyed by TypeRef and a
-// TypeRef slice both serialize as strings under encoding/json. There is no
-// inverse; [TestTypeRef_IsWriteOnly] pins that as a decision rather than a gap.
+// TypeRef slice both serialize as strings under encoding/json. Its error is
+// always nil. There is no inverse; [TestTypeRef_IsWriteOnly] pins that as a
+// decision rather than a gap.
 func (r TypeRef) MarshalText() ([]byte, error) {
 	return []byte(r.String()), nil
 }
@@ -102,43 +103,42 @@ func (s IntegrityStatus) String() string {
 // Stat reads a .ys document's header and summarizes its body without a schema
 // and without materializing an instance, so its cost scales with the document's
 // size. It runs each structural check [Unmarshal] runs that needs no schema,
-// records the integrity check in [Info.IntegrityStatus], and caps its
-// diagnostics at 100. It returns (nil, result) for a document it cannot decode
-// or whose header or types table breaks a rule, and an Info beside the result
-// for one whose body breaks a check, as the package doc's Reading Without a
-// Schema section states.
-func Stat(ctx context.Context, data []byte) (*Info, diag.Result) {
+// records the integrity check in [Info.IntegrityStatus], and its error, a
+// *[diag.ResultError], holds at most 100 failures. It returns (nil, err) for a
+// document it cannot decode, one whose header or types table breaks a rule and
+// a cancelled context, and an Info beside the error for a document that decodes
+// and whose body breaks a check, as the package doc's Reading Without a Schema
+// section states. It draws no warning.
+func Stat(ctx context.Context, data []byte) (*Info, error) {
 	if ctx == nil {
 		panic("snapshot.Stat: nil context")
 	}
 	if err := ctx.Err(); err != nil {
-		c := diag.NewCollector(0)
-		c.Collect(diag.NewIssue(diag.Fatal, diag.E_CONTEXT_CANCELLED, err.Error()).Build())
-		return nil, c.Result()
+		return nil, cancelled(err)
 	}
 
-	sd := newStreamDecoder(data, schema.Schema{}, defaultLoadConfig())
+	sd := newStreamDecoder(data, schema.Schema{}, newConfig(nil))
 	if err := checkDocument(data); err != nil {
 		sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_MALFORMED, err.Error()).Build())
-		return nil, sd.collector.Result()
+		return nil, sd.collector.Err()
 	}
 
 	if err := sd.decodeHeader(); err != nil {
 		sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_MALFORMED, err.Error()).Build())
-		return nil, sd.collector.Result()
+		return nil, sd.collector.Err()
 	}
 	if sd.collector.HasErrors() {
-		return nil, sd.collector.Result()
+		return nil, sd.collector.Err()
 	}
 
 	groups, diags, err := sd.decodeSections()
 	if err != nil {
 		sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_MALFORMED, err.Error()).Build())
-		return nil, sd.collector.Result()
+		return nil, sd.collector.Err()
 	}
 	integrityStatus, err := sd.validateBody(ctx, groups, diags)
 	if err != nil {
-		return nil, sd.collector.Result()
+		return nil, sd.collector.Err()
 	}
 	counts, totalEdges := sd.countInstances(groups)
 
@@ -155,7 +155,7 @@ func Stat(ctx context.Context, data []byte) (*Info, diag.Result) {
 		DuplicateCount:  len(diags.Duplicates),
 		UnresolvedCount: len(diags.Unresolved),
 		IntegrityStatus: integrityStatus,
-	}, sd.collector.Result()
+	}, sd.collector.Err()
 }
 
 // MaxHeaderSize is the upper bound on bytes [ReadHeader] reads before it
@@ -171,10 +171,13 @@ const MaxHeaderSize = 16 * 1024 * 1024
 // outermost shape nor its member names beyond refusing a top level that is no
 // JSON object, a first section other than the header and a missing types
 // section, nor the text of a string past the table.
-// [Header.SchemaHashMatches] compares the header with a loaded schema. The
-// package doc's Reading Without a Schema section states what it reads, and
-// its Error Handling section the header refusals every reader makes.
-func ReadHeader(ctx context.Context, r io.Reader) (*Header, diag.Result) {
+// It accepts a schema hash algorithm this package does not read and draws no
+// warning for it: [Header.SchemaHashAlgorithm] states the algorithm, and
+// [Header.SchemaHashMatches] compares the header with a loaded schema. A header
+// it refuses returns (nil, err), err a *[diag.ResultError]. The package doc's
+// Reading Without a Schema section states what it reads, and its Error Handling
+// section the header refusals every reader makes.
+func ReadHeader(ctx context.Context, r io.Reader) (*Header, error) {
 	if ctx == nil {
 		panic("snapshot.ReadHeader: nil context")
 	}
@@ -182,15 +185,13 @@ func ReadHeader(ctx context.Context, r io.Reader) (*Header, diag.Result) {
 }
 
 // readHeader is [ReadHeader] with limit in place of [MaxHeaderSize].
-func readHeader(ctx context.Context, r io.Reader, limit int64) (*Header, diag.Result) {
+func readHeader(ctx context.Context, r io.Reader, limit int64) (*Header, error) {
 	if err := ctx.Err(); err != nil {
-		c := diag.NewCollector(0)
-		c.Collect(diag.NewIssue(diag.Fatal, diag.E_CONTEXT_CANCELLED, err.Error()).Build())
-		return nil, c.Result()
+		return nil, cancelled(err)
 	}
 
 	lr := newLimitReader(r, limit)
-	cfg := defaultLoadConfig()
+	cfg := newConfig(nil)
 	cfg.headerOnly = true
 	// The decoder keeps no bytes it has decoded, so the text rule reads this copy.
 	var read bytes.Buffer
@@ -202,25 +203,25 @@ func readHeader(ctx context.Context, r io.Reader, limit int64) (*Header, diag.Re
 				"read header: "+lr.readErr.Error()).
 				WithDetail(diag.DetailKeyDetail, lr.readErr.Error()).
 				Build())
-			return nil, sd.collector.Result()
+			return nil, sd.collector.Err()
 		}
 		msg := err.Error()
 		if lr.exceeded {
 			msg = fmt.Sprintf("header exceeded MaxHeaderSize (%d bytes)", MaxHeaderSize)
 		}
 		sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_MALFORMED, msg).Build())
-		return nil, sd.collector.Result()
+		return nil, sd.collector.Err()
 	}
 	if sd.collector.HasErrors() {
-		return nil, sd.collector.Result()
+		return nil, sd.collector.Err()
 	}
 	if err := checkText(read.Bytes()[:sd.typesEnd]); err != nil {
 		sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_MALFORMED, err.Error()).Build())
-		return nil, sd.collector.Result()
+		return nil, sd.collector.Err()
 	}
 
 	h := sd.decodedHeader()
-	return &h, sd.collector.Result()
+	return &h, nil
 }
 
 // decodedHeader returns the header and types table sd decoded.

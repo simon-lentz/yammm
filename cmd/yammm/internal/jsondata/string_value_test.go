@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/simon-lentz/yammm/internal/diagtest"
 	"github.com/simon-lentz/yammm/internal/yammmtest/sourcetest"
 )
 
@@ -125,7 +126,7 @@ func TestParse_ATextFaultEditsTheOccurrenceTheDecoderKeeps(t *testing.T) {
 					repeats++
 				}
 			}
-			if repeats != c.repeats || !result.HasErrors() {
+			if repeats != c.repeats || diagtest.Err(result) == nil {
 				t.Errorf("%d repeated members, want %d:%s", repeats, c.repeats, describe(result))
 			}
 			if len(parsed["T"].Elements) != 1 || !parsed["T"].Elements[0].Refused {
@@ -199,7 +200,7 @@ func TestParse_AValidSurrogatePairIsRead(t *testing.T) {
 	t.Parallel()
 	doc := "{\"T\": [{\"id\": \"\\ud83d\\ude00\", \"r\": \"\uFFFD\", \"e\": \"\\uFFFD\"}]}"
 	parsed, result := Parse(context.Background(), sourcetest.ID("data.json"), []byte(doc))
-	if result.HasErrors() || len(parsed["T"].Elements) != 1 {
+	if (diagtest.Err(result) != nil) || len(parsed["T"].Elements) != 1 {
 		t.Fatalf("parsed %d instances:%s", len(parsed["T"].Elements), describe(result))
 	}
 	props := parsed["T"].Elements[0].Properties

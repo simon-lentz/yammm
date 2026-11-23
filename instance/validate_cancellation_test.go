@@ -2,8 +2,10 @@ package instance
 
 import (
 	"context"
+	"errors"
 	"testing"
 
+	"github.com/simon-lentz/yammm/internal/diagtest"
 	"github.com/simon-lentz/yammm/internal/yammmtest"
 
 	"github.com/simon-lentz/yammm/diag"
@@ -32,9 +34,9 @@ type Row {
 	*-> PARTS (one:many) Part
 }
 `
-	s, res := schema.LoadString(t.Context(), src, "cancellation.yammm")
-	if res.HasErrors() {
-		t.Fatalf("load: %s", res)
+	s, err := schema.LoadString(t.Context(), src, "cancellation.yammm")
+	if err != nil {
+		t.Fatalf("load: %s", err)
 	}
 	return s
 }
@@ -50,40 +52,41 @@ func TestValidate_EachGateReadsItsOwnPassesErrors(t *testing.T) {
 
 	t.Run("a property error beside an unknown field reports both", func(t *testing.T) {
 		t.Parallel()
-		_, res := v.ValidateOne(t.Context(), "Row", RawInstance{
+		_, err := v.ValidateOne(t.Context(), "Row", RawInstance{
 			Properties: map[string]any{
 				"id": "r1", "count": "not a number",
 				"extra": "x",
 				"parts": []any{map[string]any{"id": "p1"}},
 			},
 		})
-		if !res.HasCode(diag.E_TYPE_MISMATCH) {
-			t.Errorf("the property error is missing: %s", res)
+		if !errors.Is(err, diag.E_TYPE_MISMATCH) {
+			t.Errorf("the property error is missing: %s", err)
 		}
-		if !res.HasCode(diag.E_UNKNOWN_FIELD) {
-			t.Errorf("the unknown field is missing: %s", res)
+		if !errors.Is(err, diag.E_UNKNOWN_FIELD) {
+			t.Errorf("the unknown field is missing: %s", err)
 		}
 	})
 
 	t.Run("an unknown field beside an absent required composition reports both", func(t *testing.T) {
 		t.Parallel()
-		_, res := v.ValidateOne(t.Context(), "Row", RawInstance{
+		_, err := v.ValidateOne(t.Context(), "Row", RawInstance{
 			Properties: map[string]any{
 				"id":    "r1",
 				"extra": "x",
 			},
 		})
-		if !res.HasCode(diag.E_UNKNOWN_FIELD) {
-			t.Errorf("the unknown field is missing: %s", res)
+		if !errors.Is(err, diag.E_UNKNOWN_FIELD) {
+			t.Errorf("the unknown field is missing: %s", err)
 		}
-		if !res.HasCode(diag.E_UNRESOLVED_REQUIRED_COMPOSITION) {
-			t.Errorf("the absent required composition is missing: %s", res)
+		if !errors.Is(err, diag.E_UNRESOLVED_REQUIRED_COMPOSITION) {
+			t.Errorf("the absent required composition is missing: %s", err)
 		}
 	})
 }
 
 // TestValidateOne_CancelledMidRowReturnsTheCancellationAlone pins that
-// ValidateOne applies the batch rule. Validate drops a cancelled row's partial
+// ValidateOne applies the batch rule to a valid row and a refused one alike.
+// Validate drops a cancelled row's partial
 // diagnostics and returns one E_CONTEXT_CANCELLED; ValidateOne returned the
 // partial set, so a caller such as the snapshot revalidator reported a
 // timeout's leftovers as findings about the data.
@@ -91,21 +94,30 @@ func TestValidate_EachGateReadsItsOwnPassesErrors(t *testing.T) {
 func TestValidateOne_CancelledMidRowReturnsTheCancellationAlone(t *testing.T) {
 	t.Parallel()
 	v := NewValidator(cancellationSchema(t))
-	raw := RawInstance{Properties: map[string]any{"id": "r1", "count": "not a number"}}
-	total := yammmtest.CountChecks(t.Context(), func(ctx context.Context) { v.ValidateOne(ctx, "Row", raw) })
-
-	for n := range total {
-		ctx := yammmtest.NewCheckContext(t.Context(), n+1)
-		inst, res := v.ValidateOne(ctx, "Row", raw)
-		if !inst.IsZero() {
-			t.Errorf("check %d: a cancelled row yielded an instance", n+1)
-		}
-		if !res.HasCode(diag.E_CONTEXT_CANCELLED) {
-			t.Fatalf("check %d: the cancellation is missing: %s", n+1, res)
-		}
-		for is := range res.Issues() {
-			if is.Code() != diag.E_CONTEXT_CANCELLED {
-				t.Errorf("check %d: a cancelled row kept a partial diagnostic: %s %s", n+1, is.Code(), is.Message())
+	rows := map[string]RawInstance{
+		"a refused row": {Properties: map[string]any{"id": "r1", "count": "not a number"}},
+		"a valid row":   {Properties: map[string]any{"id": "r1", "count": int64(3), "parts": []any{map[string]any{"id": "p1"}}}},
+	}
+	if _, err := v.ValidateOne(t.Context(), "Row", rows["a valid row"]); err != nil {
+		t.Fatalf("the valid row is refused: %v", err)
+	}
+	for name, raw := range rows {
+		total := yammmtest.CountChecks(t.Context(), func(ctx context.Context) { _, _ = v.ValidateOne(ctx, "Row", raw) })
+		for n := range total {
+			ctx := yammmtest.NewCheckContext(t.Context(), n+1)
+			inst, res := diagtest.Issues(t, func() (ValidInstance, error) {
+				return v.ValidateOne(ctx, "Row", raw)
+			})
+			if !inst.IsZero() {
+				t.Errorf("%s, check %d: a cancelled row yielded an instance", name, n+1)
+			}
+			if !res.HasCode(diag.E_CONTEXT_CANCELLED) {
+				t.Fatalf("%s, check %d: the cancellation is missing: %s", name, n+1, res)
+			}
+			for is := range res.Issues() {
+				if is.Code() != diag.E_CONTEXT_CANCELLED {
+					t.Errorf("%s, check %d: a cancelled row kept a partial diagnostic: %s %s", name, n+1, is.Code(), is.Message())
+				}
 			}
 		}
 	}
@@ -120,12 +132,12 @@ func TestValidateProperties_CancellationRecordedAtEveryExit(t *testing.T) {
 	t.Parallel()
 	v := NewValidator(cancellationSchema(t))
 	raws := []RawInstance{{Properties: map[string]any{"id": "r1", "count": "not a number"}}}
-	total := yammmtest.CountChecks(t.Context(), func(ctx context.Context) { v.Validate(ctx, "Row", raws) })
+	total := yammmtest.CountChecks(t.Context(), func(ctx context.Context) { _, _ = v.Validate(ctx, "Row", raws) })
 
 	for n := range total {
-		_, res := v.Validate(yammmtest.NewCheckContext(t.Context(), n+1), "Row", raws)
-		if !res.HasCode(diag.E_CONTEXT_CANCELLED) {
-			t.Errorf("check %d: a row cancelled while it was erroring did not record the cancellation: %s", n+1, res)
+		_, err := v.Validate(yammmtest.NewCheckContext(t.Context(), n+1), "Row", raws)
+		if !errors.Is(err, diag.E_CONTEXT_CANCELLED) {
+			t.Errorf("check %d: a row cancelled while it was erroring did not record the cancellation: %s", n+1, err)
 		}
 	}
 }
@@ -141,10 +153,12 @@ func TestValidate_NestedBatchCancellationIsReportedOnce(t *testing.T) {
 			"parts": []any{map[string]any{"id": "p1", "Id": "p2"}},
 		},
 	}}
-	total := yammmtest.CountChecks(t.Context(), func(ctx context.Context) { v.Validate(ctx, "Row", raws) })
+	total := yammmtest.CountChecks(t.Context(), func(ctx context.Context) { _, _ = v.Validate(ctx, "Row", raws) })
 
 	for at := range total {
-		_, res := v.Validate(yammmtest.NewCheckContext(t.Context(), at+1), "Row", raws)
+		_, res := diagtest.Issues(t, func() ([]ValidInstance, error) {
+			return v.Validate(yammmtest.NewCheckContext(t.Context(), at+1), "Row", raws)
+		})
 		n := 0
 		for is := range res.Issues() {
 			if is.Code() == diag.E_CONTEXT_CANCELLED {
@@ -177,48 +191,48 @@ func (c *panicsAtCheck) Err() error {
 
 // validateOneRecovering is ValidateOne on ctx, and reports false when a panic
 // left it.
-func validateOneRecovering(ctx context.Context, v *Validator, typeName string, raw RawInstance) (res diag.Result, returned bool) {
+func validateOneRecovering(ctx context.Context, v *Validator, typeName string, raw RawInstance) (returned bool, err error) {
 	defer func() {
 		if recover() != nil {
 			returned = false
 		}
 	}()
-	_, res = v.ValidateOne(ctx, typeName, raw)
-	return res, true
+	_, err = v.ValidateOne(ctx, typeName, raw)
+	return true, err
 }
 
 // A panic in a row's invariant is a library defect, and it reaches the caller
 // beside the cancellation that follows it, stamped with the row it stopped on.
 func TestValidate_ARowsInternalErrorOutlivesTheCancellation(t *testing.T) {
 	t.Parallel()
-	s, loaded := schema.LoadString(t.Context(), `schema "defect"
+	s, err := schema.LoadString(t.Context(), `schema "defect"
 
 type Row {
 	id String primary
 	! "named" id != "bad"
 }
 `, "defect.yammm")
-	if loaded.HasErrors() {
-		t.Fatalf("load: %s", loaded)
+	if err != nil {
+		t.Fatalf("load: %s", err)
 	}
 	v := NewValidator(s)
 	raws := []RawInstance{{Properties: map[string]any{"id": "a"}}}
-	total := yammmtest.CountChecks(t.Context(), func(ctx context.Context) { v.Validate(ctx, "Row", raws) })
+	total := yammmtest.CountChecks(t.Context(), func(ctx context.Context) { _, _ = v.Validate(ctx, "Row", raws) })
 
 	defects := 0
 	for at := range total {
 		func() {
 			defer func() { _ = recover() }()
-			valid, res := v.Validate(&panicsAtCheck{Context: t.Context(), at: at + 1}, "Row", raws)
-			if !res.HasCode(diag.E_INTERNAL) {
+			valid, err := v.Validate(&panicsAtCheck{Context: t.Context(), at: at + 1}, "Row", raws)
+			if !errors.Is(err, diag.E_INTERNAL) {
 				return
 			}
 			defects++
 			if valid != nil {
 				t.Errorf("check %d: a cancelled batch returned instances: %v", at+1, valid)
 			}
-			if !res.HasCode(diag.E_CONTEXT_CANCELLED) {
-				t.Errorf("check %d: the cancellation is missing beside the defect: %s", at+1, res)
+			if !errors.Is(err, diag.E_CONTEXT_CANCELLED) {
+				t.Errorf("check %d: the cancellation is missing beside the defect: %s", at+1, err)
 			}
 		}()
 	}
@@ -231,7 +245,7 @@ type Row {
 // caller beside the cancellation that follows it, for each child of the batch.
 func TestValidateOne_AComposedChildsInternalErrorOutlivesTheCancellation(t *testing.T) {
 	t.Parallel()
-	s, loaded := schema.LoadString(t.Context(), `schema "defect"
+	s, err := schema.LoadString(t.Context(), `schema "defect"
 
 part type Line {
 	id String primary
@@ -243,29 +257,29 @@ type Order {
 	*-> LINES (_:many) Line
 }
 `, "defect.yammm")
-	if loaded.HasErrors() {
-		t.Fatalf("load: %s", loaded)
+	if err != nil {
+		t.Fatalf("load: %s", err)
 	}
 	v := NewValidator(s)
 	raw := RawInstance{Properties: map[string]any{
 		"id":    "o1",
 		"lines": []any{map[string]any{"id": "a"}, map[string]any{"id": "b"}},
 	}}
-	total := yammmtest.CountChecks(t.Context(), func(ctx context.Context) { v.ValidateOne(ctx, "Order", raw) })
+	total := yammmtest.CountChecks(t.Context(), func(ctx context.Context) { _, _ = v.ValidateOne(ctx, "Order", raw) })
 
 	defects := make(map[string]bool)
 	for at := range total {
-		res, returned := validateOneRecovering(&panicsAtCheck{Context: t.Context(), at: at + 1}, v, "Order", raw)
+		returned, err := validateOneRecovering(&panicsAtCheck{Context: t.Context(), at: at + 1}, v, "Order", raw)
 		if !returned {
 			continue
 		}
-		for is := range res.Issues() {
+		for is := range diagtest.Failures(t, err).Issues() {
 			if is.Code() != diag.E_INTERNAL {
 				continue
 			}
 			defects[is.Path()] = true
-			if !res.HasCode(diag.E_CONTEXT_CANCELLED) {
-				t.Errorf("check %d: the cancellation is missing beside the defect: %s", at+1, res)
+			if !errors.Is(err, diag.E_CONTEXT_CANCELLED) {
+				t.Errorf("check %d: the cancellation is missing beside the defect: %v", at+1, err)
 			}
 		}
 	}
@@ -308,7 +322,7 @@ func TestKeepInternalErrors(t *testing.T) {
 
 	empty := diag.NewCollector(diag.NoLimit)
 	empty.Collect(diag.NewIssue(diag.Error, diag.E_TYPE_MISMATCH, "a partial finding").Build())
-	if kept := keepInternalErrors(empty.Result()); kept.HasErrors() {
+	if kept := keepInternalErrors(empty.Result()); diagtest.Err(kept) != nil {
 		t.Errorf("a row with no internal error kept something: %s", kept)
 	}
 }

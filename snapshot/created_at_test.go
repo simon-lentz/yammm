@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"github.com/simon-lentz/yammm/diag"
+	"github.com/simon-lentz/yammm/graph"
+	"github.com/simon-lentz/yammm/internal/diagtest"
 	"github.com/simon-lentz/yammm/snapshot"
 )
 
@@ -57,13 +59,23 @@ func TestRead_RefusesACreatedAtThatIsNotRFC3339(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 			doc := stampedDoc(ctx, t, member)
-			_, load := snapshot.Unmarshal(ctx, doc, s)
-			_, stat := snapshot.Stat(ctx, doc)
-			_, header := snapshot.ReadHeader(ctx, bytes.NewReader(doc))
-			out, update := snapshot.UpdateMetadata(ctx, doc, map[string]string{"k": "v"})
+			_, load := diagtest.Capture(t, func(warn func(diag.Issue)) (graph.Snapshot, error) {
+				return snapshot.Unmarshal(ctx, doc, s, snapshot.WithWarnings(warn))
+			})
+			_, stat := diagtest.Issues(t, func() (*snapshot.Info, error) {
+				return snapshot.Stat(ctx, doc)
+			})
+			_, header := diagtest.Issues(t, func() (*snapshot.Header, error) {
+				return snapshot.ReadHeader(ctx, bytes.NewReader(doc))
+			})
+			out, update := diagtest.Issues(t, func() ([]byte, error) {
+				return snapshot.UpdateMetadata(ctx, doc, map[string]string{"k": "v"})
+			})
 			want := map[diag.Code]int{diag.E_SNAPSHOT_MALFORMED: 1}
 			for surface, res := range map[string]diag.Result{
-				"Unmarshal": load, "Verify": snapshot.Verify(ctx, doc, s), "Stat": stat,
+				"Unmarshal": load, "Verify": diagtest.CaptureErr(t, func(warn func(diag.Issue)) error {
+					return snapshot.Verify(ctx, doc, s, snapshot.WithWarnings(warn))
+				}), "Stat": stat,
 				"ReadHeader": header, "UpdateMetadata": update,
 			} {
 				if !maps.Equal(errorCodes(res), want) {
@@ -83,27 +95,31 @@ func TestRead_RefusesACreatedAtThatIsNotRFC3339(t *testing.T) {
 		`"2017-01-01T00:59:60+01:00"`: true,
 		`"2016-12-31T12:34:60Z"`:      false,
 	} {
-		_, res := snapshot.ReadHeader(ctx, bytes.NewReader(stampedDoc(ctx, t, member)))
+		_, res := diagtest.Issues(t, func() (*snapshot.Header, error) {
+			return snapshot.ReadHeader(ctx, bytes.NewReader(stampedDoc(ctx, t, member)))
+		})
 		if strings.Contains(res.String(), "states a leap second") != leap {
 			t.Errorf("created_at %s: %s, want a leap second named: %v", member, res, leap)
 		}
 	}
 
 	for _, member := range []string{`20260101`, `{}`} {
-		_, res := snapshot.ReadHeader(ctx, bytes.NewReader(stampedDoc(ctx, t, member)))
+		_, res := diagtest.Issues(t, func() (*snapshot.Header, error) {
+			return snapshot.ReadHeader(ctx, bytes.NewReader(stampedDoc(ctx, t, member)))
+		})
 		if !strings.Contains(res.String(), "created_at "+member+" is not a string") {
 			t.Errorf("created_at %s: %s, want the refusal to name it no string", member, res)
 		}
 	}
 
 	doc := stampedDoc(ctx, t, `null`)
-	header, res := snapshot.ReadHeader(ctx, bytes.NewReader(doc))
-	if res.HasErrors() || !header.CreatedAt.IsZero() {
-		t.Errorf("a null created_at reads as %v beside %s, want none", header.CreatedAt, res)
+	header, err := snapshot.ReadHeader(ctx, bytes.NewReader(doc))
+	if err != nil || !header.CreatedAt.IsZero() {
+		t.Errorf("a null created_at reads as %v beside %s, want none", header.CreatedAt, err)
 	}
-	out, res := snapshot.UpdateMetadata(ctx, doc, nil)
-	if res.HasErrors() || bytes.Contains(out, []byte("created_at")) {
-		t.Errorf("UpdateMetadata of a null created_at: %s, want a document that states none:\n%s", res, out)
+	out, err := snapshot.UpdateMetadata(ctx, doc, nil)
+	if err != nil || bytes.Contains(out, []byte("created_at")) {
+		t.Errorf("UpdateMetadata of a null created_at: %s, want a document that states none:\n%s", err, out)
 	}
 }
 
@@ -121,16 +137,16 @@ func TestRead_AcceptsEveryRFC3339FormOfATime(t *testing.T) {
 		`"0000-01-01T00:00:00Z"`:               time.Date(0, 1, 1, 0, 0, 0, 0, time.UTC),
 	} {
 		doc := stampedDoc(ctx, t, member)
-		if _, res := snapshot.Unmarshal(ctx, doc, s); res.HasErrors() {
-			t.Errorf("Unmarshal of %s: %s", member, res)
+		if _, err := snapshot.Unmarshal(ctx, doc, s); err != nil {
+			t.Errorf("Unmarshal of %s: %s", member, err)
 		}
-		info, res := snapshot.Stat(ctx, doc)
-		if res.HasErrors() || !info.CreatedAt.Equal(want) {
-			t.Errorf("Stat of %s: %v beside %s, want %v", member, info, res, want)
+		info, err := snapshot.Stat(ctx, doc)
+		if err != nil || !info.CreatedAt.Equal(want) {
+			t.Errorf("Stat of %s: %v beside %s, want %v", member, info, err, want)
 		}
-		header, res := snapshot.ReadHeader(ctx, bytes.NewReader(doc))
-		if res.HasErrors() || !header.CreatedAt.Equal(want) || header.CreatedAt.Location() != want.Location() {
-			t.Errorf("ReadHeader of %s: %v beside %s, want %v", member, header, res, want)
+		header, err := snapshot.ReadHeader(ctx, bytes.NewReader(doc))
+		if err != nil || !header.CreatedAt.Equal(want) || header.CreatedAt.Location() != want.Location() {
+			t.Errorf("ReadHeader of %s: %v beside %s, want %v", member, header, err, want)
 		}
 	}
 }
@@ -143,13 +159,23 @@ func TestRead_RefusesAnUnknownVersionBeforeItsCreatedAt(t *testing.T) {
 	s := testSchema(t)
 	doc := stampedDoc(ctx, t, `"yesterday"`)
 	doc = rehashDocument(t, bytes.Replace(doc, []byte(`"version":4`), []byte(`"version":5`), 1))
-	_, load := snapshot.Unmarshal(ctx, doc, s)
-	_, stat := snapshot.Stat(ctx, doc)
-	_, header := snapshot.ReadHeader(ctx, bytes.NewReader(doc))
-	_, update := snapshot.UpdateMetadata(ctx, doc, nil)
+	_, load := diagtest.Capture(t, func(warn func(diag.Issue)) (graph.Snapshot, error) {
+		return snapshot.Unmarshal(ctx, doc, s, snapshot.WithWarnings(warn))
+	})
+	_, stat := diagtest.Issues(t, func() (*snapshot.Info, error) {
+		return snapshot.Stat(ctx, doc)
+	})
+	_, header := diagtest.Issues(t, func() (*snapshot.Header, error) {
+		return snapshot.ReadHeader(ctx, bytes.NewReader(doc))
+	})
+	_, update := diagtest.Issues(t, func() ([]byte, error) {
+		return snapshot.UpdateMetadata(ctx, doc, nil)
+	})
 	want := map[diag.Code]int{diag.E_SNAPSHOT_UNSUPPORTED_VERSION: 1}
 	for surface, res := range map[string]diag.Result{
-		"Unmarshal": load, "Verify": snapshot.Verify(ctx, doc, s), "Stat": stat,
+		"Unmarshal": load, "Verify": diagtest.CaptureErr(t, func(warn func(diag.Issue)) error {
+			return snapshot.Verify(ctx, doc, s, snapshot.WithWarnings(warn))
+		}), "Stat": stat,
 		"ReadHeader": header, "UpdateMetadata": update,
 	} {
 		if !maps.Equal(errorCodes(res), want) {
@@ -173,9 +199,9 @@ func TestMarshal_WritesCreatedAtAsGiven(t *testing.T) {
 		if !bytes.Contains(data, []byte(`"created_at":"`+want+`"`)) {
 			t.Errorf("Marshal(%s) does not write created_at %s", at, want)
 		}
-		header, res := snapshot.ReadHeader(ctx, bytes.NewReader(data))
-		if res.HasErrors() {
-			t.Fatalf("ReadHeader: %s", res)
+		header, err := snapshot.ReadHeader(ctx, bytes.NewReader(data))
+		if err != nil {
+			t.Fatalf("ReadHeader: %s", err)
 		}
 		if !header.CreatedAt.Equal(at) || header.CreatedAt.Format(time.RFC3339Nano) != want {
 			t.Errorf("created_at reads back as %s, want %s", header.CreatedAt.Format(time.RFC3339Nano), want)
@@ -198,7 +224,9 @@ func TestMarshal_RefusesACreatedAtWithNoRFC3339Form(t *testing.T) {
 		"an offset of -3645 s":  time.Date(2026, 1, 1, 0, 0, 0, 0, time.FixedZone("", -3645)),
 		"a local mean time":     time.Date(1900, 1, 1, 12, 0, 0, 0, time.FixedZone("LMT", 1172)),
 	} {
-		data, res := snapshot.Marshal(ctx, snap, snapshot.WithCreatedAt(at))
+		data, res := diagtest.Issues(t, func() ([]byte, error) {
+			return snapshot.Marshal(ctx, snap, snapshot.WithCreatedAt(at))
+		})
 		if data != nil || !maps.Equal(errorCodes(res), map[diag.Code]int{diag.E_SNAPSHOT_MALFORMED: 1}) {
 			t.Errorf("%s: Marshal returned %d bytes and %s, want none and one %s", name, len(data), res, diag.E_SNAPSHOT_MALFORMED)
 		}
@@ -211,16 +239,16 @@ func TestUpdateMetadata_KeepsTheCreatedAtBytes(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()
 	const written = `"2026-01-01T12:00:00.120\u002b02:00"`
-	out, res := snapshot.UpdateMetadata(ctx, stampedDoc(ctx, t, written), map[string]string{"k": "v"})
-	if res.HasErrors() {
-		t.Fatalf("UpdateMetadata: %s", res)
+	out, err := snapshot.UpdateMetadata(ctx, stampedDoc(ctx, t, written), map[string]string{"k": "v"})
+	if err != nil {
+		t.Fatalf("UpdateMetadata: %s", err)
 	}
 	if !bytes.Contains(out, []byte(`"created_at":`+written)) {
 		t.Errorf("the update does not keep created_at %s:\n%s", written, out)
 	}
-	header, res := snapshot.ReadHeader(ctx, bytes.NewReader(out))
-	if res.HasErrors() {
-		t.Fatalf("ReadHeader: %s", res)
+	header, err := snapshot.ReadHeader(ctx, bytes.NewReader(out))
+	if err != nil {
+		t.Fatalf("ReadHeader: %s", err)
 	}
 	if want := time.Date(2026, 1, 1, 10, 0, 0, 120000000, time.UTC); !header.CreatedAt.Equal(want) {
 		t.Errorf("created_at reads as %s, want %s", header.CreatedAt, want)
@@ -235,13 +263,23 @@ func TestRead_ReportsACreatedAtFaultBesideTheHeadersOthers(t *testing.T) {
 	s := testSchema(t)
 	doc := stampedDoc(ctx, t, `"nope"`)
 	doc = rehashDocument(t, bytes.Replace(doc, []byte(`"features":[]`), []byte(`"features":["x"]`), 1))
-	_, load := snapshot.Unmarshal(ctx, doc, s)
-	_, stat := snapshot.Stat(ctx, doc)
-	_, header := snapshot.ReadHeader(ctx, bytes.NewReader(doc))
-	_, update := snapshot.UpdateMetadata(ctx, doc, nil)
+	_, load := diagtest.Capture(t, func(warn func(diag.Issue)) (graph.Snapshot, error) {
+		return snapshot.Unmarshal(ctx, doc, s, snapshot.WithWarnings(warn))
+	})
+	_, stat := diagtest.Issues(t, func() (*snapshot.Info, error) {
+		return snapshot.Stat(ctx, doc)
+	})
+	_, header := diagtest.Issues(t, func() (*snapshot.Header, error) {
+		return snapshot.ReadHeader(ctx, bytes.NewReader(doc))
+	})
+	_, update := diagtest.Issues(t, func() ([]byte, error) {
+		return snapshot.UpdateMetadata(ctx, doc, nil)
+	})
 	want := map[diag.Code]int{diag.E_SNAPSHOT_MALFORMED: 1, diag.E_SNAPSHOT_UNSUPPORTED_FEATURE: 1}
 	for surface, res := range map[string]diag.Result{
-		"Unmarshal": load, "Verify": snapshot.Verify(ctx, doc, s), "Stat": stat,
+		"Unmarshal": load, "Verify": diagtest.CaptureErr(t, func(warn func(diag.Issue)) error {
+			return snapshot.Verify(ctx, doc, s, snapshot.WithWarnings(warn))
+		}), "Stat": stat,
 		"ReadHeader": header, "UpdateMetadata": update,
 	} {
 		if !maps.Equal(errorCodes(res), want) {

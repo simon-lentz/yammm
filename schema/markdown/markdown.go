@@ -43,7 +43,8 @@ func WithClassMembers(include bool) Option {
 // Document Structure states. Output is deterministic — byte-identical across runs for
 // the same schema, options and build of the generator — and the text the
 // generator wrote is structurally verified before return; an error reports a
-// generator bug, and no doc comment's text draws one.
+// generator bug, and no doc comment's text draws one. The error is plain, never
+// a *[github.com/simon-lentz/yammm/diag.ResultError].
 func Marshal(s schema.Schema, opts ...Option) ([]byte, error) {
 	cfg := config{classDiagram: true, classMembers: true}
 	for _, o := range opts {

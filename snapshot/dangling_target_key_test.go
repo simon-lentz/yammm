@@ -8,6 +8,7 @@ import (
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/instance"
+	"github.com/simon-lentz/yammm/internal/diagtest"
 	"github.com/simon-lentz/yammm/schema"
 	"github.com/simon-lentz/yammm/snapshot"
 )
@@ -70,9 +71,9 @@ const sourceUUID = "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11"
 func danglingKeyDoc(t *testing.T) (schema.Schema, []byte) {
 	t.Helper()
 	ctx := t.Context()
-	s, res := schema.LoadString(ctx, danglingKeySchema, "dk.yammm")
-	if res.HasErrors() {
-		t.Fatalf("load schema: %s", res.String())
+	s, err := schema.LoadString(ctx, danglingKeySchema, "dk.yammm")
+	if err != nil {
+		t.Fatalf("load schema: %s", err)
 	}
 	v := instance.NewValidator(s)
 	g := graph.New(s)
@@ -98,17 +99,17 @@ func danglingKeyDoc(t *testing.T) (schema.Schema, []byte) {
 			"to_y":  []any{map[string]any{"_target_at": "2024-01-02T00:00:00Z"}},
 		}},
 	} {
-		vi, vr := v.ValidateOne(ctx, raw.typ, instance.RawInstance{Properties: raw.props})
-		if vr.HasErrors() {
-			t.Fatalf("validate %s: %s", raw.typ, vr.String())
+		vi, err := v.ValidateOne(ctx, raw.typ, instance.RawInstance{Properties: raw.props})
+		if err != nil {
+			t.Fatalf("validate %s: %s", raw.typ, err)
 		}
-		if r := g.Add(ctx, vi); r.HasErrors() {
-			t.Fatalf("add %s: %s", raw.typ, r.String())
+		if err := g.Add(ctx, vi); err != nil {
+			t.Fatalf("add %s: %s", raw.typ, err)
 		}
 	}
-	doc, mr := snapshot.Marshal(ctx, g.Snapshot())
-	if mr.HasErrors() {
-		t.Fatalf("marshal: %s", mr.String())
+	doc, readErr := snapshot.Marshal(ctx, g.Snapshot())
+	if readErr != nil {
+		t.Fatalf("marshal: %s", readErr)
 	}
 	return s, doc
 }
@@ -331,21 +332,25 @@ func TestRead_AnEdgeThatNamesNoRootDrawsOneIssueForItsKey(t *testing.T) {
 		}
 		for _, mode := range []struct {
 			name string
-			opts []snapshot.LoadOption
+			opts []snapshot.Option
 			want []string
 		}{
 			{"plain", nil, c.plain},
-			{"revalidate", []snapshot.LoadOption{snapshot.WithRevalidation(diag.Error)}, append(append([]string(nil), c.plain...), c.reval...)},
+			{"revalidate", []snapshot.Option{snapshot.WithRevalidation(diag.Error)}, append(append([]string(nil), c.plain...), c.reval...)},
 		} {
-			opts := append([]snapshot.LoadOption{snapshot.WithIntegrityCheck(false)}, mode.opts...)
+			opts := append([]snapshot.Option{snapshot.WithIntegrityCheck(false)}, mode.opts...)
 			t.Run(c.name+"/Load/"+mode.name, func(t *testing.T) {
 				t.Parallel()
-				_, res := snapshot.Unmarshal(t.Context(), data, s, opts...)
+				_, res := diagtest.Capture(t, func(warn func(diag.Issue)) (graph.Snapshot, error) {
+					return snapshot.Unmarshal(t.Context(), data, s, append([]snapshot.Option{snapshot.WithWarnings(warn)}, opts...)...)
+				})
 				matchIssues(t, readIssues(res), mode.want)
 			})
 			t.Run(c.name+"/Verify/"+mode.name, func(t *testing.T) {
 				t.Parallel()
-				matchIssues(t, readIssues(snapshot.Verify(t.Context(), data, s, opts...)), mode.want)
+				matchIssues(t, readIssues(diagtest.CaptureErr(t, func(warn func(diag.Issue)) error {
+					return snapshot.Verify(t.Context(), data, s, append([]snapshot.Option{snapshot.WithWarnings(warn)}, opts...)...)
+				})), mode.want)
 			})
 		}
 	}
@@ -376,7 +381,9 @@ func TestRead_EachRelationsDanglingEdgesAreJudged(t *testing.T) {
 		diag.E_SNAPSHOT_DANGLING_REFERENCE.String() + `: edge target dk#X[["abcd"]]`,
 	}
 	for range 20 {
-		_, res := snapshot.Unmarshal(t.Context(), data, s, snapshot.WithIntegrityCheck(false), snapshot.WithRevalidation(diag.Error))
+		_, res := diagtest.Capture(t, func(warn func(diag.Issue)) (graph.Snapshot, error) {
+			return snapshot.Unmarshal(t.Context(), data, s, snapshot.WithIntegrityCheck(false), snapshot.WithRevalidation(diag.Error), snapshot.WithWarnings(warn))
+		})
 		matchIssues(t, readIssues(res), want)
 	}
 }

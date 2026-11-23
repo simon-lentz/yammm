@@ -91,3 +91,26 @@ func TestSnapshotInfo_AStructuralErrorPrecedesTheSummary(t *testing.T) {
 	require.True(t, errAt >= 0 && summaryAt >= 0, "output:\n%s", out)
 	assert.Less(t, errAt, summaryAt, "the error is written below the summary:\n%s", out)
 }
+
+// TestSnapshotInfo_HeaderOnlyNamesAnUnsupportedHashAlgorithm pins the warning a
+// header-only read gives a document whose schema hash algorithm this build
+// does not read: its exact message, and the algorithm version as its one
+// detail, in both output formats.
+func TestSnapshotInfo_HeaderOnlyNamesAnUnsupportedHashAlgorithm(t *testing.T) {
+	t.Parallel()
+
+	const message = "unrecognized schema hash algorithm version 99; schema hash verification skipped"
+
+	code, _, stderr := executeCmdOutput(t, "snapshot", "info", "--header-only", "--json", hashAlgoFixture)
+	assert.Equal(t, cli.ExitOK, code)
+	assert.JSONEq(t, `{"issues":[{
+		"severity": "warning",
+		"code": "E_SNAPSHOT_UNSUPPORTED_HASH_ALGORITHM",
+		"message": "`+message+`",
+		"details": [{"key": "hash_algorithm", "value": "99"}]
+	}]}`, stderr)
+
+	code, _, stderr = executeCmdOutput(t, "snapshot", "info", "--header-only", hashAlgoFixture)
+	assert.Equal(t, cli.ExitOK, code)
+	assert.Equal(t, "warning[E_SNAPSHOT_UNSUPPORTED_HASH_ALGORITHM]: "+message+"\n", stderr)
+}

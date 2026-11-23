@@ -1,6 +1,7 @@
 package schema_test
 
 import (
+	"errors"
 	"slices"
 	"strings"
 	"testing"
@@ -365,15 +366,15 @@ type Derived extends Base {
 // live on an ancestor the failed reference hides.
 func TestAnnotation_Fulltext_DeferredSupertype_UnknownRefSilent(t *testing.T) {
 	t.Parallel()
-	_, res := schema.LoadString(t.Context(), `schema "main"
+	_, err := schema.LoadString(t.Context(), `schema "main"
 
 type Entity extends ext.Base {
 	id String primary
 	@@fulltext(ghost)
 }
 `, "main.yammm")
-	if res.HasCode(diag.E_UNKNOWN_ANNOTATION_TARGET) {
-		t.Errorf("@@fulltext under an unresolved supertype must defer the unknown-reference report, got: %v", res)
+	if errors.Is(err, diag.E_UNKNOWN_ANNOTATION_TARGET) {
+		t.Errorf("@@fulltext under an unresolved supertype must defer the unknown-reference report, got: %v", err)
 	}
 }
 

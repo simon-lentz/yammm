@@ -70,7 +70,7 @@ func TestResult_CodeCounts_ReturnsACopy(t *testing.T) {
 	if got := r.CodeCounts(Warning)[W_ANNOTATION_SHADOWED]; got != 1 {
 		t.Errorf("a caller's write reached the result: %d; want 1", got)
 	}
-	if OK().CodeCounts(Warning) == nil {
+	if (Result{}).CodeCounts(Warning) == nil {
 		t.Error("CodeCounts on an empty result returned nil; want an empty map")
 	}
 }

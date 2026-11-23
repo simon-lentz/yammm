@@ -63,13 +63,13 @@ func TestCoerce_AnOffsetPastEighteenHoursIsRefusedOnBothPaths(t *testing.T) {
 		{"ats", []any{"2026-08-19T12:00:00Z", "2026-08-19T12:00:00-18:01"}, 0, "list element 1: " + offsetRefusal("2026-08-19T12:00:00-18:01", "-18:01")},
 		{"ats", []any{atOffset(eighteen + 60)}, 0, "list element 0: " + offsetRefusal("2026-08-19T12:00:00+18:01", "+18:01")},
 	} {
-		valid, vres := validator.ValidateOne(t.Context(), "T", instance.RawInstance{Properties: map[string]any{"id": "x", row.prop: row.val}})
-		if vres.Err() != nil {
-			t.Fatalf("control: %s = %#v: the validator refuses it: %s", row.prop, row.val, vres)
+		valid, validateErr := validator.ValidateOne(t.Context(), "T", instance.RawInstance{Properties: map[string]any{"id": "x", row.prop: row.val}})
+		if validateErr != nil {
+			t.Fatalf("control: %s = %#v: the validator refuses it: %s", row.prop, row.val, validateErr)
 		}
 		g := graph.New(s)
-		if res := g.Add(t.Context(), valid); res.Err() != nil {
-			t.Fatalf("%s = %#v: graph.Add: %v", row.prop, row.val, res.Err())
+		if err := g.Add(t.Context(), valid); err != nil {
+			t.Fatalf("%s = %#v: graph.Add: %v", row.prop, row.val, err)
 		}
 		nodes, writeErr := NodeQueries(t.Context(), a, g.Snapshot())
 		params, paramErr := CoerceParams(map[string]any{row.prop: row.val}, types)
@@ -138,23 +138,23 @@ func TestCoerce_AnOffsetPastEighteenHoursIsRefusedAtEveryPlace(t *testing.T) {
 		nodes, edges    string
 	}{
 		{"every instant at the bound", atBound, atBound, atBound, "", ""},
-		{"a primary key and an endpoint key", past, atBound, atBound, `type "Target": primary key "at": ` + refusal, `target string://inline.yammm:Target: primary key "at": ` + refusal},
+		{"a primary key and an endpoint key", past, atBound, atBound, `type "Target": primary key "at": ` + refusal, `target type "Target": primary key "at": ` + refusal},
 		{"an edge property", atBound, past, atBound, "", `relation "LINK": property "when": ` + refusal},
 		{"a part's property", atBound, atBound, past, `part places__Note: property "seen": ` + refusal, ""},
 	} {
-		target, tres := validator.ValidateOne(t.Context(), "Target", instance.RawInstance{Properties: map[string]any{"at": row.key}})
-		holder, hres := validator.ValidateOne(t.Context(), "Holder", instance.RawInstance{Properties: map[string]any{
+		target, validateErr := validator.ValidateOne(t.Context(), "Target", instance.RawInstance{Properties: map[string]any{"at": row.key}})
+		holder, validateErr2 := validator.ValidateOne(t.Context(), "Holder", instance.RawInstance{Properties: map[string]any{
 			"id":    "h",
 			"link":  []any{map[string]any{"_target_at": row.key, "when": row.when}},
 			"notes": []any{map[string]any{"seen": row.seen}},
 		}})
-		if tres.Err() != nil || hres.Err() != nil {
-			t.Fatalf("control: %s: the validator refuses it: %s %s", row.name, tres, hres)
+		if validateErr != nil || validateErr2 != nil {
+			t.Fatalf("control: %s: the validator refuses it: %s %s", row.name, validateErr, validateErr2)
 		}
 		g := graph.New(s)
 		for _, valid := range []instance.ValidInstance{target, holder} {
-			if res := g.Add(t.Context(), valid); res.Err() != nil {
-				t.Fatalf("%s: graph.Add: %v", row.name, res.Err())
+			if err := g.Add(t.Context(), valid); err != nil {
+				t.Fatalf("%s: graph.Add: %v", row.name, err)
 			}
 		}
 		_, nodeErr := NodeQueries(t.Context(), a, g.Snapshot())

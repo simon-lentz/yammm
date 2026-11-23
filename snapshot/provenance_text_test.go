@@ -9,6 +9,7 @@ import (
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/instance/path"
+	"github.com/simon-lentz/yammm/internal/diagtest"
 	"github.com/simon-lentz/yammm/internal/snapparts"
 	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
@@ -33,9 +34,9 @@ type Holder {
 func TestMarshal_RefusesProvenanceTextThatIsNotUTF8(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()
-	s, res := schema.LoadString(ctx, provenanceTextSchema, "prov.yammm")
-	if res.HasErrors() {
-		t.Fatalf("schema: %s", res)
+	s, err := schema.LoadString(ctx, provenanceTextSchema, "prov.yammm")
+	if err != nil {
+		t.Fatalf("schema: %s", err)
 	}
 	holder, item := mustTypeID(t, s, "Holder"), mustTypeID(t, s, "Item")
 	key := immutable.WrapKey([]any{"k"})
@@ -62,7 +63,9 @@ func TestMarshal_RefusesProvenanceTextThatIsNotUTF8(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
-			data, res := snapshot.Marshal(ctx, snapparts.Rebuild[graph.Snapshot](s, parts))
+			data, res := diagtest.Issues(t, func() ([]byte, error) {
+				return snapshot.Marshal(ctx, snapparts.Rebuild[graph.Snapshot](s, parts))
+			})
 			if data != nil || res.Len() != 1 || !res.HasCode(diag.E_SNAPSHOT_MALFORMED) {
 				t.Errorf("Marshal wrote %d bytes, %s; want no bytes and one %s", len(data), res, diag.E_SNAPSHOT_MALFORMED)
 			}

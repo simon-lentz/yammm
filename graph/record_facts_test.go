@@ -27,9 +27,9 @@ type Employee {
 
 func recordFactsParts(t *testing.T) (schema.Schema, snapparts.Parts) {
 	t.Helper()
-	s, res := schema.LoadString(t.Context(), recordFactsSchema, "facts.yammm")
-	if res.HasErrors() {
-		t.Fatalf("load schema: %s", res)
+	s, err := schema.LoadString(t.Context(), recordFactsSchema, "facts.yammm")
+	if err != nil {
+		t.Fatalf("load schema: %s", err)
 	}
 	compID := mustTypeID(t, s, "Company")
 	empID := mustTypeID(t, s, "Employee")

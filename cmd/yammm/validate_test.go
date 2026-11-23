@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -63,6 +64,10 @@ func executeCmdOutput(t *testing.T, args ...string) (int, string, string) {
 func TestExitCodes(t *testing.T) {
 	t.Parallel()
 
+	// update-metadata rewrites its operand in place, so it is given a copy.
+	snap := filepath.Join(t.TempDir(), "valid_snapshot.ys")
+	copyFile(t, "testdata/valid_snapshot.ys", snap)
+
 	tests := []struct {
 		name string
 		args []string
@@ -83,7 +88,7 @@ func TestExitCodes(t *testing.T) {
 		{"snapshot info without arg or dir", []string{"snapshot", "info"}, cli.ExitUsage},
 		{"snapshot info nonexistent dir", []string{"snapshot", "info", "--dir", "/does/not/exist/yammm-cli-test"}, cli.ExitRuntime},
 		{"snapshot info --dir empty beside a file", []string{"snapshot", "info", "--dir", "", "testdata/valid_snapshot.ys"}, cli.ExitUsage},
-		{"update-metadata --set with an empty key", []string{"snapshot", "update-metadata", "-s", "=v", "testdata/valid_snapshot.ys"}, cli.ExitUsage},
+		{"update-metadata --set with an empty key", []string{"snapshot", "update-metadata", "-s", "=v", snap}, cli.ExitUsage},
 		{"snapshot save --metadata with no value", []string{"snapshot", "save", "-o", "/nonexistent/out.ys", "--metadata", "novalue", "testdata/valid.yammm", "testdata/data.json"}, cli.ExitUsage},
 		{"snapshot save --metadata with an empty key", []string{"snapshot", "save", "-o", "/nonexistent/out.ys", "--metadata", "=v", "testdata/valid.yammm", "testdata/data.json"}, cli.ExitUsage},
 		{"neo4j diff with a URI the driver refuses", []string{"neo4j", "diff", "--uri", "notascheme://x", "testdata/valid.yammm"}, cli.ExitUsage},

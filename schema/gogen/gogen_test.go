@@ -394,9 +394,9 @@ func TestMarshal_TemporalInsideList(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
-			s, res := schema.LoadString(context.Background(), "schema \"cal\"\n\n"+tc.body, "cal.yammm")
-			if res.HasErrors() {
-				t.Fatalf("load: %v", res.Err())
+			s, loadErr := schema.LoadString(context.Background(), "schema \"cal\"\n\n"+tc.body, "cal.yammm")
+			if loadErr != nil {
+				t.Fatalf("load: %v", loadErr)
 			}
 			got, err := gogen.Marshal(s)
 			if err != nil {
@@ -651,16 +651,16 @@ func TestMarshal_ModuleRoot_CwdIndependent(t *testing.T) {
 
 // loadModrootSchema loads the modroot fixture entry with the fixture tree's
 // top directory as the module root (module root != entry directory).
-func loadModrootSchema(t *testing.T, opts ...schema.LoadOption) schema.Schema {
+func loadModrootSchema(t *testing.T, opts ...schema.Option) schema.Schema {
 	t.Helper()
 	root, err := filepath.Abs(filepath.Join("testdata", "modroot"))
 	if err != nil {
 		t.Fatalf("abs root: %v", err)
 	}
 	entry := filepath.Join(root, "a", "b", "entry.yammm")
-	s, res := schema.Load(context.Background(), entry, append([]schema.LoadOption{schema.WithModuleRoot(root)}, opts...)...)
-	if res.HasErrors() {
-		t.Fatalf("load modroot entry: %v", res.Err())
+	s, loadErr := schema.Load(context.Background(), entry, append([]schema.Option{schema.WithModuleRoot(root)}, opts...)...)
+	if loadErr != nil {
+		t.Fatalf("load modroot entry: %v", loadErr)
 	}
 	return s
 }
@@ -672,9 +672,9 @@ func loadSchema(t *testing.T, name string) schema.Schema {
 	if err != nil {
 		t.Fatalf("abs path: %v", err)
 	}
-	s, res := schema.Load(context.Background(), path)
-	if res.HasErrors() {
-		t.Fatalf("load %s: %v", name, res.Err())
+	s, loadErr := schema.Load(context.Background(), path)
+	if loadErr != nil {
+		t.Fatalf("load %s: %v", name, loadErr)
 	}
 	return s
 }

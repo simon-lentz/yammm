@@ -57,10 +57,10 @@ func TestMarshal_WithPackageNameAdmitsAValidName(t *testing.T) {
 // TestMarshal_DerivedPackageNameIsNeverMain pins that a schema named "Main"
 // derives "main_": a file of declarations alone cannot build as package main.
 func TestMarshal_DerivedPackageNameIsNeverMain(t *testing.T) {
-	s, res := schema.LoadString(context.Background(),
+	s, loadErr := schema.LoadString(context.Background(),
 		"schema \"Main\"\n\ntype County {\n\tid String primary\n}\n", "main.yammm")
-	if res.HasErrors() {
-		t.Fatalf("load: %v", res.Err())
+	if loadErr != nil {
+		t.Fatalf("load: %v", loadErr)
 	}
 	got, err := gogen.Marshal(s)
 	if err != nil {

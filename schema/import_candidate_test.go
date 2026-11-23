@@ -54,8 +54,8 @@ func TestImportFile_ExtensionlessFileIsNotAnImport(t *testing.T) {
 		"parts":       importedPart, // no extension
 	})
 
-	_, res := schema.Load(t.Context(), filepath.Join(dir, "entry.yammm"))
-	if !res.HasErrors() {
+	_, err := schema.Load(t.Context(), filepath.Join(dir, "entry.yammm"))
+	if err == nil {
 		t.Fatal("a file named \"parts\" resolved an import written as \"./parts\"")
 	}
 }
@@ -68,8 +68,8 @@ func TestImportFile_SuffixedFileStillResolves(t *testing.T) {
 		"parts.yammm": importedPart,
 	})
 
-	if _, res := schema.Load(t.Context(), filepath.Join(dir, "entry.yammm")); res.HasErrors() {
-		t.Errorf("an extensionless import did not resolve its .yammm file: %s", res)
+	if _, err := schema.Load(t.Context(), filepath.Join(dir, "entry.yammm")); err != nil {
+		t.Errorf("an extensionless import did not resolve its .yammm file: %s", err)
 	}
 }
 
@@ -80,7 +80,7 @@ func TestImportFile_ExplicitSuffixIsUnchanged(t *testing.T) {
 		"parts.yammm": importedPart,
 	})
 
-	if _, res := schema.Load(t.Context(), filepath.Join(dir, "entry.yammm")); res.HasErrors() {
-		t.Errorf("an explicit .yammm import did not resolve: %s", res)
+	if _, err := schema.Load(t.Context(), filepath.Join(dir, "entry.yammm")); err != nil {
+		t.Errorf("an explicit .yammm import did not resolve: %s", err)
 	}
 }

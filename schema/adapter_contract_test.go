@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/simon-lentz/yammm/internal/diagtest"
 	"github.com/simon-lentz/yammm/internal/yammmtest/sourcetest"
 
 	"github.com/simon-lentz/yammm/diag"
@@ -28,9 +29,9 @@ func TestAdapter_DataTypeRefSpanCoversTheQualifier(t *testing.T) {
 		"\taddress Email\n" +
 		"}\n"
 
-	s, res := schema.LoadString(context.Background(), src, "ref.yammm")
+	s, err := schema.LoadString(context.Background(), src, "ref.yammm")
 	if s.IsZero() {
-		t.Fatalf("fixture does not load: %v", res)
+		t.Fatalf("fixture does not load: %v", err)
 	}
 
 	prop := findProperty(t, s, "Person", "address")
@@ -87,7 +88,9 @@ func TestAdapter_NoSchemaNameStopsBeforeCompletion(t *testing.T) {
 
 	const src = "type Alpha {\n\tid Missing\n\tname String required\n}\n"
 
-	s, res := schema.LoadString(context.Background(), src, "headerless.yammm")
+	s, res := diagtest.Capture(t, func(warn func(diag.Issue)) (schema.Schema, error) {
+		return schema.LoadString(context.Background(), src, "headerless.yammm", schema.WithWarnings(warn))
+	})
 	if !s.IsZero() {
 		t.Fatal("a source with no schema name must not produce a schema")
 	}

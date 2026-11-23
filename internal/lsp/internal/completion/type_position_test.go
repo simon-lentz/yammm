@@ -6,6 +6,7 @@ import (
 	"slices"
 	"testing"
 
+	"github.com/simon-lentz/yammm/internal/diagtest"
 	"github.com/simon-lentz/yammm/internal/lsp/internal/analysis"
 )
 
@@ -16,7 +17,7 @@ func TestTypePositions_AFailedLoadCompletesBuiltinsAlone(t *testing.T) {
 	if err := os.WriteFile(bad, text, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	snap, err := analysis.NewAnalyzer(nil).Analyze(t.Context(), bad, map[string][]byte{bad: text}, dir)
+	snap, err := analysis.NewAnalyzer(nil).Analyze(t.Context(), bad, map[string][]byte{bad: text}, dir, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -41,8 +42,8 @@ func TestPropertyTypeCompletions_ImportedDatatypesComeFromTheImport(t *testing.T
 	if err := os.WriteFile(filepath.Join(dir, "parts.yammm"), []byte("schema \"parts\"\n\ntype Word = String\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	snap, err := analysis.NewAnalyzer(nil).Analyze(t.Context(), entry, map[string][]byte{entry: text}, dir)
-	if err != nil || !snap.Result.OK() {
+	snap, err := analysis.NewAnalyzer(nil).Analyze(t.Context(), entry, map[string][]byte{entry: text}, dir, true)
+	if err != nil || diagtest.Err(snap.Result) != nil {
 		t.Fatal(err, snap.Result)
 	}
 	var labels []string

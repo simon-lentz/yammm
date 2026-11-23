@@ -143,9 +143,9 @@ func loadIdentitySchema(t *testing.T) schema.Schema {
 		"base.yammm":  []byte(identityBaseSource),
 		"deep.yammm":  []byte(identityDeepSource),
 	}
-	s, result := schema.LoadSourcesWithEntry(t.Context(), sources, "entry.yammm", ".", schema.WithSourcesOnly(true))
-	if result.HasErrors() {
-		t.Fatalf("load identity fixture: %s", result)
+	s, err := schema.LoadSourcesWithEntry(t.Context(), sources, "entry.yammm", schema.WithSourcesOnly(true), schema.WithModuleRoot("."))
+	if err != nil {
+		t.Fatalf("load identity fixture: %s", err)
 	}
 	return s
 }
@@ -746,7 +746,7 @@ func TestIdentityOracle_RoundTripPreservesIdentity(t *testing.T) {
 		"geo.Part under IMPORTED":         composedCase("IMPORTED", "", "Part", "p4"),
 		"geo.Part under undeclared GHOST": composedCase("GHOST", "", "Part", "p5"),
 	} {
-		if _, res := snapshot.Unmarshal(ctx, snappartstest.Document(t, s, build(t, s)), s); !res.HasErrors() {
+		if _, err := snapshot.Unmarshal(ctx, snappartstest.Document(t, s, build(t, s)), s); err == nil {
 			t.Errorf("Load admitted %s, which a validator refuses", name)
 		}
 	}
@@ -762,12 +762,12 @@ func TestIdentityOracle_RoundTripPreservesIdentity(t *testing.T) {
 			assertTagFormConsistent(t, s, built, "before the round trip")
 			want := collectIdentities(built)
 
-			data, result := snapshot.Marshal(ctx, built)
-			if err := result.Err(); err != nil {
+			data, readErr := snapshot.Marshal(ctx, built)
+			if err := readErr; err != nil {
 				t.Fatalf("marshal: %v", err)
 			}
-			loaded, result := snapshot.Unmarshal(ctx, data, s)
-			if err := result.Err(); err != nil {
+			loaded, readErr := snapshot.Unmarshal(ctx, data, s)
+			if err := readErr; err != nil {
 				t.Fatalf("load rejected a document Marshal produced: %v\n%s", err, data)
 			}
 
@@ -797,16 +797,16 @@ func TestIdentityOracle_ByteFixpoint(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			built := snappartstest.Loaded(t, s, tc.build(t, s))
-			first, result := snapshot.Marshal(ctx, built)
-			if err := result.Err(); err != nil {
+			first, readErr := snapshot.Marshal(ctx, built)
+			if err := readErr; err != nil {
 				t.Fatalf("first marshal: %v", err)
 			}
-			loaded, result := snapshot.Unmarshal(ctx, first, s)
-			if err := result.Err(); err != nil {
+			loaded, readErr := snapshot.Unmarshal(ctx, first, s)
+			if err := readErr; err != nil {
 				t.Fatalf("load: %v", err)
 			}
-			second, result := snapshot.Marshal(ctx, loaded)
-			if err := result.Err(); err != nil {
+			second, readErr := snapshot.Marshal(ctx, loaded)
+			if err := readErr; err != nil {
 				t.Fatalf("second marshal: %v", err)
 			}
 			if string(first) != string(second) {

@@ -8,6 +8,7 @@ import (
 
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/graph"
+	"github.com/simon-lentz/yammm/internal/diagtest"
 	"github.com/simon-lentz/yammm/internal/instancetest"
 	"github.com/simon-lentz/yammm/schema"
 	"github.com/simon-lentz/yammm/snapshot"
@@ -33,9 +34,9 @@ type T {
 // break is still reported.
 func TestRevalidation_ATargetKeyIsJudgedOnceAtItsRoot(t *testing.T) {
 	t.Parallel()
-	s, res := schema.LoadString(t.Context(), judgedOnceSchema, "judged_once.yammm")
-	if res.HasErrors() {
-		t.Fatalf("load schema: %s", res)
+	s, err := schema.LoadString(t.Context(), judgedOnceSchema, "judged_once.yammm")
+	if err != nil {
+		t.Fatalf("load schema: %s", err)
 	}
 	g := graph.New(s)
 	for _, in := range []struct {
@@ -46,13 +47,13 @@ func TestRevalidation_ATargetKeyIsJudgedOnceAtItsRoot(t *testing.T) {
 		{"T", map[string]any{"id": "t1", "size": int64(1), "to_n": map[string]any{"_target_id": "n1"}}},
 		{"T", map[string]any{"id": "t2", "size": int64(2), "to_n": map[string]any{"_target_id": "n1"}}},
 	} {
-		if r := g.Add(t.Context(), instancetest.Valid(t, s, in.typ, in.props)); !r.OK() {
-			t.Fatalf("add %s: %s", in.typ, r)
+		if err := g.Add(t.Context(), instancetest.Valid(t, s, in.typ, in.props)); err != nil {
+			t.Fatalf("add %s: %s", in.typ, err)
 		}
 	}
-	data, mr := snapshot.Marshal(t.Context(), g.Snapshot())
-	if mr.HasErrors() {
-		t.Fatalf("marshal: %s", mr)
+	data, readErr := snapshot.Marshal(t.Context(), g.Snapshot())
+	if readErr != nil {
+		t.Fatalf("marshal: %s", readErr)
 	}
 	// N's key leaves its bounds at every place the document states it, and t2
 	// breaks its invariant.
@@ -63,11 +64,15 @@ func TestRevalidation_ATargetKeyIsJudgedOnceAtItsRoot(t *testing.T) {
 	data = rehashDocument(t, bytes.Replace(data, []byte(`"size":2`), []byte(`"size":20`), 1))
 
 	want := map[diag.Code]int{diag.E_CONSTRAINT_FAIL: 1, diag.E_INVARIANT_FAIL: 1}
-	_, lres := snapshot.Unmarshal(t.Context(), data, s, snapshot.WithRevalidation(diag.Error))
+	_, lres := diagtest.Capture(t, func(warn func(diag.Issue)) (graph.Snapshot, error) {
+		return snapshot.Unmarshal(t.Context(), data, s, snapshot.WithRevalidation(diag.Error), snapshot.WithWarnings(warn))
+	})
 	if got := errorCodes(lres); !maps.Equal(got, want) {
 		t.Errorf("Load: %v, want %v:\n%s", got, want, lres)
 	}
-	if got := errorCodes(snapshot.Verify(t.Context(), data, s, snapshot.WithRevalidation(diag.Error))); !maps.Equal(got, want) {
+	if got := errorCodes(diagtest.CaptureErr(t, func(warn func(diag.Issue)) error {
+		return snapshot.Verify(t.Context(), data, s, snapshot.WithRevalidation(diag.Error), snapshot.WithWarnings(warn))
+	})); !maps.Equal(got, want) {
 		t.Errorf("Verify: %v, want %v", got, want)
 	}
 }
@@ -91,19 +96,19 @@ type S {
 // would name is still revalidated and its own break still reported.
 func TestRevalidation_ARecordsRespelledSourceLeavesTheRootJudged(t *testing.T) {
 	t.Parallel()
-	s, res := schema.LoadString(t.Context(), respelledSourceSchema, "respelled_source.yammm")
-	if res.HasErrors() {
-		t.Fatalf("load schema: %s", res)
+	s, err := schema.LoadString(t.Context(), respelledSourceSchema, "respelled_source.yammm")
+	if err != nil {
+		t.Fatalf("load schema: %s", err)
 	}
 	const id = "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11"
 	g := graph.New(s)
 	in := instancetest.Valid(t, s, "S", map[string]any{"id": id, "n": int64(1), "to_u": []any{map[string]any{"_target_id": "u9"}}})
-	if r := g.Add(t.Context(), in); r.HasErrors() {
-		t.Fatalf("add S: %s", r)
+	if err := g.Add(t.Context(), in); err != nil {
+		t.Fatalf("add S: %s", err)
 	}
-	data, mr := snapshot.Marshal(t.Context(), g.Snapshot())
-	if mr.HasErrors() {
-		t.Fatalf("marshal: %s", mr)
+	data, readErr := snapshot.Marshal(t.Context(), g.Snapshot())
+	if readErr != nil {
+		t.Fatalf("marshal: %s", readErr)
 	}
 	source, n := `"source_key":["`+id+`"]`, `"n":1`
 	if bytes.Count(data, []byte(source)) != 1 || bytes.Count(data, []byte(n)) != 1 {
@@ -114,10 +119,14 @@ func TestRevalidation_ARecordsRespelledSourceLeavesTheRootJudged(t *testing.T) {
 
 	want := map[diag.Code]int{diag.E_SNAPSHOT_MALFORMED: 1, diag.E_INVARIANT_FAIL: 1}
 	revalidate := snapshot.WithRevalidation(diag.Error)
-	if _, lres := snapshot.Unmarshal(t.Context(), data, s, revalidate); !maps.Equal(errorCodes(lres), want) {
+	if _, lres := diagtest.Capture(t, func(warn func(diag.Issue)) (graph.Snapshot, error) {
+		return snapshot.Unmarshal(t.Context(), data, s, revalidate, snapshot.WithWarnings(warn))
+	}); !maps.Equal(errorCodes(lres), want) {
 		t.Errorf("Load: %v, want %v:\n%s", errorCodes(lres), want, lres)
 	}
-	if vres := snapshot.Verify(t.Context(), data, s, revalidate); !maps.Equal(errorCodes(vres), want) {
+	if vres := diagtest.CaptureErr(t, func(warn func(diag.Issue)) error {
+		return snapshot.Verify(t.Context(), data, s, revalidate, snapshot.WithWarnings(warn))
+	}); !maps.Equal(errorCodes(vres), want) {
 		t.Errorf("Verify: %v, want %v:\n%s", errorCodes(vres), want, vres)
 	}
 }

@@ -129,10 +129,10 @@ func TestCoerceParams_SendsWhatTheWritePathSendsForTheValidatedValue(t *testing.
 	for prop, values := range rows {
 		for _, v := range values {
 			params, coerceErr := CoerceParams(map[string]any{prop: v}, types)
-			valid, vres := validator.ValidateOne(t.Context(), "T", instance.RawInstance{Properties: map[string]any{"id": "x", prop: v}})
-			if vres.Err() != nil {
+			valid, validateErr := validator.ValidateOne(t.Context(), "T", instance.RawInstance{Properties: map[string]any{"id": "x", prop: v}})
+			if validateErr != nil {
 				if coerceErr == nil {
-					t.Errorf("%s = %#v: the validator refuses it (%s) and CoerceParams returned %#v", prop, v, vres, params[prop])
+					t.Errorf("%s = %#v: the validator refuses it (%s) and CoerceParams returned %#v", prop, v, validateErr, params[prop])
 				} else if !errors.Is(coerceErr, ErrUnrepresentable) {
 					t.Errorf("%s = %#v: the refusal %v does not match ErrUnrepresentable", prop, v, coerceErr)
 				}
@@ -143,8 +143,8 @@ func TestCoerceParams_SendsWhatTheWritePathSendsForTheValidatedValue(t *testing.
 				continue
 			}
 			g := graph.New(s)
-			if res := g.Add(t.Context(), valid); res.Err() != nil {
-				t.Fatalf("%s = %#v: graph.Add: %v", prop, v, res.Err())
+			if err := g.Add(t.Context(), valid); err != nil {
+				t.Fatalf("%s = %#v: graph.Add: %v", prop, v, err)
 			}
 			nodes, err := NodeQueries(t.Context(), a, g.Snapshot())
 			if err != nil {
@@ -167,7 +167,7 @@ func TestCoerceParams_RefusesADriverDate(t *testing.T) {
 	typ, _ := s.Type("T")
 	types := ParamTypesForType(typ)
 	day := dbtype.Date(time.Date(2024, 1, 2, 0, 0, 0, 0, time.UTC))
-	if _, res := instance.NewValidator(s).ValidateOne(t.Context(), "T", instance.RawInstance{Properties: map[string]any{"id": "x", "d": day}}); res.Err() == nil {
+	if _, err := instance.NewValidator(s).ValidateOne(t.Context(), "T", instance.RawInstance{Properties: map[string]any{"id": "x", "d": day}}); err == nil {
 		t.Error("control: the validator accepts a dbtype.Date at a Date")
 	}
 	for _, tc := range []struct {

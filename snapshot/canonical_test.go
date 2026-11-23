@@ -52,9 +52,9 @@ type Sensor {
 
 func loadTemporalSchema(t *testing.T) schema.Schema {
 	t.Helper()
-	s, result := schema.LoadString(t.Context(), temporalTestSchema, "temporaltest.yammm")
-	if result.HasErrors() {
-		t.Fatalf("load temporaltest schema: %s", result)
+	s, err := schema.LoadString(t.Context(), temporalTestSchema, "temporaltest.yammm")
+	if err != nil {
+		t.Fatalf("load temporaltest schema: %s", err)
 	}
 	return s
 }
@@ -103,7 +103,9 @@ func buildTemporalSnapshot(t *testing.T, s schema.Schema, native bool) graph.Sna
 	g := graph.New(s)
 
 	station := mustValidate(t, v, "Station", map[string]any{"id": "st1"})
-	g.Add(ctx, station)
+	if err := g.Add(ctx, station); err != nil {
+		t.Errorf("Add: %v", err)
+	}
 
 	raw := instance.RawInstance{Properties: temporalProps("s1", native)}
 	raw.Properties["feed"] = map[string]any{
@@ -114,11 +116,13 @@ func buildTemporalSnapshot(t *testing.T, s schema.Schema, native bool) graph.Sna
 		"name":     "r1",
 		"taken_at": edgeSeenAt(native),
 	}}
-	sensor, res := v.ValidateOne(ctx, "Sensor", raw)
-	if !res.OK() {
-		t.Fatalf("validating Sensor: %s", res)
+	sensor, err := v.ValidateOne(ctx, "Sensor", raw)
+	if err != nil {
+		t.Fatalf("validating Sensor: %s", err)
 	}
-	g.Add(ctx, sensor)
+	if err := g.Add(ctx, sensor); err != nil {
+		t.Errorf("Add: %v", err)
+	}
 
 	return g.Snapshot()
 }
@@ -132,9 +136,9 @@ func edgeSeenAt(native bool) any {
 
 func mustValidate(t *testing.T, v *instance.Validator, typeName string, props map[string]any) instance.ValidInstance {
 	t.Helper()
-	vi, res := v.ValidateOne(t.Context(), typeName, instance.RawInstance{Properties: props})
-	if !res.OK() {
-		t.Fatalf("validating %s: %s", typeName, res)
+	vi, err := v.ValidateOne(t.Context(), typeName, instance.RawInstance{Properties: props})
+	if err != nil {
+		t.Fatalf("validating %s: %s", typeName, err)
 	}
 	return vi
 }
@@ -147,12 +151,12 @@ func TestMarshal_TemporalKindsReachOneFixpoint(t *testing.T) {
 	ctx := context.Background()
 	s := loadTemporalSchema(t)
 
-	fromNative, result := snapshot.Marshal(ctx, buildTemporalSnapshot(t, s, true))
-	if err := result.Err(); err != nil {
+	fromNative, readErr := snapshot.Marshal(ctx, buildTemporalSnapshot(t, s, true))
+	if err := readErr; err != nil {
 		t.Fatalf("Marshal (go-native): %v", err)
 	}
-	fromStrings, result := snapshot.Marshal(ctx, buildTemporalSnapshot(t, s, false))
-	if err := result.Err(); err != nil {
+	fromStrings, readErr := snapshot.Marshal(ctx, buildTemporalSnapshot(t, s, false))
+	if err := readErr; err != nil {
 		t.Fatalf("Marshal (string): %v", err)
 	}
 
@@ -177,12 +181,12 @@ func TestMarshal_TemporalKindsReachOneFixpoint(t *testing.T) {
 		}
 	}
 
-	loaded, lres := snapshot.Unmarshal(ctx, fromNative, s)
-	if err := lres.Err(); err != nil {
+	loaded, readErr2 := snapshot.Unmarshal(ctx, fromNative, s)
+	if err := readErr2; err != nil {
 		t.Fatalf("Load: %v", err)
 	}
 	again, r2 := snapshot.Marshal(ctx, loaded)
-	if err := r2.Err(); err != nil {
+	if err := r2; err != nil {
 		t.Fatalf("second Marshal: %v", err)
 	}
 	if string(again) != doc {
@@ -216,8 +220,8 @@ func TestMarshal_CanonicalizesALoadedValue(t *testing.T) {
 		"samples":    []any{"2026-08-19T12:00:00.500+00:00"},
 	})
 
-	data, result := snapshot.Marshal(context.Background(), snap)
-	if err := result.Err(); err != nil {
+	data, readErr := snapshot.Marshal(context.Background(), snap)
+	if err := readErr; err != nil {
 		t.Fatalf("Marshal: %v", err)
 	}
 	doc := string(data)
@@ -253,8 +257,8 @@ func TestMarshal_HealsOrPassesThroughNonConformingText(t *testing.T) {
 		"run_id":    "not-a-uuid",
 	})
 
-	data, result := snapshot.Marshal(ctx, snap)
-	if err := result.Err(); err != nil {
+	data, readErr := snapshot.Marshal(ctx, snap)
+	if err := readErr; err != nil {
 		t.Fatalf("Marshal refused a non-conforming value: %v", err)
 	}
 	doc := string(data)
@@ -270,12 +274,12 @@ func TestMarshal_HealsOrPassesThroughNonConformingText(t *testing.T) {
 	}
 
 	// Healing is idempotent, so the healed document is the fixpoint.
-	loaded, lres := snapshot.Unmarshal(ctx, data, s)
-	if err := lres.Err(); err != nil {
+	loaded, readErr2 := snapshot.Unmarshal(ctx, data, s)
+	if err := readErr2; err != nil {
 		t.Fatalf("Load: %v", err)
 	}
 	again, r2 := snapshot.Marshal(ctx, loaded)
-	if err := r2.Err(); err != nil {
+	if err := r2; err != nil {
 		t.Fatalf("second Marshal: %v", err)
 	}
 	if string(again) != doc {
@@ -295,8 +299,8 @@ func TestLoad_CanonicalizesNonConformingWireText(t *testing.T) {
 	ctx := context.Background()
 	s := loadTemporalSchema(t)
 
-	data, result := snapshot.Marshal(ctx, buildTemporalSnapshot(t, s, false))
-	if err := result.Err(); err != nil {
+	data, readErr := snapshot.Marshal(ctx, buildTemporalSnapshot(t, s, false))
+	if err := readErr; err != nil {
 		t.Fatalf("Marshal: %v", err)
 	}
 
@@ -307,8 +311,8 @@ func TestLoad_CanonicalizesNonConformingWireText(t *testing.T) {
 		t.Fatalf("fixture did not carry %s; the edit is a no-op", canonical)
 	}
 
-	loaded, lres := snapshot.Unmarshal(ctx, []byte(edited), s, snapshot.WithIntegrityCheck(false))
-	if err := lres.Err(); err != nil {
+	loaded, readErr2 := snapshot.Unmarshal(ctx, []byte(edited), s, snapshot.WithIntegrityCheck(false))
+	if err := readErr2; err != nil {
 		t.Fatalf("Load: %v", err)
 	}
 
@@ -332,8 +336,8 @@ func TestMarshal_TemporalGoldenBytes(t *testing.T) {
 	s := loadTemporalSchema(t)
 	snap := buildTemporalSnapshot(t, s, true)
 
-	data, result := snapshot.Marshal(t.Context(), snap, snapshot.WithIndent("\t"))
-	if err := result.Err(); err != nil {
+	data, readErr := snapshot.Marshal(t.Context(), snap, snapshot.WithIndent("\t"))
+	if err := readErr; err != nil {
 		t.Fatalf("Marshal: %v", err)
 	}
 	yammmtest.Golden(t, "marshal_temporal_representative.ys", data)

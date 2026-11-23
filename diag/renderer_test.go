@@ -272,10 +272,10 @@ func TestRenderer_FormatResult(t *testing.T) {
 
 func TestRenderer_FormatResult_Empty(t *testing.T) {
 	r := NewRenderer()
-	output := r.FormatResult(OK())
+	output := r.FormatResult(Result{})
 
 	if output != "" {
-		t.Errorf("FormatResult(OK()) should be empty, got: %q", output)
+		t.Errorf("FormatResult(Result{}) should be empty, got: %q", output)
 	}
 }
 

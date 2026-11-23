@@ -1,6 +1,7 @@
 package graph_test
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/simon-lentz/yammm/diag"
@@ -26,23 +27,23 @@ part type Wheel {
 // nothing about the shape settles multiplicity and the validator has to.
 func TestValidateOne_InlineComposition_OneCardinalityRefused(t *testing.T) {
 	ctx := t.Context()
-	s, res := schema.LoadString(ctx, toOneCompositionSchema, "test://to_one_composition.yammm")
-	if res.HasErrors() {
-		t.Fatalf("schema load: %v", res.Err())
+	s, err := schema.LoadString(ctx, toOneCompositionSchema, "test://to_one_composition.yammm")
+	if err != nil {
+		t.Fatalf("schema load: %v", err)
 	}
 
 	v := instance.NewValidator(s)
-	_, vres := v.ValidateOne(ctx, "Car", instance.RawInstance{Properties: map[string]any{
+	_, validateErr := v.ValidateOne(ctx, "Car", instance.RawInstance{Properties: map[string]any{
 		"vin": "v1",
 		"spare": []any{
 			map[string]any{"position": "left"},
 			map[string]any{"position": "right"},
 		},
 	}})
-	if vres.OK() {
+	if validateErr == nil {
 		t.Fatal("two children under a (one) composition passed validation")
 	}
-	if !vres.HasCode(diag.E_DUPLICATE_COMPOSED_PK) {
-		t.Fatalf("want E_DUPLICATE_COMPOSED_PK, got %s", vres.String())
+	if !errors.Is(validateErr, diag.E_DUPLICATE_COMPOSED_PK) {
+		t.Fatalf("want E_DUPLICATE_COMPOSED_PK, got %s", validateErr)
 	}
 }

@@ -48,9 +48,9 @@ type T {
 	for name, row := range rows {
 		input[name] = row.raw
 	}
-	inst, res := instance.NewValidator(s).ValidateOne(t.Context(), "T", instance.RawInstance{Properties: input})
-	if !res.OK() {
-		t.Fatal(res)
+	inst, err := instance.NewValidator(s).ValidateOne(t.Context(), "T", instance.RawInstance{Properties: input})
+	if err != nil {
+		t.Fatal(err)
 	}
 	for name, row := range rows {
 		t.Run(name, func(t *testing.T) {

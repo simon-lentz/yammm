@@ -2,12 +2,14 @@ package cypher
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
 	"testing"
 
 	"github.com/simon-lentz/yammm/diag"
+	"github.com/simon-lentz/yammm/internal/diagtest"
 	"github.com/simon-lentz/yammm/internal/yammmtest"
 	"github.com/simon-lentz/yammm/schema"
 )
@@ -28,8 +30,8 @@ func TestConstraints_StatementGolden(t *testing.T) {
 		t.Run(fixture, func(t *testing.T) {
 			t.Parallel()
 			s := loadSchema(t, fixture+".yammm")
-			stmts, result := constraintStatements(Config{}, s)
-			if err := result.Err(); err != nil {
+			stmts, result := constraintStatements(t, Config{}, s)
+			if err := diagtest.Err(result); err != nil {
 				t.Fatalf("Constraints(%s): %v", fixture, err)
 			}
 			yammmtest.Golden(t, "constraints_"+fixture, []byte(strings.Join(stmts, "\n")+"\n"))
@@ -42,8 +44,8 @@ func TestConstraints_NamedConstraints(t *testing.T) {
 	s := loadSchema(t, "basic.yammm")
 	a := Config{} // Default: named=true.
 
-	stmts, result := constraintStatements(a, s)
-	if err := result.Err(); err != nil {
+	stmts, result := constraintStatements(t, a, s)
+	if err := diagtest.Err(result); err != nil {
 		t.Fatalf("Constraints failed: %v", err)
 	}
 
@@ -67,8 +69,8 @@ func TestConstraints_NodeKey(t *testing.T) {
 	s := loadSchema(t, "basic.yammm")
 	a := Config{NodeKeys: true}
 
-	stmts, result := constraintStatements(a, s)
-	if err := result.Err(); err != nil {
+	stmts, result := constraintStatements(t, a, s)
+	if err := diagtest.Err(result); err != nil {
 		t.Fatalf("Constraints failed: %v", err)
 	}
 
@@ -88,8 +90,8 @@ func TestConstraints_NodeKeyComposite(t *testing.T) {
 	s := loadSchema(t, "composite_pk.yammm")
 	a := Config{NodeKeys: true}
 
-	stmts, result := constraintStatements(a, s)
-	if err := result.Err(); err != nil {
+	stmts, result := constraintStatements(t, a, s)
+	if err := diagtest.Err(result); err != nil {
 		t.Fatalf("Constraints failed: %v", err)
 	}
 
@@ -127,8 +129,8 @@ func TestConstraints_NodeKeyCommunity_DegradesToUnique(t *testing.T) {
 	s := loadSchema(t, "basic.yammm")
 	a := Config{NodeKeys: true, Edition: Community}
 
-	stmts, result := constraintStatements(a, s)
-	if err := result.Err(); err != nil {
+	stmts, result := constraintStatements(t, a, s)
+	if err := diagtest.Err(result); err != nil {
 		t.Fatalf("Constraints failed: %v", err)
 	}
 
@@ -155,12 +157,12 @@ func TestConstraints_NodeKeyCommunity_MatchesPlainCommunity(t *testing.T) {
 			t.Parallel()
 			s := loadSchema(t, fixture+".yammm")
 
-			withNodeKeys, r1 := constraintStatements(Config{NodeKeys: true, Edition: Community}, s)
-			if err := r1.Err(); err != nil {
+			withNodeKeys, r1 := constraintStatements(t, Config{NodeKeys: true, Edition: Community}, s)
+			if err := diagtest.Err(r1); err != nil {
 				t.Fatalf("Constraints(node-keys): %v", err)
 			}
-			plain, r2 := constraintStatements(Config{Edition: Community}, s)
-			if err := r2.Err(); err != nil {
+			plain, r2 := constraintStatements(t, Config{Edition: Community}, s)
+			if err := diagtest.Err(r2); err != nil {
 				t.Fatalf("Constraints(plain): %v", err)
 			}
 
@@ -179,8 +181,8 @@ func TestConstraints_NodeKeyCommunity_Composite(t *testing.T) {
 	s := loadSchema(t, "composite_pk.yammm")
 	a := Config{NodeKeys: true, Edition: Community}
 
-	stmts, result := constraintStatements(a, s)
-	if err := result.Err(); err != nil {
+	stmts, result := constraintStatements(t, a, s)
+	if err := diagtest.Err(result); err != nil {
 		t.Fatalf("Constraints failed: %v", err)
 	}
 
@@ -197,13 +199,13 @@ func TestConstraints_NodeKeyCommunity_WarnsOncePerCall(t *testing.T) {
 	s := loadSchema(t, "multiple_types.yammm")
 	a := Config{NodeKeys: true, Edition: Community}
 
-	_, result := constraintStatements(a, s)
-	if err := result.Err(); err != nil {
+	_, result := constraintStatements(t, a, s)
+	if err := diagtest.Err(result); err != nil {
 		t.Fatalf("Constraints failed: %v", err)
 	}
 
 	// A warning, not an error: the caller still gets usable output.
-	if result.HasErrors() {
+	if diagtest.Err(result) != nil {
 		t.Errorf("degrade must not fail the call: %v", result)
 	}
 	if got := countCode(result, W_NEO4J_NODE_KEY_UNSUPPORTED); got != 1 {
@@ -296,8 +298,10 @@ func TestConstraints_NodeKeyWarning_OnlyOnTheDegrade(t *testing.T) {
 			t.Parallel()
 			s := loadSchema(t, "basic.yammm")
 
-			_, result := tc.c.Constraints(s)
-			if err := result.Err(); err != nil {
+			_, result := diagtest.Capture(t, func(warn func(diag.Issue)) ([]Constraint, error) {
+				return tc.c.Constraints(s, WithWarnings(warn))
+			})
+			if err := diagtest.Err(result); err != nil {
 				t.Fatalf("Constraints failed: %v", err)
 			}
 			if result.HasCode(W_NEO4J_NODE_KEY_UNSUPPORTED) {
@@ -312,8 +316,8 @@ func TestConstraints_CommunityEdition(t *testing.T) {
 	s := loadSchema(t, "basic.yammm")
 	a := Config{Edition: Community}
 
-	stmts, result := constraintStatements(a, s)
-	if err := result.Err(); err != nil {
+	stmts, result := constraintStatements(t, a, s)
+	if err := diagtest.Err(result); err != nil {
 		t.Fatalf("Constraints failed: %v", err)
 	}
 
@@ -333,8 +337,8 @@ func TestConstraints_RequiredOnlyTypes(t *testing.T) {
 	s := loadSchema(t, "basic.yammm")
 	a := Config{TypeConstraints: RequiredProperties}
 
-	stmts, result := constraintStatements(a, s)
-	if err := result.Err(); err != nil {
+	stmts, result := constraintStatements(t, a, s)
+	if err := diagtest.Err(result); err != nil {
 		t.Fatalf("Constraints failed: %v", err)
 	}
 
@@ -366,8 +370,8 @@ func TestConstraints_TypeConstraintsDisabled(t *testing.T) {
 	s := loadSchema(t, "list_properties.yammm")
 	a := Config{TypeConstraints: NoProperties}
 
-	stmts, result := constraintStatements(a, s)
-	if err := result.Err(); err != nil {
+	stmts, result := constraintStatements(t, a, s)
+	if err := diagtest.Err(result); err != nil {
 		t.Fatalf("Constraints failed: %v", err)
 	}
 
@@ -398,12 +402,12 @@ func TestConstraints_DeterministicOrder(t *testing.T) {
 	s := loadSchema(t, "multiple_types.yammm")
 	a := Config{}
 
-	stmts1, result := constraintStatements(a, s)
-	if err := result.Err(); err != nil {
+	stmts1, result := constraintStatements(t, a, s)
+	if err := diagtest.Err(result); err != nil {
 		t.Fatalf("first call failed: %v", err)
 	}
-	stmts2, result := constraintStatements(a, s)
-	if err := result.Err(); err != nil {
+	stmts2, result := constraintStatements(t, a, s)
+	if err := diagtest.Err(result); err != nil {
 		t.Fatalf("second call failed: %v", err)
 	}
 
@@ -419,8 +423,8 @@ func TestConstraints_Golden(t *testing.T) {
 	t.Parallel()
 	s := loadSchema(t, "basic.yammm")
 
-	constraints, result := Config{}.Constraints(s)
-	if err := result.Err(); err != nil {
+	constraints, genErr := Config{}.Constraints(s)
+	if err := genErr; err != nil {
 		t.Fatalf("Constraints failed: %v", err)
 	}
 	yammmtest.GoldenJSON(t, "constraints_structured_basic", constraints)
@@ -451,8 +455,8 @@ func assertNotContains(t *testing.T, stmts []string, substring string) {
 // as omitted for the kinds it cannot hold.
 func enterpriseKindCounts(t *testing.T, s schema.Schema) map[ConstraintKind]int {
 	t.Helper()
-	constraints, result := Config{}.Constraints(s)
-	if err := result.Err(); err != nil {
+	constraints, genErr := Config{}.Constraints(s)
+	if err := genErr; err != nil {
 		t.Fatalf("Enterprise Constraints: %v", err)
 	}
 	counts := map[ConstraintKind]int{}
@@ -492,8 +496,10 @@ func TestConstraints_EditionOmission_WarnsOncePerCallWithCounts(t *testing.T) {
 		t.Fatalf("fixture must drop both kinds under Community, Enterprise counts %v", want)
 	}
 
-	_, result := Config{Edition: Community}.Constraints(s)
-	if result.HasErrors() {
+	_, result := diagtest.Capture(t, func(warn func(diag.Issue)) ([]Constraint, error) {
+		return Config{Edition: Community}.Constraints(s, WithWarnings(warn))
+	})
+	if diagtest.Err(result) != nil {
 		t.Fatalf("omission must not fail the call: %v", result)
 	}
 	if !result.HasWarnings() {
@@ -525,7 +531,9 @@ func TestConstraints_EditionOmission_OrderIsFixed(t *testing.T) {
 	// time in eight, so one comparison would miss a map-ordered rendering.
 	var first string
 	for i := range 64 {
-		_, result := a.Constraints(s)
+		_, result := diagtest.Capture(t, func(warn func(diag.Issue)) ([]Constraint, error) {
+			return a.Constraints(s, WithWarnings(warn))
+		})
 		msg := editionOmissionMessage(t, result)
 		if i == 0 {
 			first = msg
@@ -548,19 +556,23 @@ func TestConstraints_EditionOmission_OnlyWhenSomethingIsDropped(t *testing.T) {
 	t.Parallel()
 	t.Run("enterprise", func(t *testing.T) {
 		t.Parallel()
-		_, result := Config{}.Constraints(loadSchema(t, "multiple_types.yammm"))
+		_, result := diagtest.Capture(t, func(warn func(diag.Issue)) ([]Constraint, error) {
+			return Config{}.Constraints(loadSchema(t, "multiple_types.yammm"), WithWarnings(warn))
+		})
 		if result.HasCode(W_NEO4J_EDITION_CONSTRAINT_OMITTED) {
 			t.Errorf("Enterprise reported an omission: %s", result)
 		}
 	})
 	t.Run("community with nothing emittable", func(t *testing.T) {
 		t.Parallel()
-		s, res := schema.LoadString(context.Background(),
+		s, err := schema.LoadString(context.Background(),
 			"schema \"empty\"\n\nabstract type Base {\n\tid String primary\n}\n", "empty.yammm")
-		if res.HasErrors() {
-			t.Fatalf("load: %v", res.Err())
+		if err != nil {
+			t.Fatalf("load: %v", err)
 		}
-		constraints, result := Config{Edition: Community}.Constraints(s)
+		constraints, result := diagtest.Capture(t, func(warn func(diag.Issue)) ([]Constraint, error) {
+			return Config{Edition: Community}.Constraints(s, WithWarnings(warn))
+		})
 		if len(constraints) != 0 {
 			t.Fatalf("fixture emitted %d constraints, want none", len(constraints))
 		}
@@ -575,7 +587,9 @@ func TestConstraints_EditionOmission_OnlyWhenSomethingIsDropped(t *testing.T) {
 func TestConstraints_EditionOmission_CoexistsWithNodeKeyWarning(t *testing.T) {
 	t.Parallel()
 	s := loadSchema(t, "multiple_types.yammm")
-	_, result := Config{NodeKeys: true, Edition: Community}.Constraints(s)
+	_, result := diagtest.Capture(t, func(warn func(diag.Issue)) ([]Constraint, error) {
+		return Config{NodeKeys: true, Edition: Community}.Constraints(s, WithWarnings(warn))
+	})
 	for _, code := range []diag.Code{W_NEO4J_NODE_KEY_UNSUPPORTED, W_NEO4J_EDITION_CONSTRAINT_OMITTED} {
 		if got := countCode(result, code); got != 1 {
 			t.Errorf("expected exactly 1 %s, got %d", code, got)
@@ -593,7 +607,9 @@ func TestConstraints_ReservedPropertyNameRefused(t *testing.T) {
 	t.Parallel()
 	s := loadSchema(t, "indexes_bad_ident.yammm")
 
-	structured, result := Config{}.Constraints(s)
+	structured, result := diagtest.Capture(t, func(warn func(diag.Issue)) ([]Constraint, error) {
+		return Config{}.Constraints(s, WithWarnings(warn))
+	})
 	if structured != nil {
 		t.Errorf("a schema with a reserved property name emitted %d constraints; want none", len(structured))
 	}
@@ -626,8 +642,8 @@ func TestConstraints_RequiredOnlyTypes_SkipsOptionalList(t *testing.T) {
 	t.Parallel()
 	s := loadSchema(t, "list_properties.yammm")
 
-	stmts, result := constraintStatements(Config{TypeConstraints: RequiredProperties}, s)
-	if err := result.Err(); err != nil {
+	stmts, result := constraintStatements(t, Config{TypeConstraints: RequiredProperties}, s)
+	if err := diagtest.Err(result); err != nil {
 		t.Fatalf("Constraints: %v", err)
 	}
 
@@ -650,8 +666,8 @@ func TestConstraints_NestedListRejectedEvenWhenSkippedForVolume(t *testing.T) {
 	s := loadSchema(t, "nested_list_optional.yammm")
 
 	for _, tc := range []TypeConstraints{AllProperties, RequiredProperties, NoProperties} {
-		_, res := Config{TypeConstraints: tc}.Constraints(s)
-		if !res.HasCode(E_NEO4J_UNSUPPORTED_TYPE) {
+		_, err := Config{TypeConstraints: tc}.Constraints(s)
+		if !errors.Is(err, E_NEO4J_UNSUPPORTED_TYPE) {
 			t.Errorf("TypeConstraints %d: no %s for an optional List<List<Integer>>",
 				tc, E_NEO4J_UNSUPPORTED_TYPE)
 		}
@@ -660,15 +676,15 @@ func TestConstraints_NestedListRejectedEvenWhenSkippedForVolume(t *testing.T) {
 
 func TestConstraints_TheEntrySchemasTypesComeBeforeAnImports(t *testing.T) {
 	t.Parallel()
-	s, res := schema.LoadSourcesWithEntry(t.Context(), map[string][]byte{
+	s, err := schema.LoadSourcesWithEntry(t.Context(), map[string][]byte{
 		"geo.yammm":    []byte("schema \"geo\"\n\nimport \"./common\" as common\n\ntype Region {\n\tid String primary\n}\n\ntype County {\n\tfips String primary\n\t--> IN_REGION (one) common.Region\n}\n"),
 		"common.yammm": []byte("schema \"common\"\n\ntype Region {\n\tid String primary\n}\n"),
-	}, "geo.yammm", ".", schema.WithSourcesOnly(true))
-	if res.HasErrors() {
-		t.Fatal(res)
+	}, "geo.yammm", schema.WithSourcesOnly(true), schema.WithModuleRoot("."))
+	if err != nil {
+		t.Fatal(err)
 	}
-	constraints, cres := constraintStatements(Config{}, s)
-	if cres.HasErrors() {
+	constraints, cres := constraintStatements(t, Config{}, s)
+	if diagtest.Err(cres) != nil {
 		t.Fatal(cres)
 	}
 	entry := slices.IndexFunc(constraints, func(c string) bool { return strings.Contains(c, "geo__Region") })

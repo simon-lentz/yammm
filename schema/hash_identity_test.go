@@ -27,8 +27,8 @@ func hashTwoVariants(t *testing.T, shared map[string]string, entryA, entryB stri
 			t.Fatalf("write main.yammm: %v", err)
 		}
 		s, res := schema.Load(t.Context(), path, schema.WithModuleRoot(dir))
-		if res.Err() != nil {
-			t.Fatalf("load %s: %v", entry, res.Err())
+		if res != nil {
+			t.Fatalf("load %s: %v", entry, res)
 		}
 		if s.IsZero() {
 			t.Fatalf("load %s returned a zero schema", entry)
@@ -145,13 +145,13 @@ type T {
 `
 	}
 
-	pos, res := schema.LoadString(t.Context(), bound("0.0"), "pos.yammm")
-	if res.Err() != nil {
-		t.Fatalf("load 0.0 bound: %v", res.Err())
+	pos, err := schema.LoadString(t.Context(), bound("0.0"), "pos.yammm")
+	if err != nil {
+		t.Fatalf("load 0.0 bound: %v", err)
 	}
-	neg, res2 := schema.LoadString(t.Context(), bound("-0.0"), "neg.yammm")
-	if res2.Err() != nil {
-		t.Fatalf("load -0.0 bound: %v", res2.Err())
+	neg, err := schema.LoadString(t.Context(), bound("-0.0"), "neg.yammm")
+	if err != nil {
+		t.Fatalf("load -0.0 bound: %v", err)
 	}
 
 	if got, want := schema.StructuralHash(neg), schema.StructuralHash(pos); got != want {

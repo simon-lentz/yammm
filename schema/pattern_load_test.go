@@ -55,9 +55,9 @@ func patternOf(t *testing.T, c schema.Constraint) schema.PatternConstraint {
 // same source: by Equal, by String, in the structural hash, and in what its
 // compiled regexp matches and finds.
 func TestLoad_HoldsThePatternItsSourceStates(t *testing.T) {
-	s, res := schema.LoadString(t.Context(), patternLoadSource, "patterns.yammm")
-	if res.HasErrors() {
-		t.Fatalf("load: %v", res.Err())
+	s, err := schema.LoadString(t.Context(), patternLoadSource, "patterns.yammm")
+	if err != nil {
+		t.Fatalf("load: %v", err)
 	}
 	site, _ := s.Type("Site")
 	near, _ := site.Relation("NEAR")
@@ -100,9 +100,9 @@ func TestLoad_HoldsThePatternItsSourceStates(t *testing.T) {
 // A pattern's source is held byte for byte: the spaces round it are part of
 // what it matches.
 func TestLoad_APatternKeepsItsSpaces(t *testing.T) {
-	s, res := schema.LoadString(t.Context(), "schema \"p\"\ntype T {\n\tid String primary\n\tp Pattern[\" a \"]\n}\n", "p.yammm")
-	if res.HasErrors() {
-		t.Fatalf("load: %v", res.Err())
+	s, err := schema.LoadString(t.Context(), "schema \"p\"\ntype T {\n\tid String primary\n\tp Pattern[\" a \"]\n}\n", "p.yammm")
+	if err != nil {
+		t.Fatalf("load: %v", err)
 	}
 	typ, _ := s.Type("T")
 	p, _ := typ.Property("p")

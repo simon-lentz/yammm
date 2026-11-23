@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/simon-lentz/yammm/diag"
+	"github.com/simon-lentz/yammm/internal/diagtest"
 	"github.com/simon-lentz/yammm/schema/cypher"
 )
 
@@ -20,8 +21,8 @@ func TestConfig_ShapesUnaffectedByEdition(t *testing.T) {
 	s := loadSchema(t, "basic.yammm")
 	a := cypher.Config{Edition: cypher.Community}
 
-	shape, result := shapeFor(a, s)
-	if err := result.Err(); err != nil {
+	shape, shapeErr := shapeFor(a, s)
+	if err := shapeErr; err != nil {
 		t.Fatal(err)
 	}
 	if _, ok := shape.types[typeID(t, s, "Entity")]; !ok {
@@ -55,8 +56,8 @@ func TestConfig_LabelOptionConsistency(t *testing.T) {
 				t.Errorf("Label() = %q; want %q", got, tc.wantLabel)
 			}
 
-			stmts, result := constraintStatements(a, s)
-			if err := result.Err(); err != nil {
+			stmts, result := constraintStatements(t, a, s)
+			if err := diagtest.Err(result); err != nil {
 				t.Fatal(err)
 			}
 			constraintHasLabel := false
@@ -70,8 +71,10 @@ func TestConfig_LabelOptionConsistency(t *testing.T) {
 				t.Errorf("no constraint contains label %q", tc.wantLabel)
 			}
 
-			shape, result := shapeFor(a, s)
-			if err := result.Err(); err != nil {
+			shape, result := diagtest.Issues(t, func() (*graphShape, error) {
+				return shapeFor(a, s)
+			})
+			if err := diagtest.Err(result); err != nil {
 				t.Fatal(err)
 			}
 			if ns, ok := shape.types[typeID(t, s, "Entity")]; !ok || ns.label != tc.wantLabel {
@@ -102,8 +105,8 @@ func TestConfig_LabelConsistency(t *testing.T) {
 	ctx := context.Background()
 	shape := mustShape(t, a, s)
 
-	structured, result := a.Constraints(s)
-	if err := result.Err(); err != nil {
+	structured, genErr := a.Constraints(s)
+	if err := genErr; err != nil {
 		t.Fatal(err)
 	}
 
@@ -181,14 +184,14 @@ func TestConfig_ThreadSafety(t *testing.T) {
 	// concurrently.
 	for range 10 {
 		wg.Go(func() {
-			_, result := constraintStatements(a, s)
-			if err := result.Err(); err != nil {
+			_, result := constraintStatements(t, a, s)
+			if err := diagtest.Err(result); err != nil {
 				errs <- fmt.Errorf("constraints: %w", err)
 			}
 		})
 		wg.Go(func() {
-			_, result := shapeFor(a, s)
-			if err := result.Err(); err != nil {
+			_, shapeErr := shapeFor(a, s)
+			if err := shapeErr; err != nil {
 				errs <- fmt.Errorf("shape: %w", err)
 			}
 		})

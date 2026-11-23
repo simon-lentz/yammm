@@ -22,7 +22,7 @@ import (
 func testSchemaWithAssociation(t *testing.T) schema.Schema {
 	t.Helper()
 
-	s, result := schema.LoadString(t.Context(), `schema "association"
+	s, err := schema.LoadString(t.Context(), `schema "association"
 
 type Company {
 	id String primary
@@ -35,9 +35,8 @@ type Person {
 	--> EMPLOYER (one) Company
 }
 `, "association.yammm")
-
-	if result.HasErrors() {
-		t.Fatalf("Failed to build association schema: %s", result.String())
+	if err != nil {
+		t.Fatalf("Failed to build association schema: %s", err)
 	}
 	return s
 }
@@ -46,7 +45,7 @@ type Person {
 // declaring the edge properties role and since.
 func testSchemaWithEdgeProperties(t *testing.T) schema.Schema {
 	t.Helper()
-	s, result := schema.LoadString(t.Context(), `schema "association"
+	s, err := schema.LoadString(t.Context(), `schema "association"
 
 type Company {
 	id String primary
@@ -62,8 +61,8 @@ type Person {
 	}
 }
 `, "association.yammm")
-	if result.HasErrors() {
-		t.Fatalf("Failed to load edge-property schema: %s", result.String())
+	if err != nil {
+		t.Fatalf("Failed to load edge-property schema: %s", err)
 	}
 	return s
 }
@@ -72,7 +71,7 @@ type Person {
 func testSchemaWithOptionalAssociation(t *testing.T) schema.Schema {
 	t.Helper()
 
-	s, result := schema.LoadString(t.Context(), `schema "optional_association"
+	s, err := schema.LoadString(t.Context(), `schema "optional_association"
 
 type Company {
 	id String primary
@@ -85,9 +84,8 @@ type Person {
 	--> EMPLOYER (_:one) Company
 }
 `, "optional_association.yammm")
-
-	if result.HasErrors() {
-		t.Fatalf("Failed to build optional association schema: %s", result.String())
+	if err != nil {
+		t.Fatalf("Failed to build optional association schema: %s", err)
 	}
 	return s
 }
@@ -96,7 +94,7 @@ type Person {
 func testSchemaWithManyAssociation(t *testing.T) schema.Schema {
 	t.Helper()
 
-	s, result := schema.LoadString(t.Context(), `schema "many_association"
+	s, err := schema.LoadString(t.Context(), `schema "many_association"
 
 type Company {
 	id String primary
@@ -109,9 +107,8 @@ type Person {
 	--> EMPLOYERS (one:many) Company
 }
 `, "many_association.yammm")
-
-	if result.HasErrors() {
-		t.Fatalf("Failed to build many association schema: %s", result.String())
+	if err != nil {
+		t.Fatalf("Failed to build many association schema: %s", err)
 	}
 	return s
 }
@@ -120,7 +117,7 @@ type Person {
 func testSchemaWithChainedAssociations(t *testing.T) schema.Schema {
 	t.Helper()
 
-	s, result := schema.LoadString(t.Context(), `schema "chained"
+	s, err := schema.LoadString(t.Context(), `schema "chained"
 
 type TypeC {
 	id String primary
@@ -139,9 +136,8 @@ type TypeA {
 	--> REF_B (one) TypeB
 }
 `, "chained.yammm")
-
-	if result.HasErrors() {
-		t.Fatalf("Failed to build chained schema: %s", result.String())
+	if err != nil {
+		t.Fatalf("Failed to build chained schema: %s", err)
 	}
 	return s
 }
@@ -150,7 +146,7 @@ type TypeA {
 func testSchemaWithComposition(t *testing.T) schema.Schema {
 	t.Helper()
 
-	s, result := schema.LoadString(t.Context(), `schema "composition"
+	s, err := schema.LoadString(t.Context(), `schema "composition"
 
 part type Child {
 	id String primary
@@ -163,9 +159,8 @@ type Parent {
 	*-> CHILDREN (many) Child
 }
 `, "composition.yammm")
-
-	if result.HasErrors() {
-		t.Fatalf("Failed to build composition schema: %s", result.String())
+	if err != nil {
+		t.Fatalf("Failed to build composition schema: %s", err)
 	}
 	return s
 }
@@ -174,7 +169,7 @@ type Parent {
 func testSchemaWithOneComposition(t *testing.T) schema.Schema {
 	t.Helper()
 
-	s, result := schema.LoadString(t.Context(), `schema "one_composition"
+	s, err := schema.LoadString(t.Context(), `schema "one_composition"
 
 part type Child {
 	id String primary
@@ -187,9 +182,8 @@ type Parent {
 	*-> CHILD (_:one) Child
 }
 `, "one_composition.yammm")
-
-	if result.HasErrors() {
-		t.Fatalf("Failed to build one composition schema: %s", result.String())
+	if err != nil {
+		t.Fatalf("Failed to build one composition schema: %s", err)
 	}
 	return s
 }
@@ -198,7 +192,7 @@ type Parent {
 func testSchemaWithPKLessChild(t *testing.T) schema.Schema {
 	t.Helper()
 
-	s, result := schema.LoadString(t.Context(), `schema "pkless"
+	s, err := schema.LoadString(t.Context(), `schema "pkless"
 
 part type Item {
 	value String required
@@ -210,9 +204,8 @@ type Container {
 	*-> ITEMS (many) Item
 }
 `, "pkless.yammm")
-
-	if result.HasErrors() {
-		t.Fatalf("Failed to build pkless schema: %s", result.String())
+	if err != nil {
+		t.Fatalf("Failed to build pkless schema: %s", err)
 	}
 	return s
 }
@@ -221,7 +214,7 @@ type Container {
 func testSchemaWithNestedComposition(t *testing.T) schema.Schema {
 	t.Helper()
 
-	s, result := schema.LoadString(t.Context(), `schema "nested"
+	s, err := schema.LoadString(t.Context(), `schema "nested"
 
 part type GrandChild {
 	id String primary
@@ -240,9 +233,8 @@ type Parent {
 	*-> CHILDREN (many) Child
 }
 `, "nested.yammm")
-
-	if result.HasErrors() {
-		t.Fatalf("Failed to build nested schema: %s", result.String())
+	if err != nil {
+		t.Fatalf("Failed to build nested schema: %s", err)
 	}
 	return s
 }
@@ -251,7 +243,7 @@ type Parent {
 func testSchemaWithMultipleCompositions(t *testing.T) schema.Schema {
 	t.Helper()
 
-	s, result := schema.LoadString(t.Context(), `schema "multi_comp"
+	s, err := schema.LoadString(t.Context(), `schema "multi_comp"
 
 part type Note {
 	id String primary
@@ -269,9 +261,8 @@ type Document {
 	*-> TAGS (many) Tag
 }
 `, "multi_comp.yammm")
-
-	if result.HasErrors() {
-		t.Fatalf("Failed to build multi composition schema: %s", result.String())
+	if err != nil {
+		t.Fatalf("Failed to build multi composition schema: %s", err)
 	}
 	return s
 }
@@ -280,7 +271,7 @@ type Document {
 func testSchemaWithCompositeKey(t *testing.T) schema.Schema {
 	t.Helper()
 
-	s, result := schema.LoadString(t.Context(), `schema "composite"
+	s, err := schema.LoadString(t.Context(), `schema "composite"
 
 type Record {
 	region String primary
@@ -288,9 +279,8 @@ type Record {
 	value String required
 }
 `, "composite.yammm")
-
-	if result.HasErrors() {
-		t.Fatalf("Failed to build composite key schema: %s", result.String())
+	if err != nil {
+		t.Fatalf("Failed to build composite key schema: %s", err)
 	}
 	return s
 }
@@ -299,7 +289,7 @@ type Record {
 func testSchemaWithMutualAssociations(t *testing.T) schema.Schema {
 	t.Helper()
 
-	s, result := schema.LoadString(t.Context(), `schema "mutual"
+	s, err := schema.LoadString(t.Context(), `schema "mutual"
 
 type TypeA {
 	id String primary
@@ -313,9 +303,8 @@ type TypeB {
 	--> REF_A (_:one) TypeA
 }
 `, "mutual.yammm")
-
-	if result.HasErrors() {
-		t.Fatalf("Failed to build mutual associations schema: %s", result.String())
+	if err != nil {
+		t.Fatalf("Failed to build mutual associations schema: %s", err)
 	}
 	return s
 }
@@ -324,7 +313,7 @@ type TypeB {
 func testSchemaWithCircularChain(t *testing.T) schema.Schema {
 	t.Helper()
 
-	s, result := schema.LoadString(t.Context(), `schema "circular"
+	s, err := schema.LoadString(t.Context(), `schema "circular"
 
 type TypeA {
 	id String primary
@@ -344,9 +333,8 @@ type TypeC {
 	--> REF_A (_:one) TypeA
 }
 `, "circular.yammm")
-
-	if result.HasErrors() {
-		t.Fatalf("Failed to build circular chain schema: %s", result.String())
+	if err != nil {
+		t.Fatalf("Failed to build circular chain schema: %s", err)
 	}
 	return s
 }
@@ -559,9 +547,9 @@ func composedData(t *testing.T, s schema.Schema, typeName string, data map[strin
 // calls give two schemas a graph tells apart, whatever their text.
 func loadSchemaAt(t *testing.T, source, sourceName string) schema.Schema {
 	t.Helper()
-	s, res := schema.LoadString(t.Context(), source, sourceName)
-	if res.HasErrors() {
-		t.Fatalf("load %s: %s", sourceName, res)
+	s, err := schema.LoadString(t.Context(), source, sourceName)
+	if err != nil {
+		t.Fatalf("load %s: %s", sourceName, err)
 	}
 	return s
 }
@@ -576,9 +564,9 @@ func loadClosure(t *testing.T, entry string, sources map[string]string) map[stri
 	for key, text := range sources {
 		files[key] = []byte(text)
 	}
-	s, result := schema.LoadSourcesWithEntry(t.Context(), files, entry, "", schema.WithSyntheticRoot("test://graph"))
-	if result.HasErrors() {
-		t.Fatalf("load %s: %s", entry, result.String())
+	s, err := schema.LoadSourcesWithEntry(t.Context(), files, entry, schema.WithSyntheticRoot("test://graph"))
+	if err != nil {
+		t.Fatalf("load %s: %s", entry, err)
 	}
 	members := make(map[string]schema.Schema)
 	for member := range s.Closure() {
@@ -720,18 +708,18 @@ func rebuild(s schema.Schema, parts snapparts.Parts) graph.Snapshot {
 
 func loadAs(t *testing.T, src string) schema.Schema {
 	t.Helper()
-	s, res := schema.LoadString(t.Context(), src, "entry.yammm")
-	if res.HasErrors() {
-		t.Fatalf("load: %s", res)
+	s, err := schema.LoadString(t.Context(), src, "entry.yammm")
+	if err != nil {
+		t.Fatalf("load: %s", err)
 	}
 	return s
 }
 
 func loadEntry(t *testing.T, src string) schema.Schema {
 	t.Helper()
-	s, res := schema.LoadString(t.Context(), src, "entry.yammm")
-	if res.HasErrors() {
-		t.Fatalf("load: %s", res)
+	s, err := schema.LoadString(t.Context(), src, "entry.yammm")
+	if err != nil {
+		t.Fatalf("load: %s", err)
 	}
 	return s
 }

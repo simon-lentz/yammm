@@ -11,9 +11,9 @@ import (
 func TestIndexes_AConfiguredSeparatorIsUsed(t *testing.T) {
 	t.Parallel()
 	s := loadSchema(t, "indexes.yammm")
-	got, result := Config{LabelSeparator: "Z"}.Indexes(s)
-	if result.HasErrors() {
-		t.Fatalf("separator Z keeps the label rule for schema index_test: %v", result.Err())
+	got, err := Config{LabelSeparator: "Z"}.Indexes(s)
+	if err != nil {
+		t.Fatalf("separator Z keeps the label rule for schema index_test: %v", err)
 	}
 	if len(got) == 0 {
 		t.Fatal("expected indexes to be emitted")
@@ -33,9 +33,9 @@ func TestIndexes_AConfiguredSeparatorIsUsed(t *testing.T) {
 func TestIndexes_InheritedPropertyAnnotations(t *testing.T) {
 	t.Parallel()
 	s := loadSchema(t, "indexes_inherited.yammm")
-	indexes, result := Config{}.Indexes(s)
-	if result.HasErrors() {
-		t.Fatalf("Indexes: %v", result.Err())
+	indexes, err := Config{}.Indexes(s)
+	if err != nil {
+		t.Fatalf("Indexes: %v", err)
 	}
 
 	var names []string
@@ -75,9 +75,9 @@ func TestOwnedLabels_MatchesEmittedLabels(t *testing.T) {
 	owned := a.OwnedLabels(s)
 
 	// Every label the index emitter produced is owned.
-	indexes, res := a.Indexes(s)
-	if res.HasErrors() {
-		t.Fatalf("Indexes: %v", res.Err())
+	indexes, err := a.Indexes(s)
+	if err != nil {
+		t.Fatalf("Indexes: %v", err)
 	}
 	if len(indexes) == 0 {
 		t.Fatal("fixture emitted no indexes; the assertion would be vacuous")
@@ -89,9 +89,9 @@ func TestOwnedLabels_MatchesEmittedLabels(t *testing.T) {
 	}
 
 	// And every label the constraint emitter produced.
-	constraints, cRes := a.Constraints(s)
-	if cRes.HasErrors() {
-		t.Fatalf("Constraints: %v", cRes.Err())
+	constraints, genErr := a.Constraints(s)
+	if genErr != nil {
+		t.Fatalf("Constraints: %v", genErr)
 	}
 	for _, c := range constraints {
 		if !owned.Contains(c.Label) {
@@ -121,7 +121,7 @@ func TestOwnedLabels_IncludesLabelsTheEmittersSkip(t *testing.T) {
 	if !owned.Contains("index_test-Document") {
 		t.Error("a label the emitters skip as an invalid identifier is not owned")
 	}
-	if idx, res := a.Indexes(s); !res.HasErrors() || idx != nil {
+	if idx, err := a.Indexes(s); err == nil || idx != nil {
 		t.Error("precondition: the emitters should reject this configuration entirely")
 	}
 }

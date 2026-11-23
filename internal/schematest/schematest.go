@@ -27,9 +27,9 @@ func Constraint(tb testing.TB, c string, decls ...string) schema.Constraint {
 		src.WriteString("\n\n")
 	}
 	src.WriteString("type T {\n\tid String primary\n\tv " + c + "\n}\n")
-	s, res := schema.LoadString(tb.Context(), src.String(), "schematest.yammm")
-	if res.HasErrors() {
-		tb.Fatalf("schematest.Constraint(%q): %s\n%s", c, res, src.String())
+	s, err := schema.LoadString(tb.Context(), src.String(), "schematest.yammm")
+	if err != nil {
+		tb.Fatalf("schematest.Constraint(%q): %s\n%s", c, err, src.String())
 	}
 	t, _ := s.Type("T")
 	p, _ := t.Property("v")

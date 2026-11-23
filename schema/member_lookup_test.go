@@ -32,9 +32,9 @@ type Person extends Base {
 
 func loadMembers(t *testing.T) schema.Type {
 	t.Helper()
-	s, res := schema.LoadString(t.Context(), memberLookupSrc, "m.yammm")
-	if !res.OK() {
-		t.Fatalf("load: %s", res)
+	s, err := schema.LoadString(t.Context(), memberLookupSrc, "m.yammm")
+	if err != nil {
+		t.Fatalf("load: %s", err)
 	}
 	typ, ok := s.Type("Person")
 	if !ok {

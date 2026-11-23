@@ -1,10 +1,12 @@
 package instance_test
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/instance"
+	"github.com/simon-lentz/yammm/internal/diagtest"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -68,11 +70,15 @@ func TestValidateOne_RefusesWhatAGraphTakesAsJudged(t *testing.T) {
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
-			s, res := schema.LoadString(t.Context(), "schema \"x\"\n\n"+c.src, "x.yammm")
-			if res.HasErrors() {
+			s, res := diagtest.Capture(t, func(warn func(diag.Issue)) (schema.Schema, error) {
+				return schema.LoadString(t.Context(), "schema \"x\"\n\n"+c.src, "x.yammm", schema.WithWarnings(warn))
+			})
+			if diagtest.Err(res) != nil {
 				t.Fatalf("load: %s", res)
 			}
-			valid, res := instance.NewValidator(s).ValidateOne(t.Context(), c.typeName, instance.RawInstance{Properties: c.props})
+			valid, res := diagtest.Issues(t, func() (instance.ValidInstance, error) {
+				return instance.NewValidator(s).ValidateOne(t.Context(), c.typeName, instance.RawInstance{Properties: c.props})
+			})
 			if !valid.IsZero() || !res.HasCode(c.want) {
 				t.Errorf("ValidateOne: zero = %v, result = %s, want %s", valid.IsZero(), res, c.want)
 			}
@@ -88,10 +94,10 @@ func TestLoad_RefusesACompositionTargetThatIsNoPart(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
-			_, res := schema.LoadString(t.Context(),
+			_, err := schema.LoadString(t.Context(),
 				"schema \"x\"\n\n"+target+"\ntype H {\n\tid String primary\n\t*-> KIDS (many) G\n}\n", "x.yammm")
-			if !res.HasCode(diag.E_INVALID_COMPOSITION_TARGET) {
-				t.Errorf("load = %s, want E_INVALID_COMPOSITION_TARGET", res)
+			if !errors.Is(err, diag.E_INVALID_COMPOSITION_TARGET) {
+				t.Errorf("load = %s, want E_INVALID_COMPOSITION_TARGET", err)
 			}
 		})
 	}

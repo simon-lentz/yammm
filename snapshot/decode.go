@@ -53,8 +53,8 @@ type streamDecoder struct {
 	// use by closureHolds.
 	closureNames map[string]struct{}
 
-	// loadCfg holds deserialization options (e.g., skip integrity check).
-	loadCfg loadConfig
+	// loadCfg holds the call's options (e.g., skip integrity check).
+	loadCfg config
 
 	// schema is the provided schema, zero for a reader that validates against none.
 	schema schema.Schema
@@ -86,10 +86,10 @@ type streamDecoder struct {
 }
 
 // newStreamDecoder creates a new streamDecoder from raw .ys bytes.
-func newStreamDecoder(data []byte, s schema.Schema, cfg loadConfig) *streamDecoder {
+func newStreamDecoder(data []byte, s schema.Schema, cfg config) *streamDecoder {
 	return &streamDecoder{
 		data:         data,
-		collector:    diag.NewCollector(cfg.issueLimit),
+		collector:    newDecodeCollector(cfg),
 		loadCfg:      cfg,
 		schema:       s,
 		revalidator:  newRevalidator(s, cfg),
@@ -98,34 +98,31 @@ func newStreamDecoder(data []byte, s schema.Schema, cfg loadConfig) *streamDecod
 	}
 }
 
+// newDecodeCollector returns the collector a read reports to: it holds the
+// failures, at most cfg.issueLimit of them, and sends each issue below failure
+// severity to cfg.warnings as it arrives.
+func newDecodeCollector(cfg config) *diag.Collector {
+	c := diag.NewCollector(cfg.issueLimit)
+	c.RouteWarnings(cfg.warnings)
+	return c
+}
+
 // newRevalidator builds the validator the revalidation walk runs, or nil
 // when nobody asked. Only [Unmarshal] and [Verify] take the option, and each panics
-// on a zero schema, so a schema is present to validate against. It caps a
-// row at the load's limit, so the load has one cap and an unlimited load
-// stores every finding a row draws.
-func newRevalidator(s schema.Schema, cfg loadConfig) *instance.Validator {
+// on a zero schema, so a schema is present to validate against. It caps no row:
+// the read's collector applies the read's limit, and a row's own findings name
+// every repeated listing the row raised.
+func newRevalidator(s schema.Schema, cfg config) *instance.Validator {
 	if !cfg.revalidate {
 		return nil
 	}
-	return instance.NewValidator(s, instance.WithIssueLimit(cfg.issueLimit))
+	return instance.NewValidator(s, instance.WithIssueLimit(diag.NoLimit))
 }
 
 // revalidationTarget is a validator and the name it resolves one type by.
 type revalidationTarget struct {
 	v    *instance.Validator
 	name string
-	s    schema.Schema
-	// whole is v without its issue limit, built at the first root whose
-	// capped run dropped a repeat it raised.
-	whole *instance.Validator
-}
-
-// unlimited returns the target's validator with no issue limit.
-func (t *revalidationTarget) unlimited() *instance.Validator {
-	if t.whole == nil {
-		t.whole = instance.NewValidator(t.s, instance.WithIssueLimit(0))
-	}
-	return t.whole
 }
 
 // revalidatorFor returns the validator that revalidates a root of t and
@@ -138,14 +135,14 @@ func (sd *streamDecoder) revalidatorFor(t schema.Type) *revalidationTarget {
 	if target, ok := sd.revalidationTargets[id]; ok {
 		return target
 	}
-	target := &revalidationTarget{v: sd.revalidator, s: sd.schema}
+	target := &revalidationTarget{v: sd.revalidator}
 	if tag, ok := schema.AddressableTag(sd.schema, id); ok {
 		target.name = tag
 	} else {
 		target.name = id.Name()
 		for s := range sd.schema.Closure() {
 			if s.SourceID() == id.SchemaPath() {
-				target.v, target.s = newRevalidator(s, sd.loadCfg), s
+				target.v = newRevalidator(s, sd.loadCfg)
 				break
 			}
 		}
@@ -160,10 +157,10 @@ func (sd *streamDecoder) revalidatorFor(t schema.Type) *revalidationTarget {
 // newStreamDecoderFromReader creates a streamDecoder backed by an io.Reader,
 // which decodeHeader consumes once; decodeSections and verifyIntegrity need
 // the full byte slice and must not be called on it.
-func newStreamDecoderFromReader(r io.Reader, s schema.Schema, cfg loadConfig) *streamDecoder {
+func newStreamDecoderFromReader(r io.Reader, s schema.Schema, cfg config) *streamDecoder {
 	return &streamDecoder{
 		reader:       r,
-		collector:    diag.NewCollector(cfg.issueLimit),
+		collector:    newDecodeCollector(cfg),
 		loadCfg:      cfg,
 		schema:       s,
 		headerOffset: -1,
@@ -249,16 +246,13 @@ func (sd *streamDecoder) decodeHeader() error {
 
 	// Validate schema hash algorithm. A body-reading surface refuses the
 	// document: where a body would be trusted, an uncheckable schema
-	// identity is a refusal. A header-only read stays non-fatal, so
-	// dispatch still receives a Header whose SchemaHashMatches reports
-	// false — the stale-schema classification consumers route on.
-	if sd.header.SchemaHashAlgorithm != schema.StructuralHashVersion {
-		sev, msg := diag.Error, "unrecognized schema hash algorithm version %d; the document cannot be checked against a schema"
-		if sd.loadCfg.headerOnly {
-			sev, msg = diag.Warning, "unrecognized schema hash algorithm version %d; schema hash verification skipped"
-		}
-		sd.collector.Collect(diag.NewIssue(sev, diag.E_SNAPSHOT_UNSUPPORTED_HASH_ALGORITHM,
-			fmt.Sprintf(msg, sd.header.SchemaHashAlgorithm)).
+	// identity is a refusal. A header-only read draws nothing, so dispatch
+	// still receives a Header whose SchemaHashAlgorithm states the algorithm
+	// and whose SchemaHashMatches reports false — the stale-schema
+	// classification consumers route on.
+	if sd.header.SchemaHashAlgorithm != schema.StructuralHashVersion && !sd.loadCfg.headerOnly {
+		sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_UNSUPPORTED_HASH_ALGORITHM,
+			fmt.Sprintf("unrecognized schema hash algorithm version %d; the document cannot be checked against a schema", sd.header.SchemaHashAlgorithm)).
 			WithDetail(diag.DetailKeyHashAlgorithm, strconv.Itoa(sd.header.SchemaHashAlgorithm)).
 			Build())
 	}
@@ -1455,17 +1449,10 @@ func (sd *streamDecoder) revalidateRoot(ctx context.Context, idx *docIndex, row 
 	}
 	inst.Edges = edges
 	target := sd.revalidatorFor(t)
-	_, res := target.v.ValidateOne(ctx, target.name, instance.RawInstance{Properties: sd.rebuildRawProperties(t, inst)})
-	if raised := res.CodeCounts(diag.Error)[diag.E_DUPLICATE_EDGE]; raised > 0 {
-		repeats := repeatedListings(res)
-		if len(repeats) < raised {
-			// The row's issue limit dropped a repeat, so only a run that keeps every
-			// issue names each one.
-			_, whole := target.unlimited().ValidateOne(ctx, target.name, instance.RawInstance{Properties: sd.rebuildRawProperties(t, inst)})
-			repeats = repeatedListings(whole)
-		}
-		inst.Edges = withoutListings(t, inst.Edges, repeats)
-		_, res = target.v.ValidateOne(ctx, target.name, instance.RawInstance{Properties: sd.rebuildRawProperties(t, inst)})
+	res := rowFindings(target.v.ValidateOne(ctx, target.name, instance.RawInstance{Properties: sd.rebuildRawProperties(t, inst)}))
+	if res.CodeCounts(diag.Error)[diag.E_DUPLICATE_EDGE] > 0 {
+		inst.Edges = withoutListings(t, inst.Edges, repeatedListings(res))
+		res = rowFindings(target.v.ValidateOne(ctx, target.name, instance.RawInstance{Properties: sd.rebuildRawProperties(t, inst)}))
 	}
 	// MergeRetag keeps the validator's order, so a capped collector evicts by
 	// when a finding was raised, not by how its message sorts.
@@ -1486,6 +1473,22 @@ func (sd *streamDecoder) revalidateRoot(ctx context.Context, idx *docIndex, row 
 			}
 			return retagIssue(issue, sev, typeText, keyStr)
 		})
+}
+
+// rowFindings returns what the validator found in one root: the failures err
+// holds, none for a nil err. The validator draws no issue below failure
+// severity, and its every error is a *[diag.ResultError]; any other is a defect
+// of this package and reads as a Fatal E_INTERNAL.
+func rowFindings(_ instance.ValidInstance, err error) diag.Result {
+	if err == nil {
+		return diag.Result{}
+	}
+	if re, ok := errors.AsType[*diag.ResultError](err); ok {
+		return re.Result
+	}
+	c := diag.NewCollector(diag.NoLimit)
+	c.Collect(diag.NewIssue(diag.Fatal, diag.E_INTERNAL, err.Error()).Build())
+	return c.Result()
 }
 
 // repeatedListings returns the path of each listing res refuses as a repeat of

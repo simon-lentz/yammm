@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/simon-lentz/yammm/internal/diagtest"
 	"github.com/simon-lentz/yammm/internal/yammmtest"
 
 	"github.com/google/uuid"
@@ -24,7 +25,9 @@ func TestValidate_CancellationInsideAComposedBatchIsReportedOnce(t *testing.T) {
 		{Properties: map[string]any{"id": "c", "lines": "not a list of lines"}}, // a validated row would report this
 	}
 	v := instance.NewValidator(s)
-	valids, res := v.Validate(checkInSecondRow(t, v, "T", raws), "T", raws)
+	valids, res := diagtest.Issues(t, func() ([]instance.ValidInstance, error) {
+		return v.Validate(checkInSecondRow(t, v, "T", raws), "T", raws)
+	})
 	if valids != nil {
 		t.Errorf("a cancelled batch returned a slice of %d", len(valids))
 	}
@@ -51,10 +54,12 @@ func TestValidate_ACancelledRowsPartialDiagnosticsAreDropped(t *testing.T) {
 		{Properties: map[string]any{"id": "b", "n": "not a number"}},
 	}
 	v := instance.NewValidator(s)
-	total := yammmtest.CountChecks(t.Context(), func(ctx context.Context) { v.Validate(ctx, "T", raws) })
+	total := yammmtest.CountChecks(t.Context(), func(ctx context.Context) { _, _ = v.Validate(ctx, "T", raws) })
 
 	for at := range total {
-		valids, res := v.Validate(yammmtest.NewCheckContext(t.Context(), at+1), "T", raws)
+		valids, res := diagtest.Issues(t, func() ([]instance.ValidInstance, error) {
+			return v.Validate(yammmtest.NewCheckContext(t.Context(), at+1), "T", raws)
+		})
 		if valids != nil {
 			t.Errorf("check %d: a cancelled batch returned a slice of %d", at+1, len(valids))
 		}
@@ -75,9 +80,11 @@ func TestListProperty_RefusesAUUIDAsSixteenIntegers(t *testing.T) {
 	t.Parallel()
 	s := loadT(t, "schema \"p\"\n\ntype T {\n\tid String primary\n\tnums List<Integer>\n}\n")
 	v := instance.NewValidator(s)
-	_, res := v.ValidateOne(t.Context(), "T", instance.RawInstance{Properties: map[string]any{
-		"id": "a", "nums": uuid.MustParse("123e4567-e89b-12d3-a456-426614174000"),
-	}})
+	_, res := diagtest.Issues(t, func() (instance.ValidInstance, error) {
+		return v.ValidateOne(t.Context(), "T", instance.RawInstance{Properties: map[string]any{
+			"id": "a", "nums": uuid.MustParse("123e4567-e89b-12d3-a456-426614174000"),
+		}})
+	})
 	if !res.HasCode(diag.E_TYPE_MISMATCH) {
 		t.Errorf("a uuid.UUID at a List<Integer> property validated clean: %v", codes(res))
 	}

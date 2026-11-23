@@ -48,13 +48,13 @@ func FuzzUpdateMetadata(f *testing.F) {
 		}()
 
 		newMeta := map[string]string{metaKey: metaVal}
-		out, res := snapshot.UpdateMetadata(context.Background(), data, newMeta)
-		if res.HasErrors() {
+		out, err := snapshot.UpdateMetadata(context.Background(), data, newMeta)
+		if err != nil {
 			return
 		}
-		header, headerRes := snapshot.ReadHeader(context.Background(), bytes.NewReader(out))
-		if headerRes.HasErrors() {
-			t.Errorf("UpdateMetadata returned OK but output does not parse: %v", headerRes)
+		header, readErr := snapshot.ReadHeader(context.Background(), bytes.NewReader(out))
+		if readErr != nil {
+			t.Errorf("UpdateMetadata returned OK but output does not parse: %v", readErr)
 			return
 		}
 		if header == nil {
@@ -68,25 +68,25 @@ func FuzzUpdateMetadata(f *testing.F) {
 // helper shape as the T-suite applies.
 func buildFuzzSeed(tb testing.TB, opts ...snapshot.Option) []byte {
 	tb.Helper()
-	s, sres := schema.LoadString(tb.Context(), `schema "test"
+	s, err := schema.LoadString(tb.Context(), `schema "test"
 
 type Person {
 	id String primary
 	name String required
 }
 `, "test.yammm")
-	if sres.HasErrors() {
-		tb.Fatalf("fuzz seed schema: %v", sres.Err())
+	if err != nil {
+		tb.Fatalf("fuzz seed schema: %v", err)
 	}
 	inst := instancetest.Valid(tb, s, "Person", map[string]any{"id": "p1", "name": "Alice"})
 	g := graph.New(s)
-	if res := g.Add(context.Background(), inst); res.HasErrors() {
-		tb.Fatalf("fuzz seed add: %v", res.Err())
+	if err := g.Add(context.Background(), inst); err != nil {
+		tb.Fatalf("fuzz seed add: %v", err)
 	}
 	snap := g.Snapshot()
-	data, res := snapshot.Marshal(context.Background(), snap, opts...)
-	if res.HasErrors() {
-		tb.Fatalf("fuzz seed marshal: %v", res.Err())
+	data, readErr := snapshot.Marshal(context.Background(), snap, opts...)
+	if readErr != nil {
+		tb.Fatalf("fuzz seed marshal: %v", readErr)
 	}
 	return data
 }

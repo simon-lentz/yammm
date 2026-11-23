@@ -8,6 +8,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/simon-lentz/yammm/diag"
+	"github.com/simon-lentz/yammm/internal/diagtest"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -302,8 +304,10 @@ type JapaneseUser {
 	// Verify Source result is parseable
 	tsResult, err := formatText(input)
 	require.NoError(t, err, "Source returned error")
-	s, diagResult := schema.LoadString(ctx, tsResult, "test")
-	if !diagResult.OK() {
+	s, diagResult := diagtest.Capture(t, func(warn func(diag.Issue)) (schema.Schema, error) {
+		return schema.LoadString(ctx, tsResult, "test", schema.WithWarnings(warn))
+	})
+	if diagtest.Err(diagResult) != nil {
 		for issue := range diagResult.Issues() {
 			t.Logf("issue: %v", issue)
 		}

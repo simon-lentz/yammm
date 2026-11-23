@@ -33,9 +33,9 @@ type Holder {
 // its tags, and one LINK to Target t1 carrying text as its label.
 func utf8WireSnapshot(t *testing.T, text string) (schema.Schema, graph.Snapshot) {
 	t.Helper()
-	s, res := schema.LoadString(t.Context(), utf8WireSchema, "utf8wire.yammm")
-	if res.HasErrors() {
-		t.Fatalf("load schema: %s", res)
+	s, err := schema.LoadString(t.Context(), utf8WireSchema, "utf8wire.yammm")
+	if err != nil {
+		t.Fatalf("load schema: %s", err)
 	}
 	holder := instancetest.Valid(t, s, "Holder", map[string]any{
 		"id": "h1", "text": text, "tags": []any{"ok", text},
@@ -51,13 +51,13 @@ func TestMarshal_AStringReadsBackAsTheBytesHeld(t *testing.T) {
 	t.Parallel()
 	for _, text := range []string{"a\uFFFDb", "\u00e9\u2713", "\U0001F600"} {
 		s, snap := utf8WireSnapshot(t, text)
-		data, res := snapshot.Marshal(t.Context(), snap)
-		if res.HasErrors() {
-			t.Fatalf("Marshal(%q) refused valid text: %s", text, res)
+		data, err := snapshot.Marshal(t.Context(), snap)
+		if err != nil {
+			t.Fatalf("Marshal(%q) refused valid text: %s", text, err)
 		}
-		loaded, lres := snapshot.Unmarshal(t.Context(), data, s)
+		loaded, readErr := snapshot.Unmarshal(t.Context(), data, s)
 		if loaded.IsZero() {
-			t.Fatalf("Load(%q): %s", text, lres)
+			t.Fatalf("Load(%q): %s", text, readErr)
 		}
 		holderT, _ := s.Type("Holder")
 		inst, ok := loaded.InstanceByKey(holderT.ID(), `["h1"]`)

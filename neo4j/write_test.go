@@ -791,12 +791,12 @@ func TestCoerceSlice_TypeMismatchErrors(t *testing.T) {
 // both helpers must see the merged view rather than the type's own declarations.
 func TestParamTypes_CoverInheritedMembers(t *testing.T) {
 	t.Parallel()
-	s, res := schema.LoadString(context.Background(), `schema "inh"
+	s, err := schema.LoadString(context.Background(), `schema "inh"
 abstract type Base { created_on Date primary }
 type Doc extends Base { title String required }
 `, "p.yammm")
-	if res.HasErrors() {
-		t.Fatalf("load: %v", res.Err())
+	if err != nil {
+		t.Fatalf("load: %v", err)
 	}
 	dt, ok := s.Type("Doc")
 	if !ok {
@@ -958,7 +958,7 @@ func TestExtractKeyProps_ReportsEveryProblemInOnePass(t *testing.T) {
 	}
 	props := immutable.WrapProperties(map[string]any{"first": "not-a-date", "kept": "k", "second": "not-a-date"})
 
-	_, err := extractKeyProps(props, shape)
+	_, err := extractKeyProps(props, shape, "type \"T\"")
 	if err == nil {
 		t.Fatal("two uncoercible keys were accepted")
 	}

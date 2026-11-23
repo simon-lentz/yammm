@@ -9,6 +9,7 @@ import (
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/instance"
 	"github.com/simon-lentz/yammm/instance/path"
+	"github.com/simon-lentz/yammm/internal/diagtest"
 	"github.com/simon-lentz/yammm/internal/instancetest"
 	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
@@ -25,7 +26,7 @@ func TestAdd_ACancelledContextInstallsNothing(t *testing.T) {
 	cancel()
 
 	inst := instancetest.Valid(t, s, "Parent", map[string]any{"id": "p1", "name": "Parent 1"})
-	res := g.Add(ctx, inst)
+	res := diagtest.Failures(t, g.Add(ctx, inst))
 	if !res.HasFatal() || !res.HasCode(diag.E_CONTEXT_CANCELLED) {
 		t.Fatalf("a cancelled Add returned %s", res.String())
 	}
@@ -52,11 +53,11 @@ func TestAdd_DuplicatePK_CarriesTheProvenanceSpan(t *testing.T) {
 			Provenance: instance.NewProvenance("people.json", path.Root.Key("people").Index(0), span),
 		})
 	}
-	if res := g.Add(ctx, withSpan()); !res.OK() {
-		t.Fatalf("first add: %s", res.String())
+	if err := g.Add(ctx, withSpan()); err != nil {
+		t.Fatalf("first add: %s", err)
 	}
-	res := g.Add(ctx, withSpan())
-	if res.OK() {
+	res := diagtest.Failures(t, g.Add(ctx, withSpan()))
+	if diagtest.Err(res) == nil {
 		t.Fatal("the duplicate primary key was accepted")
 	}
 	for issue := range res.Issues() {
@@ -69,6 +70,62 @@ func TestAdd_DuplicatePK_CarriesTheProvenanceSpan(t *testing.T) {
 		return
 	}
 	t.Fatal("no E_DUPLICATE_PK issue")
+}
+
+// TestAdd_DuplicatePK_NamesTheEarlierHolder pins that a duplicate names the
+// key's earlier holder as a related location when that holder carries a span,
+// and names none when it carries no span.
+func TestAdd_DuplicatePK_NamesTheEarlierHolder(t *testing.T) {
+	t.Parallel()
+	s := testSchemaWithComposition(t)
+	ctx := t.Context()
+
+	source, err := location.NewSourceID("test://people.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	at := func(line int) location.Span {
+		return location.Span{
+			Source: source,
+			Start:  location.Position{Line: line, Column: 3},
+			End:    location.Position{Line: line, Column: 9},
+		}
+	}
+	holder := func(span location.Span) instance.ValidInstance {
+		return instancetest.ValidRaw(t, s, "Parent", instance.RawInstance{
+			Properties: map[string]any{"id": "p1", "name": "Parent 1"},
+			Provenance: instance.NewProvenance("people.json", path.Root.Key("people").Index(0), span),
+		})
+	}
+	for _, tc := range []struct {
+		name    string
+		earlier location.Span
+		want    []diag.RelatedInfo
+	}{
+		{"an earlier holder with a span", at(3), []diag.RelatedInfo{{Span: at(3), Message: "first declared here"}}},
+		{"an earlier holder with no span", location.Span{}, nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			g := graph.New(s)
+			if err := g.Add(ctx, holder(tc.earlier)); err != nil {
+				t.Fatalf("first add: %s", err)
+			}
+			res := diagtest.Failures(t, g.Add(ctx, holder(at(4))))
+			var dups []diag.Issue
+			for issue := range res.Issues() {
+				if issue.Code() == diag.E_DUPLICATE_PK {
+					dups = append(dups, issue)
+				}
+			}
+			if len(dups) != 1 {
+				t.Fatalf("the duplicate drew %d E_DUPLICATE_PK issues, want 1: %s", len(dups), res.String())
+			}
+			if got := dups[0].Related(); !slices.Equal(got, tc.want) {
+				t.Errorf("related = %+v, want %+v", got, tc.want)
+			}
+		})
+	}
 }
 
 // TestAdd_ComposedRecordAttestsValues pins that a record with a composed child
@@ -88,9 +145,9 @@ part type Wheel {
 	position String required
 }
 `
-	s, res := schema.LoadString(ctx, src, "test://attest_composed.yammm")
-	if res.HasErrors() {
-		t.Fatalf("schema load: %s", res.String())
+	s, err := schema.LoadString(ctx, src, "test://attest_composed.yammm")
+	if err != nil {
+		t.Fatalf("schema load: %s", err)
 	}
 
 	valid := instancetest.Valid(t, s, "Car", map[string]any{
@@ -98,8 +155,8 @@ part type Wheel {
 		"wheels": []any{map[string]any{"position": "left"}},
 	})
 	g := graph.New(s)
-	if r := g.Add(ctx, valid); !r.OK() {
-		t.Fatalf("add: %s", r.String())
+	if err := g.Add(ctx, valid); err != nil {
+		t.Fatalf("add: %s", err)
 	}
 	if att := g.Snapshot().Attestation(); !att.Values {
 		t.Fatal("a fully validated record did not attest Values")
@@ -135,8 +192,10 @@ func TestDiagnosticDetails_CarryBareValues(t *testing.T) {
 	main, common := testMultiSchemaSetup(t)
 	mislabelled := instancetest.Valid(t, common, "Entity", map[string]any{"id": "e1", "name": "n"})
 	g := graph.New(main)
-	g.Add(ctx, mislabelled)
-	res := g.Add(ctx, mislabelled)
+	if err := g.Add(ctx, mislabelled); err != nil {
+		t.Errorf("Add: %v", err)
+	}
+	res := diagtest.Failures(t, g.Add(ctx, mislabelled))
 	if got := detail(res, diag.E_DUPLICATE_PK, diag.DetailKeyTypeName); got != "c.Entity" {
 		t.Errorf("type_name = %q, want the canonical tag form %q", got, "c.Entity")
 	}

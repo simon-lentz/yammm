@@ -313,8 +313,8 @@ func fmtHazards(t *testing.T) map[string]string {
 // fmtSchemaHash loads src and returns its structural hash, reporting whether it
 // loaded.
 func fmtSchemaHash(src string) (string, bool) {
-	s, result := schema.LoadString(context.Background(), src, "hazard.yammm")
-	if result.Err() != nil || s.IsZero() {
+	s, err := schema.LoadString(context.Background(), src, "hazard.yammm")
+	if err != nil || s.IsZero() {
 		return "", false
 	}
 	return schema.StructuralHash(s), true

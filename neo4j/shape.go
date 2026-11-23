@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/internal/mapping"
 	"github.com/simon-lentz/yammm/schema"
@@ -37,18 +36,18 @@ type graphShape struct {
 
 // shapeFor derives the [graphShape] of every non-abstract type across s's whole
 // import closure, each labeled from its own member's schema name by
-// [cypher.Config.Label]. A result with errors is [cypher.Config.CheckLabels]'
-// refusal, and then no shape is derived.
-func shapeFor(c cypher.Config, s schema.Schema) (*graphShape, diag.Result) {
-	if res := c.CheckLabels(s); res.HasErrors() {
-		return nil, res
+// [cypher.Config.Label]. An error is [cypher.Config.CheckLabels]' refusal, and
+// then no shape is derived.
+func shapeFor(c cypher.Config, s schema.Schema) (*graphShape, error) {
+	if err := c.CheckLabels(s); err != nil {
+		return nil, err
 	}
 	shape := &graphShape{types: make(map[schema.TypeID]nodeShape)}
 	labels := mapping.Labels{Prefix: c.LabelPrefix, Separator: c.LabelSeparator}
 	for t, label := range labels.LabeledTypes(s) {
 		recordShape(shape, t, label)
 	}
-	return shape, diag.OK()
+	return shape, nil
 }
 
 // writeShape refuses a zero snapshot with [ErrZeroSnapshot], whose schema no
@@ -57,9 +56,9 @@ func writeShape(c cypher.Config, snap graph.Snapshot) (*graphShape, error) {
 	if snap.IsZero() {
 		return nil, ErrZeroSnapshot
 	}
-	shapes, res := shapeFor(c, snap.Schema())
-	if res.HasErrors() {
-		return nil, fmt.Errorf("label the schema's types: %w", res.Err())
+	shapes, err := shapeFor(c, snap.Schema())
+	if err != nil {
+		return nil, fmt.Errorf("label the schema's types: %w", err)
 	}
 	return shapes, nil
 }

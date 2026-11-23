@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/simon-lentz/yammm/diag"
+	"github.com/simon-lentz/yammm/internal/diagtest"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -72,9 +73,9 @@ func TestLoad_RefusesAnExplicitModuleRootThatIsNotADirectory(t *testing.T) {
 		for name, root := range map[string]string{"an existing directory": dir, "a regular file's parent, spelled through it": plain + string(filepath.Separator) + ".."} {
 			t.Run(entry+", "+name, func(t *testing.T) {
 				t.Parallel()
-				s, res := schema.Load(context.Background(), filepath.Join(dir, entry), schema.WithModuleRoot(root))
-				if s.IsZero() || res.HasErrors() {
-					t.Errorf("Load under module root %s failed: %s", root, res)
+				s, err := schema.Load(context.Background(), filepath.Join(dir, entry), schema.WithModuleRoot(root))
+				if s.IsZero() || err != nil {
+					t.Errorf("Load under module root %s failed: %s", root, err)
 				}
 			})
 		}
@@ -86,7 +87,9 @@ func TestLoad_RefusesAnExplicitModuleRootThatIsNotADirectory(t *testing.T) {
 // a goroutine may call it.
 func checkRefusedRoot(t *testing.T, entry, root, cause string) {
 	t.Helper()
-	s, res := schema.Load(context.Background(), entry, schema.WithModuleRoot(root))
+	s, res := diagtest.Capture(t, func(warn func(diag.Issue)) (schema.Schema, error) {
+		return schema.Load(context.Background(), entry, schema.WithModuleRoot(root), schema.WithWarnings(warn))
+	})
 	if !s.IsZero() {
 		t.Errorf("Load returned a schema under module root %s", root)
 	}
@@ -119,8 +122,8 @@ func TestLoadSourcesWithEntry_TakesARootNoDirectoryHolds(t *testing.T) {
 		"entry.yammm": []byte("schema \"entry\"\n\nimport \"./dep\" as dep\n\ntype T {\n\tid String primary\n}\n"),
 		"dep.yammm":   []byte(depSchema),
 	}
-	s, res := schema.LoadSourcesWithEntry(context.Background(), sources, "entry.yammm", root)
-	if s.IsZero() || res.HasErrors() {
-		t.Errorf("LoadSourcesWithEntry under root %s failed: %s", root, res)
+	s, err := schema.LoadSourcesWithEntry(context.Background(), sources, "entry.yammm", schema.WithModuleRoot(root))
+	if s.IsZero() || err != nil {
+		t.Errorf("LoadSourcesWithEntry under root %s failed: %s", root, err)
 	}
 }

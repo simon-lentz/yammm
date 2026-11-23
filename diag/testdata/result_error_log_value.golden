@@ -1,6 +1,5 @@
 {
   "code": "E_SYNTAX",
-  "context": "schema_load",
   "counts": {
     "errors": 1,
     "warnings": 0

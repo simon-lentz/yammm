@@ -54,7 +54,7 @@ func TestScanDir_PopulatesFileSizeForACorruptEntry(t *testing.T) {
 			t.Fatalf("ScanDir: %v", err)
 		}
 		seen++
-		if !entry.Result.HasErrors() {
+		if entry.Err == nil {
 			t.Fatal("the corrupt fixture parsed cleanly, so this asserts nothing")
 		}
 		if entry.Header != nil {
@@ -120,8 +120,8 @@ func TestScanDir_FollowsASymlinkToARegularFile(t *testing.T) {
 		if entry.Name != "link.ys" {
 			t.Errorf("scanned %q, want link.ys", entry.Name)
 		}
-		if entry.Result.HasErrors() {
-			t.Errorf("link.ys reported errors: %v", entry.Result.Err())
+		if entry.Err != nil {
+			t.Errorf("link.ys reported errors: %v", entry.Err)
 		}
 		// f.Stat answers for the symlink's target, which is the file that was
 		// actually read.
@@ -152,7 +152,7 @@ func TestScanDir_BrokenSymlinkStillYieldsAnIOEntry(t *testing.T) {
 			t.Fatalf("ScanDir: %v", err)
 		}
 		seen++
-		if !entry.Result.HasErrors() {
+		if entry.Err == nil {
 			t.Errorf("broken.ys reported no error")
 		}
 		if entry.FileSize != 0 {

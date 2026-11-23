@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/simon-lentz/yammm/diag"
+	"github.com/simon-lentz/yammm/internal/diagtest"
 	"github.com/simon-lentz/yammm/internal/yammmtest"
 	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
@@ -106,7 +107,9 @@ func TestImportCycle_ReportedOnTheClosingImport(t *testing.T) {
 				writeHostPathFile(t, filepath.Join(root, name), content)
 			}
 
-			_, res := schema.Load(t.Context(), filepath.Join(root, row.entry), schema.WithModuleRoot(root))
+			_, res := diagtest.Capture(t, func(warn func(diag.Issue)) (schema.Schema, error) {
+				return schema.Load(t.Context(), filepath.Join(root, row.entry), schema.WithModuleRoot(root), schema.WithWarnings(warn))
+			})
 
 			fileID := func(name string) location.SourceID {
 				id, err := location.SourceIDFromPath(canonicalPath(t, filepath.Join(root, name)))

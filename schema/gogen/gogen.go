@@ -85,7 +85,10 @@ func mergedInitialisms(extra []string) map[string]bool {
 }
 
 // Marshal renders a loaded schema (and its import closure) as formatted,
-// type-checked Go source that embeds the sources the load held.
+// type-checked Go source that embeds the sources the load held. It returns a
+// plain error for each refusal the package doc's Error Conditions section lists,
+// save an embedded store that does not re-load, whose error wraps the load's
+// *[github.com/simon-lentz/yammm/diag.ResultError].
 func Marshal(s schema.Schema, opts ...Option) ([]byte, error) {
 	g, err := newGenerator(s, opts...)
 	if err != nil {
@@ -138,10 +141,10 @@ const recipeRoot = "embedded://your-app"
 // prints, and returns data only when the re-load succeeds and hashes to the
 // emitted SchemaHash. A failure is a generator bug surfaced as an error.
 func (g *generator) finish(data []byte) ([]byte, error) {
-	got, res := schema.LoadSourcesWithEntry(context.Background(), g.embedded, g.entryKey, "",
+	got, err := schema.LoadSourcesWithEntry(context.Background(), g.embedded, g.entryKey,
 		schema.WithSyntheticRoot(recipeRoot))
-	if res.HasErrors() {
-		return nil, fmt.Errorf("gogen: embedded SerializedSources does not re-load: %w", res.Err())
+	if err != nil {
+		return nil, fmt.Errorf("gogen: embedded SerializedSources does not re-load: %w", err)
 	}
 	if h := schema.StructuralHash(got); h != g.schemaHash {
 		return nil, fmt.Errorf("gogen: SerializedSources round-trip hash mismatch (got %s, want %s)", h, g.schemaHash)

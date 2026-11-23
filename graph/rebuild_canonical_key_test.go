@@ -20,9 +20,9 @@ import (
 // reaches an edge position as well as an instance one.
 func canonicalKeySchema(t *testing.T) schema.Schema {
 	t.Helper()
-	s, res := schema.LoadString(t.Context(), canonicalKeySource, "canon_add_path.yammm")
-	if res.HasErrors() {
-		t.Fatalf("load: %s", res)
+	s, err := schema.LoadString(t.Context(), canonicalKeySource, "canon_add_path.yammm")
+	if err != nil {
+		t.Fatalf("load: %s", err)
 	}
 	return s
 }
@@ -79,11 +79,11 @@ func TestCanonicalization_AddAndRebuildAgree(t *testing.T) {
 	})
 
 	g := graph.New(s)
-	if r := g.Add(t.Context(), site); !r.OK() {
-		t.Fatalf("add site: %s", r)
+	if err := g.Add(t.Context(), site); err != nil {
+		t.Fatalf("add site: %s", err)
 	}
-	if r := g.Add(t.Context(), sensor); !r.OK() {
-		t.Fatalf("add: %s", r)
+	if err := g.Add(t.Context(), sensor); err != nil {
+		t.Fatalf("add: %s", err)
 	}
 	added := g.Snapshot()
 

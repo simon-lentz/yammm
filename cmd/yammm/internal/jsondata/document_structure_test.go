@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/simon-lentz/yammm/internal/diagtest"
 	"github.com/simon-lentz/yammm/internal/yammmtest/sourcetest"
 
 	"github.com/simon-lentz/yammm/diag"
@@ -180,7 +181,7 @@ func TestParse_TrailingContentIsRefused(t *testing.T) {
 	for _, c := range accepted {
 		t.Run("accepts "+c.name, func(t *testing.T) {
 			_, result := parseForProvenance(t, id, root+c.tail)
-			if !result.OK() {
+			if diagtest.Err(result) != nil {
 				t.Fatalf("refused:%s", describe(result))
 			}
 		})
@@ -365,7 +366,7 @@ func TestParse_ARepeatedMemberIsReported(t *testing.T) {
 	for _, c := range unique {
 		t.Run("accepts "+c.name, func(t *testing.T) {
 			parsed, result := parseForProvenance(t, id, `{"Person": [`+c.elem+`]}`)
-			if !result.OK() {
+			if diagtest.Err(result) != nil {
 				t.Fatalf("refused:%s", describe(result))
 			}
 			if len(parsed["Person"].Elements) != 1 {
@@ -395,8 +396,8 @@ func TestParse_AnEmptyArrayKeepsItsKey(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			parsed, result := parseForProvenance(t, id, c.doc)
-			if result.OK() != c.ok {
-				t.Fatalf("OK is %v, want %v:%s", result.OK(), c.ok, describe(result))
+			if (diagtest.Err(result) == nil) != c.ok {
+				t.Fatalf("OK is %v, want %v:%s", diagtest.Err(result) == nil, c.ok, describe(result))
 			}
 			rows, entry := parsed[c.key]
 			if entry != c.entry {
@@ -413,16 +414,18 @@ func TestParse_AnEmptyArrayKeepsItsKey(t *testing.T) {
 // kept key gives a caller that validates every entry: a type name the schema
 // does not declare is reported whatever its array holds.
 func TestParse_AnEmptyArrayOfAnUnknownTypeReachesTheValidator(t *testing.T) {
-	s, loadResult := schema.LoadString(t.Context(), `schema "s"
+	s, loadResult := diagtest.Capture(t, func(warn func(diag.Issue)) (schema.Schema, error) {
+		return schema.LoadString(t.Context(), `schema "s"
 type Person {
 	id String primary
 }
-`, "s.yammm")
-	if !loadResult.OK() {
+`, "s.yammm", schema.WithWarnings(warn))
+	})
+	if diagtest.Err(loadResult) != nil {
 		t.Fatalf("load:%s", describe(loadResult))
 	}
 	parsed, result := parseForProvenance(t, sourcetest.ID("test://data/unknown.json"), `{"Person": [], "Nobody": []}`)
-	if !result.OK() {
+	if diagtest.Err(result) != nil {
 		t.Fatalf("parse refused:%s", describe(result))
 	}
 	v := instance.NewValidator(s)
@@ -432,7 +435,9 @@ type Person {
 		if !ok {
 			t.Fatalf("no entry for %q", name)
 		}
-		_, vr := v.Validate(t.Context(), name, rawsOf(raws.Elements))
+		_, vr := diagtest.Issues(t, func() ([]instance.ValidInstance, error) {
+			return v.Validate(t.Context(), name, rawsOf(raws.Elements))
+		})
 		for issue := range vr.Issues() {
 			codes = append(codes, issue.Code())
 		}

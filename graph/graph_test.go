@@ -3,6 +3,7 @@ package graph_test
 import (
 	"cmp"
 	"context"
+	"errors"
 	"fmt"
 	"slices"
 	"testing"
@@ -10,6 +11,7 @@ import (
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/instance"
+	"github.com/simon-lentz/yammm/internal/diagtest"
 	"github.com/simon-lentz/yammm/internal/instancetest"
 	"github.com/simon-lentz/yammm/internal/yammmtest"
 	"github.com/simon-lentz/yammm/schema"
@@ -19,7 +21,7 @@ import (
 func testSchema(t *testing.T) schema.Schema {
 	t.Helper()
 
-	s, result := schema.LoadString(t.Context(), `schema "test"
+	s, err := schema.LoadString(t.Context(), `schema "test"
 
 type Person {
 	id String primary
@@ -31,9 +33,8 @@ type Company {
 	name String required
 }
 `, "test.yammm")
-
-	if result.HasErrors() {
-		t.Fatalf("Failed to build test schema: %s", result.String())
+	if err != nil {
+		t.Fatalf("Failed to build test schema: %s", err)
 	}
 	return s
 }
@@ -63,7 +64,7 @@ func TestGraph_Add_NilReceiver(t *testing.T) {
 
 	inst := instancetest.Valid(t, s, "Person", map[string]any{"id": "alice", "name": "Alice"})
 
-	yammmtest.AssertPanics(t, func() { g.Add(ctx, inst) })
+	yammmtest.AssertPanics(t, func() { _ = g.Add(ctx, inst) })
 }
 
 func TestGraph_Add_NilInstance(t *testing.T) {
@@ -76,7 +77,9 @@ func TestGraph_Add_NilInstance(t *testing.T) {
 			t.Error("Add(nil) should panic")
 		}
 	}()
-	g.Add(ctx, instance.ValidInstance{})
+	if err := g.Add(ctx, instance.ValidInstance{}); err != nil {
+		t.Errorf("Add: %v", err)
+	}
 }
 
 func TestGraph_Add_SchemaMismatch(t *testing.T) {
@@ -106,7 +109,9 @@ type TypeB {
 			t.Error("Add with mismatched schema should panic")
 		}
 	}()
-	g.Add(ctx, inst)
+	if err := g.Add(ctx, inst); err != nil {
+		t.Errorf("Add: %v", err)
+	}
 }
 
 func TestGraph_Add_ImportedSchemaAllowed(t *testing.T) {
@@ -118,9 +123,9 @@ func TestGraph_Add_ImportedSchemaAllowed(t *testing.T) {
 	// Create instance from the imported schema (common)
 	inst := instancetest.Valid(t, importedSchema, "Entity", map[string]any{"id": "e1", "name": "Test Entity"})
 
-	result := g.Add(ctx, inst)
-	if !result.OK() {
-		t.Errorf("Add with imported schema instance should succeed, got %s", result.String())
+	err := g.Add(ctx, inst)
+	if err != nil {
+		t.Errorf("Add with imported schema instance should succeed, got %s", err)
 	}
 }
 
@@ -132,8 +137,8 @@ func TestGraph_Add_ContextCancellation(t *testing.T) {
 
 	inst := instancetest.Valid(t, s, "Person", map[string]any{"id": "alice", "name": "Alice"})
 
-	result := g.Add(ctx, inst)
-	if result.OK() {
+	result := diagtest.Failures(t, g.Add(ctx, inst))
+	if diagtest.Err(result) == nil {
 		t.Error("Add with canceled context should not be OK")
 	}
 
@@ -149,6 +154,19 @@ func TestGraph_Add_ContextCancellation(t *testing.T) {
 	}
 }
 
+// TestGraph_Check_ContextCancellation pins that Check under a cancelled
+// context returns one Fatal E_CONTEXT_CANCELLED and reads nothing else.
+func TestGraph_Check_ContextCancellation(t *testing.T) {
+	t.Parallel()
+	g := graph.New(testSchema(t))
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	result := diagtest.Failures(t, g.Check(ctx))
+	if result.Len() != 1 || result.SeverityCounts().Fatal != 1 || !result.HasCode(diag.E_CONTEXT_CANCELLED) {
+		t.Errorf("Check under a cancelled context = %s, want one Fatal E_CONTEXT_CANCELLED", result)
+	}
+}
+
 func TestGraph_Add_Success(t *testing.T) {
 	s := testSchema(t)
 	g := graph.New(s)
@@ -156,8 +174,8 @@ func TestGraph_Add_Success(t *testing.T) {
 
 	inst := instancetest.Valid(t, s, "Person", map[string]any{"id": "alice", "name": "Alice"})
 
-	result := g.Add(ctx, inst)
-	if err := result.Err(); err != nil {
+	addErr := g.Add(ctx, inst)
+	if err := addErr; err != nil {
 		t.Errorf("Add() should succeed: %v", err)
 	}
 
@@ -187,14 +205,14 @@ func TestGraph_Add_DuplicatePK(t *testing.T) {
 
 	// Add first instance
 	inst1 := instancetest.Valid(t, s, "Person", map[string]any{"id": "alice", "name": "Alice"})
-	if r := g.Add(ctx, inst1); !r.OK() {
-		t.Fatalf("First Add() failed: %s", r.String())
+	if err := g.Add(ctx, inst1); err != nil {
+		t.Fatalf("First Add() failed: %s", err)
 	}
 
 	// Add duplicate
 	inst2 := instancetest.Valid(t, s, "Person", map[string]any{"id": "alice", "name": "Alice 2"})
-	result := g.Add(ctx, inst2)
-	if result.OK() {
+	result := diagtest.Failures(t, g.Add(ctx, inst2))
+	if diagtest.Err(result) == nil {
 		t.Error("Add() with duplicate PK should fail")
 	}
 
@@ -218,8 +236,8 @@ func TestGraph_Snapshot_DeterministicOrder(t *testing.T) {
 	names := []string{"charlie", "alice", "bob"}
 	for _, name := range names {
 		inst := instancetest.Valid(t, s, "Person", map[string]any{"id": name, "name": name})
-		if r := g.Add(ctx, inst); !r.OK() {
-			t.Fatalf("Add(%s) failed: %s", name, r.String())
+		if err := g.Add(ctx, inst); err != nil {
+			t.Fatalf("Add(%s) failed: %s", name, err)
 		}
 	}
 
@@ -246,8 +264,8 @@ func TestGraph_InstanceByKey(t *testing.T) {
 
 	inst := instancetest.Valid(t, s, "Person", map[string]any{"id": "alice", "name": "Alice"})
 
-	if r := g.Add(ctx, inst); !r.OK() {
-		t.Fatalf("Add() failed: %s", r.String())
+	if err := g.Add(ctx, inst); err != nil {
+		t.Fatalf("Add() failed: %s", err)
 	}
 
 	snap := g.Snapshot()
@@ -276,7 +294,7 @@ func TestGraph_InstanceByKey(t *testing.T) {
 
 func TestGraph_Check_NilReceiver(t *testing.T) {
 	var g *graph.Graph
-	yammmtest.AssertPanics(t, func() { g.Check(t.Context()) })
+	yammmtest.AssertPanics(t, func() { _ = g.Check(t.Context()) })
 }
 
 func TestSnapshot_NilReceiver(t *testing.T) {
@@ -368,7 +386,7 @@ func TestGraph_PartType_NoPK_Positional(t *testing.T) {
 		items = append(items, map[string]any{"value": "same-value"})
 	}
 	container := parentWith(t, s, "Container", []any{"box1"}, map[string]any{"name": "Box 1"}, "ITEMS", items...)
-	if err := g.Add(ctx, container).Err(); err != nil {
+	if err := g.Add(ctx, container); err != nil {
 		t.Errorf("Add should succeed: %v", err)
 	}
 
@@ -390,14 +408,14 @@ func TestGraph_PartType_SameKeyUnderTwoParentsIsNoDuplicate(t *testing.T) {
 	single := parentWith(t, s, "Parent", []any{"p1"}, map[string]any{"name": "Parent 1"}, "CHILDREN",
 		map[string]any{"id": "c1", "name": "Child 1"},
 	)
-	if err := g.Add(ctx, single).Err(); err != nil {
+	if err := g.Add(ctx, single); err != nil {
 		t.Errorf("First child should succeed: %v", err)
 	}
 
 	other := parentWith(t, s, "Parent", []any{"p2"}, map[string]any{"name": "Parent 2"}, "CHILDREN",
 		map[string]any{"id": "c1", "name": "Child 1"},
 	)
-	if err := g.Add(ctx, other).Err(); err != nil {
+	if err := g.Add(ctx, other); err != nil {
 		t.Errorf("A child at the same key under another parent should succeed: %v", err)
 	}
 }
@@ -410,8 +428,8 @@ func TestGraph_NestedComposition(t *testing.T) {
 
 	child := partData(t, s, "Child", []any{"c1"}, map[string]any{"name": "Child 1"})
 	parent := parentWith(t, s, "Parent", []any{"p1"}, map[string]any{"name": "Parent 1"}, "CHILDREN", child)
-	if r := g.Add(ctx, parent); !r.OK() {
-		t.Fatalf("Add failed: %s", r.String())
+	if err := g.Add(ctx, parent); err != nil {
+		t.Fatalf("Add failed: %s", err)
 	}
 
 	// Verify structure
@@ -443,19 +461,23 @@ func TestGraph_Duplicates_Ordering(t *testing.T) {
 	alice := instancetest.Valid(t, s, "Person", map[string]any{"id": "alice", "name": "Alice"})
 	acme := instancetest.Valid(t, s, "Company", map[string]any{"id": "acme", "name": "Acme"})
 
-	if r := g.Add(ctx, alice); !r.OK() {
-		t.Fatal(r.String())
+	if err := g.Add(ctx, alice); err != nil {
+		t.Fatal(err)
 	}
-	if r := g.Add(ctx, acme); !r.OK() {
-		t.Fatal(r.String())
+	if err := g.Add(ctx, acme); err != nil {
+		t.Fatal(err)
 	}
 
 	// Add duplicates in reverse order (Company before Person)
 	acmeDup := instancetest.Valid(t, s, "Company", map[string]any{"id": "acme", "name": "Acme Dup"})
 	aliceDup := instancetest.Valid(t, s, "Person", map[string]any{"id": "alice", "name": "Alice Dup"})
 
-	g.Add(ctx, acmeDup)
-	g.Add(ctx, aliceDup)
+	if err := g.Add(ctx, acmeDup); err != nil && !errors.Is(err, diag.E_DUPLICATE_PK) {
+		t.Errorf("Add: %v", err)
+	}
+	if err := g.Add(ctx, aliceDup); err != nil && !errors.Is(err, diag.E_DUPLICATE_PK) {
+		t.Errorf("Add: %v", err)
+	}
 
 	snap := g.Snapshot()
 	dups := slices.Collect(snap.Duplicates())
@@ -486,17 +508,17 @@ func TestGraph_Unresolved_Ordering(t *testing.T) {
 	typeB := mustValidInstanceWithEdge(t, s, "TypeB", []any{"b1"}, map[string]any{"name": "B1"}, "REF_C", [][]any{{"c-missing"}})
 
 	// Add in scrambled order
-	if r := g.Add(ctx, typeC); !r.OK() {
-		t.Fatal(r.String())
+	if err := g.Add(ctx, typeC); err != nil {
+		t.Fatal(err)
 	}
-	if r := g.Add(ctx, typeA2); !r.OK() {
-		t.Fatal(r.String())
+	if err := g.Add(ctx, typeA2); err != nil {
+		t.Fatal(err)
 	}
-	if r := g.Add(ctx, typeB); !r.OK() {
-		t.Fatal(r.String())
+	if err := g.Add(ctx, typeB); err != nil {
+		t.Fatal(err)
 	}
-	if r := g.Add(ctx, typeA1); !r.OK() {
-		t.Fatal(r.String())
+	if err := g.Add(ctx, typeA1); err != nil {
+		t.Fatal(err)
 	}
 
 	snap := g.Snapshot()
@@ -542,8 +564,8 @@ func TestGraph_LargeGraph_Performance(t *testing.T) {
 		pk := fmt.Sprintf("person-%04d", (i*7+13)%1000) // Scrambled order
 		inst := instancetest.Valid(t, s, "Person", map[string]any{"id": pk, "name": pk})
 
-		if r := g.Add(ctx, inst); !r.OK() {
-			t.Fatalf("Add %s failed: %s", pk, r.String())
+		if err := g.Add(ctx, inst); err != nil {
+			t.Fatalf("Add %s failed: %s", pk, err)
 		}
 	}
 
@@ -589,8 +611,8 @@ func TestGraph_SpecialChars_InKeys(t *testing.T) {
 	for _, key := range specialKeys {
 		inst := instancetest.Valid(t, s, "Person", map[string]any{"id": key, "name": key})
 
-		result := g.Add(ctx, inst)
-		if err := result.Err(); err != nil {
+		addErr := g.Add(ctx, inst)
+		if err := addErr; err != nil {
 			t.Errorf("Add key %q should succeed: %v", key, err)
 		}
 	}
@@ -631,8 +653,8 @@ func TestGraph_Unicode_InKeys(t *testing.T) {
 	for _, key := range unicodeKeys {
 		inst := instancetest.Valid(t, s, "Person", map[string]any{"id": key, "name": key})
 
-		result := g.Add(ctx, inst)
-		if err := result.Err(); err != nil {
+		addErr := g.Add(ctx, inst)
+		if err := addErr; err != nil {
 			t.Errorf("Add unicode key %q should succeed: %v", key, err)
 		}
 	}
@@ -656,8 +678,8 @@ func TestGraph_CompositeKey_TwoComponents(t *testing.T) {
 		for i := range 3 {
 			inst := instancetest.Valid(t, s, "Record", map[string]any{"region": region, "id": fmt.Sprintf("id-%d", i), "value": fmt.Sprintf("%s-%d", region, i)})
 
-			result := g.Add(ctx, inst)
-			if err := result.Err(); err != nil {
+			addErr := g.Add(ctx, inst)
+			if err := addErr; err != nil {
 				t.Fatalf("Add should succeed: %v", err)
 			}
 		}
@@ -698,8 +720,8 @@ type Person {
 	g := graph.New(s)
 	inst := instancetest.Valid(t, s, "Person", map[string]any{"id": "minimal"})
 
-	result := g.Add(ctx, inst)
-	if err := result.Err(); err != nil {
+	addErr := g.Add(ctx, inst)
+	if err := addErr; err != nil {
 		t.Fatalf("Add should succeed: %v", err)
 	}
 
@@ -729,8 +751,8 @@ func TestGraph_ComposedRelations_Sorted(t *testing.T) {
 	doc := instancetest.Valid(t, s, "Document", composedData(t, s, "Document",
 		composedData(t, s, "Document", keyedProps(t, s, "Document", []any{"doc1"}, map[string]any{"title": "Doc 1"}), "TAGS", tag),
 		"NOTES", note))
-	if r := g.Add(ctx, doc); !r.OK() {
-		t.Fatalf("Add document failed: %s", r.String())
+	if err := g.Add(ctx, doc); err != nil {
+		t.Fatalf("Add document failed: %s", err)
 	}
 
 	snap := g.Snapshot()
@@ -762,8 +784,8 @@ func TestGraph_ComposedRelations_AllocatesItsSliceAlone(t *testing.T) {
 		composedData(t, s, "Document", keyedProps(t, s, "Document", []any{"doc1"}, map[string]any{"title": "Doc 1"}),
 			"TAGS", partData(t, s, "Tag", []any{"t1"}, map[string]any{})),
 		"NOTES", partData(t, s, "Note", []any{"n1"}, map[string]any{"text": "Note 1"})))
-	if r := g.Add(t.Context(), doc); !r.OK() {
-		t.Fatalf("Add document failed: %s", r.String())
+	if err := g.Add(t.Context(), doc); err != nil {
+		t.Fatalf("Add document failed: %s", err)
 	}
 	docs := slices.Collect(g.Snapshot().InstancesOf(mustTypeID(t, s, "Document")))
 	if allocs := testing.AllocsPerRun(100, func() { _ = docs[0].ComposedRelations() }); allocs != 1 {
@@ -777,8 +799,8 @@ func TestGraph_ComposedRelations_NilWithoutChildren(t *testing.T) {
 	s := testSchemaWithMultipleCompositions(t)
 	g := graph.New(s)
 	doc := instancetest.Valid(t, s, "Document", keyedProps(t, s, "Document", []any{"doc1"}, map[string]any{"title": "Doc 1"}))
-	if r := g.Add(t.Context(), doc); !r.OK() {
-		t.Fatalf("Add document failed: %s", r.String())
+	if err := g.Add(t.Context(), doc); err != nil {
+		t.Fatalf("Add document failed: %s", err)
 	}
 	docs := slices.Collect(g.Snapshot().InstancesOf(mustTypeID(t, s, "Document")))
 	if got := docs[0].ComposedRelations(); got != nil {
@@ -807,8 +829,8 @@ func TestGraph_MultipleCompositions(t *testing.T) {
 	doc := instancetest.Valid(t, s, "Document", composedData(t, s, "Document",
 		composedData(t, s, "Document", keyedProps(t, s, "Document", []any{"doc1"}, map[string]any{"title": "Doc 1"}), "NOTES", notes...),
 		"TAGS", tags...))
-	if r := g.Add(ctx, doc); !r.OK() {
-		t.Fatalf("Add document failed: %s", r.String())
+	if err := g.Add(ctx, doc); err != nil {
+		t.Fatalf("Add document failed: %s", err)
 	}
 
 	snap := g.Snapshot()
@@ -833,15 +855,15 @@ func TestContract6_InstanceTagForm(t *testing.T) {
 	// Add local User
 	user := instancetest.Valid(t, mainSchema, "User", map[string]any{"id": "u1", "username": "alice"})
 
-	if r := g.Add(ctx, user); !r.OK() {
-		t.Fatalf("Add user failed: %s", r.String())
+	if err := g.Add(ctx, user); err != nil {
+		t.Fatalf("Add user failed: %s", err)
 	}
 
 	// Add imported Entity
 	entity := instancetest.Valid(t, mainSchema, "c.Entity", map[string]any{"id": "e1", "name": "Entity 1"})
 
-	if r := g.Add(ctx, entity); !r.OK() {
-		t.Fatalf("Add entity failed: %s", r.String())
+	if err := g.Add(ctx, entity); err != nil {
+		t.Fatalf("Add entity failed: %s", err)
 	}
 
 	snap := g.Snapshot()
@@ -917,15 +939,15 @@ type Container {
 	// Add b.Product with PK "p1"
 	instB := instancetest.Valid(t, mainSchema, "b.Product", map[string]any{"id": "p1", "sourceB": "from B"})
 
-	if r := g.Add(ctx, instB); !r.OK() {
-		t.Fatalf("Add b.Product failed: %s", r.String())
+	if err := g.Add(ctx, instB); err != nil {
+		t.Fatalf("Add b.Product failed: %s", err)
 	}
 
 	// Add c.Product with same PK - should NOT be a duplicate
 	instC := instancetest.Valid(t, mainSchema, "c.Product", map[string]any{"id": "p1", "sourceC": "from C"})
 
-	result := g.Add(ctx, instC)
-	if err := result.Err(); err != nil {
+	addErr := g.Add(ctx, instC)
+	if err := addErr; err != nil {
 		t.Errorf("Same PK with different TypeID should not be duplicate: %v", err)
 	}
 
@@ -950,14 +972,14 @@ func TestContract19_FailureSemantics(t *testing.T) {
 	inst1 := instancetest.Valid(t, s, "Person", map[string]any{"id": "alice", "name": "Alice"})
 	inst2 := instancetest.Valid(t, s, "Person", map[string]any{"id": "alice", "name": "Alice 2"})
 
-	result1 := g.Add(ctx, inst1)
-	if !result1.OK() {
-		t.Errorf("First Add should succeed: %s", result1.String())
+	err := g.Add(ctx, inst1)
+	if err != nil {
+		t.Errorf("First Add should succeed: %s", err)
 	}
 
-	result2 := g.Add(ctx, inst2)
-	if !result2.HasCode(diag.E_DUPLICATE_PK) {
-		t.Errorf("Duplicate PK result reported %s, want %s", result2, diag.E_DUPLICATE_PK)
+	addErr := g.Add(ctx, inst2)
+	if !errors.Is(addErr, diag.E_DUPLICATE_PK) {
+		t.Errorf("Duplicate PK result reported %s, want %s", addErr, diag.E_DUPLICATE_PK)
 	}
 
 	// Test case 2: Nil instance → panic
@@ -968,7 +990,9 @@ func TestContract19_FailureSemantics(t *testing.T) {
 				panicked = true
 			}
 		}()
-		g.Add(ctx, instance.ValidInstance{})
+		if err := g.Add(ctx, instance.ValidInstance{}); err != nil {
+			t.Errorf("Add: %v", err)
+		}
 	}()
 	if !panicked {
 		t.Error("Nil instance should panic")
@@ -978,8 +1002,8 @@ func TestContract19_FailureSemantics(t *testing.T) {
 	cancelCtx, cancel := context.WithCancel(ctx)
 	cancel()
 
-	result4 := g.Add(cancelCtx, inst1)
-	if result4.OK() {
+	result4 := diagtest.Failures(t, g.Add(cancelCtx, inst1))
+	if diagtest.Err(result4) == nil {
 		t.Error("Cancelled context result should not be OK")
 	}
 
@@ -1003,8 +1027,8 @@ func TestResult_Instances(t *testing.T) {
 	// Add some instances
 	for i := range 3 {
 		inst := instancetest.Valid(t, s, "Person", map[string]any{"id": fmt.Sprintf("person-%d", i), "name": fmt.Sprintf("Name %d", i)})
-		if r := g.Add(ctx, inst); !r.OK() {
-			t.Fatalf("Add failed: %s", r.String())
+		if err := g.Add(ctx, inst); err != nil {
+			t.Fatalf("Add failed: %s", err)
 		}
 	}
 
@@ -1032,8 +1056,8 @@ func TestGraph_Add_InlineCompositions(t *testing.T) {
 		partData(t, s, "Child", []any{"c1"}, map[string]any{"name": "Child 1"}),
 		partData(t, s, "Child", []any{"c2"}, map[string]any{"name": "Child 2"}))
 
-	result := g.Add(ctx, parent)
-	if err := result.Err(); err != nil {
+	addErr := g.Add(ctx, parent)
+	if err := addErr; err != nil {
 		t.Fatalf("Add parent should succeed: %v", err)
 	}
 
@@ -1063,8 +1087,8 @@ func TestGraph_Add_NestedInlineCompositions(t *testing.T) {
 		}},
 	})
 
-	result := g.Add(ctx, parent)
-	if err := result.Err(); err != nil {
+	addErr := g.Add(ctx, parent)
+	if err := addErr; err != nil {
 		t.Fatalf("Add parent should succeed: %v", err)
 	}
 
@@ -1107,8 +1131,8 @@ type Parent {
 	g := graph.New(s)
 	parent := instancetest.Valid(t, s, "Parent", map[string]any{"id": "p1", "name": "Parent 1", "children": []any{}})
 
-	result := g.Add(ctx, parent)
-	if err := result.Err(); err != nil {
+	addErr := g.Add(ctx, parent)
+	if err := addErr; err != nil {
 		t.Fatalf("Add parent should succeed: %v", err)
 	}
 
@@ -1132,7 +1156,7 @@ func TestAdd_NestedCompositionReachesTheGrandchild(t *testing.T) {
 			"grand_children": []any{map[string]any{"id": "gc1", "name": "GrandChild 1"}},
 		}},
 	})
-	if err := g.Add(ctx, parent).Err(); err != nil {
+	if err := g.Add(ctx, parent); err != nil {
 		t.Fatalf("Add should succeed: %v", err)
 	}
 
@@ -1171,13 +1195,13 @@ func TestAdd_PerOperationDiagnostics(t *testing.T) {
 	ctx := t.Context()
 
 	// First add - use an invalid type to trigger an error
-	if r := g.Add(ctx, mustValidInstance(t, s, "Person", []any{"dup"}, map[string]any{"name": "Dup"})); !r.OK() {
-		t.Fatal(r)
+	if err := g.Add(ctx, mustValidInstance(t, s, "Person", []any{"dup"}, map[string]any{"name": "Dup"})); err != nil {
+		t.Fatal(err)
 	}
 	invalidInst := mustValidInstance(t, s, "Person", []any{"dup"}, map[string]any{"name": "Dup"})
 
-	result1 := g.Add(ctx, invalidInst)
-	if result1.OK() {
+	result1 := diagtest.Failures(t, g.Add(ctx, invalidInst))
+	if diagtest.Err(result1) == nil {
 		t.Error("First Add with invalid type should fail")
 	}
 	issueCount1 := countIssues(result1)
@@ -1187,8 +1211,8 @@ func TestAdd_PerOperationDiagnostics(t *testing.T) {
 
 	// Second add - valid instance should return OK (per-operation, not cumulative)
 	validInst := mustValidInstance(t, s, "Person", []any{"alice"}, map[string]any{"name": "Alice"})
-	result2 := g.Add(ctx, validInst)
-	if !result2.OK() {
+	result2 := diagtest.Failures(t, g.Add(ctx, validInst))
+	if diagtest.Err(result2) != nil {
 		t.Errorf("Second Add should return OK (per-operation), but got issues: %s", result2.String())
 	}
 	issueCount2 := countIssues(result2)
@@ -1209,14 +1233,14 @@ func TestCheck_Idempotent_IssueCount(t *testing.T) {
 		[]any{"alice"}, map[string]any{"name": "Alice"},
 		"EMPLOYER", [][]any{{"missing-company"}})
 
-	if r := g.Add(ctx, person); !r.OK() {
-		t.Fatalf("Add failed: %s", r.String())
+	if err := g.Add(ctx, person); err != nil {
+		t.Fatalf("Add failed: %s", err)
 	}
 
 	// Call Check multiple times
-	result1 := g.Check(ctx)
-	result2 := g.Check(ctx)
-	result3 := g.Check(ctx)
+	result1 := diagtest.Failures(t, g.Check(ctx))
+	result2 := diagtest.Failures(t, g.Check(ctx))
+	result3 := diagtest.Failures(t, g.Check(ctx))
 
 	count1 := countIssues(result1)
 	count2 := countIssues(result2)
@@ -1246,12 +1270,12 @@ func TestCheck_UnresolvedRequired_TargetPK(t *testing.T) {
 		[]any{"alice"}, map[string]any{"name": "Alice"},
 		"EMPLOYER", [][]any{{"acme"}})
 
-	if r := g.Add(ctx, person); !r.OK() {
-		t.Fatalf("Add failed: %s", r.String())
+	if err := g.Add(ctx, person); err != nil {
+		t.Fatalf("Add failed: %s", err)
 	}
 
-	result := g.Check(ctx)
-	if result.OK() {
+	result := diagtest.Failures(t, g.Check(ctx))
+	if diagtest.Err(result) == nil {
 		t.Fatal("Check should fail with unresolved required association")
 	}
 
@@ -1298,11 +1322,11 @@ func TestCheck_UnresolvedRequired_TargetMissingReason(t *testing.T) {
 		[]any{"alice"}, map[string]any{"name": "Alice"},
 		"EMPLOYER", [][]any{{"missing"}})
 
-	if r := g.Add(ctx, person); !r.OK() {
-		t.Fatalf("Add failed: %s", r.String())
+	if err := g.Add(ctx, person); err != nil {
+		t.Fatalf("Add failed: %s", err)
 	}
 
-	result := g.Check(ctx)
+	result := diagtest.Failures(t, g.Check(ctx))
 
 	var issue diag.Issue
 	issueCount := 0
@@ -1355,17 +1379,17 @@ func TestNilContext_Panics(t *testing.T) {
 	}{
 		{
 			name:    "Add",
-			fn:      func() { g.Add(nil, inst) }, //nolint:staticcheck // testing nil context panic
+			fn:      func() { _ = g.Add(nil, inst) }, //nolint:staticcheck // testing nil context panic
 			wantMsg: "graph.Add: nil context",
 		},
 		{
 			name:    "AddOrMerge",
-			fn:      func() { g.AddOrMerge(nil, inst) }, //nolint:staticcheck // testing nil context panic
+			fn:      func() { _, _ = g.AddOrMerge(nil, inst) }, //nolint:staticcheck // testing nil context panic
 			wantMsg: "graph.AddOrMerge: nil context",
 		},
 		{
 			name:    "Check",
-			fn:      func() { g.Check(nil) }, //nolint:staticcheck // testing nil context panic
+			fn:      func() { _ = g.Check(nil) }, //nolint:staticcheck // testing nil context panic
 			wantMsg: "graph.Check: nil context",
 		},
 	}

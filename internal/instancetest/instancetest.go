@@ -20,9 +20,9 @@ func Valid(tb testing.TB, s schema.Schema, typeName string, props map[string]any
 // provenance.
 func ValidRaw(tb testing.TB, s schema.Schema, typeName string, raw instance.RawInstance) instance.ValidInstance {
 	tb.Helper()
-	valid, res := instance.NewValidator(s).ValidateOne(tb.Context(), typeName, raw)
-	if res.HasErrors() || valid.IsZero() {
-		tb.Fatalf("instancetest: validate %s: %s", typeName, res)
+	valid, err := instance.NewValidator(s).ValidateOne(tb.Context(), typeName, raw)
+	if err != nil || valid.IsZero() {
+		tb.Fatalf("instancetest: validate %s: %v", typeName, err)
 	}
 	return valid
 }
@@ -31,9 +31,9 @@ func ValidRaw(tb testing.TB, s schema.Schema, typeName string, raw instance.RawI
 // sourceName, which gives a test an identity its own schema does not declare.
 func TypeID(tb testing.TB, sourceName, typeName string) schema.TypeID {
 	tb.Helper()
-	s, res := schema.LoadString(tb.Context(), "schema \"identity\"\n\ntype "+typeName+" {\n\tid String primary\n}\n", sourceName)
-	if res.HasErrors() {
-		tb.Fatalf("instancetest.TypeID: load %s: %s", typeName, res)
+	s, err := schema.LoadString(tb.Context(), "schema \"identity\"\n\ntype "+typeName+" {\n\tid String primary\n}\n", sourceName)
+	if err != nil {
+		tb.Fatalf("instancetest.TypeID: load %s: %s", typeName, err)
 	}
 	typ, ok := s.Type(typeName)
 	if !ok {

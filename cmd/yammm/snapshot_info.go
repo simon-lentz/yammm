@@ -9,6 +9,7 @@ import (
 	"maps"
 	"os"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -18,6 +19,7 @@ import (
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/internal/termtext"
+	"github.com/simon-lentz/yammm/schema"
 	"github.com/simon-lentz/yammm/snapshot"
 )
 
@@ -67,11 +69,11 @@ func runSnapshotInfo(cmd *cobra.Command, args []string, sink *cli.DiagnosticSink
 	r := cli.SpelledReader(f, args[0])
 
 	if headerOnly, _ := cmd.Flags().GetBool("header-only"); headerOnly {
-		header, result := snapshot.ReadHeader(cmd.Context(), r)
-		sink.Add(result)
-		if result.HasErrors() {
-			return cli.Exit(cli.ExitForResult(result))
+		header, err := snapshot.ReadHeader(cmd.Context(), r)
+		if err != nil {
+			return sink.AddSnapshot(err)
 		}
+		sink.Add(headerResult(header, nil))
 
 		sink.Flush()
 		w := cmd.OutOrStdout()
@@ -95,9 +97,8 @@ func runSnapshotInfo(cmd *cobra.Command, args []string, sink *cli.DiagnosticSink
 
 	// A document that decodes and fails a structural check has a summary
 	// beside its errors: the summary prints, and the result decides the exit.
-	info, result := snapshot.Stat(cmd.Context(), data)
-	sink.Add(result)
-	exit := cli.Exit(cli.ExitForResult(result))
+	info, statErr := snapshot.Stat(cmd.Context(), data)
+	exit := sink.AddSnapshot(statErr)
 	if info == nil {
 		return exit
 	}
@@ -366,7 +367,7 @@ func runSnapshotInfoDir(cmd *cobra.Command, sink *cli.DiagnosticSink, dirPath st
 	}
 	entries, result := scanDir(cmd.Context(), host)
 	sink.Add(result)
-	if result.HasErrors() {
+	if cli.Failed(result) {
 		return cli.Exit(cli.ExitForResult(result))
 	}
 
@@ -409,7 +410,39 @@ func scanDir(ctx context.Context, dir string) ([]snapshot.ScanEntry, diag.Result
 		}
 		entries = append(entries, entry)
 	}
-	return entries, diag.OK()
+	return entries, diag.Result{}
+}
+
+// hashAlgorithmWarning returns the warning a header earns whose schema hash
+// algorithm this build does not read, and false for any other header. A header
+// read accepts such a document, so the warning is what keeps a dispatch
+// workload from calling it healthy.
+func hashAlgorithmWarning(h *snapshot.Header) (diag.Issue, bool) {
+	if h == nil || h.SchemaHashAlgorithm == schema.StructuralHashVersion {
+		return diag.Issue{}, false
+	}
+	return diag.NewIssue(diag.Warning, diag.E_SNAPSHOT_UNSUPPORTED_HASH_ALGORITHM,
+		fmt.Sprintf("unrecognized schema hash algorithm version %d; schema hash verification skipped", h.SchemaHashAlgorithm)).
+		WithDetail(diag.DetailKeyHashAlgorithm, strconv.Itoa(h.SchemaHashAlgorithm)).
+		Build(), true
+}
+
+// headerResult is what a header read drew: the failures err holds, or the
+// warning [hashAlgorithmWarning] builds from the header it returned. An err
+// that holds no [diag.ResultError] breaks [snapshot.ReadHeader]'s contract and
+// reads as an E_INTERNAL failure.
+func headerResult(h *snapshot.Header, err error) diag.Result {
+	c := diag.NewCollector(diag.NoLimit)
+	c.Merge(cli.FailureIssues(err))
+	if issue, ok := hashAlgorithmWarning(h); ok {
+		c.Collect(issue)
+	}
+	return c.Result()
+}
+
+// entryResult is what a scanned file drew, as [headerResult] states it.
+func entryResult(entry snapshot.ScanEntry) diag.Result {
+	return headerResult(entry.Header, entry.Err)
 }
 
 // dirEntriesExit reports the failure a scanned directory earns.
@@ -422,7 +455,7 @@ func scanDir(ctx context.Context, dir string) ([]snapshot.ScanEntry, diag.Result
 func dirEntriesExit(entries []snapshot.ScanEntry) error {
 	results := make([]diag.Result, 0, len(entries))
 	for _, entry := range entries {
-		results = append(results, entry.Result)
+		results = append(results, entryResult(entry))
 	}
 	return cli.Exit(cli.ExitForResult(cli.MergeResults(results...)))
 }
@@ -434,7 +467,7 @@ func scanEntryToDTO(entry snapshot.ScanEntry) dirEntryDTO {
 		Path:        entry.Path,
 		FileSize:    entry.FileSize,
 		Header:      newHeaderDTO(entry.Header, entry.FileSize),
-		Diagnostics: diagnosticWire(entry.Result),
+		Diagnostics: diagnosticWire(entryResult(entry)),
 	}
 	if !entry.ModTime.IsZero() {
 		dto.ModTime = entry.ModTime.UTC().Format(modTimeLayout)
@@ -467,9 +500,10 @@ func printDirEntries(w interface{ Write([]byte) (int, error) }, dirPath string, 
 	}
 	var okCount, warnCount, malformedCount, ioCount, otherCount int
 	for _, entry := range entries {
-		if !entry.Result.HasErrors() {
+		result := entryResult(entry)
+		if !cli.Failed(result) {
 			status := "ok"
-			if entry.Result.HasWarnings() {
+			if result.HasWarnings() {
 				status, warnCount = "warn", warnCount+1
 			} else {
 				okCount++
@@ -480,13 +514,13 @@ func printDirEntries(w interface{ Write([]byte) (int, error) }, dirPath string, 
 			}
 			fmt.Fprintf(w, "  %-40s  %-12sschema=%s  v%d  created=%s%s\n",
 				termtext.String(entry.Name), status, termtext.String(entry.Header.SchemaName), entry.Header.Version,
-				created, firstWarning(entry.Result))
+				created, firstWarning(result))
 			continue
 		}
 		// Surface the first error code and message.
 		var code diag.Code
 		var msg string
-		for iss := range entry.Result.Errors() {
+		for iss := range result.Errors() {
 			code = iss.Code()
 			msg = termtext.String(iss.Message())
 			break

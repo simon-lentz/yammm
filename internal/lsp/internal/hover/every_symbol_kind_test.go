@@ -38,9 +38,9 @@ type Sub2 extends Sub {
 `
 
 func TestRenderSymbol_EveryKindRendersFromItsIndex(t *testing.T) {
-	s, res := schema.LoadString(t.Context(), everyKindSource, "main.yammm")
-	if res.HasErrors() {
-		t.Fatal(res)
+	s, err := schema.LoadString(t.Context(), everyKindSource, "main.yammm")
+	if err != nil {
+		t.Fatal(err)
 	}
 	idx := symbols.BuildSymbolIndex(s)
 	seen := map[symbols.SymbolKind]bool{}

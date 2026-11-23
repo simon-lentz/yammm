@@ -54,8 +54,8 @@ type Employee {
 
 func loadValidRecords(t *testing.T) schema.Schema {
 	t.Helper()
-	s, res := schema.LoadString(t.Context(), validRecordsSchema, "valid.yammm")
-	require.False(t, res.HasErrors(), res.String())
+	s, err := schema.LoadString(t.Context(), validRecordsSchema, "valid.yammm")
+	require.NoError(t, err)
 	return s
 }
 

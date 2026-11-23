@@ -103,14 +103,14 @@ func TestFormatKey_PanicOnUnmarshalable(t *testing.T) {
 
 func timestampKeySchema(t *testing.T) schema.Schema {
 	t.Helper()
-	s, result := schema.LoadString(t.Context(), `schema "stamped"
+	s, err := schema.LoadString(t.Context(), `schema "stamped"
 
 type Event {
 	observed_at Timestamp primary
 }
 `, "stamped.yammm")
-	if result.HasErrors() {
-		t.Fatalf("building the timestamp-key schema: %s", result.String())
+	if err != nil {
+		t.Fatalf("building the timestamp-key schema: %s", err)
 	}
 	return s
 }
@@ -145,16 +145,16 @@ func TestGraph_TimestampKeyIdentityIsCanonical(t *testing.T) {
 
 			g := graph.New(s)
 			first := instancetest.Valid(t, s, "Event", map[string]any{"observed_at": tt.spelling})
-			if r := g.Add(t.Context(), first); !r.OK() {
-				t.Fatalf("adding the string-keyed instance: %s", r.String())
+			if err := g.Add(t.Context(), first); err != nil {
+				t.Fatalf("adding the string-keyed instance: %s", err)
 			}
 
 			second := instancetest.Valid(t, s, "Event", map[string]any{"observed_at": parsed})
-			result := g.Add(t.Context(), second)
+			addErr := g.Add(t.Context(), second)
 
-			if gotDuplicate := !result.OK(); gotDuplicate != tt.wantDuplicate {
+			if gotDuplicate := addErr != nil; gotDuplicate != tt.wantDuplicate {
 				t.Errorf("adding the time.Time-keyed instance: duplicate=%v, want %v (%s)",
-					gotDuplicate, tt.wantDuplicate, result.String())
+					gotDuplicate, tt.wantDuplicate, addErr)
 			}
 		})
 	}

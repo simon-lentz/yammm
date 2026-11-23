@@ -168,8 +168,8 @@ func closureSources() map[string][]byte {
 func BenchmarkMarshal(b *testing.B) {
 	closure := func(b *testing.B) schema.Schema {
 		b.Helper()
-		s, res := schema.LoadSourcesWithEntry(b.Context(), closureSources(), "entry.yammm", ".", schema.WithSourcesOnly(true))
-		if err := res.Err(); err != nil {
+		s, loadErr := schema.LoadSourcesWithEntry(b.Context(), closureSources(), "entry.yammm", schema.WithSourcesOnly(true), schema.WithModuleRoot("."))
+		if err := loadErr; err != nil {
 			b.Fatalf("LoadSourcesWithEntry: %v", err)
 		}
 		return s
@@ -177,8 +177,8 @@ func BenchmarkMarshal(b *testing.B) {
 	source := func(src string) func(b *testing.B) schema.Schema {
 		return func(b *testing.B) schema.Schema {
 			b.Helper()
-			s, res := schema.LoadString(b.Context(), src, "bench.yammm")
-			if err := res.Err(); err != nil {
+			s, loadErr := schema.LoadString(b.Context(), src, "bench.yammm")
+			if err := loadErr; err != nil {
 				b.Fatalf("LoadString: %v", err)
 			}
 			return s

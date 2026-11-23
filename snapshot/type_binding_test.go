@@ -25,10 +25,10 @@ type County {
 // the layout it was written under.
 func loadUnderModuleRoot(t *testing.T, moduleRoot string) schema.Schema {
 	t.Helper()
-	s, res := schema.LoadSourcesWithEntry(t.Context(),
-		map[string][]byte{"geo.yammm": []byte(typeBindingSchema)}, "geo.yammm", moduleRoot)
-	if res.HasErrors() {
-		t.Fatalf("load under %q: %v", moduleRoot, res.Err())
+	s, err := schema.LoadSourcesWithEntry(t.Context(),
+		map[string][]byte{"geo.yammm": []byte(typeBindingSchema)}, "geo.yammm", schema.WithModuleRoot(moduleRoot))
+	if err != nil {
+		t.Fatalf("load under %q: %v", moduleRoot, err)
 	}
 	return s
 }
@@ -37,11 +37,11 @@ func loadUnderModuleRoot(t *testing.T, moduleRoot string) schema.Schema {
 // root, which is what makes its identities independent of the process.
 func loadUnderSyntheticRoot(t *testing.T, root string) schema.Schema {
 	t.Helper()
-	s, res := schema.LoadSourcesWithEntry(t.Context(),
-		map[string][]byte{"geo.yammm": []byte(typeBindingSchema)}, "geo.yammm", "",
+	s, err := schema.LoadSourcesWithEntry(t.Context(),
+		map[string][]byte{"geo.yammm": []byte(typeBindingSchema)}, "geo.yammm",
 		schema.WithSourcesOnly(true), schema.WithSyntheticRoot(root))
-	if res.HasErrors() {
-		t.Fatalf("load under %q: %v", root, res.Err())
+	if err != nil {
+		t.Fatalf("load under %q: %v", root, err)
 	}
 	return s
 }
@@ -64,9 +64,9 @@ func marshalCounty(t *testing.T, s schema.Schema) []byte {
 			},
 		},
 	})
-	data, res := snapshot.Marshal(t.Context(), built)
-	if res.HasErrors() {
-		t.Fatalf("marshal: %v", res.Err())
+	data, err := snapshot.Marshal(t.Context(), built)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
 	}
 	return data
 }
@@ -74,9 +74,9 @@ func marshalCounty(t *testing.T, s schema.Schema) []byte {
 // headerOf reads back only the header, the way a dispatch caller classifies.
 func headerOf(t *testing.T, data []byte) *snapshot.Header {
 	t.Helper()
-	header, res := snapshot.ReadHeader(t.Context(), bytes.NewReader(data))
-	if res.HasErrors() {
-		t.Fatalf("header-only read: %v", res.Err())
+	header, err := snapshot.ReadHeader(t.Context(), bytes.NewReader(data))
+	if err != nil {
+		t.Fatalf("header-only read: %v", err)
 	}
 	return header
 }
@@ -90,9 +90,9 @@ func mustBind(t *testing.T, data []byte, s schema.Schema, what string) {
 	if !headerOf(t, data).SchemaHashMatches(s) {
 		t.Fatalf("%s: the header does not classify the document as current", what)
 	}
-	loaded, res := snapshot.Unmarshal(t.Context(), data, s)
-	if res.HasErrors() {
-		t.Fatalf("%s: full load: %v", what, res.Err())
+	loaded, err := snapshot.Unmarshal(t.Context(), data, s)
+	if err != nil {
+		t.Fatalf("%s: full load: %v", what, err)
 	}
 	if loaded.IsZero() {
 		t.Fatalf("%s: expected a loaded snapshot", what)

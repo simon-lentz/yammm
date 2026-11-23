@@ -282,6 +282,15 @@ linters:
         - "(*encoding/json.Encoder).Encode"
     errchkjson:
       check-error-free-encoding: true
+    wrapcheck:
+      # A *diag.ResultError is the module's failure value: a caller reads it with
+      # errors.AsType and errors.Is, and its Error text is the failures' own
+      # rendering, so a call returns it as built, as go/scanner returns
+      # ErrorList.Err().
+      extra-ignore-sigs:
+        - "diag.Collector).Err() error"
+        - "cypher.Config).CheckLabels("
+        - "mapping.Labels).Check("
     paralleltest:
       ignore-missing: true
       ignore-missing-subtests: true

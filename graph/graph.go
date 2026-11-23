@@ -91,22 +91,23 @@ func New(s schema.Schema) *Graph {
 // for associations, extracts composed children, and resolves any pending
 // forward references that target this instance.
 //
-// Return semantics: check [diag.Result.OK] for success. A non-OK result
-// contains diagnostic issues and no instance installs — every rejection is
-// decided before the install. The graph keeps a duplicate's record. The package doc's Error Handling
-// section enumerates the codes Add can emit.
-//
-// Panics if g or ctx is nil, inst is zero, or this graph's schema does not hold
-// inst's type under its identity: a validator of another load built it, even one
-// over the same text, or the type is outside that schema's import closure.
-func (g *Graph) Add(ctx context.Context, inst instance.ValidInstance) diag.Result {
-	_, res := g.add(ctx, inst, "graph.Add", false)
-	return res
+// A refusal returns a *[diag.ResultError] and installs nothing, since every
+// refusal is decided before the install; the graph keeps a duplicate's record.
+// The package doc's Error Handling section enumerates the codes Add can emit.
+// Add panics if g or ctx is nil, inst is zero, or this graph's schema does not
+// hold inst's type under its identity: a validator of another load built it,
+// even one over the same text, or the type is outside that schema's import
+// closure.
+func (g *Graph) Add(ctx context.Context, inst instance.ValidInstance) error {
+	_, err := g.add(ctx, inst, "graph.Add", false)
+	return err
 }
 
 // add is [Graph.Add], and with merge set [Graph.AddOrMerge]. name is the
-// calling method's, which its panics and its cancellation message carry.
-func (g *Graph) add(ctx context.Context, inst instance.ValidInstance, name string, merge bool) (merged bool, res diag.Result) {
+// calling method's, which its panics and its cancellation message carry. The
+// graph draws no issue below failure severity, so its calls take no warnings
+// callback.
+func (g *Graph) add(ctx context.Context, inst instance.ValidInstance, name string, merge bool) (merged bool, err error) {
 	// Programmer errors: a caller cannot recover from any of these.
 	if g == nil {
 		panic(name + ": nil *Graph receiver")
@@ -135,7 +136,7 @@ func (g *Graph) add(ctx context.Context, inst instance.ValidInstance, name strin
 	if err := ctx.Err(); err != nil {
 		opCollector.Collect(diag.NewIssue(diag.Fatal, diag.E_CONTEXT_CANCELLED,
 			name+" cancelled: "+err.Error()).Build())
-		return false, opCollector.Result()
+		return false, opCollector.Err()
 	}
 
 	// A validator refuses a part type at a root, so only a child read out of
@@ -144,14 +145,14 @@ func (g *Graph) add(ctx context.Context, inst instance.ValidInstance, name strin
 		opCollector.Collect(diag.NewIssue(diag.Error, diag.E_GRAPH_MISSING_PK,
 			fmt.Sprintf("type %s has no primary key; cannot add to graph", diag.QuoteValue(g.tagForm(typeID)))).
 			WithDetail(diag.DetailKeyTypeName, g.tagForm(typeID)).Build())
-		return false, opCollector.Result()
+		return false, opCollector.Err()
 	}
 
 	if typ.IsPart() {
 		opCollector.Collect(diag.NewIssue(diag.Error, diag.E_GRAPH_INVALID_COMPOSITION,
 			fmt.Sprintf("part type %s cannot be added directly; add it in its parent's composition", diag.QuoteValue(g.tagForm(typeID)))).
 			WithDetail(diag.DetailKeyTypeName, g.tagForm(typeID)).Build())
-		return false, opCollector.Result()
+		return false, opCollector.Err()
 	}
 
 	var staged []stagedEdge
@@ -172,10 +173,10 @@ func (g *Graph) add(ctx context.Context, inst instance.ValidInstance, name strin
 					for _, issue := range refused {
 						opCollector.Collect(issue)
 					}
-					return false, opCollector.Result()
+					return false, opCollector.Err()
 				}
 				g.commitMerge(existing, plan)
-				return true, opCollector.Result()
+				return true, nil
 			}
 			// Duplicate.Instance is documented as carrying no composed
 			// children, so the record gets its own childless instance.
@@ -185,9 +186,12 @@ func (g *Graph) add(ctx context.Context, inst instance.ValidInstance, name strin
 				WithDetail(diag.DetailKeyTypeName, typeName).
 				WithDetail(diag.DetailKeyPrimaryKey, pkString).
 				WithSpan(inst.Provenance().Span())
+			if span := existing.Provenance().Span(); !span.IsZero() {
+				diagBuilder.WithRelated(diag.RelatedInfo{Span: span, Message: "first declared here"})
+			}
 			g.duplicates = append(g.duplicates, newDuplicate(rejected, existing))
 			opCollector.Collect(diagBuilder.Build())
-			return false, opCollector.Result()
+			return false, opCollector.Err()
 		}
 	} else {
 		g.instances[typeID] = make(map[string]Instance)
@@ -217,7 +221,7 @@ func (g *Graph) add(ctx context.Context, inst instance.ValidInstance, name strin
 	// Resolve every pending edge that targets this instance.
 	g.resolvePending(typeID, pkString, graphInst)
 
-	return false, opCollector.Result()
+	return false, nil
 }
 
 // Check validates graph completeness.
@@ -225,14 +229,12 @@ func (g *Graph) add(ctx context.Context, inst instance.ValidInstance, name strin
 // Check verifies that all required associations have resolved targets.
 // Optional associations may remain unresolved without error.
 //
-// Return semantics: check [diag.Result.OK] for success. A non-OK result
-// contains diagnostic issues. A Fatal issue indicates context cancellation.
-//
-// Error codes that may appear in result:
-//   - E_UNRESOLVED_REQUIRED: A required association's target is not in the graph,
-//     or its field is absent, or its array is empty
-//   - E_CONTEXT_CANCELLED: Context was cancelled
-func (g *Graph) Check(ctx context.Context) diag.Result {
+// An incomplete graph returns a *[diag.ResultError] holding one
+// E_UNRESOLVED_REQUIRED for each target of a required association that is not
+// in the graph, and one for each required association whose field is absent or
+// whose array is empty; a cancelled ctx
+// returns a Fatal E_CONTEXT_CANCELLED.
+func (g *Graph) Check(ctx context.Context) error {
 	if g == nil {
 		panic("graph.Check: nil *Graph receiver")
 	}
@@ -246,7 +248,7 @@ func (g *Graph) Check(ctx context.Context) diag.Result {
 	if err := ctx.Err(); err != nil {
 		opCollector.Collect(diag.NewIssue(diag.Fatal, diag.E_CONTEXT_CANCELLED,
 			"graph.Check cancelled: "+err.Error()).Build())
-		return opCollector.Result()
+		return opCollector.Err()
 	}
 
 	g.mu.RLock()
@@ -286,7 +288,7 @@ func (g *Graph) Check(ctx context.Context) diag.Result {
 		}
 	}
 
-	return opCollector.Result()
+	return opCollector.Err()
 }
 
 // Snapshot creates a point-in-time snapshot of the graph.

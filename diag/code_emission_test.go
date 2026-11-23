@@ -7,6 +7,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/simon-lentz/yammm/diag"
+	"github.com/simon-lentz/yammm/internal/diagtest"
 )
 
 // TestCodeEmission_AllCodes verifies that every defined code can be used to
@@ -32,7 +33,7 @@ func TestCodeEmission_AllCodes(t *testing.T) {
 			collector.Collect(issue)
 
 			result := collector.Result()
-			assert.True(t, result.HasErrors())
+			require.Error(t, diagtest.Err(result))
 			assert.True(t, result.HasCode(code), "Code %s should be present in result", code.String())
 		})
 	}

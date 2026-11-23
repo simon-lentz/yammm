@@ -415,7 +415,7 @@ func (g *generator) emitUniformSources(entryKey string) {
 	g.buf.WriteString("// SerializedSources returns every source the schema's load held, keyed by\n")
 	g.buf.WriteString("// the name the re-load registers it under. Re-load with:\n")
 	g.buf.WriteString("//\n")
-	g.buf.WriteString("//\tschema.LoadSourcesWithEntry(ctx, SerializedSources(), SerializedEntry, \"\",\n")
+	g.buf.WriteString("//\tschema.LoadSourcesWithEntry(ctx, SerializedSources(), SerializedEntry,\n")
 	g.buf.WriteString("//\t\tschema.WithSyntheticRoot(" + strconv.Quote(recipeRoot) + "))\n")
 	g.buf.WriteString("//\n")
 	g.buf.WriteString("// The synthetic root keeps the loaded type identities stable: no working\n")

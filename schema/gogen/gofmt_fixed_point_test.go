@@ -99,9 +99,9 @@ func TestMarshal_DrawnDocCommentsAreGofmtFormatted(t *testing.T) {
 	}
 	for i := range 3000 {
 		src := documentedCar(content("   "), content("\t   "))
-		s, res := schema.LoadString(context.Background(), src, "gen.yammm")
-		if res.HasErrors() {
-			t.Fatalf("draw %d does not load: %v\n%q", i, res.Err(), src)
+		s, loadErr := schema.LoadString(context.Background(), src, "gen.yammm")
+		if loadErr != nil {
+			t.Fatalf("draw %d does not load: %v\n%q", i, loadErr, src)
 		}
 		generated, err := gogen.Marshal(s)
 		if err != nil {
@@ -173,8 +173,8 @@ func TestMarshal_DrawnDocLayoutsAreGofmtFormatted(t *testing.T) {
 	loaded := 0
 	for i := range 4000 {
 		src := documentedCar(content("   "), content("\t   "))
-		s, res := schema.LoadString(context.Background(), src, "gen.yammm")
-		if res.HasErrors() {
+		s, loadErr := schema.LoadString(context.Background(), src, "gen.yammm")
+		if loadErr != nil {
 			continue
 		}
 		loaded++

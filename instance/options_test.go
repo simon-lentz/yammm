@@ -32,8 +32,8 @@ type Person {
 			Provenance: prov,
 		}
 
-		_, result := validator.ValidateOne(t.Context(), "Person", raw)
-		require.False(t, result.OK())
+		_, err := validator.ValidateOne(t.Context(), "Person", raw)
+		require.Error(t, err)
 		// The error should include path info from provenance
 	})
 
@@ -46,7 +46,7 @@ type Person {
 			Provenance: instance.Provenance{},
 		}
 
-		_, result := validator.ValidateOne(t.Context(), "Person", raw)
-		require.False(t, result.OK())
+		_, err := validator.ValidateOne(t.Context(), "Person", raw)
+		require.Error(t, err)
 	})
 }

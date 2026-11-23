@@ -47,9 +47,9 @@ type Sensor {
 
 func loadWireTestSchema(t *testing.T) schema.Schema {
 	t.Helper()
-	s, result := schema.LoadString(t.Context(), wireTestSchema, "wiretest.yammm")
-	if result.HasErrors() {
-		t.Fatalf("load wiretest schema: %s", result)
+	s, err := schema.LoadString(t.Context(), wireTestSchema, "wiretest.yammm")
+	if err != nil {
+		t.Fatalf("load wiretest schema: %s", err)
 	}
 	return s
 }
@@ -115,8 +115,8 @@ func TestMarshal_FloatEmissionEveryPosition(t *testing.T) {
 	s := loadWireTestSchema(t)
 	snap := buildWireTestSnapshot(t, s, float64(1860000), []any{float64(1), 2.5})
 
-	data, result := snapshot.Marshal(ctx, snap)
-	if err := result.Err(); err != nil {
+	data, readErr := snapshot.Marshal(ctx, snap)
+	if err := readErr; err != nil {
 		t.Fatalf("Marshal: %v", err)
 	}
 	doc := string(data)
@@ -138,14 +138,14 @@ func TestMarshal_FloatEmissionEveryPosition(t *testing.T) {
 		t.Errorf("gain emitted %d times in float form, want 2 (resolved + unresolved edge)", got)
 	}
 
-	loaded, lres := snapshot.Unmarshal(ctx, data, s)
-	if err := lres.Err(); err != nil {
+	loaded, readErr2 := snapshot.Unmarshal(ctx, data, s)
+	if err := readErr2; err != nil {
 		t.Fatalf("Load: %v", err)
 	}
 	snapshottest.DiffSnapshots(t, snap, loaded)
 
 	data2, r2 := snapshot.Marshal(ctx, loaded)
-	if err := r2.Err(); err != nil {
+	if err := r2; err != nil {
 		t.Fatalf("second Marshal: %v", err)
 	}
 	if string(data2) != doc {
@@ -154,7 +154,7 @@ func TestMarshal_FloatEmissionEveryPosition(t *testing.T) {
 
 	// The indented branch shares the emitter; spot-check one form.
 	indented, ir := snapshot.Marshal(ctx, snap, snapshot.WithIndent("\t"))
-	if err := ir.Err(); err != nil {
+	if err := ir; err != nil {
 		t.Fatalf("indented Marshal: %v", err)
 	}
 	if !strings.Contains(string(indented), `"reading": 1860000.0`) {
@@ -184,19 +184,19 @@ func TestRoundTrip_AnIntegerAtAFloatReadsAsItsNearestFloat64(t *testing.T) {
 	yammmtest.Diff(t, map[string]any{"reading": float64(1860000), "samples": []any{float64(3), float64(9007199254740992)}},
 		map[string]any{"reading": props["reading"], "samples": props["samples"]})
 
-	data, result := snapshot.Marshal(ctx, snap)
-	if err := result.Err(); err != nil {
+	data, readErr := snapshot.Marshal(ctx, snap)
+	if err := readErr; err != nil {
 		t.Fatalf("Marshal: %v", err)
 	}
 	if doc := string(data); !strings.Contains(doc, `"reading":1860000.0`) || !strings.Contains(doc, `"samples":[3.0,9007199254740992.0]`) {
 		t.Fatalf("the loaded floats were not written as floats:\n%s", doc)
 	}
-	loaded, lres := snapshot.Unmarshal(ctx, data, s)
-	if err := lres.Err(); err != nil {
+	loaded, readErr2 := snapshot.Unmarshal(ctx, data, s)
+	if err := readErr2; err != nil {
 		t.Fatalf("Load: %v", err)
 	}
 	data2, r2 := snapshot.Marshal(ctx, loaded)
-	if err := r2.Err(); err != nil {
+	if err := r2; err != nil {
 		t.Fatalf("second Marshal: %v", err)
 	}
 	if string(data2) != string(data) {
@@ -225,19 +225,21 @@ func TestMarshal_ListOfIntegerElementsStayIntShaped(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 
-	s, result := schema.LoadString(ctx, listIntSchema, "listint.yammm")
-	if result.HasErrors() {
-		t.Fatalf("load listint schema: %s", result)
+	s, loadErr := schema.LoadString(ctx, listIntSchema, "listint.yammm")
+	if loadErr != nil {
+		t.Fatalf("load listint schema: %s", loadErr)
 	}
 
 	g := graph.New(s)
-	g.Add(ctx, mustValidInstance(t, s, "Tally", []any{"t1"}, map[string]any{
+	if err := g.Add(ctx, mustValidInstance(t, s, "Tally", []any{"t1"}, map[string]any{
 		"id":     "t1",
 		"counts": []any{int64(1), int64(2), int64(3)},
-	}))
+	})); err != nil {
+		t.Errorf("Add: %v", err)
+	}
 
-	data, res := snapshot.Marshal(ctx, g.Snapshot())
-	if err := res.Err(); err != nil {
+	data, readErr := snapshot.Marshal(ctx, g.Snapshot())
+	if err := readErr; err != nil {
 		t.Fatalf("marshal: %v", err)
 	}
 	doc := string(data)
@@ -264,8 +266,8 @@ func TestMarshal_Float64ArmEmitsAtFullWidth(t *testing.T) {
 	const wide = 3.141592653589793
 	snap := buildWireTestSnapshot(t, s, wide, []any{float64(1), 2.5})
 
-	data, res := snapshot.Marshal(ctx, snap)
-	if err := res.Err(); err != nil {
+	data, readErr := snapshot.Marshal(ctx, snap)
+	if err := readErr; err != nil {
 		t.Fatalf("marshal: %v", err)
 	}
 	doc := string(data)

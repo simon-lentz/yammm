@@ -36,12 +36,12 @@ func TestEdgeQueries_ImportedSourceTypeWritesUnderClosureShape(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 
-	s, res := schema.LoadSourcesWithEntry(t.Context(), map[string][]byte{
+	s, loadErr := schema.LoadSourcesWithEntry(t.Context(), map[string][]byte{
 		"entry.yammm": []byte(importedEdgeEntry),
 		"base.yammm":  []byte(importedEdgeBase),
-	}, "entry.yammm", ".", schema.WithSourcesOnly(true))
-	if res.HasErrors() {
-		t.Fatalf("load schema: %s", res)
+	}, "entry.yammm", schema.WithSourcesOnly(true), schema.WithModuleRoot("."))
+	if loadErr != nil {
+		t.Fatalf("load schema: %s", loadErr)
 	}
 	basin, ok := s.ResolveTypeName("base.Basin")
 	if !ok {
@@ -77,9 +77,9 @@ func TestEdgeQueries_ImportedSourceTypeWritesUnderClosureShape(t *testing.T) {
 	}
 
 	a := cypher.Config{}
-	shapes, shapeRes := shapeFor(a, s)
-	if shapeRes.HasErrors() {
-		t.Fatalf("shape: %s", shapeRes)
+	shapes, shapeErr := shapeFor(a, s)
+	if shapeErr != nil {
+		t.Fatalf("shape: %s", shapeErr)
 	}
 
 	if _, ok := shapes.types[id]; !ok {
@@ -139,13 +139,13 @@ type Hub {
 func TestShapeFor_TransitivelyImportedTypeKeepsItsOwnLabel(t *testing.T) {
 	t.Parallel()
 
-	s, res := schema.LoadSourcesWithEntry(t.Context(), map[string][]byte{
+	s, err := schema.LoadSourcesWithEntry(t.Context(), map[string][]byte{
 		"entry.yammm": []byte(collidingShapeEntry),
 		"mid.yammm":   []byte(collidingShapeMid),
 		"deep.yammm":  []byte(collidingShapeDeep),
-	}, "entry.yammm", ".", schema.WithSourcesOnly(true))
-	if res.HasErrors() {
-		t.Fatalf("load schema: %s", res)
+	}, "entry.yammm", schema.WithSourcesOnly(true), schema.WithModuleRoot("."))
+	if err != nil {
+		t.Fatalf("load schema: %s", err)
 	}
 
 	local, ok := s.Type("Hub")
@@ -168,9 +168,9 @@ func TestShapeFor_TransitivelyImportedTypeKeepsItsOwnLabel(t *testing.T) {
 	}
 
 	a := cypher.Config{}
-	shapes, shapeRes := shapeFor(a, s)
-	if shapeRes.HasErrors() {
-		t.Fatalf("shape: %s", shapeRes)
+	shapes, shapeErr := shapeFor(a, s)
+	if shapeErr != nil {
+		t.Fatalf("shape: %s", shapeErr)
 	}
 
 	localShape, ok := shapes.types[local.ID()]
@@ -196,13 +196,13 @@ func TestNodeQueries_TransitivelyImportedRootWritesUnderItsOwnLabel(t *testing.T
 	t.Parallel()
 	ctx := context.Background()
 
-	s, res := schema.LoadSourcesWithEntry(t.Context(), map[string][]byte{
+	s, loadErr := schema.LoadSourcesWithEntry(t.Context(), map[string][]byte{
 		"entry.yammm": []byte(collidingShapeEntry),
 		"mid.yammm":   []byte(collidingShapeMid),
 		"deep.yammm":  []byte(collidingShapeDeep),
-	}, "entry.yammm", ".", schema.WithSourcesOnly(true))
-	if res.HasErrors() {
-		t.Fatalf("load schema: %s", res)
+	}, "entry.yammm", schema.WithSourcesOnly(true), schema.WithModuleRoot("."))
+	if loadErr != nil {
+		t.Fatalf("load schema: %s", loadErr)
 	}
 	local, ok := s.Type("Hub")
 	if !ok {
@@ -235,9 +235,9 @@ func TestNodeQueries_TransitivelyImportedRootWritesUnderItsOwnLabel(t *testing.T
 	})
 
 	a := cypher.Config{}
-	shapes, shapeRes := shapeFor(a, s)
-	if shapeRes.HasErrors() {
-		t.Fatalf("shape: %s", shapeRes)
+	shapes, shapeErr := shapeFor(a, s)
+	if shapeErr != nil {
+		t.Fatalf("shape: %s", shapeErr)
 	}
 	queries, err := NodeQueries(ctx, a, built)
 	if err != nil {

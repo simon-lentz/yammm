@@ -174,8 +174,8 @@ func runGen(cmd *cobra.Command, args []string, sink *cli.DiagnosticSink) error {
 	if err != nil {
 		return err
 	}
-	s, schemaResult := schema.Load(cmd.Context(), absSchemaPath, loadOpts...)
-	if err := reportSchemaLoad(sink, s, moduleRootAbs, absSchemaPath, schemaResult); err != nil {
+	s, loadErr := schema.Load(cmd.Context(), absSchemaPath, loadOpts...)
+	if err := reportSchemaLoad(sink, s, moduleRootAbs, absSchemaPath, loadErr); err != nil {
 		return err
 	}
 	var data []byte
@@ -183,7 +183,7 @@ func runGen(cmd *cobra.Command, args []string, sink *cli.DiagnosticSink) error {
 		var genResult diag.Result
 		data, genResult = cypherScript(cypherConfig, s)
 		sink.Add(genResult)
-		if genResult.HasErrors() {
+		if cli.Failed(genResult) {
 			return cli.Exit(cli.ExitForResult(sink.Result()))
 		}
 	}
@@ -219,20 +219,20 @@ func runGen(cmd *cobra.Command, args []string, sink *cli.DiagnosticSink) error {
 	return nil
 }
 
-// generateCypher runs both generators for s under c. A constraint error
-// returns the constraint result alone, so a break both generators judge is
-// reported once; otherwise the result holds both generators' issues.
-// [neo4j.Diff] returns these issues for the same c and s, beside its issues
-// for the remote rows it cannot plan from.
+// generateCypher runs both generators for s under c and returns their issues,
+// warnings and failures, as one result. A constraint failure stops it before
+// the index generation, so a break both generators judge is reported once.
+// [neo4j.Diff] draws these issues for the same c and s, beside its issues for
+// the remote rows it cannot plan from.
 func generateCypher(c cypher.Config, s schema.Schema) ([]cypher.Constraint, []cypher.Index, diag.Result) {
-	constraints, constraintResult := c.Constraints(s)
-	if constraintResult.HasErrors() {
-		return nil, nil, constraintResult
+	collector := diag.NewCollector(diag.NoLimit)
+	constraints, err := c.Constraints(s, cypher.WithWarnings(collector.Collect))
+	if err != nil {
+		collector.Merge(cli.FailureIssues(err))
+		return nil, nil, collector.Result()
 	}
-	indexes, indexResult := c.Indexes(s)
-	collector := diag.NewCollector(0)
-	collector.Merge(constraintResult)
-	collector.Merge(indexResult)
+	indexes, err := c.Indexes(s)
+	collector.Merge(cli.FailureIssues(err))
 	return constraints, indexes, collector.Result()
 }
 
@@ -241,7 +241,7 @@ func generateCypher(c cypher.Config, s schema.Schema) ([]cypher.Constraint, []cy
 // ";". The result is [generateCypher]'s; on an error the script is nil.
 func cypherScript(c cypher.Config, s schema.Schema) ([]byte, diag.Result) {
 	constraints, indexes, result := generateCypher(c, s)
-	if result.HasErrors() {
+	if cli.Failed(result) {
 		return nil, result
 	}
 	var b strings.Builder

@@ -2,10 +2,12 @@ package snapshot_test
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"slices"
 	"testing"
 
+	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/instance"
 	"github.com/simon-lentz/yammm/instance/path"
@@ -16,9 +18,9 @@ import (
 
 func duplicateOrderSchema(t *testing.T) schema.Schema {
 	t.Helper()
-	s, res := schema.LoadString(t.Context(), "schema \"dup\"\n\ntype T {\n\tid String primary\n}\n", "dup.yammm")
-	if res.HasErrors() {
-		t.Fatalf("load: %s", res)
+	s, err := schema.LoadString(t.Context(), "schema \"dup\"\n\ntype T {\n\tid String primary\n}\n", "dup.yammm")
+	if err != nil {
+		t.Fatalf("load: %s", err)
 	}
 	return s
 }
@@ -31,19 +33,21 @@ func marshalDuplicates(t *testing.T, s schema.Schema, provs []instance.Provenanc
 	v := instance.NewValidator(s)
 	add := func(prov instance.Provenance) {
 		t.Helper()
-		valid, res := v.ValidateOne(t.Context(), "T", instance.RawInstance{Properties: map[string]any{"id": "k"}, Provenance: prov})
+		valid, err := v.ValidateOne(t.Context(), "T", instance.RawInstance{Properties: map[string]any{"id": "k"}, Provenance: prov})
 		if valid.IsZero() {
-			t.Fatalf("validate: %s", res)
+			t.Fatalf("validate: %s", err)
 		}
-		g.Add(t.Context(), valid)
+		if err := g.Add(t.Context(), valid); err != nil && !errors.Is(err, diag.E_DUPLICATE_PK) {
+			t.Errorf("Add: %v", err)
+		}
 	}
 	add(instance.NewProvenance("root.json", path.Root, location.Span{}))
 	for _, prov := range provs {
 		add(prov)
 	}
-	data, res := snapshot.Marshal(t.Context(), g.Snapshot())
-	if res.HasErrors() {
-		t.Fatalf("marshal: %s", res)
+	data, err := snapshot.Marshal(t.Context(), g.Snapshot())
+	if err != nil {
+		t.Fatalf("marshal: %s", err)
 	}
 	return data
 }
@@ -82,13 +86,13 @@ func TestMarshal_ALoadKeepsTheBytesOfManyDuplicates(t *testing.T) {
 			location.Span{Start: location.Position{Line: i + 1, Column: 1}}))
 	}
 	want := marshalDuplicates(t, s, provs)
-	loaded, res := snapshot.Unmarshal(t.Context(), want, s)
-	if res.HasErrors() {
-		t.Fatalf("load: %s", res)
+	loaded, err := snapshot.Unmarshal(t.Context(), want, s)
+	if err != nil {
+		t.Fatalf("load: %s", err)
 	}
-	got, res := snapshot.Marshal(t.Context(), loaded)
-	if res.HasErrors() {
-		t.Fatalf("marshal: %s", res)
+	got, err := snapshot.Marshal(t.Context(), loaded)
+	if err != nil {
+		t.Fatalf("marshal: %s", err)
 	}
 	if !bytes.Equal(got, want) {
 		t.Errorf("a load moved the duplicates:\n%s\n---\n%s", fmt.Sprintf("%.2000s", want), fmt.Sprintf("%.2000s", got))

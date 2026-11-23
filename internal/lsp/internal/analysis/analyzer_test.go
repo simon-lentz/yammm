@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/simon-lentz/yammm/internal/diagtest"
 	"github.com/simon-lentz/yammm/internal/yammmtest/sourcetest"
 
 	"github.com/stretchr/testify/assert"
@@ -16,7 +17,6 @@ import (
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/internal/yammmtest"
 	"github.com/simon-lentz/yammm/location"
-	"github.com/simon-lentz/yammm/schema"
 
 	"github.com/simon-lentz/yammm/internal/lsp/internal/lsputil"
 	"github.com/simon-lentz/yammm/internal/lsp/internal/symbols"
@@ -134,7 +134,7 @@ func TestOverlayPrecedenceOverDisk(t *testing.T) {
 	analyzer := NewAnalyzer(logger)
 
 	ctx := t.Context()
-	snapshot, err := analyzer.Analyze(ctx, diskPath, overlays, tmpDir)
+	snapshot, err := analyzer.Analyze(ctx, diskPath, overlays, tmpDir, true)
 	require.NoError(t, err, "Analyze() error")
 	require.NotNil(t, snapshot, "Analyze() returned nil snapshot")
 
@@ -200,7 +200,7 @@ func TestOverlayWithSymlinkPath_StillOverridesDisk(t *testing.T) {
 
 	ctx := t.Context()
 	// Use symlink path as entry too (matches how workspace would call this)
-	snapshot, err := analyzer.Analyze(ctx, symlinkPath, overlays, linkDir)
+	snapshot, err := analyzer.Analyze(ctx, symlinkPath, overlays, linkDir, true)
 	require.NoError(t, err, "Analyze() error")
 	require.NotNil(t, snapshot, "Analyze() returned nil snapshot")
 
@@ -247,15 +247,15 @@ func TestSources_PopulatesSourceRegistry(t *testing.T) {
 	analyzer := NewAnalyzer(logger)
 
 	ctx := t.Context()
-	snapshot, err := analyzer.Analyze(ctx, mainPath, overlays, tmpDir)
+	snapshot, err := analyzer.Analyze(ctx, mainPath, overlays, tmpDir, true)
 	require.NoError(t, err, "Analyze() error")
 	require.NotNil(t, snapshot, "Analyze() returned nil snapshot")
 	require.NotNil(t, snapshot.Sources, "snapshot.Sources is nil")
 	// The closure-population contract below holds for completed loads; a
 	// fixture invalidated by a future schema-contract tightening must fail
 	// here rather than weaken the registry assertions.
-	require.False(t, snapshot.Result.HasErrors(),
-		"fixture must load cleanly: %v", snapshot.Result.Err())
+	require.NoError(t, diagtest.Err(snapshot.Result),
+		"fixture must load cleanly: %v", diagtest.Err(snapshot.Result))
 
 	// Verify registry contains the entry file
 	mainSourceID := spelledSourceID(t, mainPath)
@@ -298,11 +298,11 @@ func TestSources_FailedLoadKeepsEverySourceItRead(t *testing.T) {
 
 	snapshot, err := analyzer.Analyze(t.Context(), mainPath, map[string][]byte{
 		mainPath: []byte(mainContent),
-	}, tmpDir)
+	}, tmpDir, true)
 	require.NoError(t, err, "a semantic load failure is not an Analyze error")
 	require.NotNil(t, snapshot)
 	require.True(t, snapshot.Schema.IsZero(), "the load must fail for this contract to apply")
-	require.True(t, snapshot.Result.HasErrors())
+	require.Error(t, diagtest.Err(snapshot.Result))
 
 	// The registry keys an overlay by the loader's identity for it: the
 	// identity of the file's on-disk spelling.
@@ -321,25 +321,6 @@ func TestSources_FailedLoadKeepsEverySourceItRead(t *testing.T) {
 		}
 	}
 	assert.Equal(t, [][2]uint32{{15, 55}}, ranges, "the missing-key diagnostic's range in the import")
-}
-
-// TestAnalyze_LeavesTheCallersOptionSliceAlone hands Analyze options in a
-// slice with room for one more: the option Analyze adds for itself must not
-// be written into that room.
-func TestAnalyze_LeavesTheCallersOptionSliceAlone(t *testing.T) {
-	t.Parallel()
-
-	opts := make([]schema.LoadOption, 1, 2)
-	opts[0] = schema.WithImportsAllowed(true)
-
-	analyzer := NewAnalyzer(slog.New(slog.DiscardHandler))
-	_, err := analyzer.Analyze(t.Context(), "/test/entry.yammm", map[string][]byte{
-		"/test/entry.yammm": []byte("schema \"entry\"\n"),
-	}, "", opts...)
-	require.NoError(t, err)
-
-	whole := opts[:cap(opts)]
-	assert.Nil(t, whole[len(whole)-1], "the caller's spare element")
 }
 
 func TestSources_DiskFallback(t *testing.T) {
@@ -373,7 +354,7 @@ func TestSources_DiskFallback(t *testing.T) {
 	analyzer := NewAnalyzer(logger)
 
 	ctx := t.Context()
-	snapshot, err := analyzer.Analyze(ctx, mainPath, overlays, tmpDir)
+	snapshot, err := analyzer.Analyze(ctx, mainPath, overlays, tmpDir, true)
 	require.NoError(t, err, "Analyze() error")
 	require.NotNil(t, snapshot, "Analyze() returned nil snapshot")
 
@@ -385,11 +366,11 @@ func TestSources_DiskFallback(t *testing.T) {
 		}
 		require.False(t, snapshot.Schema.IsZero(), "snapshot.Schema is the zero Schema: the disk fallback can have failed")
 	}
-	if !snapshot.Result.OK() {
+	if diagtest.Err(snapshot.Result) != nil {
 		for issue := range snapshot.Result.Issues() {
 			t.Logf("Issue: %v", issue)
 		}
-		assert.True(t, snapshot.Result.OK(), "Result should be OK - import resolution from disk should succeed")
+		require.NoError(t, diagtest.Err(snapshot.Result), "Result should be OK - import resolution from disk should succeed")
 	}
 
 	// Verify the Service type exists and extends Helper (from disk)
@@ -499,7 +480,7 @@ type TypeB {
 	ctx := t.Context()
 
 	// Analyze requesting b_main.yammm as entry (even though a_types is lexicographically first)
-	snapshot, err := analyzer.Analyze(ctx, bPath, overlays, tmpDir)
+	snapshot, err := analyzer.Analyze(ctx, bPath, overlays, tmpDir, true)
 	require.NoError(t, err, "Analyze() error")
 	require.NotNil(t, snapshot, "Analyze() returned nil snapshot")
 
@@ -525,7 +506,7 @@ func TestAnalyze_PartialSnapshotOnLoadError(t *testing.T) {
 		"/test/entry.yammm": []byte("schema \"test\"\nimport \"missing.yammm\"\ntype Foo {\n}\n"),
 	}
 
-	snapshot, err := analyzer.Analyze(t.Context(), "/test/entry.yammm", overlays, "")
+	snapshot, err := analyzer.Analyze(t.Context(), "/test/entry.yammm", overlays, "", true)
 	// Should get both a snapshot (with diagnostics) and an error
 	assert.NotNil(t, snapshot, "partial snapshot should be returned on load error")
 	if snapshot != nil {

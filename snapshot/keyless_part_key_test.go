@@ -10,6 +10,7 @@ import (
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/immutable"
+	"github.com/simon-lentz/yammm/internal/diagtest"
 	"github.com/simon-lentz/yammm/internal/instancetest"
 	"github.com/simon-lentz/yammm/internal/snapparts"
 	"github.com/simon-lentz/yammm/internal/snappartstest"
@@ -170,9 +171,9 @@ func partKeyStoredKeys(snap graph.Snapshot) []immutable.Key {
 func TestPartKey_EverySnapshotLoadsBack(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()
-	s, res := schema.LoadString(ctx, partKeySchema, "partkey.yammm")
-	if res.HasErrors() {
-		t.Fatalf("schema: %s", res)
+	s, loadErr := schema.LoadString(ctx, partKeySchema, "partkey.yammm")
+	if loadErr != nil {
+		t.Fatalf("schema: %s", loadErr)
 	}
 	docT, _ := s.Type("Doc")
 	docKey := immutable.WrapKey([]any{"d1"})
@@ -188,17 +189,19 @@ func TestPartKey_EverySnapshotLoadsBack(t *testing.T) {
 				"id": "d1", strings.ToLower(shape.path[0]): []any{partKeyInput(shape, key, 0)},
 			})
 			g := graph.New(s)
-			r := g.Add(ctx, doc)
+			r := diagtest.Failures(t, g.Add(ctx, doc))
 			return built{g.Snapshot(), r}
 		},
 		"snapshot.Load": func(shape partKeyShape, key []any) built {
-			snap, r := snapshot.Unmarshal(ctx, snappartstest.Document(t, s, snapparts.Parts{
-				Types: []schema.TypeID{docT.ID()},
-				Instances: []snapparts.Instance{{
-					TypeID: docT.ID(), PrimaryKey: docKey, Properties: docProps,
-					Composed: map[string][]snapparts.Instance{shape.path[0]: {partKeyParts(t, s, shape, key, 0)}},
-				}},
-			}), s)
+			snap, r := diagtest.Capture(t, func(warn func(diag.Issue)) (graph.Snapshot, error) {
+				return snapshot.Unmarshal(ctx, snappartstest.Document(t, s, snapparts.Parts{
+					Types: []schema.TypeID{docT.ID()},
+					Instances: []snapparts.Instance{{
+						TypeID: docT.ID(), PrimaryKey: docKey, Properties: docProps,
+						Composed: map[string][]snapparts.Instance{shape.path[0]: {partKeyParts(t, s, shape, key, 0)}},
+					}},
+				}), s, snapshot.WithWarnings(warn))
+			})
 			return built{snap, r}
 		},
 	}
@@ -213,7 +216,7 @@ func TestPartKey_EverySnapshotLoadsBack(t *testing.T) {
 				at := name + ", " + shape.name + ", " + kc.name
 				held := kc.readable && (shape.keyed || len(kc.components) == 0)
 				b := build(shape, kc.components)
-				if !b.res.OK() {
+				if diagtest.Err(b.res) != nil {
 					refused++
 					if held {
 						t.Errorf("%s: refused a key its part can hold: %s", at, b.res)
@@ -230,14 +233,14 @@ func TestPartKey_EverySnapshotLoadsBack(t *testing.T) {
 				snaps := map[string]graph.Snapshot{name: b.snap}
 				snaps["NewFromSnapshot of "+name] = graph.NewFromSnapshot(b.snap).Snapshot()
 				for from, snap := range snaps {
-					data, mr := snapshot.Marshal(ctx, snap)
-					if !mr.OK() {
-						t.Errorf("%s: Marshal of the %s snapshot: %s", at, from, mr)
+					data, readErr := snapshot.Marshal(ctx, snap)
+					if readErr != nil {
+						t.Errorf("%s: Marshal of the %s snapshot: %s", at, from, readErr)
 						continue
 					}
-					loaded, lr := snapshot.Unmarshal(ctx, data, s)
-					if !lr.OK() {
-						t.Errorf("%s: Load refused what Marshal wrote from the %s snapshot: %s", at, from, lr)
+					loaded, readErr2 := snapshot.Unmarshal(ctx, data, s)
+					if readErr2 != nil {
+						t.Errorf("%s: Load refused what Marshal wrote from the %s snapshot: %s", at, from, readErr2)
 						continue
 					}
 					for _, k := range partKeyStoredKeys(loaded) {

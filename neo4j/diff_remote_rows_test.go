@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/simon-lentz/yammm/diag"
+	"github.com/simon-lentz/yammm/internal/diagtest"
 	"github.com/simon-lentz/yammm/schema/cypher"
 )
 
@@ -71,7 +72,9 @@ func TestDiff_RefusesARemoteRowItCannotPlanFrom(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			plan, result := Diff(cypher.Config{}, s, tc.constraints, tc.indexes)
+			plan, result := diagtest.Capture(t, func(warn func(diag.Issue)) (Plan, error) {
+				return Diff(cypher.Config{}, s, tc.constraints, tc.indexes, WithWarnings(warn))
+			})
 			if !reflect.DeepEqual(plan, Plan{}) {
 				t.Errorf("plan = %+v, want the zero Plan", plan)
 			}
@@ -97,9 +100,9 @@ func TestDiff_AConstraintAndItsBackingIndexShareTheirName(t *testing.T) {
 
 	s := loadInline(t, "schema \"p\"\n\ntype T {\n\tid String primary\n}\n")
 	c := cypher.Config{}
-	desired, result := c.Constraints(s)
-	if result.HasErrors() {
-		t.Fatal(result)
+	desired, err := c.Constraints(s)
+	if err != nil {
+		t.Fatal(err)
 	}
 	constraints := asRemote(desired)
 	var indexes []RemoteIndex
@@ -111,9 +114,9 @@ func TestDiff_AConstraintAndItsBackingIndexShareTheirName(t *testing.T) {
 	if len(indexes) != 1 {
 		t.Fatalf("the generator emitted %d UNIQUE constraints, want 1: %+v", len(indexes), desired)
 	}
-	plan, result := Diff(c, s, constraints, indexes)
-	if result.HasErrors() {
-		t.Fatalf("result = %v, want no error", result)
+	plan, err := Diff(c, s, constraints, indexes)
+	if err != nil {
+		t.Fatalf("result = %v, want no error", err)
 	}
 	if got := len(plan.Constraints.Match); got != len(desired) {
 		t.Errorf("constraint Match = %d, want %d: %+v", got, len(desired), plan.Constraints)
@@ -129,7 +132,9 @@ func TestDiff_ReportsARemoteRowBesideASchemaError(t *testing.T) {
 	t.Parallel()
 
 	s := loadInline(t, "schema \"p\"\n\ntype T {\n\tid String primary\n}\n")
-	plan, result := Diff(cypher.Config{LabelPrefix: "9"}, s, []RemoteConstraint{{Type: "UNIQUENESS"}}, nil)
+	plan, result := diagtest.Capture(t, func(warn func(diag.Issue)) (Plan, error) {
+		return Diff(cypher.Config{LabelPrefix: "9"}, s, []RemoteConstraint{{Type: "UNIQUENESS"}}, nil, WithWarnings(warn))
+	})
 	if !reflect.DeepEqual(plan, Plan{}) {
 		t.Errorf("plan = %+v, want the zero Plan", plan)
 	}
@@ -149,7 +154,9 @@ func TestDiff_RemoteRowIssuesArriveInOneOrder(t *testing.T) {
 	}
 	indexes := []RemoteIndex{row("b"), row("a"), row("b"), row("a"), row("c"), row("c")}
 	for range 100 {
-		_, result := Diff(cypher.Config{}, s, nil, indexes)
+		_, result := diagtest.Capture(t, func(warn func(diag.Issue)) (Plan, error) {
+			return Diff(cypher.Config{}, s, nil, indexes, WithWarnings(warn))
+		})
 		kept := diag.NewCollector(1)
 		kept.Merge(result)
 		var got []string

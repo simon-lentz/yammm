@@ -1775,7 +1775,7 @@ Invariant expressions are always evaluated against concrete instance data. There
 
 ## Diagnostics
 
-YAMMM uses structured diagnostics with stable error codes. The Go programmatic interface (`diag.Result` methods, `diag.Renderer`) is documented in [API.md](API.md#diagnostics).
+YAMMM uses structured diagnostics with stable error codes. The Go programmatic interface (`diag.ResultError`, `diag.Result` methods, `diag.Renderer`) is documented in [API.md](API.md#diagnostics): a call returns its Fatal and Error issues as one `*diag.ResultError`, and hands each Warning, Info and Hint to its `WithWarnings` callback.
 
 ### Severity Levels
 
@@ -1819,7 +1819,7 @@ Codes are stable identifiers for programmatic matching. `diag/code.go` holds the
 - `E_INVALID_EDGE_PROPERTY_TYPE` — a relationship property of a type an edge does not hold: a `List` or a `Vector`, written or through a datatype
 - `E_PROPERTY_CONFLICT` — a type's own declaration of a property does not narrow an inherited one, or, with none, no inherited declaration narrows every other
 - `E_UPSTREAM_FAIL` — imported schema failed to compile
-- `E_LOAD_IO_FAILURE` — I/O error during schema loading, or a load whose arguments or options the loader refuses
+- `E_LOAD_IO_FAILURE` — I/O error during schema loading, or a load whose arguments or option values the loader refuses (an option a load does not take is refused with an error that carries no code)
 - `E_LOAD_MODULE_ROOT_MALFORMED` — a `yammm.mod` module-root marker holds content other than comment lines, is not a regular file, is larger than the size limit, or is a link that resolves to no file
 - `E_UNKNOWN_ANNOTATION`, `E_INVALID_ANNOTATION` — annotation name, placement, arity, argument kind or value, duplicate, or inherited-disagreement errors
 - `E_UNKNOWN_ANNOTATION_TARGET`, `E_INVALID_ANNOTATION_TARGET` — annotation target-property errors (unknown reference / ineligible property)
@@ -1886,8 +1886,8 @@ Codes are stable identifiers for programmatic matching. `diag/code.go` holds the
 - `E_DUPLICATE_PK` — two root instances in one group, both of whose stored keys the key rule accepts, state one primary key. Under a schema, only roots of a type that can hold a root count. Listed here as well as under Graph: `snapshot.Unmarshal`, `snapshot.Verify` and `snapshot.Stat` emit it, because the wire has a diagnostics section for a rejected duplicate and two live instances at one address is not a shape it can carry. `Stat` resolves no schema, so it judges no type and compares keys as the reader's number rule renders them; `Unmarshal` and `Verify` compare them as written too, since they refuse a `Timestamp`, `Date` or `UUID` key component its kind stores as other text
 - `E_SNAPSHOT_COMPOSED_ON_DUPLICATE`, `E_SNAPSHOT_EDGES_ON_DUPLICATE` — illegal data on duplicate records
 - `E_SNAPSHOT_DEPTH_EXCEEDED` — composed nesting exceeds depth limit (32)
-- `E_SNAPSHOT_INTEGRITY_MISMATCH` — integrity hash does not match the document, or the header holds none (an empty, null or absent `integrity_hash`); `WithIntegrityCheck(false)` skips the check, and `UpdateMetadata` always runs it
-- `E_SNAPSHOT_UNSUPPORTED_HASH_ALGORITHM` — the schema hash algorithm in the snapshot header is not recognized. An Error on the body-reading surfaces (`Unmarshal`, `Verify`, `Stat`, `UpdateMetadata`): the document is refused rather than half-trusted. A Warning at `ReadHeader` and `ScanDir`, which stay classifiable for dispatch
+- `E_SNAPSHOT_INTEGRITY_MISMATCH` — integrity hash does not match the document, or the header holds none (an empty, null or absent `integrity_hash`); `WithIntegrityCheck(false)` skips the check, at `UpdateMetadata` too, which then seals under a new hash any body whose shape and text it accepts, and refuses any other with `E_SNAPSHOT_MALFORMED`
+- `E_SNAPSHOT_UNSUPPORTED_HASH_ALGORITHM` — the schema hash algorithm in the snapshot header is not recognized. An Error on the body-reading surfaces (`Unmarshal`, `Verify`, `Stat`, `UpdateMetadata`): the document is refused rather than half-trusted. `ReadHeader` and `ScanDir` accept such a header and draw nothing, so a document stays classifiable for dispatch: `Header.SchemaHashAlgorithm` states the algorithm, and the CLI reports it as a Warning; a header that fails another way returns no `Header`, so beside that failure the CLI reports no such Warning
 - `E_SNAPSHOT_IO` — a file that fails to open during `ScanDir`, a failing reader under `ReadHeader`, or a directory `yammm snapshot info --dir` fails to read
 - `W_SNAPSHOT_UNRESOLVED_REQUIRED` — under `WithRevalidation`, a loaded document carries an unresolved record, one no structural check refused, for a required association
 - `W_SNAPSHOT_PATH_EXTENSION` (Warning) — a snapshot was written to a path that does not end in `.ys`. The write succeeded; a reader that discovers snapshots by extension will not find it
@@ -1935,7 +1935,7 @@ So a test that compares generated code's `SchemaHash` constant with the hash can
 
 The hash is deterministic. Most inputs are sorted by name; invariant blobs are sorted by their serialized bytes. Two inputs keep their order, because it is semantic: a primary key's properties, in key order, and the operands of one expression, in declared order.
 
-The hash format is `sha256:<hex>`. A structural hash version (currently `4`) names the algorithm, and a snapshot that records another version draws `E_SNAPSHOT_UNSUPPORTED_HASH_ALGORITHM` and its hash is not compared; version 2 arrived in v0.15.0 with invariants and the `abstract` / `part` markers, version 3 in v0.17.0 when the input widened to the whole import closure, and version 4 in v0.21.0 when a relation target became the pair (owning schema name, type name) so two closure members declaring one type name no longer collide. A hash can also move within a version: under version 4 a composite key is now hashed in key order and a negative number in an invariant as a signed literal, so a hash v0.21 stored for a schema with a composite key declared out of name order, or with such a number, no longer matches. The hash enables schema compatibility checking for `.ys` snapshots: `E_SNAPSHOT_INCOMPATIBLE_SCHEMA` is emitted when a snapshot's persisted hash does not match the current schema.
+The hash format is `sha256:<hex>`. A structural hash version (currently `4`) names the algorithm, and a snapshot that records another version is not hash-compared, and draws `E_SNAPSHOT_UNSUPPORTED_HASH_ALGORITHM` on a body read (a header-only read draws nothing); version 2 arrived in v0.15.0 with invariants and the `abstract` / `part` markers, version 3 in v0.17.0 when the input widened to the whole import closure, and version 4 in v0.21.0 when a relation target became the pair (owning schema name, type name) so two closure members declaring one type name no longer collide. A hash can also move within a version: under version 4 a composite key is now hashed in key order and a negative number in an invariant as a signed literal, so a hash v0.21 stored for a schema with a composite key declared out of name order, or with such a number, no longer matches. The hash enables schema compatibility checking for `.ys` snapshots: `E_SNAPSHOT_INCOMPATIBLE_SCHEMA` is emitted when a snapshot's persisted hash does not match the current schema.
 
 ## Grammar Summary
 

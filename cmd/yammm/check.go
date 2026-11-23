@@ -37,8 +37,8 @@ func runCheck(cmd *cobra.Command, args []string, sink *cli.DiagnosticSink) error
 	if err != nil {
 		return err
 	}
-	s, schemaResult := schema.Load(cmd.Context(), absSchemaPath, loadOpts...)
-	if err := reportSchemaLoad(sink, s, moduleRoot, absSchemaPath, schemaResult); err != nil {
+	s, loadErr := schema.Load(cmd.Context(), absSchemaPath, loadOpts...)
+	if err := reportSchemaLoad(sink, s, moduleRoot, absSchemaPath, loadErr); err != nil {
 		return err
 	}
 

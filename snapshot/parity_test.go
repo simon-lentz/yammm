@@ -10,6 +10,7 @@ import (
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/instance"
+	"github.com/simon-lentz/yammm/internal/diagtest"
 	"github.com/simon-lentz/yammm/schema"
 	"github.com/simon-lentz/yammm/snapshot"
 )
@@ -145,13 +146,29 @@ func TestParity_EverySurfaceAgrees(t *testing.T) {
 			}
 
 			verdicts := map[string]bool{
-				"Load":   refusedBy(t, func() diag.Result { _, r := snapshot.Unmarshal(ctx, rehashDocument(t, edited), s); return r }),
-				"Verify": refusedBy(t, func() diag.Result { return snapshot.Verify(ctx, rehashDocument(t, edited), s) }),
-				"Info":   refusedBy(t, func() diag.Result { _, r := snapshot.Stat(ctx, rehashDocument(t, edited)); return r }),
+				"Load": refusedBy(t, func() diag.Result {
+					_, r := diagtest.Capture(t, func(warn func(diag.Issue)) (graph.Snapshot, error) {
+						return snapshot.Unmarshal(ctx, rehashDocument(t, edited), s, snapshot.WithWarnings(warn))
+					})
+					return r
+				}),
+				"Verify": refusedBy(t, func() diag.Result {
+					return diagtest.CaptureErr(t, func(warn func(diag.Issue)) error {
+						return snapshot.Verify(ctx, rehashDocument(t, edited), s, snapshot.WithWarnings(warn))
+					})
+				}),
+				"Info": refusedBy(t, func() diag.Result {
+					_, r := diagtest.Issues(t, func() (*snapshot.Info, error) {
+						return snapshot.Stat(ctx, rehashDocument(t, edited))
+					})
+					return r
+				}),
 			}
 			if tc.seen == fromShape {
 				verdicts["UpdateMetadata"] = refusedBy(t, func() diag.Result {
-					_, r := snapshot.UpdateMetadata(ctx, edited, nil)
+					_, r := diagtest.Issues(t, func() ([]byte, error) {
+						return snapshot.UpdateMetadata(ctx, edited, nil)
+					})
 					return r
 				})
 			}
@@ -177,27 +194,27 @@ func TestParity_EverySurfaceAcceptsAWellFormedDocument(t *testing.T) {
 	s := testSchemaWithComposition(t)
 	clean := v3Doc(t)
 
-	if _, res := snapshot.Unmarshal(ctx, rehashDocument(t, clean), s); res.HasErrors() {
-		t.Errorf("Load refused a well-formed document: %v", res)
+	if _, err := snapshot.Unmarshal(ctx, rehashDocument(t, clean), s); err != nil {
+		t.Errorf("Load refused a well-formed document: %v", err)
 	}
-	if res := snapshot.Verify(ctx, rehashDocument(t, clean), s); res.HasErrors() {
-		t.Errorf("Verify refused a well-formed document: %v", res)
+	if err := snapshot.Verify(ctx, rehashDocument(t, clean), s); err != nil {
+		t.Errorf("Verify refused a well-formed document: %v", err)
 	}
-	if info, res := snapshot.Stat(ctx, rehashDocument(t, clean)); res.HasErrors() || info == nil {
-		t.Errorf("Info refused a well-formed document: %v", res)
+	if info, err := snapshot.Stat(ctx, rehashDocument(t, clean)); err != nil || info == nil {
+		t.Errorf("Info refused a well-formed document: %v", err)
 	}
-	if out, res := snapshot.UpdateMetadata(ctx, clean, map[string]string{"k": "v"}); res.HasErrors() || len(out) == 0 {
-		t.Errorf("UpdateMetadata refused a well-formed document: %v", res)
+	if out, err := snapshot.UpdateMetadata(ctx, clean, map[string]string{"k": "v"}); err != nil || len(out) == 0 {
+		t.Errorf("UpdateMetadata refused a well-formed document: %v", err)
 	}
-	if h, res := snapshot.ReadHeader(ctx, bytes.NewReader(clean)); res.HasErrors() || h == nil {
-		t.Errorf("ReadHeader refused a well-formed document: %v", res)
+	if h, err := snapshot.ReadHeader(ctx, bytes.NewReader(clean)); err != nil || h == nil {
+		t.Errorf("ReadHeader refused a well-formed document: %v", err)
 	}
 }
 
 // refusedBy reports whether a surface returned an Error-severity diagnostic.
 func refusedBy(t *testing.T, run func() diag.Result) bool {
 	t.Helper()
-	return run().HasErrors()
+	return diagtest.Err(run()) != nil
 }
 
 // unresolvedSchema declares a (many) association carrying an edge property,
@@ -219,9 +236,9 @@ type Company {
 // and Snapshot is called once per round to redraw it.
 func TestMarshal_IsDeterministicOverUnresolvedRecords(t *testing.T) {
 	ctx := context.Background()
-	s, res := schema.LoadString(t.Context(), unresolvedSchema, "tied.yammm")
-	if res.HasErrors() {
-		t.Fatalf("load schema: %s", res)
+	s, err := schema.LoadString(t.Context(), unresolvedSchema, "tied.yammm")
+	if err != nil {
+		t.Fatalf("load schema: %s", err)
 	}
 	v := instance.NewValidator(s)
 
@@ -234,12 +251,12 @@ func TestMarshal_IsDeterministicOverUnresolvedRecords(t *testing.T) {
 				map[string]any{"_target_id": fmt.Sprintf("c%02d", i+1), "since": "2021-01-01T00:00:00Z"},
 			},
 		}}
-		valid, vres := v.ValidateOne(ctx, "Person", raw)
-		if vres.HasErrors() {
-			t.Fatalf("validate p%02d: %s", i, vres)
+		valid, err := v.ValidateOne(ctx, "Person", raw)
+		if err != nil {
+			t.Fatalf("validate p%02d: %s", i, err)
 		}
-		if r := g.Add(ctx, valid); r.HasErrors() {
-			t.Fatalf("add p%02d: %s", i, r)
+		if err := g.Add(ctx, valid); err != nil {
+			t.Fatalf("add p%02d: %s", i, err)
 		}
 	}
 
@@ -249,9 +266,9 @@ func TestMarshal_IsDeterministicOverUnresolvedRecords(t *testing.T) {
 
 	var first []byte
 	for round := range 12 {
-		data, mres := snapshot.Marshal(ctx, g.Snapshot())
-		if mres.HasErrors() {
-			t.Fatalf("marshal round %d: %s", round, mres)
+		data, err := snapshot.Marshal(ctx, g.Snapshot())
+		if err != nil {
+			t.Fatalf("marshal round %d: %s", round, err)
 		}
 		if round == 0 {
 			first = data

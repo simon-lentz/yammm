@@ -28,9 +28,9 @@ type C extends B {
 
 func loadOverrideChain(t *testing.T) schema.Schema {
 	t.Helper()
-	s, res := schema.LoadString(t.Context(), overrideChain, "x.yammm")
-	if res.HasErrors() {
-		t.Fatalf("load: %s", res)
+	s, err := schema.LoadString(t.Context(), overrideChain, "x.yammm")
+	if err != nil {
+		t.Fatalf("load: %s", err)
 	}
 	return s
 }
@@ -104,7 +104,7 @@ func TestInvariantOverride_TheShadowedDeclarationIsNotAlsoInherited(t *testing.T
 // Invariant expressions admit no narrowing relation, so nothing there could
 // rescue a wrong pick — which is why the fix had to change the walk itself.
 func TestInvariantOverride_PropertiesWereAlreadyCorrect(t *testing.T) {
-	s, res := schema.LoadString(t.Context(), `schema "x"
+	s, err := schema.LoadString(t.Context(), `schema "x"
 
 abstract type A {
     id String primary
@@ -118,8 +118,8 @@ type B extends A {
 type C extends B {
 }
 `, "x.yammm")
-	if res.HasErrors() {
-		t.Fatalf("load: %s", res)
+	if err != nil {
+		t.Fatalf("load: %s", err)
 	}
 
 	typeC, ok := s.Type("C")

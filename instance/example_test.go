@@ -10,7 +10,7 @@ import (
 
 func ExampleValidator_ValidateOne() {
 	// Build a simple schema
-	s, result := schema.LoadString(context.Background(), `schema "example"
+	s, err := schema.LoadString(context.Background(), `schema "example"
 
 type Person {
 	id String primary
@@ -18,8 +18,7 @@ type Person {
 	age Integer
 }
 `, "example.yammm")
-
-	if result.HasErrors() {
+	if err != nil {
 		fmt.Println("Schema build failed")
 		return
 	}
@@ -37,8 +36,8 @@ type Person {
 		},
 	}
 
-	valid, result := validator.ValidateOne(ctx, "Person", raw)
-	if !result.OK() {
+	valid, validateErr := validator.ValidateOne(ctx, "Person", raw)
+	if validateErr != nil {
 		fmt.Println("Validation failed")
 		return
 	}
@@ -71,8 +70,8 @@ type Product {
 		{Properties: map[string]any{"sku": "PROD-003", "name": "Sprocket"}},
 	}
 
-	valid, result := validator.Validate(ctx, "Product", raws)
-	if !result.OK() {
+	valid, err := validator.Validate(ctx, "Product", raws)
+	if err != nil {
 		fmt.Println("Validation failed")
 		return
 	}

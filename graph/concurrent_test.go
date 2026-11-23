@@ -8,6 +8,7 @@ import (
 
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/instance"
+	"github.com/simon-lentz/yammm/internal/diagtest"
 	"github.com/simon-lentz/yammm/internal/instancetest"
 	"github.com/simon-lentz/yammm/schema"
 )
@@ -16,7 +17,7 @@ import (
 func testConcurrentSchema(t *testing.T) schema.Schema {
 	t.Helper()
 
-	s, result := schema.LoadString(t.Context(), `schema "concurrent"
+	s, err := schema.LoadString(t.Context(), `schema "concurrent"
 
 type Person {
 	id String primary
@@ -28,9 +29,8 @@ type Company {
 	name String required
 }
 `, "concurrent.yammm")
-
-	if result.HasErrors() {
-		t.Fatalf("Failed to build test schema: %s", result.String())
+	if err != nil {
+		t.Fatalf("Failed to build test schema: %s", err)
 	}
 	return s
 }
@@ -51,7 +51,9 @@ func TestGraph_Concurrent_Add(t *testing.T) {
 				pk := fmt.Sprintf("person-%d-%d", i, j)
 				inst := instancetest.Valid(t, s, "Person", map[string]any{"id": pk, "name": pk})
 
-				g.Add(ctx, inst)
+				if err := g.Add(ctx, inst); err != nil {
+					t.Errorf("Add: %v", err)
+				}
 			}
 		})
 	}
@@ -86,9 +88,9 @@ func TestGraph_Concurrent_Add_WithDuplicates(t *testing.T) {
 		wg.Go(func() {
 			inst := instancetest.Valid(t, s, "Person", map[string]any{"id": sharedKey, "name": fmt.Sprintf("Alice %d", i)})
 
-			result := g.Add(ctx, inst)
+			err := g.Add(ctx, inst)
 
-			if result.OK() {
+			if err == nil {
 				mu.Lock()
 				successCount++
 				mu.Unlock()
@@ -134,7 +136,9 @@ func TestGraph_Concurrent_Add_MultipleTypes(t *testing.T) {
 				pk := fmt.Sprintf("person-%d-%d", i, j)
 				inst := instancetest.Valid(t, s, "Person", map[string]any{"id": pk, "name": pk})
 
-				g.Add(ctx, inst)
+				if err := g.Add(ctx, inst); err != nil {
+					t.Errorf("Add: %v", err)
+				}
 			}
 		})
 	}
@@ -146,7 +150,9 @@ func TestGraph_Concurrent_Add_MultipleTypes(t *testing.T) {
 				pk := fmt.Sprintf("company-%d-%d", i, j)
 				inst := instancetest.Valid(t, s, "Company", map[string]any{"id": pk, "name": pk})
 
-				g.Add(ctx, inst)
+				if err := g.Add(ctx, inst); err != nil {
+					t.Errorf("Add: %v", err)
+				}
 			}
 		})
 	}
@@ -190,7 +196,9 @@ func TestGraph_Concurrent_Snapshot(t *testing.T) {
 				pk := fmt.Sprintf("person-%d-%d", i, j)
 				inst := instancetest.Valid(t, s, "Person", map[string]any{"id": pk, "name": pk})
 
-				g.Add(ctx, inst)
+				if err := g.Add(ctx, inst); err != nil {
+					t.Errorf("Add: %v", err)
+				}
 			}
 		})
 	}
@@ -241,13 +249,15 @@ func TestGraph_Concurrent_Check(t *testing.T) {
 			pk := fmt.Sprintf("person-%d", i)
 			inst := instancetest.Valid(t, s, "Person", map[string]any{"id": pk, "name": pk})
 
-			g.Add(ctx, inst)
+			if err := g.Add(ctx, inst); err != nil {
+				t.Errorf("Add: %v", err)
+			}
 		})
 
 		wg.Go(func() {
 			// Concurrent Check must never report a Fatal: the graph is
 			// consistent at every point an Add can be observed from.
-			if res := g.Check(ctx); res.HasFatal() {
+			if res := diagtest.Failures(t, g.Check(ctx)); res.HasFatal() {
 				t.Errorf("concurrent Check returned Fatal: %s", res.String())
 			}
 		})
@@ -257,8 +267,8 @@ func TestGraph_Concurrent_Check(t *testing.T) {
 
 	// No Person declares a required association, so the settled graph checks
 	// clean however the concurrent adds interleaved.
-	if res := g.Check(ctx); !res.OK() {
-		t.Errorf("Check after the concurrent phase: %s", res.String())
+	if err := g.Check(ctx); err != nil {
+		t.Errorf("Check after the concurrent phase: %s", err)
 	}
 }
 
@@ -284,7 +294,9 @@ func TestGraph_Concurrent_DeterministicOrder(t *testing.T) {
 					pk := fmt.Sprintf("person-%d-%d", i, j)
 					inst := instancetest.Valid(t, s, "Person", map[string]any{"id": pk, "name": pk})
 
-					g.Add(ctx, inst)
+					if err := g.Add(ctx, inst); err != nil {
+						t.Errorf("Add: %v", err)
+					}
 				}
 			})
 		}
@@ -316,16 +328,15 @@ func TestGraph_Concurrent_DeterministicOrder(t *testing.T) {
 }
 
 func BenchmarkGraph_Add_Concurrent(b *testing.B) {
-	s, result := schema.LoadString(b.Context(), `schema "bench"
+	s, err := schema.LoadString(b.Context(), `schema "bench"
 
 type Person {
 	id String primary
 	name String required
 }
 `, "bench.yammm")
-
-	if result.HasErrors() {
-		b.Fatalf("Failed to build schema: %s", result.String())
+	if err != nil {
+		b.Fatalf("Failed to build schema: %s", err)
 	}
 
 	ctx := b.Context()
@@ -341,7 +352,9 @@ type Person {
 		for pb.Next() {
 			g := graph.New(s)
 			for _, inst := range instances {
-				g.Add(ctx, inst)
+				if err := g.Add(ctx, inst); err != nil {
+					b.Errorf("Add: %v", err)
+				}
 			}
 		}
 	})
@@ -369,8 +382,8 @@ func TestIntegration_ComplexMultiSchema(t *testing.T) {
 
 	// Add in reverse order (forward refs)
 	for _, inst := range []instance.ValidInstance{top, middle, base} {
-		if result := g.Add(ctx, inst); !result.OK() {
-			t.Fatalf("Add %s: %s", inst.TypeName(), result)
+		if err := g.Add(ctx, inst); err != nil {
+			t.Fatalf("Add %s: %s", inst.TypeName(), err)
 		}
 	}
 
@@ -401,14 +414,18 @@ func TestIntegration_ForwardRefChain(t *testing.T) {
 		[]any{"c1"}, map[string]any{"name": "C1"})
 
 	// Add in forward-ref order
-	g.Add(ctx, typeA)
+	if err := g.Add(ctx, typeA); err != nil {
+		t.Errorf("Add: %v", err)
+	}
 
 	snap1 := g.Snapshot()
 	if len(slices.Collect(snap1.Unresolved())) == 0 {
 		t.Error("Should have unresolved A→B")
 	}
 
-	g.Add(ctx, typeB)
+	if err := g.Add(ctx, typeB); err != nil {
+		t.Errorf("Add: %v", err)
+	}
 
 	snap2 := g.Snapshot()
 	// A→B should be resolved, B→C still pending
@@ -416,7 +433,9 @@ func TestIntegration_ForwardRefChain(t *testing.T) {
 		t.Error("A→B edge should be resolved")
 	}
 
-	g.Add(ctx, typeC)
+	if err := g.Add(ctx, typeC); err != nil {
+		t.Errorf("Add: %v", err)
+	}
 
 	// All should be resolved
 	snap3 := g.Snapshot()
@@ -439,7 +458,7 @@ func TestIntegration_InlineChildrenKeepTheirOrder(t *testing.T) {
 			[]any{fmt.Sprintf("c%d", i)}, map[string]any{"name": fmt.Sprintf("Child %d", i)}))
 	}
 	parent := parentWith(t, s, "Parent", []any{"p1"}, map[string]any{"name": "Parent 1"}, "CHILDREN", kids...)
-	if err := g.Add(ctx, parent).Err(); err != nil {
+	if err := g.Add(ctx, parent); err != nil {
 		t.Errorf("Add should succeed: %v", err)
 	}
 
@@ -480,12 +499,16 @@ func TestIntegration_ConcurrentAddCheck(t *testing.T) {
 				// Add person
 				pk := fmt.Sprintf("person-%d-%d", w, i)
 				person := instancetest.Valid(t, s, "Person", map[string]any{"id": pk, "name": pk})
-				g.Add(ctx, person)
+				if err := g.Add(ctx, person); err != nil {
+					t.Errorf("Add: %v", err)
+				}
 
 				// Add company
 				ck := fmt.Sprintf("company-%d-%d", w, i)
 				company := instancetest.Valid(t, s, "Company", map[string]any{"id": ck, "name": ck})
-				g.Add(ctx, company)
+				if err := g.Add(ctx, company); err != nil {
+					t.Errorf("Add: %v", err)
+				}
 			}
 		})
 	}
@@ -494,7 +517,7 @@ func TestIntegration_ConcurrentAddCheck(t *testing.T) {
 	for range numWorkers {
 		wg.Go(func() {
 			for range opsPerWorker {
-				g.Check(ctx)
+				_ = g.Check(ctx)
 			}
 		})
 	}
@@ -548,7 +571,9 @@ func TestGraph_Concurrent_ForwardReferences(t *testing.T) {
 				map[string]any{"name": fmt.Sprintf("Person %d", i)},
 				"EMPLOYER", [][]any{{"shared-company"}})
 
-			g.Add(ctx, person)
+			if err := g.Add(ctx, person); err != nil {
+				t.Errorf("Add: %v", err)
+			}
 		})
 	}
 	wg.Wait()
@@ -562,7 +587,9 @@ func TestGraph_Concurrent_ForwardReferences(t *testing.T) {
 	// Add the target
 	company := mustValidInstance(t, s, "Company",
 		[]any{"shared-company"}, map[string]any{"name": "Shared Company"})
-	g.Add(ctx, company)
+	if err := g.Add(ctx, company); err != nil {
+		t.Errorf("Add: %v", err)
+	}
 
 	// All should be resolved
 	snap2 := g.Snapshot()

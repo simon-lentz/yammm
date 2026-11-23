@@ -34,9 +34,9 @@ func TestInvariant_ExpressionIsTheTextAsWritten(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			src := "schema \"s\"\ntype T {\n\tid String primary\n\tn Integer\n\ts String\n\t! \"m\" " + tt.expr + "\n}\n"
-			s, res := LoadString(t.Context(), src, "s.yammm")
-			if res.HasErrors() {
-				t.Fatalf("load: %s", res)
+			s, err := LoadString(t.Context(), src, "s.yammm")
+			if err != nil {
+				t.Fatalf("load: %s", err)
 			}
 			typ, _ := s.Type("T")
 			for inv := range typ.Invariants() {

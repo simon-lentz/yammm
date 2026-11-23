@@ -226,6 +226,21 @@ func TestAssertLoads_ReportsAFailingSchemaBlock(t *testing.T) {
 	}
 }
 
+// TestAssertDocumentedDiagnostics_ReadsAWarningCode pins that a block naming a
+// warning code passes when the load raises that warning, which reaches the gate
+// through the load's warning callback, not its error.
+func TestAssertDocumentedDiagnostics_ReadsAWarningCode(t *testing.T) {
+	t.Parallel()
+
+	var r recorder
+	AssertDocumentedDiagnostics(&r, []Block{
+		block(TagSchema, "// drops it: W_ANNOTATION_SHADOWED\nschema \"main\"\nabstract type Tracked {\n\tfirst_seen Timestamp required @writeOnce\n}\ntype Shadowed extends Tracked {\n\tid String primary\n\tfirst_seen Timestamp required\n}\n"),
+	})
+	if r.failed() {
+		t.Errorf("AssertDocumentedDiagnostics reported a block whose warning the load raises: %v", r.msgs)
+	}
+}
+
 func TestAssertDocumentedDiagnostics_ReportsAWrongCode(t *testing.T) {
 	t.Parallel()
 

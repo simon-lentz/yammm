@@ -1,10 +1,12 @@
 package schema_test
 
 import (
+	"errors"
 	"strings"
 	"testing"
 
 	"github.com/simon-lentz/yammm/diag"
+	"github.com/simon-lentz/yammm/internal/diagtest"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -107,17 +109,19 @@ type C2 extends Base {
 // abort before a targeted check could run and report the generic message.
 func TestAnnotation_IndexOnPrimary_AbstractWithNoEmitter_Silent(t *testing.T) {
 	t.Parallel()
-	_, res := schema.LoadString(t.Context(), `schema "main"
+	_, res := diagtest.Capture(t, func(warn func(diag.Issue)) (schema.Schema, error) {
+		return schema.LoadString(t.Context(), `schema "main"
 abstract type Mixin {
 	a String primary @index
 }
 type Unrelated {
 	id String primary
-}`, "main.yammm")
+}`, "main.yammm", schema.WithWarnings(warn))
+	})
 	if n := codeCounts(res)[diag.E_INVALID_ANNOTATION_TARGET]; n != 0 {
 		t.Errorf("an abstract type with no concrete descendant emits no constraint to be redundant against; got %d: %v", n, res)
 	}
-	if res.HasErrors() {
+	if diagtest.Err(res) != nil {
 		t.Errorf("schema should load clean: %v", res)
 	}
 }
@@ -128,7 +132,7 @@ type Unrelated {
 // is the unresolved reference.
 func TestAnnotation_IndexOnPrimary_DescendantDeferredSupertype_Silent(t *testing.T) {
 	t.Parallel()
-	_, res := schema.LoadString(t.Context(), `schema "main"
+	_, err := schema.LoadString(t.Context(), `schema "main"
 
 abstract type Keyed {
 	id String primary @index
@@ -137,8 +141,8 @@ abstract type Keyed {
 type Doc extends Keyed, ext.Unresolved {
 }
 `, "main.yammm")
-	if res.HasCode(diag.E_INVALID_ANNOTATION_TARGET) {
-		t.Errorf("a descendant with an unresolved supertype may still gain a co-key; got: %v", res)
+	if errors.Is(err, diag.E_INVALID_ANNOTATION_TARGET) {
+		t.Errorf("a descendant with an unresolved supertype may still gain a co-key; got: %v", err)
 	}
 }
 
@@ -146,14 +150,14 @@ type Doc extends Keyed, ext.Unresolved {
 // itself.
 func TestAnnotation_IndexOnPrimary_DeferredSupertype_Silent(t *testing.T) {
 	t.Parallel()
-	_, res := schema.LoadString(t.Context(), `schema "main"
+	_, err := schema.LoadString(t.Context(), `schema "main"
 
 type Entity extends ext.Base {
 	id String primary @index
 }
 `, "main.yammm")
-	if res.HasCode(diag.E_INVALID_ANNOTATION_TARGET) {
-		t.Errorf("@index on a primary key under an unresolved supertype must not be flagged redundant, got: %v", res)
+	if errors.Is(err, diag.E_INVALID_ANNOTATION_TARGET) {
+		t.Errorf("@index on a primary key under an unresolved supertype must not be flagged redundant, got: %v", err)
 	}
 }
 
@@ -175,7 +179,7 @@ import "./base" as base
 type Concrete extends base.Mixin {
 	x String
 }`)
-	if res.HasErrors() {
+	if diagtest.Err(res) != nil {
 		t.Fatalf("cross-file load should succeed: %v", res)
 	}
 	if n := codeCounts(res)[diag.E_INVALID_ANNOTATION_TARGET]; n != 0 {

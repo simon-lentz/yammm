@@ -3,6 +3,7 @@ package jsondata
 import (
 	"testing"
 
+	"github.com/simon-lentz/yammm/internal/diagtest"
 	"github.com/simon-lentz/yammm/internal/yammmtest/sourcetest"
 
 	"github.com/simon-lentz/yammm/diag"
@@ -30,7 +31,7 @@ func TestParse_RecordsProvenancePerInstance(t *testing.T) {
 	doc := "{\n  \"Person\": [\n    {\"name\": \"ada\"},\n    {\"name\": \"grace\"}\n  ],\n  \"Company\": [\n    {\"name\": \"acme\"}\n  ]\n}\n"
 
 	parsed, result := parseForProvenance(t, id, doc)
-	if result.HasErrors() {
+	if diagtest.Err(result) != nil {
 		t.Fatalf("parse: %s", result)
 	}
 
@@ -97,7 +98,7 @@ func TestParse_ProvenanceCountsColumnsOverTheOriginalBytes(t *testing.T) {
 	doc := `{"Person": [/* naïve */ {"a": 1}]}`
 
 	parsed, result := parseForProvenance(t, id, doc)
-	if result.HasErrors() {
+	if diagtest.Err(result) != nil {
 		t.Fatalf("parse: %s", result)
 	}
 	start := parsed["Person"].Elements[0].Provenance.Span().Start
@@ -116,7 +117,7 @@ func TestParse_ProvenanceSkipsTheByteOrderMark(t *testing.T) {
 	doc := string(rune(0xFEFF)) + `{"Person": [{"a": 1}]}`
 
 	parsed, result := parseForProvenance(t, id, doc)
-	if result.HasErrors() {
+	if diagtest.Err(result) != nil {
 		t.Fatalf("parse: %s", result)
 	}
 	start := parsed["Person"].Elements[0].Provenance.Span().Start

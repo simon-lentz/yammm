@@ -66,8 +66,8 @@ type RemoteIndex struct {
 	// independently declarable, so reporting one as an undeclared orphan advises
 	// dropping the index behind a primary key. One that serves a declaration
 	// pairing left without a row is that declaration's Actual, or, where it is
-	// FAILED, its drift's first blocker; a declaration that realises its
-	// constraint then drifts too.
+	// FAILED, its drift's first blocker; the declaration its constraint
+	// realises then drifts too.
 	// Where the plan drops the constraint of an online or POPULATING one, the
 	// declaration is a Create unless another blocker makes it a Drift.
 	//
@@ -150,7 +150,7 @@ const ShowConstraints = "SHOW CONSTRAINTS YIELD name, type, entityType, labelsOr
 // name or dropped — [RemoteIndex.Declarable] rejects them on
 // [RemoteIndex.OwningConstraint] — and one that serves a declaration pairing
 // left without a row is that declaration's Actual, or, where it is FAILED, its
-// drift's first blocker; a declaration that realises its constraint then
+// drift's first blocker; the declaration its constraint realises then
 // drifts too. Where the
 // plan drops the constraint of an online or POPULATING one, the declaration is
 // a Create unless another blocker makes it a Drift. A CREATE INDEX whose name
@@ -168,7 +168,7 @@ const ShowIndexes = "SHOW INDEXES YIELD name, type, entityType, labelsOrTypes, p
 // driver's Record.AsMap(), into structured values. It refuses a record with no
 // name, and a property type constraint's record with no propertyType, which a
 // server returns only to a projection that does not yield it: the type it
-// enforces could not be compared.
+// enforces could not be compared. A refusal is a plain error naming the record.
 func ParseConstraints(records []map[string]any) ([]RemoteConstraint, error) {
 	result := make([]RemoteConstraint, 0, len(records))
 	for i, rec := range records {
@@ -193,7 +193,9 @@ func ParseConstraints(records []map[string]any) ([]RemoteConstraint, error) {
 	return result, nil
 }
 
-// ParseIndexes parses SHOW INDEXES output into structured values.
+// ParseIndexes parses [ShowIndexes] output, each record from the driver's
+// Record.AsMap(), into structured values. It refuses a record with no name
+// with a plain error.
 func ParseIndexes(records []map[string]any) ([]RemoteIndex, error) {
 	result := make([]RemoteIndex, 0, len(records))
 	for i, rec := range records {

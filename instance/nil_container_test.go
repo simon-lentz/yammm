@@ -12,6 +12,7 @@ import (
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/instance"
+	"github.com/simon-lentz/yammm/internal/diagtest"
 	"github.com/simon-lentz/yammm/internal/value"
 )
 
@@ -39,7 +40,9 @@ func TestValidate_ANilSliceAtARequiredListIsMissing(t *testing.T) {
 		"a nil []string list":    {"id": "x", "reqTags": []string(nil), "reqVec": []float64{1, 2}},
 		"a nil []float64 vector": {"id": "x", "reqTags": []any{"a"}, "reqVec": []float64(nil)},
 	} {
-		_, res := v.ValidateOne(t.Context(), "T", instance.RawInstance{Properties: props})
+		_, res := diagtest.Issues(t, func() (instance.ValidInstance, error) {
+			return v.ValidateOne(t.Context(), "T", instance.RawInstance{Properties: props})
+		})
 		if got := codes(res); !slices.Equal(got, []string{diag.E_MISSING_REQUIRED.String()}) {
 			t.Errorf("%s: got %v, want E_MISSING_REQUIRED alone", name, got)
 		}
@@ -78,8 +81,12 @@ func TestValidate_ANilContainerAgreesWithItsJSONForm(t *testing.T) {
 		if err := dec.Decode(&decoded); err != nil {
 			t.Fatalf("%s: decode: %v", name, err)
 		}
-		goValid, goRes := v.ValidateOne(t.Context(), "T", instance.RawInstance{Properties: props})
-		jsonValid, jsonRes := v.ValidateOne(t.Context(), "T", instance.RawInstance{Properties: decoded})
+		goValid, goRes := diagtest.Issues(t, func() (instance.ValidInstance, error) {
+			return v.ValidateOne(t.Context(), "T", instance.RawInstance{Properties: props})
+		})
+		jsonValid, jsonRes := diagtest.Issues(t, func() (instance.ValidInstance, error) {
+			return v.ValidateOne(t.Context(), "T", instance.RawInstance{Properties: decoded})
+		})
 		if goRes.String() != jsonRes.String() {
 			t.Errorf("%s: the Go value drew\n%s\nits JSON form %s drew\n%s", name, goRes, encoded, jsonRes)
 			continue
@@ -110,11 +117,11 @@ func TestCheck_ANilSliceAtAListHoldsNoValue(t *testing.T) {
 			if err := value.Check(nilSlice, p.Constraint()); err != nil {
 				t.Errorf("value.Check(%#v, %s) = %v, want nil", nilSlice, p.Constraint(), err)
 			}
-			inst, res := v.ValidateOne(t.Context(), "T", instance.RawInstance{Properties: map[string]any{
+			inst, validateErr := v.ValidateOne(t.Context(), "T", instance.RawInstance{Properties: map[string]any{
 				"id": "x", "reqTags": []any{"a"}, "reqVec": []float64{1, 2}, prop: nilSlice,
 			}})
-			if res.Err() != nil {
-				t.Fatalf("%s = %#v: %s", prop, nilSlice, res)
+			if validateErr != nil {
+				t.Fatalf("%s = %#v: %s", prop, nilSlice, validateErr)
 			}
 			if stored, ok := inst.Property(prop); ok && stored.Any() != nil {
 				t.Errorf("%s = %#v stored %#v, want no value", prop, nilSlice, stored.Any())
@@ -181,9 +188,13 @@ func TestValidate_ANilContainerAtARelationAgreesWithItsJSONForm(t *testing.T) {
 		if err := json.Unmarshal(encoded, &decoded); err != nil {
 			t.Fatalf("%s: unmarshal: %v", name, err)
 		}
-		_, goRes := v.ValidateOne(t.Context(), "T", instance.RawInstance{Properties: props})
-		_, jsonRes := v.ValidateOne(t.Context(), "T", instance.RawInstance{Properties: decoded})
-		if goRes.OK() != jsonRes.OK() || goRes.String() != jsonRes.String() {
+		_, goRes := diagtest.Issues(t, func() (instance.ValidInstance, error) {
+			return v.ValidateOne(t.Context(), "T", instance.RawInstance{Properties: props})
+		})
+		_, jsonRes := diagtest.Issues(t, func() (instance.ValidInstance, error) {
+			return v.ValidateOne(t.Context(), "T", instance.RawInstance{Properties: decoded})
+		})
+		if (diagtest.Err(goRes) == nil) != (diagtest.Err(jsonRes) == nil) || goRes.String() != jsonRes.String() {
 			t.Errorf("%s: the Go value drew\n%s\nits JSON form %s drew\n%s", name, goRes, encoded, jsonRes)
 		}
 	}
@@ -208,8 +219,12 @@ func TestValidate_ANilImmutableContainerIsNull(t *testing.T) {
 			props[prop] = none
 			nulled := maps.Clone(base)
 			nulled[prop] = nil
-			_, got := v.ValidateOne(t.Context(), "T", instance.RawInstance{Properties: props})
-			_, want := v.ValidateOne(t.Context(), "T", instance.RawInstance{Properties: nulled})
+			_, got := diagtest.Issues(t, func() (instance.ValidInstance, error) {
+				return v.ValidateOne(t.Context(), "T", instance.RawInstance{Properties: props})
+			})
+			_, want := diagtest.Issues(t, func() (instance.ValidInstance, error) {
+				return v.ValidateOne(t.Context(), "T", instance.RawInstance{Properties: nulled})
+			})
 			if got.String() != want.String() {
 				t.Errorf("%s at %s drew\n%s\nwhere null drew\n%s", name, prop, got, want)
 			}
@@ -235,9 +250,13 @@ func TestValidate_AStructEmbeddingANilContainerIsAStruct(t *testing.T) {
 			props[prop] = embedding
 			plain := maps.Clone(base)
 			plain[prop] = struct{ A int }{}
-			_, got := v.ValidateOne(t.Context(), "T", instance.RawInstance{Properties: props})
-			_, want := v.ValidateOne(t.Context(), "T", instance.RawInstance{Properties: plain})
-			if !slices.Equal(codes(got), codes(want)) || !got.HasErrors() {
+			_, got := diagtest.Issues(t, func() (instance.ValidInstance, error) {
+				return v.ValidateOne(t.Context(), "T", instance.RawInstance{Properties: props})
+			})
+			_, want := diagtest.Issues(t, func() (instance.ValidInstance, error) {
+				return v.ValidateOne(t.Context(), "T", instance.RawInstance{Properties: plain})
+			})
+			if !slices.Equal(codes(got), codes(want)) || diagtest.Err(got) == nil {
 				t.Errorf("a struct embedding %s at %s drew %v; want %v, as any struct", name, prop, codes(got), codes(want))
 			}
 		}
@@ -270,8 +289,12 @@ func TestValidate_AnImmutableContainerAtARelationReadsAsWhatItHolds(t *testing.T
 		for k, val := range wrapped.All() {
 			held[k] = val.Any()
 		}
-		plainValid, plainRes := v.ValidateOne(t.Context(), "T", instance.RawInstance{Properties: plain})
-		heldValid, heldRes := v.ValidateOne(t.Context(), "T", instance.RawInstance{Properties: held})
+		plainValid, plainRes := diagtest.Issues(t, func() (instance.ValidInstance, error) {
+			return v.ValidateOne(t.Context(), "T", instance.RawInstance{Properties: plain})
+		})
+		heldValid, heldRes := diagtest.Issues(t, func() (instance.ValidInstance, error) {
+			return v.ValidateOne(t.Context(), "T", instance.RawInstance{Properties: held})
+		})
 		if plainRes.String() != heldRes.String() {
 			t.Errorf("%s: the Go value drew\n%s\nits immutable form drew\n%s", name, plainRes, heldRes)
 			continue
@@ -296,23 +319,33 @@ func TestValidate_AnImmutableContainerAtARelationReadsAsWhatItHolds(t *testing.T
 	props := func(one any) map[string]any {
 		return map[string]any{"id": "x", "head": []any{line}, "one": one}
 	}
-	valid, res := v.ValidateOne(t.Context(), "T", instance.RawInstance{Properties: props(immutable.WrapProperties(co))})
-	if edge, ok := valid.Edge("ONE"); !res.OK() || !ok || len(slices.Collect(edge.Targets())) != 1 {
+	valid, res := diagtest.Issues(t, func() (instance.ValidInstance, error) {
+		return v.ValidateOne(t.Context(), "T", instance.RawInstance{Properties: props(immutable.WrapProperties(co))})
+	})
+	if edge, ok := valid.Edge("ONE"); diagtest.Err(res) != nil || !ok || len(slices.Collect(edge.Targets())) != 1 {
 		t.Errorf("a Properties at a (one) relation drew\n%s\nwant the one target", res)
 	}
 	for value, want := range map[any]string{time.Time{}: "time.Time", &co: "*map[string]interface {}"} {
-		_, res = v.ValidateOne(t.Context(), "T", instance.RawInstance{Properties: props(value)})
+		_, res = diagtest.Issues(t, func() (instance.ValidInstance, error) {
+			return v.ValidateOne(t.Context(), "T", instance.RawInstance{Properties: props(value)})
+		})
 		if !strings.Contains(res.String(), "expected object, got "+want) {
 			t.Errorf("%s at a (one) relation drew\n%s\nwant its type named", want, res)
 		}
 	}
 	unread := map[string]any{"_target_id": "c", "junk": map[int]any{0: []any{"x"}}}
-	_, plainRes := v.ValidateOne(t.Context(), "T", instance.RawInstance{Properties: props(unread)})
-	_, heldRes := v.ValidateOne(t.Context(), "T", instance.RawInstance{Properties: props(immutable.WrapProperties(unread))})
+	_, plainRes := diagtest.Issues(t, func() (instance.ValidInstance, error) {
+		return v.ValidateOne(t.Context(), "T", instance.RawInstance{Properties: props(unread)})
+	})
+	_, heldRes := diagtest.Issues(t, func() (instance.ValidInstance, error) {
+		return v.ValidateOne(t.Context(), "T", instance.RawInstance{Properties: props(immutable.WrapProperties(unread))})
+	})
 	if plainRes.String() != heldRes.String() {
 		t.Errorf("a field no reader reads drew\n%s\nfrom the Go value and\n%s\nfrom its immutable form", plainRes, heldRes)
 	}
-	_, res = v.ValidateOne(t.Context(), "T", instance.RawInstance{Properties: props(map[int]any{1: "c"})})
+	_, res = diagtest.Issues(t, func() (instance.ValidInstance, error) {
+		return v.ValidateOne(t.Context(), "T", instance.RawInstance{Properties: props(map[int]any{1: "c"})})
+	})
 	if !strings.Contains(res.String(), "expected object, got map[int]interface {}") {
 		t.Errorf("a map keyed by no string at a (one) relation drew\n%s\nwant its type named", res)
 	}

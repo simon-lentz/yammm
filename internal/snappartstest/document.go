@@ -27,9 +27,9 @@ import (
 // reader refuses it.
 func Loaded(tb testing.TB, s schema.Schema, parts snapparts.Parts) graph.Snapshot {
 	tb.Helper()
-	snap, res := snapshot.Unmarshal(tb.Context(), Document(tb, s, parts), s)
-	if res.HasErrors() {
-		tb.Fatalf("snappartstest.Loaded: %s", res)
+	snap, err := snapshot.Unmarshal(tb.Context(), Document(tb, s, parts), s)
+	if err != nil {
+		tb.Fatalf("snappartstest.Loaded: %v", err)
 	}
 	return snap
 }
@@ -391,13 +391,13 @@ func (w *documentWriter) value(v any) any {
 // one version the reader accepts.
 func WrittenVersion(tb testing.TB, s schema.Schema) int {
 	tb.Helper()
-	data, res := snapshot.Marshal(tb.Context(), graph.New(s).Snapshot())
-	if res.HasErrors() {
-		tb.Fatalf("snappartstest: marshal an empty snapshot: %s", res)
+	data, err := snapshot.Marshal(tb.Context(), graph.New(s).Snapshot())
+	if err != nil {
+		tb.Fatalf("snappartstest: marshal an empty snapshot: %v", err)
 	}
-	h, res := snapshot.ReadHeader(tb.Context(), bytes.NewReader(data))
-	if res.HasErrors() {
-		tb.Fatalf("snappartstest: read the header an empty snapshot writes: %s", res)
+	h, err := snapshot.ReadHeader(tb.Context(), bytes.NewReader(data))
+	if err != nil {
+		tb.Fatalf("snappartstest: read the header an empty snapshot writes: %v", err)
 	}
 	return h.Version
 }

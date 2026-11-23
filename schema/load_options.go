@@ -1,45 +1,94 @@
 package schema
 
 import (
+	"fmt"
+	"slices"
+
+	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/internal/source"
 )
 
-// LoadOption configures the behavior of Load functions.
-type LoadOption func(*loadConfig)
+// Option configures a load by [Load], [LoadString] or [LoadSourcesWithEntry].
+// A load refuses an option it does not take with an error, with no diagnostic
+// code, that names the option and the load.
+type Option func(*loadConfig)
+
+// optionKind names the constructor that built an [Option], so a load can refuse
+// one it does not take.
+type optionKind uint8
+
+const (
+	optModuleRoot optionKind = iota
+	optSourcesOnly
+	optSyntheticRoot
+	optImportsAllowed
+	optCaptureSources
+	optWarnings
+)
+
+var optionNames = [...]string{
+	optModuleRoot:     "WithModuleRoot",
+	optSourcesOnly:    "WithSourcesOnly",
+	optSyntheticRoot:  "WithSyntheticRoot",
+	optImportsAllowed: "WithImportsAllowed",
+	optCaptureSources: "CaptureSources",
+	optWarnings:       "WithWarnings",
+}
 
 // loadConfig holds configuration for schema loading.
 type loadConfig struct {
+	given           []optionKind // every option passed, in argument order
 	moduleRoot      string
 	syntheticRoot   string
 	sourceRegistry  *source.Registry
 	disallowImports bool
 	sourcesOnly     bool
 	sourcesOut      *Sources
+	warnings        func(diag.Issue)
 	// syntheticRootSet separates "WithSyntheticRoot not passed" from
 	// "WithSyntheticRoot passed an empty root", which is an error rather than
 	// a no-op.
 	syntheticRootSet bool
 }
 
-// loadIssueLimit is the most diagnostic issues one load stores.
+// loadIssueLimit is the most failures one load collects. A Fatal that ends the
+// load joins them past it.
 const loadIssueLimit = 100
 
-// defaultLoadConfig returns a loadConfig with sensible defaults.
-func defaultLoadConfig() *loadConfig {
-	return &loadConfig{}
-}
-
-// applyLoadOptions applies all options to the loadConfig.
-func applyLoadOptions(cfg *loadConfig, opts []LoadOption) {
+// newLoadConfig applies opts to a new loadConfig.
+func newLoadConfig(opts []Option) *loadConfig {
+	cfg := &loadConfig{}
 	for _, opt := range opts {
 		opt(cfg)
 	}
+	return cfg
 }
 
-// WithModuleRoot sets the root directory for module-style imports.
-// This option is only meaningful for Load(), which operates on filesystem paths.
-// LoadString() has no module root, and LoadSourcesWithEntry() takes one as an
-// explicit argument rather than through this option.
+// gave reports whether the load was passed an option of kind k.
+func (c *loadConfig) gave(k optionKind) bool {
+	return slices.Contains(c.given, k)
+}
+
+// refuse returns an error naming the first option, in argument order, that the
+// load call does not take, or nil when it takes every option it was given.
+func (c *loadConfig) refuse(call string, takes ...optionKind) error {
+	for _, g := range c.given {
+		taken := false
+		for _, t := range takes {
+			taken = taken || g == t
+		}
+		if !taken {
+			return fmt.Errorf("schema.%s does not take the %s option", call, optionNames[g])
+		}
+	}
+	return nil
+}
+
+// WithModuleRoot sets the root directory for module-style imports. [Load] and
+// [LoadSourcesWithEntry] take it, and there an empty root sets no root.
+// [LoadString], which has no root, refuses it whatever root it names, and so
+// does a load given [WithSyntheticRoot], whose root stands in for this one. Under
+// [LoadSourcesWithEntry] a relative source key resolves under the root.
 //
 // It is the first rung of the ladder [Load] resolves a root by: this option,
 // then the directory of the nearest ancestor holding a [ModuleRootMarker]
@@ -61,8 +110,9 @@ func applyLoadOptions(cfg *loadConfig, opts []LoadOption) {
 // Discovery walks the canonical (symlink-resolved) ancestor chain, so a marker
 // reachable only through a symlinked spelling of the entry path is invisible
 // to it. Pass this option for that case.
-func WithModuleRoot(root string) LoadOption {
+func WithModuleRoot(root string) Option {
 	return func(c *loadConfig) {
+		c.given = append(c.given, optModuleRoot)
 		c.moduleRoot = root
 	}
 }
@@ -75,9 +125,10 @@ func WithModuleRoot(root string) LoadOption {
 // identity: without a synthetic root a key is resolved on the host under the
 // module root, or the working directory when the root is empty, as [Load]
 // resolves a path, through symlinks and in the disk's spelling. Only [LoadSourcesWithEntry] takes it; [Load] and [LoadString] refuse
-// it with true.
-func WithSourcesOnly(only bool) LoadOption {
+// it.
+func WithSourcesOnly(only bool) Option {
 	return func(c *loadConfig) {
+		c.given = append(c.given, optSourcesOnly)
 		c.sourcesOnly = only
 	}
 }
@@ -108,11 +159,11 @@ func WithSourcesOnly(only bool) LoadOption {
 // are every source the load reads: the load resolves imports as under
 // [WithSourcesOnly] with true, whether or not that option is passed, and a miss
 // fails with E_IMPORT_RESOLVE and reads no disk. The load is rejected outright,
-// rather than silently degraded, in three cases of the root: a root not of
-// that form; a root together with a non-empty moduleRoot argument, which names
-// the same concept twice; and the option passed to [Load] or [LoadString],
-// where it can only ever be a no-op. A key the key rule below refuses is
-// rejected outright too.
+// rather than silently degraded, in three cases: a root not of that form; the
+// option beside [WithModuleRoot], which names the same concept twice; and the
+// option passed to [Load] or [LoadString], where it can only ever be a no-op.
+// The last two are refusals of an option the load does not take. A key the key
+// rule below refuses is rejected outright too.
 //
 // A key is read by one rule:
 // it is valid UTF-8, holds no backslash and no character that does not print, and once cleaned
@@ -125,8 +176,9 @@ func WithSourcesOnly(only bool) LoadOption {
 // against; a schema loaded this way is a supported input to
 // [github.com/simon-lentz/yammm/schema/gogen.Marshal], whose embedded keys
 // are then relative to that root.
-func WithSyntheticRoot(root string) LoadOption {
+func WithSyntheticRoot(root string) Option {
 	return func(c *loadConfig) {
+		c.given = append(c.given, optSyntheticRoot)
 		c.syntheticRoot = root
 		c.syntheticRootSet = true
 	}
@@ -139,10 +191,11 @@ func WithSyntheticRoot(root string) LoadOption {
 // does not end the analysis: it continues with the rejected aliases
 // deferred as a failed import's is, and the rejected imports are never
 // probed or resolved. The LSP markdown analysis path passes false for
-// isolated blocks. [LoadString] always rejects imports, whatever the caller
-// passes. With true — the default — imports resolve normally.
-func WithImportsAllowed(allowed bool) LoadOption {
+// isolated blocks. [LoadString] refuses the option: it rejects every import
+// declaration. With true — the default — imports resolve normally.
+func WithImportsAllowed(allowed bool) Option {
 	return func(c *loadConfig) {
+		c.given = append(c.given, optImportsAllowed)
 		c.disallowImports = !allowed
 	}
 }
@@ -153,9 +206,22 @@ func WithImportsAllowed(allowed bool) LoadOption {
 // fails returns a zero Schema, on which Schema.Sources panics, so a caller that
 // renders excerpts for a failed load takes the sources from here. A nil dst
 // captures nothing.
-func CaptureSources(dst *Sources) LoadOption {
+func CaptureSources(dst *Sources) Option {
 	return func(c *loadConfig) {
+		c.given = append(c.given, optCaptureSources)
 		c.sourcesOut = dst
+	}
+}
+
+// WithWarnings sets fn to receive every issue below failure severity the load
+// draws: a Warning, Info or Hint. fn is called as each is found, in that
+// order, on the goroutine that called the load and before it returns; no
+// such issue is ever in the load's error. Without the option, and with a nil
+// fn, such issues are discarded. Every load takes it.
+func WithWarnings(fn func(diag.Issue)) Option {
+	return func(c *loadConfig) {
+		c.given = append(c.given, optWarnings)
+		c.warnings = fn
 	}
 }
 

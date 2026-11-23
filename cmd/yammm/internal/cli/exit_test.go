@@ -217,7 +217,7 @@ func TestExitForResult_RuntimeCodeOutranksValidation(t *testing.T) {
 
 	t.Run("a clean result is success", func(t *testing.T) {
 		t.Parallel()
-		if got := ExitForResult(diag.OK()); got != ExitOK {
+		if got := ExitForResult(diag.Result{}); got != ExitOK {
 			t.Errorf("ExitForResult of a clean result = %d, want %d", got, ExitOK)
 		}
 	})
@@ -334,6 +334,11 @@ func TestReportError(t *testing.T) {
 			"an error that wraps several causes under one message is one failure",
 			fmt.Errorf("type %q: %w: %w", "Grid", errors.New("refused"), errors.New("class")),
 			"error: type \"Grid\": refused: class\n",
+		},
+		{
+			"a control in a line shows as the glyph a terminal is shown for it",
+			errors.New("bad \x1b[31mred\x1b[0m\x00\nnext\u202e\x7f"),
+			"error: bad \u241b[31mred\u241b[0m\u2400\nerror: next\ufffd\u2421\n",
 		},
 		{
 			"a marked refusal is the one failure it marks",

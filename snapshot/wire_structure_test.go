@@ -13,6 +13,7 @@ import (
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/immutable"
+	"github.com/simon-lentz/yammm/internal/diagtest"
 	"github.com/simon-lentz/yammm/internal/snapparts"
 	"github.com/simon-lentz/yammm/internal/snappartstest"
 	"github.com/simon-lentz/yammm/schema"
@@ -69,8 +70,12 @@ func spliceOnce(t *testing.T, data []byte, anchor, replacement string) []byte {
 // loadAndVerify renders both read surfaces over one document.
 func loadAndVerify(ctx context.Context, t *testing.T, data []byte, s schema.Schema) (loadSig, verifySig string, loaded graph.Snapshot) {
 	t.Helper()
-	snap, loadRes := snapshot.Unmarshal(ctx, data, s, snapshot.WithIntegrityCheck(false))
-	verifyRes := snapshot.Verify(ctx, data, s, snapshot.WithIntegrityCheck(false))
+	snap, loadRes := diagtest.Capture(t, func(warn func(diag.Issue)) (graph.Snapshot, error) {
+		return snapshot.Unmarshal(ctx, data, s, snapshot.WithIntegrityCheck(false), snapshot.WithWarnings(warn))
+	})
+	verifyRes := diagtest.CaptureErr(t, func(warn func(diag.Issue)) error {
+		return snapshot.Verify(ctx, data, s, snapshot.WithIntegrityCheck(false), snapshot.WithWarnings(warn))
+	})
 	return sigOf(loadRes), sigOf(verifyRes), snap
 }
 
@@ -78,8 +83,8 @@ func loadAndVerify(ctx context.Context, t *testing.T, data []byte, s schema.Sche
 func marshalParts(ctx context.Context, t *testing.T, s schema.Schema, parts snapparts.Parts) []byte {
 	t.Helper()
 	built := snappartstest.Loaded(t, s, parts)
-	data, result := snapshot.Marshal(ctx, built)
-	if err := result.Err(); err != nil {
+	data, readErr := snapshot.Marshal(ctx, built)
+	if err := readErr; err != nil {
 		t.Fatalf("marshal: %v", err)
 	}
 	return data
@@ -101,9 +106,9 @@ func TestWireProbe_DuplicateTypeDiffersFromConflict(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	s := testSchemaWithComposition(t)
-	data, res := snapshot.Marshal(ctx, duplicateOfAComposingRoot(t))
-	if res.HasErrors() {
-		t.Fatalf("marshal: %v", res)
+	data, err := snapshot.Marshal(ctx, duplicateOfAComposingRoot(t))
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
 	}
 
 	edited := spliceOnce(t, data, `"duplicates":[{"type":1,`, `"duplicates":[{"type":0,`)
@@ -178,12 +183,12 @@ func TestWireProbe_TypesTableWiderThanInstances(t *testing.T) {
 		},
 	})
 
-	loaded, res := snapshot.Unmarshal(ctx, first, s)
-	if err := res.Err(); err != nil {
+	loaded, readErr := snapshot.Unmarshal(ctx, first, s)
+	if err := readErr; err != nil {
 		t.Fatalf("load: %v", err)
 	}
-	second, res := snapshot.Marshal(ctx, loaded)
-	if err := res.Err(); err != nil {
+	second, readErr := snapshot.Marshal(ctx, loaded)
+	if err := readErr; err != nil {
 		t.Fatalf("second marshal: %v", err)
 	}
 
@@ -509,13 +514,19 @@ func TestWireProbe_DuplicateIdentityRefusedWithoutASchema(t *testing.T) {
 	expectOutcome(t, "load[error:E_SNAPSHOT_MALFORMED] verify[error:E_SNAPSHOT_MALFORMED]",
 		"load["+loadSig+"] verify["+verifySig+"]")
 
-	if _, res := snapshot.UpdateMetadata(ctx, edited, map[string]string{"k": "v"}); !hasCode(res, diag.E_SNAPSHOT_MALFORMED) {
+	if _, res := diagtest.Issues(t, func() ([]byte, error) {
+		return snapshot.UpdateMetadata(ctx, edited, map[string]string{"k": "v"})
+	}); !hasCode(res, diag.E_SNAPSHOT_MALFORMED) {
 		t.Errorf("UpdateMetadata rewrote a document whose types table repeats an identity: %v", res)
 	}
-	if _, res := snapshot.ReadHeader(ctx, bytes.NewReader(edited)); !hasCode(res, diag.E_SNAPSHOT_MALFORMED) {
+	if _, res := diagtest.Issues(t, func() (*snapshot.Header, error) {
+		return snapshot.ReadHeader(ctx, bytes.NewReader(edited))
+	}); !hasCode(res, diag.E_SNAPSHOT_MALFORMED) {
 		t.Errorf("ReadHeader accepted a types table that repeats an identity: %v", res)
 	}
-	if _, res := snapshot.Stat(ctx, edited); !hasCode(res, diag.E_SNAPSHOT_MALFORMED) {
+	if _, res := diagtest.Issues(t, func() (*snapshot.Info, error) {
+		return snapshot.Stat(ctx, edited)
+	}); !hasCode(res, diag.E_SNAPSHOT_MALFORMED) {
 		t.Errorf("Info accepted a types table that repeats an identity: %v", res)
 	}
 }
@@ -592,9 +603,9 @@ func TestWireProbe_AbsentUnresolvedTargetType(t *testing.T) {
 func TestWireProbe_ComposedChildRowOutsideItsRelationTargetIsRefused(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	s, result := schema.LoadString(t.Context(), nestedSchema, "nested.yammm")
-	if result.HasErrors() {
-		t.Fatalf("load nested schema: %s", result)
+	s, err := schema.LoadString(t.Context(), nestedSchema, "nested.yammm")
+	if err != nil {
+		t.Fatalf("load nested schema: %s", err)
 	}
 	data := nestedDoc(ctx, t, s)
 
@@ -659,7 +670,9 @@ func TestWireProbe_UnresolvedSourceRowOutOfRange(t *testing.T) {
 	data := unresolvedDoc(ctx, t, s)
 
 	edited := spliceOnce(t, data, `{"source_type":0,`, `{"source_type":9,`)
-	snap, loadRes := snapshot.Unmarshal(ctx, edited, s, snapshot.WithIntegrityCheck(false))
+	snap, loadRes := diagtest.Capture(t, func(warn func(diag.Issue)) (graph.Snapshot, error) {
+		return snapshot.Unmarshal(ctx, edited, s, snapshot.WithIntegrityCheck(false), snapshot.WithWarnings(warn))
+	})
 	fact := "; snapshot=nil"
 	if !snap.IsZero() {
 		fact = fmt.Sprintf("; snapshot=non-nil with %d unresolved", len(slices.Collect(snap.Unresolved())))
@@ -672,9 +685,9 @@ func TestWireProbe_UnresolvedSourceRowOutOfRange(t *testing.T) {
 func TestWireProbe_ComposedChildWithoutTypeDiagnosticCount(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	s, result := schema.LoadString(t.Context(), nestedSchema, "nested.yammm")
-	if result.HasErrors() {
-		t.Fatalf("load nested schema: %s", result)
+	s, err := schema.LoadString(t.Context(), nestedSchema, "nested.yammm")
+	if err != nil {
+		t.Fatalf("load nested schema: %s", err)
 	}
 	data := nestedDoc(ctx, t, s)
 
@@ -714,9 +727,9 @@ func TestWireProbe_DuplicateWithEdgesAndComposed(t *testing.T) {
 func TestWireProbe_ComposedChildWithEdges(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	s, result := schema.LoadString(t.Context(), nestedSchema, "nested.yammm")
-	if result.HasErrors() {
-		t.Fatalf("load nested schema: %s", result)
+	s, err := schema.LoadString(t.Context(), nestedSchema, "nested.yammm")
+	if err != nil {
+		t.Fatalf("load nested schema: %s", err)
 	}
 	data := nestedDoc(ctx, t, s)
 
@@ -790,12 +803,16 @@ func TestWireProbe_NonCanonicalProvenancePathSurvives(t *testing.T) {
 		t.Run(stated, func(t *testing.T) {
 			t.Parallel()
 			edited := spliceOnce(t, data, `"provenance":null`, `"provenance":{"source_name":"probe","path":"`+stated+`"}`)
-			snap, res := snapshot.Unmarshal(ctx, edited, s, snapshot.WithIntegrityCheck(false))
-			if res.HasErrors() || res.HasWarnings() {
+			snap, res := diagtest.Capture(t, func(warn func(diag.Issue)) (graph.Snapshot, error) {
+				return snapshot.Unmarshal(ctx, edited, s, snapshot.WithIntegrityCheck(false), snapshot.WithWarnings(warn))
+			})
+			if (diagtest.Err(res) != nil) || res.HasWarnings() {
 				t.Fatalf("load: %v", res)
 			}
-			out, res := snapshot.Marshal(ctx, snap)
-			if err := res.Err(); err != nil {
+			out, res := diagtest.Issues(t, func() ([]byte, error) {
+				return snapshot.Marshal(ctx, snap)
+			})
+			if err := diagtest.Err(res); err != nil {
 				t.Fatalf("marshal: %v", err)
 			}
 			if !bytes.Contains(out, []byte(`"path":"`+stated+`"`)) {
@@ -812,24 +829,33 @@ func TestWireProbe_DuplicateSecondGeneration(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	s := testSchemaWithComposition(t)
-	first, res := snapshot.Marshal(ctx, duplicateOfAComposingRoot(t))
-	if res.HasErrors() {
+	dup := duplicateOfAComposingRoot(t)
+	first, res := diagtest.Issues(t, func() ([]byte, error) {
+		return snapshot.Marshal(ctx, dup)
+	})
+	if diagtest.Err(res) != nil {
 		t.Fatalf("marshal: %v", res)
 	}
 
 	const want = `gen2 carries conflict Parent@test_comp.yammm[["p1"]]`
-	gen1, res := snapshot.Unmarshal(ctx, first, s)
-	if err := res.Err(); err != nil {
+	gen1, res := diagtest.Capture(t, func(warn func(diag.Issue)) (graph.Snapshot, error) {
+		return snapshot.Unmarshal(ctx, first, s, snapshot.WithWarnings(warn))
+	})
+	if err := diagtest.Err(res); err != nil {
 		expectOutcome(t, want, "gen1 load["+sigOf(res)+"]")
 		return
 	}
-	second, res := snapshot.Marshal(ctx, gen1)
-	if err := res.Err(); err != nil {
+	second, res := diagtest.Issues(t, func() ([]byte, error) {
+		return snapshot.Marshal(ctx, gen1)
+	})
+	if err := diagtest.Err(res); err != nil {
 		expectOutcome(t, want, "gen2 marshal["+sigOf(res)+"]")
 		return
 	}
-	gen2, res := snapshot.Unmarshal(ctx, second, s)
-	if err := res.Err(); err != nil {
+	gen2, res := diagtest.Capture(t, func(warn func(diag.Issue)) (graph.Snapshot, error) {
+		return snapshot.Unmarshal(ctx, second, s, snapshot.WithWarnings(warn))
+	})
+	if err := diagtest.Err(res); err != nil {
 		expectOutcome(t, want, "gen2 load["+sigOf(res)+"]")
 		return
 	}
@@ -854,9 +880,9 @@ func TestWireProbe_DuplicateSecondGeneration(t *testing.T) {
 func TestWireProbe_ComposedNestingBeyondLimit(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	s, result := schema.LoadString(t.Context(), nestedSchema, "nested.yammm")
-	if result.HasErrors() {
-		t.Fatalf("load nested schema: %s", result)
+	s, err := schema.LoadString(t.Context(), nestedSchema, "nested.yammm")
+	if err != nil {
+		t.Fatalf("load nested schema: %s", err)
 	}
 	data := nestedDoc(ctx, t, s)
 
@@ -876,9 +902,9 @@ func TestWireProbe_DuplicateConflictKeyHoldsNoRoot(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	s := testSchemaWithComposition(t)
-	data, res := snapshot.Marshal(ctx, duplicateOfAComposingRoot(t))
-	if res.HasErrors() {
-		t.Fatalf("marshal: %v", res)
+	data, err := snapshot.Marshal(ctx, duplicateOfAComposingRoot(t))
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
 	}
 
 	edited := spliceOnce(t, data, `"conflict":{"type":1,"key":["p1"]}`, `"conflict":{"type":1,"key":["ghost"]}`)
@@ -892,9 +918,9 @@ func TestWireProbe_AbsentDuplicateConflict(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	s := testSchemaWithComposition(t)
-	data, res := snapshot.Marshal(ctx, duplicateOfAComposingRoot(t))
-	if res.HasErrors() {
-		t.Fatalf("marshal: %v", res)
+	data, err := snapshot.Marshal(ctx, duplicateOfAComposingRoot(t))
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
 	}
 
 	edited := spliceOnce(t, data, `,"conflict":{"type":1,"key":["p1"]}`, ``)

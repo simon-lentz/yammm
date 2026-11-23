@@ -1,6 +1,7 @@
 package schema_test
 
 import (
+	"errors"
 	"strings"
 	"testing"
 
@@ -26,9 +27,9 @@ type Order {
     --> HAS_2_PARTS (one:many) Order
 }
 `
-	s, res := schema.LoadString(t.Context(), src, "s.yammm")
-	if res.Err() != nil {
-		t.Fatalf("load: %v", res.Err())
+	s, err := schema.LoadString(t.Context(), src, "s.yammm")
+	if err != nil {
+		t.Fatalf("load: %v", err)
 	}
 	order, _ := s.Type("Order")
 	comp, ok := order.Relation("LINE2")
@@ -44,8 +45,8 @@ type Order {
 func TestLoad_RelationNameIsUpperSnake(t *testing.T) {
 	t.Parallel()
 
-	_, res := schema.LoadString(t.Context(), "schema \"s\"\n\ntype Company {\n\tid String primary\n}\n\ntype Person {\n\tid String primary\n\t--> worksAt (one) Company\n}\n", "s.yammm")
-	if !res.HasCode(diag.E_INVALID_NAME) {
-		t.Fatalf("a camelCase relation name must draw E_INVALID_NAME; got %v", res.Err())
+	_, err := schema.LoadString(t.Context(), "schema \"s\"\n\ntype Company {\n\tid String primary\n}\n\ntype Person {\n\tid String primary\n\t--> worksAt (one) Company\n}\n", "s.yammm")
+	if !errors.Is(err, diag.E_INVALID_NAME) {
+		t.Fatalf("a camelCase relation name must draw E_INVALID_NAME; got %v", err)
 	}
 }

@@ -28,6 +28,15 @@
 // A Config is a value. Every method reads it and writes only to values it
 // allocates, so one Config is safe for concurrent use.
 //
+// # Errors and Warnings
+//
+// A method that refuses a schema returns a *[diag.ResultError] holding every
+// failure as an issue with a stable code: read it with errors.AsType, and test
+// it for a code with errors.Is. A Config is the setting every call shares, and
+// an [Option] is a knob of one call: [Config.Constraints], the one method that
+// can draw a warning, takes [WithWarnings], which receives each warning as it is
+// found and never sees a failure.
+//
 // # Labels
 //
 // [Config.Label] composes a type's label as LabelPrefix, the name of the
@@ -36,8 +45,8 @@
 // schema gives it, which is the label its nodes are written under. Nothing is
 // rewritten; a label that breaks the rule below is refused, never repaired.
 //
-// [Config.CheckLabels] judges every label across the schema's import closure,
-// and every generator and the neo4j write path refuse the schema on its error,
+// [Config.CheckLabels] judges the label of every non-abstract type across the
+// schema's import closure, as its doc states, and every generator and the neo4j write path refuse the schema on its error,
 // each break one [E_NEO4J_INVALID_IDENTIFIER]. The rule:
 //
 //   - LabelPrefix is empty or starts an identifier, and LabelSeparator is ASCII
@@ -69,7 +78,7 @@
 // constraints whose readable names collide are told apart with a short
 // deterministic digest.
 //
-// Generation is ALL-OR-NOTHING: any validation error returns (nil, result), so
+// Generation is ALL-OR-NOTHING: any validation error returns (nil, err), so
 // one property that cannot be emitted withholds every statement. That is
 // deliberate — a partial script looks complete and silently drops the
 // guarantees it omits — but it means the diagnostic is all the user gets, so

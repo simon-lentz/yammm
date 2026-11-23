@@ -9,6 +9,7 @@ import (
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/immutable"
+	"github.com/simon-lentz/yammm/internal/diagtest"
 	"github.com/simon-lentz/yammm/internal/snapparts"
 	"github.com/simon-lentz/yammm/internal/snappartstest"
 	"github.com/simon-lentz/yammm/schema"
@@ -179,12 +180,12 @@ func TestRoundTrip_SeparatesOneNameTwoSchemasDeclare(t *testing.T) {
 	s := loadIdentitySchema(t)
 
 	built, localBeacon, importedBeacon := sameNameBeacons(t, s)
-	data, result := snapshot.Marshal(ctx, built)
-	if err := result.Err(); err != nil {
+	data, readErr := snapshot.Marshal(ctx, built)
+	if err := readErr; err != nil {
 		t.Fatalf("marshal: %v", err)
 	}
-	loaded, result := snapshot.Unmarshal(ctx, data, s)
-	if err := result.Err(); err != nil {
+	loaded, readErr := snapshot.Unmarshal(ctx, data, s)
+	if err := readErr; err != nil {
 		t.Fatalf("load rejected a document Marshal produced: %v\n%s", err, data)
 	}
 	if got := len(slices.Collect(loaded.InstancesOf(localBeacon))); got != 1 {
@@ -201,12 +202,12 @@ func TestRoundTrip_SeparatesOneNameTwoSchemasDeclare(t *testing.T) {
 func TestImportSnapshot_ResolvesJSONFieldForImportedSource(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	s, lres := schema.LoadSourcesWithEntry(ctx, map[string][]byte{
+	s, err := schema.LoadSourcesWithEntry(ctx, map[string][]byte{
 		"entry.yammm": []byte("schema \"entry\"\n\nimport \"base.yammm\" as base\n\ntype Anchor {\n\tid String primary\n}\n"),
 		"base.yammm":  []byte("schema \"base\"\n\ntype Basin {\n\tid String primary\n\t--> NEAR (one:one) Basin\n}\n"),
-	}, "entry.yammm", ".", schema.WithSourcesOnly(true))
-	if lres.HasErrors() {
-		t.Fatalf("load: %s", lres)
+	}, "entry.yammm", schema.WithSourcesOnly(true), schema.WithModuleRoot("."))
+	if err != nil {
+		t.Fatalf("load: %s", err)
 	}
 
 	basinID := mustTypeIDIn(t, s, "base", "Basin")
@@ -228,7 +229,7 @@ func TestImportSnapshot_ResolvesJSONFieldForImportedSource(t *testing.T) {
 		}},
 	})
 
-	checked := graph.NewFromSnapshot(built).Check(ctx)
+	checked := diagtest.Failures(t, graph.NewFromSnapshot(built).Check(ctx))
 
 	var seen bool
 	field := "<none>"
@@ -260,12 +261,12 @@ func TestInfo_InstanceCountsKeyedByIdentity(t *testing.T) {
 	s := loadIdentitySchema(t)
 	built, localBeacon, importedBeacon := sameNameBeacons(t, s)
 
-	data, res := snapshot.Marshal(ctx, built)
-	if res.HasErrors() {
-		t.Fatalf("marshal: %v", res)
+	data, readErr := snapshot.Marshal(ctx, built)
+	if readErr != nil {
+		t.Fatalf("marshal: %v", readErr)
 	}
-	info, infoRes := snapshot.Stat(ctx, data)
-	if err := infoRes.Err(); err != nil {
+	info, readErr2 := snapshot.Stat(ctx, data)
+	if err := readErr2; err != nil {
 		t.Fatalf("info: %v", err)
 	}
 
@@ -304,10 +305,10 @@ func sampleTypeRef() snapshot.TypeRef {
 	return snapshot.TypeRef{Schema: "a", Name: "Person"}
 }
 
-// TestTypeRef_RendersPathHashName pins the display form. The
+// TestTypeRef_RendersSchemaHashName pins the display form. The
 // separator is the contract: schema.TypeID renders "path:name" and TypeRef
 // renders "schema#name", the one form this package states a type identity in.
-func TestTypeRef_RendersPathHashName(t *testing.T) {
+func TestTypeRef_RendersSchemaHashName(t *testing.T) {
 	t.Parallel()
 	ref := sampleTypeRef()
 

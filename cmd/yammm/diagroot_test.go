@@ -90,10 +90,10 @@ func TestDiagRootFor_NeverReturnsASchemeString(t *testing.T) {
 	sources := map[string][]byte{
 		"assets/main.yammm": []byte("schema \"main\"\n\ntype T {\n\tid String primary\n}\n"),
 	}
-	s, res := schema.LoadSourcesWithEntry(t.Context(), sources, "assets/main.yammm", "",
+	s, err := schema.LoadSourcesWithEntry(t.Context(), sources, "assets/main.yammm",
 		schema.WithSyntheticRoot("embedded://app"), schema.WithSourcesOnly(true))
-	if res.HasErrors() {
-		t.Fatalf("synthetic load: %v", res.Err())
+	if err != nil {
+		t.Fatalf("synthetic load: %v", err)
 	}
 	if s.ModuleRoot() != "embedded://app" {
 		t.Fatalf("fixture does not exercise the guard: ModuleRoot = %q", s.ModuleRoot())

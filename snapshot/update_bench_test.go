@@ -33,7 +33,7 @@ var (
 func loadBenchInputs(tb testing.TB) benchInputs {
 	tb.Helper()
 	benchInputsOnce.Do(func() {
-		s, sres := schema.LoadString(tb.Context(), `schema "test"
+		s, err := schema.LoadString(tb.Context(), `schema "test"
 
 type Person {
 	id String primary
@@ -42,8 +42,8 @@ type Person {
 	role String required
 }
 `, "bench.yammm")
-		if sres.HasErrors() {
-			tb.Fatalf("bench schema: %v", sres.Err())
+		if err != nil {
+			tb.Fatalf("bench schema: %v", err)
 		}
 
 		v := instance.NewValidator(s)
@@ -52,23 +52,23 @@ type Person {
 		// 100_000 instances of about 147 bytes each: about 14.7 MB.
 		const n = 100_000
 		for i := range n {
-			inst, vres := v.ValidateOne(ctx, "Person", instance.RawInstance{Properties: map[string]any{
+			inst, err := v.ValidateOne(ctx, "Person", instance.RawInstance{Properties: map[string]any{
 				"id":    fmt.Sprintf("p%06d", i),
 				"name":  fmt.Sprintf("Person %06d", i),
 				"email": fmt.Sprintf("person%06d@example.org", i),
 				"role":  "contributor",
 			}})
-			if vres.HasErrors() {
-				tb.Fatalf("bench validate: %v", vres.Err())
+			if err != nil {
+				tb.Fatalf("bench validate: %v", err)
 			}
-			if res := g.Add(ctx, inst); res.HasErrors() {
-				tb.Fatalf("bench add: %v", res.Err())
+			if err := g.Add(ctx, inst); err != nil {
+				tb.Fatalf("bench add: %v", err)
 			}
 		}
 		snap := g.Snapshot()
-		data, res := snapshot.Marshal(ctx, snap)
-		if res.HasErrors() {
-			tb.Fatalf("bench marshal: %v", res.Err())
+		data, readErr := snapshot.Marshal(ctx, snap)
+		if readErr != nil {
+			tb.Fatalf("bench marshal: %v", readErr)
 		}
 		benchInputsVal = benchInputs{
 			schema:  s,
@@ -86,9 +86,9 @@ func BenchmarkUpdateMetadata(b *testing.B) {
 	b.SetBytes(int64(len(in.data)))
 	b.ResetTimer()
 	for b.Loop() {
-		out, res := snapshot.UpdateMetadata(context.Background(), in.data, in.newMeta)
-		if res.HasErrors() {
-			b.Fatalf("UpdateMetadata: %v", res.Err())
+		out, err := snapshot.UpdateMetadata(context.Background(), in.data, in.newMeta)
+		if err != nil {
+			b.Fatalf("UpdateMetadata: %v", err)
 		}
 		if len(out) == 0 {
 			b.Fatal("UpdateMetadata returned empty output")
@@ -107,13 +107,13 @@ func BenchmarkLoadMarshalRoundTrip(b *testing.B) {
 	b.SetBytes(int64(len(in.data)))
 	b.ResetTimer()
 	for b.Loop() {
-		loaded, loadRes := snapshot.Unmarshal(ctx, in.data, in.schema)
-		if loadRes.HasErrors() {
-			b.Fatalf("Load: %v", loadRes.Err())
+		loaded, err := snapshot.Unmarshal(ctx, in.data, in.schema)
+		if err != nil {
+			b.Fatalf("Load: %v", err)
 		}
-		out, marshalRes := snapshot.Marshal(ctx, loaded, snapshot.WithMetadata(in.newMeta))
-		if marshalRes.HasErrors() {
-			b.Fatalf("Marshal: %v", marshalRes.Err())
+		out, readErr := snapshot.Marshal(ctx, loaded, snapshot.WithMetadata(in.newMeta))
+		if readErr != nil {
+			b.Fatalf("Marshal: %v", readErr)
 		}
 		if len(out) == 0 {
 			b.Fatal("Marshal returned empty output")

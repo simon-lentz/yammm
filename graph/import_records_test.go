@@ -1,6 +1,7 @@
 package graph_test
 
 import (
+	"errors"
 	"slices"
 	"testing"
 
@@ -33,9 +34,9 @@ type Employee {
 // absent records, and a duplicate.
 func importRecordsSnapshot(t *testing.T) graph.Snapshot {
 	t.Helper()
-	s, res := schema.LoadString(t.Context(), importRecordsSchema, "records.yammm")
-	if res.HasErrors() {
-		t.Fatalf("load schema: %s", res)
+	s, err := schema.LoadString(t.Context(), importRecordsSchema, "records.yammm")
+	if err != nil {
+		t.Fatalf("load schema: %s", err)
 	}
 	ref := func(key string) map[string]any { return map[string]any{"_target_id": key} }
 	v := instance.NewValidator(s)
@@ -55,12 +56,12 @@ func importRecordsSnapshot(t *testing.T) graph.Snapshot {
 		{"Employee", map[string]any{"id": "e3", "works_at": ref("c9")}},
 		{"Employee", map[string]any{"id": "e4", "audits": []any{}}},
 	} {
-		vi, res := v.ValidateOne(t.Context(), row.typeName, instance.RawInstance{Properties: row.props})
-		if res.HasErrors() {
-			t.Fatalf("validate %s %v: %s", row.typeName, row.props["id"], res)
+		vi, err := v.ValidateOne(t.Context(), row.typeName, instance.RawInstance{Properties: row.props})
+		if err != nil {
+			t.Fatalf("validate %s %v: %s", row.typeName, row.props["id"], err)
 		}
-		if res := g.Add(t.Context(), vi); res.HasErrors() && (row.props["name"] != "one again" || !res.HasCode(diag.E_DUPLICATE_PK)) {
-			t.Fatalf("Add %s %v: %s", row.typeName, row.props["id"], res)
+		if err := g.Add(t.Context(), vi); err != nil && (row.props["name"] != "one again" || !errors.Is(err, diag.E_DUPLICATE_PK)) {
+			t.Fatalf("Add %s %v: %s", row.typeName, row.props["id"], err)
 		}
 	}
 	return g.Snapshot()

@@ -18,8 +18,8 @@ func TestRecordIterators_ARangeAllocatesNothing(t *testing.T) {
 	s := testSchemaWithAssociation(t)
 	g := graph.New(s)
 	company := mustValidInstance(t, s, "Company", []any{"c1"}, map[string]any{"id": "c1", "name": "Acme"})
-	if res := g.Add(context.Background(), company); !res.OK() {
-		t.Fatal(res)
+	if err := g.Add(context.Background(), company); err != nil {
+		t.Fatal(err)
 	}
 	snap := g.Snapshot()
 	id := mustTypeID(t, s, "Company")
@@ -103,8 +103,8 @@ func TestSnapshot_TypesIsAFreshSlice(t *testing.T) {
 	s := testSchemaWithAssociation(t)
 	g := graph.New(s)
 	company := mustValidInstance(t, s, "Company", []any{"c1"}, map[string]any{"id": "c1", "name": "Acme"})
-	if res := g.Add(t.Context(), company); !res.OK() {
-		t.Fatal(res)
+	if err := g.Add(t.Context(), company); err != nil {
+		t.Fatal(err)
 	}
 	snap := g.Snapshot()
 	want := slices.Clone(snap.Types())

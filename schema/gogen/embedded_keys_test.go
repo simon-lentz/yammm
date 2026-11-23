@@ -46,9 +46,9 @@ func symlink(t *testing.T, target, link string) {
 // loadEntry loads root/entry with root as the module root.
 func loadEntry(t *testing.T, root, entry string) schema.Schema {
 	t.Helper()
-	s, res := schema.Load(context.Background(), filepath.Join(root, filepath.FromSlash(entry)), schema.WithModuleRoot(root))
-	if res.HasErrors() {
-		t.Fatalf("load %s: %v", entry, res.Err())
+	s, err := schema.Load(context.Background(), filepath.Join(root, filepath.FromSlash(entry)), schema.WithModuleRoot(root))
+	if err != nil {
+		t.Fatalf("load %s: %v", entry, err)
 	}
 	return s
 }
@@ -112,10 +112,10 @@ func emittedStore(t *testing.T, src []byte) (map[string][]byte, string) {
 func reloadEmitted(t *testing.T, src []byte, want schema.Schema) (map[string][]byte, string) {
 	t.Helper()
 	store, entry := emittedStore(t, src)
-	got, res := schema.LoadSourcesWithEntry(context.Background(), store, entry, "",
+	got, err := schema.LoadSourcesWithEntry(context.Background(), store, entry,
 		schema.WithSourcesOnly(true), schema.WithSyntheticRoot(consumerRoot))
-	if res.HasErrors() {
-		t.Fatalf("the emitted store does not re-load through its recipe: %v", res.Err())
+	if err != nil {
+		t.Fatalf("the emitted store does not re-load through its recipe: %v", err)
 	}
 	if g, w := schema.StructuralHash(got), schema.StructuralHash(want); g != w {
 		t.Errorf("re-loaded hash %s, want %s", g, w)
@@ -265,17 +265,16 @@ func TestMarshal_KeysForSourcesNothingImports(t *testing.T) {
 		"lib/dep.yammm": []byte("schema \"dep\"\n\ntype D {\n\tid String primary\n}\n"),
 		"extra.yammm":   []byte("schema \"extra\"\n\ntype E {\n\tid String primary\n}\n"),
 	}
-	for name, opts := range map[string][]schema.LoadOption{
+	for name, opts := range map[string][]schema.Option{
 		"file root":      {schema.WithSourcesOnly(true)},
 		"synthetic root": {schema.WithSourcesOnly(true), schema.WithSyntheticRoot("embedded://gen")},
 	} {
-		root := ""
 		if name == "file root" {
-			root = t.TempDir()
+			opts = append(opts, schema.WithModuleRoot(t.TempDir()))
 		}
-		s, res := schema.LoadSourcesWithEntry(context.Background(), sources, "main.yammm", root, opts...)
-		if res.HasErrors() {
-			t.Fatalf("%s: load: %v", name, res.Err())
+		s, loadErr := schema.LoadSourcesWithEntry(context.Background(), sources, "main.yammm", opts...)
+		if loadErr != nil {
+			t.Fatalf("%s: load: %v", name, loadErr)
 		}
 		got, err := gogen.Marshal(s)
 		if err != nil {
@@ -299,13 +298,13 @@ func TestMarshal_NoRootFileEntryKeysUnderItsDirectory(t *testing.T) {
 	dep := []byte("schema \"dep\"\n\ntype D {\n\tid String primary\n}\n")
 	up := []byte("schema \"up\"\n\ntype U {\n\tid String primary\n}\n")
 	main := []byte("schema \"main\"\n\nimport \"./dep\" as dep\nimport \"../up/dep\" as up\n\ntype M {\n\tid String primary\n\t--> TO_D (one) dep.D\n\t--> TO_U (one) up.U\n}\n")
-	s, res := schema.LoadSourcesWithEntry(context.Background(), map[string][]byte{
+	s, loadErr := schema.LoadSourcesWithEntry(context.Background(), map[string][]byte{
 		filepath.Join(top, "app", "main.yammm"): main,
 		filepath.Join(top, "app", "dep.yammm"):  dep,
 		filepath.Join(top, "up", "dep.yammm"):   up,
-	}, filepath.Join(top, "app", "main.yammm"), "", schema.WithSourcesOnly(true))
-	if res.HasErrors() {
-		t.Fatalf("load: %v", res.Err())
+	}, filepath.Join(top, "app", "main.yammm"), schema.WithSourcesOnly(true))
+	if loadErr != nil {
+		t.Fatalf("load: %v", loadErr)
 	}
 	got, err := gogen.Marshal(s)
 	if err != nil {
@@ -330,9 +329,9 @@ func TestMarshal_SourceAtTheRootItselfIsRefused(t *testing.T) {
 		"the entry":             {map[string][]byte{".": src}, "."},
 		"a source not imported": {map[string][]byte{"main.yammm": src, ".": src}, "main.yammm"},
 	} {
-		s, res := schema.LoadSourcesWithEntry(context.Background(), tc.sources, tc.entry, t.TempDir(), schema.WithSourcesOnly(true))
-		if res.HasErrors() {
-			t.Fatalf("%s: load: %v", name, res.Err())
+		s, loadErr := schema.LoadSourcesWithEntry(context.Background(), tc.sources, tc.entry, schema.WithSourcesOnly(true), schema.WithModuleRoot(t.TempDir()))
+		if loadErr != nil {
+			t.Fatalf("%s: load: %v", name, loadErr)
 		}
 		if _, err := gogen.Marshal(s); err == nil || !strings.Contains(err.Error(), "has no key relative to the schema's root") {
 			t.Errorf("%s: Marshal = %v, want the no-relative-key refusal", name, err)
@@ -371,9 +370,9 @@ func TestMarshal_EntryOutsideTheModuleRoot(t *testing.T) {
 		"app/main.yammm":    "schema \"main\"\n\nimport \"lib/dep\" as dep\n\ntype M {\n\tid String primary\n\t--> TO_D (one) dep.D\n}\n",
 		"mod/lib/dep.yammm": "schema \"dep\"\n\ntype D {\n\tid String primary\n}\n",
 	})
-	s, res := schema.Load(context.Background(), filepath.Join(top, "app", "main.yammm"), schema.WithModuleRoot(filepath.Join(top, "mod")))
-	if res.HasErrors() {
-		t.Fatalf("load: %v", res.Err())
+	s, loadErr := schema.Load(context.Background(), filepath.Join(top, "app", "main.yammm"), schema.WithModuleRoot(filepath.Join(top, "mod")))
+	if loadErr != nil {
+		t.Fatalf("load: %v", loadErr)
 	}
 	got, err := gogen.Marshal(s)
 	if err != nil {
@@ -391,9 +390,9 @@ func TestMarshal_EntryOutsideTheModuleRoot(t *testing.T) {
 func TestMarshal_LoadStringKeysByBaseName(t *testing.T) {
 	t.Parallel()
 	for _, name := range []string{"person.yammm", "dir/person.yammm", `C:\schemas\person.yammm`, `\\srv\share\person.yammm`} {
-		s, res := schema.LoadString(context.Background(), "schema \"p\"\n\ntype Person {\n\tid String primary\n}\n", name)
-		if res.HasErrors() {
-			t.Fatalf("load: %v", res.Err())
+		s, loadErr := schema.LoadString(context.Background(), "schema \"p\"\n\ntype Person {\n\tid String primary\n}\n", name)
+		if loadErr != nil {
+			t.Fatalf("load: %v", loadErr)
 		}
 		got, err := gogen.Marshal(s)
 		if err != nil {
@@ -405,9 +404,9 @@ func TestMarshal_LoadStringKeysByBaseName(t *testing.T) {
 	}
 	// A base with no extension, or of one character, is still a file name.
 	for _, name := range []string{"person", "a", "dir/a"} {
-		s, res := schema.LoadString(context.Background(), "schema \"p\"\n\ntype Person {\n\tid String primary\n}\n", name)
-		if res.HasErrors() {
-			t.Fatalf("load %q: %v", name, res.Err())
+		s, loadErr := schema.LoadString(context.Background(), "schema \"p\"\n\ntype Person {\n\tid String primary\n}\n", name)
+		if loadErr != nil {
+			t.Fatalf("load %q: %v", name, loadErr)
 		}
 		got, err := gogen.Marshal(s)
 		if err != nil {
@@ -419,9 +418,9 @@ func TestMarshal_LoadStringKeysByBaseName(t *testing.T) {
 	}
 	// A name with no base names no file, so it has no key.
 	for _, name := range []string{".", "x/.", "..", "/"} {
-		s, res := schema.LoadString(context.Background(), "schema \"p\"\n\ntype Person {\n\tid String primary\n}\n", name)
-		if res.HasErrors() {
-			t.Fatalf("load %q: %v", name, res.Err())
+		s, loadErr := schema.LoadString(context.Background(), "schema \"p\"\n\ntype Person {\n\tid String primary\n}\n", name)
+		if loadErr != nil {
+			t.Fatalf("load %q: %v", name, loadErr)
 		}
 		_, err := gogen.Marshal(s)
 		if err == nil || !strings.Contains(err.Error(), "names no file") || !strings.Contains(err.Error(), strconv.Quote("string://"+name)) {
@@ -434,12 +433,12 @@ func TestMarshal_LoadStringKeysByBaseName(t *testing.T) {
 // a synthetic root, whose relative import resolves by its key.
 func TestMarshal_SyntheticRootLoadWithARelativeImport(t *testing.T) {
 	t.Parallel()
-	s, res := schema.LoadSourcesWithEntry(context.Background(), map[string][]byte{
+	s, loadErr := schema.LoadSourcesWithEntry(context.Background(), map[string][]byte{
 		"app/main.yammm": []byte("schema \"main\"\n\nimport \"../lib/dep\" as dep\n\ntype M {\n\tid String primary\n\t--> TO_D (one) dep.D\n}\n"),
 		"lib/dep.yammm":  []byte("schema \"dep\"\n\ntype D {\n\tid String primary\n}\n"),
-	}, "app/main.yammm", "", schema.WithSourcesOnly(true), schema.WithSyntheticRoot("embedded://gen"))
-	if res.HasErrors() {
-		t.Fatalf("load: %v", res.Err())
+	}, "app/main.yammm", schema.WithSourcesOnly(true), schema.WithSyntheticRoot("embedded://gen"))
+	if loadErr != nil {
+		t.Fatalf("load: %v", loadErr)
 	}
 	got, err := gogen.Marshal(s)
 	if err != nil {

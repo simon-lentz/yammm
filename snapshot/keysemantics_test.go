@@ -10,6 +10,7 @@ import (
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/immutable"
+	"github.com/simon-lentz/yammm/internal/diagtest"
 	"github.com/simon-lentz/yammm/internal/snapparts"
 	"github.com/simon-lentz/yammm/internal/snappartstest"
 	"github.com/simon-lentz/yammm/schema"
@@ -46,12 +47,12 @@ func TestRoundTrip_AbsentAssociationKeepsEmptyTargetKey(t *testing.T) {
 		t.Fatalf("precondition: built TargetKey = %q, want empty", built[0].TargetKey())
 	}
 
-	data, res := snapshot.Marshal(ctx, snap)
-	if err := res.Err(); err != nil {
+	data, readErr := snapshot.Marshal(ctx, snap)
+	if err := readErr; err != nil {
 		t.Fatalf("marshal: %v", err)
 	}
-	loaded, res := snapshot.Unmarshal(ctx, data, s)
-	if err := res.Err(); err != nil {
+	loaded, readErr := snapshot.Unmarshal(ctx, data, s)
+	if err := readErr; err != nil {
 		t.Fatalf("load: %v", err)
 	}
 
@@ -99,20 +100,22 @@ func TestInfo_ReportsAnUnresolvableInstancesEntry(t *testing.T) {
 	}
 
 	// The clean document is the control: Info counts it and reports nothing.
-	clean, cleanRes := snapshot.Stat(ctx, data)
-	if cleanRes.HasErrors() {
-		t.Fatalf("Info reported the unedited document: %v", cleanRes)
+	clean, err := snapshot.Stat(ctx, data)
+	if err != nil {
+		t.Fatalf("Info reported the unedited document: %v", err)
 	}
 	if clean.TotalInstances == 0 {
 		t.Fatal("fixture is vacuous: Info counts no instances in the unedited document")
 	}
 
 	// Load refuses the edited document, which is what makes a clean Info a defect.
-	if _, loadRes := snapshot.Unmarshal(ctx, edited, s, snapshot.WithIntegrityCheck(false)); !loadRes.HasErrors() {
+	if _, err := snapshot.Unmarshal(ctx, edited, s, snapshot.WithIntegrityCheck(false)); err == nil {
 		t.Fatal("precondition: Load must refuse an out-of-range instances row")
 	}
 
-	info, infoRes := snapshot.Stat(ctx, edited)
+	info, infoRes := diagtest.Issues(t, func() (*snapshot.Info, error) {
+		return snapshot.Stat(ctx, edited)
+	})
 	if !hasCode(infoRes, diag.E_SNAPSHOT_MALFORMED) {
 		t.Errorf("Info summarized an out-of-range instances row without %s: %v",
 			diag.E_SNAPSHOT_MALFORMED, infoRes)
@@ -140,9 +143,9 @@ type Ref {
 func TestMarshal_KeepsAnIntegerTargetKeyBeyondExactFloat(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	s, res := schema.LoadString(t.Context(), bigKeySchema, "bigkey.yammm")
-	if res.HasErrors() {
-		t.Fatalf("load bigkey schema: %s", res)
+	s, loadErr := schema.LoadString(t.Context(), bigKeySchema, "bigkey.yammm")
+	if loadErr != nil {
+		t.Fatalf("load bigkey schema: %s", loadErr)
 	}
 	typ, ok := s.Type("Ref")
 	if !ok {
@@ -174,8 +177,8 @@ func TestMarshal_KeepsAnIntegerTargetKeyBeyondExactFloat(t *testing.T) {
 		t.Fatal("fixture is vacuous: the value survives a float64 round trip")
 	}
 
-	data, mres := snapshot.Marshal(ctx, built)
-	if err := mres.Err(); err != nil {
+	data, readErr := snapshot.Marshal(ctx, built)
+	if err := readErr; err != nil {
 		t.Fatalf("marshal: %v", err)
 	}
 	if !bytes.Contains(data, []byte("9007199254740993")) {

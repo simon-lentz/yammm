@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/simon-lentz/yammm/diag"
+	"github.com/simon-lentz/yammm/internal/diagtest"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -95,7 +96,9 @@ type Order {
 func loadInvariant(t *testing.T, inv string) diag.Result {
 	t.Helper()
 	src := staticBase + "    ! \"m\" " + inv + "\n}\n"
-	_, res := schema.LoadString(t.Context(), src, "s.yammm")
+	_, res := diagtest.Capture(t, func(warn func(diag.Issue)) (schema.Schema, error) {
+		return schema.LoadString(t.Context(), src, "s.yammm", schema.WithWarnings(warn))
+	})
 	return res
 }
 
@@ -268,7 +271,7 @@ func TestStaticInvariant_Table(t *testing.T) {
 	for _, inv := range accept {
 		t.Run("accepts "+inv, func(t *testing.T) {
 			t.Parallel()
-			if res := loadInvariant(t, inv); res.Err() != nil {
+			if res := loadInvariant(t, inv); diagtest.Err(res) != nil {
 				t.Errorf("legal invariant refused: %v", res)
 			}
 		})
@@ -461,7 +464,7 @@ func TestStaticInvariant_Table(t *testing.T) {
 		t.Run("refuses "+tc.inv, func(t *testing.T) {
 			t.Parallel()
 			res := loadInvariant(t, tc.inv)
-			if res.Err() == nil {
+			if diagtest.Err(res) == nil {
 				t.Fatalf("illegal invariant loaded clean")
 			}
 			var found bool
@@ -471,7 +474,7 @@ func TestStaticInvariant_Table(t *testing.T) {
 				}
 			}
 			if !found {
-				t.Errorf("want %s mentioning %q; got %v", tc.code, tc.want, res.Err())
+				t.Errorf("want %s mentioning %q; got %v", tc.code, tc.want, res)
 			}
 		})
 	}
@@ -497,7 +500,9 @@ type B extends Base {
     y Integer
 }
 `
-	_, res := schema.LoadString(t.Context(), src, "s.yammm")
+	_, res := diagtest.Capture(t, func(warn func(diag.Issue)) (schema.Schema, error) {
+		return schema.LoadString(t.Context(), src, "s.yammm", schema.WithWarnings(warn))
+	})
 	n := 0
 	for is := range res.Issues() {
 		if is.Code() == diag.E_UNKNOWN_PROPERTY {
@@ -505,7 +510,7 @@ type B extends Base {
 		}
 	}
 	if n != 1 {
-		t.Errorf("one declaration-site mistake drew %d E_UNKNOWN_PROPERTY diagnostics, want 1: %v", n, res.Err())
+		t.Errorf("one declaration-site mistake drew %d E_UNKNOWN_PROPERTY diagnostics, want 1: %v", n, res)
 	}
 }
 
@@ -550,14 +555,16 @@ type Order extends b.HasLines {
 				t.Fatal(err)
 			}
 		}
-		_, res := schema.Load(t.Context(), filepath.Join(dir, "main.yammm"), schema.WithModuleRoot(dir))
+		_, res := diagtest.Capture(t, func(warn func(diag.Issue)) (schema.Schema, error) {
+			return schema.Load(t.Context(), filepath.Join(dir, "main.yammm"), schema.WithModuleRoot(dir), schema.WithWarnings(warn))
+		})
 		return res
 	}
 
-	if res := load(t, app("name")); res.Err() != nil {
-		t.Errorf("the declaring schema's property was refused: %v", res.Err())
+	if res := load(t, app("name")); diagtest.Err(res) != nil {
+		t.Errorf("the declaring schema's property was refused: %v", res)
 	}
-	if res := load(t, app("label")); res.Err() == nil {
+	if res := load(t, app("label")); diagtest.Err(res) == nil {
 		t.Error("the reader's shadowing property was accepted")
 	}
 }
@@ -575,7 +582,7 @@ func TestStaticInvariant_OneMistakeOneDiagnostic(t *testing.T) {
 		}
 	}
 	if n != 1 {
-		t.Errorf("%d E_INVALID_INVARIANT diagnostics, want 1: %v", n, res.Err())
+		t.Errorf("%d E_INVALID_INVARIANT diagnostics, want 1: %v", n, res)
 	}
 }
 
@@ -608,12 +615,14 @@ part type Mid extends Ancestor {
 }
 `),
 	}
-	_, res := schema.LoadSourcesWithEntry(t.Context(), sources, "entry.yammm", ".", schema.WithSourcesOnly(true))
-	if res.Err() == nil {
+	_, res := diagtest.Capture(t, func(warn func(diag.Issue)) (schema.Schema, error) {
+		return schema.LoadSourcesWithEntry(t.Context(), sources, "entry.yammm", schema.WithSourcesOnly(true), schema.WithModuleRoot("."), schema.WithWarnings(warn))
+	})
+	if diagtest.Err(res) == nil {
 		t.Fatal("a typo'd member read through an imported type loaded clean")
 	}
 	if _, ok := issueWithCode(res, diag.E_UNKNOWN_PROPERTY); !ok {
-		t.Errorf("want E_UNKNOWN_PROPERTY; got %v", res.Err())
+		t.Errorf("want E_UNKNOWN_PROPERTY; got %v", res)
 	}
 }
 
@@ -644,9 +653,9 @@ part type Mid extends Ancestor {
 }
 `),
 	}
-	_, res := schema.LoadSourcesWithEntry(t.Context(), sources, "entry.yammm", ".", schema.WithSourcesOnly(true))
-	if res.Err() != nil {
-		t.Errorf("a member inherited inside the imported schema was refused: %v", res.Err())
+	_, err := schema.LoadSourcesWithEntry(t.Context(), sources, "entry.yammm", schema.WithSourcesOnly(true), schema.WithModuleRoot("."))
+	if err != nil {
+		t.Errorf("a member inherited inside the imported schema was refused: %v", err)
 	}
 }
 
@@ -674,7 +683,7 @@ func TestStaticInvariant_RelationIsReadByItsDeclaredName(t *testing.T) {
 	} {
 		t.Run("accepts "+inv, func(t *testing.T) {
 			t.Parallel()
-			if res := loadInvariant(t, inv); res.Err() != nil {
+			if res := loadInvariant(t, inv); diagtest.Err(res) != nil {
 				t.Errorf("legal invariant refused: %v", res)
 			}
 		})
@@ -700,7 +709,7 @@ func TestStaticInvariant_RelationIsReadByItsDeclaredName(t *testing.T) {
 			res := loadInvariant(t, c.inv)
 			issues := slices.Collect(res.Issues())
 			if len(issues) != 1 || issues[0].Code() != diag.E_INVALID_NAME || issues[0].Severity() != diag.Error {
-				t.Fatalf("result = %v, want one Error E_INVALID_NAME", res.Err())
+				t.Fatalf("result = %v, want one Error E_INVALID_NAME", res)
 			}
 			want := fmt.Sprintf("relation %s on type %q is read as %q in invariant \"m\" on type \"Order\"", c.relation, c.holder, c.read)
 			if msg := issues[0].Message(); !strings.HasPrefix(msg, want) {
@@ -729,7 +738,9 @@ type T {
     ! "variable" $wORKS_AT != ""
 }
 `
-	_, res := schema.LoadString(t.Context(), src, "c.yammm")
+	_, res := diagtest.Capture(t, func(warn func(diag.Issue)) (schema.Schema, error) {
+		return schema.LoadString(t.Context(), src, "c.yammm", schema.WithWarnings(warn))
+	})
 	issues := slices.Collect(res.Issues())
 	if len(issues) != 1 || issues[0].Code() != diag.E_PROPERTY_RELATION_COLLISION {
 		t.Errorf("want one E_PROPERTY_RELATION_COLLISION; got %v", res)
@@ -754,7 +765,9 @@ type T {
     ! "miscased" Works_At != nil
 }
 `
-	_, res := schema.LoadString(t.Context(), src, "c.yammm")
+	_, res := diagtest.Capture(t, func(warn func(diag.Issue)) (schema.Schema, error) {
+		return schema.LoadString(t.Context(), src, "c.yammm", schema.WithWarnings(warn))
+	})
 	var got []string
 	for is := range res.Issues() {
 		got = append(got, is.Code().String())
@@ -797,9 +810,11 @@ type Owner {
 	for _, inv := range []string{`(f ? { P : R }).item != nil`, `(f ? { R : P }).item != nil`} {
 		t.Run(inv, func(t *testing.T) {
 			t.Parallel()
-			_, res := schema.LoadString(t.Context(), types+"    ! \"m\" "+inv+"\n}\n", "u.yammm")
+			_, res := diagtest.Capture(t, func(warn func(diag.Issue)) (schema.Schema, error) {
+				return schema.LoadString(t.Context(), types+"    ! \"m\" "+inv+"\n}\n", "u.yammm", schema.WithWarnings(warn))
+			})
 			if _, ok := issueWithCode(res, diag.E_INVALID_NAME); !ok {
-				t.Errorf("result = %v, want E_INVALID_NAME for the relation ITEM read as item", res.Err())
+				t.Errorf("result = %v, want E_INVALID_NAME for the relation ITEM read as item", res)
 			}
 		})
 	}

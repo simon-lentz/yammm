@@ -12,9 +12,9 @@ import (
 // head, by the rule every message that repeats a value follows.
 func TestBuildGraph_ReportsALongDuplicateKeyAsTheGraphDoes(t *testing.T) {
 	t.Parallel()
-	s, res := schema.LoadString(t.Context(), teamSchema, "t.yammm")
-	if res.HasErrors() {
-		t.Fatal(res.String())
+	s, err := schema.LoadString(t.Context(), teamSchema, "t.yammm")
+	if err != nil {
+		t.Fatal(err)
 	}
 	long := strings.Repeat("t", 100)
 	validated, _ := ValidateInstances(t.Context(), s, teamRaws([]map[string]any{{"id": long}, {"id": long, "name": "A"}, {"id": long, "name": "B"}}, nil))

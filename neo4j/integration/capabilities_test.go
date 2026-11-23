@@ -12,6 +12,7 @@ import (
 	"time"
 
 	neo4jdriver "github.com/neo4j/neo4j-go-driver/v6/neo4j"
+	"github.com/simon-lentz/yammm/diag"
 	n4j "github.com/simon-lentz/yammm/neo4j"
 	"github.com/simon-lentz/yammm/schema"
 	"github.com/simon-lentz/yammm/schema/cypher"
@@ -50,8 +51,8 @@ func TestAllConstraintKindsExecute(t *testing.T) {
 	s := loadRoundTripSchema(t)
 
 	constraints, res := a.Constraints(s)
-	if res.HasErrors() {
-		t.Fatalf("emitting constraints: %v", res.Err())
+	if res != nil {
+		t.Fatalf("emitting constraints: %v", res)
 	}
 	for _, c := range constraints {
 		run(t, ctx, c.Statement)
@@ -117,18 +118,20 @@ func TestNodeKeyRequest_EnforcesPrimaryKeyOnEitherEdition(t *testing.T) {
 	a := newConfig(t, ctx, cypher.Config{NodeKeys: true})
 	s := loadRoundTripSchema(t)
 
-	constraints, res := a.Constraints(s)
-	if res.HasErrors() {
-		t.Fatalf("emitting constraints: %v", res.Err())
+	var warnings []diag.Issue
+	constraints, err := a.Constraints(s, cypher.WithWarnings(func(w diag.Issue) { warnings = append(warnings, w) }))
+	if err != nil {
+		t.Fatalf("emitting constraints: %v", err)
 	}
 
 	// The warning is the Community half's other half: the substitution must be
 	// announced there and stay silent on Enterprise.
-	switch gotWarning := res.HasCode(cypher.W_NEO4J_NODE_KEY_UNSUPPORTED); {
+	gotWarning := slices.ContainsFunc(warnings, func(w diag.Issue) bool { return w.Code() == cypher.W_NEO4J_NODE_KEY_UNSUPPORTED })
+	switch {
 	case enterprise && gotWarning:
-		t.Errorf("Enterprise honored the request but still warned: %v", res)
+		t.Errorf("Enterprise honored the request but still warned: %v", warnings)
 	case !enterprise && !gotWarning:
-		t.Errorf("Community substituted UNIQUE for NODE KEY without warning: %v", res)
+		t.Errorf("Community substituted UNIQUE for NODE KEY without warning: %v", warnings)
 	}
 
 	wantKind := cypher.ConstraintNodeKey
@@ -354,8 +357,8 @@ func TestNameHeldByAnotherKind_ServerBehavior(t *testing.T) {
 	a := newConfig(t, ctx, cypher.Config{})
 	s := loadRoundTripSchema(t)
 	desired, res := a.Indexes(s)
-	if res.HasErrors() {
-		t.Fatalf("emitting indexes: %v", res.Err())
+	if res != nil {
+		t.Fatalf("emitting indexes: %v", res)
 	}
 	var rangeIdx cypher.Index
 	for _, d := range desired {
@@ -472,8 +475,8 @@ func TestRelationshipIndex_DoesNotBlockNodeIndexCreate(t *testing.T) {
 	awaitIndexes(t, ctx)
 
 	_, res := a.Indexes(s)
-	if res.HasErrors() {
-		t.Fatalf("emitting indexes: %v", res.Err())
+	if res != nil {
+		t.Fatalf("emitting indexes: %v", res)
 	}
 	parsed, err := n4j.ParseIndexes(query(t, ctx, n4j.ShowIndexes))
 	if err != nil {
@@ -678,8 +681,8 @@ func TestPopulatingIndex_IsUnverified(t *testing.T) {
 
 	a := newConfig(t, ctx, cypher.Config{})
 	s, res := schema.LoadString(ctx, "schema \"pop\"\n\ntype Bulk {\n\tid String primary\n\tv String @index\n}\n", "pop.yammm")
-	if res.HasErrors() {
-		t.Fatalf("load: %v", res.Err())
+	if res != nil {
+		t.Fatalf("load: %v", res)
 	}
 	if desired, _ := a.Indexes(s); len(desired) != 1 || desired[0].Name != name {
 		t.Fatalf("the schema declares %+v, want the one index %s", desired, name)
@@ -753,8 +756,8 @@ func TestNameHeldOnForeignLabel_BlocksCreate(t *testing.T) {
 	a := newConfig(t, ctx, cypher.Config{})
 	s := loadRoundTripSchema(t)
 	desired, res := a.Indexes(s)
-	if res.HasErrors() {
-		t.Fatalf("emitting indexes: %v", res.Err())
+	if res != nil {
+		t.Fatalf("emitting indexes: %v", res)
 	}
 	var target cypher.Index
 	for _, d := range desired {
@@ -815,8 +818,8 @@ abstract type Base { doc_id String primary
 type Doc extends Base { }
 type Rev extends Base { rev String primary }
 `, "pk.yammm")
-	if res.HasErrors() {
-		t.Fatalf("load: %v", res.Err())
+	if res != nil {
+		t.Fatalf("load: %v", res)
 	}
 
 	for _, tc := range []struct {
@@ -906,14 +909,14 @@ type Item { item_id String primary
 type Item_a { item_a_id String primary
               b String required }
 `, "cc.yammm")
-	if res.HasErrors() {
-		t.Fatalf("load: %v", res.Err())
+	if res != nil {
+		t.Fatalf("load: %v", res)
 	}
 
 	a := newConfig(t, ctx, cypher.Config{})
 	constraints, cRes := a.Constraints(s)
-	if cRes.HasErrors() {
-		t.Fatalf("emitting constraints: %v", cRes.Err())
+	if cRes != nil {
+		t.Fatalf("emitting constraints: %v", cRes)
 	}
 	names := map[string]int{}
 	for _, c := range constraints {
@@ -964,8 +967,8 @@ func TestHandNamedFulltextIndex_IsClaimedByIdentity(t *testing.T) {
 	awaitIndexes(t, ctx)
 
 	desired, res := a.Indexes(s)
-	if res.HasErrors() {
-		t.Fatalf("emitting indexes: %v", res.Err())
+	if res != nil {
+		t.Fatalf("emitting indexes: %v", res)
 	}
 	var ft cypher.Index
 	for _, d := range desired {
@@ -1046,8 +1049,8 @@ func TestMultiLabelFulltext_DoesNotBlockSingleLabelCreate(t *testing.T) {
 	s := loadRoundTripSchema(t)
 
 	desired, res := a.Indexes(s)
-	if res.HasErrors() {
-		t.Fatalf("emitting indexes: %v", res.Err())
+	if res != nil {
+		t.Fatalf("emitting indexes: %v", res)
 	}
 	var ft cypher.Index
 	for _, d := range desired {
