@@ -306,23 +306,33 @@ func decodeYAML(t *testing.T, path string, into any) {
 	}
 }
 
+// dependabotPush is the branch filter of every workflow's push: `**` reaches a
+// branch whose name holds a slash, and a Dependabot branch, which always
+// carries a pull request, runs the suite on that pull request alone.
+var dependabotPush = []string{"**", "!dependabot/**"}
+
 func TestTestWorkflow_RunsOnEveryBranchAndWhenCalled(t *testing.T) {
 	t.Parallel()
 	var wf workflow
 	decodeYAML(t, fromRoot(".github/workflows/yammm_test.yml"), &wf)
 
-	for _, event := range []string{"push", "pull_request"} {
+	for event, want := range map[string][]string{"push": dependabotPush, "pull_request": {"**"}} {
 		tr := wf.On[event]
 		if tr == nil {
 			t.Errorf("on.%s is not set", event)
 			continue
 		}
-		if !slices.Contains(tr.Branches, "**") || len(tr.BranchesIgnore) > 0 {
-			t.Errorf("on.%s filters branches %q, ignoring %q: only `**` reaches a branch whose name holds a slash", event, tr.Branches, tr.BranchesIgnore)
+		if !slices.Equal(tr.Branches, want) || len(tr.BranchesIgnore) > 0 {
+			t.Errorf("on.%s filters branches %q, ignoring %q, want %q alone", event, tr.Branches, tr.BranchesIgnore, want)
 		}
 		if len(tr.Paths) > 0 || len(tr.PathsIgnore) > 0 {
 			t.Errorf("on.%s filters paths %q, ignoring %q: a change outside them runs no suite", event, tr.Paths, tr.PathsIgnore)
 		}
+	}
+	var ci workflow
+	decodeYAML(t, fromRoot(".github/workflows/ci.yaml"), &ci)
+	if tr := ci.On["push"]; tr == nil || !slices.Equal(tr.Branches, dependabotPush) || len(tr.BranchesIgnore) > 0 {
+		t.Errorf("ci.yaml's on.push is %+v, want branches %q alone", tr, dependabotPush)
 	}
 	if _, ok := wf.On["workflow_call"]; !ok {
 		t.Error("on.workflow_call is not set, so the release workflow cannot call the tests")
@@ -633,7 +643,7 @@ func TestNodeFindings_RefusesEachDeparture(t *testing.T) {
 		{"a merge key", []string{"jobs.integration.strategy.matrix.include[0].<< is set to a mapping, which the form does not hold"}, func(doc *yaml.Node) {
 			put(in(doc, "jobs", "integration", "strategy", "matrix", "include", "0"), "<<", &yaml.Node{Kind: yaml.MappingNode})
 		}},
-		{"a branch whose push runs no suite", []string{"on.push.branches holds 2 items, want 1"}, func(doc *yaml.Node) {
+		{"a branch whose push runs no suite", []string{"on.push.branches holds 3 items, want 2"}, func(doc *yaml.Node) {
 			branches := in(doc, "on", "push", "branches")
 			branches.Content = append(branches.Content, scalar("!!str", "!main"))
 		}},

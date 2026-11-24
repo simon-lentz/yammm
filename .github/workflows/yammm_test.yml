@@ -2,8 +2,10 @@ name: YAMMM Test
 on:
   # `*` stops at a slash, so a branch named feature/x would run nothing; `**`
   # matches every branch. A tag runs this workflow through release.yml.
+  # Dependabot pushes its branches here and opens a pull request for each, so
+  # its push would run the pull request's suite a second time.
   push:
-    branches: ["**"]
+    branches: ["**", "!dependabot/**"]
   pull_request:
     branches: ["**"]
   workflow_dispatch: {}

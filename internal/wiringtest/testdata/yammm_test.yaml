@@ -1,7 +1,7 @@
 name: YAMMM Test
 on:
   push:
-    branches: ["**"]
+    branches: ["**", "!dependabot/**"]
   pull_request:
     branches: ["**"]
   workflow_dispatch: {}
