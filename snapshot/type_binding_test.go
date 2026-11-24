@@ -183,6 +183,19 @@ func loadLayout(t *testing.T, entryPath string) schema.Schema {
 	return s
 }
 
+// entryAfterLibrary reports whether s's entry source sorts after its library's.
+// Keys resolve on the host, so the library's path is read from the closure.
+func entryAfterLibrary(t *testing.T, s schema.Schema) bool {
+	t.Helper()
+	for member := range s.Closure() {
+		if member.Name() == "lib" {
+			return s.SourceID().String() > member.SourceID().String()
+		}
+	}
+	t.Fatal("the closure holds no schema lib")
+	return false
+}
+
 // layoutGraph builds a snapshot in which each schema's type sources one edge,
 // one unresolved record and one rejected duplicate, so every order that
 // compares types meets both schemas.
@@ -237,7 +250,7 @@ func TestMarshal_ClosureLayoutDoesNotMoveBytes(t *testing.T) {
 	t.Parallel()
 
 	atRoot, inDir := loadLayout(t, "main.yammm"), loadLayout(t, "a/main.yammm")
-	if atRoot.SourceID().String() < "/project/lib" == (inDir.SourceID().String() < "/project/lib") {
+	if entryAfterLibrary(t, atRoot) == entryAfterLibrary(t, inDir) {
 		t.Fatal("fixture is vacuous: the two layouts order the entry and the library alike")
 	}
 	a, b := layoutGraph(t, atRoot), layoutGraph(t, inDir)
