@@ -8,7 +8,7 @@ updates:
       runtime-minor-patch:
         update-types: [minor, patch]
     commit-message:
-      prefix: "build(deps)"
+      prefix: "build"
       include: scope
   - package-ecosystem: github-actions
     directory: /
@@ -18,7 +18,7 @@ updates:
       actions-minor-patch:
         update-types: [minor, patch]
     commit-message:
-      prefix: "build(deps)"
+      prefix: "build"
       include: scope
   # The vscode extension has its own npm manifest; the npm ecosystem does
   # not recurse from the repo root, so the directory must be named.
@@ -29,6 +29,14 @@ updates:
     groups:
       vscode-minor-patch:
         update-types: [minor, patch]
+    ignore:
+      # The types must not pass engines.vscode in package.json: vsce refuses
+      # to package an extension whose @types/vscode is newer.
+      - dependency-name: "@types/vscode"
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
+      # typescript-eslint names the TypeScript majors it reads.
+      - dependency-name: "typescript"
+        update-types: ["version-update:semver-major"]
     commit-message:
-      prefix: "build(deps)"
+      prefix: "build"
       include: scope

@@ -1,6 +1,8 @@
 name: CI
 on:
+  # Dependabot's branches run on their pull request alone.
   push:
+    branches: ["**", "!dependabot/**"]
   pull_request:
     branches: [main]
   workflow_dispatch:

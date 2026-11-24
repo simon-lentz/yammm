@@ -297,19 +297,37 @@ func TestJsoncCommentReplacement(t *testing.T) {
 }
 
 // TestJsoncUnterminatedBlockComment pins how jsonc.ToJSON writes a block
-// comment the input never closes: the "/*" is kept, the rest is written as
-// spaces with its tabs and line breaks kept but its last byte a space, and a
-// single space is appended when nothing follows the "/*".
+// comment the input never closes: the "/*" is kept and the rest is written as
+// spaces with its tabs and line breaks kept, so the output is as long as the
+// input.
 func TestJsoncUnterminatedBlockComment(t *testing.T) {
 	tests := []struct{ input, want string }{
 		{`{"a": 1} /* abc`, `{"a": 1} /*    `},
 		{"{\"a\": [1, /* c\n d", "{\"a\": [1, /*  \n  "},
 		{`{"a": 1} /* `, `{"a": 1} /* `},
-		{`{"a": 1} /*`, `{"a": 1} /* `},
-		{`/*`, `/* `},
-		{"{} /* c\n", "{} /*   "},
-		{"{} /*\n", "{} /* "},
+		{`{"a": 1} /*`, `{"a": 1} /*`},
+		{`/*`, `/*`},
+		{"{} /* c\n", "{} /*  \n"},
+		{"{} /*\n", "{} /*\n"},
+		{"{} /* c\r", "{} /*  \r"},
 		{"{} /* a\tb", "{} /*  \t "},
+	}
+	for _, tt := range tests {
+		if got := string(jsonc.ToJSON([]byte(tt.input))); got != tt.want {
+			t.Errorf("ToJSON(%q) = %q, want %q", tt.input, got, tt.want)
+		}
+	}
+}
+
+// TestJsoncLineCommentEndsAtEitherLineBreak pins that a line comment ends at
+// a carriage return or a line feed, which jsonc.ToJSON keeps in place, so the
+// bytes after a lone carriage return are JSON.
+func TestJsoncLineCommentEndsAtEitherLineBreak(t *testing.T) {
+	tests := []struct{ input, want string }{
+		{"// c\r{}", "    \r{}"},
+		{"// c\n{}", "    \n{}"},
+		{"// c\r\n{}", "    \r\n{}"},
+		{"{} // c\tx", "{}     \t "},
 	}
 	for _, tt := range tests {
 		if got := string(jsonc.ToJSON([]byte(tt.input))); got != tt.want {

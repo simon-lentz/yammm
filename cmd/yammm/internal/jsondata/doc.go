@@ -56,7 +56,8 @@
 // The bytes are read as jsonc and the decoder read them together: JSON as
 // encoding/json reads it, where a string may hold any byte of an invalid UTF-8
 // sequence (the Text section refuses one without stopping the parse), and
-// jsonc's comments wherever white space may stand. jsonc blanks
+// jsonc's comments wherever white space may stand: a line comment runs to a
+// carriage return or a line feed, and a block comment to its "*/". jsonc blanks
 // a comma that a closing delimiter follows, so "[," can still close and
 // "[1,,]" is refused at its second comma. At a blank position, a "/" that no "/" or "*"
 // follows is refused at the byte after it; inside a literal or a number, or
@@ -87,9 +88,8 @@
 // document even where element 1 failed to decode.
 //
 // Columns count runes from the line start of the bytes passed in, never of the
-// buffer jsonc returns: jsonc writes one byte per comment BYTE, and one more
-// after a "/*" that ends the input, so a multibyte rune inside a comment would
-// move every later column on its line. A malformed
+// buffer jsonc returns: jsonc writes one byte per comment BYTE, so a multibyte
+// rune inside a comment would move every later column on its line. A malformed
 // UTF-8 sequence decomposes byte by byte, as it does for a schema source.
 //
 // A leading byte order mark is trimmed before decoding and its length added back

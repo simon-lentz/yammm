@@ -152,6 +152,8 @@ func TestParse_TrailingContentIsRefused(t *testing.T) {
 		{"a comma before a closing bracket on the next line", ",\n]", 1, 21},
 		{"a comma after a comment", " /* c */,}", 1, 29},
 		{"a byte that is not UTF-8", " \xff", 1, 22},
+		// A carriage return ends a line comment, as jsonc reads it.
+		{"a word after a line comment a carriage return ends", " // done\rxyz", 2, 1},
 	}
 	for _, c := range refused {
 		t.Run(c.name, func(t *testing.T) {
@@ -177,6 +179,7 @@ func TestParse_TrailingContentIsRefused(t *testing.T) {
 		{"a line comment", " // done"},
 		{"a block comment", " /* done */\n"},
 		{"comments of both kinds", " /* a, b */ // c, ]\r\n/**/"},
+		{"line comments a carriage return ends", " // a\r// b\r"},
 	}
 	for _, c := range accepted {
 		t.Run("accepts "+c.name, func(t *testing.T) {

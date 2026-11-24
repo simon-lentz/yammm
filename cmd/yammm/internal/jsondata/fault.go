@@ -230,7 +230,7 @@ func skipBlank(src []byte, i int) (int, faultOutcome) {
 			var end int
 			switch src[i+1] {
 			case '/':
-				end = bytes.IndexByte(src[i+2:], '\n')
+				end = bytes.IndexAny(src[i+2:], "\r\n")
 			case '*':
 				if end = bytes.Index(src[i+2:], []byte("*/")); end >= 0 {
 					end++
