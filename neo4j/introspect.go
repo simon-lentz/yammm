@@ -146,14 +146,15 @@ const ShowConstraints = "SHOW CONSTRAINTS YIELD name, type, entityType, labelsOr
 // the server refuses a constraint over it and takes no effect from an index
 // over it. [RemoteIndex.Declarable] refuses them, so they only block names.
 //
-// Constraint-backing indexes are deliberately INCLUDED. They are never paired by
-// name or dropped — [RemoteIndex.Declarable] rejects them on
-// [RemoteIndex.OwningConstraint] — and one that serves a declaration pairing
-// left without a row is that declaration's Actual, or, where it is FAILED, its
-// drift's first blocker; the declaration its constraint realises then
-// drifts too. Where the
-// plan drops the constraint of an online or POPULATING one, the declaration is
-// a Create unless another blocker makes it a Drift. A CREATE INDEX whose name
+// Constraint-backing indexes are deliberately INCLUDED. They are never paired
+// by name, and the plan never drops one with DROP INDEX: [RemoteIndex.Declarable]
+// rejects them on [RemoteIndex.OwningConstraint], and a backing index that
+// blocks a declaration leaves with the constraint that owns it. One that serves
+// a declaration pairing left without a row is that declaration's Actual, or,
+// where it is FAILED, its drift's first blocker; the declaration its constraint
+// realises then drifts too. Where the plan drops the constraint of an online or
+// POPULATING one, the declaration is a Create unless another blocker makes it a
+// Drift. A CREATE INDEX whose name
 // a backing index holds takes no effect, so that backing index blocks it, and
 // neither does one whose (label, properties, kind) a backing index already
 // serves. Excluding them here would hide both, and such a declaration would

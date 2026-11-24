@@ -200,9 +200,9 @@ Internal                 : internal/* (no compatibility guarantees), the formatt
 
 ### Entry Point Pattern
 
-Every call that can fail returns `(T, error)`, or an `error` alone when it has no value, or `false` as its last value where the caller needs no reason, as `Validator.PrimaryKeyOf` does. `snapshot.ScanDir` yields an error only when the scan stops, and holds a file's own failure in `ScanEntry.Err`:
+Every call that can fail returns `(T, error)`, or an `error` alone when it has no value. `schema.FindModuleRoot` and `location.ResolveSourcePath` return two values before their error, and a call where the caller needs no reason, such as `Validator.PrimaryKeyOf`, returns `false` as its last value. `snapshot.ScanDir` yields an error only when the scan stops, and holds a file's own failure in `ScanEntry.Err`:
 
-- A call that judges its input returns its Fatal and Error issues as one `*diag.ResultError`; a few, such as `markdown.Marshal` and `neo4j.CoerceParams`, return a plain error, and each call's doc names what it returns. Read a `*diag.ResultError` with `errors.AsType[*diag.ResultError](err)`, and test it by code with `errors.Is(err, diag.E_IMPORT_CYCLE)`.
+- A call that judges its input returns its Fatal and Error issues as one `*diag.ResultError`; others, such as `markdown.Marshal` and `neo4j.CoerceParams`, return a plain error, and each call's doc names what it returns. Read a `*diag.ResultError` with `errors.AsType[*diag.ResultError](err)`, and test it by code with `errors.Is(err, diag.E_IMPORT_CYCLE)`.
 - A Warning, Info or Hint is never in the error. A call that can draw one takes a `WithWarnings(func(diag.Issue))` option, as `go/types` takes each error through `Config.Error`.
 - A call refuses an option it does not take with an error, with no diagnostic code, that names the option and the call.
 
