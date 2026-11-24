@@ -110,14 +110,15 @@
 // lives on [Result]. Both paths produce the same deterministic issue ordering.
 //
 // [Collector.Err] builds a failure as one error value: nil when the collector
-// holds no Fatal or Error issue, else a *[ResultError] whose Result holds the
-// failures alone. A caller reads it with errors.AsType[*diag.ResultError] and
+// has counted no Fatal or Error issue, dropped ones included, else a
+// *[ResultError] whose Result holds the failures alone. A caller reads it with errors.AsType[*diag.ResultError] and
 // tests it by code with errors.Is(err, code): a [Code] is the target of
 // errors.Is, and no call returns a Code as an error. A collector given a route
 // by [Collector.RouteWarnings] hands each issue below failure severity to the
 // route as it arrives and stores and counts failures alone. Only the collector
 // a warning reaches last may cap it, so a routed merge panics on a Result that
-// dropped an issue below failure severity.
+// dropped an issue the merge would hand the route: one below failure severity
+// after [Collector.MergeRetag]'s retag, of a code the merge keeps.
 //
 // # Rendering
 //

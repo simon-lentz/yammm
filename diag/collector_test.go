@@ -339,6 +339,23 @@ func TestCollector_Result_Independent(t *testing.T) {
 	}
 }
 
+// A Result's per-code counts are its own: a later Collect of the same code
+// leaves an earlier Result's count where it was.
+func TestCollector_Result_CodeCountsIndependent(t *testing.T) {
+	c := NewCollector(NoLimit)
+	c.Collect(NewIssue(Warning, W_ANNOTATION_SHADOWED, "first").Build())
+	earlier := c.Result()
+
+	c.Collect(NewIssue(Warning, W_ANNOTATION_SHADOWED, "second").Build())
+
+	if got := earlier.CodeCounts(Warning)[W_ANNOTATION_SHADOWED]; got != 1 {
+		t.Errorf("earlier Result's CodeCounts = %d after a later Collect; want 1", got)
+	}
+	if got := c.Result().CodeCounts(Warning)[W_ANNOTATION_SHADOWED]; got != 2 {
+		t.Errorf("later Result's CodeCounts = %d; want 2", got)
+	}
+}
+
 func TestCollector_SeverityQueries(t *testing.T) {
 	c := NewCollector(0)
 

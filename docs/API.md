@@ -926,7 +926,7 @@ The `diag` package implements YAMMM's five-level severity model. See [Severity L
 
 ### Result Methods
 
-A failure is a `*diag.ResultError`, and its `Result` holds the failures it carries. A `Result` comes from a `Collector` (`Collector.Result`), and the zero `Result` holds no issue. A producer collects issues into a `Collector` and returns `Collector.Err()`: nil when the collector holds no failure, and otherwise a `*diag.ResultError` whose `Result` holds the failures alone, as `go/scanner.ErrorList.Err` builds an error from its list. `Collector.RouteWarnings(fn)` sends every issue below failure severity to `fn` in place of storing it, which is how a call delivers its `WithWarnings` callback. The issue iterators return `iter.Seq[Issue]`; collect a `[]Issue` with `slices.Collect(result.Errors())` when you need one.
+A failure is a `*diag.ResultError`, and its `Result` holds the failures it carries. A `Result` comes from a `Collector` (`Collector.Result`), and the zero `Result` holds no issue. A producer collects issues into a `Collector` and returns `Collector.Err()`: nil when the collector has counted no failure, dropped ones included, and otherwise a `*diag.ResultError` whose `Result` holds the failures alone, as `go/scanner.ErrorList.Err` builds an error from its list. `Collector.RouteWarnings(fn)` sends every issue below failure severity to `fn` in place of storing it, which is how a call delivers its `WithWarnings` callback. The issue iterators return `iter.Seq[Issue]`; collect a `[]Issue` with `slices.Collect(result.Errors())` when you need one.
 
 ```go
 re, ok := errors.AsType[*diag.ResultError](err)

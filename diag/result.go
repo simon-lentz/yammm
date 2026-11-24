@@ -21,11 +21,7 @@ type SeverityCounts struct {
 	Hints    int
 }
 
-// add increments the counter for sev. It is the single Severity-to-counter
-// mapping in the package — [Collector.collectLocked] (the live collection path)
-// and [newResult] (recompute from a slice) both route through it, so the two
-// cannot disagree on how a severity is counted and a new Severity is handled in
-// exactly one switch.
+// add increments the counter for sev.
 func (c *SeverityCounts) add(sev Severity) {
 	c.addN(sev, 1)
 }
@@ -134,11 +130,8 @@ type Result struct {
 }
 
 // inArrivalOrder returns r's issues as they were collected, for a merge to
-// store. A Result carrying no index keeps the sorted order.
+// store.
 func (r Result) inArrivalOrder() []Issue {
-	if len(r.arrival) != len(r.issues) {
-		return r.issues
-	}
 	order := make([]int, len(r.issues))
 	for i := range order {
 		order[i] = i
@@ -215,44 +208,19 @@ func (c codeCounts) clone() codeCounts {
 	return out
 }
 
-// newResult creates a Result, computing the severity counts from issues.
-//
-// The issues slice is owned by the Result and must not be modified after
-// this call. Callers must pass a fresh slice (not shared with other code).
-//
-// Use [newResultWithCounts] directly when the counts must reflect issues that
-// are not in the slice (e.g. a [Collector] carrying issues dropped past its
-// limit, which must still count in [Result.SeverityCounts]).
-func newResult(issues []Issue, limitReached bool, droppedCount int) Result {
-	var counts SeverityCounts
-	var codes codeCounts
-	for _, issue := range issues {
-		counts.add(issue.Severity())
-		codes.add(issue.Severity(), issue.Code())
-	}
-	return newResultWithCounts(issues, limitReached, droppedCount, counts, codes)
-}
-
-// newResultWithCounts builds a Result from explicit precomputed severity counts.
-// It is the single point that constructs the Result struct; newResultWithArrival
-// sets the arrival order on the struct it returns. The issues slice is owned by
-// the Result (see [newResult]'s contract).
-func newResultWithCounts(issues []Issue, limitReached bool, droppedCount int, counts SeverityCounts, codes codeCounts) Result {
+// newResult is the one constructor of a non-zero Result. The counts are the
+// collector's, so they include issues dropped past its limit; arrival is the
+// collection order that sorting issues discarded. The Result owns issues, so
+// the caller passes a slice no other code holds.
+func newResult(issues []Issue, limitReached bool, droppedCount int, counts SeverityCounts, codes codeCounts, arrival []uint64) Result {
 	return Result{
 		issues:       issues,
 		limitReached: limitReached,
 		droppedCount: droppedCount,
 		counts:       counts,
 		codeCounts:   codes,
+		arrival:      arrival,
 	}
-}
-
-// newResultWithArrival is [newResultWithCounts] plus the arrival order sorting
-// discarded, which only a [Collector] knows.
-func newResultWithArrival(issues []Issue, limitReached bool, droppedCount int, counts SeverityCounts, codes codeCounts, arrival []uint64) Result {
-	r := newResultWithCounts(issues, limitReached, droppedCount, counts, codes)
-	r.arrival = arrival
-	return r
 }
 
 // HasFatal reports whether the result saw a Fatal issue, stored or dropped.

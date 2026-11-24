@@ -19,8 +19,8 @@ func TestNewRegistry(t *testing.T) {
 	if reg == nil {
 		t.Fatal("NewRegistry() returned nil")
 	}
-	if reg.Len() != 0 {
-		t.Errorf("NewRegistry().Len() = %d; want 0", reg.Len())
+	if got := len(reg.Keys()); got != 0 {
+		t.Errorf("NewRegistry() holds %d sources; want 0", got)
 	}
 }
 
@@ -98,8 +98,8 @@ func TestRegistry_Register_IdempotentSameContent(t *testing.T) {
 	}
 
 	// Verify only one entry
-	if reg.Len() != 1 {
-		t.Errorf("Len() = %d; want 1 after idempotent registration", reg.Len())
+	if got := len(reg.Keys()); got != 1 {
+		t.Errorf("registry holds %d sources; want 1 after idempotent registration", got)
 	}
 }
 
@@ -530,13 +530,13 @@ func TestRegistry_Has(t *testing.T) {
 	}
 }
 
-func TestRegistry_Len(t *testing.T) {
+func TestRegistry_KeysCountsEachRegistration(t *testing.T) {
 	t.Parallel()
 
 	reg := NewRegistry()
 
-	if reg.Len() != 0 {
-		t.Errorf("Len() = %d; want 0 for empty registry", reg.Len())
+	if got := len(reg.Keys()); got != 0 {
+		t.Errorf("empty registry holds %d sources; want 0", got)
 	}
 
 	for i := range 5 {
@@ -546,8 +546,8 @@ func TestRegistry_Len(t *testing.T) {
 		}
 	}
 
-	if reg.Len() != 5 {
-		t.Errorf("Len() = %d; want 5", reg.Len())
+	if got := len(reg.Keys()); got != 5 {
+		t.Errorf("registry holds %d sources; want 5", got)
 	}
 }
 
@@ -800,7 +800,6 @@ func TestRegistry_ConcurrentRead(t *testing.T) {
 		_ = reg.PositionAt(sourceID, 5)
 		_, _ = reg.LineStartByte(sourceID, 2)
 		_ = reg.Has(sourceID)
-		_ = reg.Len()
 		_ = reg.Keys()
 	})
 }
@@ -833,7 +832,6 @@ func TestRegistry_ConcurrentRegisterAndRead(t *testing.T) {
 				_ = reg.PositionAt(sourceID, 0)
 				_ = reg.Has(sourceID)
 			}
-			_ = reg.Len()
 			_ = reg.Keys()
 		})
 	}

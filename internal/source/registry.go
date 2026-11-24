@@ -207,14 +207,6 @@ func (r *Registry) Has(sourceID location.SourceID) bool {
 	return ok
 }
 
-// Len returns the number of registered sources.
-func (r *Registry) Len() int {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-
-	return len(r.entries)
-}
-
 // computeLineOffsets precomputes the byte offset of each line start.
 // lineOffsets[i] is the byte offset where line i+1 begins (0-indexed array, 1-based lines).
 // Handles \r\n as a single line break.

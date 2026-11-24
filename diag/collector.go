@@ -62,8 +62,9 @@ type Collector struct {
 // collected or merged, to fn instead of storing or counting it, so c holds and
 // counts failures alone. fn runs outside c's lock, on the goroutine that
 // collects or merges, in the order the issues arrive; a nil fn discards them.
-// A routed merge panics on a Result that saw more issues below failure severity
-// than it holds: only a collector that is a warning's last stop may cap it.
+// A routed merge panics on a Result that dropped an issue the merge would hand
+// fn: one below failure severity after [Collector.MergeRetag]'s retag, of a code
+// the merge keeps. Only a collector that is a warning's last stop may cap it.
 func (c *Collector) RouteWarnings(fn func(Issue)) {
 	if fn == nil {
 		fn = func(Issue) {}
@@ -357,7 +358,7 @@ func (c *Collector) collectLocked(issue Issue) {
 	// truncated. The loader and completer gate on ErrorCount deltas to decide
 	// whether a schema failed; an error dropped at the cap that left these
 	// counts untouched would read as success and let a broken schema escape the
-	// all-or-nothing contract. Len() remains the stored count.
+	// all-or-nothing contract. [Result.Len] remains the stored count.
 	c.counts.add(issue.Severity())
 	c.codeCounts.add(issue.Severity(), issue.Code())
 
@@ -443,18 +444,17 @@ func (c *Collector) Result() Result {
 
 	sorted, arrival := sortStored(c.issues)
 
-	// Carry the collector's SEEN severity counts rather than recomputing from
-	// the stored slice (what newResult does): under truncation the dropped
-	// issues are absent from sorted, and recomputing would make
-	// Result.SeverityCounts blind to a dropped error exactly as the gates would be. In the
-	// non-truncated case the two are identical (every collected issue is stored).
-	result := newResultWithArrival(sorted, c.limitReached, c.droppedCount, c.counts, c.codeCounts.clone(), arrival)
+	// Carry the collector's SEEN severity counts, not counts of the stored
+	// slice: under truncation the dropped issues are absent from sorted, and
+	// counting the slice would make Result.SeverityCounts blind to a dropped
+	// error.
+	result := newResult(sorted, c.limitReached, c.droppedCount, c.counts, c.codeCounts.clone(), arrival)
 	c.cachedResult = &result
 	return result
 }
 
-// Err returns nil when c holds no failure, and otherwise a *[ResultError]
-// whose Result holds c's failures alone, as [go/scanner.ErrorList.Err] builds
+// Err returns nil when c has counted no failure, dropped ones included, and
+// otherwise a *[ResultError] whose Result holds c's failures alone, as [go/scanner.ErrorList.Err] builds
 // an error from its list. The Result counts every failure c saw, and its
 // [Result.DroppedCount] is the failures seen less the failures stored; no
 // issue below failure severity is in it, stored or counted.
@@ -475,7 +475,7 @@ func (c *Collector) Err() error {
 	sorted, arrival := sortStored(stored)
 	dropped := seen - len(sorted)
 	counts := SeverityCounts{Fatal: c.counts.Fatal, Errors: c.counts.Errors}
-	return &ResultError{Result: newResultWithArrival(sorted, dropped > 0, dropped, counts, c.codeCounts.failures(), arrival)}
+	return &ResultError{Result: newResult(sorted, dropped > 0, dropped, counts, c.codeCounts.failures(), arrival)}
 }
 
 // sortStored returns the issues of stored in [compareIssues] order beside the

@@ -1,6 +1,7 @@
 package diag
 
 import (
+	"fmt"
 	"slices"
 	"strings"
 	"testing"
@@ -50,6 +51,26 @@ func sawFailure(r Result) bool {
 	return counts.Fatal+counts.Errors > 0
 }
 
+// collected returns the Result of a Collector with no limit that collected
+// issues.
+func collected(issues ...Issue) Result {
+	c := NewCollector(NoLimit)
+	for _, issue := range issues {
+		c.Collect(issue)
+	}
+	return c.Result()
+}
+
+// collectedPastLimit returns the Result of a Collector with the given limit
+// that collected n errors.
+func collectedPastLimit(limit, n int) Result {
+	c := NewCollector(limit)
+	for i := range n {
+		c.Collect(NewIssue(Error, E_SYNTAX, fmt.Sprintf("error %d", i)).Build())
+	}
+	return c.Result()
+}
+
 func TestResult_ZeroIsEmpty(t *testing.T) {
 	var r Result
 	if sawFailure(r) {
@@ -74,7 +95,7 @@ func TestResult_HasCode(t *testing.T) {
 		NewIssue(Error, E_SYNTAX, "error").Build(),
 		NewIssue(Warning, E_INVALID_NAME, "warning").Build(),
 	}
-	r := newResult(issues, false, 0)
+	r := collected(issues...)
 
 	if !r.HasCode(E_SYNTAX) {
 		t.Error("HasCode(E_SYNTAX) = false; want true")
@@ -198,7 +219,7 @@ func TestResult_SeverityQueries(t *testing.T) {
 		NewIssue(Hint, E_INTERNAL, "hint").Build(),
 	}
 
-	r := newResult(issues, false, 0)
+	r := collected(issues...)
 
 	if !r.HasFatal() {
 		t.Error("HasFatal() = false; want true")
@@ -231,7 +252,7 @@ func TestResult_WarningsAloneAreNoFailure(t *testing.T) {
 		NewIssue(Info, E_INTERNAL, "info").Build(),
 	}
 
-	r := newResult(issues, false, 0)
+	r := collected(issues...)
 
 	if sawFailure(r) {
 		t.Errorf("SeverityCounts() = %+v; want no Fatal or Error (only warnings)", r.SeverityCounts())
@@ -239,11 +260,7 @@ func TestResult_WarningsAloneAreNoFailure(t *testing.T) {
 }
 
 func TestResult_LimitTracking(t *testing.T) {
-	issues := []Issue{
-		NewIssue(Error, E_SYNTAX, "error").Build(),
-	}
-
-	r := newResult(issues, true, 5)
+	r := collectedPastLimit(1, 6)
 
 	if !r.LimitReached() {
 		t.Error("LimitReached() = false; want true")
@@ -254,13 +271,13 @@ func TestResult_LimitTracking(t *testing.T) {
 }
 
 func TestResult_Issues_Iterator(t *testing.T) {
-	issues := []Issue{
-		NewIssue(Error, E_SYNTAX, "first").Build(),
+	// Collected second, third, first: Issues yields the Result's sorted order,
+	// here by code, and neither the collection order nor its reverse.
+	r := collected(
 		NewIssue(Warning, E_INVALID_NAME, "second").Build(),
-		NewIssue(Error, E_DUPLICATE_TYPE, "third").Build(),
-	}
-
-	r := newResult(issues, false, 0)
+		NewIssue(Error, E_SYNTAX, "third").Build(),
+		NewIssue(Error, E_DUPLICATE_TYPE, "first").Build(),
+	)
 
 	var count int
 	var messages []string
@@ -284,7 +301,7 @@ func TestResult_Issues_EarlyBreak(t *testing.T) {
 		NewIssue(Error, E_SYNTAX, "third").Build(),
 	}
 
-	r := newResult(issues, false, 0)
+	r := collected(issues...)
 
 	var count int
 	for range r.Issues() {
@@ -306,7 +323,7 @@ func TestResult_Errors(t *testing.T) {
 		NewIssue(Warning, E_INVALID_NAME, "warning").Build(),
 	}
 
-	r := newResult(issues, false, 0)
+	r := collected(issues...)
 
 	var count int
 	for issue := range r.Errors() {
@@ -330,7 +347,7 @@ func TestResult_BySeverity(t *testing.T) {
 		NewIssue(Hint, E_INTERNAL, "hint").Build(),
 	}
 
-	r := newResult(issues, false, 0)
+	r := collected(issues...)
 
 	for _, sev := range []Severity{Fatal, Error, Warning, Info, Hint} {
 		var count int
@@ -411,7 +428,7 @@ func TestResult_String_WithErrors(t *testing.T) {
 		NewIssue(Error, E_DUPLICATE_TYPE, "type collision").Build(),
 	}
 
-	r := newResult(issues, false, 0)
+	r := collected(issues...)
 
 	s := r.String()
 	if !strings.Contains(s, "2 error(s)") {
@@ -423,11 +440,7 @@ func TestResult_String_WithErrors(t *testing.T) {
 }
 
 func TestResult_String_WithLimitReached(t *testing.T) {
-	issues := []Issue{
-		NewIssue(Error, E_SYNTAX, "error").Build(),
-	}
-
-	r := newResult(issues, true, 5)
+	r := collectedPastLimit(1, 6)
 
 	s := r.String()
 	if !strings.Contains(s, "limit reached") {
@@ -439,15 +452,14 @@ func TestResult_String_WithLimitReached(t *testing.T) {
 }
 
 func TestResult_Immutability(t *testing.T) {
-	// Result should not be constructable with arbitrary issues via public API:
-	// newResult is unexported, and Collector.Result validates during
-	// collection, so the zero Result and a collector's are the only ones.
+	// Only a Collector builds a non-zero Result, so the zero Result and a
+	// collector's are the only ones.
 
 	// Verify collected slices are independent (each slices.Collect allocates).
 	issues := []Issue{
 		NewIssue(Error, E_SYNTAX, "test").Build(),
 	}
-	r := newResult(issues, false, 0)
+	r := collected(issues...)
 
 	slice1 := slices.Collect(r.Issues())
 	slice2 := slices.Collect(r.Issues())
