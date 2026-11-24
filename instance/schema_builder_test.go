@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/instance"
 	"github.com/simon-lentz/yammm/schema"
 )
@@ -275,7 +276,7 @@ func TestSchemaBuilder_EdgeTo_ZeroTargetKey(t *testing.T) {
 
 	_, err = b.Property("id", "p1").Property("name", "Alice").EdgeTo("WORKS_AT").Build()
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "EdgeTo requires at least one target-key component")
+	assert.Contains(t, err.Error(), `relation "WORKS_AT": an edge requires at least one target-key component`)
 }
 
 func TestSchemaBuilder_EdgeTo_UnknownRelation(t *testing.T) {
@@ -300,15 +301,25 @@ func TestSchemaBuilder_EdgeTo_OnCompositionRelation(t *testing.T) {
 	assert.Contains(t, err.Error(), "does not support composed children")
 }
 
-func TestSchemaBuilder_EdgeTo_OnRelationWithEdgeProps(t *testing.T) {
+func TestSchemaBuilder_EdgeTo_LeavesARequiredEdgePropertyToTheValidator(t *testing.T) {
 	s := edgePropsSchema(t)
 	b, err := instance.BuilderFor(s, "Employee")
 	require.NoError(t, err)
 
-	_, err = b.Property("id", "e1").EdgeTo("WORKS_AT", "c1").Build()
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "declares edge properties")
-	assert.Contains(t, err.Error(), "does not support")
+	raw, err := b.Property("id", "e1").EdgeTo("WORKS_AT", "c1").Build()
+	require.NoError(t, err)
+	assert.Equal(t, map[string]any{"_target_id": "c1"}, raw.Properties["works_at"])
+
+	_, err = instance.NewValidator(s).ValidateOne(t.Context(), "Employee", raw)
+	var re *diag.ResultError
+	require.ErrorAs(t, err, &re)
+	var missing []string
+	for issue := range re.Result.Issues() {
+		if issue.Code() == diag.E_MISSING_REQUIRED {
+			missing = append(missing, issue.Message())
+		}
+	}
+	assert.Equal(t, []string{`missing required edge property "role"`, `missing required edge property "since"`}, missing)
 }
 
 func TestSchemaBuilder_EdgeTo_ArityMismatch(t *testing.T) {

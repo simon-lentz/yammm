@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/simon-lentz/yammm/internal/raceskip"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -115,6 +116,33 @@ func TestSchemaBuilder_SuccessPath_IsAllocationFree(t *testing.T) {
 		t.Errorf("a successful Property call allocated %v times per run, want 0", got)
 	}
 }
+
+// TestSchemaBuilder_EdgeTo_AllocatesOnlyItsEdge pins EdgeTo's per-call cost on
+// an association: the edge object and its key field's name, and nothing for
+// the edge-property check when there are no edge properties. Under -race the
+// runtime adds an allocation of its own.
+func TestSchemaBuilder_EdgeTo_AllocatesOnlyItsEdge(t *testing.T) {
+	raceskip.Skip(t)
+	b, err := BuilderFor(pcTestSchema(t), "Person")
+	if err != nil {
+		t.Fatalf("BuilderFor: %v", err)
+	}
+	b.EdgeTo("KNOWS", "warm")
+
+	object := testing.AllocsPerRun(200, func() {
+		m := make(map[string]any, 1)
+		m["_target_id"] = "p2"
+		edgeSink = m
+	})
+	if got := testing.AllocsPerRun(200, func() {
+		b.EdgeTo("KNOWS", "p2")
+	}); got > object+1 {
+		t.Errorf("an EdgeTo call allocated %v times per run, want at most %v: the edge object and its key field's name", got, object+1)
+	}
+}
+
+// edgeSink keeps the measured map on the heap, as the builder's edge object is.
+var edgeSink map[string]any
 
 // TestBuildError_Error_OmitsLocatorForZeroPC pins the degradation contract: a
 // capture that failed renders the message with no locator and no stray prefix,

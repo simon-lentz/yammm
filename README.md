@@ -154,7 +154,7 @@ To resume a persisted batch on a later run, seed the graph from a loaded snapsho
 
 ### Build Instances Programmatically
 
-`instance.BuilderFor` returns a builder bound to a schema type that constructs `RawInstance` values while enforcing schema shape — unknown properties, unknown relations, edge shapes it cannot build (a composition, an association with edge properties, a target key of the wrong arity), and cardinality mismatches surface from `Build()` with the offending call site's file:line:
+`instance.BuilderFor` returns a builder bound to a schema type that constructs `RawInstance` values while enforcing schema shape — unknown properties, unknown relations, edge shapes it cannot build (a composition, an edge property the association does not declare, an empty target key, a target type that is missing or has no primary key, a target key of the wrong arity), and cardinality mismatches surface from `Build()` with the offending call site's file:line:
 
 ```go
 b, err := instance.BuilderFor(s, "Car")

@@ -425,7 +425,7 @@ Instance data is a top-level object keyed by type names whose values are arrays 
 
 ### Schema-Aware Raw Instance Builder
 
-`instance.BuilderFor(schema, typeName)` returns a `*SchemaBuilder` that constructs `RawInstance` values while enforcing schema shape at build time — unknown properties, unknown relations, edge shapes it cannot build (a composition, an association with edge properties, a target key of the wrong arity), and cardinality mismatches all surface from `Build()` with file:line locators captured via `runtime.Callers`. This shifts shape failures out of `ValidateOne`'s domain:
+`instance.BuilderFor(schema, typeName)` returns a `*SchemaBuilder` that constructs `RawInstance` values while enforcing schema shape at build time — unknown properties, unknown relations, edge shapes it cannot build (a composition, an edge property the association does not declare, an empty target key, a target type that is missing or has no primary key, a target key of the wrong arity), and cardinality mismatches all surface from `Build()` with file:line locators captured via `runtime.Callers`. This shifts shape failures out of `ValidateOne`'s domain:
 
 ```go
 b, err := instance.BuilderFor(s, "Person")
@@ -438,12 +438,16 @@ raw, err := b.
     EdgeTo("works_at", "c1").                     // "one" association, single PK
     EdgeTo("knows", "p2").                        // "many" association
     EdgeTo("part_of", "publisher-1", "book-99").  // composite PK (variadic)
+    EdgeWith("member_of",                         // an edge with properties
+        map[string]any{"since": "2024-01-01T00:00:00Z"}, "g1").
     Build()
 ```
 
-The builder covers properties and property-less association edges; an
-association that declares edge properties, and a composition, each record a
-shape error — construct such instances from raw data instead.
+The builder covers properties and association edges. `EdgeWith` writes an
+edge's properties beside its target key; each key must name an edge property
+the association declares, by its declared spelling, and the validator judges
+the values and reports a required edge property left out, as it does for raw
+data. `EdgeTo` is `EdgeWith` with no properties.
 
 The builder does not construct composed children. `EdgeTo` on a composition is refused with a shape error reading *"is a composition; the builder does not support composed children — construct the instance from raw data"*, and there is no other entry point that takes a child builder. A type with a **required** composition therefore builds clean here and fails `ValidateOne` with `E_UNRESOLVED_REQUIRED_COMPOSITION`; construct those instances from raw data.
 
@@ -453,14 +457,15 @@ The builder does not construct composed children. `EdgeTo` on a composition is r
 | ------ | ------- |
 | `BuilderFor(s, typeName)` | Construct a builder bound to a schema type. Errors on a zero schema, unknown type, or abstract type. |
 | `Property(name, value)` | Set a property value. Unknown names accumulate as errors surfaced at Build. |
-| `EdgeTo(name, targetKey...)` | Add an edge target on an association without edge properties. Variadic key supports composite PKs. |
-| `Build()` | Produce the `RawInstance`. Returns the first accumulated error, suffixed `(and N more build error(s))` when more exist. |
+| `EdgeTo(name, targetKey...)` | Add an edge target on an association, with no edge properties. Variadic key supports composite PKs. |
+| `EdgeWith(name, props, targetKey...)` | Add an edge target on an association with the edge's properties. An undeclared edge property accumulates as an error surfaced at Build; the builder copies `props`. |
+| `Build()` | Produce the `RawInstance`. Its property map and each edge object are copies (a value is shared), so a change to their entries does not reach the builder. Returns the first accumulated error, suffixed `(and N more build error(s))` when more exist. |
 
 Build errors include the bound type's name, the offending property/relation, and the caller's file:line.
 
 `SchemaBuilder` is NOT concurrent-safe; construct one per goroutine. The bound `schema.Schema` remains safe to share across many concurrent builders.
 
-The shape portion of `ValidateOne` — property and relation names, and association cardinality — is guaranteed to pass on the output of a successful `Build`. Compositions are not covered: the builder cannot produce one. Every check outside that shape portion still runs at `ValidateOne` time, value-level validation and a target key a `(many)` relation names twice among them. Whether an association's target exists is the graph's question, never the validator's: `graph.Check` reports a missing target under a required association, and `Snapshot.Unresolved` holds the record of one under any association.
+The shape portion of `ValidateOne` — property, relation and edge-property names, and association cardinality — is guaranteed to pass on the output of a successful `Build`. Compositions are not covered: the builder cannot produce one. Every check outside that shape portion still runs at `ValidateOne` time, value-level validation and a target key a `(many)` relation names twice among them. Whether an association's target exists is the graph's question, never the validator's: `graph.Check` reports a missing target under a required association, and `Snapshot.Unresolved` holds the record of one under any association.
 
 ## Graph Construction
 

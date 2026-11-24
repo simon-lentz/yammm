@@ -31,8 +31,9 @@ type buildError struct {
 
 	// callerPC is the raw program counter of the user's call site, resolved to
 	// "file:line" by [symbolizePC] only when this error is rendered. Zero when
-	// not applicable. Storing the PC rather than the string is what keeps the
-	// builder's success path allocation-free — see [capturePC].
+	// runtime.Callers found no frame, and the error then renders with no
+	// locator. Storing the PC rather than the string keeps the capture from
+	// allocating — see [capturePC].
 	callerPC uintptr
 }
 

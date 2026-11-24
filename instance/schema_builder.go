@@ -25,17 +25,17 @@ import (
 // # Scope of validation
 //
 // Build catches shape errors (schema-structural): property and relation
-// names, an excess target on a (one) relation, and the shape of each edge: a relation that
-// is a composition or declares edge properties, which the builder does not
-// support, an empty target key, a target type that does not exist or has no
-// primary key, and a key whose arity is not the target's.
+// names, an excess target on a (one) relation, and the shape of each edge: a
+// composition, which the builder does not support, an edge property the
+// association does not declare, an empty target key, a target type that does
+// not exist or has no primary key, and a key whose arity is not the target's.
 // It does NOT catch value-level errors (wrong type, out-of-range, invalid PK, an
-// absent required property, an invariant, a target key a (many) relation names
-// twice, which two spellings of one key can do); those remain in
+// absent required property or edge property, an invariant, a target key a
+// (many) relation names twice, which two spellings of one key can do); those remain in
 // [Validator.ValidateOne]'s domain. A SchemaBuilder that
 // returns a clean (RawInstance, nil) from Build is guaranteed to pass the
-// shape portion of ValidateOne — property and relation names, and no
-// excess target on a (one) relation. Compositions are not covered: the builder cannot
+// shape portion of ValidateOne — property, relation and edge-property names,
+// and no excess target on a (one) relation. Compositions are not covered: the builder cannot
 // produce one, so a type with a required composition builds clean here and
 // fails ValidateOne with E_UNRESOLVED_REQUIRED_COMPOSITION.
 //
@@ -56,12 +56,13 @@ import (
 //
 // # Performance
 //
-// Property and EdgeTo capture the caller's program counter with
+// Property, EdgeTo and EdgeWith capture the caller's program counter with
 // runtime.Callers so a Build-time shape error can name the call site; the PC
-// resolves to file:line only when an error is rendered, so a successful call
-// allocates nothing for it. [BenchmarkSchemaBuilder_CallerCapture] times the
-// per-call cost and TestSchemaBuilder_SuccessPath_IsAllocationFree the
-// zero-allocation success path.
+// resolves to file:line only when an error is rendered, so the capture
+// allocates nothing. [BenchmarkSchemaBuilder_CallerCapture] times the per-call
+// cost. Build copies each edge object, one map copy per edge target, so a
+// change to an edge object of the instance it returns does not reach the
+// builder; the copy is shallow, as Build's copy of the properties is.
 type SchemaBuilder struct {
 	schema     schema.Schema
 	typeName   string // user-provided (may be qualified)
@@ -128,9 +129,9 @@ func (b *SchemaBuilder) Property(name string, value any) *SchemaBuilder {
 	return b
 }
 
-// EdgeTo adds one edge target to the named association relation for
-// associations that do NOT declare edge properties. Variadic targetKey
-// supports single-component and composite primary keys:
+// EdgeTo adds one edge target, with no edge properties, to the named
+// association. It is [SchemaBuilder.EdgeWith] with nil properties. Variadic
+// targetKey supports single-component and composite primary keys:
 //
 //	b.EdgeTo("in_region", regionCode)              // single-component PK
 //	b.EdgeTo("part_of", publisherID, bookID)     // composite PK
@@ -141,20 +142,31 @@ func (b *SchemaBuilder) Property(name string, value any) *SchemaBuilder {
 // relation.
 //
 // For "many"-cardinality relations, call EdgeTo multiple times — once per
-// target. Cardinality is enforced at Build time: a "one" relation with more
-// than one EdgeTo call surfaces a cardinality error.
+// target. Cardinality is enforced at Build time: a "one" relation given more
+// than one target with a valid key, by EdgeTo or EdgeWith, surfaces a
+// cardinality error.
 //
-// The builder supports property-less association edges only: a relation that
-// declares edge properties, and a composition, each record a shape error —
-// construct such instances from raw data instead.
+// A composition records a shape error: the builder does not construct
+// composed children, so construct such instances from raw data instead.
 func (b *SchemaBuilder) EdgeTo(name string, targetKey ...any) *SchemaBuilder {
 	callerPC := capturePC()
-	b.addEdge(name, targetKey, callerPC)
+	b.addEdge(name, nil, targetKey, callerPC)
 	return b
 }
 
-// addEdge is EdgeTo's implementation.
-func (b *SchemaBuilder) addEdge(name string, targetKey []any, callerPC uintptr) {
+// EdgeWith adds one edge target to the named association, with the edge's
+// properties. Each key of props must name an edge property the association
+// declares, by its declared spelling, as [SchemaBuilder.Property] matches a
+// property; values pass through to [Validator.ValidateOne], which judges them
+// and reports a required edge property left out. The builder copies props.
+func (b *SchemaBuilder) EdgeWith(name string, props map[string]any, targetKey ...any) *SchemaBuilder {
+	callerPC := capturePC()
+	b.addEdge(name, props, targetKey, callerPC)
+	return b
+}
+
+// addEdge is EdgeTo's and EdgeWith's implementation.
+func (b *SchemaBuilder) addEdge(name string, props map[string]any, targetKey []any, callerPC uintptr) {
 	rel, ok := b.resolveRelation(name)
 	if !ok {
 		b.recordErr(&buildError{
@@ -175,33 +187,27 @@ func (b *SchemaBuilder) addEdge(name string, targetKey []any, callerPC uintptr) 
 		})
 		return
 	}
-	if rel.HasProperties() {
-		b.recordErr(&buildError{
-			kind:     kindEdgeShape,
-			typ:      b.typeName,
-			target:   rel.Name(),
-			detail:   "declares edge properties, which the builder does not support; construct the instance from raw data",
-			callerPC: callerPC,
-		})
-		return
-	}
+	// An undeclared edge property fails Build but does not refuse the target:
+	// the key is still judged, and a valid key counts toward a (one) relation.
+	b.checkEdgeProps(rel, props, callerPC)
 	if len(targetKey) == 0 {
 		b.recordErr(&buildError{
 			kind:     kindEdgeShape,
 			typ:      b.typeName,
 			target:   rel.Name(),
-			detail:   "EdgeTo requires at least one target-key component",
+			detail:   "an edge requires at least one target-key component",
 			callerPC: callerPC,
 		})
 		return
 	}
 
-	target, err := b.buildEdgeTarget(rel, targetKey, callerPC)
+	target, err := b.buildEdgeTarget(rel, props, targetKey, callerPC)
 	if err != nil {
 		// err is already shaped as *buildError; recordErr just appends.
 		b.errors = append(b.errors, err)
 		return
 	}
+	maps.Copy(target, props)
 
 	st := b.edgeStateFor(rel)
 	st.targets = append(st.targets, target)
@@ -219,12 +225,32 @@ func (b *SchemaBuilder) addEdge(name string, targetKey []any, callerPC uintptr) 
 	}
 }
 
+// checkEdgeProps records one shape error for each key of props that names no
+// edge property of rel, in key order so Build's first error does not move with
+// map order.
+func (b *SchemaBuilder) checkEdgeProps(rel schema.Relation, props map[string]any, callerPC uintptr) {
+	keys := slices.AppendSeq(make([]string, 0, len(props)), maps.Keys(props))
+	slices.Sort(keys)
+	for _, key := range keys {
+		if _, ok := rel.Property(key); !ok {
+			b.recordErr(&buildError{
+				kind:     kindEdgeShape,
+				typ:      b.typeName,
+				target:   rel.Name(),
+				detail:   "unknown edge property " + diag.QuoteValue(key),
+				callerPC: callerPC,
+			})
+		}
+	}
+}
+
 // buildEdgeTarget assembles one edge-target map, {_target_<pk>: value, ...},
-// for a relation addEdge has already established declares no edge
-// properties. Returns a shaped buildError on a missing target type, a keyless
-// target, or a target-key arity mismatch; otherwise nil.
+// sized for the edge properties addEdge copies in after it. Returns a shaped
+// buildError on a missing target type, a keyless target, or a target-key arity
+// mismatch; otherwise nil.
 func (b *SchemaBuilder) buildEdgeTarget(
 	rel schema.Relation,
+	props map[string]any,
 	targetKey []any,
 	callerPC uintptr,
 ) (map[string]any, *buildError) {
@@ -258,7 +284,7 @@ func (b *SchemaBuilder) buildEdgeTarget(
 		}
 	}
 
-	obj := make(map[string]any, len(pks))
+	obj := make(map[string]any, len(pks)+len(props))
 	for i, pk := range pks {
 		obj[fkPrefix+pk.Name()] = targetKey[i]
 	}
@@ -276,16 +302,18 @@ func (b *SchemaBuilder) edgeStateFor(rel schema.Relation) *edgeState {
 	return st
 }
 
-// Build produces the RawInstance.
+// Build produces the RawInstance. Its property map and each edge object are
+// copies, so a caller may add, remove or replace their entries and build again;
+// a value is shared, not copied.
 //
 // If any earlier call on this builder recorded an error, Build returns the
 // first such error. When more than one error accumulated, the return wraps
-// the first via %w with a trailing "(and N more build error(s))" suffix so
-// callers retain access to the primary cause via errors.Is / errors.As.
+// the first via %w with a trailing "(and N more build error(s))" suffix, so
+// [errors.Unwrap] returns the first error.
 //
 // On success the returned RawInstance is guaranteed to pass the shape
-// portion of [Validator.ValidateOne]: property names and relation names are
-// schema-valid and no (one) relation holds an excess target. Compositions are not
+// portion of [Validator.ValidateOne]: property, relation and edge-property
+// names are schema-valid and no (one) relation holds an excess target. Compositions are not
 // covered — the builder cannot produce one — so a type with a required
 // composition builds clean and fails ValidateOne with
 // E_UNRESOLVED_REQUIRED_COMPOSITION. Every check outside that shape portion
@@ -299,7 +327,7 @@ func (b *SchemaBuilder) edgeStateFor(rel schema.Relation) *edgeState {
 //   - the offending call's target (property or relation name)
 //   - the bound type's name (for disambiguation across builders)
 //   - the caller's file:line (captured via runtime.Callers at the offending
-//     Property or EdgeTo call)
+//     Property, EdgeTo or EdgeWith call)
 func (b *SchemaBuilder) Build() (RawInstance, error) {
 	if err := b.firstErrorWithCount(); err != nil {
 		return RawInstance{}, err
@@ -315,11 +343,11 @@ func (b *SchemaBuilder) Build() (RawInstance, error) {
 		if st.rel.IsMany() {
 			arr := make([]any, len(st.targets))
 			for i, t := range st.targets {
-				arr[i] = t
+				arr[i] = maps.Clone(t)
 			}
 			out[st.rel.FieldName()] = arr
 		} else if len(st.targets) == 1 {
-			out[st.rel.FieldName()] = st.targets[0]
+			out[st.rel.FieldName()] = maps.Clone(st.targets[0])
 		}
 	}
 

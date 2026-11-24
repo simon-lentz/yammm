@@ -150,7 +150,7 @@ type RawInstance struct {
 
 ### Build RawInstances with SchemaBuilder
 
-`instance.BuilderFor(s, typeName)` returns a `*SchemaBuilder` that constructs `RawInstance` values while enforcing schema shape at build time — unknown properties, unknown relations, cardinality mismatches, and edge-shape mismatches surface from `Build()` with the offending call site's file:line. Errors on a zero schema, an unknown type, or an abstract type. The builder covers properties and property-less association edges; instances carrying edge properties or composed children are constructed from raw data instead.
+`instance.BuilderFor(s, typeName)` returns a `*SchemaBuilder` that constructs `RawInstance` values while enforcing schema shape at build time — unknown properties, unknown relations, cardinality mismatches, and edge-shape mismatches surface from `Build()` with the offending call site's file:line. Errors on a zero schema, an unknown type, or an abstract type. The builder covers properties and association edges, `EdgeWith(name, props, targetKey...)` for an edge with properties; instances carrying composed children are constructed from raw data instead.
 
 ```go
 b, err := instance.BuilderFor(s, "Person")
