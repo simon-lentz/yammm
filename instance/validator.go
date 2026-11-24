@@ -526,13 +526,17 @@ func (v *Validator) scopeOf(inst ValidInstance) immutable.Properties {
 //     properties, both read real values.
 //   - An ASSOCIATION's target is a REFERENCE. The instance holds the foreign
 //     key, never the target's row, so the entry is the single target key, or
-//     the list of target keys for a many association.
+//     the list of target keys for a many association, ordered as Sort orders them.
 //     Presence and cardinality are answerable; the target's properties are not
 //     in this instance to answer with.
 //
-// A relation with no value is absent from the map, so it evaluates to nil and
-// the `!= nil` idiom means what it says. inst's type is in v's schema, since v
-// built inst.
+// The entries are a function of the records a graph holds, so a root a merge
+// grew and a root the snapshot reader rebuilds read as the record that wrote
+// them: a graph holds an association's targets as a set and keeps no record of
+// an optional listing written empty. So a many relation is a list, empty when
+// it names nothing, and a single-valued relation with no value is absent from
+// the map and evaluates to nil. inst's type is in v's schema, since v built
+// inst.
 func (v *Validator) invariantScope(inst ValidInstance) map[string]any {
 	props := inst.Properties()
 	scope := make(map[string]any, props.Len()+len(inst.edges)+len(inst.composed))
@@ -542,20 +546,23 @@ func (v *Validator) invariantScope(inst ValidInstance) map[string]any {
 	typ := inst.typ
 
 	for rel := range typ.AllAssociations() {
-		edge, ok := inst.edges[rel.Name()]
-		if !ok {
-			continue
-		}
-		keys := make([]any, 0, len(edge.targets))
-		for _, t := range edge.targets {
+		var keys []any
+		for t := range inst.edges[rel.Name()].Targets() {
 			keys = append(keys, keyValue(t.TargetKey()))
 		}
+		if len(keys) == 0 && !rel.IsMany() {
+			continue
+		}
+		if keys == nil {
+			keys = []any{}
+		}
+		slices.SortFunc(keys, keyOrder)
 		scope[rel.Name()] = relationValue(rel, keys)
 	}
 
 	for rel := range typ.AllCompositions() {
-		children, ok := inst.composed[rel.Name()]
-		if !ok {
+		children := inst.composed[rel.Name()]
+		if len(children) == 0 && !rel.IsMany() {
 			continue
 		}
 		scope[rel.Name()] = v.composedScopeValue(rel, children)
@@ -593,6 +600,17 @@ func relationValue(rel schema.Relation, entries []any) any {
 		return nil
 	}
 	return entries[0]
+}
+
+// keyOrder orders two target keys as the DSL's Sort orders them. A key's
+// components are values the total order ranks, so it panics only on a defect,
+// which the invariant pass recovers as an internal error.
+func keyOrder(a, b any) int {
+	c, err := value.Order(a, b)
+	if err != nil {
+		panic("instance: a target key the total order cannot rank: " + err.Error())
+	}
+	return c
 }
 
 // keyValue renders a target key for the invariant scope: a single-component key

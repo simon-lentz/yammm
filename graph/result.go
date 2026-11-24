@@ -13,7 +13,10 @@ import (
 // Values reports that the snapshot holds at least one instance and that
 // every root and composed child entered through the validator — an empty
 // built snapshot attests false, so a vacuous truth cannot be re-marshalled as
-// its attestation. Rejected duplicates' payloads are outside the claim.
+// its attestation. Rejected duplicates' payloads are outside the claim. A root
+// [Graph.AddOrMerge] grew entered through the validator, but only [Graph.Check]
+// in the graph, and a reader's revalidation after it, judge the records its
+// listings hold together, so the claim covers it whether or not Check ran.
 // Associations reports that no unresolved record is Required.
 //
 // On a built snapshot both dimensions are computed. On a loaded snapshot

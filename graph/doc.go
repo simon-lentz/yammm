@@ -31,9 +31,10 @@
 //	    // A refused instance (a duplicate PK, a keyless part read out of a composition, ...; see Error Handling)
 //	}
 //
-//	// Check completeness
+//	// Check required associations and each grown root's invariants
 //	if err := g.Check(ctx); err != nil {
-//	    // Required associations are missing, or ctx was cancelled
+//	    // Required associations are missing, a root a merge grew draws a
+//	    // validator failure such as E_INVARIANT_FAIL, or ctx was cancelled
 //	}
 //
 //	// Get snapshot for inspection
@@ -271,6 +272,22 @@
 //
 // An incoming instance carrying composed children is not merged: it is refused
 // as [Graph.Add] refuses a duplicate, with a [Duplicate] and E_DUPLICATE_PK.
+//
+// A validator judges each listing alone, so a merge can grow a root past an
+// invariant no listing breaks: two listings of one vendor each pass
+// `VENDORS -> Len <= 1`, and the root holds two. An invariant is a fact of the
+// held root, so [Graph.Check] judges each root a merge grew whose type declares
+// or inherits one. It rebuilds the root's held form as the snapshot package's revalidation
+// does, runs it through the validator the reader would choose, and returns what
+// that draws, each issue carrying the root's type name and key. A lower bound
+// needs no such check: the validator refuses a listing under it before any
+// graph sees it. Until Check runs, a grown root stands unjudged: a caller that
+// never calls Check writes it under the Values attestation. Check judges only
+// the roots a merge in this graph grew: a root seeded by [NewFromSnapshot]
+// stands on the seed's claim, one an earlier graph grew included, until a
+// merge in this graph grows it, and
+// [github.com/simon-lentz/yammm/snapshot.WithRevalidation] judges a loaded
+// document's roots. Each call validates each such root again.
 // A merge finds the held root's records through an index by source. The first
 // call to reach these rules builds it, whether that call commits or is
 // refused, so a graph keeps none until an AddOrMerge without composed children
@@ -362,7 +379,8 @@
 // one beside whether it merged. A refusal is a *[diag.ResultError] holding each
 // failure as an issue with a stable code: read it with errors.AsType, and test
 // it for a code with errors.Is. A cancellation is a Fatal E_CONTEXT_CANCELLED,
-// every other refusal an Error. The graph draws no issue below failure severity,
+// and a validator defect [Graph.Check] meets on a grown root a Fatal
+// E_INTERNAL; every other refusal is an Error. The graph draws no issue below failure severity,
 // so its calls take no warnings callback.
 //
 // Programmer errors panic: a nil receiver at a method that adds or checks, a
@@ -376,7 +394,7 @@
 // [Graph.Add] emits the following. The first two judge a root's type in the
 // order listed, and a type breaking both draws the first:
 //
-//   - E_GRAPH_MISSING_PK: the type declares no primary key, so the root is a
+//   - E_GRAPH_MISSING_PK: the type declares or inherits no primary key, so the root is a
 //     keyless part read out of [instance.ValidInstance.Composed]
 //   - E_GRAPH_INVALID_COMPOSITION: the root is a keyed part read out of
 //     [instance.ValidInstance.Composed]
@@ -389,7 +407,9 @@
 // carrying composed children, and E_GRAPH_CARDINALITY for a merge that would
 // give a (one) association a second target.
 //
-// [Graph.Check] emits E_UNRESOLVED_REQUIRED and E_CONTEXT_CANCELLED.
+// [Graph.Check] emits E_UNRESOLVED_REQUIRED, E_CONTEXT_CANCELLED, each failure
+// a validator draws on a root a merge grew, such as E_INVARIANT_FAIL (Merge on
+// a Duplicate Key), and E_INTERNAL for a validator defect.
 //
 // The snapshot package's reader reports a broken fact under its own codes, such as
 // E_SNAPSHOT_DANGLING_REFERENCE and E_SNAPSHOT_INVALID_ROOT, or under a graph

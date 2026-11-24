@@ -37,10 +37,11 @@
 // No option excuses them, and [Verify] and [Stat] run the same checks; a
 // schema-less read judges none that needs a schema.
 //
-// What a .ys can still hold is data a validated graph would not: an instance
-// the validator refuses for its values rather than its structure, such as a
-// property outside its constraint, a required property absent, or an
-// invariant violation. [WithRevalidation] is the option that reports them —
+// What a .ys can still hold is data a validator would refuse for its values
+// rather than its structure, such as a property outside its constraint, a
+// required property absent, or an invariant violation. A root merges grew can
+// hold the last from validator output alone: [graph.Graph.Check] reports it and
+// changes no record. [WithRevalidation] is the option that reports them —
 // the real validator, run at load time over each root the structural checks
 // left whole, as the option's doc defines it.
 // Duplicates and unresolved records ride the document as data

@@ -155,7 +155,7 @@ The all-or-nothing contract is unchanged: any error still yields a zero schema.
 | `E_MISSING_REQUIRED` | Required property is missing |
 | `E_UNKNOWN_FIELD` | Unexpected field in instance data, a member's name spelled in another case included |
 | `E_CONSTRAINT_FAIL` | A value fails its declared constraint |
-| `E_INVARIANT_FAIL` | Invariant expression evaluated to false |
+| `E_INVARIANT_FAIL` | Invariant expression evaluated to false, at validation or at `Graph.Check` on a root `Graph.AddOrMerge` grew |
 | `E_EVAL_ERROR` | Error during expression evaluation |
 | `E_MISSING_FK_TARGET` | An edge object holds none of its target's `_target_` foreign-key fields |
 | `E_PARTIAL_COMPOSITE_FK` | Partial composite foreign key |

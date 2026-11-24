@@ -18,8 +18,9 @@ import (
 // nothing else of it. It reports whether it merged; a merge records no
 // [Duplicate], and merged is false whenever err is not nil. The package doc's
 // Merge on a Duplicate Key section states the rules, among them the
-// E_GRAPH_CARDINALITY refusal of a second (one) target. It panics as
-// [Graph.Add] does, naming AddOrMerge.
+// E_GRAPH_CARDINALITY refusal of a second (one) target; [Graph.Check] judges
+// the invariants of each root a merge grew. It panics as [Graph.Add] does,
+// naming AddOrMerge.
 func (g *Graph) AddOrMerge(ctx context.Context, inst instance.ValidInstance) (merged bool, err error) {
 	return g.add(ctx, inst, "graph.AddOrMerge", true)
 }

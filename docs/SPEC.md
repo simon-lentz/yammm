@@ -1288,6 +1288,8 @@ Both diagnostics name the invariant in the `invariant` detail, beside the `type`
 
 An instance that draws any other error runs no invariant. The validator evaluates invariants last, and only when the instance's properties and relations drew no error.
 
+A validator judges one record. `graph.Graph.AddOrMerge` can give a held root association records from several records, so `graph.Graph.Check` runs each root a merge grew through a validator again when its type declares an invariant. Each issue that run draws also carries the root's `pk` detail.
+
 ### Expression Grammar
 
 Expressions support a rich set of operators and built-in functions.
@@ -1554,7 +1556,7 @@ relation evaluates to depends on where its data lives:
   `ITEMS -> All |$i| { $i.qty > 0 }` and `ITEMS[0].qty` all read real values.
 - An **association**'s target is a reference. The instance holds the foreign
   key, not the target's row, so the relation evaluates to the target key — a
-  list for a `many` association, the single key otherwise. A key reads as the
+  list for a `many` association, ordered as `Sort` orders them, the single key otherwise. A key reads as the
   target's primary-key property, which is a string for every key kind, and a
   composite key as a list of those strings: `PLACED_BY -> Upper`,
   `PLACED_BY + "!"` and `REGION -> Len == 2` are typed as the values they
@@ -1562,8 +1564,14 @@ relation evaluates to depends on where its data lives:
   type's properties are not in this instance to answer with, and reaching for
   one is rejected at load (`E_INVALID_INVARIANT`).
 
-A relation with no value evaluates to `nil`, so the null-guard idioms apply to a
-relation exactly as they do to a property.
+A `many` relation evaluates to a list, empty when it holds nothing, whether the
+data wrote an empty list or left the field out: `LINES -> Len > 0` is its
+presence test, and `LINES != nil` is always true. A single-valued relation with
+no value evaluates to `nil`, so the null-guard idioms apply to it exactly as
+they do to a property. A relation reads only what a graph holds of it, an
+association's targets as a set, so an invariant judges a root a merge grew, or
+one the snapshot reader rebuilt, as it would judge one record that holds all of
+it.
 
 ```yammm-schema
 schema "orders"
@@ -1746,7 +1754,7 @@ type Person {
 
 - The evaluator only works against the in-memory instance graph
 - There is no implicit database lookup. An association reads as its target key, so no navigation passes through one; a composition reads as its children, whose members an expression reads in turn, at any depth
-- Evaluation errors surface as error-severity diagnostics, among them a type error, an integer division or modulo by zero, and an integer overflow; validation continues collecting further issues. A named variable that nothing binds is a load-time error, not an evaluation error, and so is a reference to an undeclared property wherever the checker knows the type it reads from. A declared member the instance leaves unset evaluates to `nil`, read by its bare name or as a `$` variable alike
+- Evaluation errors surface as error-severity diagnostics, among them a type error, an integer division or modulo by zero, and an integer overflow; validation continues collecting further issues. A named variable that nothing binds is a load-time error, not an evaluation error, and so is a reference to an undeclared property wherever the checker knows the type it reads from. A declared property or single-valued relation the instance leaves unset evaluates to `nil`, and a `many` relation to the empty list, read by its bare name or as a `$` variable alike
 - A genuine panic is recovered as a Fatal `E_INTERNAL` carrying a Go stack trace, which stops that instance's validation. Division by zero is not a panic — see Division semantics
 
 ### Evaluation Model

@@ -12,8 +12,8 @@ import (
 	"github.com/simon-lentz/yammm/schema"
 )
 
-// relationInvariantSrc carries one association and one composition, both
-// optional, so an instance can omit either and still be valid.
+// relationInvariantSrc carries a single and a many association and a many
+// composition, all optional, so an instance can omit any and still be valid.
 const relationInvariantSrc = `schema "x"
 
 type Company { id String primary }
@@ -26,6 +26,7 @@ part type Item {
 type Order {
     id String primary
     --> WORKS_AT (_:one) Company
+    --> SUPPLIERS (_:many) Company
     *-> ITEMS (_:many) Item
     ! "probe" %EXPR%
 }
@@ -118,18 +119,15 @@ func TestInvariantRelationScope_CompositionLambdasReadChildProperties(t *testing
 	}
 }
 
-// An absent relation is nil, so the null-guard idiom SPEC documents works for a
-// relation exactly as it does for a property.
-func TestInvariantRelationScope_AbsentRelationIsNil(t *testing.T) {
+// An absent single-valued relation is nil, so the null-guard idiom SPEC
+// documents works for it exactly as it does for a property.
+func TestInvariantRelationScope_AbsentSingleRelationIsNil(t *testing.T) {
 	for _, tc := range []struct {
 		name string
 		inv  string
 	}{
 		{"absent association", `WORKS_AT == nil`},
-		{"absent composition", `ITEMS == nil`},
-		{"absent composition has no length", `ITEMS -> Len == 0`},
 		{"absent association by a variable", `$WORKS_AT == nil`},
-		{"absent composition by a variable", `$ITEMS == nil`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if ok, detail := relationInvariant(t, tc.inv, map[string]any{}); !ok {
@@ -139,23 +137,44 @@ func TestInvariantRelationScope_AbsentRelationIsNil(t *testing.T) {
 	}
 }
 
-// An empty composition is an empty list, not an absent one: the null guard
-// tells the two apart.
-func TestInvariantRelationScope_EmptyCompositionIsNotNil(t *testing.T) {
-	for _, tc := range []struct {
-		inv  string
-		want bool
+// A many relation is a list whether the data left it out or wrote it empty, as
+// a graph holds no record of either, so a root rebuilt from the graph reads as
+// the record that wrote it.
+func TestInvariantRelationScope_AManyRelationIsAList(t *testing.T) {
+	for _, data := range []struct {
+		name  string
+		props map[string]any
 	}{
-		{`ITEMS != nil`, true},
-		{`ITEMS == nil`, false},
-		{`ITEMS -> IsNil`, false},
-		{`ITEMS -> Len == 0`, true},
+		{"left out", map[string]any{}},
+		{"written empty", map[string]any{"suppliers": []any{}, "items": []any{}}},
 	} {
-		t.Run(tc.inv, func(t *testing.T) {
-			if ok, detail := relationInvariant(t, tc.inv, map[string]any{"items": []any{}}); ok != tc.want {
-				t.Errorf("%s = %v, want %v: %s", tc.inv, ok, tc.want, detail)
-			}
-		})
+		for _, inv := range []string{
+			`SUPPLIERS != nil`, `SUPPLIERS -> Len == 0`, `$SUPPLIERS != nil`,
+			`ITEMS != nil`, `ITEMS -> Len == 0`, `$ITEMS != nil`,
+			`(SUPPLIERS -> IsNil) == false`, `(ITEMS -> IsNil) == false`,
+		} {
+			t.Run(data.name+"/"+inv, func(t *testing.T) {
+				if ok, detail := relationInvariant(t, inv, data.props); !ok {
+					t.Errorf("%s: %s", inv, detail)
+				}
+			})
+		}
+	}
+}
+
+// A many association reads its target keys as Sort orders them, never in the
+// order a listing wrote them: a graph holds the targets as a set.
+func TestInvariantRelationScope_AManyAssociationReadsKeysAsSortOrdersThem(t *testing.T) {
+	for _, ids := range [][]string{{"c2", "c1"}, {"Acme Corp", "Acme"}} {
+		var listing []any
+		for _, id := range ids {
+			listing = append(listing, map[string]any{"_target_id": id})
+		}
+		props := map[string]any{"suppliers": listing}
+		inv := `SUPPLIERS == (SUPPLIERS -> Sort) && SUPPLIERS[0] == "` + ids[1] + `"`
+		if ok, detail := relationInvariant(t, inv, props); !ok {
+			t.Errorf("listing %v: %s", ids, detail)
+		}
 	}
 }
 

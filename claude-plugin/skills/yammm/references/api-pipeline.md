@@ -198,15 +198,16 @@ for _, valid := range validInstances {
 
 `Add` panics on an instance another schema load validated, so build the validator and the graph from one `schema.Schema`. One text loaded twice is two loads. A validator over a member of the import closure shares the entry schema's load, so `Add` adds an instance of any type of the closure that can hold a root: concrete, not a part, and keyed, one the entry schema reaches only through another import included.
 
-### Check Graph Completeness
+### Check the Graph
 
 ```go
-if err := g.Check(ctx); errors.Is(err, diag.E_UNRESOLVED_REQUIRED) {
-    // required associations not satisfied
+if err := g.Check(ctx); err != nil {
+    // errors.Is(err, diag.E_UNRESOLVED_REQUIRED): required associations not satisfied
+    // errors.Is(err, diag.E_INVARIANT_FAIL): a root AddOrMerge grew breaks an invariant
 }
 ```
 
-`Check()` verifies that all required associations (`(one)`, `(one:many)`) have resolved targets. Call it after all instances are added.
+`Check()` verifies that all required associations (`(one)`, `(one:one)`, `(one:many)`) have resolved targets, and judges each root `AddOrMerge` grew against its type's invariants (`E_INVARIANT_FAIL`, with the root's `pk` detail): a validator judges each listing alone, so merged listings can break an invariant none breaks by itself. It judges only roots a merge in this graph grew, so a seeded root only once a merge grows it here. Call it after all instances are added.
 
 ### Create a Snapshot
 

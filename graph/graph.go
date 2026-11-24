@@ -47,6 +47,14 @@ type Graph struct {
 	// attestValues is the Values attestation: true for a new graph, whose every
 	// record comes from a validator, and a seeded graph's loaded header's claim.
 	attestValues bool
+
+	// merged holds each root a merge grew whose type declares an invariant,
+	// which [Graph.Check] judges, and judges the validator and name each such
+	// root's type is judged by. judge is the validator over the graph's schema,
+	// built at the first merge that needs it.
+	merged map[Instance]struct{}
+	judges map[schema.TypeID]judgeTarget
+	judge  *instance.Validator
 }
 
 // pendingKey identifies a pending edge by its target.
@@ -176,6 +184,9 @@ func (g *Graph) add(ctx context.Context, inst instance.ValidInstance, name strin
 					return false, opCollector.Err()
 				}
 				g.commitMerge(existing, plan)
+				if len(plan) > 0 {
+					g.noteMerged(typ, existing)
+				}
 				return true, nil
 			}
 			// Duplicate.Instance is documented as carrying no composed
@@ -224,16 +235,21 @@ func (g *Graph) add(ctx context.Context, inst instance.ValidInstance, name strin
 	return false, nil
 }
 
-// Check validates graph completeness.
+// Check validates graph completeness, and judges each root a merge grew whose
+// type carries an invariant.
 //
 // Check verifies that all required associations have resolved targets.
-// Optional associations may remain unresolved without error.
+// Optional associations may remain unresolved without error. It also runs each
+// root [Graph.AddOrMerge] grew, whose type declares or inherits an invariant, through a
+// validator, as the snapshot reader's revalidation does.
 //
-// An incomplete graph returns a *[diag.ResultError] holding one
+// A failing graph returns a *[diag.ResultError] holding one
 // E_UNRESOLVED_REQUIRED for each target of a required association that is not
-// in the graph, and one for each required association whose field is absent or
-// whose array is empty; a cancelled ctx
-// returns a Fatal E_CONTEXT_CANCELLED.
+// in the graph, one for each required association whose field is absent or
+// whose array is empty, and each failure a grown root draws, such as
+// E_INVARIANT_FAIL, carrying the root's key; a cancelled ctx returns a Fatal
+// E_CONTEXT_CANCELLED. Each call validates each grown root again, and a root
+// seeded by [NewFromSnapshot] is judged only once a merge in this graph grows it.
 func (g *Graph) Check(ctx context.Context) error {
 	if g == nil {
 		panic("graph.Check: nil *Graph receiver")
@@ -253,6 +269,10 @@ func (g *Graph) Check(ctx context.Context) error {
 
 	g.mu.RLock()
 	defer g.mu.RUnlock()
+
+	if !g.judgeMerged(ctx, opCollector) {
+		return opCollector.Err()
+	}
 
 	for _, set := range g.pending {
 		for pend := range set {
