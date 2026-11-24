@@ -57,16 +57,10 @@ func parse(ctx context.Context, source location.SourceID, data []byte, positions
 	collector := diag.NewCollector(diag.NoLimit)
 	result := make(map[string]Batch)
 
-	// jsonc tolerates comments and trailing commas, writing one byte per
-	// comment byte, so an offset into the rewritten buffer is an offset into
-	// data once the mark's length is added back — but a column must be counted
-	// over data, where a multibyte rune in a comment still occupies one column.
-	//
-	// The mapping is not a length guarantee: a block comment the input ends
-	// inside, with nothing after its "/*", gains a byte, so the buffer can be
-	// one longer than data. That byte is a space at the buffer offset where data
-	// ends, where only a document that ends too soon is placed; spanAt
-	// range-checks every offset against data all the same.
+	// jsonc tolerates comments and trailing commas, writing one byte per input
+	// byte, so an offset into the rewritten buffer is an offset into data once
+	// the mark's length is added back — but a column must be counted over data,
+	// where a multibyte rune in a comment still occupies one column.
 	trimmed := bytes.TrimPrefix(data, byteOrderMark)
 	pc := &parseContext{
 		source:    source,
@@ -251,19 +245,19 @@ func (pc *parseContext) faultSpan() location.Span {
 
 // trailingFrom returns the offset of the first byte at or after off in src that
 // is neither JSON white space nor inside a closed comment, or len(src). A line
-// comment runs to a line feed and a block comment to its "*/", as jsonc reads
-// them; an unterminated block comment is content, and starts at its "/*".
+// comment runs to a carriage return or a line feed and a block comment to its
+// "*/", as jsonc reads them; an unterminated block comment is content, and starts at its "/*".
 func trailingFrom(src []byte, off int) int {
 	for off < len(src) {
 		switch rest := src[off:]; {
 		case rest[0] == ' ' || rest[0] == '\t' || rest[0] == '\r' || rest[0] == '\n':
 			off++
 		case bytes.HasPrefix(rest, []byte("//")):
-			lf := bytes.IndexByte(rest, '\n')
-			if lf < 0 {
+			eol := bytes.IndexAny(rest, "\r\n")
+			if eol < 0 {
 				return len(src)
 			}
-			off += lf
+			off += eol
 		case bytes.HasPrefix(rest, []byte("/*")):
 			end := bytes.Index(rest[2:], []byte("*/"))
 			if end < 0 {

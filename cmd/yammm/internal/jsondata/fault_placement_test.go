@@ -98,11 +98,13 @@ func TestParse_PlacesAFaultAtTheOffendingByte(t *testing.T) {
 		{"a fault after an upper-case hex escape", `{"A": ["\u00FF", x]}`, "error reading array element", 17, 1, 18},
 		{"a fault after a carriage return", "{\"A\": [\r1x]}", "error reading array element", 9, 2, 2},
 		{"a fault after a tab", "{\"A\": [\t1x]}", "error reading array element", 9, 1, 10},
+		{"a fault after a line comment a carriage return ends", "{\"A\": [1, // c\rx]}", "error reading array element", 15, 2, 1},
 
 		// The root value.
 		{"a bare word at the root", `  x`, "invalid JSON", 2, 1, 3},
 		{"a word with a fault at the root", `trux`, "invalid JSON", 3, 1, 4},
 		{"a bare word after a comment", "// header\nx", "invalid JSON", 10, 2, 1},
+		{"a bare word after a comment a carriage return ends", "// header\rx", "invalid JSON", 10, 2, 1},
 		{"a second byte order mark", "\uFEFF\uFEFF{}", "invalid JSON", 3, 1, 2},
 		{"an array root after blank lines", "\n\n  [1]", "expected object at root", 4, 3, 3},
 		{"an array root after a comment", "// header\n[1]", "expected object at root", 10, 2, 1},

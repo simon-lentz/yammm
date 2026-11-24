@@ -99,7 +99,9 @@ func TestGenHelp_MarksEachCypherFlagAndItsDefault(t *testing.T) {
 	rows := map[string]string{}
 	for line := range strings.SplitSeq(helpText(t, "gen"), "\n") {
 		if row := strings.TrimSpace(line); strings.HasPrefix(row, "--") {
-			rows[strings.Fields(row)[0]] = row
+			// A bool flag's help reads "--name[=true|false]".
+			name, _, _ := strings.Cut(strings.Fields(row)[0], "[")
+			rows[name] = row
 		}
 	}
 	for _, flag := range []string{"--edition", "--node-keys", "--prefix", "--separator", "--type-constraints"} {
