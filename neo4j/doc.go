@@ -427,6 +427,6 @@
 // # Dependencies
 //
 //	neo4j  ──imports──▶  schema, schema/cypher, graph, immutable, diag,
-//	                     internal/mapping, internal/value,
+//	                     internal/mapping, internal/typeorder, internal/value,
 //	                     github.com/neo4j/neo4j-go-driver/v6/neo4j/dbtype
 package neo4j

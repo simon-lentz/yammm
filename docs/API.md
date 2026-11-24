@@ -568,7 +568,7 @@ The `Snapshot` type provides read access to graph state, and no method of it cha
 | Method | Description |
 | ------ | ----------- |
 | `Schema()` | The schema used for validation |
-| `Types()` | The type identities the snapshot denotes (`[]schema.TypeID`, sorted by TypeID) |
+| `Types()` | The type identities the snapshot denotes (`[]schema.TypeID`, sorted by schema name, then type name) |
 | `InstancesOf(typeID)` | Iterator over the instances of a type (sorted by primary key) |
 | `Instances()` | Iterator over all **root** instances in deterministic order. Composed children are not yielded — walk `Instance.ComposedRelations` and `Instance.Composed` for the subtree |
 | `InstanceByKey(typeID, key)` | O(1) lookup by type identity and primary key. The key is a `FormatKey` string, tried as spelled, then with each Timestamp, Date or UUID component canonicalized under the type's key constraints. One instant at two offsets is two addresses |
@@ -587,11 +587,13 @@ The `Snapshot` type provides read access to graph state, and no method of it cha
 ### Ordering Guarantees
 
 - `Schema.Types()` and `Schema.DataTypes()`: Declaration order. v0.21.1 yielded name order, so a consumer that writes generated output from either sorts it first.
-- `Snapshot.Types()`: Lexicographic by the `TypeID`'s `String`
+- `Snapshot.Types()`: By schema name, then type name. v0.21.1 sorted by the `TypeID`'s `String`, which holds the source path, so its order moved when one schema text was loaded from another directory.
 - `Snapshot.InstancesOf()`: Lexicographic by primary key
 - `Snapshot.Edges()`: Lexicographic tuple (sourceType, sourceKey, relation, targetType, targetKey); no two edges tie, since a graph holds one edge per source, association and target
-- `Snapshot.Duplicates()`: Lexicographic by (`TypeID`, primary key), then the rejected instance's properties, and finally its provenance
+- `Snapshot.Duplicates()`: Lexicographic by (type, primary key), then the rejected instance's properties, and finally its provenance
 - `Snapshot.Unresolved()`: Lexicographic by (sourceType, sourceKey, relation, targetType, targetKey); no two records tie, since a graph holds one record per source, association and target
+
+Every arm that names a type compares the declaring schema's name, then the type name, so no `Snapshot` order and no byte `snapshot.Marshal` writes depends on where the schema files were loaded from.
 
 Types are identified by `schema.TypeID`, never by name. A name is a rendering of an identity by `schema.TagForm`: bare for a local type, alias-qualified for a directly imported one, and `schema#Name` for a type the schema reaches only through an intermediate import, where `schema` is the declaring schema's name. Within one load each rendering denotes one type, since a load refuses two schemas of one name; `Schema.ResolveTypeName` resolves the first two forms alone. Use `schema.TagForm(snap.Schema(), id)` where a name is wanted for output.
 
@@ -776,7 +778,7 @@ type Info struct {
 
 `IntegrityStatus` is a `uint8` kind whose zero value names no status; `String` returns `"ok"` or `"mismatch"`, and `IntegrityStatus(n)` for any other value, the zero among them. A header that holds no hash is a mismatch. Neither struct carries a file size: a size is not knowable from the reader `ReadHeader` takes, and `ScanEntry.FileSize` carries the size on disk for a scanned file.
 
-`snapshot.TypeRef{Schema, Name string}` is the schema-less display surface: `Stat` and `ReadHeader` run without an import closure to resolve against, so each type is reported as the identity the document states, its declaring schema's name and its own, and two same-named types in different schemas stay distinct — both in `Types` and as `InstanceCounts` keys. `TypeRef` is comparable, and its `String()` and `MarshalText()` render `schema#name`. The `#` keeps that display form visibly distinct from `schema.TypeID.String()`'s `path:name`, which names a source path. The types table and the instance groups sort by schema name, then type name; the diagnostics section keeps `Snapshot.Duplicates` and `Snapshot.Unresolved` order, which sorts by `TypeID.String()`.
+`snapshot.TypeRef{Schema, Name string}` is the schema-less display surface: `Stat` and `ReadHeader` run without an import closure to resolve against, so each type is reported as the identity the document states, its declaring schema's name and its own, and two same-named types in different schemas stay distinct — both in `Types` and as `InstanceCounts` keys. `TypeRef` is comparable, and its `String()` and `MarshalText()` render `schema#name`. The `#` keeps that display form visibly distinct from `schema.TypeID.String()`'s `path:name`, which names a source path. The types table and the instance groups sort by schema name, then type name; the diagnostics section keeps `Snapshot.Duplicates` and `Snapshot.Unresolved` order, which compares types the same way.
 
 `TypeRef` renders and does not parse. It carries no `UnmarshalText`, so `Info` and `Header` serialize one way, and nothing reads them back. `yammm snapshot info --json` does not write these structs: it owns its wire shape and emits snake_case keys, carrying each `TypeRef` through as the same `schema#name` string. This is a decision, not a gap — the surfaces are a report projection, the in-process way to scan many documents is `ScanDir`, which hands back `Header` values directly, and `schema#name` is injective over the values yammm produces, whose schema and type names hold no `#`, but not over an arbitrary `TypeRef`. Adding `UnmarshalText` is additive and stays available if a consumer needs it.
 

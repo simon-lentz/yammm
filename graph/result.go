@@ -5,6 +5,7 @@ import (
 	"iter"
 	"slices"
 
+	"github.com/simon-lentz/yammm/internal/typeorder"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -49,8 +50,8 @@ type Attestation struct {
 // Every collection accessor produces deterministically sorted output
 // ([Snapshot.EdgesFrom] in [Snapshot.Edges]' order), Add() call order and
 // concurrency move only records that tie in every arm, and every ordering below
-// compares types by TypeID:
-//   - [Snapshot.Types]: lexicographic by the TypeID's String
+// compares types by schema name, then type name:
+//   - [Snapshot.Types]: by schema name, then type name
 //   - [Snapshot.InstancesOf]: lexicographic by primary key string
 //   - [Snapshot.Edges]: (sourceType, sourceKey, relation, targetType,
 //     targetKey)
@@ -129,9 +130,9 @@ func (r Snapshot) Schema() schema.Schema {
 	return r.schema
 }
 
-// Types returns every type the snapshot denotes, ordered by TypeID: each
-// root's type, and each type a document holds an instances group for with no
-// item. A types table row with no such group denotes no type.
+// Types returns every type the snapshot denotes, ordered by schema name, then
+// type name: each root's type, and each type a document holds an instances
+// group for with no item. A types table row with no such group denotes no type.
 // Every one can hold a root under the package doc's "Root type eligibility";
 // a composed child's type is a part type and is never denoted, so walk
 // [Instance.ComposedRelations] for a subtree. The slice is a copy, and a [schema.TypeID] is a value.
@@ -158,8 +159,8 @@ func (r Snapshot) InstancesOf(id schema.TypeID) iter.Seq[Instance] {
 }
 
 // Instances returns an iterator over every root instance in the graph, in
-// deterministic order: types by identity, instances within each type by
-// primary key. The order is stable across calls.
+// deterministic order: types in [Snapshot.Types] order, instances within each
+// type by primary key. The order is stable across calls.
 //
 // Composed children are not yielded. For the subtree beneath a root, walk
 // [Instance.ComposedRelations] and [Instance.Composed].
@@ -204,7 +205,7 @@ func (r Snapshot) InstanceByKey(id schema.TypeID, key string) (Instance, bool) {
 // Edges returns all resolved relationship edges in sorted order.
 //
 // Edges are sorted by the tuple (sourceType, sourceKey, relation, targetType,
-// targetKey), comparing types by identity.
+// targetKey), comparing types by schema name, then type name.
 func (r Snapshot) Edges() iter.Seq[Edge] {
 	// One return lets the compiler resolve the closure at the call, so a range over it keeps its variables off the heap.
 	var edges []Edge
@@ -302,11 +303,10 @@ func newSnapshot(
 	unresolved []UnresolvedEdge,
 	attestation *Attestation,
 ) Snapshot {
+	order := typeorder.New(s)
 	// A repeated identity would make every instance of that type appear twice
 	// in Instances and twice in the persisted document.
-	slices.SortFunc(types, func(a, b schema.TypeID) int {
-		return cmp.Compare(a.String(), b.String())
-	})
+	slices.SortFunc(types, order.Compare)
 	types = slices.CompactFunc(types, func(a, b schema.TypeID) bool { return a == b })
 
 	for _, insts := range instances {
@@ -314,9 +314,9 @@ func newSnapshot(
 			return cmp.Compare(a.PrimaryKey().String(), b.PrimaryKey().String())
 		})
 	}
-	slices.SortFunc(edges, compareEdges)
-	slices.SortFunc(duplicates, compareDuplicates)
-	slices.SortFunc(unresolved, compareUnresolved)
+	slices.SortFunc(edges, func(a, b Edge) int { return compareEdges(order, a, b) })
+	slices.SortFunc(duplicates, func(a, b Duplicate) int { return compareDuplicates(order, a, b) })
+	slices.SortFunc(unresolved, func(a, b UnresolvedEdge) int { return compareUnresolved(order, a, b) })
 
 	snap := &snapshotState{
 		schema:        s,

@@ -8,6 +8,7 @@ import (
 	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/instance"
 	"github.com/simon-lentz/yammm/internal/snapparts"
+	"github.com/simon-lentz/yammm/internal/typeorder"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -140,10 +141,10 @@ func lookupInstance(index map[schema.TypeID]map[string]Instance, id schema.TypeI
 }
 
 // compareEdges orders edges by (sourceType, sourceKey, relation, targetType,
-// targetKey), comparing types by identity. A snapshot holds one edge per source,
+// targetKey), types as o orders them. A snapshot holds one edge per source,
 // association and target, so no two of its edges tie.
-func compareEdges(a, b Edge) int {
-	if c := cmp.Compare(a.source.typeID.String(), b.source.typeID.String()); c != 0 {
+func compareEdges(o typeorder.Order, a, b Edge) int {
+	if c := o.Compare(a.source.typeID, b.source.typeID); c != 0 {
 		return c
 	}
 	if c := cmp.Compare(a.source.primaryKey.String(), b.source.primaryKey.String()); c != 0 {
@@ -152,7 +153,7 @@ func compareEdges(a, b Edge) int {
 	if c := cmp.Compare(a.relation, b.relation); c != 0 {
 		return c
 	}
-	if c := cmp.Compare(a.target.typeID.String(), b.target.typeID.String()); c != 0 {
+	if c := o.Compare(a.target.typeID, b.target.typeID); c != 0 {
 		return c
 	}
 	return cmp.Compare(a.target.primaryKey.String(), b.target.primaryKey.String())
@@ -200,12 +201,13 @@ func renderValue(v immutable.Value) string {
 }
 
 // compareUnresolved orders unresolved records by (sourceType, sourceKey,
-// relation, targetType, targetKey). Graph.pending is a map, so the records
-// arrive in map-iteration order, and only a total order keeps Marshal
-// deterministic. It is total: a source holds one record per association and
-// target, and its one "absent" or "empty" record there carries the empty key.
-func compareUnresolved(a, b UnresolvedEdge) int {
-	if c := cmp.Compare(a.source.TypeID().String(), b.source.TypeID().String()); c != 0 {
+// relation, targetType, targetKey), types as o orders them. Graph.pending is a
+// map, so the records arrive in map-iteration order, and only a total order
+// keeps Marshal deterministic. It is total: a source holds one record per
+// association and target, and its one "absent" or "empty" record there carries
+// the empty key.
+func compareUnresolved(o typeorder.Order, a, b UnresolvedEdge) int {
+	if c := o.Compare(a.source.TypeID(), b.source.TypeID()); c != 0 {
 		return c
 	}
 	if c := cmp.Compare(a.source.PrimaryKey().String(), b.source.PrimaryKey().String()); c != 0 {
@@ -214,17 +216,17 @@ func compareUnresolved(a, b UnresolvedEdge) int {
 	if c := cmp.Compare(a.relation, b.relation); c != 0 {
 		return c
 	}
-	if c := cmp.Compare(a.targetType.String(), b.targetType.String()); c != 0 {
+	if c := o.Compare(a.targetType, b.targetType); c != 0 {
 		return c
 	}
 	return cmp.Compare(a.targetKey, b.targetKey)
 }
 
-// compareDuplicates orders duplicate records. Two rejections of one key differ
-// only in the instance they carry, so its properties and its provenance are the
-// last discriminators.
-func compareDuplicates(a, b Duplicate) int {
-	if c := cmp.Compare(a.instance.TypeID().String(), b.instance.TypeID().String()); c != 0 {
+// compareDuplicates orders duplicate records by type, as o orders types, then
+// key. Two rejections of one key differ only in the instance they carry, so its
+// properties and its provenance are the last discriminators.
+func compareDuplicates(o typeorder.Order, a, b Duplicate) int {
+	if c := o.Compare(a.instance.TypeID(), b.instance.TypeID()); c != 0 {
 		return c
 	}
 	if c := cmp.Compare(a.instance.PrimaryKey().String(), b.instance.PrimaryKey().String()); c != 0 {

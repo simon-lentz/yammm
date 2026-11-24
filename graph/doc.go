@@ -429,9 +429,10 @@
 // output. [Graph.Add] call order and concurrency move only records that tie in
 // every arm of the tuple:
 //
-//   - [Snapshot.Types]: lexicographic by the TypeID's String
+//   - [Snapshot.Types]: by schema name, then type name
 //   - [Snapshot.InstancesOf]: lexicographic by primary key string
-//   - [Snapshot.Instances]: types by identity, then each type's primary keys
+//   - [Snapshot.Instances]: types in [Snapshot.Types] order, then each type's
+//     primary keys
 //   - [Snapshot.Edges]: (sourceType, sourceKey, relation, targetType,
 //     targetKey)
 //   - [Snapshot.EdgesFrom]: the order of [Snapshot.Edges], over one source
@@ -440,6 +441,9 @@
 //   - [Snapshot.Unresolved]: (sourceType, sourceKey, relation, targetType,
 //     targetKey)
 //
+// Every arm that names a type compares the declaring schema's name, then the type
+// name. A [schema.TypeID] holds the schema's source path, so an order by it would
+// move when one schema text is loaded from another directory.
 // A graph holds one edge or record per source, association and target, so no two
 // edges and no two unresolved records tie. Each sort compares every arm its tuple
 // names. A properties arm compares a rendering that writes each value as %T|%#v,
@@ -456,5 +460,5 @@
 // # Dependencies
 //
 //	graph  ──imports──▶  schema, instance, diag, immutable
-//	graph  ──imports──▶  internal/value, internal/snapparts
+//	graph  ──imports──▶  internal/value, internal/snapparts, internal/typeorder
 package graph

@@ -1,6 +1,7 @@
 package schema
 
 import (
+	"cmp"
 	"fmt"
 	"maps"
 	"regexp"
@@ -75,7 +76,7 @@ func (k scalarKind) isNumber() bool {
 type staticType struct {
 	kind           staticKind
 	scalar         scalarKind  // kindScalar
-	typs           []Type      // kindInstance; ordered by identity, no duplicates
+	typs           []Type      // kindInstance; ordered as unionTypes orders them, no duplicates
 	elem           *staticType // kindList
 	viaAssociation bool
 }
@@ -130,7 +131,10 @@ func (t staticType) typeName() string {
 }
 
 // unionTypes is the set of both operands' types, deduplicated and ordered by
-// identity so a union built in either order is one value.
+// schema name, then type name, so a union built in either order is one value
+// and its rendering does not move with where the schema files were loaded from.
+// The source path decides only between two schemas of one name: invariants are
+// checked before a load refuses the second of them.
 func unionTypes(a, b []Type) []Type {
 	out := make([]Type, 0, len(a)+len(b))
 	out = append(out, a...)
@@ -139,7 +143,13 @@ func unionTypes(a, b []Type) []Type {
 			out = append(out, t)
 		}
 	}
-	slices.SortFunc(out, func(x, y Type) int { return strings.Compare(x.ID().String(), y.ID().String()) })
+	slices.SortFunc(out, func(x, y Type) int {
+		return cmp.Or(
+			cmp.Compare(x.SchemaName(), y.SchemaName()),
+			cmp.Compare(x.Name(), y.Name()),
+			cmp.Compare(x.ID().SchemaPath().String(), y.ID().SchemaPath().String()),
+		)
+	})
 	return out
 }
 

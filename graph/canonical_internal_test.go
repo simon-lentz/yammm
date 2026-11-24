@@ -125,10 +125,10 @@ func TestCompareDuplicates_LoadedRecordsOrderBySourceName(t *testing.T) {
 		inst := newInstance("T", id, key, immutable.WrapProperties(nil), prov, false)
 		return newDuplicate(inst, conflict)
 	}
-	if c := compareDuplicates(loaded("a.json"), loaded("b.json")); c >= 0 {
+	if c := compareDuplicates(nil, loaded("a.json"), loaded("b.json")); c >= 0 {
 		t.Errorf("a.json against b.json = %d; want negative, ordered by source name", c)
 	}
-	if c := compareDuplicates(loaded("a.json"), loaded("a.json")); c != 0 {
+	if c := compareDuplicates(nil, loaded("a.json"), loaded("a.json")); c != 0 {
 		t.Errorf("a.json against a.json = %d; want a tie within one source name", c)
 	}
 }

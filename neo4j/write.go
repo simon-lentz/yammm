@@ -15,6 +15,7 @@ import (
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/internal/mapping"
+	"github.com/simon-lentz/yammm/internal/typeorder"
 	"github.com/simon-lentz/yammm/internal/value"
 	"github.com/simon-lentz/yammm/schema"
 	"github.com/simon-lentz/yammm/schema/cypher"
@@ -298,14 +299,13 @@ func EdgeQueries(
 	for sig := range groups {
 		sigs = append(sigs, sig)
 	}
+	order := typeorder.New(snap.Schema())
 	slices.SortFunc(sigs, func(a, b edgeSignature) int {
-		if v := cmp.Compare(a.sourceType.String(), b.sourceType.String()); v != 0 {
-			return v
-		}
-		if v := cmp.Compare(a.relType, b.relType); v != 0 {
-			return v
-		}
-		return cmp.Compare(a.targetType.String(), b.targetType.String())
+		return cmp.Or(
+			order.Compare(a.sourceType, b.sourceType),
+			cmp.Compare(a.relType, b.relType),
+			order.Compare(a.targetType, b.targetType),
+		)
 	})
 
 	var queries []EdgeQuery

@@ -9,13 +9,14 @@ import (
 
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/internal/mapping"
+	"github.com/simon-lentz/yammm/internal/typeorder"
 	"github.com/simon-lentz/yammm/schema"
 )
 
 // compositionClosure returns the transitive composition relation names and
 // part-type identities reachable from rootType, both sorted. The visited
 // set bounds a composition cycle.
-func compositionClosure(s schema.Schema, rootType schema.Type) (relNames []string, partIDs []schema.TypeID) {
+func compositionClosure(s schema.Schema, order typeorder.Order, rootType schema.Type) (relNames []string, partIDs []schema.TypeID) {
 	visited := make(map[schema.TypeID]bool)
 	relSeen := make(map[string]bool)
 
@@ -40,9 +41,7 @@ func compositionClosure(s schema.Schema, rootType schema.Type) (relNames []strin
 	walk(rootType)
 
 	slices.Sort(relNames)
-	slices.SortFunc(partIDs, func(a, b schema.TypeID) int {
-		return cmp.Compare(a.String(), b.String())
-	})
+	slices.SortFunc(partIDs, order.Compare)
 	return relNames, partIDs
 }
 
@@ -134,6 +133,7 @@ type createGroup struct {
 // deletes stale ones. Create groups run parent-first (depth ascending).
 func composedQueries(ctx context.Context, result graph.Snapshot, shapes *graphShape, cfg *config) ([]NodeQuery, error) {
 	s := result.Schema()
+	order := typeorder.New(s)
 	var replace []NodeQuery
 
 	groups := make(map[composedGroupKey]*createGroup)
@@ -149,7 +149,7 @@ func composedQueries(ctx context.Context, result graph.Snapshot, shapes *graphSh
 		if !ok {
 			continue
 		}
-		relNames, partIDs := compositionClosure(s, rootType)
+		relNames, partIDs := compositionClosure(s, order, rootType)
 		if len(relNames) == 0 {
 			continue
 		}

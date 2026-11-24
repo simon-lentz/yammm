@@ -87,8 +87,8 @@ func (tt *typeTable) rowRef(id schema.TypeID, position string) (*int, error) {
 
 // buildTypeTable collects every type identity the view denotes — instance,
 // composed child, edge target, duplicate, conflict, unresolved edge —
-// and orders them by TypeID. An unresolved target has no instance, so the
-// table can be wider than the set of types holding one.
+// and orders them by schema name, then type name. An unresolved target has no
+// instance, so the table can be wider than the set of types holding one.
 func buildTypeTable(view *writerView, names schemaNames) *typeTable {
 	seen := make(map[schema.TypeID]struct{})
 

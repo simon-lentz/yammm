@@ -163,14 +163,14 @@ func TestCompareDuplicates_PropertiesDiscriminate(t *testing.T) {
 	a := newDuplicate(withName("alice"), conflict)
 	b := newDuplicate(withName("bob"), conflict)
 
-	if compareDuplicates(a, b) == 0 {
+	if compareDuplicates(nil, a, b) == 0 {
 		t.Error("two rejections differing only in the instance payload compare equal, so their order on the wire is the input order")
 	}
-	if compareDuplicates(a, b) != -compareDuplicates(b, a) {
+	if compareDuplicates(nil, a, b) != -compareDuplicates(nil, b, a) {
 		t.Error("compareDuplicates is not antisymmetric across the properties arm")
 	}
-	if c := compareDuplicates(a, a); c != 0 {
-		t.Errorf("compareDuplicates(a, a) = %d, want 0", c)
+	if c := compareDuplicates(nil, a, a); c != 0 {
+		t.Errorf("compareDuplicates(nil, a, a) = %d, want 0", c)
 	}
 }
 
@@ -213,14 +213,14 @@ func TestCompareDuplicates_ProvenanceDiscriminates(t *testing.T) {
 	a := newDuplicate(at(7), conflict)
 	b := newDuplicate(at(9), conflict)
 
-	if compareDuplicates(a, b) == 0 {
+	if compareDuplicates(nil, a, b) == 0 {
 		t.Error("two rejections differing only in source position compare equal, so their order on the wire is the input order")
 	}
-	if compareDuplicates(a, b) != -compareDuplicates(b, a) {
+	if compareDuplicates(nil, a, b) != -compareDuplicates(nil, b, a) {
 		t.Error("compareDuplicates is not antisymmetric across the provenance arm")
 	}
-	if c := compareDuplicates(a, a); c != 0 {
-		t.Errorf("compareDuplicates(a, a) = %d, want 0", c)
+	if c := compareDuplicates(nil, a, a); c != 0 {
+		t.Errorf("compareDuplicates(nil, a, a) = %d, want 0", c)
 	}
 }
 
@@ -313,11 +313,11 @@ func TestCompareDuplicates_ProvenanceOrdersByWhatADocumentWrites(t *testing.T) {
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
-			if got := compareDuplicates(dup(c.before), dup(c.after)); got >= 0 {
-				t.Errorf("compareDuplicates(before, after) = %d, want negative", got)
+			if got := compareDuplicates(nil, dup(c.before), dup(c.after)); got >= 0 {
+				t.Errorf("compareDuplicates(nil, before, after) = %d, want negative", got)
 			}
-			if got := compareDuplicates(dup(c.after), dup(c.before)); got <= 0 {
-				t.Errorf("compareDuplicates(after, before) = %d, want positive", got)
+			if got := compareDuplicates(nil, dup(c.after), dup(c.before)); got <= 0 {
+				t.Errorf("compareDuplicates(nil, after, before) = %d, want positive", got)
 			}
 		})
 	}
